@@ -1081,6 +1081,53 @@ impl WorkbenchSessionService for NoopWorkbenchSessionService {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct NoopInteractionService;
+
+#[async_trait]
+impl InteractionService for NoopInteractionService {
+    async fn on_provider_requested(
+        &self,
+        _command: ProviderInteractionRequestedCommand,
+    ) -> ServiceResult<InteractionRequestedOutcome> {
+        Ok(InteractionRequestedOutcome::Duplicate)
+    }
+
+    async fn on_provider_resolved(
+        &self,
+        _command: ProviderInteractionResolvedCommand,
+    ) -> ServiceResult<()> {
+        Ok(())
+    }
+
+    async fn resolve(
+        &self,
+        _command: ResolveInteractionCommand,
+    ) -> Result<ResolveInteractionResult, InteractionServiceError> {
+        Err(InteractionServiceError::NotFound)
+    }
+
+    async fn list_pending(
+        &self,
+        _bcs_session_id: &str,
+    ) -> ServiceResult<Vec<InteractionFrontendEvent>> {
+        Ok(Vec::new())
+    }
+
+    async fn invalidate_run(
+        &self,
+        _bcs_run_id: &str,
+        _reason: &str,
+        _invalidated_at_ms: u64,
+    ) -> ServiceResult<usize> {
+        Ok(0)
+    }
+
+    async fn cleanup_terminal(&self, _terminal_before_ms: u64) -> ServiceResult<usize> {
+        Ok(0)
+    }
+}
+
 pub struct NoopBotRuntimeConnectionService;
 
 #[async_trait]

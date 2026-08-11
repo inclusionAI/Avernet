@@ -13,7 +13,7 @@ lifecycle in process memory.
 **Architecture:** Add a transport-neutral `InteractionService` Application API
 and a dedicated `bcs-interaction` service. The service coordinates a replaceable
 `InteractionStorePort`, `CanResolveInteraction`, `InteractionProviderPort`, and
-the existing `FrontendDeliveryPort`. Provider HTTP and Workbench WebSocket stay
+a typed `InteractionFrontendPort`. Provider HTTP and Workbench WebSocket stay
 delivery adapters; the bootstrap crate resolves their intentional circular
 dependency by constructing the Provider transport first and injecting the
 finished interaction service through a setter.
@@ -30,8 +30,10 @@ The isolated worktree was created from `e44799fd` on branch
 `codex/bcn-provider-sse-hitl`. The first `cargo test --workspace` compiled the
 workspace and passed all completed suites except the existing
 `bcs/tests/e2e_ws_messaging.rs::test_group_create_and_list`, whose local
-`GET /groups` request timed out after 60 seconds while the suite ran in
-parallel. Re-run that test alone during final verification.
+`GET /groups` request timed out. The isolated exact test was checked before and
+after this implementation and timed out in the same local group HTTP harness;
+it is recorded as a pre-existing verification limitation, not treated as a
+HITL regression.
 
 ## Task 1: Define the interaction wire contract
 
@@ -109,13 +111,14 @@ parallel. Re-run that test alone during final verification.
    post-acceptance resolution rejection, Provider `resolved`, and replay.
 4. Implement `InteractionManagement` orchestration. Fingerprint canonical JSON
    by recursively sorting object keys before serialization, then hash the
-   canonical bytes together with kind and interaction ID.
+   canonical bytes together with kind. The Store key already scopes the
+   fingerprint to one interaction.
 5. Map Provider outcomes exactly as approved: transport/unreadable/default
    failure stays `Pending` and is retryable; explicit `retryable=false`
    invalidates; `ok=true` accepts.
-6. Build Frontend interaction event envelopes in the Application service using
-   server-owned routing and the raw Provider payload. Do not log answer or
-   command bodies.
+6. Publish typed Frontend interaction events from the Application service using
+   server-owned routing and the raw Provider payload. The Workbench adapter owns
+   the single WS envelope serializer. Do not log answer or command bodies.
 7. Run `cargo test -p bcs-interaction`.
 
 ## Task 4: Add exact-session resolve authorization
@@ -277,4 +280,3 @@ parallel. Re-run that test alone during final verification.
    migration, or `bcs_messages` write was added.
 7. Commit coherent slices with conventional messages and report any test that
    remains unavailable or flaky with exact evidence.
-

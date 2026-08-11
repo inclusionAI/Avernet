@@ -301,6 +301,7 @@ dependencies = [
  "bcs-group",
  "bcs-group-store",
  "bcs-http",
+ "bcs-interaction",
  "bcs-judge",
  "bcs-jwt",
  "bcs-leader-election",
@@ -1087,6 +1088,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-interaction"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-domain",
+ "bcs-service-api",
+ "bcs-test-support",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "bcs-judge"
 version = "0.1.0"
 dependencies = [
@@ -1669,6 +1684,7 @@ dependencies = [
  "base64 0.22.1",
  "bcs-callback",
  "bcs-domain",
+ "bcs-interaction",
  "bcs-protocol",
  "bcs-route-security",
  "bcs-service-api",

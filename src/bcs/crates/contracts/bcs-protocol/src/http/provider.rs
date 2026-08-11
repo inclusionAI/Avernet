@@ -208,6 +208,8 @@ pub struct ProviderWebhookRequest {
     pub frame_type: String,
     pub id: String,
     pub method: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub params: Option<Value>,
     pub session_id: String,
     pub bcn_group_id: String,
     pub to_bot: ProviderWebhookBotRef,

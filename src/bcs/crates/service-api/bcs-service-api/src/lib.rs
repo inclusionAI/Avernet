@@ -32,6 +32,11 @@ pub use actors::{
 };
 pub use application::SystemMessageService;
 pub use application::system_message::resolve_session_topic;
+pub use application::interaction::{
+    InteractionRequestedOutcome, InteractionService, InteractionServiceError,
+    ProviderInteractionRequestedCommand,
+    ProviderInteractionResolvedCommand, ResolveInteractionCommand, ResolveInteractionResult,
+};
 pub use application::channel::{
     ChannelInboundError, ChannelInboundFailureKind, ChannelService, ChannelUseCaseError,
     CreateBindingCommand, InboundMessage, OutboundMessage,
@@ -156,6 +161,7 @@ pub use port::{
     BotDeliveryResult, BotMetricCount, BotMetricsSnapshotPort, BotRepoPort, BotRunContext,
     BotControlPlaneRepoPort,
     BotRunContextPort, BotTerminalEvent, BotTerminalObserverPort, BotTerminalState,
+    CompositeBotTerminalObserver,
     NoopBotTerminalObserver, NoopChannelBindingCleanupPort, ChatRunCleanupPort,
     ChatRunEventPort, ChatRunMetricCount, DeliveryBlockContext,
     DeliveryBlockReason, DeliveryBlockSurface, DeliveryMetricKind, DeliveryMetricTarget,
@@ -169,8 +175,9 @@ pub use port::{
     FrontendDeliveryPort, FrontendDeliveryResult, FrontendDeliveryTarget, GroupDispatchContextPort,
     GroupHistoryBotRequestPort, GroupMetricCount, GroupMetricsSnapshotPort, GroupRepoPort,
     GroupRuntimeBindingRepoPort, GroupSessionMetricCount, GroupSessionMetricsSnapshotPort,
-    HumanInputReadyEvent, ImParticipantRepoPort, JudgeArtifact, JudgeCheckedCriterion,
-    JudgeDecision, JudgeEvaluatorPort, JudgeRequest, KickReason, LeaderElectionPort, LeaderInfo,
+    HumanInputReadyEvent, ImParticipantRepoPort, InteractionFrontendPort, JudgeArtifact,
+    JudgeCheckedCriterion, JudgeDecision, JudgeEvaluatorPort, JudgeRequest, KickReason,
+    LeaderElectionPort, LeaderInfo,
     LeaderStatus, MarkHumanNodeRunningCommand, MetricsResult, NewSessionParams,
     ProviderBotBindingRepoPort, ProviderBotDiscoveryRecord, ProviderBotDiscoverySelector,
     ProviderCredentialRepoPort, ProviderRepoPort, ProviderStreamGrayList,
@@ -237,6 +244,16 @@ pub use core::{
     SystemMessageEvent, SystemMessageEventKind, SystemMessageProducerService,
     SystemMessageRecipientResult, Task, TaskStatus, Workspace, backfill_bot_names,
     backfill_participant_names, deserialize_skills, validate_sender_routes,
+};
+
+pub use core::interaction::{
+    InteractionKey, InteractionKind, InteractionStatus, InteractionTransitionError,
+};
+pub use port::interaction::{
+    CanResolveInteraction, CanResolveInteractionCommand, CanResolveInteractionPort,
+    InteractionFrontendEvent, InteractionInsertResult, InteractionProviderAck,
+    InteractionProviderCommand, InteractionProviderPort, InteractionRecord,
+    InteractionResolveClaim, InteractionResolveCommit, InteractionStorePort,
 };
 
 pub use bcs_domain::{

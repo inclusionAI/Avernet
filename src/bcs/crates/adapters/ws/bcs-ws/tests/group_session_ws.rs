@@ -11,6 +11,7 @@ use bcs_service_api::application::v1::{
 };
 use bcs_services_container::Services;
 use bcs_test_support::{NoopCollaborationRuntimeService, NoopWsLifecycleInstrumentationHook};
+use bcs_test_support::NoopInteractionService;
 use bcs_ws::shared::RunChannelManager;
 use bcs_ws::web::{WebDispatchState, WorkbenchConnectionRegistry, group_session_websocket_router};
 use futures::{SinkExt, StreamExt};
@@ -86,6 +87,7 @@ fn app(service: Arc<RecordingConnectionService>) -> axum::Router {
         message_flow: services.message_flow,
         collaboration_runtime: Arc::new(NoopCollaborationRuntimeService),
         workbench_sessions: services.workbench_sessions,
+        interactions: Arc::new(NoopInteractionService),
         group_session_connections: Some(service.clone()),
         frontend_connections: Arc::new(WorkbenchConnectionRegistry::new()),
         run_channels: Arc::new(RunChannelManager::new()),

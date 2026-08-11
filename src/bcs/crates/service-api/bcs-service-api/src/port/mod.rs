@@ -6,6 +6,7 @@ pub mod channel_delivery;
 pub mod delivery;
 pub mod group_context;
 pub mod group_session_token;
+pub mod interaction;
 pub mod judge;
 pub mod leader_election;
 pub mod metrics;
@@ -18,7 +19,8 @@ pub mod state_machine_result;
 
 pub use bot_connection::{BotConnectionControlPort, KickReason};
 pub use bot_terminal_observer::{
-    BotTerminalEvent, BotTerminalObserverPort, BotTerminalState, NoopBotTerminalObserver,
+    BotTerminalEvent, BotTerminalObserverPort, BotTerminalState, CompositeBotTerminalObserver,
+    NoopBotTerminalObserver,
 };
 pub use chat_run::{BotRunContext, BotRunContextPort, ChatRunCleanupPort, ChatRunEventPort};
 pub use channel_binding_cleanup::{
@@ -37,6 +39,13 @@ pub use group_context::{GroupDispatchContextPort, GroupHistoryBotRequestPort};
 pub use group_session_token::{
     GroupSessionTokenClaims, GroupSessionTokenError, GroupSessionTokenPort,
     GroupSessionTokenScope, IssuedGroupSessionToken, GROUP_SESSION_TOKEN_MAX_COMPACT_LEN,
+};
+pub use interaction::{
+    CanResolveInteraction, CanResolveInteractionCommand, CanResolveInteractionPort,
+    InteractionFrontendEvent, InteractionFrontendPort, InteractionInsertResult,
+    InteractionProviderAck, InteractionProviderCommand, InteractionProviderPort,
+    InteractionRecord, InteractionResolveClaim, InteractionResolveCommit,
+    InteractionStorePort,
 };
 pub use judge::{
     JudgeArtifact, JudgeCheckedCriterion, JudgeDecision, JudgeEvaluatorPort, JudgeRequest,

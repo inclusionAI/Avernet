@@ -1,7 +1,7 @@
 # BCN Provider SSE HITL Interaction Design
 
 - Date: 2026-08-12
-- Status: Approved
+- Status: Implemented in BCS feature branch; Provider/Frontend integration pending
 - Scope: Provider 2.0 SSE interaction ingestion, BCN-to-Frontend WebSocket delivery, and Frontend-to-Provider interaction resolve orchestration
 - Related protocol: `src/bcs/docs/bcs-provider-2.0-sse-protocol.md`
 
@@ -73,7 +73,7 @@ flowchart LR
     IS --> AUTH["CanResolveInteraction"]
     IS --> STORE["InteractionStorePort"]
     IS --> PROVIDER["InteractionProviderPort"]
-    IS --> FRONTEND["FrontendDeliveryPort"]
+    IS --> FRONTEND["InteractionFrontendPort"]
     PROVIDER --> WEBHOOK["Provider webhook"]
     FRONTEND --> FE
 ```
@@ -260,7 +260,7 @@ sequenceDiagram
     participant SSE as Provider SSE Adapter
     participant IS as InteractionService
     participant ST as InteractionStore
-    participant FD as FrontendDeliveryPort
+    participant FD as InteractionFrontendPort
     participant FE as Frontend
 
     P-->>SSE: event interaction / phase=requested
@@ -393,6 +393,12 @@ Mapping rules:
 | `ok=false`, `retryable` omitted | `true` | `Pending` |
 | `ok=false, retryable=false` | `false` | `Invalidated` |
 | `ok=true` | not applicable | `Accepted` |
+
+These rows describe the normal case. After any Provider result, BCN reconciles
+against the current authoritative Store state: a concurrent SSE `Resolved`
+wins and is reported as success, while a concurrent run `Invalidated` is
+reported as non-retryable. A transport error never rewinds either terminal
+state to `Pending`.
 
 The default is retryable unless Provider explicitly returns `false`. This is
 backward compatible and prevents an incomplete Provider response from silently
@@ -553,6 +559,12 @@ Logs include `bcs_run_id`, `interaction_id`, `bcs_session_id`, `group_id`,
 `bot_id`, and Provider ID. They must not log secret user answers or sensitive
 command contents beyond existing redaction rules.
 
+The process-local implementation additionally enforces a 256 KiB requested
+payload limit, 32 active interactions per run, 256 active interactions per
+session, and a 1 MiB SSE frame/buffer limit. These bounds permit multiple
+concurrent prompts while preventing an untrusted Provider from growing memory
+without limit.
+
 ## Testing
 
 ### Protocol contract tests
@@ -621,7 +633,6 @@ authorized Humans racing to resolve the same interaction.
 - BAAS and Frontend implementation changes are outside this BCS change.
 - No database migration or `bcs_messages` projection is introduced.
 
-The existing Provider SSE protocol document must be synchronized before or
-with implementation to remove its earlier single-active-interaction and
-`resolving`/first-writer state assumptions where they conflict with this
-approved design.
+The Provider SSE protocol document is synchronized with this implementation:
+it permits multiple active interactions and uses transient `in_flight` plus
+`Pending/Accepted/Resolved/Invalidated`, without a lifecycle `resolving` state.

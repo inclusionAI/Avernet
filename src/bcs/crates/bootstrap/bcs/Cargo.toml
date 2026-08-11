@@ -113,6 +113,7 @@ bcs-bot = { workspace = true }
 bcs-channel = { workspace = true }
 bcs-channel-store = { workspace = true }
 bcs-group    = { workspace = true }
+bcs-interaction = { workspace = true }
 bcs-message-flow = { workspace = true }
 bcs-organization = { workspace = true }
 bcs-organization-store = { workspace = true }

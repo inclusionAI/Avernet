@@ -73,6 +73,9 @@ use bcs_group::{
     GroupConfig, GroupCore, GroupManagement, GroupManagementWithRuntimeCleanup,
 };
 use bcs_group_store::{MemoryGroupRepo, MySqlGroupStore};
+use bcs_interaction::{
+    InteractionManagement, InteractionTerminalObserver, MemoryInteractionStore,
+};
 use bcs_http::{
     admin_invocation_terminal::AdminInvocationTerminalObserver,
     state::AdminInvocationStore,
@@ -110,7 +113,8 @@ use bcs_service_api::{
     DirectChatRunReason, DirectChatRunSnapshotPort, FrontendDeliveryPort, GroupCoreService,
     GroupHistoryBotRequestPort, GroupManagementService, GroupMessageHistoryService,
     GroupMetricsSnapshotPort, GroupRepoPort, GroupSessionMetricsSnapshotPort,
-    HumanInputReadyEvent, JudgeEvaluatorPort, LeaderElectionPort, MessageFlowService, MetricsResult,
+    CanResolveInteraction, CompositeBotTerminalObserver, HumanInputReadyEvent, InteractionService,
+    JudgeEvaluatorPort, LeaderElectionPort, MessageFlowService, MetricsResult,
     OrganizationCoreService, OrganizationManagementService, OrganizationRepoPort,
     FriendCoreService, FriendRequestCoreService, InviteService, ProviderBotBindingRepoPort,
     ProviderBotCoreService, ProviderBotEventService, ProviderCoreService,
@@ -1759,6 +1763,15 @@ impl Default for BcsServerState {
                 sessions.clone(),
             ))
         };
+        let interaction_terminal_observer = Arc::new(InteractionTerminalObserver::default());
+        let terminal_observer: Arc<dyn BotTerminalObserverPort> =
+            Arc::new(CompositeBotTerminalObserver::new(vec![
+                interaction_terminal_observer.clone(),
+                Arc::new(AdminInvocationTerminalObserver::new(
+                    admin_invocation_runs.clone(),
+                    outbound_url_guard.clone(),
+                )),
+            ]));
         let (message_flow, channel_slot) = create_message_flow_services(
             bot_registry.clone(),
             sessions.clone(),
@@ -1772,10 +1785,7 @@ impl Default for BcsServerState {
             system_message.clone(),
             Some(message_repo.clone()),
             provider_stream_gray_list.clone(),
-            Arc::new(AdminInvocationTerminalObserver::new(
-                admin_invocation_runs.clone(),
-                outbound_url_guard.clone(),
-            )),
+            terminal_observer,
         );
         let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let group_management_impl = Arc::new(GroupManagement::new(
@@ -1813,6 +1823,13 @@ impl Default for BcsServerState {
         let group_fusion = Arc::new(BcsGroupFusion::new(sessions.clone(), fusion.clone()));
         let message_flow = maybe_wrap_message_flow(&config, message_flow);
         provider_transport.set_ingest(message_flow.clone(), bot_run_context.clone());
+        let interactions = create_interaction_service(
+            provider_transport.clone(),
+            group_management_impl.clone(),
+            frontend_delivery.clone(),
+            config.async_chat_run_retention_ms,
+        );
+        interaction_terminal_observer.set_service(interactions.clone());
         let collaboration_store = Arc::new(MemoryCollaborationStore::new());
         let judge_evaluator: Arc<dyn JudgeEvaluatorPort> = Arc::new(NoopJudgeEvaluator::default());
         let (session_channel_outbound_slot, session_channel_outbound) =
@@ -1904,6 +1921,7 @@ impl Default for BcsServerState {
             .bot_run_context(bot_run_context)
             .frontend_delivery(frontend_delivery)
             .message_flow(message_flow)
+            .interactions(interactions)
             .group_message_history(group_message_history)
             .a2a_chat(a2a_chat)
             .a2a_chat_runs(a2a_chat_runs)
@@ -2180,6 +2198,7 @@ struct UseCaseBundle {
     group_management: Arc<dyn bcs_service_api::GroupManagementService>,
     group_query: Arc<dyn bcs_service_api::GroupQueryService>,
     workbench_sessions: Arc<dyn bcs_service_api::WorkbenchSessionService>,
+    interaction_authorization: Arc<dyn CanResolveInteraction>,
     group_proposals: Arc<dyn bcs_service_api::GroupProposalService>,
     group_fusion: Arc<dyn bcs_service_api::GroupFusionService>,
     system_message: Arc<dyn bcs_service_api::SystemMessageService>,
@@ -2312,11 +2331,33 @@ fn build_use_case_bundle(
         bot_discovery: bot_use_cases,
         group_management: group_management.clone(),
         group_query: group_management.clone(),
-        workbench_sessions: group_management,
+        workbench_sessions: group_management.clone(),
+        interaction_authorization: group_management,
         group_proposals,
         group_fusion: Arc::new(BcsGroupFusion::new(group, fusion)),
         system_message,
     }
+}
+
+fn create_interaction_service(
+    provider_transport: Arc<bcs_provider_http::HttpProviderTransport>,
+    authorization: Arc<dyn CanResolveInteraction>,
+    frontend_delivery: Arc<dyn FrontendDeliveryPort>,
+    terminal_retention_ms: u64,
+) -> Arc<dyn InteractionService> {
+    let store = Arc::new(MemoryInteractionStore::new());
+    let interaction_frontend = Arc::new(bcs_ws::web::WorkbenchInteractionDelivery::new(
+        frontend_delivery,
+    ));
+    let interactions: Arc<dyn InteractionService> = Arc::new(InteractionManagement::new(
+        store,
+        authorization,
+        provider_transport.clone(),
+        interaction_frontend,
+        terminal_retention_ms,
+    ));
+    provider_transport.set_interactions(interactions.clone());
+    interactions
 }
 
 fn create_message_flow_services(
@@ -3059,6 +3100,15 @@ impl BcsServer {
             callback_url_guard.clone(),
             provider_stream_gray_list.clone(),
         );
+        let interaction_terminal_observer = Arc::new(InteractionTerminalObserver::default());
+        let terminal_observer: Arc<dyn BotTerminalObserverPort> =
+            Arc::new(CompositeBotTerminalObserver::new(vec![
+                interaction_terminal_observer.clone(),
+                Arc::new(AdminInvocationTerminalObserver::new(
+                    admin_invocation_runs.clone(),
+                    callback_url_guard.clone(),
+                )),
+            ]));
         let (message_flow, channel_slot) = create_message_flow_services(
             bot_registry.clone(),
             sessions.clone(),
@@ -3072,10 +3122,7 @@ impl BcsServer {
             use_cases.system_message.clone(),
             Some(message_repo.clone()),
             provider_stream_gray_list.clone(),
-            Arc::new(AdminInvocationTerminalObserver::new(
-                admin_invocation_runs.clone(),
-                callback_url_guard.clone(),
-            )),
+            terminal_observer,
         );
 
         let collaboration_store = Arc::new(MemoryCollaborationStore::new());
@@ -3146,6 +3193,13 @@ impl BcsServer {
         // Build services bundle
         let message_flow = maybe_wrap_message_flow(&config, message_flow);
         provider_transport.set_ingest(message_flow.clone(), bot_run_context.clone());
+        let interactions = create_interaction_service(
+            provider_transport.clone(),
+            use_cases.interaction_authorization.clone(),
+            frontend_delivery.clone(),
+            config.async_chat_run_retention_ms,
+        );
+        interaction_terminal_observer.set_service(interactions.clone());
         let channel_runtime = build_channel_runtime(
             &config,
             channel_slot,
@@ -3181,6 +3235,7 @@ impl BcsServer {
             .bot_run_context(bot_run_context)
             .frontend_delivery(frontend_delivery)
             .message_flow(message_flow)
+            .interactions(interactions)
             .group_message_history(group_message_history)
             .a2a_chat(a2a_chat)
             .a2a_chat_runs(a2a_chat_runs)
@@ -3636,6 +3691,15 @@ impl BcsServer {
             outbound_url_guard.clone(),
             provider_stream_gray_list.clone(),
         );
+        let interaction_terminal_observer = Arc::new(InteractionTerminalObserver::default());
+        let terminal_observer: Arc<dyn BotTerminalObserverPort> =
+            Arc::new(CompositeBotTerminalObserver::new(vec![
+                interaction_terminal_observer.clone(),
+                Arc::new(AdminInvocationTerminalObserver::new(
+                    admin_invocation_runs.clone(),
+                    outbound_url_guard.clone(),
+                )),
+            ]));
         let (message_flow, channel_slot) = create_message_flow_services(
             bot_registry.clone(),
             sessions.clone(),
@@ -3649,10 +3713,7 @@ impl BcsServer {
             use_cases.system_message.clone(),
             Some(message_repo.clone()),
             provider_stream_gray_list.clone(),
-            Arc::new(AdminInvocationTerminalObserver::new(
-                admin_invocation_runs.clone(),
-                outbound_url_guard.clone(),
-            )),
+            terminal_observer,
         );
         frontend_connections
             .set_bot_query(use_cases.bot_query.clone())
@@ -3735,6 +3796,13 @@ impl BcsServer {
         // Build services bundle
         let message_flow = maybe_wrap_message_flow(&config, message_flow);
         provider_transport.set_ingest(message_flow.clone(), bot_run_context.clone());
+        let interactions = create_interaction_service(
+            provider_transport.clone(),
+            use_cases.interaction_authorization.clone(),
+            frontend_delivery.clone(),
+            config.async_chat_run_retention_ms,
+        );
+        interaction_terminal_observer.set_service(interactions.clone());
         let channel_repos = if channel_bridge_enabled(&config) {
             channel_repos_with_storage(&infrastructure_plugins).await?
         } else {
@@ -3775,6 +3843,7 @@ impl BcsServer {
             .bot_run_context(bot_run_context)
             .frontend_delivery(frontend_delivery)
             .message_flow(message_flow)
+            .interactions(interactions)
             .group_message_history(group_message_history)
             .a2a_chat(a2a_chat)
             .a2a_chat_runs(a2a_chat_runs)
@@ -4358,6 +4427,7 @@ fn web_ws_dispatch_state(
         message_flow: state.services.message_flow.clone(),
         collaboration_runtime: state.services.collaboration_runtime.clone(),
         workbench_sessions: state.services.workbench_sessions.clone(),
+        interactions: state.services.interactions.clone(),
         group_session_connections,
         frontend_connections: state.frontend_connections.clone(),
         run_channels: state.frontend_run_channels.clone(),
