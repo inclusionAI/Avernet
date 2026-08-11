@@ -4,9 +4,9 @@
 models and resource path items live in separate YAML fragments so a domain can
 evolve without creating one monolithic file.
 
-The current contract contains 32 approved operations across Bot, Group,
+The current contract contains 41 approved operations across Bot, Group,
 GroupParticipant, Session, SessionParticipant, Invitation, Friendship,
-FriendRequest, and session-bound WebSocket resources. Every operation is published below the single BCN
+FriendRequest, SessionFile, and session-bound WebSocket resources. Every operation is published below the single BCN
 ownership prefix `/openapi/v1/collaboration/**`. These are the exact endpoints
 served by BCN and intended for future Gateway aggregation; no path rewrite is
 required.
@@ -45,6 +45,16 @@ Session-bound WebSocket access adds two operations to that HTTP surface:
 The WebSocket operation uses `x-avernet-protocol: websocket` so publication
 and Gateway integration can distinguish an Upgrade endpoint from an ordinary
 HTTP GET without inventing a JSON response body for status `101`.
+
+Session files add nine operations under the same Session namespace: list,
+prepare, metadata, delete, proxy upload, complete, protected download, share,
+and public shared download. Protected operations declare User, App, and Bot as
+optional Gateway identities and use `x-bcn-identity-policy:
+human_or_owned_bot`; BCN still requires a valid Human or Bot actor and checks a
+co-present Bot's signed owner claim against the User. Shared download declares
+an empty Gateway requirement because its share token is the credential. The two
+download operations use `x-avernet-raw-response: true` to document `200` byte
+streams and `302` redirects instead of JSON success envelopes.
 
 Validate the contract:
 

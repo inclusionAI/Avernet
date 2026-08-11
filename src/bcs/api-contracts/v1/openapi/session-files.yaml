@@ -1,0 +1,625 @@
+SessionFileActor:
+  type: object
+  additionalProperties: false
+  required: [actor_kind, actor_id]
+  properties:
+    actor_kind:
+      type: string
+      enum: [human, bot]
+    actor_id:
+      type: string
+      minLength: 1
+
+SessionFileStatus:
+  type: string
+  enum: [pending, ready, deleting, failed]
+
+SessionFile:
+  type: object
+  additionalProperties: false
+  required:
+    - file_id
+    - session_id
+    - file_name
+    - mime_type
+    - size
+    - sha256
+    - owner
+    - storage_backend
+    - status
+    - created_at
+    - updated_at
+  properties:
+    file_id:
+      type: string
+      minLength: 1
+    session_id:
+      type: string
+      minLength: 1
+    file_name:
+      type: string
+      minLength: 1
+    mime_type:
+      type: string
+      minLength: 1
+    size:
+      type: integer
+      format: int64
+      minimum: 0
+    sha256:
+      type: [string, "null"]
+    owner:
+      $ref: "#/SessionFileActor"
+    storage_backend:
+      type: string
+      minLength: 1
+    status:
+      $ref: "#/SessionFileStatus"
+    created_at:
+      type: integer
+      format: int64
+      minimum: 0
+    updated_at:
+      type: integer
+      format: int64
+      minimum: 0
+
+SessionFileEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code:
+      type: integer
+    message:
+      type: string
+    data:
+      $ref: "#/SessionFile"
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
+SessionFilePageEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code:
+      type: integer
+    message:
+      type: string
+    data:
+      type: object
+      additionalProperties: false
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/SessionFile"
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
+PrepareSessionFileEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code:
+      type: integer
+    message:
+      type: string
+    data:
+      type: object
+      description: >-
+        Storage upload target. Direct presigned targets are preserved; BCN
+        proxy targets use this OpenAPI content route. Multipart targets include
+        an upload_id and ordered part URLs.
+      additionalProperties: true
+      required: [file_id]
+      properties:
+        file_id:
+          type: string
+        upload_url:
+          type: string
+          format: uri
+        upload_id:
+          type: string
+        parts:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
+UploadSessionFileEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code:
+      type: integer
+    message:
+      type: string
+    data:
+      type: object
+      additionalProperties: false
+      required: [file_id, status]
+      properties:
+        file_id:
+          type: string
+        status:
+          $ref: "#/SessionFileStatus"
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
+DeleteSessionFileEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code:
+      type: integer
+    message:
+      type: string
+    data:
+      type: object
+      additionalProperties: false
+      required: [deleted]
+      properties:
+        deleted:
+          type: boolean
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
+ShareSessionFileEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code:
+      type: integer
+    message:
+      type: string
+    data:
+      type: object
+      additionalProperties: false
+      required: [share_url, share_token, expires_at]
+      properties:
+        share_url:
+          type: string
+          format: uri
+        share_token:
+          type: string
+          minLength: 1
+        expires_at:
+          type: integer
+          format: int64
+          minimum: 0
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
+SessionFileIdPath:
+  name: file_id
+  in: path
+  required: true
+  schema:
+    type: string
+    minLength: 1
+
+ShowQuery:
+  name: show
+  in: query
+  required: false
+  schema:
+    type: boolean
+    default: false
+
+PartQuery:
+  name: part
+  in: query
+  required: false
+  schema:
+    type: integer
+    minimum: 0
+    maximum: 65535
+
+BadRequestResponse:
+  description: Invalid path, query, body, or file request.
+  x-error-codes: [invalid_request]
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+
+UnauthenticatedResponse:
+  description: Gateway Principal is missing or invalid.
+  x-error-codes: [unauthenticated]
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+
+ForbiddenResponse:
+  description: The effective Actor cannot access or mutate this file.
+  x-error-codes: [forbidden, file_upload_owner_mismatch]
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+
+NotFoundResponse:
+  description: Session, parent Group, or file was not found.
+  x-error-codes: [session_not_found, group_not_found, file_not_found]
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+
+ConflictResponse:
+  description: The operation conflicts with the current file lifecycle state.
+  x-error-codes: [conflict, invalid_transition]
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+
+PayloadTooLargeResponse:
+  description: The upload exceeds the configured maximum.
+  x-error-codes: [payload_too_large]
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+
+UnprocessableResponse:
+  description: The upload is incomplete or invalid for completion.
+  x-error-codes: [invalid_state]
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+
+StorageBackendResponse:
+  description: The configured storage backend failed.
+  x-error-codes: [storage_backend]
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+
+SessionFilesPath:
+  get:
+    operationId: list_session_files
+    tags: ["Collaboration / Sessions"]
+    summary: List files in a Session.
+    x-avernet-security:
+      user: optional
+      app: optional
+      bot: optional
+    x-bcn-identity-policy: human_or_owned_bot
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+      - name: prefix
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: status
+        in: query
+        required: false
+        schema:
+          $ref: "#/SessionFileStatus"
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          maximum: 4294967295
+          default: 100
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          maximum: 4294967295
+          default: 0
+    responses:
+      "200":
+        description: Session file page.
+        content:
+          application/json:
+            schema:
+              $ref: "#/SessionFilePageEnvelope"
+      "400": { $ref: "#/BadRequestResponse" }
+      "401": { $ref: "#/UnauthenticatedResponse" }
+      "403": { $ref: "#/ForbiddenResponse" }
+      "404": { $ref: "#/NotFoundResponse" }
+      "500": { $ref: ../shared.yaml#/InternalErrorResponse }
+
+  post:
+    operationId: prepare_session_file
+    tags: ["Collaboration / Sessions"]
+    summary: Prepare a Session file upload.
+    x-avernet-security:
+      user: optional
+      app: optional
+      bot: optional
+    x-bcn-identity-policy: human_or_owned_bot
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [file_name, size, mime_type]
+            properties:
+              file_name:
+                type: string
+                minLength: 1
+              size:
+                type: integer
+                format: int64
+                minimum: 0
+              mime_type:
+                type: string
+                minLength: 1
+    responses:
+      "201":
+        description: Upload target with an OpenAPI proxy URL when applicable.
+        content:
+          application/json:
+            schema:
+              $ref: "#/PrepareSessionFileEnvelope"
+      "400": { $ref: "#/BadRequestResponse" }
+      "401": { $ref: "#/UnauthenticatedResponse" }
+      "403": { $ref: "#/ForbiddenResponse" }
+      "404": { $ref: "#/NotFoundResponse" }
+      "413": { $ref: "#/PayloadTooLargeResponse" }
+      "502": { $ref: "#/StorageBackendResponse" }
+      "500": { $ref: ../shared.yaml#/InternalErrorResponse }
+
+SessionFilePath:
+  get:
+    operationId: get_session_file
+    tags: ["Collaboration / Sessions"]
+    summary: Get Session file metadata.
+    x-avernet-security:
+      user: optional
+      app: optional
+      bot: optional
+    x-bcn-identity-policy: human_or_owned_bot
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+      - $ref: "#/SessionFileIdPath"
+    responses:
+      "200":
+        description: Session file metadata without an internal object handle.
+        content:
+          application/json:
+            schema:
+              $ref: "#/SessionFileEnvelope"
+      "400": { $ref: "#/BadRequestResponse" }
+      "401": { $ref: "#/UnauthenticatedResponse" }
+      "403": { $ref: "#/ForbiddenResponse" }
+      "404": { $ref: "#/NotFoundResponse" }
+      "500": { $ref: ../shared.yaml#/InternalErrorResponse }
+
+  delete:
+    operationId: delete_session_file
+    tags: ["Collaboration / Sessions"]
+    summary: Delete a Session file under the existing owner/creator/driver policy.
+    x-avernet-security:
+      user: optional
+      app: optional
+      bot: optional
+    x-bcn-identity-policy: human_or_owned_bot
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+      - $ref: "#/SessionFileIdPath"
+    responses:
+      "200":
+        description: Deletion result.
+        content:
+          application/json:
+            schema:
+              $ref: "#/DeleteSessionFileEnvelope"
+      "400": { $ref: "#/BadRequestResponse" }
+      "401": { $ref: "#/UnauthenticatedResponse" }
+      "403": { $ref: "#/ForbiddenResponse" }
+      "404": { $ref: "#/NotFoundResponse" }
+      "409": { $ref: "#/ConflictResponse" }
+      "500": { $ref: ../shared.yaml#/InternalErrorResponse }
+
+SessionFileContentPath:
+  get:
+    operationId: download_session_file
+    tags: ["Collaboration / Sessions"]
+    summary: Download or view Session file content.
+    x-avernet-security:
+      user: optional
+      app: optional
+      bot: optional
+    x-bcn-identity-policy: human_or_owned_bot
+    x-avernet-raw-response: true
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+      - $ref: "#/SessionFileIdPath"
+      - $ref: "#/ShowQuery"
+    responses:
+      "200":
+        description: File bytes streamed by BCN.
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      "302":
+        description: Redirect to a storage presigned download URL.
+        headers:
+          Location:
+            required: true
+            schema:
+              type: string
+              format: uri
+      "400": { $ref: "#/BadRequestResponse" }
+      "401": { $ref: "#/UnauthenticatedResponse" }
+      "403": { $ref: "#/ForbiddenResponse" }
+      "404": { $ref: "#/NotFoundResponse" }
+      "502": { $ref: "#/StorageBackendResponse" }
+      "500": { $ref: ../shared.yaml#/InternalErrorResponse }
+
+  put:
+    operationId: upload_session_file_content
+    tags: ["Collaboration / Sessions"]
+    summary: Stream all or one multipart segment of a prepared upload.
+    x-avernet-security:
+      user: optional
+      app: optional
+      bot: optional
+    x-bcn-identity-policy: human_or_owned_bot
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+      - $ref: "#/SessionFileIdPath"
+      - $ref: "#/PartQuery"
+    requestBody:
+      required: true
+      content:
+        application/octet-stream:
+          schema:
+            type: string
+            format: binary
+    responses:
+      "202":
+        description: Upload bytes accepted by the storage lifecycle.
+        content:
+          application/json:
+            schema:
+              $ref: "#/UploadSessionFileEnvelope"
+      "400": { $ref: "#/BadRequestResponse" }
+      "401": { $ref: "#/UnauthenticatedResponse" }
+      "403": { $ref: "#/ForbiddenResponse" }
+      "404": { $ref: "#/NotFoundResponse" }
+      "409": { $ref: "#/ConflictResponse" }
+      "413": { $ref: "#/PayloadTooLargeResponse" }
+      "422": { $ref: "#/UnprocessableResponse" }
+      "502": { $ref: "#/StorageBackendResponse" }
+      "500": { $ref: ../shared.yaml#/InternalErrorResponse }
+
+CompleteSessionFilePath:
+  post:
+    operationId: complete_session_file
+    tags: ["Collaboration / Sessions"]
+    summary: Complete a prepared Session file upload.
+    x-avernet-security:
+      user: optional
+      app: optional
+      bot: optional
+    x-bcn-identity-policy: human_or_owned_bot
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+      - $ref: "#/SessionFileIdPath"
+    responses:
+      "200":
+        description: Completed Session file metadata.
+        content:
+          application/json:
+            schema:
+              $ref: "#/SessionFileEnvelope"
+      "400": { $ref: "#/BadRequestResponse" }
+      "401": { $ref: "#/UnauthenticatedResponse" }
+      "403": { $ref: "#/ForbiddenResponse" }
+      "404": { $ref: "#/NotFoundResponse" }
+      "409": { $ref: "#/ConflictResponse" }
+      "422": { $ref: "#/UnprocessableResponse" }
+      "502": { $ref: "#/StorageBackendResponse" }
+      "500": { $ref: ../shared.yaml#/InternalErrorResponse }
+
+ShareSessionFilePath:
+  post:
+    operationId: share_session_file
+    tags: ["Collaboration / Sessions"]
+    summary: Mint an OpenAPI shared-content URL for a Ready Session file.
+    x-avernet-security:
+      user: optional
+      app: optional
+      bot: optional
+    x-bcn-identity-policy: human_or_owned_bot
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+      - $ref: "#/SessionFileIdPath"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            properties:
+              ttl_seconds:
+                type: integer
+                format: int64
+                minimum: 1
+                maximum: 4294967295
+    responses:
+      "201":
+        description: Share token and OpenAPI public URL.
+        content:
+          application/json:
+            schema:
+              $ref: "#/ShareSessionFileEnvelope"
+      "400": { $ref: "#/BadRequestResponse" }
+      "401": { $ref: "#/UnauthenticatedResponse" }
+      "403": { $ref: "#/ForbiddenResponse" }
+      "404": { $ref: "#/NotFoundResponse" }
+      "409": { $ref: "#/ConflictResponse" }
+      "500": { $ref: ../shared.yaml#/InternalErrorResponse }
+
+SharedSessionFileContentPath:
+  get:
+    operationId: download_shared_session_file
+    tags: ["Collaboration / Sessions"]
+    summary: Download shared file content using only the share token.
+    x-avernet-security: {}
+    x-avernet-raw-response: true
+    parameters:
+      - name: token
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - $ref: "#/ShowQuery"
+    responses:
+      "200":
+        description: Shared file bytes streamed by BCN.
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      "302":
+        description: Redirect to a storage presigned download URL.
+        headers:
+          Location:
+            required: true
+            schema:
+              type: string
+              format: uri
+      "404":
+        description: Missing, invalid, expired, or unresolvable share token.
+        x-error-codes: [shared_file_not_found]
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500": { $ref: ../shared.yaml#/InternalErrorResponse }
