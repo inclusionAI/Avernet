@@ -1321,6 +1321,7 @@ class TestSendMessageExtended:
                 auth_token=None,
                 app_id=None,
                 chat_metadata=None,
+                attachments=None,
             )
 
     @pytest.mark.asyncio
@@ -1354,6 +1355,7 @@ class TestSendMessageExtended:
                 auth_token=None,
                 app_id=None,
                 chat_metadata=None,
+                attachments=None,
             )
 
     @pytest.mark.asyncio
@@ -1395,6 +1397,7 @@ class TestSendMessageExtended:
                 auth_token="OPEN_API:app:my-key",
                 app_id="test-app",
                 chat_metadata=None,
+                attachments=None,
             )
 
     @pytest.mark.asyncio
@@ -1530,6 +1533,7 @@ class TestInjectMessageExtended:
                 message="instruction",
                 session_key=SESSION_ID,
                 auth_token="OPEN_API:app:inj-key",
+                attachments=None,
             )
 
     @pytest.mark.asyncio
@@ -1560,6 +1564,7 @@ class TestInjectMessageExtended:
                 message="instruction",
                 session_key=SESSION_ID,
                 auth_token=None,
+                attachments=None,
             )
 
     @pytest.mark.asyncio
