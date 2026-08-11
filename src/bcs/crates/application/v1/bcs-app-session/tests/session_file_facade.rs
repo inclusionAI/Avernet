@@ -267,7 +267,78 @@ async fn human_creator_can_upload_and_complete_an_owned_bots_file() {
     assert_eq!(completed.status, SessionFileStatus::Ready);
     let events = fixture.notifications.events.lock().await;
     assert_eq!(events.len(), 1);
-    assert!(format!("{:?}", events[0]).contains("gateway.test"));
+    match &events[0] {
+        SystemMessageEvent::GenericNotification {
+            message, receivers, ..
+        } => {
+            assert!(message.starts_with("用户 alice 上传了一个文件 report.txt"));
+            assert!(message.contains("gateway.test"));
+            let mut receiver_ids = receivers
+                .iter()
+                .map(|participant| participant.bot_uuid.as_str())
+                .collect::<Vec<_>>();
+            receiver_ids.sort_unstable();
+            assert_eq!(receiver_ids, vec!["bot-a", "bot-b"]);
+        }
+        event => panic!("expected GenericNotification, got {event:?}"),
+    }
+}
+
+#[tokio::test]
+async fn completion_skips_notification_when_uploader_is_the_only_bot() {
+    let fixture = Fixture::new().await;
+    fixture.seed().await;
+    let session_id = "group-1:00000002";
+    fixture
+        .session_repo
+        .create(
+            "group-1",
+            NewSessionParams {
+                id: Some(session_id.into()),
+                session_kind: SessionKind::Chat,
+                participants: vec![Participant::bot("bot-a", ParticipantRole::Driver)],
+                created_by: Some("bot-a".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("store single-Bot session");
+    let caller = bot_caller("bot-a", "alice");
+    let prepared = fixture
+        .service
+        .prepare(PrepareSessionFile {
+            caller: caller.clone(),
+            session_id: session_id.into(),
+            file_name: "solo.txt".into(),
+            size: 3,
+            mime_type: "text/plain".into(),
+        })
+        .await
+        .expect("prepare file");
+    fixture
+        .service
+        .upload_content(UploadSessionFileContent {
+            caller: caller.clone(),
+            session_id: session_id.into(),
+            file_id: prepared.file.file_id.clone(),
+            part_number: None,
+            body: byte_stream_from_bytes(Bytes::from_static(b"abc")),
+            content_length: Some(3),
+        })
+        .await
+        .expect("upload file");
+    fixture
+        .service
+        .complete(CompleteSessionFile {
+            caller,
+            session_id: session_id.into(),
+            file_id: prepared.file.file_id,
+            notification_content_url: "http://legacy.test/content".into(),
+        })
+        .await
+        .expect("complete file");
+
+    assert!(fixture.notifications.events.lock().await.is_empty());
 }
 
 #[tokio::test]

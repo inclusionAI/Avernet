@@ -614,3 +614,20 @@ fn human_readable_size(bytes: u64) -> String {
         format!("{:.1} {}", size, UNITS[unit])
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::human_readable_size;
+
+    #[test]
+    fn human_readable_size_formats_bytes() {
+        assert_eq!(human_readable_size(0), "0 B");
+        assert_eq!(human_readable_size(500), "500 B");
+        assert_eq!(human_readable_size(1023), "1023 B");
+        assert_eq!(human_readable_size(1024), "1 KB");
+        assert_eq!(human_readable_size(12288), "12 KB");
+        assert_eq!(human_readable_size(12345), "12.1 KB");
+        assert_eq!(human_readable_size(1_048_576), "1 MB");
+        assert_eq!(human_readable_size(1_572_864), "1.5 MB");
+    }
+}

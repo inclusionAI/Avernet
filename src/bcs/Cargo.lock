@@ -1046,6 +1046,7 @@ dependencies = [
  "async-trait",
  "axum",
  "base64 0.22.1",
+ "bcs-app-session",
  "bcs-auth-api",
  "bcs-auth-local",
  "bcs-bot",
