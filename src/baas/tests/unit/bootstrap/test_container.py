@@ -372,3 +372,72 @@ class TestInjectEnterprisePluginsImportError:
         container = object()
         with patch.dict(sys.modules, {"secbaas.community.plugin_registry": None}):
             _inject_enterprise_plugins(container)
+
+
+class TestBuildDbConfig:
+    """Unit tests for ``_build_db_config`` in ``bootstrap/_container.py``."""
+
+    def _build(self, database_cfg: dict) -> DatabaseConfig:
+        from secbaas.community.bootstrap._container import _build_db_config
+
+        container = get_container()
+        container.config.from_dict({"plugins": {"database": database_cfg}})
+        return _build_db_config(container.config)
+
+    def test_mariadb_populates_all_fields(self) -> None:
+        cfg = self._build(
+            {
+                "plugin_database": "MARIADB_ORM",
+                "create_schema": True,
+                "seed_data": True,
+                "mariadb_host": "db.internal",
+                "mariadb_port": 3307,
+                "mariadb_database": "secbaas",
+                "mariadb_user": "app",
+                "mariadb_password": "secret",
+            }
+        )
+        assert cfg.plugin_type == PluginDatabaseType.MARIADB_ORM
+        assert cfg.create_schema is True
+        assert cfg.seed_data is True
+        assert cfg.mariadb_host == "db.internal"
+        assert cfg.mariadb_port == 3307
+        assert cfg.mariadb_database == "secbaas"
+        assert cfg.mariadb_user == "app"
+        assert cfg.mariadb_password == "secret"
+
+    def test_missing_opt_keys_use_defaults(self) -> None:
+        cfg = self._build({"plugin_database": "MARIADB_ORM"})
+        assert cfg.create_schema is False
+        assert cfg.seed_data is False
+        assert cfg.mariadb_host == "127.0.0.1"
+        assert cfg.mariadb_port == 3306
+        assert cfg.mariadb_database == ""
+        assert cfg.mariadb_user == ""
+        assert cfg.mariadb_password == ""
+
+    def test_bool_parsing_accepts_string_true(self) -> None:
+        cfg = self._build(
+            {
+                "plugin_database": "MARIADB_ORM",
+                "create_schema": "true",
+                "seed_data": "on",
+            }
+        )
+        assert cfg.create_schema is True
+        assert cfg.seed_data is True
+
+    def test_sqlite_requires_database_url(self) -> None:
+        container = get_container()
+        container.config.from_dict(
+            {"plugins": {"database": {"plugin_database": "SQLITE_ORM"}}}
+        )
+        from secbaas.community.bootstrap._configs import ConfigError
+        from secbaas.community.bootstrap._container import _build_db_config
+
+        with pytest.raises(ConfigError):
+            _build_db_config(container.config)
+
+    def test_non_sqlite_allows_missing_database_url(self) -> None:
+        cfg = self._build({"plugin_database": "MARIADB_ORM"})
+        assert cfg.db_url == ""

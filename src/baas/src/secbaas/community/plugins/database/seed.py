@@ -1,7 +1,9 @@
-"""Seed data required for the application to function.
+"""Backend-agnostic seed data required for the application to function.
 
 These records match what E2E tests expect via DEFAULT_TENANT / DEFAULT_TEMPLATE_UUID.
-Without them, the SQLite backend starts empty and all bot/device/tenant APIs fail.
+Without them, the database backend starts empty and all bot/device/tenant APIs fail.
+Shared by the SQLite and MySQL data source plugins so both backends start with
+identical seed data.
 """
 
 from __future__ import annotations
@@ -191,13 +193,13 @@ _SEED_TEMPLATE_DOCKER = {
 }
 
 
-def seed_sqlite(session: Session) -> None:
-    """Insert required seed records into the SQLite database.
+def seed_database(session: Session) -> None:
+    """Insert required seed records into the database.
 
     The application depends on the team_claw tenant and its ARCA
     device template being present.  These are inserted after
-    create_all() so that the in-memory SQLite backend is usable
-    out of the box.
+    create_all() so that the backend is usable out of the box.
+    This is backend-agnostic and shared by the SQLite and MySQL plugins.
     """
     from secbaas.community.core.repository.device_template import (
         DeviceTemplateModel,

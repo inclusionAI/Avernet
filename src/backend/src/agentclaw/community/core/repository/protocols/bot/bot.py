@@ -103,6 +103,48 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
+    def list_live_bot_ids_by_owner(self, owner_id: str) -> list[str]:
+        """Every live ``bot_id`` this owner has, in one query.
+
+        Unpaginated and id-only on purpose: it exists so a caller holding a set
+        of bot ids can drop the dead ones without issuing a lookup per id.
+        Returning ids rather than rows keeps that cheap even for an owner with
+        many bots.
+
+        Scoped by current env AND tenant, like its siblings, and excludes
+        soft-deleted rows — so "in this list" means "live for this owner right
+        now".
+        """
+        ...
+
+    @abstractmethod
+    def filter_live_bots(
+        self, pairs: list[tuple[str, str]]
+    ) -> set[tuple[str, str]]:
+        """Which of these ``(bot_id, owner_id)`` bots are live, in one query.
+
+        The many-owner sibling of :meth:`list_live_bot_ids_by_owner`, and it
+        exists because a caller may hold bots belonging to *several* owners — an
+        application's grants, for instance, which cover bots the delegating user
+        collaborates on rather than owns. Filtering those against one owner's
+        live ids would silently drop every shared one.
+
+        **Keyed on the pair, not the bare id.** ``ac_bots`` has no unique key on
+        ``bot_id``: with the legacy ``default`` convention, an id-only query
+        reports a soft-deleted bot as live whenever *any* owner still has a
+        live bot of that id, so a grant whose bot is gone keeps being advertised
+        as reachable. The owner is on every grant record, so there is nothing to
+        discover.
+
+        Returns a set for direct membership testing, and never more pairs than
+        it was given. An empty input returns an empty set without querying.
+
+        Scoped by current env AND tenant, like its siblings, and excludes
+        soft-deleted rows.
+        """
+        ...
+
+    @abstractmethod
     def list_by_owner_or_collaborator(
         self, owner_id: str, page: int = 1, page_size: int = 20
     ) -> tuple[int, List[Dict[str, Any]]]:
@@ -132,8 +174,14 @@ class BotRepository(Protocol):
         status: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
+        bot_ids: list[str] | None = None,
     ) -> tuple[int, List[Dict[str, Any]]]:
         """List bots by conditions with pagination.
+
+        ``bot_ids`` restricts the result to an explicit set. ``None`` means no
+        restriction; an **empty list means none**, and the two must stay
+        distinguishable — collapsing them would turn "this caller may reach no
+        bots" into "show everything".
 
         ``owner_id`` scopes to a single owner (exact), ``engine`` filters on the
         active engine (exact), ``status`` filters on lifecycle status (exact).

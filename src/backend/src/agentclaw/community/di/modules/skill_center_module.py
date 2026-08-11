@@ -136,6 +136,7 @@ from agentclaw.community.core.skills_pool.types import (
 from agentclaw.community.core.skill_center.services.skill_symlink_listener import (
     SkillSymlinkListener,
 )
+
 from agentclaw.community.core.skill_center.services.local_skill_query_service import (
     LocalSkillQueryService,
 )
@@ -176,6 +177,26 @@ from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
 from agentclaw.community.core.repository.implementations.skill_center.sync_log import SkillCenterSyncLogRepository as UnifiedSkillCenterSyncLogRepository
 from agentclaw.community.core.repository.implementations.skill_center.propagation_log import SkillPropagationLogRepository as UnifiedSkillPropagationLogRepository
 from agentclaw.community.core.repository.implementations.skill_center.local_skill_cleanup import SqlLocalSkillCleanupRepository
+
+
+def _template_service_cls():
+    from agentclaw.community.core.bot_management.services.template_service import (
+        TemplateService,
+    )
+
+    return TemplateService
+
+
+def _build__ext_info_provider(injector: Injector):
+    def provider(bot_id: str) -> dict | None:
+        template_config = injector.get(_template_service_cls()).get_template_config(
+            bot_id
+        )
+        if not isinstance(template_config, dict):
+            return None
+        return {"aicoding": {"template_config": template_config}}
+
+    return provider
 
 
 logger = get_logger()
@@ -585,6 +606,7 @@ class SkillCenterModule(Module):
             device_plugin=device_plugin,
             path_factory=path_factory,
             pool_layout_paths=skill_service_factory.resolve_pool_paths,
+            ext_info_provider=_build__ext_info_provider(injector),
         )
 
     @singleton

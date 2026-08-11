@@ -427,11 +427,45 @@ async fn add_member_allows_provider_downlink_bot_in_manager_worker_group() {
             human_actor_id: None,
             group_id: group.group_id,
             bot_id: "provider-worker".to_string(),
-            role: Some("worker".to_string()),
         })
         .await
         .expect("provider downlink bot can be added to manager_worker group");
     assert_eq!(result.member.bot_uuid, "provider-worker");
+}
+
+#[tokio::test]
+async fn add_member_assigns_worker_in_manager_worker_group() {
+    let fixture = Fixture::new()
+        .with_bot("manager", "Manager", "public", Some("alice"))
+        .with_bot("existing-worker", "Existing Worker", "public", None)
+        .with_bot("new-worker", "New Worker", "public", None);
+    let service = fixture.service_with_limits(5, 10, 10);
+
+    let mut cmd = create_cmd(
+        Some("manager"),
+        "manager",
+        vec![
+            participant("manager", Some("manager")),
+            participant("existing-worker", Some("worker")),
+        ],
+    );
+    cmd.group_strategy = Some(bcs_service_api::GroupStrategy::ManagerWorker);
+    let group = service
+        .create_group(cmd)
+        .await
+        .expect("manager_worker group should be created");
+
+    let result = service
+        .add_member(GroupAddMemberCommand {
+            caller_actor_id: Some("manager".to_string()),
+            human_actor_id: None,
+            group_id: group.group_id,
+            bot_id: "new-worker".to_string(),
+        })
+        .await
+        .expect("member should be added with the strategy-owned role");
+
+    assert_eq!(result.member.role, "worker");
 }
 
 #[tokio::test]
@@ -848,7 +882,6 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
             human_actor_id: Some("human_alice".to_string()),
             group_id: "group-under-test".to_string(),
             bot_id: "friend".to_string(),
-            role: Some("consultant".to_string()),
         })
         .await;
     assert!(matches!(
@@ -863,7 +896,6 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
             human_actor_id: Some("human_alice".to_string()),
             group_id: "group-under-test".to_string(),
             bot_id: "stranger".to_string(),
-            role: Some("consultant".to_string()),
         })
         .await;
     assert!(matches!(
@@ -877,7 +909,6 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
             human_actor_id: Some("human_alice".to_string()),
             group_id: "group-under-test".to_string(),
             bot_id: "private-friend".to_string(),
-            role: Some("consultant".to_string()),
         })
         .await
         .expect("private friend target is reachable");
@@ -889,7 +920,6 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
             human_actor_id: Some("human_impostor".to_string()),
             group_id: "group-under-test".to_string(),
             bot_id: "friend".to_string(),
-            role: Some("consultant".to_string()),
         })
         .await;
     assert!(matches!(
@@ -904,13 +934,12 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
             human_actor_id: Some("human_alice".to_string()),
             group_id: "group-under-test".to_string(),
             bot_id: "friend".to_string(),
-            role: Some("driver".to_string()),
         })
         .await
         .expect("friend target is reachable");
     assert_eq!(added.group_id, "group-under-test");
     assert_eq!(added.member.bot_uuid, "friend");
-    assert_eq!(added.member.role, "driver");
+    assert_eq!(added.member.role, "consultant");
 
     let stored = fixture.group.get("group-under-test").await.unwrap();
     assert!(
@@ -949,7 +978,6 @@ async fn add_member_writes_subscription_edge_with_driver_identity_for_public_tar
             human_actor_id: Some("human_alice".to_string()),
             group_id: "group-under-test".to_string(),
             bot_id: "public-helper".to_string(),
-            role: Some("consultant".to_string()),
         })
         .await
         .expect("originator can add public helper");
@@ -959,7 +987,6 @@ async fn add_member_writes_subscription_edge_with_driver_identity_for_public_tar
             human_actor_id: Some("human_alice".to_string()),
             group_id: "group-under-test".to_string(),
             bot_id: "protected-helper".to_string(),
-            role: Some("consultant".to_string()),
         })
         .await
         .expect("originator can add protected friend of driver");
@@ -2964,41 +2991,12 @@ async fn add_member_human_consultant_ok() {
             human_actor_id: Some("human_alice".to_string()),
             group_id: "group-under-test".to_string(),
             bot_id: "human_bob".to_string(),
-            role: Some("consultant".to_string()),
         })
         .await
         .expect("adding human consultant should succeed");
     assert_eq!(result.member.actor_kind, ActorKind::Human);
     assert_eq!(result.member.mode, Some(ParticipantMode::Present));
     assert_eq!(result.member.role, "consultant");
-}
-
-#[tokio::test]
-async fn add_member_human_driver_rejected() {
-    let fixture = Fixture::new()
-        .with_bot("driver", "Driver", "public", Some("alice"))
-        .with_human("human_bob", "Bob");
-    let service = fixture.service_with_limits(5, 10, 10);
-    service
-        .create_group(create_cmd(
-            Some("driver"),
-            "driver",
-            vec![participant("driver", Some("driver"))],
-        ))
-        .await
-        .expect("create group");
-
-    let err = service
-        .add_member(GroupAddMemberCommand {
-            caller_actor_id: Some("driver".to_string()),
-            human_actor_id: Some("human_alice".to_string()),
-            group_id: "group-under-test".to_string(),
-            bot_id: "human_bob".to_string(),
-            role: Some("driver".to_string()),
-        })
-        .await
-        .expect_err("human driver via add_member should be rejected");
-    assert!(matches!(err, GroupUseCaseError::InvalidProposal(_)));
 }
 
 #[tokio::test]
@@ -3022,40 +3020,12 @@ async fn add_member_human_worker_in_manager_worker_ok() {
             human_actor_id: Some("human_alice".to_string()),
             group_id: "group-under-test".to_string(),
             bot_id: "human_bob".to_string(),
-            role: Some("worker".to_string()),
         })
         .await
         .expect("adding human worker to mw group should succeed");
     assert_eq!(result.member.actor_kind, ActorKind::Human);
     assert_eq!(result.member.mode, Some(ParticipantMode::Present));
-}
-
-#[tokio::test]
-async fn add_member_human_manager_in_manager_worker_rejected() {
-    let fixture = Fixture::new()
-        .with_bot("mgr", "Manager", "public", Some("alice"))
-        .with_human("human_bob", "Bob");
-    let service = fixture.service_with_limits(5, 10, 10);
-
-    let mut cmd = create_cmd(
-        Some("mgr"),
-        "mgr",
-        vec![participant("mgr", Some("manager"))],
-    );
-    cmd.group_strategy = Some(bcs_service_api::GroupStrategy::ManagerWorker);
-    service.create_group(cmd).await.expect("create mw group");
-
-    let err = service
-        .add_member(GroupAddMemberCommand {
-            caller_actor_id: Some("mgr".to_string()),
-            human_actor_id: Some("human_alice".to_string()),
-            group_id: "group-under-test".to_string(),
-            bot_id: "human_bob".to_string(),
-            role: Some("manager".to_string()),
-        })
-        .await
-        .expect_err("human manager via add_member should be rejected");
-    assert!(matches!(err, GroupUseCaseError::InvalidProposal(_)));
+    assert_eq!(result.member.role, "worker");
 }
 
 #[tokio::test]
@@ -3106,7 +3076,6 @@ async fn originator_human_can_add_member() {
             human_actor_id: Some("human_alice".to_string()),
             group_id: "group-under-test".to_string(),
             bot_id: "helper".to_string(),
-            role: Some("consultant".to_string()),
         })
         .await
         .expect("human originator should be able to add member");
@@ -3187,7 +3156,6 @@ async fn originator_bot_self_driver_can_manage() {
             human_actor_id: Some("human_alice".to_string()),
             group_id: "group-under-test".to_string(),
             bot_id: "helper".to_string(),
-            role: Some("consultant".to_string()),
         })
         .await
         .expect("driver should still be able to add member");
@@ -3438,7 +3406,6 @@ async fn add_non_public_bot_to_public_group_rejected() {
         human_actor_id: None,
         group_id: "group-under-test".to_string(),
         bot_id: "bot_private".to_string(),
-        role: Some("consultant".to_string()),
     }).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("Cannot add non-public bot"));
@@ -3462,7 +3429,6 @@ async fn add_human_to_public_group_succeeds() {
         human_actor_id: None,
         group_id: "group-under-test".to_string(),
         bot_id: "human_123".to_string(),
-        role: Some("consultant".to_string()),
     }).await;
     assert!(result.is_ok(), "error: {:?}", result.unwrap_err());
 }

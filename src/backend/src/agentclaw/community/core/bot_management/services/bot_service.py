@@ -49,6 +49,9 @@ if TYPE_CHECKING:
     from agentclaw.community.core.cron.services.aicoding.cron_auto_setup import CronAutoSetupService
     from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
     from agentclaw.community.core.common_config.service import CommonConfigService
+    from agentclaw.community.core.bot_app_grant.protocols import (
+        BotAppGrantSweepProtocol,
+    )
     # Type-only: importing ``agentclaw.community.di`` at runtime would form a cycle
     # (di/__init__ -> container -> aicoding_module -> workspace_service ->
     # bot_service). ``BotService`` is provider-constructed, so this
@@ -307,6 +310,7 @@ class BotService:
         oss_record_repo: "OssToNasRecordRepository",
         bot_publish_service_provider: "Callable[[], BotPublishService]",
         device_service_provider: "Callable[[], DeviceService]",
+        bot_app_grant_service_provider: "Callable[[], BotAppGrantSweepProtocol]",
         path_factory: WorkspacePathFactory,
         template_service: TemplateService,
         # Optional: DIMA (applicationCoding) hosting is corp-only. Community does
@@ -347,6 +351,19 @@ class BotService:
         # the cycle never closes during graph build.
         self._bot_publish_provider = bot_publish_service_provider
         self._device_service_provider = device_service_provider
+        # Typed against a **core-level protocol**, not the concrete service:
+        # selecting an implementation is the composition root's job. Not the
+        # Service API Protocol either — core may not import ``api/``, which the
+        # architecture suite enforces — hence
+        # ``core/bot_app_grant/protocols.py``, the same shape
+        # ``core/bot_collaborator`` uses for the same pair of rules.
+        #
+        # Required, not optional: deleting a bot has to withdraw the
+        # authorizations standing against it, and a BotService that could not
+        # would delete bots while leaving applications able to reach them.
+        # There is no "grants not configured" state worth modelling — the
+        # alternative to a provider here is a silent security hole.
+        self._bot_app_grant_provider = bot_app_grant_service_provider
         self._path_factory = path_factory
         self._template_service = template_service
         self._workspace_hosting_service = workspace_hosting_service
@@ -2119,6 +2136,7 @@ class BotService:
         status: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
+        bot_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         List bots by conditions with pagination.
@@ -2133,6 +2151,10 @@ class BotService:
             status: Filter by lifecycle status (exact match)
             page: Page number (1-based)
             page_size: Items per page
+            bot_ids: Restrict to this explicit set. ``None`` means unrestricted;
+                an empty list means none. The distinction is load-bearing —
+                treating empty as unrestricted would show a caller entitled to
+                nothing everything.
 
         Returns:
             Dictionary with 'total' and 'items' keys
@@ -2147,6 +2169,7 @@ class BotService:
             status=status,
             page=page,
             page_size=page_size,
+            bot_ids=bot_ids,
         )
         self._attach_template_configs_to_bots(items)
         return {
@@ -3369,6 +3392,32 @@ class BotService:
                 if earliest_bot_id and bot_id == earliest_bot_id:
                     raise BotOperationNotAllowedError("不能删除首个创建的 Bot，该 Bot 受保护")
 
+            # Withdraw every application authorization standing against this
+            # bot — whoever delegated it — before anything destructive happens.
+            # This is the first of two sweeps; the second runs after the soft
+            # delete, and the pair is what actually closes the gap. See there.
+            #
+            # Ordering is the whole point. Placed after the device release and
+            # the passport destruction, a failure here would leave a bot that is
+            # already unusable with live grants against it: applications still
+            # authorized to reach something that no longer works, and no
+            # deletion to trigger the sweep again. Placed here, a failure aborts
+            # while the bot is still intact, and the worst outcome is grants
+            # withdrawn from a bot that survived — recoverable by re-granting.
+            #
+            # Failures propagate deliberately. Swallowing this would reintroduce
+            # exactly the gap it closes, and quietly.
+            revoked = self._bot_app_grant_provider().revoke_all_for_bot(
+                bot_id=bot_id, owner_id=user_id
+            )
+            if revoked:
+                logger.info(
+                    "[bot_service.delete_bot] withdrew %s app authorization(s) "
+                    "on bot %s before deleting it",
+                    revoked,
+                    bot_id,
+                )
+
             # Release device if binding exists (包括 ACTIVE 和 PENDING 状态)
             binding_id = bot.get("binding_id")
             if binding_id:
@@ -3412,6 +3461,8 @@ class BotService:
             if not result:
                 raise BotNotFoundError(f"Bot not found: {bot_id}")
 
+            self._sweep_grants_that_raced_the_deletion(bot_id, user_id)
+
             self._sync_provider_bot_delete_to_bcn(bot_id, user_id)
 
             # 清理关联的脏数据（仅限非 default bot）
@@ -3437,6 +3488,62 @@ class BotService:
         except Exception as e:
             logger.error(f"[bot_service.delete_bot] Failed to delete bot {bot_id}: {e}")
             raise BotServiceError(f"Failed to delete bot: {e}")
+
+    def _sweep_grants_that_raced_the_deletion(
+        self, bot_id: str, user_id: str
+    ) -> None:
+        """Withdraw grants that landed while the deletion was in flight.
+
+        The first sweep commits, and then the deletion spends time in the device
+        release and the Passport destruction — both remote calls. A collaborator
+        granting in that window inserts a row *after* the sweep read, and it
+        would outlive the bot.
+
+        **This narrows the window; it does not close it, and an earlier
+        revision of this docstring wrongly claimed it did.** The claim was that
+        once ``soft_delete_by_owner`` commits no further grant can be created,
+        because every way the delegation gate resolves a bot filters
+        ``is_delete == 0``. Those filters are real, but they guard *resolution*,
+        which happens early in the request — the row is written later, in
+        ``BotAppGrantService.grant``. A request that had already resolved the
+        bot can still insert behind this sweep.
+
+        What remains is bounded on the other side by
+        :class:`~...bot_app_grant.errors.GrantBotNotLiveError`: the grant path
+        rechecks liveness at the write, so the surviving gap is between that
+        check and its insert rather than the whole request. Closing even that
+        would mean locking the bot row across every grant write, to prevent a
+        row that grants nothing — every read filters bots by liveness, and every
+        request re-adjudicates against a bot that cannot be resolved. Hygiene,
+        not the boundary. The boundary is that nothing is trusted from the row.
+
+        **Failures propagate, like the first sweep.** An earlier revision made
+        this best-effort, reasoning that the bot is already deleted so raising
+        reports a failure for an operation that succeeded. That reasoning is
+        real but it loses: `AGENTS.md` is explicit that persistence write
+        failures are propagated and never swallowed into a success, and a sweep
+        that could not commit is exactly a failed write. Reporting success
+        while the authorization table still holds rows for this bot makes the
+        two disagree with no signal that they do.
+
+        The cost is worth naming rather than hiding: the deletion really has
+        happened by then, so a caller who retries is answered "no such bot".
+        That is a confusing sequence, but it is an honest one — where silent
+        success is a wrong answer that no one can later discover.
+
+        A non-zero count here means the race actually happened, which is worth
+        seeing in the log rather than inferring later from an orphan row.
+        """
+        raced = self._bot_app_grant_provider().revoke_all_for_bot(
+            bot_id=bot_id, owner_id=user_id
+        )
+        if raced:
+            logger.warning(
+                "[bot_service.delete_bot] withdrew %s app authorization(s) "
+                "created on bot %s while it was being deleted",
+                raced,
+                bot_id,
+            )
 
     def _sync_provider_bot_delete_to_bcn(self, bot_id: str, user_id: str) -> None:
         """Best-effort sync of local bot deletion to BCN provider bot deletion."""

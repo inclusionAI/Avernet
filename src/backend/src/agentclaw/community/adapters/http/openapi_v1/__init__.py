@@ -48,6 +48,35 @@ still require an authenticated caller — ``_PUBLIC_AUTH`` below — they just h
 no user-shaped answer to give. The load-test group is exempt on the same
 grounds and for the plainest reason of all: it reads and writes nothing.
 
+Who may call: a person, or an application acting for one
+--------------------------------------------------------
+
+Two caller shapes reach this surface, and the difference is whether a human is
+on the wire at all.
+
+A **person** is the ordinary case and is unchanged by everything below: their
+``user_id`` must name themselves, and every read and write is scoped to them.
+
+An **application acting alone** presents its own credential and no end user. It
+names the user it acts for in the same ``user_id`` parameter, and that parameter
+is *authorized against a grant* — a record saying "this application may act as
+this person on this bot" (``core/bot_app_grant``) — rather than compared with a
+caller that is not there. The application then inherits exactly that person's
+access, re-adjudicated on every request by the same gates they would face. It is
+never more: nothing about their authority is stored in the grant, so there is
+nothing to go stale, and the application loses a bot the moment the person does.
+
+**Which operations admit it is a per-operation decision, written down.**
+``admission.py`` holds one entry per operation; an operation absent from that
+table refuses a machine caller, so a route added later is refused by omission
+rather than by someone remembering not to opt in.
+``test_admission_inventory.py`` is what makes the omission loud.
+
+Refusals are indistinguishable on purpose. An application that reaches an
+operation it may not gets the same ``401`` an unauthenticated caller gets; one
+that names a bot it holds no grant for gets the same ``404`` a nonexistent bot
+gets, byte for byte. Anything finer would be an enumeration oracle.
+
 Planes
 ------
 
@@ -99,6 +128,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
+from .authorized_apps import app_view_router as authorized_bots_router
+from .authorized_apps import router as authorized_apps_router
 from .bots import router as bots_router
 from .contracts import (
     ENGINE_RUNTIME_ERROR_RESPONSES,
@@ -106,6 +137,7 @@ from .contracts import (
     USER_SCOPED_ERROR_RESPONSES,
 )
 from .dependencies import require_principal
+from .principal import require_granted_bot
 from .engine_runtime.approvals import router as engine_approvals_router
 from .engine_runtime.connection import router as engine_connection_router
 from .engine_runtime.engine import router as engine_engine_router
@@ -157,6 +189,30 @@ _MIXED_GROUPS = [
 # literals across three lists is about which *response table* each gets; it does
 # not change that they all precede `bots`.
 _SUBGROUPS = [
+    # Both authorization groups precede `bots` below. `authorized_apps_router`
+    # sits *under* `{bot_id}` so path shape already keeps it distinct, but
+    # `authorized_bots_router` is a top-level literal and genuinely depends on
+    # this order: nothing else stops a future `/openapi/v1/{something}` from
+    # claiming it.
+    authorized_apps_router,
+    authorized_bots_router,
+]
+
+# The groups where **every** route is GRANT_CHECKED_OWN_BOT — it names a bot and resolves it
+# owner-scoped — so the grant check can be declared once for the group instead
+# of on each of its 25 routes.
+#
+# Declared per group rather than surface-wide because the check is not a no-op
+# everywhere: on an operation that names no bot it would refuse an application
+# outright, which is exactly wrong for the listings (Mode B) and the
+# account-level reads (C/OPEN). `bots` is mixed and declares it per route;
+# `admission.py` is the authority on which is which, and
+# `test_principal_seam.py` fails if a route's declaration and its mode disagree.
+#
+# The engine-runtime groups need no entry here: their `OwnerIdDep` already
+# depends on the same check, because it is where the addressed owner comes from
+# for an application caller.
+_GRANT_CHECKED_SUBGROUPS = [
     identity_router,
     resources_router,
     routines_router,
@@ -192,6 +248,12 @@ _ENGINE_RUNTIME_GROUPS = [
 # to this same invocation.
 _PUBLIC_AUTH = [Depends(require_principal)]
 
+# The bot authorization for an application caller, for the groups that are
+# wholly own-bot. A no-op for a caller that names an end user — their own
+# operation's owner-scoped resolve already refuses a bot that is not theirs, and
+# re-deciding it here would risk a second, different answer.
+_GRANT_CHECKED = [Depends(require_granted_bot)]
+
 
 def build_public_router() -> APIRouter:
     """Assemble the ``/openapi/v1/bots`` public router.
@@ -214,6 +276,12 @@ def build_public_router() -> APIRouter:
     for router in _SUBGROUPS:
         public.include_router(
             router, responses=USER_SCOPED_ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
+        )
+    for router in _GRANT_CHECKED_SUBGROUPS:
+        public.include_router(
+            router,
+            responses=USER_SCOPED_ERROR_RESPONSES,
+            dependencies=_PUBLIC_AUTH + _GRANT_CHECKED,
         )
     for router in _ENGINE_RUNTIME_GROUPS:
         public.include_router(

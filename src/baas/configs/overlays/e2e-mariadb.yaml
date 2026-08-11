@@ -1,0 +1,22 @@
+# MariaDB E2E overlay — use MariaDB as the baas storage backend.
+# Select via: SOFAPY_CONFIG_OVERLAY=e2e-mariadb
+# Enables schema creation and seed data so the E2E acceptance suite can run
+# against a freshly-created database. Requires a reachable MariaDB server.
+# Values below target the local E2E devbox container
+# (docker run -d -p 33306:3306 -e MARIADB_DATABASE=secbaas_test \
+#   -e MARIADB_USER=secbaas -e MARIADB_PASSWORD=secbaaspass mariadb:11) and can be
+# overridden at deploy time via MARIADB_HOST / MARIADB_PORT / MARIADB_DATABASE /
+# MARIADB_USER / MARIADB_PASSWORD environment variables (read by
+# DatabasePluginConfig via pydantic-settings).
+workers: 1
+user_config:
+  plugins:
+    database:
+      plugin_database: "MARIADB_ORM"
+      create_schema: true
+      seed_data: true
+      mariadb_host: "127.0.0.1"
+      mariadb_port: 33306
+      mariadb_database: "secbaas_test"
+      mariadb_user: "secbaas"
+      mariadb_password: "secbaaspass"

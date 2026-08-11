@@ -3,10 +3,11 @@
 The behavioural half: the default is the draft byte-for-byte, a named stage
 travels to the forward unchanged, a stage a bot cannot have is the one fixed
 409, and a value outside the enum never reaches a handler. The document half,
-in the shape of ``test_explicit_user_id.py``: ``owner_id`` and ``stage`` are
-optional query parameters on exactly the sixteen engine-runtime operations,
-and nowhere else — asserted against the generated description so a later
-operation is covered without editing this file.
+in the shape of ``test_explicit_user_id.py``: ``stage`` is an optional query
+parameter on exactly the sixteen engine-runtime operations and nowhere else,
+and ``owner_id`` on those plus the three bot-scoped authorization operations —
+asserted against the generated description so a later operation is covered
+without editing this file.
 """
 
 from __future__ import annotations
@@ -34,6 +35,18 @@ _ENGINE_RUNTIME_PREFIXES = (
     "/openapi/v1/bots/approvals",
     "/openapi/v1/bots/connection",
 )
+
+#: The other operations that address a bot by ``(owner, bot_id)``.
+#:
+#: They take ``owner_id`` for the same reason and with the same default — the
+#: caller's own bot — because ``bot_id`` alone does not identify one. They do
+#: **not** take ``stage``: there is no runtime in question when you are
+#: recording who may reach a bot.
+_OWNER_ADDRESSED_ELSEWHERE = {
+    ("get", "/openapi/v1/bots/{bot_id}/authorized-apps"),
+    ("post", "/openapi/v1/bots/{bot_id}/authorized-apps"),
+    ("delete", "/openapi/v1/bots/{bot_id}/authorized-apps/{app_id}"),
+}
 
 
 @pytest.fixture
@@ -195,19 +208,31 @@ def _query_params(operation: dict) -> dict[str, dict]:
 
 def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
     schema = _schema()
-    carrying, engine_runtime = [], []
+    engine_runtime, carrying_stage, carrying_owner = [], [], []
     for path, method, operation in _operations(schema):
         params = _query_params(operation)
         if path.startswith(_ENGINE_RUNTIME_PREFIXES):
             engine_runtime.append((method, path))
             assert "owner_id" in params, f"{method.upper()} {path} lacks owner_id"
             assert "stage" in params, f"{method.upper()} {path} lacks stage"
-            assert not params["owner_id"].get("required", False), path
+        if "stage" in params:
+            carrying_stage.append((method, path))
             assert not params["stage"].get("required", False), path
-        if "owner_id" in params or "stage" in params:
-            carrying.append((method, path))
+        if "owner_id" in params:
+            carrying_owner.append((method, path))
+            # Never required anywhere: omitting it means the caller's own bot,
+            # which is what every one of these operations meant before the
+            # parameter existed.
+            assert not params["owner_id"].get("required", False), path
+
     assert len(engine_runtime) == 16
-    assert sorted(carrying) == sorted(engine_runtime)
+    assert sorted(carrying_stage) == sorted(engine_runtime), "stage is theirs alone"
+    assert sorted(carrying_owner) == sorted(
+        set(engine_runtime) | _OWNER_ADDRESSED_ELSEWHERE
+    ), (
+        "owner_id belongs to the engine-runtime operations and the three "
+        "authorization operations, and to nothing else by accident"
+    )
 
 
 def test_the_stage_enum_publishes_exactly_the_three_runtimes():

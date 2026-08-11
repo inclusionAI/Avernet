@@ -1556,6 +1556,7 @@ mod tests {
         let event = SystemMessageEvent::BotJoined {
             group_id: group_id.to_string(),
             actor: Participant::bot(&new_bot_id, ParticipantRole::Consultant),
+            session_id: session_id.clone(),
         };
         dispatcher
             .dispatch(event, &group_fixture(group_id, &existing_id), &session_id, &participants)
@@ -1580,7 +1581,7 @@ mod tests {
             1,
             "the shared notice is a single public record, not per-bot copies"
         );
-        assert!(existing_contents.iter().all(|c| !c.contains("你加入了 BCS 协作群.")),
+        assert!(existing_contents.iter().all(|c| !c.contains("<GroupContext>")),
             "new-bot's context injection (owner=new-bot) is hidden from mgr");
 
         // Viewer = new-bot: sees its own context injection (owner=new-bot) +
@@ -1593,7 +1594,7 @@ mod tests {
             res_new.messages.iter().map(|m| m.content.as_str()).collect();
         assert!(new_contents.contains(&"public-anchor"),
             "public owner=None records still visible to new-bot");
-        assert!(new_contents.iter().any(|c| c.contains("你加入了 BCS 协作群.")),
+        assert!(new_contents.iter().any(|c| c.contains("<GroupContext>")),
             "new-bot's own context injection (owner=new-bot) is returned");
         assert!(new_contents.iter().any(|c| c.contains("已加入协作群")),
             "public join notice (owner=None) is returned to new-bot");
@@ -1611,7 +1612,7 @@ mod tests {
             "public owner=None records visible to human viewers");
         assert!(human_contents.iter().any(|c| c.contains("已加入协作群")),
             "public join notice is visible to human viewers");
-        assert!(human_contents.iter().all(|c| !c.contains("你加入了 BCS 协作群.")),
+        assert!(human_contents.iter().all(|c| !c.contains("<GroupContext>")),
             "per-bot owned copies stay hidden from human viewers");
     }
 

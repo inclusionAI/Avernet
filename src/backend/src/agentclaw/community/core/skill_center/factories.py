@@ -15,7 +15,7 @@ needs the dispatcher *types* under ``TYPE_CHECKING``.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Optional, TYPE_CHECKING
+from typing import Any, Callable, Mapping, Optional, TYPE_CHECKING
 
 from injector import inject
 
@@ -431,6 +431,7 @@ class SkillSetServiceFactory:
             [str, str, str],
             tuple[str, str, str] | None,
         ],
+        ext_info_provider: Callable[[str], Mapping[str, Any] | None] | None = None,
     ) -> None:
         self._skill_repo = skill_repo
         self._skill_set_repo = skill_set_repo
@@ -444,6 +445,7 @@ class SkillSetServiceFactory:
         self._device_plugin = device_plugin
         self._path_factory = path_factory
         self._pool_layout_paths = pool_layout_paths
+        self._ext_info_provider = ext_info_provider
 
     def create(
         self,
@@ -544,6 +546,7 @@ class SkillSetServiceFactory:
             device_sync_dispatcher=self._device_sync_dispatcher_provider(),
             mcp_sync_service=self._mcp_sync_service,
             device_plugin=self._device_plugin,
+            ext_info_provider=self._ext_info_provider,
             path_factory=self._path_factory,
             pool_layout_paths=self._pool_layout_paths,
         )
