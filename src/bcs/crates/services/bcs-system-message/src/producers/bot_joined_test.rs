@@ -178,6 +178,7 @@ async fn bot_joined_produces_context_injection_and_notification() {
         group_id: "group-1".to_string(),
         actor: new_bot,
         session_id: "group-1:session".to_string(),
+        session_input: None,
     };
 
     let (messages, user_message) = producer.produce(&event, &group, &registry, &group.participants).await;
@@ -278,6 +279,7 @@ async fn bot_joined_emits_user_message_even_when_only_new_bot_present() {
         group_id: "group-1".to_string(),
         actor: new_bot.clone(),
         session_id: "group-1:session".to_string(),
+        session_input: None,
     };
 
     let (messages, user_message) = producer.produce(&event, &group, &registry, &[driver, new_bot]).await;
@@ -293,4 +295,5 @@ async fn bot_joined_emits_user_message_even_when_only_new_bot_present() {
         Some("NewBot(new-bot-id) 已加入协作群 - 能力集: {name: \"coding\"}")
     );
 }
+
 
