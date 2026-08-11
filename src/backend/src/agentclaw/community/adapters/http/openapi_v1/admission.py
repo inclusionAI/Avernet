@@ -53,23 +53,51 @@ logger = get_logger()
 
 
 class AdmissionMode(StrEnum):
-    """How an operation treats a caller that names no end user."""
+    """How an operation treats a caller that names no end user.
 
-    #: Names a bot; caller must *be* its owner. Admitted iff a live grant covers
-    #: ``(app, bot, delegating user)``.
+    Every mode answers one question — *an application is calling with no human
+    on the wire; what does this operation do about it?* — and what separates
+    them is two things: whether the operation names a bot, and **how it decides
+    which bot**.
+
+    That second part is the whole of the A1/A2 split, and it is not a
+    permission rule: both run the identical grant check. They differ only in
+    where the addressed bot's owner comes from, because ``bot_id`` alone does
+    not identify a bot.
+    """
+
+    #: **One bot, always the delegating user's own.** These groups resolve
+    #: through ``get_by_id_and_owner(bot_id, delegating user)``, so the owner is
+    #: that user by construction and the request cannot name another. Admitted
+    #: iff a live grant covers ``(app, bot, delegating user)``.
     A1 = "grant-checked"
-    #: Names a bot *and* an owner. A1's check, plus the addressed owner taken
-    #: from the grant record rather than the request.
+    #: **One bot, possibly someone else's.** Same check as A1, against the bot
+    #: the request addresses: these operations publish an ``owner_id`` query
+    #: parameter that defaults to the caller's own, and the grant is looked up
+    #: on ``(app, bot, that owner, delegating user)``.
+    #:
+    #: The owner therefore comes *from the request*, not from the grant record.
+    #: An earlier revision had it the other way round — the lookup asked "any
+    #: grant on this bot id" and took whatever owner came back — which was safe
+    #: only while the unique key happened to make that row singular.
     A2 = "grant-checked-owner-addressed"
-    #: Returns a set of bots. Admitted; the result is narrowed to granted ones.
+    #: **A set of bots, not one.** Admitted unconditionally; it is the *result*
+    #: that is narrowed, to the bots this application was granted. Refusing
+    #: outright would be wrong — the question "which bots may I reach?" is one
+    #: an application is entitled to ask, and the empty answer discloses nothing.
     B = "grant-filtered"
-    #: No bot dimension, but concerns the named user's account. Admitted only
-    #: while the application holds at least one live grant from that user.
+    #: **No bot; the named user's account.** Nothing to scope to a bot, so the
+    #: gate is the relationship itself: admitted only while the application
+    #: holds at least one live grant from that user. A stranger application
+    #: therefore learns nothing about an account that never authorized it.
     C = "user-gated"
-    #: No bot dimension and no ``user_id``; the answer is identical for every
-    #: authenticated caller in the tenant. Admitted on authentication alone.
+    #: **No bot and no user.** The answer is identical for every authenticated
+    #: caller in the tenant — a name-availability check and the MCP catalogue —
+    #: so there is no scope to enforce and authentication alone is the bar.
     OPEN = "open"
-    #: Refused. The default, and what an unlisted route effectively gets.
+    #: **Refused**, with a ``401``. Also what an operation *absent* from the
+    #: table gets, which is the point: a route added tomorrow is refused until
+    #: someone decides otherwise, rather than admitted because nobody noticed.
     REFUSED = "refused"
 
 
