@@ -15,12 +15,15 @@ pub use group_session_connection::group_session_connection_router;
 ///
 /// The Internal API deliberately has no business routes in the first batch.
 pub fn router(state: ApiState) -> Router {
-    Router::new()
-        .merge(openapi::router())
+    let protected = Router::new()
+        .merge(openapi::protected_router())
         .merge(internal::router())
         .layer(middleware::from_fn_with_state(
             state.clone(),
             verify_principal::<ApiState>,
-        ))
+        ));
+    Router::new()
+        .merge(protected)
+        .merge(openapi::public_router())
         .with_state(state)
 }

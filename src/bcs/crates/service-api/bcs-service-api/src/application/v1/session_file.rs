@@ -155,6 +155,7 @@ pub enum SessionFileContent {
     Stream {
         file: SessionFileView,
         body: ByteStream,
+        inline: bool,
     },
 }
 

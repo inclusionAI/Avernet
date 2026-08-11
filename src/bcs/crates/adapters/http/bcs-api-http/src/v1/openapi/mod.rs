@@ -12,13 +12,21 @@ pub use dto::session_file::{
     ShareSessionFileRequest, SharedFileContentQuery, UploadSessionFileQuery,
 };
 
-pub fn router() -> Router<ApiState> {
+pub fn protected_router() -> Router<ApiState> {
     Router::new().nest(
         "/openapi/v1/collaboration",
         routes::bot::router()
             .merge(routes::group::router())
             .merge(routes::session::router())
+            .merge(routes::session_file::protected_router())
             .merge(routes::invitation::router())
             .merge(routes::friendship::router()),
+    )
+}
+
+pub fn public_router() -> Router<ApiState> {
+    Router::new().nest(
+        "/openapi/v1/collaboration",
+        routes::session_file::public_router(),
     )
 }

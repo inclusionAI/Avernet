@@ -206,6 +206,7 @@ impl SessionFileApplicationServiceImpl {
         Ok(SessionFileContent::Stream {
             file: project_file(file),
             body,
+            inline: show,
         })
     }
 
