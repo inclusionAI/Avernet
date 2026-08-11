@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import tempfile
 import unittest
@@ -10,15 +9,20 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 HELPER_PATH = REPO_ROOT / "scripts/lib/resolve_base_ref.sh"
-BAAS_JUSTFILE = REPO_ROOT / "src/baas/justfile"
-GATEWAY_JUSTFILE = REPO_ROOT / "src/gateway/justfile"
-BAAS_CI_TEST = REPO_ROOT / "src/baas/scripts/ci_test.sh"
-GATEWAY_CI_TEST = REPO_ROOT / "src/gateway/scripts/ci_test.sh"
 
-# Coverage threshold enforced by GitHub CI for the two modules that ship a
-# `just test` recipe (see .github/workflows/unit-tests.yml). These assertions
-# keep the local gate aligned with CI.
-CI_CHANGE_LINE_COVERAGE = {"baas": "90", "gateway": "90"}
+# ci_test.sh is the entrypoint GitHub CI and local devs share for each Python
+# module (see .github/workflows/unit-tests.yml). backend/engine have no justfile,
+# so ci_test.sh is their only local surface; baas/gateway also expose `just test-ci`.
+CI_TEST = {
+    "backend": REPO_ROOT / "src/backend/scripts/ci_test.sh",
+    "baas": REPO_ROOT / "src/baas/scripts/ci_test.sh",
+    "engine": REPO_ROOT / "src/engine/scripts/ci_test.sh",
+    "gateway": REPO_ROOT / "src/gateway/scripts/ci_test.sh",
+}
+
+# Changed-line coverage threshold each ci_test.sh passes to report_check.py
+# when --base is set (CI always sets it; locally it is auto-derived).
+CI_CHANGE_LINE_COVERAGE = {"backend": "80", "baas": "90", "engine": "90", "gateway": "90"}
 
 
 def _run(
@@ -57,9 +61,8 @@ def _clean_git_env(env: dict[str, str]) -> dict[str, str]:
 
 
 class ResolveBaseRefTest(unittest.TestCase):
-    """Unit covers scripts/lib/resolve_base_ref.sh, the helper shared by the
-    baas/gateway `just test` recipes and `ci_test.sh` to derive the local
-    changed-line coverage base ref."""
+    """Unit covers scripts/lib/resolve_base_ref.sh, the helper each ci_test.sh
+    sources to derive the local changed-line coverage base ref."""
 
     def _make_remote_and_repo(self, root: Path, dev_commits: int = 1) -> tuple[Path, Path]:
         remote = root / "remote.git"
@@ -112,7 +115,12 @@ class ResolveBaseRefTest(unittest.TestCase):
             _, developer = self._make_remote_and_repo(root)
             expected = _git(developer, "merge-base", "HEAD", "origin/dev")
 
-            result = self._resolve(developer, env=os.environ.copy())
+            env = _clean_git_env(os.environ.copy())
+            # The default path must not be perturbed by a runner-provided override.
+            env.pop("AVERNET_PRE_PUSH_MERGE_TARGET", None)
+            env.pop("avernet.prePush.mergeTarget", None)
+            env.setdefault("HOME", str(developer))
+            result = self._resolve(developer, env=env)
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout.strip(), expected)
@@ -194,78 +202,57 @@ class ResolveBaseRefTest(unittest.TestCase):
         _git(developer, "fetch", "origin", branch)
 
 
-class JustTestCoverageGateWiringTest(unittest.TestCase):
-    """Asserts that the baas/gateway `just test` recipes delegate to
-    `ci_test.sh --base`, and that `ci_test.sh` auto-derives the base ref when
-    `--base` is omitted, so the local gate matches GitHub CI."""
-
-    def _assert_recipe_delegates_with_explicit_base(
-        self, justfile: Path, module: str
-    ) -> None:
-        text = justfile.read_text(encoding="utf-8")
-        # Locate the `test` recipe body (lines after the `test ...:` header).
-        self.assertIn("\ntest ", text)
-        self.assertIn("ci_test.sh --base", text)
-        # The recipe must source the shared helper rather than re-implementing
-        # resolution inline, keeping the three call sites (pre-push, ci_test.sh,
-        # just test) from drifting.
-        self.assertIn("resolve_base_ref.sh", text)
-        # The recipe must keep invoking the module's own ci_test.sh.
-        self.assertIn("./scripts/ci_test.sh --base", text)
-        # Threshold alignment is asserted against ci_test.sh below; the recipe
-        # delegates, so it must not hard-code a divergent threshold.
-        threshold = CI_CHANGE_LINE_COVERAGE[module]
-        self.assertIn(
-            f"--min-change-line-coverage {threshold}",
-            self._ci_test_text(module),
-        )
+class CiTestCoverageGateWiringTest(unittest.TestCase):
+    """Asserts each Python module's ci_test.sh auto-derives the changed-line
+    coverage base ref when --base is omitted, so a local `./scripts/ci_test.sh`
+    (or `just test-ci` for baas) enforces the same gate as GitHub CI instead of
+    silently skipping it. The justfile `test` recipe is intentionally left on
+    the fast run_ci_pipeline path (no gate); the gate lives in ci_test.sh."""
 
     def _ci_test_text(self, module: str) -> str:
-        path = BAAS_CI_TEST if module == "baas" else GATEWAY_CI_TEST
-        return path.read_text(encoding="utf-8")
+        return CI_TEST[module].read_text(encoding="utf-8")
 
-    def test_baas_just_test_delegates_to_ci_test_with_explicit_base(self) -> None:
-        self._assert_recipe_delegates_with_explicit_base(BAAS_JUSTFILE, "baas")
+    def test_ci_test_auto_derives_base_when_omitted(self) -> None:
+        for module in CI_TEST:
+            with self.subTest(module=module):
+                text = self._ci_test_text(module)
+                # The auto-derive branch must source the shared helper so a
+                # direct ./scripts/ci_test.sh and CI's explicit --base share one
+                # resolution path.
+                self.assertIn('if [[ -z "$base" ]]; then', text)
+                self.assertIn("resolve_base_ref.sh", text)
+                self.assertIn('base="$(resolve_base_ref)"', text)
 
-    def test_gateway_just_test_delegates_to_ci_test_with_explicit_base(self) -> None:
-        self._assert_recipe_delegates_with_explicit_base(GATEWAY_JUSTFILE, "gateway")
-
-    def test_baas_ci_test_auto_derives_base_when_omitted(self) -> None:
-        text = self._ci_test_text("baas")
-        # The auto-derive branch must source the shared helper so `just test`
-        # and a direct `./scripts/ci_test.sh` invocation share one resolution.
-        self.assertIn("if [[ -z \"$base\" ]]; then", text)
-        self.assertIn("resolve_base_ref.sh", text)
-        self.assertIn('base="$(resolve_base_ref)"', text)
-        # report_check.py change-line coverage must run with the CI threshold.
-        self.assertIn("--min-change-line-coverage 90", text)
-
-    def test_gateway_ci_test_auto_derives_base_when_omitted(self) -> None:
-        text = self._ci_test_text("gateway")
-        self.assertIn("if [[ -z \"$base\" ]]; then", text)
-        self.assertIn("resolve_base_ref.sh", text)
-        self.assertIn('base="$(resolve_base_ref)"', text)
-        self.assertIn("--min-change-line-coverage 90", text)
-
-    def test_baas_and_gateway_thresholds_match_github_ci(self) -> None:
-        # .github/workflows/unit-tests.yml drives both modules with the same
-        # --min-change-line-coverage value used below.
-        workflow = (REPO_ROOT / ".github/workflows/unit-tests.yml").read_text(encoding="utf-8")
-        # The baas and gateway CI steps pass --base "$BAAS_BASE_REF" /
-        # --base "$GATEWAY_BASE_REF"; the threshold lives in ci_test.sh.
-        self.assertIn('bash scripts/ci_test.sh --base "${BAAS_BASE_REF}"', workflow)
-        self.assertIn('bash scripts/ci_test.sh --base "${GATEWAY_BASE_REF}"', workflow)
-        for module in ("baas", "gateway"):
-            self.assertIn(
-                f"--min-change-line-coverage {CI_CHANGE_LINE_COVERAGE[module]}",
-                self._ci_test_text(module),
-            )
+    def test_ci_test_changed_line_thresholds_match_github_ci(self) -> None:
+        # CI passes --base via unit-tests.yml (the workflow-diff test asserts
+        # that wiring for all four modules); the threshold lives in each
+        # ci_test.sh and must match what CI effectively enforces.
+        for module in CI_TEST:
+            with self.subTest(module=module):
+                self.assertIn(
+                    f"--min-change-line-coverage {CI_CHANGE_LINE_COVERAGE[module]}",
+                    self._ci_test_text(module),
+                )
 
     def test_ci_test_reports_failure_when_base_cannot_be_resolved(self) -> None:
-        for module, script in (("baas", BAAS_CI_TEST), ("gateway", GATEWAY_CI_TEST)):
+        for module in CI_TEST:
             with self.subTest(module=module):
-                text = script.read_text(encoding="utf-8")
-                self.assertIn("could not resolve changed-line coverage base ref", text)
+                self.assertIn(
+                    "could not resolve changed-line coverage base ref",
+                    self._ci_test_text(module),
+                )
+
+    def test_justfiles_keep_fast_run_ci_pipeline_path(self) -> None:
+        # Approach A guard: the gate lives in ci_test.sh, not the justfile
+        # `test` recipe. baas/gateway `just test` must stay on run_ci_pipeline
+        # (fast dev path, no gate); re-introducing justfile delegation would be
+        # a regression of this fix's scope decision.
+        for justfile in (REPO_ROOT / "src/baas/justfile", REPO_ROOT / "src/gateway/justfile"):
+            with self.subTest(justfile=str(justfile)):
+                text = justfile.read_text(encoding="utf-8")
+                self.assertIn("run_ci_pipeline", text)
+                self.assertNotIn("resolve_base_ref", text)
+                self.assertNotIn("ci_test.sh --base", text)
 
 
 if __name__ == "__main__":
