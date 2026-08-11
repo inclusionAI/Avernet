@@ -1,23 +1,33 @@
 """Tests for ActivateBotService (Task 6).
 
-Six scenarios:
+Scenarios:
   1. reject_active_bot          — ACTIVE → InvalidBotStateError
   2. reactivating_friendly      — REACTIVATING → friendly dict (no update_status call)
   3. recycled_kicks_async       — RECYCLED → update_status(REACTIVATING) + start_bot called
   4. rollback_on_passport_error — passport unfreeze raises → status=RECYCLED,
                                    start_bot NOT called
   5. rollback_on_start_bot_fail — start_bot raises → passport freeze + status=RECYCLED
-  6. missing_token_after_unfreeze — token absent → freeze + RECYCLED before start
+  6. missing_token_after_unfreeze — token never queryable → RECYCLED before start,
+                                   passport left online so a retry can converge
+  7. token_settles_on_retry     — token empty then present → bot starts, no freeze
 """
 from unittest.mock import MagicMock
 
 import pytest
 
+from agentclaw.community.core.bot_dormant import activate_service
 from agentclaw.community.core.bot_dormant.activate_service import (
+    TOKEN_VERIFY_ATTEMPTS,
     ActivateBotService,
     BotNotFoundError,
     InvalidBotStateError,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_token_verify_sleep(monkeypatch):
+    """Collapse the token-verify backoff so tests exercise it without waiting."""
+    monkeypatch.setattr(activate_service.time, "sleep", lambda _seconds: None)
 
 
 def test_activate_reports_missing_bot_through_dormant_contract():
@@ -204,17 +214,47 @@ def test_missing_token_after_unfreeze_rolls_back_before_start(monkeypatch):
 
     result = svc.activate(bot_id="b1", user_id="u1")
 
-    passport_mock.query_token.assert_called_once_with(
+    # Every attempt is spent before the bot is declared un-startable.
+    assert passport_mock.query_token.call_count == TOKEN_VERIFY_ATTEMPTS
+    passport_mock.query_token.assert_called_with(
         bot_id="b1",
         owner_workno="u1",
     )
     bot_service.start_bot.assert_not_called()
-    passport_mock.freeze_agent_passport.assert_called_once_with(
-        bot_id="b1",
-        owner_workno="u1",
-        reason="reactivate rollback",
-    )
+    # The credential stays online: re-freezing would reset the next attempt to
+    # the same cold start and strand the bot in RECYCLED forever.
+    passport_mock.freeze_agent_passport.assert_not_called()
     bot_service.update_status.assert_called_with(
         bot_id="b1", user_id="u1", status="RECYCLED"
     )
     assert result["status"] == "REACTIVATING"
+
+
+def test_token_settling_after_unfreeze_starts_the_bot(monkeypatch):
+    """A token that only becomes queryable on a later read still activates."""
+    passport_mock = MagicMock()
+    passport_mock.unfreeze_agent_passport.return_value = None
+    # First read races the unfreeze propagation, second one raises, third wins.
+    passport_mock.query_token.side_effect = [
+        None,
+        RuntimeError("passport gateway timeout"),
+        "token-b1",
+    ]
+
+    svc, bot_service = _make_svc_with_passport("RECYCLED", passport_mock)
+    monkeypatch.setattr(
+        "agentclaw.community.core.bot_dormant.activate_service.threading.Thread",
+        _SyncThread,
+    )
+
+    svc.activate(bot_id="b1", user_id="u1")
+
+    assert passport_mock.query_token.call_count == 3
+    bot_service.start_bot.assert_called_once_with(
+        bot_id="b1", user_id="u1", nick_name="u1"
+    )
+    passport_mock.freeze_agent_passport.assert_not_called()
+    # No rollback: the last status write is the synchronous REACTIVATING one.
+    bot_service.update_status.assert_called_once_with(
+        bot_id="b1", user_id="u1", status="REACTIVATING"
+    )
