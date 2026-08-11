@@ -15,6 +15,7 @@ on:
       - "scripts/ci/avernet_star_growth.patch"
       - "scripts/ci/tests/test_avernet_star_report.py"
       - "scripts/ci/tests/test_avernet_star_workflow.py"
+      - "scripts/ci/vendor/avernet-star-daily/**"
 
 permissions:
   contents: read
@@ -26,6 +27,8 @@ concurrency:
 env:
   METRICS_BRANCH: automation/avernet-star-metrics
   SKILL_REF: 52c9e6d34efd40e6d808a1c086d3c75b5004e687
+  SKILL_STATS_SHA256: b2f53373ffb08efcb8f87db7262ceb941e97c187da8b2c6f099bc28f0b3ca283
+  SKILL_RENDER_SHA256: 333a1801475d79b21011beb305f3ea9842721242291860a7f71ddff341412f74
 
 jobs:
   contract:
@@ -37,22 +40,20 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Check out pinned Avernet Star Skill
-        uses: actions/checkout@v4
-        with:
-          repository: carolynli/efficiency
-          ref: ${{ env.SKILL_REF }}
-          path: efficiency
-          persist-credentials: false
-          sparse-checkout: skills/avernet-star-daily
-
-      - name: Verify pinned Skill rendering overlay
+      - name: Verify vendored Skill snapshot and rendering overlay
         run: |
-          test "$(git -C efficiency rev-parse HEAD)" = "$SKILL_REF"
-          git -C efficiency apply --check "$GITHUB_WORKSPACE/scripts/ci/avernet_star_growth.patch"
-          git -C efficiency apply "$GITHUB_WORKSPACE/scripts/ci/avernet_star_growth.patch"
-          git -C efficiency apply --reverse --check "$GITHUB_WORKSPACE/scripts/ci/avernet_star_growth.patch"
-          git -C efficiency diff --check
+          grep -F "$SKILL_REF" scripts/ci/vendor/avernet-star-daily/UPSTREAM.md
+          printf '%s  %s\n' "$SKILL_STATS_SHA256" \
+            scripts/ci/vendor/avernet-star-daily/avernet_star_stats.py \
+            | sha256sum --check --strict
+          printf '%s  %s\n' "$SKILL_RENDER_SHA256" \
+            scripts/ci/vendor/avernet-star-daily/generate_star_image.py \
+            | sha256sum --check --strict
+          git apply --check scripts/ci/avernet_star_growth.patch
+          git apply scripts/ci/avernet_star_growth.patch
+          git apply --reverse --check scripts/ci/avernet_star_growth.patch
+          git diff --check
+          git apply --reverse scripts/ci/avernet_star_growth.patch
 
       - name: Run focused contract tests
         run: >-
@@ -80,27 +81,24 @@ jobs:
           path: metrics
           persist-credentials: false
 
-      - name: Check out pinned Avernet Star Skill
-        uses: actions/checkout@v4
-        with:
-          repository: carolynli/efficiency
-          ref: ${{ env.SKILL_REF }}
-          path: efficiency
-          persist-credentials: false
-          sparse-checkout: skills/avernet-star-daily
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
 
-      - name: Verify pinned Skill rendering overlay
+      - name: Verify vendored Skill snapshot and rendering overlay
         run: |
-          test "$(git -C efficiency rev-parse HEAD)" = "$SKILL_REF"
-          git -C efficiency apply --check "$GITHUB_WORKSPACE/scripts/ci/avernet_star_growth.patch"
-          git -C efficiency apply "$GITHUB_WORKSPACE/scripts/ci/avernet_star_growth.patch"
-          git -C efficiency apply --reverse --check "$GITHUB_WORKSPACE/scripts/ci/avernet_star_growth.patch"
-          git -C efficiency diff --check
+          grep -F "$SKILL_REF" scripts/ci/vendor/avernet-star-daily/UPSTREAM.md
+          printf '%s  %s\n' "$SKILL_STATS_SHA256" \
+            scripts/ci/vendor/avernet-star-daily/avernet_star_stats.py \
+            | sha256sum --check --strict
+          printf '%s  %s\n' "$SKILL_RENDER_SHA256" \
+            scripts/ci/vendor/avernet-star-daily/generate_star_image.py \
+            | sha256sum --check --strict
+          git apply --check scripts/ci/avernet_star_growth.patch
+          git apply scripts/ci/avernet_star_growth.patch
+          git apply --reverse --check scripts/ci/avernet_star_growth.patch
+          git diff --check
 
       - name: Install rendering dependency
         run: python3 -m pip install --disable-pip-version-check matplotlib==3.10.1
@@ -123,7 +121,7 @@ jobs:
           GITHUB_PAT_TOKEN: ${{ github.token }}
         run: |
           trap 'rm -f "$RUNNER_TEMP/avernet_star_rd_team.json" "$RUNNER_TEMP/avernet_star_row.json"' EXIT
-          python3 efficiency/skills/avernet-star-daily/scripts/avernet_star_stats.py \
+          python3 scripts/ci/vendor/avernet-star-daily/avernet_star_stats.py \
             --csv candidate/reports/avernet_star_daily.csv \
             --rd-roster "$RUNNER_TEMP/avernet_star_rd_team.json" \
             --dry-run > "$RUNNER_TEMP/avernet_star_row.json"
@@ -137,7 +135,7 @@ jobs:
         env:
           MPLCONFIGDIR: ${{ runner.temp }}/avernet-matplotlib
         run: |
-          python3 efficiency/skills/avernet-star-daily/scripts/generate_star_image.py \
+          python3 scripts/ci/vendor/avernet-star-daily/generate_star_image.py \
             --repo-root candidate \
             --csv reports/avernet_star_daily.csv \
             --output reports/avernet_star_growth.png

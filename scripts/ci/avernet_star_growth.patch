@@ -1,7 +1,7 @@
-diff --git a/skills/avernet-star-daily/scripts/generate_star_image.py b/skills/avernet-star-daily/scripts/generate_star_image.py
+diff --git a/scripts/ci/vendor/avernet-star-daily/generate_star_image.py b/scripts/ci/vendor/avernet-star-daily/generate_star_image.py
 index 254fd7f..82b19cb 100644
---- a/skills/avernet-star-daily/scripts/generate_star_image.py
-+++ b/skills/avernet-star-daily/scripts/generate_star_image.py
+--- a/scripts/ci/vendor/avernet-star-daily/generate_star_image.py
++++ b/scripts/ci/vendor/avernet-star-daily/generate_star_image.py
 @@ -129,7 +129,20 @@ def render_dashboard(rows: list[dict[str, Any]], output_path: Path) -> None:
      trend.set_ylim(0, y_max)
      trend.set_xlim(-0.18, max(len(rows) - 1 + 0.18, 1))
