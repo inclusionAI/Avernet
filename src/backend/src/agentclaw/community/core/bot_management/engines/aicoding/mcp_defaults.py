@@ -12,7 +12,7 @@ class AicodingMcpDefaultsResolver:
     """Resolve effective default MCPs for AICoding bots.
 
     AICoding templates may preset MCP capabilities at
-    ``ext_info.aicoding.template_config.preset_capabilities.mcp``. These are
+    ``ext_info.aicoding.template_config.bot_template_config.preset_capabilities.mcp``. These are
     merged by ``server_code`` onto the AICoding engine default MCP list.
     """
 
@@ -49,7 +49,10 @@ class AicodingMcpDefaultsResolver:
         ).template_config
         if template_config is None:
             return []
-        preset_capabilities = template_config.get("preset_capabilities")
+        bot_template_config = template_config.get("bot_template_config")
+        if not isinstance(bot_template_config, Mapping):
+            return []
+        preset_capabilities = bot_template_config.get("preset_capabilities")
         if not isinstance(preset_capabilities, Mapping):
             return []
         raw_mcps = preset_capabilities.get("mcp")
