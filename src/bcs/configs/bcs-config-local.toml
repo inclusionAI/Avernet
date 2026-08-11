@@ -143,7 +143,7 @@ use_remote_login_check = false
 enabled = false
 
 [auth]
-chain = ["local", "oauth_session"]
+chain = ["local", "session"]
 require_authentication = false
 # mock_user_id intentionally unset: a config mock_user_id makes LocalAuthPlugin
 # (priority 5) authenticate every request and shadow oauth_session (priority
