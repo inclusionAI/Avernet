@@ -268,7 +268,8 @@ class BotRunRequestExecutor:
 
         metadata: dict[str, Any] = run.metadata or {}
         # Reconstruct Attachment objects from Queue meta (D-04 Step B)
-        attachments_raw = metadata.get("attachments")
+        queue_meta: dict[str, Any] = record.meta or {}
+        attachments_raw = queue_meta.get("attachments")
         attachments = (
             [Attachment(**a) for a in attachments_raw] if attachments_raw else None
         )

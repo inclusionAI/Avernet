@@ -994,7 +994,7 @@ class TestCleanupChunks:
 
 
 async def test_executor_rebuilds_attachments_from_meta():
-    """Worker reads attachments from meta and rebuilds Attachment dataclass objects."""
+    """Worker reads attachments from queue record meta and rebuilds Attachment dataclass objects."""
     repo = MagicMock()
     plugin = MagicMock()
     selector = MagicMock()
@@ -1007,20 +1007,6 @@ async def test_executor_rebuilds_attachments_from_meta():
             "app_type": "T",
             "tenant": "t",
             "request_type": "chat",
-            "attachments": [
-                {
-                    "attachment_id": "att_1",
-                    "type": "image",
-                    "file_name": "f1.png",
-                    "url": "https://cdn.example.com/f1",
-                },
-                {
-                    "attachment_id": "att_2",
-                    "type": "image",
-                    "file_name": "f2.png",
-                    "url": "https://cdn.example.com/f2",
-                },
-            ],
         },
     )
     plugin.get_binding = AsyncMock(return_value=_binding_data())
@@ -1034,7 +1020,27 @@ async def test_executor_rebuilds_attachments_from_meta():
         repo, plugin, selector, MagicMock(), MagicMock(), _api_key_repo()
     )
     await executor.execute(
-        _queue_rec(run_id="r1", bot_id="bot-1:ent", session_id="sess-1")
+        _queue_rec(
+            run_id="r1",
+            bot_id="bot-1:ent",
+            session_id="sess-1",
+            meta={
+                "attachments": [
+                    {
+                        "attachment_id": "att_1",
+                        "type": "image",
+                        "file_name": "f1.png",
+                        "url": "https://cdn.example.com/f1",
+                    },
+                    {
+                        "attachment_id": "att_2",
+                        "type": "image",
+                        "file_name": "f2.png",
+                        "url": "https://cdn.example.com/f2",
+                    },
+                ],
+            },
+        )
     )
 
     bot_svc.send_message.assert_awaited_once()
@@ -1058,7 +1064,7 @@ async def test_executor_rebuilds_attachments_from_meta():
 
 
 async def test_executor_handles_missing_attachments_in_meta():
-    """Worker does not crash when meta has no 'attachments' key (old-format meta)."""
+    """Worker does not crash when queue record meta has no 'attachments' key."""
     repo = MagicMock()
     plugin = MagicMock()
     selector = MagicMock()
@@ -1071,7 +1077,6 @@ async def test_executor_handles_missing_attachments_in_meta():
             "app_type": "T",
             "tenant": "t",
             "request_type": "chat",
-            # No "attachments" key — old-format meta
         },
     )
     plugin.get_binding = AsyncMock(return_value=_binding_data())
