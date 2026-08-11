@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_db_api::{DbPlugin, DbSqlFlavor, DbStatement, DbValue};
-use bcs_service_api::{UserIdentity, UserIdentityRepoPort};
+use bcs_service_api::{UserCredential, UserCredentialRepoPort, UserIdentity, UserIdentityRepoPort};
 use tracing::warn;
 
 pub mod memory;
@@ -242,3 +242,107 @@ fn row_to_display_identity(row: &bcs_db_api::DbRow) -> UserIdentity {
         env: row.get_string("env").ok().flatten().unwrap_or_default(),
     }
 }
+
+/// DB-backed `UserCredentialRepoPort`. Owns the `bcs_user_credentials` SQL;
+/// depends only on `bcs-db-api`. Mirrors `DbUserIdentityStore`.
+pub struct DbUserCredentialStore {
+    db: Arc<dyn DbPlugin>,
+    flavor: DbSqlFlavor,
+}
+
+impl DbUserCredentialStore {
+    pub fn new(db: Arc<dyn DbPlugin>, flavor: DbSqlFlavor) -> Self {
+        Self { db, flavor }
+    }
+
+    pub fn mysql(db: Arc<dyn DbPlugin>) -> Self {
+        Self::new(db, DbSqlFlavor::Mysql)
+    }
+
+    pub fn sqlite(db: Arc<dyn DbPlugin>) -> Self {
+        Self::new(db, DbSqlFlavor::Sqlite)
+    }
+
+    #[allow(dead_code)]
+    pub fn flavor(&self) -> DbSqlFlavor {
+        self.flavor
+    }
+}
+
+#[async_trait]
+impl UserCredentialRepoPort for DbUserCredentialStore {
+    async fn create_credential(
+        &self,
+        user_id: &str,
+        username: &str,
+        password_hash: &str,
+        env: &str,
+    ) -> Result<(), String> {
+        let sql = "INSERT INTO bcs_user_credentials (user_id, username, password_hash, env) \
+                   VALUES (?, ?, ?, ?)";
+        match self
+            .db
+            .execute(DbStatement::with_params(
+                sql,
+                vec![
+                    DbValue::from(user_id),
+                    DbValue::from(username),
+                    DbValue::from(password_hash),
+                    DbValue::from(env),
+                ],
+            ))
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(e) if e.is_duplicate_key() => Err("duplicate".to_string()),
+            Err(e) => Err(format!("create_credential: {e}")),
+        }
+    }
+
+    async fn find_for_login(
+        &self,
+        username: &str,
+        env: &str,
+    ) -> Result<Option<UserCredential>, String> {
+        let sql = "SELECT user_id, username, password_hash, env FROM bcs_user_credentials \
+                   WHERE username = ? AND env = ? LIMIT 1";
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                sql,
+                vec![DbValue::from(username), DbValue::from(env)],
+            ))
+            .await
+            .map_err(|e| format!("find_for_login: {e}"))?;
+        match rows.first() {
+            Some(row) => {
+                let user_id = row
+                    .get_string("user_id")
+                    .map_err(|e| format!("read user_id: {e}"))?
+                    .unwrap_or_default();
+                let username = row
+                    .get_string("username")
+                    .map_err(|e| format!("read username: {e}"))?
+                    .unwrap_or_default();
+                let password_hash = row
+                    .get_string("password_hash")
+                    .map_err(|e| format!("read password_hash: {e}"))?
+                    .unwrap_or_default();
+                let env = row
+                    .get_string("env")
+                    .map_err(|e| format!("read env: {e}"))?
+                    .unwrap_or_default();
+                Ok(Some(UserCredential {
+                    user_id,
+                    username,
+                    password_hash,
+                    env,
+                }))
+            }
+            None => Ok(None),
+        }
+    }
+}
+
+pub type MysqlUserCredentialRepo = DbUserCredentialStore;
+pub type SqliteUserCredentialRepo = DbUserCredentialStore;
