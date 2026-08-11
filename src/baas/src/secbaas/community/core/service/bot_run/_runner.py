@@ -132,6 +132,7 @@ class BotRunner:
         context: BotChatContext,
         metadata: dict[str, Any],
         message_id: str,
+        attachments: list[Any] | None = None,
     ) -> tuple[str, str]:
         """异步注入消息（不触发推理）
 
@@ -188,6 +189,7 @@ class BotRunner:
             binding_info=route.binding_info,
             context=context,
             bot_id=bot_id,
+            attachments=attachments,
         )
 
         chat_metadata = build_chat_metadata(metadata, run_id=message_id)
@@ -217,6 +219,7 @@ class BotRunner:
         metadata: dict[str, Any],
         message_id: str | None = None,
         callback: Any = None,
+        attachments: list[Any] | None = None,
     ) -> tuple[str, str]:
         """异步投递消息
 
@@ -287,6 +290,7 @@ class BotRunner:
             bot_id=bot_id,
             callback=callback,
             chat_metadata=chat_metadata,
+            attachments=attachments,
         )
 
         # 5. 上报日志关联(后台执行,不阻塞主链路)
@@ -314,6 +318,7 @@ class BotRunner:
         context: BotChatContext,
         metadata: dict[str, Any],
         message_id: str | None = None,
+        attachments: list[Any] | None = None,
     ) -> tuple[str, str, AsyncIterator[StreamChunk]]:
         """流式投递消息
 
@@ -376,6 +381,7 @@ class BotRunner:
             context=context,
             timeout=timeout,
             bot_id=bot_id,
+            attachments=attachments,
         )
 
         return message_id, actual_session_id, stream_iter

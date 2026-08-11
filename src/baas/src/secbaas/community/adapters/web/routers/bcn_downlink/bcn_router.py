@@ -270,6 +270,9 @@ async def _dispatch_chat_send_stream(
         message=req.message.to_domain(),
         timeout_ms=req.timeout_ms,
         extensions=req.extensions,
+        attachments=[a.to_domain() for a in req.attachments]
+        if req.attachments
+        else None,
     )
 
     try:
@@ -322,12 +325,17 @@ async def _dispatch_chat_send(
         message=req.message.to_domain(),
         timeout_ms=req.timeout_ms,
         extensions=req.extensions,
+        attachments=[a.to_domain() for a in req.attachments]
+        if req.attachments
+        else None,
     )
 
     try:
         result = await service.handle_chat_send(input_)
     except BotBindingNotFoundError as exc:
         raise BcnBotNotFoundError(provider_bot_ref=exc.bot_id) from exc
+    except ValueError as exc:
+        raise BcnInvalidRequestError(str(exc)) from exc
 
     return ChatSendSuccessResponse(ok=result.ok)
 
@@ -349,6 +357,9 @@ async def _dispatch_chat_inject(
         from_ref=req.from_.to_domain(),
         message=req.message.to_domain(),
         timeout_ms=req.timeout_ms,
+        attachments=[a.to_domain() for a in req.attachments]
+        if req.attachments
+        else None,
     )
 
     try:

@@ -306,6 +306,7 @@ class TestSendMessage:
             auth_token=None,
             app_id=None,
             chat_metadata=None,
+            attachments=None,
         )
 
     @pytest.mark.asyncio
@@ -344,6 +345,7 @@ class TestSendMessage:
             auth_token="OPEN_API:app:prefix-1",
             app_id="app-1",
             chat_metadata=None,
+            attachments=None,
         )
 
     @pytest.mark.asyncio
@@ -374,6 +376,7 @@ class TestSendMessage:
             auth_token=None,
             app_id=None,
             chat_metadata=None,
+            attachments=None,
         )
 
     @pytest.mark.asyncio
@@ -454,6 +457,7 @@ class TestInjectMessage:
             message="system instruction",
             session_key=SESSION_ID,
             auth_token=None,
+            attachments=None,
         )
 
     @pytest.mark.asyncio
