@@ -30,7 +30,7 @@ Backend 接口统一前缀：
 
 ## 2. 发布前置
 
-1. 执行同目录下的 `ddl.sql`，创建 `ac_expert_chat_sessions` 表。
+1. 执行同目录下的 `ddl.sql`，创建 `ac_expert_chat_owned_sessions` 表。
 2. 发布 Backend。
 3. Adapter 无需随本需求升级，本实现复用现有 `/api/sessions` 和
    `/api/session-favorites` 接口。

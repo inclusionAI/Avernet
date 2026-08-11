@@ -23,7 +23,7 @@ def _create_schema(engine):
     """Create private copies of both expert-chat session tables."""
     from agentclaw.community.core.expert_chat.sqlite_models import (
         AcExpertChatBotSession,
-        AcExpertChatSession,
+        AcExpertChatOwnedSession,
     )
 
     md = MetaData()
@@ -34,7 +34,7 @@ def _create_schema(engine):
             "uk_user_bot_owner_env",
         ),
         (
-            AcExpertChatSession,
+            AcExpertChatOwnedSession,
             ("user_id", "bot_id", "owner_id", "env", "session_key"),
             "uk_user_bot_owner_env_session",
         ),
@@ -211,7 +211,7 @@ def test_owned_session_uses_mysql_atomic_upsert_contract():
     statement = db_session.execute.call_args.args[0]
     compiled = str(statement.compile(dialect=db_session.get_bind().dialect))
     assert "ON DUPLICATE KEY UPDATE" in compiled
-    db_session.get.assert_called_once_with(repository.SessionModel, 42)
+    db_session.get.assert_called_once_with(repository.OwnedSessionModel, 42)
     assert result == stored_row.to_dict.return_value
 
 

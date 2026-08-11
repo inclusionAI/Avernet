@@ -5,7 +5,7 @@ Focuses on edge cases like JSON deserialization error handling.
 from agentclaw.community.core.expert_chat.sqlite_models import (
     AcExpertChatBotSession,
     AcExpertChatInstance,
-    AcExpertChatSession,
+    AcExpertChatOwnedSession,
 )
 
 
@@ -51,7 +51,7 @@ def test_owned_session_to_dict_exposes_complete_index_row():
     from datetime import datetime
 
     now = datetime(2026, 8, 10, 12, 0, 0)
-    session = AcExpertChatSession(
+    session = AcExpertChatOwnedSession(
         id=7,
         user_id="u1",
         bot_id="b1",
@@ -74,6 +74,13 @@ def test_owned_session_to_dict_exposes_complete_index_row():
         "gmt_create": "2026-08-10T12:00:00",
         "gmt_modified": "2026-08-10T12:00:00",
     }
+
+
+def test_owned_session_uses_dedicated_non_legacy_table():
+    assert AcExpertChatOwnedSession.__tablename__ == (
+        "ac_expert_chat_owned_sessions"
+    )
+    assert AcExpertChatOwnedSession.__tablename__ != "ac_expert_chat_sessions"
 
 
 class TestAcExpertChatInstanceToDict:

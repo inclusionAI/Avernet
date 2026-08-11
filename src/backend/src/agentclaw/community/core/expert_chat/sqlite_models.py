@@ -71,15 +71,17 @@ class AcExpertChatBotSession(Base):
         }
 
 
-class AcExpertChatSession(Base):
+class AcExpertChatOwnedSession(Base):
     """One user-owned session in an expert-chat Bot conversation list.
 
     ``AcExpertChatBotSession`` remains the legacy Bot-list row and default
     session pointer. Keeping the multi-session index separate preserves its
     unique-key and removal semantics for clients that still use ``/session``.
+    The historical ``ac_expert_chat_sessions`` table has an incompatible
+    single-session schema and must not be reused for this ownership index.
     """
 
-    __tablename__ = "ac_expert_chat_sessions"
+    __tablename__ = "ac_expert_chat_owned_sessions"
 
     id = Column(
         AutoIncrementBigInteger,
@@ -121,7 +123,9 @@ class AcExpertChatSession(Base):
             "session_key": self.session_key,
             "status": self.status,
             "env": self.env,
-            "gmt_create": self.gmt_create.isoformat() if self.gmt_create else None,
+            "gmt_create": self.gmt_create.isoformat()
+            if self.gmt_create
+            else None,
             "gmt_modified": self.gmt_modified.isoformat()
             if self.gmt_modified
             else None,
@@ -196,9 +200,7 @@ class AcExpertChatInstance(Base):
             "status": self.status,
             "ext": ext,
             "env": self.env,
-            "gmt_create": self.gmt_create.isoformat()
-            if self.gmt_create
-            else None,
+            "gmt_create": self.gmt_create.isoformat() if self.gmt_create else None,
             "gmt_modified": self.gmt_modified.isoformat()
             if self.gmt_modified
             else None,

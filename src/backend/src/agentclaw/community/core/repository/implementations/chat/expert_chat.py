@@ -55,12 +55,12 @@ class ExpertChatRepository(
     def __init__(self, db: DatabasePlugin) -> None:
         from agentclaw.community.core.expert_chat.sqlite_models import (
             AcExpertChatBotSession,
-            AcExpertChatSession,
+            AcExpertChatOwnedSession,
         )
 
         self._db = db
         self.Model = AcExpertChatBotSession
-        self.SessionModel = AcExpertChatSession
+        self.OwnedSessionModel = AcExpertChatOwnedSession
 
     def add_chat_bot(self, user_id: str, bot_id: str, owner_id: str) -> Dict[str, Any]:
         """Atomic upsert on uk_user_bot_owner_env (prod parity)."""
@@ -262,7 +262,7 @@ class ExpertChatRepository(
         env = get_current_env()
         with self._db.orm_session() as db:
             dialect = db.get_bind().dialect.name
-            table = self.SessionModel.__table__
+            table = self.OwnedSessionModel.__table__
             values = {
                 "user_id": user_id,
                 "bot_id": bot_id,
@@ -288,13 +288,13 @@ class ExpertChatRepository(
                 db.execute(stmt)
                 db.flush()
                 row = (
-                    db.query(self.SessionModel)
+                    db.query(self.OwnedSessionModel)
                     .filter(
-                        self.SessionModel.user_id == user_id,
-                        self.SessionModel.bot_id == bot_id,
-                        self.SessionModel.owner_id == owner_id,
-                        self.SessionModel.env == env,
-                        self.SessionModel.session_key == session_key,
+                        self.OwnedSessionModel.user_id == user_id,
+                        self.OwnedSessionModel.bot_id == bot_id,
+                        self.OwnedSessionModel.owner_id == owner_id,
+                        self.OwnedSessionModel.env == env,
+                        self.OwnedSessionModel.session_key == session_key,
                     )
                     .one()
                 )
@@ -303,12 +303,12 @@ class ExpertChatRepository(
 
                 stmt = _insert(table).values(**values)
                 stmt = stmt.on_duplicate_key_update(
-                    id=func.LAST_INSERT_ID(self.SessionModel.id),
+                    id=func.LAST_INSERT_ID(self.OwnedSessionModel.id),
                     status="ACTIVE",
                     gmt_modified=func.now(),
                 )
                 row_id = db.execute(stmt).lastrowid
-                row = db.get(self.SessionModel, row_id)
+                row = db.get(self.OwnedSessionModel, row_id)
             return row.to_dict()
 
     def list_owned_sessions(
@@ -320,18 +320,18 @@ class ExpertChatRepository(
     ) -> List[Dict[str, Any]]:
         env = get_current_env()
         with self._db.orm_session() as db:
-            query = db.query(self.SessionModel).filter(
-                self.SessionModel.user_id == user_id,
-                self.SessionModel.bot_id == bot_id,
-                self.SessionModel.owner_id == owner_id,
-                self.SessionModel.status == "ACTIVE",
-                self.SessionModel.env == env,
+            query = db.query(self.OwnedSessionModel).filter(
+                self.OwnedSessionModel.user_id == user_id,
+                self.OwnedSessionModel.bot_id == bot_id,
+                self.OwnedSessionModel.owner_id == owner_id,
+                self.OwnedSessionModel.status == "ACTIVE",
+                self.OwnedSessionModel.env == env,
             )
             if session_key is not None:
-                query = query.filter(self.SessionModel.session_key == session_key)
+                query = query.filter(self.OwnedSessionModel.session_key == session_key)
             rows = query.order_by(
-                self.SessionModel.gmt_modified.desc(),
-                self.SessionModel.id.desc(),
+                self.OwnedSessionModel.gmt_modified.desc(),
+                self.OwnedSessionModel.id.desc(),
             ).all()
             return [row.to_dict() for row in rows]
 
@@ -352,19 +352,19 @@ class ExpertChatRepository(
         env = get_current_env()
         with self._db.orm_session() as db:
             rowcount = (
-                db.query(self.SessionModel)
+                db.query(self.OwnedSessionModel)
                 .filter(
-                    self.SessionModel.user_id == user_id,
-                    self.SessionModel.bot_id == bot_id,
-                    self.SessionModel.owner_id == owner_id,
-                    self.SessionModel.session_key == session_key,
-                    self.SessionModel.status == "ACTIVE",
-                    self.SessionModel.env == env,
+                    self.OwnedSessionModel.user_id == user_id,
+                    self.OwnedSessionModel.bot_id == bot_id,
+                    self.OwnedSessionModel.owner_id == owner_id,
+                    self.OwnedSessionModel.session_key == session_key,
+                    self.OwnedSessionModel.status == "ACTIVE",
+                    self.OwnedSessionModel.env == env,
                 )
                 .update(
                     {
-                        self.SessionModel.status: "DELETED",
-                        self.SessionModel.gmt_modified: func.now(),
+                        self.OwnedSessionModel.status: "DELETED",
+                        self.OwnedSessionModel.gmt_modified: func.now(),
                     },
                     synchronize_session=False,
                 )
@@ -377,18 +377,18 @@ class ExpertChatRepository(
         env = get_current_env()
         with self._db.orm_session() as db:
             return (
-                db.query(self.SessionModel)
+                db.query(self.OwnedSessionModel)
                 .filter(
-                    self.SessionModel.user_id == user_id,
-                    self.SessionModel.bot_id == bot_id,
-                    self.SessionModel.owner_id == owner_id,
-                    self.SessionModel.status == "ACTIVE",
-                    self.SessionModel.env == env,
+                    self.OwnedSessionModel.user_id == user_id,
+                    self.OwnedSessionModel.bot_id == bot_id,
+                    self.OwnedSessionModel.owner_id == owner_id,
+                    self.OwnedSessionModel.status == "ACTIVE",
+                    self.OwnedSessionModel.env == env,
                 )
                 .update(
                     {
-                        self.SessionModel.status: "DELETED",
-                        self.SessionModel.gmt_modified: func.now(),
+                        self.OwnedSessionModel.status: "DELETED",
+                        self.OwnedSessionModel.gmt_modified: func.now(),
                     },
                     synchronize_session=False,
                 )
