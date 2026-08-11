@@ -26,6 +26,8 @@ user_config:
     database:
       plugin_database: "SQLITE_ORM"    # ZDAS_ORM (production ORM) | SQLITE_ORM (test only)
       database_url: "sqlite:////tmp/secbaas.db"
+      create_schema: true
+      seed_data: true
     sandbox:
       arca: stub #  arca_sdk or stub
       desktop: stub # real or stub

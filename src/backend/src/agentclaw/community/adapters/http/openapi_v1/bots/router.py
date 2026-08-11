@@ -35,7 +35,12 @@ from agentclaw.community.adapters.http.openapi_v1.errors import UnsupportedEngin
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     require_principal,
 )
-from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
+from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
+from agentclaw.community.adapters.http.openapi_v1.principal import (
+    ActingCallerDep,
+    UserIdDep,
+    require_granted_bot,
+)
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     accepted,
     created,
@@ -86,6 +91,18 @@ from .schemas import (
 )
 
 logger = get_logger()
+
+#: The bot authorization for an application caller, on the own-bot operations
+#: of this group.
+#:
+#: Declared per route here, unlike the four groups that are wholly own-bot and get it
+#: at ``include_router``. This group is mixed: it also holds the bots listing
+#: (Mode B), the ceiling (C), the name check (OPEN) and bot creation (refused),
+#: none of which names a bot — and on those the check would refuse an
+#: application outright rather than authorize it. ``admission.py`` is the
+#: authority on which route is which; ``test_principal_seam.py`` fails if a
+#: declaration and a mode disagree.
+_GRANT_CHECKED = [Depends(require_granted_bot)]
 
 router = APIRouter(prefix="/openapi/v1/bots", tags=["bots"])
 
@@ -291,12 +308,40 @@ async def list_bots(
     request: Request,
     page_params: PageParamsDep,
     owner_id: UserIdDep,
+    caller: ActingCallerDep,
     keyword: str | None = None,
     engine: str | None = None,
     status: str | None = None,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[Page[Bot]]:
-    """List the caller's bots (filter + paginate)."""
+    """List the user's bots (filter + paginate), narrowed to what may be reached.
+
+    For a human caller this is their own bots, unfiltered — unchanged.
+
+    For an **application** the result is narrowed to the bots that user granted
+    it. Filtering here rather than in the service keeps the narrowing beside the
+    thing it protects, and it is applied **before** paginating: filtering a page
+    after the fact would return short pages and, worse, let a caller infer how
+    many bots it was *not* granted from the gaps. The count reports the narrowed
+    set for the same reason.
+
+    An application granted nothing gets an empty page, not an error: naming no
+    bot, this operation has nothing to mask.
+
+    Note this listing can never show a bot the user does not own, for an
+    application any more than for the user — it is owner-scoped underneath. The
+    complete view of what an application may reach, including bots delegated by
+    a collaborator, is `GET /openapi/v1/bots/authorized`.
+    """
+    # ``owned_by_delegator``: this query is owner-scoped, and ``bot_id`` is not
+    # unique across owners — filtering it by a set holding someone else's
+    # ``default`` would match the delegating user's own ``default`` and return
+    # a bot nobody granted.
+    granted = caller.granted_bot_ids(owned_by_delegator=True)
+    if granted is not None and not granted:
+        # Granted nothing: answer without asking the service for a page it
+        # would have to discard entirely.
+        return page(0, [], request)
     result = bot_service.list_bots_by_conditions(
         owner_id=owner_id,
         bot_name=keyword,
@@ -304,6 +349,7 @@ async def list_bots(
         status=status,
         page=page_params.page,
         page_size=page_params.page_size,
+        bot_ids=sorted(granted) if granted is not None else None,
     )
     items = [_to_bot(b) for b in result["items"]]
     return page(result["total"], items, request)
@@ -352,9 +398,19 @@ async def check_bot_name(
 async def get_bots_ceiling(
     request: Request,
     owner_id: UserIdDep,
+    caller: ActingCallerDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[Ceiling]:
-    """Get the caller's bot-creation quota ceiling.
+    """Get the named user's bot-creation quota ceiling.
+
+    Names no bot, so there is no grant to check against one — but the answer is
+    still *about a person's account*, and a stranger application must not be
+    able to read it by naming a user id. So it is gated on the application
+    holding **at least one** live delegation from that user: proof of a
+    relationship, which is the closest thing this operation has to a scope.
+
+    An application with no delegation from them is answered as if the user were
+    not there. It learns nothing it did not already know.
 
     The number creation actually enforces, so a caller that is at the ceiling
     can tell that from this endpoint rather than from a failed create.
@@ -364,11 +420,28 @@ async def get_bots_ceiling(
     # hardcoded default of 5, while creation falls back to the configured
     # max_devices_per_entity. Reading it directly would advertise 5 to a caller
     # whose deployment allows (or rejects at) a different number.
+    granted = caller.granted_bot_ids()
+    if granted is not None and not granted:
+        # The named user goes to the log bounded and escaped, never into the
+        # exception message: that message reaches a log line verbatim, and
+        # ``user_id`` is declared ``min_length=1`` with no upper bound, so raw
+        # it would let a refused caller forge log lines and choose how many
+        # bytes each refusal costs.
+        logger.warning(
+            "[bots] app holds no delegation from user=%s; refusing the ceiling",
+            for_log(owner_id),
+        )
+        raise BotNotFoundError("no authorization from the named user")
     ceiling = bot_service.get_bots_ceiling_for_owner(owner_id)
     return envelope(Ceiling(ceiling=ceiling), request)
 
 
-@router.get("/{bot_id}", response_model=Envelope[Bot], responses=USER_SCOPED_403)
+@router.get(
+    "/{bot_id}",
+    response_model=Envelope[Bot],
+    responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED,
+)
 @envelope_errors
 async def get_bot(
     bot_id: str,
@@ -381,7 +454,12 @@ async def get_bot(
     return envelope(_to_bot(bot), request)
 
 
-@router.put("/{bot_id}", response_model=Envelope[Bot], responses=USER_SCOPED_403)
+@router.put(
+    "/{bot_id}",
+    response_model=Envelope[Bot],
+    responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED,
+)
 @envelope_errors
 async def update_bot(
     bot_id: str,
@@ -433,7 +511,12 @@ async def update_bot(
     return envelope(_to_bot(bot), request)
 
 
-@router.delete("/{bot_id}", response_model=Envelope[Deleted], responses=USER_SCOPED_403)
+@router.delete(
+    "/{bot_id}",
+    response_model=Envelope[Deleted],
+    responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED,
+)
 @envelope_errors
 async def delete_bot(
     bot_id: str,
@@ -451,6 +534,7 @@ async def delete_bot(
     "/{bot_id}/restart",
     response_model=Envelope[Bot],
     responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED,
 )
 @envelope_errors
 async def restart_bot(
@@ -481,6 +565,7 @@ async def restart_bot(
             "carries the terminal state (e.g. REJECTED, EXPIRED)",
         },
     },
+    dependencies=_GRANT_CHECKED,
 )
 @envelope_errors
 async def get_bot_auth_status(
@@ -559,6 +644,7 @@ async def get_bot_auth_status(
     "/{bot_id}/status",
     response_model=Envelope[BotStatus],
     responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED,
 )
 @envelope_errors
 async def get_bot_status(
@@ -586,6 +672,7 @@ async def get_bot_status(
     "/{bot_id}/passport",
     response_model=Envelope[Passport],
     responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED,
 )
 @envelope_errors
 async def get_bot_passport(
@@ -637,6 +724,7 @@ def _engine_config_target(bot: dict[str, Any]) -> tuple[str, str, str]:
     "/{bot_id}/engine-config",
     response_model=Envelope[dict[str, Any]],
     responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED,
 )
 @envelope_errors
 async def get_bot_engine_config(
@@ -667,6 +755,7 @@ async def get_bot_engine_config(
     "/{bot_id}/engine-config",
     response_model=Envelope[dict[str, Any]],
     responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED,
 )
 @envelope_errors
 async def update_bot_engine_config(

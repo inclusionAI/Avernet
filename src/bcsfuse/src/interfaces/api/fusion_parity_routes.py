@@ -362,15 +362,8 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                 # Convert domain model to API schema
                 result_dict = result.model_dump()
 
-                # Handle recommendation field type conversion
-                # Domain model: Optional[Recommendation] (object)
-                # API schema: Optional[str]
-                if result_dict.get("recommendation") and isinstance(result_dict["recommendation"], dict):
-                    # Convert Recommendation object to JSON string
-                    import json
-                    recommendation_str = json.dumps(result_dict["recommendation"], ensure_ascii=False)
-                    result_dict["recommendation"] = recommendation_str
-                    logger.info(f"[Fusion][R5] Converted recommendation object to JSON string")
+                # Recommendation is already an object in both the domain model
+                # and the API schema; no conversion needed.
 
                 # Handle G2 conflicts field type conversion
                 # Domain FusionConflict -> API ConflictPoint

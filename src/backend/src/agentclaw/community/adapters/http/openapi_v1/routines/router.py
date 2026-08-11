@@ -12,7 +12,10 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
-from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
+from agentclaw.community.adapters.http.openapi_v1.principal import (
+    ActingCallerDep,
+    UserIdDep,
+)
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Deleted,
     Envelope,
@@ -137,6 +140,7 @@ async def list_routines(
 async def create_routine(
     body: RoutineCreate,
     owner_id: UserIdDep,
+    caller: ActingCallerDep,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
 ) -> Envelope[Routine]:
@@ -145,7 +149,19 @@ async def create_routine(
     The bot is named in the body rather than the path. A routine with no
     `timezone` is scheduled in Asia/Shanghai.
     """
+    # The only operation in this group whose bot is in the *body*, so the grant
+    # check cannot run as a dependency — the body is not parsed yet when those
+    # resolve. It runs below instead, immediately after parsing and before any
+    # service call, which is the same guarantee in a different place. The shared
+    # dependency defers for exactly this operation (it is named in
+    # admission.py), so nothing checks it twice and nothing skips it.
+    #
+    # The body is translated into the engine adapter's cron shape: `schedule` is
+    # the raw cron expression string, not the nested {kind,expr,tz} dict — the
+    # adapter wraps it on read.
     bot_id = body.bot_id
+    # Before anything else touches the bot.
+    caller.require_bot(bot_id, owner_id=owner_id)
     user_id = owner_id
     nick_name = owner_id
     adapter_body = {

@@ -1,6 +1,7 @@
 import pytest
 
-from secbaas.community.plugins.database.stub.sqlite_orm import SqliteOrmPlugin
+from secbaas.community.plugins.database.mariadb.mariadb_orm import MariaDbOrmPlugin
+from secbaas.community.plugins.database.sqlite.sqlite_orm import SqliteOrmPlugin
 from secbaas.community.spi.database import ConnectionProvider, DataSourcePlugin
 
 
@@ -78,3 +79,57 @@ class ConnectionProviderContract:
     def test_get_connection_returns_something(self) -> None:
         result = self.plugin.get_connection("default")
         assert result is not None
+
+
+class TestMariaDbOrmPluginUrlResolution:
+    """Unit tests for MariaDbOrmPlugin URL resolution (no live server needed)."""
+
+    def setup_method(self) -> None:
+        self.plugin = MariaDbOrmPlugin()
+
+    def test_resolve_url_from_structured_config(self) -> None:
+        cfg = _make_mariadb_config(host="db.internal", port=3307)
+        url = self.plugin._resolve_url(cfg)
+        assert url.startswith("mysql+aiomysql://")
+        assert "db.internal:3307/mydb" in url
+
+    def test_resolve_url_env_override(self, monkeypatch) -> None:
+        monkeypatch.setenv("MARIADB_HOST", "env-host")
+        monkeypatch.setenv("MARIADB_PORT", "4406")
+        monkeypatch.setenv("MARIADB_DATABASE", "env_db")
+        monkeypatch.setenv("MARIADB_USER", "env_user")
+        monkeypatch.setenv("MARIADB_PASSWORD", "env_pass")
+        url = self.plugin._resolve_url(_make_mariadb_config(host="cfg-host", port=3306))
+        assert "env-host:4406/env_db" in url
+        assert "env_user:env_pass" in url
+
+    def test_resolve_url_database_url_env_precedence(self, monkeypatch) -> None:
+        monkeypatch.setenv("DATABASE_URL", "mysql+aiomysql://u:p@h:3306/db")
+        url = self.plugin._resolve_url(_make_mariadb_config(host="cfg-host"))
+        assert url == "mysql+aiomysql://u:p@h:3306/db"
+
+    def test_ormsession_raises_before_init(self) -> None:
+        with pytest.raises(RuntimeError):
+            with self.plugin.orm_session():
+                pass
+
+    def test_database_label_omits_credentials(self) -> None:
+        label = self.plugin._resolve_database_label(
+            "mysql+aiomysql://user:secret@db.internal:3306/mydb?charset=utf8mb4"
+        )
+        assert "secret" not in label
+        assert "db.internal:3306/mydb" in label
+
+
+def _make_mariadb_config(host="127.0.0.1", port=3306):
+    from secbaas.community.bootstrap import DatabaseConfig
+    from secbaas.community.spi.database import PluginDatabaseType
+
+    return DatabaseConfig(
+        plugin_type=PluginDatabaseType.MARIADB_ORM,
+        mariadb_host=host,
+        mariadb_port=port,
+        mariadb_database="mydb",
+        mariadb_user="user",
+        mariadb_password="pass",
+    )

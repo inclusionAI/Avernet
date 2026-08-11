@@ -149,6 +149,7 @@ def _make_service(
     if lock_repo is None:
         lock_repo = FakeRestartLockRepo()
     svc = BotService.__new__(BotService)
+    svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = bot_repository if bot_repository is not None else MagicMock()
     svc._restart_lock_repo = lock_repo
     svc._bot_publish_provider = lambda: MagicMock()

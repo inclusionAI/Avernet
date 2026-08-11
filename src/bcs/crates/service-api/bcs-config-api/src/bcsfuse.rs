@@ -21,6 +21,14 @@ pub struct BcsFuseConfig {
     #[serde(default = "default_sync_timeout")]
     pub sync_timeout_ms: u64,
 
+    /// Base backoff between worker-sync retry attempts, in milliseconds.
+    ///
+    /// Attempt N waits `sync_retry_base_ms * 2^(N-1)` before the next attempt,
+    /// so the default 1000 gives 1s + 2s between the three attempts. Tests that
+    /// point at a dead bcsfuse set this near zero to avoid paying the backoff.
+    #[serde(default = "default_sync_retry_base")]
+    pub sync_retry_base_ms: u64,
+
     /// Profile ID for worker profiles (default: "default").
     #[serde(default = "default_profile_id")]
     pub profile_id: String,
@@ -46,6 +54,10 @@ fn default_sync_timeout() -> u64 {
     10_000 // 10s — simple CRUD
 }
 
+fn default_sync_retry_base() -> u64 {
+    1_000 // 1s, doubling per attempt
+}
+
 fn default_profile_id() -> String {
     "default".to_string()
 }
@@ -65,6 +77,7 @@ impl Default for BcsFuseConfig {
             url: default_url(),
             fusion_timeout_ms: default_fusion_timeout(),
             sync_timeout_ms: default_sync_timeout(),
+            sync_retry_base_ms: default_sync_retry_base(),
             profile_id: default_profile_id(),
             recommend_top_k: default_recommend_top_k(),
             recommend_min_score: default_recommend_min_score(),

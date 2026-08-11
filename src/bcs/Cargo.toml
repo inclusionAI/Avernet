@@ -300,3 +300,19 @@ bcs-auth-wechat            = { path = "crates/plugins/bcs-auth-wechat" }
 bcs-auth-alipay            = { path = "crates/plugins/bcs-auth-alipay" }
 bcs-auth-local             = { path = "crates/plugins/bcs-auth-local" }
 bcs-auth-oauth             = { path = "crates/plugins/bcs-auth-oauth" }
+
+# ────────────────────────────────────────────────────────────────
+# Optimize the bignum stack even in dev/test builds.
+#
+# `bcs-auth-alipay` generates RSA-2048 keypairs in its tests. Prime search is
+# pure bignum arithmetic, and unoptimized it costs ~5s per keypair — ten
+# keypairs across the alipay tests, ~36s of the unit-test suite. Building just
+# these two dependencies with optimizations brings that back to noise. Both are
+# third-party leaf dependencies, so this does not affect coverage of workspace
+# code (llvm-cov reports on workspace crates).
+# ────────────────────────────────────────────────────────────────
+[profile.dev.package.rsa]
+opt-level = 3
+
+[profile.dev.package.num-bigint-dig]
+opt-level = 3

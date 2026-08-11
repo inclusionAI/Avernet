@@ -57,11 +57,6 @@ impl NamedRegistry {
         self.surfaces.insert(bot_id.to_string(), surface);
         self
     }
-
-    fn with_http_provider(mut self, bot_id: &str) -> Self {
-        self.http_providers.insert(bot_id.to_string());
-        self
-    }
 }
 
 #[async_trait]
@@ -282,13 +277,13 @@ async fn manager_worker_session_context_backfills_placeholder_names() {
         .expect("manager receives context");
     assert_eq!(manager_message.delivery_type, DeliveryType::Send);
     assert!(manager_message.message.contains(
-        "- 名称: Demo Worker的分身 | ID: 20260416_a5clr6ig:12345678 | 角色: manager — Demo Worker的分身"
+        "|Demo Worker的分身|20260416_a5clr6ig:12345678|manager|"
     ));
     assert!(manager_message.message.contains(
-        "- 名称: Demo Worker测试0528 | ID: 20260528_vobmrqo6:12345678 | 角色: worker"
+        "|Demo Worker测试0528|20260528_vobmrqo6:12345678|worker|"
     ));
     assert!(!manager_message.message.contains(
-        "- 名称: 20260528_vobmrqo6:12345678 | ID: 20260528_vobmrqo6:12345678"
+        "|20260528_vobmrqo6:12345678|20260528_vobmrqo6:12345678|"
     ));
 }
 
@@ -304,7 +299,7 @@ async fn manager_worker_manager_reminder_lists_only_manager_tools() {
     assert!(manager_message.message.contains("bcs_assign_task"));
     assert!(manager_message.message.contains("bcs_task_complete"));
     assert!(manager_message.message.contains(
-        "[协同提醒] 本群为任务群，你是主 Bot。派发子任务用 bcs_assign_task(target_bot, message)"
+        "本群为任务群，你是主 Bot。派发子任务用 bcs_assign_task(target_bot, message)"
     ));
     assert!(manager_message.message.contains("不要用引擎自带的发送工具向群里发消息。"));
     assert!(!manager_message.message.contains("bcs_send_task_message"));
@@ -402,7 +397,7 @@ async fn manager_worker_worker_reminder_lists_only_worker_tool() {
 
     assert!(worker_message.message.contains("bcs_send_task_message"));
     assert!(worker_message.message.contains(
-        "[协同提醒] 本群为任务群，你是子 Bot。收到主 Bot 派发的任务后直接处理并回复"
+        "本群为任务群，你是子 Bot。收到主 Bot 派发的任务后直接处理并回复"
     ));
     assert!(worker_message.message.contains("不要用引擎自带的发送工具向群里发消息。"));
     assert!(!worker_message.message.contains("bcs_assign_task"));
@@ -609,3 +604,4 @@ async fn manager_worker_ignores_driver_delivery_override() {
         .expect("worker receives context");
     assert_eq!(worker_message.delivery_type, DeliveryType::Inject);
 }
+

@@ -61,6 +61,9 @@ fn create_config_bcsfuse_enabled(bots_dir: &PathBuf) -> BcsConfig {
             url: "http://127.0.0.1:19999".to_string(), // no server here
             sync_timeout_ms: 1000,
             fusion_timeout_ms: 2000,
+            // Every sync here is guaranteed to fail; the production 1s/2s
+            // backoff would add 3s of pure sleep per onboard/visibility change.
+            sync_retry_base_ms: 1,
             ..Default::default()
         },
         auth_sdk: Default::default(),

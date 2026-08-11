@@ -404,7 +404,13 @@ impl VisibilitySyncPort for BootstrapVisibilitySyncPort {
             &request.visibility,
         );
 
-        bcs_fusion::sync_worker_with_retry(&fuse_client, &request.bot_uuid, &sync_req).await;
+        bcs_fusion::sync_worker_with_retry(
+            &self.bcsfuse_config,
+            &fuse_client,
+            &request.bot_uuid,
+            &sync_req,
+        )
+        .await;
     }
 }
 

@@ -94,6 +94,8 @@ export interface AdvancedSettingsSlotProps {
 }
 export interface FuseSlotProps {
   group: GroupInfo | null;
+  /** 当前活跃会话 ID，用于按 session 维度判断/清除未读 */
+  activeSessionId: string | null;
 }
 export interface GroupVisibilitySlotProps {
   group: GroupInfo;

@@ -306,7 +306,7 @@ for item in items:
     assert_json_eq "CLI group read keeps its driver" "$BCS_CLI_STDOUT" "driver_bot" "$BOT_PM_UUID"
 
     _cli_story_run "operator adds verification to the group" PM add-member \
-        --group "$group_id" --bot-uuid "$BOT_QA_UUID" --role consultant || return
+        --group "$group_id" --bot-uuid "$BOT_QA_UUID" || return
     _cli_story_run "operator reads the expanded group" PM get-group --id "$group_id" || return
     assert_contains "CLI group read contains the added specialist" "$BCS_CLI_STDOUT" "$BOT_QA_UUID"
 

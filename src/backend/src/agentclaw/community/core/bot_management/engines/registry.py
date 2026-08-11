@@ -10,6 +10,7 @@ from .aicoding.strategy import (
     AicodingProvisioningStrategy,
     CODING_TEMPLATE_TYPES,
 )
+from .aicoding.mcp_defaults import AicodingMcpDefaultsResolver
 from .default import DefaultProvisioningStrategy
 from .provisioning import BotProvisioningContext, EngineProvisioningStrategy
 
@@ -56,6 +57,71 @@ class BaasEngineBucketResolverRegistry:
                 return engine_bucket
         return normalized_engine
 
+
+
+
+class DefaultCapabilitiesEngineBucketResolver(Protocol):
+    """Resolver that may map an engine context to a default-capabilities bucket."""
+
+    def resolve_default_capabilities_engine_bucket(
+        self,
+        *,
+        normalized_engine_type: str,
+        template_type: str | None,
+    ) -> str | None:
+        """Return a bucket override, or ``None`` when not applicable."""
+
+
+class DefaultCapabilitiesEngineBucketResolverRegistry:
+    """Registry for engine-contributed default MCP/CLI bucket resolvers."""
+
+    def __init__(self) -> None:
+        self._resolvers: list[DefaultCapabilitiesEngineBucketResolver] = []
+
+    def register(self, resolver: DefaultCapabilitiesEngineBucketResolver) -> None:
+        self._resolvers.append(resolver)
+
+    def resolve(
+        self,
+        *,
+        engine_type: str | None,
+        template_type: str | None,
+    ) -> str:
+        normalized_engine = normalize_engine_type(engine_type)
+        for resolver in self._resolvers:
+            engine_bucket = resolver.resolve_default_capabilities_engine_bucket(
+                normalized_engine_type=normalized_engine,
+                template_type=template_type,
+            )
+            if engine_bucket is not None:
+                return engine_bucket
+        return normalized_engine
+
+
+class McpDefaultsResolver(Protocol):
+    """Bucket-specific hook for deriving effective default MCP configs."""
+
+    def resolve(
+        self,
+        default_servers: list[dict],
+        ext_info: dict | None = None,
+    ) -> list[dict]:
+        """Return effective default MCP configs for one engine bucket."""
+
+
+class McpDefaultsResolverRegistry:
+    """Registry for engine-contributed MCP default resolvers."""
+
+    def __init__(self) -> None:
+        self._resolvers: dict[str, McpDefaultsResolver] = {}
+
+    def register(self, engine_bucket: str, resolver: McpDefaultsResolver) -> None:
+        if engine_bucket in self._resolvers:
+            raise ValueError(f"MCP defaults resolver already registered: {engine_bucket}")
+        self._resolvers[engine_bucket] = resolver
+
+    def resolve(self, engine_bucket: str) -> McpDefaultsResolver | None:
+        return self._resolvers.get(engine_bucket)
 
 class EngineProvisioningRegistry:
     def __init__(self) -> None:
@@ -168,6 +234,50 @@ def resolve_baas_engine_bucket(
     )
 
 
+def _build_default_capabilities_engine_bucket_resolver_registry() -> DefaultCapabilitiesEngineBucketResolverRegistry:
+    """Assemble the process-wide default MCP/CLI bucket resolver registry."""
+    registry = DefaultCapabilitiesEngineBucketResolverRegistry()
+    registry.register(AicodingBaasEngineBucketResolver())
+    return registry
+
+
+_DEFAULT_CAPABILITIES_ENGINE_BUCKET_RESOLVER_REGISTRY = (
+    _build_default_capabilities_engine_bucket_resolver_registry()
+)
+
+
+def get_default_capabilities_engine_bucket_resolver_registry() -> DefaultCapabilitiesEngineBucketResolverRegistry:
+    """Return the process-wide default-capabilities bucket resolver registry."""
+    return _DEFAULT_CAPABILITIES_ENGINE_BUCKET_RESOLVER_REGISTRY
+
+
+def resolve_default_capabilities_engine_bucket(
+    *,
+    engine_type: str | None,
+    template_type: str | None,
+) -> str:
+    """Resolve the engine bucket used by default MCP/CLI capability routing."""
+    return get_default_capabilities_engine_bucket_resolver_registry().resolve(
+        engine_type=engine_type,
+        template_type=template_type,
+    )
+
+
+def _build_mcp_defaults_resolver_registry() -> McpDefaultsResolverRegistry:
+    """Assemble the process-wide MCP defaults resolver registry."""
+    registry = McpDefaultsResolverRegistry()
+    registry.register(AICODING_ENGINE_TYPE, AicodingMcpDefaultsResolver())
+    return registry
+
+
+_MCP_DEFAULTS_RESOLVER_REGISTRY = _build_mcp_defaults_resolver_registry()
+
+
+def get_mcp_defaults_resolver_registry() -> McpDefaultsResolverRegistry:
+    """Return the process-wide MCP defaults resolver registry."""
+    return _MCP_DEFAULTS_RESOLVER_REGISTRY
+
+
 def resolve_provisioning(
     *,
     bot_id: str,
@@ -205,10 +315,15 @@ __all__ = [
     "BaasEngineBucketResolver",
     "BaasEngineBucketResolverRegistry",
     "BotProvisioningContext",
+    "DefaultCapabilitiesEngineBucketResolver",
+    "DefaultCapabilitiesEngineBucketResolverRegistry",
     "EngineProvisioningRegistry",
     "get_baas_engine_bucket_resolver_registry",
+    "get_default_capabilities_engine_bucket_resolver_registry",
+    "get_mcp_defaults_resolver_registry",
     "get_engine_provisioning_registry",
     "normalize_engine_type",
     "resolve_baas_engine_bucket",
+    "resolve_default_capabilities_engine_bucket",
     "resolve_provisioning",
 ]
