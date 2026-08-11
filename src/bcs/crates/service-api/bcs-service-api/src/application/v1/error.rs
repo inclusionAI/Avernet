@@ -15,6 +15,12 @@ pub enum ApplicationError {
     Gone { code: String, message: String },
     #[error("{code}: {message}")]
     QuotaExceeded { code: String, message: String },
+    #[error("{code}: {message}")]
+    PayloadTooLarge { code: String, message: String },
+    #[error("{code}: {message}")]
+    Unprocessable { code: String, message: String },
+    #[error("{code}: {message}")]
+    BadGateway { code: String, message: String },
     #[error("internal error: {0}")]
     Internal(String),
 }
@@ -45,6 +51,27 @@ impl ApplicationError {
         }
     }
 
+    pub fn payload_too_large(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::PayloadTooLarge {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
+    pub fn unprocessable(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::Unprocessable {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
+    pub fn bad_gateway(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::BadGateway {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
     pub fn internal(message: impl Into<String>) -> Self {
         Self::Internal(message.into())
     }
@@ -55,7 +82,10 @@ impl ApplicationError {
             | Self::NotFound { code, .. }
             | Self::Conflict { code, .. }
             | Self::Gone { code, .. }
-            | Self::QuotaExceeded { code, .. } => code,
+            | Self::QuotaExceeded { code, .. }
+            | Self::PayloadTooLarge { code, .. }
+            | Self::Unprocessable { code, .. }
+            | Self::BadGateway { code, .. } => code,
             Self::Unauthenticated => "unauthenticated",
             Self::Forbidden(_) => "forbidden",
             Self::Internal(_) => "internal_error",
