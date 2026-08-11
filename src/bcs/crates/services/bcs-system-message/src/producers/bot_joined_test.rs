@@ -177,6 +177,8 @@ async fn bot_joined_produces_context_injection_and_notification() {
     let event = SystemMessageEvent::BotJoined {
         group_id: "group-1".to_string(),
         actor: new_bot,
+        session_id: "group-1:session".to_string(),
+        session_input: None,
     };
 
     let (messages, user_message) = producer.produce(&event, &group, &registry, &group.participants).await;
@@ -197,12 +199,16 @@ async fn bot_joined_produces_context_injection_and_notification() {
     );
     let injection = injection.unwrap();
     assert!(
-        injection.message.contains("你加入了 BCS 协作群."),
-        "context injection should contain '你加入了 BCS 协作群.'"
+        injection.message.contains("<GroupContext>"),
+        "context injection should use the unified <GroupContext> block"
     );
     assert!(
-        injection.message.contains("群 ID:"),
-        "context injection should contain '群 ID:'"
+        injection.message.contains("你已加入 bcn 群聊"),
+        "context injection should contain '你已加入 bcn 群聊'"
+    );
+    assert!(
+        injection.message.contains("群组ID:"),
+        "context injection should contain '群组ID:'"
     );
     assert!(
         injection.message.contains("参与者:"),
@@ -239,7 +245,7 @@ async fn bot_joined_produces_context_injection_and_notification() {
         Some("NewBot(new-bot-id) 已加入协作群 - 能力集: {name: \"coding\"}")
     );
     assert!(
-        !user_message.as_deref().unwrap().contains("你加入了 BCS 协作群"),
+        !user_message.as_deref().unwrap().contains("<GroupContext>"),
         "user_message must not leak the new-bot context injection"
     );
 }
@@ -272,6 +278,8 @@ async fn bot_joined_emits_user_message_even_when_only_new_bot_present() {
     let event = SystemMessageEvent::BotJoined {
         group_id: "group-1".to_string(),
         actor: new_bot.clone(),
+        session_id: "group-1:session".to_string(),
+        session_input: None,
     };
 
     let (messages, user_message) = producer.produce(&event, &group, &registry, &[driver, new_bot]).await;
@@ -287,3 +295,5 @@ async fn bot_joined_emits_user_message_even_when_only_new_bot_present() {
         Some("NewBot(new-bot-id) 已加入协作群 - 能力集: {name: \"coding\"}")
     );
 }
+
+

@@ -9,6 +9,15 @@ pub enum SystemMessageEvent {
     BotJoined {
         group_id: String,
         actor: Participant,
+        /// Session the bot joined within; used to fetch session-scoped history
+        /// for the join context message. `#[serde(default)]` keeps old
+        /// serialized events deserializable.
+        #[serde(default)]
+        session_id: String,
+        /// Session input (the task/goal) used to populate the `目标` line of the
+        /// join context message when non-empty. `#[serde(default)]` for old data.
+        #[serde(default)]
+        session_input: Option<serde_json::Value>,
     },
     BotLeft {
         group_id: String,
@@ -29,7 +38,7 @@ pub enum SystemMessageEvent {
         session_input: Option<serde_json::Value>,
         #[serde(default)]
         task_ledger: Option<crate::LedgerSummary>,
-        /// Delivery override for the driver bot's `[GROUP CONTEXT]` message.
+        /// Delivery override for the driver bot's `<GroupContext>` message.
         /// `None` keeps the default `DeliveryType::Send`; `Some(Inject)`
         /// delivers the context silently. Only applies to the driver;
         /// other participants always receive `DeliveryType::Inject`.
@@ -87,7 +96,7 @@ impl SystemMessageEvent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PersistMode {
     /// Persist one record per recipient with `owner_bot_id = recipient`
-    /// (personalized per-bot context such as `[GROUP CONTEXT]`, only
+    /// (personalized per-bot context such as `<GroupContext>`, only
     /// readable by that bot's history view).
     PerRecipient,
     /// Persist exactly one record with `owner_bot_id = None` so the notice

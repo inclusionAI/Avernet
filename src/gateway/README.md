@@ -149,3 +149,11 @@ just test-ut
 # Run full CI pipeline
 just test mode=bare overlay=e2e-sqlite
 ```
+
+`bash scripts/ci_test.sh` enforces the same changed-line coverage gate
+(threshold 90) as the GitHub CI job in `.github/workflows/unit-tests.yml`: when
+`--base` is omitted it is derived via `scripts/lib/resolve_base_ref.sh` (the
+merge base of `origin/dev` by default, following the pre-push target contract
+`AVERNET_PRE_PUSH_MERGE_TARGET` > `avernet.prePush.mergeTarget` > `origin/dev`);
+if the target cannot be fetched, the gate fails loudly instead of silently
+skipping. `just test` runs only the test pipeline without the coverage gate.

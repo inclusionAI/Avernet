@@ -69,6 +69,7 @@ BOUNDARY_SIGNIFICANT_MODULES: frozenset[str] = frozenset({
     "agentclaw.community.core.aicoding",
     "agentclaw.community.core.approval",
     "agentclaw.community.core.auth",
+    "agentclaw.community.core.bot_app_grant",
     "agentclaw.community.core.bot_chat",
     "agentclaw.community.core.bot_management",
     "agentclaw.community.core.bot_public",

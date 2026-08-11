@@ -31,6 +31,7 @@ pub use actors::{
     WorkerRecommendCommand, WorkerRecommendResult, WorkerRecommendation,
 };
 pub use application::SystemMessageService;
+pub use application::system_message::resolve_session_topic;
 pub use application::channel::{
     ChannelInboundError, ChannelInboundFailureKind, ChannelService, ChannelUseCaseError,
     CreateBindingCommand, InboundMessage, OutboundMessage,

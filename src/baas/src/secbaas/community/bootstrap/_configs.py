@@ -216,7 +216,8 @@ class PluginConfig(ConfigSchema):
 
     config_section = "plugins"
     crypto: str = Field(default="stub", pattern=r"^(real|stub)$")
-    secret: str = Field(default="stub", pattern=r"^(real|stub)$")
+    secret: str = Field(default="stub", pattern=r"^(real|stub|aliyun_kms)$")
+    secret_aliyun_kms: dict = Field(default_factory=dict)
     auth: str = Field(default="stub", pattern=r"^(buservice|oauth|stub)$")
     scheduler: str = Field(default="stub", pattern=r"^(real|stub)$")
     cache: str = Field(default="stub", pattern=r"^(real|stub)$")

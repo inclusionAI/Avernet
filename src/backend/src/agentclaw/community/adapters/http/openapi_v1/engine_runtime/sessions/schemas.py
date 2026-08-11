@@ -117,9 +117,10 @@ class SessionCreate(BaseModel):
 
     # Only fields every engine on this surface actually persists — the same
     # ruling `cwd` got on SessionUpdate, for the same reason. An agent was
-    # offered here and withdrawn: `claude_code` encodes it into the session key
-    # (`agent:{agent_id}:session:…`) so later reads recover it, while `openclaw`
-    # builds `session:{uuid}:user:{user_id}` and never sends the agent at all,
+    # offered here and withdrawn: these local engines build
+    # `session:{uuid}:user:{user_id}` / related local session keys and do not send
+    # the agent through this request body, while `openclaw` also builds
+    # `session:{uuid}:user:{user_id}` and never sends the agent at all,
     # then synthesises a 201 echoing the value it dropped. The association would
     # exist or not depending on the bot's engine, and the response would claim
     # it either way. `extra="forbid"` makes a caller still sending `agent_id` a

@@ -197,6 +197,7 @@ class ClawBotService(BotService):
         context: BotChatContext | None = None,
         timeout: float,
         chat_metadata: dict[str, str] | None = None,
+        attachments: list[Any] | None = None,
     ) -> BotResponse:
         """Send a message and get response via ChatClient.
 
@@ -243,6 +244,7 @@ class ClawBotService(BotService):
                 auth_token=auth_token,
                 app_id=app_id,
                 chat_metadata=chat_metadata,
+                attachments=attachments,
             )
             return BotResponse(content=content)
         except TimeoutError:
@@ -262,6 +264,7 @@ class ClawBotService(BotService):
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         timeout: float,
+        attachments: list[Any] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """流式发送消息，逐 chunk 产出 StreamChunk。
 
@@ -291,6 +294,7 @@ class ClawBotService(BotService):
                 timeout=timeout,
                 auth_token=auth_token,
                 app_id=app_id,
+                attachments=attachments,
             ):
                 yield replace(chunk, engine_type=engine_type)
         except BotServiceError:
@@ -309,6 +313,7 @@ class ClawBotService(BotService):
         message: str,
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
+        attachments: list[Any] | None = None,
     ) -> None:
         """注入消息到已有会话
 
@@ -336,6 +341,7 @@ class ClawBotService(BotService):
                 message=message,
                 session_key=session_id,
                 auth_token=auth_token,
+                attachments=attachments,
             )
         except BotServiceError:
             raise

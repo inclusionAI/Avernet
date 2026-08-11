@@ -1,4 +1,5 @@
 import json
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -6,7 +7,14 @@ from secbaas.community.adapters.web.routers.bcn_downlink.bcn_model import (
     ChatSendRequest,
 )
 from secbaas.community.adapters.web.routers.bcn_downlink.bcn_router import (
+    _dispatch_chat_send,
     _dispatch_chat_send_stream,
+)
+from secbaas.community.api.bcn import (
+    Attachment as DomainAttachment,
+)
+from secbaas.community.api.bcn import (
+    BcnInvalidRequestError,
 )
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.service.sse import DefaultStreamConverter
@@ -108,3 +116,94 @@ async def test_stream_dispatch_error_yields_error_sse():
     assert items[0].startswith("id: 1\nevent: chat\n")
     assert "error" in items[1]
     assert "INTERNAL_ERROR" in items[1]
+
+
+# ── attachment passthrough tests ──
+
+
+@pytest.mark.asyncio
+async def test_dispatch_chat_send_passes_attachments():
+    """_dispatch_chat_send constructs ChatSendInput with attachments list."""
+    # Record the ChatSendInput that handle_chat_send receives
+    captured = {}
+
+    class _CapturingService:
+        async def handle_chat_send(self, input_):
+            captured["input"] = input_
+            from secbaas.community.api.bcn import ChatSendResult
+
+            return ChatSendResult(ok=True)
+
+    req = ChatSendRequest.model_validate(
+        {
+            "id": "run-1",
+            "session_id": "session-1",
+            "bcn_group_id": "group-1",
+            "to_bot": {"provider_id": "baas", "provider_bot_ref": "bot-1"},
+            "from": {"kind": "human", "id": "user-1"},
+            "message": {"role": "user", "content": "hi"},
+            "attachments": [
+                {
+                    "attachment_id": "att_1",
+                    "type": "image",
+                    "file_name": "photo.png",
+                    "url": "https://cdn.example.com/att_1",
+                },
+            ],
+        }
+    )
+
+    await _dispatch_chat_send(req, _CapturingService())
+
+    input_ = captured["input"]
+    assert input_.attachments is not None, "ChatSendInput.attachments must not be None"
+    assert len(input_.attachments) == 1
+    assert input_.attachments[0].attachment_id == "att_1"
+    assert isinstance(input_.attachments[0], DomainAttachment), (
+        "attachments must be domain dataclass instances, not Pydantic models"
+    )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_chat_send_passes_attachments_none():
+    """_dispatch_chat_send constructs ChatSendInput with attachments=None when absent."""
+    captured = {}
+
+    class _CapturingService:
+        async def handle_chat_send(self, input_):
+            captured["input"] = input_
+            from secbaas.community.api.bcn import ChatSendResult
+
+            return ChatSendResult(ok=True)
+
+    req = ChatSendRequest.model_validate(
+        {
+            "id": "run-1",
+            "session_id": "session-1",
+            "bcn_group_id": "group-1",
+            "to_bot": {"provider_id": "baas", "provider_bot_ref": "bot-1"},
+            "from": {"kind": "human", "id": "user-1"},
+            "message": {"role": "user", "content": "hi"},
+            # no "attachments" key
+        }
+    )
+
+    await _dispatch_chat_send(req, _CapturingService())
+
+    input_ = captured["input"]
+    assert input_.attachments is None, (
+        "ChatSendInput.attachments must be None when absent"
+    )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_chat_send_value_error_wraps_to_bcn_invalid_request():
+    """When handle_chat_send raises ValueError, it's wrapped in BcnInvalidRequestError."""
+
+    class _ValueErrorService:
+        async def handle_chat_send(self, input_):
+            raise ValueError("invalid timeout value")
+
+    with pytest.raises(BcnInvalidRequestError) as exc_info:
+        await _dispatch_chat_send(_chat_send_request(), _ValueErrorService())
+    assert "invalid timeout value" in str(exc_info.value)

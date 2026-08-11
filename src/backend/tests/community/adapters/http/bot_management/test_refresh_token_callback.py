@@ -17,6 +17,7 @@ from agentclaw.community.adapters.http.bot_management.router import (
 
 def _svc_with_bot(bot: dict | None) -> BotService:
     svc = BotService.__new__(BotService)
+    svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = MagicMock()
     svc._repository.get_by_id_and_owner.return_value = bot
     svc._passport_plugin = MagicMock()

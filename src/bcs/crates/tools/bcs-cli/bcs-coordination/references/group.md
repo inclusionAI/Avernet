@@ -92,7 +92,7 @@ bcs confirm-group-help --url "http://xxx/proposals/xxx/confirm"
 }
 ```
 
-> **说明**：`chat_url` 为群聊页面链接，当服务端配置了 `botchat_url` 时返回，否则为 `null`；链接中的 `bot_uuid` 固定打开群聊时的 Bot 视角，`session` 定位默认会话。建群成功后必须立即把 `chat_url` 提供给用户，并保留 `session_id` 供后续 Session 操作使用。
+> **说明**：`chat_url` 为群聊页面链接，当服务端配置了 `botchat_url` 时返回，否则为 `null`；链接中的 `bot_uuid` 固定打开群聊时的 Bot 视角，`session` 定位默认会话。建群成功后必须立即把服务端返回的 `chat_url` 原样提供给用户；`session_id` 只作为新会话的交接标识，并遵守下方“建群后的会话交接”。
 
 ---
 
@@ -138,7 +138,32 @@ bcs create-group --manager "bot-manager" --participants "bot-worker-1,bot-worker
 }
 ```
 
-> **说明**：`chat_url` 为群聊页面链接，当服务端配置了 `botchat_url` 时返回，否则为 `null`；链接中的 `bot_uuid` 固定打开群聊时的 Bot 视角，`session` 定位默认会话。建群成功后必须立即把 `chat_url` 提供给用户，并保留 `session_id` 供后续 Session 操作使用。
+> **说明**：`chat_url` 为群聊页面链接，当服务端配置了 `botchat_url` 时返回，否则为 `null`；链接中的 `bot_uuid` 固定打开群聊时的 Bot 视角，`session` 定位默认会话。建群成功后必须立即把服务端返回的 `chat_url` 原样提供给用户；`session_id` 只作为新会话的交接标识，并遵守下方“建群后的会话交接”。
+
+---
+
+## 建群后的会话交接（默认规则）
+
+`confirm-group-help` 或 `create-group` 成功时，新群已经拥有独立的 group/session。默认在发起建群的旧会话完成交接，避免旧上下文隐式取得新会话控制权：
+
+1. 只向用户输出服务端响应中的原始 `chat_url`；不要手工重建链接。
+2. 输出链接后立即结束当前激活，不再调用任何工具。
+3. 不从旧私聊或旧群使用返回的 `session_id` 查询新群、派发任务、添加成员、提交自定义协作或控制新群生命周期。
+4. 后续协作由新 session 自身的初始化消息或用户消息激活。若运行环境没有自动激活新 session，只提示用户打开 `chat_url`。
+
+只有在建群前已满足以下任一条件时，才允许跨 session 发送一次最小 kickoff：
+
+- 用户明确要求建群后自动启动协作，并明确表示无需自己先进入新群。
+- 调用方是专用编排器，且其既有 workflow contract 明确授权跨 session kickoff。
+
+该例外必须同时满足：
+
+1. 使用建群响应中的准确 `session_id`；通过 `sessions_send` 时先找到对应的完整 `sessionKey`，无法解析时才使用 `bcs session chat --session <session_id>`。
+2. 只发送一次启动消息，且仅包含已获授权的公开任务背景；不得复制旧会话历史、私密约束、凭据或未授权上下文。
+3. kickoff 后立即结束旧会话的当前激活；后续查询、任务派发、状态机提交和生命周期控制由新 session 自身执行。
+4. 更具体的 Bot profile 或 workflow contract 若规定建群是严格终点，则该例外无效，仍按默认交接结束。
+
+当前执行上下文已经位于目标新 session 内时，可以使用其 `session_id` 执行该 session 的正常操作，这不属于跨 session 遥控。
 
 ---
 

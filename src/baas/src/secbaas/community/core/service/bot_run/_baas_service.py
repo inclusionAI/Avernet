@@ -355,6 +355,7 @@ class BaasBotService(BotService):
         context: BotChatContext | None = None,
         timeout: float,
         chat_metadata: dict[str, str] | None = None,
+        attachments: list[Any] | None = None,
     ) -> BotResponse:
         """Send a message and get response via ChatClient.
 
@@ -405,6 +406,7 @@ class BaasBotService(BotService):
                 auth_token=auth_token,
                 app_id=app_id,
                 chat_metadata=chat_metadata,
+                attachments=attachments,
             )
             self._mark_session_completed(baas_session_id, result={"content": content})
             return BotResponse(content=content)
@@ -432,6 +434,7 @@ class BaasBotService(BotService):
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         timeout: float,
+        attachments: list[Any] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """流式发送消息，逐 chunk 产出 StreamChunk。
 
@@ -469,6 +472,7 @@ class BaasBotService(BotService):
                 timeout=timeout,
                 auth_token=auth_token,
                 app_id=app_id,
+                attachments=attachments,
             ):
                 if chunk.type == "error":
                     stream_error = True
@@ -500,6 +504,7 @@ class BaasBotService(BotService):
         message: str,
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
+        attachments: list[Any] | None = None,
     ) -> None:
         """注入消息到已有会话
 
@@ -535,6 +540,7 @@ class BaasBotService(BotService):
                 message=message,
                 session_key=session_id,
                 auth_token=auth_token,
+                attachments=attachments,
             )
             self._mark_session_completed(
                 baas_session_id, result={"content": "inject success"}
