@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from secbaas.community.spi.secret import SecretStorePlugin
 
+from ._client import KmsGetSecretValueRequest
 from ._client_factory import KmsClientProvider
 
 if TYPE_CHECKING:
@@ -72,15 +73,8 @@ class AliyunKmsSecretStorePlugin(SecretStorePlugin):
 
     def _get_via_kms(self, secret_name: str) -> str:
         """Retrieve a plain secret value from KMS, or raise RuntimeError."""
-        try:
-            from alibabacloud_kms20160120 import models
-        except ImportError as exc:  # pragma: no cover - SDK present at runtime
-            raise RuntimeError(
-                "Aliyun KMS SDK is not installed; add alibabacloud-kms20160120"
-            ) from exc
-
         kms_name = self._kms_secret_name(secret_name)
-        request = models.GetSecretValueRequest(secret_name=kms_name)
+        request = KmsGetSecretValueRequest(secret_name=kms_name)
         client = self._client_factory.get_client()
         try:
             response = client.get_secret_value(request)
@@ -88,7 +82,7 @@ class AliyunKmsSecretStorePlugin(SecretStorePlugin):
             raise RuntimeError(
                 f"Failed to retrieve KMS secret {kms_name}: {exc}"
             ) from exc
-        body = response.body
+        body = getattr(response, "body", response)
         if body is None or getattr(body, "secret_data", "") is None:
             raise RuntimeError(f"KMS secret {kms_name} was not found")
         return getattr(body, "secret_data", "") or ""

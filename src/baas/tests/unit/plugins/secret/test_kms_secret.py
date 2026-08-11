@@ -10,6 +10,9 @@ from secbaas.community.bootstrap._configs import PluginConfig
 from secbaas.community.plugins.secret.kms import (
     AliyunKmsClientFactory,
     AliyunKmsSecretStorePlugin,
+    KmsClient,
+    KmsError,
+    KmsGetSecretValueRequest,
     KmsSecretStoreConfig,
 )
 
@@ -267,28 +270,11 @@ def test_kms_config_defaults() -> None:
     assert cfg.secret_name_prefix == ""
 
 
-def test_factory_missing_sdk_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    import builtins
-
-    real_import = builtins.__import__
-
-    def fake_import(
-        name: str,
-        globals: dict[str, Any] | None = None,  # noqa: A002
-        locals: dict[str, Any] | None = None,  # noqa: A002
-        fromlist: tuple[str, ...] | None = None,
-        level: int = 0,
-    ) -> Any:
-        if name.startswith("alibabacloud_kms20160120") or name.startswith(
-            "alibabacloud_tea_openapi"
-        ):
-            raise ImportError(f"No module named {name}")
-        return real_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", fake_import)
+def test_factory_builds_http_client() -> None:
     factory = AliyunKmsClientFactory(_base_config())
-    with pytest.raises(RuntimeError, match="SDK"):
-        factory.get_client()
+    client = factory.get_client()
+    assert isinstance(client, KmsClient)
+    assert factory.get_client() is client
 
 
 def test_factory_caches_client() -> None:
@@ -297,10 +283,189 @@ def test_factory_caches_client() -> None:
     assert factory.get_client() == "cached-client"
 
 
-def test_factory_builds_real_sdk_client() -> None:
-    factory = AliyunKmsClientFactory(_base_config())
+def test_factory_derives_endpoint_from_region() -> None:
+    factory = AliyunKmsClientFactory(_base_config(endpoint="", region_id="cn-shanghai"))
     client = factory.get_client()
-    from alibabacloud_kms20160120.client import Client
+    assert client._endpoint == "kms.cn-shanghai.aliyuncs.com"
 
-    assert isinstance(client, Client)
-    assert factory.get_client() is client
+
+def test_get_secret_value_request_fields() -> None:
+    request = KmsGetSecretValueRequest(secret_name="baas/app/plain")
+    assert request.secret_name == "baas/app/plain"
+
+
+def test_kms_client_call_and_parse(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import httpx
+
+    client = KmsClient(
+        access_key_id="LTAI-test",
+        access_key_secret="secret-test",
+        endpoint="kms.cn-hangzhou.aliyuncs.com",
+        region_id="cn-hangzhou",
+    )
+
+    captured: dict[str, object] = {}
+
+    def fake_get(url: str, *, params: dict[str, str], timeout: float) -> object:
+        captured["url"] = url
+        captured["params"] = params
+        captured["timeout"] = timeout
+        response = httpx.Response(200, json={"SecretData": "plain-value"})
+        return response
+
+    monkeypatch.setattr(client, "_signed_params", lambda p: {**p, "Signature": "x"})
+    monkeypatch.setattr("httpx.get", fake_get)
+
+    result = client.get_secret_value(
+        KmsGetSecretValueRequest(secret_name="baas/app/plain")
+    )
+    assert result.secret_data == "plain-value"
+    assert captured["url"] == "https://kms.cn-hangzhou.aliyuncs.com/"
+
+
+def test_kms_client_signs_rpc_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import httpx
+
+    client = KmsClient(
+        access_key_id="LTAI-test",
+        access_key_secret="secret-test",
+        endpoint="kms.cn-hangzhou.aliyuncs.com",
+        region_id="cn-hangzhou",
+    )
+
+    captured: dict[str, str] = {}
+
+    def fake_get(url: str, *, params: dict[str, str], timeout: float) -> object:
+        captured.update(params)
+        return httpx.Response(200, json={"SecretData": "v"})
+
+    monkeypatch.setattr("httpx.get", fake_get)
+
+    client.get_secret_value(KmsGetSecretValueRequest(secret_name="s"))
+    assert captured["Action"] == "GetSecretValue"
+    assert captured["Format"] == "JSON"
+    assert captured["SignatureMethod"] == "HMAC-SHA1"
+    assert captured["SecretName"] == "s"
+    assert captured["Version"] == "2016-01-20"
+    assert captured["Signature"]
+
+
+def test_kms_client_surfaces_error_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import httpx
+
+    client = KmsClient(
+        access_key_id="LTAI-test",
+        access_key_secret="secret-test",
+        endpoint="kms.cn-hangzhou.aliyuncs.com",
+        region_id="cn-hangzhou",
+    )
+
+    def fake_get(url: str, **kw: object) -> object:
+        return httpx.Response(
+            200,
+            json={"Code": "Forbidden", "Message": "no access"},
+        )
+
+    monkeypatch.setattr("httpx.get", fake_get)
+    with pytest.raises(KmsError, match="Forbidden"):
+        client.get_secret_value(KmsGetSecretValueRequest(secret_name="s"))
+
+
+def test_kms_client_missing_secret_data_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import httpx
+
+    client = KmsClient(
+        access_key_id="LTAI-test",
+        access_key_secret="secret-test",
+        endpoint="kms.cn-hangzhou.aliyuncs.com",
+        region_id="cn-hangzhou",
+    )
+
+    def fake_get(url: str, **kw: object) -> object:
+        return httpx.Response(200, json={"Code": "OK"})
+
+    monkeypatch.setattr("httpx.get", fake_get)
+    with pytest.raises(KmsError, match="not found"):
+        client.get_secret_value(KmsGetSecretValueRequest(secret_name="nope"))
+
+
+def test_kms_client_http_error_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import httpx
+
+    client = KmsClient(
+        access_key_id="LTAI-test",
+        access_key_secret="secret-test",
+        endpoint="kms.cn-hangzhou.aliyuncs.com",
+        region_id="cn-hangzhou",
+    )
+
+    def fake_get(url: str, **kw: object) -> object:
+        raise httpx.ConnectError("boom")
+
+    monkeypatch.setattr("httpx.get", fake_get)
+    with pytest.raises(KmsError, match="request error"):
+        client.get_secret_value(KmsGetSecretValueRequest(secret_name="s"))
+
+
+def test_kms_client_non_200_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx
+
+    client = KmsClient(
+        access_key_id="LTAI-test",
+        access_key_secret="secret-test",
+        endpoint="kms.cn-hangzhou.aliyuncs.com",
+        region_id="cn-hangzhou",
+    )
+
+    monkeypatch.setattr(
+        "httpx.get",
+        lambda url, **kw: httpx.Response(500, text="internal error"),
+    )
+    with pytest.raises(KmsError, match="500"):
+        client.get_secret_value(KmsGetSecretValueRequest(secret_name="s"))
+
+
+def test_kms_client_invalid_json_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx
+
+    client = KmsClient(
+        access_key_id="LTAI-test",
+        access_key_secret="secret-test",
+        endpoint="kms.cn-hangzhou.aliyuncs.com",
+        region_id="cn-hangzhou",
+    )
+
+    monkeypatch.setattr(
+        "httpx.get",
+        lambda url, **kw: httpx.Response(200, text="<html>not json</html>"),
+    )
+    with pytest.raises(KmsError, match="invalid json"):
+        client.get_secret_value(KmsGetSecretValueRequest(secret_name="s"))
+
+
+def test_kms_client_non_object_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx
+
+    client = KmsClient(
+        access_key_id="LTAI-test",
+        access_key_secret="secret-test",
+        endpoint="kms.cn-hangzhou.aliyuncs.com",
+        region_id="cn-hangzhou",
+    )
+
+    monkeypatch.setattr(
+        "httpx.get",
+        lambda url, **kw: httpx.Response(200, json=["not", "an", "object"]),
+    )
+    with pytest.raises(KmsError, match="not an object"):
+        client.get_secret_value(KmsGetSecretValueRequest(secret_name="s"))
