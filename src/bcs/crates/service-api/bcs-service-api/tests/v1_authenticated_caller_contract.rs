@@ -1,6 +1,7 @@
 use bcs_service_api::application::v1::{
     AuthenticatedAccessKeyIdentity, AuthenticatedAppIdentity, AuthenticatedBotIdentity,
-    AuthenticatedCaller, AuthenticatedUserIdentity, Principal, require_human,
+    AuthenticatedCaller, AuthenticatedUserIdentity, IdentityPolicy, Principal, require_human,
+    select_principal,
 };
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
@@ -119,4 +120,103 @@ fn require_human_rejects_a_valid_caller_without_user() {
 
     let error = require_human(&caller).expect_err("Bot-only caller is not Human");
     assert_eq!(error.code(), "forbidden");
+}
+
+fn caller(user_id: Option<&str>, bot: Option<(&str, &str)>) -> AuthenticatedCaller {
+    AuthenticatedCaller {
+        tenant: Some("tenant-a".into()),
+        user: user_id.map(|id| AuthenticatedUserIdentity {
+            id: id.into(),
+            username: "alice".into(),
+            display_name: None,
+            full_name: None,
+        }),
+        bot: bot.map(|(bot_uuid, owner_id)| AuthenticatedBotIdentity {
+            bot_uuid: bot_uuid.into(),
+            owner_id: owner_id.into(),
+            app_id: 7,
+            agent_code: "agent".into(),
+        }),
+        app: None,
+        access_key: None,
+    }
+}
+
+#[test]
+fn identity_policy_defaults_to_human_only() {
+    assert_eq!(IdentityPolicy::default(), IdentityPolicy::HumanOnly);
+
+    let error = select_principal(&caller(None, Some(("bot-1", "user-1"))), Default::default())
+        .expect_err("default policy rejects Bot-only callers");
+    assert_eq!(error.code(), "forbidden");
+}
+
+#[test]
+fn identity_policy_selects_the_requested_identity_kind() {
+    let human = select_principal(
+        &caller(Some("user-1"), None),
+        IdentityPolicy::HumanOnly,
+    )
+    .expect("Human policy");
+    assert_eq!(human.actor_id(), "human_user-1");
+
+    let bot = select_principal(
+        &caller(None, Some(("bot-1", "user-1"))),
+        IdentityPolicy::BotOnly,
+    )
+    .expect("Bot policy");
+    assert_eq!(bot.actor_id(), "bot-1");
+}
+
+#[test]
+fn human_or_owned_bot_is_bot_first_when_both_are_consistent() {
+    let selected = select_principal(
+        &caller(Some("user-1"), Some(("bot-1", "user-1"))),
+        IdentityPolicy::HumanOrOwnedBot,
+    )
+    .expect("owned Bot may act with its User");
+
+    assert!(matches!(selected, Principal::Bot(_)));
+    assert_eq!(selected.actor_id(), "bot-1");
+}
+
+#[test]
+fn human_or_owned_bot_rejects_a_mismatched_user_and_bot() {
+    let error = select_principal(
+        &caller(Some("user-1"), Some(("bot-1", "user-2"))),
+        IdentityPolicy::HumanOrOwnedBot,
+    )
+    .expect_err("User may not impersonate another owner's Bot");
+
+    assert_eq!(error.code(), "forbidden");
+}
+
+#[test]
+fn app_only_does_not_become_a_file_actor() {
+    let mut app_only = caller(None, None);
+    app_only.app = Some(AuthenticatedAppIdentity {
+        app_id: 7,
+        app_name: "Contract App".into(),
+        owners: "owner".into(),
+        app_type: "THIRD_PARTY".into(),
+    });
+
+    let error = select_principal(&app_only, IdentityPolicy::HumanOrOwnedBot)
+        .expect_err("App is not a collaboration actor");
+    assert_eq!(error.code(), "forbidden");
+}
+
+#[test]
+fn an_extra_app_does_not_override_a_valid_bot_actor() {
+    let mut caller = caller(None, Some(("bot-1", "user-1")));
+    caller.app = Some(AuthenticatedAppIdentity {
+        app_id: 7,
+        app_name: "Contract App".into(),
+        owners: "owner".into(),
+        app_type: "THIRD_PARTY".into(),
+    });
+
+    let selected = select_principal(&caller, IdentityPolicy::HumanOrOwnedBot)
+        .expect("Bot remains the effective actor");
+    assert_eq!(selected.actor_id(), "bot-1");
 }

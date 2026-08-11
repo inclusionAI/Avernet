@@ -17,7 +17,8 @@ pub mod principal;
 pub mod session;
 
 pub use authorization::{
-    Action, AuthorizationService, ResourceRef, require_authenticated_user, require_human,
+    Action, AuthorizationService, IdentityPolicy, ResourceRef, require_authenticated_user,
+    require_human, select_principal,
 };
 pub use bot::*;
 pub use error::ApplicationError;
