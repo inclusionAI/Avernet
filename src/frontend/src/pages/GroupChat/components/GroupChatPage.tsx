@@ -888,7 +888,9 @@ const GroupChatPage: React.FC<GroupChatPageProps> = ({
         </ChatLayout>
 
         {/* 智能问答悬浮按钮和聊天窗口（融合模式）：开源裁掉，内部通过 slot 注入 */}
-        {FuseSlot && <FuseSlot group={group} />}
+        {FuseSlot && (
+          <FuseSlot group={group} activeSessionId={activeSession?.sessionId || null} />
+        )}
       </div>
     </TooltipProvider>
   );

@@ -96,7 +96,7 @@ class AsyncSessionClient:
         }
 
         # IMPORTANT: no need to pass 'agent_id' for openclaw engine
-        if (engine or self.engine) == 'openclaw':
+        if (engine or self.engine) == "openclaw":
             params["agent_id"] = None
 
         resp = await self._request("GET", "/api/sessions", params=params)

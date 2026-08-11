@@ -22,6 +22,19 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
+# When --base is omitted (e.g. `just test` / `just test-ci` / a direct local
+# invocation), derive the changed-line coverage base ref so the gate runs
+# locally with the same threshold as GitHub CI instead of being skipped.
+# CI always passes an explicit --base, so this branch only affects local runs.
+if [[ -z "$base" ]]; then
+  # shellcheck source=../../../scripts/lib/resolve_base_ref.sh
+  source "$repo_root/scripts/lib/resolve_base_ref.sh"
+  base="$(resolve_base_ref)" || {
+    echo "baas CI failed: could not resolve changed-line coverage base ref" >&2
+    exit 1
+  }
+fi
+
 if [[ ! -d "$baas_dir" ]]; then
   echo "baas CI failed: community package not found: $baas_dir" >&2
   exit 1

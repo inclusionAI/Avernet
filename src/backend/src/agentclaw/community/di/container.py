@@ -18,6 +18,7 @@ from injector import Injector, Module
 
 from agentclaw.community.di.modules.access_module import AccessModule
 from agentclaw.community.di.modules.aicoding_module import AICodingModule
+from agentclaw.community.di.modules.bot_app_grant_module import BotAppGrantModule
 from agentclaw.community.di.modules.bot_collaborator_module import BotCollaboratorModule
 from agentclaw.community.di.modules.bot_chat_open_module import BotChatOpenModule
 from agentclaw.community.di.modules.bot_dormant_module import BotDormantModule
@@ -117,6 +118,7 @@ def build_injector(
         SessionResourcesModule(),
         HarnessModule(),
         BotCollaboratorModule(),
+        BotAppGrantModule(),
         BotChatOpenModule(),
         CallerIdentityModule(),
         UserListModule(),

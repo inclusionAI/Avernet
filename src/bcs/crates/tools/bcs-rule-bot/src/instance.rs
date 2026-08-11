@@ -957,24 +957,20 @@ fn begin_supervisor_dispatch(
 }
 
 fn supervisor_system_task(message: &str) -> Option<String> {
-    tagged_task(message).or_else(|| manager_worker_group_goal(message))
+    tagged_task(message)
 }
 
+/// Extracts the `## 任务说明` section body from a `<GroupContext>` system
+/// message. The task body runs from the heading line up to the next `## `
+/// section or the closing `</GroupContext>` tag.
 fn tagged_task(message: &str) -> Option<String> {
-    let (_, after_open) = message.split_once("[任务]")?;
-    let (task, _) = after_open.split_once("[/任务]")?;
-    let task = task.trim();
+    let (_, after_heading) = message.split_once("## 任务说明\n")?;
+    let end = after_heading
+        .find("\n## ")
+        .or_else(|| after_heading.find("\n</GroupContext>"))
+        .unwrap_or(after_heading.len());
+    let task = after_heading[..end].trim();
     (!task.is_empty()).then(|| task.to_string())
-}
-
-fn manager_worker_group_goal(message: &str) -> Option<String> {
-    let (_, service_context) = message.split_once("[SERVICE GROUP CONTEXT]")?;
-    let (service_context, _) = service_context.split_once("[/SERVICE GROUP CONTEXT]")?;
-    let (_, participants_and_goal) = service_context.split_once("参与者:\n")?;
-    let (roster_and_goal, _) = participants_and_goal.rsplit_once("\n[协同提醒]")?;
-    let (_, goal) = roster_and_goal.split_once("\n\n")?;
-    let goal = goal.trim();
-    (!goal.is_empty()).then(|| goal.to_string())
 }
 
 fn parse_participant_identity(value: &str) -> ParticipantIdentity {
@@ -1776,10 +1772,11 @@ mod tests {
         assert_eq!(plain.name, "worker-id");
         assert_eq!(plain.target, "worker-id");
         assert_eq!(
-            tagged_task("context\n[任务]\n检查上线\n[/任务]\nend").as_deref(),
+            tagged_task("<GroupContext>\n## 任务说明\n检查上线\n\n## 说明\n静默\n</GroupContext>")
+                .as_deref(),
             Some("检查上线")
         );
-        assert!(tagged_task("[SERVICE GROUP CONTEXT]").is_none());
+        assert!(tagged_task("<GroupContext>\n## 群聊信息\n* 群组ID: g\n</GroupContext>").is_none());
     }
 
     #[tokio::test]
@@ -1898,52 +1895,50 @@ mod tests {
     }
 
     #[test]
-    fn system_supervisor_task_prefers_session_task_and_falls_back_to_group_goal() {
-        let goal_only = "\
-[SERVICE GROUP CONTEXT]\n\
-群组ID: group\n\
-会话ID: group:session\n\
-模式: manager_worker\n\
-你的角色: manager\n\
-参与者:\n\
-- 名称: 任务协调者 | ID: manager-id | 角色: manager\n\
-- 名称: 成员A | ID: worker-a | 角色: worker\n\
+    fn system_supervisor_task_extracts_session_task_from_group_context() {
+        let with_task = "\
+<GroupContext>\n\
+当前你在 bcn 群聊中，群聊相关信息如下\n\
 \n\
-测试协作目标\n\
+## 群聊信息\n\
+* 群组ID: group\n\
+* 会话ID: group:session\n\
+* 模式: manager_worker\n\
+* 你的角色: manager\n\
 \n\
-[协同提醒] 本群为任务群，你是主 Bot。\n\
-[/SERVICE GROUP CONTEXT]";
-        assert_eq!(
-            supervisor_system_task(goal_only).as_deref(),
-            Some("测试协作目标")
-        );
-
-        let goal_and_task = "\
-[SERVICE GROUP CONTEXT]\n\
-参与者:\n\
-- 名称: 任务协调者 | ID: manager-id | 角色: manager\n\
+## 参与者:\n\
+| name | bot_id | role |\n\
+|------|--------|------|\n\
+|任务协调者|manager-id|manager|\n\
+|成员A|worker-a|worker|\n\
 \n\
-长期协作目标\n\
-\n\
-[任务]\n\
+## 任务说明\n\
 本次会话任务\n\
-[/任务]\n\
 \n\
-[协同提醒] 本群为任务群，你是主 Bot。\n\
-[/SERVICE GROUP CONTEXT]";
+## manager-worker 协同说明\n\
+本群为任务群，你是主 Bot。\n\
+</GroupContext>";
         assert_eq!(
-            supervisor_system_task(goal_and_task).as_deref(),
+            supervisor_system_task(with_task).as_deref(),
             Some("本次会话任务")
         );
 
-        let no_goal = "\
-[SERVICE GROUP CONTEXT]\n\
-参与者:\n\
-- 名称: 任务协调者 | ID: manager-id | 角色: manager\n\
+        let no_task = "\
+<GroupContext>\n\
+当前你在 bcn 群聊中，群聊相关信息如下\n\
 \n\
-[协同提醒] 本群为任务群，你是主 Bot。\n\
-[/SERVICE GROUP CONTEXT]";
-        assert!(supervisor_system_task(no_goal).is_none());
+## 群聊信息\n\
+* 群组ID: group\n\
+\n\
+## 参与者:\n\
+| name | bot_id | role |\n\
+|------|--------|------|\n\
+|任务协调者|manager-id|manager|\n\
+\n\
+## manager-worker 协同说明\n\
+本群为任务群，你是主 Bot。\n\
+</GroupContext>";
+        assert!(supervisor_system_task(no_task).is_none());
     }
 
     #[test]
@@ -2100,16 +2095,29 @@ mod tests {
         let mut input = supervisor_input();
         input.sender_name = "bcs-system-message".to_string();
         input.message_text = "\
-[SERVICE GROUP CONTEXT]\n\
-参与者:\n\
-- 名称: 任务协调者 | ID: manager-id | 角色: manager\n\
-- 名称: 成员A | ID: worker-a | 角色: worker\n\
-- 名称: 成员B | ID: worker-b | 角色: worker\n\
+<GroupContext>\n\
+当前你在 bcn 群聊中，群聊相关信息如下\n\
 \n\
+## 群聊信息\n\
+* 群组ID: group\n\
+* 会话ID: group:session\n\
+* 模式: manager_worker\n\
+* 你的身份: 任务协调者(manager-id)\n\
+* 你的角色: manager\n\
+\n\
+## 参与者:\n\
+| name | bot_id | role |\n\
+|------|--------|------|\n\
+|任务协调者|manager-id|manager|\n\
+|成员A|worker-a|worker|\n\
+|成员B|worker-b|worker|\n\
+\n\
+## 任务说明\n\
 初始化协作目标\n\
 \n\
-[协同提醒] 本群为任务群，你是主 Bot。\n\
-[/SERVICE GROUP CONTEXT]"
+## manager-worker 协同说明\n\
+本群为任务群，你是主 Bot。\n\
+</GroupContext>"
             .to_string();
         let (outgoing_tx, mut outgoing_rx) = mpsc::unbounded_channel();
         let (internal_tx, _internal_rx) = mpsc::unbounded_channel();
@@ -2220,7 +2228,7 @@ mod tests {
         state.bot_uuid = Some("manager-id".to_string());
         let mut input = supervisor_input();
         input.sender_name = "bcs-system-message".to_string();
-        input.message_text = "[MANAGER-WORKER GROUP CONTEXT]".to_string();
+        input.message_text = "<GroupContext></GroupContext>".to_string();
         let (outgoing_tx, mut outgoing_rx) = mpsc::unbounded_channel();
         let (internal_tx, _internal_rx) = mpsc::unbounded_channel();
         let start = match BehaviorRuntime::new(&behavior)

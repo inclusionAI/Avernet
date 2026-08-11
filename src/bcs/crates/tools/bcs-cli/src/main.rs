@@ -68,7 +68,8 @@ use tracing::{Level, debug, info, warn};
 use tracing_subscriber::FmtSubscriber;
 
 use bcs_cli::{
-    BcsClient, CreateCustomGroupOptions, RunSessionCollaborationOptions,
+    BcsClient, ChatAsyncError, ChatRunOutcome, CreateCustomGroupOptions,
+    RunSessionCollaborationOptions,
 };
 use bcs_protocol::{BCS_PROTOCOL_VERSION, BotConnectParams};
 
@@ -1205,10 +1206,6 @@ enum Commands {
         /// Bot UUID to add
         #[arg(long)]
         bot_uuid: String,
-
-        /// Role (driver/consultant)
-        #[arg(short, long)]
-        role: Option<String>,
     },
 
     /// Chat with another bot (1:1 message via BCS routing)
@@ -3391,7 +3388,6 @@ pub async fn run() -> Result<()> {
             token,
             group,
             bot_uuid,
-            role,
         } => {
             let token = get_token(token.as_deref())?;
             let client = create_client(
@@ -3406,21 +3402,24 @@ pub async fn run() -> Result<()> {
                 "POST",
                 &format!("/groups/{}/members", &group),
                 json!({
-                    "bot_id": &bot_uuid,
-                    "role": role.as_deref().unwrap_or("consultant")
+                    "bot_uuid": &bot_uuid,
                 })
             );
 
-            let result = client
-                .add_group_member(&group, &bot_uuid, role.as_deref())
-                .await?;
+            let result = client.add_group_member(&group, &bot_uuid).await?;
 
             debug_response!(debug, "200", &result);
 
             println!("✓ Member added to group:");
             println!("  Group: {}", group);
             println!("  Bot: {}", bot_uuid);
-            println!("  Role: {}", role.as_deref().unwrap_or("consultant"));
+            if let Some(role) = result
+                .get("member")
+                .and_then(|member| member.get("role"))
+                .and_then(|role| role.as_str())
+            {
+                println!("  Role: {}", role);
+            }
         }
 
         Commands::Chat {
@@ -3448,6 +3447,7 @@ pub async fn run() -> Result<()> {
             } else {
                 1_800_000
             });
+            let json_mode = structured_mode;
 
             debug_request!(
                 debug,
@@ -3462,61 +3462,161 @@ pub async fn run() -> Result<()> {
                     "organization_code": &organization_code,
                 })
             );
-            let result = if detach {
-                client
-                    .chat_polling_detach(
-                        &bot_uuid,
-                        &message,
-                        None,
-                        session_id.as_deref(),
-                        &tags,
-                        response_mode.as_deref(),
-                        Some(client_wait_timeout_ms),
-                        Some(poll_wait_ms),
-                        organization_code.as_deref(),
-                    )
-                    .await?
-            } else {
-                client
-                    .chat_polling(
-                        &bot_uuid,
-                        &message,
-                        None,
-                        session_id.as_deref(),
-                        &tags,
-                        response_mode.as_deref(),
-                        Some(client_wait_timeout_ms),
-                        Some(poll_wait_ms),
-                        organization_code.as_deref(),
-                    )
-                    .await?
+            let outcome: ChatRunOutcome = match client
+                .chat_async(
+                    &bot_uuid,
+                    &message,
+                    None,
+                    session_id.as_deref(),
+                    &tags,
+                    response_mode.as_deref(),
+                    organization_code.as_deref(),
+                    client_wait_timeout_ms,
+                    detach,
+                )
+                .await
+            {
+                Ok(submit) => {
+                    // Early ack: timestamped plain-text log line. json mode →
+                    // stderr (keep stdout as a single JSON object); non-json
+                    // mode → stdout, before the Response / Message block.
+                    let ack = format!(
+                        "{} [chat] submitted run_id={} session_id={}",
+                        chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f%:z"),
+                        submit.run_id,
+                        submit.session_id
+                    );
+                    if json_mode {
+                        use std::io::Write as _;
+                        eprintln!("{}", ack);
+                        let _ = std::io::stderr().flush();
+                    } else {
+                        use std::io::Write as _;
+                        println!("{}", ack);
+                        let _ = std::io::stdout().flush();
+                    }
+
+                    if detach {
+                        client
+                            .chat_poll_run_until_running(
+                                &submit,
+                                poll_wait_ms,
+                                std::time::Duration::from_millis(client_wait_timeout_ms),
+                            )
+                            .await?
+                    } else {
+                        client
+                            .chat_poll_run(
+                                &submit,
+                                poll_wait_ms,
+                                std::time::Duration::from_millis(client_wait_timeout_ms),
+                            )
+                            .await?
+                    }
+                }
+                Err(ChatAsyncError::Transport(msg)) => ChatRunOutcome {
+                    delivered: false,
+                    submitted: false,
+                    run_id: None,
+                    session_id: None,
+                    bot_uuid: Some(bot_uuid.clone()),
+                    state: "submit_indeterminate".to_string(),
+                    response_content: None,
+                    error_message: Some(format!(
+                        "chat_async transport error: {}; run may have been created server-side, ID unknown",
+                        msg
+                    )),
+                    content_truncated: false,
+                },
+                Err(ChatAsyncError::NotSuccessful { status, body }) => ChatRunOutcome {
+                    delivered: false,
+                    submitted: false,
+                    run_id: None,
+                    session_id: None,
+                    bot_uuid: Some(bot_uuid.clone()),
+                    state: "submit_failed".to_string(),
+                    response_content: None,
+                    error_message: Some(format!("chat_async failed ({}): {}", status, body)),
+                    content_truncated: false,
+                },
+                Err(ChatAsyncError::InvalidResponse(msg)) => ChatRunOutcome {
+                    delivered: false,
+                    submitted: false,
+                    run_id: None,
+                    session_id: None,
+                    bot_uuid: Some(bot_uuid.clone()),
+                    state: "submit_indeterminate".to_string(),
+                    response_content: None,
+                    error_message: Some(format!(
+                        "chat_async response unreadable: {}; run may have been created server-side, ID unknown",
+                        msg
+                    )),
+                    content_truncated: false,
+                },
             };
 
-            debug_response!(debug, "200", &result);
+            debug!(
+                state = %outcome.state,
+                delivered = outcome.delivered,
+                "chat outcome"
+            );
 
-            if cli.json {
-                println!("{}", serde_json::to_string(&result)?);
-            } else if detach {
-                println!("Message submitted to {}", bot_uuid);
-                if let Some(rid) = result.get("run_id").and_then(|v| v.as_str()) {
-                    println!("Run: {}", rid);
-                }
-                if let Some(sid) = result.get("session_id").and_then(|v| v.as_str()) {
-                    println!("Session: {}", sid);
-                }
-                if let Some(state) = result.get("state").and_then(|v| v.as_str()) {
-                    println!("State: {}", state);
-                }
-            } else {
-                if let Some(response) = result.get("response") {
-                    println!("Response from {}:", bot_uuid);
-                    println!("{}", serde_json::to_string_pretty(response)?);
+            if json_mode {
+                // stdout = EXACTLY one JSON object (jq-parseable).
+                let json_value = if detach {
+                    serde_json::json!({
+                        "delivered": outcome.delivered,
+                        "submitted": outcome.submitted,
+                        "bot_uuid": outcome.bot_uuid,
+                        "run_id": outcome.run_id,
+                        "session_id": outcome.session_id,
+                        "state": outcome.state,
+                        "error_message": outcome.error_message,
+                    })
                 } else {
-                    println!("Result: {}", serde_json::to_string_pretty(&result)?);
+                    serde_json::json!({
+                        "delivered": outcome.delivered,
+                        "submitted": outcome.submitted,
+                        "bot_uuid": outcome.bot_uuid,
+                        "run_id": outcome.run_id,
+                        "session_id": outcome.session_id,
+                        "state": outcome.state,
+                        "response": {"content": outcome.response_content.unwrap_or_default()},
+                        "error_message": outcome.error_message,
+                        "content_truncated": outcome.content_truncated,
+                    })
+                };
+                println!("{}", serde_json::to_string(&json_value)?);
+            } else {
+                // Human text on stdout.
+                if outcome.delivered {
+                    if detach {
+                        println!("Message submitted to {}", bot_uuid);
+                    } else {
+                        println!("Response from {}:", bot_uuid);
+                        let content = outcome.response_content.unwrap_or_default();
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&serde_json::json!({"content": content}))?
+                        );
+                    }
                 }
-                if let Some(sid) = result.get("session_id").and_then(|v| v.as_str()) {
-                    println!("Session: {}", sid);
+                println!(
+                    "Run: {}",
+                    outcome.run_id.as_deref().unwrap_or("none")
+                );
+                println!(
+                    "Session: {}",
+                    outcome.session_id.as_deref().unwrap_or("none")
+                );
+                println!("State: {}", outcome.state);
+                if let Some(err) = &outcome.error_message {
+                    println!("Error: {}", err);
                 }
+            }
+
+            if !outcome.delivered {
+                std::process::exit(1);
             }
         }
 
@@ -4769,6 +4869,50 @@ mod tests {
         };
 
         assert_eq!(error.kind(), ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn test_add_member_accepts_only_group_and_bot_uuid() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "add-member",
+            "--group",
+            "group-1",
+            "--bot-uuid",
+            "worker-1",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::AddMember {
+                group, bot_uuid, ..
+            } => {
+                assert_eq!(group, "group-1");
+                assert_eq!(bot_uuid, "worker-1");
+            }
+            _ => panic!("expected add-member command"),
+        }
+    }
+
+    #[test]
+    fn test_add_member_rejects_role_argument() {
+        let result = Cli::try_parse_from([
+            "bcs-cli",
+            "add-member",
+            "--group",
+            "group-1",
+            "--bot-uuid",
+            "worker-1",
+            "--role",
+            "worker",
+        ]);
+
+        let error = match result {
+            Ok(_) => panic!("group add-member must not expose role selection"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.kind(), ErrorKind::UnknownArgument);
     }
 
     #[test]

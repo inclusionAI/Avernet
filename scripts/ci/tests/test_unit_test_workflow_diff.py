@@ -16,6 +16,7 @@ MODULE_JOBS = {
     "backend": ("BACKEND_BASE_REF", "src/backend"),
     "engine": ("ENGINE_BASE_REF", "src/engine"),
     "baas": ("BAAS_BASE_REF", "src/baas"),
+    "gateway": ("GATEWAY_BASE_REF", "src/gateway"),
 }
 
 
@@ -51,6 +52,7 @@ class UnitTestWorkflowDiffTest(unittest.TestCase):
             '--base "$BACKEND_BASE_REF"',
             '--base "$ENGINE_BASE_REF"',
             '--base "${BAAS_BASE_REF}"',
+            '--base "${GATEWAY_BASE_REF}"',
         ):
             self.assertIn(coverage_argument, workflow)
         self.assertIn(
@@ -77,6 +79,7 @@ class UnitTestWorkflowDiffTest(unittest.TestCase):
                 "src/backend",
                 "src/engine",
                 "src/baas",
+                "src/gateway",
             ):
                 _write(repository, f"{module_path}/target-only.txt", "target branch\n")
             _git(repository, "add", ".")
@@ -107,6 +110,7 @@ class UnitTestWorkflowDiffTest(unittest.TestCase):
             self.assertEqual(changed_by_module["backend"], "")
             self.assertEqual(changed_by_module["engine"], "")
             self.assertEqual(changed_by_module["baas"], "")
+            self.assertEqual(changed_by_module["gateway"], "")
 
 
 if __name__ == "__main__":

@@ -27,6 +27,7 @@ from agentclaw.community.core.devices.models import DeviceBindingStatus
 
 def _make_service(max_bots: int = 5, current_bots: int = 0, policy_service=None) -> BotService:
     svc = BotService.__new__(BotService)
+    svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = MagicMock()
     svc._repository.count_by_owner.return_value = current_bots
     svc._repository.get_by_id_and_owner.return_value = None

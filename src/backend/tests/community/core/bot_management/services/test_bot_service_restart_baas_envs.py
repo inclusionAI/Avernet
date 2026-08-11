@@ -59,6 +59,7 @@ def _make_service(
     返回 (svc, baas, device_service) 三个 mock，便于断言 upgrade_bot 入参。
     """
     svc = BotService.__new__(BotService)
+    svc._bot_app_grant_provider = lambda: MagicMock()
     svc._restart_lock_repo = _FakeRestartLockRepo()
     svc._repository = MagicMock()
     svc._repository.get_by_id_and_owner.return_value = {

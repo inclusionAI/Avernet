@@ -31,7 +31,8 @@
 - 初始化 `dispatch_receipts`，只有真实工具返回 `ok=true` 和非空 `task_id` 才登记成功；未登记的 Worker 保持 `NOT_DISPATCHED`，不得在回复中补造 task_id。
 - 同时初始化 `worker_output_retries={营销:0,数据:0,供应链:0}` 和由 manager 生成的当前 `contract_version`。系统静默占位、答案只在思考区、业务卡/版本自相矛盾的结果不是“等待”，必须立即自动重派一次并要求 final text 五行业务卡；第二次仍无效才阻断。
 - 目标包含 SOP 时同时初始化 `session_completion_lock=LOCKED` 和空的 `completion_evidence`。运行前普通消息里的“接受/继续/执行”只登记为 `OWNER_DECISION_RECORDED`，绝不登记 `EXECUTION_OR_REVIEW`、`completed_at` 或调用 `bcs_task_complete`。
-- 收到 BCS 任务状态更新时只更新内部状态并等待下一条 Worker 结果；不得调用空参数 `bcs_assign_task` 或发送连续进展占位消息。
+- 收到 BCS 任务状态更新时只更新内部状态并等待下一条 Worker 结果；不得调用空参数 `bcs_assign_task`，不得把 `NO_REPLY` 等静默令牌输出为 final text，也不得发送连续进展占位消息。
 - 权限响应、建群响应和当前群 context 已足以提供 Bot 与 session 标识；禁止读取 `.bcs/session.json`。
-- 三份首轮业务卡到齐后立即执行 KNOWLEDGE 的确定性复算和私有财务校验，并把所有 PASS/FAIL/缺口压成公开 initial issues。只回派真正受 change_set 影响的 owner；授权包络内的收紧可审计 carry forward。达到 `ONE_SHOT_INPUT_READY` 的同一次激活中立即启动三 Worker 复核、店长汇总的一次性协作，不在普通群聊里等待全 PASS。当前运行时用无环图显式展开最多三轮复核；店主验收使用无 assignee 的前端 `human_input`，店主不作为 Bot participant 或 binding。私有成本和财务数字不进入 YAML/input。
-- 当前 run 的 HumanInput、唯一 final output 和 terminal 状态均为 completed 后，先从同一 run 的 BCS 回执完成 `completion_evidence` 逐字段预检；只有 `COMPLETION_PREFLIGHT=PASS` 才原子地解锁、标记 `EXECUTION_OR_REVIEW`，再用只含公开版本、run ID、`SOP_ACCEPTED_PENDING_EXTERNAL_EXECUTION` 和未完成外部动作的四字段脱敏 summary 调用 `bcs_task_complete`。该工具必须是最后一个动作，不会下达执行指令，也不产生后续监控。
+- 三份首轮业务卡到齐后立即写入 `manual_dispatch_closed=true`，执行 KNOWLEDGE 的确定性复算和私有财务校验，并把所有 PASS/FAIL/缺口压成公开 initial issues；不再用“补充测算/最终确认”任务在普通群聊里等待全 PASS。达到 `ONE_SHOT_INPUT_READY` 的同一次激活中先查询 permission，再完整读取当前安装的 BCS Skill、custom collaboration reference 和 schema 到文件末尾，形成 `schema_read_receipt` 后才生成 YAML、validate、run。当前运行时用无环图显式展开最多三轮复核；店主验收使用无 assignee 的前端 `human_input`，店主不作为 Bot participant 或 binding。私有成本和财务数字不进入 YAML/input。
+- 向店主补问时一张输入卡只允许一个 `decision_id` 和一个商家侧决定。“是/同意/继续/执行”仅能回答唯一未决决定；有多个开放事项时必须澄清，不能据此写 `risk_accepted=true`，也不能替营销、数据或供应链把条件性结论改为 PASS。
+- 当前 run 的 HumanInput completed 且 judge=accepted、accepted marker completed、失败 marker 未执行、唯一 final output 与 marker 一致、terminal 状态 completed 后，先从同一 run 的 BCS 服务端回执完成 `completion_evidence` 逐字段预检；普通聊天、final 文案或本地账本不能补证。只有 `COMPLETION_PREFLIGHT=PASS` 才原子地解锁、标记 `EXECUTION_OR_REVIEW`，再用只含公开版本、run ID、`SOP_ACCEPTED_PENDING_EXTERNAL_EXECUTION` 和未完成外部动作数组的四字段脱敏 summary 调用 `bcs_task_complete`。该工具必须是最后一个动作，不会下达执行指令，也不产生后续监控。

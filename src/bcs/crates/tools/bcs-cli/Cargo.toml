@@ -59,6 +59,9 @@ bcs-config     = { workspace = true }
 bcs-config-api = { workspace = true }
 bcs-protocol    = { workspace = true }
 
+# Local timestamp for chat ack line
+chrono = { workspace = true }
+
 [build-dependencies]
 chrono = { workspace = true }
 

@@ -44,6 +44,9 @@ from injector import inject
 from sqlalchemy import and_, func, or_
 
 from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
+from agentclaw.community.core.repository.implementations.bot.reachability import (
+    BotReachabilityQueries,
+)
 from agentclaw.community.core.workspace.constants import SUPPORTED_ENGINE_TYPES
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
@@ -76,6 +79,7 @@ _JSON_FIELDS = ("share_policy", "ext")
 
 
 class BotRepository(
+    BotReachabilityQueries,
     BotRepositoryProtocol,
 ):
     """Unified ORM ``BotRepository`` implementation."""
@@ -290,31 +294,25 @@ class BotRepository(
             )
             return total, [b.to_dict() for b in bots]
 
+    def list_live_bot_ids_by_owner(self, owner_id: str) -> List[str]:
+        """Every live ``bot_id`` for this owner, in a single id-only query."""
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(self.Model.bot_id)
+                .filter(
+                    self.Model.is_delete == 0,
+                    self.Model.owner_id == owner_id,
+                    self._env(),
+                )
+                .all()
+            )
+            return [row[0] for row in rows]
+
     def list_by_owner_or_collaborator(
         self, owner_id: str, page: int = 1, page_size: int = 20
     ) -> tuple[int, List[Dict[str, Any]]]:
-        from agentclaw.community.core.bot_collaborator.models import BotCollaboratorModel
-
-        env = get_current_env()
         with self._db.orm_session() as db:
-            query = (
-                db.query(self.Model)
-                .outerjoin(
-                    BotCollaboratorModel,
-                    (BotCollaboratorModel.bot_pk == self.Model.id)
-                    & (BotCollaboratorModel.env == env)
-                    & (BotCollaboratorModel.user_id == owner_id),
-                )
-                .filter(
-                    self.Model.is_delete == 0,
-                    self.Model.env == env,
-                    or_(
-                        self.Model.owner_id == owner_id,
-                        BotCollaboratorModel.id.isnot(None),
-                    ),
-                )
-                .distinct()
-            )
+            query = self._reachable_by(db, owner_id)
             total = query.count()
             bots = (
                 query.order_by(self.Model.gmt_create.desc())
@@ -361,6 +359,7 @@ class BotRepository(
         status: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
+        bot_ids: Optional[List[str]] = None,
     ) -> tuple[int, List[Dict[str, Any]]]:
         with self._db.orm_session() as db:
             query = db.query(self.Model).filter(
@@ -382,6 +381,11 @@ class BotRepository(
                 )
             if bot_id:
                 query = query.filter(self.Model.bot_id == bot_id)
+            if bot_ids is not None:
+                # An empty list is a real restriction — "none of them" — and must
+                # not be read as "no filter". Callers that mean "unrestricted"
+                # pass None; the difference is the whole point of the parameter.
+                query = query.filter(self.Model.bot_id.in_(bot_ids))
             if owner_id:
                 query = query.filter(self.Model.owner_id == owner_id)
             if engine:
