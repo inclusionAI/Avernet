@@ -60,6 +60,10 @@ bcs-session-file = { workspace = true }
 bcs-session-file-store = { workspace = true }
 bcs-storage-api = { workspace = true }
 bcs-auth-local = { workspace = true }
+bcs-auth = { workspace = true }
+bcs-auth-oauth = { workspace = true }
+bcs-user-identity = { workspace = true }
+bcs-jwt = { workspace = true }
 bcs-services-container = { workspace = true, features = ["test-support"] }
 bcs-test-support = { workspace = true }
 bcs-user-directory-api = { workspace = true }

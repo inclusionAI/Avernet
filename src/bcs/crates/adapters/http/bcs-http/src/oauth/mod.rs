@@ -13,7 +13,7 @@ use std::time::Duration;
 use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
@@ -122,24 +122,103 @@ pub fn identity_routes(state: Arc<OAuthRouteState>) -> Router {
         .with_state(state)
 }
 
-/// POST /auth/register — Register a new username/password credential.
-///
-/// Stub: real implementation lands in T11 (calls `password_service.register`).
-pub async fn register_handler(
-    State(_state): State<Arc<OAuthRouteState>>,
-    Json(_req): Json<RegisterRequest>,
-) -> impl IntoResponse {
-    (StatusCode::NOT_IMPLEMENTED, "not implemented").into_response()
+/// Validate username/password format before hitting the service. Mirrors the
+/// checks in `bcs_auth::PasswordAuthServiceImpl` so malformed input is rejected
+/// at the delivery boundary with a clear 400 instead of being passed through.
+fn validate_credentials(username: &str, password: &str) -> Result<(), String> {
+    let len = username.chars().count();
+    if !(3..=32).contains(&len) {
+        return Err("username must be 3-32 characters".to_string());
+    }
+    if !username
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err("username may only contain A-Za-z0-9 _ -".to_string());
+    }
+    if password.chars().count() < 8 {
+        return Err("password must be at least 8 characters".to_string());
+    }
+    Ok(())
 }
 
-/// POST /auth/login — Log in with a username/password credential.
-///
-/// Stub: real implementation lands in T11 (calls `password_service.login`).
-pub async fn login_handler(
-    State(_state): State<Arc<OAuthRouteState>>,
-    Json(_req): Json<LoginRequest>,
+/// Build the success response for register/login: a JSON body carrying the
+/// session token (for non-browser `Authorization: Bearer` clients) plus the
+/// `Set-Cookie` header carrying it for browser clients.
+fn login_response(result: bcs_service_api::PasswordLoginResult, cookie_secure: bool) -> Response {
+    let cookie = session_cookie(&result.token, cookie_secure);
+    let body = Json(serde_json::json!({
+        "user_id": result.user_id,
+        "username": result.username,
+        "token": result.token,
+        "expires_at": result.expires_at,
+    }));
+    let mut resp = (StatusCode::OK, body).into_response();
+    if let Ok(value) = axum::http::HeaderValue::from_str(&cookie) {
+        resp.headers_mut()
+            .insert(axum::http::header::SET_COOKIE, value);
+    }
+    resp
+}
+
+/// POST /auth/register — create a username/password credential and issue a
+/// session token (register implicitly logs the user in).
+pub async fn register_handler(
+    State(state): State<Arc<OAuthRouteState>>,
+    Json(req): Json<RegisterRequest>,
 ) -> impl IntoResponse {
-    (StatusCode::NOT_IMPLEMENTED, "not implemented").into_response()
+    if let Err(msg) = validate_credentials(&req.username, &req.password) {
+        return (StatusCode::BAD_REQUEST, msg).into_response();
+    }
+    let Some(svc) = state.password_service.as_ref() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "password auth not configured").into_response();
+    };
+    match svc.register(&req.username, &req.password).await {
+        Ok(result) => login_response(result, state.config.cookie_secure),
+        Err(bcs_service_api::PasswordAuthError::UsernameTaken) => {
+            (StatusCode::CONFLICT, "username already taken").into_response()
+        }
+        Err(bcs_service_api::PasswordAuthError::ValidationFailed(m)) => {
+            (StatusCode::BAD_REQUEST, m).into_response()
+        }
+        Err(bcs_service_api::PasswordAuthError::InvalidCredentials) => {
+            (StatusCode::UNAUTHORIZED, "invalid credentials").into_response()
+        }
+        Err(bcs_service_api::PasswordAuthError::Storage(e)) => {
+            warn!(error = %e, "register storage error");
+            (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response()
+        }
+    }
+}
+
+/// POST /auth/login — verify username/password credentials and issue a session
+/// token.
+pub async fn login_handler(
+    State(state): State<Arc<OAuthRouteState>>,
+    Json(req): Json<LoginRequest>,
+) -> impl IntoResponse {
+    if let Err(msg) = validate_credentials(&req.username, &req.password) {
+        return (StatusCode::BAD_REQUEST, msg).into_response();
+    }
+    let Some(svc) = state.password_service.as_ref() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "password auth not configured").into_response();
+    };
+    match svc.login(&req.username, &req.password).await {
+        Ok(result) => login_response(result, state.config.cookie_secure),
+        Err(bcs_service_api::PasswordAuthError::InvalidCredentials) => {
+            (StatusCode::UNAUTHORIZED, "invalid credentials").into_response()
+        }
+        Err(bcs_service_api::PasswordAuthError::ValidationFailed(m)) => {
+            (StatusCode::BAD_REQUEST, m).into_response()
+        }
+        Err(bcs_service_api::PasswordAuthError::UsernameTaken) => {
+            (StatusCode::CONFLICT, "username already taken").into_response()
+        }
+        Err(bcs_service_api::PasswordAuthError::Storage(e)) => {
+            warn!(error = %e, "login storage error");
+            (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response()
+        }
+    }
 }
 
 #[derive(Deserialize)]
