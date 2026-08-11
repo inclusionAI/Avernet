@@ -5,7 +5,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use bcs_service_api::{
-    AsyncA2aChatCommand, BlockingA2aChatCommand, BotActor, CallerContext, ChatResponseMode,
+    AsyncA2aChatCommand, BotActor, CallerContext, ChatResponseMode,
     ServiceError,
 };
 use serde::Deserialize;
@@ -20,7 +20,7 @@ use crate::gateway_trace::{
 };
 use crate::state::HttpAppState;
 
-use super::{bot_id_from_headers, container_header_matches};
+use super::bot_id_from_headers;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ChatRequest {
@@ -110,174 +110,6 @@ impl IntoResponse for LegacyChatError {
         }));
         (status, body).into_response()
     }
-}
-
-pub async fn bot_chat(
-    State(state): State<HttpAppState>,
-    Path(bot_uuid): Path<String>,
-    headers: HeaderMap,
-    uri: Uri,
-    Json(req): Json<ChatRequest>,
-) -> Result<Json<Value>, LegacyChatError> {
-    let started = Instant::now();
-    let message_len = req.message.len();
-    let client_identity = headers
-        .get("x-bcs-client")
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_string);
-    let effective_timeout_ms = effective_legacy_chat_timeout_ms(req.timeout_ms);
-    record_chat_dispatch_trace(
-        &bot_uuid,
-        &headers,
-        &req,
-        false,
-        effective_timeout_ms,
-        None,
-    );
-
-    let from_bot_id = match resolve_bot_caller(&state, &headers).await {
-        Ok(from_bot_id) => from_bot_id,
-        Err(err) => {
-            log_bot_chat_digest(ChatDigestArgs {
-                endpoint: "bot_chat",
-                from_bot_id: None,
-                target_bot_id: &bot_uuid,
-                run_id: None,
-                session_id: req.session_id.as_deref(),
-                client: client_identity.as_deref(),
-                async_mode: false,
-                timeout_ms: Some(effective_timeout_ms),
-                message_len,
-                started,
-                success: err.digest_success,
-                status_code: err.status,
-                error_kind: Some(err.error_kind),
-            });
-            return Err(err);
-        }
-    };
-    let authenticated_staff_id = authenticated_staff_id(&state, &headers, &uri).await;
-
-    if !container_header_matches(&state, &headers, &from_bot_id) {
-        let err = LegacyChatError::invalid_session_token();
-        log_bot_chat_digest(ChatDigestArgs {
-            endpoint: "bot_chat",
-            from_bot_id: Some(&from_bot_id),
-            target_bot_id: &bot_uuid,
-            run_id: None,
-            session_id: req.session_id.as_deref(),
-            client: client_identity.as_deref(),
-            async_mode: false,
-            timeout_ms: Some(effective_timeout_ms),
-            message_len,
-            started,
-            success: err.digest_success,
-            status_code: err.status,
-            error_kind: Some(err.error_kind),
-        });
-        return Err(err);
-    }
-
-    let run_id = uuid::Uuid::new_v4().to_string();
-    Span::current().set_attribute("bcn.run.id", run_id.clone());
-    let session_key = resolve_session_key(
-        req.session_id.as_deref(),
-        &run_id,
-        client_identity.as_deref(),
-        &from_bot_id,
-    )
-    .map_err(LegacyChatError::invalid_request)
-    .map_err(|err| {
-        log_bot_chat_digest(ChatDigestArgs {
-            endpoint: "bot_chat",
-            from_bot_id: Some(&from_bot_id),
-            target_bot_id: &bot_uuid,
-            run_id: Some(&run_id),
-            session_id: req.session_id.as_deref(),
-            client: client_identity.as_deref(),
-            async_mode: false,
-            timeout_ms: Some(effective_timeout_ms),
-            message_len,
-            started,
-            success: err.digest_success,
-            status_code: err.status,
-            error_kind: Some(err.error_kind),
-        });
-        err
-    })?;
-    let run_channel_from = req.from.clone();
-    let organization_code = normalize_optional_string(req.organization_code);
-    let chat_from_actor_id = Some(req.from.unwrap_or_else(|| "user".to_string()));
-    let tags = normalize_tags(req.tags);
-    let digest_client = client_identity.clone();
-
-    let outcome = state
-        .services
-        .a2a_chat_runs
-        .run_blocking_chat(BlockingA2aChatCommand {
-            caller: CallerContext::Bot(BotActor {
-                bot_uuid: from_bot_id.clone(),
-            }),
-            target_bot_id: bot_uuid.clone(),
-            message: req.message,
-            from_actor_id: chat_from_actor_id,
-            run_channel_from,
-            authenticated_staff_id,
-            run_id: run_id.clone(),
-            session_key: session_key.clone(),
-            timeout_ms: effective_timeout_ms,
-            client: client_identity,
-            tags,
-            response_mode: req.response_mode,
-            organization_code,
-            provider_bypass_headers: state.provider_bypass_headers_from(&headers),
-        })
-        .await
-        .map_err(map_service_error)
-        .map_err(|err| {
-            log_bot_chat_digest(ChatDigestArgs {
-                endpoint: "bot_chat",
-                from_bot_id: Some(&from_bot_id),
-                target_bot_id: &bot_uuid,
-                run_id: Some(&run_id),
-                session_id: Some(&session_key),
-                client: digest_client.as_deref(),
-                async_mode: false,
-                timeout_ms: Some(effective_timeout_ms),
-                message_len,
-                started,
-                success: err.digest_success,
-                status_code: err.status,
-                error_kind: Some(err.error_kind),
-            });
-            err
-        })?;
-    Span::current().set_attribute("bcn.delivery.accepted", outcome.delivered);
-
-    log_bot_chat_digest(ChatDigestArgs {
-        endpoint: "bot_chat",
-        from_bot_id: Some(&from_bot_id),
-        target_bot_id: &bot_uuid,
-        run_id: Some(&run_id),
-        session_id: Some(&outcome.session_id),
-        client: digest_client.as_deref(),
-        async_mode: false,
-        timeout_ms: Some(effective_timeout_ms),
-        message_len,
-        started,
-        success: true,
-        status_code: StatusCode::OK,
-        error_kind: None,
-    });
-
-    Ok(Json(serde_json::json!({
-        "delivered": outcome.delivered,
-        "bot_uuid": outcome.bot_uuid,
-        "session_id": outcome.session_id,
-        "response": {
-            "content": outcome.content,
-        },
-    })))
 }
 
 pub async fn bot_chat_async(
@@ -525,10 +357,6 @@ fn record_chat_dispatch_trace(
     } else {
         record_span_content_event("bcn.chat.message", &request.message);
     }
-}
-
-fn effective_legacy_chat_timeout_ms(timeout_ms: Option<u64>) -> u64 {
-    timeout_ms.unwrap_or(300_000).min(300_000)
 }
 
 fn normalize_tags(tags: Vec<String>) -> Vec<String> {
