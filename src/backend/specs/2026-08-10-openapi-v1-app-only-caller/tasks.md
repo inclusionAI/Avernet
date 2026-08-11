@@ -497,10 +497,40 @@
         a test of their own — so nobody mistakes that for coverage.
   - [x] All four Open Questions closed in the file, including the one the user
         answered mid-implementation, which reshaped the record.
-  - [x] Two follow-ups recorded rather than silently dropped:
-        `DesktopBotService.delete` bypasses the deletion sweep (pre-existing),
-        and the two expressions of the admission policy are not derived from one
-        another across the package boundary.
+  - [x] Three follow-ups recorded rather than silently dropped:
+        `DesktopBotService.delete` bypasses the deletion sweep (pre-existing);
+        the two expressions of the admission policy are not derived from one
+        another across the package boundary; and the delegation-slot follow-up
+        below.
+
+### Follow-up: address the app-request path, then rekey the grant
+
+Raised by review as "key grants by the addressed bot identity" (P1), and the
+capability gap it names is real: one user cannot delegate the same application
+to two owners' same-named bots, because the unique key holds no bot identity
+beyond `bot_id`.
+
+**The rekey must not land first.** `BotAppGrantService.find(bot_id, user_id,
+app_id)` — the probe every application request runs — is a point lookup on
+exactly the columns the unique key holds. Adding `bot_pk` to the key stops it
+determining a row: two grants could then share `(app, user, bot_id)` and differ
+only by bot. The sixteen A2 operations take the addressed owner *from the grant
+record*, so nothing in such a request says which of the two is meant, and the
+lookup would resolve an application onto an arbitrary one of them. That trades a
+loud 409 at write time for a silent mis-authorization at request time, on the
+hottest path in the feature.
+
+The order that works:
+
+1. Extend the explicit `(owner_id, bot_id)` addressing this feature gave the
+   three authorization operations to the A1/A2 request path, deciding as part
+   of it whether an application must name the owner to reach a shared bot —
+   that changes the A2 contract and needs its own review.
+2. Then rekey on a globally unique bot identity, at which point the read is
+   unambiguous and the key can afford to be.
+
+Scoped out here deliberately: the user reviewed this question when directing the
+owner-addressing change and confined it to the authorization operations.
   - [x] Lint clean on every changed module; the repo's 288 pre-existing ruff
         findings are unchanged (verified against a stashed tree). Gateway lint
         clean. Gateway unit tests: 527 pass.
