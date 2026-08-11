@@ -6,7 +6,7 @@ use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{DefaultBodyLimit, Extension, Json, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{MethodRouter, get, post};
+use axum::routing::{get, post};
 use axum::Router;
 use bcs_service_api::application::v1::{
     ApplicationError, AuthenticatedCaller, CompleteSessionFile, DeleteSessionFile,
@@ -20,7 +20,8 @@ use futures::Stream;
 use serde_json::{Value, json};
 
 use crate::v1::common::{
-    ApiState, Envelope, ErrorResponse, RequestId, application_error_response, invalid_request,
+    ApiState, Envelope, ErrorResponse, IdentityPolicyMethodRouterExt, RequestId,
+    RouteIdentityPolicy, application_error_response, invalid_request,
 };
 use crate::v1::openapi::dto::session_file::{
     ListSessionFilesQuery, PrepareSessionFileRequest, ProtectedFileContentQuery,
@@ -28,19 +29,6 @@ use crate::v1::openapi::dto::session_file::{
 };
 
 use super::super::SessionFileUrlProjector;
-
-trait IdentityPolicyMethodRouterExt<S> {
-    fn identity_policy(self, policy: IdentityPolicy) -> Self;
-}
-
-impl<S> IdentityPolicyMethodRouterExt<S> for MethodRouter<S>
-where
-    S: Clone + Send + Sync + 'static,
-{
-    fn identity_policy(self, policy: IdentityPolicy) -> Self {
-        self.layer(Extension(policy))
-    }
-}
 
 struct RequestBodyStream(BodyDataStream);
 
@@ -125,7 +113,7 @@ fn error(request_id: &RequestId, error: ApplicationError) -> ErrorResponse {
 async fn prepare_file(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
-    Extension(policy): Extension<IdentityPolicy>,
+    RouteIdentityPolicy(policy): RouteIdentityPolicy,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
     body: Result<Json<PrepareSessionFileRequest>, JsonRejection>,
@@ -165,7 +153,7 @@ async fn prepare_file(
 async fn list_files(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
-    Extension(policy): Extension<IdentityPolicy>,
+    RouteIdentityPolicy(policy): RouteIdentityPolicy,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
     query: Result<Query<ListSessionFilesQuery>, QueryRejection>,
@@ -195,7 +183,7 @@ async fn list_files(
 async fn get_file(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
-    Extension(policy): Extension<IdentityPolicy>,
+    RouteIdentityPolicy(policy): RouteIdentityPolicy,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<(String, String)>, PathRejection>,
 ) -> Result<Response, ErrorResponse> {
@@ -221,7 +209,7 @@ async fn get_file(
 async fn delete_file(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
-    Extension(policy): Extension<IdentityPolicy>,
+    RouteIdentityPolicy(policy): RouteIdentityPolicy,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<(String, String)>, PathRejection>,
 ) -> Result<Response, ErrorResponse> {
@@ -247,7 +235,7 @@ async fn delete_file(
 async fn upload_content(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
-    Extension(policy): Extension<IdentityPolicy>,
+    RouteIdentityPolicy(policy): RouteIdentityPolicy,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<(String, String)>, PathRejection>,
     query: Result<Query<UploadSessionFileQuery>, QueryRejection>,
@@ -285,7 +273,7 @@ async fn upload_content(
 async fn complete_file(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
-    Extension(policy): Extension<IdentityPolicy>,
+    RouteIdentityPolicy(policy): RouteIdentityPolicy,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<(String, String)>, PathRejection>,
 ) -> Result<Response, ErrorResponse> {
@@ -315,7 +303,7 @@ async fn complete_file(
 async fn share_file(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
-    Extension(policy): Extension<IdentityPolicy>,
+    RouteIdentityPolicy(policy): RouteIdentityPolicy,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<(String, String)>, PathRejection>,
     body: Result<Json<ShareSessionFileRequest>, JsonRejection>,
@@ -351,7 +339,7 @@ async fn share_file(
 async fn download_file(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
-    Extension(policy): Extension<IdentityPolicy>,
+    RouteIdentityPolicy(policy): RouteIdentityPolicy,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<(String, String)>, PathRejection>,
     query: Result<Query<ProtectedFileContentQuery>, QueryRejection>,
