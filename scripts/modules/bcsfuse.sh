@@ -41,6 +41,20 @@ bcsfuse_load_env() {
     [ -z "${LLM_AUTH_TOKEN:-}" ] && [ -n "${OPENCLAW_OPENAI_API_KEY:-}" ] && export LLM_AUTH_TOKEN="${OPENCLAW_OPENAI_API_KEY}" || true
     [ -z "${EMBEDDING_BASE_URL:-}" ] && [ -n "${OPENCLAW_OPENAI_BASE_URL:-}" ] && export EMBEDDING_BASE_URL="${OPENCLAW_OPENAI_BASE_URL}" || true
     [ -z "${EMBEDDING_AUTH_TOKEN:-}" ] && [ -n "${OPENCLAW_OPENAI_API_KEY:-}" ] && export EMBEDDING_AUTH_TOKEN="${OPENCLAW_OPENAI_API_KEY}" || true
+
+    # Default LLM feature flags to enabled when an LLM endpoint is configured.
+    # The fusion parity layer gates real-LLM routing on LLM_ENABLED/ENABLE_REAL_LLM,
+    # and .env.local does not always include these flags (e.g. standalone mode).
+    if [ -n "${LLM_BASE_URL:-}" ] && [ "${LLM_BASE_URL}" != "change_me" ]; then
+        if [ -z "${LLM_ENABLED:-}" ]; then
+            export LLM_ENABLED="true"
+            log_info "Defaulted LLM_ENABLED=true because LLM_BASE_URL is configured"
+        fi
+        if [ -z "${ENABLE_REAL_LLM:-}" ]; then
+            export ENABLE_REAL_LLM="true"
+            log_info "Defaulted ENABLE_REAL_LLM=true because LLM_BASE_URL is configured"
+        fi
+    fi
 }
 
 # ============ MySQL (runtime mode only) ============
@@ -172,6 +186,14 @@ EOF
 # ============ Start ============
 
 bcsfuse_start() {
+    # In home mode, reuse the openclaw.json LLM config for bcsfuse so users
+    # don't have to duplicate base_url/api_key/model in .env.local.
+    # Must be done BEFORE bcsfuse_load_env() so the loader can see LLM_BASE_URL
+    # and default LLM_ENABLED/ENABLE_REAL_LLM when those flags are absent.
+    if type -t singlebox_model_config_export_llm_env >/dev/null 2>&1; then
+        singlebox_model_config_export_llm_env || true
+    fi
+
     bcsfuse_load_env
 
     local mode="${BCSFUSE_PROVIDER_MODE:-dev}"
@@ -212,6 +234,17 @@ bcsfuse_start() {
     export BCSFUSE_FAISS_SQLITE_PATH="${BCSFUSE_RUNTIME_DIR}/data/faiss_index.db"
     export QDRANT_LOCAL_PATH="${BCSFUSE_RUNTIME_DIR}/data/qdrant"
     export BCSFUSE_OBJECT_STORAGE_DIR="${BCSFUSE_RUNTIME_DIR}/data/object_storage"
+
+    # WorkerRegistrySettings reads WORKER_REGISTRY_SQLITE_DB_PATH (default:
+    # data/worker_registry.db). Align it with the SQLite store path used by
+    # opensource.py so that singleton helper functions in fusion_dependencies
+    # access the same database as the provider registry.
+    export WORKER_REGISTRY_SQLITE_DB_PATH="${BCSFUSE_DATABASE_SQLITE_PATH}"
+
+    # Use streaming OpenAI chat completions to fit within the antchat 90s gateway
+    # window (each token gap must be <90s, instead of the whole response <90s).
+    # Callers can override streaming via LLM_STREAM.
+    export LLM_STREAM="${LLM_STREAM:-true}"
 
     # Clear old log
     : > "${BCSFUSE_LOG}"

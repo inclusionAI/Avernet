@@ -104,7 +104,8 @@ pub struct FuseResponse {
     pub recommendation: Option<FuseRecommendation>,
     #[serde(default)]
     pub conflicts: Vec<FuseConflict>,
-    #[serde(default)]
+    /// BCSFuse returns this field as `alignments`.
+    #[serde(default, alias = "alignments")]
     pub alignment_points: Vec<serde_json::Value>,
     #[serde(default)]
     pub key_insights: Vec<String>,
@@ -135,6 +136,8 @@ pub struct FusePerspective {
     #[serde(default)]
     pub name: Option<String>,
     pub emoji: Option<String>,
+    /// BCSFuse returns this field as `perspective`.
+    #[serde(alias = "perspective")]
     pub summary: String,
     pub key_points: Option<Vec<String>>,
     pub concerns: Option<Vec<String>>,
@@ -260,6 +263,70 @@ pub struct BatchWorkersResponse {
     pub data: HashMap<String, BatchWorkerInfo>,
     #[serde(default)]
     pub not_found_ids: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deserialize_alignment_and_perspective_aliases() {
+        let json = r#"
+        {
+            "group_id": "g1",
+            "fusion_mode": "agent",
+            "perspectives": [
+                {
+                    "participant_id": "bot1:default",
+                    "perspective": "This is a perspective summary"
+                }
+            ],
+            "alignments": [
+                {"topic": "security", "stance": "agree"}
+            ]
+        }
+        "#;
+        let resp: FuseResponse = match serde_json::from_str(json) {
+            Ok(v) => v,
+            Err(e) => panic!("deserialize failed: {e}"),
+        };
+        assert_eq!(resp.group_id, "g1");
+        assert_eq!(resp.alignment_points.len(), 1);
+        assert_eq!(
+            resp.perspectives[0].summary,
+            "This is a perspective summary"
+        );
+    }
+
+    #[test]
+    fn deserialize_recommendation_object() {
+        let json = r#"
+        {
+            "group_id": "g1",
+            "fusion_mode": "agent",
+            "recommendation": {
+                "summary": "go",
+                "decision": "yes",
+                "next_actions": ["step 1"]
+            }
+        }
+        "#;
+        let resp: FuseResponse = match serde_json::from_str(json) {
+            Ok(v) => v,
+            Err(e) => panic!("deserialize failed: {e}"),
+        };
+        let rec = match resp.recommendation {
+            Some(r) => r,
+            None => panic!("recommendation missing"),
+        };
+        assert_eq!(rec.summary, "go");
+        assert_eq!(rec.decision.as_deref(), Some("yes"));
+        let actions = match rec.next_actions {
+            Some(a) => a,
+            None => panic!("next_actions missing"),
+        };
+        assert_eq!(actions, vec!["step 1"]);
+    }
 }
 
 /// Individual worker info in batch response.
