@@ -169,24 +169,12 @@ class ConstraintKind(StrEnum):
     SOFT = "soft"
 
 
-class TaskSource(StrEnum):
-    """Where the task entered the system."""
-
-    IM = "im"
-    API = "api"
-    WEB = "web"
-    BCS = "bcs"
-    SCHEDULER = "scheduler"
-
-
 # --- spec face (intake / plan) ----------------------------------------------
 
 @dataclass
 class TaskSpecMetadata:
     id: str
     title: str
-    summary: str = ""
-    tags: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -235,11 +223,13 @@ class SubTaskSpec:
     """Sub-task descriptor(DecomposerPort.decompose_subtasks 出参 / add_node 入参)。
 
     ``depth`` = 递归深度(根 subtask=0;每次 DECOMPOSITION 产出 children depth=父+1,
-    由 DecomposerPort 按父 SubtaskState.depth+1 填,plan §3.5/§11)。"""
+    由 DecomposerPort 按父 SubtaskState.depth+1 填,plan §3.5/§11)。
+
+    run_mode 不在此声明:执行范式由运行期搜推(BotDiscoverPort)按路由结果决定,
+    非分解期预设。"""
 
     node_id: str
     spec: str
-    run_mode: Optional[RunMode] = None
     depend_on: list[str] = field(default_factory=list)
     depth: int = 0
 
@@ -426,7 +416,6 @@ class Task:
 
     id: str
     user_id: str
-    source: TaskSource
     spec: TaskSpec
     execution_graph: Optional[TaskExecutionGraph] = None
     owner_bot_id: Optional[str] = None  # task-owner 绑定(§3.6/O-7③)

@@ -6,7 +6,6 @@
 > - 5 个模块设计文档(权威 API 契约):任务中心 `yugg6dorsxo8sgmp`、任务图谱 `lunk1txfuv6gtwk2`、任务规划 `uuq2tlue91q4lkal`、任务派发 `ue1ie0g3supwo2uf`、任务执行 `lxg2mwgmtfqg6d95`。
 > - 行为基线 case 剧本 `gwqie46v7hzr1w6h`(存储行业尽调,三阶段覆盖三模态)。
 >
-> **被重构的设计文档**:`2026-08-04-task-e2e-singlebox-integration`(旧 Node/NodeState/Edge/phase 模型)、个人空间「任务执行领域模型及API设计」`iee3gg/ibgwymhk8bhwrwx1`(旧 fat-service 设计)、以及本目录 v4.3 三件套(`depends_on` 字段/`TaskGraphStore` 合并进 `TaskService`/6 facade/5 态/`ExecutionEngine.drive` fixpoint 泵/`collab_mode`/`Scope`/`SLA`/`RunMode` 枚举)——三者均按本 spec 重构覆盖。
 >
 > **代码库实现声明**:现有 Avernet/ocb 代码实现**已失效**,不作为参考;代码库需**按本 spec(最新设计)从零重新实现**。
 > 技术设计(类定义/API 契约/交互逻辑/决策总账/状态流转表/时序图)见 `plan.md`;实现计划见 `tasks.md`。
@@ -16,12 +15,7 @@
 
 需要一个**以目标(Goal + Acceptance)为唯一收敛判据、能跨 单 Bot / 协作群 / BBS 三种执行模态自驱跑完「理解 → 规划 → 派发 → 执行 → 验收 → 重规划」闭环**的任务动态规划执行框架,且必须**严格按最新设计的领域模型与六模块架构实现**。
 
-从开发者视角,障碍是:既有多份设计文档彼此不自洽,且都与最新模型对不上——
-- `2026-08-04` 用 `Node`+`NodeState` 两维视图、`Edge`+`EdgeKind`、`NodeType`、phase 进状态;
-- `iee3gg` 用 fat-service `TaskService`/`ExecutionEngine`/`StateMachineRun`/`DynamicPlanner`/`MockDispatcher` 一锅烩;
-- 本目录 v4.3 三件套把 `depends_on` 当 node 字段、`TaskGraphStore` 合并进 `TaskService`、6 facade、5 态、`collab_mode`/`Scope`/`SLA`/`RunMode` 一堆枚举、`ExecutionEngine.drive` 反应式 fixpoint 泵。
-
-而运营方最新模型已收敛为:**`Relation` 一等公民化(`depends_on` 退场)**、**6 态 `Status`(新增 `PLANNING`)**、`TaskNode` 加 `task_id`/`node_run_graph`、`TaskExecutionGraph` 加 `run_id`/`relations`、`RuntimeInfo.run_mode` 改 str(删 `collab_mode`)、`AcceptanceCriteria.tag`→`type`、删 `SLA`/`Scope`/`CollabMode` 枚举、`AcceptanceResult` 删 `verifier`;5 个模块文档进一步明确:`TaskService` 只有 2 facade(`execute`/`get_task_dashboard`)、`TaskGraphService` 是独立图谱模块(4 API,不合并)、`TaskPlanner.plan` 与 `TaskGraphService.add_task_nodes` 有显式状态触发条件(a/b/c)、`TaskDispatcher.dispatch` 决定"谁来做"写 `assignee`、`TaskRunner.start_run` 一个入口三模态自适应、`TaskLoopCallback` PUSH 回投。现有代码实现也据此失效、需重新实现。照旧设计写,模型落地不了、模块边界糊、驱动语义错位。
+领域模型收敛为:**`Relation` 一等公民(`TaskNode` 不持 `depends_on`)**、**6 态 `Status`(含 `PLANNING`)**、`TaskNode` 加 `task_id`/`node_run_graph`、`TaskExecutionGraph` 加 `run_id`/`relations`、`RuntimeInfo.run_mode` 为 str(无 `collab_mode`)、`AcceptanceCriteria.type`、无 `SLA`/`Scope`/`CollabMode` 枚举、`AcceptanceResult` 无 `verifier`;5 个模块文档进一步明确:`TaskService` 2 facade(`execute`/`get_task_dashboard`)、`TaskGraphService` 独立图谱模块(4 API)、`TaskPlanner.plan` 与 `TaskGraphService.add_task_nodes` 有显式状态触发条件(a/b/c)、`TaskDispatcher.dispatch` 决定"谁来做"写 `assignee`、`TaskRunner.start_run` 一个入口三模态自适应、`TaskLoopCallback` PUSH 回投。代码库按此从零重新实现。
 
 ## Solution
 
@@ -31,8 +25,8 @@
    - 规格面:`TaskInfo`(入口,带 `source_channel_type/id` + `execution_config`)→ `TaskSpec`(metadata/context/goal,**无 SLA**)→ `Metadata`(**含 `task_id`**/title/instruction)、`Context`(background/**`extend_props`**)、`Goal`(objective/`acceptances: List[AcceptanceCriteria]`)、`AcceptanceCriteria`(id/**`type`**/description)。
    - 运行态:`TaskExecutionGraph`(**`run_id`**/loop_round/status/output/**`tasks`**/**`relations: List[Relation]`**/extend_props)、`TaskNode`(node_id/**`task_id`**/status/task_spec/run_info/**`node_run_graph`**)、`Relation`({src_id,dst_id,**`type: RelationType`**,extend_props})、`RuntimeInfo`(**`run_mode: str`**/assignee/start_time/end_time/output/acceptance_result/extend_props,**无 collab_mode**)、`AcceptanceResult`(verdict/`acceptances_metric`/gaps,**无 verifier**)。
    - 枚举:`Status` **6 态**(PENDING/**PLANNING**/RUNNING/DONE/FAILED/HUNG)、`AcceptanceVerdict`(PASS/FAIL)、`RelationType`(DEPENDENCY)。
-   - ★**`depends_on` 退场**:依赖关系由一等公民 `Relation{type=DEPENDENCY}` 表达,存于 `TaskExecutionGraph.relations`;`TaskNode` 不再持 `depends_on` 字段。
-   - ★**`PLANNING` 新态**:承担"待规划/委托中"语义(节点已被/将被分解委托子执行),取代旧"委托中=有分解子"的结构派生判据。
+   - **依赖关系一等公民**:依赖由 `Relation{type=DEPENDENCY}` 表达,存于 `TaskExecutionGraph.relations`;`TaskNode` 不持 `depends_on` 字段。
+   - **`PLANNING` 新态**:承担"待规划/委托中"语义(节点已被/将被分解委托子执行)。
 2. **六模块 = 流程架构图 + 5 模块文档**:
    - **任务中心 `TaskService`**(对外 facade,2 API):`execute(task_info)→TaskOpResult` / `get_task_dashboard(task_id,node_id?)→TaskExecutionGraph`。内部由编排核协调其余模块。
    - **任务图谱 `TaskGraphService`**(内部 SSOT,4 API):`initialize_graph`/`add_task_nodes`/`update_task_node_info`/`query_task_dashboard`。图谱原子变更唯一网关。
@@ -40,15 +34,15 @@
    - **任务派发 `TaskDispatcher`**:`dispatch(toDoTaskList:List[TaskNode])→List[TaskNode]`,搜推决定"谁来做",写 `run_info.run_mode`/`assignee`,多 bot 动态拉协作群。
    - **任务执行 `TaskRunner`**:`start_run(List[TaskNode])→List[Boolean]` 三模态自适应 + `query_status`/`query_detail`/`query_result`/`query_bot_tasks`;`TaskLoopCallback` PUSH 回投。
    - **任务Harness**(旁路常驻):周期巡检 SLA 超时/崩溃,写同网关,不抢正向驱动。
-3. **事件驱动 + 状态条件触发(取代 fixpoint 泵)**:
+3. **事件驱动 + 状态条件触发**:
    - `TaskPlanner.plan` 显式触发条件(规划文档):图谱有更新(新增失败节点/PLANNING 节点)AND 没有派发(RUNNING)或执行中节点 AND 状态图谱有处于 PLANNING 状态的节点。
    - `TaskGraphService.add_task_nodes` 显式触发条件(图谱文档 a/b/c):a. 只有一个根节点且 `status=PENDING`(初始规划);b. 叶子节点验收未通过(FAILED + `acceptance_result.gaps` 非空);c. 父节点验收未通过(PLANNING 节点 且 前序依赖节点全 DONE)。
    - 规划原则(规划文档):处于派发、执行状态的节点不能修改(含其前序依赖节点);只针对失败节点 与 子节点都已经完成并且自身处于 PLANNING 状态的父节点进行规划。
    - `TaskDispatcher.dispatch` 触发:每次规划出新 toDo 之后。
    - `TaskRunner.start_run` 触发:图谱上有 TaskNode 完成派发后立即执行。
-   - 不再设 `ExecutionEngine.drive` 反应式 fixpoint 泵为对外契约;编排逻辑收口为 `TaskService` 内部编排核(实现细节,见 `plan.md`)。
+   - 编排逻辑收口为 `TaskService` 内部编排核(事件驱动 on_* + 状态条件触发,实现细节见 `plan.md`),不对外暴露 fixpoint 泵。
 4. **目标驱动 + 局部 reroute**:`goal.acceptances[]` 为完成 oracle;验收 FAIL 的 `gaps` 驱动 `plan` 产补救拓扑,补救子挂该 FAIL/PLANNING 节点本体下(`add_task_nodes`),下游在依赖满足前未入图,无复位概念;递归 FAIL/MISS 到深度上限 → `HUNG` → 人工确认升 BBS 接力;`loop_round` 随 reroute 递增。
-5. **重新实现而非改造**:旧设计文档(2026-08-04 + iee3gg + 本目录 v4.3)的契约被本 spec 重构覆盖;代码库按本 spec 重新实现,不沿用失效实现。
+5. **重新实现而非改造**:代码库按本 spec 从零重新实现,不沿用失效实现。
 
 ## Design Constraints (WHAT-level)
 
@@ -65,7 +59,7 @@
 - **派发只决定"谁来做"**:`dispatch` 经搜推匹配单 bot / 已有协作群 / 多 bot 动态拉协作群 / MISS;写 `run_info.run_mode`(str)/`assignee`;协作群协作模式(chat/manager_worker/state_machine)作 `form_coop_group` 内部参数(对齐 BCS `GroupStrategy`),**不进 `RuntimeInfo` 持久字段**(模型无 `collab_mode`)。
 - **执行三模态一个入口**:`TaskRunner.start_run(批量)` 按 `run_mode` 自适应分发单 bot/协作群/BBS;BBS 认领与执行由 bot 自主控制,**不在此接口内**;完成结果经 PUSH `TaskLoopCallback.report_result` 或 PULL `query_status`/`query_detail`/`query_result` 回收。
 - **执行主体只发 `task_loop_id`**:回调数据协议 `TaskCallbackData` 承载 `loop_task_id`/`workflow_type`/`workflow_id`/`instance_id`/`result`;框架适配层做 `loop_task_id↔(task_id,node_id)`、`result.success→verdict`、`result.data→output` 映射,再走图谱写口。
-- **聚合收敛**:`terminal PASS` = 全非根节点 DONE ∧ 终验 verdict=PASS ∧ 图 status=DONE;`terminal FAIL` 仅人工放弃(若提供),自动路径不产生终态 FAIL。
+- **聚合收敛**:`terminal PASS` = `plan(root)==[]` ∧ 全非根节点 DONE ∧ 无 RUNNING → 经 `source_channel` 触发 owner bot 终验 skill 验 root.goal 全 AC → 回投 verdict=PASS → 根节点 DONE ∧ 图 status=DONE;`terminal FAIL` 仅人工放弃(若提供),自动路径不产生终态 FAIL。
 - **并发安全**:同任务图推进串行化(可重入锁),跨任务并行;防止回投并发撕裂图。
 - **transport-agnostic**:core 逻辑不绑定框架/传输;搜推匹配与动态拉群不外泄为对外 API;图谱原子变更收口单一写网关(Harness 旁路同写口)。
 - **框架通用、零 case 知识**:框架不含任何具体任务的节点结构知识(维度叶/汇总/终验等一律不写死);一切分解(含是否产汇总/终验节点)由可注入的规划策略(`DecomposerPort` 委托 / 规划 agent)产出。框架只为规划提供**机制**(读图算 gap、步进式、去重、依赖/委托语义、深度闸门),不提供**内容**。
@@ -127,8 +121,7 @@
   - Harness 自愈 seam:SLA 超时/崩溃→`update_task_node_info(HUNG/FAILED)` 旁路,独立常驻 seam。
   - Planner/Dispatcher 纯逻辑 seam:`plan` 给定图谱产固定 `List[TaskNode]`、`dispatch` 给定 toDo 产派发决策,纯函数式断言(无执行主体)。
 
-> 旧失效代码的测试不作 prior art;seam 与断言面按新模型(`Relation`/6 态/`run_mode` str)从零定义。
-> 2026-08-04 case 推演(存储行业尽调全链路)作为 E2E 行为基线沿用,断言对象迁移到新模型字段。
+> seam 与断言面按新模型(`Relation`/6 态/`run_mode` str)定义;存储行业尽调全链路 case 作为 E2E 行为基线,断言对象按新模型字段。
 
 ## Out of Scope
 
@@ -138,24 +131,23 @@
 - 前端画布渲染(只校验 `get_task_dashboard` 投影)。
 - 外部 issue tracker 接入(未配置;按 `specs/` 出版)。
 - 人工 `abandon_task`/`rollback_to_node` facade(5 模块文档未提供;本 spec 预留事件位点,具体 API 待后续扩展确认后补)。
-- 直接编辑个人空间 yuque 文档 `iee3gg/ibgwymhk8bhwrwx1`(本 spec 给出重构后契约定义;如需回写个人文档另行确认)。
+- 本 spec 给出重构后的契约定义;如需回写个人空间文档另行确认。
 - AI-Credit 审计 / OKR 关联产品化(仅在框架预留事件位点)。
 - 持久化/ORM 适配(singlebox 用 in-memory `TaskGraphService`;ORM 适配按需后续)。
 
 ## Further Notes
 
-- **代码库声明**:现有 Avernet/ocb 代码实现已失效、不参考;代码库按本 spec 从零重新实现。技术设计见 `plan.md`,实现计划见 `tasks.md`。
-- **被重构设计文档**:`2026-08-04` spec、`iee3gg` 个人 API 文档、本目录 v4.3 三件套一并被本 spec 覆盖;若尚有残留旧模型表述(`depends_on` 字段/`TaskGraphStore`/6 facade/5 态/`collab_mode`/`Scope`/`SLA`/`RunMode` 枚举/`ExecutionEngine.drive` fixpoint 泵),以本 spec 为准。
-- **`depends_on` 退场(★)**:`TaskNode` 不再持 `depends_on` 字段;依赖由 `Relation{type=DEPENDENCY}` 在 `TaskExecutionGraph.relations` 表达。`dependencies_satisfied`/`depth`/传播均从 `relations` 派生。5 模块文档里 `depends_on` 字样为旧表述,语义映射到 `relations`。
-- **`PLANNING` 语义(★)**:节点被分解、委托子节点执行时进 `PLANNING`(显式状态),取代旧"委托中=有分解子"结构派生判据;`add_task_nodes` 条件 c 直接判 `PLANNING`。子全 PASS → 传播该节点 DONE。
-- **`collab_mode` 退场(★)**:`RuntimeInfo` 无 `collab_mode` 字段;协作群协作方式(chat/manager_worker/state_machine)作 `TaskRunner.form_coop_group(GroupFormation)` 内部参数(对齐 BCS `GroupStrategy`),不进模型持久字段。`run_mode` 为 str("single_bot"/"coop_group"/"bbs"。
-- **`SLA`/`Scope`/`RunMode`/`CollabMode` 枚举退场**:`TaskSpec` 无 `SLA`(SLA 超时由 Harness 周期巡检 + `execution_config` 承载);`AcceptanceCriteria` 用 `type: str` 取代 `tag`+`Scope` 枚举;`RuntimeInfo.run_mode` 为 str 取代 `RunMode` 枚举。
+- **代码库声明**:代码库按本 spec 从零重新实现。技术设计见 `plan.md`,实现计划见 `tasks.md`。
+- **依赖关系**:`TaskNode` 不持 `depends_on` 字段;依赖由 `Relation{type=DEPENDENCY}` 在 `TaskExecutionGraph.relations` 表达。`dependencies_satisfied`/`depth`/传播均从 `relations` 派生。5 模块文档里 `depends_on` 字样语义映射到 `relations`。
+- **`PLANNING` 语义**:节点被分解、委托子节点执行时进 `PLANNING`(显式状态);`add_task_nodes` 条件 c 直接判 `PLANNING`。子全 PASS → 传播该节点 DONE。
+- **`collab_mode`**:`RuntimeInfo` 无 `collab_mode` 字段;协作群协作方式(chat/manager_worker/state_machine)作 `TaskRunner.form_coop_group(GroupFormation)` 内部参数(对齐 BCS `GroupStrategy`),不进模型持久字段。`run_mode` 为 str("single_bot"/"coop_group"/"bbs")。
+- **枚举精简**:`TaskSpec` 无 `SLA`(SLA 超时由 Harness 周期巡检 + `execution_config` 承载);`AcceptanceCriteria` 用 `type: str`;`RuntimeInfo.run_mode` 为 str。
 - **`AcceptanceResult` 字段**:`{verdict, acceptances_metric, gaps}`(无 `verifier`);`acceptances_metric`=已满足验收指标明细(原 `acceptances_met` 语义)。
 - **`Metadata.task_id` 与 `TaskNode.task_id`**:`Metadata` 持 `task_id`(任务 ID);`TaskNode` 亦持 `task_id`(节点所发整体任务 ID),两者同源,便于节点定位归属图。
 - **`TaskExecutionGraph.run_id`**:运行实例唯一 ID,区分同一 task_spec 的多次执行实例。
 - **`TaskNode.node_run_graph`**:节点所属的执行图实例引用(模型 `*--` 关系),便于节点反向定位图。
-- **驱动模型重构(★)**:旧 v4.3 `ExecutionEngine.drive` 反应式 fixpoint 泵退出对外契约;新模型为**事件驱动 + 状态条件触发**:`plan`/`add_task_nodes` 有显式状态触发条件(a/b/c + plan 三条件);编排逻辑收口为 `TaskService` 内部编排核(实现细节,不对外暴露,见 `plan.md`)。
-- **TaskService facade 瘦身(★)**:从 v4.3 的 6 API 收敛为 2 API(`execute`/`get_task_dashboard`);`add_task_nodes`/`update_task_node_info`/`query_task_dashboard` 下沉 `TaskGraphService`,`dispatch`/`plan`/`start_run` 各归各模块。
+- **驱动模型**:**事件驱动 + 状态条件触发**:`plan`/`add_task_nodes` 有显式状态触发条件(a/b/c + plan 三条件);编排逻辑收口为 `TaskService` 内部编排核(实现细节,不对外暴露,见 `plan.md`)。
+- **TaskService facade**:2 API(`execute`/`get_task_dashboard`);`add_task_nodes`/`update_task_node_info`/`query_task_dashboard` 下沉 `TaskGraphService`,`dispatch`/`plan`/`start_run` 各归各模块。
 - **MISS 信号设计**:MISS 的节点仍 PENDING(没执行过);用 `RuntimeInfo.extend_props.miss_events: list[str]` 记运行期事件(像崩溃栈),plan 读它自发现补救目标,引擎即写即消费,不跨持久化为状态。比加状态干净。
 - **深度闸门**:FAIL/MISS 拆解前引擎查核内派生深度(从 `relations.type=DEPENDENCY` 递归),达 `execution_config.MAX_DEPTH` → `HUNG`,不进规划器。
 - **reroute 局部化**:补救挂该 FAIL/PLANNING 节点本体下,未触下游在依赖满足前从未入图,无下游可复位;自动 reroute 不调级联回滚。
@@ -165,5 +157,5 @@
 - **`loop_round` 审计**:reroute(补救非根节点)时 `TaskExecutionGraph.loop_round++`;补救拓扑元信息可入 `extend_props` 供审计/看板。
 - **BBS 接力**:任务广场 lease 接力(同任务串行、跨任务并行;lease+续租+超时收回),单一全局调度器引擎无关地经 `TaskRunner` 驱动任意执行主体;判断"能不能做"落在 agent(LLM 能力),非确定性代码。
 - **开源执行边界(Avernet vs corp ocb)**:Avernet(开源仓)只发**契约 seam + Noop/singlebox double**(本地关键词 cover 的 bot catalog、BCS local/mock 拉群);真实搜推、真实 Bot/协作群/BBS 执行、LLM 规划/验收 SKILL 均**不在 Avernet**,由 corp `ocb` 仓的 adapter 落地。故 Tasks 中"实现 3 模式执行模块"在 Avernet 范畴 = 落 seam + singlebox double + BCS 复用接线;prod 接线属 corp,非 singlebox 阻塞。
-- **委托式规划(解耦 case 知识)**:planner(`TaskPlanner`)是**编排壳**:读图发现规划目标(PLANNING/FAIL)、按硬契约协调,把"产哪些节点"委托给 `DecomposerPort` 策略 / 规划 agent(plan_bot);默认生产实现走 LLM/SKILL(corp,Avernet 不含),singlebox/测试用**可注入 stub decomposer** 返回固定节点(case 推演里的 `N_overview`/`N_market` 等是 **stub 产出**,不是框架写死)。
-- **5 模块文档 vs 新模型字段差异**:5 文档部分字段表述(`depends_on` 字段、`tn.goal` 简写、`asignee` 拼写、`is_plan`、`instance_id` vs `run_id`)滞后于最新 classDiagram;以本 spec + `plan.md` 字段为准,文档语义保留。
+- **委托式规划(解耦 case 知识)**:planner(`TaskPlanner`)是**编排壳**:读图发现规划目标(PLANNING/FAIL)、按硬契约协调,把"产哪些节点"委托给 `DecomposerPort` 策略 / 规划 agent(plan_bot);默认生产实现走 LLM/SKILL(corp,Avernet 不含),singlebox/测试用**可注入 stub decomposer** 返回固定节点(case 推演里的 `N_overview`/`N_market` 等是 stub 产出,不是框架写死)。
+- **5 模块文档字段对齐**:5 文档部分字段表述(`depends_on`、`tn.goal` 简写、`asignee` 拼写、`is_plan`、`instance_id` vs `run_id`)以本 spec + `plan.md` 字段为准,文档语义(触发条件/职责/分层)保留。

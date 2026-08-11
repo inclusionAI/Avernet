@@ -26,6 +26,7 @@ from __future__ import annotations
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     AcceptanceCriteriaKind,
+    EdgeKind,
     GraphStatus,
     NodeStatus,
     NodeType,
@@ -115,7 +116,7 @@ class FakeDecomposer:
         else:
             base = TEST_CHILDREN  # 兜底:仍给真实子任务内容
         return [
-            SubTaskSpec(node_id=s.node_id, spec=s.spec, run_mode=s.run_mode, depth=child_depth)
+            SubTaskSpec(node_id=s.node_id, spec=s.spec, depth=child_depth)
             for s in base
         ]
 
@@ -234,10 +235,10 @@ def _planned_task(svc: TaskService, sched: TaskScheduler, node_id: str, spec: st
         svc._task_repo.save(task)  # noqa: SLF001
     svc.add_node(
         task.id,
-        SubTaskSpec(node_id=node_id, spec=spec, run_mode=RunMode.SINGLE_BOT),
-        "n_bot_search",
+        SubTaskSpec(node_id=node_id, spec=spec),
         NodeType.DISPATCH,
     )
+    svc.add_edge(task.id, "n_bot_search", node_id, EdgeKind.DEPENDENCY)
     rec = sched._discover.recommend(task.id, node_id)  # noqa: SLF001
     lead = rec.candidates[0].bot_id if rec.candidates else "bot-x"
     svc.claim_node(task.id, node_id, lead)
@@ -436,7 +437,7 @@ def test_tick_hang_confirm_bbs_continue_same_graph():
     # BBS bot 在同一 TaskExecutionGraph 上认领待办:加一个 BBS 阶段待办节点供认领
     svc.add_node(
         task.id, SubTaskSpec(node_id="n_bbs_review", spec="BBS复核登录安全策略"),
-        None, NodeType.DISPATCH,
+        NodeType.DISPATCH,
     )
     bbs = BbsExecutorService(svc)
     claimed = bbs.claim(task.id, "bbs-bot-1")

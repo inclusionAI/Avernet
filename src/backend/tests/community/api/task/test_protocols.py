@@ -50,7 +50,7 @@ class _NoopTaskService:
         return {}
 
     # intake face
-    def create(self, title: str, source: str = "api", background: str = "") -> Any:
+    def create(self, title: str, background: str = "") -> Any:
         return None
 
     def clarify(self, task_id: str, patch: dict, confirmed: bool = False) -> Any:
@@ -68,7 +68,7 @@ class _NoopTaskService:
         return []
 
     # v2 graph-operation write face (plan §4.3/§7.1,FR-GRAPH-11)
-    def add_node(self, task_id: str, node: Any, parent_node: Any,
+    def add_node(self, task_id: str, node: Any,
                  node_type: Any, executor: str = "") -> Any:
         return None
 

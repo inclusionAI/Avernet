@@ -15,6 +15,7 @@ from agentclaw.community.core.task.domain.events import (
     next_seq,
 )
 from agentclaw.community.core.task.domain.models import (
+    EdgeKind,
     NodeStatus,
     NodeType,
     RunMode,
@@ -43,10 +44,10 @@ def _planned_with_dag(svc: TaskService, task_id: str) -> None:
     # 建一个可派发的 DISPATCH 节点 "n1"(2026-08-03:Plan 退场,不再由 plan.sub_tasks 预拆)
     svc.add_node(
         task_id,
-        SubTaskSpec(node_id="n1", spec="do x", run_mode=RunMode.SINGLE_BOT),
-        "n_execute_start",
+        SubTaskSpec(node_id="n1", spec="do x"),
         NodeType.DISPATCH,
     )
+    svc.add_edge(task_id, "n_execute_start", "n1", EdgeKind.DEPENDENCY)
     svc._task_repo.save(svc.get(task_id))  # noqa: SLF001
 
 

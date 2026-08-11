@@ -26,7 +26,6 @@ from agentclaw.community.core.task.domain.models import (
     NodeStatus,
     Task,
     TaskExecutionGraph,
-    TaskSource,
     TaskSpec,
 )
 from agentclaw.community.core.task.domain.repository import TaskNotFoundError
@@ -134,7 +133,6 @@ class OrmTaskRepository:
 
 def _apply_task_to_model(task: Task, model: AcTaskModel) -> None:
     model.user_id = task.user_id
-    model.source = task.source.value
     model.status = task.status.value
     model.loop_round = task.loop_round
     model.spec_json = _json_dumps(task.spec)
@@ -147,7 +145,6 @@ def _model_to_task(model: AcTaskModel) -> Task:
     return Task(
         id=model.task_id,
         user_id=model.user_id,
-        source=TaskSource(model.source),
         spec=spec,
         execution_graph=graph,
     )
@@ -175,8 +172,6 @@ def _deserialize_spec(raw: Optional[str]) -> TaskSpec:
     meta = TaskSpecMetadata(
         id=data.get("metadata", {}).get("id", ""),
         title=data.get("metadata", {}).get("title", ""),
-        summary=data.get("metadata", {}).get("summary", ""),
-        tags=data.get("metadata", {}).get("tags", []),
     )
     ctx_data = data.get("context") or {}
     context = TaskContext(

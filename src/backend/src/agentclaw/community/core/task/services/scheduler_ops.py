@@ -18,6 +18,7 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     AcceptanceCriteriaKind,
     AttemptOutcome,
+    EdgeKind,
     Node,
     NodeStatus,
     NodeType,
@@ -109,10 +110,16 @@ class SchedulerOpsMixin:
         executor: str = "",
         depth: Optional[int] = None,
     ) -> Node:
-        sub = SubTaskSpec(node_id=node_id, spec=spec, run_mode=RunMode.SINGLE_BOT)
+        """Scheduler 组合便利:落 child node + 父子依赖边。domain ``add_node`` 只加
+        节点(单一职责),边由本 helper 经 ``add_edge`` 补 — 不在 add_node 上耦合
+        parent 语义。"""
+        sub = SubTaskSpec(node_id=node_id, spec=spec)
         if depth is not None:
             sub.depth = depth
-        return self._svc.add_node(task.id, sub, parent_id, node_type, executor=executor)
+        node = self._svc.add_node(task.id, sub, node_type, executor=executor)
+        if parent_id:
+            self._svc.add_edge(task.id, parent_id, node.node_id, EdgeKind.DEPENDENCY)
+        return node
 
     # --- 主 tick ------------------------------------------------------------
 

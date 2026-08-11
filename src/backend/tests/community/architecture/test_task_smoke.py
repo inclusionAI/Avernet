@@ -107,7 +107,7 @@ def test_smoke_create_task_200_with_noop():
     client_gen = _client()
     client = next(client_gen)
     try:
-        r = client.post("/api/tasks/create", json={"title": "smoke", "source": "api"})
+        r = client.post("/api/tasks/create", json={"title": "smoke"})
         assert r.status_code == 200
         body = r.json()
         assert body["status"] == "drafting"
@@ -174,7 +174,7 @@ def test_smoke_create_persists_and_events_land_in_log(client):
     from agentclaw.community.core.task.domain.repository import TaskEventRepo
 
     # create
-    r = client.post("/api/tasks/create", json={"title": "persist-e2e", "source": "api"})
+    r = client.post("/api/tasks/create", json={"title": "persist-e2e"})
     assert r.status_code == 200
     task_id = r.json()["task_id"]
 

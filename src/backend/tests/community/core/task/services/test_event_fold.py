@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from agentclaw.community.core.task.domain.events import EventKind, next_seq
 from agentclaw.community.core.task.domain.models import (
+    EdgeKind,
     GraphStatus,
     NodeStatus,
     NodeType,
@@ -44,7 +45,8 @@ def _task_on_plaza(svc: TaskService, acceptances: int = 1):
     svc.init_execution_graph(task)
     task = svc.get(task.id)
     # 落一个 EXEC_AGGREGATE 节点(挂 n_bot_search)
-    svc.add_node(task.id, SubTaskSpec(node_id="n_agg", spec="exec-aggregate"), "n_bot_search", NodeType.EXEC_AGGREGATE)
+    svc.add_node(task.id, SubTaskSpec(node_id="n_agg", spec="exec-aggregate"), NodeType.EXEC_AGGREGATE)
+    svc.add_edge(task.id, "n_bot_search", "n_agg", EdgeKind.DEPENDENCY)
     return svc.get(task.id)
 
 

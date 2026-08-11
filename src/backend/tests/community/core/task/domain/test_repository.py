@@ -21,7 +21,6 @@ from agentclaw.community.core.task.domain.models import (
     Node,
     NodeStatus,
     TaskExecutionGraph,
-    TaskSource,
     TaskSpec,
     TaskSpecMetadata,
     GraphStatus,
@@ -101,7 +100,7 @@ def test_task_event_repo_is_protocol():
 def _real_task(tid: str):
     from agentclaw.community.core.task.domain.models import Task
     spec = TaskSpec(metadata=TaskSpecMetadata(id=tid, title="x"))
-    return Task(id=tid, user_id="u1", source=TaskSource.API, spec=spec)
+    return Task(id=tid, user_id="u1", spec=spec)
 
 
 def test_task_repo_save_get_roundtrip():
@@ -111,7 +110,6 @@ def test_task_repo_save_get_roundtrip():
     got = repo.get_by_id("t1")
     assert got.id == "t1"
     assert got.user_id == "u1"
-    assert got.source is TaskSource.API
 
 
 def test_task_repo_save_with_execution_graph_roundtrip():
@@ -120,7 +118,6 @@ def test_task_repo_save_with_execution_graph_roundtrip():
     task = Task(
         id="t2",
         user_id="u1",
-        source=TaskSource.API,
         spec=TaskSpec(metadata=TaskSpecMetadata(id="t2", title="x")),
         execution_graph=TaskExecutionGraph(
             status=GraphStatus.RUNNING,
@@ -162,22 +159,22 @@ def test_task_repo_save_is_deep_copy():
 
 def test_event_repo_append_assigns_monotonic_seq():
     repo = _InMemoryEventRepo()
-    e1 = repo.append(TaskCreated(task_id="t1", seq=1, title="x", source="im"))
-    e2 = repo.append(TaskCreated(task_id="t1", seq=2, title="y", source="im"))
+    e1 = repo.append(TaskCreated(task_id="t1", seq=1, title="x"))
+    e2 = repo.append(TaskCreated(task_id="t1", seq=2, title="y"))
     assert e1.seq == 1 and e2.seq == 2
 
 
 def test_event_repo_append_rejects_non_monotonic_seq():
     repo = _InMemoryEventRepo()
-    repo.append(TaskCreated(task_id="t1", seq=1, title="x", source="im"))
+    repo.append(TaskCreated(task_id="t1", seq=1, title="x"))
     with pytest.raises(ValueError):
-        repo.append(TaskCreated(task_id="t1", seq=3, title="gap", source="im"))
+        repo.append(TaskCreated(task_id="t1", seq=3, title="gap"))
 
 
 def test_event_repo_load_events_sorted_by_seq_after_filter():
     repo = _InMemoryEventRepo()
     for s in (1, 2, 3, 4):
-        repo.append(TaskCreated(task_id="t1", seq=s, title=f"t{s}", source="im"))
+        repo.append(TaskCreated(task_id="t1", seq=s, title=f"t{s}"))
     tail = repo.load_events("t1", after_seq=2)
     assert [e.seq for e in tail] == [3, 4]
 
@@ -189,8 +186,8 @@ def test_event_repo_load_events_empty_task():
 
 def test_event_repo_per_task_independent_seqs():
     repo = _InMemoryEventRepo()
-    repo.append(TaskCreated(task_id="t1", seq=1, title="x", source="im"))
-    repo.append(TaskCreated(task_id="t2", seq=1, title="x", source="im"))
+    repo.append(TaskCreated(task_id="t1", seq=1, title="x"))
+    repo.append(TaskCreated(task_id="t2", seq=1, title="x"))
     assert len(repo.load_events("t1")) == 1
     assert len(repo.load_events("t2")) == 1
 

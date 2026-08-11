@@ -120,11 +120,10 @@ class TaskEvent:
 class TaskCreated(TaskEvent):
     kind: EventKind = TASK_CREATED_KIND
     title: str = ""
-    source: str = ""
 
     def __post_init__(self) -> None:
         super().__post_init__()
-        self.payload = {"title": self.title, "source": self.source}
+        self.payload = {"title": self.title}
 
 
 @dataclass

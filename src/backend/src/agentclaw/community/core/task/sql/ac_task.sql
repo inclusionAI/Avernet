@@ -8,7 +8,6 @@ CREATE TABLE IF NOT EXISTS `ac_task` (
   `task_id` VARCHAR(128) NOT NULL,
   `env` VARCHAR(64) NOT NULL DEFAULT 'dev',
   `user_id` VARCHAR(128) NOT NULL DEFAULT '',
-  `source` VARCHAR(32) NOT NULL DEFAULT 'api',
   `status` VARCHAR(32) NOT NULL DEFAULT 'drafting',
   `loop_round` INT NOT NULL DEFAULT 0,
   ``spec_json` TEXT NULL,

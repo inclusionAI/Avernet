@@ -14,10 +14,10 @@ from __future__ import annotations
 import pytest
 
 from agentclaw.community.core.task.domain.models import (
+    EdgeKind,
     GraphStatus,
     NodeStatus,
     NodeType,
-    RunMode,
     SubTaskSpec,
 )
 from agentclaw.community.core.task.services import TaskService
@@ -41,8 +41,10 @@ def _task_with_graph(svc: TaskService) -> str:
     t = svc.get(t.id)
     svc.init_execution_graph(t)
     # 2026-08-03:Plan 退场,n1/n2 不再由 plan.sub_tasks 预拆 → 显式 add_node
-    svc.add_node(t.id, SubTaskSpec(node_id="n1", spec="a", run_mode=RunMode.SINGLE_BOT), "n_execute_start", NodeType.DISPATCH)
-    svc.add_node(t.id, SubTaskSpec(node_id="n2", spec="b", run_mode=RunMode.SINGLE_BOT), "n_execute_start", NodeType.DISPATCH)
+    svc.add_node(t.id, SubTaskSpec(node_id="n1", spec="a"), NodeType.DISPATCH)
+    svc.add_edge(t.id, "n_execute_start", "n1", EdgeKind.DEPENDENCY)
+    svc.add_node(t.id, SubTaskSpec(node_id="n2", spec="b"), NodeType.DISPATCH)
+    svc.add_edge(t.id, "n_execute_start", "n2", EdgeKind.DEPENDENCY)
     t = svc.get(t.id)
     # mark n1 running + done, n2 coop with a sub-dag ref
     svc.set_node_status(t, "n1", NodeStatus.RUNNING)
@@ -119,7 +121,9 @@ def test_get_task_graph_carries_superset_fields():
     ):
         assert field in n1, f"missing superset field {field}"
     assert n1["status"] == "done"
-    assert n1["run_mode"] == "single_bot"
+    # 2026-08-04:SubTaskSpec.run_mode 退场 → add_node 不再设 run_mode;
+    # run_mode 由路由/claim_node 在派发时设。本 fixture 未派发 n1 → None。
+    assert n1["run_mode"] is None
     # n2 carries the sub_dag_ref pointer (drill-down hint)
     n2 = next(n for n in g["nodes"] if n["node_id"] == "n2")
     assert n2["sub_dag_ref"] is not None
@@ -140,7 +144,8 @@ def test_get_node_detail_returns_attempt_and_acceptance():
     d = svc.get_node_detail(tid, "n1")
     assert d["node_id"] == "n1"
     assert d["status"] == "done"
-    assert d["run_mode"] == "single_bot"
+    # SubTaskSpec.run_mode 退场 → 未派发节点 run_mode 为 None(由路由在派发时设)
+    assert d["run_mode"] is None
     assert d["attempt"] == 0  # no attempted record on n1 in this fixture
     assert d["sub_dag_ref"] is None
 

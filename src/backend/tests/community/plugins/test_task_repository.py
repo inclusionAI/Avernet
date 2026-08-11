@@ -24,7 +24,6 @@ from agentclaw.community.core.task.domain.models import (
     NodeStatus,
     SubTaskSpec,
     Task,
-    TaskSource,
     TaskSpec,
     TaskSpecMetadata,
     GraphStatus,
@@ -84,7 +83,6 @@ def _task(task_id="task-1", user_id="u1", title="t") -> Task:
     return Task(
         id=task_id,
         user_id=user_id,
-        source=TaskSource.API,
         spec=TaskSpec(metadata=TaskSpecMetadata(id=task_id, title=title)),
     )
 
@@ -99,7 +97,6 @@ def test_save_and_get_round_trips_spec_and_status(task_repo):
     assert fetched.id == "task-1"
     assert fetched.status is GraphStatus.DRAFTING
     assert fetched.spec.metadata.title == "t"
-    assert fetched.source is TaskSource.API
 
 
 def test_save_is_upsert_keyed_on_task_id(task_repo):

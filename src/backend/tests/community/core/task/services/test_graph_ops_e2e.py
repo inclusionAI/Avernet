@@ -35,6 +35,7 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteriaKind,
     AttemptedRecord,
     AttemptOutcome,
+    EdgeKind,
     GapRecord,
     GraphStatus,
     NodeType,
@@ -43,7 +44,6 @@ from agentclaw.community.core.task.domain.models import (
     StateSemantics,
     SubTaskSpec,
     TaskGoal,
-    GraphStatus,
 )
 from agentclaw.community.core.task.protocols import DispatchResult, aggregate_verdict
 from agentclaw.community.core.task.domain.events import EventKind
@@ -188,11 +188,15 @@ def test_e2e1_single_bot_happy_path():
     # 链路:recognition→clarify→execute-start→bot-search(搜“设计登录API契约”命中架构bot)
     # →dispatch→exec-accept DONE
     design = TOP_CHILDREN[0]
-    svc.add_node(task.id, SubTaskSpec(node_id="n_rec", spec="识别需求:交付登录功能"), None, NodeType.RECOGNITION)
-    svc.add_node(task.id, SubTaskSpec(node_id="n_clar", spec="澄清:补全登录验收"), "n_rec", NodeType.CLARIFY)
-    svc.add_node(task.id, SubTaskSpec(node_id="n_exec", spec="启动执行"), "n_clar", NodeType.EXECUTE_START)
-    svc.add_node(task.id, SubTaskSpec(node_id="n_search", spec=f"搜索执行方:{design.spec}"), "n_exec", NodeType.BOT_SEARCH)
-    svc.add_node(task.id, SubTaskSpec(node_id="n_disp", spec=f"派发:{design.spec}"), "n_search", NodeType.DISPATCH, executor="arch-bot")
+    svc.add_node(task.id, SubTaskSpec(node_id="n_rec", spec="识别需求:交付登录功能"), NodeType.RECOGNITION)
+    svc.add_node(task.id, SubTaskSpec(node_id="n_clar", spec="澄清:补全登录验收"), NodeType.CLARIFY)
+    svc.add_edge(task.id, "n_rec", "n_clar", EdgeKind.DEPENDENCY)
+    svc.add_node(task.id, SubTaskSpec(node_id="n_exec", spec="启动执行"), NodeType.EXECUTE_START)
+    svc.add_edge(task.id, "n_clar", "n_exec", EdgeKind.DEPENDENCY)
+    svc.add_node(task.id, SubTaskSpec(node_id="n_search", spec=f"搜索执行方:{design.spec}"), NodeType.BOT_SEARCH)
+    svc.add_edge(task.id, "n_exec", "n_search", EdgeKind.DEPENDENCY)
+    svc.add_node(task.id, SubTaskSpec(node_id="n_disp", spec=f"派发:{design.spec}"), NodeType.DISPATCH, executor="arch-bot")
+    svc.add_edge(task.id, "n_search", "n_disp", EdgeKind.DEPENDENCY)
     leaf = "n_disp"
     _set_subtask_done(svc, task.id, leaf)  # mock:架构 bot 自判子任务 DONE
     # 任务终验:task-owner 读 State 聚合
@@ -211,11 +215,14 @@ def test_e2e3_search_miss_decompose_aggregate_verify():
     svc = _service()
     task = _task_with_graph(svc, acceptances=1)
     # 顶层搜推未匹配 → decomposition:3 个真实并行子任务
-    svc.add_node(task.id, SubTaskSpec(node_id="n_search_top", spec=f"搜索执行方:{OBJECTIVE}(未匹配)"), "n_root", NodeType.BOT_SEARCH)
-    svc.add_node(task.id, SubTaskSpec(node_id="n_decomp", spec=f"分解:{OBJECTIVE}"), "n_search_top", NodeType.DECOMPOSITION)
+    svc.add_node(task.id, SubTaskSpec(node_id="n_search_top", spec=f"搜索执行方:{OBJECTIVE}(未匹配)"), NodeType.BOT_SEARCH)
+    svc.add_edge(task.id, "n_root", "n_search_top", EdgeKind.DEPENDENCY)
+    svc.add_node(task.id, SubTaskSpec(node_id="n_decomp", spec=f"分解:{OBJECTIVE}"), NodeType.DECOMPOSITION)
+    svc.add_edge(task.id, "n_search_top", "n_decomp", EdgeKind.DEPENDENCY)
     children = [TOP_CHILDREN[0], TOP_CHILDREN[1], TOP_CHILDREN[2]]
     for c in children:
-        svc.add_node(task.id, SubTaskSpec(node_id=c.node_id, spec=c.spec), "n_decomp", NodeType.BOT_SEARCH, executor=c.node_id)
+        svc.add_node(task.id, SubTaskSpec(node_id=c.node_id, spec=c.spec), NodeType.BOT_SEARCH, executor=c.node_id)
+        svc.add_edge(task.id, "n_decomp", c.node_id, EdgeKind.DEPENDENCY)
     child_ids = [c.node_id for c in children]
     # 并行无 DEPENDENCY 边(只挂父 n_decomp)
     task = svc.get(task.id)
@@ -237,7 +244,8 @@ def test_e2e3_search_miss_decompose_aggregate_verify():
 
     parent.status = NodeStatus.DONE
     svc._task_repo.save(task)
-    svc.add_node(task.id, SubTaskSpec(node_id="n_agg", spec=f"聚合验收:{OBJECTIVE}"), "n_decomp", NodeType.EXEC_AGGREGATE)
+    svc.add_node(task.id, SubTaskSpec(node_id="n_agg", spec=f"聚合验收:{OBJECTIVE}"), NodeType.EXEC_AGGREGATE)
+    svc.add_edge(task.id, "n_decomp", "n_agg", EdgeKind.DEPENDENCY)
     task = svc.get(task.id)
     agg = next(n for n in task.execution_graph.nodes if n.node_id == "n_agg")
     assert agg.node_type is NodeType.EXEC_AGGREGATE
@@ -259,7 +267,8 @@ def test_e2e6_recursion_limit_mark_hang_escalate_bbs():
     subs = DecomposerService().decompose_subtasks("搭建测试环境; 编写用例", state)
     assert all(s.depth >= 3 for s in subs)  # 触上限
     # 卡住:节点 HUNG + 图 HUMAN_REQUIRED(递归过深,不落 MARK_HANG 节点)
-    svc.add_node(task.id, SubTaskSpec(node_id="n_hang", spec="挂起等人确认:登录功能递归过深"), "n_root", NodeType.DECOMPOSITION)
+    svc.add_node(task.id, SubTaskSpec(node_id="n_hang", spec="挂起等人确认:登录功能递归过深"), NodeType.DECOMPOSITION)
+    svc.add_edge(task.id, "n_root", "n_hang", EdgeKind.DEPENDENCY)
     hang_task = svc.get(task.id)
     hang_node = svc._find_node(hang_task, "n_hang")
     hang_node.status = NodeStatus.HUNG
@@ -284,7 +293,8 @@ def test_e2e7_hang_no_escalate_failed():
     from agentclaw.community.core.task.domain.models import NodeStatus
 
     # 卡住:节点 HUNG + 图 HUMAN_REQUIRED
-    svc.add_node(task.id, SubTaskSpec(node_id="n_hang", spec="挂起等人确认:登录功能递归过深"), "n_root", NodeType.DECOMPOSITION)
+    svc.add_node(task.id, SubTaskSpec(node_id="n_hang", spec="挂起等人确认:登录功能递归过深"), NodeType.DECOMPOSITION)
+    svc.add_edge(task.id, "n_root", "n_hang", EdgeKind.DEPENDENCY)
     hang_task = svc.get(task.id)
     svc._find_node(hang_task, "n_hang").status = NodeStatus.HUNG
     svc._ensure_subtask_state(hang_task, "n_hang").status = NodeStatus.HUNG
@@ -304,8 +314,10 @@ def test_e2e2_coop_group_happy_path():
     task = _task_with_graph(svc, acceptances=1)
     owner = _OwnerResolver(group_owner="master-bot", task_owner="task-owner-bot")
     impl = TOP_CHILDREN[1]  # 实现后端登录校验逻辑 → 后端协作组
-    svc.add_node(task.id, SubTaskSpec(node_id="n_search", spec=f"搜索执行方:{impl.spec}→后端协作组"), "n_root", NodeType.BOT_SEARCH)
-    svc.add_node(task.id, SubTaskSpec(node_id="n_disp", spec=f"派发协作组:{impl.spec}"), "n_search", NodeType.DISPATCH, executor="group1")
+    svc.add_node(task.id, SubTaskSpec(node_id="n_search", spec=f"搜索执行方:{impl.spec}→后端协作组"), NodeType.BOT_SEARCH)
+    svc.add_edge(task.id, "n_root", "n_search", EdgeKind.DEPENDENCY)
+    svc.add_node(task.id, SubTaskSpec(node_id="n_disp", spec=f"派发协作组:{impl.spec}"), NodeType.DISPATCH, executor="group1")
+    svc.add_edge(task.id, "n_search", "n_disp", EdgeKind.DEPENDENCY)
     _set_run_mode(svc, task.id, "n_disp", RunMode.COOP_GROUP, bot_ids=["master-bot", "member-b"])
     group_owner = owner.resolve_group_owner("group1")
     assert group_owner == "master-bot"
@@ -330,8 +342,10 @@ def test_e2e4_accept_fail_reroute_hit_node_identity_unchanged():
     svc = _service()
     task = _task_with_graph(svc, acceptances=1)
     design = TOP_CHILDREN[0]
-    svc.add_node(task.id, SubTaskSpec(node_id="n_search", spec=f"搜索执行方:{design.spec}"), "n_root", NodeType.BOT_SEARCH)
-    svc.add_node(task.id, SubTaskSpec(node_id="n_disp", spec=f"派发:{design.spec}"), "n_search", NodeType.DISPATCH, executor="arch-bot")
+    svc.add_node(task.id, SubTaskSpec(node_id="n_search", spec=f"搜索执行方:{design.spec}"), NodeType.BOT_SEARCH)
+    svc.add_edge(task.id, "n_root", "n_search", EdgeKind.DEPENDENCY)
+    svc.add_node(task.id, SubTaskSpec(node_id="n_disp", spec=f"派发:{design.spec}"), NodeType.DISPATCH, executor="arch-bot")
+    svc.add_edge(task.id, "n_search", "n_disp", EdgeKind.DEPENDENCY)
     leaf = "n_disp"
     _accept_fail_round(svc, task.id, leaf, executor="arch-bot", round_=1)  # 轮1 REJECTED
     st_view = svc.retrieve_state(task.id, leaf)
@@ -364,8 +378,10 @@ def test_e2e5_accept_fail_reroute_miss_recursive_decompose_depth_plus_one():
     from agentclaw.community.core.task.services.decomposer_service import DecomposerService
 
     design = TOP_CHILDREN[0]
-    svc.add_node(task.id, SubTaskSpec(node_id="n_search", spec=f"搜索执行方:{design.spec}"), "n_root", NodeType.BOT_SEARCH)
-    svc.add_node(task.id, SubTaskSpec(node_id="n_disp", spec=f"派发:{design.spec}"), "n_search", NodeType.DISPATCH, executor="arch-bot")
+    svc.add_node(task.id, SubTaskSpec(node_id="n_search", spec=f"搜索执行方:{design.spec}"), NodeType.BOT_SEARCH)
+    svc.add_edge(task.id, "n_root", "n_search", EdgeKind.DEPENDENCY)
+    svc.add_node(task.id, SubTaskSpec(node_id="n_disp", spec=f"派发:{design.spec}"), NodeType.DISPATCH, executor="arch-bot")
+    svc.add_edge(task.id, "n_search", "n_disp", EdgeKind.DEPENDENCY)
     _accept_fail_round(svc, task.id, "n_disp", executor="arch-bot", round_=1)
     # 重路由未匹配 → decomposition;父 depth 入 state → children depth=父+1
     task = svc.get(task.id)
@@ -375,10 +391,13 @@ def test_e2e5_accept_fail_reroute_miss_recursive_decompose_depth_plus_one():
     subs = DecomposerService().decompose_subtasks("定义入参; 定义出参; 定义错误码", state)
     assert len(subs) == 3
     assert all(s.depth == parent_depth + 1 for s in subs)
-    svc.add_node(task.id, SubTaskSpec(node_id="n_search2", spec=f"重路由搜索:{design.spec}(未匹配)"), "n_disp", NodeType.BOT_SEARCH)
-    svc.add_node(task.id, SubTaskSpec(node_id="n_decomp2", spec=f"分解:{design.spec}"), "n_search2", NodeType.DECOMPOSITION)
+    svc.add_node(task.id, SubTaskSpec(node_id="n_search2", spec=f"重路由搜索:{design.spec}(未匹配)"), NodeType.BOT_SEARCH)
+    svc.add_edge(task.id, "n_disp", "n_search2", EdgeKind.DEPENDENCY)
+    svc.add_node(task.id, SubTaskSpec(node_id="n_decomp2", spec=f"分解:{design.spec}"), NodeType.DECOMPOSITION)
+    svc.add_edge(task.id, "n_search2", "n_decomp2", EdgeKind.DEPENDENCY)
     for s in subs:
-        svc.add_node(task.id, SubTaskSpec(node_id=s.node_id, spec=s.spec, depth=s.depth), "n_decomp2", NodeType.BOT_SEARCH, executor=s.node_id)
+        svc.add_node(task.id, SubTaskSpec(node_id=s.node_id, spec=s.spec, depth=s.depth), NodeType.BOT_SEARCH, executor=s.node_id)
+        svc.add_edge(task.id, "n_decomp2", s.node_id, EdgeKind.DEPENDENCY)
     task = svc.get(task.id)
     children = [s.node_id for s in subs]
     for cid in children:
@@ -390,7 +409,8 @@ def test_e2e5_accept_fail_reroute_miss_recursive_decompose_depth_plus_one():
 def test_e2e8_goal_verify_fail_before_bbs_loops_gap_not_failed():
     svc = _service()
     task = _task_with_graph(svc, acceptances=1)
-    svc.add_node(task.id, SubTaskSpec(node_id="n_agg", spec=f"聚合验收:{OBJECTIVE}"), "n_root", NodeType.EXEC_AGGREGATE)
+    svc.add_node(task.id, SubTaskSpec(node_id="n_agg", spec=f"聚合验收:{OBJECTIVE}"), NodeType.EXEC_AGGREGATE)
+    svc.add_edge(task.id, "n_root", "n_agg", EdgeKind.DEPENDENCY)
     _set_subtask_done(svc, task.id, "n_agg")
     task = svc.get(task.id)
     assert task.execution_graph.status is GraphStatus.RUNNING
@@ -403,7 +423,8 @@ def test_e2e8_goal_verify_fail_before_bbs_loops_gap_not_failed():
     svc._advance_phase(task, GraphStatus.RUNNING)
     assert task.status is GraphStatus.RUNNING
     assert task.status is not GraphStatus.FAILED
-    svc.add_node(task.id, SubTaskSpec(node_id="n_search_gap", spec=f"gap 新一轮搜索:{OBJECTIVE}"), "n_agg", NodeType.BOT_SEARCH)
+    svc.add_node(task.id, SubTaskSpec(node_id="n_search_gap", spec=f"gap 新一轮搜索:{OBJECTIVE}"), NodeType.BOT_SEARCH)
+    svc.add_edge(task.id, "n_agg", "n_search_gap", EdgeKind.DEPENDENCY)
     assert any(n.node_id == "n_search_gap" for n in svc.get(task.id).execution_graph.nodes)
 
 
@@ -415,7 +436,8 @@ def test_e2e9_goal_verify_fail_after_bbs_failed_terminal():
     from agentclaw.community.core.task.domain.models import NodeStatus
 
     # 卡住 → 人确认升 BBS → BBS_ACTIVE
-    svc.add_node(task.id, SubTaskSpec(node_id="n_hang", spec="挂起等人确认:登录功能递归过深"), "n_root", NodeType.DECOMPOSITION)
+    svc.add_node(task.id, SubTaskSpec(node_id="n_hang", spec="挂起等人确认:登录功能递归过深"), NodeType.DECOMPOSITION)
+    svc.add_edge(task.id, "n_root", "n_hang", EdgeKind.DEPENDENCY)
     hang_task = svc.get(task.id)
     svc._find_node(hang_task, "n_hang").status = NodeStatus.HUNG
     svc._ensure_subtask_state(hang_task, "n_hang").status = NodeStatus.HUNG
@@ -424,7 +446,8 @@ def test_e2e9_goal_verify_fail_after_bbs_failed_terminal():
     svc.on_event({"task_id": task.id, "kind": EventKind.BBS_CONFIRMED.value, "payload": {"node_id": "n_hang"}})
     task = svc.get(task.id)
     assert task.execution_graph.status is GraphStatus.BBS_ACTIVE
-    svc.add_node(task.id, SubTaskSpec(node_id="n_agg", spec="BBS 阶段聚合验收"), "n_hang", NodeType.EXEC_AGGREGATE)
+    svc.add_node(task.id, SubTaskSpec(node_id="n_agg", spec="BBS 阶段聚合验收"), NodeType.EXEC_AGGREGATE)
+    svc.add_edge(task.id, "n_hang", "n_agg", EdgeKind.DEPENDENCY)
     _set_subtask_done(svc, task.id, "n_agg")
     verdict, _ = aggregate_verdict(task.spec.goal.acceptances, [{"outcome": AttemptOutcome.FAIL}])
     assert verdict is AttemptOutcome.FAIL
@@ -443,14 +466,18 @@ def test_e2e10_search_first_invariant():
     task = _task_with_graph(svc, acceptances=1)
     design = TOP_CHILDREN[0]
     # 命中:bot-search 命中 → dispatch,无 DECOMPOSITION
-    svc.add_node(task.id, SubTaskSpec(node_id="n_search_hit", spec=f"搜索执行方:{design.spec}→命中"), "n_root", NodeType.BOT_SEARCH)
-    svc.add_node(task.id, SubTaskSpec(node_id="n_disp_hit", spec=f"派发:{design.spec}"), "n_search_hit", NodeType.DISPATCH, executor="arch-bot")
+    svc.add_node(task.id, SubTaskSpec(node_id="n_search_hit", spec=f"搜索执行方:{design.spec}→命中"), NodeType.BOT_SEARCH)
+    svc.add_edge(task.id, "n_root", "n_search_hit", EdgeKind.DEPENDENCY)
+    svc.add_node(task.id, SubTaskSpec(node_id="n_disp_hit", spec=f"派发:{design.spec}"), NodeType.DISPATCH, executor="arch-bot")
+    svc.add_edge(task.id, "n_search_hit", "n_disp_hit", EdgeKind.DEPENDENCY)
     task = svc.get(task.id)
     assert not any(n.node_type is NodeType.DECOMPOSITION for n in task.execution_graph.nodes)
     # 未匹配:bot-search 未匹配 → DECOMPOSITION;DECOMPOSITION 有 BOT_SEARCH 祖先
     tests = TOP_CHILDREN[2]
-    svc.add_node(task.id, SubTaskSpec(node_id="n_search_miss", spec=f"搜索执行方:{tests.spec}(未匹配)"), "n_disp_hit", NodeType.BOT_SEARCH)
-    svc.add_node(task.id, SubTaskSpec(node_id="n_decomp", spec=f"分解:{tests.spec}"), "n_search_miss", NodeType.DECOMPOSITION)
+    svc.add_node(task.id, SubTaskSpec(node_id="n_search_miss", spec=f"搜索执行方:{tests.spec}(未匹配)"), NodeType.BOT_SEARCH)
+    svc.add_edge(task.id, "n_disp_hit", "n_search_miss", EdgeKind.DEPENDENCY)
+    svc.add_node(task.id, SubTaskSpec(node_id="n_decomp", spec=f"分解:{tests.spec}"), NodeType.DECOMPOSITION)
+    svc.add_edge(task.id, "n_search_miss", "n_decomp", EdgeKind.DEPENDENCY)
     task = svc.get(task.id)
     edges = task.execution_graph.edges
     decomp = next(n for n in task.execution_graph.nodes if n.node_id == "n_decomp")
@@ -467,8 +494,10 @@ def test_e2e10_search_first_invariant():
 def test_e2e11_parallel_mixed_branches_no_interdependency():
     svc = _service()
     task = _task_with_graph(svc, acceptances=1)
-    svc.add_node(task.id, SubTaskSpec(node_id="n_search", spec=f"搜索执行方:{OBJECTIVE}(未匹配)"), "n_root", NodeType.BOT_SEARCH)
-    svc.add_node(task.id, SubTaskSpec(node_id="n_decomp", spec=f"分解:{OBJECTIVE}"), "n_search", NodeType.DECOMPOSITION)
+    svc.add_node(task.id, SubTaskSpec(node_id="n_search", spec=f"搜索执行方:{OBJECTIVE}(未匹配)"), NodeType.BOT_SEARCH)
+    svc.add_edge(task.id, "n_root", "n_search", EdgeKind.DEPENDENCY)
+    svc.add_node(task.id, SubTaskSpec(node_id="n_decomp", spec=f"分解:{OBJECTIVE}"), NodeType.DECOMPOSITION)
+    svc.add_edge(task.id, "n_search", "n_decomp", EdgeKind.DEPENDENCY)
     children = ["c_design", "c_impl", "c_test"]
     child_specs = {
         "c_design": TOP_CHILDREN[0].spec,
@@ -476,19 +505,26 @@ def test_e2e11_parallel_mixed_branches_no_interdependency():
         "c_test": TOP_CHILDREN[2].spec,
     }
     for cid in children:
-        svc.add_node(task.id, SubTaskSpec(node_id=cid, spec=child_specs[cid]), "n_decomp", NodeType.BOT_SEARCH, executor=cid)
+        svc.add_node(task.id, SubTaskSpec(node_id=cid, spec=child_specs[cid]), NodeType.BOT_SEARCH, executor=cid)
+        svc.add_edge(task.id, "n_decomp", cid, EdgeKind.DEPENDENCY)
     task = svc.get(task.id)
     child_set = set(children)
     for e in task.execution_graph.edges:
         assert not (e.from_node in child_set and e.to_node in child_set)
     # 三分支:c_design 命中直派;c_impl(后端)协作;c_test 未匹配再拆 + c 验收 fail 重路由
-    svc.add_node(task.id, SubTaskSpec(node_id="c_design_disp", spec=f"派发:{child_specs['c_design']}"), "c_design", NodeType.DISPATCH, executor="arch-bot")
-    svc.add_node(task.id, SubTaskSpec(node_id="c_impl_disp", spec=f"协作派发:{child_specs['c_impl']}"), "c_impl", NodeType.DISPATCH, executor="backend-group")
-    svc.add_node(task.id, SubTaskSpec(node_id="c_test_dec", spec=f"分解:{child_specs['c_test']}"), "c_test", NodeType.DECOMPOSITION)
-    svc.add_node(task.id, SubTaskSpec(node_id="c_test_c1", spec="搭建测试环境与mock用户数据"), "c_test_dec", NodeType.BOT_SEARCH, executor="test-bot")
+    svc.add_node(task.id, SubTaskSpec(node_id="c_design_disp", spec=f"派发:{child_specs['c_design']}"), NodeType.DISPATCH, executor="arch-bot")
+    svc.add_edge(task.id, "c_design", "c_design_disp", EdgeKind.DEPENDENCY)
+    svc.add_node(task.id, SubTaskSpec(node_id="c_impl_disp", spec=f"协作派发:{child_specs['c_impl']}"), NodeType.DISPATCH, executor="backend-group")
+    svc.add_edge(task.id, "c_impl", "c_impl_disp", EdgeKind.DEPENDENCY)
+    svc.add_node(task.id, SubTaskSpec(node_id="c_test_dec", spec=f"分解:{child_specs['c_test']}"), NodeType.DECOMPOSITION)
+    svc.add_edge(task.id, "c_test", "c_test_dec", EdgeKind.DEPENDENCY)
+    svc.add_node(task.id, SubTaskSpec(node_id="c_test_c1", spec="搭建测试环境与mock用户数据"), NodeType.BOT_SEARCH, executor="test-bot")
+    svc.add_edge(task.id, "c_test_dec", "c_test_c1", EdgeKind.DEPENDENCY)
     _accept_fail_round(svc, task.id, "c_impl_disp", executor="backend-group", round_=1)
-    svc.add_node(task.id, SubTaskSpec(node_id="c_impl_search2", spec=f"重路由搜索:{child_specs['c_impl']}"), "c_impl_disp", NodeType.BOT_SEARCH)
-    svc.add_node(task.id, SubTaskSpec(node_id="c_impl_disp2", spec=f"重派:{child_specs['c_impl']}"), "c_impl_search2", NodeType.DISPATCH, executor="backend-group-2")
+    svc.add_node(task.id, SubTaskSpec(node_id="c_impl_search2", spec=f"重路由搜索:{child_specs['c_impl']}"), NodeType.BOT_SEARCH)
+    svc.add_edge(task.id, "c_impl_disp", "c_impl_search2", EdgeKind.DEPENDENCY)
+    svc.add_node(task.id, SubTaskSpec(node_id="c_impl_disp2", spec=f"重派:{child_specs['c_impl']}"), NodeType.DISPATCH, executor="backend-group-2")
+    svc.add_edge(task.id, "c_impl_search2", "c_impl_disp2", EdgeKind.DEPENDENCY)
     for leaf in ("c_design_disp", "c_test_c1", "c_impl_disp2"):
         _set_subtask_done(svc, task.id, leaf)
     task = svc.get(task.id)
@@ -512,8 +548,10 @@ def test_e2e12_watchdog_probe_redrive_node_escalation():
     task = _task_with_graph(svc, acceptances=1)
     driver = _SpyDriver()
     design = TOP_CHILDREN[0]
-    svc.add_node(task.id, SubTaskSpec(node_id="n_search", spec=f"搜索执行方:{design.spec}"), "n_root", NodeType.BOT_SEARCH)
-    svc.add_node(task.id, SubTaskSpec(node_id="n_disp", spec=f"派发:{design.spec}"), "n_search", NodeType.DISPATCH, executor="arch-bot")
+    svc.add_node(task.id, SubTaskSpec(node_id="n_search", spec=f"搜索执行方:{design.spec}"), NodeType.BOT_SEARCH)
+    svc.add_edge(task.id, "n_root", "n_search", EdgeKind.DEPENDENCY)
+    svc.add_node(task.id, SubTaskSpec(node_id="n_disp", spec=f"派发:{design.spec}"), NodeType.DISPATCH, executor="arch-bot")
+    svc.add_edge(task.id, "n_search", "n_disp", EdgeKind.DEPENDENCY)
     # 叶子长 RUNNING:watchdog 计数留 Node.properties
     leaf_task = svc.get(task.id)
     leaf_node = svc._find_node(leaf_task, "n_disp")

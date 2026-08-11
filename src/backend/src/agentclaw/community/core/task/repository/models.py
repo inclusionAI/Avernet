@@ -51,7 +51,6 @@ class AcTaskModel(Base):
     task_id = Column(String(128), nullable=False, unique=True)
     env = Column(String(64), nullable=False, default="dev")
     user_id = Column(String(128), nullable=False, default="")
-    source = Column(String(32), nullable=False, default="api")
     status = Column(String(32), nullable=False, default="drafting")  # 对齐 GraphStatus.DRAFTING(graph.status 的查询镜像)
     loop_round = Column(Integer, nullable=False, default=0)
     spec_json = Column(Text, nullable=True)

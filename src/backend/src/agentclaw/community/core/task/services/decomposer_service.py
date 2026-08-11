@@ -18,7 +18,6 @@ from difflib import SequenceMatcher
 
 from agentclaw.community.core.task.protocols import DecomposerPort
 from agentclaw.community.core.task.domain.models import (
-    RunMode,
     SubTaskSpec,
     TaskState,
 )
@@ -58,7 +57,7 @@ class DecomposerService(DecomposerPort):
         clauses = _dedup(_split_clauses(spec))
         return [
             SubTaskSpec(
-                node_id=f"n{i + 1}", spec=c, run_mode=RunMode.SINGLE_BOT, depth=child_depth
+                node_id=f"n{i + 1}", spec=c, depth=child_depth
             )
             for i, c in enumerate(clauses)
         ]

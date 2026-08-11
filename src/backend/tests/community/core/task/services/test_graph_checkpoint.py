@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 
 from agentclaw.community.core.task.domain.events import EventKind, IllegalEventError, next_seq
-from agentclaw.community.core.task.domain.models import NodeStatus, NodeType, RunMode, SubTaskSpec, GraphStatus
+from agentclaw.community.core.task.domain.models import EdgeKind, NodeStatus, NodeType, SubTaskSpec, GraphStatus
 from agentclaw.community.core.task.services import GraphCheckpoint, TaskService
 from agentclaw.community.plugins.community.task.in_memory_repos import (
     InMemoryTaskEventRepo,
@@ -35,7 +35,8 @@ def _planned(svc: TaskService) -> str:
     task = svc.get(t.id)
     svc.init_execution_graph(task)  # 自持久化
     # 2026-08-03:Plan 退场,n1 不再由 plan 预拆 → 显式 add_node 供事件 fold/重放定位
-    svc.add_node(t.id, SubTaskSpec(node_id="n1", spec="a", run_mode=RunMode.SINGLE_BOT), "n_execute_start", NodeType.DISPATCH)
+    svc.add_node(t.id, SubTaskSpec(node_id="n1", spec="a"), NodeType.DISPATCH)
+    svc.add_edge(t.id, "n_execute_start", "n1", EdgeKind.DEPENDENCY)
     return t.id
 
 

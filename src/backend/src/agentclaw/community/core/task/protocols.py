@@ -156,7 +156,7 @@ class TaskService(Protocol):
         ...
 
     # intake face
-    def create(self, title: str, source: str = "api", background: str = "") -> Task:
+    def create(self, title: str, background: str = "") -> Task:
         """Create a task at INTAKE; returns the new aggregate."""
         ...
 
@@ -208,11 +208,10 @@ class TaskService(Protocol):
         self,
         task_id: str,
         node,  # Node | SubTaskSpec
-        parent_node: Optional[str],
         node_type: NodeType,
         executor: str = "",
     ) -> Node:
-        """Append a node of ``node_type`` under ``parent_node``; append EDGE."""
+        """Append a node of ``node_type``; **不**耦合边(父子依赖经 ``add_edge``)。"""
         ...
 
     def add_edge(self, task_id: str, from_node: str, to_node: str, kind: EdgeKind) -> Edge:

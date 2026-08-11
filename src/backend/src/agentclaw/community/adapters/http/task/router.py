@@ -107,7 +107,7 @@ def _execution_graph_dict(task: Any) -> Optional[dict]:
 
 @router.post("/create", response_model=TaskCreatedResponse)
 def create_task(req: CreateTaskRequest, service: TaskServiceProtocol = Injected(TaskServiceProtocol)) -> Any:
-    task = service.create(title=req.title, source=req.source, background=req.background)
+    task = service.create(title=req.title, background=req.background)
     return TaskCreatedResponse(
         task_id=_task_id_of(task),
         status=_status_of(task) or "drafting",

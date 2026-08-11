@@ -30,7 +30,6 @@ from agentclaw.community.adapters.http.task.schemas import (
 def test_create_task_request_required_title():
     req = CreateTaskRequest(title="fix PR")
     assert req.title == "fix PR"
-    assert req.source == "api"
     assert req.background == ""
 
 
@@ -120,7 +119,7 @@ class _StubTaskService:
         return {"task_id": task_id, "status": "executing", "loop_round": 1,
                 "done": 1, "total": 3, "nodes": []}
 
-    def create(self, title: str, source: str = "api", background: str = "") -> Any:
+    def create(self, title: str, background: str = "") -> Any:
         return {"task_id": "t1", "status": "drafting", "seq": 1}
 
     def clarify(self, task_id: str, patch: dict, confirmed: bool = False) -> Any:
@@ -204,7 +203,7 @@ def _client_with_stub() -> TestClient:
 
 def test_post_create_task_returns_200():
     client = _client_with_stub()
-    r = client.post("/api/tasks/create", json={"title": "fix PR", "source": "api"})
+    r = client.post("/api/tasks/create", json={"title": "fix PR"})
     assert r.status_code == 200
     body = r.json()
     assert body["task_id"] == "t1"

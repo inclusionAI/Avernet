@@ -144,7 +144,6 @@ from agentclaw.community.adapters.http.cron import router as cron_router  # noqa
 from agentclaw.community.adapters.http.cron.cron_noauth_router import router as cron_noauth_router  # noqa: E402
 from agentclaw.community.adapters.http.aicoding import notify_router  # noqa: E402
 from agentclaw.community.adapters.http.aicoding.architect_rebind_router import router as architect_rebind_router  # noqa: E402
-from agentclaw.community.adapters.http.task.router import router as task_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_management import router as bot_management_router  # noqa: E402
 from agentclaw.community.adapters.http.caller_identity.router import router as caller_identity_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_dormant import router as bot_dormant_router  # noqa: E402
@@ -346,12 +345,6 @@ from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
     CallerMcpNotFoundError,
     CallerMcpSyncError,
 )
-from agentclaw.community.core.task.domain.repository import (  # noqa: E402
-    TaskNotFoundError,
-)
-from agentclaw.community.core.task.domain.state_machine import (  # noqa: E402
-    IllegalTransitionError,
-)
 
 _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     ValidationError:       400,
@@ -459,40 +452,8 @@ async def _domain_error_handler(request: Request, exc: DomainError) -> JSONRespo
     )
 
 
-@app.exception_handler(IllegalTransitionError)
-async def _illegal_transition_handler(
-    request: Request, exc: IllegalTransitionError,
-) -> JSONResponse:
-    """状态机非法转移(claim/release 并发冲突、源态非法)→ 409 Conflict,
-    使 skill 可据 409 换下一候选(spec FR-EXT-03)。IllegalTransitionError 是
-    ValueError 子类(非 DomainError),默认落 catch-all 500,故单独注册。"""
-    status = 409
-    logger.info("[IllegalTransition 409] %s %s: %s", request.method, request.url.path, exc)
-    if _is_public_api(request):
-        return _public_error_envelope(status, request)
-    return JSONResponse(
-        status_code=status,
-        content={"detail": str(exc)},
-        headers=_trace_headers(request),
-    )
 
 
-@app.exception_handler(TaskNotFoundError)
-async def _task_not_found_handler(
-    request: Request, exc: TaskNotFoundError,
-) -> JSONResponse:
-    """Task/node 找不到 → 404(claim/release 命中缺失 id)。TaskNotFoundError 是
-    ValueError 子类(非 DomainError),默认落 catch-all 500,故单独注册——与
-    IllegalTransitionError 同一范式(BBS skill 契约:404 不 500)。"""
-    status = 404
-    logger.info("[TaskNotFound 404] %s %s: %s", request.method, request.url.path, exc)
-    if _is_public_api(request):
-        return _public_error_envelope(status, request)
-    return JSONResponse(
-        status_code=status,
-        content={"detail": str(exc)},
-        headers=_trace_headers(request),
-    )
 
 
 @app.exception_handler(StarletteHTTPException)
@@ -838,7 +799,6 @@ app.include_router(identity_router)
 app.include_router(aicoding_router)
 app.include_router(aicoding_data_proxy_router)
 app.include_router(architect_rebind_router)
-app.include_router(task_router)
 app.include_router(bot_management_router.router)
 app.include_router(caller_identity_router)
 app.include_router(bot_dormant_router.router)

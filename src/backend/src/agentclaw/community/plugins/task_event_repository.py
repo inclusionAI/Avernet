@@ -124,7 +124,7 @@ def _row_to_event(row: AcTaskEventModel) -> TaskEvent:
         occurred_at=occurred_at,
     )
     if kind is EventKind.TASK_CREATED:
-        return TaskCreated(title=payload.get("title", ""), source=payload.get("source", ""), **common)
+        return TaskCreated(title=payload.get("title", ""), **common)
     if kind is EventKind.TASK_CLARIFIED:
         return TaskClarified(
             patch=payload.get("patch", {}),

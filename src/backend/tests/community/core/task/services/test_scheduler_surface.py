@@ -19,6 +19,7 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     AcceptanceCriteriaKind,
     AttemptOutcome,
+    EdgeKind,
     GraphStatus,
     NodeType,
     StateSemantics,
@@ -152,7 +153,8 @@ def test_add_node_appends_node_edge_and_subtask_state():
     svc = _service()
     task = _graph_task(svc)
     child = SubTaskSpec(node_id="n2", spec="child")
-    svc.add_node(task.id, child, parent_node="n1", node_type=NodeType.DISPATCH, executor="bot1")
+    svc.add_node(task.id, child, node_type=NodeType.DISPATCH, executor="bot1")
+    svc.add_edge(task.id, "n1", "n2", EdgeKind.DEPENDENCY)
     task = svc.get(task.id)
     ids = [n.node_id for n in task.execution_graph.nodes]
     assert "n2" in ids
@@ -186,8 +188,9 @@ def test_snapshot_captures_current_fold():
     svc.mark_graph_status(task, GraphStatus.RUNNING)
     # add_node 持久化一个节点(snapshot 经 repo 重读,需落盘)
     svc.add_node(
-        task.id, SubTaskSpec(node_id="n2", spec="x"), parent_node="n1", node_type=NodeType.DISPATCH
+        task.id, SubTaskSpec(node_id="n2", spec="x"), node_type=NodeType.DISPATCH
     )
+    svc.add_edge(task.id, "n1", "n2", EdgeKind.DEPENDENCY)
     snap = svc.snapshot(task.id)
     assert snap.task_id == task.id
     assert snap.graph.status is GraphStatus.RUNNING

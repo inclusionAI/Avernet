@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from agentclaw.community.core.task.protocols import DispatchResult
 from agentclaw.community.core.task.domain.events import EventKind, TaskEvent, next_seq
-from agentclaw.community.core.task.domain.models import NodeStatus, RunMode
+from agentclaw.community.core.task.domain.models import EdgeKind, NodeStatus, RunMode
 from agentclaw.community.core.task.domain.models import (
     NodeType,
     SubTaskSpec,
@@ -41,10 +41,10 @@ def _planned_with_dag(svc: TaskService, nodes=("n1", "n2")) -> str:
     for nid in nodes:
         svc.add_node(
             t.id,
-            SubTaskSpec(node_id=nid, spec=nid, run_mode=RunMode.SINGLE_BOT),
-            "n_execute_start",
+            SubTaskSpec(node_id=nid, spec=nid),
             NodeType.DISPATCH,
         )
+        svc.add_edge(t.id, "n_execute_start", nid, EdgeKind.DEPENDENCY)
     task = svc.get(t.id)
     # root BOT_SEARCH 标 DONE,免 BBS claim 误抢根节点(应认领 n1/n2 DISPATCH 叶子)
     root = svc._find_node(task, "n_bot_search")  # noqa: SLF001

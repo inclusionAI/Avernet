@@ -58,7 +58,6 @@ from agentclaw.community.core.task.domain.models import (
     Task,
     TaskExecutionGraph,
     TaskGoal,
-    TaskSource,
     TaskSpec,
     TaskSpecMetadata,
     TaskState,
@@ -125,24 +124,17 @@ class TaskService(GraphStateOpsMixin, BbsLeaseOpsMixin):
     def create(
         self,
         title: str,
-        source: str = "api",
         background: str = "",
         user_id: str = "",
     ) -> Task:
         """Create a Task at DRAFTING, init the root phase, emit TASK_CREATED,
         and publish a副屏 panel message so the dynamic DAG pops at creation
         (FR-OBS-11)."""
-        source_enum = (
-            TaskSource(source)
-            if source in {e.value for e in TaskSource}
-            else TaskSource.API
-        )
         task_id = _new_task_id()
         graph = TaskExecutionGraph(status=GraphStatus.DRAFTING)
         task = Task(
             id=task_id,
             user_id=user_id,
-            source=source_enum,
             spec=TaskSpec(
                 metadata=TaskSpecMetadata(id=task_id, title=title),
             ),
@@ -155,11 +147,10 @@ class TaskService(GraphStateOpsMixin, BbsLeaseOpsMixin):
             task,
             EventKind.TASK_CREATED,
             title=title,
-            source=source_enum.value,
         )
         logger.info(
-            "[Task] task=%s create source=%s title=%r status=drafting seq=1",
-            task_id, source_enum.value, title,
+            "[Task] task=%s create title=%r status=drafting seq=1",
+            task_id, title,
         )
         # ★ FR-OBS-11: popup the task-entry dynamic-workflow canvas on create.
         self._panel_publisher.publish(
@@ -624,15 +615,11 @@ class TaskService(GraphStateOpsMixin, BbsLeaseOpsMixin):
         meta = task.spec.metadata
         if "title" in patch and patch["title"]:
             meta.title = str(patch["title"])
-        if "summary" in patch:
-            meta.summary = str(patch.get("summary") or "")
-        if "tags" in patch and isinstance(patch["tags"], list):
-            meta.tags = list(patch["tags"])
         if "background" in patch:
             task.spec.context.background = str(patch.get("background") or "")
         # 五要素(skill 识别+澄清产出,经 clarify patch 写入 task.spec)。之前只接受
-        # title/summary/tags/background 4 个扁平字段,goal/acceptances/deliverables/
-        # constraints 被默默丢弃 → init_execution_graph 挂到历史节点上的 task_spec 是空的。
+        # title/background 扁平字段,goal/acceptances/deliverables/constraints 被默默丢弃
+        # → init_execution_graph 挂到历史节点上的 task_spec 是空的。
         # context 接受两种形式:嵌套 patch.context.{background,constraints}(SKILL
         # 约定)与顶层 background/constraints(扁平兼容)。
         context_patch = patch.get("context")
@@ -777,8 +764,6 @@ class TaskService(GraphStateOpsMixin, BbsLeaseOpsMixin):
             properties={
                 "phase_label": "任务识别",
                 "task_title": meta.title,
-                "task_summary": meta.summary,
-                "tags": list(meta.tags),
             },
         )
         clarify_obj = (

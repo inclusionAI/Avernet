@@ -29,7 +29,6 @@ from agentclaw.community.core.task.domain.models import (
     Task,
     TaskExecutionGraph,
     TaskGoal,
-    TaskSource,
     TaskSpec,
     TaskSpecMetadata,
     GraphStatus,
@@ -97,7 +96,7 @@ def test_graphstatus_edgekind_runmode_collabmode_routeclass_enum_shapes():
 
 def test_task_construct_minimal_execution_graph_none():
     spec = TaskSpec(metadata=TaskSpecMetadata(id="t1", title="fix PR"))
-    task = Task(id="t1", user_id="u1", source=TaskSource.IM, spec=spec)
+    task = Task(id="t1", user_id="u1", spec=spec)
     assert task.execution_graph is None
     assert task.loop_round == 0
     assert task.status is GraphStatus.DRAFTING  # 无图时 delegate 默认 DRAFTING
@@ -233,7 +232,6 @@ def test_models_serializable_via_asdict():
     task = Task(
         id="t1",
         user_id="u1",
-        source=TaskSource.API,
         spec=spec,
         execution_graph=TaskExecutionGraph(
             status=GraphStatus.RUNNING,

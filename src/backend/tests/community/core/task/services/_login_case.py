@@ -9,7 +9,6 @@ from __future__ import annotations
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     AcceptanceCriteriaKind,
-    RunMode,
     SubTaskSpec,
     TaskGoal,
 )
@@ -29,23 +28,23 @@ def goal() -> TaskGoal:
 
 # 顶层分解:3 个并行子任务(真实内容)
 TOP_CHILDREN = [
-    SubTaskSpec(node_id="s_design_api", spec="设计登录API契约(POST /login 入参/出参/错误码)", run_mode=RunMode.SINGLE_BOT),
-    SubTaskSpec(node_id="s_impl_backend", spec="实现后端登录校验逻辑(密码哈希比对+失败计数锁定)", run_mode=RunMode.COOP_GROUP),
-    SubTaskSpec(node_id="s_write_tests", spec="编写登录接口回归测试", run_mode=RunMode.SINGLE_BOT),
+    SubTaskSpec(node_id="s_design_api", spec="设计登录API契约(POST /login 入参/出参/错误码)"),
+    SubTaskSpec(node_id="s_impl_backend", spec="实现后端登录校验逻辑(密码哈希比对+失败计数锁定)"),
+    SubTaskSpec(node_id="s_write_tests", spec="编写登录接口回归测试"),
 ]
 
 # “编写登录接口回归测试”搜推未匹配 → 再分解一层(真实内容)
 TEST_CHILDREN = [
-    SubTaskSpec(node_id="s3_setup_env", spec="搭建测试环境与mock用户数据", run_mode=RunMode.SINGLE_BOT),
-    SubTaskSpec(node_id="s3_write_cases", spec="编写登录成功与失败用例脚本", run_mode=RunMode.SINGLE_BOT),
-    SubTaskSpec(node_id="s3_wire_ci", spec="接入CI跑回归", run_mode=RunMode.SINGLE_BOT),
+    SubTaskSpec(node_id="s3_setup_env", spec="搭建测试环境与mock用户数据"),
+    SubTaskSpec(node_id="s3_write_cases", spec="编写登录成功与失败用例脚本"),
+    SubTaskSpec(node_id="s3_wire_ci", spec="接入CI跑回归"),
 ]
 
 # “实现登录密码哈希比对” reroute 未匹配 → 再分解一层(真实内容,供 E2E-5 reroute-miss)
 HASH_CHILDREN = [
-    SubTaskSpec(node_id="h_hash_fn", spec="实现密码哈希函数(加盐)", run_mode=RunMode.SINGLE_BOT),
-    SubTaskSpec(node_id="h_salt", spec="确定盐值生成与存储策略", run_mode=RunMode.SINGLE_BOT),
-    SubTaskSpec(node_id="h_compare_test", spec="编写哈希比对单测", run_mode=RunMode.SINGLE_BOT),
+    SubTaskSpec(node_id="h_hash_fn", spec="实现密码哈希函数(加盐)"),
+    SubTaskSpec(node_id="h_salt", spec="确定盐值生成与存储策略"),
+    SubTaskSpec(node_id="h_compare_test", spec="编写哈希比对单测"),
 ]
 
 # 真实搜推映射:子任务 → 命中的执行方(BOT_SEARCH 与其 _disp 派发节点都要能搜到)。

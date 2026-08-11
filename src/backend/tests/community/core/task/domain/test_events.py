@@ -93,11 +93,10 @@ def test_next_seq_rejects_negative_latest():
 # --- concrete events shape --------------------------------------------------
 
 def test_task_created_event():
-    ev = TaskCreated(task_id="t1", seq=1, title="fix PR", source="im")
+    ev = TaskCreated(task_id="t1", seq=1, title="fix PR")
     assert ev.kind is EventKind.TASK_CREATED
     assert ev.kind is TASK_CREATED_KIND
     assert ev.title == "fix PR"
-    assert ev.source == "im"
 
 
 def test_task_clarified_merges_payload_and_confirmed_flag():

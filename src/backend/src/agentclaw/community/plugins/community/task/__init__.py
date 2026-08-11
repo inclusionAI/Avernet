@@ -27,7 +27,6 @@ from agentclaw.community.core.task.domain.models import (
     RouteClass,
     RunMode,
     Task,
-    TaskSource,
     TaskSpec,
     TaskSpecMetadata,
 )
@@ -47,13 +46,11 @@ class NoopTaskService(TaskService):
     def progress(self, task_id: str) -> dict:
         return {}
 
-    def create(self, title: str, source: str = "api", background: str = "") -> Task:
-        source_enum = TaskSource(source) if source in {e.value for e in TaskSource} else TaskSource.API
+    def create(self, title: str, background: str = "") -> Task:
         tid = "noop-task"
         return Task(
             id=tid,
             user_id="",
-            source=source_enum,
             spec=TaskSpec(
                 metadata=TaskSpecMetadata(id=tid, title=title),
             ),

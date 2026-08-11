@@ -14,7 +14,6 @@ from agentclaw.community.core.task.domain.models import (
     Node,
     NodeStatus,
     NodeType,
-    RunMode,
     StateSemantics,
     SubTaskSpec,
     SubtaskState,
@@ -55,11 +54,11 @@ class GraphStateOpsMixin:
         self,
         task_id: str,
         node,  # Node | SubTaskSpec
-        parent_node: Optional[str],
         node_type: NodeType,
         executor: str = "",
     ) -> Node:
-        """落图:add_node + (parent_node 非 None 时)add_edge + 建 SubtaskState 分区。"""
+        """落图:append Node + 建 SubtaskState 分区。**不**耦合边:父子依赖由调用方
+        经 ``add_edge`` 单独表达(add_node 单一职责 = 只加节点)。"""
         task = self._task_repo.get_by_id(task_id)
         if task.execution_graph is None:
             raise IllegalTransitionError("graph not initialized")
@@ -68,7 +67,6 @@ class GraphStateOpsMixin:
                 node_id=node.node_id,
                 spec=node.spec,
                 node_type=node_type,
-                run_mode=node.run_mode,
             )
             spec_depth = node.depth
         else:
@@ -83,15 +81,6 @@ class GraphStateOpsMixin:
         # 根 subtask 为 0;递归 children = 父 + 1(decompose_subtasks 已算)。
         if spec_depth:
             st.depth = spec_depth
-        if parent_node:
-            task.execution_graph.edges.append(
-                Edge(
-                    edge_id=f"e-{parent_node}-{new_node.node_id}",
-                    from_node=parent_node,
-                    to_node=new_node.node_id,
-                    kind=EdgeKind.DEPENDENCY,
-                )
-            )
         self._task_repo.save(task)
         return new_node
 
@@ -141,10 +130,12 @@ class GraphStateOpsMixin:
         sub = SubTaskSpec(
             node_id=f"{failed_node_id}_reroute",
             spec=gap_spec,
-            run_mode=RunMode.SINGLE_BOT,
             depth=depth,
         )
-        new_node = self.add_node(task_id, sub, parent, NodeType.BOT_SEARCH)
+        new_node = self.add_node(task_id, sub, NodeType.BOT_SEARCH)
+        # 挂 reroute 兄弟边(parent 为失败节点的父,已 DONE)→ 新节点前驱解锁。
+        if parent:
+            self.add_edge(task_id, parent, new_node.node_id, EdgeKind.DEPENDENCY)
         # 原失败尝试已被 reroute 接管 → 标 superseded(FAILED→DONE),免常驻 FAILED 挡终验。
         fresh = self._task_repo.get_by_id(task_id)
         assert fresh.execution_graph is not None

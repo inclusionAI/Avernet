@@ -52,10 +52,10 @@ def _graph_with_n1(svc: TaskService) -> Task:
     svc.init_execution_graph(task)
     svc.add_node(
         task.id,
-        SubTaskSpec(node_id="n1", spec="a", run_mode=RunMode.SINGLE_BOT),
-        "n_execute_start",
+        SubTaskSpec(node_id="n1", spec="a"),
         NodeType.DISPATCH,
     )
+    svc.add_edge(task.id, "n_execute_start", "n1", EdgeKind.DEPENDENCY)
     return svc.get(task.id)
 
 
@@ -88,11 +88,10 @@ def test_init_execution_graph_attaches_task_content_to_planning_nodes():
     cla = svc._find_node(task, "n_clarify")          # noqa: SLF001
     exe = svc._find_node(task, "n_execute_start")    # noqa: SLF001
 
-    # recognition:任务明细(title/summary/tags)
+    # recognition:任务明细(title)
     assert rec.spec.startswith("任务识别:")
     assert rec.properties.get("phase_label") == "任务识别"
     assert rec.properties.get("task_title") == "t"
-    assert rec.properties.get("task_summary") == "s"
 
     # clarify:任务Spec 五要素
     assert cla.spec.startswith("任务明确:")

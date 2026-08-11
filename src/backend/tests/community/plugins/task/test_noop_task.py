@@ -62,7 +62,7 @@ def test_noop_task_service_query_faces():
 def test_noop_task_service_intake_faces():
     s = NoopTaskService()
     # create returns a Task-shaped object with id + INTAKE status
-    t = s.create(title="x", source="api", background="b")
+    t = s.create(title="x", background="b")
     assert t is not None
     assert getattr(t, "id", None) is not None
     # clarify / clarify(confirmed) are no-ops returning None (no real impl yet)

@@ -11,7 +11,6 @@ from agentclaw.community.core.task.domain.models import (
     RunMode,
     Task,
     TaskExecutionGraph,
-    TaskSource,
     TaskSpec,
     TaskSpecMetadata,
     GraphStatus,
@@ -131,7 +130,6 @@ def test_attempted_executors_not_excluded_from_candidates():
     task = Task(
         id="t1",
         user_id="u1",
-        source=TaskSource.IM,
         spec=TaskSpec(metadata=TaskSpecMetadata(id="t1", title="t")),
         execution_graph=TaskExecutionGraph(status=GraphStatus.RUNNING, nodes=[node]),
     )
@@ -155,7 +153,6 @@ def test_recommend_loads_node_spec_from_repo():
     task = Task(
         id="t2",
         user_id="u1",
-        source=TaskSource.IM,
         spec=TaskSpec(metadata=TaskSpecMetadata(id="t2", title="t")),
         execution_graph=TaskExecutionGraph(status=GraphStatus.RUNNING, nodes=[node]),
     )
@@ -176,7 +173,6 @@ def test_recommend_unknown_node_returns_c2():
     task = Task(
         id="t3",
         user_id="u1",
-        source=TaskSource.IM,
         spec=TaskSpec(metadata=TaskSpecMetadata(id="t3", title="t")),
         execution_graph=TaskExecutionGraph(status=GraphStatus.RUNNING, nodes=[]),
     )

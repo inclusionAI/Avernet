@@ -31,7 +31,7 @@ def _service() -> tuple[TaskService, RecordingPanelPublisher]:
 
 def test_create_yields_task_at_intake_with_root_phase():
     svc, _ = _service()
-    task = svc.create(title="wire goal-driven canvas", source="api", background="bg")
+    task = svc.create(title="wire goal-driven canvas", background="bg")
     assert task.status is GraphStatus.DRAFTING
     assert task.execution_graph is not None
     assert task.execution_graph.status is GraphStatus.DRAFTING
@@ -43,7 +43,7 @@ def test_create_yields_task_at_intake_with_root_phase():
 def test_create_publishes_panel_popup_with_task_id():
     """FR-OBS-11: task creation triggers the副屏 dynamic-DAG canvas popup."""
     svc, pub = _service()
-    task = svc.create(title="t", source="api")
+    task = svc.create(title="t")
     assert len(pub.published) == 1
     msg = pub.published[0]
     assert isinstance(msg, PanelMessage)
@@ -53,7 +53,7 @@ def test_create_publishes_panel_popup_with_task_id():
 
 def test_create_emits_task_created_event_with_monotonic_seq():
     svc, _ = _service()
-    task = svc.create(title="t", source="api")
+    task = svc.create(title="t")
     events = svc._event_repo.load_events(task.id)  # noqa: SLF001
     assert len(events) == 1
     assert events[0].kind is EventKind.TASK_CREATED
@@ -68,12 +68,11 @@ def test_amend_keeps_drafting():
     task = svc.create(title="t")
     amended = svc.clarify(task.id, {"summary": "refined goal"})
     assert amended.status is GraphStatus.DRAFTING
-    assert amended.spec.metadata.summary == "refined goal"
 
 
 def test_clarify_writes_full_task_spec_five_elements():
     """clarify 必须把 skill 识别+澄清产出的五要素(goal/acceptances/deliverables/
-    constraints)写进 task.spec,不能只认 title/summary/tags/background 把其余丢弃。
+    constraints)写进 task.spec,不能只认 title/background 把其余丢弃。
     否则 init_execution_graph 挂到规划节点上的 task_spec 永远是空数组/空串。"""
     from agentclaw.community.core.task.domain.models import (
         AcceptanceCriteriaKind,
@@ -84,7 +83,6 @@ def test_clarify_writes_full_task_spec_five_elements():
     svc, _ = _service()
     task = svc.create(title="修复 PR #1243 命名")
     svc.clarify(task.id, {
-        "summary": "getUsrInfo 命名不符 PRD",
         "background": "PRD §3.2 要求 getUserInfo",
         "goal": {
             "objective": "修复命名 + 对齐 PRD §3.2",
@@ -102,7 +100,6 @@ def test_clarify_writes_full_task_spec_five_elements():
         ],
     })
     spec = svc.get(task.id).spec
-    assert spec.metadata.summary == "getUsrInfo 命名不符 PRD"
     assert spec.context.background == "PRD §3.2 要求 getUserInfo"
     # goal
     assert spec.goal is not None
@@ -180,10 +177,9 @@ def test_intake_loop_P3_close_to_defined():
     """P3 = plan–propose–approve闭环: create → clarify → clarify(confirmed=True)。"""
     svc, _ = _service()
     t = svc.create(title="goal")
-    t = svc.clarify(t.id, {"summary": "s", "tags": ["x"]})
+    t = svc.clarify(t.id, {"summary": "s"})
     t = svc.clarify(t.id, {}, confirmed=True)
     assert t.status is GraphStatus.DEFINED
-    assert t.spec.metadata.tags == ["x"]
 
 
 def test_cancel_from_defined_legal():

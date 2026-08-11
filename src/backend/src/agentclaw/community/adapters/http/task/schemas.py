@@ -16,7 +16,6 @@ from pydantic import BaseModel, Field
 
 class CreateTaskRequest(BaseModel):
     title: str = Field(..., min_length=1, description="Task title (non-empty).")
-    source: str = Field("api", description="Entry channel: im / api / web / bcs.")
     background: str = Field("", description="Optional context background.")
 
 
