@@ -42,6 +42,7 @@ members = [
     "crates/services/bcs-relation",
     "crates/services/bcs-relation-store",
     "crates/services/bcs-user-identity",
+    "crates/services/bcs-auth",
     "crates/services/bcs-proposal",
     "crates/services/bcs-proposal-store",
     "crates/services/bcs-route-security",
@@ -288,6 +289,7 @@ bcs-storage-api            = { path = "crates/plugin-api/bcs-storage-api" }
 bcs-storage-local          = { path = "crates/plugins/bcs-storage-local" }
 bcs-user-directory-api     = { path = "crates/plugin-api/bcs-user-directory-api" }
 bcs-user-identity          = { path = "crates/services/bcs-user-identity" }
+bcs-auth                   = { path = "crates/services/bcs-auth" }
 bcs-auth-api               = { path = "crates/plugin-api/bcs-auth-api" }
 bcs-cache-local            = { path = "crates/plugins/bcs-cache-local" }
 bcs-cache-redis            = { path = "crates/plugins/bcs-cache-redis" }

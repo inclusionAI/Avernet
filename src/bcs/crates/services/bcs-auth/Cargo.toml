@@ -1,0 +1,27 @@
+[package]
+name = "bcs-auth"
+description = "Username/password register + login application service for BCS"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+argon2 = { workspace = true }
+async-trait = { workspace = true }
+bcs-auth-api = { workspace = true }
+bcs-jwt = { workspace = true }
+bcs-service-api = { workspace = true }
+rand = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+bcs-db-local = { workspace = true }
+bcs-test-support = { workspace = true }
+bcs-user-identity = { workspace = true }
