@@ -121,6 +121,7 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
         )
         metadata["timeout"] = chat_send_input.timeout_ms / 1000
         message_text = _extract_message_text(chat_send_input.message)
+        attachments = chat_send_input.attachments
 
         async def _async_deliver() -> None:
             try:
@@ -131,6 +132,7 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
                     metadata=metadata,
                     message_id=chat_send_input.run_id,
                     callback="bcn_uplink",
+                    attachments=attachments,
                 )
                 logger.info(
                     "[chat.send] Message delivered: run_id=%s message_id=%s session_id=%s",

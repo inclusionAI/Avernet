@@ -50,6 +50,20 @@ class DownlinkMessage:
 
 
 @dataclass(slots=True, frozen=True)
+class Attachment:
+    """BCN 下行附件"""
+
+    attachment_id: str
+    type: str
+    file_name: str
+    url: str
+    mime_type: str | None = None
+    size: int | None = None
+    sha256: str | None = None
+    expires_at: int | None = None
+
+
+@dataclass(slots=True, frozen=True)
 class ChatSendInput:
     """chat.send 请求的领域输入"""
 
@@ -61,6 +75,7 @@ class ChatSendInput:
     message: DownlinkMessage
     extensions: dict[str, Any] | None
     timeout_ms: int = 60000
+    attachments: list[Attachment] | None = None
 
 
 @dataclass(slots=True)
@@ -85,6 +100,7 @@ class ChatInjectInput:
     from_ref: FromRef
     message: DownlinkMessage
     timeout_ms: int = 60000
+    attachments: list[Attachment] | None = None
 
 
 @dataclass(slots=True)
