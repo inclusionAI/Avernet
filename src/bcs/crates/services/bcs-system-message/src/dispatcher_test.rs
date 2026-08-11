@@ -247,6 +247,7 @@ async fn dispatch_bot_joined_delivers_to_all_participants() {
             mode: Some(ParticipantMode::Auto),
         },
         session_id: "session-test".to_string(),
+        session_input: None,
     };
 
     let registry = Arc::new(ProviderTargetRegistry::default());
@@ -327,6 +328,7 @@ async fn dispatch_bot_joined_persists_per_recipient_and_ws_shows_notification_on
             mode: Some(ParticipantMode::Auto),
         },
         session_id: "session-test".to_string(),
+        session_input: None,
     };
 
     let registry = Arc::new(ProviderTargetRegistry::default());

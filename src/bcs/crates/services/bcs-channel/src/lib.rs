@@ -344,10 +344,12 @@ impl BcsChannelService {
             )
             .await?;
         if ctx.context_projection == "group" {
-            let reason = group
-                .label
-                .clone()
-                .unwrap_or_else(|| "协作任务".to_string());
+            // bcs-channel's session reason is the group's label (purpose); its
+            // `session.input` is the inbound chat message and `group.context`
+            // is not used as the reason here, so input/context are passed as
+            // None. Empty label → no `目标` line.
+            let reason = bcs_service_api::resolve_session_topic(None, None, group.label.as_deref())
+                .unwrap_or_default();
             match self
                 .system_message
                 .notify(
