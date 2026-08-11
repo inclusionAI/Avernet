@@ -59,6 +59,7 @@ pub struct PrepareSessionFileResult {
     /// URLs and leave direct storage presigned URLs untouched.
     pub upload_target: serde_json::Value,
     pub expires_at: u64,
+    pub proxy_upload: bool,
 }
 
 pub struct UploadSessionFileContent {

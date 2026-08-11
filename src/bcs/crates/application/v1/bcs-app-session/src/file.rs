@@ -302,6 +302,7 @@ impl SessionFileApplicationService for SessionFileApplicationServiceImpl {
             file: project_file(result.file),
             upload_target: result.client_target_json,
             expires_at: result.expires_at,
+            proxy_upload: result.proxy_upload,
         })
     }
 

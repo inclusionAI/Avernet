@@ -23,6 +23,7 @@ thiserror = { workspace = true }
 time = { workspace = true, features = ["parsing"] }
 tracing = { workspace = true }
 ulid = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
