@@ -12,7 +12,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use axum::http::HeaderMap;
 
-use bcs_auth_api::{extract_session_cookie, AuthError, AuthPlugin, AuthPrincipal, UserIdentityPort};
+use bcs_auth_api::{extract_bearer_token, extract_session_cookie, AuthError, AuthPlugin, AuthPrincipal, UserIdentityPort};
 
 use crate::verify::verify_oauth_session;
 
@@ -47,7 +47,7 @@ impl OAuthSessionPlugin {
 #[async_trait]
 impl AuthPlugin for OAuthSessionPlugin {
     fn can_authenticate(&self, headers: &HeaderMap) -> bool {
-        extract_session_cookie(headers).is_some()
+        extract_session_cookie(headers).is_some() || extract_bearer_token(headers).is_some()
     }
 
     async fn authenticate(
