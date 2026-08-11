@@ -32,14 +32,37 @@ class MissingPrincipalError(Exception):
     """
 
 
+class GrantNotResolvableError(Exception):
+    """Raised when an application caller holds no grant for what it addressed (→ 404).
+
+    **The response is byte-identical to a nonexistent bot**, and that is the
+    whole reason this is a distinct type rather than a reused one: it needs its
+    own handler in ``app.py`` — a dependency-raised error never reaches
+    ``@envelope_errors`` — while producing an answer indistinguishable from
+    ``BotNotFoundError``'s. An application must not be able to tell a bot it was
+    not granted from one that does not exist, or the surface becomes an
+    enumeration oracle for every bot id in the tenant.
+
+    ``403`` would be exactly wrong here. On this surface it means "you are
+    authenticated and this is not yours", which *confirms the bot exists* — the
+    one fact the refusal is protecting.
+    """
+
+
 class UserIdMismatchError(Exception):
     """Raised when a request's ``user_id`` is not the verified caller's (→ 403).
 
-    Every user-scoped public operation now names the end user it acts for in a
+    Every user-scoped public operation names the end user it acts for in a
     required ``user_id`` query parameter rather than inferring it from the
-    principal. Until delegation lands (auth design §15) the only user a caller
-    may name is itself, so the parameter must repeat the ``user`` principal's
-    subject id and a disagreement is refused here.
+    principal. For a caller that names an end user, the only user it may name is
+    itself, so the parameter must repeat the ``user`` principal's subject id and
+    a disagreement is refused here.
+
+    An **application** caller reaches none of this: it names no end user to
+    compare against, so its ``user_id`` is authorized against the grant instead
+    (:class:`GrantNotResolvableError`) rather than compared. The two paths are
+    mutually exclusive by construction — a caller either names a user or does
+    not.
 
     401 would be wrong — the caller *is* authenticated — and so would silently
     preferring one of the two values: trusting the parameter would let any

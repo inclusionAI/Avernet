@@ -113,8 +113,69 @@ user_config:
     "/**":
       user: required
 
-    # Sample group — the bots endpoints (explicit, more-specific rule).
+    # The public API. BOTH identities optional, and the table cannot say what is
+    # actually meant here — "at least one of user or app" — so this is the
+    # closest expressible rule plus a backend guard, rather than a loosening.
+    #
+    # Why optional at all: an application may now act for a user it holds a
+    # grant from, with no human on the wire (backend
+    # `adapters/http/openapi_v1/admission.py`). Under `user: required` such a
+    # request never reaches the backend, so the App identity has to be
+    # resolvable and the User has to be allowed to be absent.
+    #
+    # Why `app: optional` rather than omitted: the runner resolves ONLY the
+    # identities a route declares (core/authn/_runner.py). An undeclared App
+    # never reaches the signed principal, so the backend could not tell an
+    # application from an anonymous caller — and every grant check would have
+    # nothing to check against.
+    #
+    # WHAT ENFORCES THE REFUSAL NOW. "Neither identity present" is still
+    # refused, one hop later: the backend's `require_principal` runs on every
+    # public route and answers 401. The refusal MOVED from the edge to the
+    # component; it was not removed. Two consequences worth knowing before
+    # changing anything here: unauthenticated traffic now reaches the backend
+    # before being refused (relevant to edge rate-limiting and to which log it
+    # appears in), and the per-operation decision about which callers are
+    # admitted lives in the backend's admission table, not here.
+    #
+    # This table therefore enumerates the REFUSALS below — the operations that
+    # still require a human — rather than the ~57 that admit a machine caller.
+    # Six rules a reviewer can check against the table beats fifty-seven nobody
+    # will read.
     "/openapi/v1/bots/**":
+      user: optional
+      app: optional
+
+    # ── The refusals: operations that still require a human on the wire ──────
+
+    # Creating a bot. No bot exists yet for a grant to cover, and creation
+    # spends the user's quota.
+    "POST /openapi/v1/bots":
+      user: required
+
+    # Reading and withdrawing authorizations. Withdrawal deliberately does NOT
+    # require an App — an owner must be able to withdraw after the
+    # application's credential is lost or rotated — but it does require a human:
+    # letting an application enumerate or withdraw authorizations on a bot would
+    # let it survey its competitors and unhook them.
+    "GET /openapi/v1/bots/{bot_id}/authorized-apps":
+      user: required
+    "DELETE /openapi/v1/bots/{bot_id}/authorized-apps/{app_id}":
+      user: required
+
+    # MCP *configuration* — account-level state with no bot dimension. A grant
+    # is consent to reach a bot, not to reconfigure an account. (The catalogue
+    # reads under /mcp/servers and /mcp/tenants are a different thing and stay
+    # on the wide rule.)
+    "/openapi/v1/bots/mcp/servers/{server_code}/config":
+      user: required
+    "/openapi/v1/bots/mcp/servers/{server_code}/permissions":
+      user: required
+
+    # The load-test endpoints touch no user's data and are not part of this
+    # feature. Left exactly as they were rather than swept along with the
+    # prefix they happen to sit under.
+    "/openapi/v1/bots/loadtest/**":
       user: required
 
     # Bot Logs can query explicit user/Bot and trace identifiers. Require both
@@ -135,10 +196,13 @@ user_config:
     # (withdraw) on the same prefix deliberately do NOT require an App: an owner
     # must be able to withdraw after the application's credential is lost or
     # rotated, and asking "which apps can reach my bot?" must not depend on
-    # holding any one application's key. Those two inherit `user: required` from
-    # "/openapi/v1/bots/**" above, which is the correct requirement for them —
-    # left to inherit rather than restated, because a second copy is a second
-    # thing to keep in step.
+    # holding any one application's key.
+    #
+    # They DO require a user, and that is now stated explicitly among the
+    # refusals above rather than inherited. It used to fall out of
+    # "/openapi/v1/bots/**"; that rule no longer requires a human, so leaving
+    # these to inherit would have quietly admitted an application to enumerating
+    # and withdrawing the authorizations on a bot.
     "POST /openapi/v1/bots/{bot_id}/authorized-apps":
       user: required
       app: required
@@ -160,8 +224,15 @@ user_config:
     # Sits under /openapi/v1/bots because the gateway resolves an upstream from
     # the segment after the version base; a top-level path here would match no
     # domain and be refused at the edge rather than reaching the backend.
+    # The application's view — "which bots may I reach as this user?".
+    #
+    # `user: optional` since the app-only caller landed: this is the one
+    # operation an integration calls to discover its own scope, and requiring a
+    # human on the wire would make that discoverable only by the very person the
+    # integration exists to act for. The App stays REQUIRED — it is what the
+    # answer is scoped by, not merely permitted.
     "/openapi/v1/bots/authorized":
-      user: required
+      user: optional
       app: required
 
     "/openapi/v1/collaboration/**":
@@ -202,12 +273,14 @@ user_config:
     #
     # `WEBSOCKET` is the method the relay entrypoint authenticates under, so this
     # rule matches a handshake and nothing else. An HTTP GET to the same path
-    # does not match it and falls to "/openapi/v1/bots/**" above — user required.
+    # does not match it and falls to "/openapi/v1/bots/**" above, where both
+    # identities are optional at the edge and the backend's `require_principal`
+    # is what refuses a caller it cannot act for.
     #
     # Pinned to the socket's own `ws` subtree rather than to the whole of
     # `/openapi/v1/bots/messages`, so it exempts exactly the paths the socket
-    # domain below claims. The HTTP endpoints `messages` is reserved for keep the
-    # user requirement they inherit from "/openapi/v1/bots/**", on every plane.
+    # domain below claims. The HTTP endpoints `messages` is reserved for stay on
+    # the wide rule, on every plane.
     "WEBSOCKET /openapi/v1/bots/messages/ws/**": {}
 
   # Domain → upstream-server map for the gateway.

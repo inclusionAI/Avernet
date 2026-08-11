@@ -327,6 +327,7 @@ from agentclaw.community.adapters.http.error_logging import (  # noqa: E402
     params_suffix,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (  # noqa: E402
+    GrantNotResolvableError,
     MissingPrincipalError,
     UserIdMismatchError,
 )
@@ -635,6 +636,39 @@ async def _user_id_mismatch_handler(
     return JSONResponse(
         status_code=403,
         content={"detail": "Forbidden"},
+        headers=_trace_headers(request),
+    )
+
+
+@app.exception_handler(GrantNotResolvableError)
+async def _grant_not_resolvable_handler(
+    request: Request, exc: GrantNotResolvableError,
+) -> JSONResponse:
+    """Answer an application caller with no grant for what it addressed — 404.
+
+    Registered as a concrete type for the same reason as the two handlers above:
+    it is raised in a **dependency**, so ``@envelope_errors`` never sees it.
+
+    **The body must be byte-identical to a nonexistent bot's**, which is why
+    this goes through ``_public_mapped_error`` with the same status rather than
+    composing its own. An application that could tell "not granted" from "no
+    such bot" would have an enumeration oracle for every bot id in the tenant —
+    and the grant check would leak precisely what it exists to protect.
+
+    ``403`` would be exactly wrong: on this surface it means "you are
+    authenticated and this is not yours", which confirms the bot exists.
+    """
+    logger.warning(
+        "[Public 404] %s on %s %s: %s%s",
+        type(exc).__name__, request.method, request.url.path, exc,
+        params_suffix(request),
+    )
+    mapped = _public_mapped_error(request, exc)
+    if mapped is not None:
+        return mapped
+    return JSONResponse(
+        status_code=404,
+        content={"detail": "Not found"},
         headers=_trace_headers(request),
     )
 

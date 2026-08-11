@@ -6,7 +6,7 @@ check_bot_name_exists, generate_bot_id.
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call as mock_call, patch
 
 import pytest
 
@@ -58,6 +58,7 @@ def _make_bot(
 
 def _make_service() -> BotService:
     svc = BotService.__new__(BotService)
+    svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = MagicMock()
     # Default: target bot (bot001) is NOT the owner's earliest (deletion allowed).
     # Earliest-bot protection tests MUST override list_by_owner to make the target earliest.
@@ -418,6 +419,123 @@ class TestDeleteBot:
         svc._repository.get_by_id_and_owner.return_value = None
         with pytest.raises(BotNotFoundError):
             svc.delete_bot("bot001", "user001")
+
+    def test_withdraws_app_authorizations_before_deleting(self):
+        """Deleting a bot means no application can reach it afterwards.
+
+        The gap this closes: grants outlived their bot, so an authorization
+        stayed live against something that no longer existed — and the
+        machine-caller path would have found it.
+        """
+        svc = _make_service()
+        grants = MagicMock()
+        grants.revoke_all_for_bot.return_value = 2
+        svc._bot_app_grant_provider = lambda: grants
+        svc._repository.get_by_id_and_owner.return_value = _make_bot(binding_id=None)
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        assert svc.delete_bot("bot001", "user001") is True
+
+        # Twice, and both for the same bot: once before anything destructive,
+        # once after the soft delete to catch the window between them.
+        assert grants.revoke_all_for_bot.call_count == 2
+        for call in grants.revoke_all_for_bot.call_args_list:
+            assert call == mock_call(bot_id="bot001", owner_id="user001")
+
+    def test_a_grant_that_races_the_deletion_is_swept_afterwards(self):
+        """The window between the first sweep and the soft delete.
+
+        The first sweep commits, then the deletion spends time in the device
+        release and the Passport destruction. A collaborator granting in there
+        inserts a row after the sweep read, and it would outlive the bot.
+
+        The second sweep catches what landed in that window. It does **not**
+        close the race — an earlier version of this docstring claimed it did,
+        on the grounds that no grant can be created once the soft delete
+        commits. That is wrong: the ``is_delete == 0`` filters guard the
+        delegation gate's *resolution*, early in the request, while the row is
+        written later, so a request that already resolved can still insert
+        behind this sweep. The grant path's own liveness recheck bounds the
+        remainder; see ``GrantBotNotLiveError``.
+        """
+        svc = _make_service()
+        grants = MagicMock()
+        swept: list[int] = []
+
+        def _sweep(*, bot_id, owner_id):
+            # First call: nothing yet. Second: the row that raced in.
+            swept.append(len(swept))
+            return 0 if len(swept) == 1 else 1
+
+        grants.revoke_all_for_bot.side_effect = _sweep
+        svc._bot_app_grant_provider = lambda: grants
+        svc._repository.get_by_id_and_owner.return_value = _make_bot(binding_id=None)
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        assert svc.delete_bot("bot001", "user001") is True
+
+        assert grants.revoke_all_for_bot.call_count == 2, "the second sweep ran"
+
+    def test_a_failed_post_deletion_sweep_is_surfaced_not_swallowed(self):
+        """A sweep that could not commit is a failed write, and says so.
+
+        An earlier revision made this best-effort, reasoning that the bot is
+        already deleted so raising reports failure for something that
+        succeeded. That reasoning is real but it loses: `AGENTS.md` requires
+        persistence write failures to propagate rather than be swallowed into a
+        success, and reporting success while the authorization table still
+        holds rows for this bot makes the two disagree with no signal that they
+        do.
+
+        The confusing retry — "no such bot", because the deletion really did
+        happen — is the accepted cost of not returning a wrong answer that
+        nobody can discover later.
+        """
+        svc = _make_service()
+        grants = MagicMock()
+        grants.revoke_all_for_bot.side_effect = [0, RuntimeError("grant store down")]
+        svc._bot_app_grant_provider = lambda: grants
+        svc._repository.get_by_id_and_owner.return_value = _make_bot(binding_id=None)
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        with pytest.raises(BotServiceError):
+            svc.delete_bot("bot001", "user001")
+
+        # The deletion itself did happen — that is precisely why the sequence
+        # is awkward, and why it is worth pinning rather than glossing.
+        svc._repository.soft_delete_by_owner.assert_called_once()
+
+    def test_a_failed_withdrawal_aborts_the_deletion(self):
+        """Never a deleted bot with live authorizations against it.
+
+        Swallowing this would reintroduce the gap quietly, which is worse than
+        the gap: the sweep would look like it ran. It runs before the device
+        release and the passport destruction too, so a failure leaves the bot
+        intact rather than unusable-but-still-reachable.
+        """
+        svc = _make_service()
+        grants = MagicMock()
+        grants.revoke_all_for_bot.side_effect = RuntimeError("grant store down")
+        svc._bot_app_grant_provider = lambda: grants
+        svc._repository.get_by_id_and_owner.return_value = _make_bot(binding_id=None)
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        with pytest.raises(BotServiceError):
+            svc.delete_bot("bot001", "user001")
+
+        svc._repository.soft_delete_by_owner.assert_not_called()
+        svc._passport_plugin.destroy_passport.assert_not_called()
+
+    def test_deleting_an_unauthorized_bot_is_ordinary(self):
+        """No grants is not an error — it is the common case."""
+        svc = _make_service()
+        grants = MagicMock()
+        grants.revoke_all_for_bot.return_value = 0
+        svc._bot_app_grant_provider = lambda: grants
+        svc._repository.get_by_id_and_owner.return_value = _make_bot(binding_id=None)
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        assert svc.delete_bot("bot001", "user001") is True
 
     def test_deletes_bot_without_binding(self):
         svc = _make_service()

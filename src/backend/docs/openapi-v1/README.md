@@ -196,7 +196,7 @@ DDL. Full ruling and per-endpoint mapping in
 | Item | State | Note |
 |---|---|---|
 | Real caller-identity verifier (auth workstream) | ✅ **DONE both halves** — backend PR [#634](https://github.com/inclusionAI/Avernet/pull/634), gateway PR [#599](https://github.com/inclusionAI/Avernet/pull/599) **merged** | `require_principal` + `resolve_avernet_tenant` verify the gateway's signed `X-Avernet-Principal` (HS256, `aud=backend`) and read tenant + owner from it. The wire contract was checked by round-tripping the **real** gateway signer into the **real** backend verifier (2026-08-02): user/bot/app/access_key shapes, secret non-projection, `aud`/`iss` refusal. **A `user` caller works end to end.** What remains is *which* callers are admitted — see the identity-admission row below |
-| **Identity admission: `user` only** | ✅ **DONE 2026-08-02** | `verify_principal_token` refuses an identity set naming no end user, so `bot` / `app` / `access_key` callers get `401` by design rather than by whether a handler asks for the owner. Widening it is delegation (auth design §15), not config. SDD: `specs/2026-08-02-public-api-user-only-principal/` |
+| **Identity admission: `user`, plus `app` under a grant** | ✅ **DONE 2026-08-10** | Widened from user-only (#950). An **application acting alone** — its own credential, no human on the wire — is admitted on the operations placed in an admission group (`adapters/http/openapi_v1/admission.py`), and reaches only what the user who authorized it has authorized it *for*, re-adjudicated per request. `bot` / `access_key` callers are still refused outright at verification. The end-user requirement moved from `verify_principal_token` to `require_principal`, which every public route declares — so an operation absent from the table refuses a machine caller by omission. SDD: `specs/2026-08-10-openapi-v1-app-only-caller/` (earlier: `specs/2026-08-02-public-api-user-only-principal/`) |
 | **No cross-repo test pins the principal wire shape** | ⬜ TODO | Both sides are tested against their own hand-written idea of the payload (`test_verifier.py` builds dicts; the gateway tests its own models). Renaming a field on one side leaves both suites green and 401s production |
 | Tenant-leading indexes (F2, **MANDATORY** policy) | ⬜ TODO | before multi-tenant go-live |
 | Background/scheduled work revisit | ⬜ TODO | before a 2nd tenant holds real data |
@@ -1423,6 +1423,37 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   Full inventory, per-endpoint mapping and the ruling on every non-wrapped
   engine route: **[`engine-surface.md`](engine-surface.md)**. Board moved: Track
   C section added (0 of 6 groups), DoD item 8 added. **Owners still unassigned.**
+- **2026-08-10** — **Identity admission widened: an application may act for a
+  user who authorized it** (#950). A registered application calling with its own
+  credential and **no human on the wire** is now admitted on the operations
+  placed in an admission group, and reaches exactly what the delegating user has
+  authorized it for. Four things worth knowing:
+  1. **The bound is live, not a snapshot.** Nothing about the delegator's
+     authority is stored in the grant, so every request is re-adjudicated by the
+     same gates that person faces. Removing them from a bot ends the
+     application's access on its next request, with the grant row untouched and
+     nothing to clean up. That property is what makes the widening safe, and it
+     has a test of its own.
+  2. **The end-user guard moved, again, and for the mirror-image reason.** It
+     could not stay in `verify_principal_token`: that component is
+     transport-agnostic and runs before routing, and admission is now a
+     *per-operation* question. It sits in `require_principal`, which every public
+     route already declares, and consults `admission.py`. The property that
+     mattered survives — a route inherits the refusal by saying nothing — and
+     gets stronger: an operation absent from the table is refused, so a new route
+     is refused by *omission* rather than by remembering not to opt in.
+  3. **`user_id` stopped being compared and started being authorized.** For a
+     person it still must name themselves (403 otherwise). For an application
+     there is no second id to compare with, so it is checked against the grant —
+     which is the branch `require_user_id`'s docstring predicted when the
+     parameter was introduced. No handler, schema or path changed.
+  4. **Refusals stay indistinguishable.** An application reaching an operation it
+     may not gets the same `401` an unauthenticated caller gets; one naming a bot
+     it holds no grant for gets the same `404` a nonexistent bot gets, byte for
+     byte. Anything finer is an enumeration oracle.
+  `bot` / `access_key` callers remain refused outright — neither can be
+  authorized against a delegation. SDD:
+  `specs/2026-08-10-openapi-v1-app-only-caller/`.
 - **2026-08-02** — **Identity admission decided: `user` only.** `verify_principal_token`
   now refuses an identity set that names no end user, so `bot` / `app` /
   `access_key` callers answer `401` **by design** rather than as a side effect of

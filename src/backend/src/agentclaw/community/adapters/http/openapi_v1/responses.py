@@ -40,12 +40,18 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Page,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
+    GrantNotResolvableError,
     ClusterMismatchError,
     MissingPrincipalError,
     UnsupportedEngineError,
     UserIdMismatchError,
 )
-from agentclaw.community.core.bot_app_grant.errors import GrantNotFoundError
+from agentclaw.community.core.bot_app_grant.errors import (
+    GrantBotNotLiveError,
+    GrantIdentityTooLongError,
+    GrantNotFoundError,
+    GrantOwnerConflictError,
+)
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotInvalidLifecycleStateError,
     BotLimitExceededError,
@@ -181,12 +187,31 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     InvalidBotLogQueryError: (400, "Invalid log query"),
     SessionNotFoundError: (404, "Not found"),
     BotNotFoundError: (404, "Not found"),
+    # Byte-identical to the line above, deliberately. An application that could
+    # tell "I hold no grant for this bot" from "no such bot" would have an
+    # enumeration oracle for every bot id in the tenant, so the refusal must be
+    # the *same* refusal — same status, same message, same envelope.
+    GrantNotResolvableError: (404, "Not found"),
     # Withdrawing an authorization that is not there. Shares the 404 shape with
     # an absent bot, and that is not a collision worth avoiding: an owner
     # reconciling their records needs "there was nothing to remove" to read
     # differently from "removed", which the status already gives them. Which of
     # the two 404s they hit is answerable from the bot's own endpoints.
     GrantNotFoundError: (404, "Not found"),
+    # The bot went away between being resolved and the row being written.
+    # Byte-identical to an absent bot, which is what it now is.
+    GrantBotNotLiveError: (404, "Not found"),
+    # 400, not 404: the delegation is not missing, it is unrepresentable. The
+    # message names no caller-supplied value.
+    GrantIdentityTooLongError: (400, "User id is too long to authorize"),
+    # 409: the request is well-formed and the caller is entitled to it, but it
+    # conflicts with a live authorization on another owner's same-named bot.
+    # Retrying is futile and the remedy is a withdrawal, which is what a
+    # conflict says and a 400 would not.
+    GrantOwnerConflictError: (
+        409,
+        "Another authorization for this bot id is already live",
+    ),
     BotPermissionError: (404, "Not found"),
     BotNameExistsError: (409, "Bot name already exists"),
     BotNameInvalidError: (400, "Invalid bot name"),

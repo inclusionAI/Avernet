@@ -51,6 +51,27 @@ from agentclaw.community.utils.env_utils import get_current_env
 #: recognition. An authorization must not fail because a display name is long.
 APP_NAME_MAX_LENGTH = 1024
 
+#: How long a user id may be for a grant to be *representable*.
+#:
+#: Both user columns are ``VARCHAR(256)`` and cannot grow: they are in the
+#: unique key, which is already at 2392 of InnoDB's 3072 bytes (see the key's
+#: own note). So unlike ``app_name`` above, this is a real limit rather than a
+#: chosen one.
+#:
+#: **And unlike ``app_name``, truncating is not safe here.** That constant's
+#: note gives the reason: truncation is fine precisely *because* ``app_name`` is
+#: not identity. ``user_id`` is — it is the column every app-only request
+#: resolves on — so a truncated value produces a row that no lookup can ever
+#: match, and the application is silently unauthorized forever with a grant
+#: that looks live in every listing.
+#:
+#: The identity boundary genuinely admits longer ids: ``GatewayUser.id`` is an
+#: unconstrained ``str`` and ``require_user_id`` refuses to cap it, deliberately
+#: (capping there would lock a caller out of the whole surface for a value the
+#: gateway accepts). That mismatch is real, and it is resolved by **refusing the
+#: grant loudly at consent time** rather than by writing a row that cannot work.
+IDENTITY_MAX_LENGTH = 256
+
 
 class GrantAction(StrEnum):
     """What a log row records. The live table needs no such enum — existence
@@ -72,6 +93,7 @@ class BotAppGrantRecord(BaseModel):
     app_id: int = Field(..., description="Gateway avernet_application.id")
     app_name: str = Field(..., description="App display name as at consent time")
     bot_id: str = Field(..., description="The authorized bot")
+    user_id: str = Field(..., description="The delegating user, resolved server-side")
     owner_id: str = Field(..., description="Bot owner, resolved server-side")
     avernet_tenant: str = Field(..., description="Data-isolation tenant")
     env: str = Field(..., description="Environment marker")
@@ -81,12 +103,27 @@ class BotAppGrantRecord(BaseModel):
 class BotAppGrantModel(Base):
     """Live grants only — one row iff the app may reach the bot right now.
 
+    A row means **"app A may act as user U on bot B, which O owns"**. The two
+    user columns are two different people whenever the bot is shared, and
+    collapsing them was the first design mistake this table made:
+
+    - ``user_id`` is the **delegating user** — whose access is being lent. It is
+      the key column, because the delegation is theirs.
+    - ``owner_id`` is the bot's **owner**, denormalized so the machine-caller
+      path can address the bot without a second lookup. It may name someone who
+      has never heard of the application.
+
     ``app_id`` is the gateway's ``avernet_application.id``, not a token, so an
     authorization survives the app rotating its credential.
 
-    ``owner_id`` is the bot's **resolved** owner, written at consent time. The
-    later machine-caller path reads ownership from here rather than from the
-    request, which is what keeps a borrowed handle from widening scope.
+    **Nothing about the delegator's authority is stored here** — no permission
+    level, no capability list — and that absence is the design. The bound on
+    what the application may do is the delegator's *live* access, re-adjudicated
+    on every request by the same collaborator gate the human faces. A snapshot
+    taken at consent time would go stale in the dangerous direction: it would
+    keep answering "yes" after the delegator was removed from the bot. Because
+    nothing is copied, losing that access ends the application's access on the
+    next request, with no revocation and nothing to clean up.
     """
 
     __tablename__ = "ac_bot_app_grant"
@@ -103,6 +140,17 @@ class BotAppGrantModel(Base):
         String(1024), nullable=False, comment="app display name, snapshotted at consent"
     )
     bot_id = Column(String(256), nullable=False, comment="the authorized bot")
+    # The delegating user. In the unique key, so it is held at 256 for the same
+    # reason ``owner_id`` is — see the key's own note.
+    #
+    # The DDL pins ``COLLATE utf8mb4_bin`` on this column and the ORM does not,
+    # which is not drift but the only portable option: the local runtime is
+    # SQLite, which has no such collation and would fail ``create_all``. Every
+    # comparison on this column is against a bound parameter rather than another
+    # column, so the two runtimes agree regardless.
+    user_id = Column(
+        String(256), nullable=False, comment="delegating user, resolved server-side"
+    )
     owner_id = Column(
         String(256), nullable=False, comment="bot owner, resolved server-side"
     )
@@ -130,32 +178,53 @@ class BotAppGrantModel(Base):
         # ``ac_bot_collaborator``.
         #
         # No ``bot_pk``: ``bot_id`` alone is not unique across owners, but
-        # ``bot_id`` + ``owner_id`` carries the same uniqueness without putting
-        # a surrogate key into a record the public surface returns.
+        # ``bot_id`` + a user id carries the same uniqueness without putting a
+        # surrogate key into a record the public surface returns.
+        #
+        # ``user_id`` and **not** ``owner_id``, for two independent reasons.
+        #
+        # Semantics: uniqueness is per delegation, and a delegation belongs to
+        # the person making it. Two collaborators may each authorize the same
+        # app for the same bot; those are two separate loans of two separate
+        # authorities, independently withdrawable. Keyed on ``owner_id`` they
+        # would collide, and the idempotent grant path would silently swallow
+        # the second as "already live" — handing the second user an application
+        # bounded by the *first* user's access.
+        #
+        # Budget: the key is 2392 bytes (``avernet_tenant`` 64x4 + ``app_id`` 8
+        # + ``bot_id`` 256x4 + one user id 256x4 + ``env`` 20x4). Carrying both
+        # user columns would be 3416, past InnoDB's 3072-byte cap — the same
+        # wall that holds these columns at 256 characters in the first place. So
+        # this was never a choice between one and both.
         UniqueConstraint(
             "avernet_tenant",
             "app_id",
             "bot_id",
-            "owner_id",
+            "user_id",
             "env",
             name="uk_bot_app_grant_scope",
         ),
-        # The app's view — "which of this owner's bots may I reach?". Not
-        # redundant with the unique key above: that key reaches ``bot_id``
-        # before ``owner_id``, so it cannot serve a lookup that names no bot.
+        # The app's view — "which bots may I reach as this user?". Not redundant
+        # with the unique key above: that key reaches ``bot_id`` before
+        # ``user_id``, so it cannot serve a lookup that names no bot.
         Index(
-            "idx_bot_app_grant_app_owner",
+            "idx_bot_app_grant_app_user",
             "avernet_tenant",
             "app_id",
-            "owner_id",
+            "user_id",
             "env",
         ),
-        # The owner's view — "which apps can reach this bot?". Needs its own
-        # index for the same reason, mirrored: the unique key and the index
-        # above both put ``app_id`` immediately after the tenant, and a B-tree
-        # cannot reach the later columns without an ``app_id`` predicate. This
-        # listing supplies none, so without this it degrades into a
-        # tenant-wide scan as grants accumulate.
+        # The bot's view — "which apps can reach this bot, and who let them in?".
+        # Needs its own index for the same reason, mirrored: the unique key and
+        # the index above both put ``app_id`` immediately after the tenant, and
+        # a B-tree cannot reach the later columns without an ``app_id``
+        # predicate. This listing supplies none, so without this it degrades
+        # into a tenant-wide scan as grants accumulate.
+        #
+        # Its ``(avernet_tenant, bot_id)`` prefix now serves two reads that name
+        # no delegating user either — the owner's cross-delegator listing and
+        # the sweep that revokes every grant when a bot is deleted — which is
+        # why ``owner_id`` staying in it costs nothing and it needs no rekeying.
         Index(
             "idx_bot_app_grant_bot_owner",
             "avernet_tenant",
@@ -172,6 +241,7 @@ class BotAppGrantModel(Base):
             app_id=self.app_id,
             app_name=self.app_name,
             bot_id=self.bot_id,
+            user_id=self.user_id,
             owner_id=self.owner_id,
             avernet_tenant=self.avernet_tenant,
             env=self.env,
@@ -198,6 +268,11 @@ class BotAppGrantLogModel(Base):
     app_id = Column(AutoIncrementBigInteger, nullable=False)
     app_name = Column(String(1024), nullable=False)
     bot_id = Column(String(256), nullable=False)
+    # Free to add, unlike on the live table: this one has no unique key by
+    # design, so nothing here is constrained by a byte budget. "Who let this
+    # application in, and when" has to stay answerable after the live row is
+    # gone — which is exactly when this table is read.
+    user_id = Column(String(256), nullable=False)
     owner_id = Column(String(256), nullable=False)
     action = Column(
         String(32), nullable=False, comment=f"{GrantAction.GRANTED} | {GrantAction.REVOKED}"

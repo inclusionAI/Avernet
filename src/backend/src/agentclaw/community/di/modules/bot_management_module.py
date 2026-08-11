@@ -48,6 +48,9 @@ from agentclaw.community.core.bot_management.render_screen.services.render_scree
     RenderScreenService,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRestartLockRepositoryProtocol
+from agentclaw.community.core.bot_app_grant.services import (
+    BotAppGrantService,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.bot import TemplateRepository
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
@@ -281,6 +284,10 @@ class BotManagementModule(Module):
             oss_record_repo=oss_record_repo,
             bot_publish_service_provider=bot_publish_service_provider,
             device_service_provider=device_service_provider,
+            # Lazy for symmetry with the providers above, not for a cycle:
+            # BotAppGrantService reaches only repositories. Resolved on demand
+            # so bot deletion is the only thing that pays for it.
+            bot_app_grant_service_provider=lambda: injector.get(BotAppGrantService),
             path_factory=path_factory,
             template_service=template_service,
             # DIMA hosting is corp-only — resolve optionally (None in community).

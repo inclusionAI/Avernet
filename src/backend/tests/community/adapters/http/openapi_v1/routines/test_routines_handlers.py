@@ -12,6 +12,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Page,
     PageParams,
 )
+from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.routines.router import (
     _map_routine,
     _map_run,
@@ -30,6 +31,15 @@ from agentclaw.community.adapters.http.openapi_v1.routines.schemas import (
     RoutineUpdate,
     ScheduleTrigger,
 )
+
+
+def _human(user_id: str) -> ActingCaller:
+    """A caller with a person on the wire, so no grant governs the request.
+
+    ``app_id=None`` is what makes ``require_bot`` a no-op — the same thing that
+    keeps every human request off the grant path in production.
+    """
+    return ActingCaller(user_id=user_id, app_id=None)
 
 
 def _request_without_trace() -> SimpleNamespace:
@@ -306,6 +316,7 @@ async def test_create_routine_returns_201_envelope():
     env = await create_routine(
         body=body,
         owner_id="u1",
+        caller=_human("u1"),
         factory=service,
         request=_request_without_trace(),
     )
@@ -335,6 +346,7 @@ async def test_create_routine_uses_body_bot_id_for_owner_and_call():
     await create_routine(
         body=body,
         owner_id="u1",
+        caller=_human("u1"),
         factory=service,
         request=_request_without_trace(),
     )
@@ -363,6 +375,7 @@ async def test_create_routine_passes_schedule_as_cron_string():
     await create_routine(
         body=body,
         owner_id="u1",
+        caller=_human("u1"),
         factory=service,
         request=_request_without_trace(),
     )
@@ -389,6 +402,7 @@ async def test_create_routine_defaults_timezone_when_null():
     await create_routine(
         body=body,
         owner_id="u1",
+        caller=_human("u1"),
         factory=service,
         request=_request_without_trace(),
     )
@@ -410,6 +424,7 @@ async def test_create_routine_reads_x_trace_id_from_request():
     env = await create_routine(
         body=body,
         owner_id="u1",
+        caller=_human("u1"),
         factory=service,
         request=request,
     )
@@ -431,6 +446,7 @@ async def test_create_routine_500_when_service_returns_no_data():
         await create_routine(
             body=body,
             owner_id="u1",
+            caller=_human("u1"),
             factory=service,
             request=_request_without_trace(),
         )
