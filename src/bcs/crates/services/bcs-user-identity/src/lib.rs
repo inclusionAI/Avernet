@@ -187,7 +187,7 @@ impl UserIdentityRepoPort for DbUserIdentityStore {
             .query(DbStatement::with_params(sql, vec![DbValue::from(token)]))
             .await
             .ok()
-            .and_then(|rows| rows.first().map(|r| row_to_display_identity(r)))
+            .and_then(|rows| rows.first().map(row_to_display_identity))
     }
 
     async fn get_by_user_id_display(&self, user_id: &str) -> Option<UserIdentity> {
@@ -197,7 +197,7 @@ impl UserIdentityRepoPort for DbUserIdentityStore {
             .query(DbStatement::with_params(sql, vec![DbValue::from(user_id)]))
             .await
             .ok()
-            .and_then(|rows| rows.first().map(|r| row_to_display_identity(r)))
+            .and_then(|rows| rows.first().map(row_to_display_identity))
     }
 
     async fn update_token(

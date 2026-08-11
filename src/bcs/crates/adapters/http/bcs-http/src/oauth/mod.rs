@@ -421,12 +421,11 @@ pub async fn logout_handler(
     State(state): State<Arc<OAuthRouteState>>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    if let Some(jwt) = extract_session_cookie(&headers).or_else(|| extract_bearer_token(&headers)) {
-        if let Ok(claims) = state.jwt_service.verify(&jwt) {
-            if let Err(e) = state.user_port.update_token(&claims.sub, "", 0).await {
-                warn!(error = %e, user_id = %claims.sub, "logout: token revocation failed");
-            }
-        }
+    if let Some(jwt) = extract_session_cookie(&headers).or_else(|| extract_bearer_token(&headers))
+        && let Ok(claims) = state.jwt_service.verify(&jwt)
+        && let Err(e) = state.user_port.update_token(&claims.sub, "", 0).await
+    {
+        warn!(error = %e, user_id = %claims.sub, "logout: token revocation failed");
     }
     let cookie = clear_session_cookie(state.config.cookie_secure);
     (StatusCode::OK, [("set-cookie", cookie)])
