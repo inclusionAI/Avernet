@@ -89,6 +89,7 @@ class BotService(Protocol):
         context: BotChatContext | None = None,
         timeout: float,
         chat_metadata: dict[str, str] | None = None,
+        attachments: list[Any] | None = None,
     ) -> BotResponse:
         """发送消息并获取响应
 
@@ -111,6 +112,7 @@ class BotService(Protocol):
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         timeout: float,
+        attachments: list[Any] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """流式发送消息，返回 StreamChunk 迭代器。
 
@@ -126,6 +128,7 @@ class BotService(Protocol):
         message: str,
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
+        attachments: list[Any] | None = None,
     ) -> None:
         """注入消息到已有会话
 
@@ -250,6 +253,7 @@ class MessageDispatcher(Protocol):
         bot_id: str = "",
         callback: Any = None,
         chat_metadata: dict[str, str] | None = None,
+        attachments: list[Any] | None = None,
     ) -> None:
         """分发消息发送以进行异步执行
 
@@ -283,6 +287,7 @@ class MessageDispatcher(Protocol):
         context: BotChatContext | None = None,
         timeout: float,
         bot_id: str = "",
+        attachments: list[Any] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """流式消息发送分发，返回 StreamChunk 迭代器。
 
@@ -304,6 +309,7 @@ class MessageDispatcher(Protocol):
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         bot_id: str = "",
+        attachments: list[Any] | None = None,
     ) -> None:
         """分发消息注入以进行异步执行
 

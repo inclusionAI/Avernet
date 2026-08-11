@@ -181,6 +181,7 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
         metadata["timeout"] = chat_send_input.timeout_ms / 1000
         metadata["stream"] = "true"
         message_text = _extract_message_text(chat_send_input.message)
+        attachments = chat_send_input.attachments
 
         (
             _run_id,
@@ -192,6 +193,7 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
             context=context,
             metadata=metadata,
             message_id=chat_send_input.run_id,
+            attachments=attachments,
         )
 
         return stream_iter
@@ -228,6 +230,7 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
             request_type="inject",
         )
         message_text = _extract_message_text(chat_inject_input.message)
+        attachments = chat_inject_input.attachments
 
         async def _async_inject() -> None:
             try:
@@ -237,6 +240,7 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
                     context=context,
                     metadata=metadata,
                     message_id=chat_inject_input.id,
+                    attachments=attachments,
                 )
                 logger.info(
                     "[chat.inject] Message injected: id=%s message_id=%s session_id=%s",
