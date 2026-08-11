@@ -16,6 +16,7 @@ bcs-domain = { workspace = true }
 bcs-message = { workspace = true }
 bcs-service-api = { workspace = true }
 serde_json = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 bcs-bot = { workspace = true }
@@ -28,7 +29,11 @@ bcs-group-store = { workspace = true }
 bcs-message-store = { workspace = true }
 bcs-relation = { workspace = true }
 bcs-session = { workspace = true }
+bcs-session-file = { workspace = true }
+bcs-session-file-store = { workspace = true }
 bcs-session-store = { workspace = true }
+bcs-storage-api = { workspace = true }
 bcs-test-support = { workspace = true }
+bytes = { workspace = true }
 tokio = { workspace = true }
 time = { workspace = true }

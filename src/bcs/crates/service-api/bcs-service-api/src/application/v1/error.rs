@@ -8,6 +8,8 @@ pub enum ApplicationError {
     #[error("forbidden: {0}")]
     Forbidden(String),
     #[error("{code}: {message}")]
+    ForbiddenCode { code: String, message: String },
+    #[error("{code}: {message}")]
     NotFound { code: String, message: String },
     #[error("{code}: {message}")]
     Conflict { code: String, message: String },
@@ -35,6 +37,13 @@ impl ApplicationError {
 
     pub fn forbidden(message: impl Into<String>) -> Self {
         Self::Forbidden(message.into())
+    }
+
+    pub fn forbidden_code(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::ForbiddenCode {
+            code: code.into(),
+            message: message.into(),
+        }
     }
 
     pub fn not_found(code: impl Into<String>, message: impl Into<String>) -> Self {
@@ -88,6 +97,7 @@ impl ApplicationError {
             | Self::BadGateway { code, .. } => code,
             Self::Unauthenticated => "unauthenticated",
             Self::Forbidden(_) => "forbidden",
+            Self::ForbiddenCode { code, .. } => code,
             Self::Internal(_) => "internal_error",
         }
     }

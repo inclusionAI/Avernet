@@ -72,6 +72,9 @@ pub fn application_error_response(
             "forbidden".to_string(),
             message,
         ),
+        ApplicationError::ForbiddenCode { code, message } => {
+            (StatusCode::FORBIDDEN, 40_300, code, message)
+        }
         ApplicationError::NotFound { code, message } => {
             (StatusCode::NOT_FOUND, 40_400, code, message)
         }

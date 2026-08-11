@@ -494,11 +494,16 @@ dependencies = [
  "bcs-relation",
  "bcs-service-api",
  "bcs-session",
+ "bcs-session-file",
+ "bcs-session-file-store",
  "bcs-session-store",
+ "bcs-storage-api",
  "bcs-test-support",
+ "bytes",
  "serde_json",
  "time",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
