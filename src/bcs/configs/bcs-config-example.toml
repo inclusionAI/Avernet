@@ -194,6 +194,10 @@ idle_timeout_minutes = 30
 base_url = "https://bcs.example.com"
 cookie_secure = true
 
+# Password-only login: set jwt_secret (and idle_timeout_minutes/cookie_secure)
+# without any [auth.oauth.providers.*] entry, and include "oauth_session" in
+# [auth].chain. POST /auth/register and POST /auth/login then mount and issue
+# bcs_session JWTs (cookie + Authorization Bearer) verifiable by oauth_session.
 [auth.oauth.providers.github]
 kind = "github"
 client_id = "replace-with-github-client-id"

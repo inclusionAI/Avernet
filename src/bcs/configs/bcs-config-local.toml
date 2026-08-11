@@ -143,11 +143,21 @@ use_remote_login_check = false
 enabled = false
 
 [auth]
-chain = ["local", "session"]
+chain = ["local", "oauth_session"]
 require_authentication = false
-mock_user_id = "000000"
+# mock_user_id intentionally unset: a config mock_user_id makes LocalAuthPlugin
+# (priority 5) authenticate every request and shadow oauth_session (priority
+# 25), preventing password sessions from resolving. keep allow_mock_headers so
+# X-Mock-User-Id can still opt in to a mock identity when needed.
 mock_user_name = "guest"
 allow_mock_headers = true
+
+[auth.oauth]
+jwt_secret = "local-development-only-token-secret"
+idle_timeout_minutes = 30
+cookie_secure = false
+# base_url empty: no OAuth providers configured locally, password-only.
+base_url = ""
 
 [bcsfuse]
 enabled = false
