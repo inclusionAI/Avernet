@@ -149,6 +149,7 @@ require_authentication = false
 # (priority 5) authenticate every request and shadow oauth_session (priority
 # 25), preventing password sessions from resolving. keep allow_mock_headers so
 # X-Mock-User-Id can still opt in to a mock identity when needed.
+mock_user_id = "000000"
 mock_user_name = "guest"
 allow_mock_headers = true
 
