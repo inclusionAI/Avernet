@@ -375,6 +375,90 @@ def test_bot_logs_routes_require_user_and_app_principal():
     assert not missing, f"Bot Logs routes not gated by User+App: {missing}"
 
 
+_AUTHORIZED_APPS_PREFIX = "/openapi/v1/bots/{bot_id}/authorized-apps"
+_AUTHORIZED_BOTS_PATH = "/openapi/v1/bots/authorized"
+
+
+def test_granting_a_bot_authorization_requires_user_and_app_principal():
+    """Granting is a consent moment, so both parties must be on the request.
+
+    Walks the dependency tree rather than trusting the gateway rule: the
+    ``route_security`` entry and this dependency are two independent nets, and
+    this one catches a handler that forgets the dependency even when the config
+    is right.
+    """
+    routes = [
+        route
+        for route in _api_routes(build_public_router())
+        if route.path == _AUTHORIZED_APPS_PREFIX and "POST" in route.methods
+    ]
+    assert routes, "no grant route found"
+
+    missing = [
+        f"{sorted(route.methods)} {route.path}"
+        for route in routes
+        if not _depends_on(route.dependant, require_user_and_app_principal)
+    ]
+    assert not missing, f"grant route not gated by User+App: {missing}"
+
+
+def test_application_view_requires_user_and_app_principal():
+    """Load-bearing beyond auth: the App is what the listing is *scoped by*.
+
+    The handler reads ``app_id`` off this principal to filter the query. A
+    missing dependency here would not merely weaken a check — it would leave
+    the listing with nothing to scope on, which widens a result set rather than
+    refusing it.
+    """
+    routes = [
+        route
+        for route in _api_routes(build_public_router())
+        if route.path == _AUTHORIZED_BOTS_PATH
+    ]
+    assert routes, "no application-view route found"
+
+    missing = [
+        f"{sorted(route.methods)} {route.path}"
+        for route in routes
+        if not _depends_on(route.dependant, require_user_and_app_principal)
+    ]
+    assert not missing, f"application view not gated by User+App: {missing}"
+
+
+def test_listing_and_withdrawing_authorizations_need_only_the_owner():
+    """The asymmetry that makes a withdrawal worth having.
+
+    An owner must be able to withdraw after the application's credential is
+    lost or rotated, and must be able to ask "which apps can reach my bot?"
+    without holding any application's key. Both still require an authenticated
+    caller — that is ``require_principal``, asserted surface-wide above.
+    """
+    owner_only = [
+        route
+        for route in _api_routes(build_public_router())
+        if route.path.startswith(_AUTHORIZED_APPS_PREFIX)
+        and ("GET" in route.methods or "DELETE" in route.methods)
+    ]
+    assert len(owner_only) == 2, f"expected list + withdraw, got {owner_only}"
+
+    over_gated = [
+        f"{sorted(route.methods)} {route.path}"
+        for route in owner_only
+        if _depends_on(route.dependant, require_user_and_app_principal)
+    ]
+    assert not over_gated, (
+        "these must NOT require an App identity — an owner has to reach them "
+        f"without one: {over_gated}"
+    )
+
+    ungated = [
+        f"{sorted(route.methods)} {route.path}"
+        for route in owner_only
+        if not _depends_on_require_principal(route.dependant)
+    ]
+    assert not ungated, f"routes not gated by require_principal: {ungated}"
+
+
 def _api_routes(router) -> list:
     """Every real route under ``router``, flattening included sub-routers.
 

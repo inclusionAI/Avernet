@@ -2600,7 +2600,7 @@ async fn manager_worker_task_result_records_independent_manager_run_context() {
 }
 
 #[tokio::test]
-async fn manager_worker_task_final_persists_worker_final_and_manager_result_history() {
+async fn manager_worker_task_final_suffix_snapshot_persists_only_after_tool_result() {
     let (support, repo, flow) = manager_worker_flow_with_repo().await;
 
     let dispatch = flow
@@ -2681,7 +2681,7 @@ async fn manager_worker_task_final_persists_worker_final_and_manager_result_hist
             "state": "final",
             "message": {
                 "role": "assistant",
-                "content": [{"type": "text", "text": "analysis before tool. answer after tool"}],
+                "content": [{"type": "text", "text": "analysis before tool.\n\nanswer after tool"}],
             },
         }),
         state: ChatEventState::Final,

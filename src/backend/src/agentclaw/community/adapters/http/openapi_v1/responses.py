@@ -45,6 +45,7 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
     UnsupportedEngineError,
     UserIdMismatchError,
 )
+from agentclaw.community.core.bot_app_grant.errors import GrantNotFoundError
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotInvalidLifecycleStateError,
     BotLimitExceededError,
@@ -180,6 +181,12 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     InvalidBotLogQueryError: (400, "Invalid log query"),
     SessionNotFoundError: (404, "Not found"),
     BotNotFoundError: (404, "Not found"),
+    # Withdrawing an authorization that is not there. Shares the 404 shape with
+    # an absent bot, and that is not a collision worth avoiding: an owner
+    # reconciling their records needs "there was nothing to remove" to read
+    # differently from "removed", which the status already gives them. Which of
+    # the two 404s they hit is answerable from the bot's own endpoints.
+    GrantNotFoundError: (404, "Not found"),
     BotPermissionError: (404, "Not found"),
     BotNameExistsError: (409, "Bot name already exists"),
     BotNameInvalidError: (400, "Invalid bot name"),

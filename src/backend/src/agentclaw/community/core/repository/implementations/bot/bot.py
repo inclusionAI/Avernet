@@ -290,6 +290,20 @@ class BotRepository(
             )
             return total, [b.to_dict() for b in bots]
 
+    def list_live_bot_ids_by_owner(self, owner_id: str) -> List[str]:
+        """Every live ``bot_id`` for this owner, in a single id-only query."""
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(self.Model.bot_id)
+                .filter(
+                    self.Model.is_delete == 0,
+                    self.Model.owner_id == owner_id,
+                    self._env(),
+                )
+                .all()
+            )
+            return [row[0] for row in rows]
+
     def list_by_owner_or_collaborator(
         self, owner_id: str, page: int = 1, page_size: int = 20
     ) -> tuple[int, List[Dict[str, Any]]]:

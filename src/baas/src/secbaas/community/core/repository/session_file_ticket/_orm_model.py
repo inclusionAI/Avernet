@@ -42,7 +42,13 @@ class SessionFileTicketModel(Base):
     __table_args__ = (
         UniqueConstraint("transfer_id", name="uk_tid"),
         Index("idx_env_tnt_sid", "env", "tenant", "session_id"),
-        Index("idx_env_tnt_dir", "env", "tenant", "staging_subdir"),
+        Index(
+            "idx_env_tnt_dir",
+            "env",
+            "tenant",
+            "staging_subdir",
+            mysql_length={"staging_subdir": 512},
+        ),
     )
 
     def to_record(self) -> SessionTicketRecord:

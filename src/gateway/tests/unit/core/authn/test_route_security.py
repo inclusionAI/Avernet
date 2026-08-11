@@ -96,6 +96,64 @@ def test_collaboration_socket_exemption_does_not_reach_the_http_plane() -> None:
     assert req[PrincipalType.USER] is Presence.REQUIRED
 
 
+_AUTHORIZED_APPS_PATH = "/openapi/v1/bots/bot-123/authorized-apps"
+_AUTHORIZED_BOTS_PATH = "/openapi/v1/bots/authorized"
+
+
+def test_shipped_config_requires_user_and_app_to_grant_a_bot_authorization() -> None:
+    """Granting is a consent moment, so both parties must be on the wire.
+
+    The rule is method-qualified and sits under the globbed
+    ``/openapi/v1/bots/**``; it wins because a glob-free pattern outranks a
+    globbed one before literal count is compared. Asserted against the shipped
+    config rather than a fixture table, so a typo in what actually deploys
+    fails here.
+    """
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    req = rs.resolve("POST", _AUTHORIZED_APPS_PATH)
+    assert req is not None
+    assert req[PrincipalType.USER] is Presence.REQUIRED
+    assert req[PrincipalType.APP] is Presence.REQUIRED
+
+
+def test_shipped_config_lets_the_owner_list_and_withdraw_without_an_app() -> None:
+    """The asymmetry that makes a withdrawal worth having.
+
+    An owner must be able to withdraw after the application's credential is
+    lost or rotated, and must be able to ask "which apps can reach my bot?"
+    without holding any application's key. Both inherit ``user: required`` from
+    ``/openapi/v1/bots/**`` — this pins that the POST rule above did not drag
+    them along with it.
+    """
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    for method, path in (
+        ("GET", _AUTHORIZED_APPS_PATH),
+        ("DELETE", f"{_AUTHORIZED_APPS_PATH}/42"),
+    ):
+        req = rs.resolve(method, path)
+        assert req is not None, (method, path)
+        assert req[PrincipalType.USER] is Presence.REQUIRED, (method, path)
+        assert PrincipalType.APP not in req, (method, path)
+
+
+def test_shipped_config_requires_user_and_app_for_the_application_view() -> None:
+    """The App here is not just required, it is what the answer is scoped by.
+
+    The runner resolves only the identities a route declares, so were this rule
+    to lose ``app``, the upstream would never see the App principal and its
+    query would have nothing to filter on. That failure would widen a listing
+    rather than break it, which is why it is pinned.
+    """
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    req = rs.resolve("GET", _AUTHORIZED_BOTS_PATH)
+    assert req is not None
+    assert req[PrincipalType.USER] is Presence.REQUIRED
+    assert req[PrincipalType.APP] is Presence.REQUIRED
+
+
 def test_more_specific_rule_wins() -> None:
     rs = RouteSecurity.from_table(
         {

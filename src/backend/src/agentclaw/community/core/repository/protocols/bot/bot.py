@@ -103,6 +103,21 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
+    def list_live_bot_ids_by_owner(self, owner_id: str) -> list[str]:
+        """Every live ``bot_id`` this owner has, in one query.
+
+        Unpaginated and id-only on purpose: it exists so a caller holding a set
+        of bot ids can drop the dead ones without issuing a lookup per id.
+        Returning ids rather than rows keeps that cheap even for an owner with
+        many bots.
+
+        Scoped by current env AND tenant, like its siblings, and excludes
+        soft-deleted rows — so "in this list" means "live for this owner right
+        now".
+        """
+        ...
+
+    @abstractmethod
     def list_by_owner_or_collaborator(
         self, owner_id: str, page: int = 1, page_size: int = 20
     ) -> tuple[int, List[Dict[str, Any]]]:
