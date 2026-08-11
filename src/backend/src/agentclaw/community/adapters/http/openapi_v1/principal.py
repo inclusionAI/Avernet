@@ -456,16 +456,35 @@ def _addressed_owner(request: Request, caller_id: str) -> str:
 def _defers_to_its_handler(request: Request) -> bool:
     """Whether this operation resolves its own bot, per ``admission.py``.
 
-    An allow-list read from the table rather than a shape test, and the seven
-    break a shape test from both sides. "The request carries no ``bot_id``"
-    over-matches five of them — it equally describes every mistake that would
-    look like them, a renamed parameter or a route placed in a grant-checked
-    mode by accident — and it misses the other two entirely, since the
-    owner-addressed pair carry a ``bot_id`` and defer anyway, because the owner
-    they act on arrives under a parameter of its own.
+    :func:`require_granted_bot` needs the addressed bot to look a grant up, and
+    reads it off the path or query string. Seven operations do not put it
+    where it can be seen, so the check moves into their handlers:
 
-    Naming them means a mistake is refused while the seven are served, and that
-    the exception list cannot grow by accident: adding to it is an edit to a
+    - ``POST /bots/routines`` — the bot id is in the **request body**. A shared
+      dependency would have to consume and re-buffer the raw stream and know
+      this operation's field name, which is per-operation knowledge it exists
+      not to have.
+    - the four ``skills/{skill_id}`` routes — the request names a **skill**.
+      Which bot it belongs to is only known after reading the skill record.
+    - ``GET /bots/skills`` and ``POST /bots/skills/upload`` — these *do* carry a
+      ``bot_id``, but they act on ``owner_entity_id or actor_id``, so the bot
+      they address is not the one a generic reader would infer.
+
+    **Deferring is about *where* the check runs, never *whether*.** All seven
+    stay in grant-checked modes, and the inventory test asserts it, so they
+    cannot quietly become exempt.
+
+    **An allow-list rather than a shape test**, because "the request carries no
+    ``bot_id``" is wrong in both directions. It over-matches the first five: it
+    equally describes every mistake that would look like them — a renamed
+    parameter, a route placed in a grant-checked mode by accident — and would
+    wave those through unchecked, where naming the seven sends them to the
+    refusal below. And it misses the last two entirely, since they do carry a
+    ``bot_id``; a shape test would let the shared dependency check them against
+    the caller's own bot instead of the owner the handler acts on, which is
+    exactly the defect review found on this group.
+
+    So the exception list cannot grow by accident: adding to it is an edit to a
     table the inventory test reads.
     """
     route = request.scope.get("route")
