@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from secbaas.community.api.bcn import Attachment
 from secbaas.community.api.bot_runtime import (
     BotBindingInfo,
     BotChatContext,
@@ -782,3 +783,73 @@ class TestBuildMetadata:
         assert "session_id" not in result
         assert result["app_id"] == "app-1"
         assert result["request_type"] == "chat"
+
+
+class TestEnqueueWorkWithAttachments:
+    """Tests for _enqueue_work meta dict including/omitting attachments."""
+
+    @pytest.mark.asyncio
+    async def test_enqueue_work_includes_attachments_in_meta(self):
+        """meta dict includes 'attachments' key when attachments are provided."""
+        d = _make_dispatcher()
+        att1 = Attachment(
+            attachment_id="att_1",
+            type="image",
+            file_name="f1.png",
+            url="https://cdn.example.com/f1",
+        )
+        att2 = Attachment(
+            attachment_id="att_2",
+            type="document",
+            file_name="f2.pdf",
+            url="https://cdn.example.com/f2",
+        )
+        await d.dispatch_send(
+            bot_service=MagicMock(),
+            run_id="r1",
+            session_id="s1",
+            message="hello",
+            binding_info=_make_binding_info(),
+            timeout=30,
+            bot_id="bot-1",
+            attachments=[att1, att2],
+        )
+        d._queue_repository.insert_queue.assert_called_once()
+        call_kwargs = d._queue_repository.insert_queue.call_args.kwargs
+        meta = call_kwargs["meta"]
+
+        assert "attachments" in meta
+        assert len(meta["attachments"]) == 2
+
+        # Verify serialization format: list of dict (dataclasses.asdict output)
+        assert isinstance(meta["attachments"][0], dict)
+        assert meta["attachments"][0]["attachment_id"] == "att_1"
+        assert meta["attachments"][0]["type"] == "image"
+        assert meta["attachments"][0]["file_name"] == "f1.png"
+        assert meta["attachments"][0]["url"] == "https://cdn.example.com/f1"
+
+        assert isinstance(meta["attachments"][1], dict)
+        assert meta["attachments"][1]["attachment_id"] == "att_2"
+
+        # Verify existing meta fields still present
+        assert meta["request_type"] == "chat"
+        assert "bot_options" in meta
+
+    @pytest.mark.asyncio
+    async def test_enqueue_work_no_attachments_when_none(self):
+        """meta dict does not include 'attachments' key when attachments is None."""
+        d = _make_dispatcher()
+        await d.dispatch_send(
+            bot_service=MagicMock(),
+            run_id="r1",
+            session_id="s1",
+            message="hello",
+            binding_info=_make_binding_info(),
+            bot_id="bot-1",
+            attachments=None,
+        )
+        d._queue_repository.insert_queue.assert_called_once()
+        call_kwargs = d._queue_repository.insert_queue.call_args.kwargs
+        meta = call_kwargs["meta"]
+
+        assert "attachments" not in meta
