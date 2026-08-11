@@ -1,13 +1,18 @@
-"""Default-capability engine-bucket routing."""
+"""Default-capability engine-bucket routing helpers.
+
+The common MCP/CLI defaults layer is engine-agnostic: it normalizes public
+engine spelling, then delegates bucket overrides to the engine registry. Engine
+modules contribute their own resolver implementations from that registry rather
+than branching here on engine-name literals.
+"""
 from __future__ import annotations
 
 from typing import Any
 
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
-
-_AICODING_ENGINE_TYPE = "aicoding"
-_CLAUDE_CODE_ENGINE_TYPE = "claude_code"
-_NORMAL_CC_TEMPLATE_TYPE = "normalcc"
+from agentclaw.community.core.bot_management.engines.registry import (
+    resolve_default_capabilities_engine_bucket,
+)
 
 
 def normalize_raw_engine_type(
@@ -38,29 +43,13 @@ def normalize_engine_type(
     *,
     default: str = DEFAULT_ENGINE_TYPE,
 ) -> str:
-    """Normalize to the engine bucket used by default MCP/CLI capabilities.
-
-    The bucket policy is intentionally the same one exposed by
-    :func:`resolve_default_capabilities_engine_type`, and follows the BaaS
-    routing rule:
-    * explicit ``aicoding`` uses the AICoding bucket;
-    * ``claude_code`` with a non-empty template type other than ``normalCC``
-      reuses the AICoding bucket;
-    * otherwise use the normalized engine type.
-    """
+    """Normalize to the engine bucket used by default MCP/CLI capabilities."""
     normalized_engine = normalize_raw_engine_type(engine_type, default=default)
-    if normalized_engine == _AICODING_ENGINE_TYPE:
-        return _AICODING_ENGINE_TYPE
-
-    if normalized_engine == _CLAUDE_CODE_ENGINE_TYPE:
-        normalized_template_type = normalize_template_type(template_type)
-        if (
-            normalized_template_type
-            and normalized_template_type != _NORMAL_CC_TEMPLATE_TYPE
-        ):
-            return _AICODING_ENGINE_TYPE
-
-    return normalized_engine
+    normalized_template_type = normalize_template_type(template_type) or None
+    return resolve_default_capabilities_engine_bucket(
+        engine_type=normalized_engine,
+        template_type=normalized_template_type,
+    )
 
 
 def resolve_default_capabilities_engine_type(

@@ -12,6 +12,9 @@ from typing import Any, Dict, List, Mapping, Optional
 from agentclaw.community.core.default_capabilities import (
     resolve_default_capabilities_engine_type,
 )
+from agentclaw.community.core.bot_management.engines.registry import (
+    get_mcp_defaults_resolver_registry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -144,21 +147,6 @@ class _EngineMcpDefaultsResolver:
 _DEFAULT_MCP_RESOLVER = _EngineMcpDefaultsResolver()
 
 
-def _build_mcp_default_resolvers_by_engine() -> dict[str, _EngineMcpDefaultsResolver]:
-    # Import engine-specific implementations here so the common MCP defaults
-    # module only owns the abstraction and dispatch.
-    from agentclaw.community.core.aicoding.mcp_defaults import (
-        AicodingMcpDefaultsResolver,
-    )
-
-    return {
-        "aicoding": AicodingMcpDefaultsResolver(),
-    }
-
-
-_MCP_DEFAULT_RESOLVERS_BY_ENGINE = _build_mcp_default_resolvers_by_engine()
-
-
 def _resolve_default_mcp_engine_bucket(
     engine_type: Optional[str],
     template_type: Any = None,
@@ -169,8 +157,11 @@ def _resolve_default_mcp_engine_bucket(
     )
 
 
-def _mcp_defaults_resolver(engine_bucket: str) -> _EngineMcpDefaultsResolver:
-    return _MCP_DEFAULT_RESOLVERS_BY_ENGINE.get(engine_bucket, _DEFAULT_MCP_RESOLVER)
+def _mcp_defaults_resolver(engine_bucket: str):
+    return (
+        get_mcp_defaults_resolver_registry().resolve(engine_bucket)
+        or _DEFAULT_MCP_RESOLVER
+    )
 
 
 def get_default_mcp_servers(

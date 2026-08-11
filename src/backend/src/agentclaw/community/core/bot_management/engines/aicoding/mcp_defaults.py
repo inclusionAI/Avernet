@@ -3,13 +3,12 @@ from __future__ import annotations
 
 from typing import Any, List, Mapping, Optional
 
-from agentclaw.community.core.aicoding.default_capabilities import (
+from agentclaw.community.core.bot_management.engines.aicoding.default_capabilities import (
     AicodingDefaultCapabilitiesExtInfo,
 )
-from agentclaw.community.core.mcp.services._defaults import _EngineMcpDefaultsResolver
 
 
-class AicodingMcpDefaultsResolver(_EngineMcpDefaultsResolver):
+class AicodingMcpDefaultsResolver:
     """Resolve effective default MCPs for AICoding bots.
 
     AICoding templates may preset MCP capabilities at
@@ -22,7 +21,7 @@ class AicodingMcpDefaultsResolver(_EngineMcpDefaultsResolver):
         default_servers: List[dict],
         ext_info: Optional[Mapping[str, Any]] = None,
     ) -> List[dict]:
-        servers = super().resolve(default_servers, ext_info)
+        servers = [dict(cfg) for cfg in default_servers]
         positions = {
             cfg.get("server_code"): idx
             for idx, cfg in enumerate(servers)

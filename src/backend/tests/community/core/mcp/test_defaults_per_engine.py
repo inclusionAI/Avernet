@@ -64,16 +64,18 @@ def test_aicoding_has_its_own_list():
     servers = get_default_mcp_servers("aicoding")
     codes = [s["server_code"] for s in servers]
     assert isinstance(servers, list)
-    assert len(servers) == 10
+    assert len(servers) == 19
     assert "mcp.ant.arkai.assistantmcpserver" in codes
     assert "mcp.ant.arkai.dimamcpserver" in codes
     assert "mcp.ant.faas.aixjiter.AixCodingMemoryMCP" in codes
     assert "mcp.ant.rgmcpserver.rgfastcheckmcpserver" in codes
+    assert "mcp.ant.antcodemcp.code.mcpserver" in codes
+    assert "mcp.ant.antprocessai.anttaskmcp" in codes
     assert BCS_MCP_SERVER_CODE in codes
     assert "hitl" in codes
-    # Trimmed servers must no longer be in the aicoding defaults.
+    assert "clawmind" in codes
+    # Removed legacy server must no longer be in the aicoding defaults.
     assert "mcp.ant.secaibase.secknowledgemcpserver" not in codes
-    assert "mcp.ant.antcodemcp.code.mcpserver" not in codes
     # No duplicate entries (dimamcpserver was previously listed twice).
     assert len(codes) == len(set(codes))
     # Different list object from openclaw — no accidental sharing.
@@ -88,11 +90,11 @@ def test_hitl_is_default_for_mcp_enabled_engines():
     assert "hitl" not in get_default_mcp_server_codes("moltis")
 
 
-def test_clawmind_is_default_for_claude_code_only():
+def test_clawmind_is_default_for_coding_engines():
     assert "clawmind" in get_default_mcp_server_codes("claude_code")
+    assert "clawmind" in get_default_mcp_server_codes("aicoding")
     assert "clawmind" not in get_default_mcp_server_codes("openclaw")
     assert "clawmind" not in get_default_mcp_server_codes("hermes")
-    assert "clawmind" not in get_default_mcp_server_codes("aicoding")
 
 
 def test_bcs_mcp_is_default_for_mcp_enabled_engines():
@@ -355,9 +357,9 @@ def test_claude_code_coding_template_uses_aicoding_mcp_bucket():
         ext_info=ext_info,
     )
 
-    assert "mcp.ant.agentix.112858.aixAicoding" in codes
+    assert "mcp.ant.antcodemcp.code.mcpserver" in codes
     assert "mcp.ant.custom.template.server" in codes
-    assert "clawmind" not in codes
+    assert "clawmind" in codes
 
 
 def test_claude_code_template_factory_non_normal_uses_aicoding_mcp_bucket():
@@ -379,9 +381,9 @@ def test_claude_code_template_factory_non_normal_uses_aicoding_mcp_bucket():
         ext_info=ext_info,
     )
 
-    assert "mcp.ant.agentix.112858.aixAicoding" in codes
+    assert "mcp.ant.antcodemcp.code.mcpserver" in codes
     assert "mcp.ant.custom.template.server" in codes
-    assert "clawmind" not in codes
+    assert "clawmind" in codes
 
 
 def test_claude_code_normal_template_keeps_claude_mcp_bucket():
