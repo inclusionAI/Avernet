@@ -910,12 +910,12 @@ class TestShouldCleanupChunks:
         dispatcher = _dispatcher_with_config(config_service=mock_service)
         assert dispatcher._should_cleanup_chunks() is True
 
-    def test_config_none_returns_false(self):
-        """When config record does not exist (None), cleanup is disabled."""
+    def test_config_none_returns_true(self):
+        """When config record does not exist (None), cleanup is enabled by default."""
         mock_service = MagicMock()
         mock_service.get_config.return_value = None
         dispatcher = _dispatcher_with_config(config_service=mock_service)
-        assert dispatcher._should_cleanup_chunks() is False
+        assert dispatcher._should_cleanup_chunks() is True
 
     def test_config_value_empty_returns_false(self):
         """When conf_value is empty string, cleanup is disabled."""
@@ -938,12 +938,12 @@ class TestShouldCleanupChunks:
         dispatcher = _dispatcher_with_config(config_service=mock_service)
         assert dispatcher._should_cleanup_chunks() is False
 
-    def test_config_read_exception_returns_false(self):
-        """When get_config raises, cleanup is disabled (fail-safe)."""
+    def test_config_read_exception_returns_true(self):
+        """When get_config raises, cleanup is enabled by default (fail-open)."""
         mock_service = MagicMock()
         mock_service.get_config.side_effect = RuntimeError("db down")
         dispatcher = _dispatcher_with_config(config_service=mock_service)
-        assert dispatcher._should_cleanup_chunks() is False
+        assert dispatcher._should_cleanup_chunks() is True
 
 
 # ----------------------------- accepts -----------------------------
