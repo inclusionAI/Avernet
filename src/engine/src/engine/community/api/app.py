@@ -88,6 +88,9 @@ from engine.community.api.models import router as models  # noqa: E402
 from engine.community.api.resource_materialization import (  # noqa: E402
     router as resource_materialization_router,
 )
+from engine.community.core.resource_materialization.service import (  # noqa: E402
+    ResourceMaterializationService,
+)
 from engine.community.api.session_files import router as session_files_router  # noqa: E402
 from engine.community.api.node import router as node  # noqa: E402
 from engine.community.api.skills import router as skills_router  # noqa: E402
@@ -317,10 +320,13 @@ def _get_openclaw_modules(engine: str | None = None):
 async def websocket_endpoint_default(
     websocket: WebSocket,
     auth_gate_service: AuthGateService = Injected(AuthGateService),
+    resource_materialization_service: ResourceMaterializationService = Injected(
+        ResourceMaterializationService
+    ),
 ):
     """WebSocket entrypoint — dispatches through the engine-agnostic server."""
     from engine.community.api.transport.ws_server import get_server
-    server = get_server()
+    server = get_server(resource_materialization_service)
     log.info(f"[ws] Using engine: {EngineManager.get_instance().engine}")
     await server.handle_connection(websocket, auth_gate_service=auth_gate_service)
 
@@ -330,6 +336,9 @@ async def websocket_endpoint(
     websocket: WebSocket,
     engine: str,
     auth_gate_service: AuthGateService = Injected(AuthGateService),
+    resource_materialization_service: ResourceMaterializationService = Injected(
+        ResourceMaterializationService
+    ),
 ):
     """WebSocket entrypoint — path-pinned to a specific engine. Rejects if the
     pinned engine isn't currently active on the manager."""
@@ -342,7 +351,7 @@ async def websocket_endpoint(
         )
         return
     from engine.community.api.transport.ws_server import get_server
-    server = get_server()
+    server = get_server(resource_materialization_service)
     log.info(f"[ws] Using engine from path: {engine}")
     await server.handle_connection(websocket, auth_gate_service=auth_gate_service)
 

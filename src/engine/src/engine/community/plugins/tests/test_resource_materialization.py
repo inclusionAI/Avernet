@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import httpx
 import pytest
 
 from engine.community.core.resource_materialization.models import (
+    ChatAttachmentMaterializationRequest,
     MaterializationRequest,
 )
 from engine.community.plugins.resource_materialization import (
+    HttpTemporaryUrlPullClient,
     SessionFileBaasMaterializationClient,
 )
 
@@ -49,7 +52,9 @@ async def test_session_pull_uses_share_link_and_never_forwards_control_headers(
                 200,
                 json={
                     "code": 0,
-                    "data": {"share_url": "https://oss.example/object?signature=redacted"},
+                    "data": {
+                        "share_url": "https://oss.example/object?signature=redacted"
+                    },
                 },
             )
         assert request.url.host == "oss.example"
@@ -94,3 +99,50 @@ async def test_session_pull_rejects_non_allowlisted_share_host_before_download(
         await client.pull(_request(), tmp_path / "download.part")
 
     assert [request.method for request in requests] == ["POST"]
+
+
+@pytest.mark.asyncio
+async def test_temporary_url_pull_checks_host_dns_and_size(tmp_path: Path):
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "files.example"
+        return httpx.Response(200, content=b"file-bytes")
+
+    client = HttpTemporaryUrlPullClient(
+        allowed_hosts=frozenset({"files.example"}),
+        max_bytes=32,
+        transport=httpx.MockTransport(handler),
+    )
+    request = ChatAttachmentMaterializationRequest(
+        attachment_id="att-1",
+        session_key="session-1",
+        filename="file.txt",
+        temporary_url="https://files.example/object?token=secret",
+        scope_key_hash="a" * 64,
+    )
+    destination = tmp_path / "file.part"
+
+    with patch(
+        "engine.community.plugins.resource_materialization.socket.getaddrinfo",
+        return_value=[(2, 1, 6, "", ("93.184.216.34", 443))],
+    ):
+        await client.pull(request, destination)
+
+    assert destination.read_bytes() == b"file-bytes"
+
+
+@pytest.mark.asyncio
+async def test_temporary_url_pull_rejects_non_allowlisted_host(tmp_path: Path):
+    client = HttpTemporaryUrlPullClient(
+        allowed_hosts=frozenset({"files.example"}),
+        transport=httpx.MockTransport(lambda request: httpx.Response(200)),
+    )
+    request = ChatAttachmentMaterializationRequest(
+        attachment_id="att-1",
+        session_key="session-1",
+        filename="file.txt",
+        temporary_url="https://blocked.example/object",
+        scope_key_hash="a" * 64,
+    )
+
+    with pytest.raises(ValueError, match="untrusted temporary URL"):
+        await client.pull(request, tmp_path / "file.part")

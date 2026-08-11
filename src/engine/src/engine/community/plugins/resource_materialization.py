@@ -1,8 +1,12 @@
 """Fail-closed materialization transports used until external contracts bind."""
+
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import ipaddress
 import logging
+import socket
 from collections.abc import Mapping
 from pathlib import Path
 from urllib.parse import quote, urlsplit
@@ -11,6 +15,7 @@ import aiofiles
 import httpx
 
 from engine.community.core.resource_materialization.models import (
+    ChatAttachmentMaterializationRequest,
     MaterializationRequest,
     MaterializationResult,
 )
@@ -25,6 +30,15 @@ class NotConfiguredBaasMaterializationClient:
         destination: Path,
     ) -> None:
         raise RuntimeError("baas_materialization_not_configured")
+
+
+class NotConfiguredTemporaryUrlPullClient:
+    async def pull(
+        self,
+        request: ChatAttachmentMaterializationRequest,
+        destination: Path,
+    ) -> None:
+        raise RuntimeError("temporary_url_pull_not_configured")
 
 
 class SessionFileBaasMaterializationClient:
@@ -72,11 +86,14 @@ class SessionFileBaasMaterializationClient:
         # COSEC: OSS is a separately authenticated presigned-URL hop. A fresh
         # client prevents BaaS internal credentials from crossing that boundary.
         timeout = httpx.Timeout(connect=10.0, read=3600.0, write=30.0, pool=30.0)
-        async with httpx.AsyncClient(
-            timeout=timeout,
-            follow_redirects=False,
-            transport=self._transport,
-        ) as client, client.stream("GET", share_url) as response:
+        async with (
+            httpx.AsyncClient(
+                timeout=timeout,
+                follow_redirects=False,
+                transport=self._transport,
+            ) as client,
+            client.stream("GET", share_url) as response,
+        ):
             response.raise_for_status()
             async with aiofiles.open(destination, "wb") as stream:
                 async for chunk in response.aiter_bytes():
@@ -137,6 +154,119 @@ class SessionFileBaasMaterializationClient:
     @staticmethod
     def _transfer_hash(transfer_id: str) -> str:
         return hashlib.sha256(transfer_id.encode("utf-8")).hexdigest()[:16]
+
+
+class HttpTemporaryUrlPullClient:
+    """Guarded downloader for provider-issued, short-lived chat URLs."""
+
+    def __init__(
+        self,
+        *,
+        allowed_hosts: frozenset[str],
+        max_bytes: int = 100 * 1024 * 1024,
+        timeout_seconds: float = 60.0,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        if not allowed_hosts:
+            raise ValueError("temporary URL allowed_hosts is required")
+        if max_bytes <= 0 or timeout_seconds <= 0:
+            raise ValueError("temporary URL limits must be positive")
+        self._allowed_hosts = {
+            host.strip().lower() for host in allowed_hosts if host.strip()
+        }
+        if not self._allowed_hosts:
+            raise ValueError("temporary URL allowed_hosts is required")
+        self._max_bytes = max_bytes
+        self._timeout_seconds = timeout_seconds
+        self._transport = transport
+
+    async def pull(
+        self,
+        request: ChatAttachmentMaterializationRequest,
+        destination: Path,
+    ) -> None:
+        host, port = self._validate_url(request.temporary_url)
+        resolved_ips = await self._resolve_public_ips(host, port)
+        timeout = httpx.Timeout(
+            connect=min(self._timeout_seconds, 10.0),
+            read=self._timeout_seconds,
+            write=30.0,
+            pool=30.0,
+        )
+        # COSEC: the capability host is exact-allowlisted, all current DNS
+        # answers are public, credentials are forbidden, and redirects are
+        # disabled so an unvalidated second hop cannot reach an internal host.
+        async with (
+            httpx.AsyncClient(
+                timeout=timeout,
+                follow_redirects=False,
+                transport=self._transport,
+            ) as client,
+            client.stream("GET", request.temporary_url) as response,
+        ):
+            response.raise_for_status()
+            if self._transport is None:
+                network_stream = response.extensions.get("network_stream")
+                peer = (
+                    network_stream.get_extra_info("server_addr")
+                    if network_stream is not None
+                    else None
+                )
+                if (
+                    not isinstance(peer, tuple)
+                    or not peer
+                    or str(peer[0]) not in resolved_ips
+                ):
+                    raise ValueError("temporary URL peer address could not be verified")
+            content_length = response.headers.get("content-length")
+            if content_length is not None:
+                try:
+                    declared_size = int(content_length)
+                except ValueError as exc:
+                    raise ValueError("invalid temporary URL content length") from exc
+                if declared_size > self._max_bytes:
+                    raise ValueError("temporary URL response exceeds size limit")
+            observed = 0
+            async with aiofiles.open(destination, "wb") as stream:
+                async for chunk in response.aiter_bytes():
+                    observed += len(chunk)
+                    if observed > self._max_bytes:
+                        raise ValueError("temporary URL response exceeds size limit")
+                    await stream.write(chunk)
+
+    def _validate_url(self, value: str) -> tuple[str, int]:
+        parsed = urlsplit(value)
+        host = parsed.hostname.lower() if parsed.hostname else ""
+        if (
+            parsed.scheme != "https"
+            or not host
+            or host not in self._allowed_hosts
+            or parsed.username is not None
+            or parsed.password is not None
+        ):
+            raise ValueError("untrusted temporary URL")
+        return host, parsed.port or 443
+
+    @staticmethod
+    async def _resolve_public_ips(host: str, port: int) -> frozenset[str]:
+        try:
+            addresses = await asyncio.to_thread(
+                socket.getaddrinfo,
+                host,
+                port,
+                type=socket.SOCK_STREAM,
+            )
+        except OSError as exc:
+            raise ValueError("temporary URL host could not be resolved") from exc
+        if not addresses:
+            raise ValueError("temporary URL host could not be resolved")
+        resolved: set[str] = set()
+        for address in addresses:
+            ip = ipaddress.ip_address(address[4][0])
+            if not ip.is_global:
+                raise ValueError("temporary URL host resolved to a non-public address")
+            resolved.add(str(ip))
+        return frozenset(resolved)
 
 
 class NotConfiguredBackendMaterializationCallbackClient:

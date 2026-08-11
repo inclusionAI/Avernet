@@ -133,7 +133,9 @@ class SessionFileService:
         if availability != "ready" or canonical is None:
             raise SessionFileError(f"resource_{availability}")
         requires_upload = (
-            size_bytes != entry.size_bytes or content_hash != entry.content_hash
+            entry.source_kind != "baas_session_file"
+            or size_bytes != entry.size_bytes
+            or content_hash != entry.content_hash
         )
         log.info(
             "engine.session_files.export.source resource_id=%s size_bytes=%s requires_upload=%s",

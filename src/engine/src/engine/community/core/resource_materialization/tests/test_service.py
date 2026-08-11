@@ -8,11 +8,13 @@ from unittest.mock import patch
 import pytest
 
 from engine.community.core.resource_materialization.models import (
+    ChatAttachmentMaterializationRequest,
     MaterializationRequest,
 )
 from engine.community.core.resource_materialization.service import (
     ResourceMaterializationService,
     ResourceNotMaterializedError,
+    build_session_file_relative_path,
 )
 
 
@@ -34,6 +36,57 @@ class _CallbackClient:
 
     async def report(self, result) -> None:
         self.results.append(result)
+
+
+def test_session_file_path_builder_matches_backend_layout():
+    relative = build_session_file_relative_path(
+        scope_key_hash="a" * 64,
+        session_key_hash="b" * 64,
+        resource_id="sr_contract",
+        filename="design.pdf",
+    )
+
+    assert relative.as_posix() == (
+        f".teamclaw/session-files/{'a' * 64}/{'b' * 64}/sr_contract/design.pdf"
+    )
+
+
+@pytest.mark.asyncio
+async def test_chat_attachment_reuses_materializer_without_backend_callback(
+    tmp_path: Path,
+):
+    content = b"design"
+    pull = _PullClient(content)
+    callback = _CallbackClient()
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(b"unused"),
+        callback_client=callback,
+        temporary_url_pull_client=pull,
+        workspace_root_provider=lambda: tmp_path,
+    )
+    request = ChatAttachmentMaterializationRequest(
+        attachment_id="att-1",
+        session_key="session-1",
+        filename="design.pdf",
+        temporary_url="https://files.example/temporary?secret=redacted",
+        scope_key_hash="a" * 64,
+        size_bytes=len(content),
+        content_hash=hashlib.sha256(content).hexdigest(),
+    )
+
+    result = await service.materialize_chat_attachment(request)
+
+    assert result.ready is True
+    assert callback.results == []
+    entry = service.manifest_store.get(result.resource_id)
+    assert entry is not None
+    assert entry.source_kind == "temporary_url"
+    assert entry.source_attachment_id == "att-1"
+    assert (
+        entry.source_url_hash
+        == hashlib.sha256(request.temporary_url.encode("utf-8")).hexdigest()
+    )
+    assert request.temporary_url not in service.manifest_store.path.read_text()
 
 
 class _FailingCallbackClient:

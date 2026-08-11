@@ -2224,12 +2224,17 @@ async fn frame_for_target(
     );
     let context_projection =
         context_projection_for_delivery(flow, group, cmd.session_id.as_deref()).await;
-    let wire_attachments = cmd.attachments.as_ref().map(|attachments| {
-        attachments
+    let wire_attachments = cmd.attachments.as_ref().and_then(|attachments| {
+        let attachments = attachments
             .iter()
+            .filter(|attachment| {
+                target.delivery_type == DeliveryType::Send
+                    || attachment.attachment_type != bcs_domain::AttachmentType::File
+            })
             .cloned()
             .map(WireAttachment::from)
-            .collect()
+            .collect::<Vec<_>>();
+        (!attachments.is_empty()).then_some(attachments)
     });
     match target.delivery_type {
         DeliveryType::Send => {
