@@ -86,6 +86,9 @@ skills-lock.json
 # Private/local API exports and release artifacts
 aideskdop_bcs*.json
 *.tgz
+/reports/avernet_star_rd_team_cache.json
+/reports/avernet_star_growth.html
+/reports/avernet_star_traffic*.json
 
 # Local dependency checkouts
 src/bcs/submodules/

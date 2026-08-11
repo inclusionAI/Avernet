@@ -91,11 +91,6 @@ def github_api(path: str, token: str) -> object:
         ) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace").strip()
-        if detail:
-            raise RuntimeError(
-                f"GitHub API failed: HTTP {exc.code} {exc.reason}: {detail[:500]}"
-            ) from exc
         raise RuntimeError(f"GitHub API failed: HTTP {exc.code} {exc.reason}") from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f"GitHub API failed: {exc.reason}") from exc
@@ -140,11 +135,6 @@ def github_api_paginated(path: str, token: str) -> list[object]:
                     next_url = section[start + 1 : end]
                     break
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace").strip()
-            if detail:
-                raise RuntimeError(
-                    f"GitHub API failed: HTTP {exc.code} {exc.reason}: {detail[:500]}"
-                ) from exc
             raise RuntimeError(f"GitHub API failed: HTTP {exc.code} {exc.reason}") from exc
         except urllib.error.URLError as exc:
             raise RuntimeError(f"GitHub API failed: {exc.reason}") from exc
@@ -155,33 +145,27 @@ def github_api_paginated(path: str, token: str) -> list[object]:
 
 def load_rd_team(roster_path: Path) -> dict[str, str]:
     if not roster_path.is_file():
-        raise RuntimeError(f"Local RD roster not found: {roster_path}")
+        raise RuntimeError("Local RD roster not found")
     try:
         payload = json.loads(roster_path.read_text(encoding="utf-8"))
     except OSError as exc:
-        raise RuntimeError(f"Local RD roster could not be read: {roster_path}") from exc
+        raise RuntimeError("Local RD roster could not be read") from exc
     except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Local RD roster is invalid JSON: {roster_path}") from exc
+        raise RuntimeError("Local RD roster is invalid JSON") from exc
     if not isinstance(payload, dict) or not payload:
-        raise RuntimeError(
-            f"Local RD roster must be a non-empty JSON object: {roster_path}"
-        )
+        raise RuntimeError("Local RD roster must be a non-empty JSON object")
 
     rd_team: dict[str, str] = {}
     for login, nickname in payload.items():
         if not isinstance(login, str) or not login.strip():
-            raise RuntimeError(
-                f"Local RD roster contains an invalid GitHub login: {login!r}"
-            )
+            raise RuntimeError("Local RD roster contains an invalid GitHub login")
         if not isinstance(nickname, str) or not nickname.strip():
-            raise RuntimeError(
-                f"Local RD roster contains an invalid nickname for {login!r}"
-            )
+            raise RuntimeError("Local RD roster contains an invalid nickname")
         normalized_login = login.strip().lower()
         normalized_nickname = nickname.strip()
         if normalized_login in rd_team:
             raise RuntimeError(
-                f"Local RD roster contains a duplicate GitHub login: {normalized_login}"
+                "Local RD roster contains duplicate GitHub logins after normalization"
             )
         rd_team[normalized_login] = normalized_nickname
     return rd_team

@@ -27,7 +27,7 @@ concurrency:
 env:
   METRICS_BRANCH: automation/avernet-star-metrics
   SKILL_REF: 52c9e6d34efd40e6d808a1c086d3c75b5004e687
-  SKILL_STATS_SHA256: b2f53373ffb08efcb8f87db7262ceb941e97c187da8b2c6f099bc28f0b3ca283
+  SKILL_STATS_SHA256: ec4aa7bf435ef72cdd5025eb421cb5bfa443ef20250bd34aae035a4ba30f3ed7
   SKILL_RENDER_SHA256: 333a1801475d79b21011beb305f3ea9842721242291860a7f71ddff341412f74
 
 jobs:
@@ -138,7 +138,7 @@ jobs:
           python3 scripts/ci/vendor/avernet-star-daily/generate_star_image.py \
             --repo-root candidate \
             --csv reports/avernet_star_daily.csv \
-            --output reports/avernet_star_growth.png
+            --output reports/avernet_star_growth.png > /dev/null
 
       - name: Validate candidate artifacts
         env:
@@ -147,16 +147,32 @@ jobs:
           python3 scripts/ci/avernet_star_report.py validate \
             --csv candidate/reports/avernet_star_daily.csv \
             --png candidate/reports/avernet_star_growth.png \
-            --expected-date "$REPORT_DATE" \
-            --output-json candidate/validation.json
+            --expected-date "$REPORT_DATE"
 
       - name: Upload candidate artifacts
         uses: actions/upload-artifact@v4
         with:
           name: avernet-star-candidate
-          path: candidate/
+          path: |
+            candidate/reports/avernet_star_daily.csv
+            candidate/reports/avernet_star_growth.png
           if-no-files-found: error
           retention-days: 14
+
+      - name: Upload image for visual QA
+        uses: actions/upload-artifact@v4
+        with:
+          name: avernet-star-visual
+          path: candidate/reports/avernet_star_growth.png
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Remove private temporary files
+        if: always()
+        run: >-
+          rm -f
+          "$RUNNER_TEMP/avernet_star_rd_team.json"
+          "$RUNNER_TEMP/avernet_star_row.json"
 
   visual_qa:
     name: Inspect rendered dashboard
@@ -174,8 +190,8 @@ jobs:
       - name: Download candidate artifacts
         uses: actions/download-artifact@v4
         with:
-          name: avernet-star-candidate
-          path: candidate
+          name: avernet-star-visual
+          path: candidate/reports
 
       - name: Run Codex visual QA
         id: codex
@@ -217,7 +233,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: avernet-star-candidate
-          path: candidate
+          path: candidate/reports
 
       - name: Enforce Codex visual QA result
         env:

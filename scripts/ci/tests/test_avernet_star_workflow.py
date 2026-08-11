@@ -15,7 +15,7 @@ VENDOR = REPO_ROOT / "scripts/ci/vendor/avernet-star-daily"
 STATS = VENDOR / "avernet_star_stats.py"
 RENDERER = VENDOR / "generate_star_image.py"
 UPSTREAM = VENDOR / "UPSTREAM.md"
-STATS_SHA256 = "b2f53373ffb08efcb8f87db7262ceb941e97c187da8b2c6f099bc28f0b3ca283"
+STATS_SHA256 = "ec4aa7bf435ef72cdd5025eb421cb5bfa443ef20250bd34aae035a4ba30f3ed7"
 RENDERER_SHA256 = "333a1801475d79b21011beb305f3ea9842721242291860a7f71ddff341412f74"
 
 
@@ -75,6 +75,13 @@ class AvernetStarWorkflowTest(unittest.TestCase):
             "trap 'rm -f \"$RUNNER_TEMP/avernet_star_rd_team.json\" \"$RUNNER_TEMP/avernet_star_row.json\"' EXIT",
             workflow,
         )
+        self.assertIn("--output reports/avernet_star_growth.png > /dev/null", workflow)
+        self.assertNotIn("          path: candidate/\n", workflow)
+        self.assertIn("candidate/reports/avernet_star_daily.csv", workflow)
+        self.assertIn("candidate/reports/avernet_star_growth.png", workflow)
+        self.assertNotIn("candidate/validation.json", workflow)
+        self.assertIn("name: avernet-star-visual", workflow)
+        self.assertIn("Remove private temporary files", workflow)
         visual_job = workflow.split("  visual_qa:\n", 1)[1].split("\n  publish:\n", 1)[0]
         self.assertEqual(visual_job.rsplit("      - name:", 1)[1].splitlines()[0], " Run Codex visual QA")
 
@@ -86,14 +93,30 @@ class AvernetStarWorkflowTest(unittest.TestCase):
             UPSTREAM.read_text(encoding="utf-8"),
         )
 
+    def test_fixtures_are_synthetic_and_runtime_errors_are_redacted(self):
+        tests = (REPO_ROOT / "scripts/ci/tests/test_avernet_star_report.py").read_text(
+            encoding="utf-8"
+        )
+        stats = STATS.read_text(encoding="utf-8")
+
+        self.assertNotIn("2026-08-", tests)
+        self.assertNotIn("438", tests)
+        self.assertNotIn("invalid nickname for {login", stats)
+        self.assertNotIn("duplicate GitHub login: {normalized_login", stats)
+        self.assertNotIn("detail[:500]", stats)
+        self.assertNotIn("{roster_path}", stats)
+
     def test_visual_qa_schema_is_strict(self):
         schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
 
-        self.assertEqual(schema["required"], ["status", "summary", "issues"])
+        self.assertEqual(schema["required"], ["status", "issue_codes"])
         self.assertFalse(schema["additionalProperties"])
         self.assertEqual(schema["properties"]["status"]["enum"], ["pass", "fail"])
+        self.assertIn("label_overlap", schema["properties"]["issue_codes"]["items"]["enum"])
+        self.assertNotIn("summary", schema["properties"])
         self.assertIn("Internal", PROMPT.read_text(encoding="utf-8"))
         self.assertIn("External", PROMPT.read_text(encoding="utf-8"))
+        self.assertNotIn("validation.json", PROMPT.read_text(encoding="utf-8"))
 
     def test_render_patch_thins_dates_and_preserves_all_value_annotations(self):
         patch = RENDER_PATCH.read_text(encoding="utf-8")

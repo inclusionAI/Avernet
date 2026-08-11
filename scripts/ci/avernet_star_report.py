@@ -180,7 +180,7 @@ def validate_report(csv_path: Path, png_path: Path, expected_date: str) -> dict[
     }
 
 
-def prepare_roster(output_path: Path, env_name: str) -> dict[str, int]:
+def prepare_roster(output_path: Path, env_name: str) -> dict[str, str]:
     raw = os.environ.get(env_name, "")
     if not raw:
         raise ContractError(f"Required GitHub Secret is missing: {env_name}")
@@ -199,7 +199,33 @@ def prepare_roster(output_path: Path, env_name: str) -> dict[str, int]:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8")
     output_path.chmod(0o600)
-    return {"entries": len(payload)}
+    return {"status": "prepared"}
+
+
+def public_log_result(command: str, result: dict[str, Any]) -> dict[str, Any]:
+    if command == "validate":
+        return {
+            "date": result["date"],
+            "height": result["height"],
+            "rows": result["rows"],
+            "status": "valid",
+            "today_rows": result["today_rows"],
+            "width": result["width"],
+        }
+    return result
+
+
+VISUAL_QA_ISSUE_CODES = {
+    "growth_line_unclear",
+    "latest_emphasis_missing",
+    "label_vocabulary_invalid",
+    "label_overlap",
+    "content_cropped",
+    "text_missing",
+    "value_mismatch",
+    "rendering_error",
+    "blank_region_abnormal",
+}
 
 
 def require_visual_qa(env_name: str) -> dict[str, str]:
@@ -212,20 +238,25 @@ def require_visual_qa(env_name: str) -> dict[str, str]:
         raise ContractError("Codex visual QA output is not valid JSON") from exc
     if not isinstance(payload, dict):
         raise ContractError("Codex visual QA output must be a JSON object")
+    if set(payload) != {"status", "issue_codes"}:
+        raise ContractError("Codex visual QA output fields are invalid")
 
     status = payload.get("status")
-    summary = payload.get("summary")
-    issues = payload.get("issues")
+    issue_codes = payload.get("issue_codes")
     if status not in {"pass", "fail"}:
         raise ContractError("Codex visual QA status must be pass or fail")
-    if not isinstance(summary, str) or not summary.strip():
-        raise ContractError("Codex visual QA summary must be a non-empty string")
-    if not isinstance(issues, list) or any(not isinstance(issue, str) for issue in issues):
-        raise ContractError("Codex visual QA issues must be an array of strings")
-    if status != "pass" or issues:
-        issue_text = "; ".join(issues) if issues else summary
-        raise ContractError(f"Codex visual QA failed: {issue_text}")
-    return {"status": status, "summary": summary}
+    if (
+        not isinstance(issue_codes, list)
+        or any(
+            not isinstance(code, str) or code not in VISUAL_QA_ISSUE_CODES
+            for code in issue_codes
+        )
+        or len(issue_codes) != len(set(issue_codes))
+    ):
+        raise ContractError("Codex visual QA issue codes are invalid")
+    if status != "pass" or issue_codes:
+        raise ContractError("Codex visual QA failed")
+    return {"status": status}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -268,7 +299,7 @@ def main() -> int:
             result = prepare_roster(args.output, args.env_name)
         else:
             result = require_visual_qa(args.env_name)
-        print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        print(json.dumps(public_log_result(args.command, result), ensure_ascii=False, sort_keys=True))
         return 0
     except (ContractError, OSError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

@@ -6,18 +6,35 @@
       "type": "string",
       "enum": ["pass", "fail"]
     },
-    "summary": {
-      "type": "string",
-      "minLength": 1
-    },
-    "issues": {
+    "issue_codes": {
       "type": "array",
       "items": {
         "type": "string",
-        "minLength": 1
-      }
+        "enum": [
+          "growth_line_unclear",
+          "latest_emphasis_missing",
+          "label_vocabulary_invalid",
+          "label_overlap",
+          "content_cropped",
+          "text_missing",
+          "value_mismatch",
+          "rendering_error",
+          "blank_region_abnormal"
+        ]
+      },
+      "uniqueItems": true
     }
   },
-  "required": ["status", "summary", "issues"],
-  "additionalProperties": false
+  "required": ["status", "issue_codes"],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "pass"}}},
+      "then": {"properties": {"issue_codes": {"maxItems": 0}}}
+    },
+    {
+      "if": {"properties": {"status": {"const": "fail"}}},
+      "then": {"properties": {"issue_codes": {"minItems": 1}}}
+    }
+  ]
 }
