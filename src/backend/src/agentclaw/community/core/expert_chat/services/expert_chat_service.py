@@ -484,7 +484,6 @@ class ExpertChatService(ExpertChatSessionRuntimeMixin):
             )
 
         items = []
-        engine_type = connection.get("engine_type", "openclaw") if connection else None
         for row in rows:
             item = adapter_items.get(row["session_key"])
             if item is None:
@@ -493,19 +492,18 @@ class ExpertChatService(ExpertChatSessionRuntimeMixin):
             enriched = dict(item)
             for key, value in self._placeholder_session(row).items():
                 enriched.setdefault(key, value)
-            if engine_type == "openclaw":
-                # OpenClaw currently synthesizes Session updated_at at conversion
-                # time. Prefer the real message timestamp, then the stable Backend
-                # ownership creation time, so repeated reads cannot reorder rows.
-                last_message = enriched.get("last_message")
-                last_message_at = (
-                    last_message.get("gmt_created")
-                    if isinstance(last_message, dict)
-                    else None
-                )
-                stable_modified = last_message_at or row.get("gmt_create")
-                if stable_modified:
-                    enriched["gmt_modified"] = stable_modified
+            # Adapter timestamps may be synthesized during reads. Prefer the real
+            # last-message timestamp and fall back to the stable ownership time so
+            # repeated list requests cannot reorder any engine's sessions.
+            last_message = enriched.get("last_message")
+            last_message_at = (
+                last_message.get("gmt_created")
+                if isinstance(last_message, dict)
+                else None
+            )
+            stable_modified = last_message_at or row.get("gmt_create")
+            if stable_modified:
+                enriched["gmt_modified"] = stable_modified
             items.append(enriched)
 
         items.sort(key=self._session_sort_key, reverse=True)
@@ -540,7 +538,6 @@ class ExpertChatService(ExpertChatSessionRuntimeMixin):
             bot,
             user_id,
             connection=connection,
-            prefer_adapter_for_relay=True,
         )
         self._repo.add_owned_session(user_id, bot_id, owner_id, created_session_key)
         # Legacy clients resume the latest session created by the new UI.

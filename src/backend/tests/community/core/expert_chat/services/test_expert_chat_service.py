@@ -1048,7 +1048,7 @@ class TestExpertChatMultiSession:
             result = await svc.create_chat_session("user1", "bot1", "owner1")
 
         assert result["session_key"] == "session:new"
-        assert create_session.await_args.kwargs["prefer_adapter_for_relay"] is True
+        assert create_session.await_args.kwargs["connection"] is result["connection"]
         mock_repository.add_owned_session.assert_called_once_with(
             "user1", "bot1", "owner1", "session:new"
         )
@@ -1816,7 +1816,7 @@ class TestDeleteAdapterSession:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("engine_type", ["aicoding", "claude_code"])
-    async def test_relay_engine_connection_uses_generic_delete_endpoint(
+    async def test_relay_engine_skips_adapter_delete(
         self,
         engine_type,
         mock_repository,
@@ -1838,52 +1838,21 @@ class TestDeleteAdapterSession:
             mock_transport=transport,
         )
 
-        await svc._delete_adapter_session(ACTIVE_BOT, "session:abc", "user1")
-
-        transport.invoke.assert_awaited_once_with(
-            conn,
-            "DELETE",
-            "/api/sessions/session%3Aabc",
-        )
-
-    @pytest.mark.asyncio
-    async def test_relay_engine_ignores_unsupported_delete_endpoint(
-        self, mock_repository, mock_bot_repo, mock_device_provider
-    ):
-        conn = dict(DEVICE_CONN, engine_type="aicoding")
-        transport = MagicMock()
-        transport.invoke = AsyncMock(
-            side_effect=DeviceAdapterHTTPStatusError(405, "Method Not Allowed")
-        )
-        svc = _make_service(
-            mock_repository,
-            mock_bot_repo,
-            mock_device_provider,
-            mock_transport=transport,
-        )
-
         await svc._delete_adapter_session(
-            ACTIVE_BOT,
+            {**ACTIVE_BOT, "active_engine": engine_type},
             "session:abc",
             "user1",
             connection=conn,
         )
 
+        transport.invoke.assert_not_awaited()
+
     def test_structured_adapter_errors_are_classified(self):
         endpoint_missing = DeviceAdapterEndpointNotFoundError("missing")
         not_found = DeviceAdapterHTTPStatusError(404, "Not Found")
-        method_not_allowed = DeviceAdapterHTTPStatusError(
-            405, "Method Not Allowed"
-        )
 
         assert ExpertChatService._is_adapter_not_found(endpoint_missing) is True
         assert ExpertChatService._is_adapter_not_found(not_found) is True
-        assert ExpertChatService._is_adapter_endpoint_unsupported(
-            endpoint_missing
-        ) is True
-        assert ExpertChatService._is_adapter_endpoint_unsupported(
-            method_not_allowed
-        ) is True
 
 
 # ---------------------------------------------------------------------------
@@ -1894,102 +1863,7 @@ class TestCreateSessionDispatch:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("engine_type", ["aicoding", "claude_code"])
-    async def test_relay_engines_use_generic_adapter_create(
-        self,
-        engine_type,
-        mock_repository,
-        mock_bot_repo,
-        mock_device_provider,
-    ):
-        canonical_key = f"agent:bot1:session:new:user:user1:{engine_type}"
-        transport = MagicMock()
-        transport.invoke = AsyncMock(
-            side_effect=[
-                {"data": {"id": canonical_key}},
-                {"data": [{"id": canonical_key}]},
-            ]
-        )
-        svc = _make_service(
-            mock_repository,
-            mock_bot_repo,
-            mock_device_provider,
-            mock_transport=transport,
-        )
-        conn = dict(DEVICE_CONN, engine_type=engine_type)
-
-        result = await svc._create_session(
-            {"bot_id": "bot1", "bot_name": "Bot"},
-            "user1",
-            connection=conn,
-            prefer_adapter_for_relay=True,
-        )
-
-        assert result == canonical_key
-        assert transport.invoke.await_args_list[0].kwargs["body"]["engine"] == engine_type
-        assert transport.invoke.await_args_list[0].kwargs["timeout"] == 330.0
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("engine_type", ["aicoding", "claude_code"])
-    @pytest.mark.parametrize("status_code", [404, 405])
-    async def test_relay_engines_fall_back_only_when_create_endpoint_is_missing(
-        self,
-        engine_type,
-        status_code,
-        mock_repository,
-        mock_bot_repo,
-        mock_device_provider,
-    ):
-        transport = MagicMock()
-        transport.invoke = AsyncMock(
-            side_effect=ValueError(
-                f"Adapter returned HTTP {status_code}: Endpoint unavailable"
-            )
-        )
-        svc = _make_service(
-            mock_repository,
-            mock_bot_repo,
-            mock_device_provider,
-            mock_transport=transport,
-        )
-        conn = dict(DEVICE_CONN, engine_type=engine_type)
-
-        result = await svc._create_session(
-            {"bot_id": "bot1", "bot_name": "Bot"},
-            "user1",
-            connection=conn,
-            prefer_adapter_for_relay=True,
-        )
-
-        assert result.startswith("session:")
-        assert result.endswith(":user:user1")
-        assert transport.invoke.await_count == 1
-
-    @pytest.mark.asyncio
-    async def test_relay_engine_does_not_fall_back_on_adapter_failure(
-        self, mock_repository, mock_bot_repo, mock_device_provider
-    ):
-        transport = MagicMock()
-        transport.invoke = AsyncMock(
-            side_effect=ValueError("Adapter returned HTTP 500: Broken")
-        )
-        svc = _make_service(
-            mock_repository,
-            mock_bot_repo,
-            mock_device_provider,
-            mock_transport=transport,
-        )
-
-        with pytest.raises(SessionCreateError):
-            await svc._create_session(
-                {"bot_id": "bot1", "bot_name": "Bot"},
-                "user1",
-                connection=dict(DEVICE_CONN, engine_type="aicoding"),
-                prefer_adapter_for_relay=True,
-            )
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("engine_type", ["aicoding", "claude_code"])
-    async def test_legacy_singular_flow_keeps_local_session_key_behavior(
+    async def test_relay_engines_use_strategy_without_adapter_create(
         self,
         engine_type,
         mock_repository,
@@ -2004,15 +1878,24 @@ class TestCreateSessionDispatch:
             mock_device_provider,
             mock_transport=transport,
         )
+        conn = dict(DEVICE_CONN, engine_type=engine_type)
 
         result = await svc._create_session(
-            {"bot_id": "bot1", "bot_name": "Bot"},
+            {
+                "bot_id": "bot1",
+                "bot_name": "Bot",
+                "active_engine": engine_type,
+            },
             "user1",
-            connection=dict(DEVICE_CONN, engine_type=engine_type),
+            connection=conn,
         )
 
-        assert result.startswith("session:")
-        assert result.endswith(":user:user1")
+        if engine_type == "aicoding":
+            assert result.startswith("user:user1:session:")
+            assert result.endswith(":agent:bot1")
+        else:
+            assert result.startswith("session:")
+            assert result.endswith(":user:user1")
         transport.invoke.assert_not_awaited()
 
 

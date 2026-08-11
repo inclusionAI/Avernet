@@ -7,6 +7,10 @@ from typing import Any, Dict, Optional
 from urllib.parse import quote
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+from agentclaw.community.core.bot_management.engines.registry import (
+    resolve_baas_engine_bucket,
+    resolve_provisioning,
+)
 from agentclaw.community.core.expert_chat.errors import (
     BotNotPublishedError,
     ChatPermissionError,
@@ -20,9 +24,6 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
 )
 
 logger = get_logger()
-
-_LEGACY_LOCAL_SESSION_ENGINES = {"aicoding", "claude_code"}
-_RELAY_SESSION_CREATE_TIMEOUT_SECONDS = 330.0
 
 
 class ExpertChatSessionRuntimeMixin:
@@ -110,10 +111,24 @@ class ExpertChatSessionRuntimeMixin:
             )
 
         conn = ctx.conn_info
+        logger.info(
+            "[ExpertChatService] Resolved device context: bot=%s binding_id=%s "
+            "provider=%s conn_engine=%s active_engine=%s template_type=%s "
+            "runtime_engine=%s",
+            bot_id,
+            binding_id,
+            ctx.provider,
+            conn.get("engine_type"),
+            bot.get("active_engine"),
+            bot.get("template_type"),
+            (bot.get("template_config") or {}).get("active_runtime_engine_type"),
+        )
         if conn.get("use_proxy"):
             logger.info(
-                "[ExpertChatService] Got ARCA proxy connection: bot=%s, sandbox_id=%s",
+                "[ExpertChatService] Got proxy connection: bot=%s, provider=%s, "
+                "sandbox_id=%s",
                 bot_id,
+                ctx.provider,
                 conn.get("sandbox_id"),
             )
         else:
@@ -167,50 +182,65 @@ class ExpertChatSessionRuntimeMixin:
         )
         raise ChatPermissionError(f"User {user_id} has no chat access to bot {bot_id}")
 
+    def _resolve_chat_engine_type(
+        self, bot: Dict[str, Any], conn: Dict[str, Any]
+    ) -> str:
+        """Resolve the effective chat engine from authoritative Bot metadata."""
+        template_config = bot.get("template_config") or {}
+        if not isinstance(template_config, dict):
+            template_config = {}
+        raw_engine_type = (
+            bot.get("active_engine")
+            or template_config.get("active_runtime_engine_type")
+            or conn.get("engine_type")
+            or "openclaw"
+        )
+        return resolve_baas_engine_bucket(
+            engine_type=raw_engine_type,
+            template_type=bot.get("template_type") or "",
+        )
+
+    def _resolve_chat_engine_strategy(
+        self, bot: Dict[str, Any], conn: Dict[str, Any]
+    ):
+        """Resolve the normalized chat engine and its registered strategy."""
+        engine_type = self._resolve_chat_engine_type(bot, conn)
+        template_config = bot.get("template_config")
+        if not isinstance(template_config, dict):
+            template_config = None
+        return resolve_provisioning(
+            bot_id=str(bot.get("bot_id") or ""),
+            owner_id=str(bot.get("owner_id") or ""),
+            bot_type=str(bot.get("bot_type") or ""),
+            active_engine=engine_type,
+            template_type=bot.get("template_type") or None,
+            template_config=template_config,
+        )
+
     async def _create_session(
         self,
         bot: Dict[str, Any],
         user_id: str,
         connection: Optional[Dict[str, Any]] = None,
-        prefer_adapter_for_relay: bool = False,
     ) -> str:
         """Create a session through the current runtime strategy."""
         conn = connection or self._get_connection(bot, user_id)
-        engine_type = conn.get("engine_type", "openclaw")
+        ctx, strategy = self._resolve_chat_engine_strategy(bot, conn)
+        conn["engine_type"] = ctx.active_engine
 
-        # Preserve the legacy singular /session behavior. Only the plural
-        # /sessions flow opts into persisted, canonical relay session keys.
-        if (
-            engine_type in _LEGACY_LOCAL_SESSION_ENGINES
-            and not prefer_adapter_for_relay
-        ):
-            return await self._create_aicoding_session(conn, bot, user_id)
+        if not strategy.uses_adapter_chat_session_lifecycle(ctx):
+            session_key = strategy.build_local_chat_session_key(ctx, user_id=user_id)
+            logger.info(
+                "[ExpertChatService] Relay-managed chat session: bot=%s, user=%s, "
+                "engine=%s, session=%s",
+                bot.get("bot_id"),
+                user_id,
+                ctx.active_engine,
+                session_key,
+            )
+            return session_key
 
-        try:
-            return await self._create_openclaw_session(conn, bot, user_id)
-        except Exception as error:
-            if (
-                engine_type in _LEGACY_LOCAL_SESSION_ENGINES
-                and self._is_adapter_endpoint_unsupported(error)
-            ):
-                logger.warning(
-                    "[ExpertChatService] Adapter session creation unsupported; "
-                    "using legacy local key: engine=%s bot=%s",
-                    engine_type,
-                    bot.get("bot_id"),
-                )
-                return await self._create_aicoding_session(conn, bot, user_id)
-            raise
-
-    async def _create_aicoding_session(
-        self, conn: Dict[str, Any], bot: Dict[str, Any], user_id: str
-    ) -> str:
-        """Generate the legacy local relay session key."""
-        import uuid
-
-        session_key = f"session:{uuid.uuid4()}:user:{user_id}"
-        logger.info("[aicoding] local session key generated: %s", session_key)
-        return session_key
+        return await self._create_openclaw_session(conn, bot, user_id)
 
     async def _create_openclaw_session(
         self, conn: Dict[str, Any], bot: Dict[str, Any], user_id: str
@@ -231,19 +261,11 @@ class ExpertChatSessionRuntimeMixin:
         )
 
         try:
-            create_timeout = (
-                _RELAY_SESSION_CREATE_TIMEOUT_SECONDS
-                if conn.get("engine_type") in _LEGACY_LOCAL_SESSION_ENGINES
-                else None
-            )
-            invoke_kwargs: Dict[str, Any] = {"body": payload}
-            if create_timeout is not None:
-                invoke_kwargs["timeout"] = create_timeout
             data = await self._transport.invoke(
                 conn,
                 "POST",
                 "/api/sessions",
-                **invoke_kwargs,
+                body=payload,
             )
             logger.info("[ExpertChatService] Adapter POST response %s", data)
             raw_session_key = data.get("data", {}).get("id") or data.get("id")
@@ -354,14 +376,15 @@ class ExpertChatSessionRuntimeMixin:
     ) -> bool:
         """Check whether a session still exists in the active Adapter."""
         conn = connection or self._get_connection(bot, user_id)
+        ctx, strategy = self._resolve_chat_engine_strategy(bot, conn)
+        conn["engine_type"] = ctx.active_engine
 
-        if conn.get("engine_type") == "aicoding":
-            return True
-        if conn.get("engine_type") == "claude_code":
+        if not strategy.uses_adapter_chat_session_lifecycle(ctx):
             logger.info(
-                "[ExpertChatService] claude_code session check: skipping "
-                "adapter pre-check for session=%s",
+                "[ExpertChatService] Relay-managed chat session check: skipping "
+                "adapter pre-check for session=%s, engine=%s",
                 session_key,
+                ctx.active_engine,
             )
             return True
 
@@ -394,8 +417,25 @@ class ExpertChatSessionRuntimeMixin:
         connection: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Delete a session through the active Adapter."""
+        # Resolve from Bot metadata before opening a connection. Historical
+        # caller-instance bindings can report a fallback engine that must not
+        # override the Bot's authoritative relay strategy.
+        ctx, strategy = self._resolve_chat_engine_strategy(bot, connection or {})
+        if not strategy.uses_adapter_chat_session_lifecycle(ctx):
+            logger.info(
+                "[ExpertChatService] Skipping adapter session deletion for "
+                "relay-managed engine: bot=%s, session=%s, engine=%s",
+                bot.get("bot_id"),
+                session_key,
+                ctx.active_engine,
+            )
+            return
+
         conn = connection or self._get_connection(bot, user_id)
-        engine_type = conn.get("engine_type", "openclaw")
+        ctx, strategy = self._resolve_chat_engine_strategy(bot, conn)
+        conn["engine_type"] = ctx.active_engine
+        if not strategy.uses_adapter_chat_session_lifecycle(ctx):
+            return
 
         logger.info(
             "[ExpertChatService] Deleting adapter session via transport: session=%s",
@@ -427,17 +467,6 @@ class ExpertChatSessionRuntimeMixin:
                     session_key,
                 )
                 return
-            if (
-                engine_type in _LEGACY_LOCAL_SESSION_ENGINES
-                and self._is_adapter_endpoint_unsupported(error)
-            ):
-                logger.warning(
-                    "[ExpertChatService] Adapter session deletion unsupported; "
-                    "keeping legacy metadata-only behavior: engine=%s session=%s",
-                    engine_type,
-                    session_key,
-                )
-                return
             logger.error(
                 "[ExpertChatService] Unexpected error when DELETE session via "
                 "transport: %s: %s",
@@ -463,18 +492,3 @@ class ExpertChatSessionRuntimeMixin:
     def _is_ambiguous_adapter_delete_not_found(error: Exception) -> bool:
         """Identify the Engine 404 that also represents runtime delete failure."""
         return "Session not found or delete failed" in str(error)
-
-    @staticmethod
-    def _is_adapter_endpoint_unsupported(error: Exception) -> bool:
-        if isinstance(error, DeviceAdapterEndpointNotFoundError):
-            return True
-        if isinstance(error, DeviceAdapterHTTPStatusError):
-            return error.status_code in {404, 405}
-        error_msg = (
-            error.original_error
-            if isinstance(error, SessionCreateError) and error.original_error
-            else str(error)
-        )
-        return "Adapter returned" in error_msg and (
-            "404" in error_msg or "405" in error_msg
-        )
