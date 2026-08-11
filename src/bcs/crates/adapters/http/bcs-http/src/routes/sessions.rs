@@ -180,7 +180,7 @@ pub struct CreateSessionRequest {
     pub created_by: Option<String>,
     #[serde(default)]
     pub caller_role: Option<String>,
-    /// Optional delivery override for the driver bot's `[GROUP CONTEXT]`
+    /// Optional delivery override for the driver bot's `<GroupContext>`
     /// message: `"send"` (default, driver is asked to respond) or
     /// `"inject"` (driver observes silently). Other participants always
     /// receive the context via `chat.inject`.
@@ -1245,6 +1245,7 @@ pub async fn add_session_participant(
             let event = SystemMessageEvent::BotJoined {
                 group_id: sess.group_id.clone(),
                 actor: participant.into(),
+                session_id: sid.clone(),
             };
             let _ = state
                 .services
