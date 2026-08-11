@@ -19,10 +19,12 @@ and client construction happen in downstream module providers.
 """
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from injector import Module, inject, provider, singleton
 
+from agentclaw.community.core.cron.protocols import AssistantSessionEndpointProvider
 from agentclaw.community.di import config as cfg
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
@@ -362,6 +364,27 @@ class ConfigModule(Module):
                 else gateway.base_url
             )
         )
+
+    @singleton
+    @provider
+    def assistant_session_endpoint(self) -> AssistantSessionEndpointProvider:
+        """TeamClaw assistant deep-link base for this environment.
+
+        The core cron relay only formats the final session URL. The env
+        split lives here, alongside the rest of the composition-root
+        wiring, so the service does not read process env directly.
+        """
+        defaults = cfg.AssistantSessionEndpoint()
+        prod_base_url = os.getenv(
+            "TEAMCLAW_ASSISTANT_URL_BASE",
+            defaults.base_url,
+        )
+        base_url = (
+            os.getenv("TEAMCLAW_ASSISTANT_URL_BASE_PRE") or prod_base_url
+            if get_current_env() == "pre"
+            else prod_base_url
+        )
+        return cfg.AssistantSessionEndpoint(base_url=base_url)
 
     @singleton
     @provider

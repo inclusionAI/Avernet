@@ -14,7 +14,6 @@ Architecture compliance:
 from __future__ import annotations
 
 import asyncio
-import os
 from typing import Any, Optional
 
 from injector import inject
@@ -27,6 +26,7 @@ from agentclaw.community.core.cron.protocols import (
     BotInfoProvider,
     DeviceConnectionProvider,
     DeviceBindingStatus,
+    AssistantSessionEndpointProvider,
 )
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
@@ -56,9 +56,6 @@ from agentclaw.community.log import get_logger
 logger = get_logger()
 
 _CRON_UNSUPPORTED_ENGINES = frozenset({"hermes"})
-_ASSISTANT_SESSION_URL_BASE_ENV = "TEAMCLAW_ASSISTANT_URL_BASE"
-_ASSISTANT_SESSION_URL_BASE_PRE_ENV = "TEAMCLAW_ASSISTANT_URL_BASE_PRE"
-_ASSISTANT_SESSION_URL_BASE_DEFAULT = "https://teamclaw.example.com/assistant"
 
 
 class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
@@ -73,6 +70,7 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
         resolver: DeviceContextResolver,
         template_repo: TemplateRepository,
         publish_repo: BotPublishRepositoryProtocol,
+        assistant_session_endpoint: AssistantSessionEndpointProvider,
     ):
         """Initialise.
 
@@ -95,6 +93,7 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
         self._resolver = resolver
         self._template_repo = template_repo
         self._publish_repo = publish_repo
+        self._assistant_session_endpoint = assistant_session_endpoint
         # Cron 批量查询共用限流器，控制同步设备连接准备占用的线程数。
         self._runtime_query_prepare_semaphore = asyncio.Semaphore(
             RUNTIME_QUERY_PREPARE_CONCURRENCY
@@ -500,24 +499,13 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
         )
         return result
 
-    @staticmethod
-    def _assistant_session_url(bot_id: str, session_id: str) -> str:
+    def _assistant_session_url(self, bot_id: str, session_id: str) -> str:
         """Build the TeamClaw assistant deep link for a bot session."""
-        if get_current_env() == "pre":
-            base_url = os.getenv(_ASSISTANT_SESSION_URL_BASE_PRE_ENV) or os.getenv(
-                _ASSISTANT_SESSION_URL_BASE_ENV,
-                _ASSISTANT_SESSION_URL_BASE_DEFAULT,
-            )
-        else:
-            base_url = os.getenv(
-                _ASSISTANT_SESSION_URL_BASE_ENV,
-                _ASSISTANT_SESSION_URL_BASE_DEFAULT,
-            )
+        base_url = self._assistant_session_endpoint.base_url
         return f"{base_url}?botId={bot_id}&sessionId={session_id}"
 
-    @classmethod
     def _append_auto_initiate_session_links_to_message(
-        cls,
+        self,
         payload: Any,
         bot_id: str,
     ) -> None:
@@ -529,7 +517,7 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
         if not isinstance(payload, dict):
             return
 
-        session_urls = cls._collect_auto_initiate_session_links(payload, bot_id)
+        session_urls = self._collect_auto_initiate_session_links(payload, bot_id)
         payload.pop("sessions", None)
         if not session_urls:
             return
@@ -545,9 +533,8 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
             else links_message
         )
 
-    @classmethod
     def _collect_auto_initiate_session_links(
-        cls,
+        self,
         payload: Any,
         bot_id: str,
     ) -> list[str]:
@@ -556,7 +543,7 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
         if isinstance(payload, list):
             for item in payload:
                 session_urls.extend(
-                    cls._collect_auto_initiate_session_links(item, bot_id)
+                    self._collect_auto_initiate_session_links(item, bot_id)
                 )
             return session_urls
 
@@ -565,12 +552,12 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
 
         session_id = payload.get("session_id") or payload.get("sessionId")
         if isinstance(session_id, str) and session_id:
-            session_urls.append(cls._assistant_session_url(bot_id, session_id))
+            session_urls.append(self._assistant_session_url(bot_id, session_id))
 
         for value in payload.values():
             if isinstance(value, (dict, list)):
                 session_urls.extend(
-                    cls._collect_auto_initiate_session_links(value, bot_id)
+                    self._collect_auto_initiate_session_links(value, bot_id)
                 )
         return session_urls
 

@@ -42,6 +42,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from typing import Any, Dict
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -157,6 +158,9 @@ def _make_service(*, bot_provider: BotInfoProvider) -> CronRelayService:
         resolver=resolver,
         template_repo=MagicMock(),
         publish_repo=MagicMock(),
+        assistant_session_endpoint=SimpleNamespace(
+            base_url="https://teamclaw.alipay.com/assistant"
+        ),
     )
 
 

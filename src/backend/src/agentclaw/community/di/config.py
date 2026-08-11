@@ -120,6 +120,19 @@ class GatewayEndpoint:
 
 
 @dataclass(frozen=True)
+class AssistantSessionEndpoint:
+    """The TeamClaw assistant deep-link origin selected for this env.
+
+    :class:`AssistantSessionEndpoint` keeps the env choice in the
+    composition root so core services only format the final URL. The
+    base itself is neutral configuration; the provider resolves the
+    ``pre``/``prod`` selection once at boot.
+    """
+
+    base_url: str = "https://teamclaw.example.com/assistant"
+
+
+@dataclass(frozen=True)
 class KbConfig:
     """Internal knowledge-base config for the D-TOOLS-002 diagnostic (the ``kb``
     user_config block).

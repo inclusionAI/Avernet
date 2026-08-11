@@ -54,6 +54,9 @@ def _make_service(
         resolver=resolver or MagicMock(),
         template_repo=MagicMock(),
         publish_repo=publish_repo or MagicMock(),
+        assistant_session_endpoint=SimpleNamespace(
+            base_url="https://teamclaw.alipay.com/assistant"
+        ),
     )
 
 

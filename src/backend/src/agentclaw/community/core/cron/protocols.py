@@ -57,6 +57,21 @@ class BotInfoProvider(Protocol):
         """
         ...
 
+
+@runtime_checkable
+class AssistantSessionEndpointProvider(Protocol):
+    """Protocol for the selected assistant session deep-link endpoint.
+
+    Implementations are bound by DI/config loading so cron core logic does not
+    branch on process environment or read env vars directly.
+    """
+
+    @property
+    def base_url(self) -> str:
+        """Selected assistant deep-link base URL for this deployment."""
+        ...
+
+
 @runtime_checkable
 class DeviceConnectionProvider(Protocol):
     """Protocol for device connection provider.

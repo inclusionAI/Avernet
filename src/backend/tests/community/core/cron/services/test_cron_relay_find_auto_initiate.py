@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -19,18 +20,6 @@ from agentclaw.community.core.cron.services.cron_relay import CronRelayService
 from agentclaw.community.core.devices.services.device_context import DeviceContext
 
 
-@pytest.fixture(autouse=True)
-def _assistant_url_env(monkeypatch):
-    monkeypatch.setenv(
-        "TEAMCLAW_ASSISTANT_URL_BASE",
-        "https://teamclaw.alipay.com/assistant",
-    )
-    monkeypatch.setenv(
-        "TEAMCLAW_ASSISTANT_URL_BASE_PRE",
-        "https://teamclaw-pre.alipay.com/assistant",
-    )
-
-
 def _make_service(
     *,
     bot_provider=None,
@@ -38,6 +27,7 @@ def _make_service(
     transport=None,
     resolver=None,
     publish_repo=None,
+    assistant_session_endpoint=None,
 ):
     return CronRelayService(
         bot_provider=bot_provider or MagicMock(),
@@ -46,6 +36,8 @@ def _make_service(
         resolver=resolver or MagicMock(),
         template_repo=MagicMock(),
         publish_repo=publish_repo or MagicMock(),
+        assistant_session_endpoint=assistant_session_endpoint
+        or SimpleNamespace(base_url="https://teamclaw.alipay.com/assistant"),
     )
 
 
@@ -323,13 +315,14 @@ class TestFindAutoInitiateAndRun:
             )
 
 
-def test_assistant_session_url_uses_pre_domain(monkeypatch):
-    monkeypatch.setattr(
-        "agentclaw.community.core.cron.services.cron_relay.get_current_env",
-        lambda: "pre",
+def test_assistant_session_url_uses_injected_endpoint():
+    svc = _make_service(
+        assistant_session_endpoint=SimpleNamespace(
+            base_url="https://teamclaw-pre.alipay.com/assistant",
+        )
     )
 
-    assert CronRelayService._assistant_session_url("bot-x", "session-x") == (
+    assert svc._assistant_session_url("bot-x", "session-x") == (
         "https://teamclaw-pre.alipay.com/assistant?botId=bot-x"
         "&sessionId=session-x"
     )
@@ -344,7 +337,7 @@ def test_append_auto_initiate_session_links_to_message():
         ],
     }
 
-    CronRelayService._append_auto_initiate_session_links_to_message(payload, "bot-x")
+    _make_service()._append_auto_initiate_session_links_to_message(payload, "bot-x")
 
     assert payload["message"] == (
         "本次发起 2 个新任务\n\n会话链接：\n"
@@ -363,7 +356,7 @@ def test_collect_auto_initiate_session_links_handles_nested_shapes():
         "ignored": {"session_id": ""},
     }
 
-    urls = CronRelayService._collect_auto_initiate_session_links(payload, "bot-x")
+    urls = _make_service()._collect_auto_initiate_session_links(payload, "bot-x")
 
     assert urls == [
         "https://teamclaw.alipay.com/assistant?botId=bot-x&sessionId=user:u:session:s1:agent:bot-x",
