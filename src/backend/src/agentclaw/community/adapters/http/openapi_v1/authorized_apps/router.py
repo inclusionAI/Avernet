@@ -180,6 +180,7 @@ def _to_authorized_app(record: BotAppGrantRecord) -> AuthorizedApp:
         user_id=record.user_id,
         app_name=record.app_name,
         bot_id=record.bot_id,
+        owner_id=record.owner_id,
         granted_at=record.gmt_create,
     )
 
@@ -317,6 +318,16 @@ async def revoke_authorized_app(
       naming whose grant to remove.
     - A **collaborator** withdraws only their own. Theirs is the loan they made;
       a colleague's is not theirs to call in.
+
+    TODO(#951 follow-up): the owner's withdrawal is all-or-nothing, and it
+    should not be. An owner who wants to cut off *one* colleague's delegation of
+    an application — the colleague who left the team, say — currently has to
+    withdraw every delegation of that application on the bot, including their
+    own and other colleagues'. The record supports the narrower operation
+    already (``revoke`` is keyed on the delegating user), so what is missing is
+    a way to *name* whose delegation to withdraw: another path segment, or a
+    parameter. Deliberately not added here — it is a new operation on the public
+    surface, not a fix.
 
     ``owner_id`` names whose bot is being withdrawn from and defaults to the
     caller's own. Which delegations go still follows from who is asking, not

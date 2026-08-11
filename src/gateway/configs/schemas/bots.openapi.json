@@ -120,6 +120,11 @@
             "title": "Granted At",
             "type": "string"
           },
+          "owner_id": {
+            "description": "The owner of that bot. Together with `bot_id` it identifies which bot this authorization covers — `bot_id` alone does not, because two owners may each have a bot of the same id. Equal to `user_id` only when the delegating user owns the bot themselves.",
+            "title": "Owner Id",
+            "type": "string"
+          },
           "user_id": {
             "description": "The user who granted this authorization, and whose access the application acts with. Not necessarily the bot's owner: a collaborator may delegate the access they hold, and the application then reaches the bot as them, bounded by their permissions at the time of each request.",
             "title": "User Id",
@@ -131,6 +136,7 @@
           "user_id",
           "app_name",
           "bot_id",
+          "owner_id",
           "granted_at"
         ],
         "title": "AuthorizedApp",
@@ -14021,7 +14027,7 @@
     },
     "/openapi/v1/bots/{bot_id}/authorized-apps/{app_id}": {
       "delete": {
-        "description": "Withdraw an application's authorization for this bot.\n\nThe application is named in the path rather than read off a principal,\nbecause a withdrawal must not require the application's cooperation — that\nis precisely the situation it exists for: a credential lost, rotated, or a\nrelationship ended. Withdrawing an authorization that does not exist answers\n404, distinctly from a successful withdrawal (``GrantNotFoundError``).\n\n**How much this withdraws depends on who asks**, and it has to: since a\ndelegation is keyed on the user who made it, ``{app_id}`` alone no longer\nnames one row.\n\n- The **owner** withdraws *every* delegation of this application on their\n  bot. That is what an owner means by revoking an app's access to their own\n  bot — a withdrawal that left it reaching them through a colleague's grant\n  would not be a withdrawal — and it is why the path needs no extra segment\n  naming whose grant to remove.\n- A **collaborator** withdraws only their own. Theirs is the loan they made;\n  a colleague's is not theirs to call in.\n\n``owner_id`` names whose bot is being withdrawn from and defaults to the\ncaller's own. Which delegations go still follows from who is asking, not\nfrom this parameter.",
+        "description": "Withdraw an application's authorization for this bot.\n\nThe application is named in the path rather than read off a principal,\nbecause a withdrawal must not require the application's cooperation — that\nis precisely the situation it exists for: a credential lost, rotated, or a\nrelationship ended. Withdrawing an authorization that does not exist answers\n404, distinctly from a successful withdrawal (``GrantNotFoundError``).\n\n**How much this withdraws depends on who asks**, and it has to: since a\ndelegation is keyed on the user who made it, ``{app_id}`` alone no longer\nnames one row.\n\n- The **owner** withdraws *every* delegation of this application on their\n  bot. That is what an owner means by revoking an app's access to their own\n  bot — a withdrawal that left it reaching them through a colleague's grant\n  would not be a withdrawal — and it is why the path needs no extra segment\n  naming whose grant to remove.\n- A **collaborator** withdraws only their own. Theirs is the loan they made;\n  a colleague's is not theirs to call in.\n\nTODO(#951 follow-up): the owner's withdrawal is all-or-nothing, and it\nshould not be. An owner who wants to cut off *one* colleague's delegation of\nan application — the colleague who left the team, say — currently has to\nwithdraw every delegation of that application on the bot, including their\nown and other colleagues'. The record supports the narrower operation\nalready (``revoke`` is keyed on the delegating user), so what is missing is\na way to *name* whose delegation to withdraw: another path segment, or a\nparameter. Deliberately not added here — it is a new operation on the public\nsurface, not a fix.\n\n``owner_id`` names whose bot is being withdrawn from and defaults to the\ncaller's own. Which delegations go still follows from who is asking, not\nfrom this parameter.",
         "operationId": "revoke_authorized_app_openapi_v1_bots__bot_id__authorized_apps__app_id__delete",
         "parameters": [
           {

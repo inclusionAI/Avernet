@@ -80,8 +80,9 @@ rule independent of whether a given handler remembers to call this function.
 
 The "carries no user_id" branch below is therefore unreachable for a verified
 caller, and stays only as the fail-closed answer for a hand-constructed
-principal. The tolerance of a bare string or a mapping is what let this helper
-survive the stub-to-real swap unchanged.
+principal. A mapping is accepted alongside the real verified caller so test
+stand-ins keep working; a bare id string used to be too, and was removed once
+nothing — production or test — produced one.
 """
 
 from __future__ import annotations
@@ -131,15 +132,19 @@ USER_ID_DESCRIPTION = (
 def caller_owner_id(principal: Principal) -> str:
     """Return the caller's owner id, or raise :class:`MissingPrincipalError`.
 
-    Accepts either a bare id string or an object/mapping exposing ``user_id``,
-    so it fits whatever shape the auth workstream's verified principal takes.
+    Accepts an object or a mapping exposing ``user_id``. Production always
+    supplies the first — ``Principal`` *is*
+    :class:`~...core.gateway_principal.VerifiedCaller` — and the mapping form is
+    what test stand-ins use, which is why it stays.
+
+    A **bare id string** used to be accepted too, from when the principal was a
+    stub. Nothing produced one by the time the real verifier landed, and nothing
+    did afterwards: not production, and not a single test. Removed rather than
+    carried, because a tolerance no caller exercises is not flexibility — it is
+    an untested branch in the function that decides who a request acts for.
     """
     if principal is None:
         raise MissingPrincipalError("no authenticated caller")
-    if isinstance(principal, str):
-        if not principal:
-            raise MissingPrincipalError("empty caller id")
-        return principal
     user_id = (
         principal.get("user_id")
         if isinstance(principal, dict)
@@ -160,19 +165,17 @@ def caller_names_a_user(principal: Principal) -> bool:
 
     Mirrors :func:`caller_owner_id`'s tolerance rather than reading
     ``VerifiedCaller.has_user`` directly, and for the same reason that helper
-    has it: this module accepts a bare id string or a mapping as well as the
-    real verified caller, so a stand-in keeps working. Reading the attribute
-    alone would make every such stand-in look like an application acting alone —
-    which is the one shape that skips the id comparison, so the failure would be
-    a silently *weaker* check rather than an error.
+    has it: this module accepts a mapping as well as the real verified caller,
+    so a test stand-in keeps working. Reading the attribute alone would make
+    every such stand-in look like an application acting alone — which is the one
+    shape that skips the id comparison, so the failure would be a silently
+    *weaker* check rather than an error.
 
     A real :class:`VerifiedCaller` answers from ``has_user``. Anything else is
     asked the question that actually matters: does it yield an owner id?
     """
     if principal is None:
         return False
-    if isinstance(principal, str):
-        return bool(principal)
     has_user = getattr(principal, "has_user", None)
     if isinstance(has_user, bool):
         return has_user
