@@ -71,6 +71,63 @@ class AcExpertChatBotSession(Base):
         }
 
 
+class AcExpertChatSession(Base):
+    """One user-owned session in an expert-chat Bot conversation list.
+
+    ``AcExpertChatBotSession`` remains the legacy Bot-list row and default
+    session pointer. Keeping the multi-session index separate preserves its
+    unique-key and removal semantics for clients that still use ``/session``.
+    """
+
+    __tablename__ = "ac_expert_chat_sessions"
+
+    id = Column(
+        AutoIncrementBigInteger,
+        primary_key=True,
+        autoincrement=True,
+        nullable=False,
+    )
+    user_id = Column(String(64), nullable=False)
+    bot_id = Column(String(64), nullable=False)
+    owner_id = Column(String(64), nullable=False)
+    session_key = Column(String(255), nullable=False)
+    status = Column(String(20), nullable=False, server_default="ACTIVE")
+    env = Column(String(50), nullable=False)
+    gmt_create = Column(DateTime, server_default=func.now(), nullable=True)
+    gmt_modified = Column(
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=True,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "bot_id",
+            "owner_id",
+            "env",
+            "session_key",
+            name="uk_user_bot_owner_env_session",
+        ),
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "bot_id": self.bot_id,
+            "owner_id": self.owner_id,
+            "session_key": self.session_key,
+            "status": self.status,
+            "env": self.env,
+            "gmt_create": self.gmt_create.isoformat() if self.gmt_create else None,
+            "gmt_modified": self.gmt_modified.isoformat()
+            if self.gmt_modified
+            else None,
+        }
+
+
 class AcExpertChatInstance(Base):
     """ac_expert_chat_instance — per-caller baas container instance.
 

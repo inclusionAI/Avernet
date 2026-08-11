@@ -2,11 +2,10 @@
 
 Focuses on edge cases like JSON deserialization error handling.
 """
-import pytest
-
 from agentclaw.community.core.expert_chat.sqlite_models import (
     AcExpertChatBotSession,
     AcExpertChatInstance,
+    AcExpertChatSession,
 )
 
 
@@ -46,6 +45,35 @@ class TestAcExpertChatBotSessionToDict:
         result = session.to_dict()
         assert result["gmt_create"] == "2024-01-15T10:30:00"
         assert result["gmt_modified"] == "2024-01-15T10:30:00"
+
+
+def test_owned_session_to_dict_exposes_complete_index_row():
+    from datetime import datetime
+
+    now = datetime(2026, 8, 10, 12, 0, 0)
+    session = AcExpertChatSession(
+        id=7,
+        user_id="u1",
+        bot_id="b1",
+        owner_id="o1",
+        session_key="session:one",
+        status="ACTIVE",
+        env="test",
+        gmt_create=now,
+        gmt_modified=now,
+    )
+
+    assert session.to_dict() == {
+        "id": 7,
+        "user_id": "u1",
+        "bot_id": "b1",
+        "owner_id": "o1",
+        "session_key": "session:one",
+        "status": "ACTIVE",
+        "env": "test",
+        "gmt_create": "2026-08-10T12:00:00",
+        "gmt_modified": "2026-08-10T12:00:00",
+    }
 
 
 class TestAcExpertChatInstanceToDict:

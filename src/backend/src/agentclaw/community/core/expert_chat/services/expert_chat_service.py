@@ -12,10 +12,13 @@ ExpertChat Service — 用户与专家Bot对话业务逻辑层
 - BotInfoProvider: Bot信息查询
 - DeviceConnectionProvider: 设备连接服务
 """
+
 from __future__ import annotations
 
 import traceback
+from datetime import datetime
 from typing import Dict, Any, List, Optional, Protocol, runtime_checkable
+from urllib.parse import quote
 
 from injector import inject
 
@@ -47,9 +50,18 @@ from agentclaw.community.core.bot_management.engines.registry import (
     resolve_provisioning,
 )
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterTransport
+from agentclaw.community.plugin_api.device_adapter_transport import (
+    DeviceAdapterEndpointNotFoundError,
+    DeviceAdapterHTTPStatusError,
+    DeviceAdapterTransport,
+)
 
 logger = get_logger()
+
+_ADAPTER_SESSION_PAGE_SIZE = 500
+_EXACT_SESSION_LOOKUP_ENGINES = {"openclaw", "hermes", "claude_code"}
+_LEGACY_LOCAL_SESSION_ENGINES = {"aicoding", "claude_code"}
+_RELAY_SESSION_CREATE_TIMEOUT_SECONDS = 330.0
 
 
 # ============ Protocol Definitions ============
@@ -239,7 +251,7 @@ class ExpertChatService:
         return result
 
     async def remove_chat_bot(self, user_id: str, bot_id: str, owner_id: str) -> bool:
-        """从对话列表移除专家Bot并清理 session
+        """从对话列表移除专家Bot并清理全部 session
 
         Args:
             user_id: 用户ID（使用人）
@@ -249,21 +261,79 @@ class ExpertChatService:
         Returns:
             是否成功
         """
-        # 1. 尝试删除 session（包括 Adapter 和本地）
-        try:
-            await self.delete_chat_session(user_id, bot_id, owner_id)
-        except BotNotFoundError:
-            # Bot 不存在，继续移除
-            pass
-        except Exception as e:
-            logger.warning(f"[ExpertChatService] Failed to delete session during remove: {e}")
+        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        legacy_session_key = self._repo.get_session(user_id, bot_id, owner_id)
+        if legacy_session_key:
+            self._repo.add_owned_session(
+                user_id, bot_id, owner_id, legacy_session_key
+            )
+        owned_sessions = self._repo.list_owned_sessions(user_id, bot_id, owner_id)
 
-        # 2. 移除记录
+        if bot and owned_sessions:
+            connection, need_poll = await self._prepare_chat_connection(
+                bot, user_id, owner_id, None
+            )
+            if need_poll or connection is None:
+                raise ConnectionError(
+                    "Bot服务正在启动，请稍后重试",
+                    error_code="5001",
+                )
+
+            remaining_session_keys = [row["session_key"] for row in owned_sessions]
+            for row in owned_sessions:
+                session_key = row["session_key"]
+                await self._delete_adapter_session(
+                    bot,
+                    session_key,
+                    user_id,
+                    connection=connection,
+                )
+                await self._remove_session_favorite(
+                    connection, session_key, user_id
+                )
+                # Persist progress after each confirmed runtime deletion. If a
+                # later deletion fails, retrying must not revisit a session that
+                # the Engine has already removed.
+                self._repo.delete_owned_session(
+                    user_id, bot_id, owner_id, session_key
+                )
+                remaining_session_keys.remove(session_key)
+                if legacy_session_key == session_key:
+                    if remaining_session_keys:
+                        legacy_session_key = remaining_session_keys[0]
+                        self._repo.save_session(
+                            user_id,
+                            bot_id,
+                            owner_id,
+                            legacy_session_key,
+                        )
+                    else:
+                        self._repo.delete_session(user_id, bot_id, owner_id)
+                        legacy_session_key = None
+        elif not bot and owned_sessions:
+            logger.warning(
+                "[ExpertChatService] Bot missing during removal; runtime session "
+                "cleanup is unavailable: bot=%s owner=%s sessions=%s",
+                bot_id,
+                owner_id,
+                len(owned_sessions),
+            )
+
+        # Runtime cleanup is complete (or impossible because the Bot no longer
+        # exists), so the local indexes can now be removed together.
+        self._repo.delete_all_owned_sessions(user_id, bot_id, owner_id)
+        if legacy_session_key:
+            self._repo.delete_session(user_id, bot_id, owner_id)
+
         result = self._repo.remove_chat_bot(user_id, bot_id, owner_id)
-        logger.info(f"[ExpertChatService] Removed chat bot: user={user_id}, bot={bot_id}, owner={owner_id}")
+        logger.info(
+            f"[ExpertChatService] Removed chat bot: user={user_id}, bot={bot_id}, owner={owner_id}"
+        )
         return result
 
-    async def get_chat_session(self, user_id: str, bot_id: str, owner_id: str, iam_token: Optional[str] = None) -> Dict[str, Any]:
+    async def get_chat_session(
+        self, user_id: str, bot_id: str, owner_id: str, iam_token: Optional[str] = None
+    ) -> Dict[str, Any]:
         """获取/创建与专家Bot的 chat session
 
         Authorization order (all checks BEFORE expensive operations):
@@ -295,105 +365,267 @@ class ExpertChatService:
             BotNotActiveError: Bot 状态不是 ACTIVE
             ChatPermissionError: 用户无聊天权限
         """
-        # 1. 校验 bot 是否存在且属于该 owner（通过 bot_id + owner_id 唯一定位）
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if not bot:
-            raise BotNotFoundError(f"Bot不存在: {bot_id}")
-
-        if bot.get("status") != "ACTIVE":
-            raise BotNotActiveError(f"Bot未激活: {bot_id}")
-
-        # 2. 【安全前置】校验 bot 是否在用户的对话列表中
-        #    必须在任何昂贵操作（容器创建/升级）之前执行，防止未授权用户触发副作用
-        chat_bots = self._repo.list_chat_bots(user_id)
-        bot_in_list = any(
-            entry["bot_id"] == bot_id and entry["owner_id"] == owner_id
-            for entry in chat_bots
+        bot = self._get_authorized_chat_bot(user_id, bot_id, owner_id)
+        connection, need_poll = await self._prepare_chat_connection(
+            bot, user_id, owner_id, iam_token
         )
-        if not bot_in_list:
-            raise BotNotFoundError(f"Bot不在对话列表中: {bot_id}")
-
-        # 3. 【安全前置】校验用户是否有聊天权限
-        #    必须在任何昂贵操作（容器创建/升级）之前执行，防止未授权用户触发副作用
-        self._check_chat_access(bot, user_id)
-
-        # 4. 根据 call_type 决定连接获取方式（授权检查之后）
-        # Caller 模式：为每个 caller 分配独立的 baas 容器
-        bot_call_type = McpCallType.parse(bot.get("call_type") or None)
-        logger.info("[ExpertChatService] Bot call_type: bot=%s, call_type=%s, parsed=%s", bot_id, bot.get("call_type"), bot_call_type)
-        if bot_call_type == McpCallType.CALLER:
-            logger.info("[ExpertChatService] Caller mode: bot=%s, owner=%s, user=%s", bot_id, owner_id, user_id)
-            result = await self._instance_service.get_caller_connection(
-                user_id=user_id,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                iam_token=iam_token
-            )
-            connection = result.get("connection")
-            need_poll = result.get("need_poll", False)
-
-            # 容器还在创建中，直接返回
-            if need_poll:
-                logger.info("[ExpertChatService] Caller instance not ready: bot=%s, user=%s, need_poll=%s", bot_id, user_id, need_poll)
-                return {
-                    "session_key": None,
-                    "is_new": True,
-                    "connection": connection,
-                    "need_poll": need_poll,
-                }
-
-            # 从 result 中获取 binding_id 并设置到 bot 对象
-            instance = result.get("instance", {})
-            ext = instance.get("ext") or {}
-            bot["binding_id"] = ext.get("binding_id")
-        else:
-            # Owner 模式：使用原有的 binding_id 方式
-            # 根据 bot_type 获取 binding_id
-            # 服务型 Bot：通过 BaasService 获取发布成功的发布单
-            bot_type = bot.get("bot_type", "personal")
-            if bot_type == "service":
-                from agentclaw.community.core.service_bot.repository.models import PublishStatus
-                binding_id = self._baas_service.get_bind_id(
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                    bot_type=bot_type,
-                    publish_status=PublishStatus.SUCCESS.value,
-                )
-                # 将 binding_id 设置到 bot 对象中，供后续 _get_connection 使用
-                bot["binding_id"] = binding_id
+        if need_poll:
+            return {
+                "session_key": None,
+                "is_new": True,
+                "connection": connection,
+                "need_poll": True,
+            }
 
         # 5. 查是否已有 session
         session_key = self._repo.get_session(user_id, bot_id, owner_id)
 
         # 6. 有则校验有效性
         if session_key:
-            exists = await self._check_session_exists(bot, session_key, user_id)
+            exists = await self._check_session_exists(
+                bot, session_key, user_id, connection=connection
+            )
             if exists:
-                conn = self._get_connection(bot, user_id)
-                logger.info(f"[ExpertChatService] Reusing session: user={user_id}, bot={bot_id}, session={session_key}")
+                self._repo.add_owned_session(user_id, bot_id, owner_id, session_key)
+                logger.info(
+                    f"[ExpertChatService] Reusing session: user={user_id}, bot={bot_id}, session={session_key}"
+                )
                 return {
                     "session_key": session_key,
                     "is_new": False,
-                    "connection": conn
+                    "connection": connection,
                 }
             else:
                 # Session 已失效，删除旧记录
+                self._repo.delete_owned_session(
+                    user_id, bot_id, owner_id, session_key
+                )
                 self._repo.delete_session(user_id, bot_id, owner_id)
 
         # 7. 没有或无效则创建新 session
-        session_key = await self._create_session(bot, user_id)
+        session_key = await self._create_session(
+            bot, user_id, connection=connection
+        )
         self._repo.save_session(user_id, bot_id, owner_id, session_key)
+        self._repo.add_owned_session(user_id, bot_id, owner_id, session_key)
 
-        conn = self._get_connection(bot, user_id)
-        logger.info(f"[ExpertChatService] Created new session: user={user_id}, bot={bot_id}, session={session_key}")
+        logger.info(
+            f"[ExpertChatService] Created new session: user={user_id}, bot={bot_id}, session={session_key}"
+        )
 
         return {
             "session_key": session_key,
             "is_new": True,
-            "connection": conn
+            "connection": connection,
         }
 
-    async def delete_chat_session(self, user_id: str, bot_id: str, owner_id: str) -> bool:
+    async def list_chat_sessions(
+        self,
+        user_id: str,
+        bot_id: str,
+        owner_id: str,
+        session_key: Optional[str] = None,
+        favorite_only: bool = False,
+        limit: int = 20,
+        offset: int = 0,
+        iam_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """List one user's sessions for one expert Bot.
+
+        The Backend-owned index is authoritative for ownership. Adapter data is
+        only used to enrich those already-authorized keys with live metadata.
+        """
+        bot = self._get_authorized_chat_bot(user_id, bot_id, owner_id)
+        legacy_session_key = self._repo.get_session(user_id, bot_id, owner_id)
+        if legacy_session_key:
+            self._repo.add_owned_session(user_id, bot_id, owner_id, legacy_session_key)
+
+        rows = self._repo.list_owned_sessions(
+            user_id=user_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            session_key=session_key,
+        )
+        if not rows:
+            return {"total": 0, "items": []}
+
+        connection, need_poll = await self._prepare_chat_connection(
+            bot, user_id, owner_id, iam_token
+        )
+        if favorite_only and need_poll:
+            return {"total": 0, "items": [], "need_poll": True}
+
+        if favorite_only and connection is not None:
+            favorite_items = await self._list_favorite_sessions(
+                connection, user_id, bot_id
+            )
+            rows_by_key = {row["session_key"]: row for row in rows}
+            items = []
+            for favorite in favorite_items:
+                favorite_key = favorite.get("id")
+                row = rows_by_key.get(favorite_key)
+                if row is None:
+                    continue
+                item = dict(favorite)
+                for key, value in self._placeholder_session(row).items():
+                    item.setdefault(key, value)
+                items.append(item)
+            total = len(items)
+            return {
+                "total": total,
+                "items": items[offset : offset + limit],
+            }
+
+        adapter_items = {}
+        if not need_poll and connection is not None:
+            adapter_items = await self._list_owned_adapter_sessions(
+                connection=connection,
+                rows=rows,
+                user_id=user_id,
+            )
+
+        items = []
+        engine_type = connection.get("engine_type", "openclaw") if connection else None
+        for row in rows:
+            item = adapter_items.get(row["session_key"])
+            if item is None:
+                items.append(self._placeholder_session(row))
+                continue
+            enriched = dict(item)
+            for key, value in self._placeholder_session(row).items():
+                enriched.setdefault(key, value)
+            if engine_type == "openclaw":
+                # OpenClaw currently synthesizes Session updated_at at conversion
+                # time. Prefer the real message timestamp, then the stable Backend
+                # ownership creation time, so repeated reads cannot reorder rows.
+                last_message = enriched.get("last_message")
+                last_message_at = (
+                    last_message.get("gmt_created")
+                    if isinstance(last_message, dict)
+                    else None
+                )
+                stable_modified = last_message_at or row.get("gmt_create")
+                if stable_modified:
+                    enriched["gmt_modified"] = stable_modified
+            items.append(enriched)
+
+        items.sort(key=self._session_sort_key, reverse=True)
+        total = len(items)
+        return {
+            "total": total,
+            "items": items[offset : offset + limit],
+            **({"need_poll": True} if need_poll else {}),
+        }
+
+    async def create_chat_session(
+        self,
+        user_id: str,
+        bot_id: str,
+        owner_id: str,
+        iam_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Always create a new session and make it the legacy default."""
+        bot = self._get_authorized_chat_bot(user_id, bot_id, owner_id)
+        connection, need_poll = await self._prepare_chat_connection(
+            bot, user_id, owner_id, iam_token
+        )
+        if need_poll:
+            return {
+                "session_key": None,
+                "is_new": True,
+                "connection": connection,
+                "need_poll": True,
+            }
+
+        created_session_key = await self._create_session(
+            bot,
+            user_id,
+            connection=connection,
+            prefer_adapter_for_relay=True,
+        )
+        self._repo.add_owned_session(user_id, bot_id, owner_id, created_session_key)
+        # Legacy clients resume the latest session created by the new UI.
+        self._repo.save_session(user_id, bot_id, owner_id, created_session_key)
+        return {
+            "session_key": created_session_key,
+            "is_new": True,
+            "connection": connection,
+        }
+
+    async def connect_chat_session(
+        self,
+        user_id: str,
+        bot_id: str,
+        owner_id: str,
+        session_key: str,
+        iam_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Return connection data for one session owned by the caller."""
+        bot = self._get_authorized_chat_bot(user_id, bot_id, owner_id)
+        # 以下为安全注释COSEC：会话归属必须在建立容器连接前由登录用户维度校验。
+        owned = self._repo.get_owned_session(user_id, bot_id, owner_id, session_key)
+        if not owned:
+            raise BotNotFoundError("Session不存在或不属于当前用户")
+
+        connection, need_poll = await self._prepare_chat_connection(
+            bot, user_id, owner_id, iam_token
+        )
+        if not need_poll:
+            self._repo.save_session(user_id, bot_id, owner_id, session_key)
+        return {
+            "session_key": session_key,
+            "is_new": False,
+            "connection": connection,
+            **({"need_poll": True} if need_poll else {}),
+        }
+
+    async def delete_owned_chat_session(
+        self,
+        user_id: str,
+        bot_id: str,
+        owner_id: str,
+        session_key: str,
+    ) -> bool:
+        """Delete one authorized multi-session entry and its favorite marker."""
+        bot = self._get_authorized_chat_bot(user_id, bot_id, owner_id)
+        # 以下为安全注释COSEC：禁止仅凭前端提供的 session_key 删除会话。
+        owned = self._repo.get_owned_session(user_id, bot_id, owner_id, session_key)
+        if not owned:
+            raise BotNotFoundError("Session不存在或不属于当前用户")
+
+        connection, need_poll = await self._prepare_chat_connection(
+            bot, user_id, owner_id, None
+        )
+        if need_poll or connection is None:
+            raise ConnectionError(
+                "Bot服务正在启动，请稍后重试",
+                error_code="5001",
+            )
+
+        # Keep the ownership row until runtime deletion is confirmed. Otherwise
+        # a transient Adapter failure would make the session impossible to retry.
+        await self._delete_adapter_session(
+            bot, session_key, user_id, connection=connection
+        )
+        await self._remove_session_favorite(connection, session_key, user_id)
+        self._repo.delete_owned_session(user_id, bot_id, owner_id, session_key)
+
+        if self._repo.get_session(user_id, bot_id, owner_id) == session_key:
+            remaining = self._repo.list_owned_sessions(user_id, bot_id, owner_id)
+            if remaining:
+                self._repo.save_session(
+                    user_id,
+                    bot_id,
+                    owner_id,
+                    remaining[0]["session_key"],
+                )
+            else:
+                self._repo.delete_session(user_id, bot_id, owner_id)
+        return True
+
+    async def delete_chat_session(
+        self, user_id: str, bot_id: str, owner_id: str
+    ) -> bool:
         """删除用户与专家Bot的 chat session
 
         Args:
@@ -415,15 +647,17 @@ class ExpertChatService:
             logger.warning(f"[ExpertChatService] No session found for user={user_id}, bot={bot_id}, owner={owner_id}")
             return True  # 本来就没有，也算成功
 
-        # 3. 调用 Adapter 删除 session
+        # 3. 调用 Adapter 删除 session。运行时删除失败时保留新的 ownership，
+        # 让新旧前端都能重试，而不是制造 Engine 孤儿会话。
         try:
             await self._delete_adapter_session(bot, session_key, user_id)
             logger.info(f"[ExpertChatService] Deleted adapter session: {session_key}")
         except Exception as e:
             logger.error(f"[ExpertChatService] Failed to delete adapter session {session_key}: {e}")
-            # Adapter 删除失败也要继续删除本地记录
+            raise
 
         # 4. 删除本地 session 映射
+        self._repo.delete_owned_session(user_id, bot_id, owner_id, session_key)
         self._repo.delete_session(user_id, bot_id, owner_id)
         logger.info(
             "[ExpertChatService] Deleted local session mapping: user=%s, bot=%s, owner=%s",
@@ -436,7 +670,271 @@ class ExpertChatService:
 
     # ============ Private Methods ============
 
-    def _get_connection(self, bot: Dict[str, Any], user_id: Optional[str] = None) -> Dict[str, Any]:
+    def _get_authorized_chat_bot(
+        self, user_id: str, bot_id: str, owner_id: str
+    ) -> Dict[str, Any]:
+        """Resolve and authorize a Bot before any container-side operation."""
+        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        if not bot:
+            raise BotNotFoundError(f"Bot不存在: {bot_id}")
+        if bot.get("status") != "ACTIVE":
+            raise BotNotActiveError(f"Bot未激活: {bot_id}")
+
+        # 以下为安全注释COSEC：互动列表归属和 Bot 访问权均使用服务端登录身份校验。
+        bot_in_list = any(
+            entry["bot_id"] == bot_id and entry["owner_id"] == owner_id
+            for entry in self._repo.list_chat_bots(user_id)
+        )
+        if not bot_in_list:
+            raise BotNotFoundError(f"Bot不在对话列表中: {bot_id}")
+        self._check_chat_access(bot, user_id)
+        return bot
+
+    async def _prepare_chat_connection(
+        self,
+        bot: Dict[str, Any],
+        user_id: str,
+        owner_id: str,
+        iam_token: Optional[str],
+    ) -> tuple[Optional[Dict[str, Any]], bool]:
+        """Resolve caller/owner binding and return Adapter connection data."""
+        bot_id = bot["bot_id"]
+        bot_call_type = McpCallType.parse(bot.get("call_type") or None)
+        logger.info(
+            "[ExpertChatService] Bot call_type: bot=%s, call_type=%s, parsed=%s",
+            bot_id,
+            bot.get("call_type"),
+            bot_call_type,
+        )
+        if bot_call_type == McpCallType.CALLER:
+            result = await self._instance_service.get_caller_connection(
+                user_id=user_id,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                iam_token=iam_token,
+            )
+            if result.get("need_poll", False):
+                logger.info(
+                    "[ExpertChatService] Caller instance not ready: bot=%s, user=%s",
+                    bot_id,
+                    user_id,
+                )
+                return result.get("connection"), True
+            instance = result.get("instance", {})
+            ext = instance.get("ext") or {}
+            bot["binding_id"] = ext.get("binding_id")
+        elif bot.get("bot_type", "personal") == "service":
+            from agentclaw.community.core.service_bot.repository.models import (
+                PublishStatus,
+            )
+
+            bot["binding_id"] = self._baas_service.get_bind_id(
+                bot_id=bot_id,
+                owner_id=owner_id,
+                bot_type="service",
+                publish_status=PublishStatus.SUCCESS.value,
+            )
+
+        return self._get_connection(bot, user_id), False
+
+    async def _list_owned_adapter_sessions(
+        self,
+        connection: Dict[str, Any],
+        rows: List[Dict[str, Any]],
+        user_id: str,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Batch-read Adapter metadata until every owned session is resolved.
+
+        The Adapter may host sessions for multiple Bots or legacy keys that do
+        not encode an ``agent_id``. We therefore omit the agent filter and make
+        the Backend ownership index the final authorization boundary.
+        """
+        remaining_keys = {row["session_key"] for row in rows}
+        matched: Dict[str, Dict[str, Any]] = {}
+        engine_type = connection.get("engine_type", "openclaw")
+        if engine_type in _EXACT_SESSION_LOOKUP_ENGINES:
+            await self._lookup_remaining_adapter_sessions(
+                connection=connection,
+                remaining_keys=remaining_keys,
+                matched=matched,
+            )
+            return matched
+
+        seen_adapter_ids: set[str] = set()
+        offset = 0
+        list_unavailable = False
+
+        while remaining_keys:
+            try:
+                response = await self._transport.invoke(
+                    connection,
+                    "GET",
+                    "/api/sessions",
+                    params={
+                        "user_id": user_id,
+                        "limit": _ADAPTER_SESSION_PAGE_SIZE,
+                        "offset": offset,
+                    },
+                )
+            except Exception as error:
+                list_unavailable = True
+                logger.warning(
+                    "[ExpertChatService] Adapter session list unavailable; "
+                    "unresolved sessions will use placeholders: offset=%s error=%s",
+                    offset,
+                    error,
+                )
+                break
+
+            data = response.get("data")
+            if not isinstance(data, list) or not data:
+                break
+
+            page_ids: set[str] = set()
+            for raw_item in data:
+                if not isinstance(raw_item, dict):
+                    continue
+                session_id = raw_item.get("id")
+                if not isinstance(session_id, str) or not session_id:
+                    continue
+                page_ids.add(session_id)
+                # 以下为安全注释COSEC：Adapter 结果必须与已授权的 Backend ownership 取交集。
+                if session_id in remaining_keys:
+                    matched[session_id] = raw_item
+                    remaining_keys.remove(session_id)
+
+            unseen_ids = page_ids - seen_adapter_ids
+            if not unseen_ids:
+                logger.warning(
+                    "[ExpertChatService] Adapter session pagination made no progress; "
+                    "stopping at offset=%s",
+                    offset,
+                )
+                break
+            seen_adapter_ids.update(unseen_ids)
+            offset += len(data)
+
+        if remaining_keys and not list_unavailable:
+            await self._lookup_remaining_adapter_sessions(
+                connection=connection,
+                remaining_keys=remaining_keys,
+                matched=matched,
+            )
+
+        return matched
+
+    async def _lookup_remaining_adapter_sessions(
+        self,
+        connection: Dict[str, Any],
+        remaining_keys: set[str],
+        matched: Dict[str, Dict[str, Any]],
+    ) -> None:
+        """Resolve keys hidden by engines that filter after pagination."""
+        for session_key in sorted(remaining_keys):
+            encoded_session_key = quote(session_key, safe="")
+            try:
+                response = await self._transport.invoke(
+                    connection,
+                    "GET",
+                    f"/api/sessions/{encoded_session_key}",
+                )
+            except Exception as error:
+                if self._is_adapter_not_found(error):
+                    continue
+                logger.warning(
+                    "[ExpertChatService] Exact session lookup unavailable; "
+                    "remaining sessions will use placeholders: session=%s error=%s",
+                    session_key,
+                    error,
+                )
+                break
+
+            item = response.get("data")
+            # The session key comes from the authorized Backend index, and the
+            # Adapter response must still match it exactly before enrichment.
+            if isinstance(item, dict) and item.get("id") == session_key:
+                matched[session_key] = item
+
+    @staticmethod
+    def _placeholder_session(row: Dict[str, Any]) -> Dict[str, Any]:
+        """Build the complete list shape for an empty or unavailable session."""
+        return {
+            "id": row["session_key"],
+            "title": "新会话",
+            "user_id": row["user_id"],
+            "agent_id": row["bot_id"],
+            "model": None,
+            "permission_mode": None,
+            "cwd": None,
+            "gmt_created": row.get("gmt_create") or "",
+            "gmt_modified": row.get("gmt_modified") or "",
+            "message_count": 0,
+            "last_message": None,
+        }
+
+    @staticmethod
+    def _session_sort_key(item: Dict[str, Any]) -> float:
+        value = item.get("gmt_modified") or item.get("gmt_created")
+        if not value:
+            return 0.0
+        try:
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+        except (TypeError, ValueError):
+            return 0.0
+
+    async def _remove_session_favorite(
+        self,
+        connection: Dict[str, Any],
+        session_key: str,
+        user_id: str,
+    ) -> None:
+        """Best-effort favorite cleanup for engines whose delete is deferred."""
+        encoded_session_key = quote(session_key, safe="")
+        try:
+            await self._transport.invoke(
+                connection,
+                "DELETE",
+                f"/api/session-favorites/{encoded_session_key}",
+                params={"user_id": user_id},
+            )
+        except Exception as error:
+            logger.warning(
+                "[ExpertChatService] Favorite cleanup skipped: session=%s error=%s",
+                session_key,
+                error,
+            )
+
+    async def _list_favorite_sessions(
+        self,
+        connection: Dict[str, Any],
+        user_id: str,
+        bot_id: str,
+    ) -> List[Dict[str, Any]]:
+        """Read existing Adapter favorites; old Adapters degrade to an empty tab."""
+        try:
+            response = await self._transport.invoke(
+                connection,
+                "GET",
+                "/api/session-favorites",
+                params={
+                    "user_id": user_id,
+                    "limit": 10_000,
+                    "offset": 0,
+                },
+            )
+            data = response.get("data")
+            return data if isinstance(data, list) else []
+        except Exception as error:
+            logger.warning(
+                "[ExpertChatService] Favorite list unavailable: bot=%s error=%s",
+                bot_id,
+                error,
+            )
+            return []
+
+    def _get_connection(
+        self, bot: Dict[str, Any], user_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         """获取 Bot 的连接信息
 
         分流:
@@ -596,45 +1094,13 @@ class ExpertChatService:
             f"User {user_id} has no chat access to bot {bot_id}"
         )
 
-    def _resolve_chat_engine_type(self, bot: Dict[str, Any], conn: Dict[str, Any]) -> str:
-        """Resolve effective chat engine from authoritative bot metadata.
-
-        ``conn["engine_type"]`` may be a resolver fallback when a historical
-        runtime binding cannot reverse-resolve the business bot, for example
-        caller-instance BaaS bindings created before ``device_props.bolt_id`` was
-        persisted. ExpertChat already has the authoritative bot row, so prefer it
-        and apply the public BaaS bucket normalization used by runtime routing.
-        """
-        template_config = bot.get("template_config") or {}
-        if not isinstance(template_config, dict):
-            template_config = {}
-        raw_engine_type = (
-            bot.get("active_engine")
-            or template_config.get("active_runtime_engine_type")
-            or conn.get("engine_type")
-            or "openclaw"
-        )
-        return resolve_baas_engine_bucket(
-            engine_type=raw_engine_type,
-            template_type=bot.get("template_type") or "",
-        )
-
-    def _resolve_chat_engine_strategy(self, bot: Dict[str, Any], conn: Dict[str, Any]):
-        """Resolve normalized chat engine plus its registered strategy."""
-        engine_type = self._resolve_chat_engine_type(bot, conn)
-        template_config = bot.get("template_config")
-        if not isinstance(template_config, dict):
-            template_config = None
-        return resolve_provisioning(
-            bot_id=str(bot.get("bot_id") or ""),
-            owner_id=str(bot.get("owner_id") or ""),
-            bot_type=str(bot.get("bot_type") or ""),
-            active_engine=engine_type,
-            template_type=bot.get("template_type") or None,
-            template_config=template_config,
-        )
-
-    async def _create_session(self, bot: Dict[str, Any], user_id: str) -> str:
+    async def _create_session(
+        self,
+        bot: Dict[str, Any],
+        user_id: str,
+        connection: Optional[Dict[str, Any]] = None,
+        prefer_adapter_for_relay: bool = False,
+    ) -> str:
         """调用 Adapter 创建 session
 
         Args:
@@ -644,27 +1110,54 @@ class ExpertChatService:
         Returns:
             session_key
         """
-        conn = self._get_connection(bot, user_id)
-        ctx, strategy = self._resolve_chat_engine_strategy(bot, conn)
-        conn["engine_type"] = ctx.active_engine
+        conn = connection or self._get_connection(bot, user_id)
+        engine_type = conn.get("engine_type", "openclaw")
 
-        if not strategy.uses_adapter_chat_session_lifecycle(ctx):
-            session_key = strategy.build_local_chat_session_key(ctx, user_id=user_id)
-            logger.info(
-                "[ExpertChatService] Relay-managed chat session: bot=%s, user=%s, engine=%s, session=%s",
-                bot.get("bot_id"), user_id, ctx.active_engine, session_key,
-            )
-            return session_key
+        # Preserve the legacy singular /session behavior. Only the new plural
+        # /sessions flow opts into persisted, canonical relay session keys.
+        if (
+            engine_type in _LEGACY_LOCAL_SESSION_ENGINES
+            and not prefer_adapter_for_relay
+        ):
+            return await self._create_aicoding_session(conn, bot, user_id)
 
-        return await self._create_openclaw_session(conn, bot, user_id)
+        try:
+            return await self._create_openclaw_session(conn, bot, user_id)
+        except Exception as error:
+            if (
+                engine_type in _LEGACY_LOCAL_SESSION_ENGINES
+                and self._is_adapter_endpoint_unsupported(error)
+            ):
+                logger.warning(
+                    "[ExpertChatService] Adapter session creation unsupported; "
+                    "using legacy local key: engine=%s bot=%s",
+                    engine_type,
+                    bot.get("bot_id"),
+                )
+                return await self._create_aicoding_session(conn, bot, user_id)
+            raise
 
-    async def _create_openclaw_session(self, conn: Dict[str, Any], bot: Dict[str, Any], user_id: str) -> str:
-        """调用 Adapter 创建 OpenClaw session，返回带前缀的完整 session ID"""
+    async def _create_aicoding_session(
+        self, conn: Dict[str, Any], bot: Dict[str, Any], user_id: str
+    ) -> str:
+        """
+        AI Coding 引擎：teamclaw-aicoding-relay 按需建 session，本地生成 key，不调 Adapter。
+        """
+        import uuid
+
+        session_key = f"session:{uuid.uuid4()}:user:{user_id}"
+        logger.info(f"[aicoding] local session key generated: {session_key}")
+        return session_key
+
+    async def _create_openclaw_session(
+        self, conn: Dict[str, Any], bot: Dict[str, Any], user_id: str
+    ) -> str:
+        """Create a session through the active Adapter and return its full ID."""
         payload = {
             "title": f"Chat with {bot.get('bot_name', bot['bot_id'])}",
             "user_id": user_id,
             "agent_id": bot["bot_id"],
-            "engine": "openclaw",
+            "engine": conn.get("engine_type", "openclaw"),
         }
         use_proxy = conn.get("use_proxy", False)
         logger.info(
@@ -676,11 +1169,19 @@ class ExpertChatService:
         )
 
         try:
+            create_timeout = (
+                _RELAY_SESSION_CREATE_TIMEOUT_SECONDS
+                if conn.get("engine_type") in _LEGACY_LOCAL_SESSION_ENGINES
+                else None
+            )
+            invoke_kwargs: Dict[str, Any] = {"body": payload}
+            if create_timeout is not None:
+                invoke_kwargs["timeout"] = create_timeout
             data = await self._transport.invoke(
                 conn,
                 "POST",
                 "/api/sessions",
-                body=payload,
+                **invoke_kwargs,
             )
             logger.info(f"[ExpertChatService] Adapter POST response {data}")
             raw_session_key = data.get("data", {}).get("id") or data.get("id")
@@ -762,24 +1263,34 @@ class ExpertChatService:
             original_error=error_msg,
         )
 
-    async def _check_session_exists(self, bot: Dict[str, Any], session_key: str, user_id: Optional[str] = None) -> bool:
+    async def _check_session_exists(
+        self,
+        bot: Dict[str, Any],
+        session_key: str,
+        user_id: Optional[str] = None,
+        connection: Optional[Dict[str, Any]] = None,
+    ) -> bool:
         """
         调用 Adapter 校验 session 是否还存在。
         AI Coding 引擎：teamclaw-aicoding-relay 按需创建 session，始终返回 True。
         """
-        conn = self._get_connection(bot, user_id)
-        ctx, strategy = self._resolve_chat_engine_strategy(bot, conn)
-        conn["engine_type"] = ctx.active_engine
+        conn = connection or self._get_connection(bot, user_id)
 
-        if not strategy.uses_adapter_chat_session_lifecycle(ctx):
+        if conn.get("engine_type") == "aicoding":
+            return True
+        if conn.get("engine_type") == "claude_code":
             logger.info(
-                "[ExpertChatService] Relay-managed chat session check: skipping adapter pre-check for session=%s, engine=%s",
-                session_key, ctx.active_engine,
+                "[ExpertChatService] claude_code session check: skipping "
+                "adapter pre-check for session=%s",
+                session_key,
             )
             return True
 
         try:
-            await self._transport.invoke(conn, "GET", f"/api/sessions/{session_key}")
+            encoded_session_key = quote(session_key, safe="")
+            await self._transport.invoke(
+                conn, "GET", f"/api/sessions/{encoded_session_key}"
+            )
             return True
         except Exception as e:
             if self._is_adapter_not_found(e):
@@ -799,37 +1310,44 @@ class ExpertChatService:
         bot: Dict[str, Any],
         session_key: str,
         user_id: Optional[str] = None,
+        connection: Optional[Dict[str, Any]] = None,
     ) -> None:
         """调用 Adapter 删除 session"""
-        # Relay-managed sessions do not require Adapter deletion. Resolve from bot
-        # first so historical caller-instance bindings with conn_engine=openclaw do
-        # not accidentally call the OpenClaw adapter endpoint.
-        bot_ctx, bot_strategy = self._resolve_chat_engine_strategy(bot, {})
-        if not bot_strategy.uses_adapter_chat_session_lifecycle(bot_ctx):
-            logger.info(
-                "[ExpertChatService] Skipping adapter session deletion for relay-managed engine: bot=%s, session=%s, engine=%s",
-                bot.get("bot_id"), session_key, bot_ctx.active_engine,
-            )
-            return
-
-        conn = self._get_connection(bot, user_id)
-        ctx, strategy = self._resolve_chat_engine_strategy(bot, conn)
-        conn["engine_type"] = ctx.active_engine
-        if not strategy.uses_adapter_chat_session_lifecycle(ctx):
-            logger.info(
-                "[ExpertChatService] Skipping adapter session deletion for relay-managed engine: bot=%s, session=%s, engine=%s",
-                bot.get("bot_id"), session_key, ctx.active_engine,
-            )
-            return
+        conn = connection or self._get_connection(bot, user_id)
+        engine_type = conn.get("engine_type", "openclaw")
 
         logger.info(f"[ExpertChatService] Deleting adapter session via transport: session={session_key}")
 
         try:
-            await self._transport.invoke(conn, "DELETE", f"/api/sessions/{session_key}")
+            encoded_session_key = quote(session_key, safe="")
+            await self._transport.invoke(
+                conn, "DELETE", f"/api/sessions/{encoded_session_key}"
+            )
             logger.info(f"[ExpertChatService] Successfully deleted adapter session: {session_key}")
         except Exception as e:
             if self._is_adapter_not_found(e):
+                if self._is_ambiguous_adapter_delete_not_found(e):
+                    # Engine's generic DELETE endpoint uses this 404 for both a
+                    # missing session and an operational deletion failure. The
+                    # Backend ownership index must remain retryable on ambiguity.
+                    logger.error(
+                        "[ExpertChatService] Adapter returned ambiguous delete "
+                        "result; preserving ownership: session=%s",
+                        session_key,
+                    )
+                    raise
                 logger.warning(f"[ExpertChatService] Session not found in adapter: {session_key}")
+                return
+            if (
+                engine_type in _LEGACY_LOCAL_SESSION_ENGINES
+                and self._is_adapter_endpoint_unsupported(e)
+            ):
+                logger.warning(
+                    "[ExpertChatService] Adapter session deletion unsupported; "
+                    "keeping legacy metadata-only behavior: engine=%s session=%s",
+                    engine_type,
+                    session_key,
+                )
                 return
             logger.error(
                 "[ExpertChatService] Unexpected error when DELETE session via transport: %s: %s",
@@ -841,5 +1359,29 @@ class ExpertChatService:
 
     @staticmethod
     def _is_adapter_not_found(error: Exception) -> bool:
+        if isinstance(error, DeviceAdapterEndpointNotFoundError):
+            return True
+        if isinstance(error, DeviceAdapterHTTPStatusError):
+            return error.status_code == 404
         error_msg = str(error)
         return "Adapter returned" in error_msg and "404" in error_msg
+
+    @staticmethod
+    def _is_ambiguous_adapter_delete_not_found(error: Exception) -> bool:
+        """Identify the Engine 404 that also represents runtime delete failure."""
+        return "Session not found or delete failed" in str(error)
+
+    @staticmethod
+    def _is_adapter_endpoint_unsupported(error: Exception) -> bool:
+        if isinstance(error, DeviceAdapterEndpointNotFoundError):
+            return True
+        if isinstance(error, DeviceAdapterHTTPStatusError):
+            return error.status_code in {404, 405}
+        error_msg = (
+            error.original_error
+            if isinstance(error, SessionCreateError) and error.original_error
+            else str(error)
+        )
+        return "Adapter returned" in error_msg and (
+            "404" in error_msg or "405" in error_msg
+        )

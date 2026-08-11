@@ -1,6 +1,6 @@
 """Tests for ExpertChatService."""
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 from agentclaw.community.core.expert_chat.services.expert_chat_service import ExpertChatService
 from agentclaw.community.core.expert_chat.errors import (
@@ -10,6 +10,10 @@ from agentclaw.community.core.expert_chat.errors import (
     SessionCreateError,
     ConnectionError,
     ChatPermissionError,
+)
+from agentclaw.community.plugin_api.device_adapter_transport import (
+    DeviceAdapterEndpointNotFoundError,
+    DeviceAdapterHTTPStatusError,
 )
 
 
@@ -219,38 +223,181 @@ class TestRemoveChatBot:
     async def test_success(self, mock_repository, mock_bot_repo, mock_device_provider):
         mock_repository.remove_chat_bot.return_value = True
         svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider)
-        svc.delete_chat_session = AsyncMock(return_value=True)
 
         result = await svc.remove_chat_bot("user1", "bot1", "owner1")
 
         assert result is True
         mock_repository.remove_chat_bot.assert_called_once_with("user1", "bot1", "owner1")
+        mock_repository.delete_all_owned_sessions.assert_called_once_with(
+            "user1", "bot1", "owner1"
+        )
 
     @pytest.mark.asyncio
     async def test_bot_not_found_during_session_delete_is_ignored(
         self, mock_repository, mock_bot_repo, mock_device_provider
     ):
-        """BotNotFoundError from delete_chat_session should not propagate."""
+        """A missing Bot cannot expose runtime cleanup, but local removal works."""
+        mock_bot_repo.get_by_id_and_owner.return_value = None
+        mock_repository.get_session.return_value = "session:orphan"
+        mock_repository.list_owned_sessions.return_value = [
+            {"session_key": "session:orphan"}
+        ]
         mock_repository.remove_chat_bot.return_value = True
         svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider)
-        svc.delete_chat_session = AsyncMock(side_effect=BotNotFoundError("not found"))
 
         result = await svc.remove_chat_bot("user1", "bot1", "owner1")
 
         assert result is True
+        mock_repository.delete_all_owned_sessions.assert_called_once_with(
+            "user1", "bot1", "owner1"
+        )
+        mock_repository.delete_session.assert_called_once_with(
+            "user1", "bot1", "owner1"
+        )
 
     @pytest.mark.asyncio
-    async def test_generic_exception_during_session_delete_is_logged_not_raised(
+    async def test_runtime_delete_failure_preserves_local_ownership(
         self, mock_repository, mock_bot_repo, mock_device_provider
     ):
-        """Non-BotNotFoundError exceptions should be caught and logged."""
-        mock_repository.remove_chat_bot.return_value = True
+        """A runtime cleanup failure must keep local ownership retryable."""
+        mock_bot_repo.get_by_id_and_owner.return_value = dict(ACTIVE_BOT)
+        mock_repository.list_owned_sessions.return_value = [
+            {"session_key": "session:one"}
+        ]
         svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider)
-        svc.delete_chat_session = AsyncMock(side_effect=RuntimeError("boom"))
+        with patch.object(
+            svc,
+            "_delete_adapter_session",
+            new=AsyncMock(side_effect=RuntimeError("boom")),
+        ):
+            with pytest.raises(RuntimeError, match="boom"):
+                await svc.remove_chat_bot("user1", "bot1", "owner1")
 
-        result = await svc.remove_chat_bot("user1", "bot1", "owner1")
+        mock_repository.delete_all_owned_sessions.assert_not_called()
+        mock_repository.delete_session.assert_not_called()
+        mock_repository.remove_chat_bot.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_remove_while_caller_instance_is_starting_is_retryable(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        mock_bot_repo.get_by_id_and_owner.return_value = dict(ACTIVE_BOT)
+        mock_repository.list_owned_sessions.return_value = [
+            {"session_key": "session:one"}
+        ]
+        svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider)
+
+        with patch.object(
+            svc,
+            "_prepare_chat_connection",
+            new=AsyncMock(return_value=(None, True)),
+        ):
+            with pytest.raises(ConnectionError, match="正在启动"):
+                await svc.remove_chat_bot("user1", "bot1", "owner1")
+
+        mock_repository.delete_owned_session.assert_not_called()
+        mock_repository.delete_all_owned_sessions.assert_not_called()
+        mock_repository.remove_chat_bot.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_partial_runtime_delete_failure_retries_only_remaining_sessions(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        mock_bot_repo.get_by_id_and_owner.return_value = dict(ACTIVE_BOT)
+        mock_repository.get_session.side_effect = [
+            "session:first",
+            "session:second",
+        ]
+        mock_repository.list_owned_sessions.side_effect = [
+            [
+                {"session_key": "session:first"},
+                {"session_key": "session:second"},
+            ],
+            [{"session_key": "session:second"}],
+        ]
+        svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider)
+        delete_attempts = {"session:second": 0}
+
+        async def delete_with_one_transient_failure(
+            _bot, session_key, _user_id, connection=None
+        ):
+            if session_key == "session:second":
+                delete_attempts[session_key] += 1
+                if delete_attempts[session_key] == 1:
+                    raise RuntimeError("transient")
+
+        with patch.object(
+            svc,
+            "_delete_adapter_session",
+            new=AsyncMock(side_effect=delete_with_one_transient_failure),
+        ) as delete_adapter, patch.object(
+            svc, "_remove_session_favorite", new=AsyncMock()
+        ):
+            with pytest.raises(RuntimeError, match="transient"):
+                await svc.remove_chat_bot("user1", "bot1", "owner1")
+
+            result = await svc.remove_chat_bot("user1", "bot1", "owner1")
 
         assert result is True
+        assert [call.args[1] for call in delete_adapter.await_args_list] == [
+            "session:first",
+            "session:second",
+            "session:second",
+        ]
+        assert mock_repository.delete_owned_session.call_args_list == [
+            call("user1", "bot1", "owner1", "session:first"),
+            call("user1", "bot1", "owner1", "session:second"),
+        ]
+        mock_repository.save_session.assert_called_once_with(
+            "user1", "bot1", "owner1", "session:second"
+        )
+        mock_repository.delete_session.assert_called_once_with(
+            "user1", "bot1", "owner1"
+        )
+        mock_repository.delete_all_owned_sessions.assert_called_once_with(
+            "user1", "bot1", "owner1"
+        )
+        mock_repository.remove_chat_bot.assert_called_once_with(
+            "user1", "bot1", "owner1"
+        )
+
+    @pytest.mark.asyncio
+    async def test_all_owned_sessions_are_deleted_before_bot_is_removed(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        mock_bot_repo.get_by_id_and_owner.return_value = dict(ACTIVE_BOT)
+        mock_repository.get_session.return_value = "session:default"
+        mock_repository.list_owned_sessions.return_value = [
+            {"session_key": "session:default"},
+            {"session_key": "session:second"},
+        ]
+        svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider)
+
+        with patch.object(
+            svc, "_delete_adapter_session", new=AsyncMock()
+        ) as delete_adapter, patch.object(
+            svc, "_remove_session_favorite", new=AsyncMock()
+        ) as remove_favorite:
+            result = await svc.remove_chat_bot("user1", "bot1", "owner1")
+
+        assert result is True
+        assert [call.args[1] for call in delete_adapter.await_args_list] == [
+            "session:default",
+            "session:second",
+        ]
+        assert [call.args[1] for call in remove_favorite.await_args_list] == [
+            "session:default",
+            "session:second",
+        ]
+        mock_repository.delete_all_owned_sessions.assert_called_once_with(
+            "user1", "bot1", "owner1"
+        )
+        mock_repository.delete_session.assert_called_once_with(
+            "user1", "bot1", "owner1"
+        )
+        mock_repository.remove_chat_bot.assert_called_once_with(
+            "user1", "bot1", "owner1"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -313,6 +460,9 @@ class TestGetChatSession:
 
         assert result["session_key"] == "session:new-456"
         assert result["is_new"] is True
+        mock_repository.delete_owned_session.assert_called_once_with(
+            "user1", "bot1", "owner1", "session:stale"
+        )
         mock_repository.delete_session.assert_called_once()
 
     @pytest.mark.asyncio
@@ -426,8 +576,684 @@ class TestGetChatSession:
             user_id="user1", bot_id="bot1", owner_id="owner1", iam_token=None
         )
 
+
+class TestExpertChatMultiSession:
+    @staticmethod
+    def _authorized_service(
+        mock_repository,
+        mock_bot_repo,
+        mock_device_provider,
+        *,
+        mock_transport=None,
+    ):
+        mock_bot_repo.get_by_id_and_owner.return_value = dict(ACTIVE_BOT)
+        mock_repository.list_chat_bots.return_value = [
+            {"bot_id": "bot1", "owner_id": "owner1"}
+        ]
+        return _make_service(
+            mock_repository,
+            mock_bot_repo,
+            mock_device_provider,
+            mock_transport=mock_transport,
+        )
+
     @pytest.mark.asyncio
-    async def test_caller_mode_container_ready_creates_new_session(self, mock_repository, mock_bot_repo, mock_device_provider):
+    async def test_list_migrates_legacy_session_enriches_and_sorts(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        mock_repository.get_session.return_value = "session:legacy"
+        mock_repository.list_owned_sessions.return_value = [
+            {
+                "user_id": "user1",
+                "bot_id": "bot1",
+                "owner_id": "owner1",
+                "session_key": "session:old",
+                "gmt_create": "2026-08-10T08:00:00",
+                "gmt_modified": "2026-08-10T08:00:00",
+            },
+            {
+                "user_id": "user1",
+                "bot_id": "bot1",
+                "owner_id": "owner1",
+                "session_key": "session:new",
+                "gmt_create": "2026-08-10T09:00:00",
+                "gmt_modified": "2026-08-10T09:00:00",
+            },
+        ]
+        transport = MagicMock()
+        adapter_sessions = {
+            "/api/sessions/session%3Aold": {
+                "data": {
+                    "id": "session:old",
+                    "title": "Old",
+                    # OpenClaw currently synthesizes this value at read time.
+                    "gmt_modified": "2026-08-10T12:00:00Z",
+                    "last_message": {
+                        "content": "older",
+                        "gmt_created": "2026-08-10T10:00:00Z",
+                    },
+                }
+            },
+            "/api/sessions/session%3Anew": {
+                "data": {
+                    "id": "session:new",
+                    "title": "New",
+                    "gmt_modified": "2026-08-10T11:59:59Z",
+                    "last_message": {
+                        "content": "latest",
+                        "gmt_created": "2026-08-10T11:00:00Z",
+                    },
+                }
+            },
+        }
+        transport.invoke = AsyncMock(
+            side_effect=lambda _connection, _method, path: adapter_sessions[path]
+        )
+        svc = self._authorized_service(
+            mock_repository,
+            mock_bot_repo,
+            mock_device_provider,
+            mock_transport=transport,
+        )
+
+        result = await svc.list_chat_sessions("user1", "bot1", "owner1", limit=1)
+
+        assert result["total"] == 2
+        assert [item["id"] for item in result["items"]] == ["session:new"]
+        assert result["items"][0]["gmt_modified"] == "2026-08-10T11:00:00Z"
+        assert result["items"][0]["message_count"] == 0
+        expected_conn = mock_device_provider.get_device_connection_v2.return_value
+        assert all(
+            call.args[:2] == (expected_conn, "GET")
+            for call in transport.invoke.await_args_list
+        )
+        assert {call.args[2] for call in transport.invoke.await_args_list} == {
+            "/api/sessions/session%3Aold",
+            "/api/sessions/session%3Anew",
+        }
+        mock_repository.add_owned_session.assert_called_once_with(
+            "user1", "bot1", "owner1", "session:legacy"
+        )
+
+    @pytest.mark.asyncio
+    async def test_aicoding_list_finds_owned_session_beyond_first_adapter_page(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        target_key = "user:user1:session:target:agent:bot1"
+        mock_repository.get_session.return_value = None
+        mock_repository.list_owned_sessions.return_value = [
+            {
+                "user_id": "user1",
+                "bot_id": "bot1",
+                "owner_id": "owner1",
+                "session_key": target_key,
+                "gmt_create": "2026-08-10T09:00:00",
+                "gmt_modified": "2026-08-10T09:00:00",
+            }
+        ]
+        first_page = [
+            {
+                "id": f"user:user1:session:{index}:agent:other",
+                "title": f"Other {index}",
+            }
+            for index in range(500)
+        ]
+        transport = MagicMock()
+        transport.invoke = AsyncMock(
+            side_effect=[
+                {"data": first_page},
+                {
+                    "data": [
+                        {
+                            "id": target_key,
+                            "title": "Target beyond the first page",
+                            "gmt_modified": "2026-08-10T12:00:00Z",
+                        }
+                    ]
+                },
+            ]
+        )
+        svc = self._authorized_service(
+            mock_repository,
+            mock_bot_repo,
+            mock_device_provider,
+            mock_transport=transport,
+        )
+        mock_device_provider.get_device_connection_v2.return_value[
+            "engine_type"
+        ] = "aicoding"
+
+        result = await svc.list_chat_sessions("user1", "bot1", "owner1")
+
+        assert result["items"][0]["id"] == target_key
+        assert result["items"][0]["title"] == "Target beyond the first page"
+        assert transport.invoke.await_count == 2
+        assert transport.invoke.await_args_list[1].kwargs["params"] == {
+            "user_id": "user1",
+            "limit": 500,
+            "offset": 500,
+        }
+
+    @pytest.mark.asyncio
+    async def test_aicoding_list_transport_failure_returns_no_metadata(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        transport = MagicMock()
+        transport.invoke = AsyncMock(side_effect=ConnectionError("offline"))
+        svc = self._authorized_service(
+            mock_repository,
+            mock_bot_repo,
+            mock_device_provider,
+            mock_transport=transport,
+        )
+
+        result = await svc._list_owned_adapter_sessions(
+            connection=dict(DEVICE_CONN, engine_type="aicoding"),
+            rows=[{"session_key": "session:owned"}],
+            user_id="user1",
+        )
+
+        assert result == {}
+        transport.invoke.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_aicoding_list_ignores_invalid_rows_and_stops_on_repeated_page(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        target_key = "session:target"
+        repeated_page = [None, {}, {"id": ""}, {"id": "session:other"}]
+        transport = MagicMock()
+        transport.invoke = AsyncMock(
+            side_effect=[
+                {"data": repeated_page},
+                {"data": repeated_page},
+                {"data": {"id": target_key, "title": "Target"}},
+            ]
+        )
+        svc = self._authorized_service(
+            mock_repository,
+            mock_bot_repo,
+            mock_device_provider,
+            mock_transport=transport,
+        )
+
+        result = await svc._list_owned_adapter_sessions(
+            connection=dict(DEVICE_CONN, engine_type="aicoding"),
+            rows=[{"session_key": target_key}],
+            user_id="user1",
+        )
+
+        assert result[target_key]["title"] == "Target"
+        assert transport.invoke.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_aicoding_empty_list_and_missing_exact_lookup_use_placeholder(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        transport = MagicMock()
+        transport.invoke = AsyncMock(
+            side_effect=[
+                {"data": []},
+                DeviceAdapterEndpointNotFoundError("missing"),
+            ]
+        )
+        svc = self._authorized_service(
+            mock_repository,
+            mock_bot_repo,
+            mock_device_provider,
+            mock_transport=transport,
+        )
+
+        result = await svc._list_owned_adapter_sessions(
+            connection=dict(DEVICE_CONN, engine_type="aicoding"),
+            rows=[{"session_key": "session:missing"}],
+            user_id="user1",
+        )
+
+        assert result == {}
+        assert transport.invoke.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_openclaw_list_uses_exact_lookup_without_scanning_pages(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        target_key = "agent:bot1:session:target:user:user1"
+        mock_repository.get_session.return_value = None
+        mock_repository.list_owned_sessions.return_value = [
+            {
+                "user_id": "user1",
+                "bot_id": "bot1",
+                "owner_id": "owner1",
+                "session_key": target_key,
+                "gmt_create": "2026-08-10T09:00:00",
+                "gmt_modified": "2026-08-10T09:00:00",
+            }
+        ]
+        transport = MagicMock()
+        transport.invoke = AsyncMock(
+            return_value={
+                "data": {
+                    "id": target_key,
+                    "title": "Visible after exact lookup",
+                    "gmt_modified": "2026-08-10T12:00:00Z",
+                }
+            }
+        )
+        svc = self._authorized_service(
+            mock_repository,
+            mock_bot_repo,
+            mock_device_provider,
+            mock_transport=transport,
+        )
+
+        result = await svc.list_chat_sessions("user1", "bot1", "owner1")
+
+        assert result["items"][0]["title"] == "Visible after exact lookup"
+        assert result["items"][0]["gmt_modified"] == "2026-08-10T09:00:00"
+        transport.invoke.assert_awaited_once()
+        assert transport.invoke.await_args.args[1:] == (
+            "GET",
+            "/api/sessions/agent%3Abot1%3Asession%3Atarget%3Auser%3Auser1",
+        )
+
+    @pytest.mark.asyncio
+    async def test_list_returns_placeholder_when_adapter_metadata_fails(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        mock_repository.get_session.return_value = None
+        mock_repository.list_owned_sessions.return_value = [
+            {
+                "user_id": "user1",
+                "bot_id": "bot1",
+                "owner_id": "owner1",
+                "session_key": "session:empty",
+                "gmt_create": "2026-08-10T09:00:00",
+                "gmt_modified": "2026-08-10T09:00:00",
+            }
+        ]
+        transport = MagicMock()
+        transport.invoke = AsyncMock(side_effect=ConnectionError("offline"))
+        svc = self._authorized_service(
+            mock_repository,
+            mock_bot_repo,
+            mock_device_provider,
+            mock_transport=transport,
+        )
+
+        result = await svc.list_chat_sessions("user1", "bot1", "owner1")
+
+        assert result["items"][0]["id"] == "session:empty"
+        assert result["items"][0]["title"] == "新会话"
+        assert result["items"][0]["last_message"] is None
+
+    @pytest.mark.asyncio
+    async def test_list_returns_empty_before_resolving_connection(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        mock_repository.get_session.return_value = None
+        mock_repository.list_owned_sessions.return_value = []
+        svc = self._authorized_service(
+            mock_repository, mock_bot_repo, mock_device_provider
+        )
+
+        result = await svc.list_chat_sessions("user1", "bot1", "owner1")
+
+        assert result == {"total": 0, "items": []}
+        svc._resolver.resolve_for_binding.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_list_returns_placeholders_while_caller_is_starting(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        bot = dict(ACTIVE_BOT, call_type="caller")
+        mock_bot_repo.get_by_id_and_owner.return_value = bot
+        mock_repository.list_chat_bots.return_value = [
+            {"bot_id": "bot1", "owner_id": "owner1"}
+        ]
+        mock_repository.get_session.return_value = None
+        mock_repository.list_owned_sessions.return_value = [
+            {
+                "user_id": "user1",
+                "bot_id": "bot1",
+                "owner_id": "owner1",
+                "session_key": "session:waiting",
+                "gmt_create": None,
+                "gmt_modified": None,
+            }
+        ]
+        mock_instance = MagicMock()
+        mock_instance.get_caller_connection = AsyncMock(
+            return_value={
+                "connection": None,
+                "need_poll": True,
+            }
+        )
+        svc = _make_service(
+            mock_repository,
+            mock_bot_repo,
+            mock_device_provider,
+            mock_instance_service=mock_instance,
+        )
+
+        result = await svc.list_chat_sessions("user1", "bot1", "owner1")
+
+        assert result["need_poll"] is True
+        assert result["items"][0]["id"] == "session:waiting"
+
+    @pytest.mark.asyncio
+    async def test_favorite_list_stays_filtered_while_caller_is_starting(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        bot = dict(ACTIVE_BOT, call_type="caller")
+        mock_bot_repo.get_by_id_and_owner.return_value = bot
+        mock_repository.list_chat_bots.return_value = [
+            {"bot_id": "bot1", "owner_id": "owner1"}
+        ]
+        mock_repository.list_owned_sessions.return_value = [
+            {
+                "user_id": "user1",
+                "bot_id": "bot1",
+                "owner_id": "owner1",
+                "session_key": "session:not-confirmed-favorite",
+            }
+        ]
+        mock_instance = MagicMock()
+        mock_instance.get_caller_connection = AsyncMock(
+            return_value={"connection": None, "need_poll": True}
+        )
+        svc = _make_service(
+            mock_repository,
+            mock_bot_repo,
+            mock_device_provider,
+            mock_instance_service=mock_instance,
+        )
+
+        result = await svc.list_chat_sessions(
+            "user1", "bot1", "owner1", favorite_only=True
+        )
+
+        assert result == {"total": 0, "items": [], "need_poll": True}
+
+    @pytest.mark.asyncio
+    async def test_create_returns_poll_state_without_writing_mapping(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        svc = self._authorized_service(
+            mock_repository, mock_bot_repo, mock_device_provider
+        )
+        with patch.object(
+            svc,
+            "_prepare_chat_connection",
+            new=AsyncMock(return_value=(None, True)),
+        ):
+            result = await svc.create_chat_session("user1", "bot1", "owner1")
+
+        assert result["need_poll"] is True
+        mock_repository.add_owned_session.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_favorite_list_filters_unowned_sessions(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        mock_repository.get_session.return_value = None
+        mock_repository.list_owned_sessions.return_value = [
+            {
+                "user_id": "user1",
+                "bot_id": "bot1",
+                "owner_id": "owner1",
+                "session_key": "session:owned",
+                "gmt_create": None,
+                "gmt_modified": None,
+            }
+        ]
+        transport = MagicMock()
+        transport.invoke = AsyncMock(
+            return_value={
+                "data": [
+                    {"id": "session:not-owned", "title": "Hidden"},
+                    {"id": "session:owned", "title": "Favorite"},
+                ]
+            }
+        )
+        svc = self._authorized_service(
+            mock_repository,
+            mock_bot_repo,
+            mock_device_provider,
+            mock_transport=transport,
+        )
+
+        result = await svc.list_chat_sessions(
+            "user1", "bot1", "owner1", favorite_only=True
+        )
+
+        assert result["total"] == 1
+        assert result["items"][0]["id"] == "session:owned"
+        assert result["items"][0]["user_id"] == "user1"
+        assert transport.invoke.await_args.kwargs["params"] == {
+            "user_id": "user1",
+            "limit": 10_000,
+            "offset": 0,
+        }
+
+    @pytest.mark.asyncio
+    async def test_create_adds_mapping_and_updates_legacy_default(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        svc = self._authorized_service(
+            mock_repository, mock_bot_repo, mock_device_provider
+        )
+        with patch.object(
+            svc, "_create_session", new=AsyncMock(return_value="session:new")
+        ) as create_session:
+            result = await svc.create_chat_session("user1", "bot1", "owner1")
+
+        assert result["session_key"] == "session:new"
+        assert create_session.await_args.kwargs["prefer_adapter_for_relay"] is True
+        mock_repository.add_owned_session.assert_called_once_with(
+            "user1", "bot1", "owner1", "session:new"
+        )
+        mock_repository.save_session.assert_called_once_with(
+            "user1", "bot1", "owner1", "session:new"
+        )
+
+    @pytest.mark.asyncio
+    async def test_connect_rejects_unowned_key_before_connection(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        svc = self._authorized_service(
+            mock_repository, mock_bot_repo, mock_device_provider
+        )
+
+        with pytest.raises(BotNotFoundError):
+            await svc.connect_chat_session("user1", "bot1", "owner1", "session:other")
+
+        mock_repository.save_session.assert_not_called()
+        svc._resolver.resolve_for_binding.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_connect_owned_session_updates_legacy_default(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        mock_repository.get_owned_session.return_value = {
+            "session_key": "session:owned"
+        }
+        svc = self._authorized_service(
+            mock_repository, mock_bot_repo, mock_device_provider
+        )
+
+        result = await svc.connect_chat_session(
+            "user1", "bot1", "owner1", "session:owned"
+        )
+
+        assert result["session_key"] == "session:owned"
+        mock_repository.save_session.assert_called_once_with(
+            "user1", "bot1", "owner1", "session:owned"
+        )
+
+    @pytest.mark.asyncio
+    async def test_delete_cleans_mapping_favorite_and_legacy_default(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        mock_repository.get_owned_session.return_value = {
+            "session_key": "session:owned"
+        }
+        mock_repository.get_session.return_value = "session:owned"
+        mock_repository.list_owned_sessions.return_value = []
+        transport = MagicMock()
+        transport.invoke = AsyncMock(return_value={"success": True})
+        svc = self._authorized_service(
+            mock_repository,
+            mock_bot_repo,
+            mock_device_provider,
+            mock_transport=transport,
+        )
+
+        with patch.object(
+            svc, "_delete_adapter_session", new=AsyncMock()
+        ) as delete_adapter:
+            assert (
+                await svc.delete_owned_chat_session(
+                    "user1", "bot1", "owner1", "session:owned"
+                )
+                is True
+            )
+
+        delete_adapter.assert_awaited_once()
+        mock_repository.delete_owned_session.assert_called_once_with(
+            "user1", "bot1", "owner1", "session:owned"
+        )
+        mock_repository.delete_session.assert_called_once_with(
+            "user1", "bot1", "owner1"
+        )
+        favorite_call = transport.invoke.await_args
+        assert favorite_call.args[1:] == (
+            "DELETE",
+            "/api/session-favorites/session%3Aowned",
+        )
+        assert favorite_call.kwargs == {"params": {"user_id": "user1"}}
+
+    @pytest.mark.asyncio
+    async def test_delete_rejects_unowned_session(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        svc = self._authorized_service(
+            mock_repository, mock_bot_repo, mock_device_provider
+        )
+
+        with pytest.raises(BotNotFoundError):
+            await svc.delete_owned_chat_session(
+                "user1", "bot1", "owner1", "session:other"
+            )
+
+        mock_repository.delete_owned_session.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_delete_selects_next_session_when_default_is_removed(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        mock_repository.get_owned_session.return_value = {
+            "session_key": "session:owned"
+        }
+        mock_repository.get_session.return_value = "session:owned"
+        mock_repository.list_owned_sessions.return_value = [
+            {"session_key": "session:next"}
+        ]
+        svc = self._authorized_service(
+            mock_repository, mock_bot_repo, mock_device_provider
+        )
+        with patch.object(
+            svc,
+            "_delete_adapter_session",
+            new=AsyncMock(),
+        ), patch.object(svc, "_remove_session_favorite", new=AsyncMock()):
+            assert await svc.delete_owned_chat_session(
+                "user1", "bot1", "owner1", "session:owned"
+            )
+
+        mock_repository.save_session.assert_called_once_with(
+            "user1", "bot1", "owner1", "session:next"
+        )
+
+    @pytest.mark.asyncio
+    async def test_delete_failure_preserves_mapping_and_default_pointer(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        mock_repository.get_owned_session.return_value = {
+            "session_key": "session:owned"
+        }
+        svc = self._authorized_service(
+            mock_repository, mock_bot_repo, mock_device_provider
+        )
+        with patch.object(
+            svc,
+            "_delete_adapter_session",
+            new=AsyncMock(side_effect=ConnectionError("offline")),
+        ):
+            with pytest.raises(ConnectionError, match="offline"):
+                await svc.delete_owned_chat_session(
+                    "user1", "bot1", "owner1", "session:owned"
+                )
+
+        mock_repository.delete_owned_session.assert_not_called()
+        mock_repository.save_session.assert_not_called()
+        mock_repository.delete_session.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_delete_during_caller_startup_preserves_mapping(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        mock_repository.get_owned_session.return_value = {
+            "session_key": "session:owned"
+        }
+        svc = self._authorized_service(
+            mock_repository, mock_bot_repo, mock_device_provider
+        )
+        with patch.object(
+            svc,
+            "_prepare_chat_connection",
+            new=AsyncMock(return_value=(None, True)),
+        ):
+            with pytest.raises(ConnectionError, match="正在启动"):
+                await svc.delete_owned_chat_session(
+                    "user1", "bot1", "owner1", "session:owned"
+                )
+
+        mock_repository.delete_owned_session.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_favorite_helpers_degrade_on_old_adapter(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        transport = MagicMock()
+        transport.invoke = AsyncMock(side_effect=ConnectionError("offline"))
+        svc = self._authorized_service(
+            mock_repository,
+            mock_bot_repo,
+            mock_device_provider,
+            mock_transport=transport,
+        )
+
+        await svc._remove_session_favorite(DEVICE_CONN, "session:test", "user1")
+        favorites = await svc._list_favorite_sessions(DEVICE_CONN, "user1", "bot1")
+
+        assert favorites == []
+
+    def test_session_sort_key_handles_missing_and_invalid_timestamps(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        svc = self._authorized_service(
+            mock_repository, mock_bot_repo, mock_device_provider
+        )
+
+        assert svc._session_sort_key({}) == 0.0
+        assert svc._session_sort_key({"gmt_modified": "not-a-date"}) == 0.0
+
+
+class TestGetChatSessionCallerMode:
+    @pytest.mark.asyncio
+    async def test_caller_mode_container_ready_creates_new_session(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
         """Caller 模式：容器就绪，创建新 session"""
         caller_bot = {
             "bot_id": "bot1",
@@ -628,18 +1454,23 @@ class TestDeleteChatSession:
         mock_repository.delete_session.assert_called_once_with("user1", "bot1", "owner1")
 
     @pytest.mark.asyncio
-    async def test_adapter_delete_failure_still_deletes_local(
+    async def test_adapter_delete_failure_preserves_local_indexes(
         self, mock_repository, mock_bot_repo, mock_device_provider
     ):
         mock_bot_repo.get_by_id_and_owner.return_value = ACTIVE_BOT
         mock_repository.get_session.return_value = "session:abc"
         svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider)
 
-        with patch.object(svc, "_delete_adapter_session", new=AsyncMock(side_effect=RuntimeError("adapter down"))):
-            result = await svc.delete_chat_session("user1", "bot1", "owner1")
+        with patch.object(
+            svc,
+            "_delete_adapter_session",
+            new=AsyncMock(side_effect=RuntimeError("adapter down")),
+        ):
+            with pytest.raises(RuntimeError, match="adapter down"):
+                await svc.delete_chat_session("user1", "bot1", "owner1")
 
-        assert result is True
-        mock_repository.delete_session.assert_called_once()
+        mock_repository.delete_owned_session.assert_not_called()
+        mock_repository.delete_session.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -836,7 +1667,9 @@ class TestCheckSessionExists:
 
         assert result is True
         expected_conn = mock_device_provider.get_device_connection_v2.return_value
-        transport.invoke.assert_awaited_once_with(expected_conn, "GET", "/api/sessions/session:abc")
+        transport.invoke.assert_awaited_once_with(
+            expected_conn, "GET", "/api/sessions/session%3Aabc"
+        )
 
     @pytest.mark.asyncio
     async def test_returns_false_on_404(self, mock_repository, mock_bot_repo, mock_device_provider):
@@ -930,7 +1763,9 @@ class TestDeleteAdapterSession:
         await svc._delete_adapter_session(ACTIVE_BOT, "session:abc", "user1")
 
         expected_conn = mock_device_provider.get_device_connection_v2.return_value
-        transport.invoke.assert_awaited_once_with(expected_conn, "DELETE", "/api/sessions/session:abc")
+        transport.invoke.assert_awaited_once_with(
+            expected_conn, "DELETE", "/api/sessions/session%3Aabc"
+        )
 
     @pytest.mark.asyncio
     async def test_404_is_silently_ignored(self, mock_repository, mock_bot_repo, mock_device_provider):
@@ -944,6 +1779,26 @@ class TestDeleteAdapterSession:
         )
 
         await svc._delete_adapter_session(ACTIVE_BOT, "session:abc", "user1")
+
+    @pytest.mark.asyncio
+    async def test_ambiguous_delete_404_is_retryable(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        transport = MagicMock()
+        transport.invoke = AsyncMock(
+            side_effect=ValueError(
+                "Adapter returned HTTP 404: Session not found or delete failed"
+            )
+        )
+        svc = _make_service(
+            mock_repository,
+            mock_bot_repo,
+            mock_device_provider,
+            mock_transport=transport,
+        )
+
+        with pytest.raises(ValueError, match="delete failed"):
+            await svc._delete_adapter_session(ACTIVE_BOT, "session:abc", "user1")
 
     @pytest.mark.asyncio
     async def test_4xx_raises_exception(self, mock_repository, mock_bot_repo, mock_device_provider):
@@ -960,10 +1815,15 @@ class TestDeleteAdapterSession:
             await svc._delete_adapter_session(ACTIVE_BOT, "session:abc", "user1")
 
     @pytest.mark.asyncio
-    async def test_resolved_aicoding_connection_skips_transport_call(
-        self, mock_repository, mock_bot_repo, mock_device_provider
+    @pytest.mark.parametrize("engine_type", ["aicoding", "claude_code"])
+    async def test_relay_engine_connection_uses_generic_delete_endpoint(
+        self,
+        engine_type,
+        mock_repository,
+        mock_bot_repo,
+        mock_device_provider,
     ):
-        conn = dict(DEVICE_CONN, engine_type="aicoding")
+        conn = dict(DEVICE_CONN, engine_type=engine_type)
         resolver = MagicMock()
         ctx = MagicMock()
         ctx.conn_info = conn
@@ -980,6 +1840,179 @@ class TestDeleteAdapterSession:
 
         await svc._delete_adapter_session(ACTIVE_BOT, "session:abc", "user1")
 
+        transport.invoke.assert_awaited_once_with(
+            conn,
+            "DELETE",
+            "/api/sessions/session%3Aabc",
+        )
+
+    @pytest.mark.asyncio
+    async def test_relay_engine_ignores_unsupported_delete_endpoint(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        conn = dict(DEVICE_CONN, engine_type="aicoding")
+        transport = MagicMock()
+        transport.invoke = AsyncMock(
+            side_effect=DeviceAdapterHTTPStatusError(405, "Method Not Allowed")
+        )
+        svc = _make_service(
+            mock_repository,
+            mock_bot_repo,
+            mock_device_provider,
+            mock_transport=transport,
+        )
+
+        await svc._delete_adapter_session(
+            ACTIVE_BOT,
+            "session:abc",
+            "user1",
+            connection=conn,
+        )
+
+    def test_structured_adapter_errors_are_classified(self):
+        endpoint_missing = DeviceAdapterEndpointNotFoundError("missing")
+        not_found = DeviceAdapterHTTPStatusError(404, "Not Found")
+        method_not_allowed = DeviceAdapterHTTPStatusError(
+            405, "Method Not Allowed"
+        )
+
+        assert ExpertChatService._is_adapter_not_found(endpoint_missing) is True
+        assert ExpertChatService._is_adapter_not_found(not_found) is True
+        assert ExpertChatService._is_adapter_endpoint_unsupported(
+            endpoint_missing
+        ) is True
+        assert ExpertChatService._is_adapter_endpoint_unsupported(
+            method_not_allowed
+        ) is True
+
+
+# ---------------------------------------------------------------------------
+# _create_session engine dispatch
+# ---------------------------------------------------------------------------
+
+class TestCreateSessionDispatch:
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("engine_type", ["aicoding", "claude_code"])
+    async def test_relay_engines_use_generic_adapter_create(
+        self,
+        engine_type,
+        mock_repository,
+        mock_bot_repo,
+        mock_device_provider,
+    ):
+        canonical_key = f"agent:bot1:session:new:user:user1:{engine_type}"
+        transport = MagicMock()
+        transport.invoke = AsyncMock(
+            side_effect=[
+                {"data": {"id": canonical_key}},
+                {"data": [{"id": canonical_key}]},
+            ]
+        )
+        svc = _make_service(
+            mock_repository,
+            mock_bot_repo,
+            mock_device_provider,
+            mock_transport=transport,
+        )
+        conn = dict(DEVICE_CONN, engine_type=engine_type)
+
+        result = await svc._create_session(
+            {"bot_id": "bot1", "bot_name": "Bot"},
+            "user1",
+            connection=conn,
+            prefer_adapter_for_relay=True,
+        )
+
+        assert result == canonical_key
+        assert transport.invoke.await_args_list[0].kwargs["body"]["engine"] == engine_type
+        assert transport.invoke.await_args_list[0].kwargs["timeout"] == 330.0
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("engine_type", ["aicoding", "claude_code"])
+    @pytest.mark.parametrize("status_code", [404, 405])
+    async def test_relay_engines_fall_back_only_when_create_endpoint_is_missing(
+        self,
+        engine_type,
+        status_code,
+        mock_repository,
+        mock_bot_repo,
+        mock_device_provider,
+    ):
+        transport = MagicMock()
+        transport.invoke = AsyncMock(
+            side_effect=ValueError(
+                f"Adapter returned HTTP {status_code}: Endpoint unavailable"
+            )
+        )
+        svc = _make_service(
+            mock_repository,
+            mock_bot_repo,
+            mock_device_provider,
+            mock_transport=transport,
+        )
+        conn = dict(DEVICE_CONN, engine_type=engine_type)
+
+        result = await svc._create_session(
+            {"bot_id": "bot1", "bot_name": "Bot"},
+            "user1",
+            connection=conn,
+            prefer_adapter_for_relay=True,
+        )
+
+        assert result.startswith("session:")
+        assert result.endswith(":user:user1")
+        assert transport.invoke.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_relay_engine_does_not_fall_back_on_adapter_failure(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        transport = MagicMock()
+        transport.invoke = AsyncMock(
+            side_effect=ValueError("Adapter returned HTTP 500: Broken")
+        )
+        svc = _make_service(
+            mock_repository,
+            mock_bot_repo,
+            mock_device_provider,
+            mock_transport=transport,
+        )
+
+        with pytest.raises(SessionCreateError):
+            await svc._create_session(
+                {"bot_id": "bot1", "bot_name": "Bot"},
+                "user1",
+                connection=dict(DEVICE_CONN, engine_type="aicoding"),
+                prefer_adapter_for_relay=True,
+            )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("engine_type", ["aicoding", "claude_code"])
+    async def test_legacy_singular_flow_keeps_local_session_key_behavior(
+        self,
+        engine_type,
+        mock_repository,
+        mock_bot_repo,
+        mock_device_provider,
+    ):
+        transport = MagicMock()
+        transport.invoke = AsyncMock()
+        svc = _make_service(
+            mock_repository,
+            mock_bot_repo,
+            mock_device_provider,
+            mock_transport=transport,
+        )
+
+        result = await svc._create_session(
+            {"bot_id": "bot1", "bot_name": "Bot"},
+            "user1",
+            connection=dict(DEVICE_CONN, engine_type=engine_type),
+        )
+
+        assert result.startswith("session:")
+        assert result.endswith(":user:user1")
         transport.invoke.assert_not_awaited()
 
 
