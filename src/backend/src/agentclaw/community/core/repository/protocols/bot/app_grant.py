@@ -159,7 +159,7 @@ class BotAppGrantRepositoryProtocol(Protocol):
 
     @abstractmethod
     def find(
-        self, bot_id: str, user_id: str, app_id: int
+        self, bot_id: str, owner_id: str, user_id: str, app_id: int
     ) -> Optional[BotAppGrantRecord]:
         """One live authorization, or ``None`` when the app may not act as this user.
 

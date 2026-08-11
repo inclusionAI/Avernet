@@ -216,13 +216,20 @@ class BotAppGrantService:
         return self._repository.list_for_bot(bot_id, owner_id)
 
     def find(
-        self, *, bot_id: str, user_id: str, app_id: int
+        self, *, bot_id: str, owner_id: str, user_id: str, app_id: int
     ) -> BotAppGrantRecord | None:
         """The live delegation for this scope, or ``None``.
 
         The authorization probe the machine-caller path runs on every
-        bot-scoped request. A unique-key point lookup, because the delegating
-        user travels on the request rather than having to be discovered.
+        bot-scoped request. Both people travel on the request rather than having
+        to be discovered: the delegating user acts, and ``owner_id`` says whose
+        bot is addressed.
+
+        **The bot is named by the pair.** ``ac_bots`` has no unique key on
+        ``bot_id``, so a probe keyed on the id alone asks a question with more
+        than one answer, and can only be made safe by checking the owner it
+        happens to get back. Taking the owner as an input asks the right
+        question instead.
 
         ``None`` is a real state of the contract — "this application may not act
         as this user on this bot" is the answer it exists to give.
@@ -232,7 +239,7 @@ class BotAppGrantService:
         question for the collaborator gate, and the caller must ask it. That
         separation is what stops a delegation outliving the access it lends.
         """
-        return self._repository.find(bot_id, user_id, app_id)
+        return self._repository.find(bot_id, owner_id, user_id, app_id)
 
     def list_for_app(self, *, app_id: int, user_id: str) -> list[BotAppGrantRecord]:
         """The app's view — which bots may this app reach as ``user_id``.

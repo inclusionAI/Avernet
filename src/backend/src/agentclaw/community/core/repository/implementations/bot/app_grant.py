@@ -434,11 +434,20 @@ class BotAppGrantRepository(
             return [row.to_record() for row in rows]
 
     def find(
-        self, bot_id: str, user_id: str, app_id: int
+        self, bot_id: str, owner_id: str, user_id: str, app_id: int
     ) -> Optional[BotAppGrantRecord]:
-        """One live authorization, or ``None`` when the app may not act as this user."""
+        """One live authorization, or ``None`` when the app may not act as this user.
+
+        Scoped to the addressed bot by ``(bot_id, owner_id)``, because ``bot_id``
+        alone names more than one bot. Without the owner this probe could return
+        a grant for a *different* owner's same-named bot, and the caller could
+        only notice by comparing the owner afterwards — a check that holds only
+        while the unique key happens to make the row singular.
+        """
         with self._db.orm_session() as db:
-            row = self._live_row(db, bot_id, user_id, app_id, get_current_env())
+            row = self._live_row(
+                db, bot_id, user_id, app_id, get_current_env(), owner_id=owner_id
+            )
             return row.to_record() if row else None
 
     # ========================================================================
@@ -487,11 +496,15 @@ class BotAppGrantRepository(
         )
         if owner_id is not None:
             # Narrows from "the row on this unique key" to "the row for *this*
-            # bot". Only the destructive caller passes it: ``bot_id`` is not
-            # unique across owners, and a delete that resolved to another
-            # owner's same-named bot would revoke an authorization nobody
-            # asked about. Reads leave it off — they already fail safe, and
-            # ``find`` genuinely does not know the owner it is looking for.
+            # bot", which is what every caller actually means: ``bot_id`` is not
+            # unique across owners, so the key alone names a bot only by
+            # accident of there being one row.
+            #
+            # ``find`` passes it too, not just the destructive callers. It used
+            # to omit it and compare ``record.owner_id`` afterwards, which was
+            # safe but let the store answer a question it could not answer
+            # uniquely — and made it impossible to ever key the record on the
+            # bot's real identity, since the read could not have supplied it.
             query = query.filter(self._Grant.owner_id == owner_id)
         if lock:
             query = query.with_for_update()

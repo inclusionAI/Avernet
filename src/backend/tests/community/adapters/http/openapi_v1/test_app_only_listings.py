@@ -94,10 +94,15 @@ class _Grants:
     def __init__(self, *bot_ids: str) -> None:
         self.bot_ids = list(bot_ids)
 
-    def find(self, *, bot_id: str, user_id: str, app_id: int):
-        if bot_id in self.bot_ids and user_id == USER and app_id == APP_ID:
-            return _record(bot_id)
-        return None
+    def find(self, *, bot_id: str, owner_id: str, user_id: str, app_id: int):
+        if bot_id not in self.bot_ids or user_id != USER or app_id != APP_ID:
+            return None
+        # The grant on SHARED names another owner; every other bot is the
+        # delegating user's own. A request must address the right one.
+        granted_owner = "someone-else" if bot_id == SHARED else USER
+        if owner_id != granted_owner:
+            return None
+        return _record(bot_id, owner_id=granted_owner)
 
     def list_for_app(self, *, app_id: int, user_id: str):
         if app_id != APP_ID or user_id != USER:
@@ -260,13 +265,22 @@ class _CrossOwnerGrants:
     the two bots, so the lookup alone cannot tell them apart.
     """
 
-    def find(self, *, bot_id: str, user_id: str, app_id: int):
+    def find(self, *, bot_id: str, owner_id: str, user_id: str, app_id: int):
         if (bot_id, user_id, app_id) != (LEGACY_ID, USER, APP_ID):
+            return None
+        # The one grant is on ``someone-else``'s bot. An owner-scoped request
+        # addresses the delegating user's own, so it must not match.
+        if owner_id != "someone-else":
             return None
         return _record(LEGACY_ID, owner_id="someone-else")
 
     def list_for_app(self, *, app_id: int, user_id: str):
-        record = self.find(bot_id=LEGACY_ID, user_id=user_id, app_id=app_id)
+        record = self.find(
+            bot_id=LEGACY_ID,
+            owner_id="someone-else",
+            user_id=user_id,
+            app_id=app_id,
+        )
         return [record] if record else []
 
 

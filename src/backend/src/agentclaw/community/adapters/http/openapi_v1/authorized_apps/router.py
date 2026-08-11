@@ -185,7 +185,11 @@ def _to_authorized_app(record: BotAppGrantRecord) -> AuthorizedApp:
 
 
 def _to_authorized_bot(record: BotAppGrantRecord) -> AuthorizedBot:
-    return AuthorizedBot(bot_id=record.bot_id, granted_at=record.gmt_create)
+    return AuthorizedBot(
+        bot_id=record.bot_id,
+        owner_id=record.owner_id,
+        granted_at=record.gmt_create,
+    )
 
 
 @router.post(

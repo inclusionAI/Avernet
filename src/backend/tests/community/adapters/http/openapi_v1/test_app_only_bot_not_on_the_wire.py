@@ -83,8 +83,9 @@ def _app_caller() -> VerifiedCaller:
 class _Grants:
     """One delegation: ``APP_ID`` may act as ``USER`` on ``GRANTED_BOT``."""
 
-    def find(self, *, bot_id: str, user_id: str, app_id: int):
-        if (bot_id, user_id, app_id) != (GRANTED_BOT, USER, APP_ID):
+    def find(self, *, bot_id: str, owner_id: str, user_id: str, app_id: int):
+        # ``USER`` owns the granted bot here, so the addressed owner is them.
+        if (bot_id, owner_id, user_id, app_id) != (GRANTED_BOT, USER, USER, APP_ID):
             return None
         return BotAppGrantRecord(
             id=1,
@@ -99,7 +100,9 @@ class _Grants:
         )
 
     def list_for_app(self, *, app_id: int, user_id: str):
-        record = self.find(bot_id=GRANTED_BOT, user_id=user_id, app_id=app_id)
+        record = self.find(
+            bot_id=GRANTED_BOT, owner_id=user_id, user_id=user_id, app_id=app_id
+        )
         return [record] if record else []
 
 

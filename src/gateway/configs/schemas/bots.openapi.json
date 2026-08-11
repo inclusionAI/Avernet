@@ -149,10 +149,16 @@
             "format": "date-time",
             "title": "Granted At",
             "type": "string"
+          },
+          "owner_id": {
+            "description": "The owner of that bot. Pass it as `owner_id` on the operations you call for this bot — `bot_id` alone does not identify one, because two owners may each have a bot of the same id. It equals the delegating user only when they own the bot themselves.",
+            "title": "Owner Id",
+            "type": "string"
           }
         },
         "required": [
           "bot_id",
+          "owner_id",
           "granted_at"
         ],
         "title": "AuthorizedBot",

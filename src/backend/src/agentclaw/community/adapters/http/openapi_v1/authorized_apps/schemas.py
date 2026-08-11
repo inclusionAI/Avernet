@@ -62,6 +62,15 @@ class AuthorizedBot(BaseModel):
     """A bot the calling application may reach — the application's view."""
 
     bot_id: str = Field(..., description="The bot this authorization covers.")
+    owner_id: str = Field(
+        ...,
+        description=(
+            "The owner of that bot. Pass it as `owner_id` on the operations "
+            "you call for this bot — `bot_id` alone does not identify one, "
+            "because two owners may each have a bot of the same id. It equals "
+            "the delegating user only when they own the bot themselves."
+        ),
+    )
     granted_at: datetime = Field(
         ..., description="When this authorization began."
     )

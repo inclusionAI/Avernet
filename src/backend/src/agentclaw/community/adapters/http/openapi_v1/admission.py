@@ -285,49 +285,40 @@ class ActingCaller:
         """Whether a grant governs this request."""
         return self.app_id is not None
 
-    def require_bot(self, bot_id: str, *, expected_owner_id: str | None) -> str:
+    def require_bot(self, bot_id: str, *, owner_id: str) -> str:
         """The addressed bot's owner, refusing an application without a grant.
 
-        ``expected_owner_id`` names **the owner of the bot this operation is
-        about to act on**, and it has no default because getting it wrong is an
-        authorization bug rather than a preference:
+        ``owner_id`` names **the owner of the bot this operation is about to act
+        on**, and it is required because getting it wrong is an authorization
+        bug rather than a preference. Every operation knows it before it acts:
+        the user-scoped groups address the delegating user's own bot, ``skills``
+        takes ``owner_entity_id``, and the engine-runtime groups take
+        ``owner_id`` — defaulting, like all of them, to the caller's own.
 
-        - a **value** — the operation has already decided whose bot it will
-          touch, from its own scoping (the user-scoped groups: the delegating
-          user) or from its own parameter (``skills``, which takes
-          ``owner_entity_id``). The grant authorizes this request only if it
-          names that same owner.
-        - ``None`` — the operation takes the addressed owner from what this
-          returns, as the engine-runtime groups do. There is nothing to compare
-          against because the grant *is* the answer.
+        **The pair is the address, and the lookup takes the pair.** ``ac_bots``
+        has no unique key on ``bot_id`` — the legacy ``default`` convention gave
+        many owners one — so a probe keyed on the id alone asks a question with
+        more than one answer. Passing the owner through to the grant lookup is
+        what makes this a probe for *this bot* rather than for any bot that
+        happens to share its name.
 
-        ``None`` is a real state of the contract, not an "unknown": it says the
-        caller will use the returned owner rather than one it already holds.
+        An earlier revision looked the grant up on ``(bot, delegating user)``
+        and compared ``record.owner_id`` afterwards. That was safe but backwards:
+        it let the store answer a question it could not answer uniquely and then
+        checked the answer, which works only while the key happens to make it
+        unique — and closed off ever keying the record on the bot's real
+        identity, because the read could not have supplied it.
 
         For a **human** caller this returns their own id and asks nothing: on
         the user-scoped groups the owner *is* the caller, and on the
-        engine-runtime groups the request's own ``owner_id`` parameter overrides
-        this anyway.
+        engine-runtime groups the request's own ``owner_id`` parameter is
+        already the value passed in here.
 
-        For an **application** it is the authorization probe — a unique-key
-        lookup on ``(app, bot, delegating user)``. A missing grant raises
+        For an **application** it is the authorization — a unique-key lookup on
+        ``(app, bot, owner, delegating user)``. A missing grant raises
         :class:`GrantNotResolvableError`, which the app maps to a ``404``
         byte-identical to a nonexistent bot: an application must not be able to
         tell a bot it was not granted from one that does not exist.
-
-        What comes back is the **grant's** owner, not the request's. That is
-        what lets an application address a bot its delegating user collaborates
-        on without ever being able to name an owner of its own choosing.
-
-        **``bot_id`` alone does not identify a bot**, which is why the owner
-        has to be compared rather than merely returned. ``ac_bots`` carries no
-        unique key on it — the legacy ``default`` convention gave many owners a
-        bot of that id — so a grant naming *someone else's* ``default`` and a
-        request naming the delegating user's own ``default`` agree on every
-        column the grant's unique key holds. Returning the owner and letting an
-        owner-scoped caller discard it made the check and the resolution
-        disagree about which bot they meant, and the application got a bot
-        nobody granted.
 
         A grant is not the whole answer. It says the delegation exists; whether
         the delegating user may still operate the bot is asked separately, live,
@@ -341,41 +332,30 @@ class ActingCaller:
             # an application. Refusing rather than defaulting, because the
             # alternative to a grant check here is no check at all.
             raise GrantNotResolvableError("no grant reader for an application caller")
-        record = self.grants.find(bot_id=bot_id, user_id=self.user_id, app_id=self.app_id)
+        record = self.grants.find(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            user_id=self.user_id,
+            app_id=self.app_id,
+        )
         if record is None:
-            # Which user and which bot were asked for goes to the **log**, not
-            # into the exception message. The message is carried into a log line
-            # verbatim by the handlers in ``app.py`` and ``error_logging.py``,
-            # and both of these values are caller-chosen and unbounded — so
-            # interpolating them there would let the party being refused inject
-            # extra log lines and choose how many bytes each refusal costs.
+            # Which user, which owner and which bot were asked for go to the
+            # **log**, not into the exception message. The message is carried
+            # into a log line verbatim by the handlers in ``app.py`` and
+            # ``error_logging.py``, and all three are caller-chosen and
+            # unbounded — so interpolating them there would let the party being
+            # refused inject extra log lines and choose how many bytes each
+            # refusal costs.
             #
             # ``app_id`` is safe to name: it is an int off the verified
             # principal, not something the request supplied.
             logger.warning(
                 "[bot_app_grant] app_id=%s holds no live grant from user=%s "
-                "on bot=%s",
+                "on bot=%s owned by=%s",
                 self.app_id,
                 for_log(self.user_id),
                 for_log(bot_id),
-            )
-            raise GrantNotResolvableError(
-                f"app {self.app_id} holds no live grant for the requested bot"
-            )
-        if expected_owner_id is not None and record.owner_id != expected_owner_id:
-            # The grant names one bot and the operation is about to act on
-            # another — same ``bot_id``, different owner, and ``ac_bots`` has no
-            # unique key on ``bot_id`` so both can exist at once.
-            #
-            # Refused rather than reconciled: the caller is entitled to neither
-            # here. The granted bot is not the one being addressed, and the one
-            # being addressed was never granted.
-            logger.warning(
-                "[bot_app_grant] app_id=%s holds a grant on bot=%s owned by a "
-                "different user than the request addresses (delegator=%s)",
-                self.app_id,
-                for_log(bot_id),
-                for_log(self.user_id),
+                for_log(owner_id),
             )
             raise GrantNotResolvableError(
                 f"app {self.app_id} holds no live grant for the requested bot"

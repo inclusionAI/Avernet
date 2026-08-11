@@ -742,7 +742,7 @@ def test_grant_ignores_a_caller_supplied_env(repo, sessions):
     """
     written = repo.grant({**GRANT, "env": "pre"})
 
-    assert repo.find("b-1", "u-1", 42) is not None, "must stay findable"
+    assert repo.find("b-1", "u-1", "u-1", 42) is not None, "must stay findable"
     assert repo.revoke("b-1", "u-1", 42, "u-1") is True, "must stay revocable"
     assert written.env != "pre"
 

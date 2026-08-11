@@ -83,7 +83,7 @@ class BotAppGrantServiceProtocol(Protocol):
         """
 
     def find(
-        self, *, bot_id: str, user_id: str, app_id: int
+        self, *, bot_id: str, owner_id: str, user_id: str, app_id: int
     ) -> BotAppGrantRecord | None:
         """The live delegation for this scope, or ``None`` when there is none.
 

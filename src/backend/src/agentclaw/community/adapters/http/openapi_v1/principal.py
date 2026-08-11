@@ -91,12 +91,10 @@ from typing import Annotated
 from fastapi import Depends, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.admission import (
-    ADMISSION,
     BODY_BOT_ID_OPERATIONS,
     OWNER_ADDRESSED_OPERATIONS,
     SKILL_SCOPED_OPERATIONS,
     ActingCaller,
-    AdmissionMode,
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     Principal,
@@ -355,6 +353,14 @@ ActingCallerDep = Annotated[ActingCaller, Depends(require_acting_caller)]
 #: while the handler acted on another.
 _BOT_ID_KEY = "bot_id"
 
+#: Where the addressed owner is found, when the request names one.
+#:
+#: Query only. Every group that takes it — engine-runtime, and the bot-scoped
+#: authorization operations — declares it as a query parameter, for the reason
+#: ``user_id`` is one: it says who the call is *for*, not what resource is being
+#: addressed in the path.
+_OWNER_ID_KEY = "owner_id"
+
 
 async def require_granted_bot(
     request: Request,
@@ -384,7 +390,7 @@ async def require_granted_bot(
     """
     if _defers_to_its_handler(request):
         return caller.user_id
-    expected_owner = caller.user_id if _resolves_owner_scoped(request) else None
+    addressed_owner = _addressed_owner(request, caller.user_id)
     bot_id = request.path_params.get(_BOT_ID_KEY) or request.query_params.get(
         _BOT_ID_KEY
     )
@@ -397,28 +403,32 @@ async def require_granted_bot(
             "no bot id on a grant-checked request; the operation must resolve "
             "its own bot before acting"
         )
-    return caller.require_bot(str(bot_id), expected_owner_id=expected_owner)
+    return caller.require_bot(str(bot_id), owner_id=addressed_owner)
 
 
-def _resolves_owner_scoped(request: Request) -> bool:
-    """Whether this operation resolves its bot as ``(bot_id, delegating user)``.
+def _addressed_owner(request: Request, caller_id: str) -> str:
+    """Whose bot this request addresses — never a guess, and never ``None``.
 
-    True for Mode A1, whose groups read through ``get_by_id_and_owner``; false
-    for A2, which takes the addressed owner from the grant instead. The
-    difference decides whether a grant naming *another* owner can legitimately
-    authorize the request — on A1 it cannot, because ``bot_id`` is not unique
-    across owners and the operation would act on the delegating user's own
-    same-named bot.
+    ``bot_id`` does not identify a bot; ``(owner_id, bot_id)`` does. So the
+    grant lookup needs an owner, and every operation on this surface already
+    knows one:
 
-    Unknown routes answer ``True``, the stricter side: an operation this cannot
-    classify has not been placed in a mode, and it is refused a moment later
-    anyway.
+    - The **user-scoped groups** resolve through ``get_by_id_and_owner`` with
+      the delegating user, so the owner is the caller.
+    - The **engine-runtime groups** take an ``owner_id`` query parameter that
+      defaults to the caller, which is exactly this value.
+
+    Reading it off the request rather than from the mode table is deliberate:
+    it is the same value ``resolve_owner_id`` will use downstream, so the check
+    and the operation cannot disagree about which bot they meant. Taking it
+    from a second source would let them drift.
+
+    An earlier revision passed ``None`` here for the engine-runtime groups and
+    took the owner *from the grant*, comparing nothing. That was safe only
+    because the unique key made the row singular — the lookup asked "any grant
+    on this bot id" and trusted whatever came back.
     """
-    route = request.scope.get("route")
-    path = getattr(route, "path", None)
-    if path is None:
-        return True
-    return ADMISSION.get((request.method, path)) is not AdmissionMode.A2
+    return request.query_params.get(_OWNER_ID_KEY) or caller_id
 
 
 def _defers_to_its_handler(request: Request) -> bool:

@@ -100,7 +100,7 @@ def _require_skills_grant(caller: ActingCaller, record: dict[str, Any]) -> None:
     authorize work on one bot with a grant for a different, same-named one.
     """
     caller.require_bot(
-        str(record["bolt_id"]), expected_owner_id=str(record["user_id"])
+        str(record["bolt_id"]), owner_id=str(record["user_id"])
     )
 
 
@@ -143,7 +143,7 @@ async def list_skills(
     same-named bot authorize a read of someone else's, and refuse a legitimate
     grant on a bot shared with them.
     """
-    caller.require_bot(bot_id, expected_owner_id=owner_entity_id or actor_id)
+    caller.require_bot(bot_id, owner_id=owner_entity_id or actor_id)
     total, records = query_service.list_local_skills(
         bot_id=bot_id,
         owner_id=owner_entity_id or actor_id,
@@ -224,7 +224,7 @@ async def upload_skill(
     knows. A write makes the mis-binding worse — it would create a skill on a
     bot the application was never granted.
     """
-    caller.require_bot(bot_id, expected_owner_id=owner_entity_id or actor_id)
+    caller.require_bot(bot_id, owner_id=owner_entity_id or actor_id)
     if (
         request.headers.get("content-type", "").split(";", 1)[0].lower()
         != "application/zip"

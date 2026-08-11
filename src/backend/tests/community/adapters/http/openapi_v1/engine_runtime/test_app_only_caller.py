@@ -83,9 +83,11 @@ class FakeGrants:
     def grant(self, *, app_id: int, bot_id: str, user_id: str, owner_id: str) -> None:
         self.granted[(app_id, bot_id, user_id)] = owner_id
 
-    def find(self, *, bot_id: str, user_id: str, app_id: int):
+    def find(self, *, bot_id: str, owner_id: str, user_id: str, app_id: int):
         owner = self.granted.get((app_id, bot_id, user_id))
-        if owner is None:
+        # The address is the pair: a grant on one owner's bot must not answer a
+        # request addressing another owner's bot of the same id.
+        if owner is None or owner != owner_id:
             return None
         return BotAppGrantRecord(
             id=1,
@@ -101,7 +103,12 @@ class FakeGrants:
 
     def list_for_app(self, *, app_id: int, user_id: str):
         return [
-            self.find(bot_id=bot, user_id=user, app_id=app)
+            self.find(
+                bot_id=bot,
+                owner_id=self.granted[(app, bot, user)],
+                user_id=user,
+                app_id=app,
+            )
             for (app, bot, user) in self.granted
             if app == app_id and user == user_id
         ]
@@ -167,18 +174,25 @@ def test_losing_the_collaboration_ends_the_applications_access(
     relay.add_operator(COLLAB)
     client = app_client()
 
-    assert _sessions(client).status_code == 200, "delegated access works"
+    assert _sessions(client, owner_id=OWNER).status_code == 200, (
+        "delegated access works"
+    )
 
     relay.operators.clear()  # COLLAB is removed from the bot
 
-    refused = _sessions(client)
+    refused = _sessions(client, owner_id=OWNER)
     assert refused.status_code == 404, "access ends immediately"
-    assert grants.find(bot_id=BOT, user_id=COLLAB, app_id=APP_ID) is not None, (
-        "and it ends without the delegation being revoked"
-    )
+    assert (
+        grants.find(
+            bot_id=BOT, owner_id=OWNER, user_id=COLLAB, app_id=APP_ID
+        )
+        is not None
+    ), "and it ends without the delegation being revoked"
 
     relay.add_operator(COLLAB)
-    assert _sessions(client).status_code == 200, "restored, with no re-granting"
+    assert _sessions(client, owner_id=OWNER).status_code == 200, (
+        "restored, with no re-granting"
+    )
 
 
 def test_the_application_is_bounded_by_the_delegator_not_the_owner(
@@ -250,17 +264,36 @@ def test_the_refusal_reaches_no_device(app_client, relay, grants):
 # ── the addressed owner comes from the record, never the request ─────────────
 
 
-def test_the_addressed_owner_is_taken_from_the_grant(app_client, relay, grants):
-    """With ``owner_id`` omitted, it resolves to the grant's owner.
+def test_a_shared_bot_must_be_addressed_by_its_owner(app_client, relay, grants):
+    """``owner_id`` omitted means "my own bot" — for an application too.
 
-    A human caller omitting it means "my own bot". An application means "the bot
-    my grant names" — which is someone else's, and is exactly the case
-    delegation exists for.
+    ``bot_id`` alone does not identify a bot, so the grant lookup takes the
+    owner as an input rather than reading it off whichever row the id happened
+    to match. Omitting it addresses the delegating user's own bot; this grant
+    is on someone else's, so it does not answer.
+
+    An earlier revision let the *grant* supply the owner. That read "any grant
+    on this bot id" and trusted the result, which is only safe while the unique
+    key makes the row singular — and it is what the application's own listing
+    now avoids by returning ``owner_id`` alongside each bot.
     """
     grants.grant(app_id=APP_ID, bot_id=BOT, user_id=COLLAB, owner_id=OWNER)
     relay.add_operator(COLLAB)
 
-    assert _sessions(app_client()).status_code == 200
+    assert _sessions(app_client()).status_code == 404
+    assert relay.calls == [], "refused before the relay"
+
+
+def test_naming_the_owner_reaches_the_shared_bot(app_client, relay, grants):
+    """The same delegation, addressed properly, works.
+
+    This is the case delegation exists for: an application acting as a
+    collaborator on a bot that collaborator does not own.
+    """
+    grants.grant(app_id=APP_ID, bot_id=BOT, user_id=COLLAB, owner_id=OWNER)
+    relay.add_operator(COLLAB)
+
+    assert _sessions(app_client(), owner_id=OWNER).status_code == 200
     assert relay.calls[0]["owner_id"] == OWNER
 
 
