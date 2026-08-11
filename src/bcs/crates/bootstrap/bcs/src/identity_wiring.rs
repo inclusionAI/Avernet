@@ -9,8 +9,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bcs_auth_api::{AuthError, UserIdentityInfo, UserIdentityPort};
 use bcs_db_api::DbPlugin;
-use bcs_service_api::UserIdentityRepoPort;
-use bcs_user_identity::{DbUserIdentityStore, MemoryUserIdentityRepo};
+use bcs_service_api::{UserCredentialRepoPort, UserIdentityRepoPort};
+use bcs_user_identity::{DbUserCredentialStore, DbUserIdentityStore, MemoryUserCredentialRepo, MemoryUserIdentityRepo};
 
 use crate::plugins::DbPluginKind;
 
@@ -130,4 +130,26 @@ pub fn memory_user_identity_port() -> Arc<dyn UserIdentityPort> {
     Arc::new(RepoUserIdentityPort::new(Arc::new(
         MemoryUserIdentityRepo::new(),
     )))
+}
+
+/// Build a DB-backed credential repo from the selected DB plugin.
+pub fn db_user_credential_repo(
+    db_kind: DbPluginKind,
+    db: Arc<dyn DbPlugin>,
+) -> Arc<dyn UserCredentialRepoPort> {
+    match db_kind {
+        DbPluginKind::LocalSqlite => Arc::new(DbUserCredentialStore::sqlite(db)),
+        DbPluginKind::Mysql => Arc::new(DbUserCredentialStore::mysql(db)),
+        DbPluginKind::External(provider) => {
+            panic!(
+                "external database plugin '{}' has no user credential store wiring",
+                provider
+            )
+        }
+    }
+}
+
+/// In-memory credential repo for standalone / test paths without a DB plugin.
+pub fn memory_user_credential_repo() -> Arc<dyn UserCredentialRepoPort> {
+    Arc::new(MemoryUserCredentialRepo::new())
 }

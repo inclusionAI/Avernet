@@ -956,6 +956,9 @@ pub struct BcsServerState {
     /// Shared OAuth identity port (used to build `/auth/*` route state).
     pub user_identity_port: Option<Arc<dyn bcs_auth_api::UserIdentityPort>>,
 
+    /// Shared user credential repo backing `PasswordAuthServiceImpl`.
+    pub credential_repo: Option<Arc<dyn bcs_service_api::UserCredentialRepoPort>>,
+
     /// User-controlled outbound HTTP URL security policy.
     pub outbound_url_guard: OutboundUrlGuard,
 
@@ -1956,6 +1959,7 @@ impl Default for BcsServerState {
             crate::config_loader::Environment::resolve().as_str(),
         );
         let user_identity_port = Some(crate::identity_wiring::memory_user_identity_port());
+        let credential_repo = Some(crate::identity_wiring::memory_user_credential_repo());
         let auth_chain = Arc::new(crate::auth_wiring::build_auth_chain(
             &auth_config,
             bot_registry.clone(),
@@ -1988,6 +1992,7 @@ impl Default for BcsServerState {
             openapi_v1,
             group_session_secret_access,
             user_identity_port,
+            credential_repo,
             outbound_url_guard,
             admin_invocation_runs,
         }
@@ -3230,6 +3235,7 @@ impl BcsServer {
             crate::config_loader::Environment::resolve().as_str(),
         );
         let user_identity_port = Some(crate::identity_wiring::memory_user_identity_port());
+        let credential_repo = Some(crate::identity_wiring::memory_user_credential_repo());
         let auth_chain = Arc::new(crate::auth_wiring::build_auth_chain(
             &auth_config,
             bot_registry.clone(),
@@ -3261,6 +3267,7 @@ impl BcsServer {
             openapi_v1,
             group_session_secret_access,
             user_identity_port,
+            credential_repo,
             outbound_url_guard: callback_url_guard,
             admin_invocation_runs,
         });
@@ -3831,6 +3838,13 @@ impl BcsServer {
             )),
             None => Some(crate::identity_wiring::memory_user_identity_port()),
         };
+        let credential_repo = match infrastructure_plugins.db() {
+            Some(db) => Some(crate::identity_wiring::db_user_credential_repo(
+                infrastructure_plugins.db_kind(),
+                db,
+            )),
+            None => Some(crate::identity_wiring::memory_user_credential_repo()),
+        };
         let auth_chain = Arc::new(
             crate::auth_wiring::try_build_auth_chain_with_factories(
                 &auth_config,
@@ -3866,6 +3880,7 @@ impl BcsServer {
             openapi_v1,
             group_session_secret_access,
             user_identity_port,
+            credential_repo,
             outbound_url_guard,
             admin_invocation_runs,
         });
