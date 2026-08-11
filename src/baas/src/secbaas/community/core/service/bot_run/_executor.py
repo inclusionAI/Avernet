@@ -269,7 +269,9 @@ class BotRunRequestExecutor:
         metadata: dict[str, Any] = run.metadata or {}
         # Reconstruct Attachment objects from Queue meta (D-04 Step B)
         attachments_raw = metadata.get("attachments")
-        attachments = [Attachment(**a) for a in attachments_raw] if attachments_raw else None
+        attachments = (
+            [Attachment(**a) for a in attachments_raw] if attachments_raw else None
+        )
         request_type = metadata.get("request_type", "chat")
         stream = metadata.get("stream", "false") == "true"
         timeout_sec = metadata.get("timeout")
@@ -313,12 +315,21 @@ class BotRunRequestExecutor:
         try:
             if request_type == "inject":
                 await self._do_inject(
-                    run, bot_service, session_id, binding_info, context,
+                    run,
+                    bot_service,
+                    session_id,
+                    binding_info,
+                    context,
                     attachments=attachments,
                 )
             elif stream:
                 await self._do_send_stream(
-                    run, bot_service, session_id, timeout_sec, binding_info, context,
+                    run,
+                    bot_service,
+                    session_id,
+                    timeout_sec,
+                    binding_info,
+                    context,
                     attachments=attachments,
                 )
             else:

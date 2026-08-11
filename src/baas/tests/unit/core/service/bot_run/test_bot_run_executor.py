@@ -1027,9 +1027,7 @@ async def test_executor_rebuilds_attachments_from_meta():
 
     bot_svc = MagicMock()
     bot_svc.create_session = AsyncMock(return_value=MagicMock(session_id="sess-new"))
-    bot_svc.send_message = AsyncMock(
-        return_value=BotResponse(content="ok", usage=None)
-    )
+    bot_svc.send_message = AsyncMock(return_value=BotResponse(content="ok", usage=None))
     selector.select.return_value = bot_svc
 
     executor = BotRunRequestExecutor(
@@ -1080,9 +1078,7 @@ async def test_executor_handles_missing_attachments_in_meta():
 
     bot_svc = MagicMock()
     bot_svc.create_session = AsyncMock(return_value=MagicMock(session_id="sess-new"))
-    bot_svc.send_message = AsyncMock(
-        return_value=BotResponse(content="ok", usage=None)
-    )
+    bot_svc.send_message = AsyncMock(return_value=BotResponse(content="ok", usage=None))
     selector.select.return_value = bot_svc
 
     executor = BotRunRequestExecutor(

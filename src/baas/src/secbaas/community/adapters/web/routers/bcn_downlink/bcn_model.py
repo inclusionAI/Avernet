@@ -161,9 +161,7 @@ class ChatSendRequest(BaseModel):
         default=60000, description="BCN 等待 final 回调的最长时间 (毫秒)"
     )
     extensions: dict[str, Any] | None = Field(default=None, description="扩展信息")
-    attachments: list[Attachment] | None = Field(
-        default=None, description="附件列表"
-    )
+    attachments: list[Attachment] | None = Field(default=None, description="附件列表")
 
     model_config = {"populate_by_name": True}
 
@@ -186,9 +184,7 @@ class ChatInjectRequest(BaseModel):
     from_: FromRef = Field(..., alias="from", description="消息发送方")
     message: DownlinkMessage = Field(..., description="注入消息")
     timeout_ms: int = Field(default=60000, description="超时时间 (毫秒)")
-    attachments: list[Attachment] | None = Field(
-        default=None, description="附件列表"
-    )
+    attachments: list[Attachment] | None = Field(default=None, description="附件列表")
 
     model_config = {"populate_by_name": True}
 

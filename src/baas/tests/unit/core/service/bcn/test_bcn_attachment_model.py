@@ -13,14 +13,11 @@ from secbaas.community.adapters.web.routers.bcn_downlink.bcn_model import (
 )
 from secbaas.community.adapters.web.routers.bcn_downlink.bcn_model import (
     ChatInjectRequest,
-)
-from secbaas.community.adapters.web.routers.bcn_downlink.bcn_model import (
     ChatSendRequest,
 )
 from secbaas.community.api.bcn import (
     Attachment as DomainAttachment,
 )
-
 
 # ── helpers ──
 
@@ -68,7 +65,9 @@ def test_attachment_to_domain_all_fields():
     )
     domain = att.to_domain()
 
-    assert isinstance(domain, DomainAttachment), "to_domain() must return DomainAttachment"
+    assert isinstance(domain, DomainAttachment), (
+        "to_domain() must return DomainAttachment"
+    )
     assert domain.attachment_id == "att_1"
     assert domain.type == "image"
     assert domain.file_name == "test.png"
@@ -86,7 +85,9 @@ def test_attachment_to_domain_optional_fields_none():
     )
     domain = att.to_domain()
 
-    assert isinstance(domain, DomainAttachment), "to_domain() must return DomainAttachment"
+    assert isinstance(domain, DomainAttachment), (
+        "to_domain() must return DomainAttachment"
+    )
     assert domain.attachment_id == "att_1"
     assert domain.type == "image"
     assert domain.file_name == "test.png"

@@ -345,7 +345,9 @@ async def test_handle_chat_send_with_attachments(service, mock_bot_runner):
     mock_bot_runner.deliver_message.assert_awaited_once()
     kwargs = mock_bot_runner.deliver_message.call_args.kwargs
     attachments = kwargs.get("attachments")
-    assert attachments is not None, "deliver_message must be called with attachments kwarg"
+    assert attachments is not None, (
+        "deliver_message must be called with attachments kwarg"
+    )
     assert len(attachments) == 2
     assert attachments[0].attachment_id == "att_1"
     assert attachments[1].attachment_id == "att_2"
@@ -361,7 +363,9 @@ async def test_handle_chat_send_without_attachments(service, mock_bot_runner):
 
     mock_bot_runner.deliver_message.assert_awaited_once()
     kwargs = mock_bot_runner.deliver_message.call_args.kwargs
-    assert kwargs.get("attachments") is None, "attachments kwarg must be None when not set"
+    assert kwargs.get("attachments") is None, (
+        "attachments kwarg must be None when not set"
+    )
 
 
 @pytest.mark.asyncio
@@ -376,7 +380,9 @@ async def test_handle_chat_inject_with_attachments(service, mock_bot_runner):
     mock_bot_runner.inject_message.assert_awaited_once()
     kwargs = mock_bot_runner.inject_message.call_args.kwargs
     attachments = kwargs.get("attachments")
-    assert attachments is not None, "inject_message must be called with attachments kwarg"
+    assert attachments is not None, (
+        "inject_message must be called with attachments kwarg"
+    )
     assert len(attachments) == 1
     assert attachments[0].attachment_id == "att_1"
 
@@ -384,6 +390,7 @@ async def test_handle_chat_inject_with_attachments(service, mock_bot_runner):
 @pytest.mark.asyncio
 async def test_handle_chat_send_stream_with_attachments(service, mock_bot_runner):
     """Service passes attachments from ChatSendInput to bot_runner.deliver_message_stream."""
+
     async def _async_gen():
         yield MagicMock()
 
@@ -399,6 +406,8 @@ async def test_handle_chat_send_stream_with_attachments(service, mock_bot_runner
     mock_bot_runner.deliver_message_stream.assert_awaited_once()
     kwargs = mock_bot_runner.deliver_message_stream.call_args.kwargs
     attachments = kwargs.get("attachments")
-    assert attachments is not None, "deliver_message_stream must be called with attachments kwarg"
+    assert attachments is not None, (
+        "deliver_message_stream must be called with attachments kwarg"
+    )
     assert len(attachments) == 1
     assert attachments[0].attachment_id == "att_1"

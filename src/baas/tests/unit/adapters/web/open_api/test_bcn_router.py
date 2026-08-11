@@ -140,7 +140,12 @@ async def test_dispatch_chat_send_passes_attachments():
             "from": {"kind": "human", "id": "user-1"},
             "message": {"role": "user", "content": "hi"},
             "attachments": [
-                {"attachment_id": "att_1", "type": "image", "file_name": "photo.png", "url": "https://cdn.example.com/att_1"},
+                {
+                    "attachment_id": "att_1",
+                    "type": "image",
+                    "file_name": "photo.png",
+                    "url": "https://cdn.example.com/att_1",
+                },
             ],
         }
     )
@@ -183,4 +188,6 @@ async def test_dispatch_chat_send_passes_attachments_none():
     await _dispatch_chat_send(req, _CapturingService())
 
     input_ = captured["input"]
-    assert input_.attachments is None, "ChatSendInput.attachments must be None when absent"
+    assert input_.attachments is None, (
+        "ChatSendInput.attachments must be None when absent"
+    )
