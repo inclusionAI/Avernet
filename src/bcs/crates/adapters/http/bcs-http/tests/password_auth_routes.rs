@@ -206,6 +206,30 @@ async fn get_with_bearer(app: &axum::Router, uri: &str, token: &str) -> (StatusC
     (status, body)
 }
 
+/// Send a POST request with a bearer token (no body) through a clone of the
+/// app; return (status, set-cookie header).
+async fn post_with_bearer(app: &axum::Router, uri: &str, token: &str) -> (StatusCode, Option<String>) {
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = resp.status();
+    let cookie = resp
+        .headers()
+        .get(axum::http::header::SET_COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    (status, cookie)
+}
+
 /// Register alice via POST /auth/register; return (status, body, cookie).
 async fn register_alice(app: &axum::Router) -> (StatusCode, Value, Option<String>) {
     post_json(
@@ -276,4 +300,37 @@ async fn login_bad_password_returns_401() {
     )
     .await;
     assert_eq!(login_status, StatusCode::UNAUTHORIZED, "login body: {body}");
+}
+
+#[tokio::test]
+async fn logout_with_bearer_revokes_token() {
+    let app = build_app();
+
+    // Register alice → 200; capture the bearer token from the JSON body.
+    let (status, body, _cookie) = register_alice(&app).await;
+    assert_eq!(status, StatusCode::OK, "register body: {body}");
+    let token = body["token"].as_str().expect("token in body");
+
+    // The issued bearer token resolves through GET /auth/user before logout.
+    let (pre_status, _pre_body) = get_with_bearer(&app, "/auth/user", token).await;
+    assert_eq!(pre_status, StatusCode::OK, "token should resolve before logout");
+
+    // POST /auth/logout with the bearer header → 200, and the response
+    // `set-cookie` clears the session cookie (Max-Age=0).
+    let (logout_status, logout_cookie) = post_with_bearer(&app, "/auth/logout", token).await;
+    assert_eq!(logout_status, StatusCode::OK, "logout should return 200");
+    let logout_cookie = logout_cookie.expect("set-cookie header present on logout");
+    assert!(
+        logout_cookie.contains("Max-Age=0"),
+        "logout must clear the cookie with Max-Age=0, got: {logout_cookie}"
+    );
+
+    // Revocation: the stored token hash was cleared by logout, so the bearer
+    // token no longer resolves through the OAuthSessionPlugin read path.
+    let (post_status, _post_body) = get_with_bearer(&app, "/auth/user", token).await;
+    assert_eq!(
+        post_status,
+        StatusCode::UNAUTHORIZED,
+        "bearer token must not resolve after logout (revocation)"
+    );
 }

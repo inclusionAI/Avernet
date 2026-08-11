@@ -20,7 +20,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
-use bcs_auth_api::{extract_session_cookie, OAuthConfig, OAuthProvider, UserIdentityPort, BCS_SESSION_COOKIE};
+use bcs_auth_api::{extract_bearer_token, extract_session_cookie, OAuthConfig, OAuthProvider, UserIdentityPort, BCS_SESSION_COOKIE};
 use bcs_jwt::{Claims, JwtService};
 use bcs_service_api::PasswordAuthService;
 
@@ -421,7 +421,7 @@ pub async fn logout_handler(
     State(state): State<Arc<OAuthRouteState>>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    if let Some(jwt) = extract_session_cookie(&headers) {
+    if let Some(jwt) = extract_session_cookie(&headers).or_else(|| extract_bearer_token(&headers)) {
         if let Ok(claims) = state.jwt_service.verify(&jwt) {
             if let Err(e) = state.user_port.update_token(&claims.sub, "", 0).await {
                 warn!(error = %e, user_id = %claims.sub, "logout: token revocation failed");
