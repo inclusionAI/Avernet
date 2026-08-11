@@ -8,7 +8,7 @@ import zlib
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, List, Mapping, Optional
 
 from agentclaw.community.core.devices.models import SynlinkMappingInfo
 from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
@@ -156,6 +156,7 @@ class SkillSetService:
         device_sync_dispatcher: "DeviceSyncDispatcher | None" = None,
         mcp_sync_service=None,
         device_plugin: DeviceAccessor | None = None,
+        ext_info_provider: Callable[[str], Mapping[str, Any] | None] | None = None,
         *,
         path_factory: WorkspacePathFactory,
         pool_layout_paths: Callable[
@@ -197,6 +198,7 @@ class SkillSetService:
         self.engine_type = engine_type or DEFAULT_ENGINE_TYPE
 
         self.device_plugin = device_plugin
+        self._ext_info_provider = ext_info_provider
 
         # device_provider: dead field (only written, never read). Historically
         # looked up from ``DeviceAccessor.get_connection_info``. Kept as ``None``
@@ -208,6 +210,7 @@ class SkillSetService:
         # agentbox engine-view path. Service bots' device_provider is also "baas" but
         # they're NOT desktop and must stay on the cloud OSS-view path.
         self.is_desktop = False
+
         if user_id or entity_id:
             try:
                 owner_id = user_id or entity_id
@@ -258,6 +261,54 @@ class SkillSetService:
         self._resolver = resolver
         self._device_sync_dispatcher = device_sync_dispatcher
         self._mcp_sync_service = mcp_sync_service
+
+    def _get_default_capabilities_ext_info(
+        self,
+        engine_type: Optional[str],
+        bot_id: Optional[str] = None,
+    ) -> Mapping[str, Any] | None:
+        """Best-effort extra context lookup for engine-specific default capabilities."""
+        provider = self._ext_info_provider
+        if provider is None:
+            return None
+        target_bot_id = bot_id or self.bot_id
+        if not target_bot_id:
+            return None
+        try:
+            ext_info = provider(str(target_bot_id))
+        except Exception as exc:
+            logger.warning(
+                "[SkillSetService] default capabilities ext_info lookup failed for "
+                "engine_type=%s bot_id=%s: %s",
+                engine_type,
+                target_bot_id,
+                exc,
+            )
+            return None
+        return ext_info if isinstance(ext_info, Mapping) else None
+
+    def _get_default_capabilities_template_type(
+        self,
+        bot_id: Optional[str] = None,
+    ) -> str | None:
+        """Best-effort template_type lookup for default-capability bucket routing."""
+        target_bot_id = bot_id or self.bot_id
+        if not target_bot_id:
+            return None
+        try:
+            bot = self._bot_repo.get_by_id(str(target_bot_id))
+            if isinstance(bot, dict):
+                template_type = bot.get("template_type")
+                if isinstance(template_type, str):
+                    return template_type
+        except Exception as exc:
+            logger.warning(
+                "[SkillSetService] default capabilities template_type lookup failed for "
+                "bot_id=%s: %s",
+                target_bot_id,
+                exc,
+            )
+        return None
 
     def _get_current_active_skill_set_id(self) -> str | None:
         """Get currently active skill set ID from database (is_active=1)."""
@@ -1522,6 +1573,11 @@ class SkillSetService:
 
         # 判断是否是默认能力集
         is_default = skill_set.get('is_default', False)
+        effective_ext_info = self._get_default_capabilities_ext_info(
+            self.engine_type,
+            self.bot_id,
+        )
+        effective_template_type = self._get_default_capabilities_template_type(self.bot_id)
 
         if is_default:
             # 默认能力集：写入排除表（用户隔离）
@@ -1540,7 +1596,19 @@ class SkillSetService:
                 for ss in self.list_skill_sets(user_id=user_id, bolt_id=self.bot_id):
                     if str(ss.get('id')) == skill_set_id:
                         continue
-                    if server_code in {m.get('server_code') for m in self.get_set_mcp_servers(str(ss.get('id')), user_id, self.bot_id) if m.get('server_code')}:
+                    mcps_in_set = self.get_set_mcp_servers(
+                        str(ss.get('id')),
+                        user_id,
+                        self.bot_id,
+                        self.engine_type,
+                        effective_template_type,
+                        ext_info=effective_ext_info,
+                    )
+                    if server_code in {
+                        m.get('server_code')
+                        for m in mcps_in_set
+                        if m.get('server_code')
+                    }:
                         should_remove = False
                         break
             except Exception as e:
@@ -1593,10 +1661,30 @@ class SkillSetService:
                 for ss in self.list_skill_sets(user_id=user_id, bolt_id=self.bot_id):
                     if str(ss.get('id')) == skill_set_id:
                         continue
-                    if server_code in {m.get('server_code') for m in self.get_set_mcp_servers(str(ss.get('id')), user_id, self.bot_id) if m.get('server_code')}:
+                    mcps_in_set = self.get_set_mcp_servers(
+                        str(ss.get('id')),
+                        user_id,
+                        self.bot_id,
+                        self.engine_type,
+                        effective_template_type,
+                        ext_info=effective_ext_info,
+                    )
+                    if server_code in {
+                        m.get('server_code')
+                        for m in mcps_in_set
+                        if m.get('server_code')
+                    }:
                         should_remove = False
                         break
-                if should_remove and server_code in {c.get("server_code") for c in get_default_mcp_servers(self.engine_type)}:
+                default_server_codes = {
+                    c.get("server_code")
+                    for c in get_default_mcp_servers(
+                        self.engine_type,
+                        effective_template_type,
+                        ext_info=effective_ext_info,
+                    )
+                }
+                if should_remove and server_code in default_server_codes:
                     should_remove = False
             except Exception as e:
                 should_remove = False
@@ -1639,6 +1727,9 @@ class SkillSetService:
         user_id: Optional[str] = None,
         bot_id: Optional[str] = None,
         engine_type: Optional[str] = None,
+        template_type: Any = None,
+        *,
+        ext_info: Optional[Mapping[str, Any]] = None,
     ) -> List[dict]:
         """Get all MCP servers in a skill set.
 
@@ -1656,13 +1747,27 @@ class SkillSetService:
             return []
 
         effective_engine = engine_type if engine_type is not None else self.engine_type
+        effective_ext_info = (
+            ext_info
+            if ext_info is not None
+            else self._get_default_capabilities_ext_info(effective_engine, bot_id)
+        )
+        effective_template_type = (
+            template_type
+            if template_type is not None
+            else self._get_default_capabilities_template_type(bot_id)
+        )
 
         # Get associations from DB (contains server_code and name)
         associations = self.skill_set_repo.get_mcp_servers_in_set(skill_set_id)
 
         # If this is a default skill set, merge with DEFAULT_MCP_SERVERS_CONFIG
         if skill_set.get('is_default'):
-            default_codes = get_default_mcp_server_codes(effective_engine)
+            default_codes = get_default_mcp_server_codes(
+                effective_engine,
+                effective_template_type,
+                ext_info=effective_ext_info,
+            )
             excluded_codes = set()
 
             # Use provided bot_id, fallback to self.bot_id, then None
@@ -1687,7 +1792,12 @@ class SkillSetService:
                     # 分配 mock id，避免前端因 id 为 None 导致 checkbox key 冲突
                     # 用 adler32 保证同一 server_code 的 mock id 稳定，不受列表顺序/排除项影响
                     mock_id = (zlib.adler32(code.encode("utf-8")) % 99999) + 1
-                    default_cfg = get_default_mcp_config(effective_engine, code) or {}
+                    default_cfg = get_default_mcp_config(
+                        effective_engine,
+                        code,
+                        effective_template_type,
+                        ext_info=effective_ext_info,
+                    ) or {}
                     associations.append({
                         "id": mock_id,
                         "server_code": code,
@@ -1729,6 +1839,11 @@ class SkillSetService:
             engine_type: Engine type for scoping. Defaults to self.engine_type.
         """
         effective_engine = engine_type if engine_type is not None else self.engine_type
+        effective_ext_info = self._get_default_capabilities_ext_info(
+            effective_engine,
+            bot_id,
+        )
+        effective_template_type = self._get_default_capabilities_template_type(bot_id)
         active_skill_sets = self.skill_set_repo.get_all_active_skill_sets(
             user_id=entity_id,
             bolt_id=bot_id,
@@ -1741,7 +1856,14 @@ class SkillSetService:
         for skill_set in active_skill_sets:
             skill_set_id = str(skill_set.get("id"))
             skill_set_name = skill_set.get("name", "unnamed")
-            mcps_in_set = self.get_set_mcp_servers(skill_set_id, user_id, bot_id, effective_engine)
+            mcps_in_set = self.get_set_mcp_servers(
+                skill_set_id,
+                user_id,
+                bot_id,
+                effective_engine,
+                effective_template_type,
+                ext_info=effective_ext_info,
+            )
             skill_mcp_codes = []
             for mcp in mcps_in_set:
                 server_code = mcp.get("server_code")
@@ -1755,7 +1877,11 @@ class SkillSetService:
         # Get user-excluded default MCPs (across all default skill sets)
         excluded_codes = set(self.skill_set_repo.get_all_excluded_mcps(user_id, bot_id))
 
-        default_mcp_configs = get_default_mcp_servers(effective_engine)
+        default_mcp_configs = get_default_mcp_servers(
+            effective_engine,
+            effective_template_type,
+            ext_info=effective_ext_info,
+        )
         default_mcps = []
         for config in default_mcp_configs:
             server_code = config["server_code"]
@@ -1798,6 +1924,11 @@ class SkillSetService:
             engine_type: Engine type for scoping. Defaults to self.engine_type.
         """
         effective_engine = engine_type if engine_type is not None else self.engine_type
+        effective_ext_info = self._get_default_capabilities_ext_info(
+            effective_engine,
+            bot_id,
+        )
+        effective_template_type = self._get_default_capabilities_template_type(bot_id)
         all_skill_sets = self.list_skill_sets(
             user_id=entity_id,
             bolt_id=bot_id,
@@ -1809,7 +1940,14 @@ class SkillSetService:
         for skill_set in all_skill_sets:
             skill_set_id = str(skill_set.get("id"))
             skill_set_name = skill_set.get("name", "unnamed")
-            mcps_in_set = self.get_set_mcp_servers(skill_set_id, user_id, bot_id, effective_engine)
+            mcps_in_set = self.get_set_mcp_servers(
+                skill_set_id,
+                user_id,
+                bot_id,
+                effective_engine,
+                effective_template_type,
+                ext_info=effective_ext_info,
+            )
             skill_mcp_codes = []
             for mcp in mcps_in_set:
                 server_code = mcp.get("server_code")
@@ -1823,7 +1961,11 @@ class SkillSetService:
         # Get user-excluded default MCPs (across all default skill sets)
         excluded_codes = set(self.skill_set_repo.get_all_excluded_mcps(user_id, bot_id))
 
-        default_mcp_configs = get_default_mcp_servers(effective_engine)
+        default_mcp_configs = get_default_mcp_servers(
+            effective_engine,
+            effective_template_type,
+            ext_info=effective_ext_info,
+        )
         default_mcps = []
         for config in default_mcp_configs:
             server_code = config["server_code"]
@@ -1899,7 +2041,16 @@ class SkillSetService:
         excluded_codes = set(
             self.skill_set_repo.get_all_excluded_mcps(user_id, bot_id)
         )
-        for default_mcp in get_default_mcp_servers(effective_engine):
+        effective_ext_info = self._get_default_capabilities_ext_info(
+            effective_engine,
+            bot_id,
+        )
+        effective_template_type = self._get_default_capabilities_template_type(bot_id)
+        for default_mcp in get_default_mcp_servers(
+            effective_engine,
+            effective_template_type,
+            ext_info=effective_ext_info,
+        ):
             code = default_mcp["server_code"]
             if code not in excluded_codes and code not in seen:
                 seen.add(code)
@@ -1920,6 +2071,11 @@ class SkillSetService:
             engine_type: Engine type for scoping (e.g., 'openclaw', 'aicoding').
         """
         effective_engine = engine_type if engine_type is not None else self.engine_type
+        effective_ext_info = self._get_default_capabilities_ext_info(
+            effective_engine,
+            bot_id,
+        )
+        effective_template_type = self._get_default_capabilities_template_type(bot_id)
         active_skill_sets = self.skill_set_repo.get_all_active_skill_sets(
             user_id=entity_id,
             bolt_id=bot_id,
@@ -1931,7 +2087,14 @@ class SkillSetService:
         for skill_set in active_skill_sets:
             skill_set_id = str(skill_set.get("id"))
             skill_set_name = skill_set.get("name", "")
-            mcps_in_set = self.get_set_mcp_servers(skill_set_id, user_id, bot_id, effective_engine)
+            mcps_in_set = self.get_set_mcp_servers(
+                skill_set_id,
+                user_id,
+                bot_id,
+                effective_engine,
+                effective_template_type,
+                ext_info=effective_ext_info,
+            )
             active_skill_sets_info.append({
                 "id": skill_set_id,
                 "name": skill_set_name,

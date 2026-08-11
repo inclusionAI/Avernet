@@ -53,6 +53,17 @@ class AicodingBaasEngineBucketResolver:
             template_type=template_type,
         )
 
+    def resolve_default_capabilities_engine_bucket(
+        self,
+        *,
+        normalized_engine_type: str,
+        template_type: str | None,
+    ) -> str | None:
+        return self.resolve_baas_engine_bucket(
+            normalized_engine_type=normalized_engine_type,
+            template_type=template_type,
+        )
+
 
 class AicodingProvisioningStrategy(EngineProvisioningStrategy):
     """Provisioning strategy shared by ``aicoding`` and ``claude_code`` engines."""
