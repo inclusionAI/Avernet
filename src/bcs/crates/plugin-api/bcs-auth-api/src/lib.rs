@@ -11,12 +11,14 @@ pub mod chain;
 pub mod port;
 pub mod config;
 pub mod cookie;
+pub mod headers;
 pub mod oauth_types;
 pub mod oauth_provider;
 
 pub use chain::{AuthPlugin, AuthPluginChain};
 pub use config::{AuthConfig, LocalAuthConfig, OAuthConfig};
 pub use cookie::{extract_session_cookie, BCS_SESSION_COOKIE};
+pub use headers::extract_bearer_token;
 pub use jwt::is_jwt_format;
 pub use oauth_provider::OAuthProvider;
 pub use oauth_types::{OAuthError, OAuthToken, ProviderUserInfo};
