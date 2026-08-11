@@ -380,15 +380,7 @@ async fn download_shared_file(
             show: query.show,
         })
         .await
-        .map_err(|_| {
-            application_error_response(
-                &request_id,
-                ApplicationError::not_found(
-                    "shared_file_not_found",
-                    "Shared file was not found",
-                ),
-            )
-        })?;
+        .map_err(|e| error(&request_id, e))?;
     Ok(content_response(content))
 }
 

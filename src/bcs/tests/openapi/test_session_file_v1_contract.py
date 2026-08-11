@@ -77,3 +77,45 @@ def test_raw_content_successes_are_explicit_and_contract_is_valid() -> None:
         assert "application/octet-stream" in operation["responses"]["200"]["content"]
 
     assert validate_contract(contract) == []
+
+
+def test_session_file_error_codes_match_the_application_vocabulary() -> None:
+    contract = _contract()
+    list_responses = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/files"
+    ]["get"]["responses"]
+    assert list_responses["404"]["x-error-codes"] == [
+        "session_not_found",
+        "group_not_found",
+        "session_file_not_found",
+    ]
+
+    prepare_responses = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/files"
+    ]["post"]["responses"]
+    assert prepare_responses["413"]["x-error-codes"] == ["file_too_large"]
+    assert prepare_responses["502"]["x-error-codes"] == [
+        "storage_backend_unavailable"
+    ]
+
+    content_responses = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/files/{file_id}/content"
+    ]["get"]["responses"]
+    assert content_responses["422"]["x-error-codes"] == ["file_upload_incomplete"]
+
+    share_responses = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/files/{file_id}/share"
+    ]["post"]["responses"]
+    assert share_responses["422"]["x-error-codes"] == ["file_upload_incomplete"]
+
+    upload_responses = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/files/{file_id}/content"
+    ]["put"]["responses"]
+    assert upload_responses["409"]["x-error-codes"] == ["file_upload_not_pending"]
+
+    delete_responses = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/files/{file_id}"
+    ]["delete"]["responses"]
+    assert delete_responses["502"]["x-error-codes"] == [
+        "storage_backend_unavailable"
+    ]

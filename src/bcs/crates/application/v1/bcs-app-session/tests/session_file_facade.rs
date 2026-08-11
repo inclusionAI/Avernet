@@ -361,3 +361,96 @@ async fn non_member_cannot_list_session_files() {
 
     assert_eq!(error.code(), "forbidden");
 }
+
+#[tokio::test]
+async fn direct_human_participant_can_list_session_files() {
+    let fixture = Fixture::new().await;
+    fixture.seed().await;
+    let session_id = "group-1:00000003";
+    fixture
+        .session_repo
+        .create(
+            "group-1",
+            NewSessionParams {
+                id: Some(session_id.into()),
+                session_kind: SessionKind::Chat,
+                participants: vec![Participant::human(
+                    "human_alice",
+                    ParticipantRole::Consultant,
+                )],
+                created_by: Some("human_alice".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("store Human session");
+
+    let page = fixture
+        .service
+        .list(ListSessionFiles {
+            caller: human_caller("alice"),
+            session_id: session_id.into(),
+            prefix: None,
+            status: None,
+            limit: 100,
+            offset: 0,
+        })
+        .await
+        .expect("direct Human participant is admitted");
+
+    assert!(page.items.is_empty());
+}
+
+#[tokio::test]
+async fn participant_id_collision_does_not_cross_actor_kinds() {
+    let fixture = Fixture::new().await;
+    fixture.seed().await;
+    let session_id = "group-1:00000004";
+    fixture
+        .session_repo
+        .create(
+            "group-1",
+            NewSessionParams {
+                id: Some(session_id.into()),
+                session_kind: SessionKind::Chat,
+                participants: vec![Participant::human(
+                    "bot-a",
+                    ParticipantRole::Consultant,
+                )],
+                created_by: Some("bot-a".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("store colliding Human participant");
+
+    let error = fixture
+        .service
+        .list(ListSessionFiles {
+            caller: bot_caller("bot-a", "alice"),
+            session_id: session_id.into(),
+            prefix: None,
+            status: None,
+            limit: 100,
+            offset: 0,
+        })
+        .await
+        .expect_err("Bot must not match a Human participant with the same identifier");
+
+    assert_eq!(error.code(), "forbidden");
+
+    let error = fixture
+        .service
+        .list(ListSessionFiles {
+            caller: human_caller("alice"),
+            session_id: session_id.into(),
+            prefix: None,
+            status: None,
+            limit: 100,
+            offset: 0,
+        })
+        .await
+        .expect_err("Human must not inherit ownership through a Human participant ID collision");
+
+    assert_eq!(error.code(), "forbidden");
+}

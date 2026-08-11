@@ -7,8 +7,9 @@ use axum::http::{HeaderMap, Request, StatusCode};
 use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
 use bcs_api_http::v1::openapi::SessionFileUrlProjector;
 use bcs_service_api::application::v1::{
-    AddGroupParticipant, AddSessionParticipant, ApplicationError, AuthenticatedCaller,
-    AuthenticatedUserIdentity, BotParticipantMode, CompleteSession, CreateGroup, CreateSession,
+    AddGroupParticipant, AddSessionParticipant, ApplicationError, AuthenticatedAppIdentity,
+    AuthenticatedBotIdentity, AuthenticatedCaller, AuthenticatedUserIdentity, BotParticipantMode,
+    CompleteSession, CreateGroup, CreateSession,
     CreateSessionOutcome,
     DeleteGroup, DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant,
     GetGroup, GetSession, GroupDetail, GroupService, GroupSummary, ListGroups,
@@ -145,12 +146,24 @@ impl bcs_service_api::application::v1::SessionFileApplicationService
         &self,
         command: bcs_service_api::application::v1::DownloadSharedSessionFile,
     ) -> Result<bcs_service_api::application::v1::SessionFileContent, ApplicationError> {
-        if command.token == "good-token" {
-            return Ok(bcs_service_api::application::v1::SessionFileContent::Stream {
-                file: session_file_view(),
-                body: byte_stream_from_bytes(Bytes::from_static(b"abc")),
-                inline: command.show,
-            });
+        match command.token.as_str() {
+            "good-token" => {
+                return Ok(bcs_service_api::application::v1::SessionFileContent::Stream {
+                    file: session_file_view(),
+                    body: byte_stream_from_bytes(Bytes::from_static(b"abc")),
+                    inline: command.show,
+                });
+            }
+            "backend-error" => {
+                return Err(ApplicationError::bad_gateway(
+                    "storage_backend_unavailable",
+                    "Storage backend is unavailable",
+                ));
+            }
+            "internal-error" => {
+                return Err(ApplicationError::internal("database unavailable"));
+            }
+            _ => {}
         }
         Err(ApplicationError::not_found(
             "shared_file_not_found",
@@ -559,6 +572,14 @@ fn test_session_router(
     session: Arc<FakeSessionService>,
     message: Arc<FakeSessionMessageService>,
 ) -> axum::Router {
+    test_session_router_for_caller(session, message, caller())
+}
+
+fn test_session_router_for_caller(
+    session: Arc<FakeSessionService>,
+    message: Arc<FakeSessionMessageService>,
+    authenticated_caller: AuthenticatedCaller,
+) -> axum::Router {
     router(ApiState::new(
         Arc::new(NoopGroupService),
         session,
@@ -566,7 +587,7 @@ fn test_session_router(
         Arc::new(NoopInvitationService),
         Arc::new(NoopFriendshipService),
         Arc::new(HeaderVerifier {
-            caller: caller(),
+            caller: authenticated_caller,
         }),
     )
     .with_session_file_service(
@@ -762,6 +783,116 @@ async fn shared_file_content_is_public_and_token_failures_are_uniform_not_found(
         .await
         .expect("protected response");
     assert_eq!(protected.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn shared_file_content_preserves_infrastructure_failures() {
+    let app = test_session_router(
+        Arc::new(FakeSessionService::default()),
+        Arc::new(FakeSessionMessageService::default()),
+    );
+
+    for (token, expected) in [
+        ("backend-error", StatusCode::BAD_GATEWAY),
+        ("internal-error", StatusCode::INTERNAL_SERVER_ERROR),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/openapi/v1/collaboration/sessions/shared-file/content?token={token}"
+                    ))
+                    .body(Body::empty())
+                    .expect("public request"),
+            )
+            .await
+            .expect("public response");
+        assert_eq!(response.status(), expected, "{token}");
+    }
+}
+
+#[tokio::test]
+async fn session_file_routes_admit_bot_and_reject_mismatched_or_app_only_callers() {
+    let session = Arc::new(FakeSessionService::default());
+    let message = Arc::new(FakeSessionMessageService::default());
+    let bot = AuthenticatedBotIdentity {
+        bot_uuid: "bot-1".into(),
+        owner_id: "staff-1".into(),
+        app_id: 1,
+        agent_code: "agent".into(),
+    };
+
+    let bot_only = test_session_router_for_caller(
+        session.clone(),
+        message.clone(),
+        AuthenticatedCaller {
+            tenant: Some("tenant-a".into()),
+            user: None,
+            bot: Some(bot.clone()),
+            app: None,
+            access_key: None,
+        },
+    );
+    let response = bot_only
+        .oneshot(authenticated_request(
+            "GET",
+            "/openapi/v1/collaboration/sessions/session-1/files",
+            Value::Null,
+        ))
+        .await
+        .expect("Bot-only response");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let mismatched = test_session_router_for_caller(
+        session.clone(),
+        message.clone(),
+        AuthenticatedCaller {
+            tenant: Some("tenant-a".into()),
+            user: caller().user,
+            bot: Some(AuthenticatedBotIdentity {
+                owner_id: "someone-else".into(),
+                ..bot
+            }),
+            app: None,
+            access_key: None,
+        },
+    );
+    let response = mismatched
+        .oneshot(authenticated_request(
+            "GET",
+            "/openapi/v1/collaboration/sessions/session-1/files",
+            Value::Null,
+        ))
+        .await
+        .expect("mismatched User/Bot response");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let app_only = test_session_router_for_caller(
+        session,
+        message,
+        AuthenticatedCaller {
+            tenant: Some("tenant-a".into()),
+            user: None,
+            bot: None,
+            app: Some(AuthenticatedAppIdentity {
+                app_id: 1,
+                app_name: "test-app".into(),
+                owners: "staff-1".into(),
+                app_type: "service".into(),
+            }),
+            access_key: None,
+        },
+    );
+    let response = app_only
+        .oneshot(authenticated_request(
+            "GET",
+            "/openapi/v1/collaboration/sessions/session-1/files",
+            Value::Null,
+        ))
+        .await
+        .expect("App-only response");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]

@@ -93,7 +93,13 @@ impl SessionFileApplicationServiceImpl {
         if session
             .participants
             .iter()
-            .any(|participant| participant.bot_uuid == actor_id)
+            .any(|participant| {
+                participant.bot_uuid == actor_id
+                    && match principal {
+                        Principal::Human(_) => participant.is_human(),
+                        Principal::Bot(_) => participant.is_bot(),
+                    }
+            })
         {
             return Ok(true);
         }
@@ -111,7 +117,9 @@ impl SessionFileApplicationServiceImpl {
         Ok(session
             .participants
             .iter()
-            .any(|participant| owned.contains(&participant.bot_uuid)))
+            .any(|participant| {
+                participant.is_bot() && owned.contains(&participant.bot_uuid)
+            }))
     }
 
     async fn caller_identities(
@@ -462,13 +470,14 @@ impl SessionFileApplicationService for SessionFileApplicationServiceImpl {
             .files
             .share_consume(&command.token)
             .await
-            .map_err(|_| shared_file_not_found())?;
+            .map_err(map_shared_file_error)?;
         self.content(
             &consumed.file.session_id,
             &consumed.file.file_id,
             command.show,
         )
         .await
+        .map_err(map_shared_content_error)
     }
 }
 
@@ -531,6 +540,22 @@ fn upload_owner_mismatch() -> ApplicationError {
 
 fn shared_file_not_found() -> ApplicationError {
     ApplicationError::not_found("shared_file_not_found", "Shared file was not found")
+}
+
+fn map_shared_file_error(error: SessionFileUseCaseError) -> ApplicationError {
+    match error {
+        SessionFileUseCaseError::Backend | SessionFileUseCaseError::Internal(_) => {
+            map_file_error(error)
+        }
+        _ => shared_file_not_found(),
+    }
+}
+
+fn map_shared_content_error(error: ApplicationError) -> ApplicationError {
+    match error {
+        ApplicationError::BadGateway { .. } | ApplicationError::Internal(_) => error,
+        _ => shared_file_not_found(),
+    }
 }
 
 fn map_file_error(error: SessionFileUseCaseError) -> ApplicationError {
@@ -612,6 +637,55 @@ fn human_readable_size(bytes: u64) -> String {
         format!("{:.0} {}", size, UNITS[unit])
     } else {
         format!("{:.1} {}", size, UNITS[unit])
+    }
+}
+
+#[cfg(test)]
+mod shared_error_tests {
+    use bcs_service_api::application::session_files::SessionFileUseCaseError;
+    use bcs_service_api::application::v1::ApplicationError;
+    use bcs_service_api::ServiceError;
+
+    use super::{map_shared_content_error, map_shared_file_error};
+
+    #[test]
+    fn shared_file_failures_hide_token_and_file_state() {
+        for error in [
+            SessionFileUseCaseError::InvalidInput("invalid token".into()),
+            SessionFileUseCaseError::InvalidState("expired token".into()),
+            SessionFileUseCaseError::NotFound("file missing".into()),
+        ] {
+            assert_eq!(map_shared_file_error(error).code(), "shared_file_not_found");
+        }
+    }
+
+    #[test]
+    fn shared_file_failures_preserve_infrastructure_categories() {
+        assert!(matches!(
+            map_shared_file_error(SessionFileUseCaseError::Backend),
+            ApplicationError::BadGateway { .. }
+        ));
+        assert!(matches!(
+            map_shared_file_error(SessionFileUseCaseError::Internal(
+                ServiceError::InternalError("database unavailable".into()),
+            )),
+            ApplicationError::Internal(_)
+        ));
+        assert!(matches!(
+            map_shared_content_error(ApplicationError::bad_gateway(
+                "storage_backend_unavailable",
+                "Storage backend is unavailable",
+            )),
+            ApplicationError::BadGateway { .. }
+        ));
+        assert_eq!(
+            map_shared_content_error(ApplicationError::unprocessable(
+                "file_upload_incomplete",
+                "File is not Ready",
+            ))
+            .code(),
+            "shared_file_not_found",
+        );
     }
 }
 

@@ -254,7 +254,7 @@ ForbiddenResponse:
 
 NotFoundResponse:
   description: Session, parent Group, or file was not found.
-  x-error-codes: [session_not_found, group_not_found, file_not_found]
+  x-error-codes: [session_not_found, group_not_found, session_file_not_found]
   content:
     application/json:
       schema:
@@ -262,7 +262,7 @@ NotFoundResponse:
 
 ConflictResponse:
   description: The operation conflicts with the current file lifecycle state.
-  x-error-codes: [conflict, invalid_transition]
+  x-error-codes: [file_upload_not_pending]
   content:
     application/json:
       schema:
@@ -270,7 +270,7 @@ ConflictResponse:
 
 PayloadTooLargeResponse:
   description: The upload exceeds the configured maximum.
-  x-error-codes: [payload_too_large]
+  x-error-codes: [file_too_large]
   content:
     application/json:
       schema:
@@ -278,7 +278,7 @@ PayloadTooLargeResponse:
 
 UnprocessableResponse:
   description: The upload is incomplete or invalid for completion.
-  x-error-codes: [invalid_state]
+  x-error-codes: [file_upload_incomplete]
   content:
     application/json:
       schema:
@@ -286,7 +286,7 @@ UnprocessableResponse:
 
 StorageBackendResponse:
   description: The configured storage backend failed.
-  x-error-codes: [storage_backend]
+  x-error-codes: [storage_backend_unavailable]
   content:
     application/json:
       schema:
@@ -438,6 +438,7 @@ SessionFilePath:
       "403": { $ref: "#/ForbiddenResponse" }
       "404": { $ref: "#/NotFoundResponse" }
       "409": { $ref: "#/ConflictResponse" }
+      "502": { $ref: "#/StorageBackendResponse" }
       "500": { $ref: ../shared.yaml#/InternalErrorResponse }
 
 SessionFileContentPath:
@@ -475,6 +476,7 @@ SessionFileContentPath:
       "401": { $ref: "#/UnauthenticatedResponse" }
       "403": { $ref: "#/ForbiddenResponse" }
       "404": { $ref: "#/NotFoundResponse" }
+      "422": { $ref: "#/UnprocessableResponse" }
       "502": { $ref: "#/StorageBackendResponse" }
       "500": { $ref: ../shared.yaml#/InternalErrorResponse }
 
@@ -582,6 +584,8 @@ ShareSessionFilePath:
       "403": { $ref: "#/ForbiddenResponse" }
       "404": { $ref: "#/NotFoundResponse" }
       "409": { $ref: "#/ConflictResponse" }
+      "422": { $ref: "#/UnprocessableResponse" }
+      "502": { $ref: "#/StorageBackendResponse" }
       "500": { $ref: ../shared.yaml#/InternalErrorResponse }
 
 SharedSessionFileContentPath:
@@ -622,4 +626,5 @@ SharedSessionFileContentPath:
           application/json:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
+      "502": { $ref: "#/StorageBackendResponse" }
       "500": { $ref: ../shared.yaml#/InternalErrorResponse }
