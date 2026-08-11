@@ -285,19 +285,23 @@ def test_default_cli_items_returns_copy():
 
 def test_template_config_mcps_append_and_override_defaults():
     template_config = {
-        "preset_capabilities": {
-            "mcp": [
-                {
-                    "server_code": "mcp.ant.arkai.dimamcpserver",
-                    "name": "Template Dima",
-                    "description": "template override",
-                },
-                {
-                    "server_code": "mcp.ant.custom.template.server",
-                    "name": "Template Custom",
-                    "description": "template appended",
-                },
-            ]
+        "template_config": {
+            "bot_template_config": {
+                "preset_capabilities": {
+                    "mcp": [
+                        {
+                            "server_code": "mcp.ant.arkai.dimamcpserver",
+                            "name": "Template Dima",
+                            "description": "template override",
+                        },
+                        {
+                            "server_code": "mcp.ant.custom.template.server",
+                            "name": "Template Custom",
+                            "description": "template appended",
+                        },
+                    ]
+                }
+            }
         }
     }
 
@@ -314,16 +318,56 @@ def test_template_config_mcps_append_and_override_defaults():
     assert appended["name"] == "Template Custom"
 
 
-def test_template_config_mcp_presets_are_aicoding_specific():
+def test_template_config_top_level_mcp_presets_are_ignored():
     template_config = {
         "preset_capabilities": {
             "mcp": [
                 {
                     "server_code": "mcp.ant.custom.template.server",
                     "name": "Template Custom",
-                    "description": "template appended",
                 }
             ]
+        }
+    }
+
+    assert "mcp.ant.custom.template.server" not in get_default_mcp_server_codes(
+        "aicoding", ext_info={"aicoding": {"template_config": template_config}}
+    )
+
+
+def test_template_config_without_bot_template_config_mcp_presets_are_ignored():
+    template_config = {
+        "template_config": {
+            "preset_capabilities": {
+                "mcp": [
+                    {
+                        "server_code": "mcp.ant.custom.template.server",
+                        "name": "Template Custom",
+                    }
+                ]
+            }
+        }
+    }
+
+    assert "mcp.ant.custom.template.server" not in get_default_mcp_server_codes(
+        "aicoding", ext_info={"aicoding": {"template_config": template_config}}
+    )
+
+
+def test_template_config_mcp_presets_are_aicoding_specific():
+    template_config = {
+        "template_config": {
+            "bot_template_config": {
+                "preset_capabilities": {
+                    "mcp": [
+                        {
+                            "server_code": "mcp.ant.custom.template.server",
+                            "name": "Template Custom",
+                            "description": "template appended",
+                        }
+                    ]
+                }
+            }
         }
     }
 
@@ -340,13 +384,17 @@ def test_template_config_mcp_presets_are_aicoding_specific():
 
 def test_claude_code_coding_template_uses_aicoding_mcp_bucket():
     template_config = {
-        "preset_capabilities": {
-            "mcp": [
-                {
-                    "server_code": "mcp.ant.custom.template.server",
-                    "name": "Template Custom",
+        "template_config": {
+            "bot_template_config": {
+                "preset_capabilities": {
+                    "mcp": [
+                        {
+                            "server_code": "mcp.ant.custom.template.server",
+                            "name": "Template Custom",
+                        }
+                    ]
                 }
-            ]
+            }
         }
     }
     ext_info = {"aicoding": {"template_config": template_config}}
@@ -364,13 +412,17 @@ def test_claude_code_coding_template_uses_aicoding_mcp_bucket():
 
 def test_claude_code_template_factory_non_normal_uses_aicoding_mcp_bucket():
     template_config = {
-        "preset_capabilities": {
-            "mcp": [
-                {
-                    "server_code": "mcp.ant.custom.template.server",
-                    "name": "Template Custom",
+        "template_config": {
+            "bot_template_config": {
+                "preset_capabilities": {
+                    "mcp": [
+                        {
+                            "server_code": "mcp.ant.custom.template.server",
+                            "name": "Template Custom",
+                        }
+                    ]
                 }
-            ]
+            }
         }
     }
     ext_info = {"aicoding": {"template_config": template_config}}
