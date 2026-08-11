@@ -392,6 +392,14 @@ async def require_granted_bot(
     grant to the ``(bot, owner)`` they actually act on before acting. Naming
     them is what keeps "the dependency could not tell" from becoming a way
     through: any *other* operation arriving here without a bot id is refused.
+
+    TODO(#960): those seven are an inconsistency — two mechanisms doing one
+    job — and the exception has already cost one real defect, since a
+    handler-side check is a place the check and the resolution can drift apart.
+    #960 tracks removing it: make the address uniform on the skills group, move
+    the body-carried ``bot_id``, or resolve the skill before the check. Any
+    replacement has to keep the property this list exists for — an operation
+    that cannot be checked is refused, not waved through.
     """
     if _defers_to_its_handler(request):
         return caller.user_id
@@ -448,7 +456,7 @@ def _addressed_owner(request: Request, caller_id: str) -> str:
     path = getattr(route, "path", None)
     if path is None:
         return caller_id
-    if ADMISSION.get((request.method, path)) is not AdmissionMode.A2:
+    if ADMISSION.get((request.method, path)) is not AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT:
         return caller_id
     return request.query_params.get(_OWNER_ID_KEY) or caller_id
 

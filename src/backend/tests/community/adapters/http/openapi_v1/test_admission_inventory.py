@@ -38,7 +38,12 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import require_pr
 from agentclaw.community.adapters.http.openapi_v1.principal import require_granted_bot
 
 #: The modes whose contract is "a grant is checked for the addressed bot".
-_GRANT_CHECKED_MODES = frozenset({AdmissionMode.A1, AdmissionMode.A2})
+_GRANT_CHECKED_MODES = frozenset(
+    {
+        AdmissionMode.GRANT_CHECKED_OWN_BOT,
+        AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    }
+)
 
 
 def _effective_routes():
@@ -144,11 +149,11 @@ def test_every_public_operation_still_requires_a_principal():
 
 
 def test_every_grant_checked_operation_actually_checks():
-    """Mode A1/A2 must mean the check runs, not that someone intended it to.
+    """A grant-checked mode must mean the check runs, not that someone meant it to.
 
     Verified against the assembled router rather than the handler signature,
     because the check is declared three different ways — at ``include_router``
-    for the wholly-A1 groups, per route in the mixed ``bots`` group, and
+    for the wholly own-bot groups, per route in the mixed ``bots`` group, and
     transitively through ``OwnerIdDep`` on the engine-runtime groups. A test
     that looked for one spelling would pass while the other two rotted.
     """

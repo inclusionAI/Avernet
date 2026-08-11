@@ -198,7 +198,7 @@ _SUBGROUPS = [
     authorized_bots_router,
 ]
 
-# The groups where **every** route is Mode A1 — it names a bot and resolves it
+# The groups where **every** route is GRANT_CHECKED_OWN_BOT — it names a bot and resolves it
 # owner-scoped — so the grant check can be declared once for the group instead
 # of on each of its 25 routes.
 #
@@ -249,7 +249,7 @@ _ENGINE_RUNTIME_GROUPS = [
 _PUBLIC_AUTH = [Depends(require_principal)]
 
 # The bot authorization for an application caller, for the groups that are
-# wholly Mode A1. A no-op for a caller that names an end user — their own
+# wholly own-bot. A no-op for a caller that names an end user — their own
 # operation's owner-scoped resolve already refuses a bot that is not theirs, and
 # re-deciding it here would risk a second, different answer.
 _GRANT_CHECKED = [Depends(require_granted_bot)]

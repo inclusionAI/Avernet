@@ -71,6 +71,11 @@ class BotReachabilityQueries:
         env = get_current_env()
         return (
             db.query(self.Model)
+            # ``outerjoin`` is a LEFT outer join in SQLAlchemy — there is no
+            # separate ``leftjoin``. That direction is the whole mechanism here:
+            # bots the user *owns* have no collaborator row, so an inner join
+            # would silently drop every one of them and answer "you can reach
+            # only what you collaborate on".
             .outerjoin(
                 BotCollaboratorModel,
                 (BotCollaboratorModel.bot_pk == self.Model.id)

@@ -92,10 +92,10 @@ from .schemas import (
 
 logger = get_logger()
 
-#: The bot authorization for an application caller, on the Mode A1 operations
+#: The bot authorization for an application caller, on the own-bot operations
 #: of this group.
 #:
-#: Declared per route here, unlike the four groups that are wholly A1 and get it
+#: Declared per route here, unlike the four groups that are wholly own-bot and get it
 #: at ``include_router``. This group is mixed: it also holds the bots listing
 #: (Mode B), the ceiling (C), the name check (OPEN) and bot creation (refused),
 #: none of which names a bot — and on those the check would refuse an
