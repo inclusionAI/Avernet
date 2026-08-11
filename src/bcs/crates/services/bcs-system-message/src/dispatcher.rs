@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bcs_domain::{DeliveryType, Group, GroupStrategy, NewMessage, Participant, SenderType, SystemGroupMessage, SystemMessageEvent, SystemMessageEventKind};
+use bcs_domain::{DeliveryType, Group, GroupStrategy, NewMessage, Participant, PersistMode, SenderType, SystemGroupMessage, SystemMessageEvent, SystemMessageEventKind};
 use bcs_protocol::{
     build_chat_inject_frame, build_chat_send_frame, now_ms, BotDeliveryKind, GroupContextInput,
     GroupContextParticipant,
@@ -180,42 +180,54 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
             ServiceError::InternalError(format!("No producer registered for kind {:?}", kind))
         })?;
 
-        let messages = producer.produce(&event, group, self.registry.as_ref(), participants).await;
+        let (bot_messages, user_message) = producer.produce(&event, group, self.registry.as_ref(), participants).await;
 
-        // Persist system messages to the message store (best-effort). Most
-        // system events keep one global record. Manager-worker session context
-        // has recipient-specific content, so worker context is persisted under
-        // that worker's owner_bot_id while manager context stays global.
+        // Persist system messages according to each message's PersistMode:
+        // - PerRecipient: one record per recipient with owner_bot_id = recipient
+        //   (personalized per-bot context, readable only in that bot's view).
+        // - Public: exactly one record with owner_bot_id = None so the notice
+        //   joins the public history that human viewers read (their history
+        //   filter is owner_bot_id IS NULL); persisted even when recipients is
+        //   empty (e.g. last bot leaving) since the event is still broadcast
+        //   to human viewers via user_message.
+        // - Skip: no record.
+        // user_message is NOT persisted (frontend-only).
         if let Some(ref repo) = self.message_repo {
             let mut persisted_count = 0usize;
-            for (msg, owner_bot_id) in history_messages_to_persist(kind, group, &messages) {
-                let new_msg = NewMessage {
-                    group_id: group.id.clone(),
-                    session_id: session_id.to_string(),
-                    sender_id: "system".to_string(),
-                    sender_type: SenderType::System,
-                    message_type: "system".to_string(),
-                    content: serde_json::Value::String(msg.message.clone()),
-                    client_msg_id: None,
-                    owner_bot_id,
-                    created_at: now_ms(),
-                    run_id: String::new(),
+            let new_record = |msg: &SystemGroupMessage, owner_bot_id: Option<String>| NewMessage {
+                group_id: group.id.clone(),
+                session_id: session_id.to_string(),
+                sender_id: "system".to_string(),
+                sender_type: SenderType::System,
+                message_type: "system".to_string(),
+                content: serde_json::Value::String(msg.message.clone()),
+                client_msg_id: None,
+                owner_bot_id,
+                created_at: now_ms(),
+                run_id: String::new(),
+            };
+            for msg in &bot_messages {
+                let records: Vec<NewMessage> = match msg.persist {
+                    PersistMode::Skip => vec![],
+                    PersistMode::Public => vec![new_record(msg, None)],
+                    PersistMode::PerRecipient => msg
+                        .recipients
+                        .iter()
+                        .map(|recipient| new_record(msg, Some(recipient.clone())))
+                        .collect(),
                 };
-                if let Err(e) = repo.append_message(new_msg).await {
-                    tracing::warn!(
-                        group_id = %group.id,
-                        error = %e,
-                        "failed to persist system message to message store"
-                    );
-                } else {
-                    persisted_count += 1;
+                for new_msg in records {
+                    if let Err(e) = repo.append_message(new_msg).await {
+                        tracing::warn!(
+                            group_id = %group.id, error = %e,
+                            "failed to persist system message to message store"
+                        );
+                    } else {
+                        persisted_count += 1;
+                    }
                 }
             }
-            tracing::info!(
-                group_id = %group.id,
-                count = persisted_count,
-                "system message persisted"
-            );
+            tracing::info!(group_id = %group.id, count = persisted_count, "system message persisted");
         }
         let protocol_group = group_context_input(group, session_id);
         let group_type = group_type_wire(group.group_strategy);
@@ -225,7 +237,7 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
         let mut failed = 0usize;
         let mut results = Vec::new();
         let mut commands = Vec::new();
-        for msg in &messages {
+        for msg in &bot_messages {
             for recipient in &msg.recipients {
                 total += 1;
                 let run_id = uuid::Uuid::new_v4().to_string();
@@ -306,6 +318,7 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                         frame,
                         delivery_kind,
                         provider_transport,
+                        provider_bypass_headers: Vec::new(),
                     },
                 });
             }
@@ -362,16 +375,11 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
             }
         }
 
-        // Publish all produced messages to frontend WebSocket clients.
-        let mut seen = std::collections::HashSet::new();
-        let frontend_content = messages
-            .iter()
-            .filter(|msg| seen.insert(msg.message.clone()))
-            .map(|msg| msg.message.clone())
-            .collect::<Vec<_>>()
-            .join("\n");
-        if !frontend_content.is_empty() {
-            let event_json = build_frontend_system_event_frame(&group.id, &frontend_content, session_id);
+        // Publish the user-facing text to frontend WebSocket clients (single
+        // session-level broadcast; NOT persisted). bot_messages are never
+        // broadcast to the frontend.
+        if let Some(content) = user_message.filter(|s| !s.trim().is_empty()) {
+            let event_json = build_frontend_system_event_frame(&group.id, &content, session_id);
             let target = FrontendDeliveryTarget::Session { session_id: session_id.to_string() };
             if let Err(e) = self.frontend_delivery.publish(FrontendDeliveryCommand {
                 target,
@@ -381,9 +389,7 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                 exclude_conn_id: None,
             }).await {
                 tracing::warn!(
-                    group_id = %group.id,
-                    %session_id,
-                    error = %e,
+                    group_id = %group.id, %session_id, error = %e,
                     "system message frontend delivery failed"
                 );
             }
@@ -442,54 +448,6 @@ fn frame_protocol_version(protocol_version: u32, target: &BotDeliveryTarget) -> 
     } else {
         protocol_version
     }
-}
-
-fn history_messages_to_persist<'a>(
-    kind: SystemMessageEventKind,
-    group: &Group,
-    messages: &'a [SystemGroupMessage],
-) -> Vec<(&'a SystemGroupMessage, Option<String>)> {
-    if messages.is_empty() {
-        return Vec::new();
-    }
-    if kind != SystemMessageEventKind::SessionContext
-        || group.group_strategy != GroupStrategy::ManagerWorker
-    {
-        return vec![(&messages[0], None)];
-    }
-
-    let mut records = Vec::new();
-    let mut has_global = false;
-    for msg in messages {
-        if !has_global && is_manager_context_message(group, msg) {
-            records.push((msg, None));
-            has_global = true;
-        }
-        for recipient in msg.recipients.iter().filter(|recipient| {
-            participant_has_role(group, recipient, bcs_domain::ParticipantRole::Worker)
-        }) {
-            records.push((msg, Some(recipient.clone())));
-        }
-    }
-
-    records
-}
-
-fn is_manager_context_message(group: &Group, msg: &SystemGroupMessage) -> bool {
-    msg.recipients
-        .iter()
-        .any(|recipient| participant_has_role(group, recipient, bcs_domain::ParticipantRole::Manager))
-}
-
-fn participant_has_role(group: &Group, bot_id: &str, role: bcs_domain::ParticipantRole) -> bool {
-    group
-        .participants
-        .iter()
-        .any(|participant| {
-            participant.is_bot()
-                && participant.bot_uuid == bot_id
-                && participant.role == role
-        })
 }
 
 fn group_context_input(group: &Group, session_id: &str) -> GroupContextInput {

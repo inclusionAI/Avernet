@@ -197,6 +197,7 @@ class ClawBotService(BotService):
         context: BotChatContext | None = None,
         timeout: float,
         chat_metadata: dict[str, str] | None = None,
+        attachments: list[Any] | None = None,
     ) -> BotResponse:
         """Send a message and get response via ChatClient.
 
@@ -243,6 +244,7 @@ class ClawBotService(BotService):
                 auth_token=auth_token,
                 app_id=app_id,
                 chat_metadata=chat_metadata,
+                attachments=attachments,
             )
             return BotResponse(content=content)
         except TimeoutError:
@@ -262,6 +264,7 @@ class ClawBotService(BotService):
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         timeout: float,
+        attachments: list[Any] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """流式发送消息，逐 chunk 产出 StreamChunk。
 
@@ -291,6 +294,7 @@ class ClawBotService(BotService):
                 timeout=timeout,
                 auth_token=auth_token,
                 app_id=app_id,
+                attachments=attachments,
             ):
                 yield replace(chunk, engine_type=engine_type)
         except BotServiceError:
@@ -309,6 +313,7 @@ class ClawBotService(BotService):
         message: str,
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
+        attachments: list[Any] | None = None,
     ) -> None:
         """注入消息到已有会话
 
@@ -336,6 +341,7 @@ class ClawBotService(BotService):
                 message=message,
                 session_key=session_id,
                 auth_token=auth_token,
+                attachments=attachments,
             )
         except BotServiceError:
             raise
@@ -432,6 +438,52 @@ class ClawBotService(BotService):
             raise
         except Exception as e:
             raise BotServiceError(f"Failed to get session: {e}") from e
+
+    async def list_sessions(
+        self,
+        *,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[SessionInfo]:
+        """List sessions for a given bot binding (read-only).
+
+        通过 AsyncSessionClient 从 adapter 侧查询会话列表，不创建新会话。
+
+        Args:
+            binding_info: Binding info for HTTP connection.
+            context: Optional request context (unused in ClawBotService).
+            limit: Maximum number of sessions to return.
+            offset: Number of sessions to skip.
+
+        Returns:
+            List of SessionInfo objects.
+
+        Raises:
+            BotServiceError: 请求失败
+        """
+        sandbox_id = binding_info.sandbox_id
+        if sandbox_id is None:
+            raise BotServiceError("ClawBotService requires sandbox_id in binding_info.")
+
+        session_client = self._create_session_client(sandbox_id)
+        try:
+            async with session_client:
+                adapter_sessions = await session_client.list_sessions(
+                    agent_id=binding_info.bot_id,
+                    limit=limit,
+                    offset=offset,
+                    engine=binding_info.engine_type,
+                )
+                return [
+                    _map_adapter_session_info(s, binding_info.bot_id)
+                    for s in adapter_sessions
+                ]
+        except BotServiceError:
+            raise
+        except Exception as e:
+            raise BotServiceError(f"Failed to list sessions: {e}") from e
 
     # ── 私有方法 ─────────────────────────────────────────────────────────────
 

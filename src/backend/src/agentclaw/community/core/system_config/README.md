@@ -12,6 +12,8 @@ provides:
 consumes:
   []
 internal_dependencies:
+  - agentclaw.community.core.repository.protocols.config    # repository contracts consumed by this module
+  - agentclaw.community.core.base    # declarative Base for the system_config-owned ORM models
   - agentclaw.community.log
 ```
 

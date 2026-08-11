@@ -142,7 +142,7 @@ impl SessionService for FakeSessionService {
 
 fn session_binding() -> GroupSessionConnectionBinding {
     GroupSessionConnectionBinding {
-        tenant: "tenant-a".into(),
+        tenant: Some("tenant-a".into()),
         user_id: "user-a".into(),
         group_id: "server-owned-group".into(),
         session_id: "session-a".into(),
@@ -203,7 +203,7 @@ impl GroupSessionTokenPort for FakeTokenPort {
         match self.mode {
             TokenMode::Success => Ok(GroupSessionTokenClaims {
                 scope: GroupSessionTokenScope {
-                    tenant: "tenant-a".into(),
+                    tenant: Some("tenant-a".into()),
                     user_id: "user-a".into(),
                     group_id: "group-a".into(),
                     session_id: "session-a".into(),
@@ -220,7 +220,7 @@ impl GroupSessionTokenPort for FakeTokenPort {
 
 fn human_caller() -> AuthenticatedCaller {
     AuthenticatedCaller {
-        tenant: "tenant-a".into(),
+        tenant: Some("tenant-a".into()),
         user: Some(AuthenticatedUserIdentity {
             id: "user-a".into(),
             username: "alice".into(),
@@ -274,7 +274,7 @@ async fn authorize_connect_reloads_the_exact_bound_session() {
     let calls = sessions.get_calls();
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].session_id, "session-a");
-    assert_eq!(calls[0].caller.tenant, "tenant-a");
+    assert_eq!(calls[0].caller.tenant.as_deref(), Some("tenant-a"));
     assert_eq!(
         calls[0].caller.user.as_ref().map(|user| user.id.as_str()),
         Some("user-a")
@@ -398,7 +398,7 @@ async fn issues_scope_only_from_human_and_authorized_session() {
         tokens.issued_scopes(),
         vec![(
             GroupSessionTokenScope {
-                tenant: "tenant-a".into(),
+                tenant: Some("tenant-a".into()),
                 user_id: "user-a".into(),
                 group_id: "server-owned-group".into(),
                 session_id: "session-from-path".into(),
@@ -409,13 +409,32 @@ async fn issues_scope_only_from_human_and_authorized_session() {
 }
 
 #[tokio::test]
+async fn issues_a_tenantless_scope_for_a_tenantless_human() {
+    let sessions = Arc::new(FakeSessionService::new(SessionMode::Success));
+    let tokens = Arc::new(FakeTokenPort::new(TokenMode::Success));
+    let service = GroupSessionConnectionServiceImpl::new(sessions, tokens.clone());
+    let mut caller = human_caller();
+    caller.tenant = None;
+
+    let result = service
+        .issue_token(IssueGroupSessionConnectionToken {
+            caller,
+            session_id: "session-from-path".into(),
+        })
+        .await;
+
+    assert!(result.is_ok());
+    assert_eq!(tokens.issued_scopes()[0].0.tenant, None);
+}
+
+#[tokio::test]
 async fn rejects_every_non_human_caller_before_reading_session_or_signing() {
     let sessions = Arc::new(FakeSessionService::new(SessionMode::Success));
     let tokens = Arc::new(FakeTokenPort::new(TokenMode::Success));
     let service = GroupSessionConnectionServiceImpl::new(sessions.clone(), tokens.clone());
     let callers = [
         AuthenticatedCaller {
-            tenant: "tenant-a".into(),
+            tenant: Some("tenant-a".into()),
             user: None,
             bot: Some(AuthenticatedBotIdentity {
                 bot_uuid: "bot-a".into(),
@@ -427,7 +446,7 @@ async fn rejects_every_non_human_caller_before_reading_session_or_signing() {
             access_key: None,
         },
         AuthenticatedCaller {
-            tenant: "tenant-a".into(),
+            tenant: Some("tenant-a".into()),
             user: None,
             bot: None,
             app: Some(AuthenticatedAppIdentity {
@@ -439,7 +458,7 @@ async fn rejects_every_non_human_caller_before_reading_session_or_signing() {
             access_key: None,
         },
         AuthenticatedCaller {
-            tenant: "tenant-a".into(),
+            tenant: Some("tenant-a".into()),
             user: None,
             bot: None,
             app: None,
@@ -449,7 +468,7 @@ async fn rejects_every_non_human_caller_before_reading_session_or_signing() {
             }),
         },
         AuthenticatedCaller {
-            tenant: "tenant-a".into(),
+            tenant: Some("tenant-a".into()),
             user: None,
             bot: None,
             app: None,
@@ -560,7 +579,7 @@ async fn verifies_binding_and_maps_invalid_connection_tokens() {
     assert!(matches!(
         binding,
         Ok(value)
-            if value.tenant == "tenant-a"
+            if value.tenant.as_deref() == Some("tenant-a")
                 && value.user_id == "user-a"
                 && value.group_id == "group-a"
                 && value.session_id == "session-a"

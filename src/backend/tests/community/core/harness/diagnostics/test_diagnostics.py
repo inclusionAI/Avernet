@@ -8,7 +8,15 @@ from agentclaw.community.core.harness.diagnostics.agents.safety_rules import Age
 from agentclaw.community.core.harness.diagnostics.agents.fail_first import AgentsFailFirstDiagnostic
 from agentclaw.community.core.harness.diagnostics.agents.behavior_boundaries import AgentsBehaviorBoundariesDiagnostic
 from agentclaw.community.core.harness.diagnostics.tools.declaration import ToolsDeclarationDiagnostic
-from agentclaw.community.core.harness.diagnostics.tools.mcp_format import ToolsMcpFormatDiagnostic
+from agentclaw.community.core.harness.diagnostics.tools.mcp_format import (
+    ToolsMcpFormatDiagnostic,
+    _BATCH_CHAR_BUDGET,
+    _BATCH_MAX_MCPS,
+    _compact_tool_for_prompt,
+    _MAX_TOOLS_PER_MCP_IN_PROMPT,
+    _pack_mcp_batches,
+    _synthesize_batch_responses,
+)
 from agentclaw.community.core.harness.diagnostics.config.soul import SoulPersonaDiagnostic
 from agentclaw.community.core.harness.models import Severity
 
@@ -322,7 +330,9 @@ class TestToolsMcpFormatDiagnostic:
 
     @pytest.mark.asyncio
     async def test_no_verified_guide_for_unknown_mcp(self, monkeypatch):
-        """MCPs NOT in _VERIFIED_MCP_GUIDES should have verified_guide as null."""
+        """MCPs NOT in _VERIFIED_MCP_GUIDES (and without inputSchema) land in the
+        unreachable bucket: rendered as a mapping-table-only text block carrying
+        the 平台补全中 note, with no verified_guide content."""
         diag = ToolsMcpFormatDiagnostic()
         mcps = [{"server_code": "some-unknown-mcp", "name": "Unknown"}]
         ctx = _make_ctx({"TOOLS.md": "# Tools\n\n- some tools"}, activated_mcps=mcps)
@@ -345,7 +355,12 @@ class TestToolsMcpFormatDiagnostic:
         ctx.llm.chat = capture_chat
         await diag.analyze(ctx)
 
-        assert '"verified_guide": null' in captured_user
+        # No verified_guide anywhere (the MCP is unknown), and it lands in the
+        # unreachable (no-schema) bucket as a text block, not a JSON dump.
+        assert "verified_guide:" not in captured_user
+        assert "无 schema MCP" in captured_user
+        assert "some-unknown-mcp" in captured_user
+        assert "平台补全中" in captured_user
 
     @pytest.mark.asyncio
     async def test_no_activated_mcps_still_works(self):
@@ -671,7 +686,9 @@ class TestToolsMcpFormatDiagnostic:
     async def test_input_schema_keeps_template_and_forwards_schema(self):
         """A tool exposing inputSchema is schema-derivable: keep the auto-fix
         template (so Phase 3 emits a real, schema-transcribed call-spec patch
-        instead of a TODO) and forward inputSchema to the diagnostic LLM.
+        instead of a TODO) and forward a *compact* param table (flattened from
+        inputSchema — not the full nested JSON, which would bloat the prompt
+        past antchat's ~90s gateway window) to the diagnostic LLM.
         The finding is NOT bumped (it is recoverable)."""
         diag = ToolsMcpFormatDiagnostic()
         mcps = [{"server_code": "mcp.ant.arkai.dimamcpserver", "name": "Dima"}]
@@ -711,11 +728,13 @@ class TestToolsMcpFormatDiagnostic:
         assert findings[0].severity == Severity.WARNING
         assert findings[0].score == 55
         assert findings[0].result != "pass"
-        # inputSchema content is forwarded (not stripped) for transcription.
-        assert "inputSchema" in captured_user
-        assert "generateWorkSummary" in captured_user
-        assert "startDate" in captured_user
-        assert "可据 schema 转录" in captured_user
+        # inputSchema is rendered as a compact one-line tool signature for
+        # transcription; the full nested JSON is NOT forwarded (that's what used
+        # to bloat the prompt past antchat's ~90s gateway window). The one-liner
+        # keeps param name/type/required (star) so the LLM can transcribe it.
+        assert "inputSchema" not in captured_user
+        assert "generateWorkSummary(startDate:string*, endDate:string*)" in captured_user
+        assert "可据参数表转录" in captured_user
 
     @pytest.mark.asyncio
     async def test_all_unreachable_clears_template_and_bumps(self):
@@ -771,6 +790,139 @@ class TestToolsMcpFormatDiagnostic:
         assert findings[0].suggested_template_ids == [2]
         assert findings[0].score == 60
         assert findings[0].severity == Severity.WARNING
+
+    def test_compact_tool_flattens_input_schema(self):
+        """_compact_tool_for_prompt flattens a nested inputSchema into a single
+        prompt line (name + param:type*=required sig + one-line desc) and drops
+        the nested JSON — the slimmed payload that goes into the diagnostic
+        prompt."""
+        tool = {
+            "name": "create_doc",
+            "description": "创建语雀文档\n第二行不该进入 prompt",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "文档标题"},
+                    "tags": {"type": "array", "description": "标签列表"},
+                    "private": {"type": "boolean", "description": "是否私有"},
+                },
+                "required": ["title"],
+            },
+        }
+        compact = _compact_tool_for_prompt(tool)
+        assert compact == "create_doc(title:string*, tags:array, private:boolean) — 创建语雀文档"
+
+    def test_compact_tool_without_schema_returns_empty_params(self):
+        """A tool with no inputSchema renders as `name — desc` (no param sig) so
+        the LLM can still list it in the mapping table."""
+        compact = _compact_tool_for_prompt({"name": "bare_tool", "description": "no schema"})
+        assert compact == "bare_tool — no schema"
+
+    def test_compact_tool_skips_malformed_param_defs(self):
+        """A schema property whose value is not a dict is skipped (the
+        `not isinstance(pdef, dict)` guard) rather than crashing the prompt
+        build; well-formed siblings still come through."""
+        tool = {
+            "name": "weird",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "good": {"type": "string", "description": "ok"},
+                    "bad": "not-a-dict",
+                    "also_bad": None,
+                },
+                "required": ["good"],
+            },
+        }
+        compact = _compact_tool_for_prompt(tool)
+        assert compact == "weird(good:string*)"
+
+    def test_compact_mcp_tools_non_list_returns_empty(self):
+        """A non-list `tools` value (None, a string, a dict) hits the early
+        return and yields no tools and no omitted count."""
+        from agentclaw.community.core.harness.diagnostics.tools.mcp_format import (
+            _compact_mcp_tools_for_prompt,
+        )
+        assert _compact_mcp_tools_for_prompt({"tools": None}) == ([], 0)
+        assert _compact_mcp_tools_for_prompt({"tools": "not-a-list"}) == ([], 0)
+        assert _compact_mcp_tools_for_prompt({}) == ([], 0)
+
+    @pytest.mark.asyncio
+    async def test_verified_guide_tools_also_capped_with_omitted(self):
+        """The verified bucket also caps tools and surfaces the `…另N个未列出`
+        note (the verified-guide path shares _compact_mcp_tools_for_prompt);
+        this covers the `if omitted` branch of the verified block."""
+        diag = ToolsMcpFormatDiagnostic()
+        code = "mcp.ant.faas.skylarkmcpserver.skylarkmcpserver"
+        mcps = [{"server_code": code, "name": "skylark"}]
+        ctx = _make_ctx({"TOOLS.md": "# Tools\n\n- some"}, activated_mcps=mcps)
+        total = _MAX_TOOLS_PER_MCP_IN_PROMPT + 3
+        mock_center = MagicMock()
+        mock_center.get_mcp_detail.return_value = {
+            "name": "语雀MCP",
+            "description": "语雀",
+            "tools": [
+                {"name": f"t{i}", "description": "d", "inputSchema": {"type": "object"}}
+                for i in range(total)
+            ],
+        }
+        ctx.mcp_center = mock_center
+
+        captured_user = None
+
+        async def capture_chat(system, user, **kwargs):
+            nonlocal captured_user
+            captured_user = user
+            return "无问题"
+
+        ctx.llm.chat = capture_chat
+        await diag.analyze(ctx)
+
+        assert "另3个未列出" in captured_user
+        assert "t0" in captured_user
+        assert f"t{total - 1}" not in captured_user
+
+    @pytest.mark.asyncio
+    async def test_tools_capped_per_mcp_with_omitted(self):
+        """An MCP exposing more tools than the per-MCP cap only forwards the
+        first N (compacted one-liners); the remainder is summarised as
+        ``…另N个未列出`` so a 27-tool MCP doesn't dominate the prompt and blow
+        the gateway window."""
+        diag = ToolsMcpFormatDiagnostic()
+        mcps = [{"server_code": "big", "name": "big"}]
+        ctx = _make_ctx({"TOOLS.md": "# Tools\n\n- some"}, activated_mcps=mcps)
+        total = _MAX_TOOLS_PER_MCP_IN_PROMPT + 5
+        tools = [{
+            "name": f"tool_{i}",
+            "description": f"desc {i}",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"p": {"type": "string", "description": "p"}},
+                "required": ["p"],
+            },
+        } for i in range(total)]
+        mock_center = MagicMock()
+        mock_center.get_mcp_detail.return_value = {
+            "name": "big", "description": "big mcp", "tools": tools,
+        }
+        ctx.mcp_center = mock_center
+
+        captured_user = None
+
+        async def capture_chat(system, user, **kwargs):
+            nonlocal captured_user
+            captured_user = user
+            return "无问题"
+
+        ctx.llm.chat = capture_chat
+        await diag.analyze(ctx)
+
+        assert "另5个未列出" in captured_user
+        # First capped tool and the boundary tool are present …
+        assert "tool_0" in captured_user
+        assert f"tool_{_MAX_TOOLS_PER_MCP_IN_PROMPT - 1}" in captured_user
+        # … the truncated tail is not.
+        assert f"tool_{_MAX_TOOLS_PER_MCP_IN_PROMPT + 4}" not in captured_user
 
 
 class TestSoulPersonaDiagnostic:
@@ -1038,3 +1190,142 @@ class TestDiagnosticContextNoCache:
 
         result = await ctx.read_file("NONEXISTENT.md")
         assert result == ""
+
+
+class TestToolsMcpFormatBatching:
+    """D-TOOLS-002 batched prompt mode: prompt size decoupled from MCP count."""
+
+    def test_pack_splits_on_count(self):
+        items = [("schema", f"block-{i}", {"server_code": f"mcp.{i}"}) for i in range(7)]
+        batches = _pack_mcp_batches(items)
+        assert [len(b) for b in batches] == [_BATCH_MAX_MCPS, 2]
+
+    def test_pack_splits_on_chars(self):
+        big = "x" * (_BATCH_CHAR_BUDGET - 100)
+        items = [
+            ("schema", big, {"server_code": "mcp.a"}),
+            ("schema", big, {"server_code": "mcp.b"}),
+        ]
+        batches = _pack_mcp_batches(items)
+        assert [[d["server_code"] for _, _, d in b] for b in batches] == [["mcp.a"], ["mcp.b"]]
+
+    def test_pack_single_when_small(self):
+        items = [("schema", "tiny", {"server_code": "mcp.a"})]
+        assert len(_pack_mcp_batches(items)) == 1
+
+    def test_pack_oversized_block_gets_own_batch(self):
+        huge = "y" * (_BATCH_CHAR_BUDGET * 2)
+        items = [
+            ("schema", "a", {"server_code": "mcp.a"}),
+            ("schema", huge, {"server_code": "mcp.b"}),
+            ("schema", "c", {"server_code": "mcp.c"}),
+        ]
+        batches = _pack_mcp_batches(items)
+        assert [[d["server_code"] for _, _, d in b] for b in batches] == [["mcp.a"], ["mcp.b"], ["mcp.c"]]
+
+    def test_pack_large_mcp_alone(self):
+        # A many-tool MCP (tools > _LARGE_MCP_TOOL_THRESHOLD) gets its own
+        # batch so that batch's output is one spec draft, not several —
+        # keeps the call inside the 90s window for big MCPs.
+        big = {"server_code": "mcp.big", "tools": [{} for _ in range(25)]}
+        small_a = {"server_code": "mcp.a", "tools": [{} for _ in range(3)]}
+        small_b = {"server_code": "mcp.b", "tools": [{} for _ in range(3)]}
+        items = [
+            ("schema", "a", small_a),
+            ("schema", "y", big),
+            ("schema", "b", small_b),
+        ]
+        batches = _pack_mcp_batches(items)
+        codes = [[d["server_code"] for _, _, d in b] for b in batches]
+        assert ["mcp.big"] in codes  # big sits in its own batch
+        big_batch = [b for b in batches if any(d["server_code"] == "mcp.big" for _, _, d in b)][0]
+        assert len(big_batch) == 1
+
+    def test_synthesize_all_no_issue(self):
+        out = _synthesize_batch_responses([("无问题", ["mcp.a"]), ("无问题", ["mcp.b"])])
+        assert out == "无问题"
+
+    def test_synthesize_all_failed_returns_sentinel(self):
+        out = _synthesize_batch_responses([(None, ["mcp.a"]), ("[llm disabled]", ["mcp.b"])])
+        assert out == "[llm disabled]"
+
+    def test_synthesize_aggregates_scores_and_summaries(self):
+        out = _synthesize_batch_responses([
+            ("映射表缺失\n缺 a 的映射\n[SCORE:70]", ["mcp.a"]),
+            ("规范不全\n缺 b 的规范\n[SCORE:80]", ["mcp.b"]),
+        ])
+        assert out.startswith("映射表缺失；规范不全")
+        assert "缺 a 的映射" in out and "缺 b 的规范" in out
+        assert "[SCORE:50]" in out  # 100 - (30 + 20)
+
+    def test_synthesize_partial_failure_noted(self):
+        out = _synthesize_batch_responses([
+            ("映射表缺失\n缺 a\n[SCORE:70]", ["mcp.a"]),
+            (None, ["mcp.b"]),
+        ])
+        assert "未完成诊断" in out and "mcp.b" in out
+        assert "[SCORE:70]" in out
+
+    def test_synthesize_only_failures_is_check_failed_not_pass(self):
+        out = _synthesize_batch_responses([
+            ("无问题", ["mcp.a"]),
+            (None, ["mcp.b"]),
+        ])
+        assert "部分 MCP 诊断失败" in out
+        assert "[SCORE:0]" in out
+
+    @pytest.mark.asyncio
+    async def test_analyze_splits_into_batches_and_aggregates(self):
+        diag = ToolsMcpFormatDiagnostic()
+        mcps = [{"server_code": f"mcp.{c}", "name": c} for c in "abcdefg"]
+        ctx = _make_ctx({"TOOLS.md": "# Tools\n\n- some tools"}, activated_mcps=mcps)
+        ctx.mcp_center = _MockMCPCenter({
+            f"mcp.{c}": {
+                "name": c,
+                "description": f"desc {c}",
+                "tools": [{
+                    "name": "t1",
+                    "inputSchema": {"type": "object", "properties": {"p": {"type": "string"}}},
+                }],
+            }
+            for c in "abcdefg"
+        })
+
+        captured: list[str] = []
+
+        async def fake_chat(system, user, **kwargs):
+            captured.append(user)
+            if "mcp.a" in user:
+                return "规范缺失\n缺 a 规范\n[SCORE:70]"
+            return "无问题"
+
+        ctx.llm.chat = fake_chat
+        findings = await diag.analyze(ctx)
+
+        # 7 MCPs / _BATCH_MAX_MCPS(5) -> 2 batches [a-e],[f-g]
+        assert len(captured) == 2
+        assert "第 1/2 批" in captured[0] and "第 2/2 批" in captured[1]
+        assert "mcp.a" in captured[0] and "mcp.f" not in captured[0]
+        assert "mcp.g" in captured[1] and "mcp.a" not in captured[1]
+        assert len(findings) == 1
+        assert findings[0].score == 70
+        assert findings[0].short_summary == "规范缺失"
+
+    @pytest.mark.asyncio
+    async def test_analyze_all_batches_failed_yields_llm01(self):
+        diag = ToolsMcpFormatDiagnostic()
+        mcps = [{"server_code": f"mcp.{c}", "name": c} for c in "abcde"]
+        ctx = _make_ctx({"TOOLS.md": "# Tools\n\n- some tools"}, activated_mcps=mcps)
+        ctx.mcp_center = _MockMCPCenter({
+            f"mcp.{c}": {"name": c, "description": f"desc {c}", "tools": []}
+            for c in "abcde"
+        })
+
+        async def dead_chat(system, user, **kwargs):
+            return "[llm disabled]"
+
+        ctx.llm.chat = dead_chat
+        findings = await diag.analyze(ctx)
+
+        assert len(findings) == 1
+        assert findings[0].rule_id == "LLM01"

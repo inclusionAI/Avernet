@@ -10,6 +10,7 @@ from secbaas.community.core.repository.bot_run_queue import (
 
 from ._async_chat_client import (
     AsyncChatClient,
+    BotSessionError,
     ConcurrentSessionError,
     NotConnectedError,
 )
@@ -56,6 +57,7 @@ __all__ = [
     "BotWebSocketClient",
     "ChatRequestError",
     "ClawBotService",
+    "BotSessionError",
     "ConcurrentSessionError",
     "NotConnectedError",
     "BotBindingResolver",

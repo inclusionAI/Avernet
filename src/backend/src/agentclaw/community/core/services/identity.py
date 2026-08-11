@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from agentclaw.community.core.errors import InternalError
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.engine_resolver import (
     resolve_engine_for_bot,
 )
@@ -31,9 +31,7 @@ from agentclaw.community.core.devices.services.device_context import (
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.devices.services import device_info as device_info_lookup
 from agentclaw.community.di.modules.skill_center_module import (
     DeviceFilesystemDispatcher,

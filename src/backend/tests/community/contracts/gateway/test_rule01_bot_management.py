@@ -8,7 +8,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from agentclaw.community.core.bot_management.services.bot_service import BotService
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory

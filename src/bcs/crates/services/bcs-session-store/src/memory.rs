@@ -230,11 +230,13 @@ impl SessionRepoPort for MemorySessionRepo {
             })
             .cloned()
             .collect();
-        // VSN7M: order by created_at DESC with session_id ASC tie-breaker
+        // VSN7M: order by created_at DESC with session_id DESC tie-breaker
         // BEFORE pagination so same-timestamp sessions do not skip/duplicate
         // across pages. The repo owns the deterministic order; the facade's
-        // post-pagination sort is now a no-op safety net.
-        v.sort_by(|a, b| b.created_at.cmp(&a.created_at).then(a.id.cmp(&b.id)));
+        // post-pagination sort is now a no-op safety net. DESC tie-break keeps
+        // memory consistent with the MySQL ORDER BY s.id DESC tie-break
+        // (later-created rows sort first on timestamp ties).
+        v.sort_by(|a, b| b.created_at.cmp(&a.created_at).then(b.id.cmp(&a.id)));
         v.into_iter()
             .skip(offset as usize)
             .take(limit as usize)
@@ -587,8 +589,12 @@ impl SessionRepoPort for MemorySessionRepo {
                 s
             })
             .collect();
-        // 由近到远：collected_at（已 or_insert 兜底为 created_at）降序。
-        v.sort_by_key(|s| std::cmp::Reverse(s.collected_at.unwrap_or(s.created_at)));
+
+        v.sort_by(|a, b| {
+            let ka = a.collected_at.unwrap_or(a.created_at);
+            let kb = b.collected_at.unwrap_or(b.created_at);
+            kb.cmp(&ka).then(b.id.cmp(&a.id))
+        });
         v.into_iter().skip(offset as usize).take(limit as usize).collect()
     }
 
@@ -638,6 +644,44 @@ mod tests {
         let sessions = repo.list_by_group("g1", None, 0, 10, Some("alpha"), None).await;
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].session_title.as_deref(), Some("Project Alpha"));
+    }
+
+    /// `list_by_group` orders by created_at DESC with id DESC tie-break
+    /// (mirrors the MySQL `ORDER BY s.gmt_create DESC, s.id DESC`). Two
+    /// sessions with explicit ids let us assert the deterministic order:
+    /// the later-created session (s2) sorts first whether the timestamps
+    /// differ (created_at DESC) or tie (id DESC, larger id first).
+    #[tokio::test]
+    async fn list_by_group_orders_desc_with_id_tiebreak() {
+        let repo = MemorySessionRepo::new();
+        let gid = "order-group";
+        let s1 = repo
+            .create(
+                gid,
+                NewSessionParams {
+                    id: Some(format!("{}:00000001", gid)),
+                    session_kind: SessionKind::Chat,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("create s1");
+        let s2 = repo
+            .create(
+                gid,
+                NewSessionParams {
+                    id: Some(format!("{}:00000002", gid)),
+                    session_kind: SessionKind::Chat,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("create s2");
+
+        let listed = repo.list_by_group(gid, None, 0, 10, None, None).await;
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].id, s2.id);
+        assert_eq!(listed[1].id, s1.id);
     }
 
     #[tokio::test]
@@ -754,6 +798,35 @@ mod tests {
         repo.uncollect(&sess.id, "bot1").await.expect("uncollect");
         let listed = repo.list_collected_by_group(gid, "bot1", None, None, 0, 10).await;
         assert!(listed.is_empty());
+    }
+
+    /// `list_collected_by_group` orders by collected_at DESC with id DESC
+    /// tie-break (mirrors the MySQL `ORDER BY COALESCE(sp.collected_at,
+    /// s.gmt_create) DESC, s.id DESC`). The single-session test above never
+    /// invokes the comparator (sort_by on <2 elements skips it); this test
+    /// collects two sessions so the sort closure runs and the DESC order is
+    /// asserted. s2 is collected after s1 and has the larger explicit id, so
+    /// it sorts first under both the timestamp and the tie-break.
+    #[tokio::test]
+    async fn list_collected_by_group_orders_desc_with_id_tiebreak() {
+        let repo = MemorySessionRepo::new();
+        let gid = "col-order";
+        let mk = |id: &str| NewSessionParams {
+            id: Some(id.to_string()),
+            session_kind: SessionKind::Chat,
+            participants: vec![Participant::bot("bot1", bcs_service_api::ParticipantRole::Driver)],
+            ..Default::default()
+        };
+        let s1 = repo.create(gid, mk(&format!("{}:00000001", gid))).await.expect("create s1");
+        let s2 = repo.create(gid, mk(&format!("{}:00000002", gid))).await.expect("create s2");
+
+        repo.collect(&s1.id, "bot1").await.expect("collect s1");
+        repo.collect(&s2.id, "bot1").await.expect("collect s2");
+
+        let listed = repo.list_collected_by_group(gid, "bot1", None, None, 0, 10).await;
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].id, s2.id);
+        assert_eq!(listed[1].id, s1.id);
     }
 
     #[tokio::test]

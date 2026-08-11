@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     CODE_ACCEPTED,
@@ -24,6 +27,18 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
     BotPermissionError,
 )
+
+
+class _BotUpdate(BaseModel):
+    """Body model for the end-to-end route below.
+
+    Module level on purpose: ``from __future__ import annotations`` makes the
+    handler's annotations strings, and FastAPI resolves them against the
+    function's *globals*.
+    """
+
+    bot_name: str
+    api_token: str = "s3cret"
 
 
 def _request(trace_id: str | None = "trace-123") -> Request:
@@ -120,6 +135,123 @@ async def test_envelope_errors_passes_through_unmapped():
 
     with pytest.raises(ValueError, match="boom"):
         await handler(request=_request())
+
+
+# ── Diagnostics: every converted failure leaves a log record ─────────────────
+# The public response carries a fixed message, so without these the only trace
+# of a mapped failure is the status code on the access log.
+
+
+@pytest.mark.asyncio
+async def test_mapped_error_is_logged_with_traceback_and_params(caplog):
+    @envelope_errors
+    async def handler(bot_id: str, request: Request, page: int):
+        raise BotNotFoundError("Bot not found: b-123")
+
+    with caplog.at_level(logging.DEBUG):
+        resp = await handler("b-123", request=_request(), page=2)
+
+    assert resp.status_code == 404
+    record = caplog.records[-1]
+    assert record.levelno == logging.WARNING, "4xx is the caller's fault"
+    assert record.exc_info is not None, "the raise site must be recoverable"
+    message = record.getMessage()
+    assert "BotNotFoundError" in message
+    # The internal text is kept OUT of the response but must appear in the log —
+    # that asymmetry is the entire point of this path.
+    assert "Bot not found: b-123" in message
+    assert "bot_id='b-123'" in message and "page=2" in message
+
+
+@pytest.mark.asyncio
+async def test_mapped_5xx_is_logged_at_error_level(caplog):
+    from agentclaw.community.core.bot_management.services.bot_service import (
+        BotServiceError,
+    )
+
+    @envelope_errors
+    async def handler(request: Request):
+        raise BotServiceError("device provisioning failed")
+
+    with caplog.at_level(logging.DEBUG):
+        resp = await handler(request=_request())
+
+    assert resp.status_code == 500
+    assert caplog.records[-1].levelno == logging.ERROR
+
+
+@pytest.mark.asyncio
+async def test_unmapped_error_stashes_params_for_the_app_handler():
+    """An unmapped error is answered by ``app.py``, far past the frame that knew
+    the arguments — so the decorator leaves them on the request."""
+    from agentclaw.community.adapters.http.error_logging import recall_call_params
+
+    request = _request()
+
+    @envelope_errors
+    async def handler(bot_id: str, request: Request):
+        raise ValueError("boom")
+
+    with pytest.raises(ValueError):
+        await handler("b-9", request=request)
+
+    assert recall_call_params(request) == {"bot_id": "b-9"}
+
+
+def test_end_to_end_through_a_real_route(caplog):
+    """The whole chain over a served request: body, path param, route template.
+
+    The unit tests above call the wrapped handler directly; this one proves the
+    same line comes out when FastAPI does the calling, including the route
+    *template* that groups occurrences of one failure across different ids.
+    """
+    import json
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    app = FastAPI()
+
+    @app.post("/openapi/v1/bots/{bot_id}")
+    @envelope_errors
+    async def update_bot(bot_id: str, body: _BotUpdate, request: Request):
+        raise BotNotFoundError(f"Bot not found: {bot_id}")
+
+    with caplog.at_level(logging.DEBUG):
+        resp = TestClient(app).post(
+            "/openapi/v1/bots/b-42", json={"bot_name": "alpha"}
+        )
+
+    assert resp.status_code == 404
+    assert json.loads(resp.content)["message"] == "Not found"
+
+    # Not ``records[-1]``: the test client's own httpx logger also records here.
+    record = next(r for r in caplog.records if "[Public 404]" in r.getMessage())
+    message = record.getMessage()
+    assert "POST /openapi/v1/bots/b-42" in message
+    assert "route=/openapi/v1/bots/{bot_id}" in message
+    assert "bot_id='b-42'" in message
+    assert "'bot_name': 'alpha'" in message
+    # The body's credential field is named, never valued.
+    assert "s3cret" not in message
+    assert record.exc_info is not None
+
+
+@pytest.mark.asyncio
+async def test_successful_request_logs_nothing_and_captures_nothing(caplog):
+    from agentclaw.community.adapters.http.error_logging import recall_call_params
+
+    request = _request()
+
+    @envelope_errors
+    async def handler(bot_id: str, request: Request):
+        return envelope({"bot_id": bot_id}, request)
+
+    with caplog.at_level(logging.DEBUG):
+        await handler("b-1", request=request)
+
+    assert caplog.records == []
+    assert recall_call_params(request) == {}
 
 
 # ── Envelope shape (Track C) ─────────────────────────────────────────────────

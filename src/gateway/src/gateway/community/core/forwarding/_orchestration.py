@@ -1,7 +1,7 @@
 """Forwarding subsystem orchestration — transport-agnostic domain class.
 
-``Forwarding`` composes the domain map, both forwarders, and the schema catalog,
-and owns the catalog's background refresh lifecycle. It is a domain object, not
+``Forwarding`` composes the domain map, both forwarders, and the schema catalogs,
+and owns the catalog background refresh lifecycle. It is a domain object, not
 bootstrap wiring — adapters receive it via ``app.state`` and never import
 plugins or core.
 """
@@ -9,7 +9,9 @@ plugins or core.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import Any
 
 from gateway.community.core.authn import RouteSecurity
 from gateway.community.core.forwarding import DomainMap, build_served_openapi
@@ -26,22 +28,28 @@ class Forwarding:
 
     domain_map: DomainMap
     forwarder: Forwarder
-    catalog: SchemaCatalog
+    schema_catalogs: Mapping[str, SchemaCatalog]
     ws_forwarder: WebSocketForwarder
     refresh_seconds: float = _DEFAULT_REFRESH_SECONDS
     _stop: asyncio.Event = field(default_factory=asyncio.Event)
     _task: asyncio.Task[None] | None = field(default=None)
 
     async def start_refresh(self) -> None:
-        """Begin the catalog's background refresh (no-op if unsupported)."""
-        catalog = self.catalog
-        if hasattr(catalog, "refresh_loop") and self._task is None:
-            self._task = asyncio.create_task(
+        if self._task is not None:
+            return
+
+        async def _refresh_all() -> None:
+            coros = [
                 catalog.refresh_loop(self.refresh_seconds, self._stop)
-            )
+                for catalog in self.schema_catalogs.values()
+                if hasattr(catalog, "refresh_loop")
+            ]
+            if coros:
+                await asyncio.gather(*coros)
+
+        self._task = asyncio.create_task(_refresh_all())
 
     async def stop_refresh(self) -> None:
-        """Stop the background refresh and await the task."""
         self._stop.set()
         if self._task is not None:
             await self._task
@@ -56,11 +64,31 @@ class Forwarding:
         description: str = "",
     ) -> dict[str, object]:
         """The current served OpenAPI document across all configured domains."""
+        rewrites = {
+            name: domain.rewrite for name, domain in self.domain_map.domains.items()
+        }
+        # A matched-child domain mounts beneath another, so its real prefix is not
+        # /openapi/v1/<name>; pass each domain's actual mount prefix so the served
+        # doc filters and emits paths against the prefix clients truly reach.
+        mount_prefixes = {
+            name: domain.mount_prefix
+            for name, domain in self.domain_map.domains.items()
+        }
         return build_served_openapi(
             list(self.domain_map.domains),
-            self.catalog.current,
+            self._describe,
             route_security,
             title=title,
             version=version,
             description=description,
+            rewrites=rewrites,
+            mount_prefixes=mount_prefixes,
         )
+
+    def _describe(self, domain: str) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for catalog in self.schema_catalogs.values():
+            doc = catalog.current(domain)
+            if doc:
+                result = doc
+        return result

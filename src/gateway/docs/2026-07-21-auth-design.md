@@ -112,7 +112,7 @@ class PrincipalType(StrEnum):
 
 class UserPrincipal(BaseModel):
     type: Literal[PrincipalType.USER] = PrincipalType.USER
-    tenant: str                          # 必填；租户 **id**（稳定、非展示名），见 §4.6
+    tenant: str                          # 已于 2026-08-05 移除，见 §4.6 修订
     scopes: frozenset[str] = frozenset()
     subject: AuthenticatedUser           # 必填
 
@@ -132,6 +132,8 @@ Principal = Annotated[UserPrincipal | AppPrincipal, Field(discriminator="type")]
 **要点：**
 
 - `tenant` 在两个成员里都是**必填**——每个 Principal 一定归属某个租户（来源见 §4.6）。
+  **2026-08-05 修订：`UserPrincipal` 上的 `tenant` 已移除**，只有机器身份
+  （`app` / `bot` / `access_key`）断言租户；理由与后果见 §4.6 开头的修订说明。
 - pydantic 靠 `type` tag 干净地序列化/反序列化——正好用于网关签名内部头；下游按 `type` 做 `match` 投影。
 - `on_behalf_of_opaque` 是唯一保留的 `| None`，且其 `None` 是**契约上真的可缺省**（App 未代表任何具体用户），
   不是"取决于别的字段"的隐式互斥——符合仓库对 `T | None` 的要求。
@@ -169,6 +171,28 @@ class StrategyParams:
 ```
 
 ### 4.6 新增：`tenant` 字段与它的**来源**（本轮重点）
+
+> **修订 2026-08-05：`UserPrincipal` 不再带 `tenant`。** 本节原文要求"每个 Principal
+> 必填 `tenant`"，其中用户侧取 `subject.tenant_id or DEFAULT_TENANT`。实现走的是另一条
+> 路：`google` 策略直接填配置项 `authn.google.default_tenant`，而该项从未在
+> `configs/application.yaml` 里出现，于是网关签发的每个用户 Principal 都带 `tenant: null`，
+> 后端（要求 `str`）解析失败，公有面全量 401。
+>
+> 结论是把字段去掉，而不是把它补上：**租户是"调用程序"的属性，不是"人"的属性**。
+> `app` / `bot` / `access_key` 都在注册时归属某个租户，它们的 Principal 断言的就是这份注册记录；
+> 用户凭证证明不了任何租户归属，配置默认值只是把部署默认包装成"已认证事实"。
+> 因此下表的"我们的前端 / 人工"一行不再适用：**只带 `user` 的请求不断言租户**，由上游按
+> 自己的内部默认租户（后端为 `teamclaw`）来限定；真正属于某租户的用户请求，会同时带上
+> 断言该租户的机器身份（`user` + `app`），以那一个为准。
+>
+> 这条修订同时收紧了一处：由于用户 Principal 无法再断言租户，任何调用方都**无法通过声明
+> 内部租户名来进入内部数据**——后端对"令牌声明 `teamclaw`"的拒绝仍然生效，而 user-only
+> 的落库租户是上游本地决定的，不是令牌给的。
+>
+> ⚠️ **随之而来的问题（未在本轮解决）：** `route_security` 对 `/openapi/v1/**` 只声明
+> `user: required`，所以公有面每个请求都会落到 `teamclaw`；而 `AuthPlugin.is_allowed`
+> 这个白名单在 SPI 里有定义、却没有任何 authn 策略调用它。公有面要serve真实数据，必须先接上
+> 白名单，或让路由要求一个带注册租户的身份。
 
 `tenant` 在每个 `Principal` 上**必填**，值是**租户 id**（不是展示名），但**来源随调用方类型而定**——不是所有流量都从令牌来。
 关键约束：租户令牌是密钥，**不能下发给浏览器**，所以第一方前端不能用令牌。

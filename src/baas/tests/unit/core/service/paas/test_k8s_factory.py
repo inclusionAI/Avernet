@@ -6,7 +6,7 @@ Covers:
   - Error cases: None config, wrong config type
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -82,6 +82,7 @@ def factory():
             ),
         ),
         secret_plugin=MagicMock(),
+        callback_handler=MagicMock(handle=AsyncMock(return_value={"status": "ok"})),
     )
 
 

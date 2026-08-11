@@ -23,7 +23,7 @@ import json
 
 from injector import inject
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.config_compose.teclaw_paths import (
     CONFIG_NS,
     TECLAW_ENGINE_CONFIG_FILE,

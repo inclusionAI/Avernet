@@ -7,9 +7,7 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.passport import SubResourceItem
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.resources.repository.protocol import (
-        ResourceRepositoryProtocol,
-    )
+    from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
     from agentclaw.community.plugin_api.passport import PassportPlugin
 
 logger = get_logger()

@@ -15,8 +15,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from agentclaw.community.core.skill_center.factories import SkillServiceFactory
-from agentclaw.community.core.skill_center.services.repositories import SkillSetRepository
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 
 from tests.community.contracts.gateway.conftest import (
     assert_response_schema, assert_success, assert_has_fields,

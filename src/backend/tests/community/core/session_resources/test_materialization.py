@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import UTC, datetime
 
 from agentclaw.community.core.bot_management.token_vault import TokenVault
 from agentclaw.community.core.session_resources.materialization import (
@@ -19,8 +20,18 @@ class _Resolver:
     def __init__(self, conn_info=None, *, provider="baas") -> None:
         self._conn_info = conn_info or {"target": "engine"}
         self._provider = provider
+        self.bot_calls = []
+        self.binding_calls = []
 
     def resolve_for_bot(self, bot_id, owner_id):
+        self.bot_calls.append((bot_id, owner_id))
+        return self._context()
+
+    def resolve_for_binding(self, binding_id, operator_id, *, bot_id):
+        self.binding_calls.append((binding_id, operator_id, bot_id))
+        return self._context()
+
+    def _context(self):
         return type(
             "Context",
             (),
@@ -72,6 +83,7 @@ def _record(vault: TokenVault) -> SessionResourceRecord:
         task_version=1,
         size_bytes=1,
         client_content_hash="hash",
+        gmt_create=datetime(2026, 8, 3, 10, 20, 30, tzinfo=UTC),
     )
 
 
@@ -97,6 +109,7 @@ def test_handler_reloads_decrypts_and_dispatches_to_shared_engine_endpoint():
     assert body["session_id"] == "session-raw"
     assert body["transfer_api_version"] == "session_v2"
     assert body["workspace_relative_path"].startswith(".teamclaw/")
+    assert body["uploaded_at"] == "2026-08-03T10:20:30Z"
     assert "owner_id" not in body
 
 
@@ -124,6 +137,40 @@ def test_session_v2_empty_bot_uuid_uses_the_given_arca_proxypass_context():
     assert body["tenant"] == "team_claw"
     assert "bot_uuid" not in body
     assert "bot_uuid" not in path
+
+
+def test_handler_routes_new_resource_with_persisted_binding_to_target_engine():
+    vault = TokenVault(master_key="test-master-key")
+    resolver = _Resolver()
+    transport = _Transport()
+    handler = SessionResourceMaterializeHandler(
+        resolver,
+        transport,
+        _Repo(replace(_record(vault), binding_id=77)),
+        vault,
+    )
+
+    result = handler.handle(_payload())
+
+    assert isinstance(result, Complete)
+    assert resolver.binding_calls == [(77, "owner-1", "bot-1")]
+    assert resolver.bot_calls == []
+
+
+def test_handler_leaves_upload_time_empty_for_legacy_record():
+    vault = TokenVault(master_key="test-master-key")
+    transport = _Transport()
+    handler = SessionResourceMaterializeHandler(
+        _Resolver(),
+        transport,
+        _Repo(replace(_record(vault), gmt_create=None)),
+        vault,
+    )
+
+    result = handler.handle(_payload())
+
+    assert isinstance(result, Complete)
+    assert transport.calls[0][3]["uploaded_at"] is None
 
 
 def test_handler_ignores_stale_task_without_calling_engine():

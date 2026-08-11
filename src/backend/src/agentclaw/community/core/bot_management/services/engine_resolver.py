@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.log import get_logger
 

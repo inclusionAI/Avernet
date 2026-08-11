@@ -10,7 +10,7 @@
 
 2. 4 个实例方法 + ``_ensure_within_workspace`` 保护
    - ``list_file_tree`` —— AICoding workspace 本地扫描、基础设施目录剪枝 + 建树
-   - ``preview_file`` —— 校验 path/大小/路径穿越，读出 utf-8 文本
+   - ``preview_file`` —— 校验 path/大小/路径穿越，按指定编码或回退顺序解码文本
    - ``list_git_diff`` —— ``find .git`` + ``git status --porcelain`` 全流程
    - ``get_file_diff`` —— ``git diff HEAD`` 主路径 + untracked fallback
    - ``_ensure_within_workspace`` —— 防 ``..`` / 绝对路径穿越
@@ -596,6 +596,172 @@ async def test_preview_file_returns_decoded_content(workspace_dir: Path) -> None
     out = await service.preview_file(SESSION_ID, "a.txt")
     assert out.content == "hello 你好"
     assert out.size == len("hello 你好".encode("utf-8"))
+
+
+async def test_preview_file_auto_decodes_gbk_content(
+    workspace_dir: Path,
+) -> None:
+    text = "GBK 中文内容"
+    raw = text.encode("gbk")
+    target = str(workspace_dir / "gbk.txt")
+    service = _make_service(
+        file_plugin=FakeFilePlugin(read_map={target: raw})
+    )
+
+    out = await service.preview_file(SESSION_ID, "gbk.txt")
+
+    assert out.content == text
+    assert out.size == len(raw)
+
+
+async def test_preview_file_auto_decodes_gb18030_four_byte_content(
+    workspace_dir: Path,
+) -> None:
+    text = "GB18030 扩展字符：𠮷"
+    raw = text.encode("gb18030")
+    target = str(workspace_dir / "gb18030.txt")
+    service = _make_service(
+        file_plugin=FakeFilePlugin(read_map={target: raw})
+    )
+
+    out = await service.preview_file(SESSION_ID, "gb18030.txt")
+
+    assert out.content == text
+    assert out.size == len(raw)
+
+
+async def test_preview_file_auto_falls_back_to_utf8_replacement(
+    workspace_dir: Path,
+) -> None:
+    raw = b"text\xff\xff"
+    target = str(workspace_dir / "invalid.txt")
+    service = _make_service(
+        file_plugin=FakeFilePlugin(read_map={target: raw})
+    )
+
+    out = await service.preview_file(SESSION_ID, "invalid.txt")
+
+    assert out.content == "text��"
+    assert out.size == len(raw)
+
+
+@pytest.mark.parametrize("encoding", [None, "", " ", "\t"])
+async def test_preview_file_blank_encoding_uses_auto_mode(
+    workspace_dir: Path, encoding: str | None
+) -> None:
+    text = "自动识别 GBK"
+    raw = text.encode("gbk")
+    target = str(workspace_dir / "auto.txt")
+    service = _make_service(
+        file_plugin=FakeFilePlugin(read_map={target: raw})
+    )
+
+    out = await service.preview_file(
+        SESSION_ID, "auto.txt", encoding=encoding
+    )
+
+    assert out.content == text
+    assert out.size == len(raw)
+
+
+@pytest.mark.parametrize(
+    ("encoding", "text"),
+    [
+        ("utf-8", "UTF-8 内容"),
+        ("gb18030", "GB18030 扩展字符：𠮷"),
+        ("gbk", "GBK 内容"),
+    ],
+)
+async def test_preview_file_uses_explicit_encoding(
+    workspace_dir: Path, encoding: str, text: str
+) -> None:
+    raw = text.encode(encoding)
+    target = str(workspace_dir / "explicit.txt")
+    service = _make_service(
+        file_plugin=FakeFilePlugin(read_map={target: raw})
+    )
+
+    out = await service.preview_file(
+        SESSION_ID, "explicit.txt", encoding=encoding
+    )
+
+    assert out.content == text
+    assert out.size == len(raw)
+
+
+@pytest.mark.parametrize(
+    ("encoding", "codec"),
+    [
+        ("UTF-8", "utf-8"),
+        ("utf8", "utf-8"),
+        ("utf_8", "utf-8"),
+        ("GB18030", "gb18030"),
+        ("GBK", "gbk"),
+    ],
+)
+async def test_preview_file_normalizes_encoding_aliases(
+    workspace_dir: Path, encoding: str, codec: str
+) -> None:
+    text = "alias 内容"
+    raw = text.encode(codec)
+    target = str(workspace_dir / "alias.txt")
+    service = _make_service(
+        file_plugin=FakeFilePlugin(read_map={target: raw})
+    )
+
+    out = await service.preview_file(
+        SESSION_ID, "alias.txt", encoding=encoding
+    )
+
+    assert out.content == text
+    assert out.size == len(raw)
+
+
+async def test_preview_file_rejects_unsupported_encoding(
+    workspace_dir: Path,
+) -> None:
+    target = str(workspace_dir / "unsupported.txt")
+    service = _make_service(
+        file_plugin=FakeFilePlugin(read_map={target: b"text"})
+    )
+
+    with pytest.raises(ValueError, match="unsupported file encoding: big5"):
+        await service.preview_file(
+            SESSION_ID, "unsupported.txt", encoding="big5"
+        )
+
+
+async def test_preview_file_rejects_mismatched_explicit_encoding(
+    workspace_dir: Path,
+) -> None:
+    raw = "你好".encode("gbk")
+    target = str(workspace_dir / "mismatch.txt")
+    service = _make_service(
+        file_plugin=FakeFilePlugin(read_map={target: raw})
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="file content cannot be decoded with encoding utf-8",
+    ):
+        await service.preview_file(
+            SESSION_ID, "mismatch.txt", encoding="utf-8"
+        )
+
+
+async def test_preview_file_does_not_strip_utf8_bom(
+    workspace_dir: Path,
+) -> None:
+    raw = b"\xef\xbb\xbfcontent"
+    target = str(workspace_dir / "bom.txt")
+    service = _make_service(
+        file_plugin=FakeFilePlugin(read_map={target: raw})
+    )
+
+    out = await service.preview_file(SESSION_ID, "bom.txt")
+
+    assert out.content == "\ufeffcontent"
+    assert out.size == len(raw)
 
 
 async def test_preview_file_normalizes_path_and_strips_whitespace(

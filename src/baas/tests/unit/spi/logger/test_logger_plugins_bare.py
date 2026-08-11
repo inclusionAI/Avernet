@@ -10,7 +10,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from secbaas.community.plugins.logger.bare import BareLoggerPlugin, _resolve_log_level
+from secbaas.community.plugins.logger.bare import BareLoggerPlugin
+from secbaas.community.plugins.logger.bare._plugin import _resolve_log_level
 from secbaas.community.spi.logger._protocols import LoggerPlugin
 
 
@@ -73,7 +74,7 @@ class TestBaasLoggerPlugin:
         with (
             patch("os.makedirs"),
             patch(
-                "secbaas.community.plugins.logger.bare.TimedRotatingFileHandler"
+                "secbaas.community.plugins.logger.bare._plugin.TimedRotatingFileHandler"
             ) as mock_handler_cls,
         ):
             mock_handler_cls.side_effect = lambda *a, **kw: MagicMock()
@@ -88,7 +89,9 @@ class TestBaasLoggerPlugin:
 
         with (
             patch("os.makedirs"),
-            patch("secbaas.community.plugins.logger.bare.TimedRotatingFileHandler"),
+            patch(
+                "secbaas.community.plugins.logger.bare._plugin.TimedRotatingFileHandler"
+            ),
         ):
             plugin.configure(app_name="test", log_dir="/tmp/test_logs")
 
@@ -102,7 +105,7 @@ class TestBaasLoggerPlugin:
         with patch(
             "secbaas.community.tracer.get_tracer_plugin", return_value=mock_tracer
         ):
-            from secbaas.community.plugins.logger.bare import _TraceIdFilter
+            from secbaas.community.plugins.logger.bare._plugin import _TraceIdFilter
 
             f = _TraceIdFilter()
             record = logging.LogRecord(

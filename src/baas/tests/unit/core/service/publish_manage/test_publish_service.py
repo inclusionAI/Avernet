@@ -229,6 +229,14 @@ class TestPublishCreation:
 
         assert result.publish_type == "UPDATE"
         assert result.status == "PENDING"
+        _publish_service_instance._template_service.get_online_template_by_uuid.assert_not_called()
+        _publish_service_instance._bot_service.create_bot_record.assert_awaited_once_with(
+            tenant="test_tenant",
+            source_bot_id=1,
+            new_config=None,
+            new_template_uuid=None,
+            operator="user1",
+        )
 
     @pytest.mark.asyncio
     async def test_create_publish_restart_type(self):
@@ -8531,7 +8539,10 @@ class TestCreatePublishUpdateConfigOverwrite:
             "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
             return_value=mock_env,
         ):
-            config = PublishConfig(batch_capacity=5)
+            config = PublishConfig(
+                batch_capacity=5,
+                template_uuid="TEMPLATE-new",
+            )
             result = await _publish_service_instance.create_publish(
                 tenant="test_tenant",
                 bot_id=1,
@@ -8544,11 +8555,41 @@ class TestCreatePublishUpdateConfigOverwrite:
             assert result.status == "PENDING"
             # config.replica_desired should be set from bot
             assert config.replica_desired == 3
+            _publish_service_instance._template_service.get_online_template_by_uuid.assert_called_once_with(
+                tenant="test_tenant",
+                template_uuid="TEMPLATE-new",
+            )
+            create_call = _publish_service_instance._bot_service.create_bot_record.call_args.kwargs
+            assert create_call["new_template_uuid"] == "TEMPLATE-new"
 
             insert_call_args = (
                 _publish_service_instance._publish_repo.insert_publish.call_args
             )
             assert insert_call_args.kwargs["replica_desired"] == 3
+
+    @pytest.mark.asyncio
+    async def test_create_publish_update_rejects_unknown_template_before_insert(self):
+        """An invalid tenant-scoped template must not leave publish state behind."""
+        mock_bot = MagicMock(id=1, replica_desired=1)
+        _publish_service_instance._bot_service.get_bot = AsyncMock(
+            return_value=mock_bot
+        )
+        _publish_service_instance._template_service.get_online_template_by_uuid.return_value = None
+
+        with pytest.raises(ValueError, match="Template not found or not online"):
+            await _publish_service_instance.create_publish(
+                tenant="test_tenant",
+                bot_id=1,
+                publish_type=PublishType.UPDATE,
+                operator="user1",
+                request_id="template-update-request",
+                config=PublishConfig(
+                    replica_desired=1,
+                    template_uuid="TEMPLATE-missing",
+                ),
+            )
+
+        _publish_service_instance._publish_repo.insert_publish.assert_not_called()
 
 
 class TestCreatePublishRestartUnhealthy:

@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use bcs_domain::{
     ActorKind, DeliveryType, Group, GroupKind, GroupStatus, GroupStrategy, Participant,
-    ParticipantMode, ParticipantRole, RedactedToken, SystemGroupMessage, SystemMessageEvent,
-    SystemMessageEventKind,
+    ParticipantMode, ParticipantRole, PersistMode, RedactedToken, SystemGroupMessage,
+    SystemMessageEvent, SystemMessageEventKind,
 };
 use bcs_service_api::{
     ActorStatus, AgentCredentials, BotCapabilities, BotDeliveryCommand, BotDeliveryPort,
@@ -100,6 +100,29 @@ impl BotRunContextPort for RecordingRunContext {
     }
 
     async fn release_terminal(&self, _run_id: &str) {}
+}
+
+#[derive(Default, Clone)]
+struct RecordingFrontendDeliveryPort {
+    published: Arc<Mutex<Vec<bcs_service_api::FrontendDeliveryCommand>>>,
+}
+
+#[async_trait]
+impl bcs_service_api::FrontendDeliveryPort for RecordingFrontendDeliveryPort {
+    async fn publish(
+        &self,
+        cmd: bcs_service_api::FrontendDeliveryCommand,
+    ) -> ServiceResult<bcs_service_api::FrontendDeliveryResult> {
+        self.published.lock().unwrap().push(cmd.clone());
+        Ok(bcs_service_api::FrontendDeliveryResult {
+            target: cmd.target,
+            delivered: 1,
+        })
+    }
+
+    async fn unregister_run(&self, _run_id: &str) -> ServiceResult<()> {
+        Ok(())
+    }
 }
 
 #[derive(Default)]
@@ -223,6 +246,8 @@ async fn dispatch_bot_joined_delivers_to_all_participants() {
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
         },
+        session_id: "session-test".to_string(),
+        session_input: None,
     };
 
     let registry = Arc::new(ProviderTargetRegistry::default());
@@ -261,6 +286,149 @@ async fn dispatch_bot_joined_delivers_to_all_participants() {
 }
 
 #[tokio::test]
+async fn dispatch_bot_joined_persists_per_recipient_and_ws_shows_notification_only() {
+    let new_bot_id = "new-bot-001".to_string();
+    let existing_bot_id = "existing-bot-001".to_string();
+    let group = Group {
+        id: "group-001".into(),
+        label: None,
+        status: GroupStatus::Active,
+        driver_bot: existing_bot_id.clone(),
+        originator: Some(existing_bot_id.clone()),
+        routing_policy: None,
+        context: None,
+        participants: vec![
+            Participant {
+                bot_uuid: existing_bot_id.clone(),
+                bot_name: None, kind: None,
+                role: ParticipantRole::Driver,
+                actor_kind: ActorKind::Bot,
+                mode: Some(ParticipantMode::Auto),
+            },
+            Participant {
+                bot_uuid: new_bot_id.clone(),
+                bot_name: None, kind: None,
+                role: ParticipantRole::Consultant,
+                actor_kind: ActorKind::Bot,
+                mode: Some(ParticipantMode::Auto),
+            },
+        ],
+        messages: vec![], workspace: Default::default(),
+        service_group_uuid: None, service_mode: None,
+        created_at: 0, updated_at: 0,
+        group_kind: GroupKind::Normal, dm_pair_key: None,
+        group_strategy: GroupStrategy::Chat, service_spec: None,
+        version: 0, record_status: "active".to_string(), visibility: "private".to_string(),
+    };
+    let event = SystemMessageEvent::BotJoined {
+        group_id: group.id.clone(),
+        actor: Participant {
+            bot_uuid: new_bot_id.clone(), bot_name: None, kind: None,
+            role: ParticipantRole::Consultant, actor_kind: ActorKind::Bot,
+            mode: Some(ParticipantMode::Auto),
+        },
+        session_id: "session-test".to_string(),
+        session_input: None,
+    };
+
+    let registry = Arc::new(ProviderTargetRegistry::default());
+    let delivery = Arc::new(MockDeliveryPort::default());
+    let frontend_delivery = Arc::new(RecordingFrontendDeliveryPort::default());
+    let message_repo = Arc::new(RecordingMessageRepo::default());
+
+    let dispatcher = SystemMessageDispatcherImpl::builder()
+        .with_registry(registry)
+        .with_delivery(delivery.clone())
+        .with_frontend_delivery(frontend_delivery.clone())
+        .with_message_repo(message_repo.clone())
+        .register(BotJoinedMessageProducer::new(Arc::new(bcs_test_support::NoopGroupMessageHistoryService)))
+        .build()
+        .expect("build dispatcher");
+
+    dispatcher.dispatch(event, &group, "session-test", &group.participants)
+        .await.expect("dispatch");
+
+    // Persistence: the new-bot injection is per-recipient (owner=new-bot);
+    // the shared join notice is a single public record (owner=None) that
+    // human viewers and every bot's PublicOrOwner view read — no per-bot
+    // copies of the identical text.
+    let appended = message_repo.appended().await;
+    assert_eq!(appended.len(), 2);
+    let injection = appended.iter().find(|m| m.owner_bot_id.as_deref() == Some(&new_bot_id))
+        .expect("new-bot injection record");
+    assert_eq!(injection.sender_id, "system");
+    assert_eq!(injection.message_type, "system");
+    assert!(content_text(injection).contains("<GroupContext>"),
+        "new-bot context injection persisted under owner=new-bot");
+    let notice = appended.iter().find(|m| m.owner_bot_id.is_none())
+        .expect("public join notification record");
+    assert!(content_text(notice).contains("已加入协作群"));
+    assert!(!content_text(notice).contains("<GroupContext>"));
+    assert!(!appended.iter().any(|m| m.owner_bot_id.as_deref() == Some(&existing_bot_id)),
+        "shared notice must not persist per-bot copies");
+
+    // WS: exactly one publish, content = user_message (join notification),
+    // NOT the new-bot context injection.
+    let published = frontend_delivery.published.lock().unwrap();
+    assert_eq!(published.len(), 1, "WS publishes a single user_message");
+    let payload = &published[0].event_json;
+    assert!(payload.contains("已加入协作群"));
+    assert!(!payload.contains("<GroupContext>"),
+        "WS must not leak the new-bot context injection");
+}
+
+#[tokio::test]
+async fn dispatch_bot_left_with_no_recipients_persists_public_record_and_pushes_ws() {
+    let leaving = "bot-only".to_string();
+    let group = Group {
+        id: "group-left".into(), label: None, status: GroupStatus::Active,
+        driver_bot: leaving.clone(), originator: Some(leaving.clone()),
+        routing_policy: None, context: None,
+        participants: vec![Participant {
+            bot_uuid: leaving.clone(), bot_name: Some("Solo".into()), kind: None,
+            role: ParticipantRole::Driver, actor_kind: ActorKind::Bot,
+            mode: Some(ParticipantMode::Auto),
+        }],
+        messages: vec![], workspace: Default::default(),
+        service_group_uuid: None, service_mode: None,
+        created_at: 0, updated_at: 0, group_kind: GroupKind::Normal,
+        dm_pair_key: None, group_strategy: GroupStrategy::Chat, service_spec: None,
+        version: 0, record_status: "active".to_string(), visibility: "private".to_string(),
+    };
+    let event = SystemMessageEvent::BotLeft {
+        group_id: group.id.clone(),
+        actor: Participant {
+            bot_uuid: leaving.clone(), bot_name: Some("Solo".into()), kind: None,
+            role: ParticipantRole::Driver, actor_kind: ActorKind::Bot, mode: None,
+        },
+    };
+    let registry = Arc::new(ProviderTargetRegistry::default());
+    let delivery = Arc::new(MockDeliveryPort::default());
+    let frontend_delivery = Arc::new(RecordingFrontendDeliveryPort::default());
+    let message_repo = Arc::new(RecordingMessageRepo::default());
+
+    let dispatcher = SystemMessageDispatcherImpl::builder()
+        .with_registry(registry)
+        .with_delivery(delivery)
+        .with_frontend_delivery(frontend_delivery.clone())
+        .with_message_repo(message_repo.clone())
+        .register(crate::producers::bot_left::BotLeftMessageProducer)
+        .build()
+        .expect("build dispatcher");
+
+    dispatcher.dispatch(event, &group, "session-left", &group.participants)
+        .await.expect("dispatch");
+
+    let appended = message_repo.appended().await;
+    assert_eq!(appended.len(), 1,
+        "no recipients → still a single public record for human history");
+    assert!(appended[0].owner_bot_id.is_none(), "public record has no owner");
+    let published = frontend_delivery.published.lock().unwrap();
+    assert_eq!(published.len(), 1);
+    assert!(published[0].event_json.contains("已退出协作群"));
+}
+
+#[tokio::test]
 async fn dispatch_session_context_preserves_manager_worker_group_type() {
     let mut manager = Participant::bot("bot-manager", ParticipantRole::Manager);
     manager.bot_name = Some("Manager".to_string());
@@ -276,6 +444,7 @@ async fn dispatch_session_context_preserves_manager_worker_group_type() {
         reason: "性能审计".to_string(),
         session_input: Some(serde_json::json!("执行数据库慢查询审计")),
         task_ledger: None,
+        driver_delivery: None,
     };
     let registry = Arc::new(ProviderTargetRegistry::default());
     let delivery = Arc::new(MockDeliveryPort::default());
@@ -326,6 +495,7 @@ async fn dispatch_manager_worker_session_context_persists_worker_private_context
         reason: "性能审计".to_string(),
         session_input: Some(serde_json::json!("执行数据库慢查询审计")),
         task_ledger: None,
+        driver_delivery: None,
     };
     let registry = Arc::new(ProviderTargetRegistry::default());
     let delivery = Arc::new(MockDeliveryPort::default());
@@ -349,22 +519,20 @@ async fn dispatch_manager_worker_session_context_persists_worker_private_context
     let appended = message_repo.appended().await;
     assert_eq!(appended.len(), 2);
 
-    let global_context = appended
+    let manager_context = appended
         .iter()
-        .find(|msg| msg.owner_bot_id.is_none())
-        .expect("global manager context");
-    assert_eq!(global_context.group_id, group.id);
-    assert_eq!(global_context.session_id, session_id);
-    assert_eq!(global_context.sender_id, "system");
-    assert_eq!(global_context.message_type, "system");
-    assert!(content_text(global_context).contains("你的角色: manager"));
+        .find(|msg| msg.owner_bot_id.as_deref() == Some("bot-manager"))
+        .expect("manager-owned context record");
+    assert_eq!(manager_context.group_id, group.id);
+    assert_eq!(manager_context.session_id, session_id);
+    assert_eq!(manager_context.sender_id, "system");
+    assert_eq!(manager_context.message_type, "system");
+    assert!(content_text(manager_context).contains("你的角色: manager"));
 
     let worker_context = appended
         .iter()
         .find(|msg| msg.owner_bot_id.as_deref() == Some("bot-worker"))
-        .expect("worker private context");
-    assert_eq!(worker_context.group_id, group.id);
-    assert_eq!(worker_context.session_id, session_id);
+        .expect("worker-owned context record");
     assert_eq!(worker_context.sender_id, "system");
     assert_eq!(worker_context.message_type, "system");
     assert!(content_text(worker_context).contains("你的角色: worker"));
@@ -393,6 +561,7 @@ async fn dispatch_manager_worker_session_context_persists_each_worker_private_co
         reason: "性能审计".to_string(),
         session_input: Some(serde_json::json!("执行数据库慢查询审计")),
         task_ledger: None,
+        driver_delivery: None,
     };
     let registry = Arc::new(ProviderTargetRegistry::default());
     let delivery = Arc::new(MockDeliveryPort::default());
@@ -415,18 +584,24 @@ async fn dispatch_manager_worker_session_context_persists_each_worker_private_co
 
     let appended = message_repo.appended().await;
     assert_eq!(appended.len(), 3);
-    assert_eq!(appended.iter().filter(|msg| msg.owner_bot_id.is_none()).count(), 1);
+    assert!(
+        appended.iter().all(|msg| msg.owner_bot_id.is_some()),
+        "no global (owner=None) record; each bot owns its context copy"
+    );
+    let manager_ctx = appended.iter()
+        .find(|msg| msg.owner_bot_id.as_deref() == Some("bot-manager"))
+        .expect("manager copy");
+    assert!(content_text(manager_ctx).contains("你的角色: manager"));
     for worker_id in ["bot-worker-a", "bot-worker-b"] {
-        let worker_context = appended
-            .iter()
+        let worker_context = appended.iter()
             .find(|msg| msg.owner_bot_id.as_deref() == Some(worker_id))
-            .unwrap_or_else(|| panic!("worker private context for {worker_id}"));
+            .unwrap_or_else(|| panic!("worker-owned context for {worker_id}"));
         assert!(content_text(worker_context).contains("你的角色: worker"));
     }
 }
 
 #[tokio::test]
-async fn dispatch_non_manager_worker_session_context_persists_single_global_record() {
+async fn dispatch_non_manager_worker_session_context_persists_per_recipient_records() {
     let mut driver = Participant::bot("bot-driver", ParticipantRole::Driver);
     driver.bot_name = Some("Driver".to_string());
     let mut consultant = Participant::bot("bot-consultant", ParticipantRole::Consultant);
@@ -444,6 +619,7 @@ async fn dispatch_non_manager_worker_session_context_persists_single_global_reco
         reason: "普通协作".to_string(),
         session_input: None,
         task_ledger: None,
+        driver_delivery: None,
     };
     let registry = Arc::new(ProviderTargetRegistry::default());
     let delivery = Arc::new(MockDeliveryPort::default());
@@ -465,9 +641,18 @@ async fn dispatch_non_manager_worker_session_context_persists_single_global_reco
         .expect("dispatch succeeded");
 
     let appended = message_repo.appended().await;
-    assert_eq!(appended.len(), 1);
-    assert_eq!(appended[0].owner_bot_id, None);
-    assert!(content_text(&appended[0]).contains("[GROUP CONTEXT]"));
+    assert_eq!(appended.len(), 2);
+    assert_eq!(
+        appended.iter().filter(|m| m.owner_bot_id.is_none()).count(),
+        0,
+        "no global record; each recipient owns a copy"
+    );
+    for owner in ["bot-driver", "bot-consultant"] {
+        let rec = appended.iter()
+            .find(|m| m.owner_bot_id.as_deref() == Some(owner))
+            .unwrap_or_else(|| panic!("owner record for {owner}"));
+        assert!(content_text(rec).contains("<GroupContext>"));
+    }
 }
 
 #[tokio::test]
@@ -486,6 +671,7 @@ async fn dispatch_manager_worker_session_context_does_not_make_worker_context_pu
         reason: "性能审计".to_string(),
         session_input: None,
         task_ledger: None,
+        driver_delivery: None,
     };
     let registry = Arc::new(ProviderTargetRegistry::default());
     let delivery = Arc::new(MockDeliveryPort::default());
@@ -548,7 +734,7 @@ async fn dispatch_manager_worker_generic_system_message_persists_single_global_r
 
     let appended = message_repo.appended().await;
     assert_eq!(appended.len(), 1);
-    assert_eq!(appended[0].owner_bot_id, None);
+    assert_eq!(appended[0].owner_bot_id.as_deref(), Some("bot-provider"));
     assert_eq!(content_text(&appended[0]), "member changed");
 }
 
@@ -563,9 +749,9 @@ async fn dispatch_session_context_uses_bcs_route_when_group_has_no_provider_down
     let calls = dispatch_session_context_with_provider_registry(&group, "普通协作").await;
     let text = delivered_text_for(&calls, "bot-ws");
 
-    assert!(text.contains("路由工具 (bcs_route)"));
-    assert!(text.contains("使用 bcs_route 工具指定下一个响应者"));
-    assert!(!text.contains("路由工具 (@mention)"));
+    assert!(text.contains("## 工具说明 (bcs_route)"));
+    assert!(text.contains("使用 `bcs_route` 工具替代 @mention 指定下一个响应者可以提高路由准确率"));
+    assert!(!text.contains("## 工具说明 (@mention)"));
     assert!(!text.contains("可@:"));
 }
 
@@ -587,21 +773,15 @@ async fn dispatch_session_context_uses_at_mention_when_group_has_provider_downli
 
     for recipient in ["bot-ws", "bot-provider"] {
         let text = delivered_text_for(&calls, recipient);
-        assert!(text.contains("路由工具 (@mention)"));
+        assert!(text.contains("## 工具说明 (@mention)"));
         assert!(text.contains("消息中任何 @ 标识都会触发路由，让被 @ 的 Bot 收到消息并被要求响应。"));
         assert!(text.contains("只有希望某个 Bot 响应时才使用 @"));
         assert!(text.contains("不要用 @ 表示引用、收到或转述某个 Bot 的消息"));
         assert!(text.contains("优先使用名称；名称为空、重复或不确定时，使用 Bot ID。"));
-        assert!(text.contains(
-            "- 名称: Driver | ID: bot-ws | 角色: driver | 可@: @Driver / @bot-ws"
-        ));
-        assert!(text.contains(
-            "- 名称: Reviewer | ID: bot-provider | 角色: consultant | 可@: @bot-provider"
-        ));
-        assert!(text.contains(
-            "- 名称: Reviewer | ID: bot-peer | 角色: consultant | 可@: @bot-peer"
-        ));
-        assert!(!text.contains("路由工具 (bcs_route)"));
+        assert!(text.contains("|Driver|bot-ws|driver|"));
+        assert!(text.contains("|Reviewer|bot-provider|consultant|"));
+        assert!(text.contains("|Reviewer|bot-peer|consultant|"));
+        assert!(!text.contains("## 工具说明 (bcs_route)"));
         assert!(!text.contains("等待 @mention、bcs_route 或任务点名后再响应。"));
     }
 }
@@ -1042,6 +1222,7 @@ async fn dispatch_session_context_with_provider_registry(
         reason: reason.to_string(),
         session_input: None,
         task_ledger: None,
+        driver_delivery: None,
     };
     let registry = Arc::new(ProviderTargetRegistry::default());
     let delivery = Arc::new(MockDeliveryPort::default());
@@ -1096,12 +1277,16 @@ impl SystemMessageProducerService for WorkerOnlySessionContextProducer {
         _group: &Group,
         _registry: &dyn BotRegistryCoreService,
         _participants: &[Participant],
-    ) -> Vec<SystemGroupMessage> {
-        vec![SystemGroupMessage {
-            recipients: vec!["bot-worker".to_string()],
-            message: "worker-only context".to_string(),
-            delivery_type: DeliveryType::Inject,
-        }]
+    ) -> (Vec<SystemGroupMessage>, Option<String>) {
+        (
+            vec![SystemGroupMessage {
+                recipients: vec!["bot-worker".to_string()],
+                message: "worker-only context".to_string(),
+                delivery_type: DeliveryType::Inject,
+                persist: PersistMode::PerRecipient,
+            }],
+            None,
+        )
     }
 }
 
@@ -1119,12 +1304,16 @@ impl SystemMessageProducerService for FixedProducer {
         _group: &Group,
         _registry: &dyn BotRegistryCoreService,
         _participants: &[Participant],
-    ) -> Vec<SystemGroupMessage> {
-        vec![SystemGroupMessage {
-            recipients: vec!["bot-provider".to_string()],
-            message: "member changed".to_string(),
-            delivery_type: DeliveryType::Inject,
-        }]
+    ) -> (Vec<SystemGroupMessage>, Option<String>) {
+        (
+            vec![SystemGroupMessage {
+                recipients: vec!["bot-provider".to_string()],
+                message: "member changed".to_string(),
+                delivery_type: DeliveryType::Inject,
+                persist: PersistMode::PerRecipient,
+            }],
+            None,
+        )
     }
 }
 
@@ -1142,12 +1331,16 @@ impl SystemMessageProducerService for FixedSendProducer {
         _group: &Group,
         _registry: &dyn BotRegistryCoreService,
         _participants: &[Participant],
-    ) -> Vec<SystemGroupMessage> {
-        vec![SystemGroupMessage {
-            recipients: vec!["bot-provider".to_string()],
-            message: "member changed".to_string(),
-            delivery_type: DeliveryType::Send,
-        }]
+    ) -> (Vec<SystemGroupMessage>, Option<String>) {
+        (
+            vec![SystemGroupMessage {
+                recipients: vec!["bot-provider".to_string()],
+                message: "member changed".to_string(),
+                delivery_type: DeliveryType::Send,
+                persist: PersistMode::PerRecipient,
+            }],
+            None,
+        )
     }
 }
 
@@ -1165,12 +1358,16 @@ impl SystemMessageProducerService for FixedWebSocketSendProducer {
         _group: &Group,
         _registry: &dyn BotRegistryCoreService,
         _participants: &[Participant],
-    ) -> Vec<SystemGroupMessage> {
-        vec![SystemGroupMessage {
-            recipients: vec!["bot-ws".to_string()],
-            message: "member changed".to_string(),
-            delivery_type: DeliveryType::Send,
-        }]
+    ) -> (Vec<SystemGroupMessage>, Option<String>) {
+        (
+            vec![SystemGroupMessage {
+                recipients: vec!["bot-ws".to_string()],
+                message: "member changed".to_string(),
+                delivery_type: DeliveryType::Send,
+                persist: PersistMode::PerRecipient,
+            }],
+            None,
+        )
     }
 }
 

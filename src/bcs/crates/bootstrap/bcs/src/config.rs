@@ -107,7 +107,7 @@ fn default_session_files_share_link_ttl() -> u64 {
     3600
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionFilesShareConfig {
     /// HMAC secret for share-token mint/consume. If unset, bootstrap logs a
     /// warning and generates a random 32-byte secret that does NOT survive
@@ -123,10 +123,78 @@ pub struct SessionFilesShareConfig {
     /// to `bcs_endpoint` or `http://{bind}:{port}` in the service layer.
     #[serde(default)]
     pub share_base_url: Option<String>,
+
+    /// TTL (seconds) for share URLs minted at history-read time for image
+    /// echo. Clamped to [60, 604800]. Independent from `default_ttl_seconds`
+    /// (the share-API default) so history echo can be tuned separately.
+    #[serde(default = "default_history_attachment_ttl")]
+    pub history_attachment_ttl_seconds: u64,
+}
+
+impl Default for SessionFilesShareConfig {
+    fn default() -> Self {
+        Self {
+            token_secret: None,
+            default_ttl_seconds: default_session_files_share_ttl(),
+            share_base_url: None,
+            history_attachment_ttl_seconds: default_history_attachment_ttl(),
+        }
+    }
 }
 
 fn default_session_files_share_ttl() -> u64 {
     86400
+}
+
+fn default_history_attachment_ttl() -> u64 {
+    3600
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderHttpConfig {
+    /// Inbound HTTP header names that BCS may forward to HTTP provider webhooks.
+    /// Empty by default; matching is case-insensitive.
+    #[serde(default)]
+    pub bypass_headers: Vec<String>,
+}
+
+impl ProviderHttpConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        for raw_name in &self.bypass_headers {
+            let name = raw_name.trim();
+            if name.is_empty() {
+                return Err(
+                    "provider_http.bypass_headers must not contain empty header names".to_string(),
+                );
+            }
+            axum::http::HeaderName::try_from(name).map_err(|_| {
+                format!("provider_http.bypass_headers contains invalid header name '{raw_name}'")
+            })?;
+            if is_reserved_provider_bypass_header(name) {
+                return Err(format!(
+                    "provider_http.bypass_headers contains reserved header name '{raw_name}'"
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn is_reserved_provider_bypass_header(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "authorization"
+            | "cookie"
+            | "host"
+            | "content-length"
+            | "content-type"
+            | "x-bcs-bot-token"
+            | "x-bcs-service-key"
+    ) || lower == "bcn"
+        || lower.starts_with("bcn-")
+        || lower.starts_with("x-bcn-")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -442,6 +510,10 @@ pub struct BcsConfig {
     /// Channel(IM bridge) configuration.
     #[serde(default)]
     pub channels: ChannelConfigSection,
+
+    /// HTTP provider webhook adapter configuration.
+    #[serde(default)]
+    pub provider_http: ProviderHttpConfig,
 
     /// Structured collaboration authoring-template configuration.
     #[serde(default)]
@@ -862,6 +934,7 @@ impl Default for BcsConfig {
             database: DatabaseConfig::default(),
             secret: SecretConfig::default(),
             channels: ChannelConfigSection::default(),
+            provider_http: ProviderHttpConfig::default(),
             collaboration: CollaborationConfig::default(),
             max_groups_as_driver: default_max_groups_as_driver(),
             max_group_members: default_max_group_members(),
@@ -1291,6 +1364,10 @@ fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn std::error::
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
     })?;
+    config.provider_http.validate().map_err(|e| {
+        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
+            as Box<dyn std::error::Error>
+    })?;
     config.validate_metrics().map_err(|e| {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
@@ -1381,6 +1458,50 @@ mod tests {
             .expect_err("blank group-session WebSocket secret name rejected");
 
         assert!(err.contains("group_session_ws.signing_key_secret must not be blank"));
+    }
+
+    #[test]
+    fn provider_http_bypass_headers_parse_and_default() {
+        let default_config = BcsConfig::default();
+        assert!(default_config.provider_http.bypass_headers.is_empty());
+
+        let toml = r#"
+            bots_base_dir = "/bots"
+
+            [provider_http]
+            bypass_headers = ["X-Sandbox-Bypass"]
+        "#;
+        let config: BcsConfig = toml::from_str(toml).expect("parse [provider_http]");
+        assert_eq!(
+            config.provider_http.bypass_headers,
+            vec!["X-Sandbox-Bypass".to_string()]
+        );
+        config.provider_http.validate().expect("valid bypass header");
+    }
+
+    #[test]
+    fn provider_http_bypass_headers_reject_invalid_and_reserved_names() {
+        for name in [
+            "",
+            "bad header",
+            "Authorization",
+            "Cookie",
+            "Host",
+            "Content-Length",
+            "Content-Type",
+            "X-BCS-Bot-Token",
+            "X-BCS-Service-Key",
+            "bcn-message-id",
+            "x-bcn-protocol-version",
+        ] {
+            let config = ProviderHttpConfig {
+                bypass_headers: vec![name.to_string()],
+            };
+            assert!(
+                config.validate().is_err(),
+                "header name {name:?} should be rejected"
+            );
+        }
     }
 
     #[test]

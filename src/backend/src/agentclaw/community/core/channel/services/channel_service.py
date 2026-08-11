@@ -15,7 +15,8 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotService,
 )
 from agentclaw.community.core.channel.json_config_utils import JsonConfigFile
-from agentclaw.community.core.channel.services.repositories import ChannelRepository, ChannelRecord
+from agentclaw.community.core.repository.protocols.chat import ChannelRepository
+from agentclaw.community.core.channel.models import ChannelRecord
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )

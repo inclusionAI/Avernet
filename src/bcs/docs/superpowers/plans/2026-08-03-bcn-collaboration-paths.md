@@ -2,6 +2,10 @@
 
 > **Superseded:** Do not execute this two-prefix plan. It is replaced by
 > [`2026-08-03-bcn-collaboration-prefix.md`](./2026-08-03-bcn-collaboration-prefix.md).
+> The current checked-in contract exposes every BCN V1 operation below
+> `/openapi/v1/collaboration/**`, removes the public session completion and
+> group-participant patch endpoints, and uses
+> `GET /openapi/v1/collaboration/bots/{bot_id}/groups` for Group list.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

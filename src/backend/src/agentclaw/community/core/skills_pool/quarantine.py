@@ -21,6 +21,7 @@ from agentclaw.community.core.task_queue.types import (
     Retry,
     TaskOutcome,
 )
+from agentclaw.community.core.repository.protocols.skills_pool import QuarantineRepositoryProtocol
 
 QUARANTINE_RETENTION = timedelta(days=7)
 SKILLS_POOL_QUARANTINE_CLEANUP_TASK = "skills_pool.quarantine.cleanup"
@@ -101,51 +102,6 @@ class QuarantineOperationalView:
     eligible: bool
     eligible_at: datetime
     blockers: tuple[QuarantineBlocker, ...]
-
-
-class QuarantineRepositoryProtocol(Protocol):
-    def get_quarantine(
-        self,
-        scope: BotSkillLayoutScope,
-        migration_generation: str,
-    ) -> QuarantineRecord | None: ...
-
-    def mark_cleaned(
-        self,
-        *,
-        scope: BotSkillLayoutScope,
-        migration_generation: str,
-        cleanup_owner: str,
-        evidence: dict[str, object],
-    ) -> bool: ...
-
-    def claim_cleanup(
-        self,
-        *,
-        scope: BotSkillLayoutScope,
-        migration_generation: str,
-        cleanup_owner: str,
-        lease_seconds: int,
-        eligible_before: datetime,
-    ) -> bool: ...
-
-    def mark_cleanup_failed(
-        self,
-        *,
-        scope: BotSkillLayoutScope,
-        migration_generation: str,
-        cleanup_owner: str,
-        evidence: dict[str, object],
-    ) -> bool: ...
-
-    def record_cleanup_uncertain(
-        self,
-        *,
-        scope: BotSkillLayoutScope,
-        migration_generation: str,
-        cleanup_owner: str,
-        evidence: dict[str, object],
-    ) -> bool: ...
 
 
 class LayoutReaderProtocol(Protocol):

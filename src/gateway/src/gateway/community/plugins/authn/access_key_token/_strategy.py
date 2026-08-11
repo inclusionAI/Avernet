@@ -19,6 +19,7 @@ Behaviour:
 
 from __future__ import annotations
 
+from gateway.community.logger import get_logger
 from gateway.community.spi.access_key import AccessKeyRegistry
 from gateway.community.spi.authn import (
     AccessKey,
@@ -27,6 +28,8 @@ from gateway.community.spi.authn import (
     Principal,
     PrincipalType,
 )
+
+logger = get_logger("authn-access-key")
 
 _AUTH_HEADER = "authorization"
 
@@ -69,7 +72,13 @@ class AccessKeyTokenStrategy:
             return None  # no access-key token → not applicable
         record = await self._registry.find_access_key_by_token(token)
         if record is None:
+            logger.debug("access key token not found in registry")
             return None  # unknown token → soft miss
+        logger.debug(
+            "access key token resolved: access_key=%s tenant=%s",
+            record.access_key,
+            record.tenant,
+        )
         return AccessKeyPrincipal(
             tenant=record.tenant,
             access_key=AccessKey(

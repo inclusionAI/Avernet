@@ -1,36 +1,46 @@
-"""Models group — ``/openapi/v1/bots/{bot_id}/models``."""
+"""Models group — ``/openapi/v1/bots/models/{bot_id}``.
+
+An **operator console**: served to the addressed bot's owner and its
+member-level collaborators, for the stage the request names (``?stage=``,
+draft by default), and device-wide — see ``engine_runtime/gating.py`` and
+``core/engine_runtime/gate.py``.
+"""
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Envelope,
     Page,
     PageParamsDep,
 )
-from agentclaw.community.adapters.http.openapi_v1.dependencies import (
-    Principal,
-    require_principal,
-)
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.models.schemas import (
     Model,
 )
-from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
+    RuntimeStage,
+)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
+    OwnerIdDep,
+    StageQuery,
+)
+from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
     page as page_envelope,
 )
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.gating import (
+    resolve_operable_bot,
+)
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.core.engine_runtime.errors import EngineResourceNotFoundError
 from agentclaw.community.di import Injected
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/models", tags=["models"])
-
-PrincipalDep = Annotated[Principal, Depends(require_principal)]
+router = APIRouter(prefix="/openapi/v1/bots/models", tags=["models"])
 
 
 def _map_model(data: dict[str, Any]) -> Model:
@@ -41,19 +51,29 @@ def _map_model(data: dict[str, Any]) -> Model:
     )
 
 
-@router.get("", response_model=Envelope[Page[Model]])
+@router.get("/{bot_id}", response_model=Envelope[Page[Model]])
 @envelope_errors
 async def list_models(
     bot_id: str,
     page: PageParamsDep,
-    principal: PrincipalDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[Page[Model]]:
     """List the models this bot's engine can route to."""
-    owner_id = caller_owner_id(principal)
+    facts = await resolve_operable_bot(
+        relay,
+        bot_id,
+        caller_id=user_id,
+        owner_id=owner_id,
+        stage=stage.value,
+        surface="models",
+    )
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, method="GET", path="/api/models",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        method="GET", path="/api/models",
     )
     # The engine wraps this one: data is {"models": [...], "total": n}, not a
     # bare list. Reading it as a list yields an empty page on every call against
@@ -69,13 +89,15 @@ async def list_models(
     return page_envelope(total, mapped[start : start + page.page_size], request)
 
 
-@router.get("/{model_id:path}", response_model=Envelope[Model])
+@router.get("/{bot_id}/{model_id:path}", response_model=Envelope[Model])
 @envelope_errors
 async def get_model(
     bot_id: str,
     model_id: str,
-    principal: PrincipalDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[Model]:
     """Get one model by id.
@@ -90,9 +112,17 @@ async def get_model(
     # A model id never contains a dot segment.
     if any(part in ("..", ".") for part in model_id.split("/")):
         raise EngineResourceNotFoundError("invalid model id")
-    owner_id = caller_owner_id(principal)
+    facts = await resolve_operable_bot(
+        relay,
+        bot_id,
+        caller_id=user_id,
+        owner_id=owner_id,
+        stage=stage.value,
+        surface="models",
+    )
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, method="GET",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        method="GET",
         path=f"/api/models/{model_id}",
     )
     if not isinstance(result.data, dict):

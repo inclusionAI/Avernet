@@ -26,7 +26,8 @@ pub struct IssuedGroupSessionConnectionToken {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupSessionConnectionBinding {
-    pub tenant: String,
+    /// Optional compatibility metadata copied from the authenticated caller.
+    pub tenant: Option<String>,
     pub user_id: String,
     pub group_id: String,
     pub session_id: String,

@@ -237,7 +237,7 @@ impl BotDeliveryPort for HttpProviderTransport {
             ) && method == "chat.send";
             let client = if wants_sse { &self.sse_client } else { &self.client };
             let resp =
-                send_provider_request(client, &self.url_guard, &cmd.target, &body, wants_sse)
+                send_provider_request(client, &self.url_guard, &cmd.target, &body, wants_sse, &cmd.provider_bypass_headers)
                     .await?;
             let ctype = resp
                 .headers()
@@ -351,7 +351,7 @@ impl BotDeliveryPort for HttpProviderTransport {
 
         let started = Instant::now();
         let ack_result: ServiceResult<ProviderAckResponse> =
-            post_provider(&self.client, &self.url_guard, &cmd.target, &body).await;
+            post_provider(&self.client, &self.url_guard, &cmd.target, &body, &cmd.provider_bypass_headers).await;
         let elapsed_ms = started.elapsed().as_millis();
         let ack = match ack_result {
             Ok(ack) => ack,
@@ -419,7 +419,7 @@ impl GroupHistoryBotRequestPort for HttpProviderTransport {
             .map_err(|error| error.to_string())?;
         let target_bot_id = target.bot_id().to_string();
         let response: ProviderHistoryResponse =
-            post_provider(&self.client, &self.url_guard, &target, &body)
+            post_provider(&self.client, &self.url_guard, &target, &body, &[])
                 .await
                 .map_err(|error| error.to_string())?;
         let history_body = provider_history_log(&response);
@@ -661,8 +661,9 @@ async fn post_provider<T: DeserializeOwned>(
     url_guard: &OutboundUrlGuard,
     target: &BotDeliveryTarget,
     body: &ProviderWebhookRequest,
+    provider_bypass_headers: &[(String, String)],
 ) -> ServiceResult<T> {
-    let response = send_provider_request(client, url_guard, target, body, false).await?;
+    let response = send_provider_request(client, url_guard, target, body, false, provider_bypass_headers).await?;
     let status = response.status();
     let method = body.method.clone();
     let frame_id = body.id.clone();
@@ -690,6 +691,7 @@ async fn send_provider_request(
     target: &BotDeliveryTarget,
     body: &ProviderWebhookRequest,
     accept_sse: bool,
+    provider_bypass_headers: &[(String, String)],
 ) -> ServiceResult<reqwest::Response> {
     send_provider_request_with_policy(
         client,
@@ -697,9 +699,30 @@ async fn send_provider_request(
         target,
         body,
         accept_sse,
+        provider_bypass_headers,
         ProviderClientPolicy::for_request(accept_sse),
     )
     .await
+}
+
+fn is_safe_provider_bypass_header(name: &str) -> bool {
+    let trimmed = name.trim();
+    if trimmed.is_empty() || reqwest::header::HeaderName::try_from(trimmed).is_err() {
+        return false;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    !matches!(
+        lower.as_str(),
+        "authorization"
+            | "cookie"
+            | "host"
+            | "content-length"
+            | "content-type"
+            | "x-bcs-bot-token"
+            | "x-bcs-service-key"
+    ) && lower != "bcn"
+        && !lower.starts_with("bcn-")
+        && !lower.starts_with("x-bcn-")
 }
 
 async fn send_provider_request_with_policy(
@@ -708,6 +731,7 @@ async fn send_provider_request_with_policy(
     target: &BotDeliveryTarget,
     body: &ProviderWebhookRequest,
     accept_sse: bool,
+    provider_bypass_headers: &[(String, String)],
     client_policy: ProviderClientPolicy,
 ) -> ServiceResult<reqwest::Response> {
     let BotDeliveryTarget::HttpProvider {
@@ -799,6 +823,11 @@ async fn send_provider_request_with_policy(
         .header(BCN_PROTOCOL_VERSION_HEADER, protocol_version)
         .header(BCN_MESSAGE_ID_HEADER, &message_id)
         .header(BCN_TIMESTAMP_HEADER, bcs_protocol::now_ms().to_string());
+    for (name, value) in provider_bypass_headers {
+        if is_safe_provider_bypass_header(name) {
+            request = request.header(name.as_str(), value.as_str());
+        }
+    }
     if protocol_version == "2.0" {
         request = request.header(BCN_TRANSPORT_HEADER, transport);
     }
@@ -1716,6 +1745,7 @@ Connection: keep-alive\r\n\
             &target,
             &body,
             true,
+            &[],
             policy,
         )
         .await

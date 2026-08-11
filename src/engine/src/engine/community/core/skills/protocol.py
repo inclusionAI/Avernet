@@ -25,8 +25,10 @@ should raise :class:`CapabilityNotSupportedError`.
 The versioned Pool mapping wire contract and compatibility rules are recorded
 in ``src/engine/docs/heterogeneous-engine-architecture.md`` §7.3.
 """
+
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
 
 from engine.community.core.engine.context import AuthContext
@@ -66,25 +68,32 @@ class SkillsService(Protocol):
 
     # ── Per-skill management ──
     async def list_skills(
-        self, auth: AuthContext | None = None,
+        self,
+        auth: AuthContext | None = None,
     ) -> list[Skill]:
         """List all skills known to the engine, installed or otherwise."""
         ...
 
     async def get_skill(
-        self, skill_id: str, auth: AuthContext | None = None,
+        self,
+        skill_id: str,
+        auth: AuthContext | None = None,
     ) -> Skill | None:
         """Look up a single skill by id."""
         ...
 
     async def install_skill(
-        self, config: SkillConfig, auth: AuthContext | None = None,
+        self,
+        config: SkillConfig,
+        auth: AuthContext | None = None,
     ) -> Skill:
         """Install a skill from the given configuration."""
         ...
 
     async def uninstall_skill(
-        self, skill_id: str, auth: AuthContext | None = None,
+        self,
+        skill_id: str,
+        auth: AuthContext | None = None,
     ) -> bool:
         """Uninstall a skill. Returns True if it was installed and is now removed."""
         ...
@@ -99,13 +108,17 @@ class SkillsService(Protocol):
         ...
 
     async def enable_skill(
-        self, skill_id: str, auth: AuthContext | None = None,
+        self,
+        skill_id: str,
+        auth: AuthContext | None = None,
     ) -> bool:
         """Enable a previously disabled skill."""
         ...
 
     async def disable_skill(
-        self, skill_id: str, auth: AuthContext | None = None,
+        self,
+        skill_id: str,
+        auth: AuthContext | None = None,
     ) -> bool:
         """Disable a skill without uninstalling it."""
         ...
@@ -120,7 +133,9 @@ class SkillsService(Protocol):
         ...
 
     async def validate_skill(
-        self, skill_id: str, auth: AuthContext | None = None,
+        self,
+        skill_id: str,
+        auth: AuthContext | None = None,
     ) -> list[str]:
         """Validate a skill's configuration. Returns an empty list when valid,
         otherwise a list of human-readable error messages."""
@@ -128,7 +143,9 @@ class SkillsService(Protocol):
 
     # ── Skill discovery ──
     async def discover_skills(
-        self, source: str, auth: AuthContext | None = None,
+        self,
+        source: str,
+        auth: AuthContext | None = None,
     ) -> list[Skill]:
         """Enumerate skills available to install from the given source."""
         ...
@@ -222,6 +239,7 @@ class SkillsService(Protocol):
         self,
         mappings: list[PoolSkillMappingIntent | SymlinkItem],
         *,
+        retired_mappings: Sequence[PoolSkillMappingIntent | SymlinkItem] = (),
         source_layout: PoolMappingSourceLayout = PoolMappingSourceLayout.POOL,
         mapping_contract_version: str | None = None,
         auth: AuthContext | None = None,
@@ -241,6 +259,7 @@ class SkillsService(Protocol):
         self,
         mappings: list[PoolSkillMappingIntent | SymlinkItem],
         *,
+        retired_mappings: Sequence[PoolSkillMappingIntent | SymlinkItem] = (),
         source_layout: PoolMappingSourceLayout = PoolMappingSourceLayout.POOL,
         mapping_contract_version: str | None = None,
         auth: AuthContext | None = None,

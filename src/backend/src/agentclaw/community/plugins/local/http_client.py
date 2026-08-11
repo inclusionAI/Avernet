@@ -82,3 +82,15 @@ class LocalHttpClient(MockSeam, HttpClient):
         timeout: float = 30.0,
     ) -> httpx.Response:
         raise HttpNotConfiguredError("delete", self._base_url, path)
+
+    def stream(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: Mapping[str, Any] | None = None,
+        json: Any | None = None,
+        headers: Mapping[str, str] | None = None,
+        timeout: float = 30.0,
+    ) -> httpx.Response:
+        raise HttpNotConfiguredError("stream", self._base_url, path)

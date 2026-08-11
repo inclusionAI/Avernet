@@ -37,10 +37,10 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
 )
 from agentclaw.community.core.bot_management import codefuse_token as _codefuse_token
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.services.identity import VALID_ENTITY_TYPES
 from agentclaw.community.api.workspace_service import WorkspaceServiceProtocol
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.core.devices.services import device_info as device_info_lookup
 from agentclaw.community.core.devices.services.device_context_resolver import (

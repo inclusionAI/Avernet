@@ -265,7 +265,7 @@ impl Fixture {
 
     fn human_principal(subject_id: &str) -> AuthenticatedCaller {
         AuthenticatedCaller {
-            tenant: "dev".into(),
+            tenant: Some("dev".into()),
             user: Some(AuthenticatedUserIdentity {
                 id: subject_id.to_string(),
                 username: subject_id.to_string(),
@@ -280,7 +280,7 @@ impl Fixture {
 
     fn human_principal_with_display(subject_id: &str, display_name: &str) -> AuthenticatedCaller {
         AuthenticatedCaller {
-            tenant: "dev".into(),
+            tenant: Some("dev".into()),
             user: Some(AuthenticatedUserIdentity {
                 id: subject_id.to_string(),
                 username: subject_id.to_string(),
@@ -295,7 +295,7 @@ impl Fixture {
 
     fn bot_only_caller(bot_uuid: &str) -> AuthenticatedCaller {
         AuthenticatedCaller {
-            tenant: "dev".into(),
+            tenant: Some("dev".into()),
             user: None,
             bot: Some(bcs_service_api::application::v1::AuthenticatedBotIdentity {
                 bot_uuid: bot_uuid.into(),

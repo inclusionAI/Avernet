@@ -265,6 +265,15 @@ P3 的多引擎目录契约如下：
 | Hermes | `~/.hermes/skills` | `~/.hermes/workspace/skills-pool/skills-repo` | `~/.hermes/workspace/skills-pool/skills-local` |
 | Teclaw | 不参与本期文件型 Pool 协议 | 不变 | 不变 |
 
+Pool repo 是完整 Git corpus 的 canonical 真实目录或挂载点，不能是指回 Legacy
+active root 的软链。Cloud 把 OSS 内容直接挂载到 Pool repo；Desktop downloader
+把 target、临时解压、单份 backup 与 ETag 状态放在同一 Pool root 下。Desktop
+preparation 原子迁移旧真实 repo 后，只在 cutover 前保留
+`legacy_repo -> pool_repo` 反向兼容桥；cutover 验证逐 Skill mapping 后移除 active
+root 可达的完整 corpus 入口。同一 runtime 内，canonical repo move、历史 locator
+bridge 发布与结构校验在 Pool root 的本地 advisory directory lock 内完成，使并发启动
+收敛到同一布局；该锁不跨 Bot、不持久化业务状态，也不是分布式 rollout 锁。
+
 SC 接入后，`skills-center` 作为 `skills-pool` 下与 `skills-repo`、`skills-local` 并列的第三个内容目录；它同样不进入 active-skill-dir，只能通过逐 Skill 激活入口暴露给 Agent。
 
 `skills-repo` 与 `skills-center` 只读是架构约束，而不是实现细节。已发布 Skill 的运行时内容不可被 Agent 对话直接修改；写操作必须经过相应的治理和发布路径。
@@ -397,6 +406,13 @@ Engine 对外提供统一的 Skill 激活 API，并在内部完成以下工作�
 ```
 
 过渡期间，如果 Backend 必须持久化物理 locator，Engine Runtime 应返回已解析的 locator 与校验证据；Backend 只保存结果，不再自行重建路径。
+
+产品激活集合是受管逐 Skill mapping 的权威源。若 activate/deactivate 与数据面
+cutover 并发，Backend 在 cutover 提交后重读最新集合，并把旧快照中已退出的精确
+identity 作为 `retired_mappings` 与最新完整 mapping 一起发布和验证；提交
+`POOL_ACTIVE` 前再次确认快照稳定。快照变化只重跑 post-cutover mapping 收敛，
+不重复数据面 cutover。Engine 只删除仍指向该精确旧受管 source 的入口，同名最新
+mapping、未登记文件系统 entry 与外部 entry 均必须保留。
 
 这样，Backend、部署工具和镜像启动脚本不再各自维护引擎路径常量；它们只负责向 Engine Runtime 请求解析或提供内容分发所需的输入，目录布局的演进由 Engine 单点维护。
 

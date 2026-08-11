@@ -55,9 +55,7 @@ class WhitelistEntry:
 
     def to_orm(self, row: object | None = None) -> object:
         """写翻译: 领域模型 → ORM。sealed 列由 repo 方法内部填充。"""
-        from agentclaw.community.core.economy.governance.repositories.orm import (
-            WhitelistEntryOrm,
-        )
+        from agentclaw.community.core.economy.governance.orm import WhitelistEntryOrm
         row = row or WhitelistEntryOrm()
         row.bot_id = self.bot_id
         row.owner_id = self.owner_id

@@ -42,13 +42,20 @@ def _serialize(rule: OutBoundOperationRule) -> dict[str, Any]:
 
 def test_community_provider_yields_no_egress_mutation():
     provider = CommunityOutboundRuleProvider()
-    assert _serialize(provider.build_rule(bolt_id="b", owner_id="o")) == {
-        "header_operation_rules": []
-    }
+    rule = provider.build_rule(
+        bolt_id="b",
+        owner_id="o",
+        extra_properties={"outbound_api_key": "ignored"},
+    )
+    assert _serialize(rule) == {"header_operation_rules": []}
     assert provider.build_agentpass_rule(agent_pass_token="tok") is None
 
 
 def test_local_provider_yields_no_egress_mutation():
     provider = NoopOutboundRuleProvider()
-    assert provider.build_rule(bolt_id="b", owner_id="o").header_operation_rules == ()
+    assert provider.build_rule(
+        bolt_id="b",
+        owner_id="o",
+        extra_properties={"outbound_api_key": "ignored"},
+    ).header_operation_rules == ()
     assert provider.build_agentpass_rule(agent_pass_token="tok") is None

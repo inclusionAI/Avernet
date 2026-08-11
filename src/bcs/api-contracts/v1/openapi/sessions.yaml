@@ -1,22 +1,17 @@
 CreateSessionRequest:
   type: object
+  description: >-
+    Creates a new Session using the parent Group as the source of truth for
+    driver and participants. The request body does not accept driver_bot_uuid or
+    participants; the Session roster inherits all parent Group participants,
+    including both Bot and Human actors, and the parent driver Bot is ensured as
+    the Session driver.
   additionalProperties: false
-  required:
-    - driver_bot_uuid
-    - participants
   properties:
     title:
       type: string
     input:
       $ref: ../domain-models.yaml#/SessionInput
-    driver_bot_uuid:
-      type: string
-    participants:
-      type: array
-      minItems: 1
-      uniqueItems: true
-      items:
-        $ref: "#/SessionParticipantInput"
 
 SessionParticipantInput:
   type: object
@@ -26,8 +21,6 @@ SessionParticipantInput:
   properties:
     bot_uuid:
       type: string
-    mode:
-      $ref: ../domain-models.yaml#/BotParticipantMode
 
 UpdateSessionRequest:
   type: object
@@ -52,6 +45,7 @@ GroupSessionsPath:
     summary: Create a Session under a Group.
     x-avernet-security:
       user: required
+      app: required
     parameters:
       - $ref: ../shared.yaml#/GroupIdPath
     requestBody:
@@ -62,7 +56,10 @@ GroupSessionsPath:
             $ref: "#/CreateSessionRequest"
     responses:
       "201":
-        description: Created session detail.
+        description: >-
+          Created session detail. Participants are inherited from the parent
+          Group roster, including Human participants, with the parent driver Bot
+          ensured as driver.
         content:
           application/json:
             schema:
@@ -119,6 +116,7 @@ GroupSessionsPath:
     summary: List Sessions under a Group for the selected View Actor.
     x-avernet-security:
       user: required
+      app: required
     parameters:
       - $ref: ../shared.yaml#/GroupIdPath
       - $ref: ../shared.yaml#/ViewBotIdQuery
@@ -195,6 +193,7 @@ SessionPath:
     summary: Get session detail.
     x-avernet-security:
       user: required
+      app: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
     responses:
@@ -246,6 +245,7 @@ SessionPath:
     summary: Update the explicitly mutable session properties.
     x-avernet-security:
       user: required
+      app: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
     requestBody:
@@ -278,7 +278,15 @@ SessionPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: Principal cannot manage the session.
+        description: >-
+          Principal cannot manage the session. A Human Principal may manage
+          when it can act as the Session creator or at least one parent Group
+          management actor: the driver, originator, or ManagerWorker manager participant.
+          Human-to-actor authority is checked only against these target actors:
+          direct human_{user.id}, a Bot whose created_by equals the Human user
+          id, or a creator relation edge from human_{user.id} to that Bot. The
+          server does not enumerate every Bot created by the Human for this
+          authorization decision.
         x-error-codes:
           - forbidden
         content:
@@ -309,8 +317,10 @@ SessionPath:
     summary: Delete a session using the authenticated Principal as caller.
     x-avernet-security:
       user: required
+      app: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
+      - $ref: ../shared.yaml#/ActingBotIdQuery
     responses:
       "200":
         description: Idempotent delete result.
@@ -335,60 +345,14 @@ SessionPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: Principal cannot delete the session.
+        description: >-
+          Principal cannot delete the session. A Human Principal may delete
+          when it can act as the Session creator or at least one parent Group
+          management actor. Human-to-actor authority is checked only against
+          those target actors rather than by enumerating all Bots created by
+          the Human.
         x-error-codes:
           - forbidden
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "500":
-        $ref: ../shared.yaml#/InternalErrorResponse
-
-SessionCompletionPath:
-  post:
-    operationId: complete_session
-    tags: ["Collaboration / Sessions"]
-    summary: Complete a running chat session; idempotent after completion.
-    x-avernet-security:
-      user: required
-    parameters:
-      - $ref: ../shared.yaml#/SessionIdPath
-    responses:
-      "200":
-        description: Session completion result. Returns the same result when repeated.
-        content:
-          application/json:
-            schema:
-              $ref: ../domain-models.yaml#/SessionCompletionEnvelope
-      "400":
-        description: Invalid session identifier encoding.
-        x-error-codes:
-          - invalid_request
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "401":
-        description: Gateway Principal is missing or invalid.
-        x-error-codes:
-          - unauthenticated
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "403":
-        description: Principal cannot complete the session.
-        x-error-codes:
-          - forbidden
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "404":
-        description: Session is missing or intentionally hidden.
-        x-error-codes:
-          - session_not_found
         content:
           application/json:
             schema:
@@ -403,6 +367,7 @@ SessionMessagesPath:
     summary: List session message history (cursor-based).
     x-avernet-security:
       user: required
+      app: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
       - name: before
@@ -480,6 +445,7 @@ AddSessionParticipantPath:
     summary: Add a Bot as a Session participant.
     x-avernet-security:
       user: required
+      app: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
     requestBody:
@@ -513,7 +479,15 @@ AddSessionParticipantPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: Principal cannot manage the session.
+        description: >-
+          Principal cannot manage the session. A Human Principal may manage
+          when it can act as the Session creator or at least one parent Group
+          management actor: the driver, originator, or ManagerWorker manager participant.
+          Human-to-actor authority is checked only against these target actors:
+          direct human_{user.id}, a Bot whose created_by equals the Human user
+          id, or a creator relation edge from human_{user.id} to that Bot. The
+          server does not enumerate every Bot created by the Human for this
+          authorization decision.
         x-error-codes:
           - forbidden
         content:
@@ -548,6 +522,7 @@ SessionParticipantPath:
     summary: Update a Session participant mode.
     x-avernet-security:
       user: required
+      app: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
       - $ref: ../shared.yaml#/BotUuidPath
@@ -581,7 +556,13 @@ SessionParticipantPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: Principal cannot manage the participant.
+        description: >-
+          Principal cannot manage the participant. A Human Principal may manage
+          when it can act as the Session creator or at least one parent Group
+          management actor: the driver, originator, or ManagerWorker manager participant.
+          Human-to-actor authority is checked only against those target actors:
+          direct human_{user.id}, a Bot whose created_by equals the Human user
+          id, or a creator relation edge from human_{user.id} to that Bot.
         x-error-codes:
           - forbidden
         content:
@@ -613,6 +594,7 @@ SessionParticipantPath:
     summary: Remove a Session participant or let a Bot leave.
     x-avernet-security:
       user: required
+      app: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
       - $ref: ../shared.yaml#/BotUuidPath
@@ -640,7 +622,12 @@ SessionParticipantPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: Principal cannot remove the participant.
+        description: >-
+          Principal cannot remove the participant. A Human Principal may remove
+          when it can act as the Session creator or at least one parent Group
+          management actor. Human-to-actor authority is checked only against
+          those target actors rather than by enumerating all Bots created by
+          the Human.
         x-error-codes:
           - forbidden
         content:

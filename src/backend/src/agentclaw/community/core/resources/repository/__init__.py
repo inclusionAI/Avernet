@@ -1,1 +1,0 @@
-"""Resource repository module."""

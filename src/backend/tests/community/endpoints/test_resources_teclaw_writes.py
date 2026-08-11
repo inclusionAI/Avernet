@@ -16,8 +16,8 @@ from typing import Annotated
 
 import httpx
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.plugin_api.http_client import HttpClient, QUALIFIER_BAAS, QUALIFIER_GENERAL
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.devices import make_active_arca_device

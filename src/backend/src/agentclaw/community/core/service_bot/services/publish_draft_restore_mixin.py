@@ -12,9 +12,7 @@ from agentclaw.community.core.service_bot.repository.models import (
     PublishOperationState,
     PublishStatus,
 )
-from agentclaw.community.core.service_bot.repository.publish_operation_repository import (
-    PublishOperationRepository,
-)
+from agentclaw.community.core.repository.protocols.publishing import PublishOperationRepository
 from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
     TECLAW_DEVICE_PROVIDER,
     resolve_device_provider,
@@ -30,9 +28,7 @@ if TYPE_CHECKING:
     from agentclaw.community.core.task_queue.services.task_queue_service import (
         TaskQueueService,
     )
-    from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-        BotPublishRepositoryProtocol,
-    )
+    from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
     from agentclaw.community.core.service_bot.repository.models import BotPublishRecord
     from agentclaw.community.core.service_bot.services.publish_flow_service import (
         PublishFlowService,

@@ -14,7 +14,7 @@ from agentclaw.community.core.harness.models import (
     PatchTemplateStatus,
     RiskLevel,
 )
-from agentclaw.community.core.harness.repository_protocol import HarnessTemplateRepository
+from agentclaw.community.core.repository.protocols.harness import HarnessTemplateRepository
 from agentclaw.community.core.harness.services.patch_library import PatchLibrary
 
 

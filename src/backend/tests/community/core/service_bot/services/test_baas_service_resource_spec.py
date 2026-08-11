@@ -253,6 +253,13 @@ def test_payload_maps_template_config_overrides_to_deploy_config():
         },
     )
 
+    svc._build_outbound_operation_rule.assert_called_once_with(
+        "B1",
+        "U1",
+        "",
+        extra_properties=None,
+    )
+
     deploy_config = payload["config"]["deploy_config"]
     assert deploy_config["docker_image"] == "registry.example.com/aicoding:latest"
     assert deploy_config["resource_spec"] == {"cpu": 4, "memory": 8192, "disk": 100}

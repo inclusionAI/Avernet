@@ -1084,6 +1084,7 @@ async fn group_history_falls_back_to_store_when_bot_window_has_no_older_messages
                 history_meta: None,
                 metadata: None,
                 run_id: String::new(),
+                attachments: None,
             },
         )
         .await
@@ -1103,6 +1104,7 @@ async fn group_history_falls_back_to_store_when_bot_window_has_no_older_messages
                 history_meta: None,
                 metadata: None,
                 run_id: String::new(),
+                attachments: None,
             },
         )
         .await
@@ -1199,7 +1201,8 @@ async fn web_send_resets_message_count_routes_and_delivers() {
             thinking: None,
             idempotency_key: None,
             source_im_message_id: None,
-        sender_conn_id: None,
+            sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -1264,6 +1267,7 @@ async fn web_send_persists_public_human_owner_for_manager_worker() {
         idempotency_key: None,
         source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -1302,6 +1306,7 @@ async fn web_send_persists_public_human_owner_for_manager_worker() {
             idempotency_key: None,
             source_im_message_id: None,
             sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -1342,6 +1347,7 @@ async fn accepted_chat_send_records_run_context_for_callback() {
             idempotency_key: Some("idempotency-1".to_string()),
             source_im_message_id: Some("source-msg-1".to_string()),
             sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -1429,6 +1435,7 @@ async fn web_send_delivers_to_registered_provider_target_without_ws_connection()
             idempotency_key: None,
             source_im_message_id: None,
             sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -1470,6 +1477,7 @@ async fn provider_stream_gray_created_by_enables_sse_for_provider_chat_send() {
         idempotency_key: None,
         source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -1511,6 +1519,7 @@ async fn provider_stream_gray_created_by_miss_keeps_provider_callback() {
         idempotency_key: None,
         source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -1552,6 +1561,7 @@ async fn provider_stream_gray_mode_disabled_sends_provider_chat_send_over_sse() 
         idempotency_key: None,
         source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -1611,6 +1621,7 @@ async fn provider_stream_gray_created_by_still_keeps_inject_on_callback() {
         idempotency_key: None,
         source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -1731,6 +1742,7 @@ async fn web_send_explicit_mentions_do_not_inject_manager_worker_workers() {
             idempotency_key: None,
             source_im_message_id: None,
             sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -1775,7 +1787,8 @@ async fn web_send_in_human_bot_dm_uses_dm_routing_and_keeps_frontend_echo() {
             thinking: None,
             idempotency_key: None,
             source_im_message_id: None,
-        sender_conn_id: None,
+            sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -1826,6 +1839,7 @@ async fn web_send_in_human_bot_dm_omits_group_context_by_default() -> ServiceRes
         idempotency_key: None,
         source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await?;
 
@@ -1878,7 +1892,8 @@ async fn web_send_blocking_interceptor_prevents_bot_delivery() {
             thinking: None,
             idempotency_key: None,
             source_im_message_id: None,
-        sender_conn_id: None,
+            sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -1920,7 +1935,8 @@ async fn web_send_delivery_frame_contains_recipient_group_context() {
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
-    sender_conn_id: None,
+        sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -1990,7 +2006,8 @@ async fn web_send_with_session_id_routes_v2_by_substituting_wire_group_id() {
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
-    sender_conn_id: None,
+        sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -2058,6 +2075,7 @@ async fn web_send_with_legacy_session_id_routes_v2_with_group_wire_id() {
         idempotency_key: None,
         source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -2114,7 +2132,8 @@ async fn web_send_with_session_id_routes_v3_with_explicit_bcs_session_id() {
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
-    sender_conn_id: None,
+        sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -2178,6 +2197,7 @@ async fn web_send_to_provider_with_session_id_uses_explicit_bcs_session_id() {
         idempotency_key: None,
         source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -2243,6 +2263,7 @@ async fn web_send_direct_bot_projection_hides_bcs_group_context() -> ServiceResu
         idempotency_key: None,
         source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await?;
 
@@ -2302,7 +2323,8 @@ async fn web_send_prefers_human_from_name_in_delivered_frame() {
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
-    sender_conn_id: None,
+        sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -2354,7 +2376,8 @@ async fn web_send_inject_delivery_uses_event_frame() {
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
-    sender_conn_id: None,
+        sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -2408,7 +2431,8 @@ async fn web_send_delivers_to_private_group_targets() {
             thinking: None,
             idempotency_key: None,
             source_im_message_id: None,
-        sender_conn_id: None,
+            sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -2455,7 +2479,8 @@ async fn web_send_partial_delivery_failure_is_represented_in_outcome() {
             thinking: None,
             idempotency_key: None,
             source_im_message_id: None,
-        sender_conn_id: None,
+            sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -2496,6 +2521,7 @@ async fn group_chat_validates_sender_and_returns_legacy_delivery_projection() {
             requested_sender_id: Some("bot-driver".to_string()),
             message: "hello as my bot".to_string(),
             session_id: Some("session-1".to_string()),
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -2547,6 +2573,7 @@ async fn group_chat_uses_session_participants_for_human_sender_validation() {
             requested_sender_id: Some("human_2".to_string()),
             message: "hello from the session Human".to_string(),
             session_id: Some(session_id.to_string()),
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -2595,6 +2622,7 @@ async fn group_chat_rejects_bot_that_is_not_a_session_participant() {
             requested_sender_id: Some("bot-observer".to_string()),
             message: "should not be delivered".to_string(),
             session_id: Some(session_id.to_string()),
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap_err();
@@ -2635,6 +2663,7 @@ async fn group_chat_rejects_session_from_another_group() {
             requested_sender_id: Some("bot-driver".to_string()),
             message: "should not be delivered".to_string(),
             session_id: Some(session_id.to_string()),
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap_err();
@@ -2670,6 +2699,7 @@ async fn group_chat_rejects_session_without_participants() {
             requested_sender_id: Some("bot-driver".to_string()),
             message: "should not be delivered".to_string(),
             session_id: Some(session_id.to_string()),
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap_err();
@@ -2708,6 +2738,7 @@ async fn group_chat_treats_requested_sender_id_literally_without_trimming() {
             requested_sender_id: Some(" bot-driver ".to_string()),
             message: "hello as my bot".to_string(),
             session_id: Some("session-1".to_string()),
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap_err();
@@ -2742,6 +2773,7 @@ async fn group_chat_uses_human_staff_number_as_display_name_when_speaking_as_own
         requested_sender_id: Some("bot-driver".to_string()),
         message: "hello as my bot".to_string(),
         session_id: Some("session-1".to_string()),
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -3535,4 +3567,124 @@ fn request_id_for_method(frames: &[BcsFrame], method: &str) -> String {
             _ => None,
         })
         .unwrap_or_else(|| panic!("{method} request frame not found"))
+}
+
+// ==== Workbench realtime attachment echo ====
+
+fn image_attachment() -> bcs_domain::Attachment {
+    bcs_domain::Attachment {
+        attachment_id: "file_1".to_string(),
+        attachment_type: bcs_domain::AttachmentType::Image,
+        file_name: "a.png".to_string(),
+        mime_type: Some("image/png".to_string()),
+        size: Some(4),
+        sha256: Some("abcd".to_string()),
+        url: "https://bcs.test/sessions/shared-file/content?token=fromsender".to_string(),
+        expires_at: Some(1_786_346_756_000),
+    }
+}
+
+fn human_web_send(message: &str, attachments: Option<Vec<bcs_domain::Attachment>>) -> WebSendCommand {
+    WebSendCommand {
+        caller: CallerContext::Human(HumanActor {
+            actor_id: "human_1".to_string(),
+            staff_no: "1".to_string(),
+        }),
+        group_id: "group-1".to_string(),
+        session_id: Some("session-1".to_string()),
+        from_actor_id: "human_1".to_string(),
+        from_name: Some("Human One".to_string()),
+        message: message.to_string(),
+        mentions: vec![],
+        attachments,
+        thinking: None,
+        idempotency_key: None,
+        source_im_message_id: None,
+        sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
+    }
+}
+
+#[tokio::test]
+async fn web_send_event_echoes_attachments_verbatim() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    );
+
+    flow.handle_web_send(human_web_send("看图", Some(vec![image_attachment()])))
+        .await
+        .unwrap();
+
+    let events = support.frontend_delivery.events().await;
+    assert_eq!(events.len(), 1);
+    let event: serde_json::Value = serde_json::from_str(&events[0]).unwrap();
+    let atts = &event["payload"]["message"]["attachments"];
+    assert!(atts.is_array(), "event: {event}");
+    assert_eq!(atts[0]["attachment_id"], "file_1");
+    assert_eq!(atts[0]["type"], "image");
+    assert_eq!(atts[0]["file_name"], "a.png");
+    assert_eq!(atts[0]["mime_type"], "image/png");
+    assert_eq!(atts[0]["size"], 4);
+    assert_eq!(atts[0]["sha256"], "abcd");
+    // url and expires_at are echoed verbatim (expires_at in milliseconds).
+    assert_eq!(
+        atts[0]["url"],
+        "https://bcs.test/sessions/shared-file/content?token=fromsender"
+    );
+    assert_eq!(atts[0]["expires_at"], 1_786_346_756_000_u64);
+    // Existing content shape is untouched.
+    assert_eq!(event["payload"]["message"]["content"][0]["text"], "看图");
+}
+
+#[tokio::test]
+async fn web_send_event_without_attachments_has_no_attachments_key() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    );
+
+    flow.handle_web_send(human_web_send("plain", None))
+        .await
+        .unwrap();
+
+    let events = support.frontend_delivery.events().await;
+    assert_eq!(events.len(), 1);
+    let event: serde_json::Value = serde_json::from_str(&events[0]).unwrap();
+    assert!(
+        event["payload"]["message"].get("attachments").is_none(),
+        "event: {event}"
+    );
+}
+
+#[tokio::test]
+async fn web_send_event_omits_attachments_key_for_empty_attachment_list() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    );
+
+    flow.handle_web_send(human_web_send("plain", Some(Vec::new())))
+        .await
+        .unwrap();
+
+    let events = support.frontend_delivery.events().await;
+    assert_eq!(events.len(), 1);
+    let event: serde_json::Value = serde_json::from_str(&events[0]).unwrap();
+    assert!(
+        event["payload"]["message"].get("attachments").is_none(),
+        "event: {event}"
+    );
 }

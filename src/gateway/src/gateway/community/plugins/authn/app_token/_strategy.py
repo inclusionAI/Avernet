@@ -13,6 +13,7 @@ credential (US27 — each chain adjudicates independently).
 
 from __future__ import annotations
 
+from gateway.community.logger import get_logger
 from gateway.community.spi.app import AppRegistry
 from gateway.community.spi.authn import (
     AppPrincipal,
@@ -21,6 +22,8 @@ from gateway.community.spi.authn import (
     PrincipalType,
     ThirdPartyApp,
 )
+
+logger = get_logger("authn-app-token")
 
 _AUTH_HEADER = "authorization"
 
@@ -59,7 +62,11 @@ class AppTokenStrategy:
             return None  # no app token → strategy not applicable
         record = await self._registry.find_app_by_token(app_token)
         if record is None:
+            logger.debug("app token not found in registry")
             return None  # not one of mine → absent; another chain may resolve this Bearer (US27)
+        logger.debug(
+            "app token resolved: app_name=%s tenant=%s", record.app_name, record.tenant
+        )
         return AppPrincipal(
             tenant=record.tenant,
             app=ThirdPartyApp(

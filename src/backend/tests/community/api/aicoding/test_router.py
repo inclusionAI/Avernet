@@ -42,7 +42,7 @@ def arca_device_fs():
 def client(mock_ctx, fake_path_factory, arca_device_fs):
     from fastapi_injector import attach_injector
     from injector import Injector, Module
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.core.devices.services.device_context_resolver import (
         DeviceContextResolver,
     )

@@ -8,7 +8,7 @@ from typing import Any
 from injector import inject
 
 from agentclaw.community.core.common_config.models import CommonConfigRecord
-from agentclaw.community.core.common_config.repository import CommonConfigRepositoryProtocol
+from agentclaw.community.core.repository.protocols.config import CommonConfigRepositoryProtocol
 from agentclaw.community.log import get_logger
 
 

@@ -208,6 +208,7 @@ pub async fn handle_task_dispatch(
             frame,
             delivery_kind,
             provider_transport,
+            provider_bypass_headers: Vec::new(),
         })
         .await
     {
@@ -555,6 +556,7 @@ pub async fn handle_task_message(
             frame,
             delivery_kind,
             provider_transport,
+            provider_bypass_headers: Vec::new(),
         })
         .await?;
 

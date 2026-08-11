@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from agentclaw.community.api.workitem_service import WorkItemServiceProtocol
 from agentclaw.community.di import Injected
@@ -55,6 +56,11 @@ class UpdateWorkItemRequest(BaseModel):
 
     model_config = {"extra": "allow", "populate_by_name": True}
 
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, value: str) -> str:
+        return normalize_dima_http_url(value)
+
 
 class DimaUpdateWorkItemDocumentRequest(BaseModel):
     """修改工作项描述内容请求。"""
@@ -73,6 +79,33 @@ class WorkItemApiResponse(BaseModel):
     code: str = "200"
     message: str = "OK"
     data: Optional[Any] = None
+
+
+_ALLOWED_DIMA_URL_SCHEMES = {"http", "https"}
+_MAX_DIMA_URL_LENGTH = 4096
+
+
+def normalize_dima_http_url(raw_url: str) -> str:
+    """Normalize and validate DIMA URL relation input.
+
+    This endpoint is a pass-through wrapper for DIMA URL relation capability.
+    To avoid narrowing DIMA's HTTP(S) linking ability, this validation only
+    rejects malformed URLs and non-HTTP(S) schemes such as file:// or gopher://.
+    It intentionally does not restrict domains, IP ranges, DNS results, or ports.
+    """
+    value = raw_url.strip()
+    if not value:
+        raise ValueError("invalid url")
+    if len(value) > _MAX_DIMA_URL_LENGTH:
+        raise ValueError("invalid url")
+
+    parsed = urlsplit(value)
+    if parsed.scheme.lower() not in _ALLOWED_DIMA_URL_SCHEMES:
+        raise ValueError("invalid url")
+    if not parsed.hostname:
+        raise ValueError("invalid url")
+
+    return value
 
 
 logger = logging.getLogger(__name__)

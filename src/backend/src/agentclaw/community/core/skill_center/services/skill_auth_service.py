@@ -11,10 +11,8 @@ from typing import Any
 from injector import inject
 
 from agentclaw.community.core.mcp.services.auth_service import MCPAuthService
-from agentclaw.community.core.skill_center.services.repositories import (
-    SkillRepository,
-    SkillSetRepository,
-)
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 

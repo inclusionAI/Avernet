@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agentclaw.community.core.channel.services.channel_service import ChannelService
-from agentclaw.community.core.channel.services.repositories import ChannelRecord
+from agentclaw.community.core.channel.models import ChannelRecord
 from agentclaw.community.core.devices.services.device_context import DeviceContext
 
 

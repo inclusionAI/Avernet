@@ -11,8 +11,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from secbaas.community.adapters.web.routers.open_api.dependencies import (
-    _normalize_bot_id,
     get_bot_chat_context,
+    normalize_bot_id,
     validate_api_key,
     validate_policy,
 )
@@ -93,7 +93,7 @@ async def deliver_message(
             },
         )
 
-    bot_id = _normalize_bot_id(request.bot_id)
+    bot_id = normalize_bot_id(request.bot_id)
 
     bot_id = validate_policy(api_key_record, bot_id)
 
@@ -219,7 +219,7 @@ async def deliver_message_stream(
             },
         )
 
-    bot_id = _normalize_bot_id(request.bot_id)
+    bot_id = normalize_bot_id(request.bot_id)
 
     bot_id = validate_policy(api_key_record, bot_id)
 

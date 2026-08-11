@@ -28,6 +28,17 @@ Receive = Callable[[], Awaitable[dict[str, Any]]]
 Send = Callable[[dict[str, Any]], Awaitable[None]]
 
 
+# The gateway signs every forwarded identity, and there is no fallback key, so
+# a test that forwards has to provision one exactly as a deployment does: the
+# community resolver reads ``{env_prefix}{NAME}_VALUE``.
+_TEST_KEY = "integration-test-shared-secret-32b!!"
+
+
+@pytest.fixture(autouse=True)
+def _signing_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE", _TEST_KEY)
+
+
 def _load_user_config() -> UserConfig:
     return ConfigLoader.load().user_config
 
@@ -236,9 +247,7 @@ def _test_authenticator(db):
 
     return build_authenticator(
         strategies={
-            "google": GoogleUserStrategy(
-                token_header="x-avernet-google-token", default_tenant="default"
-            ),
+            "google": GoogleUserStrategy(token_header="x-avernet-google-token"),
             "bot_token": BotTokenStrategy(registry=BotRepository(db)),
             "app_token": AppTokenStrategy(registry=AppRepository(db)),
             "access_key_token": AccessKeyTokenStrategy(
@@ -272,7 +281,6 @@ def test_real_authenticator_admits_google_token_then_forwards() -> None:
         (
             GoogleUserStrategy(
                 token_header="x-avernet-google-token",
-                default_tenant="default",
                 transport=httpx.MockTransport(_userinfo_handler),
             ),
         ),

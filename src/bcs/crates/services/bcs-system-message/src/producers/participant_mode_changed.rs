@@ -6,7 +6,7 @@
 
 use async_trait::async_trait;
 use bcs_domain::{
-    ActorKind, DeliveryType, Group, Participant, ParticipantMode, SystemMessageEvent,
+    ActorKind, DeliveryType, Group, Participant, ParticipantMode, PersistMode, SystemMessageEvent,
     SystemMessageEventKind, SystemGroupMessage,
 };
 use bcs_service_api::{BotRegistryCoreService, SystemMessageProducerService};
@@ -26,7 +26,7 @@ impl SystemMessageProducerService for ParticipantModeChangedMessageProducer {
         _group: &Group,
         _registry: &dyn BotRegistryCoreService,
         participants: &[Participant],
-    ) -> Vec<SystemGroupMessage> {
+    ) -> (Vec<SystemGroupMessage>, Option<String>) {
         let SystemMessageEvent::ParticipantModeChanged {
             actor_id: _,
             actor_name,
@@ -36,14 +36,14 @@ impl SystemMessageProducerService for ParticipantModeChangedMessageProducer {
             ..
         } = event
         else {
-            return vec![];
+            return (vec![], None);
         };
 
         if *actor_kind == ActorKind::Bot && from.is_none() {
             tracing::warn!(
                 "ParticipantModeChanged with from=None for Bot; BotJoined should handle this"
             );
-            return vec![];
+            return (vec![], None);
         }
 
         let content = match (*actor_kind, *to) {
@@ -61,6 +61,7 @@ impl SystemMessageProducerService for ParticipantModeChangedMessageProducer {
             }
             _ => format!("{} 的状态变成了 {:?}", actor_name, to),
         };
+        let user_message = Some(content.clone());
 
         let recipients: Vec<String> = participants
             .iter()
@@ -68,14 +69,14 @@ impl SystemMessageProducerService for ParticipantModeChangedMessageProducer {
             .map(|p| p.bot_uuid.clone())
             .collect();
 
-        if recipients.is_empty() {
-            return vec![];
-        }
-
-        vec![SystemGroupMessage {
+        // Identical text for every recipient: persist a single public record
+        // (owner = None) that human viewers also read in history.
+        let bot_messages = vec![SystemGroupMessage {
             recipients,
             message: content,
             delivery_type: DeliveryType::Inject,
-        }]
+            persist: PersistMode::Public,
+        }];
+        (bot_messages, user_message)
     }
 }

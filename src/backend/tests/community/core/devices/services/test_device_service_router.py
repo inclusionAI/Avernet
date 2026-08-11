@@ -427,9 +427,13 @@ class TestApplyDeviceRouting:
             entity_type="staff",
             operator=_make_operator(),
             bot_id="bot1",
+            device_props_extra={"image_policy_on_active": "default"},
         )
 
         mock_service.apply_device.assert_called_once()
+        assert mock_service.apply_device.call_args.kwargs["device_props_extra"] == {
+            "image_policy_on_active": "default"
+        }
         assert result is record
 
     def test_apply_forwards_template_type_and_bot_type_to_routing(self):

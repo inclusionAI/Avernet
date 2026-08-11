@@ -10,6 +10,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+from agentclaw.community.plugin_api.secret_resolver import SecretResolver
+
 
 @dataclass(frozen=True)
 class BotProvisioningContext:
@@ -61,12 +63,45 @@ class EngineProvisioningStrategy(ABC):
         """Return extra env vars to inject into the runtime container."""
 
     @abstractmethod
+    def build_extra_properties(
+        self,
+        ctx: BotProvisioningContext,
+        *,
+        secret_resolver: SecretResolver | None = None,
+        theta_master_key_secret: str = "",
+    ) -> dict[str, Any] | None:
+        """Resolve engine-owned template fields into a generic runtime envelope."""
+
+    @abstractmethod
     def should_encrypt_template_token(self, ctx: BotProvisioningContext) -> bool:
         """Whether ``template_config['token']`` should be encrypted before persist."""
 
     @abstractmethod
     def extract_runtime_token(self, ctx: BotProvisioningContext) -> str | None:
         """Return the token value that should be forwarded to container init."""
+
+    @abstractmethod
+    def uses_adapter_chat_session_lifecycle(self, ctx: BotProvisioningContext) -> bool:
+        """Whether ExpertChat should manage chat sessions through Adapter APIs.
+
+        ``True`` preserves the legacy OpenClaw adapter lifecycle: create, pre-check,
+        and delete call ``/api/sessions`` on the device adapter. Engines that create
+        sessions lazily through their relay/runtime should return ``False`` so
+        ExpertChat only keeps its local session key.
+        """
+
+    @abstractmethod
+    def build_local_chat_session_key(
+        self, ctx: BotProvisioningContext, *, user_id: str
+    ) -> str:
+        """Build the local session key for relay-managed chat sessions.
+
+        Only strategies with ``uses_adapter_chat_session_lifecycle(ctx) == False``
+        should be asked to construct this key. The concrete engine strategy owns
+        the wire format instead of ExpertChat branching on engine literals.
+        Versioned service-bot formats are documented in
+        ``src/backend/specs/2026-08-10-expert-chat-service-bot-session-keys/spec.md``.
+        """
 
     @abstractmethod
     def on_bot_created(self, ctx: BotProvisioningContext) -> None:

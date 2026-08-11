@@ -8,16 +8,10 @@ from uuid import uuid4
 
 from injector import inject
 
-from agentclaw.community.core.bot_management.repository.protocol import (
-    BotRepository,
-)
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
-from agentclaw.community.core.skills_pool.repository.protocol import (
-    SkillsPoolLayoutRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolLayoutRepositoryProtocol
 from agentclaw.community.core.skills_pool.rollout_gate import (
     BotRuntimeForm,
     RolloutDecision,

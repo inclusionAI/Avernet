@@ -56,6 +56,12 @@ def sample_sessions():
 
 class TestListSessions:
 
+    def test_owner_id_is_not_a_public_query_parameter(self):
+        from agentclaw.community.adapters.http.bot_chat.router import router
+
+        route = next(route for route in router.routes if route.path == "/api/v1/bot-chats")
+        assert "owner_id" not in {parameter.name for parameter in route.dependant.query_params}
+
     @pytest.mark.asyncio
     async def test_product_query_parameters_are_forwarded(self, mock_service, mock_user):
         from agentclaw.community.adapters.http.bot_chat.router import list_sessions
@@ -73,7 +79,6 @@ class TestListSessions:
         await list_sessions(
             service=mock_service,
             user=mock_user,
-            owner_id=None,
             bot_id=None,
             trace_id=None,
             session_id=None,
@@ -114,7 +119,6 @@ class TestListSessions:
 
         result = await list_sessions(
             service=mock_service,
-            owner_id=None,
             bot_id=None,
             trace_id=None,
             session_id=None,
@@ -130,13 +134,13 @@ class TestListSessions:
         assert result.success is True
         assert result.data.total == 1
         assert len(result.data.sessions) == 1
-        # Verify owner_id defaults to user's staffId
+        # The authenticated user's staffId is the only product query owner.
         mock_service.list_sessions.assert_called_once()
         call_kwargs = mock_service.list_sessions.call_args
         assert call_kwargs.kwargs.get("owner_id") == "361618" or call_kwargs[1].get("owner_id") == "361618"
 
     @pytest.mark.asyncio
-    async def test_list_sessions_with_filters(self, mock_service, mock_user):
+    async def test_list_sessions_with_filters_uses_authenticated_owner(self, mock_service, mock_user):
         from agentclaw.community.adapters.http.bot_chat.router import list_sessions
 
         mock_service.list_sessions = AsyncMock(return_value=SessionListResponse(
@@ -149,7 +153,6 @@ class TestListSessions:
 
         await list_sessions(
             service=mock_service,
-            owner_id="custom_owner",
             bot_id="bot_123",
             trace_id=None,
             session_id="gen-ai-sess-456",
@@ -163,7 +166,7 @@ class TestListSessions:
         )
 
         call_kwargs = mock_service.list_sessions.call_args.kwargs
-        assert call_kwargs["owner_id"] == "custom_owner"
+        assert call_kwargs["owner_id"] == "361618"
         assert call_kwargs["bot_id"] == "bot_123"
         assert call_kwargs["session_id"] == "gen-ai-sess-456"
 
@@ -181,7 +184,6 @@ class TestListSessions:
 
         result = await list_sessions(
             service=mock_service,
-            owner_id=None,
             bot_id=None,
             trace_id=None,
             session_id=None,
@@ -213,7 +215,6 @@ class TestListSessions:
 
         await list_sessions(
             service=mock_service,
-            owner_id=None,
             bot_id=None,
             trace_id=None,
             session_id="120e838c-011c-4e72-a744-8ca165a2ccdb",
@@ -245,7 +246,6 @@ class TestListSessions:
 
         await list_sessions(
             service=mock_service,
-            owner_id=None,
             bot_id=None,
             trace_id=None,
             session_id=None,
@@ -271,7 +271,7 @@ class TestListSessions:
 
         result = await list_sessions(
             service=mock_service,
-            owner_id=None, bot_id=None, trace_id=None, session_id=None, query=None,
+            bot_id=None, trace_id=None, session_id=None, query=None,
             from_date=None, to_date=None, page=1, limit=20, user=mock_user,
         )
 

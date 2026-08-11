@@ -116,6 +116,7 @@
 | `test_core_rules.py` | 7, 14 (transport-agnostic core, wiring) | pytestarch + AST | ✅ 3 tests passing; adapter thinness not checked |
 | `test_structure_rules.py` | 22, 25 (context docs, conformance tests, import-linter gap) | AST | ✅ **4** tests passing (2 new: import-linter gap, file-size) |
 | `test_plugin_rules.py` | 11 (plugin lifecycle, SPI→plugin method mapping) | AST | ✅ **5** tests passing (1 new: SPI method coverage) |
+| `test_no_private_exports.py` | Local convention (CLAUDE.md) — no `_`-prefixed names exported in `__init__.py` | AST | ✅ **1** test passing (8 known debt files) |
 | `test_env_import_regression.py` | 14 watchdog (core→infra env-import regression) | AST | ✅ **5** tests passing (NEW in Phase 2) |
 | `test_plugin_isolation.py` | 15 (cross-plugin import ban) | pytestarch | ✅ **2** tests passing (NEW in Phase 2) |
 | `test_protocol_exports.py` | 5 complement (Protocol `__all__` exports) | AST | ✅ **3** tests passing (NEW in Phase 2) |

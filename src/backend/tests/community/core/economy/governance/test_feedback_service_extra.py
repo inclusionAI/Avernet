@@ -13,21 +13,11 @@ from datetime import datetime
 
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.economy.governance.repositories.orm import (
-    GovernanceNotificationOrm,
-    GovernanceTicketOrm,
-    WhitelistEntryOrm,
-)
+from agentclaw.community.core.economy.governance.orm import GovernanceNotificationOrm, GovernanceTicketOrm, WhitelistEntryOrm
 from agentclaw.community.core.economy.governance.domain.enums import AuditAction
-from agentclaw.community.core.economy.governance.repositories.audit_repo import (
-    GovernanceAuditRepository,
-)
-from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
-    NotifyLogRepository,
-)
-from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
-    TaskRecordRepository,
-)
+from agentclaw.community.core.repository.implementations.governance.audit import GovernanceAuditRepository
+from agentclaw.community.core.repository.implementations.governance.notify_log import NotifyLogRepository
+from agentclaw.community.core.repository.implementations.governance.task_record import TaskRecordRepository
 from agentclaw.community.core.economy.governance.services.feedback_service import (
     GovernanceFeedbackService,
 )
@@ -192,9 +182,7 @@ class TestResolveEdgeBranches:
             assert ticket.governance_status == "waiting_review"
 
         # 3. 审计 user_whitelisted(申请动作)仍写
-        from agentclaw.community.core.economy.governance.repositories.orm import (
-            AuditLogOrm,
-        )
+        from agentclaw.community.core.economy.governance.orm import AuditLogOrm
         with Session() as s:
             audits = [a for a in s.query(AuditLogOrm).all()
                       if a.action_taken == AuditAction.USER_WHITELIST]

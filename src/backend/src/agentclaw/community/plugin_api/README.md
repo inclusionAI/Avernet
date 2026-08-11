@@ -7,7 +7,7 @@ Plugin Protocol declarations (the kernel's outbound interface to swappable capab
 ```yaml
 purpose: "Plugin Protocol declarations (the kernel's outbound interface to swappable capabilities)."
 provides:
-  - "23 plugin Protocol classes (AuthPlugin, CachePlugin, DatabasePlugin, …)"
+  - "27 plugin Protocol classes (AuthPlugin, CachePlugin, DatabasePlugin, …)"
   - "Plugin marker"
   - "@plugin_impl decorator + Mode/Flavor enums"
   - "IMPL_REGISTRY"

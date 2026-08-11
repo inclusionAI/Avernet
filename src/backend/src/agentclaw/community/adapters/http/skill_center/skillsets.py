@@ -30,9 +30,9 @@ from agentclaw.community.core.bot_collaborator.interceptor import (
     with_interceptors,
 )
 
-from agentclaw.community.core.skill_center.services.repositories import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
 from agentclaw.community.core.mcp.services.passport_scope import filter_passport_mcp_codes
 from agentclaw.community.di import Injected

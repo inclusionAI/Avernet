@@ -6,6 +6,7 @@ _normalize_model_id, and _get_provider_map.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from engine.community.openclaw.client.gateway_client import OpenClawGatewayClient
@@ -14,15 +15,12 @@ log = logging.getLogger("openclaw-port")
 
 _BCS_GROUP_SESSION_MARKER = "bcs:group:"
 _BCS_INTERNAL_SESSION_PREFIX = "agent:main:bcs_grp_"
+_BCS_DM_GROUP_PATTERN = re.compile(r"(?:^|:)bcs_grp_(?:[^:]*_)?dm_[^:]+")
 
 
 def _is_bcs_dm_session_key(key: str) -> bool:
-    """Return whether an OpenClaw key belongs to a namespaced BCS DM group."""
-    marker_index = key.rfind(_BCS_GROUP_SESSION_MARKER)
-    if marker_index < 0:
-        return False
-    group_id = key[marker_index + len(_BCS_GROUP_SESSION_MARKER):]
-    return group_id.startswith("bcs_grp_") and "_dm_" in group_id
+    """Return whether an OpenClaw key belongs to a BCS DM group."""
+    return _BCS_DM_GROUP_PATTERN.search(key) is not None
 
 
 def _should_keep_session(session: dict[str, Any]) -> bool:
@@ -30,6 +28,8 @@ def _should_keep_session(session: dict[str, Any]) -> bool:
     key = session.get("key")
     if not isinstance(key, str):
         return False
+    if _is_bcs_dm_session_key(key):
+        return True
     if key.startswith(_BCS_INTERNAL_SESSION_PREFIX):
         return False
     return (

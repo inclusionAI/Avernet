@@ -7,24 +7,11 @@ from datetime import datetime, timedelta
 import pytest
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.economy.governance.repositories.orm import (
-    WhitelistEntryOrm,
-    AuditLogOrm,
-    GovernanceNotificationOrm,
-    GovernanceTicketOrm,
-)
-from agentclaw.community.core.economy.governance.repositories.audit_repo import (
-    GovernanceAuditRepository,
-)
-from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
-    NotifyLogRepository,
-)
-from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
-    TaskRecordRepository,
-)
-from agentclaw.community.core.economy.governance.repositories.whitelist_repo import (
-    GovernanceWhitelistRepository,
-)
+from agentclaw.community.core.economy.governance.orm import WhitelistEntryOrm, AuditLogOrm, GovernanceNotificationOrm, GovernanceTicketOrm
+from agentclaw.community.core.repository.implementations.governance.audit import GovernanceAuditRepository
+from agentclaw.community.core.repository.implementations.governance.notify_log import NotifyLogRepository
+from agentclaw.community.core.repository.implementations.governance.task_record import TaskRecordRepository
+from agentclaw.community.core.repository.implementations.governance.whitelist import GovernanceWhitelistRepository
 from agentclaw.community.core.economy.governance.services.record_process_service import (
     GovernanceRecordService,
     OfflineBatchResult,
@@ -258,9 +245,7 @@ class TestProcessRecord:
         Step6 建新活跃 OPEN 单 + first_send 通知。老观察单暂留(Group D 删白收尾
         才转 CLOSED)。
         """
-        from agentclaw.community.core.economy.governance.repositories.whitelist_repo import (
-            GovernanceWhitelistRepository,
-        )
+        from agentclaw.community.core.repository.implementations.governance.whitelist import GovernanceWhitelistRepository
         svc, db = _build_svc(engine)
         whitelist_repo = GovernanceWhitelistRepository(db=db)
         whitelist_repo.add(

@@ -28,6 +28,10 @@ class InvalidBotStateError(Exception):
     """Raised when activate is called on a bot that is not RECYCLED."""
 
 
+class BotNotFoundError(Exception):
+    """Raised when the requested bot does not exist for the owner."""
+
+
 class ActivateBotService:
     @inject
     def __init__(
@@ -42,7 +46,8 @@ class ActivateBotService:
         """Activate a RECYCLED bot.
 
         Returns a dict with keys ``status`` and ``message``.
-        Raises ``InvalidBotStateError`` if the bot is not RECYCLED (or REACTIVATING).
+        Raises ``BotNotFoundError`` if the bot does not exist and
+        ``InvalidBotStateError`` if it is not RECYCLED (or REACTIVATING).
         """
         bot = self._bot_service.get_bot(bot_id=bot_id, user_id=user_id)
         if not bot:
@@ -50,7 +55,7 @@ class ActivateBotService:
                 "[activate] bot not found bot_id=%s user_id=%s",
                 bot_id, user_id,
             )
-            raise InvalidBotStateError(f"bot not found: {bot_id}")
+            raise BotNotFoundError(f"bot not found: {bot_id}")
 
         status = bot.get("status")
         logger.info(

@@ -76,6 +76,7 @@ async fn delivery_ports_are_transport_free_contracts() {
             frame,
             delivery_kind: BotDeliveryKind::Send,
             provider_transport: Default::default(),
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -145,6 +146,7 @@ fn group_chat_command() -> GroupChatCommand {
         requested_sender_id: None,
         message: "hello".to_string(),
         session_id: None,
+        provider_bypass_headers: Vec::new(),
     }
 }
 

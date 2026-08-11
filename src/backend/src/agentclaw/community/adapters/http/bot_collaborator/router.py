@@ -17,6 +17,8 @@ from agentclaw.community.adapters.http.bot_collaborator.schemas import (
     UpdateCollaboratorResponse,
     RemoveCollaboratorRequest,
     RemoveCollaboratorResponse,
+    LeaveCollaborationRequest,
+    LeaveCollaborationResponse,
     CheckPermissionRequest,
     CheckPermissionResponse,
     AcquireLockRequest,
@@ -506,6 +508,71 @@ async def remove_collaborator(
     except Exception as e:
         logger.error(f"[remove_collaborator] Unexpected error: {e}")
         return ApiResponse(success=False, message=f"移除协作者失败: {str(e)}", error_code=500, data=None)
+
+
+@router.post(
+    "/leave",
+    response_model=ApiResponse,
+    summary="退出协作",
+)
+async def leave_collaboration(
+    request: LeaveCollaborationRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+    service: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
+) -> ApiResponse:
+    """当前登录成员主动退出 Bot 协作。
+
+    POST /api/bot/collaborator/leave
+    Body: {
+        "bot_id": "xxx",
+        "owner_id": "xxx"
+    }
+
+    权限要求：当前登录用户必须是该 Bot 的协作者。
+    注意：该接口只允许成员删除自己的协作者记录，不支持 owner 退出自己的 Bot，
+    也不支持代其他成员退出。
+
+    Returns:
+        ApiResponse: 包含退出结果
+    """
+    try:
+        user_id = user.staffId
+
+        if not user_id or user_id == "anonymous":
+            return ApiResponse(success=False, message="无法获取用户信息", error_code=400, data=None)
+
+        logger.info(
+            "[leave_collaboration] Leaving: bot_id=%s, owner_id=%s, user=%s",
+            request.bot_id, request.owner_id, user_id
+        )
+
+        success = service.leave_collaboration(
+            bot_id=request.bot_id,
+            owner_id=request.owner_id,
+            user_id=user_id,
+        )
+
+        return ApiResponse(
+            success=True,
+            data=LeaveCollaborationResponse(deleted=success).model_dump(),
+            message="已退出协作",
+        )
+
+    except BotNotFoundError as e:
+        logger.warning(f"[leave_collaboration] Bot not found: {e}")
+        return ApiResponse(success=False, message=str(e), error_code=404, data=None)
+
+    except CollaboratorNotFoundError as e:
+        logger.warning(f"[leave_collaboration] Collaborator not found: {e}")
+        return ApiResponse(success=False, message=str(e), error_code=404, data=None)
+
+    except CollaboratorServiceError as e:
+        logger.error(f"[leave_collaboration] Service error: {e}")
+        return ApiResponse(success=False, message=str(e), error_code=500, data=None)
+
+    except Exception as e:
+        logger.error(f"[leave_collaboration] Unexpected error: {e}")
+        return ApiResponse(success=False, message=f"退出协作失败: {str(e)}", error_code=500, data=None)
 
 
 @router.post(

@@ -5,7 +5,10 @@ from __future__ import annotations
 import os
 
 from gateway.community.config import ConfigLoader
+from gateway.community.logger import get_logger
 from gateway.community.spi.runner import AppRunnerPlugin
+
+logger = get_logger("runner-bare")
 
 
 class BareAppRunnerPlugin(AppRunnerPlugin):
@@ -24,6 +27,8 @@ class BareAppRunnerPlugin(AppRunnerPlugin):
         # lifespan's configure_logging() call are visible. Plugin selection
         # (bare vs sofa) happens via entry points, keyed off GATEWAY_RUN_MODE.
         workers = config.workers if config.workers > 1 else 1
+
+        logger.info("starting bare runner: port=%d workers=%d", port, workers)
 
         import uvicorn
 

@@ -92,7 +92,6 @@ pub struct SessionCompletionResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionParticipantInput {
     pub bot_uuid: String,
-    pub mode: Option<BotParticipantMode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,10 +104,8 @@ pub struct CreateSessionOutcome {
 pub struct CreateSession {
     pub caller: AuthenticatedCaller,
     pub group_id: String,
-    pub driver_bot_uuid: String,
     pub title: Option<String>,
     pub input: Option<SessionInput>,
-    pub participants: Vec<SessionParticipantInput>,
 }
 
 #[derive(Debug, Clone)]
@@ -138,6 +135,7 @@ pub struct UpdateSession {
 pub struct DeleteSession {
     pub caller: AuthenticatedCaller,
     pub session_id: String,
+    pub acting_bot_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -151,7 +149,6 @@ pub struct AddSessionParticipant {
     pub caller: AuthenticatedCaller,
     pub session_id: String,
     pub bot_uuid: String,
-    pub mode: Option<BotParticipantMode>,
 }
 
 #[derive(Debug, Clone)]

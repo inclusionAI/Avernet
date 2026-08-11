@@ -132,3 +132,11 @@ __all__ = [
     "McpCallType",
     "McpCallTypeUpdateResult",
 ]
+
+
+class CallerIdentityLockMismatchError(RuntimeError):
+    """The lock changed after the service-layer authorization check."""
+
+
+class CallerIdentityEngineChangedError(RuntimeError):
+    """The Bot active engine changed while updating its MCP identity."""

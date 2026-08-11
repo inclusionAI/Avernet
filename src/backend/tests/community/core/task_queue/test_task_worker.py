@@ -30,7 +30,7 @@ from agentclaw.community.core.task_queue.services.task_queue_service import Task
 from agentclaw.community.core.task_queue.services.worker import TaskWorker
 from agentclaw.community.core.task_queue.types import Complete, TaskStatus
 from agentclaw.community.di.config import TaskQueueWorkerConfig
-from agentclaw.community.plugins.task_queue_repository import TaskQueueRepository
+from agentclaw.community.core.repository.implementations.platform.task_queue import TaskQueueRepository
 
 pytestmark = pytest.mark.integration
 
@@ -70,13 +70,25 @@ class _World:
         self.service = TaskQueueService(self.repo)
         self.worker = TaskWorker(self.repo, self.registry, config)
 
-    def enqueue(self, task_type, payload=None, *, deadline_seconds=3600, delay_seconds=0):
+    def enqueue(
+        self,
+        task_type,
+        payload=None,
+        *,
+        deadline_seconds=3600,
+        delay_seconds=0,
+        idempotency_key=None,
+    ):
+        """Just the ``TaskRecord``. These tests predate enqueue idempotency and
+        pass no key, so they double as a regression guard that un-keyed enqueue
+        behaves exactly as it always has."""
         return self.service.enqueue(
             task_type,
             payload if payload is not None else {},
             deadline_seconds,
             delay_seconds=delay_seconds,
-        )
+            idempotency_key=idempotency_key,
+        ).record
 
     def status_of(self, task_id):
         return self.repo.get_by_id(task_id).status

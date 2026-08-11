@@ -18,7 +18,7 @@ from secbaas.community.core.service.bot_run._executor import (
     RequeuedToPendingError,
     ResultGuardExecutor,
 )
-from secbaas.community.plugins.database.stub.sqlite_orm import SqliteOrmPlugin
+from secbaas.community.plugins.database.sqlite.sqlite_orm import SqliteOrmPlugin
 
 
 @pytest.fixture(autouse=True)

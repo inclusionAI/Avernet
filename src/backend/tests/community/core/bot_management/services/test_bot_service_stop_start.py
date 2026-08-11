@@ -50,6 +50,7 @@ def _make_binding(status: str = "ACTIVE"):
 def _make_service() -> BotService:
     """构造带 mock repository 的 BotService。"""
     svc = BotService.__new__(BotService)
+    svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = MagicMock()
     svc._passport_plugin = MagicMock()
     # Cycle-breaker providers installed by __init__; tests using __new__
@@ -57,6 +58,9 @@ def _make_service() -> BotService:
     # the resolved DeviceService.
     svc._bot_publish_provider = lambda: MagicMock()
     svc._device_service_provider = lambda: MagicMock()
+    teclaw_provision = MagicMock()
+    teclaw_provision.is_teclaw.side_effect = lambda engine: engine == "teclaw"
+    svc._teclaw_provision_provider = lambda: teclaw_provision
     # Restart idempotency lock repo. Default: acquire() returns a truthy mock
     # so restart_bot treats the lock as acquired and proceeds to stop+start.
     svc._restart_lock_repo = MagicMock()

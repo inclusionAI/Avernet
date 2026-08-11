@@ -9,7 +9,7 @@ from agentclaw.community.core.user_list import (
     UserListRepositoryProtocol,
     UserListService,
 )
-from agentclaw.community.plugins.user_list_repository import UserListRepository
+from agentclaw.community.core.repository.implementations.identity.user_list import UserListRepository
 
 
 class UserListModule(Module):

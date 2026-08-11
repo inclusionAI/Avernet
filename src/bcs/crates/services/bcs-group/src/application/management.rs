@@ -1059,10 +1059,6 @@ impl GroupManagementService for GroupManagement {
                 .await;
         }
 
-        let topic = cmd
-            .topic
-            .as_deref()
-            .unwrap_or_else(|| group.label.as_deref().unwrap_or(""));
         let initial_session_kind = match requested_strategy {
             GroupStrategy::StateMachine => SessionKind::ServiceInvocation,
             GroupStrategy::Chat | GroupStrategy::ManagerWorker => SessionKind::Chat,
@@ -1089,6 +1085,16 @@ impl GroupManagementService for GroupManagement {
             participant.mode = Some(ParticipantMode::Present);
             initial_session_participants.push(participant);
         }
+        // `目标` (reason) sourcing mirrors the create-session HTTP path:
+        // session input (as text) → group.context → group.label, empty when
+        // all are absent (the `目标` line is then omitted). Computed before the
+        // create call because `initial_session_input` is moved into it below.
+        let reason = bcs_service_api::resolve_session_topic(
+            initial_session_input.as_ref(),
+            group.context.as_deref(),
+            group.label.as_deref(),
+        )
+        .unwrap_or_default();
         let initial_session_id;
         let context_injected = match self
             .session_management
@@ -1122,7 +1128,6 @@ impl GroupManagementService for GroupManagement {
                     let sid = outcome.session.id.clone();
                     let gid = group.id.clone();
                     let session_participants = outcome.session.participants.clone();
-                    let reason = topic.to_string();
                     self.system_message
                         .notify(
                             &gid,
@@ -1132,6 +1137,7 @@ impl GroupManagementService for GroupManagement {
                                 reason,
                                 session_input: None,
                                 task_ledger: None,
+                                driver_delivery: None,
                             },
                             &sid,
                             &session_participants,
@@ -1307,7 +1313,7 @@ impl GroupManagementService for GroupManagement {
             .get(&cmd.bot_id)
             .await
             .ok_or_else(|| ServiceError::BotNotFound(cmd.bot_id.clone()))?;
-        let role = member_role(cmd.role.as_deref());
+        let role = default_added_member_role(group.group_strategy);
 
         if bot.actor_kind == ActorKind::Human {
             let allowed = match group.group_strategy {
@@ -2042,13 +2048,10 @@ fn validate_human_constraints(
     Ok(())
 }
 
-fn member_role(role: Option<&str>) -> ParticipantRole {
-    match role {
-        Some("driver") => ParticipantRole::Driver,
-        Some("manager") => ParticipantRole::Manager,
-        Some("worker") => ParticipantRole::Worker,
-        Some("observer") => ParticipantRole::Observer,
-        _ => ParticipantRole::Consultant,
+fn default_added_member_role(strategy: GroupStrategy) -> ParticipantRole {
+    match strategy {
+        GroupStrategy::ManagerWorker => ParticipantRole::Worker,
+        GroupStrategy::Chat | GroupStrategy::StateMachine => ParticipantRole::Consultant,
     }
 }
 

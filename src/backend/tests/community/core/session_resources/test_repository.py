@@ -9,9 +9,7 @@ from agentclaw.community.core.session_resources.types import (
     TransferApiVersion,
 )
 from agentclaw.community.plugins.local.database import SqliteDB, reset_for_tests
-from agentclaw.community.plugins.session_resource_repository import (
-    SessionResourceRepository,
-)
+from agentclaw.community.core.repository.implementations.platform.session_resource import SessionResourceRepository
 
 
 def _record() -> SessionResourceRecord:
@@ -38,6 +36,7 @@ def _record() -> SessionResourceRecord:
         status=SessionResourceStatus.UPLOAD_URL_ISSUED,
         transfer_api_version=TransferApiVersion.SESSION_V2,
         session_key_ciphertext="enc:v1:ciphertext",
+        binding_id=42,
     )
 
 
@@ -52,8 +51,9 @@ async def repo():
 
 @pytest.mark.asyncio
 async def test_owned_lookup_requires_owner_bot_and_session(repo):
-    repo.create(_record())
+    created = repo.create(_record())
 
+    assert created.binding_id == 42
     assert repo.get_owned("sr_001", "owner-1", "bot-1", "session-hash") is not None
     assert repo.get_owned("sr_001", "owner-2", "bot-1", "session-hash") is None
     assert repo.get_owned("sr_001", "owner-1", "bot-2", "session-hash") is None

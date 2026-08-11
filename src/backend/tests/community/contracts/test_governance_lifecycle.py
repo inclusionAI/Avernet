@@ -32,19 +32,11 @@ from agentclaw.community.core.economy.governance.domain.ticket import (
     IllegalTicketTransitionError,
     MutableSnapshot,
 )
-from agentclaw.community.core.economy.governance.repositories.audit_repo import (
-    GovernanceAuditRepository,
-)
-from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
-    NotifyLogRepository,
-)
-from agentclaw.community.core.economy.governance.repositories.orm import (
-    Base,  # noqa: F401 — import 注册表
-    GovernanceTicketOrm,
-)
-from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
-    TaskRecordRepository,
-)
+from agentclaw.community.core.repository.implementations.governance.audit import GovernanceAuditRepository
+from agentclaw.community.core.repository.implementations.governance.notify_log import NotifyLogRepository
+from agentclaw.community.core.economy.governance.orm import Base
+from agentclaw.community.core.economy.governance.orm import GovernanceTicketOrm
+from agentclaw.community.core.repository.implementations.governance.task_record import TaskRecordRepository
 from agentclaw.community.core.economy.governance.services.lifecycle_service import (
     GovernanceLifecycleService,
 )

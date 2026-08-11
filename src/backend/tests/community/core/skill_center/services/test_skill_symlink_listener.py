@@ -43,6 +43,7 @@ def _make_listener(
 
     resolver = MagicMock()
     fake_ctx = MagicMock()
+    fake_ctx.binding_id = 42
     resolver.resolve_for_bot.return_value = fake_ctx
 
     dispatcher = MagicMock()
@@ -133,6 +134,55 @@ class TestHandleDeviceActivated:
 
         resolver.resolve_for_bot.assert_not_called()
         dispatcher.dispatch.assert_not_called()
+
+    def test_skips_when_event_binding_is_no_longer_current(self):
+        event = _make_event(binding_id=42)
+        bot_query = MagicMock()
+        bot_query.get_by_binding_id.return_value = {
+            "bot_id": "default",
+            "owner_id": "u001",
+        }
+        sync_plugin = MagicMock()
+        service = MagicMock()
+        listener, factory, dispatcher, resolver = _make_listener(
+            service,
+            sync_plugin,
+            bot_query=bot_query,
+        )
+        resolver.resolve_for_bot.return_value.binding_id = 84
+
+        listener.handle(event)
+
+        resolver.resolve_for_bot.assert_called_once_with("default", "u001")
+        factory.create.assert_not_called()
+        dispatcher.dispatch.assert_not_called()
+        sync_plugin.sync_symlinks.assert_not_called()
+
+    def test_published_service_binding_never_uses_draft_db_mapping(self):
+        event = _make_event(binding_id=42, device_provider="baas")
+        bot_query = MagicMock()
+        bot_query.get_by_binding_id.return_value = {
+            "bot_id": "service-bot-1",
+            "owner_id": "u001",
+            "bot_type": "service",
+        }
+        sync_plugin = MagicMock()
+        service = MagicMock()
+        listener, factory, dispatcher, resolver = _make_listener(
+            service,
+            sync_plugin,
+            bot_query=bot_query,
+        )
+        # Published Service bindings are version bindings.  The resolver owns
+        # only the current Draft binding, so the identities must never match.
+        resolver.resolve_for_bot.return_value.binding_id = 84
+
+        listener.handle(event)
+
+        resolver.resolve_for_bot.assert_called_once_with("service-bot-1", "u001")
+        factory.create.assert_not_called()
+        dispatcher.dispatch.assert_not_called()
+        sync_plugin.sync_symlinks.assert_not_called()
 
     def test_skips_when_bot_missing_owner(self):
         event = _make_event()

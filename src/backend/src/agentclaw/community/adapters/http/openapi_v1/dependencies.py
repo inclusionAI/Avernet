@@ -6,7 +6,14 @@ backend end of that contract. It holds the two seams the rest of the public
 surface was built against, and nothing else changes when they go live:
 
 - :func:`require_principal` — the FastAPI dependency every public route already
-  declares. Returns the verified caller, or raises so the route answers ``401``.
+  declares. Returns the verified caller **naming an end user**, or raises so the
+  route answers ``401`` (a WebSocket handshake is refused with close code
+  ``1008`` instead — same rule, and the only shape a handshake can be refused
+  in).
+  Whether it admits an **application acting alone** is decided by the
+  operation's entry in ``admission.py``'s table — not by a second dependency a
+  route could declare, because a route-level dependency can add a check and
+  never relax one.
 - :func:`resolve_avernet_tenant` — the data-isolation tenant for the request,
   read by ``AvernetTenantMiddleware`` before any route runs.
 
@@ -14,6 +21,11 @@ surface was built against, and nothing else changes when they go live:
 first, so it does the work and caches the outcome on the request scope; the
 dependency reuses it. Verifying twice would be wasted signature work and, worse,
 a window in which the two seams could disagree about who the caller is.
+
+:func:`resolve_caller` is that shared step, exported because the access log
+(``access_log.py``) is a third reader of it: it names the caller on every
+completed request and must name the *same* caller the route was scoped by, not a
+second opinion arrived at independently.
 
 Failure is uniform on purpose. No header, a bad signature, an expired token, an
 audience meant for another component, a payload we cannot parse — every one of
@@ -35,10 +47,19 @@ on the environment, and this seam only ever sees one of the two cases:
 
 from __future__ import annotations
 
-from fastapi import Request
+from typing import Annotated
 
+from fastapi import Depends, Request, WebSocketException
+from starlette.requests import HTTPConnection
+from starlette.status import WS_1008_POLICY_VIOLATION
+
+from agentclaw.community.adapters.http.openapi_v1.admission import (
+    ADMISSION,
+    ADMITTING_MODES,
+)
 from agentclaw.community.adapters.http.openapi_v1.errors import MissingPrincipalError
 from agentclaw.community.core.gateway_principal import (
+    PrincipalType,
     PrincipalVerificationError,
     VerifiedCaller,
     verify_principal_token,
@@ -74,46 +95,177 @@ _UNSET = _Unset()
 Principal = VerifiedCaller
 
 
-def _resolve_caller(request: Request) -> VerifiedCaller | None:
-    """Verify the forwarded principal once per request, caching the outcome.
+def _verb(connection: HTTPConnection) -> str:
+    """What to call this connection in a log line.
+
+    The HTTP method where there is one, and the literal ``WEBSOCKET`` on the
+    socket plane — the same word the gateway's route table qualifies a socket
+    rule with, so a refusal here and the rule that let the handshake through are
+    greppable by the same token. A WebSocket scope carries no ``method`` key at
+    all, so this is a substitution rather than a default.
+    """
+    return connection.scope.get("method") or "WEBSOCKET"
+
+
+def resolve_caller(connection: HTTPConnection) -> VerifiedCaller | None:
+    """Verify the forwarded principal once per connection, caching the outcome.
 
     ``None`` means "no caller we can trust" — absent header or failed
     verification, deliberately indistinguishable to the caller. The cache holds
     ``None`` too, so a failed verification is not retried on the same request.
+
+    Takes an :class:`HTTPConnection` rather than a ``Request`` because both
+    planes of this surface arrive here: the gateway signs the same
+    ``X-Avernet-Principal`` into a WebSocket handshake's headers as into an HTTP
+    request's, and a handshake is where a socket's credential is checked. The
+    body of the function never needed anything narrower — headers and
+    ``state`` are what it reads, and both belong to the base class.
     """
-    cached = getattr(request.state, _CALLER_STATE_ATTR, _UNSET)
+    cached = getattr(connection.state, _CALLER_STATE_ATTR, _UNSET)
     if cached is not _UNSET:
         return cached
 
-    caller = _verify_from_headers(request)
-    setattr(request.state, _CALLER_STATE_ATTR, caller)
+    caller = _verify_from_headers(connection)
+    setattr(connection.state, _CALLER_STATE_ATTR, caller)
     return caller
 
 
-def _verify_from_headers(request: Request) -> VerifiedCaller | None:
-    """Verify the request's principal header, logging why if it fails."""
-    token = request.headers.get(PRINCIPAL_HEADER, "").strip()
+def _verify_from_headers(connection: HTTPConnection) -> VerifiedCaller | None:
+    """Verify the connection's principal header, logging why if it fails."""
+    config = get_principal_verifier_config()
+    token = connection.headers.get(PRINCIPAL_HEADER, "").strip()
     if not token:
+        # Distinguished from a rejected token, and on its own log line, because
+        # the two point at completely different things. A *missing* header is
+        # not an auth failure at all: the gateway injects it on every forwarded
+        # request, so its absence means this request did not come through the
+        # gateway, or came through one whose route table does not require an
+        # identity for this path. Chasing signing keys for that is chasing the
+        # wrong half of the system, which is exactly what the previous silence
+        # invited.
+        logger.warning(
+            "no %s header on %s %s (request did not arrive through the "
+            "gateway's authenticated path; verifier key fp=%s)",
+            PRINCIPAL_HEADER,
+            _verb(connection),
+            connection.url.path,
+            config.key_fingerprint,
+        )
         return None
     try:
-        return verify_principal_token(token, get_principal_verifier_config())
+        return verify_principal_token(token, config)
     except PrincipalVerificationError as exc:
         # Log the reason (never the token) and treat the caller as absent. The
-        # request goes on to answer 401 from require_principal.
+        # request goes on to answer 401 from require_principal. The reason
+        # carries the fingerprint of the key this component judged the token
+        # against, plus the token's own JOSE header marked as caller-supplied —
+        # see ``core/gateway_principal/verifier.py``. The fingerprint is the
+        # part to reason from: compared against the gateway's boot line it
+        # separates a key mismatch from an expiry or a wrong audience, while
+        # the header is unauthenticated and can say anything a forger likes.
         logger.warning(
             "rejected forwarded principal on %s %s: %s",
-            request.method,
-            request.url.path,
+            _verb(connection),
+            connection.url.path,
             exc,
         )
         return None
 
 
-async def require_principal(request: Request) -> Principal:
-    """Return the verified caller, or raise :class:`MissingPrincipalError` (401)."""
-    caller = _resolve_caller(request)
+def _refuse(connection: HTTPConnection, reason: str) -> None:
+    """Refuse this connection in the shape its plane can carry.
+
+    One refusal for both planes and for both dependencies below, so "no caller
+    we can trust" and "no caller of an admissible shape" are indistinguishable
+    from outside — which they must be, or the surface would tell an unauthorized
+    caller which half it failed.
+    """
+    if connection.scope["type"] == "websocket":
+        raise WebSocketException(code=WS_1008_POLICY_VIOLATION, reason="Unauthorized")
+    raise MissingPrincipalError(reason)
+
+
+async def require_principal(connection: HTTPConnection) -> Principal:
+    """Return the verified caller **naming an end user**, or refuse.
+
+    **This is where the end-user guard now lives.** It used to sit inside
+    ``verify_principal_token``, which refused an identity set naming no end user
+    before any route ran. That could not stay: an application acting alone is
+    now a caller some operations admit, and the verifier is transport-agnostic
+    and route-blind (Rule 7) — the middleware that drives it runs before
+    routing, so deciding per operation there would mean a second route table in
+    the backend, hand-synced with the gateway's.
+
+    Moving it *here* keeps the property that actually mattered: **a route
+    inherits the refusal by saying nothing.** Every public route already
+    declares this dependency, so a route written tomorrow gets the end-user
+    requirement for free, and a route can only become admissible to a machine
+    caller by being given an entry in ``admission.py``'s table — which the route
+    inventory test forces someone to write deliberately. The guard moved one
+    layer up; it did not become optional.
+
+    One dependency for both planes, because the surface's rule is one rule:
+    every public route requires an authenticated caller. Only the *shape* of the
+    refusal differs, and it has to — an HTTP request is answered with a body and
+    a status, and a WebSocket handshake has neither:
+
+    - HTTP → :class:`MissingPrincipalError`, which ``app.py``'s handler turns
+      into the surface's ``401`` envelope, exactly as before.
+    - WebSocket → :class:`~fastapi.WebSocketException` with ``1008``
+      (policy violation). Raised before the endpoint runs, so the socket is
+      never accepted and Starlette refuses the handshake instead of opening a
+      connection it would immediately have to close.
+
+    Both say only "no caller we can trust"; which half of verification failed is
+    logged above and never returned, on either plane.
+    """
+    caller = resolve_caller(connection)
     if caller is None:
-        raise MissingPrincipalError("no verified caller for this request")
+        _refuse(connection, "no verified caller for this request")
+    elif not caller.has_user and not _admits_application(connection):
+        # Verified, but names only an application, on an operation that does not
+        # admit one. Refused here rather than at the handler's owner lookup, and
+        # with the same ``401`` an unverified caller gets.
+        _refuse(connection, "this operation requires a caller naming an end user")
+    return caller
+
+
+def _admits_application(connection: HTTPConnection) -> bool:
+    """Whether the matched operation admits a caller with no end user.
+
+    **The fail-closed default lives here.** An operation absent from
+    ``ADMISSION`` — a route added tomorrow, a path renamed without the table
+    following — is not admitted, so a new route refuses a machine caller by
+    *omission* rather than by someone remembering not to opt in. The route
+    inventory test then makes that omission loud rather than silent.
+
+    Reading the matched route from the connection scope is what makes one shared
+    declaration possible at all. The alternative the plan first reached for — a
+    second dependency that admitted routes declare instead of this one — cannot
+    work: ``build_public_router`` applies this dependency to every route through
+    ``_PUBLIC_AUTH``, and FastAPI *merges* router-level dependencies into each
+    route rather than letting one be swapped out. A route can add a check; it
+    can never relax one.
+
+    This lookup is route-aware, and that is fine *here* while it was not fine in
+    ``verify_principal_token``: this module is the HTTP adapter, which is the
+    layer that knows about routes. The verifier stays transport-agnostic
+    (Rule 7), which was the actual constraint.
+    """
+    route = connection.scope.get("route")
+    path = getattr(route, "path", None)
+    if path is None:
+        return False
+    method = connection.scope.get("method") or "WEBSOCKET"
+    return ADMISSION.get((method, path)) in ADMITTING_MODES
+
+
+async def require_user_and_app_principal(
+    caller: Annotated[Principal, Depends(require_principal)],
+) -> Principal:
+    """Require the signed caller to contain both User and App identities."""
+    if not any(principal.type == PrincipalType.APP for principal in caller.principals):
+        raise MissingPrincipalError("no verified user-and-app caller for this request")
     return caller
 
 
@@ -131,10 +283,15 @@ def resolve_avernet_tenant(request: Request) -> str:
     With no trustworthy caller this falls back to the internal default, which is
     what every non-public path resolves to anyway. That is safe because the
     request cannot get data out: every public route depends on
-    :func:`require_principal` and therefore answers ``401`` first — a property
-    pinned by ``test_public_routes_require_principal``, not left to inspection.
+    :func:`require_principal` and therefore answers ``401`` first — a property pinned by
+    ``test_public_routes_require_principal``, not left to inspection.
+
+    An **app-only** caller resolves its tenant from its ``AppPrincipal``, which
+    is registered to one. The same argument extends unchanged: on an operation
+    that has not admitted a machine caller the route still answers ``401``
+    before anything is read, so resolving a tenant for it grants nothing.
     """
-    caller = _resolve_caller(request)
+    caller = resolve_caller(request)
     if caller is None:
         return DEFAULT_AVERNET_TENANT
     return caller.tenant

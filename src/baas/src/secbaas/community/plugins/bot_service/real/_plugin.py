@@ -28,6 +28,10 @@ from secbaas.community.spi.bot_service import (
 
 logger = get_logger("plugin-bot-service")
 
+_SUPPORTED_RUNTIME_ENGINE_TYPES = frozenset(
+    {"openclaw", "teclaw", "aicoding", "hermes", "claude_code"}
+)
+
 
 class AiohttpBotServicePlugin(BotServicePlugin):
     """Aiohttp-based BotService plugin — production HTTP implementation.
@@ -289,19 +293,51 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                 _stage_ms,
                 (time.monotonic() - _binding_t0) * 1000,
             )
+            resolved_bot_id = inner.get("bot_id", bot_id)
+            bot_type = inner.get("bot_type", "")
+            original_engine_type = inner.get("engine_type", "openclaw")
+            runtime_engine_type = inner.get("active_runtime_engine_type")
+            normalized_runtime_engine_type = (
+                runtime_engine_type.strip()
+                if isinstance(runtime_engine_type, str)
+                else ""
+            )
+            if normalized_runtime_engine_type in _SUPPORTED_RUNTIME_ENGINE_TYPES:
+                engine_type = normalized_runtime_engine_type
+            else:
+                engine_type = original_engine_type
+                runtime_field_present = "active_runtime_engine_type" in inner
+                unsupported_nonempty_value = bool(normalized_runtime_engine_type)
+                if runtime_field_present and (
+                    bot_type == "personal" or unsupported_nonempty_value
+                ):
+                    logger.warning(
+                        "[bot-service] invalid active runtime engine; fallback to "
+                        "original engine: bot_id=%s bot_type=%r engine_type=%r "
+                        "active_runtime_engine_type=%r fallback=%r",
+                        resolved_bot_id,
+                        bot_type,
+                        original_engine_type,
+                        runtime_engine_type,
+                        engine_type,
+                    )
+
             logger.info(
                 "[bot-service] get_binding raw: bot_id=%s engine_type=%r "
+                "active_runtime_engine_type=%r consumed_engine_type=%r "
                 "template_type=%r device_provider=%r",
-                inner.get("bot_id", bot_id),
-                inner.get("engine_type"),
+                resolved_bot_id,
+                original_engine_type,
+                runtime_engine_type,
+                engine_type,
                 inner.get("template_type"),
                 inner.get("device_provider"),
             )
             return BotBindingData(
-                bot_id=inner.get("bot_id", bot_id),
+                bot_id=resolved_bot_id,
                 owner_id=inner.get("owner_id", owner_id),
-                bot_type=inner.get("bot_type", ""),
-                engine_type=inner.get("engine_type", "openclaw"),
+                bot_type=bot_type,
+                engine_type=engine_type,
                 publish_id=inner.get("publish_id"),
                 publish_status=inner.get("publish_status"),
                 binding_id=inner.get("binding_id", 0),

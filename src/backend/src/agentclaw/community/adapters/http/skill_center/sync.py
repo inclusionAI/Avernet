@@ -12,7 +12,7 @@ Body: { "skill_id": "...", "env": "dev", "version": "..." (可选) }
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.di import Injected
 from agentclaw.community.api.skill_center_sync_service import SkillCenterSyncServiceProtocol
 from agentclaw.community.api.skill_propagation_service import SkillPropagationServiceProtocol

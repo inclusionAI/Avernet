@@ -7,10 +7,8 @@ from dataclasses import dataclass
 
 from injector import inject
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.devices.repository.protocol import (
-    DeviceBindingRepository,
-)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.skills_pool.claim_service import (
     SkillsPoolMigrationClaimService,
 )
@@ -18,13 +16,8 @@ from agentclaw.community.core.skills_pool.operations import (
     RolloutBotEntry,
     SkillsPoolRolloutOperations,
 )
-from agentclaw.community.core.skills_pool.quarantine import (
-    QuarantineOperationalView,
-    SkillsPoolQuarantineService,
-)
-from agentclaw.community.core.skills_pool.repository.protocol import (
-    SkillsPoolLayoutRepositoryProtocol,
-)
+from agentclaw.community.core.skills_pool.quarantine import QuarantineOperationalView, SkillsPoolQuarantineService
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolLayoutRepositoryProtocol
 from agentclaw.community.core.skills_pool.rollout_gate import (
     BotRuntimeForm,
     RolloutDecision,

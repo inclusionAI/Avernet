@@ -3,9 +3,7 @@ from contextlib import contextmanager
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.plugins.skill_center_sync_log_repository import (
-    SkillCenterSyncLogRepository,
-)
+from agentclaw.community.core.repository.implementations.skill_center.sync_log import SkillCenterSyncLogRepository
 
 
 class InMemorySqliteDB:

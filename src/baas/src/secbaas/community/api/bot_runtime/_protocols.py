@@ -404,6 +404,29 @@ class BotRunner(Protocol):
         """
         ...
 
+    async def list_sessions(
+        self,
+        *,
+        bot_id: str,
+        context: "BotChatContext",
+        metadata: dict[str, Any],
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list["SessionInfo"]:
+        """List sessions for a given bot (read-only).
+
+        Args:
+            bot_id: Bot 唯一标识，格式为 <real_bot_id>:<entity_id>
+            context: 请求上下文
+            metadata: 元数据，支持 bot_options.lifecycle_stage 指定生命周期阶段
+            limit: Maximum number of sessions to return
+            offset: Number of sessions to skip
+
+        Returns:
+            List of SessionInfo objects
+        """
+        ...
+
     def get_result(self, run_id: str) -> Any:
         """获取执行结果
 

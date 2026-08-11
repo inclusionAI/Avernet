@@ -810,7 +810,7 @@ async fn user_bound_unknown_method_preserves_protocol_error_response() {
 
 fn session_bound_auth() -> WorkbenchConnectionAuth {
     WorkbenchConnectionAuth::SessionBound {
-        tenant: "tenant-a".to_string(),
+        tenant: Some("tenant-a".to_string()),
         actor_id: "human_100001".to_string(),
         group_id: "group-web-1".to_string(),
         session_id: "session-bound-1".to_string(),
@@ -974,7 +974,7 @@ async fn session_bound_connect_authorizes_once_with_immutable_binding() {
     assert_eq!(
         authorizations[0].binding,
         GroupSessionConnectionBinding {
-            tenant: "tenant-a".to_string(),
+            tenant: Some("tenant-a".to_string()),
             user_id: "100001".to_string(),
             group_id: "group-web-1".to_string(),
             session_id: "session-bound-1".to_string(),

@@ -23,6 +23,7 @@ class SessionResourceModel(Base):
     resource_id = Column(String(128), nullable=False, unique=True)
     owner_id = Column(String(128), nullable=False)
     bot_id = Column(String(128), nullable=False)
+    binding_id = Column(BigInteger, nullable=True)
     scope_type = Column(String(64), nullable=False)
     scope_key_hash = Column(String(128), nullable=False)
     session_key_hash = Column(String(128), nullable=False)
@@ -67,6 +68,7 @@ class SessionResourceModel(Base):
             resource_id=self.resource_id,
             owner_id=self.owner_id,
             bot_id=self.bot_id,
+            binding_id=self.binding_id,
             scope_type=self.scope_type,
             scope_key_hash=self.scope_key_hash,
             session_key_hash=self.session_key_hash,

@@ -16,7 +16,7 @@ from typing import List, Dict, Optional, Any
 
 from injector import inject
 
-from agentclaw.community.core.skill_center.services.repositories import SkillMemberRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillMemberRepository
 from agentclaw.community.log import get_logger
 
 logger = get_logger()

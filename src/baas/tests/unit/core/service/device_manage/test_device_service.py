@@ -78,6 +78,7 @@ def service(mock_repo, mock_paas_facade, mock_device_template_service, mock_env)
         repository=mock_repo,
         device_template_service=mock_device_template_service,
         secret_plugin=MagicMock(),
+        callback_handler=MagicMock(handle=AsyncMock(return_value={"status": "ok"})),
     )
     yield svc
 
@@ -109,14 +110,18 @@ def _make_record(**overrides):
 
 class TestSafeFormatHookEdgeCases:
     def test_value_error_is_caught(self):
-        from secbaas.community.core.service.device_manage import _safe_format_hook
+        from secbaas.community.core.service.device_manage._device_service import (
+            _safe_format_hook,
+        )
 
         result = _safe_format_hook("echo {token} and {other}", token="hello")
         assert result == "echo hello and {other}"
         assert "{other}" in result  # unknown placeholder preserved
 
     def test_client_id_placeholder(self):
-        from secbaas.community.core.service.device_manage import _safe_format_hook
+        from secbaas.community.core.service.device_manage._device_service import (
+            _safe_format_hook,
+        )
 
         result = _safe_format_hook("register --id {client_id}", client_id="DEVICE-001")
         assert result == "register --id DEVICE-001"
@@ -197,7 +202,7 @@ class TestRecordToResponseEdgeCases:
 
 class TestDecryptHeaderRuleValuesEdgeCases:
     def test_decryption_failure_raises_value_error(self):
-        from secbaas.community.core.service.device_manage import (
+        from secbaas.community.core.service.device_manage._device_service import (
             _decrypt_header_rule_values,
         )
 
@@ -217,7 +222,7 @@ class TestDecryptHeaderRuleValuesEdgeCases:
                 _decrypt_header_rule_values(outbound, mock_secret)
 
     def test_non_encryptable_non_sdk_type_returns_none(self):
-        from secbaas.community.core.service.device_manage import (
+        from secbaas.community.core.service.device_manage._device_service import (
             _decrypt_header_rule_values,
         )
 
@@ -236,6 +241,7 @@ class TestDefaultDeviceServiceInit:
             repository=MagicMock(),
             device_template_service=MagicMock(),
             secret_plugin=MagicMock(),
+            callback_handler=MagicMock(handle=AsyncMock(return_value={"status": "ok"})),
         )
         assert svc._paas_facade is facade
 
@@ -248,6 +254,7 @@ class TestDefaultDeviceServiceInit:
             repository=repo,
             device_template_service=tpl_svc,
             secret_plugin=MagicMock(),
+            callback_handler=MagicMock(handle=AsyncMock(return_value={"status": "ok"})),
         )
         assert svc._paas_facade is facade
 
@@ -2302,6 +2309,7 @@ class TestStopDeviceByUuid:
             repository=mock_repo,
             device_template_service=MagicMock(),
             secret_plugin=MagicMock(),
+            callback_handler=MagicMock(handle=AsyncMock(return_value={"status": "ok"})),
         )
 
         result = await service.stop_device_by_uuid(
@@ -2339,6 +2347,7 @@ class TestStopDeviceByUuid:
             repository=mock_repo,
             device_template_service=MagicMock(),
             secret_plugin=MagicMock(),
+            callback_handler=MagicMock(handle=AsyncMock(return_value={"status": "ok"})),
         )
 
         result = await service.stop_device_by_uuid(
@@ -2383,6 +2392,7 @@ class TestStopDeviceByUuid:
             repository=mock_repo,
             device_template_service=MagicMock(),
             secret_plugin=MagicMock(),
+            callback_handler=MagicMock(handle=AsyncMock(return_value={"status": "ok"})),
         )
 
         result = await service.stop_device_by_uuid(
@@ -2407,6 +2417,7 @@ class TestStopDeviceByUuid:
             repository=mock_repo,
             device_template_service=MagicMock(),
             secret_plugin=MagicMock(),
+            callback_handler=MagicMock(handle=AsyncMock(return_value={"status": "ok"})),
         )
 
         result = await service.stop_device_by_uuid(
@@ -2454,6 +2465,7 @@ class TestStopDeviceByUuid:
             repository=mock_repo,
             device_template_service=MagicMock(),
             secret_plugin=MagicMock(),
+            callback_handler=MagicMock(handle=AsyncMock(return_value={"status": "ok"})),
         )
 
         result = await service.stop_device_by_uuid(

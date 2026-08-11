@@ -6,12 +6,8 @@ import asyncio
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from agentclaw.community.core.bot_management.repository.protocol import (
-    BotRepository,
-)
-from agentclaw.community.core.devices.repository.protocol import (
-    DeviceBindingRepository,
-)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.events.types import (
     BaasPublishCompletedEvent,
@@ -25,21 +21,14 @@ from agentclaw.community.core.skills_pool.claim_service import (
     MigrationClaimOutcome,
     SkillsPoolMigrationClaimService,
 )
-from agentclaw.community.core.skills_pool.quarantine import (
-    QUARANTINE_RETENTION,
-    SKILLS_POOL_QUARANTINE_CLEANUP_TASK,
-    QuarantineRepositoryProtocol,
-    QuarantineStatus,
-    SkillsPoolQuarantineCleanupTaskHandler,
-)
+from agentclaw.community.core.skills_pool.quarantine import QUARANTINE_RETENTION, SKILLS_POOL_QUARANTINE_CLEANUP_TASK, QuarantineStatus, SkillsPoolQuarantineCleanupTaskHandler
+from agentclaw.community.core.repository.protocols.skills_pool import QuarantineRepositoryProtocol
 from agentclaw.community.core.skills_pool.reconcile_service import (
     SkillsPoolReconcileOutcome,
     SkillsPoolReconcileResult,
     SkillsPoolReconcileService,
 )
-from agentclaw.community.core.skills_pool.repository.protocol import (
-    SkillsPoolLayoutRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolLayoutRepositoryProtocol
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     BotSkillLayoutState,
@@ -155,12 +144,6 @@ class SkillsPoolReconcileTaskHandler:
             generation = claim.state.migration_generation
             if generation is None:
                 return Fail("pool-active layout has no migration generation")
-            quarantine = self._quarantines.get_quarantine(scope, generation)
-            if (
-                quarantine is not None
-                and quarantine.status is QuarantineStatus.CLEANED
-            ):
-                return Complete()
             if observed_at is None:
                 # Tasks written by the previous Backend cannot prove a
                 # post-activation runtime observation. They remain safe to
@@ -198,6 +181,17 @@ class SkillsPoolReconcileTaskHandler:
                 },
             )
             if not recorded:
+                # Retention cleanup deliberately makes the quarantine row
+                # immutable.  A post-cleanup wake-up must still verify the
+                # live runtime (including any Engine-owned repair), but has
+                # no mutable evidence sink left to update.  It is therefore
+                # complete rather than a permanent evidence-write retry.
+                quarantine = self._quarantines.get_quarantine(scope, generation)
+                if quarantine is not None and (
+                    quarantine.status is QuarantineStatus.CLEANED
+                    or quarantine.cleaned_at is not None
+                ):
+                    return Complete()
                 return Retry("skills pool runtime reconciliation evidence race lost")
             return Complete()
 

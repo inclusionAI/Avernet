@@ -14,10 +14,7 @@ from .test_admin_service import (  # noqa: E402  (relative import within test pa
 )
 
 from agentclaw.community.core.economy.governance.domain.enums import AuditAction
-from agentclaw.community.core.economy.governance.repositories.orm import (
-    AuditLogOrm,
-    GovernanceTicketOrm,
-)
+from agentclaw.community.core.economy.governance.orm import AuditLogOrm, GovernanceTicketOrm
 
 
 # ── helper: create GovernanceTicketOrm rows ────────────────────

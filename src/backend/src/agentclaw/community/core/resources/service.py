@@ -18,9 +18,7 @@ from agentclaw.community.core.resources.models import (
     create_node_resource,
     create_url_resource,
 )
-from agentclaw.community.core.resources.repository.protocol import (
-    ResourceRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
 from agentclaw.community.log import get_logger
 
 logger = get_logger()

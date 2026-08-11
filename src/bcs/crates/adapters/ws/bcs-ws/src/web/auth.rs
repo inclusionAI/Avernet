@@ -4,7 +4,7 @@ pub enum WorkbenchConnectionAuth {
         actor_id: Option<String>,
     },
     SessionBound {
-        tenant: String,
+        tenant: Option<String>,
         actor_id: String,
         group_id: String,
         session_id: String,

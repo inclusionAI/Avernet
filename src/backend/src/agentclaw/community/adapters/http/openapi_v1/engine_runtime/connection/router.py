@@ -1,4 +1,4 @@
-"""Connection endpoint — ``GET /openapi/v1/bots/{bot_id}/connection``.
+"""Connection endpoint — ``GET /openapi/v1/bots/connection/{bot_id}``.
 
 The public replacement for the device-connection hand-off. Returns finished
 socket URLs; the caller opens the socket itself. Chat is not relayed through
@@ -8,20 +8,22 @@ this API, so the engine's frame format never becomes a public contract.
 from __future__ import annotations
 
 import asyncio
-from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
-from agentclaw.community.adapters.http.openapi_v1.dependencies import (
-    Principal,
-    require_principal,
-)
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.connection.schemas import (
     Connection,
     Socket,
 )
-from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
+    RuntimeStage,
+)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
+    OwnerIdDep,
+    StageQuery,
+)
+from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
@@ -31,23 +33,22 @@ from agentclaw.community.api.engine_connection_service import (
 )
 from agentclaw.community.di import Injected
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}", tags=["connection"])
-
-PrincipalDep = Annotated[Principal, Depends(require_principal)]
+router = APIRouter(prefix="/openapi/v1/bots/connection", tags=["connection"])
 
 
-@router.get("/connection", response_model=Envelope[Connection])
+@router.get("/{bot_id}", response_model=Envelope[Connection])
 @envelope_errors
 async def get_connection(
     bot_id: str,
-    principal: PrincipalDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
     connections: EngineConnectionServiceProtocol = Injected(
         EngineConnectionServiceProtocol
     ),
 ) -> Envelope[Connection]:
     """Get usable socket connections for a bot."""
-    owner_id = caller_owner_id(principal)
     # No capability probe: the only socket offered is chat, derived from the
     # bot's active engine, which is a backend fact. The terminal socket that
     # once needed one was removed — the spec excludes an interactive shell from
@@ -61,7 +62,11 @@ async def get_connection(
     # signature — which ``test_service_api_conformance`` pins, coroutine status
     # included — the same on both sides.
     result = await asyncio.to_thread(
-        connections.build, bot_id=bot_id, owner_id=owner_id
+        connections.build,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        caller_id=user_id,
+        stage=stage.value,
     )
     return envelope(
         Connection(

@@ -31,6 +31,7 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     PRINCIPAL_HEADER,
     Principal,
     require_principal,
+    require_user_and_app_principal,
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
 from agentclaw.community.adapters.http.openapi_v1.responses import (
@@ -82,20 +83,57 @@ def signing_key():
     reset_principal_verifier_config_cache()
 
 
-def mint(*, tenant: str = TENANT, user_id: str = "u-1", **overrides) -> str:
+def mint(
+    *,
+    tenant: str | None = TENANT,
+    user_id: str | None = "u-1",
+    include_app: bool | None = None,
+    **overrides,
+) -> str:
+    """A signed token for a caller, optionally belonging to a tenant.
+
+    ``tenant=None`` mints the **user-only** set: a first-party caller, which
+    asserts no tenant and so scopes to the internal default. Any other value
+    mints the user alongside an ``app`` principal registered to that tenant,
+    because a user principal cannot carry one — see ``gateway_principal/models``.
+    """
     now = int(time.time())
+    # ``user_id=None`` mints the **app-only** set: a machine caller with no
+    # human anywhere on the wire, which is the shape the admission split exists
+    # to distinguish.
+    principals: list[dict] = []
+    if user_id is not None:
+        principals.append(
+            {
+                "type": "user",
+                "subject": {"id": user_id, "username": "alice@example.com"},
+            }
+        )
+    if include_app is None:
+        include_app = tenant is not None
+    if include_app and tenant is not None:
+        principals.append(
+            {
+                "type": "app",
+                "tenant": tenant,
+                "app": {
+                    "app_id": 1,
+                    "app_name": "bot-logs-test-app",
+                    # Free-text org attribution, never an identity — and it has
+                    # to stand alone here, because an app-only set has no
+                    # ``user_id`` to borrow.
+                    "owners": "platform-team",
+                    "tenant": tenant,
+                    "app_type": "integration",
+                },
+            }
+        )
     claims = {
         "iss": overrides.get("issuer", "gateway"),
         "aud": overrides.get("audience", "backend"),
         "iat": now,
         "exp": now + 60,
-        "principals": [
-            {
-                "type": "user",
-                "tenant": tenant,
-                "subject": {"id": user_id, "username": "alice@example.com"},
-            }
-        ],
+        "principals": principals,
     }
     return jwt.encode(claims, overrides.get("key", KEY), algorithm="HS256")
 
@@ -131,6 +169,27 @@ def probe_app():
             request,
         )
 
+    # An operation that *is* in the admission table, so the shared dependency
+    # admits an application on it. ``GET /openapi/v1/bots/ceiling`` is Mode C in
+    # the real table; the probe borrows its path so the lookup is the production
+    # one rather than a fixture.
+    @app.get("/openapi/v1/bots/ceiling")
+    @envelope_errors
+    async def admitted_probe(
+        request: Request, principal: Principal = Depends(require_principal)
+    ):
+        return envelope(
+            {"has_user": principal.has_user, "app_id": principal.app_id}, request
+        )
+
+    @app.get("/openapi/v1/bots/logs/_probe")
+    @envelope_errors
+    async def bot_logs_probe(
+        request: Request,
+        principal: Principal = Depends(require_user_and_app_principal),
+    ):
+        return envelope({"owner_id": caller_owner_id(principal)}, request)
+
     return app
 
 
@@ -152,6 +211,47 @@ def test_verified_caller_scopes_owner_and_tenant(client):
 
     assert response.status_code == 200
     assert response.json()["data"] == {"owner_id": "u-1", "tenant": TENANT}
+
+
+def test_a_first_party_user_scopes_to_the_internal_tenant(client):
+    """A caller naming only a user asserts no tenant, so the internal one applies.
+
+    This is the shape the google chain produces, and the shape ``route_security``
+    asks for on the whole public surface today: ``user: required`` and nothing
+    else. Until an identity that carries a registered tenant is required
+    alongside it, every request through this seam lands here.
+    """
+    response = client.get(
+        "/openapi/v1/bots/_probe", headers={PRINCIPAL_HEADER: mint(tenant=None)}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "owner_id": "u-1",
+        "tenant": DEFAULT_AVERNET_TENANT,
+    }
+
+
+def test_a_token_naming_the_internal_tenant_is_scoped_to_it(client):
+    """A claimed ``teamclaw`` binds ``teamclaw``. *Changed 2026-08-05.*
+
+    The seam used to answer ``401`` here: no gateway tenant was spelled
+    ``teamclaw``, so a token naming it could only be an attempt to reach internal
+    rows. Now that a tenant registered under that name is a supported
+    first-party path, the claim is honoured and the middleware binds it like any
+    other — which is what makes this worth asserting through the probe rather
+    than at the verifier: the tenant a handler *observes* is the internal one.
+    """
+    response = client.get(
+        "/openapi/v1/bots/_probe",
+        headers={PRINCIPAL_HEADER: mint(tenant=DEFAULT_AVERNET_TENANT)},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "owner_id": "u-1",
+        "tenant": DEFAULT_AVERNET_TENANT,
+    }
 
 
 def test_each_caller_gets_their_own_tenant(client):
@@ -180,6 +280,21 @@ def test_verification_runs_once_per_request(client):
 
     assert response.status_code == 200
     assert spy.call_count == 1
+
+
+def test_bot_logs_requires_user_and_app(client):
+    user_only = client.get(
+        "/openapi/v1/bots/logs/_probe",
+        headers={PRINCIPAL_HEADER: mint(tenant=None)},
+    )
+    user_and_app = client.get(
+        "/openapi/v1/bots/logs/_probe",
+        headers={PRINCIPAL_HEADER: mint()},
+    )
+
+    assert user_only.status_code == 401
+    assert user_and_app.status_code == 200
+    assert user_and_app.json()["data"]["owner_id"] == "u-1"
 
 
 # ── denial, and its uniformity ───────────────────────────────────────────────
@@ -240,16 +355,6 @@ def test_rejected_caller_never_binds_the_internal_tenant_to_a_handler(client):
     assert response.json()["data"] is None
 
 
-def test_internal_tenant_cannot_be_claimed_over_the_wire(client):
-    """A token naming ``teamclaw`` would otherwise read every internal row."""
-    response = client.get(
-        "/openapi/v1/bots/_probe",
-        headers={PRINCIPAL_HEADER: mint(tenant=DEFAULT_AVERNET_TENANT)},
-    )
-
-    assert response.status_code == 401
-
-
 # ── the property that makes the tenant fallback safe ─────────────────────────
 
 
@@ -272,6 +377,107 @@ def test_public_routes_require_principal():
     ]
 
     assert not missing, f"public routes not gated by require_principal: {missing}"
+
+
+def test_bot_logs_routes_require_user_and_app_principal():
+    bot_logs_routes = [
+        route
+        for route in _api_routes(build_public_router())
+        if route.path.startswith("/openapi/v1/bots/logs")
+    ]
+    assert bot_logs_routes, "no Bot Logs routes found"
+
+    missing = [
+        f"{sorted(route.methods)} {route.path}"
+        for route in bot_logs_routes
+        if not _depends_on(route.dependant, require_user_and_app_principal)
+    ]
+
+    assert not missing, f"Bot Logs routes not gated by User+App: {missing}"
+
+
+_AUTHORIZED_APPS_PREFIX = "/openapi/v1/bots/{bot_id}/authorized-apps"
+_AUTHORIZED_BOTS_PATH = "/openapi/v1/bots/authorized"
+
+
+def test_granting_a_bot_authorization_requires_user_and_app_principal():
+    """Granting is a consent moment, so both parties must be on the request.
+
+    Walks the dependency tree rather than trusting the gateway rule: the
+    ``route_security`` entry and this dependency are two independent nets, and
+    this one catches a handler that forgets the dependency even when the config
+    is right.
+    """
+    routes = [
+        route
+        for route in _api_routes(build_public_router())
+        if route.path == _AUTHORIZED_APPS_PREFIX and "POST" in route.methods
+    ]
+    assert routes, "no grant route found"
+
+    missing = [
+        f"{sorted(route.methods)} {route.path}"
+        for route in routes
+        if not _depends_on(route.dependant, require_user_and_app_principal)
+    ]
+    assert not missing, f"grant route not gated by User+App: {missing}"
+
+
+def test_application_view_requires_user_and_app_principal():
+    """Load-bearing beyond auth: the App is what the listing is *scoped by*.
+
+    The handler reads ``app_id`` off this principal to filter the query. A
+    missing dependency here would not merely weaken a check — it would leave
+    the listing with nothing to scope on, which widens a result set rather than
+    refusing it.
+    """
+    routes = [
+        route
+        for route in _api_routes(build_public_router())
+        if route.path == _AUTHORIZED_BOTS_PATH
+    ]
+    assert routes, "no application-view route found"
+
+    missing = [
+        f"{sorted(route.methods)} {route.path}"
+        for route in routes
+        if not _depends_on(route.dependant, require_user_and_app_principal)
+    ]
+    assert not missing, f"application view not gated by User+App: {missing}"
+
+
+def test_listing_and_withdrawing_authorizations_need_only_the_owner():
+    """The asymmetry that makes a withdrawal worth having.
+
+    An owner must be able to withdraw after the application's credential is
+    lost or rotated, and must be able to ask "which apps can reach my bot?"
+    without holding any application's key. Both still require an authenticated
+    caller — that is ``require_principal``, asserted surface-wide above.
+    """
+    owner_only = [
+        route
+        for route in _api_routes(build_public_router())
+        if route.path.startswith(_AUTHORIZED_APPS_PREFIX)
+        and ("GET" in route.methods or "DELETE" in route.methods)
+    ]
+    assert len(owner_only) == 2, f"expected list + withdraw, got {owner_only}"
+
+    over_gated = [
+        f"{sorted(route.methods)} {route.path}"
+        for route in owner_only
+        if _depends_on(route.dependant, require_user_and_app_principal)
+    ]
+    assert not over_gated, (
+        "these must NOT require an App identity — an owner has to reach them "
+        f"without one: {over_gated}"
+    )
+
+    ungated = [
+        f"{sorted(route.methods)} {route.path}"
+        for route in owner_only
+        if not _depends_on_require_principal(route.dependant)
+    ]
+    assert not ungated, f"routes not gated by require_principal: {ungated}"
 
 
 def _api_routes(router) -> list:
@@ -299,7 +505,96 @@ def _depends_on_require_principal(dependant) -> bool:
     return any(_depends_on_require_principal(sub) for sub in dependant.dependencies)
 
 
+def _depends_on(dependant, dependency) -> bool:
+    if dependant.call is dependency:
+        return True
+    return any(_depends_on(sub, dependency) for sub in dependant.dependencies)
+
+
 def _body_without_request_id(response) -> dict:
     body = dict(response.json())
     body.pop("request_id", None)
     return body
+
+
+# ── the admission split: where the end-user guard now lives ──────────────────
+
+
+def test_an_app_only_caller_is_refused_on_an_operation_not_in_the_table(client):
+    """A path absent from the admission table refuses a machine caller.
+
+    ``_probe`` is not a real operation and so has no entry — which is exactly
+    the case a route added tomorrow is in. Refused by *omission*, rather than by
+    someone remembering not to opt in.
+    """
+    response = client.get(
+        "/openapi/v1/bots/_probe",
+        headers={PRINCIPAL_HEADER: mint(user_id=None)},
+    )
+
+    assert response.status_code == 401
+
+
+def test_an_app_only_refusal_is_identical_to_no_credential(client):
+    """The caller learns nothing about which half it failed.
+
+    A verified application refused for its *shape* must be indistinguishable
+    from an unverified caller, or the surface reports that the credential was
+    good and the identity type wrong — which tells a prober what to change.
+    """
+    refused = client.get(
+        "/openapi/v1/bots/_probe",
+        headers={PRINCIPAL_HEADER: mint(user_id=None)},
+    )
+    absent = client.get("/openapi/v1/bots/_probe")
+
+    assert refused.status_code == absent.status_code == 401
+    assert _body_without_request_id(refused) == _body_without_request_id(absent)
+
+
+def test_an_app_only_caller_is_admitted_on_an_operation_in_the_table(client):
+    """Admission is per operation, read from the table, and only about *shape*."""
+    response = client.get(
+        "/openapi/v1/bots/ceiling",
+        headers={PRINCIPAL_HEADER: mint(user_id=None)},
+    )
+
+    assert response.status_code == 200, response.json()
+    assert response.json()["data"] == {"has_user": False, "app_id": 1}
+
+
+def test_an_admitting_operation_still_refuses_an_unverified_caller(client):
+    """Admitting a machine caller is not opting out of authentication."""
+    assert client.get("/openapi/v1/bots/ceiling").status_code == 401
+    assert (
+        client.get(
+            "/openapi/v1/bots/ceiling",
+            headers={PRINCIPAL_HEADER: "not-a-token"},
+        ).status_code
+        == 401
+    )
+
+
+def test_a_user_caller_is_unchanged_on_an_admitting_route(client):
+    """The relaxation adds a caller shape; it removes nothing."""
+    response = client.get(
+        "/openapi/v1/bots/ceiling",
+        headers={PRINCIPAL_HEADER: mint()},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["has_user"] is True
+
+
+def test_an_app_only_caller_still_scopes_to_its_own_tenant(client):
+    """A machine caller is tenant-scoped by its app registration.
+
+    Asserted on an admitting route, because the others refuse it — the tenant
+    has to be right for the operations that *do* admit it.
+    """
+    response = client.get(
+        "/openapi/v1/bots/ceiling",
+        headers={PRINCIPAL_HEADER: mint(user_id=None, tenant="other-tenant")},
+    )
+
+    assert response.status_code == 200

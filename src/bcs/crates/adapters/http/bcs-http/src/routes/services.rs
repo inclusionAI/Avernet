@@ -168,10 +168,12 @@ pub async fn post_invocation(
                 let gid = group_id.clone();
                 let sid = outcome.session.id.clone();
                 let session_participants = outcome.session.participants.clone();
-                let reason = group
-                    .label
-                    .clone()
-                    .unwrap_or_else(|| "协作任务".to_string());
+                let reason = bcs_service_api::resolve_session_topic(
+                    session_input.as_ref(),
+                    group.context.as_deref(),
+                    group.label.as_deref(),
+                )
+                .unwrap_or_default();
                 let _task = tokio::spawn(async move {
                     let _ = notify
                         .notify(
@@ -182,6 +184,7 @@ pub async fn post_invocation(
                                 reason,
                                 session_input,
                                 task_ledger: None,
+                                driver_delivery: None,
                             },
                             &sid,
                             &session_participants,

@@ -25,6 +25,7 @@ registers one ``IdentityChain`` per ``PrincipalType``.
 
 from __future__ import annotations
 
+from gateway.community.logger import get_logger
 from gateway.community.spi.auth import AuthError
 from gateway.community.spi.authn import (
     AuthStrategy,
@@ -32,6 +33,8 @@ from gateway.community.spi.authn import (
     Principal,
     PrincipalType,
 )
+
+logger = get_logger("authn-chain")
 
 
 class IdentityChain:
@@ -61,13 +64,26 @@ class IdentityChain:
         for strategy in self._strategies:
             # AuthError (present-but-invalid) propagates and short-circuits the
             # chain; None (absent) falls through to the next strategy.
+            logger.debug("chain %s trying strategy %s", self.name, strategy.name)
             principal = await strategy.build(creds)
             if principal is None:
+                logger.debug(
+                    "chain %s strategy %s returned None", self.name, strategy.name
+                )
                 continue
             if principal.type is not self.principal_type:  # defensive: wrong type
+                logger.error(
+                    "chain %s strategy %s built wrong principal type %s",
+                    self.name,
+                    strategy.name,
+                    principal.type,
+                )
                 raise AuthError(
                     f"strategy {strategy.name!r} built wrong principal type for "
                     f"{self.principal_type.value!r}"
                 )
+            logger.debug(
+                "chain %s strategy %s resolved principal", self.name, strategy.name
+            )
             return principal
         return None  # every inner strategy was inapplicable

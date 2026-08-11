@@ -572,7 +572,27 @@ def test_only_one_unaccepted_batch_can_be_open_per_engine() -> None:
         )
 
 
-def test_claimed_batch_stays_open_after_whitelist_removal() -> None:
+@pytest.mark.parametrize(
+    ("active_layout", "target_layout", "phase"),
+    [
+        (
+            SkillLayout.LEGACY,
+            SkillLayout.POOL,
+            SkillLayoutPhase.POOL_PREPARING,
+        ),
+        (
+            SkillLayout.POOL,
+            SkillLayout.LEGACY,
+            SkillLayoutPhase.LEGACY_ROLLBACK_COMMITTED,
+        ),
+    ],
+    ids=["pool-claim", "rollback-in-progress"],
+)
+def test_claimed_batch_stays_open_after_whitelist_removal(
+    active_layout: SkillLayout,
+    target_layout: SkillLayout,
+    phase: SkillLayoutPhase,
+) -> None:
     operations, _, _, layouts = build_operations(
         config=rollout_config(
             promoted_engines=["openclaw"],
@@ -587,8 +607,9 @@ def test_claimed_batch_stays_open_after_whitelist_removal() -> None:
     )
     layouts.state = replace(
         layouts.state,
-        target_layout=SkillLayout.POOL,
-        phase=SkillLayoutPhase.POOL_PREPARING,
+        active_layout=active_layout,
+        target_layout=target_layout,
+        phase=phase,
         migration_generation="generation-1",
         persisted=True,
         rollout_evidence=RolloutEvidence(
@@ -621,6 +642,38 @@ def test_claimed_batch_stays_open_after_whitelist_removal() -> None:
             operator="freddie",
             reason="must not bypass claimed batch",
         )
+
+
+def test_fully_rolled_back_batch_releases_open_batch_ownership() -> None:
+    operations, _, _, layouts = build_operations(
+        config=rollout_config(promoted_engines=["openclaw"])
+    )
+    layouts.state = replace(
+        layouts.state,
+        persisted=True,
+        rollout_evidence=RolloutEvidence(
+            env=ENV,
+            config_id=7,
+            config_version="config-1",
+            batch_id="batch-1",
+            engine_type="openclaw",
+            decision_reason="exact_bot_whitelist",
+        ),
+    )
+
+    result = operations.add_bot(
+        env=ENV,
+        owner_id=OWNER,
+        bot_id=BOT_ID,
+        batch_id="batch-2",
+        acceptance_batch_id=None,
+        operator="freddie",
+        reason="retry after complete rollback",
+    )
+
+    assert result.snapshot.whitelist[0].batch_id == "batch-2"
+    assert layouts.state.rollout_evidence is not None
+    assert layouts.state.rollout_evidence.batch_id == "batch-1"
 
 
 def test_other_engine_can_promote_while_existing_engine_batch_is_open() -> None:

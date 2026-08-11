@@ -38,10 +38,21 @@ class EngineCapabilityUnsupportedError(EngineRuntimeError):
 class EngineBotTypeNotSupportedError(EngineRuntimeError):
     """This endpoint group is not offered for the bot's type.
 
-    Not an engine capability question — a product rule. The sessions group is
-    personal-bots-only because the engine's session list is not scoped per
-    caller, so on a multi-caller ``service`` bot it would expose other callers'
-    conversations to the bot's owner.
+    Not an engine capability question — a product rule: the operator surfaces
+    serve an allowlist of bot types (``gate.SUPPORTED_BOT_TYPES``), and a type
+    this build has never heard of is refused rather than assumed personal.
+    """
+
+
+class EngineStageNotLiveError(EngineRuntimeError):
+    """The requested stage has no live runtime for this bot.
+
+    A verify stage with nothing validating, an online stage with nothing
+    released — or any stage but the draft on a ``personal`` bot, which has no
+    published stages at all. Distinct from the masked 404 on purpose: an
+    operator may fix a stage (publish, promote), while a stranger must never
+    learn a bot exists — and the adjudication has already run by the time this
+    can be raised.
     """
 
 
@@ -87,5 +98,6 @@ __all__ = [
     "EngineDeviceNotReadyError",
     "EngineHistoryDepthExceededError",
     "EngineResourceNotFoundError",
+    "EngineStageNotLiveError",
     "EngineUpstreamError",
 ]

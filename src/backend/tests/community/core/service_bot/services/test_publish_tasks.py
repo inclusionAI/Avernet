@@ -8,8 +8,11 @@ from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.task_queue.types import Complete, Fail, Reschedule
 from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
     PROGRESS_POLL_TASK,
+    RESTART_POLL_TASK,
     PublishOnlineReleaseHandler,
     PublishProgressPollHandler,
+    PublishRestartHandler,
+    PublishRestartPollHandler,
     PublishVerifyFlowHandler,
 )
 
@@ -287,3 +290,198 @@ def test_handler_invalid_payload_raises():
     verify, _online, _poll, _tq = _handlers(flow)
     with pytest.raises(ValueError):
         verify.handle({"operator": "op"})  # missing publish_id
+
+
+# ── restart + restart_poll ──────────────────────────────────────────────────
+# A restart runs on a stable record (VALIDATING / SUCCESS) and never transitions
+# the publish status, so the status-keyed progress_poll cannot drive it — hence a
+# separate task whose wait state is ext.restart.restarting.
+
+
+class _FakeRestartFlow:
+    """PublishFlowService stand-in for the restart pair: tracks the in-progress
+    marker and the BaaS restart statuses ``sync_restart_progress`` reports."""
+
+    def __init__(
+        self,
+        *,
+        restart_succeeds=True,
+        restarting=True,
+        sync_statuses=None,
+        missing=False,
+        unreconciled=False,
+    ):
+        self.calls: list[str] = []
+        self.restarting = restarting
+        self._restart_succeeds = restart_succeeds
+        self._missing = missing
+        # Whether the record already carries a submitted-but-unreconciled
+        # restart for the stage — the redelivery guard's signal.
+        self._unreconciled = unreconciled
+        # Successive BaaS statuses returned by sync_restart_progress; the last one
+        # repeats. ``None`` models the no-data early returns (unresolved workflow
+        # id / progress-fetch error).
+        self._sync_statuses = list(sync_statuses or [])
+
+    def get_publish_record(self, publish_id):
+        if self._missing:
+            return None
+        return SimpleNamespace(id=publish_id, status=PublishStatus.SUCCESS.value)
+
+    def has_unreconciled_restart(self, publish_id, stage):
+        return self._unreconciled
+
+    async def execute_restart(self, *, publish_id, stage, operator):
+        self.calls.append("execute_restart")
+        if not self._restart_succeeds:
+            return {"success": False, "message": "restart boom"}
+        return {"success": True, "message": "Restart submitted", "stage": stage}
+
+    def is_restart_in_progress(self, publish_id):
+        return self.restarting
+
+    def sync_restart_progress(self, publish_id):
+        self.calls.append("sync_restart")
+        status = self._sync_statuses.pop(0) if len(self._sync_statuses) > 1 else (
+            self._sync_statuses[0] if self._sync_statuses else None
+        )
+        if status in ("SUCCESS", "FAILED"):
+            self.restarting = False  # the sync clears the marker on terminal
+        return SimpleNamespace(
+            message=f"Restart publish status: {status}",
+            data={"status": status} if status is not None else None,
+        )
+
+
+def _restart_handlers(flow):
+    tq = Mock()
+    return (
+        PublishRestartHandler(flow=flow, task_queue_service=tq),
+        PublishRestartPollHandler(flow=flow, task_queue_service=tq, poll_delay_seconds=1.0),
+        tq,
+    )
+
+
+def test_restart_success_enqueues_restart_poll():
+    flow = _FakeRestartFlow()
+    restart, _poll, tq = _restart_handlers(flow)
+    outcome = restart.handle({"publish_id": 1, "stage": "online", "operator": "op"})
+    assert isinstance(outcome, Complete)
+    tq.enqueue.assert_called_once()
+    assert tq.enqueue.call_args.args[0] == RESTART_POLL_TASK
+    assert tq.enqueue.call_args.args[1] == {"publish_id": 1}
+
+
+def test_restart_poll_enqueue_failure_propagates():
+    # AGENTS.md: never swallow a failed persistence write and return success.
+    # The redelivery guard below is what makes propagating safe.
+    flow = _FakeRestartFlow()
+    restart, _poll, tq = _restart_handlers(flow)
+    tq.enqueue.side_effect = RuntimeError("queue down")
+    with pytest.raises(RuntimeError):
+        restart.handle({"publish_id": 1, "stage": "online", "operator": "op"})
+    assert flow.calls == ["execute_restart"]
+
+
+def test_restart_redelivery_enqueues_poll_without_reissuing():
+    # execute_restart COMPLETEs its ledger op before returning, and
+    # open_publish_operation opens a *new attempt* past a terminal op — so an
+    # at-least-once redelivery would issue a SECOND BaaS restart. A record that
+    # already carries a submitted-but-unreconciled restart re-runs only the
+    # handoff. This is what the propagating enqueue above relies on.
+    flow = _FakeRestartFlow(unreconciled=True)
+    restart, _poll, tq = _restart_handlers(flow)
+    outcome = restart.handle({"publish_id": 1, "stage": "online", "operator": "op"})
+    assert isinstance(outcome, Complete)
+    assert flow.calls == []  # execute_restart NOT called again
+    tq.enqueue.assert_called_once()
+    assert tq.enqueue.call_args.args[0] == RESTART_POLL_TASK
+
+
+def test_restart_first_delivery_is_not_treated_as_a_redelivery():
+    flow = _FakeRestartFlow(unreconciled=False)
+    restart, _poll, tq = _restart_handlers(flow)
+    restart.handle({"publish_id": 1, "stage": "online", "operator": "op"})
+    assert flow.calls == ["execute_restart"]  # the restart really was issued
+
+
+def test_restart_failure_preserves_a_concurrent_restarts_marker():
+    # Every ``success: False`` return in execute_restart is a preflight check that
+    # runs BEFORE the marker is written, so a failing handler never set it. Since
+    # restart_bot does not reject a restart while one is in flight, the marker it
+    # would see belongs to a *concurrent* restart whose poll is still using it as
+    # its wait state — clearing it would strand that restart.
+    flow = _FakeRestartFlow(restart_succeeds=False, restarting=True)
+    restart, _poll, tq = _restart_handlers(flow)
+    outcome = restart.handle({"publish_id": 1, "stage": "online", "operator": "op"})
+    assert isinstance(outcome, Fail)
+    assert "restart failed" in outcome.error and "restart boom" in outcome.error
+    assert flow.calls == ["execute_restart"]  # no clear_marker
+    assert flow.restarting is True  # the other restart's poll still has its wait state
+    tq.enqueue.assert_not_called()
+
+
+def test_restart_failure_leaves_the_concurrent_poll_working():
+    # End-to-end of the above: the failed handler must not turn the other
+    # restart's poll into an immediate no-op.
+    flow = _FakeRestartFlow(restart_succeeds=False, sync_statuses=["SUCCESS"])
+    restart, poll, _tq = _restart_handlers(flow)
+    restart.handle({"publish_id": 1, "stage": "online", "operator": "op"})
+    outcome = poll.handle({"publish_id": 1})
+    assert isinstance(outcome, Complete)
+    assert flow.calls == ["execute_restart", "sync_restart"]  # sync still ran
+
+
+def test_restart_poll_reschedules_while_baas_pending():
+    flow = _FakeRestartFlow(sync_statuses=["PENDING"])
+    _restart, poll, _tq = _restart_handlers(flow)
+    outcome = poll.handle({"publish_id": 1})
+    assert isinstance(outcome, Reschedule)
+    assert outcome.delay_seconds == 1.0
+    assert flow.calls == ["sync_restart"]
+
+
+def test_restart_poll_completes_on_baas_success():
+    # The SUCCESS observation is what activates a recreate's PENDING binding and
+    # refreshes the provider MCP rule — it must happen without a /restart_status call.
+    flow = _FakeRestartFlow(sync_statuses=["PENDING", "SUCCESS"])
+    _restart, poll, _tq = _restart_handlers(flow)
+    assert isinstance(poll.handle({"publish_id": 1}), Reschedule)
+    assert isinstance(poll.handle({"publish_id": 1}), Complete)
+    assert flow.calls == ["sync_restart", "sync_restart"]
+    assert flow.restarting is False
+
+
+def test_restart_poll_fails_task_on_baas_failure():
+    flow = _FakeRestartFlow(sync_statuses=["FAILED"])
+    _restart, poll, _tq = _restart_handlers(flow)
+    outcome = poll.handle({"publish_id": 1})
+    assert isinstance(outcome, Fail)
+    assert "BaaS restart failed" in outcome.error
+
+
+def test_restart_poll_completes_when_marker_already_cleared():
+    # /restart_status (or an earlier run) already reconciled it — stop polling.
+    flow = _FakeRestartFlow(restarting=False, sync_statuses=["PENDING"])
+    _restart, poll, _tq = _restart_handlers(flow)
+    outcome = poll.handle({"publish_id": 1})
+    assert isinstance(outcome, Complete)
+    assert flow.calls == []  # sync not called
+
+
+def test_restart_poll_reschedules_when_sync_returns_no_data():
+    # Unresolved workflow id / progress-fetch error: retry within the deadline
+    # rather than declaring the restart done.
+    flow = _FakeRestartFlow(sync_statuses=[None])
+    _restart, poll, _tq = _restart_handlers(flow)
+    outcome = poll.handle({"publish_id": 1})
+    assert isinstance(outcome, Reschedule)
+    assert flow.calls == ["sync_restart"]
+
+
+def test_restart_poll_missing_record_fails_task():
+    flow = _FakeRestartFlow(missing=True)
+    _restart, poll, _tq = _restart_handlers(flow)
+    outcome = poll.handle({"publish_id": 1})
+    assert isinstance(outcome, Fail)
+    assert "not found" in outcome.error

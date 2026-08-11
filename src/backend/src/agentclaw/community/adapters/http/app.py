@@ -109,7 +109,6 @@ from agentclaw.community.adapters.http.access.router import user_list_router  # 
 from agentclaw.community.adapters.http.access.router import user_router  # noqa: E402
 from agentclaw.community.adapters.http.expert_chat import router as expert_chats_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_chat import router as bot_chat_router  # noqa: E402
-from agentclaw.community.adapters.http.bot_chat.open_router import router as bot_chat_open_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_chat.otel_router import router as bot_chat_otel_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_chat.relation_router import router as bot_chat_relation_router  # noqa: E402
 from agentclaw.community.adapters.http.system_config.router import router as system_config_router  # noqa: E402
@@ -325,6 +324,17 @@ from agentclaw.community.core.errors import (  # noqa: E402
     Unauthorized,
     ValidationError,
 )
+from agentclaw.community.adapters.http.error_logging import (  # noqa: E402
+    params_suffix,
+)
+from agentclaw.community.adapters.http.openapi_v1.errors import (  # noqa: E402
+    GrantNotResolvableError,
+    MissingPrincipalError,
+    UserIdMismatchError,
+)
+from agentclaw.community.core.gateway_principal import (  # noqa: E402
+    PrincipalVerificationError,
+)
 from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
     CallerCallTypeInvalidError,
     CallerIdentityAmbiguousError,
@@ -415,13 +425,30 @@ def _public_mapped_error(request: Request, exc: Exception) -> JSONResponse | Non
 @app.exception_handler(DomainError)
 async def _domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     status = _DOMAIN_ERROR_STATUS_MAP.get(type(exc), 500)
-    # 4xx/3xx are expected client-side flow (bad input, missing auth) — logging
-    # every one would be noise. 5xx means a core service signalled an internal
-    # failure; emit a full traceback so the cause is recoverable from logs.
+    # 5xx means a core service signalled an internal failure; emit a full
+    # traceback so the cause is recoverable from logs. 4xx is expected
+    # client-side flow (bad input, missing auth), so it gets one compact line
+    # without a traceback: enough to see that the request was refused and with
+    # what arguments, without a per-401 stack in the log file. It used to get
+    # nothing at all, which is why a refused request could not be traced.
+    #
+    # 3xx stays silent: the only one is ``LoginRedirectRequired``, an ordinary
+    # step in the login flow rather than a failure to diagnose.
+    #
+    # ``params_suffix`` is empty unless the public surface's ``@envelope_errors``
+    # captured the handler's arguments on the way past, so the message shape is
+    # unchanged for internal routes that never had them.
     if status >= 500:
         logger.exception(
-            "[DomainError 5xx] %s on %s %s: %s",
+            "[DomainError 5xx] %s on %s %s: %s%s",
             type(exc).__name__, request.method, request.url.path, exc.detail,
+            params_suffix(request),
+        )
+    elif status >= 400:
+        logger.warning(
+            "[DomainError %s] %s on %s %s: %s%s",
+            status, type(exc).__name__, request.method, request.url.path,
+            exc.detail, params_suffix(request),
         )
     if _is_public_api(request):
         return _public_error_envelope(status, request)
@@ -490,6 +517,25 @@ async def _http_exception_handler(
     they got it wrong but not what would be right.
     """
     if _is_public_api(request):
+        # The public response is the bare reason phrase — ``exc.detail`` is
+        # replaced, not returned — so this line is the only place the raised
+        # detail survives. It also covers an ``HTTPException`` raised *inside* a
+        # public handler: ``@envelope_errors`` does not map that type, so it
+        # arrives here with the handler's arguments already stashed.
+        #
+        # 5xx carries the traceback like every other 5xx path here, because a
+        # handler-raised one ("Upload storage failed", "cron service returned no
+        # data") is diagnosed by its raise site. 4xx does not: the common case is
+        # Starlette's own routing 404/405, raised before any handler, whose stack
+        # is framework internals rather than anything we would read.
+        is_server_error = exc.status_code >= 500
+        log = logger.error if is_server_error else logger.warning
+        log(
+            "[Public %s] HTTPException on %s %s: %s%s",
+            exc.status_code, request.method, request.url.path, exc.detail,
+            params_suffix(request),
+            exc_info=exc if is_server_error else None,
+        )
         return _public_error_envelope(exc.status_code, request, exc.headers)
     return await http_exception_handler(request, exc)
 
@@ -513,6 +559,18 @@ async def _validation_error_handler(
     from agentclaw.community.adapters.http.openapi_v1.responses import error_response
 
     if request.url.path.startswith(PUBLIC_API_PREFIX):
+        # "Invalid request" is all the caller gets, so which field failed is
+        # only knowable from here. ``loc``/``type``/``msg`` only — the ``input``
+        # each error carries is the caller's raw value, which is exactly the
+        # payload this surface must not copy into a log file.
+        logger.warning(
+            "[Public 422] validation failed on %s %s: %s",
+            request.method, request.url.path,
+            [
+                {"loc": e.get("loc"), "type": e.get("type"), "msg": e.get("msg")}
+                for e in exc.errors()
+            ],
+        )
         return error_response(422, "Invalid request", request)
     return await request_validation_exception_handler(request, exc)
 
@@ -532,12 +590,128 @@ async def _data_proxy_error_handler(
     detail: dict[str, object] = {"error": exc.message, "op": exc.op}
     if status >= 500:
         logger.exception(
-            "[DataProxyError 5xx] %s on %s %s: %s",
+            "[DataProxyError 5xx] %s on %s %s: %s%s",
             type(exc).__name__, request.method, request.url.path, exc.message,
+            params_suffix(request),
         )
     return JSONResponse(
         status_code=status,
         content={"detail": detail},
+        headers=_trace_headers(request),
+    )
+
+
+@app.exception_handler(MissingPrincipalError)
+@app.exception_handler(PrincipalVerificationError)
+async def _principal_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Answer an unverifiable caller with a 401 — and *only* a 401.
+
+    Both errors are raised in a **dependency** (``require_principal``, which
+    every public route declares), so they surface inside
+    ``solve_dependencies`` before the handler runs and ``@envelope_errors``
+    never sees them. The catch-all below already mapped them to the right
+    status via ``ENVELOPE_ERRORS``, so this handler exists for a different
+    reason: *where* it is registered.
+
+    Starlette splits registered handlers by key. ``Exception`` becomes
+    ``ServerErrorMiddleware``'s handler, and that middleware sends the response
+    and then unconditionally re-raises ("We always continue to raise the
+    exception", ``starlette/middleware/errors.py``) so the server can log a
+    crash. The result was a correct 401 on the wire followed by a hundred-odd
+    lines of ASGI traceback per request — precisely what the catch-all's
+    warning-without-a-traceback was written to avoid, and ruinous on this path
+    because an auth misconfiguration makes *every* request take it.
+
+    Registering the concrete types instead puts them in the inner
+    ``ExceptionMiddleware``, which answers and does not re-raise. The status
+    and body still come from ``ENVELOPE_ERRORS`` via ``_public_mapped_error``,
+    so this adds a route out of the stack, not a second opinion on the answer.
+    """
+    # ``exc`` carries the operator-facing diagnosis on the verification path —
+    # the token's ``alg``/``kid`` and the fingerprint of the key we judged it
+    # against. It is logged, never returned: the response is the same fixed
+    # "Unauthorized" the table gives every failure here, so a forger still
+    # cannot tell which part of a token was rejected.
+    logger.warning(
+        "[Public 401] %s on %s %s: %s%s",
+        type(exc).__name__, request.method, request.url.path, exc,
+        params_suffix(request),
+    )
+    mapped = _public_mapped_error(request, exc)
+    if mapped is not None:
+        return mapped
+    # Raised off the public surface — an internal ``/api`` route reaching the
+    # verifier directly. Those keep the ``{"detail": ...}`` shape their clients
+    # parse rather than being handed an Envelope they do not expect.
+    return JSONResponse(
+        status_code=401,
+        content={"detail": "Unauthorized"},
+        headers=_trace_headers(request),
+    )
+
+
+@app.exception_handler(UserIdMismatchError)
+async def _user_id_mismatch_handler(
+    request: Request, exc: UserIdMismatchError,
+) -> JSONResponse:
+    """Answer a request that named a user its caller may not act for — 403.
+
+    Registered as a concrete type for the same reason as the handler above: it
+    is raised in ``require_user_id``, a **dependency** every user-scoped public
+    route declares, so ``@envelope_errors`` never sees it and letting it reach
+    the ``Exception`` catch-all would answer correctly and then re-raise through
+    ``ServerErrorMiddleware``, adding an ASGI traceback to every occurrence.
+
+    Which ids disagreed is already logged by ``require_user_id``; this line
+    records that the request was refused, and where.
+    """
+    logger.warning(
+        "[Public 403] %s on %s %s: %s%s",
+        type(exc).__name__, request.method, request.url.path, exc,
+        params_suffix(request),
+    )
+    mapped = _public_mapped_error(request, exc)
+    if mapped is not None:
+        return mapped
+    # Unreachable while the dependency is only mounted on the public surface;
+    # kept so a future internal caller of the same seam gets the ``{"detail":
+    # ...}`` shape its clients parse rather than an Envelope.
+    return JSONResponse(
+        status_code=403,
+        content={"detail": "Forbidden"},
+        headers=_trace_headers(request),
+    )
+
+
+@app.exception_handler(GrantNotResolvableError)
+async def _grant_not_resolvable_handler(
+    request: Request, exc: GrantNotResolvableError,
+) -> JSONResponse:
+    """Answer an application caller with no grant for what it addressed — 404.
+
+    Registered as a concrete type for the same reason as the two handlers above:
+    it is raised in a **dependency**, so ``@envelope_errors`` never sees it.
+
+    **The body must be byte-identical to a nonexistent bot's**, which is why
+    this goes through ``_public_mapped_error`` with the same status rather than
+    composing its own. An application that could tell "not granted" from "no
+    such bot" would have an enumeration oracle for every bot id in the tenant —
+    and the grant check would leak precisely what it exists to protect.
+
+    ``403`` would be exactly wrong: on this surface it means "you are
+    authenticated and this is not yours", which confirms the bot exists.
+    """
+    logger.warning(
+        "[Public 404] %s on %s %s: %s%s",
+        type(exc).__name__, request.method, request.url.path, exc,
+        params_suffix(request),
+    )
+    mapped = _public_mapped_error(request, exc)
+    if mapped is not None:
+        return mapped
+    return JSONResponse(
+        status_code=404,
+        content={"detail": "Not found"},
         headers=_trace_headers(request),
     )
 
@@ -551,11 +725,17 @@ async def _data_proxy_error_handler(
 @app.exception_handler(Exception)
 async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     # A mapped public error can still land here: @envelope_errors only wraps the
-    # handler, so an ENVELOPE_ERRORS type raised in a **dependency** — the auth
-    # seam every public route declares — is raised before the handler runs and
-    # arrives as an "unhandled" exception. Consulting the same table here is what
-    # makes an unauthenticated public request a 401 rather than a 500, wherever
-    # the error was raised. One table, two entry points.
+    # handler, so an ENVELOPE_ERRORS type raised in a **dependency** is raised
+    # before the handler runs and arrives as an "unhandled" exception.
+    # Consulting the same table here is what makes such a request its mapped
+    # status rather than a 500, wherever the error was raised. One table, two
+    # entry points.
+    #
+    # The auth seam's two errors no longer reach this handler — they have their
+    # own registration above, so that a routine 401 does not pay for
+    # ServerErrorMiddleware's re-raise. Everything else mapped still arrives
+    # here, and the traceback note below is why that is tolerable for the rest:
+    # they are rare, where an unverifiable caller is not.
     mapped = _public_mapped_error(request, exc)
     if mapped is not None:
         # Expected client-side flow (missing/invalid credentials, bad input).
@@ -564,21 +744,22 @@ async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSON
         # treats 4xx.
         if mapped.status_code < 500:
             logger.warning(
-                "[Public %s] %s on %s %s",
+                "[Public %s] %s on %s %s%s",
                 mapped.status_code, type(exc).__name__, request.method,
-                request.url.path,
+                request.url.path, params_suffix(request),
             )
             return mapped
         logger.exception(
-            "[Public %s] %s on %s %s",
+            "[Public %s] %s on %s %s%s",
             mapped.status_code, type(exc).__name__, request.method,
-            request.url.path,
+            request.url.path, params_suffix(request),
         )
         return mapped
 
     logger.exception(
-        "[Unhandled exception] %s on %s %s",
+        "[Unhandled exception] %s on %s %s%s",
         type(exc).__name__, request.method, request.url.path,
+        params_suffix(request),
     )
     # The public surface guarantees the Envelope on every response, including
     # the ones nobody anticipated. Enumerating each new escapee in
@@ -613,7 +794,6 @@ app.include_router(yuque_router)
 app.include_router(device_router)
 app.include_router(expert_chats_router)  # 新增：用户与专家Bot对话管理
 app.include_router(bot_chat_router)  # 个人对话（Langfuse trace 查询）
-app.include_router(bot_chat_open_router)  # embed 精确日志查询（不按 owner 过滤）
 app.include_router(bot_chat_otel_router)  # bot-chat OTLP 日志写入
 app.include_router(bot_chat_relation_router)  # bot-chat 业务任务关系写入
 app.include_router(whitelist_router)

@@ -230,6 +230,7 @@ pub async fn bot_chat(
             tags,
             response_mode: req.response_mode,
             organization_code,
+            provider_bypass_headers: state.provider_bypass_headers_from(&headers),
         })
         .await
         .map_err(map_service_error)
@@ -383,6 +384,7 @@ pub async fn bot_chat_async(
             response_mode: req.response_mode,
             caller_wait_mode,
             organization_code,
+            provider_bypass_headers: state.provider_bypass_headers_from(&headers),
         })
         .await;
     let accepted = match accepted_result {

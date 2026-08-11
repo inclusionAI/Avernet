@@ -6,8 +6,6 @@ Tests the following endpoints:
 """
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -21,11 +19,9 @@ from agentclaw.community.core.harness.models import (
     PatchTarget,
     FindingsReport,
 )
-from agentclaw.community.core.harness.repository_protocol import (
-    HarnessPatchRecordRepository,
-    HarnessPatchRepository,
-    HarnessScanRecordRepository,
-)
+from agentclaw.community.core.repository.protocols.harness import HarnessScanRecordRepository
+from agentclaw.community.core.repository.protocols.harness import HarnessPatchRepository
+from agentclaw.community.core.repository.protocols.harness import HarnessPatchRecordRepository
 from agentclaw.community.api.patch_engine_service import PatchEngineProtocol
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.bot_collaborator import make_bot
@@ -33,6 +29,7 @@ from tests.community.framework import (
     CaseInput,
     ExpectError,
     ExpectSuccess,
+    bind_method,
     endpoint_test,
 )
 from tests.community.framework.fixtures import app_with_testing_modules
@@ -49,6 +46,24 @@ from tests.community.framework.fixtures import app_with_testing_modules
 def client(app_with_testing_modules):
     """TestClient backed by a per-test injector with all tables created."""
     return TestClient(app_with_testing_modules)
+
+
+def _bind_patch_engine(world, *, returns=None, raises=None):
+    """Serve ``PatchEngineProtocol.apply`` from a stand-in bound on the injector.
+
+    Applying a patch writes files onto a bot's device, which is the one part of
+    this flow a test host cannot perform. The stand-in replaces exactly that
+    method on a subclass of the wired engine and is bound for the life of this
+    test's injector, so the router still resolves the engine the production way
+    and nothing survives into the next test.
+    """
+
+    async def _apply(_self, *_args, **_kwargs):
+        if raises is not None:
+            raise raises
+        return returns
+
+    bind_method(world, PatchEngineProtocol, "apply", _apply)
 
 
 # ── Seed helpers ────────────────────────────────────────────────
@@ -210,27 +225,33 @@ def admin_apply_patch_not_found():
 class TestAdminDiagnoseConflict:
     """Test the 409 conflict branch when a scan is already active."""
 
-    def test_diagnose_conflict(self, client):
-        """When an active scan exists, second diagnose returns 409."""
-        from agentclaw.community.core.harness.repository_protocol import (
-            HarnessScanRecordRepository,
-        )
-        from agentclaw.community.di import Injected
+    def test_diagnose_conflict(self, client, world):
+        """When an active scan exists, second diagnose returns 409.
 
-        scan_repo = client.app.state.injector.get(HarnessScanRecordRepository)
-        # Make has_active_scan return True
-        with patch.object(
-            type(scan_repo), "has_active_scan", return_value=True
-        ):
-            resp = client.post(
-                "/api/harness/admin/diagnose",
-                json={
-                    "bot_id": "bot_conflict",
-                    "entity_id": "100000",
-                    "entity_type": "staff",
-                },
-                headers={"x-user-id": "100000"},
+        The in-progress scan is a real row: ``has_active_scan`` matches on
+        status and age, so inserting a freshly-created ``scanning`` record is
+        what the first request would have left behind.
+        """
+        world.get(HarnessScanRecordRepository).create(
+            FindingsReport(
+                bot_id="bot_conflict",
+                entity_id="100000",
+                scan_type="full",
+                layer=Layer.L1,
+                trigger_source="manual",
+                status="scanning",
             )
+        )
+
+        resp = client.post(
+            "/api/harness/admin/diagnose",
+            json={
+                "bot_id": "bot_conflict",
+                "entity_id": "100000",
+                "entity_type": "staff",
+            },
+            headers={"x-user-id": "100000"},
+        )
         assert resp.status_code == 409
         assert "诊断中" in resp.json().get("detail", "")
 
@@ -258,9 +279,7 @@ class TestAdminApplyByRecordId:
             PatchStatus,
             PatchTarget,
         )
-        from agentclaw.community.core.harness.repository_protocol import (
-            HarnessPatchRecordRepository,
-        )
+        from agentclaw.community.core.repository.protocols.harness import HarnessPatchRecordRepository
 
         patch_record_repo = client.app.state.injector.get(
             HarnessPatchRecordRepository
@@ -289,14 +308,12 @@ class TestAdminApplyByRecordId:
 
 
 class TestAdminApplyPatchIdListSuccess:
-    """Test admin/apply with patch_id_list mode — happy path via mock."""
+    """Test admin/apply with patch_id_list mode — happy path."""
 
-    def test_apply_patch_id_list_success(self, client):
-        """Applying patches by patch_id_list with mocked engine returns success."""
-        from agentclaw.community.core.harness.repository_protocol import (
-            HarnessPatchRepository,
-            HarnessPatchRecordRepository,
-        )
+    def test_apply_patch_id_list_success(self, client, world):
+        """Applying patches by patch_id_list returns success."""
+        from agentclaw.community.core.repository.protocols.harness import HarnessPatchRepository
+        from agentclaw.community.core.repository.protocols.harness import HarnessPatchRecordRepository
 
         patch_repo = client.app.state.injector.get(HarnessPatchRepository)
         patch_record_repo = client.app.state.injector.get(
@@ -312,44 +329,27 @@ class TestAdminApplyPatchIdListSuccess:
         )
         patch_id = patch_repo.create(patch_def)
 
-        # Mock the patch_record_repo.get_by_patch_id to return None (no existing record)
-        with patch.object(
-            type(patch_record_repo),
-            "get_by_patch_id",
-            return_value=None,
-        ):
-            # Mock patch_record_repo.create to return a valid record_id
-            with patch.object(
-                type(patch_record_repo),
-                "create",
-                return_value=1,
-            ):
-                # Mock engine.apply to return a successful record
-                mock_engine = client.app.state.injector.get(PatchEngineProtocol)
-                applied_record = DomainPatchRecord(
-                    bot_id="bot_test",
-                    entity_id="100000",
-                    patch_id=patch_id,
-                    layer=Layer.L1,
-                    target=PatchTarget(files=["AGENTS.md"]),
-                    status=PatchStatus.APPLIED,
-                )
-                applied_record.id = 1
-                with patch.object(
-                    type(mock_engine),
-                    "apply",
-                    new_callable=AsyncMock,
-                    return_value=applied_record,
-                ):
-                    resp = client.post(
-                        "/api/harness/admin/apply",
-                        json={
-                            "bot_id": "bot_test",
-                            "entity_id": "100000",
-                            "patch_id_list": [patch_id],
-                        },
-                        headers={"x-user-id": "100000"},
-                    )
+        # No record exists for this patch yet, so the route takes its
+        # create-then-apply path against the real repository.
+        applied_record = DomainPatchRecord(
+            bot_id="bot_test",
+            entity_id="100000",
+            patch_id=patch_id,
+            layer=Layer.L1,
+            target=PatchTarget(files=["AGENTS.md"]),
+            status=PatchStatus.APPLIED,
+        )
+        applied_record.id = 1
+        _bind_patch_engine(world, returns=applied_record)
+        resp = client.post(
+            "/api/harness/admin/apply",
+            json={
+                "bot_id": "bot_test",
+                "entity_id": "100000",
+                "patch_id_list": [patch_id],
+            },
+            headers={"x-user-id": "100000"},
+        )
         assert resp.status_code == 200
         assert resp.json().get("success") is True
 
@@ -357,17 +357,15 @@ class TestAdminApplyPatchIdListSuccess:
 class TestAdminApplyRecordIdSuccess:
     """Test admin/apply with record_id mode — happy path via mock."""
 
-    def test_apply_record_id_success(self, client):
+    def test_apply_record_id_success(self, client, world):
         """Applying a PLANNED record by record_id with mocked engine returns success."""
         from agentclaw.community.core.harness.models import (
             PatchRecord as DomainPatchRecord,
             PatchStatus,
             PatchTarget,
         )
-        from agentclaw.community.core.harness.repository_protocol import (
-            HarnessPatchRecordRepository,
-            HarnessPatchRepository,
-        )
+        from agentclaw.community.core.repository.protocols.harness import HarnessPatchRepository
+        from agentclaw.community.core.repository.protocols.harness import HarnessPatchRecordRepository
 
         patch_record_repo = client.app.state.injector.get(
             HarnessPatchRecordRepository
@@ -392,8 +390,6 @@ class TestAdminApplyRecordIdSuccess:
         )
         record_id = patch_record_repo.create(record)
 
-        # Mock engine.apply to return APPLIED record
-        mock_engine = client.app.state.injector.get(PatchEngineProtocol)
         applied_record = DomainPatchRecord(
             bot_id="bot_test",
             entity_id="100000",
@@ -403,21 +399,16 @@ class TestAdminApplyRecordIdSuccess:
             status=PatchStatus.APPLIED,
         )
         applied_record.id = record_id
-        with patch.object(
-            type(mock_engine),
-            "apply",
-            new_callable=AsyncMock,
-            return_value=applied_record,
-        ):
-            resp = client.post(
-                "/api/harness/admin/apply",
-                json={
-                    "bot_id": "bot_test",
-                    "entity_id": "100000",
-                    "record_id": record_id,
-                },
-                headers={"x-user-id": "100000"},
-            )
+        _bind_patch_engine(world, returns=applied_record)
+        resp = client.post(
+            "/api/harness/admin/apply",
+            json={
+                "bot_id": "bot_test",
+                "entity_id": "100000",
+                "record_id": record_id,
+            },
+            headers={"x-user-id": "100000"},
+        )
         assert resp.status_code == 200
         assert resp.json().get("success") is True
 
@@ -425,16 +416,14 @@ class TestAdminApplyRecordIdSuccess:
 class TestAdminApplyPatchEngineError:
     """Test admin/apply when engine raises PatchEngineError."""
 
-    def test_apply_engine_error(self, client):
+    def test_apply_engine_error(self, client, world):
         """PatchEngineError from engine.apply returns 400."""
         from agentclaw.community.core.harness.models import (
             PatchRecord as DomainPatchRecord,
             PatchStatus,
             PatchTarget,
         )
-        from agentclaw.community.core.harness.repository_protocol import (
-            HarnessPatchRecordRepository,
-        )
+        from agentclaw.community.core.repository.protocols.harness import HarnessPatchRecordRepository
         from agentclaw.community.core.harness.services.patch_engine import PatchEngineError
 
         patch_record_repo = client.app.state.injector.get(
@@ -451,23 +440,18 @@ class TestAdminApplyPatchEngineError:
         )
         record_id = patch_record_repo.create(record)
 
-        # Mock engine.apply to raise PatchEngineError
-        mock_engine = client.app.state.injector.get(PatchEngineProtocol)
-        with patch.object(
-            type(mock_engine),
-            "apply",
-            new_callable=AsyncMock,
-            side_effect=PatchEngineError("apply", "something went wrong"),
-        ):
-            resp = client.post(
-                "/api/harness/admin/apply",
-                json={
-                    "bot_id": "bot_test",
-                    "entity_id": "100000",
-                    "record_id": record_id,
-                },
-                headers={"x-user-id": "100000"},
-            )
+        _bind_patch_engine(
+            world, raises=PatchEngineError("apply", "something went wrong"),
+        )
+        resp = client.post(
+            "/api/harness/admin/apply",
+            json={
+                "bot_id": "bot_test",
+                "entity_id": "100000",
+                "record_id": record_id,
+            },
+            headers={"x-user-id": "100000"},
+        )
         assert resp.status_code == 400
         assert "something went wrong" in resp.json().get("detail", "")
 
@@ -475,16 +459,14 @@ class TestAdminApplyPatchEngineError:
 class TestAdminApplyRecordPreviewed:
     """Test admin/apply with a record in PREVIEWED status (should succeed)."""
 
-    def test_apply_previewed_record_success(self, client):
+    def test_apply_previewed_record_success(self, client, world):
         """A PREVIEWED record should be accepted for apply, same as PLANNED."""
         from agentclaw.community.core.harness.models import (
             PatchRecord as DomainPatchRecord,
             PatchStatus,
             PatchTarget,
         )
-        from agentclaw.community.core.harness.repository_protocol import (
-            HarnessPatchRecordRepository,
-        )
+        from agentclaw.community.core.repository.protocols.harness import HarnessPatchRecordRepository
 
         patch_record_repo = client.app.state.injector.get(
             HarnessPatchRecordRepository
@@ -507,8 +489,6 @@ class TestAdminApplyRecordPreviewed:
         )
         record_id = patch_record_repo.create(record)
 
-        # Mock engine.apply to return APPLIED record
-        mock_engine = client.app.state.injector.get(PatchEngineProtocol)
         applied_record = DomainPatchRecord(
             bot_id="bot_test",
             entity_id="100000",
@@ -518,21 +498,16 @@ class TestAdminApplyRecordPreviewed:
             status=PatchStatus.APPLIED,
         )
         applied_record.id = record_id
-        with patch.object(
-            type(mock_engine),
-            "apply",
-            new_callable=AsyncMock,
-            return_value=applied_record,
-        ):
-            resp = client.post(
-                "/api/harness/admin/apply",
-                json={
-                    "bot_id": "bot_test",
-                    "entity_id": "100000",
-                    "record_id": record_id,
-                },
-                headers={"x-user-id": "100000"},
-            )
+        _bind_patch_engine(world, returns=applied_record)
+        resp = client.post(
+            "/api/harness/admin/apply",
+            json={
+                "bot_id": "bot_test",
+                "entity_id": "100000",
+                "record_id": record_id,
+            },
+            headers={"x-user-id": "100000"},
+        )
         assert resp.status_code == 200
         assert resp.json().get("success") is True
 
@@ -540,16 +515,14 @@ class TestAdminApplyRecordPreviewed:
 class TestAdminApplyServerError:
     """Test admin/apply when engine raises an unexpected Exception."""
 
-    def test_apply_generic_error_returns_500(self, client):
+    def test_apply_generic_error_returns_500(self, client, world):
         """A generic Exception from engine.apply returns 500."""
         from agentclaw.community.core.harness.models import (
             PatchRecord as DomainPatchRecord,
             PatchStatus,
             PatchTarget,
         )
-        from agentclaw.community.core.harness.repository_protocol import (
-            HarnessPatchRecordRepository,
-        )
+        from agentclaw.community.core.repository.protocols.harness import HarnessPatchRecordRepository
 
         patch_record_repo = client.app.state.injector.get(
             HarnessPatchRecordRepository
@@ -565,23 +538,16 @@ class TestAdminApplyServerError:
         )
         record_id = patch_record_repo.create(record)
 
-        # Mock engine.apply to raise a generic Exception
-        mock_engine = client.app.state.injector.get(PatchEngineProtocol)
-        with patch.object(
-            type(mock_engine),
-            "apply",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("unexpected failure"),
-        ):
-            resp = client.post(
-                "/api/harness/admin/apply",
-                json={
-                    "bot_id": "bot_test",
-                    "entity_id": "100000",
-                    "record_id": record_id,
-                },
-                headers={"x-user-id": "100000"},
-            )
+        _bind_patch_engine(world, raises=RuntimeError("unexpected failure"))
+        resp = client.post(
+            "/api/harness/admin/apply",
+            json={
+                "bot_id": "bot_test",
+                "entity_id": "100000",
+                "record_id": record_id,
+            },
+            headers={"x-user-id": "100000"},
+        )
         assert resp.status_code == 500
 
 
@@ -598,9 +564,7 @@ class TestAdminApplyRecordOtherBadStatus:
             PatchRecord as DomainPatchRecord,
             PatchTarget,
         )
-        from agentclaw.community.core.harness.repository_protocol import (
-            HarnessPatchRecordRepository,
-        )
+        from agentclaw.community.core.repository.protocols.harness import HarnessPatchRecordRepository
 
         patch_record_repo = client.app.state.injector.get(
             HarnessPatchRecordRepository
@@ -672,13 +636,11 @@ class TestAdminDiagnoseSuccess:
 class TestAdminApplyPatchIdListEmptyContent:
     """Test admin/apply with patch_id_list when patch has empty content."""
 
-    def test_apply_patch_empty_content(self, client):
+    def test_apply_patch_empty_content(self, client, world):
         """A patch with no content (empty operations list) is still submitted
         to engine.apply — the endpoint does not enforce non-empty ops."""
-        from agentclaw.community.core.harness.repository_protocol import (
-            HarnessPatchRepository,
-            HarnessPatchRecordRepository,
-        )
+        from agentclaw.community.core.repository.protocols.harness import HarnessPatchRepository
+        from agentclaw.community.core.repository.protocols.harness import HarnessPatchRecordRepository
 
         patch_repo = client.app.state.injector.get(HarnessPatchRepository)
         patch_record_repo = client.app.state.injector.get(
@@ -694,8 +656,6 @@ class TestAdminApplyPatchIdListEmptyContent:
         )
         patch_id = patch_repo.create(patch_def)
 
-        # Mock get_by_patch_id to return None, create to return a record_id
-        mock_engine = client.app.state.injector.get(PatchEngineProtocol)
         applied_record = DomainPatchRecord(
             bot_id="bot_test",
             entity_id="100000",
@@ -705,20 +665,15 @@ class TestAdminApplyPatchIdListEmptyContent:
             status=PatchStatus.APPLIED,
         )
         applied_record.id = 1
-
-        with patch.object(type(patch_record_repo), "get_by_patch_id", return_value=None), \
-             patch.object(type(patch_record_repo), "create", return_value=1), \
-             patch.object(
-                type(mock_engine), "apply", new_callable=AsyncMock, return_value=applied_record
-             ):
-            resp = client.post(
-                "/api/harness/admin/apply",
-                json={
-                    "bot_id": "bot_test",
-                    "entity_id": "100000",
-                    "patch_id_list": [patch_id],
-                },
-                headers={"x-user-id": "100000"},
-            )
+        _bind_patch_engine(world, returns=applied_record)
+        resp = client.post(
+            "/api/harness/admin/apply",
+            json={
+                "bot_id": "bot_test",
+                "entity_id": "100000",
+                "patch_id_list": [patch_id],
+            },
+            headers={"x-user-id": "100000"},
+        )
         assert resp.status_code == 200
         assert resp.json().get("success") is True

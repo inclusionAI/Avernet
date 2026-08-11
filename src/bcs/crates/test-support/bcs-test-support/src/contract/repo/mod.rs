@@ -1295,6 +1295,37 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
     assert_eq!(public_owner_page.messages.len(), 1);
     assert_eq!(public_owner_page.messages[0].owner_bot_id, None);
 
+    // PublicOrOwner → 公共(owner=None) + 命中 viewer 的副本；他人 owner 不返回。
+    let public_or_mgr = repo
+        .query_messages(MessageQuery {
+            group_id: group_id.to_string(),
+            session_id: session_id.to_string(),
+            cursor: None,
+            limit: 10,
+            keyword: None,
+            sender_id: None,
+            message_type: None,
+            owner_filter: MessageOwnerFilter::PublicOrOwner("mgr".to_string()),
+            time_range: Some((5000, 5200)),
+            visible_from_seq: None,
+        })
+        .await
+        .expect("query public-or-mgr");
+    // sys(owner=None) + mgr(owner=mgr) 命中；workerA(owner=workerA) 不返回。
+    assert_eq!(public_or_mgr.messages.len(), 2);
+    assert!(public_or_mgr
+        .messages
+        .iter()
+        .all(|m| m.owner_bot_id.is_none() || m.owner_bot_id.as_deref() == Some("mgr")));
+    assert!(public_or_mgr
+        .messages
+        .iter()
+        .any(|m| m.owner_bot_id.is_none()));
+    assert!(public_or_mgr
+        .messages
+        .iter()
+        .any(|m| m.owner_bot_id.as_deref() == Some("mgr")));
+
     // list_session_history — legacy direct-read contract: `created_at DESC,
     // session_seq DESC` with composite `(created_at, session_seq)` cursor
     // pagination + full `MessageOwnerFilter`. env isolation (VUlao) is the
@@ -1378,6 +1409,34 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
             .map(|m| m.session_seq)
             .collect::<Vec<_>>(),
         vec![8]
+    );
+
+    // PublicOrOwner("workerA") → 公共(NULL seqs 9,6,5,4,3,2,1) + workerA(seq 8)，DESC；
+    // seq 7(mgr) 被排除。
+    let public_or_wa = repo
+        .list_session_history(
+            session_id,
+            MessageOwnerFilter::PublicOrOwner("workerA".to_string()),
+            None,
+            None,
+            100,
+        )
+        .await
+        .expect("list_session_history PublicOrOwner");
+    assert_eq!(
+        public_or_wa
+            .messages
+            .iter()
+            .map(|m| m.session_seq)
+            .collect::<Vec<_>>(),
+        vec![9, 8, 6, 5, 4, 3, 2, 1]
+    );
+    assert!(public_or_wa.messages.iter().all(|m| {
+        m.owner_bot_id.is_none() || m.owner_bot_id.as_deref() == Some("workerA")
+    }));
+    assert!(
+        !public_or_wa.messages.iter().any(|m| m.session_seq == 7),
+        "mgr-owned seq 7 must NOT appear under PublicOrOwner(workerA)"
     );
 
     // visible_from_seq cutoff: only seqs >= 4 survive, DESC.

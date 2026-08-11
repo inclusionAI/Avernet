@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 
+from gateway.community.logger import get_logger
 from gateway.community.spi.forwarder import (
     Forwarder,
     ForwardRequest,
@@ -20,6 +21,8 @@ from gateway.community.spi.forwarder import (
     strip_hop_by_hop,
     strip_hop_by_hop_items,
 )
+
+logger = get_logger("http-forwarder")
 
 
 class HttpxForwarder(Forwarder):
@@ -36,7 +39,9 @@ class HttpxForwarder(Forwarder):
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
-            self._client = httpx.AsyncClient()
+            self._client = httpx.AsyncClient(
+                timeout=httpx.Timeout(connect=5.0, read=120.0, write=5.0, pool=5.0),
+            )
         return self._client
 
     @asynccontextmanager
@@ -48,7 +53,25 @@ class HttpxForwarder(Forwarder):
             headers=strip_hop_by_hop(request.headers),
             content=request.content,
         )
-        response = await client.send(upstream, stream=True)
+        logger.info(
+            "forwarding request %s %s headers_len=%d content_len=%d",
+            request.method,
+            request.url,
+            len(request.headers),
+            len(request.content),
+        )
+        try:
+            response = await client.send(upstream, stream=True)
+        except Exception:
+            logger.exception(
+                "upstream send failed for %s %s", request.method, request.url
+            )
+            raise
+        logger.info(
+            "upstream response status=%d headers=%s",
+            response.status_code,
+            response.headers.multi_items(),
+        )
         try:
             # multi_items() preserves duplicate response headers (Set-Cookie).
             yield ForwardResponse(

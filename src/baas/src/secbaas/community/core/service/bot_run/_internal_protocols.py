@@ -89,6 +89,7 @@ class BotService(Protocol):
         context: BotChatContext | None = None,
         timeout: float,
         chat_metadata: dict[str, str] | None = None,
+        attachments: list[Any] | None = None,
     ) -> BotResponse:
         """发送消息并获取响应
 
@@ -111,6 +112,7 @@ class BotService(Protocol):
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         timeout: float,
+        attachments: list[Any] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """流式发送消息，返回 StreamChunk 迭代器。
 
@@ -126,6 +128,7 @@ class BotService(Protocol):
         message: str,
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
+        attachments: list[Any] | None = None,
     ) -> None:
         """注入消息到已有会话
 
@@ -183,6 +186,27 @@ class BotService(Protocol):
         """
         ...
 
+    async def list_sessions(
+        self,
+        *,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[SessionInfo]:
+        """List sessions for a given bot binding (read-only).
+
+        Args:
+            binding_info: 已解析的 binding 信息（用于创建底层连接）
+            context: 可选的请求上下文
+            limit: Maximum number of sessions to return
+            offset: Number of sessions to skip
+
+        Returns:
+            List of SessionInfo objects
+        """
+        ...
+
 
 @runtime_checkable
 class MessageDispatcher(Protocol):
@@ -229,6 +253,7 @@ class MessageDispatcher(Protocol):
         bot_id: str = "",
         callback: Any = None,
         chat_metadata: dict[str, str] | None = None,
+        attachments: list[Any] | None = None,
     ) -> None:
         """分发消息发送以进行异步执行
 
@@ -262,6 +287,7 @@ class MessageDispatcher(Protocol):
         context: BotChatContext | None = None,
         timeout: float,
         bot_id: str = "",
+        attachments: list[Any] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """流式消息发送分发，返回 StreamChunk 迭代器。
 
@@ -283,6 +309,7 @@ class MessageDispatcher(Protocol):
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         bot_id: str = "",
+        attachments: list[Any] | None = None,
     ) -> None:
         """分发消息注入以进行异步执行
 

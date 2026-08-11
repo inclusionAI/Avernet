@@ -25,11 +25,9 @@ from injector import Binder, Module, inject, provider, singleton
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.plugin_api.approval_workflow import ApprovalWorkflowPlugin
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotService
-from agentclaw.community.core.bot_public.repository.bot_friend_repository import (
-    BotFriendRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.bot import BotFriendRepositoryProtocol
 from agentclaw.community.core.bot_public.services.bot_discover_service import BotDiscoverService
 from agentclaw.community.core.bot_public.services.bot_public_service import BotPublicService
 from agentclaw.community.core.devices.services.device_context_resolver import (
@@ -41,9 +39,7 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.bot_publish_approval import BotPublishApprovalPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
-from agentclaw.community.plugins.bot_friend_repository import (
-    BotFriendRepository as UnifiedBotFriendRepository,
-)
+from agentclaw.community.core.repository.implementations.bot.friend import BotFriendRepository as UnifiedBotFriendRepository
 from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
 
 

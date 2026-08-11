@@ -1000,6 +1000,19 @@ def _get_context_preparation_service():
     return _context_preparation_service
 
 
+def _create_llm_provider(settings: "LLMSettings") -> "LLMProvider":
+    """Create an LLM provider based on LLM_API_TYPE environment variable."""
+    import os
+    llm_api_type = os.environ.get("LLM_API_TYPE", "anthropic").lower()
+    if llm_api_type in ("openai", "openai-completions"):
+        from src.infra.llm.providers.openai_compatible_provider import OpenAICompatibleProvider
+        logger.info("[DEP-DIAG] Using OpenAICompatibleProvider (LLM_API_TYPE=%s)", llm_api_type)
+        return OpenAICompatibleProvider(settings=settings)
+    from src.infra.llm.providers.anthropic_compatible_provider import AnthropicCompatibleProvider
+    logger.info("[DEP-DIAG] Using AnthropicCompatibleProvider (LLM_API_TYPE=%s)", llm_api_type)
+    return AnthropicCompatibleProvider(settings=settings)
+
+
 def _get_llm_gateway_service():
     """
     获取 LLM Gateway Service 实例
@@ -1043,7 +1056,6 @@ def _get_llm_gateway_service():
 
         try:
             from src.infra.llm.config.llm_settings import LLMSettings
-            from src.infra.llm.providers.anthropic_compatible_provider import AnthropicCompatibleProvider
             from src.infra.llm.routing.static_llm_router import StaticLLMRouter
             from src.application.services.llm_gateway_service import LLMGatewayService
 
@@ -1051,8 +1063,7 @@ def _get_llm_gateway_service():
             settings = LLMSettings()
             logger.info("[DEP-DIAG] LLMSettings: model=%s", getattr(settings, 'model', 'N/A'))
 
-            logger.info("[DEP-DIAG] 创建 AnthropicCompatibleProvider...")
-            provider = AnthropicCompatibleProvider(settings=settings)
+            provider = _create_llm_provider(settings)
             logger.info("[DEP-DIAG] provider id: %d", id(provider))
 
             logger.info("[DEP-DIAG] 创建 StaticLLMRouter...")
@@ -1669,13 +1680,12 @@ def _create_llm_recommendation_service():
     # 创建 LLM 服务链
     try:
         from src.infra.llm.config.llm_settings import LLMSettings
-        from src.infra.llm.providers.anthropic_compatible_provider import AnthropicCompatibleProvider
         from src.infra.llm.routing.static_llm_router import StaticLLMRouter
         from src.application.services.llm_gateway_service import LLMGatewayService
         from src.application.services.fusion_recommendation_service import FusionRecommendationService
 
         settings = LLMSettings()
-        provider = AnthropicCompatibleProvider(settings=settings)
+        provider = _create_llm_provider(settings)
         router = StaticLLMRouter(settings=settings)
         gateway = LLMGatewayService(provider=provider, router=router)
         return FusionRecommendationService(gateway=gateway)

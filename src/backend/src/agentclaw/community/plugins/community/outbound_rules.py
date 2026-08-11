@@ -28,6 +28,7 @@ class CommunityOutboundRuleProvider(OutboundRuleProvider):
         agent_pass_token: str = "",
         agent_code: str = "",
         bot_type_resolver: Callable[[str, str], str | None] | None = None,
+        extra_properties: dict[str, object] | None = None,
     ) -> OutBoundOperationRule:
         return OutBoundOperationRule()
 

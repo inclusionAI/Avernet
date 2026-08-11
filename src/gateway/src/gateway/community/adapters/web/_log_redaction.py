@@ -5,7 +5,7 @@ so socket credentials travel as query parameters. The engine socket's
 ``x-proxypass-token`` is one such credential, and uvicorn logs the request
 target *including its query string* on every accepted or refused handshake::
 
-    INFO: 127.0.0.1:43078 - "WebSocket /openapi/v1/engine/T/api/ws?x-proxypass-token=eyJ…" [accepted]
+    INFO: 127.0.0.1:43078 - "WebSocket /openapi/v1/bots/messages/T/api/ws?x-proxypass-token=eyJ…" [accepted]
 
 That line is emitted through ``uvicorn.error`` and is not governed by the
 ``access_log`` switch, so a deployment cannot turn it off without losing the

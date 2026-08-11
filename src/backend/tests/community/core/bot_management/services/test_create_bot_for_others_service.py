@@ -46,7 +46,7 @@ def _freeze_restart_wait_clock(monkeypatch):
     return service_module, FrozenDateTime
 
 
-def _bot(*, status="ACTIVE", ext=None, gmt_modified=None):
+def _bot(*, status="ACTIVE", ext=None, gmt_modified=None, active_engine="openclaw"):
     return {
         "bot_id": EXISTING_BOT_ID,
         "owner_id": TARGET_USER,
@@ -55,7 +55,7 @@ def _bot(*, status="ACTIVE", ext=None, gmt_modified=None):
         "bot_name": "Default Bot",
         "bot_desc": "default vault",
         "status": status,
-        "active_engine": "openclaw",
+        "active_engine": active_engine,
         "template_type": None,
         "ext": ext or {},
         "gmt_modified": gmt_modified,
@@ -84,6 +84,7 @@ def _service(*, existing_bot=None):
         "bot_id": "default",
         "status": "PENDING",
     }
+    bot_service.is_teclaw_bot.return_value = False
 
     passport = MagicMock()
     passport.apply_first_agent_passport.return_value = {
@@ -412,6 +413,29 @@ def test_active_bot_with_complete_identity_is_verified_without_restart():
     bot_service.restart_bot.assert_not_called()
 
 
+def test_active_teclaw_bot_is_verified_without_requesting_restart():
+    stored = _bot(
+        active_engine="teclaw",
+        ext={"passport": {"agent_code": AGENT_CODE}},
+    )
+    service, _, bot_service, passport, relationship, _ = _service(
+        existing_bot=stored
+    )
+    bot_service.is_teclaw_bot.return_value = True
+    relationship.query_relationships.return_value = [
+        {"auth_id": 42, "work_no": TARGET_USER, "agent_code": AGENT_CODE},
+    ]
+
+    result = _execute(service)
+
+    assert result["action"] == "skipped"
+    assert result["runtime"]["restart_required"] is False
+    bot_service.is_teclaw_bot.assert_called_once_with("teclaw")
+    passport.apply_first_agent_passport.assert_not_called()
+    relationship.create_relationship.assert_not_called()
+    bot_service.restart_bot.assert_not_called()
+
+
 def test_active_bot_with_missing_identity_is_repaired_but_not_restarted():
     stored = _bot(
         ext={
@@ -507,6 +531,36 @@ def test_failed_bot_is_repaired_before_restart_after_wait_period():
     assert result["action"] == "restarted"
     assert events.index("passport.token") < events.index("relationship.query")
     assert events.index("relationship.query") < events.index("bot.restart")
+    bot_service.restart_bot.assert_called_once_with(
+        bot_id=EXISTING_BOT_ID,
+        user_id=TARGET_USER,
+        nick_name="Alice",
+    )
+
+
+def test_failed_teclaw_bot_restart_rejection_is_client_error_after_wait_period():
+    from agentclaw.community.core.bot_management.errors import (
+        CreateBotForOthersError,
+    )
+    from agentclaw.community.core.bot_management.services.bot_service import (
+        BotOperationNotAllowedError,
+    )
+
+    stored = _bot(
+        status="FAILED",
+        ext={"passport": {"agent_code": AGENT_CODE}},
+        gmt_modified=datetime.now(timezone.utc) - timedelta(minutes=31),
+    )
+    service, _, bot_service, _, _, _ = _service(existing_bot=stored)
+    bot_service.restart_bot.side_effect = BotOperationNotAllowedError(
+        "teclaw 类型的 Bot 不支持重启"
+    )
+
+    with pytest.raises(CreateBotForOthersError) as exc_info:
+        _execute(service)
+
+    assert exc_info.value.error_code == 400
+    assert str(exc_info.value) == "teclaw 类型的 Bot 不支持重启"
     bot_service.restart_bot.assert_called_once_with(
         bot_id=EXISTING_BOT_ID,
         user_id=TARGET_USER,

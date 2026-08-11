@@ -116,13 +116,18 @@ class BaasServiceProtocol(Protocol):
         self,
         bind_id: int,
         port: int = 20003,
-        path: str = "api/openclaw/ws",
+        path: str = "/api/openclaw/ws",
         tenant: str = "",
         device_affinity: Optional[str] = None,
         device_uuid: Optional[str] = None,
         ws_conn_mode: Optional[str] = None,
     ) -> BotWsConnectionInfoResponse:
         """Resolve WebSocket / proxypass info for a device binding.
+
+        ``path`` carries its own leading slash. BaaS appends it to the routing
+        target verbatim — ``build_proxypass_url`` is
+        ``f"{scheme}://{host}/proxypass/{target}{path}"`` — so a value without
+        one yields ``…@0:20003api/openclaw/ws``, a URL no socket can open.
 
         ``device_uuid`` (optional) locks a specific instance in a multi-instance
         service bot; omitted → BaaS auto-selects an active instance.

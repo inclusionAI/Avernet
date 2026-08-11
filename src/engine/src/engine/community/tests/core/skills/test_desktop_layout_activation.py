@@ -46,6 +46,7 @@ ROLLBACK = {
     "aicoding": rollback_aicoding_pool,
     "hermes": rollback_hermes_pool,
 }
+ACTIVE_ROOT_REPO_BRIDGE_ENGINES = ("openclaw", "claude_code")
 
 
 def _target(path: Path) -> Path:
@@ -122,14 +123,19 @@ def test_desktop_download_layout_uses_public_cutover_and_rollback(
     )
 
     assert activated.status is PoolActivationStatus.COMMITTED
-    assert (repo_source / "business/reviewer/SKILL.md").read_text() == "repo"
-    assert layout.pool_repo.is_symlink()
-    assert _target(layout.pool_repo) == repo_source
+    assert (layout.pool_repo / "business/reviewer/SKILL.md").read_text() == (
+        "repo"
+    )
+    assert layout.pool_repo.is_dir()
+    assert not layout.pool_repo.is_symlink()
     assert _target(layout.active_root / "handmade") == (
         layout.pool_local / "handmade"
     )
     if engine in {"aicoding", "hermes"}:
         assert _target(layout.repo_bridge) == layout.pool_repo
+    else:
+        assert not layout.repo_bridge.exists()
+        assert not layout.repo_bridge.is_symlink()
     active = inspect_runtime_layout(
         engine=engine,
         home=home,
@@ -164,6 +170,8 @@ def test_desktop_download_layout_uses_public_cutover_and_rollback(
     assert rolled_back.status is PoolActivationStatus.COMMITTED
     assert (layout.legacy_local / "handmade/SKILL.md").read_text() == "pool"
     assert (repo_source / "business/reviewer/SKILL.md").read_text() == "repo"
+    assert repo_source.is_symlink()
+    assert _target(repo_source) == layout.pool_repo
     legacy_ready = inspect_runtime_layout(
         engine=engine,
         home=home,
@@ -171,3 +179,47 @@ def test_desktop_download_layout_uses_public_cutover_and_rollback(
     )
     assert legacy_ready.status is RuntimeLayoutInspectionStatus.READY
     assert legacy_ready.preparation_id == prepared.preparation_id
+
+
+@pytest.mark.parametrize("engine", ACTIVE_ROOT_REPO_BRIDGE_ENGINES)
+def test_active_probe_rejects_recreated_repo_bridge_inside_active_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    engine: str,
+) -> None:
+    monkeypatch.setenv("MAC_CONTAINER", "true")
+    home = tmp_path / "home/admin"
+    layout, repo_source = _legacy_runtime(home, engine)
+    prepared = prepare_desktop_pool(
+        engine=engine,
+        repo_source=repo_source,
+        home=home,
+    )
+    assert prepared.status is DesktopPreparationStatus.PREPARED
+
+    activated = ACTIVATE[engine](
+        migration_generation="G1",
+        preparation_id=str(prepared.preparation_id),
+        registered_local_names=["handmade"],
+        mappings=[
+            SkillMapping(
+                source=str(layout.pool_local / "handmade"),
+                target=str(layout.active_root / "handmade"),
+            )
+        ],
+        home=home,
+    )
+    assert activated.status is PoolActivationStatus.COMMITTED
+    assert layout.repo_bridge.is_relative_to(layout.active_root)
+    assert not layout.repo_bridge.exists()
+    assert not layout.repo_bridge.is_symlink()
+
+    layout.repo_bridge.symlink_to(layout.pool_repo, target_is_directory=True)
+
+    inspection = inspect_runtime_layout(
+        engine=engine,
+        home=home,
+        repo_delivery=RepoDelivery.DOWNLOAD,
+    )
+    assert inspection.status is RuntimeLayoutInspectionStatus.INVALID
+    assert inspection.evidence["reason"] == "retired_repo_bridge_present"

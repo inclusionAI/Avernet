@@ -12,6 +12,7 @@ from secbaas.community.api.device_manage import (
 from secbaas.community.spi.sandbox import PaasSandboxPlugins
 
 from ._arca_paas_service import ArcaPaasService
+from ._callback_handler import DeviceCallbackHandler
 from ._facade import PaasServiceFacade
 from ._factory import (
     PaasServiceFactory,
@@ -25,6 +26,7 @@ from ._paas_service import PaasService
 from ._poolab_paas_service import PoolabPaasService
 from ._sigma_paas_service import SigmaPaasService
 from ._standalone_paas_service import StandalonePaasService
+from ._start_hook_dispatcher import dispatch_start_hook
 from ._teclaw_paas_service import TeClawPaasService
 
 __all__ = [
@@ -37,6 +39,8 @@ __all__ = [
     "K8sPaasService",
     "StandalonePaasService",
     "TeClawPaasService",
+    "dispatch_start_hook",
+    "DeviceCallbackHandler",
     "PaasServiceFactory",
     "PaasSandboxPlugins",
     "PaasServiceFacade",

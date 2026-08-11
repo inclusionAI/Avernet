@@ -16,7 +16,7 @@ from agentclaw.community.core.engine_runtime.errors import (
 )
 from agentclaw.community.core.engine_runtime.models import EngineResult
 
-from .conftest import BOT, fails, ok
+from .conftest import BOT, OWNER, fails, ok
 
 
 @pytest.fixture
@@ -46,7 +46,7 @@ def test_status_is_requested_unenveloped(engine_client, relay):
     since the body has no ``success`` key.
     """
     relay.results = [EngineResult(data=RAW_STATUS)]
-    ok(engine_client.get(f"/openapi/v1/bots/{BOT}/engine/status"))
+    ok(engine_client.get(f"/openapi/v1/bots/engine/{BOT}/status"))
     assert relay.calls[0]["enveloped"] is False
     assert relay.calls[0]["path"] == "/api/engine/status"
 
@@ -54,14 +54,14 @@ def test_status_is_requested_unenveloped(engine_client, relay):
 def test_status_publishes_only_stable_fields(engine_client, relay):
     """``process`` and ``transition`` are open dicts assembled ad hoc."""
     relay.results = [EngineResult(data=RAW_STATUS)]
-    data = ok(engine_client.get(f"/openapi/v1/bots/{BOT}/engine/status"))
+    data = ok(engine_client.get(f"/openapi/v1/bots/engine/{BOT}/status"))
     assert data == {"engine": "openclaw", "active_connections": 2, "running": True}
     assert "4711" not in str(data)
 
 
 def test_status_of_a_down_engine_is_not_an_error(engine_client, relay):
     relay.results = [EngineResult(data={**RAW_STATUS, "process": {"running": False}})]
-    assert ok(engine_client.get(f"/openapi/v1/bots/{BOT}/engine/status"))[
+    assert ok(engine_client.get(f"/openapi/v1/bots/engine/{BOT}/status"))[
         "running"
     ] is False
 
@@ -85,7 +85,7 @@ def test_capabilities_publishes_names_never_the_engines_prose(engine_client, rel
             }
         )
     ]
-    data = ok(engine_client.get(f"/openapi/v1/bots/{BOT}/engine/capabilities"))
+    data = ok(engine_client.get(f"/openapi/v1/bots/engine/{BOT}/capabilities"))
     assert data["supported"] == ["model.list", "session.list"]
     assert data["limited"] == ["session.create"]
     assert data["unavailable"] == ["mcp.start"]
@@ -97,7 +97,7 @@ def test_capabilities_publishes_names_never_the_engines_prose(engine_client, rel
 
 def test_capabilities_tolerates_a_missing_section(engine_client, relay):
     relay.results = [EngineResult(data={"supported": ["session.list"]})]
-    data = ok(engine_client.get(f"/openapi/v1/bots/{BOT}/engine/capabilities"))
+    data = ok(engine_client.get(f"/openapi/v1/bots/engine/{BOT}/capabilities"))
     assert data["limited"] == [] and data["unavailable"] == []
 
 
@@ -115,7 +115,7 @@ def test_available_engines(engine_client, relay):
             }
         )
     ]
-    data = ok(engine_client.get(f"/openapi/v1/bots/{BOT}/engine/available"))
+    data = ok(engine_client.get(f"/openapi/v1/bots/engine/{BOT}/available"))
     assert [e["engine"] for e in data] == ["openclaw", "claude_code"]
     assert [e["active"] for e in data] == [True, False]
     assert relay.calls[0]["path"] == "/api/engine/list"
@@ -124,7 +124,7 @@ def test_available_engines(engine_client, relay):
 def test_switch_and_restart_are_not_exposed(engine_client):
     """Deliberate omissions, asserted so nobody adds them without a decision."""
     for path in ("switch", "restart"):
-        resp = engine_client.post(f"/openapi/v1/bots/{BOT}/engine/{path}")
+        resp = engine_client.post(f"/openapi/v1/bots/engine/{BOT}/{path}")
         assert resp.status_code in (404, 405), resp.status_code
 
 
@@ -148,7 +148,7 @@ def test_list_models(models_client, relay):
             }
         )
     ]
-    data = ok(models_client.get(f"/openapi/v1/bots/{BOT}/models"))
+    data = ok(models_client.get(f"/openapi/v1/bots/models/{BOT}"))
     assert data["total"] == 1
     assert data["items"][0]["model_id"] == "openai/gpt-5.3"
 
@@ -157,12 +157,12 @@ def test_list_models_prefers_the_engines_total(models_client, relay):
     relay.results = [
         EngineResult(data={"models": [{"id": "a"}, {"id": "b"}], "total": 97})
     ]
-    assert ok(models_client.get(f"/openapi/v1/bots/{BOT}/models"))["total"] == 97
+    assert ok(models_client.get(f"/openapi/v1/bots/models/{BOT}"))["total"] == 97
 
 
 def test_a_bare_list_payload_yields_an_empty_page_not_a_crash(models_client, relay):
     relay.results = [EngineResult(data=[{"id": "x"}])]
-    assert ok(models_client.get(f"/openapi/v1/bots/{BOT}/models"))["total"] == 0
+    assert ok(models_client.get(f"/openapi/v1/bots/models/{BOT}"))["total"] == 0
 
 
 @pytest.mark.parametrize(
@@ -175,7 +175,7 @@ def test_dot_segments_in_a_model_id_are_rejected(models_client, relay, bad):
     reach engine routes this surface deliberately does not wrap — on the
     caller's own bot, but outside the published scope all the same.
     """
-    resp = models_client.get(f"/openapi/v1/bots/{BOT}/models/{bad}")
+    resp = models_client.get(f"/openapi/v1/bots/models/{BOT}/{bad}")
     assert resp.status_code in (404, 400), resp.status_code
     assert relay.calls == []
 
@@ -185,13 +185,13 @@ def test_get_model_id_with_a_slash_survives_routing(models_client, relay):
     relay.results = [
         EngineResult(data={"id": "openai/gpt-5.3", "name": "G", "provider": "openai"})
     ]
-    ok(models_client.get(f"/openapi/v1/bots/{BOT}/models/openai/gpt-5.3"))
+    ok(models_client.get(f"/openapi/v1/bots/models/{BOT}/openai/gpt-5.3"))
     assert relay.calls[0]["path"] == "/api/models/openai/gpt-5.3"
 
 
 def test_unknown_model_is_404(models_client, relay):
     relay.results = [EngineResult(data=None)]
-    assert fails(models_client.get(f"/openapi/v1/bots/{BOT}/models/nope"), 404)[
+    assert fails(models_client.get(f"/openapi/v1/bots/models/{BOT}/nope"), 404)[
         "message"
     ] == "Not found"
 
@@ -200,16 +200,16 @@ def test_unknown_model_is_404(models_client, relay):
 
 
 def test_both_groups_serve_service_bots(engine_client, models_client, relay):
-    """Only sessions is personal-only; engine state and models are device facts."""
+    """Engine state and models are device facts, served for both bot types."""
     relay.set_bot_type("service")
     relay.results = [EngineResult(data=RAW_STATUS)]
-    ok(engine_client.get(f"/openapi/v1/bots/{BOT}/engine/status"))
+    ok(engine_client.get(f"/openapi/v1/bots/engine/{BOT}/status"))
     relay.results = [EngineResult(data=[])]
-    ok(models_client.get(f"/openapi/v1/bots/{BOT}/models"))
+    ok(models_client.get(f"/openapi/v1/bots/models/{BOT}"))
 
 
 def test_foreign_bot_is_masked_404_without_a_device_call(engine_client, relay):
-    assert fails(engine_client.get("/openapi/v1/bots/other/engine/status"), 404)
+    assert fails(engine_client.get("/openapi/v1/bots/engine/other/status"), 404)
     assert relay.calls == []
 
 
@@ -222,4 +222,68 @@ def test_foreign_bot_is_masked_404_without_a_device_call(engine_client, relay):
 )
 def test_relay_errors_are_enveloped(models_client, relay, exc, status):
     relay.raises = exc
-    fails(models_client.get(f"/openapi/v1/bots/{BOT}/models"), status)
+    fails(models_client.get(f"/openapi/v1/bots/models/{BOT}"), status)
+
+
+# ── the operator gate ────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("client_name", "path"),
+    [
+        ("engine_client", f"/openapi/v1/bots/engine/{BOT}/status"),
+        ("engine_client", f"/openapi/v1/bots/engine/{BOT}/capabilities"),
+        ("engine_client", f"/openapi/v1/bots/engine/{BOT}/available"),
+        ("models_client", f"/openapi/v1/bots/models/{BOT}"),
+        ("models_client", f"/openapi/v1/bots/models/{BOT}/openai/gpt-5.3"),
+    ],
+)
+def test_a_service_bot_is_served_at_its_draft_device(
+    request, relay, client_name, path
+):
+    """Every route serves a service bot at its DRAFT binding by default.
+
+    A request that names no stage behaves exactly as before stages were
+    addressable: every forward carries ``stage == "draft"``, never the
+    published runtime the relay's internal default would resolve.
+    """
+    client = request.getfixturevalue(client_name)
+    relay.set_bot_type("service")
+    relay.results = [EngineResult(data={"engines": [], "models": []})]
+    resp = client.get(path)
+    assert resp.status_code == 200, resp.json()
+    assert relay.calls, "the route never forwarded"
+    assert all(c["stage"] == "draft" for c in relay.calls)
+
+
+def test_a_collaborator_is_served_and_a_stranger_is_the_masked_404(
+    make_client, relay
+):
+    """The flip of the old shared-bot 501: operators are adjudicated per
+    caller — a collaborator reads engine state, a stranger's answer is
+    byte-identical to a bot that does not exist."""
+    relay.add_operator("u2")
+    relay.results = [EngineResult(data=RAW_STATUS)]
+    collaborator = make_client(engine_router, caller="u2")
+    ok(
+        collaborator.get(
+            f"/openapi/v1/bots/engine/{BOT}/status", params={"owner_id": OWNER}
+        )
+    )
+    stranger = make_client(engine_router, caller="u9")
+    refused = fails(
+        stranger.get(
+            f"/openapi/v1/bots/engine/{BOT}/status", params={"owner_id": OWNER}
+        ),
+        404,
+    )
+    assert refused["message"] == "Not found"
+
+
+def test_an_unknown_bot_type_gets_501_without_touching_the_device(
+    models_client, relay
+):
+    relay.set_bot_type("something-new")
+    body = fails(models_client.get(f"/openapi/v1/bots/models/{BOT}"), 501)
+    assert body["message"] == "Not supported for this bot type"
+    assert relay.calls == []

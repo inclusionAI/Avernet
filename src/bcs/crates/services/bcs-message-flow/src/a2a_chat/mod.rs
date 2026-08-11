@@ -308,6 +308,7 @@ impl A2aChatRunService for A2aChat {
                 response_mode: cmd.response_mode,
                 caller_wait_mode: None,
                 organization_code: cmd.organization_code,
+                provider_bypass_headers: cmd.provider_bypass_headers,
             })
             .await;
 
@@ -361,6 +362,7 @@ impl A2aChatRunService for A2aChat {
                 response_mode: cmd.response_mode,
                 caller_wait_mode: cmd.caller_wait_mode,
                 organization_code: cmd.organization_code,
+                provider_bypass_headers: cmd.provider_bypass_headers,
             })
             .await;
 
@@ -572,6 +574,7 @@ impl A2aChatService for A2aChat {
                     run_id: String::new(),
                     history_meta: None,
                     metadata: None,
+                    attachments: None,
                 };
                 let mut outbound = OutboundMessage {
                     group_id: run_id.clone(),
@@ -627,6 +630,7 @@ impl A2aChatService for A2aChat {
                 frame,
                 delivery_kind: BotDeliveryKind::Send,
                 provider_transport: Default::default(),
+                provider_bypass_headers: cmd.provider_bypass_headers.clone(),
             })
             .await
         {
@@ -1078,6 +1082,10 @@ impl A2aChat {
             .get(target_bot_id)
             .await
             .ok_or_else(|| ServiceError::BotNotFound(target_bot_id.to_string()))?;
+
+        if from_bot_id == target_bot_id {
+            return Ok(target);
+        }
 
         match target.capabilities.visibility.as_str() {
             "public" => Ok(target),

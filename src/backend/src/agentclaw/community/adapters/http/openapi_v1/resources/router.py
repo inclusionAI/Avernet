@@ -14,10 +14,10 @@ until that lands (see ``openapi_v1/dependencies.py`` and the cross-team tenant
 isolation track in ``src/backend/docs/openapi-v1/README.zh-CN.md``).
 
 Gates / follow-ups (block public-readiness, NOT a silent deployment):
-- Owner/identity comes from ``caller_owner_id(principal)`` (fail-closed: a
-  ``None`` principal raises ``MissingPrincipalError`` → 401), mirroring the
-  bots router. The gateway's signed-Principal seam is the single replaceable
-  point — when it lands, only ``principal.py``/``dependencies.py`` change.
+- Owner/identity comes from ``UserIdDep`` — the request's own ``user_id``
+  query parameter, refused unless it names the verified caller — mirroring the
+  bots router. That dependency is the single replaceable point: when an App may
+  act for a user, only ``principal.py`` changes.
 - Cross-tenant isolation rides on the ac_bots guard (Phase 0); a deployed DDL
   for ``ac_resource.avernet_tenant`` MUST precede this code reaching prod (see
   Phase 0 plan) — code first / DDL later breaks bot reads with a missing column.
@@ -29,10 +29,9 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
 
 from agentclaw.community.api.resource_service import ResourceServiceFactoryProtocol
-from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Deleted,
     Envelope,
@@ -40,8 +39,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Page,
     PageParamsDep,
 )
-from agentclaw.community.adapters.http.openapi_v1.dependencies import Principal
-from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
+from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
     deleted as deleted_envelope,
@@ -122,20 +120,27 @@ def _to_openapi_resource(legacy: _LegacyResource) -> Resource:
 
 router = APIRouter(prefix="/openapi/v1/bots/resources", tags=["resources"])
 
-PrincipalDep = Annotated[Principal, Depends(require_principal)]
-
 
 @router.get("", response_model=Envelope[Page[Resource]])
 @envelope_errors
 async def list_resources(
     page: PageParamsDep,
-    principal: PrincipalDep,
+    user_id: UserIdDep,
     request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     type: ResourceType | None = None,
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
 ) -> Envelope[Page[Resource]]:
     """List resources (filter + paginate)."""
+    # Declared but not used — and that is a gap, not a design. These four
+    # handlers scope on the caller-supplied ``bot_id`` and the tenant guard, and
+    # never check that the caller owns that bot; see
+    # ``specs/2026-08-02-public-api-user-only-principal/``. They take the
+    # parameter because they are user-scoped in principle, so closing the gap
+    # later is a change to this function and not to the public contract. This is
+    # NOT the ``check_bot_name`` / MCP-catalogue case, which has no user
+    # dimension at all and therefore takes no ``user_id``.
+    del user_id
     effective_bot_id = bot_id
     service = factory.create(bot_id=effective_bot_id)
     if type is not None and _legacy_type_for(type) is None:
@@ -159,7 +164,7 @@ async def list_resources(
 @envelope_errors
 async def check_resource_name(
     name: str,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     request: Request,
     type: ResourceType | None = None,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
@@ -167,10 +172,11 @@ async def check_resource_name(
 ) -> Envelope[NameCheck]:
     """Check whether a resource name is available.
 
-    ``parent_path`` / ``user_id`` / ``exclude_id`` from the legacy signature
-    are intentionally not exposed on the openapi contract yet — Direction A
-    (principal → user_id) will wire ``user_id`` once it lands. For now the
-    service treats them as None.
+    ``user_id`` is the request's own required parameter, forwarded to the
+    service — the wiring the older note here said was still pending.
+    ``parent_path`` and ``exclude_id`` from the legacy signature remain
+    unexposed on this contract and are passed as None: resources are bot-scoped,
+    so there is no parent path to qualify the name with.
     """
     effective_bot_id = bot_id
     service = factory.create(bot_id=effective_bot_id)
@@ -179,12 +185,10 @@ async def check_resource_name(
     # legacy handler's most common case — the openapi check-name call shape
     # has no FOLDER equivalent).
     legacy_type = _legacy_type_for(type) or _LegacyType.FILE
-    # owner_id from the verified principal (fail-closed via caller_owner_id);
-    # parent_path stays None — the openapi check-name contract has no
-    # parent_path concept (resources are bot-scoped only). The slim service
-    # signature REQUIRES both keyword args (no defaults), so pass them
-    # explicitly.
-    owner_id = caller_owner_id(principal)
+    # owner_id is the request's own ``user_id`` — fail-closed, since neither a
+    # missing parameter nor one naming another user reaches this line. The slim
+    # service signature REQUIRES both keyword args (no defaults), so parent_path
+    # is passed explicitly as None rather than omitted.
     exists = await service.check_name_exists(
         name=name,
         resource_type=legacy_type,
@@ -198,7 +202,7 @@ async def check_resource_name(
 @envelope_errors
 async def create_resource(
     body: ResourceCreate,
-    principal: PrincipalDep,
+    user_id: UserIdDep,
     request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
@@ -209,6 +213,7 @@ async def create_resource(
     FOLDER → create_directory (Phase 3, device_fs branch). Duplicate name
     surfaces as ValueError from the service → 409 Conflict (legacy parity).
     """
+    del user_id  # not-yet-enforced ownership — see list_resources
     if body.type == ResourceType.FILE:
         raise HTTPException(
             status_code=400,
@@ -243,7 +248,7 @@ async def create_resource(
 @router.post("/upload", status_code=201, response_model=Envelope[Resource])
 @envelope_errors
 async def upload_resource(
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     name: str,
     content: Annotated[bytes, Body(media_type="application/octet-stream")],
     request: Request,
@@ -258,11 +263,10 @@ async def upload_resource(
 
     device_fs is resolved per-bot; upload_file is async and raises
     DuplicateResourceError on duplicate name → 409 (via @envelope_errors).
-    owner_id comes from the verified principal (``caller_owner_id``),
+    owner_id comes from the request's ``user_id`` parameter (``UserIdDep``),
     fail-closed — mirroring the bots router.
     """
     effective_bot_id = bot_id
-    owner_id = caller_owner_id(principal)
     ctx = resolver.resolve_for_bot(effective_bot_id, owner_id)
     device_fs = device_fs_dispatcher.dispatch(ctx)
     service = factory.create(bot_id=effective_bot_id)
@@ -290,12 +294,13 @@ async def upload_resource(
 @envelope_errors
 async def get_resource(
     resource_id: str,
-    principal: PrincipalDep,
+    user_id: UserIdDep,
     request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
 ) -> Envelope[Resource]:
     """Get a resource."""
+    del user_id  # not-yet-enforced ownership — see list_resources
     effective_bot_id = bot_id
     service = factory.create(bot_id=effective_bot_id)
     # NOTE: ``get_resource`` on the concrete service is SYNC (unlike
@@ -311,7 +316,7 @@ async def get_resource(
 async def update_resource(
     resource_id: str,
     body: ResourceUpdate,
-    principal: PrincipalDep,
+    user_id: UserIdDep,
     request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
@@ -322,6 +327,7 @@ async def update_resource(
     openapi contract. ValueError from the service (not found / url clash)
     → 409 Conflict, per legacy + create parity.
     """
+    del user_id  # not-yet-enforced ownership — see list_resources
     effective_bot_id = bot_id
     service = factory.create(bot_id=effective_bot_id)
     # ResourceNotFoundError (404) / DuplicateResourceError (409) propagate to
@@ -339,7 +345,7 @@ async def update_resource(
 @envelope_errors
 async def delete_resource(
     resource_id: str,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
@@ -350,7 +356,7 @@ async def delete_resource(
 ) -> Envelope[Deleted]:
     """Delete a resource (file → device FS, link/folder → DB soft-delete).
 
-    owner_id comes from the verified principal (``caller_owner_id``),
+    owner_id comes from the request's ``user_id`` parameter (``UserIdDep``),
     fail-closed. device_fs is resolved per-bot ONLY for FILE resources — a
     link/folder soft-delete never touches device_fs, so it must not fail on an
     unbound bot (``resolve_for_bot`` raises DeviceNotBoundError when there is no
@@ -358,7 +364,6 @@ async def delete_resource(
     out of the served OpenAPI schema — see test_public_namespace.py.
     """
     effective_bot_id = bot_id
-    owner_id = caller_owner_id(principal)
     # Follow-up (#4): device_fs resolution is unconditional — a link/folder
     # soft-delete never touches device_fs but the handler can't tell the type
     # until the service reads the row, so an unbound bot raises
@@ -383,7 +388,7 @@ async def delete_resource(
 @envelope_errors
 async def download_resource(
     resource_id: str,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
@@ -393,14 +398,13 @@ async def download_resource(
 ) -> Response:
     """Download a resource's bytes (raw, not enveloped).
 
-    owner_id comes from the verified principal (``caller_owner_id``),
+    owner_id comes from the request's ``user_id`` parameter (``UserIdDep``),
     fail-closed — mirroring the bots router. device_fs is resolved per-bot
     (unconditional today; see #4 follow-up — only a file has bytes, but the
     handler can't tell the type before the service reads the row). Service
     returns ``(bytes, mime)`` or ``None`` → 404.
     """
     effective_bot_id = bot_id
-    owner_id = caller_owner_id(principal)
     ctx = resolver.resolve_for_bot(effective_bot_id, owner_id)
     device_fs = device_fs_dispatcher.dispatch(ctx)
     service = factory.create(bot_id=effective_bot_id)
@@ -417,7 +421,7 @@ async def download_resource(
 @envelope_errors
 async def preview_resource(
     resource_id: str,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
@@ -428,14 +432,13 @@ async def preview_resource(
 ) -> Envelope[Preview]:
     """Get a resource preview (text-ified content, enveloped).
 
-    owner_id comes from the verified principal (``caller_owner_id``),
+    owner_id comes from the request's ``user_id`` parameter (``UserIdDep``),
     fail-closed — mirroring the bots router. device_fs is resolved per-bot
     (unconditional today; see #4 follow-up). FileTooLargeError (content > 1 MB)
     → 413 via @envelope_errors; a None result is not-found / not-a-file /
     read-failure → 404.
     """
     effective_bot_id = bot_id
-    owner_id = caller_owner_id(principal)
     ctx = resolver.resolve_for_bot(effective_bot_id, owner_id)
     device_fs = device_fs_dispatcher.dispatch(ctx)
     service = factory.create(bot_id=effective_bot_id)

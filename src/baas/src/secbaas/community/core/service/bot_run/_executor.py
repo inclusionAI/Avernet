@@ -25,6 +25,7 @@ import json
 import time
 from typing import TYPE_CHECKING, Any
 
+from secbaas.community.api.bcn import Attachment
 from secbaas.community.api.bot_runtime import (
     BotBindingInfo,
     BotChatContext,
@@ -190,13 +191,27 @@ class SerializingExecutor:
 def _rebuild_context(
     api_key_prefix: str,
     api_key_repository: APIKeyRepository,
+    metadata: dict[str, Any] | None = None,
 ) -> BotChatContext:
-    """通过 api_key_prefix 查 api_key 记录重建 BotChatContext。
+    """重建 BotChatContext。
 
-    进入 Worker 后已离开 HTTP 请求生命周期，无法访问 cookie / header。
-    参照 BCN 的 _build_chat_context 方式，从 api_key 记录获取
-    app_id / app_type / tenant，用 BotChatContext.from_api_key 构造。
+    优先从 metadata 中的 app_id / app_type / tenant 重建（Runner 入库时写入），
+    避免 gateway 路径的 api_key_prefix（resource_key[:8]）无法反查 baas_api_key 表。
+    若 metadata 缺失，则 fallback 到 api_key_repository.get_by_prefix 反查。
     """
+    metadata = metadata or {}
+    app_id = metadata.get("app_id")
+    app_type = metadata.get("app_type")
+    tenant = metadata.get("tenant")
+
+    if app_id is not None:
+        return BotChatContext.from_api_key(
+            api_key_prefix=api_key_prefix,
+            app_id=app_id,
+            app_type=app_type or "UNKNOWN",
+            tenant=tenant or "",
+        )
+
     api_key_record = api_key_repository.get_by_prefix(api_key_prefix)
     if not api_key_record:
         raise ValueError(f"api key not found: {api_key_prefix}")
@@ -252,12 +267,20 @@ class BotRunRequestExecutor:
             return
 
         metadata: dict[str, Any] = run.metadata or {}
+        # Reconstruct Attachment objects from Queue meta (D-04 Step B)
+        queue_meta: dict[str, Any] = record.meta or {}
+        attachments_raw = queue_meta.get("attachments")
+        attachments = (
+            [Attachment(**a) for a in attachments_raw] if attachments_raw else None
+        )
         request_type = metadata.get("request_type", "chat")
         stream = metadata.get("stream", "false") == "true"
         timeout_sec = metadata.get("timeout")
         chat_metadata = build_chat_metadata(metadata, run.run_id)
 
-        context = _rebuild_context(run.api_key_prefix, self._api_key_repository)
+        context = _rebuild_context(
+            run.api_key_prefix, self._api_key_repository, metadata
+        )
         lifecycle_stage = extract_lifecycle_stage(metadata)
         binding_info = await self._resolve_binding(run.bot_id, lifecycle_stage)
 
@@ -293,11 +316,22 @@ class BotRunRequestExecutor:
         try:
             if request_type == "inject":
                 await self._do_inject(
-                    run, bot_service, session_id, binding_info, context
+                    run,
+                    bot_service,
+                    session_id,
+                    binding_info,
+                    context,
+                    attachments=attachments,
                 )
             elif stream:
                 await self._do_send_stream(
-                    run, bot_service, session_id, timeout_sec, binding_info, context
+                    run,
+                    bot_service,
+                    session_id,
+                    timeout_sec,
+                    binding_info,
+                    context,
+                    attachments=attachments,
                 )
             else:
                 await self._do_send(
@@ -309,6 +343,7 @@ class BotRunRequestExecutor:
                     binding_info,
                     context,
                     chat_metadata,
+                    attachments=attachments,
                 )
 
         except TimeoutError:
@@ -327,6 +362,7 @@ class BotRunRequestExecutor:
         binding_info: BotBindingInfo,
         context: BotChatContext,
         chat_metadata: dict[str, str] | None = None,
+        attachments: list[Any] | None = None,
     ) -> None:
         wait_result = True
         if "ignore_result" in metadata:
@@ -351,6 +387,7 @@ class BotRunRequestExecutor:
             context=context,
             timeout=timeout_sec,
             chat_metadata=chat_metadata,
+            attachments=attachments,
         )
 
         extra: dict[str, Any] = {"session_id": session_id}
@@ -376,6 +413,7 @@ class BotRunRequestExecutor:
         timeout_sec: float | None,
         binding_info: BotBindingInfo,
         context: BotChatContext,
+        attachments: list[Any] | None = None,
     ) -> None:
         """流式发送：消费 bot_service.send_message_stream，逐 chunk 写 chunk 表 + ZCache watermark。
 
@@ -459,6 +497,7 @@ class BotRunRequestExecutor:
             )
 
         final_content = ""
+        stream_error: str | None = None
         last_flush_ts = time.monotonic()
         try:
             async for chunk in bot_service.send_message_stream(
@@ -467,6 +506,7 @@ class BotRunRequestExecutor:
                 binding_info=binding_info,
                 context=context,
                 timeout=timeout_sec,
+                attachments=attachments,
             ):
                 if chunk.type == "delta":
                     delta_buffer.append(chunk.content)
@@ -487,6 +527,7 @@ class BotRunRequestExecutor:
                     _write_chunk(chunk)
                     last_flush_ts = time.monotonic()
                 elif chunk.type == "error":
+                    stream_error = chunk.content or "stream error"
                     _write_chunk(chunk)
                     last_flush_ts = time.monotonic()
                 else:
@@ -512,11 +553,14 @@ class BotRunRequestExecutor:
         # flush 残留 buffer
         _flush_buffers()
 
-        self._repo.update_result(
-            run_id=run.run_id,
-            content_long=final_content,
-            extra={"session_id": session_id, "stream": "true"},
-        )
+        if stream_error:
+            self._repo.update_error(run.run_id, stream_error)
+        else:
+            self._repo.update_result(
+                run_id=run.run_id,
+                content_long=final_content,
+                extra={"session_id": session_id, "stream": "true"},
+            )
 
     async def _do_inject(
         self,
@@ -525,12 +569,14 @@ class BotRunRequestExecutor:
         session_id: str,
         binding_info: BotBindingInfo,
         context: BotChatContext,
+        attachments: list[Any] | None = None,
     ) -> None:
         await bot_service.inject_message(
             session_id=session_id,
             message=run.message_long or "",
             binding_info=binding_info,
             context=context,
+            attachments=attachments,
         )
         self._repo.update_result(
             run_id=run.run_id,

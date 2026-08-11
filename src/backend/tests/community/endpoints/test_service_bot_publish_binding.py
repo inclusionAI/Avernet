@@ -1,9 +1,7 @@
 """Endpoint tests for GET /api/service-bot/publish/{bot_id}/binding."""
 from __future__ import annotations
 
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from tests.community.framework import (
     CaseInput,
@@ -22,8 +20,8 @@ _ENDPOINT = "/api/service-bot/publish/{bot_id}/binding"
 def _seed_binding_happy(world) -> None:
     """Seed a bot and a publish record for binding query."""
     from tests.community.factories.access import make_staff_user
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-    from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
+    from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 
     make_staff_user(world, user_id=_OWNER)
 
@@ -92,7 +90,13 @@ def _seed_binding_error(world) -> None:
         query_params={"owner_id": _OWNER, "stage": "online"},
     ),
     seed=_seed_binding_happy,
-    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "success": True,
+            "data": {"active_runtime_engine_type": ""},
+        },
+    ),
 )
 def get_binding_happy():
     """Happy path: query binding info for online stage succeeds."""

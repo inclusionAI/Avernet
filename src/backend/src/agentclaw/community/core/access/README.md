@@ -14,6 +14,7 @@ provides:
 consumes:
   - "DatabasePlugin (via SQLAlchemy session)"
 internal_dependencies:
+  - agentclaw.community.core.repository.protocols.identity    # repository contracts consumed by this module
   - agentclaw.community.core.config
   - agentclaw.community.log
   - agentclaw.community.plugin_api.models

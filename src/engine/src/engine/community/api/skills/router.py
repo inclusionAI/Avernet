@@ -5,6 +5,7 @@ Engine-specific behaviour (filesystem symlinks under
 AiCoding) lives in the engine's ``skills`` plugin. The router only
 marshals HTTP↔Plugin types and applies capability guards.
 """
+
 from __future__ import annotations
 
 import logging
@@ -73,6 +74,7 @@ log = logging.getLogger("api-skills")
 
 def _skills_plugin():
     from engine.community.manager import EngineManager
+
     return EngineManager.get_instance().skills
 
 
@@ -251,9 +253,11 @@ async def verify_runtime_skill_mappings(
         else {}
     )
     if body.mapping_contract_version is not None:
-        layout_kwargs["mapping_contract_version"] = (
-            body.mapping_contract_version
-        )
+        layout_kwargs["mapping_contract_version"] = body.mapping_contract_version
+    if body.retired_mappings:
+        layout_kwargs["retired_mappings"] = [
+            _mapping_command(item) for item in body.retired_mappings
+        ]
     try:
         result = await plugin.verify_pool_mappings(
             [_mapping_command(item) for item in body.mappings],
@@ -283,9 +287,11 @@ async def publish_runtime_skill_mappings(
         else {}
     )
     if body.mapping_contract_version is not None:
-        layout_kwargs["mapping_contract_version"] = (
-            body.mapping_contract_version
-        )
+        layout_kwargs["mapping_contract_version"] = body.mapping_contract_version
+    if body.retired_mappings:
+        layout_kwargs["retired_mappings"] = [
+            _mapping_command(item) for item in body.retired_mappings
+        ]
     try:
         result = await plugin.publish_pool_mappings(
             [_mapping_command(item) for item in body.mappings],
@@ -305,7 +311,9 @@ async def publish_runtime_skill_mappings(
 @router.post("/symlink", response_model=ApiResponse)
 async def sync_symlinks(body: SyncSymlinkRequest) -> ApiResponse:
     warning = check_capability(Capability.SKILLS_SYNC_SYMLINKS)
-    items = [SymlinkItem(source=i.source, target=i.target) for i in (body.symlinks or [])]
+    items = [
+        SymlinkItem(source=i.source, target=i.target) for i in (body.symlinks or [])
+    ]
     try:
         plugin = _skills_plugin()
         result = await plugin.sync_symlinks(SyncSymlinksRequest(symlinks=items))
@@ -391,7 +399,9 @@ async def clean_symlinks(body: CleanSymlinkRequest) -> ApiResponse:
 @router.post("/center/ensure", response_model=ApiResponse)
 async def ensure_center_skills(body: CenterEnsureRequestSchema) -> ApiResponse:
     warning = check_capability(Capability.SKILLS_CENTER_ENSURE)
-    items = [CenterEnsureItem(skill_uuid=i.skill_uuid, version=i.version) for i in body.items]
+    items = [
+        CenterEnsureItem(skill_uuid=i.skill_uuid, version=i.version) for i in body.items
+    ]
     try:
         plugin = _skills_plugin()
         result = await plugin.ensure_center_skills(CenterEnsureRequest(items=items))
@@ -401,7 +411,9 @@ async def ensure_center_skills(body: CenterEnsureRequestSchema) -> ApiResponse:
     return ApiResponse(
         success=True,
         data={
-            "ok": [{"skill_uuid": x.skill_uuid, "version": x.version} for x in result.ok],
+            "ok": [
+                {"skill_uuid": x.skill_uuid, "version": x.version} for x in result.ok
+            ],
             "failed": [
                 {"skill_uuid": x.skill_uuid, "version": x.version, "reason": x.reason}
                 for x in result.failed

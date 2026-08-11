@@ -6,14 +6,26 @@ import pytest
 
 from gateway.community.bootstrap import initialize_database
 from gateway.community.bootstrap._configs import DatabaseConfig
-from gateway.community.core.bot import BotRepository
+from gateway.community.core.bot import BotRepository, BotRow
 from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
 from gateway.community.spi.bot import RegisteredBot
 
 
 def _make_db():
     db = SqliteDatabasePlugin()
-    return initialize_database(db, DatabaseConfig(plugin_type="SQLITE_ORM", db_url=""))
+    db = initialize_database(db, DatabaseConfig(plugin_type="SQLITE_ORM", db_url=""))
+    with db.orm_session() as session:
+        session.add(
+            BotRow(
+                id=1,
+                session_token="bot-key",
+                bot_uuid="bot-7",
+                env="",
+                created_by="owner-1",
+                agent_code="agent-1",
+            )
+        )
+    return db
 
 
 @pytest.fixture(scope="module")

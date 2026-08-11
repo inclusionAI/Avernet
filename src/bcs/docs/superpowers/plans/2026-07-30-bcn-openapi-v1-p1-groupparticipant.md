@@ -2,11 +2,24 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement the 3 V1 GroupParticipant operations (`POST /groups/{group_id}/participants`, `PATCH /groups/{group_id}/participants/{actor_id}`, `DELETE /groups/{group_id}/participants/{actor_id}`) end-to-end — `application::v1` trait → `bcs-group-v1` facade → `bcs-api-http` route — behind the test Principal verifier.
+**Goal:** Implement the current V1 GroupParticipant operations (`POST /openapi/v1/collaboration/groups/{group_id}/participants` and `DELETE /openapi/v1/collaboration/groups/{group_id}/participants/{actor_id}`) end-to-end — `application::v1` trait → `bcs-group-v1` facade → `bcs-api-http` route — behind the test Principal verifier.
 
-**Architecture:** Extend the PR#514 group V1 vertical slice. Add `GroupService` participant methods + `Action` variants in `application::v1`; implement them in `bcs-group-v1` by authorizing via `load_readable_group` + `can_manage_group` and delegating to legacy `GroupManagementService.add_member` / `remove_member` / `update_participant_mode`; add 3 thin route handlers in `bcs-api-http`. No production bootstrap mount; test verifier only.
+**Architecture:** Extend the PR#514 group V1 vertical slice. Add only the current `GroupService` participant methods + `Action` variants in `application::v1`; implement them in `bcs-group-v1` by authorizing via `load_readable_group` + `can_manage_group` and delegating to legacy `GroupManagementService.add_member` / `remove_member`. Do not add `update_participant_mode` to the public V1 route surface. No production bootstrap mount; test verifier only.
 
 **Tech Stack:** Rust 1.91, Axum 0.8, async-trait, serde, bcs-domain, bcs-service-api.
+
+**Current contract amendment (2026-08-05):** This historical implementation
+plan is superseded by the checked-in OpenAPI contract for GroupParticipant. The
+public surface now contains only:
+
+- `POST /openapi/v1/collaboration/groups/{group_id}/participants` with request
+  body `{ "actor_id": "..." }`; request-supplied `role` is no longer supported.
+- `DELETE /openapi/v1/collaboration/groups/{group_id}/participants/{actor_id}`.
+
+Do **not** implement or mount `PATCH /groups/{group_id}/participants/{actor_id}`
+for the public V1 contract. Any task below that references `UpdateGroupParticipant`,
+participant `mode` patching, or an add-participant request `role` must be skipped
+or rewritten to match the current contract before implementation.
 
 **Reference code (read before starting):**
 - Facade struct + helpers: `src/bcs/crates/services/bcs-group-v1/src/lib.rs:38` (`GroupServiceImpl`), `:201` (`can_manage_group`), `:212` (`load_readable_group`), `:180` (`can_read_group`), `:1096` (`delete` impl pattern).
@@ -17,22 +30,22 @@
 - Error mapping: `src/bcs/crates/adapters/http/bcs-api-http/src/v1/common/error.rs` (`application_error_response`), `src/bcs/crates/services/bcs-group-v1/src/lib.rs:1304` (`map_delete_group_error`), `:1315` (`map_service_error`).
 
 **Key decisions (from design + Codex review):**
-- `UpdateGroupParticipantRequest.mode` keeps the full 4-value `ParticipantMode` (group participant can be Human or Bot; `is_valid_for(actor_kind)` enforced by legacy).
-- `delete_participant` targets Bot actors in phase one (legacy `remove_member` uses `bot_id`); Human-participant removal is out of phase one.
-- V1 `add_participant` resolves `actor_kind` from `actor_id` via `BotRegistryCoreService` (Bot if registered, else Human) — the contract request carries only `actor_id` + `role`.
+- Public V1 does not expose `UpdateGroupParticipantRequest`; participant mode/role patching is out of the current contract.
+- `delete_participant` targets Bot actors in phase one (legacy `remove_member` uses `bot_id`); Human-participant removal is out of phase one unless the implementation updates the legacy bridge deliberately.
+- V1 `add_participant` resolves `actor_kind` from `actor_id` via `BotRegistryCoreService` (Bot if registered, else Human) — the contract request carries only `actor_id`, not `role`.
 
 ---
 
 ## File Structure
 
-- `src/bcs/crates/service-api/bcs-service-api/src/application/v1/group.rs` (Modify) — add 3 command structs + 3 trait methods.
+- `src/bcs/crates/service-api/bcs-service-api/src/application/v1/group.rs` (Modify) — add current add/delete command structs + trait methods; do not add public update participant method unless a future contract reintroduces it.
 - `src/bcs/crates/service-api/bcs-service-api/src/application/v1/authorization.rs` (Modify) — add 3 `Action` variants.
 - `src/bcs/crates/service-api/bcs-service-api/tests/v1_group_application_contracts.rs` (Modify) — boundary test for new commands.
 - `src/bcs/crates/services/bcs-group-v1/src/lib.rs` (Modify) — impl 3 participant methods + `map_group_use_case_error` helper + `GroupParticipantView`/domain `Participant` → V1 `Participant` projection (reuse existing projection from `get`/`create`).
 - `src/bcs/crates/services/bcs-group-v1/tests/v1_group_participant.rs` (Create) — use-case authorization/role tests.
 - `src/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/dto/group.rs` (Modify) — `AddParticipantRequest`, `UpdateParticipantRequest` + `impl From`.
-- `src/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/group.rs` (Modify) — 3 handlers + router routes.
-- `src/bcs/crates/adapters/http/bcs-api-http/tests/group_routes.rs` (Modify) — 3 route tests + fake service methods.
+- `src/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/group.rs` (Modify) — add/remove handlers + router routes; assert patch route is absent.
+- `src/bcs/crates/adapters/http/bcs-api-http/tests/group_routes.rs` (Modify) — add/remove route tests + fake service methods, plus an inventory/404 assertion for the absent patch route.
 
 ---
 
@@ -503,7 +516,7 @@ async fn add_group_participant_returns_created_participant() {
                 .method("POST")
                 .uri("/openapi/v1/groups/group-1/participants")
                 .header("x-test-principal", bot_principal_header())
-                .json(&serde_json::json!({ "actor_id": "bot-2", "role": "consultant" })),
+                .json(&serde_json::json!({ "actor_id": "bot-2" })),
         )
         .await
         .expect("request");
@@ -558,7 +571,7 @@ async fn add_group_participant_rejects_unknown_field() {
                 .method("POST")
                 .uri("/openapi/v1/groups/group-1/participants")
                 .header("x-test-principal", bot_principal_header())
-                .json(&serde_json::json!({ "actor_id": "bot-2", "role": "consultant", "extra": 1 })),
+                .json(&serde_json::json!({ "actor_id": "bot-2", "extra": 1 })),
         )
         .await
         .expect("request");
@@ -707,7 +720,7 @@ async fn remove_group_participant(
 }
 ```
 
-**`actor_kind` resolution:** `add_group_participant` needs `actor_kind`, which the contract request does not carry. Rather than pushing a `resolve_actor_kind` method onto the `GroupService` trait (which would force every impl + fake to add it), resolve it in the facade: change `add_participant` to accept `actor_id` only and resolve `actor_kind` internally via `BotRegistryCoreService` (Bot if `registry.try_get(actor_id)` returns `Some`, else Human). Update the `AddGroupParticipant` command in Task 1 to drop `actor_kind` (only `actor_id` + `role`), and have `GroupServiceImpl::add_participant` call `self.registry.try_get(&command.actor_id)` to determine `ActorKind`. The route handler then passes only `actor_id` + `role`. Update the Task 1 command/contract test accordingly (remove `actor_kind` field).
+**`actor_kind` resolution:** `add_group_participant` needs `actor_kind`, which the contract request does not carry. Rather than pushing a `resolve_actor_kind` method onto the `GroupService` trait (which would force every impl + fake to add it), resolve it in the facade: change `add_participant` to accept `actor_id` only and resolve `actor_kind` internally via `BotRegistryCoreService` (Bot if `registry.try_get(actor_id)` returns `Some`, else Human). Update the `AddGroupParticipant` command in Task 1 to drop both `actor_kind` and request-supplied `role` (only `actor_id`), and have `GroupServiceImpl::add_participant` call `self.registry.try_get(&command.actor_id)` to determine `ActorKind`. The route handler then passes only `actor_id`. Update the Task 1 command/contract test accordingly (remove `actor_kind` and `role` fields).
 
 - [ ] **Step 5: Run route tests**
 
@@ -751,7 +764,7 @@ Run:
 uv run --with pyyaml python src/bcs/scripts/validate_openapi_contract.py --root src/bcs/api-contracts/v1
 uv run --with pytest --with pyyaml pytest src/bcs/tests/openapi -q
 ```
-Expected: `27 operations validated`; pytest all pass.
+Expected: `32 operations validated`; pytest all pass.
 
 - [ ] **Step 4: Commit (if any cleanup) + push**
 
@@ -764,7 +777,7 @@ git push --no-verify origin bcn-openapi-batch-2
 ## Self-Review Notes
 
 - **Spec coverage:** design §8.2 (3 GroupParticipant ops) + design §8.7 (authorization: manager/non-manager, role invariants, Bot target for remove) + Codex C1-declined/C2..C5 (none apply to #P1 except full 4-value `ParticipantMode` kept). Covered by Tasks 1-3.
-- **Type consistency:** `AddGroupParticipant` (drop `actor_kind` per Task 3 Step 4 note — final shape: `{principal, group_id, actor_id, role}`), `UpdateGroupParticipant{principal, group_id, actor_id, mode}`, `DeleteGroupParticipant{principal, group_id, actor_id}`, return `Participant` / `DeleteResult{deleted}`. Update the Task 1 command + test to remove `actor_kind` before Task 2/3.
+- **Type consistency:** `AddGroupParticipant` (drop `actor_kind` and request-supplied `role` — final shape: `{principal, group_id, actor_id}`), no public `UpdateGroupParticipant`, `DeleteGroupParticipant{principal, group_id, actor_id}`, return `Participant` / `DeleteResult{deleted}`. Update the Task 1 command + test to remove `actor_kind` before Task 2/3.
 - **Phased gaps (out of #P1):** Human-participant `delete` (legacy `remove_member` is Bot-only); production mount / Principal transport (Slice #P4).
 
 ## Execution

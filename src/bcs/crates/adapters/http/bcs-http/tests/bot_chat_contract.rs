@@ -1,6 +1,6 @@
 use axum::{
     body::{Body, to_bytes},
-    http::{Request, StatusCode},
+    http::{HeaderName, Request, StatusCode},
 };
 use bcs_auth_api::{AuthPluginChain, AuthPrincipal};
 use bcs_auth_local::StaticAuthPlugin;
@@ -223,6 +223,7 @@ impl A2aChatRunService for RecordingA2aChat {
             response_mode: cmd.response_mode,
             caller_wait_mode: None,
             organization_code: cmd.organization_code,
+            provider_bypass_headers: cmd.provider_bypass_headers,
         });
         self.run_channel_froms
             .lock()
@@ -278,6 +279,7 @@ impl A2aChatRunService for RecordingA2aChat {
             response_mode: cmd.response_mode,
             caller_wait_mode: cmd.caller_wait_mode,
             organization_code: cmd.organization_code,
+            provider_bypass_headers: cmd.provider_bypass_headers,
         });
         self.run_channel_froms
             .lock()
@@ -406,6 +408,18 @@ async fn build_chat_app_with_events(
     Arc<RecordingA2aChat>,
     Arc<RecordingChatRunEvents>,
 ) {
+    build_chat_app_with_events_and_bypass(events, keep_open_after_send, Vec::new()).await
+}
+
+async fn build_chat_app_with_events_and_bypass(
+    events: Vec<String>,
+    keep_open_after_send: bool,
+    provider_bypass_header_names: Vec<HeaderName>,
+) -> (
+    axum::Router,
+    Arc<RecordingA2aChat>,
+    Arc<RecordingChatRunEvents>,
+) {
     let temp_dir = TempDir::new().unwrap();
     let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
     for bot_id in ["caller-bot", "target-bot"] {
@@ -456,7 +470,8 @@ async fn build_chat_app_with_events(
     let app = build_router(
         HttpAppState::new(services)
             .with_user_identity(Arc::new(ChainUserIdentityPort::new(chain)))
-            .with_chat_run_events(run_events.clone()),
+            .with_chat_run_events(run_events.clone())
+            .with_provider_bypass_header_names(provider_bypass_header_names),
     );
     (app, a2a, run_events)
 }
@@ -572,6 +587,47 @@ async fn bot_chat_waits_for_final_event_and_preserves_response_shape() {
     assert_eq!(
         a2a.run_channel_froms.lock().await.as_slice(),
         &[Some("human_123".to_string())]
+    );
+}
+
+#[tokio::test]
+async fn bot_chat_forwards_only_configured_provider_bypass_headers() {
+    let (app, a2a, _run_events) = build_chat_app_with_events_and_bypass(
+        vec![final_event("pong")],
+        false,
+        vec![HeaderName::from_static("x-sandbox-bypass")],
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/bots/target-bot/chat")
+                .header("authorization", "Bearer caller-token")
+                .header("content-type", "application/json")
+                .header("X-Sandbox-Bypass", "sandbox-route-1")
+                .header("X-Unconfigured-Bypass", "must-not-pass")
+                .body(Body::from(
+                    serde_json::json!({
+                        "message": "ping",
+                        "from": "human_123",
+                        "session_id": "stable-session"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let commands = a2a.commands.lock().await;
+    assert_eq!(commands.len(), 1);
+    assert_eq!(
+        commands[0].provider_bypass_headers,
+        vec![("x-sandbox-bypass".to_string(), "sandbox-route-1".to_string())]
     );
 }
 

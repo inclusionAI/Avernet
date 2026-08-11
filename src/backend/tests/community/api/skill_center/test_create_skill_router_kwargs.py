@@ -16,7 +16,7 @@ from injector import Injector, Module
 
 from agentclaw.community.adapters.http.skill_center.skills import router as skills_router
 from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.adapters.http.dependencies import get_request_context
 

@@ -22,9 +22,7 @@ from injector import inject
 
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.economy.governance.repositories.audit_repo import (
-        GovernanceAuditRepository,
-    )
+    from agentclaw.community.core.repository.implementations.governance.audit import GovernanceAuditRepository
 
 
 class GovernanceAuditReadService:

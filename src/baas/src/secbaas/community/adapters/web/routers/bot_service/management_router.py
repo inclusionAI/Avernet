@@ -76,6 +76,12 @@ class UpdateBotRequest(BaseModel):
 
     name: str | None = Field(default=None, max_length=128)
     description: str | None = Field(default=None, max_length=512)
+    template_uuid: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        description="Optional device template UUID for the UPDATE publish",
+    )
     operator: str = Field(default="", max_length=64)
     request_id: str | None = Field(
         default=None,
@@ -404,6 +410,7 @@ async def update_bot(
         bot_desc=request.description,
         bot_config=request.config,
         request_id=request.request_id,
+        template_uuid=request.template_uuid,
     )
     return ApiResponse(data=bot)
 

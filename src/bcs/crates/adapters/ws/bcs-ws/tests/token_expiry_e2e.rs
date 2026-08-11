@@ -38,6 +38,15 @@ use futures::{SinkExt, StreamExt};
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::Message;
 
+/// Upper bound on how long a disconnected client is given to observe the close.
+///
+/// `disconnect()` drops the sender synchronously, so a close frame — or a dead
+/// stream — is visible immediately if it is coming at all. Every wait below also
+/// accepts the elapsed-timeout arm, and the load-bearing assertion is the
+/// `is_connected` check that follows, so a generous bound bought nothing but a
+/// guaranteed multi-second stall on the three tests that exercise this path.
+const CLOSE_OBSERVE_TIMEOUT: Duration = Duration::from_millis(500);
+
 // ─── Minimal mocks ──────────────────────────────────────────────────────────
 
 #[derive(Default)]
@@ -357,7 +366,7 @@ async fn scanner_disconnects_bot_with_expired_token() {
     }
 
     // The client should receive a Close frame or the stream should end
-    let msg = tokio::time::timeout(Duration::from_secs(5), ws.next()).await;
+    let msg = tokio::time::timeout(CLOSE_OBSERVE_TIMEOUT, ws.next()).await;
     match msg {
         Ok(Some(Ok(Message::Close(_)))) => {} // explicit close frame
         Ok(None) => {}                         // stream ended cleanly
@@ -454,7 +463,7 @@ async fn scanner_respects_grace_period_on_real_connection() {
     }
 
     // Client sees close
-    let msg = tokio::time::timeout(Duration::from_secs(5), ws.next()).await;
+    let msg = tokio::time::timeout(CLOSE_OBSERVE_TIMEOUT, ws.next()).await;
     match msg {
         Ok(Some(Ok(Message::Close(_)))) | Ok(None) | Ok(Some(Err(_))) => {}
         Err(_) => {} // timeout (connection already dead)
@@ -486,7 +495,7 @@ async fn scanner_disconnects_only_expired_bots_in_batch() {
     }
 
     // expired-bot should be closed
-    let msg = tokio::time::timeout(Duration::from_secs(5), ws_expired.next()).await;
+    let msg = tokio::time::timeout(CLOSE_OBSERVE_TIMEOUT, ws_expired.next()).await;
     match msg {
         Ok(Some(Ok(Message::Close(_)))) | Ok(None) | Ok(Some(Err(_))) => {}
         Err(_) => {} // timeout (connection already dead)

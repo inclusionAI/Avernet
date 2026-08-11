@@ -28,6 +28,7 @@ fn sample_message() -> GroupMessage {
         history_meta: None,
         metadata: None,
         run_id: String::new(),
+        attachments: None,
     }
 }
 

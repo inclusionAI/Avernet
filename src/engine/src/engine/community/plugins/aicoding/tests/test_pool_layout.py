@@ -18,6 +18,8 @@ from engine.community.plugins.aicoding.layout_pool import (
 )
 from engine.community.plugins.skills_pool.layout_activation import (
     ActiveRepoRetirementError,
+    _Layout,
+    _trusted_active_repo_bridge_rewrite_retry,
     mapping_sources_use_pool,
 )
 
@@ -611,6 +613,180 @@ def test_aicoding_active_probe_rejects_skill_link_through_retired_corpus(
         inspection.evidence["reason"]
         == "retired_active_corpus_reference_present"
     )
+
+
+def test_aicoding_active_rewrites_trusted_stable_repo_bridge_mapping(
+    tmp_path: Path,
+) -> None:
+    home, _, local_bridge, repo_bridge, pool_local, pool_repo = _prepared_home(
+        tmp_path
+    )
+    active_repo_skill = local_bridge.parent / "shared"
+    mappings = [
+        SkillMapping(
+            source=str(pool_local / "handmade"),
+            target=str(local_bridge.parent / "handmade"),
+        ),
+        SkillMapping(
+            source=str(pool_repo / "business" / "shared"),
+            target=str(active_repo_skill),
+        )
+    ]
+    relay_owned_source = home / ".agents" / "skills" / "relay-owned"
+    relay_owned_source.mkdir(parents=True)
+    (relay_owned_source / "SKILL.md").write_text("relay")
+    relay_owned_link = local_bridge.parent / "relay-owned"
+    relay_owned_link.symlink_to(relay_owned_source, target_is_directory=True)
+    relay_owned_directory = local_bridge.parent / "relay-owned-directory"
+    relay_owned_directory.mkdir()
+    activated = activate_aicoding_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=mappings,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+    assert activated.committed
+    assert active_repo_skill.is_symlink()
+
+    active_repo_skill.unlink()
+    active_repo_skill.symlink_to(
+        repo_bridge / "business" / "shared",
+        target_is_directory=True,
+    )
+    before_retry = inspect_aicoding_runtime_layout(
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+    assert before_retry.status is RuntimeLayoutInspectionStatus.INVALID
+    assert before_retry.evidence["reason"] == "active_managed_entry_invalid"
+
+    retry = activate_aicoding_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=mappings,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert retry.status is PoolActivationStatus.ALREADY_COMMITTED
+    assert active_repo_skill.readlink() == pool_repo / "business" / "shared"
+    assert relay_owned_link.readlink() == relay_owned_source
+    assert relay_owned_directory.is_dir()
+    ready = inspect_aicoding_runtime_layout(
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+    assert ready.status is RuntimeLayoutInspectionStatus.READY
+
+
+def test_aicoding_active_refuses_untrusted_stable_repo_bridge_mapping(
+    tmp_path: Path,
+) -> None:
+    home, _, local_bridge, repo_bridge, _, pool_repo = _prepared_home(
+        tmp_path
+    )
+    active_repo_skill = local_bridge.parent / "shared"
+    mappings = [
+        SkillMapping(
+            source=str(pool_repo / "business" / "shared"),
+            target=str(active_repo_skill),
+        )
+    ]
+    activated = activate_aicoding_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=mappings,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+    assert activated.committed
+    active_repo_skill.unlink()
+    active_repo_skill.symlink_to(
+        repo_bridge / "business" / "missing",
+        target_is_directory=True,
+    )
+
+    retry = activate_aicoding_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=mappings,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert retry.status is PoolActivationStatus.INVALID
+    assert retry.evidence["reason"] == "runtime_layout_not_ready"
+
+
+def test_aicoding_active_rewrites_stable_bridge_when_pool_repo_is_downloaded(
+    tmp_path: Path,
+) -> None:
+    home, _, local_bridge, repo_bridge, _, pool_repo = _prepared_home(tmp_path)
+    downloaded_repo = home / ".aicoding" / ".downloads" / "skills-repo"
+    downloaded_repo.parent.mkdir(parents=True)
+    pool_repo.rename(downloaded_repo)
+    pool_repo.symlink_to(downloaded_repo, target_is_directory=True)
+    active_repo_skill = local_bridge.parent / "shared"
+    mappings = [
+        SkillMapping(
+            source=str(pool_repo / "business" / "shared"),
+            target=str(active_repo_skill),
+        )
+    ]
+    activated = activate_aicoding_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=mappings,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+    assert activated.committed
+    active_repo_skill.unlink()
+    active_repo_skill.symlink_to(
+        repo_bridge / "business" / "shared",
+        target_is_directory=True,
+    )
+
+    retry = activate_aicoding_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=mappings,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert retry.status is PoolActivationStatus.ALREADY_COMMITTED
+    assert active_repo_skill.readlink() == pool_repo / "business" / "shared"
+
+
+def test_aicoding_active_bridge_rewrite_refuses_dangling_or_retired_sources(
+    tmp_path: Path,
+) -> None:
+    home, legacy_local, local_bridge, _, pool_local, pool_repo = _prepared_home(
+        tmp_path
+    )
+    layout = _Layout.for_engine("aicoding", home)
+    active_root = local_bridge.parent
+    dangling = active_root / "dangling"
+    dangling.symlink_to(pool_repo / "missing", target_is_directory=True)
+    assert not _trusted_active_repo_bridge_rewrite_retry(layout=layout)
+
+    dangling.unlink()
+    retired = active_root / "retired"
+    retired.symlink_to(legacy_local / "handmade", target_is_directory=True)
+    assert not _trusted_active_repo_bridge_rewrite_retry(layout=layout)
+
+    retired.unlink()
+    escaped = active_root / "escaped"
+    escaped.symlink_to(pool_local / "handmade", target_is_directory=True)
+    assert not _trusted_active_repo_bridge_rewrite_retry(layout=layout)
 
 
 def test_aicoding_rollback_rebuilds_legacy_from_current_pool(

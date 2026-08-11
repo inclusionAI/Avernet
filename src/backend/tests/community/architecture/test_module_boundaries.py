@@ -69,6 +69,7 @@ BOUNDARY_SIGNIFICANT_MODULES: frozenset[str] = frozenset({
     "agentclaw.community.core.aicoding",
     "agentclaw.community.core.approval",
     "agentclaw.community.core.auth",
+    "agentclaw.community.core.bot_app_grant",
     "agentclaw.community.core.bot_chat",
     "agentclaw.community.core.bot_management",
     "agentclaw.community.core.bot_public",
@@ -85,6 +86,9 @@ BOUNDARY_SIGNIFICANT_MODULES: frozenset[str] = frozenset({
     "agentclaw.community.core.grt_chat",
     "agentclaw.community.core.harness",
     "agentclaw.community.core.mcp",
+    # Every repository contract and implementation, grouped by domain. A
+    # top-level architectural package under §8, so it declares its own role.
+    "agentclaw.community.core.repository",
     "agentclaw.community.core.resources",
     "agentclaw.community.core.service_bot",
     "agentclaw.community.core.skill_center",

@@ -18,9 +18,9 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.desktop_bot.status_mapping import StatusDecision
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.device_service import DeviceService
 from agentclaw.community.core.mcp.services.passport_scope import filter_passport_mcp_codes
 from agentclaw.community.core.service_bot.services.baas_service import (

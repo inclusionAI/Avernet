@@ -10,6 +10,7 @@ collaborators), so the bodies stay interceptable by tests.
 """
 from __future__ import annotations
 
+import copy
 from typing import Dict, Literal
 
 from agentclaw.community.core.service_bot.repository.models import (
@@ -94,6 +95,7 @@ class ProgressSyncMixin:
         baas_status = progress.get("status", "")
         source_status = _SUCCESS_SOURCE_STATUS[stage]
         target_status = _SUCCESS_TARGET_STATUS[stage]
+        expected_ext = copy.deepcopy(ext)
 
         # Clear the transient retry marker, then atomically advance the status
         # together with ext under the optimistic lock (a separate status-then-ext
@@ -108,6 +110,7 @@ class ProgressSyncMixin:
             target_status=target_status,
             source_status=source_status,
             ext=ext,
+            expected_ext=expected_ext,
         )
         logger.info(
             f"[PublishFlowService._handle_sync_success] "
@@ -169,7 +172,7 @@ class ProgressSyncMixin:
         if not bot:
             return
         try:
-            self._provider_behavior(bot).refresh_after_upgrade(
+            self._publish_provider_behavior(publish_record).refresh_after_upgrade(
                 bot_uuid=binding.device_id, bot=bot
             )
         except Exception as e:
@@ -213,7 +216,8 @@ class ProgressSyncMixin:
             return
 
         # Clear the rollback_restored_from marker (if present)
-        last_ext = last_publish.ext or {}
+        expected_last_ext = copy.deepcopy(last_publish.ext)
+        last_ext = copy.deepcopy(last_publish.ext or {})
         if last_ext.pop("rollback_restored_from", None):
             logger.info(
                 f"[PublishFlowService._mark_previous_publish_superseded] "
@@ -227,6 +231,7 @@ class ProgressSyncMixin:
                 target_status=PublishStatus.UPGRADED,
                 source_status=PublishStatus.SUCCESS,
                 ext=last_ext,
+                expected_ext=expected_last_ext,
             )
             logger.info(
                 f"[PublishFlowService._mark_previous_publish_superseded] "
@@ -254,7 +259,7 @@ class ProgressSyncMixin:
                 f"Bot does not exist: {publish_record.source_bot_id}"
             )
 
-        if not self._provider_behavior(bot).destroys_verify_bot_on_online:
+        if not self._publish_provider_behavior(publish_record).destroys_verify_bot_on_online:
             logger.info(
                 "[PublishFlowService._destroy_verify_bot_after_online_success] "
                 "Skip destroying verify BaaS bot for this provider: "
@@ -304,6 +309,8 @@ class ProgressSyncMixin:
             failed_devices = progress.get("failed_devices", [])
             error_message = f"BaaS publish failed: {len(failed_devices)} device(s) failed"
 
+        expected_ext = copy.deepcopy(ext)
+
         # Outcome correction, before the record's FAILED write: the op's steps
         # completed at bookkeeping time, but its workflow just terminally failed —
         # without this, the failed deploy still reads as the live deployment, so
@@ -325,6 +332,7 @@ class ProgressSyncMixin:
             target_status=PublishStatus.FAILED,
             source_status=current_status,
             ext=ext,
+            expected_ext=expected_ext,
         )
 
         logger.error(f"[PublishFlowService._handle_sync_failure] {error_message}")

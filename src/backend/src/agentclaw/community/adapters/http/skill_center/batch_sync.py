@@ -44,7 +44,7 @@ from agentclaw.community.core.skill_center.services.skill_batch_sync_service imp
     SyncResult,
     generate_report,
 )
-from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.di import Injected
 from agentclaw.community.api.git_sync_service import GitSyncServiceProtocol
 from agentclaw.community.api.skill_batch_sync_service import SkillBatchSyncServiceProtocol

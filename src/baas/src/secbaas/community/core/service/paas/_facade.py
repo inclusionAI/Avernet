@@ -1033,7 +1033,12 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
         service = None
         try:
             # Step 1 & 2: Parse device ID and lookup template
-            template = self._device_template_service.get_by_template_id(
+            # DeviceTemplateService and PaasServiceFactory both issue synchronous
+            # DB queries. This coroutine runs on the uvicorn event loop, so both
+            # are offloaded to a worker thread — running them inline blocks the
+            # loop and stalls unrelated requests on the same worker.
+            template = await asyncio.to_thread(
+                self._device_template_service.get_by_template_id,
                 template_id=template_id,
             )
             if not template:
@@ -1049,8 +1054,10 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
                 )
 
             # Step 3: Create service via Factory using resolved template
-            service = self._factory.create(
-                tenant_name=template.tenant, template_uuid=template.template_uuid
+            service = await asyncio.to_thread(
+                self._factory.create,
+                tenant_name=template.tenant,
+                template_uuid=template.template_uuid,
             )
 
             # Step 4: Delegate to service polymorphic method

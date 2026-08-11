@@ -72,12 +72,8 @@ class InMemorySqliteDB:
 @pytest.fixture
 def sync_e2e(tmp_path):
     """构造完整的 SkillCenterSyncService（mock SC client + 真 NAS）。"""
-    from agentclaw.community.core.skill_center.services.skill_center_sync_service import (
-        SkillCenterSyncService,
-    )
-    from agentclaw.community.plugins.skill_center_sync_log_repository import (
-        SkillCenterSyncLogRepository,
-    )
+    from agentclaw.community.core.skill_center.services.skill_center_sync_service import SkillCenterSyncService
+    from agentclaw.community.core.repository.implementations.skill_center.sync_log import SkillCenterSyncLogRepository
 
     # Capture original sys.modules state before any pollution
     original_modules = set(sys.modules.keys())

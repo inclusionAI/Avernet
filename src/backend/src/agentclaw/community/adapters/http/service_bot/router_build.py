@@ -27,7 +27,7 @@ from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.bot_build_service import BotBuildServiceProtocol
 from agentclaw.community.core.bot_collaborator.interceptor import CollaboratorPermissionInterceptor, with_interceptors
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
 from agentclaw.community.core.service_bot.services.bot_build_service import (
     BotBuildServiceError,

@@ -20,17 +20,13 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.economy.governance.repositories.orm import (
-    GovernanceNotificationOrm,
-)
-from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
-    NotifyLogRepository,
-)
+from agentclaw.community.core.economy.governance.orm import GovernanceNotificationOrm
+from agentclaw.community.core.repository.implementations.governance.notify_log import NotifyLogRepository
 
 from .conftest import FakeDB
 
 
-_ENV_PATCH = "agentclaw.community.core.economy.governance.repositories.notify_log_repo.get_current_env"
+_ENV_PATCH = "agentclaw.community.core.repository.implementations.governance.notify_log.get_current_env"
 
 
 def _make_notification(

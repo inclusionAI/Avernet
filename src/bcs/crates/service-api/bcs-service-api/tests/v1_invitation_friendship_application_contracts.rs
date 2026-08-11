@@ -10,7 +10,7 @@ use bcs_service_api::application::v1::{
 
 fn human_caller() -> AuthenticatedCaller {
     AuthenticatedCaller {
-        tenant: "tenant-a".into(),
+        tenant: Some("tenant-a".into()),
         user: Some(AuthenticatedUserIdentity {
             id: "staff-1".into(),
             username: "alice".into(),

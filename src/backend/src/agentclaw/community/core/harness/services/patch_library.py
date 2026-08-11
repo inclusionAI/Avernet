@@ -13,7 +13,7 @@ from agentclaw.community.core.harness.models import (
     PatchTemplate,
     PatchTemplateStatus,
 )
-from agentclaw.community.core.harness.repository_protocol import HarnessTemplateRepository
+from agentclaw.community.core.repository.protocols.harness import HarnessTemplateRepository
 
 
 class PatchLibrary:

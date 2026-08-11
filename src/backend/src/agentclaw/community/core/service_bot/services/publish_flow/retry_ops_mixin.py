@@ -7,6 +7,8 @@ Extracted from ``publish_flow_service.py`` to keep that file within the R9 line 
 """
 from __future__ import annotations
 
+import copy
+
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
@@ -18,6 +20,7 @@ from agentclaw.community.core.service_bot.services.publish_flow.errors import (
 from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
     enqueue_online_release,
     enqueue_progress_poll,
+    enqueue_restart_poll,
     enqueue_verify_flow,
 )
 from agentclaw.community.log import get_logger
@@ -114,6 +117,7 @@ class RetryOpsMixin:
 
         # Step 3: Get the pre-failure status from ext
         ext = self._get_latest_ext(publish_id)
+        expected_ext = copy.deepcopy(ext)
         source_status = ext.get("source_status")
         if not source_status:
             raise PublishFlowServiceError(
@@ -147,6 +151,7 @@ class RetryOpsMixin:
                 target_status=rollback_status,
                 source_status=PublishStatus.FAILED,
                 ext=ext,
+                expected_ext=expected_ext,
             )
         except Exception as e:
             raise PublishFlowServiceError(
@@ -208,9 +213,15 @@ class RetryOpsMixin:
         if success:
             # VALIDATE_PUB: the durable poll (retry-flag redirect →
             # sync_restart_progress) drives the record out of its wait state.
-            # SUCCESS: not a poll wait state — the poll completes immediately and
-            # the restart is settled by the user-called /restart_status endpoint.
             enqueue_progress_poll(self._task_queue_service, publish_id=publish_id)
+            # SUCCESS is not a poll wait state, so the poll above completes
+            # immediately and would leave this restart depending on a client
+            # calling /restart_status — the very gap the restart poll closes. It
+            # keys on ext.restart.restarting (set by the execute_restart above)
+            # rather than the status, so it covers both rollback targets. For the
+            # *_PUB ones that means two pollers on one sync; they are idempotent
+            # and whichever observes the terminal workflow first ends both.
+            enqueue_restart_poll(self._task_queue_service, publish_id=publish_id)
         else:
             # The restart never submitted → clear the retry flag so a stray poll does
             # not keep redirecting to a restart-sync that will never find a workflow.

@@ -1,6 +1,7 @@
 """Rollback deploy + BaaS bot teardown, mixed into PublishFlowService."""
 from __future__ import annotations
 
+import copy
 
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.service_bot.repository.models import (
@@ -75,6 +76,7 @@ class RollbackOpsMixin:
 
         # 2. Get the target version's build artifact
         target_ext = self._get_latest_ext(target_publish_id)
+        expected_target_ext = copy.deepcopy(target_ext)
         migration_path = target_ext.get("migration_path")
         config_artifact = target_ext.get("config_artifact")
 
@@ -113,6 +115,7 @@ class RollbackOpsMixin:
         version = f"{target_record.version}"
         delivery = self._ext_state.compose_stored(target_ext, PublishStage.ONLINE)
         skills_env = service_skills_env_from_ext(target_ext, bot)
+        image_pin = self.resolve_publish_image_pin(target_record)
 
         # (#197) Crash-safe issuance via the operation runner (existing bot →
         # adopt-by-query on resume, never a second rollback deploy).
@@ -135,6 +138,8 @@ class RollbackOpsMixin:
                 version=version,
                 delivery=delivery,
                 extra_envs=skills_env,
+                docker_image=image_pin.docker_image,
+                runtime_kind=self.resolve_publish_runtime_kind(target_record),
             )
 
         op = await self._operation_runner.acquire_workflow(op, _issue)
@@ -152,6 +157,7 @@ class RollbackOpsMixin:
             target_status=PublishStatus.ONLINE_PUB,
             source_status=PublishStatus.SUCCESS,
             ext=target_ext,
+            expected_ext=expected_target_ext,
         )
         self._operation_runner.complete_operation(op)
 
@@ -333,4 +339,3 @@ class RollbackOpsMixin:
                 f"[PublishFlowService._destroy_bot_by_stage] "
                 f"Failed to destroy bot: binding_id={binding_id}, stage={stage.value}, error={e}"
             )
-

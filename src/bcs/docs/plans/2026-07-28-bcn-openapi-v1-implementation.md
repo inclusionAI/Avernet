@@ -6,6 +6,14 @@
 > The authoritative contract and Axum adapter now use
 > `/openapi/v1/collaboration/**` for every BCN V1 operation.
 
+> **Contract shape update (2026-08-05):** The current public contract is the
+> checked-in `api-contracts/v1` YAML and exported Gateway schema. It removes
+> session completion and group-participant patch, changes Group list to
+> `GET /openapi/v1/collaboration/bots/{bot_id}/groups`, narrows create/add
+> request bodies, adds optional `acting_bot_id` to Group/Session DELETE, and
+> requires state-machine creation by `content_yaml`. Historical tasks below
+> must be rewritten to match that contract before implementation.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Add the first BCN OpenAPI V1 surface for Group, Session, Participant, Invitation, Friendship, and Session message history while preserving every Legacy BCS endpoint unchanged.
@@ -16,14 +24,15 @@
 
 ## Current implementation increment
 
-The first executable increment intentionally contains only the five Group
-resource operations:
+The first executable increment intentionally contained only the Group resource
+operations from the historical contract. The current contract shape for that
+slice is:
 
-- `GET /openapi/v1/bots/collaboration/{bot_uuid}/groups`
-- `POST /openapi/v1/groups`
-- `GET /openapi/v1/groups/{group_id}`
-- `PATCH /openapi/v1/groups/{group_id}`
-- `DELETE /openapi/v1/groups/{group_id}`
+- `GET /openapi/v1/collaboration/bots/{bot_id}/groups`
+- `POST /openapi/v1/collaboration/groups`
+- `GET /openapi/v1/collaboration/groups/{group_id}`
+- `PATCH /openapi/v1/collaboration/groups/{group_id}` with no `context` field
+- `DELETE /openapi/v1/collaboration/groups/{group_id}?acting_bot_id=...`
 
 The checked-in contract, versioned Application API, Group-domain facade, and
 `bcs-api-http` routes implement this slice. The remaining operations in this
@@ -45,7 +54,7 @@ blocked until Gateway and BCN agree on the signed Principal transport.
   response bodies, or authorization behavior.
 - Do not mount production V1 routes until the trusted Principal verification
   task is complete.
-- Do not add `POST /openapi/v1/sessions/{session_id}/messages`, SSE,
+- Do not add `POST /openapi/v1/collaboration/sessions/{session_id}/messages`, SSE,
   Provider, StateMachineRun, Service Invocation, CollaborationTemplate, or
   Internal API operations.
 - The architecture source is
@@ -85,44 +94,51 @@ include tenant in either value.
 **Step 1: Add the failing contract inventory test**
 
 Write a test that loads all path fragments and compares the exact `(method,
-path)` set with the 27 operations in the design:
+path)` set with the current 32 operations in the checked-in contract:
 
 ```python
 EXPECTED = {
-    ("get", "/openapi/v1/bots/collaboration/{bot_uuid}/groups"),
-    ("post", "/openapi/v1/groups"),
-    ("get", "/openapi/v1/groups/{group_id}"),
-    ("patch", "/openapi/v1/groups/{group_id}"),
-    ("delete", "/openapi/v1/groups/{group_id}"),
-    ("post", "/openapi/v1/groups/{group_id}/participants"),
-    ("patch", "/openapi/v1/groups/{group_id}/participants/{actor_id}"),
-    ("delete", "/openapi/v1/groups/{group_id}/participants/{actor_id}"),
-    ("post", "/openapi/v1/groups/{group_id}/sessions"),
-    ("get", "/openapi/v1/groups/{group_id}/sessions"),
-    ("get", "/openapi/v1/sessions/{session_id}"),
-    ("patch", "/openapi/v1/sessions/{session_id}"),
-    ("delete", "/openapi/v1/sessions/{session_id}"),
-    ("post", "/openapi/v1/sessions/{session_id}/completion"),
-    ("get", "/openapi/v1/sessions/{session_id}/messages"),
-    ("post", "/openapi/v1/sessions/{session_id}/participants"),
-    ("patch", "/openapi/v1/sessions/{session_id}/participants/{bot_uuid}"),
-    ("delete", "/openapi/v1/sessions/{session_id}/participants/{bot_uuid}"),
-    ("post", "/openapi/v1/groups/{group_id}/invitations"),
-    ("post", "/openapi/v1/sessions/{session_id}/invitations"),
-    ("post", "/openapi/v1/invitations/{token}/accept"),
-    ("get", "/openapi/v1/bots/collaboration/{bot_uuid}/friendships"),
-    ("delete", "/openapi/v1/bots/collaboration/{bot_uuid}/friendships/{friend_bot_uuid}"),
-    ("post", "/openapi/v1/bots/collaboration/{bot_uuid}/friend-requests"),
-    ("get", "/openapi/v1/bots/collaboration/{bot_uuid}/friend-requests"),
-    ("post", "/openapi/v1/friend-requests/{request_id}/accept"),
-    ("post", "/openapi/v1/friend-requests/{request_id}/reject"),
+    ("get", "/openapi/v1/collaboration/bots/mine"),
+    ("post", "/openapi/v1/collaboration/bots/query"),
+    ("get", "/openapi/v1/collaboration/bots/{bot_id}"),
+    ("patch", "/openapi/v1/collaboration/bots/{bot_id}"),
+    ("get", "/openapi/v1/collaboration/bots/{bot_id}/candidates"),
+    ("get", "/openapi/v1/collaboration/bots/{bot_id}/groups"),
+    ("get", "/openapi/v1/collaboration/bots/{bot_uuid}/friend-requests"),
+    ("post", "/openapi/v1/collaboration/bots/{bot_uuid}/friend-requests"),
+    ("get", "/openapi/v1/collaboration/bots/{bot_uuid}/friendships"),
+    ("delete", "/openapi/v1/collaboration/bots/{bot_uuid}/friendships/{friend_bot_uuid}"),
+    ("post", "/openapi/v1/collaboration/friend-requests/{request_id}/accept"),
+    ("post", "/openapi/v1/collaboration/friend-requests/{request_id}/reject"),
+    ("post", "/openapi/v1/collaboration/groups"),
+    ("delete", "/openapi/v1/collaboration/groups/{group_id}"),
+    ("get", "/openapi/v1/collaboration/groups/{group_id}"),
+    ("patch", "/openapi/v1/collaboration/groups/{group_id}"),
+    ("post", "/openapi/v1/collaboration/groups/{group_id}/invitations"),
+    ("post", "/openapi/v1/collaboration/groups/{group_id}/participants"),
+    ("delete", "/openapi/v1/collaboration/groups/{group_id}/participants/{actor_id}"),
+    ("get", "/openapi/v1/collaboration/groups/{group_id}/sessions"),
+    ("post", "/openapi/v1/collaboration/groups/{group_id}/sessions"),
+    ("post", "/openapi/v1/collaboration/invitations/{token}/accept"),
+    ("get", "/openapi/v1/collaboration/messages/ws"),
+    ("delete", "/openapi/v1/collaboration/sessions/{session_id}"),
+    ("get", "/openapi/v1/collaboration/sessions/{session_id}"),
+    ("patch", "/openapi/v1/collaboration/sessions/{session_id}"),
+    ("post", "/openapi/v1/collaboration/sessions/{session_id}/invitations"),
+    ("get", "/openapi/v1/collaboration/sessions/{session_id}/messages"),
+    ("post", "/openapi/v1/collaboration/sessions/{session_id}/participants"),
+    ("delete", "/openapi/v1/collaboration/sessions/{session_id}/participants/{bot_uuid}"),
+    ("patch", "/openapi/v1/collaboration/sessions/{session_id}/participants/{bot_uuid}"),
+    ("post", "/openapi/v1/collaboration/sessions/{session_id}/token"),
 }
 ```
 
 Also assert:
 
 ```python
-assert ("post", "/openapi/v1/sessions/{session_id}/messages") not in actual
+assert ("get", "/openapi/v1/collaboration/groups") not in actual
+assert ("post", "/openapi/v1/collaboration/sessions/{session_id}/completion") not in actual
+assert ("post", "/openapi/v1/collaboration/sessions/{session_id}/messages") not in actual
 assert not any(path.startswith("/openapi/v1/bcn/") for _, path in actual)
 assert not any(path.startswith("/openapi/v1/actors/") for _, path in actual)
 assert not internal_operations
@@ -265,7 +281,7 @@ uv run --with pyyaml python src/bcs/scripts/validate_openapi_contract.py \
   --root src/bcs/api-contracts/v1
 ```
 
-Expected: PASS and `27 operations validated`.
+Expected: PASS and `32 operations validated`.
 
 **Step 7: Commit**
 
@@ -527,8 +543,8 @@ bcs_protocol
 serde_json::Value as an untyped request body
 ```
 
-Allow `serde_json::Value` only for a domain-defined Session completion output
-if the Contract explicitly declares that extension point.
+Do not introduce a domain-defined Session completion output unless the public
+contract adds a completion route again in a later revision.
 
 **Step 5: Run all Service API tests**
 
@@ -740,7 +756,6 @@ git commit -m "feat(bcs): implement v1 group use cases"
 - Create: `src/bcs/crates/services/bcs-session/src/application/v1/mod.rs`
 - Create: `src/bcs/crates/services/bcs-session/src/application/v1/session.rs`
 - Create: `src/bcs/crates/services/bcs-session/src/application/v1/participant.rs`
-- Create: `src/bcs/crates/services/bcs-session/src/application/v1/completion.rs`
 - Modify: `src/bcs/crates/services/bcs-session/src/lib.rs`
 - Create: `src/bcs/crates/services/bcs-session/tests/v1_session_service.rs`
 
@@ -766,7 +781,7 @@ Cover all nine Session/SessionParticipant operations:
 
 - create/list under a Group;
 - read/update/delete Session;
-- completion only from Running and idempotent after Completed;
+- no public completion route is implemented;
 - add/update/delete Participant;
 - Human is never automatically enrolled as a SessionParticipant and may only
   manage an authorized target Bot's Session membership;
@@ -778,7 +793,7 @@ Cover all nine Session/SessionParticipant operations:
 
 Inject `Arc<dyn AuthorizationService>` and the existing
 `SessionManagementService`. Reuse the existing persistence and state transition
-logic. Do not route V1 completion through the Legacy HTTP function.
+logic. Do not add a V1 completion facade or route; the current public contract removed that lifecycle endpoint.
 
 **Step 5: Run tests**
 
@@ -1085,7 +1100,7 @@ git add src/bcs/crates/adapters/http/bcs-api-http
 git commit -m "feat(bcs): expose v1 group HTTP routes"
 ```
 
-### Task 11: Add Session, SessionParticipant, completion, and history routes
+### Task 11: Add Session, SessionParticipant, and history routes
 
 **Files:**
 
@@ -1096,15 +1111,18 @@ git commit -m "feat(bcs): expose v1 group HTTP routes"
 
 **Step 1: Write failing route tests**
 
-Test all nine Session operations. Explicitly assert:
+Test all nine Session/SessionParticipant operations. Explicitly assert:
 
 ```rust
-assert_route_absent(Method::POST, "/openapi/v1/sessions/s-1/messages");
-assert_route_absent(Method::POST, "/openapi/v1/sessions/s-1/chat");
+assert_route_absent(Method::POST, "/openapi/v1/collaboration/sessions/s-1/completion");
+assert_route_absent(Method::POST, "/openapi/v1/collaboration/sessions/s-1/messages");
+assert_route_absent(Method::POST, "/openapi/v1/collaboration/sessions/s-1/chat");
 ```
 
-Also verify no request DTO contains `sender_bot_uuid`, `sender`, `from`, or
-`view_bot_uuid`.
+Also verify create-session DTOs contain only `title` and optional `input`,
+add-session-participant DTOs contain only `bot_uuid`, delete-session accepts
+optional `acting_bot_id`, and no request DTO contains `driver_bot_uuid`,
+`participants`, `sender_bot_uuid`, `sender`, `from`, or `view_bot_uuid`.
 
 **Step 2: Run and verify failure**
 
@@ -1118,8 +1136,7 @@ Expected: FAIL with unmatched routes.
 
 **Step 3: Implement thin handlers**
 
-The message route is GET-only. The completion route calls
-`SessionService::complete` and returns the documented idempotent result.
+The message route is GET-only. Do not register the removed completion route.
 
 **Step 4: Run tests**
 
@@ -1156,7 +1173,7 @@ Cover all nine operations and verify:
 
 - invitation acceptance uses the Bot Principal's own `bot_uuid`, or a
   Human-authorized target `bot_uuid`;
-- Bot-scoped paths use `/bots/collaboration/{bot_uuid}` and never `/actors`;
+- Bot-scoped paths use `/openapi/v1/collaboration/bots/{bot_uuid}/...` and never `/actors`;
 - `from_bot_uuid` cannot override a Bot Principal;
 - Human-owned-Bot management is passed to Application authorization;
 - no Legacy response shapes leak into V1.
@@ -1202,8 +1219,8 @@ git commit -m "feat(bcs): expose v1 invitation and friendship routes"
 
 Build the complete router and assert:
 
-- all 27 V1 routes are mounted;
-- V1 POST Session messages is `404/405`;
+- all 32 V1 routes are mounted;
+- V1 POST Session completion and POST Session messages are `404/405`;
 - V1 Internal operations are absent;
 - representative Legacy routes still resolve:
   - `POST /groups/{id}/messages`;
@@ -1230,7 +1247,7 @@ rewriting the path. Keep `bcs_http::router::build_router` unchanged.
 
 **Step 4: Update endpoint coverage inventory**
 
-Add the 27 V1 operations as Router API leaves and keep all Legacy denominators.
+Add the 32 V1 operations as Router API leaves and keep all Legacy denominators.
 Do not mark absent POST Message/Internal routes as covered.
 
 **Step 5: Run adapter and bootstrap tests**
@@ -1271,20 +1288,19 @@ Parametrize:
 @pytest.mark.parametrize(
     "path",
     [
-        "/openapi/v1/groups/g1",
-        "/openapi/v1/sessions/s1",
-        "/openapi/v1/bots/collaboration/b1/groups",
-        "/openapi/v1/invitations/t/accept",
-        "/openapi/v1/friend-requests/r1/accept",
+        "/openapi/v1/collaboration/groups/g1",
+        "/openapi/v1/collaboration/sessions/s1",
+        "/openapi/v1/collaboration/bots/b1/groups",
+        "/openapi/v1/collaboration/invitations/t/accept",
+        "/openapi/v1/collaboration/friend-requests/r1/accept",
     ],
 )
 def test_bcn_domains_resolve_to_one_server(path: str) -> None:
     ...
 ```
 
-Also assert `/openapi/v1/bots/b1` still resolves to AgentClaw/TeamClaw, while
-`/openapi/v1/bots/collaboration/b1/groups` resolves to BCN by longest-prefix
-matching.
+Also assert non-collaboration resources still resolve to their existing owners, while
+`/openapi/v1/collaboration/**` resolves to BCN by longest-prefix matching.
 
 **Step 2: Run and verify failure**
 
@@ -1299,10 +1315,10 @@ Expected: FAIL because BCN domains are not configured.
 
 **Step 3: Add one BCN server and resource-domain aliases**
 
-Add one `bcn` server and map `groups`, `sessions`, `bots/collaboration`,
-`invitations`, and `friend-requests` to it. Each alias points to the same BCN
-schema artifact; do not duplicate schemas per operation. Keep the general
-`bots/**` mapping owned by AgentClaw/TeamClaw.
+Add one `bcn` server and map the single `collaboration/**` ownership prefix to
+it. The prefix points to the same BCN schema artifact; do not duplicate schemas
+per operation. Keep non-collaboration Bot/Session resources owned by their
+existing Gateway owners.
 
 **Step 4: Add fail-closed route security**
 
@@ -1435,7 +1451,7 @@ git commit -m "feat: forward and verify trusted Gateway principals"
 **Step 1: Write failing deterministic-generation tests**
 
 Generate twice into separate temporary directories and compare bytes. Assert
-the public artifact contains exactly 27 operations and the Internal artifact
+the public artifact contains exactly 32 operations and the Internal artifact
 contains zero.
 
 **Step 2: Write failing compatibility tests**
@@ -1511,7 +1527,7 @@ git commit -m "ci: generate and compatibility-check BCN OpenAPI"
 Cover at least:
 
 1. Human creates Group while joining as a Participant, becomes originator,
-   manages Participants, creates Session, reads history, and completes Session.
+   manages Participants, creates Session, reads history, and deletes or otherwise concludes the Session through the current contract-supported lifecycle.
 2. Human creates Group without joining; originator falls back to driver and
    the Human cannot manage the Group even when the Human owns that driver Bot.
 3. Bot friendship request lifecycle using BotPrincipal.
@@ -1521,7 +1537,7 @@ Cover at least:
    collaborate when visibility and relationship policies allow it.
 7. Cross-resource attempts by unrelated Actors are rejected.
 8. Missing/tampered Gateway Principal is rejected.
-9. `POST /openapi/v1/sessions/{id}/messages` remains absent.
+9. `POST /openapi/v1/collaboration/sessions/{id}/completion` and `POST /openapi/v1/collaboration/sessions/{id}/messages` remain absent.
 10. Representative Legacy chat/message/CLI stories still pass.
 
 **Step 2: Run the focused E2E and verify failure**

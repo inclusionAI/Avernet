@@ -7,6 +7,7 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineHistoryDepthExceededError,
     EngineResourceNotFoundError,
     EngineRuntimeError,
+    EngineStageNotLiveError,
     EngineUpstreamError,
 )
 from agentclaw.community.core.engine_runtime.connection import EngineConnectionService
@@ -28,6 +29,7 @@ __all__ = [
     "EngineResourceNotFoundError",
     "EngineResult",
     "EngineRuntimeError",
+    "EngineStageNotLiveError",
     "EngineUpstreamError",
     "SocketInfo",
 ]

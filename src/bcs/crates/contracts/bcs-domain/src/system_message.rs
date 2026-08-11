@@ -9,6 +9,15 @@ pub enum SystemMessageEvent {
     BotJoined {
         group_id: String,
         actor: Participant,
+        /// Session the bot joined within; used to fetch session-scoped history
+        /// for the join context message. `#[serde(default)]` keeps old
+        /// serialized events deserializable.
+        #[serde(default)]
+        session_id: String,
+        /// Session input (the task/goal) used to populate the `目标` line of the
+        /// join context message when non-empty. `#[serde(default)]` for old data.
+        #[serde(default)]
+        session_input: Option<serde_json::Value>,
     },
     BotLeft {
         group_id: String,
@@ -29,6 +38,12 @@ pub enum SystemMessageEvent {
         session_input: Option<serde_json::Value>,
         #[serde(default)]
         task_ledger: Option<crate::LedgerSummary>,
+        /// Delivery override for the driver bot's `<GroupContext>` message.
+        /// `None` keeps the default `DeliveryType::Send`; `Some(Inject)`
+        /// delivers the context silently. Only applies to the driver;
+        /// other participants always receive `DeliveryType::Inject`.
+        #[serde(default)]
+        driver_delivery: Option<DeliveryType>,
     },
     HumanJoined {
         group_id: String,
@@ -73,8 +88,30 @@ impl SystemMessageEvent {
     }
 }
 
+/// Persistence policy for a system group message.
+///
+/// Producers decide how each bot-facing message is recorded in the message
+/// store; the dispatcher executes the policy mechanically (it never inspects
+/// message content to decide ownership).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PersistMode {
+    /// Persist one record per recipient with `owner_bot_id = recipient`
+    /// (personalized per-bot context such as `<GroupContext>`, only
+    /// readable by that bot's history view).
+    PerRecipient,
+    /// Persist exactly one record with `owner_bot_id = None` so the notice
+    /// joins the public history that human viewers read (their history
+    /// filter is `owner_bot_id IS NULL`). Bot viewers see it via
+    /// `PublicOrOwner`; use this for notices whose text is identical for
+    /// all recipients to avoid storing N identical copies.
+    Public,
+    /// Do not persist this message.
+    Skip,
+}
+
 pub struct SystemGroupMessage {
     pub recipients: Vec<String>,
     pub message: String,
     pub delivery_type: DeliveryType,
+    pub persist: PersistMode,
 }

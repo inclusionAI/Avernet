@@ -189,6 +189,7 @@ pub async fn create_admin_run(
             response_mode: ChatResponseMode::Full,
             caller_wait_mode: request.detach.then(|| "detached".to_string()),
             organization_code: Some(organization_code.clone()),
+            provider_bypass_headers: Vec::new(),
         })
         .await;
 

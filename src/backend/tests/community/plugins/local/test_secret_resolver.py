@@ -124,6 +124,35 @@ def test_principal_signing_key_does_not_resolve_locally():
     assert LocalSecretResolver().get_secret("gateway_principal_signing_key") is None
 
 
+def test_principal_signing_key_resolves_when_injected_by_composition_root():
+    secret = LocalSecretResolver(
+        gateway_principal_signing_key="singlebox-test-signing-key"
+    ).get_secret("gateway_principal_signing_key")
+
+    assert secret is not None
+    assert secret.secret_value == "singlebox-test-signing-key"
+
+
+def test_singlebox_composition_root_injects_principal_signing_key(monkeypatch):
+    from injector import Injector
+
+    from agentclaw.community.di.modules.infrastructure.test.secret import (
+        TestSecretModule,
+    )
+    from agentclaw.community.plugin_api.secret_resolver import SecretResolver
+
+    monkeypatch.setenv(
+        "AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE",
+        "singlebox-composition-signing-key",
+    )
+
+    resolver = Injector([TestSecretModule()]).get(SecretResolver)
+    secret = resolver.get_secret("gateway_principal_signing_key")
+
+    assert secret is not None
+    assert secret.secret_value == "singlebox-composition-signing-key"
+
+
 def test_no_signing_key_is_committed_to_the_singlebox_config():
     """Whatever else the shipped config grows, it must carry no signing key."""
     import yaml

@@ -18,7 +18,7 @@ _mock_secret_utils = MagicMock()
 _mock_env_utils = MagicMock()
 _mock_env_utils.get_current_env = MagicMock(return_value="dev")
 _mock_arca_utils = MagicMock()
-_mock_arca_utils._generate_proxypass_jwt = MagicMock(return_value="mock-jwt-token")
+_mock_arca_utils.generate_proxypass_jwt = MagicMock(return_value="mock-jwt-token")
 sys.modules.setdefault("secbaas.community.infra", MagicMock())
 sys.modules.setdefault("secbaas.community.infra.utils", MagicMock())
 sys.modules.setdefault("secbaas.community.infra.utils.secret_utils", _mock_secret_utils)
@@ -57,13 +57,22 @@ def cm() -> MagicMock:
 
 
 @pytest.fixture
-def device(cm: MagicMock) -> RealDesktopSandbox:
+def arca_utils() -> MagicMock:
+    """Create a mocked ArcaUtils instance."""
+    mock = MagicMock()
+    mock.generate_proxypass_jwt = MagicMock(return_value="mock-jwt-token")
+    return mock
+
+
+@pytest.fixture
+def device(cm: MagicMock, arca_utils: MagicMock) -> RealDesktopSandbox:
     """Create a RealDesktopSandbox with default IDs."""
     return RealDesktopSandbox(
         connection_manager=cm,
         container_id="cont-abc-123",
         machine_id="mach-xyz-789",
         user_id="user-42",
+        arca_utils=arca_utils,
         template_id=42,
     )
 
@@ -483,24 +492,28 @@ class TestRealDesktopSandboxRestart:
 class TestRealDesktopSandboxConstructor:
     """Tests for constructor with various ID values."""
 
-    def test_different_container_id(self, cm: MagicMock) -> None:
-        dev = RealDesktopSandbox(cm, "c-1", "m-1", "u-1")
+    def test_different_container_id(self, cm: MagicMock, arca_utils: MagicMock) -> None:
+        dev = RealDesktopSandbox(cm, "c-1", "m-1", "u-1", arca_utils)
         assert dev.container_id == "c-1"
 
-    def test_different_machine_id(self, cm: MagicMock) -> None:
-        dev = RealDesktopSandbox(cm, "c-1", "m-1", "u-1")
+    def test_different_machine_id(self, cm: MagicMock, arca_utils: MagicMock) -> None:
+        dev = RealDesktopSandbox(cm, "c-1", "m-1", "u-1", arca_utils)
         assert dev.machine_id == "m-1"
 
-    def test_different_user_id(self, cm: MagicMock) -> None:
-        dev = RealDesktopSandbox(cm, "c-1", "m-1", "u-1")
+    def test_different_user_id(self, cm: MagicMock, arca_utils: MagicMock) -> None:
+        dev = RealDesktopSandbox(cm, "c-1", "m-1", "u-1", arca_utils)
         assert dev.user_id == "u-1"
 
-    def test_constructor_stores_template_id(self, cm: MagicMock) -> None:
-        dev = RealDesktopSandbox(cm, "c-1", "m-1", "u-1", template_id=99)
+    def test_constructor_stores_template_id(
+        self, cm: MagicMock, arca_utils: MagicMock
+    ) -> None:
+        dev = RealDesktopSandbox(cm, "c-1", "m-1", "u-1", arca_utils, template_id=99)
         assert dev._template_id == 99
 
-    def test_constructor_template_id_defaults_to_zero(self, cm: MagicMock) -> None:
-        dev = RealDesktopSandbox(cm, "c-1", "m-1", "u-1")
+    def test_constructor_template_id_defaults_to_zero(
+        self, cm: MagicMock, arca_utils: MagicMock
+    ) -> None:
+        dev = RealDesktopSandbox(cm, "c-1", "m-1", "u-1", arca_utils)
         assert dev._template_id == 0
 
 
@@ -513,8 +526,8 @@ class TestRealDesktopSandboxPluginCreateDevice:
     """Tests for plugin.create_device."""
 
     @pytest.fixture
-    def plugin(self, cm: MagicMock) -> RealDesktopSandboxPlugin:
-        return RealDesktopSandboxPlugin(connection_manager=cm)
+    def plugin(self, cm: MagicMock, arca_utils: MagicMock) -> RealDesktopSandboxPlugin:
+        return RealDesktopSandboxPlugin(connection_manager=cm, arca_utils=arca_utils)
 
     def test_create_device_basic(
         self, plugin: RealDesktopSandboxPlugin, cm: MagicMock
@@ -621,8 +634,8 @@ class TestRealDesktopSandboxPluginConnectDevice:
     """Tests for plugin.connect_device."""
 
     @pytest.fixture
-    def plugin(self, cm: MagicMock) -> RealDesktopSandboxPlugin:
-        return RealDesktopSandboxPlugin(connection_manager=cm)
+    def plugin(self, cm: MagicMock, arca_utils: MagicMock) -> RealDesktopSandboxPlugin:
+        return RealDesktopSandboxPlugin(connection_manager=cm, arca_utils=arca_utils)
 
     def test_connect_device_success(
         self, plugin: RealDesktopSandboxPlugin, cm: MagicMock
@@ -665,8 +678,8 @@ class TestRealDesktopSandboxPluginGetMachineInfo:
     """Tests for plugin.get_machine_info."""
 
     @pytest.fixture
-    def plugin(self, cm: MagicMock) -> RealDesktopSandboxPlugin:
-        return RealDesktopSandboxPlugin(connection_manager=cm)
+    def plugin(self, cm: MagicMock, arca_utils: MagicMock) -> RealDesktopSandboxPlugin:
+        return RealDesktopSandboxPlugin(connection_manager=cm, arca_utils=arca_utils)
 
     def test_get_machine_info_success(
         self, plugin: RealDesktopSandboxPlugin, cm: MagicMock
@@ -717,8 +730,8 @@ class TestRealDesktopSandboxPluginGetMachineResDirs:
     """Tests for plugin.get_machine_res_dirs."""
 
     @pytest.fixture
-    def plugin(self, cm: MagicMock) -> RealDesktopSandboxPlugin:
-        return RealDesktopSandboxPlugin(connection_manager=cm)
+    def plugin(self, cm: MagicMock, arca_utils: MagicMock) -> RealDesktopSandboxPlugin:
+        return RealDesktopSandboxPlugin(connection_manager=cm, arca_utils=arca_utils)
 
     def test_get_machine_res_dirs_default_dir(
         self, plugin: RealDesktopSandboxPlugin, cm: MagicMock
@@ -776,8 +789,8 @@ class TestRealDesktopSandboxPluginClose:
     """Tests for plugin.close."""
 
     @pytest.fixture
-    def plugin(self, cm: MagicMock) -> RealDesktopSandboxPlugin:
-        return RealDesktopSandboxPlugin(connection_manager=cm)
+    def plugin(self, cm: MagicMock, arca_utils: MagicMock) -> RealDesktopSandboxPlugin:
+        return RealDesktopSandboxPlugin(connection_manager=cm, arca_utils=arca_utils)
 
     def test_close_is_noop(self, plugin: RealDesktopSandboxPlugin) -> None:
         # Should not raise
@@ -799,8 +812,10 @@ class TestRealDesktopSandboxPluginClose:
 class TestRealDesktopSandboxPluginConstructor:
     """Tests for plugin constructor."""
 
-    def test_stores_connection_manager(self, cm: MagicMock) -> None:
-        plugin = RealDesktopSandboxPlugin(connection_manager=cm)
+    def test_stores_connection_manager(
+        self, cm: MagicMock, arca_utils: MagicMock
+    ) -> None:
+        plugin = RealDesktopSandboxPlugin(connection_manager=cm, arca_utils=arca_utils)
         assert plugin._cm is cm
 
 
@@ -812,8 +827,8 @@ class TestRealDesktopSandboxPluginConstructor:
 class TestFullDeviceLifecycle:
     """End-to-end test through create → connect → operate → destroy."""
 
-    def test_full_lifecycle(self, cm: MagicMock) -> None:
-        plugin = RealDesktopSandboxPlugin(connection_manager=cm)
+    def test_full_lifecycle(self, cm: MagicMock, arca_utils: MagicMock) -> None:
+        plugin = RealDesktopSandboxPlugin(connection_manager=cm, arca_utils=arca_utils)
 
         # Create
         cm.send_command.return_value = {"data": {"container_id": "lifecycle-cont"}}
@@ -857,17 +872,15 @@ class TestFullDeviceLifecycle:
 class TestRealDesktopSandboxPluginResolveWsConnInfo:
     """Tests for RealDesktopSandboxPlugin.resolve_ws_conn_info()."""
 
-    def test_returns_ws_connection_info_with_all_fields(self, cm: MagicMock) -> None:
+    def test_returns_ws_connection_info_with_all_fields(
+        self, cm: MagicMock, arca_utils: MagicMock
+    ) -> None:
         """返回 WsConnectionInfo 包含 ws_url, token, target, expires_at 四个字段。"""
         from datetime import datetime, timezone
 
-        plugin = RealDesktopSandboxPlugin(connection_manager=cm)
+        plugin = RealDesktopSandboxPlugin(connection_manager=cm, arca_utils=arca_utils)
 
         with (
-            patch(
-                "secbaas.community.plugins.sandbox.utils.arca_utils._generate_proxypass_jwt",
-                return_value="mock-jwt-token",
-            ),
             patch(
                 "secbaas.community.core.utils.env_utils.get_current_env",
                 return_value="dev",
@@ -892,16 +905,12 @@ class TestRealDesktopSandboxPluginResolveWsConnInfo:
         assert result.expires_at is not None
         assert result.expires_at > datetime.now(UTC)
 
-    def test_ws_url_format_dev_env(self, cm: MagicMock) -> None:
+    def test_ws_url_format_dev_env(self, cm: MagicMock, arca_utils: MagicMock) -> None:
         """ws_url 格式包含 wss://{agentclawproxy-dev-host}/wsrelay/session_id。"""
 
-        plugin = RealDesktopSandboxPlugin(connection_manager=cm)
+        plugin = RealDesktopSandboxPlugin(connection_manager=cm, arca_utils=arca_utils)
 
         with (
-            patch(
-                "secbaas.community.plugins.sandbox.utils.arca_utils._generate_proxypass_jwt",
-                return_value="mock-jwt-token",
-            ),
             patch(
                 "secbaas.community.core.utils.env_utils.get_current_env",
                 return_value="dev",
@@ -923,16 +932,12 @@ class TestRealDesktopSandboxPluginResolveWsConnInfo:
 
         assert "wss://ac-proxy-dev.test/wsrelay/my-session-123" == result.ws_url
 
-    def test_ws_url_format_pre_env(self, cm: MagicMock) -> None:
+    def test_ws_url_format_pre_env(self, cm: MagicMock, arca_utils: MagicMock) -> None:
         """pre 环境 ws_url 使用 agentclawproxy-pre 域名。"""
 
-        plugin = RealDesktopSandboxPlugin(connection_manager=cm)
+        plugin = RealDesktopSandboxPlugin(connection_manager=cm, arca_utils=arca_utils)
 
         with (
-            patch(
-                "secbaas.community.plugins.sandbox.utils.arca_utils._generate_proxypass_jwt",
-                return_value="mock-jwt-token",
-            ),
             patch(
                 "secbaas.community.core.utils.env_utils.get_current_env",
                 return_value="pre",
@@ -954,16 +959,14 @@ class TestRealDesktopSandboxPluginResolveWsConnInfo:
 
         assert result.ws_url.startswith("wss://ac-proxy-pre.test/wsrelay/")
 
-    def test_target_format_includes_all_ids(self, cm: MagicMock) -> None:
+    def test_target_format_includes_all_ids(
+        self, cm: MagicMock, arca_utils: MagicMock
+    ) -> None:
         """target 格式为 LOCAL_{cid}--{mid}--{uid}@{tid}:{port}:{sid}。"""
 
-        plugin = RealDesktopSandboxPlugin(connection_manager=cm)
+        plugin = RealDesktopSandboxPlugin(connection_manager=cm, arca_utils=arca_utils)
 
         with (
-            patch(
-                "secbaas.community.plugins.sandbox.utils.arca_utils._generate_proxypass_jwt",
-                return_value="mock-jwt-token",
-            ),
             patch(
                 "secbaas.community.core.utils.env_utils.get_current_env",
                 return_value="dev",
@@ -982,16 +985,14 @@ class TestRealDesktopSandboxPluginResolveWsConnInfo:
         expected_target = "LOCAL_cont-xyz--mach-001--user-42@42:9527:abc123"
         assert result.target == expected_target
 
-    def test_different_port_and_template_id(self, cm: MagicMock) -> None:
+    def test_different_port_and_template_id(
+        self, cm: MagicMock, arca_utils: MagicMock
+    ) -> None:
         """不同 port 和 template_id 参数透传到 target。"""
 
-        plugin = RealDesktopSandboxPlugin(connection_manager=cm)
+        plugin = RealDesktopSandboxPlugin(connection_manager=cm, arca_utils=arca_utils)
 
         with (
-            patch(
-                "secbaas.community.plugins.sandbox.utils.arca_utils._generate_proxypass_jwt",
-                return_value="mock-jwt-token",
-            ),
             patch(
                 "secbaas.community.core.utils.env_utils.get_current_env",
                 return_value="dev",
@@ -1010,16 +1011,12 @@ class TestRealDesktopSandboxPluginResolveWsConnInfo:
         expected_target = "LOCAL_ctr-x--m-x--u-x@99:443:sid-x"
         assert result.target == expected_target
 
-    def test_session_id_in_ws_url(self, cm: MagicMock) -> None:
+    def test_session_id_in_ws_url(self, cm: MagicMock, arca_utils: MagicMock) -> None:
         """session_id 参数透传到 ws_url 路径段。"""
 
-        plugin = RealDesktopSandboxPlugin(connection_manager=cm)
+        plugin = RealDesktopSandboxPlugin(connection_manager=cm, arca_utils=arca_utils)
 
         with (
-            patch(
-                "secbaas.community.plugins.sandbox.utils.arca_utils._generate_proxypass_jwt",
-                return_value="mock-jwt-token",
-            ),
             patch(
                 "secbaas.community.core.utils.env_utils.get_current_env",
                 return_value="dev",

@@ -25,13 +25,9 @@ from agentclaw.community.core.economy.governance.domain.enums import (
     ACTIVE_STATUSES,
     GovernanceStatus,
 )
-from agentclaw.community.core.economy.governance.repositories.orm import (
-    Base,
-    GovernanceTicketOrm,
-)
-from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
-    TaskRecordRepository,
-)
+from agentclaw.community.core.economy.governance.orm import Base
+from agentclaw.community.core.economy.governance.orm import GovernanceTicketOrm
+from agentclaw.community.core.repository.implementations.governance.task_record import TaskRecordRepository
 
 from .conftest import FakeDB
 
@@ -55,7 +51,7 @@ def engine():
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
-    import agentclaw.community.core.economy.governance.repositories.orm  # noqa: F401
+    import agentclaw.community.core.economy.governance.orm  # noqa: F401
     Base.metadata.create_all(eng)
     return eng
 

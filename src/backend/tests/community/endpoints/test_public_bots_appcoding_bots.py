@@ -10,10 +10,8 @@ tests. (The contrived service-raises-500 case was dropped with that mock.)
 """
 from __future__ import annotations
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.bot_management.repository.template_repository_protocol import (
-    TemplateRepository,
-)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.bot import TemplateRepository
 
 from tests.community.framework import (
     CaseInput,
@@ -71,9 +69,7 @@ def list_public_coding_bots_ok():
 
 # --- Regression: members (collaborators) are returned on each coding bot ---
 
-from agentclaw.community.core.bot_collaborator.repository.protocol import (  # noqa: E402
-    CollaboratorRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
 
 MEMBER_USER_ID = "collab_001"
 MEMBER_USER_NAME = "Collab One"

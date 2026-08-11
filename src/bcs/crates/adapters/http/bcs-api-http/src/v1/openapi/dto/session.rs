@@ -1,6 +1,5 @@
 use bcs_service_api::application::v1::{
-    AuthenticatedCaller, BotParticipantMode, CreateSession, SessionInput,
-    SessionParticipantInput as ServiceParticipantInput, SessionStatus, UpdateSession,
+    AuthenticatedCaller, BotParticipantMode, CreateSession, SessionInput, SessionStatus, UpdateSession,
 };
 use serde::Deserialize;
 
@@ -29,31 +28,10 @@ impl From<SessionInputDto> for SessionInput {
     }
 }
 
-/// Input shape for a session participant on creation. Session participants
-/// are Bot-only in V1; the facade resolves `bot_uuid` to a participant with
-/// `actor_kind = Bot`.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SessionParticipantInput {
-    pub bot_uuid: String,
-    #[serde(default)]
-    pub mode: Option<BotParticipantMode>,
-}
-
-impl From<SessionParticipantInput> for ServiceParticipantInput {
-    fn from(dto: SessionParticipantInput) -> Self {
-        Self {
-            bot_uuid: dto.bot_uuid,
-            mode: dto.mode,
-        }
-    }
-}
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CreateSessionRequest {
-    pub driver_bot_uuid: String,
-    pub participants: Vec<SessionParticipantInput>,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]
@@ -65,14 +43,8 @@ impl CreateSessionRequest {
         CreateSession {
             caller,
             group_id,
-            driver_bot_uuid: self.driver_bot_uuid,
             title: self.title,
             input: self.input.map(SessionInput::from),
-            participants: self
-                .participants
-                .into_iter()
-                .map(ServiceParticipantInput::from)
-                .collect(),
         }
     }
 }
@@ -98,6 +70,19 @@ impl UpdateSessionRequest {
 #[serde(deny_unknown_fields)]
 pub struct UpdateSessionParticipantRequest {
     pub mode: BotParticipantMode,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AddSessionParticipantRequest {
+    pub bot_uuid: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteSessionQuery {
+    #[serde(default)]
+    pub acting_bot_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

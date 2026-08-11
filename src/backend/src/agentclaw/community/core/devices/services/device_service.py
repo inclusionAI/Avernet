@@ -16,17 +16,15 @@ import json
 import secrets
 import threading
 import uuid
-from typing import Callable, Literal, Optional, TYPE_CHECKING, TypeVar
+from typing import Callable, Literal, Optional, TYPE_CHECKING, TypeVar, Any
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.services.data_init_service import DataInitService
     from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
     from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
 
-from agentclaw.community.core.devices.repository.protocol import (
-    DeviceBindingRepository,
-    OssToNasRecordRepository,
-)
+from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.devices.models import (
     AllocatedDevice,
@@ -538,6 +536,7 @@ class DeviceService:
         admins: list[str] | None = None,
         template_type: str | None = None,
         template_config: dict | None = None,
+        device_props_extra: dict[str, Any] | None = None,
     ) -> DeviceBindingRecord | None:
         """Apply for a device — template method with provider hooks.
 
@@ -565,6 +564,7 @@ class DeviceService:
             admins: List of admin user IDs
             template_type: Template type
             template_config: Template configuration
+            device_props_extra: Lifecycle metadata persisted with the binding.
         """
         # Resolve parameters
         resolved_entity_id = entity_id if entity_id else operator.staff_id
@@ -654,6 +654,7 @@ class DeviceService:
             "symbol": json.dumps(symbol_json, ensure_ascii=False) if symbol else "[]",
             "entity_id": resolved_entity_id,
             "entity_type": resolved_entity_type,
+            **(device_props_extra or {}),
         }
         # 4. Process database record
         status = DeviceBindingStatus.PENDING.value

@@ -229,7 +229,7 @@ identity kinds neither grant nor deny access.
 Paths such as:
 
 ```text
-/openapi/v1/bots/collaboration/{bot_uuid}/friendships
+/openapi/v1/collaboration/bots/{bot_uuid}/friendships
 ```
 
 remain Human APIs for this batch. The Application service checks that the
@@ -256,22 +256,29 @@ Human is not an independently authorized Human Actor, management requests
 remain forbidden. The read-only View Actor selection below is the only
 exception and scopes data rather than changing the business caller.
 
-### Unified View Actor contract
+### View Actor list contract
 
-These Human HTTP operations use the same optional `view_bot_id` query
-parameter:
+Group list, Session list, and Session message history use the same optional
+`view_bot_id` selector. The Group list operation is:
 
 ```text
-GET /openapi/v1/groups
-GET /openapi/v1/groups/{group_id}/sessions
-GET /openapi/v1/sessions/{session_id}/messages
+GET /openapi/v1/collaboration/groups
 ```
 
-The first path replaces the Bot-scoped
-`GET /openapi/v1/bots/collaboration/{bot_uuid}/groups` list operation. The
-operation count remains 32 and its operation ID becomes `list_groups`.
+The Group list retains these query filters and pagination parameters:
 
-Application resolves one effective View Actor before querying data:
+```text
+view_bot_id
+strategy
+kind
+q
+membership
+limit
+offset
+```
+
+For these reads, Application resolves one effective View Actor before querying
+data:
 
 | Request value | Effective View Actor | Required authorization |
 | --- | --- | --- |
@@ -286,12 +293,10 @@ the same generic `403 forbidden`. The check never uses a creator relation edge
 and never auto-claims a legacy Bot. Extra Bot/App/AccessKey identities in the
 authenticated Caller do not change the result.
 
-The selected Actor affects only these read operations:
+The selected View Actor affects only these read operations:
 
-- `list_groups` applies the existing `membership=all|direct|session_only`,
-  search, kind, and strategy filters to the selected Actor's Group relations.
-  Omitting `view_bot_id` therefore lists the authenticated Human Actor's
-  Groups, not Groups belonging to all Bots that the Human created.
+- `list_groups` returns only Groups where the selected Actor is a direct Group
+  Participant or a Session-only Participant, according to the `membership` filter.
 - `list_sessions` returns only Sessions under `group_id` where the selected
   Actor is a Session Participant. Group membership, ownership, creator, or
   manager status does not broaden the result set.
@@ -301,9 +306,16 @@ The selected Actor affects only these read operations:
 
 Explicit and default View Actor branches are mutually exclusive. A failed
 explicit View Actor check never falls back to the Human Actor's direct
-permissions. For both list operations, an authorized View Actor with no
+permissions. For the Session list operation, an authorized View Actor with no
 matching relation returns `200` with an empty page. Both `items` and `total`
 must be filtered by the selected Actor before `offset`/`limit` pagination.
+
+Session creation under `POST /openapi/v1/collaboration/groups/{group_id}/sessions`
+does not accept a request-body roster. It snapshots the parent Group roster as
+the initial Session roster, including both Bot and Human participants, and then
+ensures the parent driver Bot has the Session driver role. This preserves the
+legacy Group-to-Session roster semantics and allows Human Group participants to
+see newly created Sessions through the default Human View Actor.
 
 For message history, omitting `view_bot_id` is exactly equivalent to passing
 the authenticated Human Actor ID. The Human must be a Session Participant;
@@ -312,9 +324,9 @@ manager view. Likewise, an explicitly selected owned Bot must be a Session
 Participant. A selected Actor that is not a Session Participant is rejected
 with the same generic `403 forbidden`.
 
-View Actor selection does not apply to `get_group`, `get_session`, or any
-Group/Session mutation. In particular, neither detail operation accepts a
-`view_bot_id` query parameter.
+View Actor selection does not apply to `get_group`, `get_session`, Group list,
+or any Group/Session mutation. In particular, neither detail operation accepts
+a `view_bot_id` query parameter.
 
 Detail reads instead use an implicit read relation derived from the
 authenticated User. `get_group` is readable when the Group participants
@@ -326,8 +338,13 @@ no Group or Session management authority is granted. Bot ownership is still
 determined only by exact `created_by`; creator relation edges, UUID suffixes,
 and auto-claim do not count.
 
-All Group and Session mutations continue to evaluate the authenticated Human
-Actor and their operation-specific direct management relations.
+Group and Session delete operations additionally accept optional
+`acting_bot_id`. That parameter is not a generic caller override: when present,
+it asks Application to evaluate the delete decision from that Bot's identity
+perspective after proving the authenticated Human may manage that Bot. When
+omitted, deletion is evaluated from the authenticated Human Actor perspective.
+All other Group and Session mutations continue to evaluate the authenticated
+Human Actor and their operation-specific direct management relations.
 
 ## Error semantics
 
@@ -367,30 +384,21 @@ Contract tests must assert that every one of the 32 operations uses exactly
 Invalid Gateway authentication remains `401`; a valid Caller that reaches
 Application without User remains `403` as a defense-in-depth rule.
 
-The Group list operation also moves from:
+The Group list operation is `GET /openapi/v1/collaboration/groups`; the existing
+`POST /openapi/v1/collaboration/groups` operation remains on the same collection
+path for creation. The Group list retains `offset`, `limit`, `q`, `membership`,
+`kind`, and `strategy`, and adds the same optional `view_bot_id` parameter used
+by Session list and Session message history. Parameter descriptions must
+document that omission selects the caller's Human Actor, an explicit Human value
+may only identify the caller, and an explicit Bot value requires `created_by`
+ownership.
 
-```text
-GET /openapi/v1/bots/collaboration/{bot_uuid}/groups
-```
-
-to:
-
-```text
-GET /openapi/v1/groups?view_bot_id=<optional-view-actor>
-```
-
-The existing `POST /openapi/v1/groups` operation remains on the same path. The
-Group list retains `offset`, `limit`, `q`, `membership`, `kind`, and `strategy`.
-The Session list adds the same optional `view_bot_id` parameter; Session
-message history changes the default from an implicit manager view to the
-authenticated Human Actor's Participant view. All three parameter descriptions
-must document that an explicit Human value may only identify the caller and an
-explicit Bot value requires `created_by` ownership.
-
-`GET /openapi/v1/groups/{group_id}` and
-`GET /openapi/v1/sessions/{session_id}` deliberately do not add
+`GET /openapi/v1/collaboration/groups/{group_id}` and
+`GET /openapi/v1/collaboration/sessions/{session_id}` deliberately do not add
 `view_bot_id`. Their `403` contract documents the implicit participant
 intersection across the caller's Human Actor and Bots created by that User.
+Group and Session DELETE operations add optional `acting_bot_id`; omitted
+values use the authenticated Human perspective.
 
 ## Compatibility and risk
 
@@ -442,12 +450,13 @@ Focused contract and regression tests must pin all three boundaries.
 - Group and Session detail reads succeed when either the Human Actor or an
   exact-`created_by` owned Bot is a participant, but that implicit relation
   grants neither management access nor a message perspective.
-- Omitting `view_bot_id` on all three View Actor operations selects the
-  authenticated Human Actor and never expands to owned Bots.
+- Omitting `view_bot_id` on View Actor operations selects the authenticated
+  Human Actor and never expands to owned Bots. Group list, Session list, and
+  Session history share this rule.
 - Passing the caller's Human Actor is equivalent to omission; passing an owned
   Bot scopes to that Bot; every other explicit value is Forbidden without
   fallback.
-- Group and Session list `items` and `total` are both scoped before pagination.
+- Group and Session list `items` and `total` are both scoped before pagination by the effective View Actor.
 - Session history requires the selected Human or Bot to be a Session
   Participant, including when the Human is a creator or manager.
 - Invitation creation uses Human Group/Session authorization and invitation
@@ -459,10 +468,11 @@ Focused contract and regression tests must pin all three boundaries.
 
 - OpenAPI validation counts 32 operations and requires
   `x-avernet-security.user: required` on every operation.
-- The operation inventory contains `GET /openapi/v1/groups` with
-  `operationId: list_groups` and excludes the old Bot-scoped Group list path.
-- Group list, Session list, and Session message history expose the documented
-  optional `view_bot_id` parameter.
+- The operation inventory contains `GET /openapi/v1/collaboration/groups` with
+  `operationId: list_groups` and does not expose `/bots/{bot_id}/groups`.
+- Group list exposes `view_bot_id`, `strategy`, `kind`, `q`, `membership`,
+  `limit`, and `offset`. Session list and Session message history expose the
+  documented optional `view_bot_id` parameter with the same authorization rule.
 - Group and Session detail expose no `view_bot_id` parameter and document the
   Human-or-created-Bot participant read rule.
 - HTTP route tests distinguish invalid authentication (`401`) from valid

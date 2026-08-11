@@ -18,12 +18,14 @@ from contextlib import contextmanager
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from tests.community.adapters.http.openapi_v1.conftest import (
+    user_scoped_client,
+)
 from agentclaw.community.adapters.http.openapi_v1 import _ENGINE_RUNTIME_GROUPS
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.api.engine_connection_service import (
@@ -33,8 +35,8 @@ from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayPro
 from agentclaw.community.core.bot_collaborator.models import BotCollaboratorModel
 from agentclaw.community.core.service_bot.repository.models import BotPublishModel
 from agentclaw.community.plugin_api.models import BotModel
-from agentclaw.community.plugins.bot_repository import BotRepository
-from agentclaw.community.plugins.local.sqlite_models import EntityDeviceBinding
+from agentclaw.community.core.repository.implementations.bot.bot import BotRepository
+from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 from .conftest import BOT, OWNER, FakeRelay
@@ -44,29 +46,36 @@ TENANT_B = "tenant-b"
 
 SESSION_ID = "session:abc:user:1"
 
-#: (method, suffix under /openapi/v1/bots/{bot_id}, body) for all 16 routes.
+#: (method, path template, body) for all 16 routes. ``{bot}`` is substituted
+#: with the bot the sweep is probing, and it sits *after* the component name —
+#: the surface's addressing rule (see ``openapi_v1/__init__.py``).
 #:
 #: Bodies are per-route and valid: every request model sets ``extra="forbid"``,
 #: so a generic body would 422 in validation — before the handler runs — and the
 #: sweep would prove nothing about ownership.
 ROUTES = [
-    ("get", "/sessions", None),
-    ("post", "/sessions", {"title": "T"}),
-    ("get", f"/sessions/{SESSION_ID}", None),
-    ("patch", f"/sessions/{SESSION_ID}", {"title": "T"}),
-    ("delete", f"/sessions/{SESSION_ID}", None),
-    ("get", f"/sessions/{SESSION_ID}/messages", None),
-    ("delete", f"/sessions/{SESSION_ID}/messages", None),
-    ("get", "/engine/status", None),
-    ("get", "/engine/capabilities", None),
-    ("get", "/engine/available", None),
-    ("get", "/models", None),
-    ("get", "/models/openai/gpt-5.3", None),
-    ("get", "/approvals/mode?session_key=k", None),
-    ("put", "/approvals/mode", {"session_key": "k", "mode": "never"}),
-    ("get", "/approvals/modes", None),
-    ("get", "/connection", None),
+    ("get", "/sessions/{bot}", None),
+    ("post", "/sessions/{bot}", {"title": "T"}),
+    ("get", f"/sessions/{{bot}}/{SESSION_ID}", None),
+    ("patch", f"/sessions/{{bot}}/{SESSION_ID}", {"title": "T"}),
+    ("delete", f"/sessions/{{bot}}/{SESSION_ID}", None),
+    ("get", f"/sessions/{{bot}}/{SESSION_ID}/messages", None),
+    ("delete", f"/sessions/{{bot}}/{SESSION_ID}/messages", None),
+    ("get", "/engine/{bot}/status", None),
+    ("get", "/engine/{bot}/capabilities", None),
+    ("get", "/engine/{bot}/available", None),
+    ("get", "/models/{bot}", None),
+    ("get", "/models/{bot}/openai/gpt-5.3", None),
+    ("get", "/approvals/{bot}/mode?session_key=k", None),
+    ("put", "/approvals/{bot}/mode", {"session_key": "k", "mode": "never"}),
+    ("get", "/approvals/{bot}/modes", None),
+    ("get", "/connection/{bot}", None),
 ]
+
+
+def _url(suffix: str, bot: str) -> str:
+    """A sweep entry's full path for *bot*."""
+    return f"/openapi/v1/bots{suffix.format(bot=bot)}"
 
 
 class _FakeConnections:
@@ -84,8 +93,9 @@ class _FakeConnections:
         #: builds that got past bot resolution — i.e. would reach a device
         self.built: list[str] = []
 
-    def build(self, *, bot_id, owner_id):
-        self._relay.resolve_bot(bot_id, owner_id)  # raises for a foreign bot
+    def build(self, *, bot_id, owner_id, caller_id, stage):
+        # raises for a foreign bot or a non-operator caller
+        self._relay.resolve_bot(bot_id, owner_id, caller_id)
         self.built.append(bot_id)
         raise AssertionError("unreachable in these tests — resolution must fail")
 
@@ -107,7 +117,7 @@ def client(relay: FakeRelay, connections: _FakeConnections):
         app.include_router(group)
     app.dependency_overrides[require_principal] = lambda: {"user_id": OWNER}
     attach_injector(app, Injector([_M()]))
-    return TestClient(app)
+    return user_scoped_client(app, OWNER)
 
 
 def test_all_sixteen_routes_are_covered():
@@ -120,7 +130,7 @@ def test_a_bot_that_is_not_the_callers_is_a_masked_404(
     client, relay, method, suffix, body
 ):
     kwargs = {"json": body} if body is not None else {}
-    resp = getattr(client, method)(f"/openapi/v1/bots/not-my-bot{suffix}", **kwargs)
+    resp = getattr(client, method)(_url(suffix, "not-my-bot"), **kwargs)
 
     assert resp.status_code == 404, resp.json()
     body = resp.json()
@@ -151,7 +161,7 @@ def test_no_device_is_reached_for_a_foreign_bot(
     it must branch on ``bot_type`` before deciding to forward at all.
     """
     kwargs = {"json": body} if body is not None else {}
-    getattr(client, method)(f"/openapi/v1/bots/not-my-bot{suffix}", **kwargs)
+    getattr(client, method)(_url(suffix, "not-my-bot"), **kwargs)
     assert relay.calls == [], f"{method.upper()} {suffix} reached a device"
     assert connections.built == [], (
         f"{method.upper()} {suffix} built a connection for a foreign bot"
@@ -174,7 +184,7 @@ def test_sessions_does_not_even_attempt_a_forward_for_a_foreign_bot(
     gate is ever moved after the forward.
     """
     kwargs = {"json": body} if body is not None else {}
-    getattr(client, method)(f"/openapi/v1/bots/not-my-bot{suffix}", **kwargs)
+    getattr(client, method)(_url(suffix, "not-my-bot"), **kwargs)
     assert relay.attempts == [], (
         f"{method.upper()} {suffix} tried to forward before checking the bot"
     )

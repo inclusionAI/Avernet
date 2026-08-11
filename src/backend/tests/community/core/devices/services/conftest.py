@@ -68,7 +68,7 @@ def _seed_bot_and_binding(
     ``user_id`` so ``DeviceBindingRepository.get_active_by_bot_and_owner``
     returns the binding for this owner.
     """
-    from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+    from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
     from agentclaw.community.plugin_api.database import DatabasePlugin
     from agentclaw.community.plugin_api.models import BotModel
 
@@ -201,17 +201,15 @@ def device_service(world, fake_baas_service):
     """
     from typing import cast
 
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.core.bot_management.services.bot_service import BotService
     from agentclaw.community.core.devices.protocols import (
         BotQueryProtocol,
         BotSyncProtocol,
         McpSyncProtocol,
     )
-    from agentclaw.community.core.devices.repository.protocol import (
-        DeviceBindingRepository,
-        OssToNasRecordRepository,
-    )
+    from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
+    from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
     from agentclaw.community.core.devices.services.baas_device_service import (
         BaasDeviceService,
     )
@@ -285,8 +283,8 @@ def device_context_resolver(world, fake_baas_service, device_service):
     output — not a transport mismatch. Once Task 1.10 registers the resolver
     as a DI provider, this collapses to ``world.get(DeviceContextResolver)``.
     """
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-    from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
+    from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
     from agentclaw.community.core.devices.services.conn_info_builders.arca_builder import (
         ArcaConnInfoBuilder,
     )

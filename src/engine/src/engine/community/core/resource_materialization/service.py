@@ -1,4 +1,5 @@
 """Materialize BaaS transfers into the controlled Bot workspace."""
+
 from __future__ import annotations
 
 import asyncio
@@ -98,6 +99,49 @@ class ManifestStore:
             self._write_locked(payload)
             return ManifestEntry.model_validate(value)
 
+    def replace_export_source(
+        self,
+        *,
+        resource_id: str,
+        scope_key_hash: str,
+        session_key_hash: str,
+        transfer_id: str,
+        size_bytes: int,
+        content_hash: str,
+        observed_size: int,
+        observed_mtime_ns: int,
+        observed_inode: int | None,
+        baas_tenant: str,
+    ) -> ManifestEntry | None:
+        """Atomically replace the BaaS source after a verified Engine re-upload."""
+        with self._lock_for(self.path):
+            payload = self._read_locked()
+            value = payload["resources"].get(resource_id)
+            if value is None:
+                return None
+            entry = ManifestEntry.model_validate(value)
+            if (
+                entry.status != "ready"
+                or entry.scope_key_hash != scope_key_hash
+                or entry.session_key_hash != session_key_hash
+            ):
+                return None
+            updated = entry.model_copy(
+                update={
+                    "transfer_id": transfer_id,
+                    "size_bytes": size_bytes,
+                    "content_hash": content_hash,
+                    "observed_size": observed_size,
+                    "observed_mtime_ns": observed_mtime_ns,
+                    "observed_inode": observed_inode,
+                    "baas_tenant": baas_tenant,
+                }
+            )
+            payload["resources"][resource_id] = updated.model_dump(mode="json")
+            payload["version"] = 1
+            self._write_locked(payload)
+            return updated
+
     def _write_locked(self, payload: dict) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_name(f".manifest-{uuid.uuid4().hex}.tmp")
@@ -162,7 +206,9 @@ class ResourceMaterializationService:
                 raise ResourceNotMaterializedError("resource_not_materialized")
         except (OSError, MaterializationSecurityError) as exc:
             raise ResourceNotMaterializedError("resource_not_materialized") from exc
-        media_type = mimetypes.guess_type(entry.filename)[0] or "application/octet-stream"
+        media_type = (
+            mimetypes.guess_type(entry.filename)[0] or "application/octet-stream"
+        )
         content_disposition = "{}; filename*=UTF-8''{}".format(
             disposition,
             quote(entry.filename, safe=""),
@@ -278,6 +324,8 @@ class ResourceMaterializationService:
                 observed_size=observed.st_size,
                 observed_mtime_ns=observed.st_mtime_ns,
                 observed_inode=getattr(observed, "st_ino", None),
+                uploaded_at=request.uploaded_at,
+                baas_tenant=request.tenant,
             )
             store.upsert(entry)
             log.info(
@@ -319,7 +367,9 @@ class ResourceMaterializationService:
         try:
             filename_bytes = request.filename.encode("utf-8")
         except UnicodeEncodeError as exc:
-            raise MaterializationSecurityError("invalid controlled path segment") from exc
+            raise MaterializationSecurityError(
+                "invalid controlled path segment"
+            ) from exc
         if (
             not request.filename
             or Path(request.filename).name != request.filename
@@ -348,9 +398,13 @@ class ResourceMaterializationService:
         )
         if request.transfer_api_version == "session_v2":
             if tuple(supplied.parts) != expected_suffix:
-                raise MaterializationSecurityError("workspace path does not match resource scope")
-        elif tuple(supplied.parts[-len(expected_suffix):]) != expected_suffix:
-            raise MaterializationSecurityError("device_path does not match resource scope")
+                raise MaterializationSecurityError(
+                    "workspace path does not match resource scope"
+                )
+        elif tuple(supplied.parts[-len(expected_suffix) :]) != expected_suffix:
+            raise MaterializationSecurityError(
+                "device_path does not match resource scope"
+            )
         relative = Path(*expected_suffix)
         target = root / relative
         self._assert_contained(root, target)
@@ -362,7 +416,10 @@ class ResourceMaterializationService:
         # string-prefix checks are insufficient for sibling-prefix and symlink escapes.
         resolved_root = root.resolve(strict=True)
         resolved_target = target.resolve(strict=False)
-        if resolved_target != resolved_root and resolved_root not in resolved_target.parents:
+        if (
+            resolved_target != resolved_root
+            and resolved_root not in resolved_target.parents
+        ):
             raise MaterializationSecurityError("workspace path escapes Bot root")
 
     async def _entry_file_is_valid(self, root: Path, entry: ManifestEntry) -> bool:

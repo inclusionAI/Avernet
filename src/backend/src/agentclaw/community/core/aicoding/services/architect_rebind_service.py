@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 from injector import inject
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
     BotPermissionError,

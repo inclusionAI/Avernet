@@ -105,6 +105,17 @@ impl SessionFileService for NoopSessionFileService {
         )))
     }
 
+    async fn share_mint_for_history(
+        &self,
+        _session_id: &str,
+        _file_id: &str,
+        _ttl_seconds: u64,
+    ) -> Result<ShareMintResult, SessionFileUseCaseError> {
+        Err(SessionFileUseCaseError::Internal(ServiceError::InternalError(
+            NOT_SUPPORTED.into(),
+        )))
+    }
+
     async fn share_consume(
         &self,
         _token: &str,

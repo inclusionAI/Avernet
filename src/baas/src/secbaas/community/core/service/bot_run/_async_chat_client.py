@@ -97,6 +97,15 @@ class ConcurrentSessionError(Exception):
     """
 
 
+class BotSessionError(Exception):
+    """WebSocket 会话以 error 状态终止时抛出。
+
+    当 agent/chat 事件回调收到 state=error 时，send_message 在
+    chat_complete 后检查 state.state 并抛出此异常，使上游调用方
+    （BaasBotService / executor）能将 bot_run 标记为 FAILED 而非 COMPLETED。
+    """
+
+
 class NotConnectedError(Exception):
     """连接未建立或已断开时抛出。"""
 
@@ -275,6 +284,7 @@ class AsyncChatClient:
         auth_token: str | None = None,
         app_id: str | None = None,
         chat_metadata: dict[str, str] | None = None,
+        attachments: list[Any] | None = None,
     ) -> tuple[str, list[Any]]:
         """发送消息并等待 chat 完成
 
@@ -369,6 +379,7 @@ class AsyncChatClient:
                         app_id=app_id,
                         timeout_ms=int(timeout * 1000) if timeout else None,
                         chat_metadata=chat_metadata,
+                        attachments=attachments,
                     )
                 except ChatRequestError as e:
                     logger.error(
@@ -396,17 +407,23 @@ class AsyncChatClient:
                     # 无超时等待
                     await state.chat_complete.wait()
 
+                # 6. 检查是否以 error 状态终止
+                if state.state == "error":
+                    raise BotSessionError(
+                        f"session ended with error state: session_key={session_key}"
+                    )
+
                 return state.content, state.agent_payloads
 
             finally:
-                # 6. 清除 sessionKey 标记并唤醒等待者
+                # 7. 清除 sessionKey 标记并唤醒等待者
                 async with self._condition:
                     self._active_sessions.discard(session_key)
                     self._sessions.pop(session_key, None)
                     self._condition.notify_all()
 
         finally:
-            # 7. 释放并发信号量
+            # 8. 释放并发信号量
             if self._concurrency_sem is not None:
                 self._concurrency_sem.release()
 
@@ -418,6 +435,7 @@ class AsyncChatClient:
         auth_token: str | None = None,
         app_id: str | None = None,
         chat_metadata: dict[str, str] | None = None,
+        attachments: list[Any] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """流式发送消息，逐 chunk 产出 StreamChunk。
 
@@ -488,6 +506,7 @@ class AsyncChatClient:
                         app_id=app_id,
                         timeout_ms=int(timeout * 1000) if timeout else None,
                         chat_metadata=chat_metadata,
+                        attachments=attachments,
                     )
                 except ChatRequestError as e:
                     logger.error(
@@ -523,6 +542,7 @@ class AsyncChatClient:
         session_key: str | None = None,
         auth_token: str | None = None,
         chat_metadata: dict[str, str] | None = None,
+        attachments: list[Any] | None = None,
     ) -> None:
         """注入消息到已有会话，不等待响应
 
@@ -558,6 +578,7 @@ class AsyncChatClient:
                 message=message,
                 auth_token=auth_token,
                 chat_metadata=chat_metadata,
+                attachments=attachments,
             )
             logger.info(
                 "[inject] injected message not wait, return as soon as possible"
@@ -721,14 +742,9 @@ class AsyncChatClient:
                         f"[chat] final: sessionKey={session_key}, state={chat_state}"
                     )
         elif chat_state == "error":
-            state.content = text
-            state.state = chat_state
-            state.chat_complete.set()
-            self._emit_stream_chunk(state, StreamChunk(type="error", content=text))
-            if self.verbose:
-                logger.info(
-                    f"[chat] error: sessionKey={session_key}, payload={payload}"
-                )
+            self._handle_terminal_error(
+                state, session_key, payload.get("errorMessage", ""), "chat"
+            )
         else:
             if self.verbose:
                 logger.info(

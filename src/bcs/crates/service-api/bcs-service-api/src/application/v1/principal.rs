@@ -20,7 +20,9 @@ pub struct AuthenticatedUser {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HumanPrincipal {
     pub subject: AuthenticatedUser,
-    pub tenant: String,
+    /// Optional Gateway tenant metadata; current Human authorization is based
+    /// on the authenticated identity and ownership relationships.
+    pub tenant: Option<String>,
     #[serde(default)]
     pub scopes: BTreeSet<String>,
 }
@@ -45,12 +47,12 @@ pub enum Principal {
 impl Principal {
     pub fn human(
         subject: AuthenticatedUser,
-        tenant: impl Into<String>,
+        tenant: Option<String>,
         scopes: BTreeSet<String>,
     ) -> Self {
         Self::Human(HumanPrincipal {
             subject,
-            tenant: tenant.into(),
+            tenant,
             scopes,
         })
     }
@@ -88,10 +90,10 @@ impl Principal {
         }
     }
 
-    pub fn tenant(&self) -> &str {
+    pub fn tenant(&self) -> Option<&str> {
         match self {
-            Self::Human(principal) => &principal.tenant,
-            Self::Bot(principal) => &principal.tenant,
+            Self::Human(principal) => principal.tenant.as_deref(),
+            Self::Bot(principal) => Some(&principal.tenant),
         }
     }
 

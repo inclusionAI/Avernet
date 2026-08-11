@@ -19,10 +19,8 @@ from pathlib import Path
 
 from injector import inject
 
-from agentclaw.community.core.skill_center.services.repositories import SkillRepository
-from agentclaw.community.core.skill_center.services.skill_propagation_service import (
-    SkillPropagationService,
-)
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.skill_center.services.skill_propagation_service import SkillPropagationService
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
@@ -471,6 +469,14 @@ class SkillPublishService:
         oss_path = f"{_OSS_PUBLISH_PREFIX}/{skill_name}/{ts}/{version}.zip"
 
         git_path = skill.get("git_path", "")
+        # ``_resolve_skill_dir`` maps an empty ``git_path`` to ``Path("")``, which
+        # normalises to ``PosixPath('.')`` — the process CWD. ``is_dir()`` says True
+        # for it, so the fail-fast guard below waves it through and the zip loop
+        # packs the entire working directory. A skill with no ``git_path`` has
+        # nothing to publish; reject it before resolving.
+        if not git_path:
+            raise FileNotFoundError("技能目录不存在: git_path 为空，无法打包发布")
+
         base = self._resolve_skill_dir(git_path)
 
         if not base.is_dir():

@@ -9,7 +9,9 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import * as fs from 'node:fs';
 import { rm } from 'node:fs/promises';
+import * as path from 'node:path';
 import type { BcsWsClient } from './bcs-ws-client.js';
 import { resolveGatewayPort, scopesForGatewayMethod } from './gateway-security.js';
 import { getBcsRuntime } from './runtime.js';
@@ -44,6 +46,7 @@ const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const IMAGE_DOWNLOAD_TIMEOUT_MS = 30_000;
 const IMAGE_READ_IDLE_TIMEOUT_MS = 10_000;
 const RUN_TERMINAL_TIMEOUT_MS = 15 * 60 * 1000;
+const INJECT_ASSISTANT_ONLY_FIELDS = [ 'api', 'provider', 'model', 'stopReason', 'usage' ];
 
 /** Extract sender name from [from:botName] prefix. Returns stripped text and sender name. */
 function extractFromPrefix(raw: string): { senderName: string; text: string } {
@@ -59,6 +62,103 @@ function extractFromPrefix(raw: string): { senderName: string; text: string } {
 function nonEmptyString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   return value.trim() || undefined;
+}
+
+function isPathInside(baseDir: string, candidate: string): boolean {
+  const relative = path.relative(path.resolve(baseDir), path.resolve(candidate));
+  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
+function resolveTranscriptPathFromSessionEntry(
+  sessionsDir: string,
+  sessionId: string,
+  sessionEntry: Record<string, unknown> | undefined,
+): string {
+  const rawSessionFile = typeof sessionEntry?.sessionFile === 'string'
+    ? sessionEntry.sessionFile.trim()
+    : '';
+  if (rawSessionFile) {
+    const resolved = path.isAbsolute(rawSessionFile)
+      ? path.resolve(rawSessionFile)
+      : path.resolve(sessionsDir, rawSessionFile);
+    if (isPathInside(sessionsDir, resolved)) {
+      return resolved;
+    }
+  }
+  return path.join(sessionsDir, `${sessionId}.jsonl`);
+}
+
+function rewriteInjectedTranscriptMessage(params: {
+  transcriptPath: string;
+  messageId: string;
+  log?: { warn: (...args: unknown[]) => void };
+}): boolean {
+  const { transcriptPath, messageId, log } = params;
+
+  let raw = '';
+  try {
+    raw = fs.readFileSync(transcriptPath, 'utf8');
+  } catch (err) {
+    log?.warn?.(`chat.inject: transcript rewrite skipped, read failed: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+
+  const hadTrailingNewline = raw.endsWith('\n');
+  const lines = raw.split(/\r?\n/);
+  if (lines.at(-1) === '') lines.pop();
+
+  let matched = false;
+  const rewritten = lines.map(line => {
+    if (!line.trim()) return line;
+    let entry: any;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      return line;
+    }
+    if (entry?.type !== 'message' || entry?.id !== messageId || entry?.message?.role !== 'assistant') {
+      return line;
+    }
+    entry.message = { ...entry.message, role: 'user' };
+    for (const field of INJECT_ASSISTANT_ONLY_FIELDS) {
+      delete entry.message[field];
+    }
+    matched = true;
+    return JSON.stringify(entry);
+  });
+
+  if (!matched) {
+    log?.warn?.(`chat.inject: transcript rewrite skipped, messageId not found: ${messageId}`);
+    return false;
+  }
+
+  const tmpPath = path.join(path.dirname(transcriptPath), `.${path.basename(transcriptPath)}.${process.pid}.${Date.now()}.tmp`);
+  const next = `${rewritten.join('\n')}${hadTrailingNewline ? '\n' : ''}`;
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(tmpPath, 'w', 0o600);
+    fs.writeFileSync(fd, next, { encoding: 'utf8' });
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
+    fd = undefined;
+    fs.renameSync(tmpPath, transcriptPath);
+    return true;
+  } catch (err) {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // Best-effort cleanup only.
+      }
+    }
+    try {
+      fs.rmSync(tmpPath, { force: true });
+    } catch {
+      // Best-effort cleanup only.
+    }
+    log?.warn?.(`chat.inject: transcript rewrite skipped, write failed: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
 }
 
 export function resolveInboundSender(
@@ -1422,15 +1522,13 @@ export async function handleChatInject(
       },
     });
 
-    // Ensure transcript (.jsonl) file exists - gateway chat.inject requires it
-    const fs = await import('node:fs');
-    const path = await import('node:path');
     const sessionsDir = path.dirname(storePath);
     const sessionsData = JSON.parse(fs.readFileSync(storePath, 'utf8'));
     const sessionEntry = sessionsData[route.sessionKey];
     const sessionId = sessionEntry?.sessionId;
+    let transcriptPath: string | undefined;
     if (sessionId) {
-      const transcriptPath = path.join(sessionsDir, `${sessionId}.jsonl`);
+      transcriptPath = resolveTranscriptPathFromSessionEntry(sessionsDir, sessionId, sessionEntry);
       if (!fs.existsSync(transcriptPath)) {
         const header = JSON.stringify({ type: 'session', version: 3, id: sessionId, timestamp: new Date().toISOString() });
         fs.writeFileSync(transcriptPath, header + '\n');
@@ -1439,13 +1537,20 @@ export async function handleChatInject(
     }
 
     // Call gateway chat.inject to write message to transcript (visible in UI)
-    await callGatewayChatInject({
+    const injected = await callGatewayChatInject({
       cfg: currentCfg,
       sessionKey: route.sessionKey,
       message: text,
       dataDir,
       log,
     });
+    if (transcriptPath && injected.messageId) {
+      rewriteInjectedTranscriptMessage({
+        transcriptPath,
+        messageId: injected.messageId,
+        log,
+      });
+    }
   } catch (err) {
     log?.warn?.(`chat.inject: error: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -1491,7 +1596,7 @@ async function callGatewayChatInject(params: {
   message: string;
   dataDir?: string;
   log?: { info: (...args: unknown[]) => void; warn: (...args: unknown[]) => void };
-}): Promise<void> {
+}): Promise<{ messageId?: string }> {
   const { cfg, sessionKey, message, dataDir, log } = params;
 
   const port = resolveGatewayPort(cfg);
@@ -1499,7 +1604,7 @@ async function callGatewayChatInject(params: {
   const token = (cfg as { gateway?: { auth?: { token?: string } } }).gateway?.auth?.token;
   if (!token) {
     log?.warn?.('chat.inject: no gateway token found, skipping transcript write');
-    return;
+    return {};
   }
 
   const os = await import('node:os');
@@ -1511,7 +1616,7 @@ async function callGatewayChatInject(params: {
   const WebSocket = (await import('ws')).default;
   const ws = new WebSocket(`ws://127.0.0.1:${port}`);
 
-  await new Promise<void>((resolve, reject) => {
+  return await new Promise<{ messageId?: string }>((resolve, reject) => {
     const connectId = `connect-${randomUUID()}`;
     const reqId = `inject-${randomUUID()}`;
     let connected = false;
@@ -1573,7 +1678,10 @@ async function callGatewayChatInject(params: {
           clearTimeout(timeout);
           ws.close();
           if (frame.ok) {
-            resolve();
+            const messageId = typeof frame.payload?.messageId === 'string'
+              ? frame.payload.messageId
+              : undefined;
+            resolve({ messageId });
           } else {
             reject(new Error(`gateway chat.inject failed: ${JSON.stringify(frame.error)}`));
           }

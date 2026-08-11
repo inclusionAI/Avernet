@@ -55,7 +55,7 @@ impl PrincipalVerifier for HeaderVerifier {
 
 fn caller() -> AuthenticatedCaller {
     AuthenticatedCaller {
-        tenant: "tenant-a".into(),
+        tenant: Some("tenant-a".into()),
         user: Some(AuthenticatedUserIdentity {
             id: "staff-1".into(),
             username: "alice".into(),
@@ -296,10 +296,7 @@ impl SessionService for FakeSessionService {
             actor_kind: ActorKind::Bot,
             name: None,
             role: ParticipantRole::Consultant,
-            mode: match command.mode {
-                Some(BotParticipantMode::Muted) => ParticipantMode::Muted,
-                Some(BotParticipantMode::Auto) | None => ParticipantMode::Auto,
-            },
+            mode: ParticipantMode::Auto,
             joined_at: Some(1),
         })
     }
@@ -456,11 +453,6 @@ async fn create_session_returns_created_and_forwards_principal() {
             "POST",
             "/openapi/v1/collaboration/groups/group-1/sessions",
             json!({
-                "driver_bot_uuid": "bot-1",
-                "participants": [
-                    {"bot_uuid": "bot-1", "mode": "auto"},
-                    {"bot_uuid": "bot-2"}
-                ],
                 "title": "Planning",
                 "input": {"query": "how to coordinate?"}
             }),
@@ -479,14 +471,8 @@ async fn create_session_returns_created_and_forwards_principal() {
         let created = created.as_ref().expect("create command");
         assert_eq!(caller_user_id(&created.caller), "staff-1");
         assert_eq!(created.group_id, "group-1");
-        assert_eq!(created.driver_bot_uuid, "bot-1");
         assert_eq!(created.title.as_deref(), Some("Planning"));
         assert_eq!(created.input.as_ref().unwrap().query.as_deref(), Some("how to coordinate?"));
-        assert_eq!(created.participants.len(), 2);
-        assert_eq!(created.participants[0].bot_uuid, "bot-1");
-        assert_eq!(created.participants[0].mode, Some(BotParticipantMode::Auto));
-        assert_eq!(created.participants[1].bot_uuid, "bot-2");
-        assert_eq!(created.participants[1].mode, None);
     }
 }
 
@@ -501,10 +487,7 @@ async fn create_session_reused_returns_ok() {
         .oneshot(authenticated_request(
             "POST",
             "/openapi/v1/collaboration/groups/group-1/sessions",
-            json!({
-                "driver_bot_uuid": "bot-1",
-                "participants": [{"bot_uuid": "bot-1"}]
-            }),
+            json!({}),
         ))
         .await
         .expect("reused create response");
@@ -628,7 +611,7 @@ async fn delete_session_returns_deleted() {
 }
 
 #[tokio::test]
-async fn complete_session_returns_completion_result() {
+async fn complete_session_route_is_not_mounted() {
     let session = Arc::new(FakeSessionService::default());
     let message = Arc::new(FakeSessionMessageService::default());
     let app = test_session_router(session.clone(), message);
@@ -641,18 +624,8 @@ async fn complete_session_returns_completion_result() {
         ))
         .await
         .expect("complete response");
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = response_json(response).await;
-    assert_eq!(body["code"], 20_000);
-    assert_eq!(body["data"]["session_id"], "session-1");
-    assert_eq!(body["data"]["status"], "completed");
-    assert_eq!(body["data"]["completed_at"], 3);
-    {
-        let completed = session.completed.lock().expect("complete lock");
-        let completed = completed.as_ref().expect("complete command");
-        assert_eq!(caller_user_id(&completed.caller), "staff-1");
-        assert_eq!(completed.session_id, "session-1");
-    }
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert!(session.completed.lock().expect("complete lock").is_none());
 }
 
 #[tokio::test]
@@ -785,7 +758,7 @@ async fn add_session_participant_returns_participant() {
         .oneshot(authenticated_request(
             "POST",
             "/openapi/v1/collaboration/sessions/session-1/participants",
-            json!({"bot_uuid": "bot-2", "mode": "muted"}),
+            json!({"bot_uuid": "bot-2"}),
         ))
         .await
         .expect("add participant response");
@@ -793,14 +766,13 @@ async fn add_session_participant_returns_participant() {
     let body = response_json(response).await;
     assert_eq!(body["code"], 20_000);
     assert_eq!(body["data"]["actor_id"], "bot-2");
-    assert_eq!(body["data"]["mode"], "muted");
+    assert_eq!(body["data"]["mode"], "auto");
     {
         let added = session.added_participant.lock().expect("add participant lock");
         let added = added.as_ref().expect("add participant command");
         assert_eq!(caller_user_id(&added.caller), "staff-1");
         assert_eq!(added.session_id, "session-1");
         assert_eq!(added.bot_uuid, "bot-2");
-        assert_eq!(added.mode, Some(BotParticipantMode::Muted));
     }
 }
 
@@ -871,9 +843,7 @@ async fn unknown_fields_rejected_with_invalid_request() {
             "POST",
             "/openapi/v1/collaboration/groups/group-1/sessions",
             json!({
-                "driver_bot_uuid": "bot-1",
-                "participants": [{"bot_uuid": "bot-1"}],
-                "extra": 1
+                "driver_bot_uuid": "bot-1"
             }),
         ))
         .await

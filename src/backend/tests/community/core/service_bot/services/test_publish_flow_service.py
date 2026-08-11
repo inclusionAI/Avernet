@@ -1,3 +1,4 @@
+import copy
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, Mock
@@ -12,6 +13,11 @@ from agentclaw.community.core.service_bot.repository.models import (
     PublishStatus,
 )
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService, BotBuildServiceError
+from agentclaw.community.core.service_bot.services.arca_image_pin import (
+    ImagePolicyState,
+    ServiceBotImagePin,
+    resolve_publish_image_pin as resolve_publish_image_pin_policy,
+)
 from agentclaw.community.core.service_bot.services.publish_flow_service import (
     PublishFlowService,
     PublishFlowServiceError,
@@ -22,6 +28,7 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
 )
 from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
     PROGRESS_POLL_TASK,
+    RESTART_POLL_TASK,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     DraftRestoreRetryableError,
@@ -68,9 +75,7 @@ def _real_ledger():
     from agentclaw.community.core.service_bot.repository.models import (  # noqa: F401
         PublishOperationModel,
     )
-    from agentclaw.community.plugins.publish_operation_repository import (
-        OrmPublishOperationRepository as PublishOperationRepository,
-    )
+    from agentclaw.community.core.repository.implementations.publishing.publish_operation import OrmPublishOperationRepository as PublishOperationRepository
 
     engine = create_engine(
         "sqlite:///:memory:",
@@ -100,8 +105,11 @@ def _real_ledger():
 
 def _pf(*args, **kw):
     """Construct PublishFlowService for tests, defaulting the DI-required teclaw
-    promotion deps to Mocks (the arca/verify flow tests don't exercise them)."""
-    kw.setdefault("common_config_service", Mock())
+    promotion deps to Mocks (the ARCA/verify flow tests don't exercise them)."""
+    if "common_config_service" not in kw:
+        common_config = Mock()
+        common_config.get_value.return_value = None
+        kw["common_config_service"] = common_config
     kw.setdefault("task_queue_service", Mock())
     kw.setdefault("resolver", Mock())
     kw.setdefault("device_fs_dispatcher", Mock())
@@ -114,6 +122,51 @@ def _pf(*args, **kw):
     baas = args[2] if len(args) >= 3 else kw.get("baas_service")
     if isinstance(baas, Mock):
         baas.list_bot_publishes.return_value = []
+    publish_service = args[0] if args else kw.get("bot_publish_service")
+    if isinstance(publish_service, Mock):
+        def _resolve_image_policy(record):
+            artifact = (record.ext or {}).get("config_artifact")
+            if isinstance(artifact, dict) and artifact.get("engine_type") == "teclaw":
+                return ServiceBotImagePin(ImagePolicyState.LEGACY, None)
+            if not any(
+                key in (record.ext or {})
+                for key in (
+                    "sbot_pin_image",
+                    "sbot_docker_image",
+                    "sbot_use_default_image",
+                )
+            ):
+                # These flow tests predate runtime-pin configuration and focus
+                # on orchestration. Dedicated image-policy tests cover the
+                # production resolver's fail-closed behavior.
+                return ServiceBotImagePin(ImagePolicyState.LEGACY, None)
+            return resolve_publish_image_pin_policy(
+                record,
+                common_config_service=kw["common_config_service"],
+                env=record.env,
+            )
+
+        publish_service.resolve_publish_image_pin.side_effect = _resolve_image_policy
+        def _resolve_runtime_kind(record):
+            ext = record.ext or {}
+            explicit = ext.get("sbot_runtime_kind")
+            if explicit == "arka":
+                return "arca"
+            if explicit in {"arca", "teclaw"}:
+                return explicit
+            artifact = ext.get("config_artifact")
+            if isinstance(artifact, dict) and artifact.get("engine_type") == "teclaw":
+                return "teclaw"
+            # Old flow fixtures express their historical binding through the
+            # BaaS provider mock. Production uses Publish ext/bindings only.
+            provider = (
+                baas.resolve_container_provider.return_value
+                if isinstance(baas, Mock)
+                else None
+            )
+            return "teclaw" if provider == "teclaw" else "arca"
+
+        publish_service.resolve_publish_runtime_kind.side_effect = _resolve_runtime_kind
     if "channel_overrides_reader" not in kw:
         # Default to "no channels for this stage" ({}), so promotion delivers the
         # base artifact with channels cleared — tests that care about channels pass
@@ -121,7 +174,16 @@ def _pf(*args, **kw):
         reader = Mock()
         reader.overrides_for_stage.return_value = {}
         kw["channel_overrides_reader"] = reader
-    return PublishFlowService(*args, **kw)
+    svc = PublishFlowService(*args, **kw)
+
+    # Unit tests commonly replace get_latest_ext with a focused stub. Preserve
+    # that seam while supplying the exact-snapshot API used by status+ext CAS.
+    def _latest_ext_snapshot(publish_id):
+        ext = svc._ext_state.get_latest_ext(publish_id)
+        return copy.deepcopy(ext), copy.deepcopy(ext)
+
+    svc._ext_state.get_latest_ext_snapshot = _latest_ext_snapshot
+    return svc
 
 
 def _arca_router(build_service=None):
@@ -644,8 +706,9 @@ async def test_retry_clears_retry_flag_when_restart_submit_fails():
     assert result.message == 'Retry failed: submit failed'
     rollback_ext = publish_service.update_publish_status_with_ext.call_args.kwargs['ext']
     assert rollback_ext['retry'] is True
-    publish_service.update_publish_ext.assert_called_once()
-    cleared_ext = publish_service.update_publish_ext.call_args.kwargs['ext']
+    publish_service.mutate_publish_ext.assert_called_once()
+    cleared_ext = {**ext, 'retry': True}
+    publish_service.mutate_publish_ext.call_args.args[1](cleared_ext)
     assert 'retry' not in cleared_ext
     assert cleared_ext['source_status'] == PublishStatus.VALIDATE_PUB.value
 
@@ -680,12 +743,48 @@ async def test_retry_restart_enqueues_progress_poll_on_success():
     result = await svc.retry(publish_id=1, operator='u1')
 
     assert result.action == 'restart'
-    # The poll was enqueued for this record; the retry flag was NOT cleared.
-    svc._task_queue_service.enqueue.assert_called_once()
-    args = svc._task_queue_service.enqueue.call_args.args
-    assert args[0] == PROGRESS_POLL_TASK
-    assert args[1] == {'publish_id': 1}
+    # Both polls were enqueued for this record; the retry flag was NOT cleared.
+    enqueued = [c.args[0] for c in svc._task_queue_service.enqueue.call_args_list]
+    assert enqueued == [PROGRESS_POLL_TASK, RESTART_POLL_TASK]
+    for call in svc._task_queue_service.enqueue.call_args_list:
+        assert call.args[1] == {'publish_id': 1}
     publish_service.update_publish_ext.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_retry_restart_from_success_enqueues_restart_poll():
+    """A restart retry whose rollback target is SUCCESS is outside
+    _POLL_ACTIVE_STATES, so the progress poll completes immediately and cannot
+    drive it. Without the restart poll this path still depended on a client
+    calling /restart_status — leaving ext.restart.restarting set and a recreated
+    binding PENDING."""
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    ext = {
+        'source_status': PublishStatus.SUCCESS.value,
+        'retry': False,
+        'binding': {'online': 123},
+    }
+    records = [
+        _make_publish_record(status=PublishStatus.FAILED.value, ext=ext.copy()),
+        _make_publish_record(status=PublishStatus.FAILED.value, ext=ext.copy()),
+        _make_publish_record(status=PublishStatus.SUCCESS.value, ext={**ext, 'retry': True}),
+    ]
+    publish_service.get_publish_by_id.side_effect = records
+    publish_service.update_publish_status_with_ext.return_value = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        ext={**ext, 'retry': True},
+    )
+    svc.execute_restart = AsyncMock(return_value={'success': True, 'message': 'ok', 'stage': 'online'})
+
+    result = await svc.retry(publish_id=1, operator='u1')
+
+    assert result.action == 'restart'
+    enqueued = [c.args[0] for c in svc._task_queue_service.enqueue.call_args_list]
+    assert RESTART_POLL_TASK in enqueued
 
 
 @pytest.mark.asyncio
@@ -988,7 +1087,12 @@ async def test_restart_sets_restarting_flag_in_ext():
 
     record = _make_publish_record(
         status=PublishStatus.SUCCESS.value,
-        ext={"binding": {"online": 1}, "migration_path": "/path/to/artifact"},
+        ext={
+            "binding": {"online": 1},
+            "migration_path": "/path/to/artifact",
+            "sbot_pin_image": True,
+            "sbot_docker_image": "registry/arca:v2",
+        },
     )
     _setup_restart(svc, record)
 
@@ -1051,13 +1155,19 @@ async def test_restart_recreate_threads_config_artifact():
     artifact = {"schema_version": 2, "skills": []}
     record = _make_publish_record(
         status=PublishStatus.SUCCESS.value,
-        ext={"binding": {"online": 1}, "config_artifact": artifact},
+        ext={
+            "binding": {"online": 1},
+            "config_artifact": artifact,
+            "sbot_pin_image": True,
+            "sbot_docker_image": "registry/arca:v2",
+        },
     )
     _setup_restart(svc, record)
 
     result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
     assert result["success"] is True
     assert build_service.release_async.await_args.kwargs["delivery"].config_artifact == artifact
+    assert build_service.release_async.await_args.kwargs["docker_image"] == "registry/arca:v2"
     # The recreate minted a fresh binding for the new bot.
     assert publish_service.create_device_binding.call_args.kwargs["device_id"] == "BOT-recreated"
     # BOT_NOT_FOUND = the record is already gone → nothing to retire.
@@ -1142,7 +1252,12 @@ async def test_restart_baas_not_live_target_upgrades_in_place():
     svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
     record = _make_publish_record(
         status=PublishStatus.SUCCESS.value,
-        ext={"binding": {"online": 1}, "migration_path": "/m/1"},
+        ext={
+            "binding": {"online": 1},
+            "migration_path": "/m/1",
+            "sbot_pin_image": True,
+            "sbot_docker_image": "registry/arca:v2",
+        },
     )
     _setup_restart(svc, record, bot_uuid="BOT-old")
 
@@ -1150,6 +1265,7 @@ async def test_restart_baas_not_live_target_upgrades_in_place():
 
     assert result["success"] is True
     build_service.upgrade_async.assert_awaited_once()
+    assert build_service.upgrade_async.await_args.kwargs["docker_image"] == "registry/arca:v2"
     build_service.release_async.assert_not_awaited()
     build_service.retire_superseded_bot.assert_not_called()
 
@@ -1586,7 +1702,12 @@ async def test_verify_first_release_stamps_canary_delivered_and_persisted():
     svc.approve_baas_publish = Mock()
 
     record = _make_publish_record(
-        status=PublishStatus.BUILT.value, ext=_artifact_ext("draft")
+        status=PublishStatus.BUILT.value,
+        ext={
+            **_artifact_ext("draft"),
+            "sbot_pin_image": True,
+            "sbot_docker_image": "registry/arca:v2",
+        },
     )
     await svc._execute_verify_first_release(
         publish_record=record,
@@ -1600,6 +1721,9 @@ async def test_verify_first_release_stamps_canary_delivered_and_persisted():
     # identity keys stable across the promotion
     assert delivered["engine_ext"]["bot_id"] == "b2"
     assert delivered["engine_ext"]["owner_id"] == "u1"
+    # TeClaw does not consume ARCA image Pin fields even if a historical row
+    # happens to contain them.
+    assert build_service.release_async.await_args.kwargs["docker_image"] is None
 
     persisted = svc._ext_state.update_status.call_args.kwargs["ext"]["config_artifact"]
     assert persisted["engine_ext"]["stage"] == "canary"
@@ -1623,7 +1747,12 @@ async def test_verify_upgrade_stamps_canary_delivered_and_persisted():
     svc.refresh_publish_handle = Mock()
 
     record = _make_publish_record(
-        status=PublishStatus.BUILT.value, ext=_artifact_ext("draft")
+        status=PublishStatus.BUILT.value,
+        ext={
+            **_artifact_ext("draft"),
+            "sbot_pin_image": True,
+            "sbot_docker_image": "registry/arca:v2",
+        },
     )
     await svc._execute_verify_upgrade(
         publish_record=record,
@@ -1636,6 +1765,7 @@ async def test_verify_upgrade_stamps_canary_delivered_and_persisted():
 
     delivered = build_service.upgrade_async.await_args.kwargs["delivery"].config_artifact
     assert delivered["engine_ext"]["stage"] == "canary"
+    assert build_service.upgrade_async.await_args.kwargs["docker_image"] is None
     persisted = svc._ext_state.update_status.call_args.kwargs["ext"]["config_artifact"]
     assert persisted["engine_ext"]["stage"] == "canary"
 
@@ -2168,6 +2298,10 @@ async def test_execute_rollback_uses_fixed_device_count_one():
         status=PublishStatus.DRAFT.value,
         version=3,
         source_bot_id="bot-123",
+        ext={
+            "sbot_pin_image": True,
+            "sbot_docker_image": "registry.example.com/arca/openclaw:v3",
+        },
     )
 
     # Target version (v2, SUCCESS) - has a build artifact and binding
@@ -2178,6 +2312,8 @@ async def test_execute_rollback_uses_fixed_device_count_one():
         ext={
             "migration_path": "/tmp/build/v2",
             "binding": {"online": 100},  # binding_id
+            "sbot_pin_image": True,
+            "sbot_docker_image": "registry.example.com/arca/openclaw:v2",
             "skills_manifest": {
                 "schema_version": 1,
                 "engine": "openclaw",
@@ -2216,6 +2352,10 @@ async def test_execute_rollback_uses_fixed_device_count_one():
     # Verify upgrade_async uses the fixed device_count
     upgrade_call = build_service.upgrade_async.call_args
     assert upgrade_call.kwargs["device_count"] == 1
+    assert (
+        upgrade_call.kwargs["docker_image"]
+        == "registry.example.com/arca/openclaw:v2"
+    )
     assert upgrade_call.kwargs["extra_envs"] == {
         "AGENTCLAW_SKILLS_LAYOUT": "pool",
         "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "skills-pool-p3-v1",
@@ -2368,6 +2508,7 @@ async def test_execute_rollback_with_config_artifact():
     upgrade_call = build_service.upgrade_async.call_args
     assert upgrade_call.kwargs["delivery"].config_artifact == artifact
     assert upgrade_call.kwargs["migration_path"] is None
+    assert upgrade_call.kwargs["docker_image"] is None
 
     assert result.publish_id == 2
     assert result.status == PublishStatus.ONLINE_PUB
@@ -2488,6 +2629,9 @@ async def test_scale_bot_success_prefers_bot_ext_device_count():
         ext={
             "binding": {"online": 123},
             "skills_manifest": frozen_skills,
+            "sbot_runtime_kind": "arca",
+            "sbot_pin_image": True,
+            "sbot_docker_image": "registry/arca:v2",
         },
     )
     binding = Mock()
@@ -2495,7 +2639,13 @@ async def test_scale_bot_success_prefers_bot_ext_device_count():
 
     publish_service.get_publish_by_id = Mock(return_value=record)
     publish_service.get_device_binding_by_id = Mock(return_value=binding)
-    bot_service.get_bot = Mock(return_value={"bot_id": "bot-source", "ext": {"service_bot_config": {"device_count": 3}}})
+    # The mutable Draft has already switched to TeClaw, but this historical
+    # Publish remains ARCA-owned and must still execute BaaS scale.
+    bot_service.get_bot = Mock(return_value={
+        "bot_id": "bot-source",
+        "active_engine": "teclaw",
+        "ext": {"service_bot_config": {"device_count": 3}},
+    })
     baas_service.scale_bot = Mock(return_value={"publish_id": 888, "target_count": 3})
 
     result = await svc.scale_bot(publish_id=10, operator="u1")
@@ -2510,16 +2660,16 @@ async def test_scale_bot_success_prefers_bot_ext_device_count():
     assert kwargs["owner_id"] == "u1"
     assert kwargs["target_count"] == 3
     assert kwargs["auto_approve_publish"] is True
+    assert kwargs["config"] == {
+        "deploy_config": {"docker_image": "registry/arca:v2"}
+    }
     # (#197) request_id is now the runner's deterministic op id (wall-clock id gone).
     assert kwargs["request_id"] == operation_request_id(10, "scale", "online", 1)
-    publish_service.update_publish_ext.assert_called_once_with(
-        publish_id=10,
-        ext={
-            "binding": {"online": 123},
-            "skills_manifest": frozen_skills,
-            "scale": {"publish_id": 888},
-        },
-    )
+    publish_service.mutate_publish_ext.assert_called_once()
+    assert publish_service.mutate_publish_ext.call_args.args[0] == 10
+    persisted_ext = dict(record.ext)
+    publish_service.mutate_publish_ext.call_args.args[1](persisted_ext)
+    assert persisted_ext["scale"] == {"publish_id": 888}
 
 
 @pytest.mark.unit
@@ -2551,13 +2701,19 @@ async def test_scale_bot_falls_back_to_common_config_default_device_count():
     publish_service.get_publish_by_id = Mock(return_value=record)
     publish_service.get_device_binding_by_id = Mock(return_value=binding)
     bot_service.get_bot = Mock(return_value={"bot_id": "bot-source", "ext": {}})
-    common_config_service.get_value = Mock(return_value=2)
+    common_config_service.get_value = Mock(
+        side_effect=lambda **kwargs: (
+            2
+            if kwargs["business_code"] == "service_bot_device_count"
+            else None
+        )
+    )
     baas_service.scale_bot = Mock(return_value={"publish_id": 999, "target_count": 2})
 
     result = await svc.scale_bot(publish_id=13, operator="u1")
 
     assert result["target_count"] == 2
-    common_config_service.get_value.assert_called_once()
+    assert common_config_service.get_value.call_count == 1
     _, kwargs = baas_service.scale_bot.call_args
     assert kwargs["bot_uuid"] == "BOT-UUID-2"
     assert kwargs["owner_id"] == "u1"
@@ -2577,14 +2733,17 @@ async def test_scale_bot_teclaw_returns_supported_message_without_baas_call():
     svc = _pf(publish_service, build_service, baas_service, bot_service, _arca_router(build_service))
 
     publish_service.get_publish_by_id = Mock(
-        return_value=_make_publish_record(id=15, status=PublishStatus.SUCCESS.value)
+        return_value=_make_publish_record(
+            id=15,
+            status=PublishStatus.SUCCESS.value,
+            ext={"sbot_runtime_kind": "teclaw"},
+        )
     )
     bot_service.get_bot = Mock(
-        return_value={"bot_id": "bot-source", "active_engine": "teclaw", "ext": {}}
+        return_value={"bot_id": "bot-source", "active_engine": "openclaw", "ext": {}}
     )
-    # resolve_container_provider derives from active_engine in real code; the
-    # provider seam reads teclaw → TeclawProviderBehavior (supports_scale=False).
-    baas_service.resolve_container_provider.return_value = "teclaw"
+    # The current Draft is ARCA, but the immutable Publish is TeClaw-owned.
+    baas_service.resolve_container_provider.return_value = "baas"
 
     result = await svc.scale_bot(publish_id=15, operator="u1")
 
@@ -3134,6 +3293,11 @@ def test_handle_sync_success_verify_stage_updates_validating_and_clears_retry():
         target_status=PublishStatus.VALIDATING,
         ext=ext,
         source_status=PublishStatus.VALIDATE_PUB,
+        expected_ext={
+            "binding": {PublishStage.VERIFY.value: 300},
+            "retry": True,
+            "restart": {"verify": 123, "restarting": True},
+        },
     )
     svc._mark_previous_publish_superseded.assert_called_once_with(
         publish_record, PublishStage.VERIFY, PublishStatus.VALIDATING

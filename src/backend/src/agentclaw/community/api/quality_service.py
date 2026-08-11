@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Optional, Protocol, runtime_checkable
 
-from agentclaw.community.core.quality.repositories import QualityTaskRecord
+from agentclaw.community.core.quality.models import QualityTaskRecord
 
 
 @runtime_checkable

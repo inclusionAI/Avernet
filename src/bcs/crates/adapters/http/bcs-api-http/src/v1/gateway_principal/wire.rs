@@ -1,19 +1,16 @@
 use serde::Deserialize;
+use serde_json::Value;
 
 #[derive(Deserialize)]
 pub(super) struct GatewayClaims {
-    pub iss: String,
-    pub aud: String,
     pub iat: u64,
     pub exp: u64,
-    pub principals: Vec<GatewayPrincipal>,
+    pub principals: Vec<Value>,
 }
 
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
 pub(super) enum GatewayPrincipal {
     User {
-        tenant: String,
+        tenant: Option<String>,
         subject: GatewayUser,
     },
     Bot {
@@ -28,6 +25,31 @@ pub(super) enum GatewayPrincipal {
         tenant: String,
         access_key: GatewayAccessKey,
     },
+}
+
+#[derive(Deserialize)]
+pub(super) struct GatewayUserPrincipal {
+    #[serde(default)]
+    pub tenant: Option<String>,
+    pub subject: GatewayUser,
+}
+
+#[derive(Deserialize)]
+pub(super) struct GatewayBotPrincipal {
+    pub tenant: String,
+    pub bot: GatewayBot,
+}
+
+#[derive(Deserialize)]
+pub(super) struct GatewayAppPrincipal {
+    pub tenant: String,
+    pub app: GatewayApp,
+}
+
+#[derive(Deserialize)]
+pub(super) struct GatewayAccessKeyPrincipal {
+    pub tenant: String,
+    pub access_key: GatewayAccessKey,
 }
 
 #[derive(Deserialize)]

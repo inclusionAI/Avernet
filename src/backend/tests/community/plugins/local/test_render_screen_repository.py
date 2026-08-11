@@ -49,12 +49,10 @@ def mock_db(session_factory):
 
 @pytest.fixture
 def repo(mock_db):
-    from agentclaw.community.plugins.render_screen_repository import (
-        RenderScreenRepository,
-    )
+    from agentclaw.community.core.repository.implementations.bot.render_screen import RenderScreenRepository
 
     with patch(
-        "agentclaw.community.plugins.render_screen_repository.get_current_env",
+        "agentclaw.community.core.repository.implementations.bot.render_screen.get_current_env",
         return_value="dev",
     ):
         yield RenderScreenRepository(mock_db)

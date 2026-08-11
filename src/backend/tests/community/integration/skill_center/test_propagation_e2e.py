@@ -69,12 +69,8 @@ class InMemorySqliteDB:
 
 @pytest.fixture
 def e2e_service(tmp_path):
-    from agentclaw.community.plugins.skill_propagation_log_repository import (
-        SkillPropagationLogRepository,
-    )
-    from agentclaw.community.core.skill_center.services.skill_propagation_service import (
-        SkillPropagationService,
-    )
+    from agentclaw.community.core.repository.implementations.skill_center.propagation_log import SkillPropagationLogRepository
+    from agentclaw.community.core.skill_center.services.skill_propagation_service import SkillPropagationService
 
     db = InMemorySqliteDB()
     log_repo = SkillPropagationLogRepository(db)

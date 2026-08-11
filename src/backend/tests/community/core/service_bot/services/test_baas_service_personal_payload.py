@@ -354,3 +354,19 @@ def test_baas_wrapper_resolver_returns_none_when_bot_missing():
 
     resolver = svc._outbound_rule_provider.build_rule.call_args.kwargs["bot_type_resolver"]
     assert resolver("b1", "o1") is None
+
+
+def test_baas_wrapper_forwards_extra_properties_to_outbound_provider():
+    svc = _make_service()
+    svc._outbound_rule_provider = MagicMock()
+    extra_properties = {"outbound_api_key": "resolved"}
+
+    svc._build_outbound_operation_rule(
+        bot_id="b1",
+        owner_id="o1",
+        extra_properties=extra_properties,
+    )
+
+    assert svc._outbound_rule_provider.build_rule.call_args.kwargs[
+        "extra_properties"
+    ] is extra_properties

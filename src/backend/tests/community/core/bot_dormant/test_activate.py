@@ -13,7 +13,21 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService, InvalidBotStateError
+from agentclaw.community.core.bot_dormant.activate_service import (
+    ActivateBotService,
+    BotNotFoundError,
+    InvalidBotStateError,
+)
+
+
+def test_activate_reports_missing_bot_through_dormant_contract():
+    """A protocol implementation returning no bot raises the stable service error."""
+    bot_service = MagicMock()
+    bot_service.get_bot.return_value = None
+    svc = ActivateBotService(bot_service, passport_plugin=MagicMock())
+
+    with pytest.raises(BotNotFoundError):
+        svc.activate(bot_id="missing", user_id="u1")
 
 
 def test_activate_rejects_active_bot():

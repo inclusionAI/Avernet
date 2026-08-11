@@ -1,6 +1,5 @@
 """Public re-exports for the file_transfer_ticket repository subpackage."""
 
-from ._factory import get_ticket_repository
 from ._orm_model import FileTransferTicketModel
 from ._orm_repository import OrmTicketRepository
 from ._protocol import (
@@ -15,7 +14,6 @@ __all__ = [
     "TicketRepository",
     "OrmTicketRepository",
     "FileTransferTicketModel",
-    "get_ticket_repository",
     "TransferNotFoundError",
     "TransferStateConflictError",
 ]

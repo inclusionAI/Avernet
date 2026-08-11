@@ -15,24 +15,11 @@ from agentclaw.community.core.economy.governance.domain.enums import (
     CloseReason,
     GovernanceStatus,
 )
-from agentclaw.community.core.economy.governance.repositories.orm import (
-    WhitelistEntryOrm,
-    AuditLogOrm,
-    GovernanceNotificationOrm,
-    GovernanceTicketOrm,
-)
-from agentclaw.community.core.economy.governance.repositories.audit_repo import (
-    GovernanceAuditRepository,
-)
-from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
-    NotifyLogRepository,
-)
-from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
-    TaskRecordRepository,
-)
-from agentclaw.community.core.economy.governance.repositories.whitelist_repo import (
-    GovernanceWhitelistRepository,
-)
+from agentclaw.community.core.economy.governance.orm import WhitelistEntryOrm, AuditLogOrm, GovernanceNotificationOrm, GovernanceTicketOrm
+from agentclaw.community.core.repository.implementations.governance.audit import GovernanceAuditRepository
+from agentclaw.community.core.repository.implementations.governance.notify_log import NotifyLogRepository
+from agentclaw.community.core.repository.implementations.governance.task_record import TaskRecordRepository
+from agentclaw.community.core.repository.implementations.governance.whitelist import GovernanceWhitelistRepository
 from agentclaw.community.core.economy.governance.services.lifecycle_service import (
     GovernanceLifecycleService,
 )
@@ -516,9 +503,7 @@ class TestListAllWithTicketMeta:
 
     def test_overlays_latest_ticket_fields(self, session, engine):
         """白单有对应工单 → 叠加最近一条工单维度字段。"""
-        from agentclaw.community.core.economy.governance.repositories.orm import (
-            GovernanceTicketOrm,
-        )  # noqa: F401 — already imported above, kept for clarity
+        from agentclaw.community.core.economy.governance.orm import GovernanceTicketOrm
         svc, db = _build_svc(engine)
         now = datetime.now()
         _make_whitelist(session, bot_id="bot-a", owner_id="owner-a")

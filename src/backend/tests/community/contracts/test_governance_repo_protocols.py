@@ -25,24 +25,14 @@ import inspect
 
 import pytest
 
-from agentclaw.community.core.economy.governance.domain.protocols import (
-    AuditRepositoryProtocol,
-    NotifyLogRepositoryProtocol,
-    TaskRecordRepositoryProtocol,
-    WhitelistRepositoryProtocol,
-)
-from agentclaw.community.core.economy.governance.repositories.audit_repo import (
-    GovernanceAuditRepository,
-)
-from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
-    NotifyLogRepository,
-)
-from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
-    TaskRecordRepository,
-)
-from agentclaw.community.core.economy.governance.repositories.whitelist_repo import (
-    GovernanceWhitelistRepository,
-)
+from agentclaw.community.core.repository.protocols.governance import WhitelistRepositoryProtocol
+from agentclaw.community.core.repository.protocols.governance import TaskRecordRepositoryProtocol
+from agentclaw.community.core.repository.protocols.governance import NotifyLogRepositoryProtocol
+from agentclaw.community.core.repository.protocols.governance import AuditRepositoryProtocol
+from agentclaw.community.core.repository.implementations.governance.audit import GovernanceAuditRepository
+from agentclaw.community.core.repository.implementations.governance.notify_log import NotifyLogRepository
+from agentclaw.community.core.repository.implementations.governance.task_record import TaskRecordRepository
+from agentclaw.community.core.repository.implementations.governance.whitelist import GovernanceWhitelistRepository
 
 
 # ---------------------------------------------------------------------------
@@ -196,10 +186,8 @@ def test_orm_business_properties() -> None:
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
-    from agentclaw.community.core.economy.governance.repositories.orm import (
-        GovernanceTicketOrm,
-        Base,
-    )
+    from agentclaw.community.core.economy.governance.orm import Base
+    from agentclaw.community.core.economy.governance.orm import GovernanceTicketOrm
     from agentclaw.community.core.economy.governance.domain.enums import (
         GovernanceStatus,
     )

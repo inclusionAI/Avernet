@@ -4,9 +4,9 @@
 models and resource path items live in separate YAML fragments so a domain can
 evolve without creating one monolithic file.
 
-The current contract contains 34 approved operations across Bot, Group,
-GroupParticipant, Session, SessionParticipant, Invitation, Friendship, and
-FriendRequest resources. Every operation is published below the single BCN
+The current contract contains 32 approved operations across Bot, Group,
+GroupParticipant, Session, SessionParticipant, Invitation, Friendship,
+FriendRequest, and session-bound WebSocket resources. Every operation is published below the single BCN
 ownership prefix `/openapi/v1/collaboration/**`. These are the exact endpoints
 served by BCN and intended for future Gateway aggregation; no path rewrite is
 required.
@@ -82,6 +82,8 @@ uv run --with pytest --with pyyaml \
   pytest src/bcs/tests/openapi -q
 ```
 
-Generated files are build artifacts and are not committed. The candidate YAML
-is reviewed before implementation; compatibility checks compare later
-revisions against an approved baseline.
+Generated bundle outputs are build artifacts and are not committed from BCS.
+The Gateway-owned schema snapshot `src/gateway/configs/schemas/bcn.openapi.json`
+must be regenerated from this contract when Gateway consumers need the updated
+BCN OpenAPI JSON. The candidate YAML is reviewed before implementation;
+compatibility checks compare later revisions against an approved baseline.

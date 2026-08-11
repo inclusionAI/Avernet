@@ -19,7 +19,7 @@ from agentclaw.community.core.bot_collaborator.interceptor import (
     with_interceptors,
 )
 from agentclaw.community.api.channel_service import ChannelServiceProtocol
-from agentclaw.community.core.channel.services.repositories import ChannelRecord
+from agentclaw.community.core.channel.models import ChannelRecord
 from agentclaw.community.di import Injected
 from agentclaw.community.di import config as cfg
 from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError

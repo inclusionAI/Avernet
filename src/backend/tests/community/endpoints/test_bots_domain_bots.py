@@ -10,7 +10,7 @@ handler's generic try/except is covered elsewhere.)
 """
 from __future__ import annotations
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 
 from tests.community.framework import (
     CaseInput,

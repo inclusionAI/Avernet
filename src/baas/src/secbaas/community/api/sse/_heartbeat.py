@@ -57,7 +57,7 @@ async def convert_chunks_to_sse(
 async def with_sse_heartbeat(
     sse_iter: AsyncIterator[str],
     *,
-    interval: float = 30.0,
+    interval: float = 10.0,
 ) -> AsyncIterator[str]:
     """Wrap an SSE string stream, injecting heartbeat when idle.
 

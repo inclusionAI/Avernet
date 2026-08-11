@@ -1,11 +1,11 @@
-"""``ArcaSnapshotProducer`` — produce the ARCA build snapshot (existing behavior).
+"""``ArcaSnapshotProducer`` — produce one versioned ARCA build snapshot.
 
-Wraps the existing ``bot_build_service.build()`` (rsync engine dir into the
-versioned target + regenerate ``mcporter.json``) and maps its result dict onto a
-:class:`DeployArtifact` with **no behavior change**. The exact deployable
-pointers the build phase pins today (``migration_path`` / ``build_target_path``)
-are carried through unchanged on ``ext`` so the downstream verify/online deploy
-path — which reads them off ``BotPublishRecord.ext`` — is untouched.
+Wraps ``bot_build_service.build()`` (host-side rsync of the engine root into the
+versioned target + regenerated ``mcporter.json``) and maps its result dict onto
+a :class:`DeployArtifact`. The exact deployable pointers the build phase pins
+(``migration_path`` / ``build_target_path``) are carried through unchanged on
+``ext`` so the downstream verify/online deploy path — which reads them off
+``BotPublishRecord.ext`` — is untouched.
 
 This is the ARCA branch of the provider-keyed producer selection wired in
 Task 12; external bots take :class:`TeclawComposeProducer` instead.
@@ -50,7 +50,10 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
         return type changes.
         """
         captured_layout = self._skills_manifest_builder.capture(bot=bot)
-        result = self._build_service.build(bot=bot, version=version)
+        result = self._build_service.build(
+            bot=bot,
+            version=version,
+        )
 
         success = bool(result.get("success"))
         ext: dict[str, Any] = {}

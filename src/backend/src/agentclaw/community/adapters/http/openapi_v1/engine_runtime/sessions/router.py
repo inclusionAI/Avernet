@@ -1,23 +1,21 @@
-"""Sessions group — ``/openapi/v1/bots/{bot_id}/sessions``.
+"""Sessions group — ``/openapi/v1/bots/sessions/{bot_id}``.
 
-Wraps the engine's ``/api/sessions`` surface. **Private personal bots only** —
-see :func:`_require_private_personal_bot`.
+Wraps the engine's ``/api/sessions`` surface. An **operator console**: served
+to the addressed bot's owner and its member-level collaborators, for the
+stage the request names (``?stage=``, draft by default), and device-wide —
+see ``engine_runtime/gating.py`` and ``core/engine_runtime/gate.py``.
 """
 
 from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Deleted,
     Envelope,
     PageParamsDep,
-)
-from agentclaw.community.adapters.http.openapi_v1.dependencies import (
-    Principal,
-    require_principal,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.schemas import (
     Message,
@@ -27,7 +25,14 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.schema
     SessionPage,
     SessionUpdate,
 )
-from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
+    RuntimeStage,
+)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
+    OwnerIdDep,
+    StageQuery,
+)
+from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
     deleted,
@@ -36,27 +41,20 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     page as page_envelope,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.gating import (
+    resolve_operable_bot,
+)
 from agentclaw.community.core.engine_runtime.errors import (
-    EngineBotTypeNotSupportedError,
     EngineHistoryDepthExceededError,
     EngineResourceNotFoundError,
 )
-from agentclaw.community.core.engine_runtime.models import BotFacts
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/sessions", tags=["sessions"])
+router = APIRouter(prefix="/openapi/v1/bots/sessions", tags=["sessions"])
 
-PrincipalDep = Annotated[Principal, Depends(require_principal)]
-
-#: The only bot type this group serves. A ``service`` bot's device is reached by
-#: many callers and the engine's session list is not scoped per caller, so
-#: listing there would show the bot's owner other people's conversations.
-#:
-#: Necessary but **not** sufficient — see :func:`_require_private_personal_bot`.
-_SUPPORTED_BOT_TYPE = "personal"
 
 #: One extra item is requested beyond the page, purely to learn whether more
 #: exist. Neither engine route reports a total, and ``Page.total`` is required —
@@ -73,40 +71,6 @@ _LOOKAHEAD = 1
 #: Generous for a conversation; bounded enough that a page number cannot be
 #: turned into device load.
 _MAX_HISTORY_DEPTH = 5000
-
-
-async def _require_private_personal_bot(
-    relay: EngineRuntimeRelayProtocol, bot_id: str, owner_id: str
-) -> BotFacts:
-    """Resolve the caller's bot and reject anything more than one caller reaches.
-
-    Runs **before** any device call, deliberately: a filter applied to what the
-    device returned would already have fetched every caller's sessions. This
-    also performs the owner-scoped resolve, so a foreign ``bot_id`` raises
-    ``BotNotFoundError`` here — before a device is touched. The resolved facts
-    are returned so the forward can reuse them instead of resolving again.
-
-    Two conditions, because the hazard is *multi-caller*, not *bot type*. A
-    ``service`` bot is the obvious case. But ``personal`` is single-caller only
-    by default: the bot can be made public, and a coding app can take
-    collaborators, and ``ExpertChatService`` then creates those callers'
-    sessions on this same binding. Since the engine's collection is not scoped
-    per caller (see :attr:`BotFacts.is_shared`), serving this group for such a
-    bot would let its owner list, read, rename and delete other people's
-    conversations. Both refusals are the same 501: what the surface cannot
-    serve, rather than something the caller may retry or fix.
-    """
-    facts = await relay.resolve_bot_off_loop(bot_id, owner_id)
-    if facts.bot_type != _SUPPORTED_BOT_TYPE:
-        raise EngineBotTypeNotSupportedError(
-            f"sessions are not served for bot_type={facts.bot_type!r}"
-        )
-    if facts.is_shared:
-        raise EngineBotTypeNotSupportedError(
-            "sessions are not served for a shared bot: the engine's session "
-            "collection is not scoped per caller"
-        )
-    return facts
 
 
 def _map_session(data: dict[str, Any]) -> Session:
@@ -322,13 +286,15 @@ def _history_page(
     return n, visible
 
 
-@router.get("", response_model=Envelope[SessionPage])
+@router.get("/{bot_id}", response_model=Envelope[SessionPage])
 @envelope_errors
 async def list_sessions(
     bot_id: str,
     page: PageParamsDep,
-    principal: PrincipalDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
     agent_id: Annotated[
         str | None, Query(description="Only sessions belonging to this agent.")
     ] = None,
@@ -342,8 +308,14 @@ async def list_sessions(
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[SessionPage]:
     """List the bot's sessions."""
-    owner_id = caller_owner_id(principal)
-    facts = await _require_private_personal_bot(relay, bot_id, owner_id)
+    facts = await resolve_operable_bot(
+        relay,
+        bot_id,
+        caller_id=user_id,
+        owner_id=owner_id,
+        stage=stage.value,
+        surface="sessions",
+    )
     params: dict[str, Any] = _window(page)
     if agent_id:
         params["agent_id"] = agent_id
@@ -353,7 +325,8 @@ async def list_sessions(
     if session_key:
         params["session_key"] = session_key
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, method="GET", path="/api/sessions",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        method="GET", path="/api/sessions",
         params=params,
     )
     mapped = [_map_session(d) for d in _as_list(result.data)]
@@ -362,25 +335,35 @@ async def list_sessions(
     return page_envelope(total, items, request)
 
 
-@router.post("", status_code=201, response_model=Envelope[Session])
+@router.post("/{bot_id}", status_code=201, response_model=Envelope[Session])
 @envelope_errors
 async def create_session(
     bot_id: str,
     body: SessionCreate,
-    principal: PrincipalDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[Session]:
     """Create a session."""
-    owner_id = caller_owner_id(principal)
-    facts = await _require_private_personal_bot(relay, bot_id, owner_id)
+    facts = await resolve_operable_bot(
+        relay,
+        bot_id,
+        caller_id=user_id,
+        owner_id=owner_id,
+        stage=stage.value,
+        surface="sessions",
+    )
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, method="POST", path="/api/sessions",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        method="POST", path="/api/sessions",
         body={
             "title": body.title,
             "model": body.model,
-            # Filled from the principal, never accepted from the caller.
-            "user_id": owner_id,
+            # The verified caller (never accepted from the body), so on a
+            # shared bot a session records the operator who created it.
+            "user_id": user_id,
         },
     )
     if not isinstance(result.data, dict):
@@ -388,13 +371,15 @@ async def create_session(
     return created(_map_session(result.data), request)
 
 
-@router.get("/{session_id}", response_model=Envelope[Session])
+@router.get("/{bot_id}/{session_id}", response_model=Envelope[Session])
 @envelope_errors
 async def get_session(
     bot_id: str,
     session_id: str,
-    principal: PrincipalDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[Session]:
     """Get one session.
@@ -404,10 +389,17 @@ async def get_session(
     """
     # A colon is legal in a path segment (RFC 3986), so ids route as-is. An id
     # containing "/" would not be addressable, but no engine id format has one.
-    owner_id = caller_owner_id(principal)
-    facts = await _require_private_personal_bot(relay, bot_id, owner_id)
+    facts = await resolve_operable_bot(
+        relay,
+        bot_id,
+        caller_id=user_id,
+        owner_id=owner_id,
+        stage=stage.value,
+        surface="sessions",
+    )
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, method="GET",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        method="GET",
         path=f"/api/sessions/{session_id}",
     )
     if not isinstance(result.data, dict):
@@ -415,24 +407,33 @@ async def get_session(
     return envelope(_map_session(result.data), request)
 
 
-@router.patch("/{session_id}", response_model=Envelope[Session])
+@router.patch("/{bot_id}/{session_id}", response_model=Envelope[Session])
 @envelope_errors
 async def update_session(
     bot_id: str,
     session_id: str,
     body: SessionUpdate,
-    principal: PrincipalDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[Session]:
     """Update a session. Omitted fields are left unchanged."""
     # Publicly a PATCH on the resource; the engine models the same operation as
     # a POST to an /update sub-path.
-    owner_id = caller_owner_id(principal)
-    facts = await _require_private_personal_bot(relay, bot_id, owner_id)
+    facts = await resolve_operable_bot(
+        relay,
+        bot_id,
+        caller_id=user_id,
+        owner_id=owner_id,
+        stage=stage.value,
+        surface="sessions",
+    )
     payload = {k: v for k, v in body.model_dump().items() if v is not None}
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, method="POST",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        method="POST",
         # QUERY params, not a body. The engine declares this route's fields as
         # bare scalar arguments, which FastAPI binds from the query string —
         # there is no Body(...) on it. Sending a body is silently discarded and
@@ -445,33 +446,44 @@ async def update_session(
     return envelope(_map_session(result.data), request)
 
 
-@router.delete("/{session_id}", response_model=Envelope[Deleted])
+@router.delete("/{bot_id}/{session_id}", response_model=Envelope[Deleted])
 @envelope_errors
 async def delete_session(
     bot_id: str,
     session_id: str,
-    principal: PrincipalDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[Deleted]:
     """Delete a session."""
-    owner_id = caller_owner_id(principal)
-    facts = await _require_private_personal_bot(relay, bot_id, owner_id)
+    facts = await resolve_operable_bot(
+        relay,
+        bot_id,
+        caller_id=user_id,
+        owner_id=owner_id,
+        stage=stage.value,
+        surface="sessions",
+    )
     await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, method="DELETE",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        method="DELETE",
         path=f"/api/sessions/{session_id}",
     )
     return deleted(request)
 
 
-@router.get("/{session_id}/messages", response_model=Envelope[MessagePage])
+@router.get("/{bot_id}/{session_id}/messages", response_model=Envelope[MessagePage])
 @envelope_errors
 async def list_session_messages(
     bot_id: str,
     session_id: str,
     page: PageParamsDep,
-    principal: PrincipalDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[MessagePage]:
     """Read a session's message history, newest page first.
@@ -483,11 +495,18 @@ async def list_session_messages(
     depth is rejected with 422 rather than returned empty, so an end of history
     is never confused with the limit of what this endpoint serves.
     """
-    owner_id = caller_owner_id(principal)
-    facts = await _require_private_personal_bot(relay, bot_id, owner_id)
+    facts = await resolve_operable_bot(
+        relay,
+        bot_id,
+        caller_id=user_id,
+        owner_id=owner_id,
+        stage=stage.value,
+        surface="sessions",
+    )
     _require_within_depth(page)
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, method="GET",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        method="GET",
         path=f"/api/sessions/{session_id}/messages",
         # The history route tail-limits rather than paginating, so the offset is
         # applied here instead of being sent. See ``_history_window``.
@@ -501,20 +520,29 @@ async def list_session_messages(
     return page_envelope(total, items, request)
 
 
-@router.delete("/{session_id}/messages", response_model=Envelope[Deleted])
+@router.delete("/{bot_id}/{session_id}/messages", response_model=Envelope[Deleted])
 @envelope_errors
 async def clear_session_messages(
     bot_id: str,
     session_id: str,
-    principal: PrincipalDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[Deleted]:
     """Clear a session's message history, keeping the session."""
-    owner_id = caller_owner_id(principal)
-    facts = await _require_private_personal_bot(relay, bot_id, owner_id)
+    facts = await resolve_operable_bot(
+        relay,
+        bot_id,
+        caller_id=user_id,
+        owner_id=owner_id,
+        stage=stage.value,
+        surface="sessions",
+    )
     await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, method="DELETE",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        method="DELETE",
         path=f"/api/sessions/{session_id}/messages",
     )
     return deleted(request)

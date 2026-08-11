@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 from injector import inject
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.desktop_bot.services.desktop_bot_service import (
     DesktopBotOrphanError,
     DesktopBotService,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 
 import pytest
@@ -80,6 +81,25 @@ def test_lock_identity_includes_entity_for_reused_bot_ids() -> None:
     assert first is not None
     assert second is not None
     assert first.key != second.key
+
+
+@pytest.mark.asyncio
+async def test_waiting_edit_acquires_lock_after_ordinary_edit_releases() -> None:
+    guard = SkillsPoolEditGuard(
+        cache=_Cache(),
+        layout_repository=_Layouts(),
+    )
+    first = guard.acquire_for_edit(scope=SCOPE)
+
+    waiting = asyncio.create_task(
+        guard.acquire_for_edit_wait(scope=SCOPE, timeout_seconds=0.2)
+    )
+    await asyncio.sleep(0.02)
+    assert not waiting.done()
+
+    assert guard.release(first)
+    second = await waiting
+    assert guard.release(second)
 
 
 def test_rollback_phase_rejects_edit_even_after_lock_becomes_available() -> None:

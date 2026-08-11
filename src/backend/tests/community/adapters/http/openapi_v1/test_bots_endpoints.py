@@ -12,12 +12,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
 import importlib
 
+from tests.community.adapters.http.openapi_v1.conftest import (
+    mount_public_error_handlers,
+    user_scoped_client,
+)
 from agentclaw.community.adapters.http.openapi_v1.bots.router import router
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.api.bot_service import BotServiceProtocol
@@ -25,7 +28,7 @@ from agentclaw.community.api.policy_service import PolicyServiceProtocol
 from agentclaw.community.api.skill_set_service_factory import (
     SkillSetServiceFactoryProtocol,
 )
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
@@ -115,7 +118,8 @@ def client(svc, policy, passport, engine_config, bot_repo, skill_set_factory, au
     app.include_router(router)
     app.dependency_overrides[require_principal] = lambda: {"user_id": "u1"}
     attach_injector(app, Injector([_M()]))
-    return TestClient(app)
+    mount_public_error_handlers(app)
+    return user_scoped_client(app, "u1")
 
 
 def _ok(resp, code=200000):
@@ -148,6 +152,20 @@ def test_list_bots_filters_reach_service(client, svc):
     assert kw["engine"] == "teclaw"
     assert kw["status"] == "ACTIVE"
     assert kw["page"] == 2 and kw["page_size"] == 5
+
+
+def test_check_name_needs_no_user_id(client):
+    """The one bots operation with no user dimension answers without one.
+
+    Name uniqueness is checked across the tenant, so there is nothing to scope
+    by. ``user_id=None`` is how ``user_scoped_client`` is told to omit the
+    parameter rather than send it empty.
+    """
+    response = client.get(
+        "/openapi/v1/bots/check-name", params={"name": "Foo", "user_id": None}
+    )
+
+    assert response.status_code == 200, response.json()
 
 
 def test_check_name(client):

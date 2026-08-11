@@ -5,6 +5,7 @@ Advances the different stages of the publish flow based on the publish record st
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -41,6 +42,9 @@ from agentclaw.community.core.service_bot.services.publish_flow.errors import (
 )
 from agentclaw.community.core.service_bot.services.publish_flow.ext_state import (
     PublishExtState,
+)
+from agentclaw.community.core.service_bot.services.publish_flow.image_policy_mixin import (
+    PublishImagePolicyMixin,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.provider_behavior import (
     DefaultProviderBehavior,
@@ -107,13 +111,11 @@ from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.services.bot_service import BotService
-    from agentclaw.community.core.service_bot.repository.publish_operation_repository import (
-        PublishOperationRepository,
-    )
+    from agentclaw.community.core.repository.protocols.publishing import PublishOperationRepository
     from agentclaw.community.core.service_bot.services.deploy.teclaw_file_promotion import (
         TeclawFilePromotion,
     )
-    from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+    from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
     from agentclaw.community.core.devices.services.device_context_resolver import (
         DeviceContextResolver,
     )
@@ -125,10 +127,7 @@ if TYPE_CHECKING:
 
 logger = get_logger()
 
-# Describe-only messages for the non-user-driven statuses that ``process()`` just
-# reports back (no side effects). DRAFT and VALIDATING are handled separately —
-# they are the only user-driven advance points. FAILED is special-cased (it needs
-# the ext error message) and any status absent here is an invalid/unknown state.
+# Describe-only messages for statuses that ``process()`` reports without side effects.
 _DESCRIBE_STATUS_MESSAGES = {
     PublishStatus.BUILT: "Build complete, publish in progress, please check progress later",
     PublishStatus.BUILDING: "Build in progress, please wait",
@@ -162,6 +161,7 @@ class PublishFlowService(
     UpgradeResolutionMixin,
     RetryOpsMixin,
     DraftRestoreOpsMixin,
+    PublishImagePolicyMixin,
 ):
     """Bot publish flow processing service.
 
@@ -541,6 +541,7 @@ class PublishFlowService(
             error_msg = "Build artifact path does not exist, please run the build first"
             logger.error(f"[PublishFlowService.execute_verify_release_phase] publish_id={publish_id}, {error_msg}")
             ext = self._get_latest_ext(publish_id)
+            expected_ext = copy.deepcopy(ext)
             self._clear_retry_flag(ext)
             ext["error_message"] = error_msg
             ext["source_status"] = PublishStatus.BUILT.value
@@ -549,6 +550,7 @@ class PublishFlowService(
                 target_status=PublishStatus.FAILED,
                 source_status=PublishStatus.BUILT,
                 ext=ext,
+                expected_ext=expected_ext,
             )
             return PublishFlowResult(
                 publish_id=publish_id,
@@ -599,6 +601,7 @@ class PublishFlowService(
 
             # Publish failed; update the status and error info
             ext = self._get_latest_ext(publish_id)
+            expected_ext = copy.deepcopy(ext)
             self._clear_retry_flag(ext)
             ext["error_message"] = str(e)
             ext["source_status"] = PublishStatus.BUILT.value
@@ -607,6 +610,7 @@ class PublishFlowService(
                 target_status=PublishStatus.FAILED,
                 source_status=PublishStatus.BUILT,
                 ext=ext,
+                expected_ext=expected_ext,
             )
 
             return PublishFlowResult(
@@ -683,6 +687,7 @@ class PublishFlowService(
             error_msg = "Build artifact path does not exist, please run the build first"
             logger.error(f"[PublishFlowService]{publish_id}, publish_record={publish_record},  {error_msg}")
             ext = self._get_latest_ext(publish_id)
+            expected_ext = copy.deepcopy(ext)
             self._clear_retry_flag(ext)
             ext["error_message"] = error_msg
             # The online release runs within ONLINE_PUB (process owns the
@@ -693,6 +698,7 @@ class PublishFlowService(
                 target_status=PublishStatus.FAILED,
                 source_status=PublishStatus.ONLINE_PUB,
                 ext=ext,
+                expected_ext=expected_ext,
             )
             return PublishFlowResult(
                 publish_id=publish_id,
@@ -764,6 +770,7 @@ class PublishFlowService(
 
             # Publish failed; update the status and error info
             ext = self._get_latest_ext(publish_id)
+            expected_ext = copy.deepcopy(ext)
             self._clear_retry_flag(ext)
             ext["error_message"] = str(e)
             # Roll back to ONLINE_PUB (the state the release runs within).
@@ -773,6 +780,7 @@ class PublishFlowService(
                 target_status=PublishStatus.FAILED,
                 source_status=PublishStatus.ONLINE_PUB,
                 ext=ext,
+                expected_ext=expected_ext,
             )
 
             return PublishFlowResult(
@@ -878,12 +886,14 @@ class PublishFlowService(
         target_status: PublishStatus,
         source_status: PublishStatus,
         ext: dict,
+        expected_ext: dict | None,
     ) -> None:
         self._ext_state.update_status(
             publish_id=publish_id,
             target_status=target_status,
             source_status=source_status,
             ext=ext,
+            expected_ext=expected_ext,
         )
 
     # ── public accessors for the durable task handlers ───────────────────────
@@ -985,4 +995,3 @@ class PublishFlowService(
             ):
                 return True
         return False
-

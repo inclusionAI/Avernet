@@ -12,6 +12,7 @@ BotCandidatesPath:
       remove candidates.
     x-avernet-security:
       user: required
+      app: required
     x-avernet-behavior:
       acting_bot: managed_physical_bot
       result_kind: bot
@@ -118,6 +119,7 @@ QueryBotsPath:
       silently omitted. An empty bot_ids array returns an empty items array.
     x-avernet-security:
       user: required
+      app: required
     x-avernet-behavior:
       result_kinds:
         - bot
@@ -180,6 +182,7 @@ BotPath:
       visibility controls directory discovery rather than explicit hydration.
     x-avernet-security:
       user: required
+      app: required
     x-avernet-behavior:
       result_kinds:
         - bot
@@ -241,6 +244,7 @@ BotPath:
       and agent_code are immutable through this operation.
     x-avernet-security:
       user: required
+      app: required
     x-avernet-behavior:
       authorization: created_by_matches_current_staff_no
       missing_created_by: forbidden
@@ -311,6 +315,7 @@ MyBotsPath:
       with reachability produces an empty page.
     x-avernet-security:
       user: required
+      app: required
     x-avernet-behavior:
       owner_field: created_by
       owner_value: current_staff_no

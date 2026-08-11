@@ -5,7 +5,7 @@
 //! → targets receive chat.send, non-targets receive chat.inject.
 //!
 //! Note: When a group is created via POST /groups, BCS automatically injects
-//! a [GROUP CONTEXT] message to all participants (chat.send to driver,
+//! a <GroupContext> message to all participants (chat.send to driver,
 //! chat.inject to others). Tests must drain these frames before proceeding.
 
 mod helpers;
@@ -76,7 +76,7 @@ async fn setup_group_and_send_message(
     group_id: &str,
     message: &str,
 ) -> String {
-    // Group creation injects [GROUP CONTEXT] to all participants.
+    // Group creation injects <GroupContext> to all participants.
     let _ = bot_a.recv_frame().await; // context chat.send for driver
     let _ = bot_b.recv_frame().await; // context chat.inject
     let _ = bot_c.recv_frame().await; // context chat.inject

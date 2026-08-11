@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
 
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
@@ -10,30 +11,10 @@ from agentclaw.community.core.skill_center.services.runtime_layout_probe import 
 from agentclaw.community.core.skills_pool.models import (
     PoolCutoverResult,
     PoolSkillMapping,
-    RegisteredSkillAsset,
     SkillMappingSourceLayout,
 )
-from agentclaw.community.core.skills_pool.quarantine import (
-    RuntimeQuarantineCleanupResult,
-)
-
-
-@runtime_checkable
-class SkillsPoolSkillRepositoryProtocol(Protocol):
-    """激活所需的 Bot 级 Skill 资产视图。"""
-
-    def list_bot_local_assets(
-        self, *, env: str, bot_id: str
-    ) -> list[RegisteredSkillAsset]: ...
-
-    def list_bot_active_assets(
-        self,
-        *,
-        env: str,
-        bot_id: str,
-        user_id: str,
-        engine: str,
-    ) -> list[RegisteredSkillAsset]: ...
+from agentclaw.community.core.skills_pool.quarantine import RuntimeQuarantineCleanupResult
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolSkillRepositoryProtocol
 
 
 @runtime_checkable
@@ -83,6 +64,7 @@ class SkillsPoolRuntimeProtocol(Protocol):
         bot_id: str,
         user_id: str,
         mappings: list[PoolSkillMapping],
+        retired_mappings: Sequence[PoolSkillMapping] = (),
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
     ) -> bool: ...
 
@@ -92,6 +74,7 @@ class SkillsPoolRuntimeProtocol(Protocol):
         bot_id: str,
         user_id: str,
         mappings: list[PoolSkillMapping],
+        retired_mappings: Sequence[PoolSkillMapping] = (),
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
     ) -> bool: ...
 

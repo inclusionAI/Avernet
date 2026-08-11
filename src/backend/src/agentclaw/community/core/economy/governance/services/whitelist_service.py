@@ -32,18 +32,10 @@ from agentclaw.community.core.economy.governance.services.service_protocols impo
 
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.economy.governance.repositories.audit_repo import (
-        GovernanceAuditRepository,
-    )
-    from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
-        NotifyLogRepository,
-    )
-    from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
-        TaskRecordRepository,
-    )
-    from agentclaw.community.core.economy.governance.repositories.whitelist_repo import (
-        GovernanceWhitelistRepository,
-    )
+    from agentclaw.community.core.repository.implementations.governance.audit import GovernanceAuditRepository
+    from agentclaw.community.core.repository.implementations.governance.notify_log import NotifyLogRepository
+    from agentclaw.community.core.repository.implementations.governance.task_record import TaskRecordRepository
+    from agentclaw.community.core.repository.implementations.governance.whitelist import GovernanceWhitelistRepository
 
 log = get_logger(__name__)
 

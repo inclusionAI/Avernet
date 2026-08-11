@@ -120,7 +120,7 @@ def _load_route_security(user_config: UserConfig | None = None) -> RouteSecurity
         "route security (application.yaml user_config.route_security): %d routes\n%s",
         len(rules._rules),
         "\n".join(
-            f"  {rule.method or '*'} /{'/'.join(rule.segments)} → "
+            f"  {rule.method or '*'} /{'/'.join(rule.pattern.segments)} → "
             + str({idty.value: pres.value for idty, pres in rule.requirement.items()})
             for rule in rules._rules
         ),

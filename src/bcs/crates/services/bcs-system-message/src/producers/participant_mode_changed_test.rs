@@ -27,7 +27,7 @@ async fn human_joined_from_none_produces_message() {
         to: ParticipantMode::Present,
     };
 
-    let messages = producer
+    let (messages, user_message) = producer
         .produce(&event, &group, &bcs_test_support::NoopBotRegistryCoreService, &group.participants)
         .await;
     assert_eq!(messages.len(), 1);
@@ -36,6 +36,7 @@ async fn human_joined_from_none_produces_message() {
     assert!(messages[0].recipients.contains(&"consultant-id".to_string()));
     assert!(!messages[0].recipients.contains(&"human-id".to_string()));
     assert_eq!(messages[0].delivery_type, bcs_domain::DeliveryType::Inject);
+    assert_eq!(user_message, Some(messages[0].message.clone()));
 }
 
 #[tokio::test]
@@ -51,7 +52,7 @@ async fn human_mode_change_produces_message() {
         to: ParticipantMode::Absent,
     };
 
-    let messages = producer
+    let (messages, user_message) = producer
         .produce(&event, &group, &bcs_test_support::NoopBotRegistryCoreService, &group.participants)
         .await;
     assert_eq!(messages.len(), 1);
@@ -60,6 +61,7 @@ async fn human_mode_change_produces_message() {
     assert!(messages[0].recipients.contains(&"consultant-id".to_string()));
     assert!(!messages[0].recipients.contains(&"human-id".to_string()));
     assert_eq!(messages[0].delivery_type, bcs_domain::DeliveryType::Inject);
+    assert_eq!(user_message, Some(messages[0].message.clone()));
 }
 
 #[tokio::test]
@@ -75,10 +77,11 @@ async fn bot_joined_from_none_produces_empty() {
         to: ParticipantMode::Auto,
     };
 
-    let messages = producer
+    let (messages, user_message) = producer
         .produce(&event, &group, &bcs_test_support::NoopBotRegistryCoreService, &group.participants)
         .await;
     assert!(messages.is_empty());
+    assert_eq!(user_message, None, "anomalous from=None Bot yields no user_message");
 }
 
 #[tokio::test]
@@ -94,7 +97,7 @@ async fn bot_mode_change_produces_message() {
         to: ParticipantMode::Muted,
     };
 
-    let messages = producer
+    let (messages, user_message) = producer
         .produce(&event, &group, &bcs_test_support::NoopBotRegistryCoreService, &group.participants)
         .await;
     assert_eq!(messages.len(), 1);
@@ -103,4 +106,5 @@ async fn bot_mode_change_produces_message() {
     assert!(messages[0].recipients.contains(&"consultant-id".to_string()));
     assert!(!messages[0].recipients.contains(&"human-id".to_string()));
     assert_eq!(messages[0].delivery_type, bcs_domain::DeliveryType::Inject);
+    assert_eq!(user_message, Some(messages[0].message.clone()));
 }

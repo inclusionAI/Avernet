@@ -16,6 +16,7 @@ a builder on success and let the decorator handle the mapped failures.
 
 from __future__ import annotations
 
+import inspect
 from functools import wraps
 from http import HTTPStatus
 from json import JSONDecodeError
@@ -24,6 +25,11 @@ from typing import Awaitable, Callable, Mapping, TypeVar
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
+from agentclaw.community.adapters.http.error_logging import (
+    capture_call_params,
+    log_public_error,
+    remember_call_params,
+)
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     CODE_ACCEPTED,
     CODE_CREATED,
@@ -34,9 +40,17 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Page,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
+    GrantNotResolvableError,
     ClusterMismatchError,
     MissingPrincipalError,
     UnsupportedEngineError,
+    UserIdMismatchError,
+)
+from agentclaw.community.core.bot_app_grant.errors import (
+    GrantBotNotLiveError,
+    GrantIdentityTooLongError,
+    GrantNotFoundError,
+    GrantOwnerConflictError,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotInvalidLifecycleStateError,
@@ -48,6 +62,10 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotPermissionError,
     BotServiceError,
     DeviceLimitError,
+)
+from agentclaw.community.core.bot_chat.errors import (
+    InvalidBotLogQueryError,
+    SessionNotFoundError,
 )
 from agentclaw.community.core.bot_management.create_flow import (
     AuthStatusUnavailableError,
@@ -64,6 +82,7 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineDeviceNotReadyError,
     EngineResourceNotFoundError,
     EngineRuntimeError,
+    EngineStageNotLiveError,
     EngineUpstreamError,
 )
 from agentclaw.community.core.gateway_principal import PrincipalVerificationError
@@ -78,6 +97,18 @@ from agentclaw.community.core.resources.service import (
     DuplicateResourceError,
     FileTooLargeError,
     ResourceNotFoundError,
+)
+from agentclaw.community.core.skill_center.errors import (
+    LocalSkillDuplicateError,
+    LocalSkillActiveError,
+    LocalSkillEditPausedError,
+    LocalSkillInvalidPackageError,
+    LocalSkillNotFoundError,
+    LocalSkillNotReadyError,
+    LocalSkillOwnerAmbiguousError,
+    LocalSkillRuntimeSyncError,
+    LocalSkillStorageError,
+    LocalSkillTooLargeError,
 )
 from agentclaw.community.core.services.identity import (
     InvalidIdentityEntityTypeError,
@@ -146,7 +177,41 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # entry covers a handler that calls ``verify_principal_token`` directly, so
     # the error cannot escape the envelope as a 500.
     PrincipalVerificationError: (401, "Unauthorized"),
+    # 403, not 401: the caller authenticated fine, it just asked to act for
+    # someone it may not act for. Not folded into the 401s above for that
+    # reason — a partner debugging an integration needs to tell "my credential
+    # is wrong" from "my credential is fine but this user is not mine", and the
+    # two have different fixes. The message says nothing about which user was
+    # asked for; both ids are on the warning line in ``principal.py``.
+    UserIdMismatchError: (403, "Forbidden"),
+    InvalidBotLogQueryError: (400, "Invalid log query"),
+    SessionNotFoundError: (404, "Not found"),
     BotNotFoundError: (404, "Not found"),
+    # Byte-identical to the line above, deliberately. An application that could
+    # tell "I hold no grant for this bot" from "no such bot" would have an
+    # enumeration oracle for every bot id in the tenant, so the refusal must be
+    # the *same* refusal — same status, same message, same envelope.
+    GrantNotResolvableError: (404, "Not found"),
+    # Withdrawing an authorization that is not there. Shares the 404 shape with
+    # an absent bot, and that is not a collision worth avoiding: an owner
+    # reconciling their records needs "there was nothing to remove" to read
+    # differently from "removed", which the status already gives them. Which of
+    # the two 404s they hit is answerable from the bot's own endpoints.
+    GrantNotFoundError: (404, "Not found"),
+    # The bot went away between being resolved and the row being written.
+    # Byte-identical to an absent bot, which is what it now is.
+    GrantBotNotLiveError: (404, "Not found"),
+    # 400, not 404: the delegation is not missing, it is unrepresentable. The
+    # message names no caller-supplied value.
+    GrantIdentityTooLongError: (400, "User id is too long to authorize"),
+    # 409: the request is well-formed and the caller is entitled to it, but it
+    # conflicts with a live authorization on another owner's same-named bot.
+    # Retrying is futile and the remedy is a withdrawal, which is what a
+    # conflict says and a 400 would not.
+    GrantOwnerConflictError: (
+        409,
+        "Another authorization for this bot id is already live",
+    ),
     BotPermissionError: (404, "Not found"),
     BotNameExistsError: (409, "Bot name already exists"),
     BotNameInvalidError: (400, "Invalid bot name"),
@@ -183,6 +248,16 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # str(exc), which would leak internal ids/paths to external callers.
     DuplicateResourceError: (409, "Resource already exists"),
     ResourceNotFoundError: (404, "Not found"),
+    LocalSkillNotFoundError: (404, "Not found"),
+    LocalSkillOwnerAmbiguousError: (409, "Ambiguous Local Skill owner"),
+    LocalSkillInvalidPackageError: (400, "Invalid Skill package"),
+    LocalSkillNotReadyError: (409, "Bot is not ready"),
+    LocalSkillActiveError: (409, "Skill is active"),
+    LocalSkillDuplicateError: (409, "Local Skill already exists"),
+    LocalSkillTooLargeError: (413, "Skill package is too large"),
+    LocalSkillStorageError: (502, "Skill storage operation failed"),
+    LocalSkillRuntimeSyncError: (502, "Skill runtime synchronization failed"),
+    LocalSkillEditPausedError: (409, "Skill layout is being updated"),
     FileTooLargeError: (413, "File too large for preview"),
     # Identity domain errors — ValueError subclasses raised by IdentityService
     # validate_entity_type / validate_file_type.
@@ -217,6 +292,13 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # Retryable: cold, dormant or restarting. Distinct from 404 (the bot IS the
     # caller's) and from 500 (nothing is broken).
     EngineDeviceNotReadyError: (409, "Bot device is not ready"),
+    # NOT retryable as-is: the named stage has no live runtime (nothing
+    # validating for verify, nothing released for online, or a published stage
+    # named on a personal bot). Distinct from the masked 404 deliberately — the
+    # operator adjudication has already run, and an operator may fix a stage by
+    # publishing — and from "device not ready", which promises a retry will
+    # eventually succeed.
+    EngineStageNotLiveError: (409, "No live runtime at the requested stage"),
     # An out-of-range page argument, so it joins the 422 FastAPI already returns
     # for page_size > 100 rather than inventing a status. Needs a mapped entry
     # rather than a bare HTTPException: app-level handlers replace an unmapped
@@ -230,7 +312,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # cannot be distinguished from a bot that is not the caller's.
     EngineResourceNotFoundError: (404, "Not found"),
     EngineUpstreamError: (502, "Engine service error"),
-    # Base of the four above — LAST of its group.
+    # Base of the Engine* errors above — LAST of its group.
     EngineRuntimeError: (502, "Engine service error"),
     # Transport errors that reach a handler without the relay translating them
     # (e.g. a future caller using the transport directly). The relay already
@@ -262,6 +344,20 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # re-raise and the app's catch-all would answer with {"detail": ...}, which
     # is not an Envelope and breaks the public contract.
     BotServiceError: (500, "Internal error"),
+}
+
+# Most public categories retain the ordinary ``xxx000`` business code.  A
+# small, explicit override table lets a category expose a stable actionable
+# subcode without changing any existing public response.
+ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
+    LocalSkillOwnerAmbiguousError: 409104,
+    LocalSkillInvalidPackageError: 400101,
+    LocalSkillNotReadyError: 409101,
+    LocalSkillActiveError: 409102,
+    LocalSkillDuplicateError: 409103,
+    LocalSkillTooLargeError: 413101,
+    LocalSkillStorageError: 502101,
+    LocalSkillRuntimeSyncError: 502102,
 }
 
 
@@ -346,6 +442,7 @@ def _error_response(
     request: Request,
     *,
     headers: Mapping[str, str] | None = None,
+    code: int | None = None,
 ) -> JSONResponse:
     # ``ErrorEnvelope``, not ``Envelope``: it is the model every route documents
     # for failures (``ERROR_RESPONSES``), and since ``Envelope`` gained the
@@ -354,7 +451,7 @@ def _error_response(
     # error body has no partial payload to caveat, so ``warning`` has no meaning
     # here.
     body = ErrorEnvelope(
-        code=http_status * 1000,
+        code=code if code is not None else http_status * 1000,
         message=message,
         data=None,
         request_id=_trace_id(request),
@@ -384,7 +481,17 @@ def envelope_errors(
     The wrapped handler must take a ``request: Request`` parameter (used for the
     error envelope's ``request_id``). Unmapped exceptions are re-raised so the
     app's 500 handler still owns them.
+
+    Every failure is also logged here, with its traceback and the arguments the
+    handler was called with. This is the only frame that has both: the public
+    response carries a fixed message by design, so without this the sole record
+    of a mapped failure was the status code on the access log. Capture is lazy —
+    a successful request pays nothing — and the parameters are stashed on the
+    request for the unmapped case, where ``app.py`` logs further out.
     """
+    # Resolved once, at import: ``fn`` is the undecorated handler, so the bind
+    # in the except-branch recovers real parameter names for positional args.
+    signature = inspect.signature(fn)
 
     @wraps(fn)
     async def wrapper(*args: object, **kwargs: object) -> object:
@@ -394,9 +501,17 @@ def envelope_errors(
             request = _find_request(args, kwargs)
             if request is None:
                 raise
+            params = capture_call_params(signature, args, kwargs)
+            # Stashed before the mapping decision: an unmapped error is
+            # re-raised out of this frame, and the handler that catches it can
+            # no longer see the arguments.
+            remember_call_params(request, params)
             response = mapped_error_response(exc, request)
             if response is None:
                 raise
+            log_public_error(
+                request, exc, status=response.status_code, params=params
+            )
             return response
 
     return wrapper
@@ -417,5 +532,10 @@ def mapped_error_response(exc: Exception, request: Request) -> JSONResponse | No
     """
     for error_type, (http_status, message) in ENVELOPE_ERRORS.items():
         if isinstance(exc, error_type):
-            return _error_response(http_status, message, request)
+            return _error_response(
+                http_status,
+                message,
+                request,
+                code=ENVELOPE_ERROR_CODES.get(error_type),
+            )
     return None

@@ -8,6 +8,7 @@
 - [Participants](#participants)
 - [State machine](#state-machine)
 - [Bot task node](#bot-task-node)
+- [Human input node](#human-input-node)
 - [LLM judge node](#llm-judge-node)
 - [Parallel fan-out and join](#parallel-fan-out-and-join)
 - [Runtime input and artifacts](#runtime-input-and-artifacts)
@@ -81,9 +82,11 @@ runtime:
 - Require `version: 1` and `graph_mode: acyclic`.
 - If projection is present, use only `default_visibility: private` or
   `default_visibility: shared`.
-- Use only `bot_task` nodes.
+- Use only `bot_task` and `human_input` nodes.
 - Do not use `initial_node`, `input_schema`, `variables`, `events`, actions,
-  output contracts, runtime actors, or guards; the current runtime rejects them.
+  output contracts, or guards; the current runtime rejects them. A `bot_task`
+  must not use a runtime actor. Runtime actors are reserved for the separately
+  configured IM-targeted HumanInput mode described below.
 - A node may use an LLM `judge` only when the current BCS instance has an LLM
   provider configured. Declare every judge outcome and give each outcome a
   transition.
@@ -118,6 +121,48 @@ nodes:
 - `node_timeout_ms: 0` disables the timeout. `max_attempts` values below 1 are
   normalized to 1 by the current runtime; prefer explicit positive values for
   readable authoring YAML.
+
+## Human input node
+
+For a Human who is already Present in the current Workbench session, use a
+frontend HumanInput node:
+
+```yaml
+nodes:
+  owner_acceptance:
+    kind: human_input
+    display_name: 店主验收
+    instruction: |
+      请针对当前公开版本明确回复“接受”，或给出需要修改的条款。
+    node_timeout_ms: 600000
+    visibility: shared
+    transitions:
+      complete:
+        targets:
+          - publish
+```
+
+- A frontend `human_input` node has no `assignee` and no `notification`.
+  Any Present Human participant in the run session may respond from the
+  Workbench.
+- A Human is not a logical Bot participant. Do not add an `owner` participant
+  slot for this node, do not pass `--binding owner=human_001`, and never bind a
+  `human_*` actor ID to a `bot_task`.
+- Require an explicit positive `node_timeout_ms` on the node. The state-machine
+  default timeout is not inherited by HumanInput.
+- Do not set `max_attempts` or `final_output` on HumanInput. Put the single
+  final-output `bot_task` after the HumanInput node when the Human response
+  must be incorporated into the deliverable.
+- Without a judge, use only the `complete` transition. A HumanInput node may
+  use the same LLM judge contract described below when branching on natural
+  language is required.
+- Starting a definition with HumanInput requires at least one Present Human
+  session participant. This is checked by BCS independently of Bot role
+  bindings.
+
+IM-targeted HumanInput uses `assignee.type: runtime_actor` plus `notification`
+and `human_input_channel`. It is a different delivery mode. Do not add those
+fields merely to target the Human already using the current Workbench session.
 
 ## LLM judge node
 
@@ -161,7 +206,7 @@ BCS includes the original run `[Input]` in every node prompt and includes each d
 - Put scenario-specific defaults, formats and business rules in the caller's profile or runtime input, not in this shared Skill.
 
 For a one-shot run in the current session, pass runtime input and every required
-role binding together:
+Bot role binding together:
 
 ```bash
 bcs collaborate run workflow.yaml \
@@ -175,6 +220,7 @@ Call `bcs collaborate permission --session "$session_id"` before writing or
 submitting the YAML. Permission is a server-owned policy and must not be
 inferred from the Bot's apparent group role. The role bindings above are
 transient for that run and do not modify the Group's persisted runtime binding.
+HumanInput has no `--binding` in this frontend flow.
 
 ## Validation errors
 
@@ -183,5 +229,8 @@ transient for that run and do not modify the Group's persisted runtime binding.
 - `UNKNOWN_KEY`: remove a misspelled or unsupported field.
 - `INVALID_DEFINITION`: fix unsupported runtime fields, participant bindings, transition targets, graph reachability, entry/final counts, cycles, or invalid node settings according to the message.
 - `UNAVAILABLE_FEATURE`: the definition uses `judge`, but the current BCS instance has no LLM provider configured.
+- A run error requiring a Present Human means the session roster has no Human
+  participant in Present mode; do not work around it by binding the Human ID as
+  a Bot.
 
 Treat `bcs-cli collaboration validate` output as authoritative for the current BCS instance. Do not bypass an error because the YAML looks plausible. The command exits non-zero and returns structured `errors` when validation fails.

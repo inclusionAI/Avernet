@@ -17,7 +17,7 @@ pub async fn bot_service_contract_tests<T: BotService + ?Sized>(svc: &T) {
     let error = svc
         .query(QueryBots {
             caller: AuthenticatedCaller {
-                tenant: "contract".into(),
+                tenant: Some("contract".into()),
                 user: None,
                 bot: Some(AuthenticatedBotIdentity {
                     bot_uuid: "contract-bot".into(),

@@ -121,6 +121,29 @@ def mock_relay_repository():
 
 
 @pytest.fixture
+def mock_secret_plugin():
+    """Create a mock SecretStorePlugin for proxypass JWT signing."""
+    mock = MagicMock()
+    mock.get_secret.return_value = "mock-proxypass-secret"
+    return mock
+
+
+@pytest.fixture
+def mock_callback_handler():
+    """Create a mock DeviceCallbackHandler for publish callback delegation."""
+    mock = MagicMock()
+    mock.handle = AsyncMock(return_value={"status": "ok"})
+    return mock
+
+
+def _build_callback_handler():
+    """Build a fresh mock DeviceCallbackHandler for inline constructions."""
+    handler = MagicMock()
+    handler.handle = AsyncMock(return_value={"status": "ok"})
+    return handler
+
+
+@pytest.fixture
 def local_paas_service(
     local_credentials,
     mock_repository,
@@ -128,6 +151,8 @@ def local_paas_service(
     mock_instance_router,
     mock_device_template_repository,
     mock_desktop_sandbox_plugin,
+    mock_secret_plugin,
+    mock_callback_handler,
 ):
     """Create a LocalPaasService instance with mocked dependencies."""
     return LocalPaasService(
@@ -137,6 +162,8 @@ def local_paas_service(
         instance_router=mock_instance_router,
         server_ip="test-instance",
         desktop_sandbox_plugin=mock_desktop_sandbox_plugin,
+        secret_plugin=mock_secret_plugin,
+        callback_handler=mock_callback_handler,
         env="test",
         device_template_repository=mock_device_template_repository,
     )
@@ -151,6 +178,8 @@ def local_paas_service_with_relay(
     mock_device_template_repository,
     mock_desktop_sandbox_plugin,
     mock_relay_repository,
+    mock_secret_plugin,
+    mock_callback_handler,
 ):
     """Create a LocalPaasService instance with relay_repository injected."""
     return LocalPaasService(
@@ -160,6 +189,8 @@ def local_paas_service_with_relay(
         instance_router=mock_instance_router,
         server_ip="test-instance",
         desktop_sandbox_plugin=mock_desktop_sandbox_plugin,
+        secret_plugin=mock_secret_plugin,
+        callback_handler=mock_callback_handler,
         env="test",
         device_template_repository=mock_device_template_repository,
         relay_repository=mock_relay_repository,
@@ -1885,6 +1916,8 @@ class TestGetDefaultLocalTemplateId:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             device_template_repository=mock_device_template_repository,
         )
@@ -1909,6 +1942,8 @@ class TestGetDefaultLocalTemplateId:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             device_template_repository=None,
         )
@@ -1939,6 +1974,8 @@ class TestGetDefaultLocalTemplateId:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             device_template_repository=mock_device_template_repository,
         )
@@ -1973,6 +2010,8 @@ class TestHandleMngRegister:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             device_template_repository=mock_device_template_repository,
         )
@@ -2012,6 +2051,8 @@ class TestHandleMngRegister:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             device_template_repository=mock_device_template_repository,
         )
@@ -2047,6 +2088,8 @@ class TestHandleMngRegister:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             device_template_repository=mock_device_template_repository,
         )
@@ -3005,7 +3048,7 @@ class TestResolveInvokeHttpInfo:
 
     @pytest.mark.asyncio
     async def test_token_generated_via_proxypass_jwt(self, local_paas_service):
-        """Token is generated via _generate_proxypass_jwt."""
+        """Token is generated via generate_proxypass_jwt."""
         # Setup: mock with known JWT token
         with (
             mock.patch(
@@ -3669,6 +3712,8 @@ class TestHandleMngDisconnect:
                 instance_router=mock_instance_router,
                 server_ip="test-instance",
                 desktop_sandbox_plugin=MagicMock(),
+                secret_plugin=MagicMock(),
+                callback_handler=_build_callback_handler(),
                 env="test",
                 device_template_repository=mock_device_template_repository,
                 device_repository=mock_device_repo,
@@ -3764,6 +3809,8 @@ class TestHandleMngDisconnect:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             device_template_repository=mock_device_template_repository,
             device_repository=None,  # Explicitly None
@@ -4044,6 +4091,8 @@ class TestHandleContainerReady:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             device_template_repository=None,
             device_repository=None,  # Not configured
@@ -4085,6 +4134,8 @@ class TestHandleContainerReady:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             device_template_repository=mock_device_template_repository,
             device_repository=mock_device_repo,
@@ -4121,6 +4172,8 @@ class TestHandleContainerReady:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             device_template_repository=mock_device_template_repository,
             device_repository=mock_device_repo,
@@ -4341,6 +4394,8 @@ class TestHandleMngRegisterEdgeCases:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             device_template_repository=mock_device_template_repository,
         )
@@ -4394,6 +4449,8 @@ class TestHandleContainerReadyIdempotency:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             device_template_repository=mock_device_template_repository,
             device_repository=mock_device_repo,
@@ -4440,6 +4497,8 @@ class TestHandleContainerReadyIdempotency:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             device_template_repository=mock_device_template_repository,
             device_repository=mock_device_repo,
@@ -4550,6 +4609,8 @@ class TestConstructorEdgeCases:
                 instance_router=mock_instance_router,
                 server_ip="test-instance",
                 desktop_sandbox_plugin=MagicMock(),
+                secret_plugin=MagicMock(),
+                callback_handler=_build_callback_handler(),
             )
 
     def test_env_defaults_from_get_current_env_when_none(
@@ -4568,6 +4629,8 @@ class TestConstructorEdgeCases:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
         )
         assert service._env is not None
 
@@ -4633,6 +4696,8 @@ class TestRouteCommandWorkerRouter:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -4689,6 +4754,8 @@ class TestRouteCommandWorkerRouter:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -4751,6 +4818,8 @@ class TestRouteCommandWorkerRouter:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -4807,6 +4876,8 @@ class TestRouteCommandWorkerRouter:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -4858,6 +4929,8 @@ class TestRouteCommandWorkerRouter:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -4911,6 +4984,8 @@ class TestRouteCommandWorkerRouter:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -4956,6 +5031,8 @@ class TestRouteCommandWorkerRouter:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -5033,6 +5110,8 @@ class TestRouteCommandWorkerRouter:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -5091,6 +5170,8 @@ class TestRouteCommandWorkerRouter:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -5134,6 +5215,8 @@ class TestRouteCommandWorkerRouter:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -5357,6 +5440,8 @@ class TestHandleHeartbeatContainers:
                 instance_router=mock_instance_router,
                 server_ip="test-instance",
                 desktop_sandbox_plugin=MagicMock(),
+                secret_plugin=MagicMock(),
+                callback_handler=_build_callback_handler(),
                 env="test",
                 device_template_repository=mock_device_template_repository,
                 device_repository=mock_device_repo,
@@ -5574,6 +5659,7 @@ class TestHandleContainerReadySuccess:
         """Create service with all repos for callback success path."""
         mock_device_repo = MagicMock()
         mock_publish_record_repo = MagicMock()
+        callback_handler = _build_callback_handler()
 
         return (
             LocalPaasService(
@@ -5583,6 +5669,8 @@ class TestHandleContainerReadySuccess:
                 instance_router=mock_instance_router,
                 server_ip="test-instance",
                 desktop_sandbox_plugin=MagicMock(),
+                secret_plugin=MagicMock(),
+                callback_handler=callback_handler,
                 env="test",
                 device_template_repository=mock_device_template_repository,
                 device_repository=mock_device_repo,
@@ -5591,16 +5679,21 @@ class TestHandleContainerReadySuccess:
             mock_repository,
             mock_device_repo,
             mock_publish_record_repo,
+            callback_handler,
         )
 
     @pytest.mark.asyncio
     async def test_successful_callback_sends_to_publish_service(
         self, service_for_callback_success
     ):
-        """Full success callback path sends to DefaultPublishService (lines 1557-1580)."""
-        service, mock_repository, mock_device_repo, mock_publish_record_repo = (
-            service_for_callback_success
-        )
+        """Full success callback path sends to DefaultPublishService via handler (lines 1557-1580)."""
+        (
+            service,
+            mock_repository,
+            mock_device_repo,
+            mock_publish_record_repo,
+            callback_handler,
+        ) = service_for_callback_success
 
         # Setup: machine found
         machine_record = MagicMock()
@@ -5622,31 +5715,26 @@ class TestHandleContainerReadySuccess:
             record
         )
 
-        # Mock get_container so DI container is not needed
-        mock_publish_svc = MagicMock()
-        mock_publish_svc.handle_device_callback = AsyncMock(
-            return_value={"status": "ok"}
-        )
-        mock_container = MagicMock()
-        mock_container.services.publish_service.return_value = mock_publish_svc
-        with mock.patch(
-            "secbaas.community.bootstrap.get_container",
-            return_value=mock_container,
-        ):
-            result = await service._handle_container_ready(
-                machine_id="machine-001",
-                params={"container_id": "container-001"},
-            )
+        callback_handler.handle = AsyncMock(return_value={"status": "ok"})
 
-            assert result is None
-            mock_publish_svc.handle_device_callback.assert_called_once()
+        result = await service._handle_container_ready(
+            machine_id="machine-001",
+            params={"container_id": "container-001"},
+        )
+
+        assert result is None
+        callback_handler.handle.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_callback_exception_is_handled(self, service_for_callback_success):
         """Exception during callback handling is caught and logged (line 1578-1584)."""
-        service, mock_repository, mock_device_repo, mock_publish_record_repo = (
-            service_for_callback_success
-        )
+        (
+            service,
+            mock_repository,
+            mock_device_repo,
+            mock_publish_record_repo,
+            callback_handler,
+        ) = service_for_callback_success
 
         # Setup: machine found
         machine_record = MagicMock()
@@ -5668,24 +5756,16 @@ class TestHandleContainerReadySuccess:
             record
         )
 
-        # Mock get_container with a raising handle_device_callback
-        mock_publish_svc = MagicMock()
-        mock_publish_svc.handle_device_callback = AsyncMock(
-            side_effect=RuntimeError("Callback failed")
-        )
-        mock_container = MagicMock()
-        mock_container.services.publish_service.return_value = mock_publish_svc
-        with mock.patch(
-            "secbaas.community.bootstrap.get_container",
-            return_value=mock_container,
-        ):
-            result = await service._handle_container_ready(
-                machine_id="machine-001",
-                params={"container_id": "container-001"},
-            )
+        # Inject a raising callback handler
+        callback_handler.handle = AsyncMock(side_effect=RuntimeError("Callback failed"))
 
-            assert result is None
-            mock_publish_svc.handle_device_callback.assert_called_once()
+        result = await service._handle_container_ready(
+            machine_id="machine-001",
+            params={"container_id": "container-001"},
+        )
+
+        assert result is None
+        callback_handler.handle.assert_awaited_once()
 
 
 class TestProcessPublishCallbackForDevice:
@@ -5724,6 +5804,7 @@ class TestProcessPublishCallbackForDevice:
         mock_device_template_repository,
         *,
         publish_record_repository,
+        callback_handler=None,
     ):
         return LocalPaasService(
             credentials=local_credentials,
@@ -5732,6 +5813,8 @@ class TestProcessPublishCallbackForDevice:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=callback_handler or _build_callback_handler(),
             env="test",
             device_template_repository=mock_device_template_repository,
             device_repository=MagicMock(),
@@ -5845,6 +5928,10 @@ class TestProcessPublishCallbackForDevice:
         mock_publish_repo = MagicMock()
         mock_publish_repo.get_latest_processing_record_by_device.return_value = record
 
+        fake_handle = AsyncMock(return_value={"ok": True})
+        callback_handler = _build_callback_handler()
+        callback_handler.handle = fake_handle
+
         service = self._make_service(
             local_credentials,
             mock_repository,
@@ -5852,23 +5939,13 @@ class TestProcessPublishCallbackForDevice:
             mock_instance_router,
             mock_device_template_repository,
             publish_record_repository=mock_publish_repo,
+            callback_handler=callback_handler,
         )
-
-        fake_handle = AsyncMock(return_value={"ok": True})
-        mock_publish_svc = MagicMock()
-        mock_publish_svc.handle_device_callback = fake_handle
-        mock_container = MagicMock()
-        mock_container.services.publish_service.return_value = mock_publish_svc
 
         device = self._make_device()
 
         caplog.set_level("INFO")
-        with mock.patch(
-            "secbaas.community.bootstrap.get_container", return_value=mock_container
-        ):
-            await service._process_publish_callback_for_device(
-                device, source="heartbeat"
-            )
+        await service._process_publish_callback_for_device(device, source="heartbeat")
 
         # Callback invoked exactly once
         fake_handle.assert_awaited_once()
@@ -5905,6 +5982,10 @@ class TestProcessPublishCallbackForDevice:
         mock_publish_repo = MagicMock()
         mock_publish_repo.get_latest_processing_record_by_device.return_value = record
 
+        fake_handle = AsyncMock(return_value={"ok": True})
+        callback_handler = _build_callback_handler()
+        callback_handler.handle = fake_handle
+
         service = self._make_service(
             local_credentials,
             mock_repository,
@@ -5912,23 +5993,15 @@ class TestProcessPublishCallbackForDevice:
             mock_instance_router,
             mock_device_template_repository,
             publish_record_repository=mock_publish_repo,
+            callback_handler=callback_handler,
         )
-
-        fake_handle = AsyncMock(return_value={"ok": True})
-        mock_publish_svc = MagicMock()
-        mock_publish_svc.handle_device_callback = fake_handle
-        mock_container = MagicMock()
-        mock_container.services.publish_service.return_value = mock_publish_svc
 
         device = self._make_device()
 
         caplog.set_level("INFO")
-        with mock.patch(
-            "secbaas.community.bootstrap.get_container", return_value=mock_container
-        ):
-            await service._process_publish_callback_for_device(
-                device, source="container_ready"
-            )
+        await service._process_publish_callback_for_device(
+            device, source="container_ready"
+        )
 
         fake_handle.assert_awaited_once()
         callback = fake_handle.call_args.args[0]
@@ -5956,6 +6029,10 @@ class TestProcessPublishCallbackForDevice:
         mock_publish_repo = MagicMock()
         mock_publish_repo.get_latest_processing_record_by_device.return_value = record
 
+        fake_handle = AsyncMock(side_effect=RuntimeError("boom"))
+        callback_handler = _build_callback_handler()
+        callback_handler.handle = fake_handle
+
         service = self._make_service(
             local_credentials,
             mock_repository,
@@ -5963,24 +6040,16 @@ class TestProcessPublishCallbackForDevice:
             mock_instance_router,
             mock_device_template_repository,
             publish_record_repository=mock_publish_repo,
+            callback_handler=callback_handler,
         )
-
-        fake_handle = AsyncMock(side_effect=RuntimeError("boom"))
-        mock_publish_svc = MagicMock()
-        mock_publish_svc.handle_device_callback = fake_handle
-        mock_container = MagicMock()
-        mock_container.services.publish_service.return_value = mock_publish_svc
 
         device = self._make_device()
 
         caplog.set_level("ERROR")
         # Must NOT raise
-        with mock.patch(
-            "secbaas.community.bootstrap.get_container", return_value=mock_container
-        ):
-            result = await service._process_publish_callback_for_device(
-                device, source="heartbeat"
-            )
+        result = await service._process_publish_callback_for_device(
+            device, source="heartbeat"
+        )
         assert result is None
 
         # ERROR log emitted and contains RuntimeError marker
@@ -6036,6 +6105,8 @@ class TestHeartbeatPublishTrigger:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             device_template_repository=mock_device_template_repository,
             device_repository=mock_device_repo,
@@ -6271,6 +6342,8 @@ class TestHandleContainerReadyDelegation:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             device_template_repository=mock_device_template_repository,
             device_repository=mock_device_repo,
@@ -6329,6 +6402,8 @@ class TestHandleContainerReadyDelegation:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             device_template_repository=mock_device_template_repository,
             device_repository=mock_device_repo,
@@ -6388,6 +6463,8 @@ class TestDispatchToLocalConnection:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
         )
 
@@ -6422,6 +6499,8 @@ class TestDispatchToLocalConnection:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
         )
 
@@ -6466,6 +6545,8 @@ class TestDispatchToLocalConnection:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
         )
 
@@ -6504,6 +6585,8 @@ class TestDispatchToLocalConnection:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -6554,6 +6637,8 @@ class TestDispatchToLocalConnection:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -6598,6 +6683,8 @@ class TestDispatchToLocalConnection:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -6657,6 +6744,8 @@ class TestDispatchToLocalConnection:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -6700,6 +6789,8 @@ class TestDispatchToLocalConnection:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -6742,6 +6833,8 @@ class TestDispatchToLocalConnection:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -6775,6 +6868,8 @@ class TestDispatchToLocalConnection:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -6803,6 +6898,8 @@ class TestDispatchToLocalConnection:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
             env="test",
             worker_router=None,  # explicitly not wired
         )

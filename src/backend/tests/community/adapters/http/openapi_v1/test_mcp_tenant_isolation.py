@@ -1,6 +1,6 @@
 """Cross-tenant isolation for the public MCP config path (Track B, Task 7).
 
-Stage 5 (`tests/community/plugins/test_user_mcp_config_tenant_isolation.py`)
+Stage 5 (`tests/community/repository/bot/test_user_mcp_config_tenant_isolation.py`)
 proves the guard at the repository. This proves it through the exact layer the
 public handlers use: `core/mcp/config_flow.read_unified_config` /
 `write_unified_config`, driven against a **real** `MCPConfigService` + real
@@ -29,9 +29,7 @@ from agentclaw.community.core.mcp.config_flow import (
 )
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
 from agentclaw.community.core.models.mcp import UserMCPConfig
-from agentclaw.community.plugins.user_mcp_config_repository import (
-    UserMCPConfigRepository,
-)
+from agentclaw.community.core.repository.implementations.bot.user_mcp_config import UserMCPConfigRepository
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 pytestmark = pytest.mark.integration

@@ -71,5 +71,20 @@ class OpenClawChatPort(Protocol):
         """
         ...
 
+    async def chat_inject(
+        self,
+        session_key: str,
+        message: str,
+        label: str | None = None,
+        token: str | None = None,
+    ) -> dict[str, Any]:
+        """Inject a chat message through the OpenClaw gateway without running the agent.
+
+        Returns the raw normalized dict from the port. Successful payloads may
+        include ``messageId`` from ``chat.inject`` and ``sessionId`` from
+        ``sessions.describe`` so higher layers can repair the transcript role.
+        """
+        ...
+
 
 __all__ = ["OpenClawChatPort"]

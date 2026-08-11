@@ -27,9 +27,7 @@ from agentclaw.community.adapters.http.skills_pool.schemas import (
 from agentclaw.community.api.skills_pool_rollout_service import (
     SkillsPoolRolloutServiceProtocol,
 )
-from agentclaw.community.core.common_config.repository import (
-    CommonConfigRepository,
-)
+from agentclaw.community.core.repository.implementations.config.common_config import CommonConfigRepository
 from agentclaw.community.core.skills_pool.recovery_service import (
     SkillsPoolRollbackOutcome,
     SkillsPoolRollbackResult,
@@ -39,9 +37,7 @@ from agentclaw.community.core.skills_pool.rollout_gate import (
     SKILLS_POOL_ROLLOUT_BUSINESS_CODE,
     SKILLS_POOL_ROLLOUT_PARAM_CODE,
 )
-from agentclaw.community.core.skills_pool.rollout_repository import (
-    SkillsPoolRolloutRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolRolloutRepositoryProtocol
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
@@ -256,6 +252,39 @@ async def test_rollback_route_supplies_a_unique_lease_owner() -> None:
     assert service.call["scope"] == scope
     assert service.call["operator"] == "freddie"
     assert str(service.call["lease_owner"]).startswith("operator-api:")
+
+
+@pytest.mark.asyncio
+async def test_rollback_route_rejects_service_bot_rollback() -> None:
+    scope = BotSkillLayoutScope("pre", "entity-1", "service-bot-1")
+
+    class Query:
+        def get_bot(self, **_: object):
+            return SimpleNamespace(scope=scope)
+
+    class RollbackService:
+        async def rollback(self, **_: object) -> SkillsPoolRollbackResult:
+            return SkillsPoolRollbackResult(
+                SkillsPoolRollbackOutcome.SERVICE_BOT_UNSUPPORTED,
+                evidence={"reason": "service_draft_pool_rollback_disabled"},
+                retryable=False,
+            )
+
+    with pytest.raises(HTTPException) as captured:
+        await rollback_bot(
+            bot_id="service-bot-1",
+            request=RollbackRequest(
+                owner_id="owner-1",
+                rollback_generation="rollback-1",
+                note="must remain closed",
+            ),
+            user=SimpleNamespace(staffId="freddie"),
+            service=RollbackService(),
+            query=Query(),
+        )
+
+    assert captured.value.status_code == 409
+    assert captured.value.detail == "Service Bot Skills Pool rollback is disabled"
 
 
 @pytest.mark.asyncio

@@ -13,8 +13,15 @@ the verifier answers 401 to everything on an empty key.
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
+from agentclaw.community.core.gateway_principal import (
+    MIN_SIGNING_KEY_BYTES,
+    is_weak_signing_key,
+    key_fingerprint,
+)
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.utils.gateway_principal_config import (
     get_principal_verifier_config,
@@ -160,10 +167,11 @@ def test_strict_failure_leaves_the_config_denying():
 
 
 def test_no_fallback_key_is_invented():
-    """The gateway's ``bare`` signer keeps a dev fallback; we deliberately do not.
+    """A committed shared secret is a committed credential.
 
-    A committed shared secret is a committed credential, and here "no key" fails
-    safe rather than open.
+    "No key" fails safe rather than open. The gateway's ``bare`` signer used to
+    keep a dev fallback and no longer does, so both ends of this contract now
+    answer an unresolvable key the same way.
     """
     init_principal_verifier_config(_FakeResolver(None), SECRET_NAME, strict=False)
 
@@ -180,3 +188,127 @@ def test_key_is_resolved_once_at_boot():
 
     assert get_principal_verifier_config() is first
     assert resolver.calls == [SECRET_NAME], "resolved once at boot, then reused"
+
+
+# ── boot-time diagnostics ────────────────────────────────────────────────────
+#
+# The two halves of this contract never meet at request time: the gateway signs
+# successfully on every request and only the backend ever sees a mismatch, as a
+# signature failure it cannot attribute. Boot is therefore the one place the two
+# keys can be compared, and these tests pin what makes that comparison possible.
+
+
+def test_boot_logs_a_fingerprint_not_the_key(caplog):
+    """The line an operator diffs against the gateway's.
+
+    A fingerprint rather than the key itself: comparable across components,
+    useless to anyone who reads the log.
+    """
+    with caplog.at_level(logging.INFO):
+        init_principal_verifier_config(_FakeResolver(_Secret(KEY)), SECRET_NAME, strict=False)
+
+    line = "\n".join(r.getMessage() for r in caplog.records)
+    assert f"key fp={key_fingerprint(KEY)}" in line
+    assert f"key len={len(KEY)}" in line, "length separates keys differing only by whitespace"
+    assert SECRET_NAME in line, "names which secret was read, for the wrong-name case"
+    assert KEY not in line, "the key itself never reaches a log"
+
+
+def test_boot_logs_the_contract_it_will_enforce(caplog):
+    """``aud``/``iss`` are hardcoded here and configurable on the gateway.
+
+    Logging them turns "the gateway's issuer was changed and every request now
+    401s" into something readable from a boot line rather than from source.
+    """
+    with caplog.at_level(logging.INFO):
+        init_principal_verifier_config(_FakeResolver(_Secret(KEY)), SECRET_NAME, strict=False)
+
+    line = "\n".join(r.getMessage() for r in caplog.records)
+    assert "aud='backend'" in line
+    assert "iss='gateway'" in line
+
+
+def test_surrounding_whitespace_is_reported_with_both_fingerprints(caplog):
+    """Stripping is otherwise silent, and silence is what makes this bite.
+
+    A gateway released before it stripped signs with the untrimmed bytes, so
+    naming *both* fingerprints makes a mixed-version rollout a grep rather than
+    a second incident.
+    """
+    with caplog.at_level(logging.WARNING):
+        init_principal_verifier_config(
+            _FakeResolver(_Secret(f"  {KEY}\n")), SECRET_NAME, strict=False
+        )
+
+    line = "\n".join(r.getMessage() for r in caplog.records)
+    assert "whitespace" in line
+    assert f"untrimmed={key_fingerprint(f'  {KEY}' + chr(10))}" in line
+    assert f"trimmed={key_fingerprint(KEY)}" in line
+    assert get_principal_verifier_config().signing_key == KEY, "still uses the trimmed key"
+
+
+def test_a_clean_key_reports_no_whitespace(caplog):
+    with caplog.at_level(logging.WARNING):
+        init_principal_verifier_config(_FakeResolver(_Secret(KEY)), SECRET_NAME, strict=False)
+
+    assert "whitespace" not in "\n".join(r.getMessage() for r in caplog.records)
+
+
+def test_two_deployments_holding_the_same_key_log_the_same_fingerprint():
+    """The property the whole diagnostic rests on."""
+    assert key_fingerprint(KEY) == key_fingerprint(KEY)
+    assert key_fingerprint(KEY) != key_fingerprint(KEY + "-rotated")
+
+
+# ── weak keys ────────────────────────────────────────────────────────────────
+#
+# The boot line publishes a fingerprint, and that is only safe while the key is
+# strong: against a guessable one a truncated digest confirms a dictionary guess
+# offline, and confirming the shared secret means forging any caller identity.
+# Nothing enforces the strength, so it is warned about rather than assumed.
+
+
+WEAK_KEY = "hunter2"
+
+
+def test_a_weak_key_warns_but_still_reports_its_fingerprint(caplog):
+    """Withholding the fingerprint would remove the diagnostic exactly when a
+    deployment is most misconfigured. The remedy is a better secret."""
+    with caplog.at_level(logging.INFO):
+        init_principal_verifier_config(
+            _FakeResolver(_Secret(WEAK_KEY)), SECRET_NAME, strict=False
+        )
+
+    line = "\n".join(r.getMessage() for r in caplog.records)
+    assert f"key fp={key_fingerprint(WEAK_KEY)}" in line, "still diagnosable"
+    assert "below the 32-byte minimum" in line
+    assert "forge any caller identity" in line, "says why it matters"
+    assert WEAK_KEY not in line, "and never prints the key itself"
+
+
+def test_a_strong_key_does_not_warn(caplog):
+    with caplog.at_level(logging.WARNING):
+        init_principal_verifier_config(
+            _FakeResolver(_Secret(KEY)), SECRET_NAME, strict=False
+        )
+
+    assert "minimum" not in "\n".join(r.getMessage() for r in caplog.records)
+
+
+def test_a_weak_key_still_configures_the_verifier(caplog):
+    """A warning, not a refusal: rejecting a short key here would deny every
+    request on a deployment that was at least partly working, which is a
+    bigger change than this diagnostic is entitled to make."""
+    init_principal_verifier_config(
+        _FakeResolver(_Secret(WEAK_KEY)), SECRET_NAME, strict=False
+    )
+
+    assert get_principal_verifier_config().signing_key == WEAK_KEY
+
+
+def test_the_strength_threshold_is_shared_with_the_gateway():
+    """Both ends judge one shared secret by one rule."""
+    assert MIN_SIGNING_KEY_BYTES == 32
+    assert is_weak_signing_key("a" * 31)
+    assert not is_weak_signing_key("a" * 32)
+    assert not is_weak_signing_key(""), "absent is its own state, warned elsewhere"

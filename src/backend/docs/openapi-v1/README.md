@@ -34,9 +34,9 @@ that file holds the inventory.
 
 **Goal:** implement the public `/openapi/v1` API, whose callers are **external
 registered tenants**. It lives under
-`src/backend/src/agentclaw/community/adapters/http/openapi_v1/*`. The **bots**
-category is implemented (PR #494); the other six are still **route definitions
-with stub handlers**.
+`src/backend/src/agentclaw/community/adapters/http/openapi_v1/*`. The **bots**,
+**mcp**, and **skills** categories have implemented handlers; the remaining
+categories retain their independently tracked readiness states below.
 
 > 🔒 **The surface is still not callable end-to-end, but no longer because of a
 > stub.** `require_principal` now really verifies the gateway's signed
@@ -65,7 +65,8 @@ The work therefore splits into **three tracks**:
 - **Track B — Public API implementation.** Wire the seven `/openapi/v1`
   category handlers to the existing services. **This is where the endpoint/API
   code actually lands.** Each category depends on its data being isolated
-  (Track A) first. **2 of 7 done: bots (PR #494), mcp (PR #610).**
+  (Track A) first. Skills implementation/CI is complete but its schema and
+  pre-production release gates remain pending; see its board row.
 - **Track C — Engine (runtime) surface.** _Added 2026-07-30._ Wrap the engine
   adapter's client-facing HTTP behind `/openapi/v1/bots/{bot_id}/…`, and replace
   the `get_device_connection` hand-off with one sanitised socket-info endpoint.
@@ -74,7 +75,8 @@ The work therefore splits into **three tracks**:
 > ⚠️ **The one confusion to avoid:** "isolation Stage N is done" does **not**
 > mean any API endpoint was implemented. A Track A stage is plumbing only (the
 > reusable mechanism + that category's records). The API endpoints land in
-> Track B — done for bots, still stubs for the other six.
+> Track B — each category has its own state on the board; implementation does
+> not by itself make a category release-complete.
 >
 > ⚠️ **Track C has no Track A stage, and that is correct.** Tracks A and B pair
 > up (isolate a category, then wire its endpoints); Track C does not. Its data
@@ -96,7 +98,7 @@ owner.)
 
 | Person | Owns (vertical slices) | Track A stages | Track B endpoint groups |
 |---|---|---|---|
-| **totalfrank** | bots, mcp, channels, **skills** (shared) | 1 (bots ✅), 5 (mcp), 3 (channels), 4 (skills, shared) | bots, mcp, channels, skills (shared) |
+| **totalfrank** | bots, mcp, **skills** (shared) | 1 (bots ✅), 5 (mcp), 4 (skills, shared) | bots, mcp, skills (shared) |
 | **lucas-xzp** | resources, routines, identity, **skills** (shared) | 2 (resources), 6 (routines), 4 (skills, shared) | resources, routines, identity, skills (shared) |
 
 - **totalfrank** also owns the **reusable Track A mechanism** (built in Stage 1 /
@@ -114,7 +116,7 @@ owner.)
 | Tier | Categories | Owners |
 |---|---|---|
 | **P1 — first** | bots, mcp, resources, routines | bots + mcp → totalfrank; resources + routines → lucas-xzp |
-| **P2 — second** | channels, identity | channels → totalfrank; identity → lucas-xzp |
+| **P2 — second** | identity | identity → lucas-xzp |
 | **P3 — third** | skills | **co-owned** (totalfrank + lucas-xzp) — the most involved category |
 
 Within each lane, do your **P1** slices before P2 before P3. Skills (P3) is the
@@ -136,7 +138,7 @@ must implement._
 |---|---|---|---|---|---|
 | 1 | Bot records (`ac_bots` / `BotModel`) | totalfrank | P1 | ✅ **DONE — PR #456 merged 2026-07-27** | — |
 | 2 | Resources (`ac_resource`) | lucas-xzp | P1 | ✅ DONE — Phase 0 (branch `rongzhi_0727`) | column + guards + tests green; internal API unchanged — verified: `to_dict()` excludes tenant, guard uses direct expression not lambda |
-| 3 | Channels (`ac_channel_config`) | totalfrank | 🅳 **DEPRIORITIZED** | ⏸️ PARKED — scope intact, not cancelled | same, if picked back up |
+| 3 | Channels (`ac_channel_config`) | — | ❌ **DROPPED** | Stage never started; its Track B component was removed 2026-08-03 | n/a |
 | 4 | Skills (skill tables) | totalfrank + lucas-xzp | P3 | ⬜ TODO | same |
 | 5 | MCP configuration (`ac_user_mcp_config` + `ac_bot_mcp_call_config`) | totalfrank | P1 | ✅ DONE — **PR #564** | PR #564 merges |
 | 6 | Routines | lucas-xzp | P1 | ⬜ TODO | same |
@@ -144,7 +146,7 @@ must implement._
 > Stage 1 also builds the **reusable mechanism** (see below) that every later
 > stage copies. It's the foundation, not just "bots."
 
-### Track B — Public API implementation (where the endpoints land — 2 of 7 done)
+### Track B — Public API implementation
 _Ordered by priority tier._
 | Category | Owner | Pri | Router | State | Depends on |
 |---|---|---|---|---|---|
@@ -152,9 +154,9 @@ _Ordered by priority tier._
 | mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` | ✅ **DONE — PR #610** (6/6 endpoints) | ~~Track A stage 5~~ ✅ (PR #564) |
 | resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | 🔧 IN PROGRESS (PARTIAL) — 9 handlers all wired but DEFINITION-ONLY / NOT PUBLIC-READY | Track A resources ✅(Phase 0); Track B all 9 endpoints wired stub→service; gated on auth workstream (gateway principal seam) + DDL deploy before public exposure |
 | routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` *(stub)* | ⬜ TODO | Track A routines (lucas-xzp) |
-| channels | totalfrank | 🅳 **DEPRIORITIZED** | `openapi_v1/channels/router.py` *(stub)* | ⏸️ PARKED — scope intact, not cancelled | Track A stage 3 (also parked) |
+| channels | — | ❌ **REMOVED (2026-08-03)** | *(deleted)* | Router, schemas and both published paths deleted — see the channels section below | n/a |
 | identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` *(stub)* | ⬜ TODO | bots isolation (Stage 1 ✅) |
-| skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` *(stub)* | ⬜ TODO | Track A skills (shared) |
+| skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` | 🔧 **IMPLEMENTATION + CI COMPLETE; RELEASE PENDING** — six ratified Local Skill operations | #725 cleanup-work DDL must deploy before code; [pre-production acceptance runbook](skills-track-b-preprod-acceptance.md) remains **PRE-PROD PENDING** |
 
 ### Track C — Engine (runtime) surface (5 of 5 groups implemented — PR #630)
 _All groups depend only on **bots isolation (Stage 1 ✅)** — no Track A stage, no
@@ -163,7 +165,7 @@ DDL. Full ruling and per-endpoint mapping in
 
 | Group | Endpoints | Owner | Pri | Router | State |
 |---|---|---|---|---|---|
-| sessions | 7 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/sessions/` | ✅ **IMPLEMENTED — PR #630** (personal bots only; `service` → 501) |
+| sessions | 7 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/sessions/` | ✅ **IMPLEMENTED — PR #630**; operators + stages 2026-08-09 |
 | engine (read-only) | 3 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/engine/` | ✅ **IMPLEMENTED — PR #630** |
 | connection | 1 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/connection/` | ✅ **IMPLEMENTED — PR #630** |
 | approvals | 3 | ⬜ unassigned | P2 | `openapi_v1/engine_runtime/approvals/` | ✅ **IMPLEMENTED — PR #630** |
@@ -194,7 +196,7 @@ DDL. Full ruling and per-endpoint mapping in
 | Item | State | Note |
 |---|---|---|
 | Real caller-identity verifier (auth workstream) | ✅ **DONE both halves** — backend PR [#634](https://github.com/inclusionAI/Avernet/pull/634), gateway PR [#599](https://github.com/inclusionAI/Avernet/pull/599) **merged** | `require_principal` + `resolve_avernet_tenant` verify the gateway's signed `X-Avernet-Principal` (HS256, `aud=backend`) and read tenant + owner from it. The wire contract was checked by round-tripping the **real** gateway signer into the **real** backend verifier (2026-08-02): user/bot/app/access_key shapes, secret non-projection, `aud`/`iss` refusal. **A `user` caller works end to end.** What remains is *which* callers are admitted — see the identity-admission row below |
-| **Identity admission: `user` only** | ✅ **DONE 2026-08-02** | `verify_principal_token` refuses an identity set naming no end user, so `bot` / `app` / `access_key` callers get `401` by design rather than by whether a handler asks for the owner. Widening it is delegation (auth design §15), not config. SDD: `specs/2026-08-02-public-api-user-only-principal/` |
+| **Identity admission: `user`, plus `app` under a grant** | ✅ **DONE 2026-08-10** | Widened from user-only (#950). An **application acting alone** — its own credential, no human on the wire — is admitted on the operations placed in an admission group (`adapters/http/openapi_v1/admission.py`), and reaches only what the user who authorized it has authorized it *for*, re-adjudicated per request. `bot` / `access_key` callers are still refused outright at verification. The end-user requirement moved from `verify_principal_token` to `require_principal`, which every public route declares — so an operation absent from the table refuses a machine caller by omission. SDD: `specs/2026-08-10-openapi-v1-app-only-caller/` (earlier: `specs/2026-08-02-public-api-user-only-principal/`) |
 | **No cross-repo test pins the principal wire shape** | ⬜ TODO | Both sides are tested against their own hand-written idea of the payload (`test_verifier.py` builds dicts; the gateway tests its own models). Renaming a field on one side leaves both suites green and 401s production |
 | Tenant-leading indexes (F2, **MANDATORY** policy) | ⬜ TODO | before multi-tenant go-live |
 | Background/scheduled work revisit | ⬜ TODO | before a 2nd tenant holds real data |
@@ -208,11 +210,12 @@ DDL. Full ruling and per-endpoint mapping in
 > that must be settled before a second tenant holds real data.
 | **Stage 5 unique-key swap on `ac_user_mcp_config`** | ⬜ TODO (DDL below) | **before a 2nd tenant writes MCP config** — not before deploy |
 
-> **⏸️ Why channels are parked (2026-07-29).** The product does not need
-> channels at this point, so they must stop presenting as the next thing to
-> pick up. This is a **deprioritization, not a cancellation** — both rows keep
-> their full scope and can be picked back up unchanged. If channels are ever
-> actually cancelled, delete the rows rather than leaving them parked.
+> **❌ Channels removed (2026-08-03).** Parked since 2026-07-29 as a
+> deprioritization; now deleted outright. Parking was the wrong shape for it:
+> the component was *published*, so a parked stub was not a dormant row on a
+> board — it was six operations in the document the gateway serves, each
+> answering 500. The Track A stage was never started, so there is no data work
+> to unwind. See the channels section under **Endpoints** for what was removed.
 
 ---
 
@@ -363,6 +366,66 @@ route dependency        → require_principal(request)       ─┘  cache on sc
   Either way the trigger is the same: no such secret, an empty value, or a
   resolver that raises.
 
+  **The gateway now behaves identically** — one contract, one rule. It shipped a
+  committed dev fallback key until 2026-08-04; that was removed rather than made
+  louder, because no peer ever accepted those tokens (this side has never had a
+  fallback to match) and all it bought was a gateway that looked healthy while
+  every request failed one hop away. Missing key there ⇒ boot refused in
+  `pre`/`prod`, otherwise every signature attempt refuses and the forwarder
+  answers `500 principal signing failed`.
+
+### Diagnosing a 401 on this surface
+
+Both halves log a **key fingerprint** at boot — a truncated SHA-256, safe in a
+log, useless to a reader. They are the same eight characters when and only when
+the two ends hold the same secret, so the first question is answered by diffing
+two lines rather than by printing a credential:
+
+```text
+backend:  gateway principal verification is configured (secret='...', key fp=eb128a7a, key len=38, aud='backend', iss='gateway')
+gateway:  principal signer configured (secret='principal_signing_key', key fp=eb128a7a, key len=38, kid='bare', iss='gateway', ttl=60s)
+```
+
+| What you see | What it means |
+| --- | --- |
+| fingerprints differ | the two ends hold different secrets — the usual cause |
+| gateway `key fp=unset` | the gateway resolved no key and cannot sign at all |
+| same fp, different `key len` | one side's value carries whitespace (both strip, so this only appears across a mixed-version rollout) |
+| fingerprints match | not a key problem — check `iss`, clock skew, and whether either process predates the last rotation (each resolves once at boot) |
+
+Per-request, the backend logs one line per failure, and it names the cause:
+
+```text
+rejected forwarded principal on GET /openapi/v1/bots: principal token rejected:
+Signature verification failed [verifier key fp=eb128a7a, expects aud='backend'
+iss='gateway'; unverified caller-supplied header alg='HS256' kid='bare']
+```
+
+**The two halves of that suffix do not carry equal weight, and the difference
+decides what you should do about it.**
+
+`verifier key fp`, `aud` and `iss` come from this process's own configuration.
+They are trustworthy, and together with the gateway's boot line they are what
+a diagnosis should rest on.
+
+`alg` and `kid` come from the token's JOSE header, which a failed signature
+means nothing has authenticated. Anyone who can reach the surface can stamp
+`kid: bare` on a token they minted. So `kid='bare'` is **not** evidence the
+gateway sent it — treating it as such during a burst of forged traffic would
+have you rotate a shared secret that was never broken. Read it as a hint that
+is useful mainly in the negative: an unexpected `alg`, an unfamiliar `kid`, or
+a header that will not parse says *look somewhere other than the key*.
+
+When the fingerprints match and forged-looking traffic persists, the token is
+not coming from your gateway, whatever its `kid` claims. None of this reaches
+the caller: every failure answers the same fixed `401 Unauthorized`.
+
+A **missing** header logs distinctly (`no X-Avernet-Principal header on ...`)
+and is not an auth failure at all — the gateway injects that header on every
+forwarded request, so its absence means the request did not come through the
+gateway's authenticated path. Chasing signing keys for that one is chasing the
+wrong half of the system.
+
 - `aud` and `iss` are fixed in code here, not configurable — one wire contract,
   one spelling. They are **not** symmetric on the signing side, though:
   - `aud` is not configurable there either (the gateway signs it from the
@@ -381,6 +444,31 @@ route dependency        → require_principal(request)       ─┘  cache on sc
 - The gateway's tenant id **is** the `avernet_tenant` value — no mapping table.
   So a real external tenant reads an empty dataset until it has data; that is
   isolation working, not a bug.
+- **Only the machine principals carry a tenant.** _Changed 2026-08-05._ A
+  `user` principal has no `tenant` field: nothing in a user credential proves
+  which tenant a person acts for, and the gateway's google chain used to fill it
+  from a config default — which, left unset as it shipped, sent `null` and 401'd
+  every request. `app`, `bot` and `access_key` are each registered to a tenant,
+  and that registration is what their principal asserts.
+  - An identity set that asserts **no** tenant — a user and nothing else —
+    resolves to `DEFAULT_AVERNET_TENANT`. A first-party caller on our own
+    frontend *is* an internal caller, which is the scope `teamclaw` names, and
+    it is the same tenant every other path in this component resolves to.
+  - That fallback is **ours**, decided from the absence of a claim; it is not a
+    value the token supplied. A token may *also* name `teamclaw` on a machine
+    principal — _changed 2026-08-05_, see below — and both routes reach the same
+    scope. A `tenant` smuggled onto a `user` entry is still neither: unknown
+    fields are dropped, not honoured, so it never becomes a scope.
+  - ⚠️ **Consequence for the public surface.** `route_security` declares
+    `user: required` and nothing else for every `/openapi/v1` path, so the
+    gateway resolves a user-only set and **every public request now scopes to
+    `teamclaw`** — the internal tenant. Nothing gates *which* Google account
+    that is (`AuthPlugin.is_allowed` exists in the gateway SPI but no authn
+    strategy calls it), so serving real data on this surface needs either that
+    whitelist wired up or a route requiring an identity that carries a
+    registered tenant. Until then the surface reads internal data for any
+    authenticated Google user, which is a widening of what the 401 used to
+    prevent by accident.
 
 **Two things you inherit if you own a Track B category:**
 
@@ -458,6 +546,30 @@ rebuild it. Everything below is category-agnostic and lives in
   - Add *your* category's errors to `ENVELOPE_ERRORS`. Anything unmapped escapes
     to the app 500 handler — which now envelopes it too, but with a generic
     message.
+  - **Every converted failure is logged, with its traceback and the handler's
+    arguments** — see the next bullet. You inherit this; do not add per-handler
+    `try/except: logger.error(...)` around a mapped error.
+- **`error_logging.py`** (`adapters/http/`) — the diagnostics half of the fixed
+  message rule. Because the response says only "Not found", the log line is the
+  *only* record of what actually happened, so `@envelope_errors` emits one per
+  failure: exception type, the internal message, the concrete path plus the route
+  template, and the arguments the handler was called with. Level follows status
+  (`4xx` → warning, `5xx` → error); both carry the traceback, because an error
+  reaching this path was raised inside a handler and the trace is a short chain
+  of our own frames pointing at the check that refused the request. What you need
+  to know when adding a category:
+  - **Capture is lazy** — a successful request pays nothing.
+  - **Values are summarized, not dumped**: strings truncated, collections capped,
+    bytes reduced to a size, request bodies rendered from `model_dump()`, and
+    injected services dropped rather than rendered.
+  - **Names that look like credentials are redacted** (`token`, `password`,
+    `secret`, `authorization`, `api_key`, `signature`, `cookie`, …), at any
+    nesting depth. `Request` and `Headers` are opaque by type — `Request` is a
+    `Mapping` over its ASGI scope, so walking it would put the raw header list
+    in the log. **If your category adds a body field holding a credential whose
+    name is not on that list, add the substring to `_SENSITIVE_NAME_PARTS`.**
+  - An **unmapped** error is re-raised, and the arguments are stashed on the
+    request scope so `app.py`'s handler logs the same detail from further out.
 - **`contracts.py`** — `Envelope[T]` / `Page[T]` / `Deleted` / `NameCheck` plus
   `ErrorEnvelope` and `ERROR_RESPONSES`. `ERROR_RESPONSES` is attached **once**
   in `openapi_v1/__init__.py::build_public_router()`, so every route on every
@@ -531,22 +643,229 @@ contract overview in **PR #363** (`docs/api-endpoints.zh-CN.md`, a Chinese
 endpoint reference by totalfrank — still open/draft as of 2026-07-29; kept here
 as reference).
 
-> ⚠️ **Path divergence — RESOLVED for `mcp` (PR #610), open for the remaining
-> stub groups.** The routers nest every non-`bots` group under
-> `/openapi/v1/bots/...` (e.g. `/openapi/v1/bots/resources`,
-> `/openapi/v1/bots/mcp`). PR #363's overview used **top-level** paths
-> (`/openapi/v1/resources`, `/openapi/v1/mcp`, …). **Ruling (mcp owner, PR #610):
-> the nested router shape stays** — the router is authoritative and the churn of
-> a re-prefix buys nothing while the surface is pre-auth. The remaining five
-> groups inherit this precedent unless their owner decides otherwise; if you do
-> want the top-level shape, change the router `prefix` and update this section in
-> the same PR. _(bots is unaffected: it is `/openapi/v1/bots` under either
-> reading, and shipped that way in #494.)_
->
-> **Mount order is load-bearing.** `build_public_router()` includes the six
-> literal sub-groups **before** the bots group, so `/openapi/v1/bots/channels`
-> resolves ahead of the `/openapi/v1/bots/{bot_id}` wildcard. Keep any new group
-> in the `_SUBGROUPS` list, above the bots router.
+## Naming the end user (`?user_id=`)
+
+**Every operation that scopes to a user takes a required `user_id` query
+parameter.** Not a body field, not a path segment — the query string, whatever
+the method, whatever the body.
+
+```text
+GET    /openapi/v1/bots/b-1?user_id=u-42
+PUT    /openapi/v1/bots/b-1?user_id=u-42        {"bot_name": "Ada"}
+DELETE /openapi/v1/bots/b-1?user_id=u-42
+POST   /openapi/v1/bots/skills/upload?bot_id=b-1&user_id=u-42    <raw zip>
+```
+
+**Why one placement.** The user id is not an attribute of any resource on this
+surface — it is *who the call is for*: the same value on every operation and the
+same meaning on a read as on a write. A request body describes the resource, so
+putting it there makes it read as a property of the thing (in a `PUT
+…/bots/{bot_id}` payload, beside `bot_name`, it looks like a field you are
+setting on the bot). A path segment *names* the resource, so
+`/bots/{bot_id}/users/{user_id}` would claim to address a user beneath a bot —
+inverting the ownership and describing something the operation does not return.
+
+Three alternatives were considered and rejected, recorded so the question is not
+reopened from scratch (`specs/2026-08-08-openapi-v1-explicit-user-id/plan.md`):
+
+| Rejected | Why |
+| --- | --- |
+| Body field on the 11 JSON-body writes | Needed a three-row exception table for the writes whose body this API does not define — the two raw-byte uploads and the free-form `PUT …/engine-config` — and split one concept across two placements on the same resource |
+| Path segment | Inverts ownership as above; the user-first form `/openapi/v1/users/{user_id}/…` is coherent but closed, because the first segment after `/openapi/v1` is the gateway's **domain selector** |
+| `X-Avernet-User-Id` header | Uniform and matches the gateway's delegation sketch (auth design §15), but makes the user transport metadata rather than an argument of the operation |
+
+**`bot_id` is untouched.** It stays in the path where it addresses a bot, and in
+the query string where it is a parameter. This change moved none of them.
+
+**What it does not change.** The named user must still be the verified caller.
+Naming anyone else is a `403` with a fixed `"Forbidden"` — the body says nothing
+about the user asked for, and two rejected ids give byte-identical responses. A
+request with no verified principal still answers `401`, exactly as before. The
+whole point is to have the contract ready for App-on-behalf-of *before* that
+caller exists; admitting it is the delegation workstream (auth design §15), and
+the single line it relaxes is the equality check in
+`openapi_v1/principal.py::require_user_id`.
+
+**Four operations take no `user_id`,** because they have no user dimension to
+scope by. They still require an authenticated caller — that is
+`require_principal`'s job — they just have no user-shaped answer to give:
+
+| Operation | Why it takes none |
+| --- | --- |
+| `GET /openapi/v1/bots/check-name` | Name uniqueness is checked across the tenant; `check_bot_name_exists` takes only the name |
+| `GET /openapi/v1/bots/mcp/servers` | Marketplace catalogue — identical for every caller in the tenant |
+| `GET /openapi/v1/bots/mcp/servers/{server_code}` | Same |
+| `GET /openapi/v1/bots/mcp/tenants` | Same |
+
+Note what is *not* on that list: `list_resources`, `create_resource`,
+`get_resource` and `update_resource` also do not use the value, but they take it
+anyway. They are user-scoped in principle and merely fail to enforce it today —
+they scope on a caller-supplied `bot_id` without checking the caller owns that
+bot, the gap `specs/2026-08-02-public-api-user-only-principal/` records. Closing
+it later should be a change to those handlers, not a required parameter added to
+four public operations.
+
+**Bot Logs is a different exclusion, and the sharpest thing to know here.**
+`GET /openapi/v1/bots/logs/traces` has taken a required `user_id` since #692 —
+but there it means *whose traces to read*, a filter a caller presenting both a
+user and an App identity may point at someone else. Here it means *whose call
+this is*, and pointing it at someone else is a 403. **Same spelling, opposite
+contract**, and the published document carries both. Do not "unify" them without
+deciding which meaning the address should have.
+
+`tests/…/openapi_v1/test_explicit_user_id.py` asserts all of the above against
+the generated document — the 56 that take it, the 4 that do not, that `user_id`
+is never a body field or a path segment, and that `bot_id`'s placement is
+unchanged — so a route that breaks the rule fails there rather than in review.
+
+---
+
+## Operating shared bots and published stages (`?owner_id=`, `?stage=`)
+
+**The engine-runtime groups are an operator console, and who may hold it is
+one rule:** the bot's **owner**, or a **collaborator at member level or
+above** — the same bar the internal device-connection applies
+(`core/engine_runtime/gate.py`, `OPERATOR_LEVEL`). Public visibility grants
+operation to **no one**: a public bot's audience converses with it over the
+messages channel; operating it stays with its team. Anyone else is answered
+**byte-identically to a bot that does not exist** (the masked 404) — not a
+403, which keeps its single `user_id`-mismatch meaning. A failed collaborator
+lookup refuses (fail closed). Both ids are logged at the refusal; the
+response carries neither.
+
+Two optional query parameters name the target, following the same placement
+rule as `user_id` (query string, never a body field or a path segment):
+
+```text
+GET /openapi/v1/bots/sessions/b-1?user_id=u-collab&owner_id=u-owner            collaborator, team bot
+GET /openapi/v1/bots/engine/b-1/status?user_id=u-owner&stage=online            owner, live runtime
+GET /openapi/v1/bots/connection/b-1?user_id=u-collab&owner_id=u-owner&stage=verify
+```
+
+- **`owner_id`** — the owner of the bot the request addresses. Defaults to
+  the caller, so operating one's own bot names nothing extra and **every
+  request valid before this change behaves byte-for-byte the same**.
+- **`stage`** — which runtime the request addresses: `draft` (default — the
+  bot's own workspace, the only runtime a personal bot has), `verify`, or
+  `online`. A published stage is live per the rule in
+  `core/engine_runtime/stage.py`, shared with cron's runtime targeting:
+  `online` while the newest publish record is at `SUCCESS`; `verify` while a
+  record validates, or through the promoted record's **retained** verify
+  binding while it stays ACTIVE. A stage with no live runtime — including a
+  published stage named on a personal bot — is `409` `"No live runtime at
+  the requested stage"`, never a fallback to another stage's binding.
+  (`eval` has no long-lived runtime and is not addressable.)
+
+**What an operator sees is device-wide, by documented contract.** The
+engine's session collection is not scoped per caller — the engine ports drop
+the `user_id` filter — so an admitted operator sees every session on the
+addressed runtime, including ones end users' chats created, exactly as the
+internal workbench already shows an owner. Sessions created through this
+surface stamp the acting caller, so they stay attributable. One caveat: a
+multi-instance provider can fan a published stage out to several device
+instances; a stage-addressed answer describes the addressed binding's current
+instance, not the fleet (cron's fan-out stays internal).
+
+Rejected alternatives, recorded so the question is not reopened
+(`specs/2026-08-09-openapi-v1-access-expansion/plan.md`): per-caller session
+scoping (the engine ignores per-user filters, and a backend-owned caller→
+session index rebuilds the chat product inside an operator console);
+admitting public-bot callers as operators (internal reachability is not
+public authorization); `stage` as a path segment; a required `owner_id`.
+
+Deferred, not lost — filed as issues: collaborator access to the data
+categories ([#906](https://github.com/inclusionAI/Avernet/issues/906),
+[#907](https://github.com/inclusionAI/Avernet/issues/907)), routines' stage
+pin ([#908](https://github.com/inclusionAI/Avernet/issues/908)), publish
+lifecycle ([#909](https://github.com/inclusionAI/Avernet/issues/909)),
+visibility/collaborator management
+([#910](https://github.com/inclusionAI/Avernet/issues/910)), delegation
+([#911](https://github.com/inclusionAI/Avernet/issues/911)). The skills
+group's `owner_entity_id` locator predates `owner_id` and should be
+reconciled to it before skills' pending release (spec Open Question 1).
+
+`tests/…/openapi_v1/engine_runtime/test_operator_access.py` sweeps the
+operator matrix across all sixteen operations;
+`…/test_stage_addressing.py` pins the stage behaviour and asserts the two
+parameters sit on exactly the sixteen, optional, in the query;
+`tests/community/core/engine_runtime/test_stage.py` pins the liveness rule.
+
+---
+
+## Addressing rule
+
+**Every operation is addressed `/openapi/v1/bots/<component>/…`.** The
+component's **literal** name comes first; a bot-scoped operation takes
+`{bot_id}` as the first segment *after* it — never before it, and never with a
+`/bot/` segment in between.
+
+```text
+/openapi/v1/bots/<component>            # the component's own collection
+/openapi/v1/bots/<component>/{bot_id}   # …scoped to one bot
+```
+
+The `bots` component is the one exception, and only because it *is* the
+component the base names: it owns `/openapi/v1/bots` and
+`/openapi/v1/bots/{bot_id}`, and its own sub-resources (`/status`, `/passport`,
+`/restart`, `/auth-status`, `/engine-config`) hang off the bot record beneath
+it. Those are properties of the bot, not other components borrowing the bot's
+address.
+
+**Why.** Three components used to break this — `identity` carried a redundant
+`/bot/` segment, and `connection`/`engine`/`approvals`/`sessions`/`models`/
+`skills` put `{bot_id}` *before* their own name. That made a router file unable
+to state its own address (a reader of `engine_runtime/sessions/router.py` could
+not tell whether `/openapi/v1/bots/{bot_id}/sessions` was served there or by a
+`{bot_id}`-shaped route in the bots component), and it blocked a second owner
+under the same base — the reason BCS moved its own control plane to
+`/openapi/v1/bots/collaboration/{bot_id}`
+(`src/bcs/docs/plans/2026-08-03-bcn-collaboration-paths-design.md`). Normalized
+in the `2026-08-03-openapi-v1-path-normalization` spec; a test
+(`tests/…/openapi_v1/test_path_convention.py`) asserts the rule against the
+generated document, so a route that breaks it fails there rather than in review.
+
+**Reserved names.** Because the `bots` component keeps the bare
+`/openapi/v1/bots/{bot_id}`, a bot whose id equals a component name is
+unreachable at that address. The set is fixed, and the same test asserts this
+list still equals the literals the routes actually publish:
+
+<!-- reserved-component-names -->
+```text
+approvals  authorized  ceiling  check-name  connection  engine  identity
+loadtest  logs  mcp  models  resources  routines  sessions  skills
+```
+
+**Reserved ahead of their routes.** A second, separate list — names claimed here
+before any route publishes them. They are *not* reserved for the reason above:
+no route serves them, so nothing is currently unreachable at those addresses.
+They are reserved because something else already occupies the address and a
+component is intended there, so a bot id must not be allowed to take it in the
+meantime.
+
+<!-- reserved-component-names-unrouted -->
+```text
+messages
+```
+
+- `messages` — the gateway serves the bot's chat WebSocket at
+  `/openapi/v1/bots/messages/ws/**`, relayed to the engine proxy
+  (`src/gateway/configs/application.yaml`). That claim is on the **socket plane
+  only**, so an HTTP request to the address still reaches this service; the name
+  is held for the HTTP endpoint intended there. See
+  `src/gateway/specs/2026-08-03-gateway-path-specific-domain-routing/`.
+
+A name in this list must move to the routed list above the moment a route
+publishes it — the convention test asserts the two lists stay disjoint, so
+adding the route without moving the name fails there rather than in review.
+
+> **Mount order is load-bearing.** `build_public_router()` includes the literal
+> sub-groups **before** the bots group, so `/openapi/v1/bots/resources` resolves
+> ahead of the `/openapi/v1/bots/{bot_id}` wildcard. Only the components that
+> serve a single-segment collection root (`resources`, `routines`, plus the
+> bots-owned `check-name`/`ceiling`) actually depend on it now — every other
+> component is reachable only at two segments or more — but keep any new group
+> in the `_SUBGROUPS` list, above the bots router, rather than reasoning about
+> the exception each time.
 
 All responses use the `Envelope[T]` / `Page[T]` shapes from
 `openapi_v1/contracts.py` unless noted (binary streams bypass the envelope).
@@ -583,19 +902,16 @@ registry widened to include the bot's own active engine; update's duplicate-name
 check compares owner **and** `bot_id` together; deleting the default bot raises
 `BotOperationNotAllowedError` (internal response shape unchanged, public → 409)._
 
-### 🟦 totalfrank · P2 — channels (6 endpoints) · `openapi_v1/channels/router.py`
-DingTalk (`dingding`) config CRUD + status toggle.
-| Method | Path | Purpose | Success |
-|---|---|---|---|
-| GET | `/openapi/v1/bots/channels` | List channels (optional `bot_id`) | `Envelope[list[Channel]]` |
-| POST | `/openapi/v1/bots/channels` | Create channel (starts inactive) | `201 Envelope[Channel]` |
-| GET | `/openapi/v1/bots/channels/{channel_id}` | Get channel | `Envelope[Channel]` |
-| PUT | `/openapi/v1/bots/channels/{channel_id}` | Full update | `Envelope[Channel]` |
-| PATCH | `/openapi/v1/bots/channels/{channel_id}` | Toggle active/inactive | `Envelope[Channel]` |
-| DELETE | `/openapi/v1/bots/channels/{channel_id}` | Delete | `Envelope[Deleted]` |
+### ❌ channels — **REMOVED (2026-08-03)**
+The component is deleted: router, schemas, package, mounted entry and its two
+published paths. It was never implemented, and unlike an unwritten component it
+was **published** — an integrator reading the served document saw a channels API
+and got a 500 on every call. Parking it kept that cost with none of the benefit.
 
-_Note: the stub returns `Envelope[list[Channel]]` for list (not `Page`); PR #363
-showed `Page[Channel]`. Confirm which you want when you wire it._
+Nothing was lost that a re-add would need: the six operations (DingTalk config
+CRUD + a status toggle) are recorded above in the `2026-07-27` history and in the
+PR that removed them. If channels come back, they come back as a designed
+component, not as a resurrected stub.
 
 ### ✅ totalfrank · P1 — mcp (6 endpoints) · `openapi_v1/mcp/router.py` — **IMPLEMENTED (PR #610)**
 Marketplace + tenants + the caller's unified per-server config. All 6 wired to
@@ -637,31 +953,32 @@ _Note: upload is finalized as a raw `application/octet-stream` body (not
 multipart). This diverges from PR #363's multipart summary — implementation
 follows the route; switching to multipart would be a contract change._
 
-### 🟪 totalfrank + lucas-xzp · P3 — skills, co-owned (7 endpoints: 5 in stub + 2 proposed ★) · `openapi_v1/skills/router.py`
-Catalog at `/openapi/v1/bots/skills`; a bot's installed skills are a bot
-sub-resource.
+### 🟪 totalfrank + lucas-xzp · P3 — skills, co-owned (six ratified operations) · `openapi_v1/skills/router.py`
 
-> **Co-owned — the trickiest category.** Skills has a three-layer lifecycle
-> (global **upload** → per-bot **install** → per-bot **enable/disable**), two ★
-> endpoints not yet ratified into the stubs, and an open question on whether the
-> richer backend skill-set model gets promoted to a first-class concept. Because
-> of that, **both** own it. Agree a shared sub-plan first — e.g. split
-> catalog/upload vs. per-bot install/lifecycle — and give it its own SDD before
-> writing code. Do it after your P1/P2 slices.
+The public surface is a Bot-owned `local://` Local Skill lifecycle. It is not a
+catalog, marketplace, Git/Center installation surface, or a general Skill Set
+API. The collection's optional `active` filter is the only Active-list
+mechanism. Every operation requires a verified principal, is owner/Bot scoped,
+and uses the standard `Envelope` / `Page` contract.
 
-The **Status** column marks whether each endpoint is already in the router stub
-(`in stub`) or a proposed addition from PR #363 (`★ proposed` — not in the stubs
-yet; ratify with totalfrank before implementing).
+| Method | Path | Purpose | Success |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/skills` | List exact Bot-owned Local Skill metadata (`bot_id`, optional owner locator, `active`, `keyword`, paged) | `Envelope[Page[Skill]]` |
+| POST | `/openapi/v1/bots/skills/upload` | Create or safely replace one raw `application/zip` Local Skill package | `201 Envelope[SkillUpload]` / `200` replacement |
+| GET | `/openapi/v1/bots/skills/{skill_id}` | Read public metadata for one deployment-wide Skill ID | `Envelope[Skill]` |
+| POST | `/openapi/v1/bots/skills/{skill_id}/activate` | Set desired Active state and synchronously reconcile runtime | `Envelope[SkillState]` |
+| POST | `/openapi/v1/bots/skills/{skill_id}/deactivate` | Set desired Inactive state and synchronously reconcile runtime | `Envelope[SkillState]` |
+| DELETE | `/openapi/v1/bots/skills/{skill_id}` | Recoverably delete one Inactive Local Skill | `Envelope[Deleted]` |
 
-| Method | Path | Purpose | Success | Status |
-|---|---|---|---|---|
-| GET | `/openapi/v1/bots/skills` | Skill catalog (`keyword`, paged) | `Envelope[Page[Skill]]` | in stub |
-| GET | `/openapi/v1/bots/skills/{skill_id}` | Skill detail | `Envelope[SkillDetail]` | in stub |
-| POST ★ | `/openapi/v1/skills/upload` | Upload a custom skill (global, owned by caller) | `Envelope[Skill]` | ★ proposed |
-| GET | `/openapi/v1/bots/{bot_id}/skills` | List a bot's installed skills | `Envelope[list[BotSkill]]` | in stub |
-| POST | `/openapi/v1/bots/{bot_id}/skills` | Install a skill on a bot (default enabled) | `201 Envelope[BotSkill]` | in stub |
-| PATCH ★ | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | Enable/disable an installed skill (`status`) | `Envelope[BotSkill]` | ★ proposed |
-| DELETE | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | Remove (unbind) a skill from a bot | `Envelope[Deleted]` | in stub |
+`413101` is documented only on raw ZIP upload. The stable Local Skill business
+subcodes are `400101`, `404000`, `409101`–`409104`, `413101`, `502101`, and
+`502102`; existing public categories retain their `xxx000` codes. Generated
+OpenAPI is contract-tested to expose exactly these six operations.
+
+**Release gate — do not mark Track B complete yet.** The cleanup-work table DDL
+from #725 must be applied and verified before application rollout, and the real
+owner/collaborator acceptance still needs approved pre-production credentials
+and Bot containers. See the [English runbook and rollback procedure](skills-track-b-preprod-acceptance.md).
 
 ### 🟩 lucas-xzp · P1 — routines (7 endpoints) · `openapi_v1/routines/router.py`
 Scheduled/triggered agent tasks (the former "cron"); trigger is a nested object.
@@ -680,9 +997,68 @@ Read/write a bot's identity markdown files (RULES, SOUL, …), `file_type` is an
 enum whitelist. No own Track A stage — scoped by bots isolation (Stage 1 ✅).
 | Method | Path | Purpose | Success |
 |---|---|---|---|
-| GET | `/openapi/v1/bots/identity/bot/{bot_id}` | List identity files + whether each exists | `Envelope[IdentityFileList]` |
-| GET | `/openapi/v1/bots/identity/bot/{bot_id}/{file_type}` | Read one identity file | `Envelope[IdentityFile]` |
-| PUT | `/openapi/v1/bots/identity/bot/{bot_id}/{file_type}` | Overwrite one identity file (`content`) | `Envelope[IdentityFileRef]` |
+| GET | `/openapi/v1/bots/identity/{bot_id}` | List identity files + whether each exists | `Envelope[IdentityFileList]` |
+| GET | `/openapi/v1/bots/identity/{bot_id}/{file_type}` | Read one identity file | `Envelope[IdentityFile]` |
+| PUT | `/openapi/v1/bots/identity/{bot_id}/{file_type}` | Overwrite one identity file (`content`) | `Envelope[IdentityFileRef]` |
+
+### ✅ loadtest (2 endpoints) · `openapi_v1/loadtest/router.py` — **IMPLEMENTED**
+
+Two synthetic endpoints that do nothing, so a load run can measure what the
+*path* costs — gateway authentication and forwarding, this service's middleware
+stack, the framework's request handling — without a database round trip, an
+engine call, or a bot's state in the same number. Not a product surface: they
+are the baseline every other endpoint's number is read against.
+
+| Method | Path | Purpose | Success |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/loadtest/hello` | Answer the constant `hello world` | `Envelope[HelloWorld]` (`data.message == "hello world"`) |
+| WEBSOCKET | `/openapi/v1/bots/loadtest/ws/echo` | Send every received frame straight back | — (see below) |
+
+**Authentication — the same as every other operation on this surface.** Both
+declare `require_principal`, so a caller with no verified `X-Avernet-Principal`
+is refused before the handler runs: `401` with the standard `ErrorEnvelope` on
+the HTTP endpoint, and close code `1008` on the socket — the handshake is
+refused before the socket is accepted, which a client sees as an HTTP `403`.
+Through the gateway both inherit `user: required` from `/openapi/v1/bots/**`;
+neither is exempted in `route_security`. A measurement taken without the auth
+would describe a path no caller can take, which is why they are not exempt.
+
+**Not user-scoped.** Neither takes `?user_id=` — they read and write nothing, so
+there is no scope for it to name. See "Naming the end user" above; the HTTP one
+is recorded in `test_explicit_user_id.py` alongside the four catalogue reads
+that are exempt for the same reason, and it documents no `403`.
+
+**The socket's contract**, written out here because a WebSocket has no OpenAPI
+representation and therefore appears in **no** generated artifact — this table
+is the whole of it, not a summary of something machine-readable:
+
+- **Frames.** Text and binary are both accepted, and each is echoed back as the
+  same type it arrived as. The payload is returned byte for byte: nothing is
+  trimmed, re-encoded, parsed, or interpreted, so a driver picks its own payload
+  shape.
+- **Ordering.** One frame in, one frame out, in order. No batching, no coalescing,
+  and no server-initiated frames — the socket says nothing the client did not
+  say first.
+- **Disconnect.** The client closing ends the connection; the server does not
+  close first and sends no close frame of its own. A dropped transport is the
+  same outcome. Neither is an error, and neither is logged as one.
+- **Lifetime.** No idle timeout, no ping/pong, no message-count or size limit
+  beyond whatever the ASGI server and any L7 hop impose.
+
+**Routing.** The HTTP endpoint reaches the backend through the `bots` domain
+with no gateway change. The socket needs its own domain — `bots` declares no
+`protocols` and so serves HTTP only — which is `bots-loadtest-ws` in
+`src/gateway/configs/application.yaml`: socket-only, forwarded verbatim to the
+backend, no rewrite. The `ws` segment is what that claim is pinned to, following
+`/openapi/v1/bots/messages/ws/**`, so an HTTP endpoint added under `loadtest`
+later falls outside it by construction.
+
+> **Known gap.** `AvernetTenantMiddleware` and the public access log both return
+> early on a non-HTTP scope, so the socket runs under the **default** tenant and
+> writes no access line. Harmless here — it reads and writes nothing — and the
+> first thing to fix before any socket route on this surface touches data, since
+> a tenant-scoped read under the default tenant is a data-isolation failure
+> rather than a missing log.
 
 ### ⬜ unassigned · Track C — engine runtime (16 endpoints)
 Not a Track B category — these wrap the **engine adapter** on the bot's device
@@ -692,17 +1068,17 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 
 | Group | Endpoints | Public paths |
 |---|---|---|
-| sessions | 7 | `/openapi/v1/bots/{bot_id}/sessions…` — personal bots only |
-| engine | 3 | `…/engine/{status,capabilities,available}` |
-| models | 2 | `…/models`, `…/models/{model_id}` |
-| approvals | 3 | `…/approvals/mode` (GET/PUT), `…/approvals/modes` |
-| connection | 1 | `…/connection` — complete WS URL, replaces `get_device_connection` |
+| sessions | 7 | `/openapi/v1/bots/sessions/{bot_id}…` — owner/collaborator operators |
+| engine | 3 | `/openapi/v1/bots/engine/{bot_id}/{status,capabilities,available}` |
+| models | 2 | `/openapi/v1/bots/models/{bot_id}`, `…/{bot_id}/{model_id}` |
+| approvals | 3 | `/openapi/v1/bots/approvals/{bot_id}/mode` (GET/PUT), `…/modes` |
+| connection | 1 | `/openapi/v1/bots/connection/{bot_id}` — complete WS URL, replaces `get_device_connection` |
 
 ---
 
 ## Definition of done (whole `/openapi/v1` effort)
 
-1. **Track A:** every data category (bots, resources, channels, skills, mcp,
+1. **Track A:** every data category (bots, resources, skills, mcp,
    routines) carries `avernet_tenant` and is guarded, Stage-1 test shape green.
    — _2 of 6 (bots ✅, mcp ✅ PR #564)._
 2. Internal API unchanged throughout (no `to_dict()` leaks; internal suites
@@ -816,17 +1192,82 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 
 ## Changelog (append a dated line whenever you move the board)
 
+- **2026-08-09** — **The engine-runtime groups serve shared bots and published
+  stages.** The operator rule replaces the shared-bot refusal: a bot's owner
+  and its member-level collaborators operate it — public personal bots,
+  collaborated bots, and a service bot's verify/online runtimes included —
+  via two optional query parameters (`owner_id`, defaulting to the caller;
+  `stage`, defaulting to `draft`) whose defaults keep every prior request
+  byte-for-byte identical. A non-operator is answered identically to an
+  absent bot; a dead stage is `409` `"No live runtime at the requested
+  stage"`; the 501 now means only "bot type not served". `draft_device`
+  became `stage` in the relay (required, no default), the stage→binding rule
+  lives once in `core/engine_runtime/stage.py` (shared with the connection
+  service, aligned with cron's retained-verify rule), and `sharing.py` /
+  `BotFacts.is_shared` retired. See **Operating shared bots and published
+  stages** above and `specs/2026-08-09-openapi-v1-access-expansion/`.
+  Board moved: sessions row note. Follow-ups filed as #906–#911.
+
+- **2026-08-09 (retroactive, recording PR #880, merged 2026-08-07)** — **Draft
+  service bots were served across the public surface, draft device always.**
+  Landed without a spec directory or a changelog entry; recorded here so the
+  doc's history is whole. It widened the Track C gate from "private personal
+  bots only" to "unshared personal bots + a service bot's unshared
+  pre-publication draft", with every gated forward pinned `draft_device=True`
+  — the state the 2026-08-09 access expansion above then replaced. Its
+  docstrings' `publish_bot_id + "pub" + version` naming-scheme claim was
+  factually wrong (the code writes `publish_bot_id = bot_id`; the real
+  draft/published separation is binding storage — `ac_bots.binding_id` vs
+  `ac_bot_publish.ext.binding.{verify,online}`) and was corrected by the
+  access expansion.
+
+- **2026-08-09** — **A `loadtest` component was added, and it is the surface's
+  first WebSocket.** Two synthetic endpoints — `GET …/loadtest/hello` answering a
+  constant, and `WEBSOCKET …/loadtest/ws/echo` echoing its input — so a load run
+  can measure the shared path without a service call in the number. Both require
+  `require_principal` like everything else here; neither is user-scoped, so the
+  HTTP one joins the four operations with no user dimension. To make one
+  dependency serve both planes, `require_principal` and `resolve_caller` now take
+  an `HTTPConnection` rather than a `Request`, and a handshake with no verified
+  caller is refused with close code `1008` instead of a `401` envelope it cannot
+  carry — **HTTP behaviour is unchanged**. Because a WebSocket appears in no
+  generated artifact, the socket's full contract is written out under
+  **Endpoints per component** above rather than published; the gateway serves it
+  through a socket-only `bots-loadtest-ws` domain, and the tenant/access-log gap
+  on the socket plane is recorded there too.
+
+- **2026-08-09** — **The public surface now names its end user explicitly.** 56
+  of the 65 operations take a required `user_id` query parameter instead of
+  deriving the owner from the verified principal; naming another user is a
+  `403`. Four operations with no user dimension (`check-name`, the three MCP
+  catalogue reads) take none, and Bot Logs is untouched — its own `user_id`
+  means the opposite thing. `bot_id` moved nowhere. Nothing about who may call
+  what changed: this readies the contract for App-on-behalf-of, it does not
+  admit it. See **Naming the end user** above and
+  `specs/2026-08-08-openapi-v1-explicit-user-id/`.
+
+- **2026-08-04** — **Skills Track B integration/release gate implementation and
+  CI are complete, but Track B is not release-complete.** The served OpenAPI is
+  now locked to exactly six Bot-owned Local Skill operations; obsolete
+  `{bot_id}/skills` install/uninstall stubs were removed. Assembled real-guard
+  tests prove another tenant cannot list, read, upload/replace, activate,
+  deactivate, or delete the target tenant's Local Skill. The #725
+  `ac_local_skill_cleanup_work` deploy-before-code DDL remains pending, and the
+  owner plus authorized collaborator pre-production lifecycle remains **PRE-PROD
+  PENDING**. The executable acceptance, verification, and rollback checklist is
+  `skills-track-b-preprod-acceptance.md`.
+
 - **2026-07-27** — Handoff README created. Track A Stage 1 (bots + reusable
   mechanism) complete and in **PR #456**, awaiting approval. Track B not
   started.
 - **2026-07-27** — Work split assigned by **vertical slice** (no cross-person
-  blocking): **totalfrank** = bots, channels, mcp; **lucas-xzp** = resources,
+  blocking): **totalfrank** = bots, mcp; **lucas-xzp** = resources,
   skills, routines, identity. Sequencing decision resolved → per-category
   vertical slices. Added **Endpoints per component** checklists (from the stub
   routers + PR #363), flagged the `/openapi/v1/bots/...` vs top-level path
   divergence and the two proposed ★ skills endpoints.
 - **2026-07-27** — Added **priority tiers**: P1 = bots, mcp, resources, routines;
-  P2 = channels, identity; P3 = skills. **Skills is now co-owned** by totalfrank
+  P2 = identity; P3 = skills. **Skills is now co-owned** by totalfrank
   + lucas-xzp (its Track A stage and its endpoints), being the most involved
   category. Priority columns added to both status boards; per-component headers
   tagged with tier.
@@ -982,6 +1423,37 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   Full inventory, per-endpoint mapping and the ruling on every non-wrapped
   engine route: **[`engine-surface.md`](engine-surface.md)**. Board moved: Track
   C section added (0 of 6 groups), DoD item 8 added. **Owners still unassigned.**
+- **2026-08-10** — **Identity admission widened: an application may act for a
+  user who authorized it** (#950). A registered application calling with its own
+  credential and **no human on the wire** is now admitted on the operations
+  placed in an admission group, and reaches exactly what the delegating user has
+  authorized it for. Four things worth knowing:
+  1. **The bound is live, not a snapshot.** Nothing about the delegator's
+     authority is stored in the grant, so every request is re-adjudicated by the
+     same gates that person faces. Removing them from a bot ends the
+     application's access on its next request, with the grant row untouched and
+     nothing to clean up. That property is what makes the widening safe, and it
+     has a test of its own.
+  2. **The end-user guard moved, again, and for the mirror-image reason.** It
+     could not stay in `verify_principal_token`: that component is
+     transport-agnostic and runs before routing, and admission is now a
+     *per-operation* question. It sits in `require_principal`, which every public
+     route already declares, and consults `admission.py`. The property that
+     mattered survives — a route inherits the refusal by saying nothing — and
+     gets stronger: an operation absent from the table is refused, so a new route
+     is refused by *omission* rather than by remembering not to opt in.
+  3. **`user_id` stopped being compared and started being authorized.** For a
+     person it still must name themselves (403 otherwise). For an application
+     there is no second id to compare with, so it is checked against the grant —
+     which is the branch `require_user_id`'s docstring predicted when the
+     parameter was introduced. No handler, schema or path changed.
+  4. **Refusals stay indistinguishable.** An application reaching an operation it
+     may not gets the same `401` an unauthenticated caller gets; one naming a bot
+     it holds no grant for gets the same `404` a nonexistent bot gets, byte for
+     byte. Anything finer is an enumeration oracle.
+  `bot` / `access_key` callers remain refused outright — neither can be
+  authorized against a delegation. SDD:
+  `specs/2026-08-10-openapi-v1-app-only-caller/`.
 - **2026-08-02** — **Identity admission decided: `user` only.** `verify_principal_token`
   now refuses an identity set that names no end user, so `bot` / `app` /
   `access_key` callers answer `401` **by design** rather than as a side effect of
@@ -1017,3 +1489,101 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   cross-repo test pins that contract, so a rename on either side leaves both
   suites green and 401s production. Full suite 10204 passed / 3 skipped. SDD:
   `src/backend/specs/2026-08-02-public-api-user-only-principal/`.
+- **2026-08-03** — **`/openapi/v1/bots` path normalization + channels removed.**
+  Every component's routes now live under `/openapi/v1/bots/<component>/…` with
+  `{bot_id}` as the first segment *inside* the component — see the new
+  **Addressing rule** section, which is now the thing to read before adding a
+  component. Three shapes were in use and only one was the intended one:
+  `identity` carried a redundant `/bot/` segment, and `connection`, `engine`,
+  `approvals`, `sessions`, `models` and `skills` put `{bot_id}` ahead of their
+  own name, which left those router files unable to state their own address and
+  left no room for a second owner under the shared base (the collision BCS hit
+  from the other side and solved the same way). `skills` also gained a literal
+  `catalog` segment, because its two resource families would otherwise both want
+  `/openapi/v1/bots/skills/{…}`. `channels` was deleted rather than parked.
+  41 published paths, down from 43. No handler, schema, status code, auth rule
+  or tenant-scoping rule changed — addresses only, and **no compatibility
+  aliases**: the surface has no reachable external caller yet, so there was no
+  contract to preserve. The gateway's pinned `bots.openapi.json` was regenerated
+  through the real compat gate (`--allow-breaking`); it had been stale since
+  Track C, carrying 32 paths against the backend's 43. A new test,
+  `tests/…/openapi_v1/test_path_convention.py`, asserts the rule — and this
+  file's reserved-name list — against the generated document, so both fail here
+  rather than in review. SDD:
+  `src/backend/specs/2026-08-03-openapi-v1-path-normalization/`.
+- **2026-08-04** — **Track B Skills contract finalized at six endpoints.** Removed
+  the separate `/skills/active` route in favor of the collection's optional
+  `active` filter. Pinned Bot-scoped raw ZIP upload, same-name replacement,
+  owner-versus-collaborator semantics, offline reads, ready-Bot mutation gating,
+  and compensation on runtime synchronization failure. Skill Center publication
+  and reusable tenant-level Skills remain a later contract.
+- **2026-08-05** — **`tenant` removed from the `user` principal; a user-only
+  caller is an internal caller.** The public surface was answering `401` on every
+  request: the gateway declared `UserPrincipal.tenant` as `str | None` and filled
+  it from `authn.google.default_tenant`, a config key that appears nowhere in
+  `configs/application.yaml`, so it signed `tenant: null` — and this side
+  declared the field required, so the payload never parsed. The fix removes the
+  field on both halves rather than making it required, because the field was
+  asserting something no user credential proves.
+  1. **A tenant is a property of the calling program, not of a person.** `app`,
+     `bot` and `access_key` are each *registered* to a tenant, and their
+     principals assert that registration. A Google token proves a `sub` and an
+     email; the tenant that used to ride alongside it was a deployment default
+     dressed up as an authenticated fact.
+  2. **A set that asserts no tenant resolves to `DEFAULT_AVERNET_TENANT`.**
+     `VerifiedCaller.tenant` reads only the machine principals, so a user-only
+     caller — a first-party human on our own frontend — scopes to `teamclaw`,
+     the same tenant every non-public path in this component already resolves
+     to. `_reject_contradictory_tenant` likewise vets only what was claimed.
+  3. **The internal-tenant guard got sharper, not weaker.** The fallback is
+     decided *here*, from the absence of a claim; it is never a value the token
+     supplied. A token that names `teamclaw` is still refused, and a `tenant`
+     smuggled onto a `user` entry is dropped by the DTO rather than honoured —
+     both pinned by tests. Nobody can talk their way into the internal tenant.
+
+     _Superseded 2026-08-05:_ the first of those two — refusing a token that
+     names `teamclaw` — was removed once a `teamclaw` tenant was registered on
+     the gateway as a first-party path onto this surface. See
+     `core/gateway_principal/README.md` § Change impact for what still holds the
+     boundary. The second half stands: a `tenant` on a `user` entry is still
+     dropped, so a caller cannot assert a scope the gateway did not sign.
+  4. ⚠️ **What this leaves open.** `route_security` declares `user: required`
+     and nothing else for the whole public surface, so *every* public request is
+     now a user-only set and scopes to `teamclaw`. Nothing gates which Google
+     account that is — `AuthPlugin.is_allowed` exists in the gateway SPI and no
+     authn strategy calls it. Before this surface serves real data, either wire
+     that whitelist up or have a route require an identity carrying a registered
+     tenant. Tests that meant to exercise external-tenant isolation now mint
+     `user` + `app` so they keep testing isolation instead of the internal
+     default.
+
+  Backend suite 10535 passed / 3 skipped; gateway suite green except the
+  pre-existing markdown-formatting and live-server failures. Gateway half:
+  `spi/authn/_models.py`, the `google` strategy (its `default_tenant` argument
+  and DI wiring are gone), and a dated amendment in
+  `src/gateway/docs/2026-07-21-auth-design.md` §4.6, whose original text made
+  `tenant` mandatory on every principal.
+- **2026-08-05** — **Every error this surface converts now leaves a log record.**
+  `@envelope_errors` mapped a domain error to its status and fixed message and
+  logged *nothing*, so a caller's report of a 404 or a 409 could not be traced to
+  a raise site: the fixed-message rule keeps the diagnosis out of the response,
+  and there was nowhere else it went. The decorator now emits one line per
+  failure — exception type and its internal message, method, concrete path, route
+  template, and the handler's own arguments — with the traceback attached.
+  4xx logs at warning, 5xx at error; both carry the trace, because these errors
+  are raised *inside* a handler, so the trace is a short chain of our own frames,
+  not an ASGI stack. Routine unauthenticated traffic is unaffected: the auth
+  seam raises in a dependency, which `app.py` still answers and logs without one.
+  New `adapters/http/error_logging.py` owns the capture — lazy (a successful
+  request pays nothing), bounded (strings, collections and nesting all capped;
+  bytes reduced to a size), and redacting by *name* at any depth, with `Request`
+  and `Headers` opaque by type since `Request` is a `Mapping` over its ASGI scope
+  and walking it would log the raw `Authorization` header. Unmapped errors are
+  still re-raised, with the arguments stashed on the request scope so `app.py`
+  logs the same detail from further out; the `DomainError` handler additionally
+  logs 4xx (one compact line, no traceback) where it previously logged nothing,
+  and the public 422 handler now records which field failed validation — `loc` /
+  `type` / `msg` only, never the caller's `input` value. **If your category adds
+  a body field holding a credential, add its name substring to
+  `_SENSITIVE_NAME_PARTS`.** No status code, response body, or envelope shape
+  changed.

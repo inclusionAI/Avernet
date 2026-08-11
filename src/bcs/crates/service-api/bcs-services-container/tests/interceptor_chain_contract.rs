@@ -99,6 +99,7 @@ fn sample_message() -> OutboundMessage {
             history_meta: None,
             metadata: None,
             run_id: String::new(),
+            attachments: None,
         },
     }
 }

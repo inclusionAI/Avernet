@@ -18,7 +18,7 @@ from agentclaw.community.api.caller_iam_token_service import (
 from agentclaw.community.core.bot_management.services.teclaw_publish_task_handler import (
     TeclawPublishTaskLifecycle,
 )
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.baas_device_accessor import (
     BaasDeviceAccessor,
 )

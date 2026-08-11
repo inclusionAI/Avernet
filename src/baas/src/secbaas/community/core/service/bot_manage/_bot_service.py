@@ -117,6 +117,7 @@ class DefaultBotCrudService(BotCrudService):
         source_bot_id: int,
         new_config: BotConfig | None = None,
         new_name: str | None = None,
+        new_template_uuid: str | None = None,
         operator: str = "system",
     ) -> BotResponse:
         """Create a new bot record by cloning an existing one with PENDING status.
@@ -130,6 +131,7 @@ class DefaultBotCrudService(BotCrudService):
             source_bot_id: The existing bot record to clone
             new_config: Optional new BotConfig for the cloned record
             new_name: Optional new name for the cloned record
+            new_template_uuid: Optional template UUID for the cloned record
             operator: User performing the operation
 
         Returns:
@@ -156,6 +158,7 @@ class DefaultBotCrudService(BotCrudService):
             status=BotStatus.PENDING.value,
             extra_config=extra_config,
             name=new_name,
+            template_uuid=new_template_uuid,
             modifier=operator,
         )
 

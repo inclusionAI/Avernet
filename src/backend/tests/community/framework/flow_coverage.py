@@ -25,6 +25,15 @@ def covered_modules(flows: list[FlowCase]) -> set[str]:
     return out
 
 
+# Structural packages under ``core/`` that are not business modules and so are
+# not part of the E3 denominator. ``repository`` holds the Protocol contracts and
+# the ORM bodies shared by every business module; it carries no flow of its own,
+# and its bodies are exercised by the flows of the modules that consume it. It is
+# excluded here rather than added to SINGLEBOX_E2E_EXEMPT because exempt means
+# "not covered yet" — these ARE covered, just not nameable as a `covers` entry.
+_STRUCTURAL_NON_BUSINESS: frozenset[str] = frozenset({"repository"})
+
+
 def all_core_modules() -> set[str]:
     """Top-level business module package names under agentclaw/core/."""
     regular_packages = {
@@ -40,7 +49,7 @@ def all_core_modules() -> set[str]:
         and not child.name.startswith("_")
         and child.name not in regular_packages
     }
-    return regular_packages | namespace_packages
+    return (regular_packages | namespace_packages) - _STRUCTURAL_NON_BUSINESS
 
 
 # First pass: all core modules exempt (no real e2e flows exist yet, those
@@ -102,8 +111,31 @@ _ENGINE_RUNTIME_EXEMPT_REASON = (
     "is the same event that unblocks the whole track's definition of done."
 )
 
+_BOT_APP_GRANT_EXEMPT_REASON = (
+    "TEMPORARY, and blocked on the same single thing as "
+    "_GATEWAY_PRINCIPAL_EXEMPT_REASON above rather than on anything in this "
+    "module. All four of its routes are /openapi/v1 and require a signed "
+    "principal; two of them require an App identity as well, which only a "
+    "gateway can mint. Singlebox runs the backend without a gateway and ships "
+    "no local signing key, so a flow here could assert 401s and nothing else "
+    "— and for the grant and application-view routes it could not even "
+    "construct the App half of the request. Following the auth workstream's "
+    "ruling that tests do not forge tokens against a shared key, rather than "
+    "inventing a second answer for this module. Covered meanwhile by "
+    "tests/community/core/bot_app_grant/test_grant_service.py (service and "
+    "repository over a real database, including the grant/withdraw/grant/"
+    "withdraw cycle and both scoping dimensions of the application's view), "
+    "tests/community/adapters/http/openapi_v1/authorized_apps/test_router.py "
+    "(all four operations end to end), the principal-seam assertions in "
+    "test_principal_seam.py, and src/gateway/tests/unit/core/authn/"
+    "test_route_security.py against the shipped config. Drain this together "
+    "with _GATEWAY_PRINCIPAL_EXEMPT_REASON — one gateway in the box unblocks "
+    "both."
+)
+
 SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "aicoding": _EXEMPT_REASON,
+    "bot_app_grant": _BOT_APP_GRANT_EXEMPT_REASON,
     "engine_runtime": _ENGINE_RUNTIME_EXEMPT_REASON,
     # antcode relocated to agentclaw/corp/core (B11 T3.3) — no longer a core module.
     "bot_dormant": _EXEMPT_REASON,

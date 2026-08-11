@@ -702,6 +702,7 @@ async def test_update_bot_success(mock_service):
         bot_desc="Updated description",
         bot_config=None,
         request_id=None,
+        template_uuid=None,
     )
 
 
@@ -750,6 +751,61 @@ async def test_update_bot_with_config(mock_service):
     call_kwargs = mock_service.update_bot.call_args.kwargs
     assert call_kwargs["bot_config"] is not None
     assert call_kwargs["request_id"] == "a" * 32
+    assert call_kwargs["template_uuid"] is None
+
+
+@pytest.mark.asyncio
+async def test_update_bot_with_template_uuid(mock_service):
+    """POST /{bot_uuid}/update forwards an optional template override."""
+    now = datetime.now(tz=UTC)
+    update_resp = UpdateBotResponse(
+        id=1,
+        bot_uuid="BOT-001",
+        tenant="test_tenant",
+        env="dev",
+        domain="default",
+        is_deleted=0,
+        creator="user1",
+        modifier="operator1",
+        status="ACTIVE",
+        name="cfg-bot",
+        description=None,
+        template_uuid="TEMPLATE-new",
+        replica_desired=1,
+        replica_minimum=1,
+        replica_maximum=10,
+        auto_scaling_enabled=0,
+        sla_grade="standard",
+        gmt_create=now,
+        gmt_modified=now,
+        config=None,
+        devices=[],
+        publish_id=302,
+    )
+    mock_service.update_bot.return_value = update_resp
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/api/v1/bots/BOT-001/update?tenant=test_tenant",
+            json={
+                "operator": "operator1",
+                "request_id": "b" * 32,
+                "template_uuid": "TEMPLATE-new",
+            },
+        )
+
+    assert resp.status_code == 200
+    mock_service.update_bot.assert_awaited_once_with(
+        tenant="test_tenant",
+        bot_uuid="BOT-001",
+        operator="operator1",
+        bot_name=None,
+        bot_desc=None,
+        bot_config=None,
+        request_id="b" * 32,
+        template_uuid="TEMPLATE-new",
+    )
 
 
 @pytest.mark.asyncio

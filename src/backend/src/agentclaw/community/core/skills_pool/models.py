@@ -5,69 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-
-@dataclass(frozen=True, slots=True)
-class OpenClawPoolPaths:
-    """OpenClaw P3 的容器视角路径契约。"""
-
-    active: str = "/home/admin/.openclaw/workspace/skills"
-    legacy_local: str = "/home/admin/.openclaw/workspace/skills/skills-local"
-    legacy_repo: str = "/home/admin/.openclaw/workspace/skills/skills-repo"
-    pool_local: str = "/home/admin/.openclaw/workspace/skills-pool/skills-local"
-    pool_repo: str = "/home/admin/.openclaw/workspace/skills-pool/skills-repo"
-
-
-@dataclass(frozen=True, slots=True)
-class ClaudeCodePoolPaths:
-    """Claude Code P3 的容器视角路径契约。"""
-
-    active: str = "/home/admin/.claude/skills"
-    legacy_local: str = "/home/admin/.claude_code/workspace/skills/skills-local"
-    legacy_repo: str = "/home/admin/.claude_code/skills-repo"
-    pool_local: str = "/home/admin/.claude_code/workspace/skills-pool/skills-local"
-    pool_repo: str = "/home/admin/.claude_code/workspace/skills-pool/skills-repo"
-
-
-@dataclass(frozen=True, slots=True)
-class AICodingPoolPaths:
-    """AICoding P3 的容器视角路径契约。"""
-
-    active: str = "/home/admin/.claude/skills"
-    legacy_local: str = "/home/admin/.aicoding/workspace/skills/skills-local"
-    legacy_repo: str = "/home/admin/.aicoding/skills-repo"
-    pool_local: str = "/home/admin/.aicoding/workspace/skills-pool/skills-local"
-    pool_repo: str = "/home/admin/.aicoding/workspace/skills-pool/skills-repo"
-
-
-@dataclass(frozen=True, slots=True)
-class HermesPoolPaths:
-    """Hermes P3 的容器视角路径契约。"""
-
-    active: str = "/home/admin/.hermes/skills"
-    legacy_local: str = "/home/admin/.hermes/workspace/skills/skills-local"
-    legacy_repo: str = "/home/admin/.hermes/skills-repo"
-    pool_local: str = "/home/admin/.hermes/workspace/skills-pool/skills-local"
-    pool_repo: str = "/home/admin/.hermes/workspace/skills-pool/skills-repo"
-
-
-PoolPaths = (
-    OpenClawPoolPaths | ClaudeCodePoolPaths | AICodingPoolPaths | HermesPoolPaths
+from agentclaw.community.core.workspace.skill_layout import (
+    AICodingPoolPaths,
+    ClaudeCodePoolPaths,
+    FILESYSTEM_POOL_ENGINES,
+    HermesPoolPaths,
+    OpenClawPoolPaths,
+    PoolPaths,
+    pool_paths_for_engine,
 )
-FILESYSTEM_POOL_ENGINES = ("openclaw", "claude_code", "aicoding", "hermes")
-
-
-def pool_paths_for_engine(engine: str) -> PoolPaths:
-    """Resolve only explicitly supported engine layouts; never fall back."""
-
-    if engine == "openclaw":
-        return OpenClawPoolPaths()
-    if engine == "claude_code":
-        return ClaudeCodePoolPaths()
-    if engine == "aicoding":
-        return AICodingPoolPaths()
-    if engine == "hermes":
-        return HermesPoolPaths()
-    raise ValueError(f"engine Pool layout not implemented: {engine}")
 
 
 def local_locator_prefixes(*, pool: bool) -> tuple[str, ...]:

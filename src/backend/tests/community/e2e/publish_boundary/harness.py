@@ -19,9 +19,7 @@ from __future__ import annotations
 import httpx
 from httpx import ASGITransport
 
-from agentclaw.community.core.service_bot.repository.publish_operation_repository import (
-    PublishOperationRepository,
-)
+from agentclaw.community.core.repository.protocols.publishing import PublishOperationRepository
 from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
     PROGRESS_POLL_TASK,
     VERIFY_FLOW_TASK,

@@ -644,6 +644,7 @@ mod tests {
             history_meta: None,
             metadata: None,
             run_id: String::new(),
+            attachments: None,
         };
         store.add_message("test-group", msg).await.unwrap();
 
@@ -694,6 +695,7 @@ mod tests {
             history_meta: None,
             metadata: None,
             run_id: String::new(),
+            attachments: None,
         };
 
         let result = store.add_message("nonexistent", msg).await;
@@ -873,6 +875,7 @@ mod tests {
             history_meta: None,
             metadata: None,
             run_id: String::new(),
+            attachments: None,
         };
         store.add_message("test-group", msg).await.unwrap();
 
@@ -1012,6 +1015,7 @@ mod tests {
             history_meta: None,
             metadata: None,
             run_id: String::new(),
+            attachments: None,
         };
         store.add_message("test-group", msg).await.unwrap();
 
@@ -1058,6 +1062,7 @@ mod tests {
                 history_meta: None,
                 metadata: None,
                 run_id: String::new(),
+                attachments: None,
             },
             GroupMessage {
                 id: "msg-2".to_string(),
@@ -1070,6 +1075,7 @@ mod tests {
                 history_meta: None,
                 metadata: None,
                 run_id: String::new(),
+                attachments: None,
             },
             GroupMessage {
                 id: "msg-3".to_string(),
@@ -1082,6 +1088,7 @@ mod tests {
                 history_meta: None,
                 metadata: None,
                 run_id: String::new(),
+                attachments: None,
             },
         ];
 

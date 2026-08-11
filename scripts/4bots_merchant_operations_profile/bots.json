@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "name": "商家经营协作队",
+  "port_start": 30601,
+  "port_step": 10,
+  "scopes": "local,merchant-operations,local-commerce,merchant-platform-coordination",
+  "bots": [
+    {
+      "source": "merchant-operations",
+      "profile": "merchant-operations-manager",
+      "name": "店长日常运营",
+      "summary": "商家侧 manager，从店主私聊建立本地私有账本，通过脱敏定向任务协调平台 Worker，并依据本轮 Worker handoff 动态编排带有界反馈和店主 HumanInput 的真实 one-shot SOP。",
+      "domains": "merchant-operations,local-commerce,delegated-authority,manager-worker-coordination,negotiation,workflow-orchestration,incident-response,business-review",
+      "skills": "goal-clarification,constraint-ledger,private-boundary-control,shared-brief-redaction,manager-worker-dispatch,unit-economics-check,agent-discovery,human-escalation,contract-drafting,one-shot-collaboration,bounded-feedback-loop,human-input-acceptance,sop-design,daily-review"
+    },
+    {
+      "source": "platform-marketing",
+      "profile": "platform-marketing-planner",
+      "name": "平台营销方案",
+      "summary": "平台侧营销 Worker，只根据 manager 定向提供且有来源的平台目标、预算和规则提出营销方案，并以边界清晰、可验收的条款返回证据和缺口。",
+      "domains": "local-commerce,platform-marketing,campaign-design,coupon-strategy,user-acquisition,conversion,promotion-budget,merchant-negotiation",
+      "skills": "campaign-design,coupon-structure,subsidy-allocation,audience-targeting,offer-negotiation,claim-risk-review,contract-commitment,change-request"
+    },
+    {
+      "source": "platform-data",
+      "profile": "platform-data-analyst",
+      "name": "平台数据分析",
+      "summary": "平台侧数据 Worker，基于 manager 定向数据或平台美发行业聚合基准比较方案、识别异常信号，并返回可复算、可追溯的证据和限制。",
+      "domains": "local-commerce,data-analysis,campaign-measurement,conversion-funnel,forecasting,anomaly-detection,decision-support,data-governance",
+      "skills": "metric-definition,cohort-comparison,campaign-forecast,capacity-check,trend-analysis,anomaly-signal,decision-table,data-lineage"
+    },
+    {
+      "source": "platform-supply-chain",
+      "profile": "platform-supply-chain-planner",
+      "name": "平台供应链",
+      "summary": "平台侧供应 Worker，在契约冻结前依据 manager 定向提供的库存、需求、商品和供应商资料给出履约准入、品质证据、缺口及可验证的 Plan A/B。",
+      "domains": "local-commerce,supply-chain,inventory,replenishment,supplier-risk,quality-assurance,contingency-planning,fulfillment",
+      "skills": "demand-gap-check,replenishment-plan,lead-time-check,spec-verification,cost-comparison,supplier-delay-response,plan-b-trigger,fulfillment-checklist"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 """Factories for quality module tests."""
 from __future__ import annotations
 
-from agentclaw.community.core.quality.repositories import QualityTaskRecord
+from agentclaw.community.core.quality.models import QualityTaskRecord
 from tests.community.framework.world import World
 
 

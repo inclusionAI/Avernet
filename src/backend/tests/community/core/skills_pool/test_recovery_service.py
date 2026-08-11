@@ -15,6 +15,7 @@ from agentclaw.community.core.skill_center.services.runtime_layout_probe import 
 from agentclaw.community.core.skills_pool.recovery_service import (
     ManualRepairResolution,
     SkillsPoolRollbackOutcome,
+    SkillsPoolRollbackResult,
     SkillsPoolRollbackService,
     SkillsPoolRecoveryOutcome,
     SkillsPoolRecoveryService,
@@ -298,6 +299,14 @@ class _ChangedBots:
         return None
 
 
+class _ServiceBots(_Bots):
+    def get_by_id_and_entity(
+        self, bot_id: str, entity_id: str
+    ) -> dict[str, object]:
+        value = super().get_by_id_and_entity(bot_id, entity_id)
+        return {**value, "bot_type": "service"}
+
+
 class _AICodingBots(_Bots):
     def get_by_id_and_entity(
         self, bot_id: str, entity_id: str
@@ -455,6 +464,37 @@ async def test_new_rollback_uses_the_lease_acquired_by_begin() -> None:
 
     assert result.outcome is SkillsPoolRollbackOutcome.LEGACY_ACTIVE
     assert layouts.lease_acquire_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_service_draft_operator_rollback_is_rejected_before_state_change() -> None:
+    layouts = _RollbackLayouts()
+    runtime = _RollbackRuntime()
+    edit_guard = _EditGuard()
+    service = SkillsPoolRollbackService(
+        bot_repository=_ServiceBots(),
+        layout_repository=layouts,
+        skill_repository=_Skills(),
+        runtime=runtime,
+        edit_guard=edit_guard,
+    )
+
+    result = await service.rollback(
+        scope=SCOPE,
+        rollback_generation="rollback-1",
+        lease_owner="operator-task-1",
+        operator="oncall-1",
+        note="service rollback must remain closed",
+    )
+
+    assert result == SkillsPoolRollbackResult(
+        SkillsPoolRollbackOutcome.SERVICE_BOT_UNSUPPORTED,
+        evidence={"reason": "service_draft_pool_rollback_disabled"},
+        retryable=False,
+    )
+    assert layouts.state == _pool_state()
+    assert layouts.events == []
+    assert runtime.events == []
 
 
 @pytest.mark.asyncio

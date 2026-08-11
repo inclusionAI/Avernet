@@ -970,6 +970,94 @@ class TestReportDeviceAlive:
         )
         reset_event_bus()
 
+    def test_default_image_intent_retries_alive_until_bot_mapping_is_ready(self):
+        from agentclaw.community.core.bot_management.services.default_image_policy_listener import (
+            DEFAULT_IMAGE_POLICY_VALUE,
+            IMAGE_POLICY_ON_ACTIVE_KEY,
+            DefaultImagePolicyActivationListener,
+        )
+        from agentclaw.community.core.events.bus import get_event_bus, reset_event_bus
+        from agentclaw.community.core.events.types import DeviceAliveEvent
+
+        reset_event_bus()
+        record = _make_record(
+            status=DeviceBindingStatus.PENDING.value,
+            device_provider="arca",
+            device_props={
+                "callback_token": "tok123",
+                "sandbox_id": "sbx-current",
+                IMAGE_POLICY_ON_ACTIVE_KEY: DEFAULT_IMAGE_POLICY_VALUE,
+            },
+        )
+        updated = _make_record(
+            status=DeviceBindingStatus.ACTIVE.value,
+            device_provider="arca",
+        )
+        repo = MagicMock()
+        repo.get_by_device_id.return_value = record
+        # Listener reads the Binding on both Alive attempts; DeviceService reads
+        # the final ACTIVE row only after the successful second attempt.
+        repo.get_by_id.side_effect = [record, record, updated]
+
+        policy_bot_repo = MagicMock()
+        policy_bot_repo.get_by_binding_id.side_effect = [
+            None,
+            {
+                "bot_id": "bot-1",
+                "owner_id": "u001",
+                "bot_type": "service",
+                "active_engine": "openclaw",
+            },
+        ]
+        publish_repo = MagicMock()
+        common_config = MagicMock()
+        common_config.get_value.return_value = {"image": "registry/arca:default"}
+        listener = DefaultImagePolicyActivationListener(
+            bot_repository=policy_bot_repo,
+            publish_repository=publish_repo,
+            binding_repository=repo,
+            common_config_service=common_config,
+        )
+        get_event_bus().subscribe(DeviceAliveEvent, listener.handle, required=True)
+
+        svc = _make_service(repo=repo, bot_query=MagicMock())
+        with patch(
+            "agentclaw.community.core.bot_management.services."
+            "default_image_policy_listener.persist_default_image_policy"
+        ) as persist:
+            with pytest.raises(RuntimeError, match="required handler failed"):
+                svc.report_device_alive(
+                    device_id="staff_u001_default",
+                    token="tok123",
+                )
+
+            repo.update_status_and_alive_at.assert_not_called()
+            repo.update_device_props.assert_not_called()
+
+            result = svc.report_device_alive(
+                device_id="staff_u001_default",
+                token="tok123",
+            )
+
+        assert result is updated
+        persist.assert_called_once_with(
+            bot_repository=policy_bot_repo,
+            publish_repository=publish_repo,
+            bot_id="bot-1",
+            owner_id="u001",
+            env="dev",
+            common_config_service=common_config,
+        )
+        repo.update_device_props.assert_called_once_with(
+            binding_id=record.id,
+            props={IMAGE_POLICY_ON_ACTIVE_KEY: None},
+        )
+        repo.update_status_and_alive_at.assert_called_once_with(
+            binding_id=record.id,
+            status=DeviceBindingStatus.ACTIVE.value,
+        )
+        reset_event_bus()
+
     def test_event_publish_failure_does_not_break_report_alive(self):
         from agentclaw.community.core.events.bus import get_event_bus, reset_event_bus
         from agentclaw.community.core.events.types import DeviceActivatedEvent
@@ -1517,10 +1605,14 @@ class TestApplyDevice:
                 entity_type="staff",
                 operator=_make_operator(),
                 bot_id="bot1",
+                device_props_extra={"image_policy_on_active": "default"},
             )
 
         assert result is record
         repo.insert_binding.assert_called_once()
+        assert repo.insert_binding.call_args.kwargs["device_props"][
+            "image_policy_on_active"
+        ] == "default"
 
     def test_apply_reuses_released_binding(self):
         released = _make_record(id=5, status=DeviceBindingStatus.RELEASED.value)

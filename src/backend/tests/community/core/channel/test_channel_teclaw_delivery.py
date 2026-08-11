@@ -16,8 +16,8 @@ from __future__ import annotations
 import pytest
 
 from agentclaw.community.api.channel_service import ChannelServiceProtocol
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.channel.services.repositories import ChannelRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.chat import ChannelRepository
 from agentclaw.community.core.config_compose.models import ComposeRequest
 from agentclaw.community.core.config_compose.services.collector import (
     ConfigComposerInputCollector,

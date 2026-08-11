@@ -259,7 +259,7 @@ def _channel_record(**kw):
     Defaults to an active (status='1'), no-stage dingding row whose JSON
     ``config`` carries the stored snake_case fields the frontend persists.
     """
-    from agentclaw.community.core.channel.services.repositories import ChannelRecord
+    from agentclaw.community.core.channel.models import ChannelRecord
 
     config = kw.pop("config", None)
     if config is None:

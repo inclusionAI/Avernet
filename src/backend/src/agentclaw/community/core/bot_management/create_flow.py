@@ -197,7 +197,7 @@ def _apply_passport(
     spec: BotCreateSpec,
     mcp_codes: list[str],
     cli_items: list[Any],
-    is_first_bot: bool,
+    use_first_passport: bool,
 ) -> dict[str, Any] | None:
     """Apply for the bot's Passport, normalizing non-Passport failures.
 
@@ -205,10 +205,14 @@ def _apply_passport(
     any other apply failure becomes a ``BotServiceError`` so it keeps the
     "Passport apply failed" mapping rather than falling into a generic bucket.
     """
-    # 默认租户:首 bot → applyFirst(跳过审批),非首 → applyAgent(走审批)。
+    # 默认租户:首个个人 Bot → applyFirst(跳过审批),否则 → applyAgent(走审批)。
+    # 服务 Bot 不占用“首个个人 Bot”资格；软删除过滤由仓储查询保证。
     # 其他租户(openapi / 外部):一律 applyFirst —— 审批流不适用于外部租户,
-    # 且 applyFirst 对重复调用幂等,故不依赖 is_first_bot。见 #556 的根因修复。
-    if get_current_avernet_tenant() == DEFAULT_AVERNET_TENANT and not is_first_bot:
+    # 且 applyFirst 对重复调用幂等,故不依赖首个个人 Bot 判断。见 #556。
+    if (
+        get_current_avernet_tenant() == DEFAULT_AVERNET_TENANT
+        and not use_first_passport
+    ):
         apply = passport_plugin.apply_agent_passport
     else:
         apply = passport_plugin.apply_first_agent_passport
@@ -332,7 +336,14 @@ def create_bot_with_authorization(
     # Validate the name up front so an invalid one never reaches Passport or
     # create. An unset name stays unset — create_bot applies default naming.
     bot_name = validate_bot_name(spec.bot_name) if spec.bot_name is not None else None
+    # Preserve the existing first-Bot Passport path for every Bot type. When the
+    # owner already has service Bots, the first live personal Bot also uses that
+    # path; service and soft-deleted personal Bots do not consume this eligibility.
     is_first_bot = bot_service.is_first_bot(user_id)
+    use_first_passport = is_first_bot or (
+        spec.bot_type == "personal"
+        and bot_service.is_first_personal_bot(user_id)
+    )
 
     # Pre-flight before Passport, so quota, name, and reserved-bot engine
     # violations are reported before an external Passport identity is minted.
@@ -356,7 +367,7 @@ def create_bot_with_authorization(
         cli_items=get_default_cli_items(
             spec.engine_type, spec.template_type
         ),
-        is_first_bot=is_first_bot,
+        use_first_passport=use_first_passport,
     )
 
     passport_token = passport_result.get("token") if passport_result else None

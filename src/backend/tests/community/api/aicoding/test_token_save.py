@@ -22,8 +22,8 @@ from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.api.baas_service import BaasServiceProtocol
 from agentclaw.community.api.device_service import DeviceServiceProtocol
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 
 

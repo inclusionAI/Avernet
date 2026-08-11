@@ -14,6 +14,7 @@ consumes:
   - "DeviceFileSystem"
   - "DeviceSyncDispatcher"
 internal_dependencies:
+  - agentclaw.community.core.repository.protocols.chat    # repository contracts consumed by this module
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.devices
   - agentclaw.community.di.modules

@@ -461,6 +461,7 @@ impl StateMachineResultPublisherPort for MessageFlowStateMachineResultPublisher 
                 idempotency_key: Some(idempotency_key),
                 source_im_message_id: None,
                 sender_conn_id: None,
+                provider_bypass_headers: Vec::new(),
             })
             .await?;
         Ok(())
@@ -1682,6 +1683,13 @@ impl Default for BcsServerState {
         );
         let bot_run_context: Arc<dyn BotRunContextPort> =
             Arc::new(bcs_message_flow::MemoryBotRunContextStore::new());
+        let session_file_service = build_session_files_service_blocking(
+            &config,
+            crate::env::resolve_env(),
+            None,
+            None,
+            session_repo.clone(),
+        );
         let group_message_history = create_group_message_history_service(
             sessions.clone(),
             bot_registry.clone(),
@@ -1695,6 +1703,8 @@ impl Default for BcsServerState {
             config.message_history.new_participant_visible_limit,
             config.message_history.default_page_limit,
             config.message_history.max_page_limit,
+            session_file_service.clone(),
+            config.session_files.share.history_attachment_ttl_seconds,
         );
         let a2a_run_store = Arc::new(bcs_message_flow::a2a_chat::ChatRunStore::with_capacity(
             config.async_chat_run_max_entries,
@@ -1917,13 +1927,7 @@ impl Default for BcsServerState {
             .session_management(session_management.clone())
             .channel(channel_service.clone())
             .secret(default_bootstrap_secret_service())
-            .session_files(build_session_files_service_blocking(
-                &config,
-                crate::env::resolve_env(),
-                None,
-                None,
-                session_repo.clone(),
-            ))
+            .session_files(session_file_service)
             .build()
             .expect("services must be fully wired");
 
@@ -2687,6 +2691,8 @@ fn create_group_message_history_service(
     new_participant_visible_limit: u64,
     default_page_limit: u32,
     max_page_limit: u32,
+    session_file: Arc<dyn bcs_service_api::application::session_files::SessionFileService>,
+    history_attachment_ttl: u64,
 ) -> Arc<dyn GroupMessageHistoryService> {
     let websocket_request: Arc<dyn GroupHistoryBotRequestPort> =
         Arc::new(BootstrapGroupHistoryBotRequestPort { bot_connections });
@@ -2705,11 +2711,13 @@ fn create_group_message_history_service(
         session_repo,
         group,
         registry,
+        session_file,
         cutoff_timestamp,
         manager_worker_cutoff_timestamp,
         new_participant_visible_limit,
         default_page_limit,
         max_page_limit,
+        history_attachment_ttl,
     ))
 }
 
@@ -2976,6 +2984,13 @@ impl BcsServer {
         );
         let bot_run_context: Arc<dyn BotRunContextPort> =
             Arc::new(bcs_message_flow::MemoryBotRunContextStore::new());
+        let session_file_service = build_session_files_service_blocking(
+            &config,
+            crate::env::resolve_env(),
+            None,
+            None,
+            session_repo.clone(),
+        );
         let group_message_history = create_group_message_history_service(
             sessions.clone(),
             bot_registry.clone(),
@@ -2989,6 +3004,8 @@ impl BcsServer {
             config.message_history.new_participant_visible_limit,
             config.message_history.default_page_limit,
             config.message_history.max_page_limit,
+            session_file_service.clone(),
+            config.session_files.share.history_attachment_ttl_seconds,
         );
         let a2a_run_store = Arc::new(bcs_message_flow::a2a_chat::ChatRunStore::with_capacity(
             config.async_chat_run_max_entries,
@@ -3191,13 +3208,7 @@ impl BcsServer {
             .session_management(session_management.clone())
             .channel(channel_service.clone())
             .secret(default_bootstrap_secret_service())
-            .session_files(build_session_files_service_blocking(
-                &config,
-                crate::env::resolve_env(),
-                None,
-                None,
-                session_repo.clone(),
-            ))
+            .session_files(session_file_service)
             .build()
             .expect("services must be fully wired");
 
@@ -3550,6 +3561,14 @@ impl BcsServer {
         };
         let bot_run_context: Arc<dyn BotRunContextPort> =
             Arc::new(bcs_message_flow::MemoryBotRunContextStore::new());
+        let session_file_service = build_session_files_service(
+            &config,
+            crate::env::resolve_env(),
+            infrastructure_plugins.db(),
+            Some(db_flavor),
+            session_repo.clone(),
+        )
+        .await;
         let group_message_history = create_group_message_history_service(
             sessions.clone(),
             bot_registry.clone(),
@@ -3563,6 +3582,8 @@ impl BcsServer {
             config.message_history.new_participant_visible_limit,
             config.message_history.default_page_limit,
             config.message_history.max_page_limit,
+            session_file_service.clone(),
+            config.session_files.share.history_attachment_ttl_seconds,
         );
         let a2a_run_store = Arc::new(bcs_message_flow::a2a_chat::ChatRunStore::with_capacity(
             config.async_chat_run_max_entries,
@@ -3785,13 +3806,7 @@ impl BcsServer {
             .session_management(session_management.clone())
             .channel(channel_service.clone())
             .secret(default_bootstrap_secret_service())
-            .session_files(build_session_files_service(
-                &config,
-                crate::env::resolve_env(),
-                infrastructure_plugins.db(),
-                Some(db_flavor),
-                session_repo.clone(),
-            ).await)
+            .session_files(session_file_service)
             .build()
             .expect("services must be fully wired");
 

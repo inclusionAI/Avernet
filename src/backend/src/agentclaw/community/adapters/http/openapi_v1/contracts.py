@@ -81,14 +81,36 @@ ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
     502: {"model": ErrorEnvelope, "description": "Upstream service error"},
 }
 
+# The extra failure a **user-scoped** route can produce: its ``user_id`` named
+# someone other than the verified caller. Kept out of ``ERROR_RESPONSES`` for the
+# same reason the engine-runtime statuses below are — that dict is applied
+# surface-wide, and the routes that take no ``user_id`` (the Bot Logs group, plus
+# the four catalogue reads with no user dimension) can never answer 403.
+USER_SCOPED_403: dict[int | str, dict[str, object]] = {
+    403: {
+        "model": ErrorEnvelope,
+        "description": "The user_id names a user the authenticated caller may "
+        "not act for",
+    },
+}
+
+# For the nine groups whose every route is user-scoped, applied at assembly.
+USER_SCOPED_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
+    **ERROR_RESPONSES,
+    **USER_SCOPED_403,
+}
+
 # Extra failures only the engine-runtime groups can produce. Attached to those
 # routers, NOT merged into ``ERROR_RESPONSES``: that dict is applied surface-wide
 # in ``build_public_router``, and ``test_openapi_error_schema`` asserts every
 # operation documents every status in it — so adding these there would make the
 # six already-shipped categories advertise a 501 they cannot return, pointing at
 # an endpoint unrelated to them, and generate dead branches in clients.
+#
+# Built on the user-scoped set, not on ``ERROR_RESPONSES``: every engine-runtime
+# route is user-scoped too, so it documents the 403 as well.
 ENGINE_RUNTIME_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
-    **ERROR_RESPONSES,
+    **USER_SCOPED_ERROR_RESPONSES,
     501: {
         "model": ErrorEnvelope,
         "description": "Not supported for this bot — either its engine does not "

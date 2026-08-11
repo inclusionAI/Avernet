@@ -813,7 +813,7 @@ impl SessionRepoPort for MySqlSessionStore {
         let sql = format!(
             "SELECT {select_cols} FROM bcs_group_sessions s {join} \
              WHERE {where_clause} \
-             ORDER BY s.gmt_create DESC, s.session_id ASC LIMIT ? OFFSET ?",
+             ORDER BY s.gmt_create DESC, s.id DESC LIMIT ? OFFSET ?",
             select_cols = select_cols,
             join = join_clause,
             where_clause = conditions.join(" AND "),
@@ -1429,7 +1429,7 @@ impl SessionRepoPort for MySqlSessionStore {
              JOIN bcs_session_participants sp \
                ON sp.env = s.env AND sp.session_id = s.session_id \
              WHERE {where_clause} \
-             ORDER BY COALESCE(sp.collected_at, s.gmt_create) DESC LIMIT ? OFFSET ?",
+             ORDER BY COALESCE(sp.collected_at, s.gmt_create) DESC, s.id DESC LIMIT ? OFFSET ?",
             select_cols = select_cols,
             where_clause = conditions.join(" AND "),
         );

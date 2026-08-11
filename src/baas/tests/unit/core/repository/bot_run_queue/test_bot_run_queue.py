@@ -17,7 +17,7 @@ import secbaas.community.core.repository.bot_run_queue._orm_model  # noqa: F401
 from secbaas.community.core.database import DatabaseManager
 from secbaas.community.core.repository.bot_run_queue import OrmBotRunQueueRepository
 from secbaas.community.core.repository.bot_run_queue._orm_model import BotRunQueueModel
-from secbaas.community.plugins.database.stub.sqlite_orm import SqliteOrmPlugin
+from secbaas.community.plugins.database.sqlite.sqlite_orm import SqliteOrmPlugin
 
 
 @pytest.fixture

@@ -8,19 +8,20 @@ requires an authenticated user principal.
 from __future__ import annotations
 
 from datetime import datetime, timezone as _tz
-from typing import Annotated, Any
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 
-from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
-from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
+from agentclaw.community.adapters.http.openapi_v1.principal import (
+    ActingCallerDep,
+    UserIdDep,
+)
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Deleted,
     Envelope,
     Page,
     PageParamsDep,
 )
-from agentclaw.community.adapters.http.openapi_v1.dependencies import Principal
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
     envelope,
@@ -29,13 +30,14 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 )
 from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
 from agentclaw.community.core.cron.errors import CronRelayError
+from agentclaw.community.core.cron.services.cron_runtime_targets import (
+    RUNTIME_STAGE_DRAFT,
+)
 from agentclaw.community.di import Injected
 
 from .schemas import Routine, RoutineCreate, RoutineRun, RoutineUpdate, ScheduleTrigger
 
 router = APIRouter(prefix="/openapi/v1/bots/routines", tags=["routines"])
-
-PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
 
 def _ms_to_iso(ms: Any) -> str:
@@ -99,7 +101,7 @@ def _map_run(data: dict, routine_id: str) -> RoutineRun:
 @envelope_errors
 async def list_routines(
     page: PageParamsDep,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     bot_id: str,
     request: Request,
     status: str | None = None,
@@ -113,11 +115,14 @@ async def list_routines(
     set and let the client filter on ``enabled``. Wire a server-side filter
     here only if/when the engine surfaces a status dimension.
     """
-    owner_id = caller_owner_id(principal)
     user_id = owner_id
     nick_name = owner_id
+    # Draft only, like every other route in this group: the public surface
+    # operates a bot's pre-publication workspace, so a service bot's published
+    # verify/online runtimes are neither listed nor queried here.
     result = await factory.list_all_crons(
-        user_id=user_id, nick_name=nick_name, bot_id=bot_id
+        user_id=user_id, nick_name=nick_name, bot_id=bot_id,
+        runtime_stage=RUNTIME_STAGE_DRAFT,
     )
     data = result.get("data") if isinstance(result, dict) else None
     if isinstance(data, list):
@@ -137,11 +142,19 @@ async def list_routines(
 @envelope_errors
 async def create_routine(
     body: RoutineCreate,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
+    caller: ActingCallerDep,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
 ) -> Envelope[Routine]:
     """Create a routine.
+
+    The only operation in this group whose bot is in the **body**, so the grant
+    check cannot run as a dependency — the body is not parsed yet when those
+    resolve. It runs here instead, immediately after parsing and **before any
+    service call**, which is the same guarantee in a different place. The
+    shared dependency defers for exactly this operation (it is named in
+    ``admission.py``), so nothing checks it twice and nothing skips it.
 
     Translates the openapi ``RoutineCreate`` body into the engine adapter
     cron body shape: ``schedule`` is the raw cron expression STRING (not
@@ -150,7 +163,8 @@ async def create_routine(
     to ``Asia/Shanghai`` to match legacy ``cron/router.py``'s create path.
     """
     bot_id = body.bot_id
-    owner_id = caller_owner_id(principal)
+    # Before anything else touches the bot.
+    caller.require_bot(bot_id, owner_id=owner_id)
     user_id = owner_id
     nick_name = owner_id
     adapter_body = {
@@ -177,7 +191,7 @@ async def create_routine(
 @envelope_errors
 async def get_routine(
     routine_id: str,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     bot_id: str,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
@@ -187,9 +201,8 @@ async def get_routine(
     C3: the path carries only ``routine_id`` (no routine table to
     reverse-map to a bot), so ``bot_id`` is a required query. Owner
     identity comes from the authenticated principal via
-    ``caller_owner_id``. Missing/non-dict ``data`` collapses to 404.
+    ``UserIdDep``. Missing/non-dict ``data`` collapses to 404.
     """
-    owner_id = caller_owner_id(principal)
     user_id = owner_id
     nick_name = owner_id
     result = await factory.get_cron_detail(
@@ -206,7 +219,7 @@ async def get_routine(
 async def update_routine(
     routine_id: str,
     body: RoutineUpdate,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     bot_id: str,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
@@ -219,7 +232,6 @@ async def update_routine(
     wraps it on read; Task 3 contract). Missing/non-dict ``data`` on the
     response collapses to 404.
     """
-    owner_id = caller_owner_id(principal)
     user_id = owner_id
     nick_name = owner_id
     update_body: dict = {}
@@ -250,7 +262,7 @@ async def update_routine(
 @envelope_errors
 async def delete_routine(
     routine_id: str,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     bot_id: str,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
@@ -266,7 +278,6 @@ async def delete_routine(
     two only via its ``error`` text today; a structured engine ``error_code``
     would make timeout-vs-missing precise (follow-up).
     """
-    owner_id = caller_owner_id(principal)
     user_id = owner_id
     nick_name = owner_id
     try:
@@ -294,7 +305,7 @@ async def delete_routine(
 @envelope_errors
 async def run_routine(
     routine_id: str,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     bot_id: str,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
@@ -310,7 +321,6 @@ async def run_routine(
     ``finished_at`` are None because the adapter doesn't surface them on the
     run-trigger seam (use ``GET /{routine_id}/runs`` for actual timestamps).
     """
-    owner_id = caller_owner_id(principal)
     user_id = owner_id
     nick_name = owner_id
     result = await factory.run_cron(
@@ -346,7 +356,7 @@ async def run_routine(
 async def list_routine_runs(
     routine_id: str,
     page: PageParamsDep,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     bot_id: str,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
@@ -360,7 +370,6 @@ async def list_routine_runs(
     ``data``, leaving ``runs`` intact). We map each entry via ``_map_run``
     and paginate client-side.
     """
-    owner_id = caller_owner_id(principal)
     user_id = owner_id
     nick_name = owner_id
     result = await factory.get_cron_runs(

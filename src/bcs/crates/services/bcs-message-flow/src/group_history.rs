@@ -848,6 +848,7 @@ fn convert_bot_history_messages(
                 run_id: String::new(),
                 history_meta: message.get("historyMeta").cloned(),
                 metadata,
+                attachments: None,
             }
         })
         .collect()
@@ -1013,6 +1014,7 @@ fn normalize_group_store_messages(
                         run_id: String::new(),
                         history_meta: message.history_meta.clone(),
                         metadata: message.metadata.clone(),
+                        attachments: None,
                     }
                 })
                 .collect::<Vec<_>>()

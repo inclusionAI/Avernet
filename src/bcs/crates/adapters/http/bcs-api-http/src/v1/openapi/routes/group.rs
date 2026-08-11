@@ -3,18 +3,17 @@ use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{Extension, Json, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, patch, post};
+use axum::routing::{delete, get, post};
 use bcs_service_api::application::v1::{
     AddGroupParticipant, AuthenticatedCaller, CreateGroup, DeleteGroup, DeleteGroupParticipant,
-    GetGroup, ListGroups, UpdateGroup, UpdateGroupParticipant,
+    GetGroup, ListGroups, UpdateGroup,
 };
 
 use crate::v1::common::{
     ApiState, Envelope, ErrorResponse, RequestId, application_error_response, invalid_request,
 };
 use crate::v1::openapi::dto::group::{
-    AddParticipantRequest, CreateGroupRequest, ListGroupsQuery, UpdateGroupRequest,
-    UpdateParticipantRequest,
+    AddParticipantRequest, CreateGroupRequest, DeleteGroupQuery, ListGroupsQuery, UpdateGroupRequest,
 };
 
 pub fn router() -> Router<ApiState> {
@@ -30,7 +29,7 @@ pub fn router() -> Router<ApiState> {
         )
         .route(
             "/groups/{group_id}/participants/{actor_id}",
-            patch(update_group_participant).delete(remove_group_participant),
+            delete(remove_group_participant),
         )
 }
 
@@ -143,13 +142,16 @@ async fn delete_group(
     Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
+    query: Result<Query<DeleteGroupQuery>, QueryRejection>,
 ) -> Result<Response, ErrorResponse> {
     let Path(group_id) = path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    let Query(query) = query.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = state
         .group_service
         .delete(DeleteGroup {
             caller,
             group_id,
+            acting_bot_id: query.acting_bot_id,
         })
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
@@ -175,34 +177,6 @@ async fn add_group_participant(
             caller,
             group_id,
             actor_id: body.actor_id,
-            role: body.role,
-        })
-        .await
-        .map_err(|error| application_error_response(&request_id, error))?;
-    Ok((
-        StatusCode::OK,
-        Json(Envelope::success(20_000, "OK", result, request_id.0)),
-    )
-        .into_response())
-}
-
-async fn update_group_participant(
-    State(state): State<ApiState>,
-    Extension(caller): Extension<AuthenticatedCaller>,
-    Extension(request_id): Extension<RequestId>,
-    path: Result<Path<(String, String)>, PathRejection>,
-    body: Result<Json<UpdateParticipantRequest>, JsonRejection>,
-) -> Result<Response, ErrorResponse> {
-    let Path((group_id, actor_id)) =
-        path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
-    let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
-    let result = state
-        .group_service
-        .update_participant(UpdateGroupParticipant {
-            caller,
-            group_id,
-            actor_id,
-            mode: body.mode,
         })
         .await
         .map_err(|error| application_error_response(&request_id, error))?;

@@ -34,16 +34,14 @@ from agentclaw.community.core.bot_collaborator.interceptor import (
     with_interceptors,
 )
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
 from agentclaw.community.core.services.resource_file_service import (
     ResourceFileService,
     is_readonly,
 )
 from agentclaw.community.core.devices.services.device_filesystem import FileTooLargeError
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.di import Injected
 
 logger = logging.getLogger(__name__)

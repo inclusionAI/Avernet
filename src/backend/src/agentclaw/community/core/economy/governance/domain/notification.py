@@ -321,9 +321,7 @@ class GovernanceNotification:
         Returns:
             ORM 对象(已赋值,可 s.add)。
         """
-        from agentclaw.community.core.economy.governance.repositories.orm import (
-            GovernanceNotificationOrm,
-        )
+        from agentclaw.community.core.economy.governance.orm import GovernanceNotificationOrm
         row = row or GovernanceNotificationOrm()
         # 身份
         row.notification_id = self.notification_id

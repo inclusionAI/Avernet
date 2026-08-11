@@ -24,12 +24,16 @@ from agentclaw.community.core.gateway_principal.models import (
     UserPrincipal,
 )
 from agentclaw.community.core.gateway_principal.verifier import (
+    MIN_SIGNING_KEY_BYTES,
     PrincipalVerifierConfig,
     VerifiedCaller,
+    is_weak_signing_key,
+    key_fingerprint,
     verify_principal_token,
 )
 
 __all__ = [
+    "MIN_SIGNING_KEY_BYTES",
     "AccessKeyPrincipal",
     "AppPrincipal",
     "BotPrincipal",
@@ -43,5 +47,7 @@ __all__ = [
     "PrincipalVerifierConfig",
     "UserPrincipal",
     "VerifiedCaller",
+    "is_weak_signing_key",
+    "key_fingerprint",
     "verify_principal_token",
 ]

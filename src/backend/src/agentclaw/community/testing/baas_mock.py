@@ -35,19 +35,29 @@ def mock_baas_calls() -> Iterator[Any]:
         r.route(url__regex=r"^(?!http://localhost:8890).*").pass_through()
 
         # ws-info: LocalDeviceService._compose_device_conn_info 必调
-        r.get(url__regex=r"http://localhost:8890/api/v1/bots/.*/ws-info").mock(
-            return_value=httpx.Response(
+        #
+        # ``ws_url`` 按 BaaS 的拼法回显请求参数，而不是写死一个规范 URL：BaaS
+        # 侧 ``build_proxypass_url`` 是 ``…/proxypass/{target}{path}`` 直接拼接，
+        # 不补分隔符，所以 caller 少给前导斜杠时这里就该拼出坏 URL。写死规范值
+        # 会把这类 caller 侧的拼接错误一路放到线上才暴露。
+        def _ws_info_response(request: httpx.Request) -> httpx.Response:
+            port = request.url.params.get("port", "20003")
+            path = request.url.params.get("path", "/api/openclaw/ws")
+            return httpx.Response(
                 200,
                 json={
                     "code": 0,
                     "data": {
-                        "ws_url": "ws://localhost:20003/api/openclaw/ws",
+                        "ws_url": f"ws://localhost:{port}{path}",
                         "token": "test_token",
-                        "target": "localhost:20003",
+                        "target": f"localhost:{port}",
                         "expires_at": "2099-12-31T00:00:00Z",
                     },
                 },
             )
+
+        r.get(url__regex=r"http://localhost:8890/api/v1/bots/.*/ws-info").mock(
+            side_effect=_ws_info_response
         )
 
         # create_bot

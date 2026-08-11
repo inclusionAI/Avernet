@@ -17,9 +17,7 @@ from agentclaw.community.core.service_bot.repository.models import (  # noqa: F4
     PublishOperationModel,
     PublishOperationState,
 )
-from agentclaw.community.plugins.publish_operation_repository import (
-    OrmPublishOperationRepository as PublishOperationRepository,
-)
+from agentclaw.community.core.repository.implementations.publishing.publish_operation import OrmPublishOperationRepository as PublishOperationRepository
 from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
     OperationAlreadyInFlightError,
     PublishOperationError,

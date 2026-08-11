@@ -44,7 +44,7 @@ class TestDeactivateSkill:
         mock_unlink.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_deactivate_returns_false_when_skill_not_found(self):
+    async def test_deactivate_checks_remote_runtime_when_host_path_is_missing(self):
         device_fs = MagicMock()
         device_fs.delete_tree = AsyncMock(return_value=True)
         svc = _make_service(device_fs)
@@ -54,5 +54,5 @@ class TestDeactivateSkill:
         ):
             ok = await svc.deactivate_skill("missing", bolt_id="bolt-1", user_id="u-1")
 
-        assert ok is False
-        device_fs.delete_tree.assert_not_awaited()
+        assert ok is True
+        device_fs.delete_tree.assert_awaited_once_with("/oss/skills/missing")

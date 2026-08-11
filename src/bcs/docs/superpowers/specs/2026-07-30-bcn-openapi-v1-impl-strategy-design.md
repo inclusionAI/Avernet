@@ -7,14 +7,14 @@
 
 ## Context
 
-Contract PR #621 defines the 27-operation BCN OpenAPI V1 phase-one surface (5 Group ops from PR #514 + 22 new across GroupParticipant / Session / SessionParticipant / Invitation / Friendship). Four rounds of Codex review on #621 are resolved:
+Contract PR #621 originally defined the 27-operation BCN OpenAPI V1 phase-one surface. The current `bcn-openapis-refactor` contract narrows and repaths that surface to 32 approved operations under `/openapi/v1/collaboration/**` by adding Bot control-plane and session-bound WebSocket operations while removing the public session completion and group-participant patch endpoints. Four rounds of Codex review on #621 are resolved:
 
 1. `DeleteResult` unified to `{deleted}` — group Rust synced (`87997ffc`).
 2. Session participant mode restricted to `BotParticipantMode{auto,muted}`, `actor_kind=const bot`.
 3. Session message sender modeled as `MessageSenderKind{bot,human,system}`; friend-request `message` removed (`9aca2977`).
 4. Session `context` replaced by `SessionInput{query?}` (group-context fallback); list operations declare stable ordering (`ddb84bd3`).
 
-This document specifies the **Rust implementation strategy** for the 22 new operations. The 17-task implementation plan already details per-task TDD steps; this strategy adds batching, sequencing, scope boundaries, Principal-transport handling, comment follow-up integration, and test strategy. It references the plan, does not rewrite it.
+This document specifies the **Rust implementation strategy** for the current contract delta. The historical 17-task implementation plan still provides useful TDD sequencing, but implementation must follow the checked-in OpenAPI contract when this document and the old plan differ. This strategy adds batching, sequencing, scope boundaries, Principal-transport handling, comment follow-up integration, and test strategy. It references the plan, does not rewrite it.
 
 ## Strategy Overview
 
@@ -22,8 +22,8 @@ Four PRs, serial order — test-only vertical slices + one production-rollout PR
 
 | PR | Scope | Plan tasks |
 | --- | --- | --- |
-| #P1 | GroupParticipant (3 ops) | 3 (GroupService participant methods) + 5 (use case) + 10 (routes) |
-| #P2 | Session (10 ops: 7 Session + 3 SessionParticipant) | 3 (SessionService + SessionMessageService traits) + 6 + 11 |
+| #P1 | GroupParticipant (2 ops: add/remove; no patch) | 3 (GroupService participant methods) + 5 (use case) + 10 (routes), skipping participant patch work |
+| #P2 | Session (9 ops: 6 Session + 3 SessionParticipant; no completion) | 3 (SessionService + SessionMessageService traits) + 6 + 11, skipping completion work |
 | #P3 | Invitation + Friendship (9 ops) | 3 (InvitationService + FriendshipService traits) + 7 + 12 |
 | #P4 | Rollout: mount + gateway + principal + compat + E2E | 13, 14, 15, 16, 17 |
 
@@ -39,36 +39,36 @@ PR base: slices build on contract PR #621's contract commits (`bcn-openapi-batch
 
 ## Slice #P1 — GroupParticipant
 
-Operations: `POST /groups/{group_id}/participants`, `PATCH /groups/{group_id}/participants/{actor_id}`, `DELETE /groups/{group_id}/participants/{actor_id}`.
+Operations: `POST /openapi/v1/collaboration/groups/{group_id}/participants`, `DELETE /openapi/v1/collaboration/groups/{group_id}/participants/{actor_id}`. The public contract does **not** expose `PATCH /groups/{group_id}/participants/{actor_id}`.
 
-- **Trait:** extend `GroupService` with `add_participant` / `update_participant` / `delete_participant` + command types. Reuse legacy `Participant` / `ParticipantMode` / `ParticipantRole`.
-- **Use case (`bcs-group-v1`):** V1 authorizer → delegate legacy `GroupCoreService` `add_participant` / `update_participant_mode` / `remove_participant`; role invariants (originator/driver non-removable before transfer), no actor-kind branching.
-- **Routes (`bcs-api-http/routes/group.rs`):** 3 thin handlers; `CreateParticipant` / `UpdateGroupParticipantRequest` DTO mapping.
-- **Tests:** use-case authorization matrix (originator/driver/manager manage; plain participant read-only; Human/Bot same rules; required-role non-removable) + route tests.
-- **Comment follow-ups:** group `DeleteResult{deleted}` already synced (`87997ffc`); `UpdateGroupParticipantRequest.mode` keeps full 4-value `ParticipantMode` (group participant can be Human or Bot). No new follow-ups.
+- **Trait:** extend `GroupService` with `add_participant` / `delete_participant` + command types. Reuse legacy `Participant` / `ParticipantRole` for projections, but `AddGroupParticipant` input carries only `actor_id`; request-supplied `role` is not supported.
+- **Use case (`bcs-group-v1`):** V1 authorizer → delegate legacy `GroupCoreService` `add_participant` / `remove_participant`; role invariants (originator/driver non-removable before transfer), no actor-kind branching. Role assignment/defaulting is owned by the service, not the HTTP body.
+- **Routes (`bcs-api-http/routes/group.rs`):** 2 thin handlers; `AddGroupParticipantRequest` DTO mapping only `actor_id`. Do not register a participant patch route.
+- **Tests:** use-case authorization matrix (originator/driver/manager manage; plain participant read-only; Human/Bot same rules; required-role non-removable), route tests for add/remove, and route inventory tests proving participant patch is absent.
+- **Comment follow-ups:** group `DeleteResult{deleted}` already synced (`87997ffc`). The old `UpdateGroupParticipantRequest.mode` follow-up is obsolete for the public contract because group participant patch was removed.
 - **Dependency:** PR #514 group V1 foundation (authorizer + GroupService + routes + test verifier) ready.
 
 ## Slice #P2 — Session (most comment follow-ups)
 
-Operations: 7 Session (create/list/get/update/delete/completion/messages) + 3 SessionParticipant (add/update/remove).
+Operations: 6 Session (create/list/get/update/delete/messages) + 3 SessionParticipant (add/update/remove). The public contract does **not** expose `POST /sessions/{session_id}/completion`.
 
 - **Trait:** new `application::v1::session::SessionService` + `application::v1::message::SessionMessageService`.
-- **Use case (`bcs-session`):** per Task 6, move legacy `application.rs` to `application/legacy.rs`, add `v1/{session,participant,completion}.rs`. V1 facade delegates legacy `SessionManagementService` + V1 authorizer; `SessionMessageService` delegates `GroupMessageHistoryService`.
+- **Use case (`bcs-session`):** per Task 6, move legacy `application.rs` to `application/legacy.rs`, add `v1/{session,participant}.rs`. V1 facade delegates legacy `SessionManagementService` + V1 authorizer; `SessionMessageService` delegates `GroupMessageHistoryService`.
 - **Routes (`bcs-api-http/routes/session.rs` + `dto/session.rs`, new).**
 
 Comment follow-ups (Rust mapping):
 
 1. `BotParticipantMode{auto,muted}` — V1 `SessionParticipant.mode` Bot-only; legacy `ParticipantMode` full 4 values, session participants are Bot-only (project auto/muted).
 2. `MessageSenderKind{bot,human,system}` — `SessionMessage.sender_type` maps legacy `SenderType{Bot,Human,System}`; `sender_id` from legacy (system messages `"system"`).
-3. `SessionInput{query?}` + group-context fallback — `create_session` input narrowed (extract `query` from JSON); `SessionDetail.input` projects `Session.input.query`; fallback: no `input` → V1 facade uses parent group `context` as `input.query`.
+3. `SessionInput{query?}` + group-context fallback — `create_session` input contains only `title` and optional `input`; it does not accept `driver_bot_uuid` or `participants`. Extract `query` from JSON; `SessionDetail.input` projects `Session.input.query`; fallback: no `input` → V1 facade uses parent group `context` as `input.query`.
 4. Stable ordering — `SessionRepoPort::list_by_group` enforces `created_at DESC, session_id ASC`; message store enforces `session_seq ASC` (memory sort + mysql `ORDER BY`).
 5. `SessionDetail.input` projection + `SessionMessage.content` from legacy `serde_json::Value` to string.
 6. C2 — `GroupMessage` add `session_seq: Option<i64>` + `sender_type` with `#[serde(default, skip_serializing_if)]` (serde-compat: old JSON decodes None, None not serialized, legacy wire unchanged); stores fill `session_seq` from `PersistedMessage`; V1 derives `MessageSenderKind` from sender/`"system"`, maps `GroupMessageType`→`SessionMessageKind`. V1 field `message_id`→`id` to match legacy wire.
 7. C5 — `SessionRepoPort` add `count_by_group(group_id, status, title_contains, participant_id) -> u64`; old `list_by_group` signature unchanged (compat); `SessionManagementService` exposes count so V1 `list_sessions` populates `total`.
 
-Other alignments: `SessionStatus[running,completed]`; completion idempotent (`complete_if_running` CAS, Completed→`Ok(None)`→V1 200); `delete_session` idempotent (`delete`→bool→`{deleted}`); `SessionParticipant.actor_kind=const bot`; `update_session` only `title`.
+Other alignments: `SessionStatus[running,completed]`; public completion route removed from the contract; `delete_session` idempotent (`delete`→bool→`{deleted}`) and accepts optional `acting_bot_id` for Bot-perspective authorization; `SessionParticipant.actor_kind=const bot`; `update_session` only `title`.
 
-Tests: use case (completion idempotency, Completed rejects mutable, session belongs to group, Human not auto-enrolled, driver invariant, input fallback) + route (10 ops; assert `POST /sessions/{id}/messages` 404).
+Tests: use case (Completed rejects mutable operations where applicable, session belongs to group, Human not auto-enrolled, driver invariant, input fallback, delete `acting_bot_id` perspective) + route (9 ops; assert `POST /sessions/{id}/completion` and `POST /sessions/{id}/messages` are absent/404).
 Dependency: based on #P1 merged `dev`; legacy `SessionManagementService` / `GroupMessageHistoryService` ready.
 
 ## Slice #P3 — Invitation + Friendship
@@ -137,5 +137,5 @@ Plan tasks 13 (mount) + 14 (gateway) + 15 (principal transport) + 16 (compat gat
 
 - Design: `docs/plans/2026-07-28-bcn-openapi-v1-design.md` (§8 scope + Legacy mapping).
 - Implementation plan: `docs/plans/2026-07-28-bcn-openapi-v1-implementation.md` (17 tasks, per-task TDD steps).
-- Contract: `src/bcs/api-contracts/v1/` (27 operations, validated).
+- Contract: `src/bcs/api-contracts/v1/` (32 operations, validated).
 - PR #514 (first 5 Group ops + V1 foundation), PR #621 (contract expansion to 27 ops).

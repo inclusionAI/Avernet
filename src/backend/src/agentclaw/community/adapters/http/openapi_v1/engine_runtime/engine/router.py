@@ -1,4 +1,9 @@
-"""Engine group (read-only) — ``/openapi/v1/bots/{bot_id}/engine``.
+"""Engine group (read-only) — ``/openapi/v1/bots/engine/{bot_id}``.
+
+An **operator console**: served to the addressed bot's owner and its
+member-level collaborators, for the stage the request names (``?stage=``,
+draft by default), and device-wide — see ``engine_runtime/gating.py`` and
+``core/engine_runtime/gate.py``.
 
 Three reads. ``switch`` and ``restart`` are deliberately **not** wrapped:
 wrapping ``switch`` would be a back door around the rule that a bot's engine is
@@ -8,32 +13,36 @@ fixed at creation (``PUT /openapi/v1/bots/{bot_id}`` rejects it), and
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
-from agentclaw.community.adapters.http.openapi_v1.dependencies import (
-    Principal,
-    require_principal,
-)
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.engine.schemas import (
     EngineCapabilities,
     EngineInfo,
     EngineStatus,
 )
-from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
+    RuntimeStage,
+)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
+    OwnerIdDep,
+    StageQuery,
+)
+from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
+)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.gating import (
+    resolve_operable_bot,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.core.engine_runtime.errors import EngineUpstreamError
 from agentclaw.community.di import Injected
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/engine", tags=["engine"])
-
-PrincipalDep = Annotated[Principal, Depends(require_principal)]
+router = APIRouter(prefix="/openapi/v1/bots/engine", tags=["engine"])
 
 
 def _names(raw: Any) -> list[str]:
@@ -51,20 +60,30 @@ def _names(raw: Any) -> list[str]:
     return []
 
 
-@router.get("/status", response_model=Envelope[EngineStatus])
+@router.get("/{bot_id}/status", response_model=Envelope[EngineStatus])
 @envelope_errors
 async def get_engine_status(
     bot_id: str,
-    principal: PrincipalDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[EngineStatus]:
     """Runtime state of the bot's engine."""
-    owner_id = caller_owner_id(principal)
+    facts = await resolve_operable_bot(
+        relay,
+        bot_id,
+        caller_id=user_id,
+        owner_id=owner_id,
+        stage=stage.value,
+        surface="engine",
+    )
     # enveloped=False: this engine route answers with its status payload raw —
     # no `success` key and no `data` wrapper. The only such route wrapped here.
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, method="GET", path="/api/engine/status",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        method="GET", path="/api/engine/status",
         enveloped=False,
     )
     raw = result.data if isinstance(result.data, dict) else {}
@@ -81,12 +100,14 @@ async def get_engine_status(
     )
 
 
-@router.get("/capabilities", response_model=Envelope[EngineCapabilities])
+@router.get("/{bot_id}/capabilities", response_model=Envelope[EngineCapabilities])
 @envelope_errors
 async def get_engine_capabilities(
     bot_id: str,
-    principal: PrincipalDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[EngineCapabilities]:
     """What this bot can do.
@@ -94,9 +115,17 @@ async def get_engine_capabilities(
     The discovery endpoint for these groups: capabilities differ per bot, so the
     same request can succeed for one of your bots and be refused for another.
     """
-    owner_id = caller_owner_id(principal)
+    facts = await resolve_operable_bot(
+        relay,
+        bot_id,
+        caller_id=user_id,
+        owner_id=owner_id,
+        stage=stage.value,
+        surface="engine",
+    )
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, method="GET",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        method="GET",
         path="/api/engine/capabilities",
     )
     raw = result.data if isinstance(result.data, dict) else {}
@@ -114,19 +143,29 @@ async def get_engine_capabilities(
     )
 
 
-@router.get("/available", response_model=Envelope[list[EngineInfo]])
+@router.get("/{bot_id}/available", response_model=Envelope[list[EngineInfo]])
 @envelope_errors
 async def list_available_engines(
     bot_id: str,
-    principal: PrincipalDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[list[EngineInfo]]:
     """Engines available on this bot, with the active one marked."""
     # Publicly a noun; the engine models the same read under a verb path.
-    owner_id = caller_owner_id(principal)
+    facts = await resolve_operable_bot(
+        relay,
+        bot_id,
+        caller_id=user_id,
+        owner_id=owner_id,
+        stage=stage.value,
+        surface="engine",
+    )
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, method="GET", path="/api/engine/list",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        method="GET", path="/api/engine/list",
     )
     raw = result.data
     if isinstance(raw, dict):

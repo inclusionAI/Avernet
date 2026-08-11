@@ -21,14 +21,9 @@ from agentclaw.community.core.caller_identity.contracts import (
 )
 from agentclaw.community.core.caller_identity import service as caller_identity_service
 from agentclaw.community.core.caller_identity.credential import CallerToken
-from agentclaw.community.core.caller_identity.repository import (
-    CallerIdentityEngineChangedError,
-    CallerIdentityLockMismatchError,
-)
+from agentclaw.community.core.caller_identity.contracts import CallerIdentityEngineChangedError, CallerIdentityLockMismatchError
 from agentclaw.community.core.caller_identity.service import CallerIdentityService
-from agentclaw.community.core.bot_management.repository.protocol import (
-    BotLookupAmbiguousError,
-)
+from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 
 
 def _bot(*, call_type: str = "owner") -> dict[str, object]:

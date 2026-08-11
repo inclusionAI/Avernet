@@ -20,7 +20,7 @@ from typing import Any
 import httpx
 from injector import inject
 
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.health_probe import HealthProbePlugin
 from agentclaw.community.utils.env_utils import get_current_env

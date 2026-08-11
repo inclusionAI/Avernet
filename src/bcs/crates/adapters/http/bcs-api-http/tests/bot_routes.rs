@@ -27,7 +27,7 @@ impl PrincipalVerifier for HeaderVerifier {
             == Some("yes")
         {
             Ok(AuthenticatedCaller {
-                tenant: "tenant-1".into(),
+                tenant: Some("tenant-1".into()),
                 user: Some(AuthenticatedUserIdentity {
                     id: "staff-1".to_string(),
                     username: "staff-1".to_string(),

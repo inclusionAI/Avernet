@@ -9,7 +9,7 @@ from typing import Any
 from agentclaw.community.core.bot_management.errors import (
     DefaultBotPassportRepairError,
 )
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.mcp.services._defaults import get_default_cli_items
 from agentclaw.community.core.mcp.services.passport_scope import (
     filter_passport_mcp_codes,

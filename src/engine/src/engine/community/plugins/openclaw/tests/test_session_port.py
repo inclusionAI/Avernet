@@ -174,9 +174,11 @@ class TestSessionsList:
         assert s["_messages"] == messages
 
     async def test_bcs_sessions_hide_internal_and_group_chats_and_keep_dm_sessions(self):
-        """Internal/group chats are hidden while namespaced BCS DMs stay visible."""
+        """Internal/group chats are hidden while BCS DMs stay visible."""
         token = "bc7d52974947474da2f1cdea1c5642b6"
         internal_group_key = f"agent:main:bcs_grp_{token}:e69117ce_1"
+        legacy_channel_dm_key = f"agent:main:bcs_grp_dingtalk_dm_{token}:e69117ce"
+        legacy_native_dm_key = f"agent:main:bcs_grp_dm_{token}:e69117ce"
         channel_dm_key = f"agent:main:bcs:group:bcs_grp_dingtalk_dm_{token}"
         native_dm_key = f"agent:main:bcs:group:bcs_grp_dm_{token}"
         flexible_dm_key = "agent:main:bcs:group:bcs_grp_dingtalk_dm_not-a-token"
@@ -189,6 +191,8 @@ class TestSessionsList:
                 "key": f"agent:main:bcs:group:bcs_grp_dingtalk_{token}",
                 "label": "DingTalk group",
             },
+            {"key": legacy_channel_dm_key, "label": "Legacy DingTalk DM"},
+            {"key": legacy_native_dm_key, "label": "Legacy Native DM"},
             {"key": channel_dm_key, "label": "DingTalk DM"},
             {"key": native_dm_key, "label": "Native DM"},
             {"key": flexible_dm_key, "label": "Flexible DM"},
@@ -208,6 +212,8 @@ class TestSessionsList:
         assert f"agent:main:bcs:group:bcs_grp_dingtalk_{token}" not in keys
         assert "agent:main:bcs:group:legacy_dm_session" not in keys
         assert keys == [
+            legacy_channel_dm_key,
+            legacy_native_dm_key,
             channel_dm_key,
             native_dm_key,
             flexible_dm_key,

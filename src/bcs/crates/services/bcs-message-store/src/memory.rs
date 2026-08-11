@@ -126,6 +126,12 @@ impl MessageRepoPort for MemoryMessageRepo {
             MessageOwnerFilter::Eq(owner_bot_id) => {
                 filtered.retain(|m| m.owner_bot_id.as_deref() == Some(owner_bot_id.as_str()));
             }
+            MessageOwnerFilter::PublicOrOwner(owner_bot_id) => {
+                filtered.retain(|m| {
+                    m.owner_bot_id.is_none()
+                        || m.owner_bot_id.as_deref() == Some(owner_bot_id.as_str())
+                });
+            }
         }
 
         // Apply time_range filter
@@ -203,6 +209,12 @@ impl MessageRepoPort for MemoryMessageRepo {
             }
             MessageOwnerFilter::Eq(owner) => {
                 filtered.retain(|m| m.owner_bot_id.as_deref() == Some(owner.as_str()));
+            }
+            MessageOwnerFilter::PublicOrOwner(owner) => {
+                filtered.retain(|m| {
+                    m.owner_bot_id.is_none()
+                        || m.owner_bot_id.as_deref() == Some(owner.as_str())
+                });
             }
         }
 

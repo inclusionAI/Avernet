@@ -3,7 +3,7 @@ from datetime import date
 
 from injector import inject
 
-from agentclaw.community.core.access.repository import PolicyRepository
+from agentclaw.community.core.repository.protocols.identity import PolicyRepository
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.log import get_logger
 

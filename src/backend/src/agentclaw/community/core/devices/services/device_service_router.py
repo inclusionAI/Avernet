@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from agentclaw.community.plugin_api.passport import PassportPlugin
     from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.devices.errors import (
     DeviceNotFoundError,
     DeviceServiceError,
@@ -27,9 +27,7 @@ from agentclaw.community.core.devices.models import (
 from agentclaw.community.core.devices.protocols import (
     BotQueryProtocol,
 )
-from agentclaw.community.core.devices.repository.protocol import (
-    DeviceBindingRepository,
-)
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.arca_bot_create_baas_rollout_policy import (
     ArcaBotCreateBaasRolloutDecision,
     ArcaBotCreateBaasRolloutPolicy,
@@ -44,9 +42,7 @@ from agentclaw.community.core.devices.services.device_service import (
     BAAS_DEVICE_PROVIDER,
     DeviceService,
 )
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.log import get_logger
 
 
@@ -307,6 +303,7 @@ class DeviceServiceRouter(DeviceService):
         admins: list[str] | None = None,
         template_type: str | None = None,
         template_config: dict | None = None,
+        device_props_extra: dict[str, Any] | None = None,
     ):
         """申请新设备 - 根据员工工号 + bot 属性路由到对应 Provider.
 
@@ -378,6 +375,7 @@ class DeviceServiceRouter(DeviceService):
             admins=admins,
             template_type=template_type,
             template_config=template_config,
+            device_props_extra=device_props_extra,
         )
 
     @override

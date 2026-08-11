@@ -3,9 +3,7 @@ the recreate leg, end-to-end through the production wiring on the shared
 online bot."""
 import pytest
 
-from agentclaw.community.core.devices.repository.protocol import (
-    DeviceBindingRepository,
-)
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.service_bot.repository.models import (
     PublishOperationState,
     PublishStatus,

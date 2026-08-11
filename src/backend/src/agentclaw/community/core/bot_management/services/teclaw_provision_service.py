@@ -56,12 +56,8 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.bot_management.repository.protocol import (
-        BotRepository,
-    )
-    from agentclaw.community.core.devices.repository.protocol import (
-        DeviceBindingRepository,
-    )
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
+    from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
     from agentclaw.community.core.service_bot.services.baas_service import BaasService
     from agentclaw.community.core.service_bot.services.deploy.producer import (
         DeployArtifactProducerRouter,

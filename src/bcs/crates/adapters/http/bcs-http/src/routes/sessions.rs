@@ -13,7 +13,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::Value;
 
-use bcs_domain::{ActorKind, SystemMessageEvent};
+use bcs_domain::{ActorKind, DeliveryType, SystemMessageEvent};
 use bcs_service_api::{
     AuthenticatedHumanCaller, GroupChatCommand, StartStateMachineRunCommand,
     StartStateMachineRunOutcome,
@@ -180,6 +180,12 @@ pub struct CreateSessionRequest {
     pub created_by: Option<String>,
     #[serde(default)]
     pub caller_role: Option<String>,
+    /// Optional delivery override for the driver bot's `<GroupContext>`
+    /// message: `"send"` (default, driver is asked to respond) or
+    /// `"inject"` (driver observes silently). Other participants always
+    /// receive the context via `chat.inject`.
+    #[serde(default)]
+    pub group_context_delivery: Option<DeliveryType>,
 }
 
 pub async fn create_session_for_group(
@@ -590,10 +596,13 @@ pub async fn create_session_for_group(
                 let sid = sess.id.clone();
                 let session_input = sess.input.clone();
                 let session_participants = sess.participants.clone();
-                let reason = group
-                    .label
-                    .clone()
-                    .unwrap_or_else(|| "协作任务".to_string());
+                let driver_delivery = body.group_context_delivery;
+                let reason = bcs_service_api::resolve_session_topic(
+                    session_input.as_ref(),
+                    group.context.as_deref(),
+                    group.label.as_deref(),
+                )
+                .unwrap_or_default();
                 let _task = tokio::spawn(async move {
                     let _ = notify
                         .notify(
@@ -604,6 +613,7 @@ pub async fn create_session_for_group(
                                 reason,
                                 session_input,
                                 task_ledger: None,
+                                driver_delivery,
                             },
                             &sid,
                             &session_participants,
@@ -869,7 +879,45 @@ pub async fn list_sessions_for_group(
                     .create_or_reactivate(cmd)
                     .await
                 {
-                    Ok(outcome) => vec![session_to_json(&outcome.session)],
+                    Ok(outcome) => {
+                        let items = vec![session_to_json(&outcome.session)];
+                        // A new legacy session was materialized for a sessionless
+                        // group; emit the session-context system message so bots
+                        // receive their `<GroupContext>` injection, mirroring the
+                        // create-session path. Skipped when the legacy row already
+                        // existed (`created == false`, a reactivation).
+                        if outcome.created {
+                            let notify = state.services.system_message.clone();
+                            let gid = group_id.clone();
+                            let sid = legacy_sid.clone();
+                            let session_input = outcome.session.input.clone();
+                            let session_participants = outcome.session.participants.clone();
+                            let reason = bcs_service_api::resolve_session_topic(
+                                session_input.as_ref(),
+                                group.context.as_deref(),
+                                group.label.as_deref(),
+                            )
+                            .unwrap_or_default();
+                            let _task = tokio::spawn(async move {
+                                let _ = notify
+                                    .notify(
+                                        &gid,
+                                        SystemMessageEvent::SessionContext {
+                                            group_id: gid.clone(),
+                                            session_id: sid.clone(),
+                                            reason,
+                                            session_input,
+                                            task_ledger: None,
+                                            driver_delivery: None,
+                                        },
+                                        &sid,
+                                        &session_participants,
+                                    )
+                                    .await;
+                            });
+                        }
+                        items
+                    }
                     Err(e) => {
                         tracing::warn!(
                             group_id = %group_id,
@@ -1237,6 +1285,8 @@ pub async fn add_session_participant(
             let event = SystemMessageEvent::BotJoined {
                 group_id: sess.group_id.clone(),
                 actor: participant.into(),
+                session_id: sid.clone(),
+                session_input: s.input.clone(),
             };
             let _ = state
                 .services
@@ -1710,6 +1760,7 @@ pub async fn session_chat(
         requested_sender_id,
         message: body.message,
         session_id: Some(sid.clone()),
+        provider_bypass_headers: state.provider_bypass_headers_from(&headers),
     };
 
     match state.services.message_flow.handle_group_chat(cmd).await {

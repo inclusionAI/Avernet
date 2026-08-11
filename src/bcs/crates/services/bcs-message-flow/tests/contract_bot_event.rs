@@ -2600,7 +2600,7 @@ async fn manager_worker_task_result_records_independent_manager_run_context() {
 }
 
 #[tokio::test]
-async fn manager_worker_task_final_persists_worker_final_and_manager_result_history() {
+async fn manager_worker_task_final_suffix_snapshot_persists_only_after_tool_result() {
     let (support, repo, flow) = manager_worker_flow_with_repo().await;
 
     let dispatch = flow
@@ -2681,7 +2681,7 @@ async fn manager_worker_task_final_persists_worker_final_and_manager_result_hist
             "state": "final",
             "message": {
                 "role": "assistant",
-                "content": [{"type": "text", "text": "analysis before tool. answer after tool"}],
+                "content": [{"type": "text", "text": "analysis before tool.\n\nanswer after tool"}],
             },
         }),
         state: ChatEventState::Final,
@@ -5079,6 +5079,74 @@ async fn agent_tool_result_persists_worker_owner_and_public_manager_owner_for_ma
     assert_eq!(chat_appended.len(), 1);
     assert_eq!(chat_appended[0].message_type, "tool_call");
     assert_eq!(chat_appended[0].owner_bot_id, None);
+}
+
+#[tokio::test]
+async fn agent_tool_result_backfills_missing_name_from_tool_start() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let repo = Arc::new(RecordingMessageRepo::default());
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_message_repo(repo.clone());
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-observer".to_string(),
+        run_id: "run-tool-name".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "agent".to_string(),
+        event_payload: json!({
+            "stream": "tool",
+            "data": {
+                "phase": "start",
+                "toolCallId": "tool-backfill",
+                "name": "Bash",
+                "args": { "command": "mcporter list --json" },
+            },
+        }),
+        state: ChatEventState::ToolCallStart,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .unwrap();
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-observer".to_string(),
+        run_id: "run-tool-name".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "agent".to_string(),
+        event_payload: agent_tool_result_payload(Some("Bash"), "tool-backfill", "command echo", false),
+        state: ChatEventState::ToolCallEnd,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .unwrap();
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-observer".to_string(),
+        run_id: "run-tool-name".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "agent".to_string(),
+        event_payload: agent_tool_result_payload(None, "tool-backfill", "actual command output", false),
+        state: ChatEventState::ToolCallEnd,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .unwrap();
+
+    let appended = repo.appended().await;
+    assert_eq!(appended.len(), 2);
+    assert_eq!(appended[0].content["name"], "Bash");
+    assert_eq!(appended[1].content["name"], "Bash");
+    assert_eq!(appended[1].content["args"]["command"], "mcporter list --json");
+    assert_eq!(
+        appended[1].content["result"]["content"][0]["text"],
+        "actual command output"
+    );
 }
 
 /// A run that streams chat deltas and then terminates with `error` (never a

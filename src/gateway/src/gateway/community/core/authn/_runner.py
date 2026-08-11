@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from gateway.community.core.authn._chain import IdentityChain
 from gateway.community.core.authn._route_security import Requirement
+from gateway.community.logger import get_logger
 from gateway.community.spi.auth import AuthError
 from gateway.community.spi.authn import (
     CredentialBundle,
@@ -25,6 +26,8 @@ from gateway.community.spi.authn import (
     Principal,
     PrincipalType,
 )
+
+logger = get_logger("authn-runner")
 
 
 async def authenticate(
@@ -37,6 +40,7 @@ async def authenticate(
     for identity, presence in requirement.items():
         chain = registry.get(identity)
         if chain is None:  # misconfigured identity → fail closed, terminal
+            logger.warning("no auth strategy registered for type: %s", identity.value)
             raise AuthError(f"no auth strategy registered for type: {identity.value}")
         # AuthError from a present-but-invalid credential propagates and is
         # terminal (required or optional alike); None means the chain found no
@@ -44,7 +48,10 @@ async def authenticate(
         principal = await chain.build(creds)
         if principal is None:
             if presence is Presence.REQUIRED:
+                logger.warning("required identity %s has no credential", identity.value)
                 raise AuthError(f"unauthenticated: no credential for {identity.value}")
+            logger.debug("optional identity %s absent", identity.value)
             continue  # OPTIONAL + exhausted → absent from the result set
+        logger.debug("identity %s resolved", identity.value)
         resolved[identity] = principal
     return resolved

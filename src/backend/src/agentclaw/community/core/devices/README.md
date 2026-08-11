@@ -21,9 +21,14 @@ consumes:
   - "PassportPlugin"
   - "DeviceAccessor (models only)"
 internal_dependencies:
+  - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.publishing    # repository contracts consumed by this module
+  - agentclaw.community.core.base    # declarative Base for the devices-owned ORM model
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.bot_collaborator
   - agentclaw.community.core.config
+  - agentclaw.community.core.common_config
   - agentclaw.community.core.config_compose    # teclaw_paths — namespaces/mappers used by the device-fs dispatcher (B6)
   - agentclaw.community.core.events
   - agentclaw.community.core.service_bot

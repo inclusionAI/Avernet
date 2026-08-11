@@ -15,7 +15,7 @@ from secbaas.community.api.device_manage import (
     EncryptableHeaderRule,
     EncryptableOutBoundRule,
 )
-from secbaas.community.core.service.device_manage import (
+from secbaas.community.core.service.device_manage._device_service import (
     _decrypt_header_rule_values,
     _encrypt_header_rule_values,
 )

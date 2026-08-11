@@ -42,21 +42,20 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
         if parameter["in"] == "query"
     }
     assert query_names == {
+        "view_bot_id",
         "offset",
         "limit",
         "q",
         "membership",
         "kind",
         "strategy",
-        "view_bot_id",
     }
-    view_actor = next(
-        parameter
+    path_names = {
+        parameter["name"]
         for parameter in list_operation["parameters"]
-        if parameter["name"] == "view_bot_id"
-    )
-    assert view_actor["schema"] == {"type": "string", "minLength": 1}
-    assert view_actor.get("required", False) is False
+        if parameter["in"] == "path"
+    }
+    assert path_names == set()
 
     assert (
         contract["paths"][GROUPS_PATH]["post"]["responses"]["201"]["content"][
@@ -74,7 +73,7 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
         contract["paths"][GROUPS_PATH]["post"]["responses"]["404"][
             "x-error-codes"
         ]
-    ) == {"bot_not_found", "collaboration_definition_not_found"}
+    ) == {"bot_not_found"}
     assert set(
         contract["paths"][GROUPS_PATH]["post"]["responses"]["409"][
             "x-error-codes"
@@ -179,3 +178,139 @@ def test_bundled_discriminator_mappings_resolve_inside_the_document(
             visit(item)
 
     visit(contract)
+
+
+def test_add_group_participant_accepts_only_actor_id() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][
+        "/openapi/v1/collaboration/groups/{group_id}/participants"
+    ]["post"]
+    schema = operation["requestBody"]["content"]["application/json"]["schema"]
+
+    assert schema == {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["actor_id"],
+        "properties": {"actor_id": {"type": "string"}},
+    }
+
+
+def test_update_group_participant_endpoint_is_not_in_public_contract() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    path_item = contract["paths"][
+        "/openapi/v1/collaboration/groups/{group_id}/participants/{actor_id}"
+    ]
+
+    assert "patch" not in path_item
+    assert "delete" in path_item
+
+
+def test_list_groups_uses_the_shared_view_actor_query() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    path = "/openapi/v1/collaboration/groups"
+
+    assert "/openapi/v1/collaboration/bots/{bot_id}/groups" not in contract["paths"]
+    operation = contract["paths"][path]["get"]
+    assert operation["operationId"] == "list_groups"
+    path_names = {
+        parameter["name"]
+        for parameter in operation["parameters"]
+        if parameter["in"] == "path"
+    }
+    query_names = {
+        parameter["name"]
+        for parameter in operation["parameters"]
+        if parameter["in"] == "query"
+    }
+
+    assert path_names == set()
+    assert query_names == {
+        "view_bot_id",
+        "offset",
+        "limit",
+        "q",
+        "membership",
+        "kind",
+        "strategy",
+    }
+    assert "post" in contract["paths"][path]
+
+
+def test_delete_group_accepts_optional_acting_bot_id_query() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][GROUP_PATH]["delete"]
+    queries = {
+        parameter["name"]: parameter
+        for parameter in operation["parameters"]
+        if parameter["in"] == "query"
+    }
+
+    assert queries == {
+        "acting_bot_id": {
+            "name": "acting_bot_id",
+            "in": "query",
+            "required": False,
+            "description": "Optional Bot identity perspective for the delete decision. Omit to evaluate the authenticated Human perspective.",
+            "schema": {"type": "string", "minLength": 1},
+        }
+    }
+
+
+def test_create_group_request_defaults_private_visibility_and_chat_delivery() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][GROUPS_PATH]["post"]
+    request_schema = operation["requestBody"]["content"]["application/json"]["schema"]
+    create_group_schema = next(
+        schema
+        for schema in request_schema["oneOf"]
+        if schema["properties"]["group_kind"]["const"] == "normal"
+    )
+
+    assert "visibility" not in create_group_schema["properties"]
+    chat_config = next(
+        schema
+        for schema in create_group_schema["properties"]["collaboration"]["oneOf"]
+        if schema["properties"]["strategy"]["const"] == "chat"
+    )
+    assert chat_config["required"] == ["strategy"]
+    assert chat_config["properties"]["delivery_policy"]["default"] == {
+        "bot_final_delivery": "send_to_driver"
+    }
+    delivery_policy = chat_config["properties"]["delivery_policy"]
+    assert delivery_policy["required"] == ["bot_final_delivery"]
+    assert delivery_policy["properties"]["bot_final_delivery"]["default"] == "send_to_driver"
+
+
+def test_create_state_machine_group_accepts_definition_content_yaml() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][GROUPS_PATH]["post"]
+    request_schema = operation["requestBody"]["content"]["application/json"]["schema"]
+    create_group_schema = next(
+        schema
+        for schema in request_schema["oneOf"]
+        if schema["properties"]["group_kind"]["const"] == "normal"
+    )
+    state_machine_config = next(
+        schema
+        for schema in create_group_schema["properties"]["collaboration"]["oneOf"]
+        if schema["properties"]["strategy"]["const"] == "state_machine"
+    )
+    definition = state_machine_config["properties"]["definition"]
+
+    assert definition == {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["content_yaml"],
+        "properties": {"content_yaml": {"type": "string", "minLength": 1}},
+    }
+    assert "definition_id" not in repr(state_machine_config)
+    assert "version" not in definition["properties"]
+
+
+def test_update_group_does_not_accept_context() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][GROUP_PATH]["patch"]
+    schema = operation["requestBody"]["content"]["application/json"]["schema"]
+
+    assert "context" not in schema["properties"]
+    assert set(schema["properties"]) == {"name", "visibility", "delivery_policy"}

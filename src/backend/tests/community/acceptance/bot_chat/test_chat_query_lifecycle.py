@@ -62,7 +62,7 @@ def test_bot_chat_lifecycle_baseline(live_backend, acceptance_fs_root):
         headers={"x-user-id": "e2e_user"},
         timeout=10.0,
     ) as client:
-        list_resp = client.get("/api/v1/bot-chats?owner_id=e2e_user").json()
+        list_resp = client.get("/api/v1/bot-chats").json()
         detail_resp = client.get("/api/v1/bot-chats/trace_does_not_exist").json()
 
     snapshot = {

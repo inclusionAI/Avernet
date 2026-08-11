@@ -16,28 +16,22 @@ from agentclaw.community.api.caller_iam_token_service import (
     CallerIamTokenServiceProtocol,
 )
 from agentclaw.community.api.mcp_sync_service import MCPSyncServiceProtocol
-from agentclaw.community.core.bot_collaborator.repository.protocol import (
-    BotCollabLockRepositoryProtocol,
-    CollaboratorRepositoryProtocol,
-)
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import BotCollabLockRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.caller_identity.protocols import (
     CallerIdentityTokenExchangeProtocol,
     CallerRuntimeUpdaterProtocol,
     CallerTokenProviderProtocol,
 )
-from agentclaw.community.core.caller_identity.repository import (
-    CallerIdentityRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.identity import CallerIdentityRepositoryProtocol
 from agentclaw.community.core.caller_identity.service import CallerIdentityService
 from agentclaw.community.core.caller_identity.iam_token_service import (
     CallerIamTokenService,
 )
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
-from agentclaw.community.plugins.caller_identity_repository import (
-    CallerIdentityRepository,
-)
+from agentclaw.community.core.repository.implementations.identity.caller_identity import CallerIdentityRepository
 from agentclaw.community.plugin_api.auth import AuthPlugin
 
 

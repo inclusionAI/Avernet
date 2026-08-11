@@ -143,6 +143,38 @@ def test_step1_hit_engine_type_openclaw_regression_guard(
     assert conn_info["engine_type"] == "openclaw"
 
 
+def test_step1_hit_claude_code_with_non_normalcc_template_normalizes_to_aicoding(
+    fake_binding, fake_baas_service, fake_bot_repo, fake_device_repo
+):
+    """claude_code + 非 normalCC template_type 应归一到 aicoding。"""
+    fake_bot_repo.get_by_binding_id.return_value = {
+        "active_engine": "claude_code",
+        "template_type": "applicationCoding",
+        "bot_type": "desktop",
+    }
+    builder = _make_builder(fake_baas_service, fake_bot_repo, fake_device_repo)
+
+    conn_info = builder.build(fake_binding, user_id="user-1")
+
+    assert conn_info["engine_type"] == "aicoding"
+
+
+def test_step1_hit_claude_code_with_normalcc_stays_claude_code(
+    fake_binding, fake_baas_service, fake_bot_repo, fake_device_repo
+):
+    """claude_code + normalCC 保持 claude_code。"""
+    fake_bot_repo.get_by_binding_id.return_value = {
+        "active_engine": "claude_code",
+        "template_type": "normalCC",
+        "bot_type": "desktop",
+    }
+    builder = _make_builder(fake_baas_service, fake_bot_repo, fake_device_repo)
+
+    conn_info = builder.build(fake_binding, user_id="user-1")
+
+    assert conn_info["engine_type"] == "claude_code"
+
+
 # ── Step 2 反查:service bot via binding.device_props.bolt_id ──────
 #
 # 现场:trace 0be8ed2217816832272041880e9da7

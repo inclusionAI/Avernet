@@ -16,7 +16,7 @@ from threading import Lock
 from typing import TYPE_CHECKING, Any
 
 from agentclaw.community.core.bot_management.errors import CreateBotForOthersError
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.mcp.services._defaults import get_default_cli_items
 from agentclaw.community.core.mcp.services.passport_scope import (
     filter_passport_mcp_codes,
@@ -24,6 +24,7 @@ from agentclaw.community.core.mcp.services.passport_scope import (
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.core.bot_management.services.bot_service import (
+    BotOperationNotAllowedError,
     generate_bot_id,
 )
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
@@ -237,6 +238,7 @@ class CreateBotForOthersService:
                 error_code=500,
             )
         engine_type = str(bot.get("active_engine") or DEFAULT_ENGINE_TYPE)
+        is_teclaw_bot = self._bot_service.is_teclaw_bot(engine_type)
         existing_ext = self._mapping_copy(bot.get("ext"))
         readiness = self._ensure_passport(
             bot_id=bot_id,
@@ -280,11 +282,18 @@ class CreateBotForOthersService:
             return {
                 **base_result,
                 "action": "repaired" if identity_repaired else "skipped",
-                "runtime": {"restart_required": identity_repaired},
+                "runtime": {
+                    "restart_required": identity_repaired and not is_teclaw_bot
+                },
             }
 
         wait = self._restart_wait(bot.get("gmt_modified"))
         if wait is not None:
+            if is_teclaw_bot:
+                raise CreateBotForOthersError(
+                    "teclaw 类型的 Bot 不支持重启",
+                    error_code=400,
+                )
             minutes_since_modified, minutes_remaining = wait
             return {
                 **base_result,
@@ -294,11 +303,14 @@ class CreateBotForOthersService:
                 "runtime": {"restart_required": True},
             }
 
-        result = self._bot_service.restart_bot(
-            bot_id=bot_id,
-            user_id=target_user_id,
-            nick_name=target_nick_name,
-        )
+        try:
+            result = self._bot_service.restart_bot(
+                bot_id=bot_id,
+                user_id=target_user_id,
+                nick_name=target_nick_name,
+            )
+        except BotOperationNotAllowedError as exc:
+            raise CreateBotForOthersError(str(exc), error_code=400) from exc
         return {
             **base_result,
             "action": "restarted",

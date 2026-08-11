@@ -3,9 +3,7 @@ import pytest
 
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.models.skill import SkillCategory  # noqa: F401 — register table
-from agentclaw.community.plugins.skill_category_repository import (
-    SkillCategoryRepository,
-)
+from agentclaw.community.core.repository.implementations.skill_center.category import SkillCategoryRepository
 
 
 @pytest.fixture

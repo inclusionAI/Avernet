@@ -12,8 +12,8 @@ Response: VerifyReport JSON
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.skill_center.services.skill_symlink_verify_service import (
     SkillSymlinkVerifyService,
 )

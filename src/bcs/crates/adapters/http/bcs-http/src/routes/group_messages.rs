@@ -127,6 +127,7 @@ pub async fn group_chat(
             requested_sender_id: req.from,
             message: req.message,
             session_id: req.session_id,
+            provider_bypass_headers: state.provider_bypass_headers_from(&headers),
         })
         .await
         .map_err(service_error_to_legacy)?;

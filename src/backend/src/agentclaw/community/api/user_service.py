@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from agentclaw.community.core.access.repository import UserInfoRecord
+from agentclaw.community.core.access.models import UserInfoRecord
 
 
 @runtime_checkable

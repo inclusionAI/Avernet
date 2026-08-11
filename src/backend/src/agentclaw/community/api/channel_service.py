@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Optional, Protocol, runtime_checkable
 
-from agentclaw.community.core.channel.services.repositories import ChannelRecord
+from agentclaw.community.core.channel.models import ChannelRecord
 
 
 @runtime_checkable

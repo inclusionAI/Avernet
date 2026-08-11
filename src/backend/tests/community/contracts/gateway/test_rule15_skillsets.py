@@ -9,7 +9,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, AsyncMock
 
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
 from tests.community.contracts.gateway.conftest import (

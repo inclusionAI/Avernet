@@ -10,13 +10,13 @@ from datetime import datetime
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
 from agentclaw.community.plugin_api.approval_workflow import ApprovalWorkflowPlugin
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.utils.avernet_tenant import (
     bind_current_avernet_tenant,
     get_current_avernet_tenant,
 )
-from agentclaw.community.core.bot_public.repository.bot_friend_repository import BotFriendRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import BotFriendRepositoryProtocol
 from agentclaw.community.core.bot_public.repository.models import BotFriendQueryKey, BotFriendStatus, ApprovalStatus, ApprovalType
 from agentclaw.community.core.operator_context import OperatorContext
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE

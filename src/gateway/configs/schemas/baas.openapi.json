@@ -376,216 +376,6 @@
         "title": "MessageResultResponseData",
         "type": "object"
       },
-      "RunRequest": {
-        "description": "Single-turn conversation request model",
-        "properties": {
-          "message": {
-            "description": "User message content",
-            "minLength": 1,
-            "title": "Message",
-            "type": "string"
-          },
-          "metadata": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Optional metadata information.Recognized keys: biz_task_id (str, optional): Caller-assigned business task identifier. Defaults to run_id when absent. biz_scene (str, optional): Business scene/category tag. Defaults to 'default' when absent.",
-            "title": "Metadata"
-          }
-        },
-        "required": [
-          "message"
-        ],
-        "title": "RunRequest",
-        "type": "object"
-      },
-      "RunResponse": {
-        "description": "Single-turn conversation standard response",
-        "properties": {
-          "code": {
-            "default": 0,
-            "description": "响应码，0 表示成功",
-            "title": "Code",
-            "type": "integer"
-          },
-          "data": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RunResponseData"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Response data"
-          },
-          "message": {
-            "default": "success",
-            "description": "响应消息",
-            "title": "Message",
-            "type": "string"
-          }
-        },
-        "title": "RunResponse",
-        "type": "object"
-      },
-      "RunResponseData": {
-        "description": "Single-turn conversation response data",
-        "properties": {
-          "run_id": {
-            "description": "Run ID",
-            "title": "Run Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "run_id"
-        ],
-        "title": "RunResponseData",
-        "type": "object"
-      },
-      "RunResultData": {
-        "description": "Conversation result data",
-        "properties": {
-          "content": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Bot reply content",
-            "title": "Content"
-          },
-          "extra": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ExtraInfo"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Result extra information"
-          }
-        },
-        "title": "RunResultData",
-        "type": "object"
-      },
-      "RunResultResponse": {
-        "description": "Run result query response",
-        "properties": {
-          "code": {
-            "default": 0,
-            "description": "响应码，0 表示成功",
-            "title": "Code",
-            "type": "integer"
-          },
-          "data": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RunResultResponseData"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Run result data"
-          },
-          "message": {
-            "default": "success",
-            "description": "响应消息",
-            "title": "Message",
-            "type": "string"
-          }
-        },
-        "title": "RunResultResponse",
-        "type": "object"
-      },
-      "RunResultResponseData": {
-        "description": "Run result response data",
-        "properties": {
-          "bot_id": {
-            "description": "Bot ID",
-            "title": "Bot Id",
-            "type": "string"
-          },
-          "completed_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Completion time",
-            "title": "Completed At"
-          },
-          "created_at": {
-            "description": "Creation time",
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Error information",
-            "title": "Error"
-          },
-          "result": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RunResultData"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Conversation result"
-          },
-          "run_id": {
-            "description": "Run ID",
-            "title": "Run Id",
-            "type": "string"
-          },
-          "session_id": {
-            "description": "Session ID",
-            "title": "Session Id",
-            "type": "string"
-          },
-          "status": {
-            "description": "Run status: pending/running/completed/failed",
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "run_id",
-          "bot_id",
-          "session_id",
-          "status",
-          "created_at"
-        ],
-        "title": "RunResultResponseData",
-        "type": "object"
-      },
       "SessionMessagesResponse": {
         "description": "Session message list standard response",
         "properties": {
@@ -819,14 +609,14 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/openapi/v1/messages": {
+    "/openapi/v1/chat/messages": {
       "post": {
-        "description": "Deliver a message to a specified Bot using a Bearer Token-authenticated API Key",
-        "operationId": "deliver_message_openapi_v1_messages_post",
+        "description": "Deliver a message to a specified Bot using a JWT-authenticated request",
+        "operationId": "deliver_message_openapi_v1_chat_messages_post",
         "parameters": [
           {
             "in": "header",
-            "name": "authorization",
+            "name": "x-avernet-principal",
             "required": false,
             "schema": {
               "anyOf": [
@@ -837,7 +627,7 @@
                   "type": "null"
                 }
               ],
-              "title": "Authorization"
+              "title": "X-Avernet-Principal"
             }
           }
         ],
@@ -868,6 +658,9 @@
           "401": {
             "description": "Authentication failed"
           },
+          "403": {
+            "description": "Bot access denied"
+          },
           "404": {
             "description": "Bot not found"
           },
@@ -888,20 +681,20 @@
             "description": "Bot unavailable"
           }
         },
-        "summary": "Message delivery",
+        "summary": "Gateway message delivery",
         "tags": [
-          "messages"
+          "Chat / Messages"
         ]
       }
     },
-    "/openapi/v1/messages/stream": {
+    "/openapi/v1/chat/messages/stream": {
       "post": {
-        "description": "Deliver a message to a specified Bot using a Bearer Token-authenticated API Key, returning results as an SSE stream",
-        "operationId": "deliver_message_stream_openapi_v1_messages_stream_post",
+        "description": "Deliver a message to a specified Bot using a JWT-authenticated request, returning results as an SSE stream",
+        "operationId": "deliver_message_stream_openapi_v1_chat_messages_stream_post",
         "parameters": [
           {
             "in": "header",
-            "name": "authorization",
+            "name": "x-avernet-principal",
             "required": false,
             "schema": {
               "anyOf": [
@@ -912,7 +705,7 @@
                   "type": "null"
                 }
               ],
-              "title": "Authorization"
+              "title": "X-Avernet-Principal"
             }
           }
         ],
@@ -942,7 +735,7 @@
             "description": "Authentication failed"
           },
           "403": {
-            "description": "Forbidden"
+            "description": "Bot access denied"
           },
           "404": {
             "description": "Bot not found"
@@ -967,16 +760,16 @@
             "description": "Bot unavailable"
           }
         },
-        "summary": "Streaming message delivery",
+        "summary": "Gateway streaming message delivery",
         "tags": [
-          "messages"
+          "Chat / Messages"
         ]
       }
     },
-    "/openapi/v1/messages/{message_id}": {
+    "/openapi/v1/chat/messages/{message_id}": {
       "get": {
-        "description": "Query the processing result of a message delivery by message_id",
-        "operationId": "get_message_result_openapi_v1_messages__message_id__get",
+        "description": "Query the processing result of a message delivery by message_id (JWT-authenticated)",
+        "operationId": "get_message_result_openapi_v1_chat_messages__message_id__get",
         "parameters": [
           {
             "in": "path",
@@ -989,7 +782,7 @@
           },
           {
             "in": "header",
-            "name": "authorization",
+            "name": "x-avernet-principal",
             "required": false,
             "schema": {
               "anyOf": [
@@ -1000,7 +793,7 @@
                   "type": "null"
                 }
               ],
-              "title": "Authorization"
+              "title": "X-Avernet-Principal"
             }
           }
         ],
@@ -1018,6 +811,9 @@
           "401": {
             "description": "Authentication failed"
           },
+          "403": {
+            "description": "Bot access denied"
+          },
           "404": {
             "description": "Message not found"
           },
@@ -1032,156 +828,16 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Query message result",
+        "summary": "Gateway query message result",
         "tags": [
-          "messages"
+          "Chat / Messages"
         ]
       }
     },
-    "/openapi/v1/runs": {
-      "post": {
-        "description": "Invoke a Bot for a single-turn conversation using a Bearer Token-authenticated API Key",
-        "operationId": "run_chat_openapi_v1_runs_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RunRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RunResponse"
-                }
-              }
-            },
-            "description": "Conversation successful"
-          },
-          "400": {
-            "description": "Invalid parameters"
-          },
-          "401": {
-            "description": "Authentication failed"
-          },
-          "404": {
-            "description": "Bot not found"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "500": {
-            "description": "Internal server error"
-          },
-          "503": {
-            "description": "Bot unavailable"
-          }
-        },
-        "summary": "Single-turn conversation",
-        "tags": [
-          "runs"
-        ]
-      }
-    },
-    "/openapi/v1/runs/{run_id}": {
+    "/openapi/v1/chat/sessions/{session_id}": {
       "get": {
-        "description": "Query the execution result of a conversation task by run_id",
-        "operationId": "get_run_result_openapi_v1_runs__run_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "run_id",
-            "required": true,
-            "schema": {
-              "title": "Run Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RunResultResponse"
-                }
-              }
-            },
-            "description": "Query successful"
-          },
-          "401": {
-            "description": "Authentication failed"
-          },
-          "404": {
-            "description": "Run not found"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Query conversation result",
-        "tags": [
-          "runs"
-        ]
-      }
-    },
-    "/openapi/v1/sessions/{session_id}": {
-      "get": {
-        "description": "Query a specific session's information using a Bearer Token-authenticated API Key",
-        "operationId": "get_session_openapi_v1_sessions__session_id__get",
+        "description": "Query a specific session's information using a JWT-authenticated request",
+        "operationId": "get_session_openapi_v1_chat_sessions__session_id__get",
         "parameters": [
           {
             "in": "path",
@@ -1193,21 +849,14 @@
             }
           },
           {
-            "description": "Bot ID, format: bot_id or default:staff_no. If omitted, resolved from the API Key.",
+            "description": "Bot ID, format: bot_id:staff_no",
             "in": "query",
             "name": "bot_id",
-            "required": false,
+            "required": true,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Bot ID, format: bot_id or default:staff_no. If omitted, resolved from the API Key.",
-              "title": "Bot Id"
+              "description": "Bot ID, format: bot_id:staff_no",
+              "title": "Bot Id",
+              "type": "string"
             }
           },
           {
@@ -1224,7 +873,7 @@
           },
           {
             "in": "header",
-            "name": "authorization",
+            "name": "x-avernet-principal",
             "required": false,
             "schema": {
               "anyOf": [
@@ -1235,7 +884,7 @@
                   "type": "null"
                 }
               ],
-              "title": "Authorization"
+              "title": "X-Avernet-Principal"
             }
           }
         ],
@@ -1254,7 +903,7 @@
             "description": "Authentication failed"
           },
           "403": {
-            "description": "Access denied"
+            "description": "Bot access denied"
           },
           "404": {
             "description": "Session not found"
@@ -1273,16 +922,16 @@
             "description": "Internal server error"
           }
         },
-        "summary": "Query session",
+        "summary": "Gateway query session",
         "tags": [
-          "sessions"
+          "Chat / Sessions"
         ]
       }
     },
-    "/openapi/v1/sessions/{session_id}/messages": {
+    "/openapi/v1/chat/sessions/{session_id}/messages": {
       "get": {
-        "description": "Query a specific session's message list using a Bearer Token-authenticated API Key",
-        "operationId": "get_session_messages_openapi_v1_sessions__session_id__messages_get",
+        "description": "Query a specific session's message list using a JWT-authenticated request",
+        "operationId": "get_session_messages_openapi_v1_chat_sessions__session_id__messages_get",
         "parameters": [
           {
             "in": "path",
@@ -1308,21 +957,14 @@
             }
           },
           {
-            "description": "Bot ID, format: bot_id or default:staff_no. If omitted, resolved from the API Key.",
+            "description": "Bot ID, format: bot_id:staff_no",
             "in": "query",
             "name": "bot_id",
-            "required": false,
+            "required": true,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Bot ID, format: bot_id or default:staff_no. If omitted, resolved from the API Key.",
-              "title": "Bot Id"
+              "description": "Bot ID, format: bot_id:staff_no",
+              "title": "Bot Id",
+              "type": "string"
             }
           },
           {
@@ -1339,7 +981,7 @@
           },
           {
             "in": "header",
-            "name": "authorization",
+            "name": "x-avernet-principal",
             "required": false,
             "schema": {
               "anyOf": [
@@ -1350,7 +992,7 @@
                   "type": "null"
                 }
               ],
-              "title": "Authorization"
+              "title": "X-Avernet-Principal"
             }
           }
         ],
@@ -1369,7 +1011,7 @@
             "description": "Authentication failed"
           },
           "403": {
-            "description": "Access denied"
+            "description": "Bot access denied"
           },
           "404": {
             "description": "Session not found"
@@ -1388,9 +1030,9 @@
             "description": "Internal server error"
           }
         },
-        "summary": "Query session messages",
+        "summary": "Gateway query session messages",
         "tags": [
-          "sessions"
+          "Chat / Sessions"
         ]
       }
     }
