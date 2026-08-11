@@ -7,9 +7,11 @@ be present in that engine's default skill set.
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
-from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
+from agentclaw.community.core.default_capabilities import (
+    resolve_default_capabilities_engine_type,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,22 +78,27 @@ _DEFAULT_MCP_SERVERS_BY_ENGINE: Dict[str, List[dict]] = {
         {"server_code": "hitl"},
     ],
     "aicoding": [
-        {"server_code": "mcp.ant.zlatan.yuntumcpserver"},
-        {"server_code": "mcp.ant.alipaybase-antlogsmcp.mcp-server"},
-        {"server_code": "mcp.ant.faas.skylarkmcpserver.skylarkmcpserver"},
-        {"server_code": "mcp.ant.arkai.assistantmcpserver"},
-        {"server_code": "mcp.ant.arkai.dimamcpserver"},
-        {"server_code": "mcp.ant.agentix.112858.aixAicoding"},
-        {"server_code": "mcp.ant.agentclawscs.bcs_mcp"},
-        {"server_code": "mcp.ant.faas.aixjiter.AixCodingMemoryMCP"},
-        {"server_code": "mcp.ant.rgmcpserver.rgfastcheckmcpserver"},
-        {"server_code": "hitl"},
+         {"server_code": "mcp.ant.antprocessai.anttaskmcp", "name": "任务中心MCP", "description": "任务中心待办任务，已办任务等相关任务查询MCP"},
+                {"server_code": "mcp.ant.arkai.dimamcpserver", "name": "Dima MCP", "description": "Dima MCP"},
+                {"server_code": "mcp.ant.homistudio.meetmcp", "name": "会议信息服务", "description": "会议信息相关mcp，提供查询分享给我的会议列表、我创建的会议列表、单个会议的纪要、会议发言信息以及待办查询等功能"},
+                {"server_code": _UCT_SERVER_CODE},
+                {"server_code": "mcp.ant.antdingopenapi.antdingeventmcpserver", "name": "蚂蚁钉日程相关-MCP服务", "description": "蚂蚁钉日程相关-MCP服务"},
+                {"server_code": "mcp.ant.antdingopenapi.antdingtodomcpserver", "name": "蚂蚁钉待办服务", "description": "蚂蚁钉待办服务"},
+                {"server_code": "mcp.ant.antdingopenapi.antdingmessagemcpserver", "name": "蚂蚁钉消息相关-MCP服务", "description": "蚂蚁钉消息相关-MCP服务"},
+                {"server_code": "mcp.ant.faas.skylarkmcpserver.skylarkmcpserver", "name": "语雀 MCP", "description": "语雀 MCP 服务，覆盖文档读写、知识库管理、目录操作、团队协作、互动分析全流程。"},
+                {"server_code": "mcp.ant.antcodemcp.code.mcpserver", "name": "AntCodeMCP", "description": "AntCode提供的 MCP 服务"},
+                {"server_code": "mcp.ant.archassistant-mcp.appmcp", "name": "应用信息服务", "description": "架构工作台提供的应用元信息查询服务"},
+                {"server_code": "mcp.ant.brwithub.worksummaryserver", "name": "工作报告撰写", "description": "基于用户输入的结构化数据或非结构化文本，智能生成专业、规范的职场汇报文档（如周报、月报、项目总结等）的 MCP 服务。"},
+                {"server_code": "mcp.ant.agentclawscs.bcs_mcp", "name": "BCN协作服务", "description": "用于BCN群聊中bot间协作"},
+                {"server_code": "mcp.ant.zlatan.yuntumcpserver", "name": "云图 mcp 服务", "description": "云图官方mcp服务，支持链路环境自动检测，链路树状与数组形式详情查询"},
+                {"server_code": "mcp.ant.alipaybase-antlogsmcp.mcp-server", "name": "antlogs mcp 服务", "description": "antlogs mcp 服务"},
+                {"server_code": "mcp.ant.arkai.assistantmcpserver", "name": "Skybase - 知识问答", "description": "Skybase 是蚂蚁的研发 AI 知识库。当前 MCP 主要用于两个方面：1) 知识库的检索、2) 研发通用问答、前端问答、中间件问答。"},
+                {"server_code": "mcp.ant.faas.aixjiter.AixCodingMemoryMCP", "name": "AixCodingMemoryMCP", "description": "用于aixcoding memoryOS知识库查询"},
+                {"server_code": "mcp.ant.rgmcpserver.rgfastcheckmcpserver", "name": "星海MCP服务", "description": "星海MCP服务"},
+                {"server_code": "hitl"},
+                {"server_code": "clawmind"},
     ],
 }
-
-
-def _resolve(engine_type: Optional[str]) -> str:
-    return engine_type or DEFAULT_ENGINE_TYPE
 
 
 def _uct_auth_header() -> Dict[str, str]:
@@ -117,16 +124,76 @@ def _uct_auth_header() -> Dict[str, str]:
     return {}
 
 
-def get_default_mcp_servers(engine_type: Optional[str] = None) -> List[dict]:
+
+class _EngineMcpDefaultsResolver:
+    """Engine hook for deriving effective default MCP configs.
+
+    The common MCP defaults flow resolves the default-capabilities engine bucket
+    before selecting a resolver. The resolver only owns bucket-specific
+    post-processing, such as merging template-provided MCP presets.
+    """
+
+    def resolve(
+        self,
+        default_servers: List[dict],
+        ext_info: Optional[Mapping[str, Any]] = None,
+    ) -> List[dict]:
+        return [dict(cfg) for cfg in default_servers]
+
+
+_DEFAULT_MCP_RESOLVER = _EngineMcpDefaultsResolver()
+
+
+def _build_mcp_default_resolvers_by_engine() -> dict[str, _EngineMcpDefaultsResolver]:
+    # Import engine-specific implementations here so the common MCP defaults
+    # module only owns the abstraction and dispatch.
+    from agentclaw.community.core.aicoding.mcp_defaults import (
+        AicodingMcpDefaultsResolver,
+    )
+
+    return {
+        "aicoding": AicodingMcpDefaultsResolver(),
+    }
+
+
+_MCP_DEFAULT_RESOLVERS_BY_ENGINE = _build_mcp_default_resolvers_by_engine()
+
+
+def _resolve_default_mcp_engine_bucket(
+    engine_type: Optional[str],
+    template_type: Any = None,
+) -> str:
+    return resolve_default_capabilities_engine_type(
+        engine_type,
+        template_type,
+    )
+
+
+def _mcp_defaults_resolver(engine_bucket: str) -> _EngineMcpDefaultsResolver:
+    return _MCP_DEFAULT_RESOLVERS_BY_ENGINE.get(engine_bucket, _DEFAULT_MCP_RESOLVER)
+
+
+def get_default_mcp_servers(
+    engine_type: Optional[str] = None,
+    template_type: Any = None,
+    *,
+    ext_info: Optional[Mapping[str, Any]] = None,
+) -> List[dict]:
     """Return the default MCP server configs for the given engine.
 
     Unknown engines get an empty list (fail-closed, not a crash). The uctmcptools
     entry gets its secret ``x-ling-auth`` header injected from config when one is
     set (see :func:`_uct_auth_header`); otherwise it is returned header-free.
     """
-    servers = [
-        dict(cfg) for cfg in _DEFAULT_MCP_SERVERS_BY_ENGINE.get(_resolve(engine_type), [])
-    ]
+    engine_bucket = _resolve_default_mcp_engine_bucket(
+        engine_type,
+        template_type,
+    ) 
+    resolver = _mcp_defaults_resolver(engine_bucket)
+    servers = resolver.resolve(
+        _DEFAULT_MCP_SERVERS_BY_ENGINE.get(engine_bucket, []),
+        ext_info,
+    )
     auth_header = _uct_auth_header()
     if auth_header:
         for cfg in servers:
@@ -135,14 +202,29 @@ def get_default_mcp_servers(engine_type: Optional[str] = None) -> List[dict]:
     return servers
 
 
-def get_default_mcp_server_codes(engine_type: Optional[str] = None) -> List[str]:
+def get_default_mcp_server_codes(
+    engine_type: Optional[str] = None,
+    template_type: Any = None,
+    *,
+    ext_info: Optional[Mapping[str, Any]] = None,
+) -> List[str]:
     """Return the list of default MCP server_codes for the given engine."""
-    return [cfg["server_code"] for cfg in get_default_mcp_servers(engine_type)]
+    return [
+        cfg["server_code"]
+        for cfg in get_default_mcp_servers(
+            engine_type,
+            template_type,
+            ext_info=ext_info,
+        )
+    ]
 
 
 def get_default_mcp_config(
     engine_type: Optional[str],
     server_code: str,
+    template_type: Any = None,
+    *,
+    ext_info: Optional[Mapping[str, Any]] = None,
 ) -> Optional[dict]:
     """Return the default MCP config dict (with optional name/description/icon) for ``server_code``.
 
@@ -152,11 +234,14 @@ def get_default_mcp_config(
     ``server_code`` (no ``name``) also return a dict — callers decide via
     ``cfg.get("name")`` whether a real name is available.
     """
-    for cfg in _DEFAULT_MCP_SERVERS_BY_ENGINE.get(_resolve(engine_type), []):
+    for cfg in get_default_mcp_servers(
+        engine_type,
+        template_type,
+        ext_info=ext_info,
+    ):
         if cfg.get("server_code") == server_code:
             return dict(cfg)
     return None
-
 
 
 # ============ 默认 CLI 列表（按 engine 分桶）============
@@ -177,36 +262,21 @@ _DEFAULT_CLI_ITEMS_BY_ENGINE: Dict[str, List[dict]] = {
 }
 
 
-# template_type 白名单：claude_code 引擎下，仅 personalCoding / applicationCoding
-# 走 aicoding 默认 CLI 链路（研发类 bot 才需要这些 CLI）。
-_CLAUDE_CODE_CLI_TEMPLATE_TYPES = frozenset({"personalCoding", "applicationCoding"})
-
-
 def get_default_cli_items(
     engine_type: Optional[str] = None,
     template_type: Optional[str] = None,
 ) -> List[dict]:
     """返回默认 CLI 列表（CliItem dict 形式）。
 
-    走 aicoding 链路（返回默认 CLI）的判定：
-      1. engine_type == "aicoding"；或
-      2. engine_type == "claude_code" 且 template_type in
-         {"personalCoding", "applicationCoding"}。
-    其余一律返回空列表（fail-closed，避免给非研发类 bot 误授权 CLI）。
-
-    注意：与 get_default_mcp_servers 不同，CLI 不做 DEFAULT_ENGINE_TYPE 兜底，
-    None 直接返回空列表。
+    默认能力分桶规则由对应引擎维护；CLI 这里只按分桶结果读取默认
+    CLI 列表，未知桶返回空列表（fail-closed，避免误授权 CLI）。
     """
-    if not engine_type:
-        return []
-    if engine_type == "aicoding":
-        key = "aicoding"
-    elif (
-        engine_type == "claude_code"
-        and isinstance(template_type, str)
-        and template_type in _CLAUDE_CODE_CLI_TEMPLATE_TYPES
-    ):
-        key = "aicoding"
-    else:
-        return []
+    from agentclaw.community.core.default_capabilities import (
+        resolve_default_capabilities_engine_type,
+    )
+
+    key = resolve_default_capabilities_engine_type(
+        engine_type,
+        template_type,
+    )
     return [dict(item) for item in _DEFAULT_CLI_ITEMS_BY_ENGINE.get(key, [])]

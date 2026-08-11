@@ -310,8 +310,8 @@ class TestClaudeCodeDefaultMcpNames:
 
         original = _defaults.get_default_mcp_servers
 
-        def patched(engine_type=None):
-            servers = [dict(c) for c in original(engine_type)]
+        def patched(engine_type=None, template_type=None, *, ext_info=None):
+            servers = [dict(c) for c in original(engine_type, template_type, ext_info=ext_info)]
             for c in servers:
                 if c["server_code"] == "mcp.ant.antcodemcp.code.mcpserver":
                     c["icon"] = "https://icon.example/antcode.png"
@@ -344,8 +344,8 @@ class TestClaudeCodeDefaultMcpNames:
 
         original = _defaults.get_default_mcp_servers
 
-        def patched(engine_type=None):
-            servers = [dict(c) for c in original(engine_type)]
+        def patched(engine_type=None, template_type=None, *, ext_info=None):
+            servers = [dict(c) for c in original(engine_type, template_type, ext_info=ext_info)]
             for c in servers:
                 if c["server_code"] == "mcp.ant.rgmcpserver.rgfastcheckmcpserver":
                     c["icon"] = "https://icon.example/xinghai.png"
