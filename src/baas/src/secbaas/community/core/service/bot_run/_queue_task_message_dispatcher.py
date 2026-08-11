@@ -17,6 +17,7 @@ dispatch_send / dispatch_inject 只做「写结果行 + 写队列工作项」两
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
@@ -88,6 +89,7 @@ class QueueTaskMessageDispatcher:
         bot_id: str = "",
         callback: Any = None,
         chat_metadata: dict[str, str] | None = None,
+        attachments: list[Any] | None = None,
     ) -> None:
         """队列化消息发送：只入库（PENDING），Worker 异步执行。
 
@@ -103,6 +105,8 @@ class QueueTaskMessageDispatcher:
             meta["callback_function"] = callback
         if timeout is not None:
             meta["timeout"] = timeout
+        if attachments:
+            meta["attachments"] = [dataclasses.asdict(a) for a in attachments]
         self._enqueue_work(run_id, bot_id, session_id, meta=meta)
         logger.info(
             "[queue_dispatcher.dispatch_send] run_id=%s bot_id=%s session_id=%s",
@@ -121,6 +125,7 @@ class QueueTaskMessageDispatcher:
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         bot_id: str = "",
+        attachments: list[Any] | None = None,
     ) -> None:
         """队列化消息注入：只入库（PENDING），Worker 异步执行。
 
@@ -129,6 +134,8 @@ class QueueTaskMessageDispatcher:
         """
         self._check_backpressure(bot_id)
         meta: dict[str, Any] = {"request_type": "inject"}
+        if attachments:
+            meta["attachments"] = [dataclasses.asdict(a) for a in attachments]
         self._enqueue_work(run_id, bot_id, session_id, meta=meta)
         logger.info(
             "[queue_dispatcher.dispatch_inject] run_id=%s bot_id=%s session_id=%s",
@@ -150,6 +157,7 @@ class QueueTaskMessageDispatcher:
         context: BotChatContext | None = None,
         timeout: int | None = None,
         bot_id: str = "",
+        attachments: list[Any] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """队列化流式发送：入队 + 轮询 chunk 表。
 
@@ -165,6 +173,8 @@ class QueueTaskMessageDispatcher:
         meta: dict[str, Any] = {"request_type": "chat", "stream": "true"}
         if timeout is not None:
             meta["timeout"] = timeout
+        if attachments:
+            meta["attachments"] = [dataclasses.asdict(a) for a in attachments]
         self._enqueue_work(run_id, bot_id, session_id, meta=meta)
 
         logger.info(
