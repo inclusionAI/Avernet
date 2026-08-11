@@ -3,35 +3,33 @@
 ## Summary
 
 A bot gains a startup script that belongs to the bot rather than to any one
-container, and that the platform runs every time one of the bot's containers
-starts. Owners read, replace, and clear it through the public API, and read back
-what the last run did — its exit status and its output, per container instance.
-The script is how a team provisions its own environment inside the bot: install
-a CLI, drop in a plugin, preload a skill.
+container, and that the platform runs as part of the container's start sequence.
+Owners read, replace, and clear it through the public API. The script is how a
+team provisions its own environment inside the bot: install a CLI, drop in a
+plugin, preload a skill.
 
 ## Motivation
 
 Anything installed by hand inside a running bot container is lost the moment the
-container is recreated. A restart, a republish, or a scale-out all come back
-with a bare image, so every one of those events means provisioning by hand
-again, and a scaled bot has no way to make its instances identical. Teams
-operating bots on the platform have asked for a supported way to attach that
-provisioning to the bot itself (issue #926).
+container is recreated. A restart, a republish, or a scale-out all come back with
+a bare image, so every one of those events means provisioning by hand again, and
+a scaled bot has no way to make its instances identical. Teams operating bots on
+the platform have asked for a supported way to attach that provisioning to the
+bot itself (issue #926).
 
-The platform can already run a script when a container starts, but that
-mechanism is not available for this. It carries the platform's own startup
-sequence — bootstrap, engine install, service start, watchdog — as a single
-chained command whose failure marks the container failed. User-supplied content
-cannot be added to that chain: a mistyped install command would stop the agent
-from ever starting. What is missing is a **second, separate stage** that runs the
-bot's own script, reports its own result, and cannot take the agent down with it.
+The platform already runs a script when a container starts — the boot sequence
+carried in `after_create_cmd_hook`, executed inside the container by a generated
+wrapper that reports its result back and drives the device to ACTIVE or FAILED.
+This feature **reuses that mechanism** rather than building a second one: the
+bot's script is appended to the sequence, isolated so that its failure cannot
+change the outcome of the boot.
 
-The second gap is coverage. The existing mechanism re-runs on container start
-for only one of the platform's container providers; on the others it runs at
-creation and never again, which is the opposite of what "runs on every start"
-promises. And a provider that cannot run scripts at all silently does nothing —
-acceptable for an internal detail, not for a public API where the caller cannot
-otherwise tell a completed install from one that never happened.
+That choice is deliberate and it has a price, stated here rather than
+discovered later: the platform sees one script, so it reports **one combined
+result** for the whole container start. A caller cannot read the exit status of
+their own script separately from the platform's. Separating them is a larger
+change — a distinct execution stage, its own result channel, its own timeout —
+and is deferred until someone needs it.
 
 ## User Stories
 
@@ -39,19 +37,14 @@ otherwise tell a completed install from one that never happened.
   container my bot starts comes up with my tools already installed.
 - As a bot owner, I want to replace or clear that script and restart the bot, so
   that I can iterate on my provisioning without rebuilding an image.
-- As a bot owner, I want to read the exit status and output of the last run, so
-  that a failed install is visible to me instead of surfacing later as a
-  mysteriously broken agent.
-- As the operator of a scaled bot, I want per-instance results, so that I can
-  see when one instance's install failed and the rest succeeded.
-- As a bot owner whose bot runs somewhere the script cannot execute, I want the
-  API to tell me so, so that I do not believe provisioning happened when it did
-  not.
-- As the owner of a **personal** bot, I want the same behavior as a service bot,
-  because a personal bot is provisioned through the same platform startup
-  sequence and differs only in which container provider its template resolves to.
-- As a bot owner, I want a failed script to leave my agent running, so that a
-  bad script costs me a feature and not the bot.
+- As a bot owner, I want my script to finish before the bot is reported ready, so
+  that a bot that is serving is a bot that is provisioned.
+- As a bot owner, I want a failed or slow script to leave my agent running, so
+  that a bad script costs me a feature and not the bot.
+- As a bot owner, I want to see the result of the last container start, so that a
+  failed start is visible to me at all.
+- As a bot owner, I want to know that the script is stored but cannot run for my
+  bot, rather than believing provisioning happened when it did not.
 
 ## Acceptance Criteria
 
@@ -59,70 +52,72 @@ otherwise tell a completed install from one that never happened.
       cleared through the public API, and a bot that has never had one reads as
       empty rather than as an error.
 - [ ] Replacing or clearing the script does not disturb a running container. The
-      change takes effect the next time a container for that bot starts.
-- [ ] When a container for a bot with a stored script starts, the script runs —
-      on the first start and on every subsequent start, including after a
-      restart, a republish, and for each instance created by a scale-out.
-- [ ] The script runs as its own stage, after the platform's own startup
-      sequence and after the agent is serving. A non-zero exit, a timeout, or a
-      crash of the script leaves the agent running and reachable.
-- [ ] A failed run is recorded and readable: exit status, output, and when it
-      ran. The recorded output is bounded, and a caller can tell a truncated
-      output from a complete one.
-- [ ] The API reports the last run per container instance, so that a scaled bot
-      whose instances disagree reports the disagreement rather than a single
-      summarized answer.
-- [ ] The script runs to completion or is stopped at a stated timeout; the
-      timeout is part of the published contract and a stopped run is recorded as
-      such, distinguishable from a script that exited non-zero on its own.
-- [ ] The API states, per bot, whether that bot's container provider can run a
-      startup script at all. Where it cannot, the caller gets an explicit answer
-      — never a stored script that silently never runs.
-- [ ] The published contract states that the script runs on every start and must
-      therefore be idempotent; the platform does not attempt to detect or
-      suppress repeat runs.
-- [ ] Only a bot's operators may read or write its startup script, and every
-      write records who changed it and when.
+      change takes effect the next time the platform composes a start sequence
+      for that bot — that is, on the next create or restart.
+- [ ] The script runs as part of the container's start sequence, after the
+      platform's own boot steps have completed and **before** the bot is
+      reported ready.
+- [ ] A non-zero exit, a crash, or a timeout in the script does not change the
+      outcome of the container start. The bot reaches its normal running state.
+- [ ] The script is stopped at a stated timeout, and the timeout is small enough
+      that the whole start sequence stays within the platform's start budget.
+- [ ] The script body cannot alter the platform's boot steps, whatever it
+      contains — including quotes, shell metacharacters, heredoc delimiters, and
+      placeholder-shaped text.
+- [ ] A caller can read the result of the last container start for each of the
+      bot's instances, and the API states plainly that this result covers the
+      whole start sequence rather than the script alone.
+- [ ] The published contract states that the script runs on every start the
+      platform composes and must therefore be idempotent; the platform does not
+      attempt to detect or suppress repeat runs.
+- [ ] The published contract states which bots the script cannot run for, and the
+      API reports that per bot rather than storing a script that silently never
+      runs.
+- [ ] Only a bot's operators may read or write its startup script, subject to the
+      same authorization every other own-bot operation in the group carries, and
+      every write records who changed it and when.
 - [ ] A script larger than the published size limit is refused at write time with
       a message naming the limit, rather than failing later at run time.
-- [ ] Values a script needs but must not carry in its body — registry tokens,
-      package credentials — are supplied to the run by reference, so that reading
-      the stored script never discloses them.
-- [ ] Every operation uses the same response envelope, security model, and error
-      shape as the rest of the public bots group.
+- [ ] A bot with no stored script produces a start sequence byte-identical to
+      today's.
 
 ## In Scope
 
-- Public API to read, replace, and clear a bot's startup script, and to read the
-  result of its last run.
-- A startup-script execution stage, separate from the platform's own startup
-  sequence, with its own result reporting.
-- Running that stage on **every** container start — including on the container
-  providers where a restart currently skips it.
-- Per-instance results for scaled bots.
-- An explicit capability answer for bots whose provider cannot run scripts.
-- Supplying secrets to a run by reference rather than in the script body.
+- Public API to read, replace, and clear a bot's startup script.
+- Appending the stored script to the platform's start sequence, isolated so its
+  failure and its runtime cannot affect the boot.
+- A read path for the last container-start result per instance.
+- An explicit answer for bots the script cannot run for.
 
 ## Out of Scope
 
-- Executing the script on container providers that support neither command
-  execution nor restart today. Those bots get the explicit unsupported answer;
-  making them capable is separate work, in part outside this repository.
-- Binding the script to a service bot's publication stage. One script per bot,
-  used by whichever stage starts.
+- **Separating the script's exit status and output from the platform's.** This is
+  the accepted cost of reusing the existing hook; a caller reads one combined
+  result. A separate execution stage with its own result channel is the follow-up
+  if this proves insufficient.
+- **Re-running on providers whose restart does not re-run the start sequence.**
+  The script inherits the existing behavior exactly: it re-runs wherever the
+  platform's own boot sequence re-runs, and does not where it does not. Today
+  that means it re-runs on a provider whose restart is implemented as
+  destroy-and-create, and not on providers that restart a container in place.
+  Closing that gap is separate work with its own risks.
+- **Bots whose container is not provisioned through the shared start sequence** —
+  teclaw. Those get the contract and an explicit unsupported answer.
+- Supplying secrets to the run by reference. For now the contract states that
+  secrets must not be placed in the script body, and provides no alternative.
+- Binding the script to a service bot's publication stage. One script per bot.
 - Streaming or live-tailing a run. Results are read after the fact.
-- A script library, templating, sharing between bots, or any content the
-  platform authors on the caller's behalf.
-- Changing what the platform's own startup sequence does.
+- A script library, templating, or sharing between bots.
+- Changing what the platform's own boot steps do.
 
 ## Open Questions
 
 - What is the size limit for a script body, and the timeout for a run?
 - Which interpreters are permitted — is the script always run by a shell, or may
   it declare its own interpreter?
-- Is network egress during a run expected to work under a bot's existing
-  outbound restrictions, or does provisioning need its own allowance?
+- Is network egress during a run expected to work under a bot's existing outbound
+  restrictions, or does provisioning need its own allowance?
 - Does the operator bar for writing the script equal the bar for restarting a
-  bot, or is it higher — a script is arbitrary code inside the container, and the
-  two are not obviously the same permission.
-- How long are run results retained, and how many past runs are kept?
+  bot, or is it higher — the script is arbitrary code inside the container.
+- Is the combined start result enough for a caller to debug a failed install in
+  practice, or does the follow-up separation need to be scheduled now?
