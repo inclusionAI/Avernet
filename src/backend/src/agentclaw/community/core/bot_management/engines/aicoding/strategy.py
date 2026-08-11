@@ -16,6 +16,7 @@ from agentclaw.community.core.bot_management.capabilities import (
 
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.utils import secret_utils
+from agentclaw.community.log import get_logger
 
 from ..provisioning import BotProvisioningContext, EngineProvisioningStrategy
 
@@ -38,6 +39,8 @@ LEGACY_BOT_TYPE_ENV_MAP = {
 }
 _THETA_KEY_PATH = ("bot_template_config", "ext_config", "thetaKey")
 _ENCRYPTED_VALUE_PREFIX = "enc:v1:"
+
+logger = get_logger()
 
 
 class AicodingBaasEngineBucketResolver:
@@ -310,6 +313,56 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         if self._engine_type == CLAUDE_CODE_ENGINE_TYPE:
             return f"session:{uuid.uuid4()}:user:{user_id}"
         return f"user:{user_id}:session:{uuid.uuid4()}:agent:{ctx.bot_id}"
+
+    @staticmethod
+    def _template_version_id(config: Any) -> int | None:
+        """Return a comparable template version id from a saved snapshot."""
+        if not isinstance(config, dict):
+            return None
+        value = config.get("template_version_id")
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def apply_restart_extra_configs(
+        self,
+        ctx: BotProvisioningContext,
+        extra_configs: dict[str, Any] | None,
+        *,
+        template_service: Any,
+    ) -> None:
+        """Apply AICoding/Claude Code values from generic restart extras."""
+        active_engine = self.normalize_engine_type(ctx.active_engine, default="")
+        if active_engine not in TEMPLATE_CONFIG_CONSUMING_ENGINES:
+            return
+        if not isinstance(extra_configs, dict):
+            return
+        candidate = extra_configs.get("template_config")
+        if not isinstance(candidate, dict):
+            return
+
+        stored_config = template_service.get_template_config(ctx.bot_id) or {}
+        incoming_version = self._template_version_id(candidate)
+        stored_version = self._template_version_id(stored_config)
+        if incoming_version is None or incoming_version < 0:
+            return
+        if stored_version is not None and incoming_version <= stored_version:
+            return
+
+        template_service.update_template(
+            bot_id=ctx.bot_id,
+            template_config=candidate,
+            template_type=ctx.template_type,
+            active_engine=ctx.active_engine,
+        )
+        logger.info(
+            "[aicoding.restart] persisted newer template snapshot: "
+            "bot_id=%s old_version=%s new_version=%s",
+            ctx.bot_id, stored_version, incoming_version,
+        )
 
     def on_bot_created(self, ctx: BotProvisioningContext) -> None:
         # Application-only hooks (DIMA workspace/memory/cron) intentionally stay
