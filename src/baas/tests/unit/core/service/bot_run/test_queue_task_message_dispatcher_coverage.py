@@ -175,6 +175,28 @@ class TestDispatchInject:
         assert call_kwargs["meta"]["request_type"] == "inject"
 
     @pytest.mark.asyncio
+    async def test_inject_with_attachments(self):
+        d = _make_dispatcher()
+        att = Attachment(
+            attachment_id="att_1",
+            type="image",
+            file_name="f.png",
+            url="https://cdn.example.com/f",
+        )
+        await d.dispatch_inject(
+            bot_service=MagicMock(),
+            run_id="run-1",
+            session_id="sess-1",
+            message="inject",
+            binding_info=_make_binding_info(),
+            bot_id="bot-1",
+            attachments=[att],
+        )
+        call_kwargs = d._queue_repository.insert_queue.call_args.kwargs
+        assert "attachments" in call_kwargs["meta"]
+        assert call_kwargs["meta"]["attachments"][0]["attachment_id"] == "att_1"
+
+    @pytest.mark.asyncio
     async def test_inject_backpressure_raises(self):
         d = _make_dispatcher(max_queue_depth=3)
         d._queue_repository.count_pending_by_bot.return_value = 3
@@ -619,6 +641,39 @@ class TestDispatchSendStream:
         ):
             chunks.append(c)
         d._chunk_repository.delete_chunks_by_run.assert_called_once_with("run-1")
+
+    @pytest.mark.asyncio
+    async def test_stream_with_attachments_in_meta(self):
+        d = _make_dispatcher()
+        d._cache_plugin.get.return_value = None
+        run = MagicMock()
+        run.status = "FAILED"
+        d._run_repository.get_by_run_id.return_value = run
+
+        att = Attachment(
+            attachment_id="att_1",
+            type="image",
+            file_name="f.png",
+            url="https://cdn.example.com/f",
+        )
+
+        chunks = []
+        async for c in d.dispatch_send_stream(
+            bot_service=MagicMock(),
+            run_id="run-1",
+            session_id="sess-1",
+            message="hello",
+            binding_info=_make_binding_info(),
+            bot_id="bot-1",
+            attachments=[att],
+        ):
+            chunks.append(c)
+
+        # Verify attachments were serialized into meta on queue insert
+        d._queue_repository.insert_queue.assert_called_once()
+        call_kwargs = d._queue_repository.insert_queue.call_args.kwargs
+        assert "attachments" in call_kwargs["meta"]
+        assert call_kwargs["meta"]["attachments"][0]["attachment_id"] == "att_1"
 
 
 class TestShouldCleanupChunks:

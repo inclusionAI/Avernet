@@ -12,6 +12,7 @@ from secbaas.community.adapters.web.routers.bcn_downlink.bcn_router import (
 )
 from secbaas.community.api.bcn import (
     Attachment as DomainAttachment,
+    BcnInvalidRequestError,
 )
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.service.sse import DefaultStreamConverter
@@ -191,3 +192,16 @@ async def test_dispatch_chat_send_passes_attachments_none():
     assert input_.attachments is None, (
         "ChatSendInput.attachments must be None when absent"
     )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_chat_send_value_error_wraps_to_bcn_invalid_request():
+    """When handle_chat_send raises ValueError, it's wrapped in BcnInvalidRequestError."""
+
+    class _ValueErrorService:
+        async def handle_chat_send(self, input_):
+            raise ValueError("invalid timeout value")
+
+    with pytest.raises(BcnInvalidRequestError) as exc_info:
+        await _dispatch_chat_send(_chat_send_request(), _ValueErrorService())
+    assert "invalid timeout value" in str(exc_info.value)
