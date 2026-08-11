@@ -80,11 +80,35 @@ and absence means "never set" / "never ran".
 
 ```python
 # src/backend/.../adapters/http/openapi_v1/bots/router.py  (new routes)
-@router.get("/{bot_id}/startup-script", response_model=Envelope[StartupScript])
-@router.put("/{bot_id}/startup-script", response_model=Envelope[StartupScript])
-@router.delete("/{bot_id}/startup-script", response_model=Envelope[Deleted])
-@router.get("/{bot_id}/startup-script/runs", response_model=Envelope[Page[StartupScriptRun]])
+# dependencies=_GRANT_CHECKED is not optional: #951 put it on every own-bot
+# operation in this group, and these four are own-bot operations.
+@router.get("/{bot_id}/startup-script", response_model=Envelope[StartupScript],
+            dependencies=_GRANT_CHECKED)
+@router.put("/{bot_id}/startup-script", response_model=Envelope[StartupScript],
+            dependencies=_GRANT_CHECKED)
+@router.delete("/{bot_id}/startup-script", response_model=Envelope[Deleted],
+               dependencies=_GRANT_CHECKED)
+@router.get("/{bot_id}/startup-script/runs",
+            response_model=Envelope[Page[StartupScriptRun]],
+            dependencies=_GRANT_CHECKED)
 ```
+
+```diff
+# src/backend/.../adapters/http/openapi_v1/admission.py — ADMISSION
+# "every operation on this surface appears in ADMISSION exactly once", and
+# test_principal_seam.py fails until it does. A new route is refused by default.
+  ("PUT", "/openapi/v1/bots/{bot_id}/engine-config"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
++ ("GET", "/openapi/v1/bots/{bot_id}/startup-script"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
++ ("PUT", "/openapi/v1/bots/{bot_id}/startup-script"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
++ ("DELETE", "/openapi/v1/bots/{bot_id}/startup-script"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
++ ("GET", "/openapi/v1/bots/{bot_id}/startup-script/runs"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+```
+
+`GRANT_CHECKED_OWN_BOT` is the right mode by shape: each route names a bot in
+the path and resolves it against the caller's own ownership, exactly like
+`engine-config`. The invariant it serves — "an application's reach is exactly
+its granting user's reach, and never more" — applies unchanged to a field that
+executes arbitrary commands in the container.
 
 ```python
 # src/backend/.../adapters/http/openapi_v1/bots/schemas.py (new)

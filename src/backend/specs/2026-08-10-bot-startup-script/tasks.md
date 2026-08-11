@@ -25,11 +25,15 @@
 - **Goal:** Expose the three script operations on the bots group.
 - **Files:** `src/backend/.../adapters/http/openapi_v1/bots/router.py`,
   `.../openapi_v1/bots/schemas.py`, `.../openapi_v1/responses.py`,
-  `src/backend/.../di/modules/` (registration)
+  `.../openapi_v1/admission.py`, `src/backend/.../di/modules/` (registration)
 - **Done when:**
   - [ ] `GET` / `PUT` / `DELETE /openapi/v1/bots/{bot_id}/startup-script` served.
   - [ ] Every response uses `Envelope[T]`; errors use the standard shape.
   - [ ] Ownership guard runs before any read or write; a non-operator gets 403.
+  - [ ] Each route declares `dependencies=_GRANT_CHECKED`, matching every other
+        own-bot operation in the group (#951).
+  - [ ] Each route is registered in `ADMISSION` as `GRANT_CHECKED_OWN_BOT`;
+        `test_principal_seam.py` refuses a route that is not in the table.
   - [ ] Oversize body → 413 whose message names the limit.
   - [ ] `entity_id` never appears as a parameter (group contract).
   - [ ] `test_bots_startup_script.py` covers empty-read, write-then-read, delete, 403, 413.
@@ -119,7 +123,8 @@
 - **Files:** `src/backend/.../adapters/http/openapi_v1/bots/router.py`,
   `.../bots/schemas.py`, `src/backend/.../core/bot_startup_script/services/`
 - **Done when:**
-  - [ ] `GET /openapi/v1/bots/{bot_id}/startup-script/runs` returns one entry per instance.
+  - [ ] `GET /openapi/v1/bots/{bot_id}/startup-script/runs` returns one entry per instance,
+        declaring `_GRANT_CHECKED` and carrying its `ADMISSION` entry like the other three.
   - [ ] Each entry carries status, exit code, output, truncation, and timestamps.
   - [ ] A scaled bot whose instances disagree reports both outcomes, not a summary.
   - [ ] `GET .../startup-script` reports `supported` / `unsupported_reason` from the
