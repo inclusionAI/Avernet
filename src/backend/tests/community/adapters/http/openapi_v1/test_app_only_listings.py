@@ -324,6 +324,30 @@ def test_a_grant_on_another_owners_samenamed_bot_does_not_admit_the_users_own(
     assert response.status_code == 404, response.json()
 
 
+def test_an_injected_owner_id_does_not_authorize_an_owner_scoped_route(
+    cross_owner_client,
+):
+    """A query parameter the route never declares must not steer the check.
+
+    ``request.query_params`` is the raw parsed query string, not the parameters
+    a route publishes, so an application can append ``owner_id`` to any of the
+    wholly owner-scoped operations — none of which document it. If the grant
+    check read it there, it would validate against the bot the application
+    *does* hold a grant on while the handler, which reads only ``user_id``,
+    resolved and acted on the delegating user's own same-named bot. A grant on
+    anyone's ``default`` would become access to the delegator's ``default``.
+
+    The check and the resolution must never be able to mean different bots.
+    Only the operations that publish ``owner_id`` and adjudicate it themselves
+    may take it from the wire.
+    """
+    response = cross_owner_client.get(
+        f"/openapi/v1/bots/{LEGACY_ID}", params={"owner_id": "someone-else"}
+    )
+
+    assert response.status_code == 404, response.json()
+
+
 def test_an_owner_scoped_listing_does_not_widen_through_a_shared_bot_id(
     cross_owner_client,
 ):

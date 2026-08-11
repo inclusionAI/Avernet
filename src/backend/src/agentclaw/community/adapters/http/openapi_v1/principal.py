@@ -91,10 +91,12 @@ from typing import Annotated
 from fastapi import Depends, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.admission import (
+    ADMISSION,
     BODY_BOT_ID_OPERATIONS,
     OWNER_ADDRESSED_OPERATIONS,
     SKILL_SCOPED_OPERATIONS,
     ActingCaller,
+    AdmissionMode,
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     Principal,
@@ -414,20 +416,37 @@ def _addressed_owner(request: Request, caller_id: str) -> str:
     knows one:
 
     - The **user-scoped groups** resolve through ``get_by_id_and_owner`` with
-      the delegating user, so the owner is the caller.
-    - The **engine-runtime groups** take an ``owner_id`` query parameter that
-      defaults to the caller, which is exactly this value.
+      the delegating user. The owner is the caller, full stop, and **nothing on
+      the wire may say otherwise** — see below.
+    - The **engine-runtime groups** publish an ``owner_id`` query parameter that
+      defaults to the caller, and adjudicate it in ``resolve_owner_id``. There
+      the request is entitled to name an owner, so this reads the same value the
+      operation will act on.
 
-    Reading it off the request rather than from the mode table is deliberate:
-    it is the same value ``resolve_owner_id`` will use downstream, so the check
-    and the operation cannot disagree about which bot they meant. Taking it
-    from a second source would let them drift.
+    **The mode decides whether the wire is consulted at all, and that gate is
+    load-bearing.** ``request.query_params`` is the raw parsed query string, not
+    the parameters a route declares, so an operation that never publishes
+    ``owner_id`` will still hand one over if a client appends it. Trusting it
+    unconditionally let an application aim the *check* at a bot it held a grant
+    on while the *handler* — reading only its own ``user_id`` — resolved and
+    acted on the delegating user's own, different, ungranted bot of the same id.
+    A grant on anyone's ``default`` became access to the delegator's ``default``.
 
-    An earlier revision passed ``None`` here for the engine-runtime groups and
-    took the owner *from the grant*, comparing nothing. That was safe only
-    because the unique key made the row singular — the lookup asked "any grant
-    on this bot id" and trusted whatever came back.
+    That failure is this surface's oldest one, in a new place: the check and the
+    resolution must never be able to mean different bots. Reading the wire only
+    where the operation itself reads it keeps them the same value by
+    construction.
+
+    An operation this cannot classify answers with the caller's own id, the
+    stricter side — it has not been placed in a mode and is refused a moment
+    later anyway.
     """
+    route = request.scope.get("route")
+    path = getattr(route, "path", None)
+    if path is None:
+        return caller_id
+    if ADMISSION.get((request.method, path)) is not AdmissionMode.A2:
+        return caller_id
     return request.query_params.get(_OWNER_ID_KEY) or caller_id
 
 
