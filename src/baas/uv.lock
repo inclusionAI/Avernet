@@ -3,15 +3,6 @@ revision = 3
 requires-python = "==3.12.*"
 
 [[package]]
-name = "aiofiles"
-version = "24.1.0"
-source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/0b/03/a88171e277e8caa88a4c77808c20ebb04ba74cc4681bf1e9416c862de237/aiofiles-24.1.0.tar.gz", hash = "sha256:22a075c9e5a3810f0c2e48f3008c94d68c65d763b9b03857924c99e57355166c" }
-wheels = [
-    { url = "https://mirrors.aliyun.com/pypi/packages/a5/45/30bb92d442636f570cb5651bc661f52b610e2eec3f891a5dc3a4c3667db0/aiofiles-24.1.0-py3-none-any.whl", hash = "sha256:b4ec55f4195e3eb5d7abd1bf7e061763e864dd4954231fb8539a0ef8bb8260e5" },
-]
-
-[[package]]
 name = "aiohappyeyeballs"
 version = "2.6.2"
 source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
@@ -89,180 +80,6 @@ sdist = { url = "https://mirrors.aliyun.com/pypi/packages/4e/8a/64761f4005f17809
 wheels = [
     { url = "https://mirrors.aliyun.com/pypi/packages/00/b7/e3bf5133d697a08128598c8d0abc5e16377b51465a33756de24fa7dee953/aiosqlite-0.22.1-py3-none-any.whl", hash = "sha256:21c002eb13823fad740196c5a2e9d8e62f6243bd9e7e4a1f87fb5e44ecb4fceb" },
 ]
-
-[[package]]
-name = "alibabacloud-credentials"
-version = "1.0.11"
-source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
-dependencies = [
-    { name = "aiofiles" },
-    { name = "alibabacloud-credentials-api" },
-    { name = "alibabacloud-tea" },
-    { name = "apscheduler" },
-]
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/09/82/fc869972311e9ba0f2dad85c070cbd8097acf29f7f907815ac7d8bf76e7a/alibabacloud_credentials-1.0.11.tar.gz", hash = "sha256:11050e8996e3f1821bfb52aa6032ff9f0192798a772c07b7d34ab19a68a82cc0" }
-wheels = [
-    { url = "https://mirrors.aliyun.com/pypi/packages/a2/7a/ae77e175b04688dad358849916e803a1772ab76165394afb55e2cd897b85/alibabacloud_credentials-1.0.11-py3-none-any.whl", hash = "sha256:bcd31b04055cbd9dfc8fc618dd202caa6df591b455887117466623790e3a4d07" },
-]
-
-[[package]]
-name = "alibabacloud-credentials-api"
-version = "1.0.1"
-source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/89/7e/6145e2d132752f0de72701df556304c59dda311405a252a598ad6fd9b4de/alibabacloud_credentials_api-1.0.1.tar.gz", hash = "sha256:8ea0668a6558f6956b8d20b2e561d19a80ea29c22cf56a3004d434b24a981b36" }
-wheels = [
-    { url = "https://mirrors.aliyun.com/pypi/packages/0b/49/ff401af96d77d40ab918096d831bd3360f3eec60f10e65125e5789c4e617/alibabacloud_credentials_api-1.0.1-py3-none-any.whl", hash = "sha256:5f27889113214fc53493b3e918eb26d73dfab2022e22bdaac262849b8e58cbc0" },
-]
-
-[[package]]
-name = "alibabacloud-darabonba-array"
-version = "0.1.0"
-source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/50/be/1813d7553e11e20a1422ffaaead392cfa7239a855c7e67c6a6b5776cfa64/alibabacloud_darabonba_array-0.1.0.tar.gz", hash = "sha256:7f9a7c632518ff4f0cebb0d4e825a48c12e7cf0b9016ea25054dd73732e155aa" }
-
-[[package]]
-name = "alibabacloud-darabonba-encode-util"
-version = "0.0.3"
-source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/a7/62/5ad776035482fddb8831459c7072f25463f2cb06e5b8b1e93eb537c2a43e/alibabacloud_darabonba_encode_util-0.0.3.tar.gz", hash = "sha256:f293ed5f5933e97061a51d80aeb4bdc4d38bc67f6e0aca6eda7c5d7814b21c46" }
-wheels = [
-    { url = "https://mirrors.aliyun.com/pypi/packages/c1/33/a2f254e5610b6b83b28c010c1c8e67c26d4ac0355f59f16cba25c9440567/alibabacloud_darabonba_encode_util-0.0.3-py3-none-any.whl", hash = "sha256:6a91c82f6cc4227091be39b65d1f6921d7330119bac7b911e5a26daf895cc9dc" },
-]
-
-[[package]]
-name = "alibabacloud-darabonba-map"
-version = "0.0.1"
-source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/d5/bc/f11d56adffffade9a0d33ccca155ce82ca950b97cdce27a75228715c4639/alibabacloud_darabonba_map-0.0.1.tar.gz", hash = "sha256:adb17384658a1a8f72418f1838d4b6a5fd2566bfd392a3ef06d9dbb0a595a23f" }
-
-[[package]]
-name = "alibabacloud-darabonba-signature-util"
-version = "0.0.4"
-source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
-dependencies = [
-    { name = "cryptography" },
-]
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/13/09/2118a2df631eaa06a291013ea61f31e449ba7a3cc3d6061477a43420e93a/alibabacloud_darabonba_signature_util-0.0.4.tar.gz", hash = "sha256:71d79b2ae65957bcfbf699ced894fda782b32f9635f1616635533e5a90d5feb0" }
-
-[[package]]
-name = "alibabacloud-darabonba-string"
-version = "0.0.4"
-source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/f9/d4/3d22bd2ff88985f970a10f8cedf2ea326d11d4d95e244f7665dc83d26465/alibabacloud-darabonba-string-0.0.4.tar.gz", hash = "sha256:ec6614c0448dadcbc5e466485838a1f8cfdd911135bea739e20b14511270c6f7" }
-
-[[package]]
-name = "alibabacloud-endpoint-util"
-version = "0.0.4"
-source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/92/7d/8cc92a95c920e344835b005af6ea45a0db98763ad6ad19299d26892e6c8d/alibabacloud_endpoint_util-0.0.4.tar.gz", hash = "sha256:a593eb8ddd8168d5dc2216cd33111b144f9189fcd6e9ca20e48f358a739bbf90" }
-
-[[package]]
-name = "alibabacloud-gateway-pop"
-version = "0.1.3"
-source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
-dependencies = [
-    { name = "alibabacloud-credentials" },
-    { name = "alibabacloud-darabonba-array" },
-    { name = "alibabacloud-darabonba-encode-util" },
-    { name = "alibabacloud-darabonba-map" },
-    { name = "alibabacloud-darabonba-signature-util" },
-    { name = "alibabacloud-darabonba-string" },
-    { name = "alibabacloud-endpoint-util" },
-    { name = "alibabacloud-gateway-spi" },
-    { name = "alibabacloud-openapi-util" },
-    { name = "alibabacloud-tea-util" },
-    { name = "alibabacloud-tea-xml" },
-]
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/8f/30/f3577c0bcb461194aef7bcb2ae7538b964212a31806117fe08841d01c184/alibabacloud_gateway_pop-0.1.3.tar.gz", hash = "sha256:ae4998fb374f015c93a5728568fa19b53729d0b19a1675e2c6eaae390e5f721a" }
-wheels = [
-    { url = "https://mirrors.aliyun.com/pypi/packages/bc/2e/042f29c7e7bebd16f7e5a36774be2e5b1b014acbd4df33883d458b58841e/alibabacloud_gateway_pop-0.1.3-py3-none-any.whl", hash = "sha256:6314f92885d5ddc449716952beabbe9704e3469655a270703397955283676769" },
-]
-
-[[package]]
-name = "alibabacloud-gateway-spi"
-version = "0.0.4"
-source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
-dependencies = [
-    { name = "alibabacloud-credentials" },
-]
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/cd/67/7cd36a36bf0ec53efd3fe31eaf398713f375b7b1cdcd32c51b6c0fdc09e2/alibabacloud_gateway_spi-0.0.4.tar.gz", hash = "sha256:73d6e20d65b54eed26d89c19640d3a7572e18c45ecada627f806f5dbe8ed2130" }
-wheels = [
-    { url = "https://mirrors.aliyun.com/pypi/packages/45/85/81170c45e9d1240736f9776a1c690b958c975509381221b5f8d960b5376d/alibabacloud_gateway_spi-0.0.4-py3-none-any.whl", hash = "sha256:0d5256e95d8719da8ec9611b7ffbb12c2d26fdf7ce52c8f64e4e06350731e893" },
-]
-
-[[package]]
-name = "alibabacloud-kms20160120"
-version = "3.2.0"
-source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
-dependencies = [
-    { name = "alibabacloud-gateway-pop" },
-    { name = "alibabacloud-tea-openapi" },
-    { name = "darabonba-core" },
-]
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/80/0c/7ffd90876fcae83e08e80c52c6c21535eaa82589edc898e816043375be62/alibabacloud_kms20160120-3.2.0.tar.gz", hash = "sha256:e1d1671db5e257b0e45d9bc5aacc0e3e3d7bfeae297a0178760e5de231bb77de" }
-wheels = [
-    { url = "https://mirrors.aliyun.com/pypi/packages/4b/c4/9affd08739ec3eaedb0ce2052abe9cc7c17b2428496b13915c2221350874/alibabacloud_kms20160120-3.2.0-py3-none-any.whl", hash = "sha256:8b25c7b4f8cfe2a930745622bb7ccecc004f112771ae5036fcf1b51a3fbe78a2" },
-]
-
-[[package]]
-name = "alibabacloud-openapi-util"
-version = "0.2.4"
-source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
-dependencies = [
-    { name = "alibabacloud-tea-util" },
-    { name = "cryptography" },
-]
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/f6/51/be5802851a4ed20ac2c6db50ac8354a6e431e93db6e714ca39b50983626f/alibabacloud_openapi_util-0.2.4.tar.gz", hash = "sha256:87022b9dcb7593a601f7a40ca698227ac3ccb776b58cb7b06b8dc7f510995c34" }
-wheels = [
-    { url = "https://mirrors.aliyun.com/pypi/packages/08/46/9b217343648b366eb93447f5d93116e09a61956005794aed5ef95a2e9e2e/alibabacloud_openapi_util-0.2.4-py3-none-any.whl", hash = "sha256:a2474f230b5965ae9a8c286e0dc86132a887928d02d20b8182656cf6b1b6c5bd" },
-]
-
-[[package]]
-name = "alibabacloud-tea"
-version = "0.4.3"
-source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
-dependencies = [
-    { name = "aiohttp" },
-    { name = "requests" },
-]
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/9a/7d/b22cb9a0d4f396ee0f3f9d7f26b76b9ed93d4101add7867a2c87ed2534f5/alibabacloud-tea-0.4.3.tar.gz", hash = "sha256:ec8053d0aa8d43ebe1deb632d5c5404339b39ec9a18a0707d57765838418504a" }
-
-[[package]]
-name = "alibabacloud-tea-openapi"
-version = "0.4.5"
-source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
-dependencies = [
-    { name = "alibabacloud-credentials" },
-    { name = "alibabacloud-gateway-spi" },
-    { name = "alibabacloud-tea-util" },
-    { name = "cryptography" },
-    { name = "darabonba-core" },
-]
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/3b/73/fb0c4d44759791ecdf269fc715c1e810fa1aba3981bfaaf8a01f61899296/alibabacloud_tea_openapi-0.4.5.tar.gz", hash = "sha256:75fa1f4360a46e41f5bf5f8d4917e52efb6f64885839bc1328c35590670c97b9" }
-wheels = [
-    { url = "https://mirrors.aliyun.com/pypi/packages/8d/ec/6b368a10e9c2e8b1b394c69b96ac213ae66e8c4895e0baa1ffaf7178fd32/alibabacloud_tea_openapi-0.4.5-py3-none-any.whl", hash = "sha256:338979095c7beda80a5b413c31262892cafdc12069dde4ce4fc2e4f7ce0fc609" },
-]
-
-[[package]]
-name = "alibabacloud-tea-util"
-version = "0.3.15"
-source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
-dependencies = [
-    { name = "alibabacloud-tea" },
-]
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/01/22/d3ce00317d9ba963bcc48234210bd718c42425267ecb05881cbb189b1c76/alibabacloud_tea_util-0.3.15.tar.gz", hash = "sha256:79f78e596f6be03fb9565e34ac45420f3730e52888376cc9713bd07432a4c6cc" }
-wheels = [
-    { url = "https://mirrors.aliyun.com/pypi/packages/6b/29/6d05604c74f3b1326c317727c532e9054f56dca5299ff5b645f73425680d/alibabacloud_tea_util-0.3.15-py3-none-any.whl", hash = "sha256:afb3dd8ad5cd2f93804258fbbac4360c050462100499269795ea055c1644e193" },
-]
-
-[[package]]
-name = "alibabacloud-tea-xml"
-version = "0.0.3"
-source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
-dependencies = [
-    { name = "alibabacloud-tea" },
-]
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/32/eb/5e82e419c3061823f3feae9b5681588762929dc4da0176667297c2784c1a/alibabacloud_tea_xml-0.0.3.tar.gz", hash = "sha256:979cb51fadf43de77f41c69fc69c12529728919f849723eb0cd24eb7b048a90c" }
 
 [[package]]
 name = "annotated-doc"
@@ -531,21 +348,6 @@ wheels = [
     { url = "https://mirrors.aliyun.com/pypi/packages/52/41/04cb5eb17085ade6f50cc611fb657df6a0f5885350de8764ece89c050197/cryptography-48.0.1-cp39-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:86fe77abb1bd87afb251d4d02ada7ecf53a32cee9b67d976abb2e45a13297475" },
     { url = "https://mirrors.aliyun.com/pypi/packages/36/bf/ed70785c496e89d7e73b7cda2d21f2447fd6d4e821714b8d04ff217fed92/cryptography-48.0.1-cp39-abi3-win32.whl", hash = "sha256:6b2c0c3e6ccf3ade7750f836ef3ee36eea250cc467d45c256895573ac08cc6f1" },
     { url = "https://mirrors.aliyun.com/pypi/packages/b3/ff/371ea7d252656ee1eb6d83eeeef3d1d0c6baf1d6497687d081ea03814670/cryptography-48.0.1-cp39-abi3-win_amd64.whl", hash = "sha256:9a49ca6c81417f6a5edb50375a60cccdd70fa0a91a5211829dbea74eba94d2ac" },
-]
-
-[[package]]
-name = "darabonba-core"
-version = "1.0.8"
-source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
-dependencies = [
-    { name = "aiohttp" },
-    { name = "alibabacloud-tea" },
-    { name = "requests" },
-    { name = "websocket-client" },
-]
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/f5/83/9321ccdb7a800c2cb97d8fa34bead5f20141f27f804594fd1fd815c4cd07/darabonba_core-1.0.8.tar.gz", hash = "sha256:f1661960b368e342d3d36434be82d264b70a01c49e843921d8a4dacd217376ae" }
-wheels = [
-    { url = "https://mirrors.aliyun.com/pypi/packages/6d/88/38800ca22f39a31fdb75c7b2867c61d3af5e2792cee0b72942a639c88a79/darabonba_core-1.0.8-py3-none-any.whl", hash = "sha256:ac093fdd40f88f2f9dfbbbfd7bc143495a3cb031f35b397c98d24edfa6b69483" },
 ]
 
 [[package]]
@@ -1580,7 +1382,6 @@ dependencies = [
     { name = "aiohttp" },
     { name = "aiomysql" },
     { name = "aiosqlite" },
-    { name = "alibabacloud-kms20160120" },
     { name = "apscheduler" },
     { name = "cryptography" },
     { name = "dependency-injector" },
@@ -1635,7 +1436,6 @@ requires-dist = [
     { name = "aiohttp", specifier = ">=3.13.5" },
     { name = "aiomysql", specifier = ">=0.2.0" },
     { name = "aiosqlite", specifier = ">=0.22.1" },
-    { name = "alibabacloud-kms20160120", specifier = ">=3.2.0" },
     { name = "apscheduler", specifier = ">=3.10.0,<4.0.0" },
     { name = "cryptography", specifier = ">=3.0.0" },
     { name = "dependency-injector", specifier = ">=4.49.1" },
