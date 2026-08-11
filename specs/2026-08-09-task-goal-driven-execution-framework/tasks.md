@@ -63,9 +63,9 @@ M2 依赖 M1/M3/M4 接口(可 seam/double);M5 集成;M6 验证。
 ## M4 — TaskDispatcher + TaskRunner(执行模块,按 `lxg2mwgmtfqg6d95`)
 - **M4a TaskDispatcher + BotDiscoverPort**
   - T4.1 `BotDiscoverPort.search(node,graph)->SearchResult`:4 态 HIT_SINGLE/HIT_GROUP/HIT_MULTI_BOTS/MISS;HIT_MULTI_BOTS 一并决出 collab_mode(填 GroupFormation,内部参数不持久)。Avernet `StubBotDiscover`(本地关键词 cover + bot catalog)。
-  - T4.2 `TaskDispatcher`(不持 graph);`dispatch(to_do_list)->list[DispatchOutcome]`:无 graph 入参、**不写图、不起 run**;search→产 DispatchOutcome(run_mode str/assignee 推荐);HIT_MULTI_BOTS→`runner.form_coop_group` 得 gid 填 outcome;MISS→DispatchOutcome(miss)交编排核。编排核拿 outcome→`graph.update_task_node_info(run_mode/assignee,RUNNING)` 落库 + `runner.start_run`。
+  - T4.2 `TaskDispatcher`(不持 graph);`dispatch(toDoTaskList)->list[TaskNode]`(对齐派发文档签名):无 graph 入参、**不写图、不起 run**;search→把 run_mode(str)/assignee 填到 `TaskNode.run_info` 上返回;HIT_MULTI_BOTS→`runner.form_coop_group` 得 gid 填 node;MISS→不填执行者(仍 None),标 `run_info.extend_props.miss_events` 交编排核。编排核拿返回节点→有 assignee 的 `graph.update_task_node_info(run_mode/assignee,RUNNING)` 落库 + `runner.start_run`;标 miss_events 的走 `on_miss`。
   - T4.3 `SearchBasedDispatchRule`(`OptimizerRule`)委托 `BotDiscoverPort`+`TaskRunner`。
-  - T4a.x 单测:四 outcome 产出(DispatchOutcome 含 run_mode/assignee)、MISS 不决策、collab_mode 来自 search(内部)、dispatcher 不写图不起 run、编排核落库后 DISPATCHED 必 RUNNING、前序依赖双检、start_run 由编排核触发(批量)。
+  - T4a.x 单测:四态填 TaskNode.run_info(HIT_SINGLE/HIT_GROUP/HIT_MULTI_BOTS 填 run_mode/assignee、MISS 不填标 miss_events)、collab_mode 来自 search(内部)、dispatcher 不写图不起 run、编排核落库后 DISPATCHED 必 RUNNING、前序依赖双检、start_run 由编排核触发(批量)、MISS 节点 status 仍 PENDING。
 - **M4b TaskRunner + TaskLoopCallback**
   - T4.4 `TaskRunner.start_run(toDoTaskList)->list[bool]`:批量;按 run_mode(str)自适应投递 single_bot/coop_group/bbs(BBS 仅挂悬赏,认领执行 bot 自主);返回每派发是否成功。
   - T4.5 `TaskRunner.query_status(task_id)->Status` / `query_detail(TaskNode)->TaskNode` / `query_result(TaskNode)->TaskNode` / `query_bot_tasks(bot_id)->list[TaskNode]`。

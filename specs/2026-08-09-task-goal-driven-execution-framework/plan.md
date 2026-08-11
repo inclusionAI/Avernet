@@ -14,7 +14,7 @@
 | **TaskGraphService** | 内部图谱 SSOT | 图谱原子变更唯一网关(增删改查);`relations` 依赖派生 | ❌ 内部(7 API:4 核心+3 派生只读) |
 | **TaskPlanner** | 规划编排壳(可插拔) | 读图按状态条件产逻辑子节点(不含执行信息);分解内容委托 `DecomposerPort`/规划 agent | ❌ 内部 |
 | **DecomposerPort** | 规划策略 seam | 真正的分解智能:产哪些节点。默认 LLM/规划 bot(corp);Avernet stub/singlebox | ❌ seam |
-| **TaskDispatcher** | 分发策略(可插拔) | 搜推决定"谁来做",产 `run_mode`/`assignee` 推荐(DispatchOutcome),多 bot 动态拉协作群;**不写图、不起 run**(编排核落库+起 run) | ❌ 内部 |
+| **TaskDispatcher** | 分发策略(可插拔) | 搜推决定"谁来做",把 `run_mode`/`assignee` 填到 `TaskNode.run_info` 后返回 `list[TaskNode]`,多 bot 动态拉协作群;**不写图、不起 run**(编排核落库+起 run) | ❌ 内部 |
 | **TaskRunner** | 执行承载 | `start_run(批量)` 三模态自适应 + `query_status/detail/result/bot_tasks`;`TaskLoopCallback` 回投;`form_coop_group` 复用 BCS | ❌ 内部 |
 | **TaskHarness** | 旁路常驻 | 周期巡检超时/崩溃,写同网关,不抢正向驱动 | ❌ 内部 |
 | **(编排核)** | TaskService 内部 | 事件驱动 + 状态条件触发协调 plan/graph/dispatch/execution | ❌ 非独立模块 |
@@ -161,12 +161,12 @@ class ExecutionEngine:   # TaskService 内部编排核(不对外)
     def on_execute(self, task_id) -> None:
         # execute 事件:initialize_graph(根 PENDING)→ 触发首帧推进:
         #   条件 a(根 PENDING)成立 → planner.plan(graph) → graph.add_task_nodes(第一层,根进 PLANNING)
-        #   → 条件:有新 PENDING 就绪 ∧ 无 RUNNING → dispatcher.dispatch(toDo) 产 DispatchOutcome(不写图不起 run)→ 落 outcome(graph.update_task_node_info run_mode/assignee/RUNNING)→ runner.start_run
+        #   → 条件:有新 PENDING 就绪 ∧ 无 RUNNING → dispatcher.dispatch(toDo) 返回填执行者后的 list[TaskNode](不写图不起 run)→ 编排核落库(graph.update_task_node_info run_mode/assignee/RUNNING)→ runner.start_run
     def on_report(self, task_id, node_id, output_patch, acceptance_result) -> NodeOpResult:
         # 回投事件:graph.update_task_node_info(output_patch=fold, acceptance_result=唯一翻态依据)
         #   PASS→DONE:传播(结构子 decomposed_by==本 全 DONE ∧ 非根 → 父 DONE;根 DONE → 图 DONE)
-        #     → 触发:若有 PLANNING 父节点条件 c 成立 → plan → add_task_nodes(下一层)→ dispatch(产 DispatchOutcome)→ 落 outcome(RUNNING)→ start_run
-        #   FAIL+gaps→FAILED:深度闸门(<MAX 放行)→ 条件 b(FAILED+gaps 叶子)成立 → plan → add_task_nodes(补救子挂该节点下,该节点进 PLANNING)→ dispatch(产 DispatchOutcome)→ 落 outcome(RUNNING)→ start_run
+        #     → 触发:若有 PLANNING 父节点条件 c 成立 → plan → add_task_nodes(下一层)→ dispatch(返 list[TaskNode] 填执行者)→ 编排核落库(RUNNING)→ start_run
+        #   FAIL+gaps→FAILED:深度闸门(<MAX 放行)→ 条件 b(FAILED+gaps 叶子)成立 → plan → add_task_nodes(补救子挂该节点下,该节点进 PLANNING)→ dispatch(返 list[TaskNode] 填执行者)→ 编排核落库(RUNNING)→ start_run
         #   FAIL 无 gaps/STUCK→HUNG:不推进,等人工
     def on_miss(self, task_id, node_id) -> None:
         # dispatch 返回 MISS → 节点仍 PENDING,写 extend_props.miss_events
@@ -264,7 +264,7 @@ class TaskPlanner(PlannerPort):     # 编排壳,零 case 知识
 
 ### 3.3 `TaskDispatcher`(决定"谁来做",不做执行)
 
-> **职责**:据搜推 4 态选执行主体 + 多 bot 动态拉协作群;**只产 `list[DispatchOutcome]`(含 `run_mode`(str)/`assignee` 推荐),不写图、不起 run**;执行交 `TaskRunner.start_run`(由编排核拿 outcome 后调用)。分层:搜推(谁做)产 DispatchOutcome → 编排骨 `update_task_node_info`(落派发目标+RUNNING)→ `start_run`(真正发)。
+> **职责**:据搜推 4 态选执行主体 + 多 bot 动态拉协作群;**把 `run_mode`(str)/`assignee` 填到 `TaskNode.run_info` 后返回 `list[TaskNode]`,不写图、不起 run**(对齐派发文档 `dispatch(toDoTaskList)->List[TaskNode]`);执行交 `TaskRunner.start_run`(由编排核拿返回节点后调用)。分层:搜推(谁做)填 TaskNode → 编排骨 `update_task_node_info`(落派发目标+RUNNING)→ `start_run`(真正发)。
 
 ```python
 class BotDiscoverPort(Protocol):    # 搜推 seam(同步 in-process)
@@ -274,19 +274,19 @@ class BotDiscoverPort(Protocol):    # 搜推 seam(同步 in-process)
 
 class TaskDispatcher(DispatcherPort):
     def __init__(self, discover: BotDiscoverPort, runner: "TaskRunner"): ...   # 不持 graph;不写图不起 run
-    def dispatch(self, to_do_list: list[TaskNode]) -> list["DispatchOutcome"]:
-        # 无 graph 入参、不写图、不起 run(对齐派发文档);per node:
-        #   数据依赖(DEPENDENCY 入边)就绪由编排核保证;dispatcher 仅按 node.task_spec 搜推
-        #   search → 产 DispatchOutcome(含 run_mode/assignee 推荐),不改图、不起 run:
-        #   HIT_SINGLE     → DispatchOutcome(run_mode="single_bot", assignee=bot_id)
-        #   HIT_GROUP      → DispatchOutcome(run_mode="coop_group", assignee=group_id)
-        #   HIT_MULTI_BOTS → runner.form_coop_group(gf) → DispatchOutcome(run_mode="coop_group", assignee=gid, collab_mode)
-        #   MISS → DispatchOutcome(miss)(不改状态,交编排核 on_miss)
-        # 返回 list[DispatchOutcome] 交编排核:on_execute/on_report 落 graph.update_task_node_info(run_mode/assignee,RUNNING) + runner.start_run
+    def dispatch(self, toDoTaskList: list[TaskNode]) -> list[TaskNode]:
+        # 入参=待派发节点;返回=填充执行者信息后的 list[TaskNode](对齐派发文档签名);
+        #   不写图、不起 run;per node 仅按 node.task_spec 搜推,把结果填 node.run_info 上:
+        #   HIT_SINGLE     → node.run_info.run_mode="single_bot",  assignee=bot_id
+        #   HIT_GROUP      → node.run_info.run_mode="coop_group",  assignee=group_id
+        #   HIT_MULTI_BOTS → runner.form_coop_group(gf)→ node.run_info.run_mode="coop_group", assignee=gid
+        #   MISS → 不填执行者(run_mode/assignee 仍 None,节点 status 仍 PENDING),标 node.run_info.extend_props.miss_events
+        # 返回 list[TaskNode] 交编排核:有 assignee 的→ graph.update_task_node_info(run_mode/assignee,RUNNING)+ runner.start_run;
+        #                     标了 miss_events 的→ 编排核 on_miss(深度闸门)
 ```
 
 > 搜推/拉群不对外;`HIT_MULTI_BOTS` 时 `collab_mode` 由 `search` 一并决出(在 `GroupFormation` 内,作 `form_coop_group` 参数)。可经 `SearchBasedDispatchRule`(§3.4)包策略。
-> **派发文档注**:文档 `dispatch` 返 `list[TaskNode]`(补充 run_info);本设计 dispatcher 只产 `list[DispatchOutcome]`(含 run_mode/assignee 推荐),**不写图、不起 run**;编排核拿 outcome 后调 `graph.update_task_node_info(run_mode/assignee,RUNNING)` 落库 + `runner.start_run`(图谱 SSOT,dispatcher 不直接返改 node)。
+> **派发文档注**:对齐派发文档 `dispatch(toDoTaskList)->List[TaskNode]`——dispatcher 搜推后把 `run_mode`/`assignee` 填到 `TaskNode.run_info` 上返回 `list[TaskNode]`,**不写图、不起 run**;编排核拿返回节点后调 `graph.update_task_node_info(run_mode/assignee,RUNNING)` 落库 + `runner.start_run`(图谱 SSOT,dispatcher 不直接写图;返回的 TaskNode 是入参填充后副本,落库由编排核经 patch 完成)。
 
 ### 3.4 可插拔策略(`OptimizerRule`, Unified Optimizer Contract)
 
@@ -554,19 +554,18 @@ sequenceDiagram
     P-->>ORC: 去重+硬契约后 list[TaskNode]
     ORC->>G: add_task_nodes(第一层;B1双写:子.decomposed_by=root,父→PLANNING)
     ORC->>D: dispatch(toDo)
-    D->>D: BotDiscoverPort.search → 4态(产 DispatchOutcome,不写图不起 run)
+    D->>D: BotDiscoverPort.search → 4态(填 node.run_info,不写图不起 run)
     alt HIT_SINGLE
-        D-->>ORC: DispatchOutcome(run_mode="single_bot",assignee)
+        D-->>ORC: list[TaskNode](run_mode="single_bot",assignee 已填)
         ORC->>G: update_task_node_info(run_mode/assignee,RUNNING)
     else HIT_MULTI_BOTS(动态拉群)
         D->>R: form_coop_group(GroupFormation{collab_mode})
         R-->>D: group_id
-        D-->>ORC: DispatchOutcome(run_mode="coop_group",assignee=gid,collab_mode)
+        D-->>ORC: list[TaskNode](run_mode="coop_group",assignee=gid 已填)
         ORC->>G: update_task_node_info(run_mode/assignee,RUNNING)
     else MISS
-        D-->>ORC: DispatchOutcome{miss}
+        D-->>ORC: list[TaskNode](assignee 仍 None,标 miss_events)
         ORC->>ORC: on_miss:闸门→miss_events→plan→add→消费
-    end
     ORC->>R: start_run(toDoTaskList)
     R-->>ORC: list[Boolean]
     R->>X: 按 run_mode 投递
@@ -578,14 +577,14 @@ sequenceDiagram
         opt 条件 c:有 PLANNING 父 ∧ 无 RUNNING
             ORC->>P: plan(graph)→decompose(父)
             ORC->>G: add_task_nodes(下一层;父→PLANNING)
-            ORC->>D: dispatch→DispatchOutcome→(ORC)update(RUNNING)+start_run
+            ORC->>D: dispatch→list[TaskNode]填执行者→(ORC)update(RUNNING)+start_run
         end
     else FAIL+gaps
         G-->>G: 节点→FAILED
         ORC->>ORC: 深度闸门 depth<MAX?
         ORC->>P: plan(graph)→decompose(failed_node)
         ORC->>G: add_task_nodes(补救子挂该节点下;failed_node→PLANNING;loop_round++)
-        ORC->>D: dispatch→DispatchOutcome→(ORC)update(RUNNING)+start_run
+        ORC->>D: dispatch→list[TaskNode]填执行者→(ORC)update(RUNNING)+start_run
     end
     opt 产品/系统探活
         TS->>R: query_status(task_id) / query_detail(node) / query_result(node)
@@ -600,7 +599,7 @@ sequenceDiagram
     G-->>U: TaskExecutionGraph{status=DONE,loop_round,看板}
 ```
 
-> **分层要点**:facade 2 API(execute/get_task_dashboard);编排核 on_* 事件驱动 + 状态条件(a/b/c + plan 三条件)分段推进;Dispatcher 只搜推产 DispatchOutcome(不写图不起 run);编排核落 update_task_node_info + 置 RUNNING + 立即 start_run;执行结果 PUSH `TaskLoopCallback.report_result` 为主,可选 PULL `query_status/detail/result`;`TaskCallbackData.loop_task_id↔(task_id,node_id)`、`result.success→verdict`、`result.data→output` 由适配层完成,再走 `on_report`→`update_task_node_info`。
+> **分层要点**:facade 2 API(execute/get_task_dashboard);编排核 on_* 事件驱动 + 状态条件(a/b/c + plan 三条件)分段推进;Dispatcher 只搜推把 run_mode/assignee 填到 TaskNode 上返回 list[TaskNode](不写图不起 run);编排核落 update_task_node_info + 置 RUNNING + 立即 start_run;执行结果 PUSH `TaskLoopCallback.report_result` 为主,可选 PULL `query_status/detail/result`;`TaskCallbackData.loop_task_id↔(task_id,node_id)`、`result.success→verdict`、`result.data→output` 由适配层完成,再走 `on_report`→`update_task_node_info`。
 
 ## 7. Case 端到端推演:存储行业尽调(权威剧本 `gwqie46v7hzr1w6h`;从任务输入到任务执行完成按 API 流程串联)
 
