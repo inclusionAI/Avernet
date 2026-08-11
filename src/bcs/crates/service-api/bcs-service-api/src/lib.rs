@@ -40,6 +40,9 @@ pub use application::message_log::{
     MessageLogTargetSummary, MESSAGE_LOG_CONTENT_MAX_BYTES, MESSAGE_LOG_SCHEMA_VERSION,
     MSG_LOG_TARGET, message_log_json,
 };
+pub use application::password_auth::{
+    PasswordAuthError, PasswordAuthService, PasswordLoginResult,
+};
 pub use application::secret::{SecretService, SecretServiceError, SecretView};
 pub use application::invite::{
     CreateInviteTokenCommand, InviteService, InviteTokenResult,
