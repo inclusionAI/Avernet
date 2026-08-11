@@ -569,6 +569,35 @@ regression tests.
    silently. It propagates now, and the awkward retry — "no such bot" — is the
    accepted cost.
 
+6. **The owner was inferred where it should have been asked for.** Raised by the
+   user against the shipped shape, and it is the root the five entries above
+   were all circling. `bot_id` does not identify a bot; `(owner_id, bot_id)`
+   does. The engine-runtime operations have taken an optional `owner_id`
+   defaulting to the caller all along, and skills takes `owner_entity_id` the
+   same way — this group was the outlier, and it *inferred* the owner instead:
+   owner-scoped read, owner-blind fallback, then a caller-reach candidate
+   resolve with an operability filter and a cap.
+
+   That machinery could never answer the case it was built for. A caller who
+   collaborates on two owners' same-named bots can operate both, and no amount
+   of inference says which they meant. The three operations now take
+   `owner_id`, defaulting to the caller — which is byte-identical to the
+   behaviour on `dev`, where they resolved as `get_bot(bot_id, caller)` — and
+   the entire inference path is deleted: `list_reachable_by_bot_id`,
+   `list_bots_reachable_by_id`, `get_bot_by_id`, `CANDIDATE_CAP` and
+   `_resolve_within_reach` are all gone, along with entry 1's ambiguity
+   handling and the defect in entry 4 that lived inside it.
+
+   **One consequence is a loss, and it is recorded rather than glossed.** While
+   the owner was inferred, the resolve was deterministic on `(bot_id, caller)`,
+   which accidentally made the delegation-slot collision of entry 2 unreachable
+   within a single session. Naming the owner removes that protection: a caller
+   who can operate two same-named bots can now address each one and will hit
+   the 409 on the second. It is refused rather than silently wrong, but only
+   one of the two can be delegated to a given application at a time. This is an
+   argument for keying the record on a globally unique bot identity, which is
+   still open with the reviewer.
+
 Three further defects were introduced *by* these fixes and caught in the same
 review rounds — a candidate bound that decided the answer it was meant only to
 bound, and a grant provider typed against a concrete class. Both are fixed;

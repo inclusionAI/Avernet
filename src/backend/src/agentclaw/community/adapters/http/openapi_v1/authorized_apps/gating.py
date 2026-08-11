@@ -30,32 +30,13 @@ from __future__ import annotations
 from typing import Any
 
 from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
-from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
 )
-from agentclaw.community.core.engine_runtime.gate import (
-    OPERATOR_LEVEL,
-    require_bot_operator,
-    resolve_operator_level,
-)
+from agentclaw.community.core.engine_runtime.gate import require_bot_operator
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
-
-#: How many same-named reachable bots :func:`_resolve_within_reach` will weigh.
-#:
-#: Generous rather than tight, because it is not a performance dial: every
-#: candidate under it is adjudicated, and the only thing it bounds is how absurd
-#: a collision has to be before the surface gives up. A person collaborating on
-#: fifty distinct bots that all share one ``bot_id`` is past what a bare
-#: ``bot_id`` can address at all.
-#:
-#: Small values are actively wrong here. The candidate rows are unordered, so a
-#: cap that trims a realistic set decides the outcome by whichever rows the
-#: database happened to return — and the caller's only operable bot is as likely
-#: to be trimmed as any other.
-CANDIDATE_CAP = 50
 
 
 def resolve_delegable_bot(
@@ -64,84 +45,61 @@ def resolve_delegable_bot(
     *,
     bot_id: str,
     caller_id: str,
+    owner_id: str | None = None,
 ) -> tuple[str, int]:
-    """Resolve the bot and refuse a caller who may not operate it.
+    """Resolve the addressed bot and refuse a caller who may not operate it.
 
     Returns the resolved ``(owner_id, bot_pk)`` — the owner because the grant
     records it, and the primary key because the collaborator table is keyed on
-    it (``bot_id`` alone is not unique across owners).
+    it.
+
+    **The bot is addressed, not inferred.** ``bot_id`` alone does not identify a
+    bot: ``ac_bots`` carries no unique key on it, and the retired ``default``
+    convention gave many owners one. The pair does. So ``owner_id`` names whose
+    bot this is and defaults to the caller's own — the same shape the
+    engine-runtime operations already use, and the reason this group needed no
+    special resolution of its own.
+
+    An earlier revision of this function tried to *infer* the owner: read
+    owner-scoped, fall back to an owner-blind read, and when that was ambiguous,
+    narrow to the bots the caller could reach and adjudicate each candidate. It
+    grew a bounded candidate query, an operability filter and a cap, and it
+    still could not address the case it was built for — a caller who collaborates
+    on two owners' same-named bots can operate both, and no amount of inference
+    tells you which one they meant. Asking is not a workaround for that; it is
+    the answer, and it deletes every one of those parts.
+
+    Omitting ``owner_id`` is exactly the behaviour this group shipped with:
+    ``get_bot(bot_id, caller)``, your own bot or nothing. Supplying it is the
+    only new reach, and it is adjudicated rather than trusted.
 
     Both failures raise :class:`BotNotFoundError`, and that sameness is the
-    security property rather than a convenience: a caller who may not reach the
-    bot gets the answer a caller naming a nonexistent bot gets, byte for byte,
-    so the surface never confirms a bot exists to someone with no business
-    knowing.
-
-    **The owner is resolved owner-scoped first**, and that is not an
-    optimisation. ``bot_id`` is not unique across owners — the legacy
-    ``default`` convention gave many owners a bot of that id — so the owner-blind
-    read fails closed on a duplicate rather than picking a row. Reaching for it
-    first would turn three operations that work today into refusals for every
-    owner of such a bot. Asking "is this the caller's own bot?" first answers
-    exactly as it always did; the owner-blind read is the *fallback*, for the
-    shared-bot case it exists to serve.
-
-    **An ambiguous ``bot_id`` is resolved inside the caller's own reach**
-    rather than refused. Failing closed on the duplicate was refusing the very
-    caller this surface was built for: a member-level collaborator on someone
-    else's legacy ``default`` bot misses the owner-scoped read (they do not own
-    it) and trips the owner-blind one (another owner has a ``default`` too), so
-    the bot they can plainly operate became unaddressable — the feature's whole
-    point, lost to a name collision with a stranger's bot.
-
-    Narrowing to the bots the caller owns or collaborates on breaks the tie,
-    because the duplicates that make the id ambiguous tenant-wide are other
-    people's. It cannot admit anyone: a candidate still has to pass the same
-    operator adjudication, and a caller who reaches nothing sees the set go
-    empty and gets the same masked refusal as before.
-
-    Two operable candidates is the one case that stays refused, and it is a
-    genuine ambiguity rather than a fail-closed default: the caller can operate
-    both bots, ``bot_id`` is the only thing the request says, and it does not
-    say which. Guessing would delegate the wrong bot silently.
-
-    A caller who is neither the owner nor a collaborator raises
-    :class:`BotNotFoundError` — the same masked refusal, since anything
-    distinguishable tells a stranger that a bot exists.
+    security property rather than a convenience: a caller who may not operate
+    the bot gets the answer a caller naming a nonexistent bot gets, byte for
+    byte, so the surface never confirms a bot exists to someone with no business
+    knowing. Naming an owner you have no relationship with therefore discloses
+    nothing.
 
     **The refusals name no caller-supplied value.** Their message is carried
     into a log line verbatim by ``error_logging.log_public_error``, so a
     ``bot_id`` containing a percent-encoded newline would forge log lines on
-    every refused request. The id goes to the log through
+    every refused request. The ids go to the log through
     :func:`~...log_safe.for_log` instead — escaped and bounded.
     """
+    addressed_owner = owner_id or caller_id
     try:
-        bot = bots.get_bot(bot_id, caller_id)
+        bot = bots.get_bot(bot_id, addressed_owner)
     except BotNotFoundError:
-        try:
-            bot = bots.get_bot_by_id(bot_id)
-        except BotLookupAmbiguousError:
-            # Several live bots share this id and none is the caller's own.
-            # Ask again inside the caller's reach — the duplicates are other
-            # people's bots, and dropping them usually leaves exactly one.
-            #
-            # Letting the ambiguity escape is not an option either way: the
-            # error is not in the surface's status map, so it would answer 500,
-            # telling an unrelated caller that two bots share an id on a
-            # surface whose whole refusal story is that a stranger learns
-            # nothing.
-            bot = _resolve_within_reach(
-                bots, collaborators, bot_id=bot_id, caller_id=caller_id
-            )
+        # Re-raised with a server-authored message. The one it carries names the
+        # bot id, and this one reaches a log line verbatim.
+        logger.warning(
+            "[authorized_apps] no such bot for the addressed owner: bot=%s owner=%s",
+            for_log(bot_id),
+            for_log(addressed_owner),
+        )
+        raise BotNotFoundError("Bot not found") from None
     resolved_owner = str(bot.get("owner_id") or "")
     bot_pk = int(bot.get("id") or 0)
-    require_bot_operator(
-        collaborators,
-        bot_pk=bot_pk,
-        bot_id=bot_id,
-        caller_id=caller_id,
-        owner_id=resolved_owner,
-    )
     if not resolved_owner:
         # Unreachable for a well-formed row, and refused rather than trusted:
         # an empty owner would be written into the grant as the bot's owner and
@@ -151,75 +109,14 @@ def resolve_delegable_bot(
             for_log(bot_id),
         )
         raise BotNotFoundError("Bot not found")
+    require_bot_operator(
+        collaborators,
+        bot_pk=bot_pk,
+        bot_id=bot_id,
+        caller_id=caller_id,
+        owner_id=resolved_owner,
+    )
     return resolved_owner, bot_pk
-
-
-def _resolve_within_reach(
-    bots: Any,
-    collaborators: Any,
-    *,
-    bot_id: str,
-    caller_id: str,
-) -> dict[str, Any]:
-    """The one bot with this id the caller may operate, or a masked refusal.
-
-    Reachability is not operability — the candidate query admits a collaborator
-    at *any* level, and the operator bar is ``MEMBER``. So the candidates are
-    filtered by the same adjudication the caller would face anyway, and the
-    count that matters is of bots the caller can actually operate. A viewer on
-    one ``default`` and a member on another is not ambiguous; there is one
-    answer and this finds it.
-
-    Every reachable candidate is weighed, up to :data:`CANDIDATE_CAP`, and
-    going over it refuses rather than deciding from the ones that came back.
-    The rows are unordered, so trimming them chooses arbitrarily — and the row
-    trimmed can be the only operable one, which turns this function back into
-    the silent 404 it was written to remove.
-
-    All three refusals are :class:`BotNotFoundError`, matching every other
-    refusal here: a caller who reaches none of the duplicates must not be able
-    to tell that any of them exist, and one who reaches several must not learn
-    how many from the shape of the error.
-    """
-    candidates = bots.list_bots_reachable_by_id(
-        bot_id, caller_id, CANDIDATE_CAP + 1
-    )
-    if len(candidates) > CANDIDATE_CAP:
-        # More same-named bots than this is willing to adjudicate. Refused on
-        # the *count*, before looking at any of them, because the rows come back
-        # unordered: answering from them would mean deciding from an arbitrary
-        # subset, and the row dropped could be the only one the caller can
-        # operate. That failure is invisible — a masked 404 for someone who
-        # really may delegate — and it is the failure this whole function was
-        # added to remove, so reintroducing it through the bound would be worse
-        # than refusing.
-        logger.warning(
-            "[authorized_apps] more than %d reachable bots share this id; "
-            "refusing rather than deciding from a truncated set: %s",
-            CANDIDATE_CAP,
-            for_log(bot_id),
-        )
-        raise BotNotFoundError("Bot not found") from None
-    operable = [
-        bot
-        for bot in candidates
-        if resolve_operator_level(
-            collaborators,
-            bot_pk=int(bot.get("id") or 0),
-            caller_id=caller_id,
-            owner_id=str(bot.get("owner_id") or ""),
-        )
-        >= OPERATOR_LEVEL
-    ]
-    if len(operable) == 1:
-        return operable[0]
-    logger.warning(
-        "[authorized_apps] ambiguous bot id resolved to %d operable bots for "
-        "the caller, refusing as not-found: %s",
-        len(operable),
-        for_log(bot_id),
-    )
-    raise BotNotFoundError("Bot not found") from None
 
 
 __all__ = ["resolve_delegable_bot"]

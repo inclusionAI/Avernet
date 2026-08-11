@@ -1,28 +1,27 @@
 """Which bots are live, and which a given person can get at.
 
-Split out of ``bot.py`` as one concern rather than for size alone. These three
-queries answer the same shape of question — *given a set of bots or a person,
-which rows still count* — and they exist because of one fact the rest of the
-repository can take for granted but they cannot:
+Split out of ``bot.py`` as one concern rather than for size alone. Both queries
+answer the same shape of question — *given a set of bots or a person, which rows
+still count* — and both exist because of one fact the rest of the repository can
+take for granted but they cannot:
 
 > ``ac_bots`` has no unique key on ``bot_id``.
 
 The retired ``default`` convention gave many owners a bot of that id, so an
-id-only answer is wrong in both directions here: it reports a deleted bot as
-live whenever any owner still has a live one of that id, and it refuses a
-caller whose bot is perfectly unambiguous *within their own reach* because a
-stranger's bot shares the name. Both are corrected by asking with more than the
-bare id — the owner alongside it, or the caller whose bots are in question.
+id-only answer reports a deleted bot as live whenever any owner still has a live
+one of that id. :meth:`filter_live_bots` is keyed on the ``(bot_id, owner_id)``
+pair for exactly that reason, and the owner is on every grant record, so there
+is nothing to discover.
 
 A mixin rather than a module of functions because every query needs the
-repository's session, model and env scoping. It decides nothing: reachability
-here is ownership or a collaborator row at **any** level, which is below the
-operator bar, so callers must still adjudicate what comes back.
+repository's session, model and env scoping. Neither decides anything:
+reachability here is ownership or a collaborator row at **any** level, which is
+below the operator bar, so callers must still adjudicate what comes back.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import List
 
 from sqlalchemy import or_
 
@@ -60,9 +59,9 @@ class BotReachabilityQueries:
     def _reachable_by(self, db, user_id: str):
         """Live bots this user owns or collaborates on, as an unordered query.
 
-        Shared by the two reads that mean "bots this person can get at": the
-        paginated listing, and the by-id resolve that breaks a duplicated
-        ``bot_id``.
+        Backs the paginated "bots I can get at" listing. Reachability is
+        ownership **or** a collaborator row at any level — below the operator
+        bar, so a caller must still adjudicate.
 
         COSEC: SQLAlchemy binds the request-derived id; never interpolate it
         into a raw SQL expression.
@@ -88,28 +87,6 @@ class BotReachabilityQueries:
             )
             .distinct()
         )
-
-    def list_reachable_by_bot_id(
-        self, bot_id: str, caller_id: str, limit: int
-    ) -> List[Dict[str, Any]]:
-        """Live bots with this id that ``caller_id`` owns or collaborates on.
-
-        Returns at most ``limit`` rows, **unordered**, so a full result means
-        "at least this many" and not "these are the ones that matter". The
-        caller asks for one more than it can use and refuses on the overflow —
-        see :func:`~...authorized_apps.gating._resolve_within_reach`. Silently
-        answering from a truncated set is the bug this signature exists to make
-        hard: the rows dropped are arbitrary, and the one dropped may be the
-        only one the caller can operate.
-        """
-        with self._db.orm_session() as db:
-            bots = (
-                self._reachable_by(db, caller_id)
-                .filter(self.Model.bot_id == bot_id)
-                .limit(limit)
-                .all()
-            )
-            return [self._to_caller_identity_dict(b) for b in bots]
 
 
 __all__ = ["BotReachabilityQueries"]

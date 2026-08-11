@@ -22,9 +22,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from agentclaw.community.adapters.http.openapi_v1.authorized_apps.gating import (
-    CANDIDATE_CAP,
-)
 from agentclaw.community.adapters.http.openapi_v1.authorized_apps.router import (
     app_view_router,
     router,
@@ -45,7 +42,6 @@ from agentclaw.community.core.bot_app_grant.models import (
     BotAppGrantModel,
 )
 from agentclaw.community.core.bot_app_grant.services import BotAppGrantService
-from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
 )
@@ -181,91 +177,30 @@ def grants(sessions):
 
 @pytest.fixture
 def bots():
-    """A bot service holding exactly ``BOT``, owned by ``OWNER``.
+    """The bot table, keyed on ``(bot_id, owner_id)`` — the real address.
 
-    ``get_bot_by_id`` resolves by id alone and decides **nothing** about who may
-    reach it — that is the collaborator double's job below. The split mirrors
-    production: resolution and adjudication are two steps, and only running both
-    is a check.
+    ``OWNER`` and ``OTHER_OWNER`` each hold a legacy ``default``. That is the
+    collision the whole feature kept tripping over, and with the owner on the
+    request it is simply two different rows.
+
+    ``get_bot`` is owner-scoped, as production is. Naming an owner you have no
+    relationship with resolves a real bot here and is then refused by the
+    collaborator double — resolution and adjudication are two steps, and only
+    running both is a check.
     """
 
     class _Bots:
+        rows = {
+            (BOT, OWNER): BOT_PK,
+            (AMBIGUOUS_BOT, OWNER): AMBIGUOUS_PK,
+            (AMBIGUOUS_BOT, OTHER_OWNER): OTHER_AMBIGUOUS_PK,
+        }
+
         def get_bot(self, bot_id: str, user_id: str):
-            """Owner-scoped, as production is: only the caller's own bot.
-
-            ``OWNER`` holds both ``BOT`` and a legacy ``AMBIGUOUS_BOT``. This
-            read resolves the second correctly *because* it is owner-scoped —
-            which is exactly what the owner-blind read below cannot do.
-            """
-            if user_id != OWNER:
+            bot_pk = self.rows.get((bot_id, user_id))
+            if bot_pk is None:
                 raise BotNotFoundError(f"Bot not found: {bot_id}")
-            if bot_id == BOT:
-                return {"id": BOT_PK, "bot_id": bot_id, "owner_id": OWNER}
-            if bot_id == AMBIGUOUS_BOT:
-                return {"id": AMBIGUOUS_PK, "bot_id": bot_id, "owner_id": OWNER}
-            raise BotNotFoundError(f"Bot not found: {bot_id}")
-
-        def get_bot_by_id(self, bot_id: str):
-            """Owner-blind, and fails closed when the id is ambiguous.
-
-            ``AMBIGUOUS_BOT`` stands for a legacy ``default`` bot: several live
-            rows share the id, so no single owner can be resolved from it alone.
-            """
-            if bot_id == AMBIGUOUS_BOT:
-                raise BotLookupAmbiguousError(bot_id)
-            if bot_id != BOT:
-                raise BotNotFoundError(f"Bot not found: {bot_id}")
-            return {"id": BOT_PK, "bot_id": bot_id, "owner_id": OWNER}
-
-        def list_bots_reachable_by_id(
-            self, bot_id: str, caller_id: str, limit: int
-        ):
-            """The caller's own candidates — what breaks the ambiguity above.
-
-            Reachability is ownership **or** collaboration at any level, which
-            is deliberately below the operator bar: the caller filters what
-            comes back. ``DOUBLE_COLLAB`` reaches both ``default`` bots, which
-            is the case that stays refused.
-
-            ``limit`` is honoured, and unordered truncation is modelled the way
-            the real query behaves: the extras are prepended, so a caller that
-            trimmed and then answered would lose the operable bot rather than
-            one of the padding rows.
-            """
-            everything = [
-                {"id": BOT_PK, "bot_id": BOT, "owner_id": OWNER},
-                {"id": AMBIGUOUS_PK, "bot_id": AMBIGUOUS_BOT, "owner_id": OWNER},
-                {
-                    "id": OTHER_AMBIGUOUS_PK,
-                    "bot_id": AMBIGUOUS_BOT,
-                    "owner_id": OTHER_OWNER,
-                },
-            ]
-            reachable = {
-                OWNER: {BOT_PK, AMBIGUOUS_PK},
-                COLLAB: {BOT_PK, OTHER_AMBIGUOUS_PK},
-                DOUBLE_COLLAB: {AMBIGUOUS_PK, OTHER_AMBIGUOUS_PK},
-            }.get(caller_id, set())
-            matches = [
-                bot
-                for bot in everything
-                if bot["bot_id"] == bot_id and bot["id"] in reachable
-            ]
-            crowd = {CROWDED_COLLAB: CROWD_SIZE, OVERFLOW_COLLAB: CANDIDATE_CAP + 4}
-            if caller_id in crowd and bot_id == AMBIGUOUS_BOT:
-                # Reachable-but-not-operable padding, with the one operable bot
-                # **last** — so any truncation drops precisely the answer.
-                matches = [
-                    {"id": 1000 + n, "bot_id": AMBIGUOUS_BOT, "owner_id": f"o-{n}"}
-                    for n in range(crowd[caller_id])
-                ] + [
-                    {
-                        "id": OTHER_AMBIGUOUS_PK,
-                        "bot_id": AMBIGUOUS_BOT,
-                        "owner_id": OTHER_OWNER,
-                    }
-                ]
-            return matches[:limit]
+            return {"id": bot_pk, "bot_id": bot_id, "owner_id": user_id}
 
     return _Bots()
 
@@ -446,7 +381,11 @@ def test_collaborator_may_delegate_the_access_they_have(collab_client, sessions)
     bot's real owner as the owner.
     """
     data = _ok(
-        collab_client.post(f"/openapi/v1/bots/{BOT}/authorized-apps", json={}),
+        collab_client.post(
+        f"/openapi/v1/bots/{BOT}/authorized-apps",
+        params={"owner_id": OWNER},
+        json={},
+    ),
         201000,
         201,
     )
@@ -502,7 +441,11 @@ def _grant_both(client, collab_client):
     Two rows, not one: they are two loans of two different authorities.
     """
     client.post(f"/openapi/v1/bots/{BOT}/authorized-apps", json={})
-    collab_client.post(f"/openapi/v1/bots/{BOT}/authorized-apps", json={})
+    collab_client.post(
+        f"/openapi/v1/bots/{BOT}/authorized-apps",
+        params={"owner_id": OWNER},
+        json={},
+    )
 
 
 def test_owner_sees_a_grant_a_collaborator_made(client, collab_client):
@@ -524,7 +467,11 @@ def test_collaborator_sees_only_their_own_delegation(client, collab_client):
     """A collaborator has no claim on their colleagues' delegations."""
     _grant_both(client, collab_client)
 
-    listed = _ok(collab_client.get(f"/openapi/v1/bots/{BOT}/authorized-apps"))
+    listed = _ok(
+        collab_client.get(
+            f"/openapi/v1/bots/{BOT}/authorized-apps", params={"owner_id": OWNER}
+        )
+    )
 
     assert [item["user_id"] for item in listed["items"]] == [COLLAB]
     assert listed["total"] == 1
@@ -554,7 +501,10 @@ def test_collaborator_withdrawal_leaves_the_owners_delegation_alone(
     """The narrow half of the same operation."""
     _grant_both(client, collab_client)
 
-    resp = collab_client.delete(f"/openapi/v1/bots/{BOT}/authorized-apps/{APP_ID}")
+    resp = collab_client.delete(
+        f"/openapi/v1/bots/{BOT}/authorized-apps/{APP_ID}",
+        params={"owner_id": OWNER},
+    )
 
     assert resp.status_code == 200, resp.json()
     with sessions() as session:
@@ -571,117 +521,107 @@ def test_collaborator_cannot_withdraw_the_owners_delegation(client, collab_clien
     """
     client.post(f"/openapi/v1/bots/{BOT}/authorized-apps", json={})
 
-    resp = collab_client.delete(f"/openapi/v1/bots/{BOT}/authorized-apps/{APP_ID}")
+    resp = collab_client.delete(
+        f"/openapi/v1/bots/{BOT}/authorized-apps/{APP_ID}",
+        params={"owner_id": OWNER},
+    )
 
     assert resp.status_code == 404, resp.json()
 
 
-def test_an_ambiguous_bot_id_resolves_to_the_one_the_caller_can_operate(
+def test_naming_the_owner_reaches_a_shared_bot_with_a_duplicated_id(
     collab_client, sessions
 ):
-    """The case the feature exists for, and it used to be refused.
+    """The case that was unaddressable while the owner was inferred.
 
-    ``COLLAB`` is a member on ``OTHER_OWNER``'s ``default`` and on none of
-    ``OWNER``'s. The owner-scoped read misses (they own nothing) and the
-    owner-blind one fails closed (two live bots share the id), so the bot they
-    can plainly operate was unaddressable — a member-level collaborator refused
-    by a name collision with a stranger's bot.
-
-    Resolving inside the caller's own reach removes the stranger's bot from the
-    question, and one candidate remains.
+    ``COLLAB`` is a member on ``OTHER_OWNER``'s ``default`` and owns nothing.
+    Inference could not serve them: the owner-scoped read missed, and the
+    owner-blind one saw two live ``default`` bots and failed closed. Naming the
+    owner makes the address exact, and the grant records the bot they actually
+    operate.
     """
     resp = collab_client.post(
-        f"/openapi/v1/bots/{AMBIGUOUS_BOT}/authorized-apps", json={}
+        f"/openapi/v1/bots/{AMBIGUOUS_BOT}/authorized-apps",
+        params={"owner_id": OTHER_OWNER},
+        json={},
     )
 
     assert resp.status_code == 201, resp.json()
     with sessions() as session:
         row = session.query(BotAppGrantModel).one()
-        # The grant records the bot COLLAB can actually operate, not OWNER's
-        # same-named one.
         assert (row.user_id, row.owner_id) == (COLLAB, OTHER_OWNER)
 
 
-def test_an_ambiguous_bot_id_is_still_refused_when_the_caller_reaches_none(
-    stranger_client,
-):
-    """A duplicated ``bot_id`` must not answer 500, and must not admit.
-
-    ``BotLookupAmbiguousError`` is a bare ``RuntimeError`` and is not in this
-    surface's status map, so letting it escape would answer 500 — telling an
-    unrelated caller that two live bots share an id, on a surface whose entire
-    refusal story is that a stranger learns nothing.
-    """
-    resp = stranger_client.get(f"/openapi/v1/bots/{AMBIGUOUS_BOT}/authorized-apps")
-
-    assert resp.status_code == 404, resp.json()
-
-
-def test_a_crowded_bot_id_still_finds_the_one_operable_bot(
+def test_two_same_named_bots_collide_on_one_delegation_slot(
     grants, bots, collaborators, sessions
 ):
-    """A fetch bound must not decide the answer.
+    """A limitation the explicit address makes plainly reachable.
 
-    The candidate rows come back unordered and the operator filter runs
-    *after* them, so a bound small enough to trim a realistic set picks the
-    outcome by whichever rows the database happened to return — and the one
-    operable bot is as likely to be trimmed as any other. Here it is
-    deliberately last among thirteen, so any truncation loses it and the caller
-    is refused a delegation they may plainly make, for reasons no one can see.
+    ``DOUBLE_COLLAB`` can operate both owners' ``default`` bots and can now
+    address each one exactly — but the grant's unique key is
+    ``(tenant, app_id, bot_id, user_id, env)`` with **no owner**, held there by
+    InnoDB's 3072-byte cap. So one user has one slot per ``bot_id`` per
+    application, and the second bot lands on the first's slot.
 
-    That is the same silent 404 this resolve was written to remove, which is
-    why the bound is generous and every candidate under it is weighed.
-    """
-    client = user_scoped_client(
-        _build(grants, bots, collaborators, _caller(user_id=CROWDED_COLLAB)),
-        CROWDED_COLLAB,
-    )
+    Refused rather than silently overwriting or reporting a success the request
+    time would then deny — that much is right. But it is a real gap: these are
+    two different bots the caller may operate, and only one of them can be
+    delegated to a given application at a time.
 
-    resp = client.post(f"/openapi/v1/bots/{AMBIGUOUS_BOT}/authorized-apps", json={})
-
-    assert resp.status_code == 201, resp.json()
-    with sessions() as session:
-        row = session.query(BotAppGrantModel).one()
-        assert (row.user_id, row.owner_id) == (CROWDED_COLLAB, OTHER_OWNER)
-
-
-def test_past_the_cap_the_resolve_refuses_instead_of_guessing(
-    grants, bots, collaborators, sessions
-):
-    """Over the cap, refuse — do not answer from an arbitrary subset.
-
-    Refusing on the *count*, before weighing any candidate, is what keeps the
-    outcome from depending on row order. A caller past this is reaching more
-    same-named bots than a bare ``bot_id`` can address at all.
-    """
-    client = user_scoped_client(
-        _build(grants, bots, collaborators, _caller(user_id=OVERFLOW_COLLAB)),
-        OVERFLOW_COLLAB,
-    )
-
-    resp = client.post(f"/openapi/v1/bots/{AMBIGUOUS_BOT}/authorized-apps", json={})
-
-    assert resp.status_code == 404, resp.json()
-    with sessions() as session:
-        assert session.query(BotAppGrantModel).count() == 0
-
-
-def test_an_ambiguous_bot_id_is_refused_when_the_caller_can_operate_both(
-    grants, bots, collaborators
-):
-    """The genuine ambiguity, and the one case that must stay refused.
-
-    ``DOUBLE_COLLAB`` is a member on both ``default`` bots. Narrowing to the
-    caller's reach does not help here — they really can operate both, the
-    request says only ``bot_id``, and it does not say which. Picking one would
-    delegate the wrong bot silently, which is worse than refusing.
+    While the owner was *inferred* this was unreachable in a single session,
+    because the resolve was deterministic on ``(bot_id, caller)``. Naming the
+    owner removes that accidental protection, which is an argument for keying
+    the record on a globally unique bot identity rather than on ``bot_id``.
     """
     client = user_scoped_client(
         _build(grants, bots, collaborators, _caller(user_id=DOUBLE_COLLAB)),
         DOUBLE_COLLAB,
     )
 
-    resp = client.post(f"/openapi/v1/bots/{AMBIGUOUS_BOT}/authorized-apps", json={})
+    first = client.post(
+        f"/openapi/v1/bots/{AMBIGUOUS_BOT}/authorized-apps",
+        params={"owner_id": OWNER},
+        json={},
+    )
+    second = client.post(
+        f"/openapi/v1/bots/{AMBIGUOUS_BOT}/authorized-apps",
+        params={"owner_id": OTHER_OWNER},
+        json={},
+    )
+
+    assert first.status_code == 201, first.json()
+    assert second.status_code == 409, second.json()
+    with sessions() as session:
+        rows = session.query(BotAppGrantModel).all()
+    assert [row.owner_id for row in rows] == [OWNER], "the first is untouched"
+
+
+def test_omitting_the_owner_still_means_your_own_bot(collab_client):
+    """The default is what this group shipped with: your own bot, or nothing.
+
+    ``COLLAB`` owns no ``default``, so omitting the owner must refuse rather
+    than quietly find the one they collaborate on. Anything else would make the
+    parameter's absence mean something different from what it always meant.
+    """
+    resp = collab_client.get(f"/openapi/v1/bots/{AMBIGUOUS_BOT}/authorized-apps")
+
+    assert resp.status_code == 404, resp.json()
+
+
+def test_naming_an_owner_you_have_no_relationship_with_discloses_nothing(
+    stranger_client,
+):
+    """The bot really exists, and the answer must not say so.
+
+    Naming another owner is the one way a caller can point this at a bot that
+    resolves but is not theirs. It has to answer exactly as a nonexistent bot
+    does, or the parameter becomes an existence oracle for every
+    ``(bot_id, owner)`` pair in the tenant.
+    """
+    resp = stranger_client.get(
+        f"/openapi/v1/bots/{AMBIGUOUS_BOT}/authorized-apps",
+        params={"owner_id": OWNER},
+    )
 
     assert resp.status_code == 404, resp.json()
 

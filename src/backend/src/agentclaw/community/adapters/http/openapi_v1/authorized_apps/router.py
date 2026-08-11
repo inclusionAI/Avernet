@@ -58,7 +58,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Request
+from fastapi import APIRouter, Depends, Path, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.authorized_apps.schemas import (
     AuthorizedApp,
@@ -128,6 +128,36 @@ PrincipalDep = Annotated[Principal, Depends(require_principal)]
 #: between them.
 BotIdPath = Annotated[str, Path(min_length=1, max_length=256)]
 
+#: Whose bot the request addresses, defaulting to the caller's own.
+#:
+#: ``bot_id`` alone does not identify a bot — ``ac_bots`` has no unique key on
+#: it, and the retired ``default`` convention gave many owners one — so the pair
+#: is the address. Omitting this is what these operations have always done:
+#: your own bot, or nothing.
+#:
+#: Named and shaped to match ``owner_id`` on the engine-runtime operations,
+#: which have addressed bots this way all along. Inferring it instead was this
+#: group's own invention, and it could not resolve the case it existed for: a
+#: caller who collaborates on two owners' same-named bots can operate both, and
+#: nothing about the request says which they mean.
+#:
+#: ``min_length`` only, matching ``user_id``: owner ids come from the same
+#: unconstrained gateway subject-id space, and a cap here would 422 a
+#: collaborator naming a legitimately long owner before adjudication ran, while
+#: the owner themselves — parameter omitted — sailed through.
+OwnerIdQuery = Annotated[
+    str | None,
+    Query(
+        min_length=1,
+        description=(
+            "The owner of the bot this request addresses. Defaults to the "
+            "caller — name it only to reach a bot shared with you. The caller "
+            "must be the bot's owner or a collaborator on it; anyone else is "
+            "answered exactly as if the bot did not exist (404)."
+        ),
+    ),
+]
+
 
 def _calling_app(principal: Principal) -> tuple[int, str]:
     """The calling application's id and name, off the verified principal.
@@ -170,6 +200,7 @@ async def grant_authorized_app(
     request: Request,
     user_id: UserIdDep,
     principal: UserAndAppDep,
+    owner_id: OwnerIdQuery = None,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     collaborators: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
     grants: BotAppGrantServiceProtocol = Injected(BotAppGrantServiceProtocol),
@@ -181,6 +212,11 @@ async def grant_authorized_app(
     resolved owner is recorded alongside them, and is someone else whenever the
     bot is shared.
 
+    ``owner_id`` names whose bot this is and defaults to the caller's own, so
+    omitting it behaves exactly as this operation always has. Name it to
+    delegate on a bot shared with you: ``bot_id`` alone does not identify a bot,
+    and two owners may hold the same one.
+
     Idempotent: granting an authorization that is already in force returns it
     unchanged rather than failing, so a partner retrying a timed-out request is
     not punished for one that actually succeeded. Two *different* users
@@ -189,14 +225,15 @@ async def grant_authorized_app(
     """
     # Existence check and authority in one: raises BotNotFoundError -> 404 for a
     # bot that is absent or that this caller may not operate, indistinguishably.
-    owner_id, _ = resolve_delegable_bot(
-        bot_service, collaborators, bot_id=bot_id, caller_id=user_id
+    resolved_owner, _ = resolve_delegable_bot(
+        bot_service, collaborators, bot_id=bot_id, caller_id=user_id,
+        owner_id=owner_id,
     )
     app_id, app_name = _calling_app(principal)
     record = grants.grant(
         bot_id=bot_id,
         user_id=user_id,
-        owner_id=owner_id,
+        owner_id=resolved_owner,
         app_id=app_id,
         app_name=app_name,
     )
@@ -212,6 +249,7 @@ async def list_authorized_apps(
     request: Request,
     user_id: UserIdDep,
     principal: PrincipalDep,
+    owner_id: OwnerIdQuery = None,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     collaborators: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
     grants: BotAppGrantServiceProtocol = Injected(BotAppGrantServiceProtocol),
@@ -224,13 +262,18 @@ async def list_authorized_apps(
     record exists to prevent. A collaborator has no equivalent claim on their
     colleagues' delegations, so theirs is narrowed — the same reason their
     withdrawal is.
+
+    ``owner_id`` says whose bot to read and defaults to the caller's own. It
+    addresses the bot; it does not widen the answer — a collaborator naming the
+    owner still sees only what they themselves delegated.
     """
     del principal  # authority comes from the adjudicated bot resolve below
-    owner_id, _ = resolve_delegable_bot(
-        bot_service, collaborators, bot_id=bot_id, caller_id=user_id
+    resolved_owner, _ = resolve_delegable_bot(
+        bot_service, collaborators, bot_id=bot_id, caller_id=user_id,
+        owner_id=owner_id,
     )
-    records = grants.list_for_bot(bot_id=bot_id, owner_id=owner_id)
-    if user_id != owner_id:
+    records = grants.list_for_bot(bot_id=bot_id, owner_id=resolved_owner)
+    if user_id != resolved_owner:
         records = [record for record in records if record.user_id == user_id]
     items = [_to_authorized_app(record) for record in records]
     return page(len(items), items, request)
@@ -245,6 +288,7 @@ async def revoke_authorized_app(
     request: Request,
     user_id: UserIdDep,
     principal: PrincipalDep,
+    owner_id: OwnerIdQuery = None,
     app_id: int = Path(ge=1),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     collaborators: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
@@ -269,16 +313,21 @@ async def revoke_authorized_app(
       naming whose grant to remove.
     - A **collaborator** withdraws only their own. Theirs is the loan they made;
       a colleague's is not theirs to call in.
+
+    ``owner_id`` names whose bot is being withdrawn from and defaults to the
+    caller's own. Which delegations go still follows from who is asking, not
+    from this parameter.
     """
     del principal
-    owner_id, _ = resolve_delegable_bot(
-        bot_service, collaborators, bot_id=bot_id, caller_id=user_id
+    resolved_owner, _ = resolve_delegable_bot(
+        bot_service, collaborators, bot_id=bot_id, caller_id=user_id,
+        owner_id=owner_id,
     )
-    if user_id == owner_id:
-        grants.revoke_app(bot_id=bot_id, owner_id=owner_id, app_id=app_id)
+    if user_id == resolved_owner:
+        grants.revoke_app(bot_id=bot_id, owner_id=resolved_owner, app_id=app_id)
     else:
         grants.revoke(
-            bot_id=bot_id, user_id=user_id, owner_id=owner_id, app_id=app_id
+            bot_id=bot_id, user_id=user_id, owner_id=resolved_owner, app_id=app_id
         )
     return deleted_envelope(request)
 

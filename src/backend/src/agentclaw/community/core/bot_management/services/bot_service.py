@@ -1943,58 +1943,6 @@ class BotService:
         thread.start()
         logger.info(f"[bot_service._allocate_device_async] Started background thread for bot {bot_id} device allocation")
 
-    def get_bot_by_id(self, bot_id: str) -> Dict[str, Any]:
-        """Resolve a bot by id alone. **Decides nothing about who may reach it.**
-
-        The counterpart to :meth:`get_bot` for the one case that genuinely
-        cannot use it: a caller who may reach a bot *without owning it*, and so
-        cannot supply the owner the owner-scoped read needs. It exists to answer
-        "which bot, and whose" — the authority question is the caller's to ask
-        afterwards, against the resolved owner and primary key this returns.
-
-        **A caller that stops here has performed no check at all.** Every caller
-        must follow it with an adjudication (``core/engine_runtime/gate.py``'s
-        ``require_bot_operator``) and must raise the same
-        :class:`BotNotFoundError` on refusal, so a caller who may not reach the
-        bot cannot tell it apart from one that does not exist.
-
-        Ambiguity fails closed rather than picking a row: ``bot_id`` is not
-        unique across owners for legacy ``default`` bots, so
-        ``get_unique_by_id`` raises rather than resolving one caller's bot for
-        another's request.
-
-        Raises:
-            BotNotFoundError: no live bot has this id in this env and tenant.
-        """
-        bot = self._repository.get_unique_by_id(bot_id)
-        if not bot:
-            raise BotNotFoundError(f"Bot not found: {bot_id}")
-        return bot
-
-    def list_bots_reachable_by_id(
-        self, bot_id: str, caller_id: str, limit: int
-    ) -> List[Dict[str, Any]]:
-        """Live bots with this id the caller owns or collaborates on.
-
-        The tie-breaker for :meth:`get_bot_by_id`'s fail-closed ambiguity. That
-        method has to refuse a duplicated ``bot_id`` because it has no way to
-        know which one is meant; asking the question inside the caller's own
-        reach usually answers it, because the other owners' same-named bots
-        were never candidates for this caller in the first place.
-
-        **Decides nothing**, exactly like its sibling. Reachability here is
-        collaboration at any level, which is below the operator bar, so a caller
-        must still adjudicate every candidate this returns. It narrows the
-        field; it does not confer anything.
-
-        ``limit`` is required rather than defaulted: the rows are unordered and
-        the adjudication happens after, so a caller that truncates and then
-        answers can drop the one bot it was looking for. Making the bound an
-        explicit decision at the call site is what keeps that from being an
-        accident.
-        """
-        return self._repository.list_reachable_by_bot_id(bot_id, caller_id, limit)
-
     def get_bot(self, bot_id: str, user_id: str) -> Dict[str, Any]:
         """
         Get bot by ID.
