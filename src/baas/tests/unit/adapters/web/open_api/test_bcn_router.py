@@ -12,6 +12,8 @@ from secbaas.community.adapters.web.routers.bcn_downlink.bcn_router import (
 )
 from secbaas.community.api.bcn import (
     Attachment as DomainAttachment,
+)
+from secbaas.community.api.bcn import (
     BcnInvalidRequestError,
 )
 from secbaas.community.api.sse import StreamChunk
