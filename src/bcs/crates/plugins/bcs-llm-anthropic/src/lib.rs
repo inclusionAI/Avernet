@@ -12,7 +12,6 @@ use serde_json::{Value, json};
 use tracing::warn;
 
 const ANTHROPIC_VERSION: &str = "2023-06-01";
-const RESPONSE_LOG_LIMIT: usize = 2_048;
 const X_API_KEY: HeaderName = HeaderName::from_static("x-api-key");
 const ANTHROPIC_VERSION_HEADER: HeaderName = HeaderName::from_static("anthropic-version");
 
@@ -159,7 +158,7 @@ impl LlmChatCompletionPort for AnthropicLlmClient {
             ))
         })?;
         let elapsed_ms = elapsed_ms(started_at);
-        let body_excerpt = response_excerpt(&body);
+        let body_len = body.len();
         if !status.is_success() {
             warn!(
                 provider = "anthropic",
@@ -168,11 +167,11 @@ impl LlmChatCompletionPort for AnthropicLlmClient {
                 status = %status,
                 request_id = %request_id,
                 elapsed_ms,
-                response_body_excerpt = %body_excerpt,
+                response_body_len = body_len,
                 "anthropic: message request returned non-success status"
             );
             return Err(LlmError::Request(format!(
-                "anthropic returned {status} from {url} after {elapsed_ms}ms: {body_excerpt}; request_id={request_id}"
+                "anthropic returned {status} from {url} after {elapsed_ms}ms; body_len={body_len}; request_id={request_id}"
             )));
         }
 
@@ -184,12 +183,12 @@ impl LlmChatCompletionPort for AnthropicLlmClient {
                 status = %status,
                 request_id = %request_id,
                 elapsed_ms,
-                response_body_excerpt = %body_excerpt,
+                response_body_len = body_len,
                 error = %error,
                 "anthropic: message response is not valid JSON"
             );
             LlmError::Response(format!(
-                "anthropic response from {url} with status {status} is not valid JSON after {elapsed_ms}ms: {error}; body={body_excerpt}; request_id={request_id}"
+                "anthropic response from {url} with status {status} is not valid JSON after {elapsed_ms}ms: {error}; body_len={body_len}; request_id={request_id}"
             ))
         })?;
         let parsed: AnthropicMessageResponse =
@@ -201,12 +200,12 @@ impl LlmChatCompletionPort for AnthropicLlmClient {
                     status = %status,
                     request_id = %request_id,
                     elapsed_ms,
-                    response_body_excerpt = %body_excerpt,
+                    response_body_len = body_len,
                     error = %error,
                     "anthropic: message response schema mismatch"
                 );
                 LlmError::Response(format!(
-                    "anthropic response schema mismatch from {url} with status {status} after {elapsed_ms}ms: {error}; body={body_excerpt}; request_id={request_id}"
+                    "anthropic response schema mismatch from {url} with status {status} after {elapsed_ms}ms: {error}; body_len={body_len}; request_id={request_id}"
                 ))
             })?;
 
@@ -422,19 +421,6 @@ fn structured_output_mode_name(mode: StructuredOutputMode) -> &'static str {
         StructuredOutputMode::JsonObject => "json_object",
         StructuredOutputMode::ToolCall => "tool_call",
     }
-}
-
-fn response_excerpt(body: &str) -> String {
-    let body = body.trim();
-    let mut excerpt = String::new();
-    for (index, ch) in body.chars().enumerate() {
-        if index >= RESPONSE_LOG_LIMIT {
-            excerpt.push_str("...");
-            return excerpt;
-        }
-        excerpt.push(ch);
-    }
-    excerpt
 }
 
 fn elapsed_ms(started_at: Instant) -> u64 {

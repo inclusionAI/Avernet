@@ -461,7 +461,7 @@ async fn rejects_refusal_stop_reason() {
 }
 
 #[tokio::test]
-async fn http_error_includes_status_body_and_request_id() {
+async fn http_error_includes_status_length_and_request_id_without_body() {
     let base_url =
         spawn_anthropic_response(429, r#"{"error":{"message":"rate limited"}}"#, "req-rate").await;
     let client = AnthropicLlmClient::new(test_config(&base_url, StructuredOutputMode::JsonSchema))
@@ -474,7 +474,8 @@ async fn http_error_includes_status_body_and_request_id() {
         .to_string();
 
     assert!(error.contains("429 Too Many Requests"), "{error}");
-    assert!(error.contains("rate limited"), "{error}");
+    assert!(error.contains("body_len=36"), "{error}");
+    assert!(!error.contains("rate limited"), "{error}");
     assert!(error.contains("req-rate"), "{error}");
 }
 

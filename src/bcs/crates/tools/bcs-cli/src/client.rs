@@ -2019,7 +2019,7 @@ impl BcsClient {
         debug!(
             group_id = %group_id,
             status = %status,
-            reason = ?reason,
+            reason_len = reason.map_or(0, str::len),
             "Updating group status"
         );
 
@@ -3209,6 +3209,12 @@ impl BcsClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn client_does_not_log_raw_status_reason() {
+        let source = include_str!("client.rs");
+        assert!(!source.contains(concat!("reason", " = ?reason")));
+    }
 
     #[test]
     fn guess_mime_from_extension_known_types() {

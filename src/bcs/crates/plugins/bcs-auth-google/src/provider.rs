@@ -88,12 +88,8 @@ impl OAuthProvider for GoogleOAuthProvider {
 
         if !resp.status().is_success() {
             let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            warn!(%status, %body, "Google token exchange failed");
-            return Err(OAuthError::TokenExchangeFailed(format!(
-                "token endpoint returned {}: {}",
-                status, body
-            )));
+            warn!(%status, "Google token exchange failed");
+            return Err(OAuthError::TokenExchangeFailed(format!("token endpoint returned {status}")));
         }
 
         let google_token: GoogleTokenResponse = resp
@@ -126,12 +122,8 @@ impl OAuthProvider for GoogleOAuthProvider {
 
         if !resp.status().is_success() {
             let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            warn!(%status, %body, "Google userinfo request failed");
-            return Err(OAuthError::UserInfoFailed(format!(
-                "userinfo endpoint returned {}: {}",
-                status, body
-            )));
+            warn!(%status, "Google userinfo request failed");
+            return Err(OAuthError::UserInfoFailed(format!("userinfo endpoint returned {status}")));
         }
 
         let user: GoogleUserInfoResponse = resp
@@ -147,5 +139,15 @@ impl OAuthProvider for GoogleOAuthProvider {
             email: user.email,
             avatar: user.picture,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn oauth_failures_do_not_expose_provider_response_bodies() {
+        let source = include_str!("provider.rs");
+        assert!(!source.contains(concat!("warn!(%status, %", "body")));
+        assert!(!source.contains(concat!("status, ", "body")));
     }
 }

@@ -67,7 +67,7 @@ pub async fn handle_connection(
     while let Some(msg_result) = ws_rx.next().await {
         match msg_result {
             Ok(Message::Text(text)) => {
-                info!(len = text.len(), text = %text, "Received bot frame");
+                info!(len = text.len(), "Received bot frame");
 
                 match dispatch_frame(&state, &text, &client_tx, &mut registered_bot_id).await {
                     Ok(outcome) => {
@@ -151,7 +151,7 @@ pub async fn handle_connection(
                 close_reason = WsCloseReason::ClientClose;
                 info!(
                     close_code = ?close_frame.as_ref().map(|f| f.code),
-                    close_reason = ?close_frame.as_ref().map(|f| f.reason.to_string()),
+                    close_reason_len = close_frame.as_ref().map_or(0, |f| f.reason.len()),
                     "WebSocket close frame received"
                 );
                 break;
@@ -287,5 +287,12 @@ mod tests {
     fn treats_connection_reset_without_close_frame_as_client_disconnect() {
         let error = "WebSocket protocol error: Connection reset without closing handshake";
         assert!(is_connection_reset_without_closing_handshake(&error));
+    }
+
+    #[test]
+    fn handler_does_not_log_raw_client_controlled_content() {
+        let source = include_str!("handler.rs");
+        assert!(!source.contains(concat!("text", " = %text")));
+        assert!(!source.contains(concat!("f.reason", ".to_string()")));
     }
 }

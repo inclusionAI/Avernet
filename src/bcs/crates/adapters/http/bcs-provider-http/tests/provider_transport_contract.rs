@@ -809,16 +809,7 @@ async fn provider_history_logs_provider_bot_group_and_history_response() {
     assert_eq!(event.field("message_count").as_deref(), Some("1"));
     assert_eq!(event.field("has_more").as_deref(), Some("false"));
 
-    let history_body: Value = serde_json::from_str(
-        event
-            .field("history_body")
-            .as_deref()
-            .expect("history body log field"),
-    )
-    .expect("history body should be json");
-    assert_eq!(history_body["session_id"], "group-1:feedbeef");
-    assert_eq!(history_body["messages"][0]["content"], "done");
-    assert_eq!(history_body["messages"][0]["timestamp"], 1710960050000_u64);
+    assert!(event.field("history_body").is_none());
 
     server.abort();
 }

@@ -2301,9 +2301,9 @@ pub async fn run() -> Result<()> {
                     println!("✓ Bot reconnected to BCS network:");
                 }
                 println!("  Bot UUID: {}", result.bot_uuid);
-                println!("  Token: {}...", &result.token[..8.min(result.token.len())]);
+                println!("  Token: [saved to the BCS session file]");
                 if result.is_new {
-                    println!("\n  Save this token for reconnection!");
+                    println!("\n  Keep the BCS session file private for reconnection.");
                 }
             }
         }
@@ -4784,6 +4784,12 @@ mod tests {
     use serial_test::serial;
     use std::io::Write;
     use tempfile::TempDir;
+
+    #[test]
+    fn human_connect_output_does_not_print_token_prefix() {
+        let source = include_str!("main.rs");
+        assert!(!source.contains(concat!("result.token", "[..8.min")));
+    }
 
     // Helper to safely set env var
     #[allow(unsafe_code)]

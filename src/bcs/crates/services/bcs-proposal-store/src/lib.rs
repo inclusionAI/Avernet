@@ -35,7 +35,7 @@ impl ProposalStore {
 impl ProposalCoreService for ProposalStore {
     async fn store(&self, proposal: GroupChatProposal) -> String {
         let token = proposal.token.clone();
-        debug!(token = %token, "Storing proposal");
+        debug!("Storing proposal");
         let mut proposals = self.proposals.write().await;
         proposals.insert(token.clone(), proposal);
         token
@@ -143,6 +143,12 @@ impl ProposalBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn proposal_store_does_not_log_confirmation_tokens() {
+        let source = include_str!("lib.rs");
+        assert!(!source.contains(concat!("token", " = %token")));
+    }
 
     #[tokio::test]
     async fn test_proposal_store() {

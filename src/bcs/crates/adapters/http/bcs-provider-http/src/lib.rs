@@ -422,7 +422,6 @@ impl GroupHistoryBotRequestPort for HttpProviderTransport {
             post_provider(&self.client, &self.url_guard, &target, &body, &[])
                 .await
                 .map_err(|error| error.to_string())?;
-        let history_body = provider_history_log(&response);
         info!(
             target_bot_id = %target_bot_id,
             provider_id = %body.to_bot.provider_id,
@@ -440,7 +439,6 @@ impl GroupHistoryBotRequestPort for HttpProviderTransport {
             has_more = %response.has_more,
             next_before = ?response.next_before,
             next_after = ?response.next_after,
-            history_body = %history_body,
             "provider downlink: history response"
         );
         if !response.ok {
@@ -779,7 +777,6 @@ async fn send_provider_request_with_policy(
     } else {
         "callback"
     };
-    let request_body = provider_body_log(body);
     info!(
         provider_id = %body.to_bot.provider_id,
         provider_bot_ref = %body.to_bot.provider_bot_ref,
@@ -788,13 +785,13 @@ async fn send_provider_request_with_policy(
         session_id = %body.session_id,
         bcn_group_id = %body.bcn_group_id,
         from = ?body.from,
-        message = ?body.message,
+        message_present = body.message.is_some(),
+        message_len = body.message.as_ref().map_or(0, |message| message.to_string().len()),
         before = ?body.before,
         after = ?body.after,
         limit = ?body.limit,
         timeout_ms = %body.timeout_ms,
-        request_body = %request_body,
-        "provider downlink: request body"
+        "provider downlink: request metadata"
     );
     let request_started_ms = bcs_protocol::now_ms();
     let request_started = Instant::now();
@@ -803,7 +800,7 @@ async fn send_provider_request_with_policy(
         method = %body.method,
         frame_id = %body.id,
         message_id = %message_id,
-        webhook_url = %webhook_url,
+        webhook_url = %webhook_url_for_log(webhook_url),
         protocol_version = %protocol_version,
         accept = %accept,
         transport = %transport,
@@ -973,32 +970,6 @@ fn provider_client_for_url(
         .resolve_to_addrs(host, addrs)
         .build()
         .map(Some)
-}
-
-fn provider_body_log(body: &ProviderWebhookRequest) -> String {
-    let mut redacted = match serde_json::to_value(body) {
-        Ok(value) => value,
-        Err(error) => return format!("{{\"serialize_error\":\"{}\"}}", error),
-    };
-    if let Some(attachments) = redacted
-        .get_mut("attachments")
-        .and_then(Value::as_array_mut)
-    {
-        for attachment in attachments {
-            if let Some(url) = attachment.get_mut("url") {
-                *url = Value::String("<redacted>".to_string());
-            }
-        }
-    }
-    serde_json::to_string(&redacted).unwrap_or_else(|error| {
-        format!("{{\"serialize_error\":\"{}\"}}", error)
-    })
-}
-
-fn provider_history_log(response: &ProviderHistoryResponse) -> String {
-    serde_json::to_string(response).unwrap_or_else(|error| {
-        format!("{{\"serialize_error\":\"{}\"}}", error)
-    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1776,45 +1747,10 @@ Connection: keep-alive\r\n\
     }
 
     #[test]
-    fn provider_body_log_redacts_temporary_attachment_urls() {
-        let body = ProviderWebhookRequest {
-            frame_type: "event".to_string(),
-            id: "frame-1".to_string(),
-            method: "chat.send".to_string(),
-            session_id: "session-1".to_string(),
-            bcn_group_id: "group-1".to_string(),
-            to_bot: ProviderWebhookBotRef {
-                provider_id: "provider-1".to_string(),
-                provider_bot_ref: "bot-1".to_string(),
-                tags: Vec::new(),
-            },
-            from: None,
-            message: None,
-            attachments: vec![Attachment {
-                attachment_id: "att-1".to_string(),
-                attachment_type: bcs_protocol::AttachmentType::Image,
-                file_name: "image".to_string(),
-                mime_type: None,
-                size: None,
-                sha256: None,
-                url: "https://download.example.com/image?token=secret".to_string(),
-                expires_at: None,
-            }],
-            before: None,
-            after: None,
-            limit: None,
-            timeout_ms: 1_000,
-            extensions: None,
-        };
-
-        let logged = provider_body_log(&body);
-
-        assert!(logged.contains("\"url\":\"<redacted>\""));
-        assert!(!logged.contains("token=secret"));
-        assert_eq!(
-            body.attachments[0].url,
-            "https://download.example.com/image?token=secret"
-        );
+    fn provider_downlink_does_not_log_serialized_request_body() {
+        let source = include_str!("lib.rs");
+        assert!(!source.contains(concat!("request_body", " = %request_body")));
+        assert!(!source.contains(concat!("payload", " = ?event.payload")));
     }
 
     #[tokio::test]

@@ -11,8 +11,6 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tracing::warn;
 
-const RESPONSE_LOG_LIMIT: usize = 2048;
-
 #[derive(Clone)]
 pub struct OpenAiCompatibleLlmClient {
     config: LlmConfig,
@@ -182,7 +180,7 @@ impl LlmChatCompletionPort for OpenAiCompatibleLlmClient {
                 ))
             })?;
         let elapsed_ms = elapsed_ms(started_at);
-        let body_excerpt = response_excerpt(&body);
+        let body_len = body.len();
         if !status.is_success() {
             warn!(
                 provider = "openai_compatible",
@@ -190,11 +188,11 @@ impl LlmChatCompletionPort for OpenAiCompatibleLlmClient {
                 url = %url,
                 status = %status,
                 elapsed_ms = elapsed_ms,
-                response_body_excerpt = %body_excerpt,
+                response_body_len = body_len,
                 "openai-compatible: chat completion returned non-success status"
             );
             return Err(LlmError::Request(format!(
-                "openai-compatible returned {status} from {url} after {elapsed_ms}ms: {body_excerpt}"
+                "openai-compatible returned {status} from {url} after {elapsed_ms}ms; body_len={body_len}"
             )));
         }
         let raw: Value = serde_json::from_str(&body).map_err(|error| {
@@ -204,12 +202,12 @@ impl LlmChatCompletionPort for OpenAiCompatibleLlmClient {
                 url = %url,
                 status = %status,
                 elapsed_ms = elapsed_ms,
-                response_body_excerpt = %body_excerpt,
+                response_body_len = body_len,
                 error = %error,
                 "openai-compatible: chat completion response is not valid JSON"
             );
             LlmError::Response(format!(
-                "openai-compatible response from {url} with status {status} is not valid JSON after {elapsed_ms}ms: {error}; body={body_excerpt}"
+                "openai-compatible response from {url} with status {status} is not valid JSON after {elapsed_ms}ms: {error}; body_len={body_len}"
             ))
         })?;
         let parsed: OpenAiCompatibleChatResponse = serde_json::from_value(raw.clone())
@@ -220,12 +218,12 @@ impl LlmChatCompletionPort for OpenAiCompatibleLlmClient {
                     url = %url,
                     status = %status,
                     elapsed_ms = elapsed_ms,
-                    response_body_excerpt = %body_excerpt,
+                    response_body_len = body_len,
                     error = %error,
                     "openai-compatible: chat completion response schema mismatch"
                 );
                 LlmError::Response(format!(
-                    "openai-compatible response schema mismatch from {url} with status {status} after {elapsed_ms}ms: {error}; body={body_excerpt}"
+                    "openai-compatible response schema mismatch from {url} with status {status} after {elapsed_ms}ms: {error}; body_len={body_len}"
                 ))
             })?;
         let content = parsed
@@ -240,11 +238,11 @@ impl LlmChatCompletionPort for OpenAiCompatibleLlmClient {
                     url = %url,
                     status = %status,
                     elapsed_ms = elapsed_ms,
-                    response_body_excerpt = %body_excerpt,
+                    response_body_len = body_len,
                     "openai-compatible: chat completion response missing content"
                 );
                 LlmError::Response(format!(
-                    "openai-compatible response from {url} with status {status} missing choices[0].message.content or tool_calls[0].function.arguments after {elapsed_ms}ms; body={body_excerpt}"
+                    "openai-compatible response from {url} with status {status} missing choices[0].message.content or tool_calls[0].function.arguments after {elapsed_ms}ms; body_len={body_len}"
                 ))
             })?;
         Ok(LlmChatCompletionResponse { content, raw })
@@ -403,19 +401,6 @@ fn redact_proxy(value: &str) -> String {
         }
     }
     value.to_string()
-}
-
-fn response_excerpt(body: &str) -> String {
-    let body = body.trim();
-    let mut excerpt = String::new();
-    for (index, ch) in body.chars().enumerate() {
-        if index >= RESPONSE_LOG_LIMIT {
-            excerpt.push_str("...");
-            return excerpt;
-        }
-        excerpt.push(ch);
-    }
-    excerpt
 }
 
 fn elapsed_ms(started_at: Instant) -> u64 {

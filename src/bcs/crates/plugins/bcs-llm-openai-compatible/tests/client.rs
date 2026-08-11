@@ -83,7 +83,7 @@ fn builds_forced_tool_call_when_configured() {
 }
 
 #[tokio::test]
-async fn openai_compatible_http_error_includes_status_url_and_body_excerpt() {
+async fn openai_compatible_http_error_includes_status_url_and_length_without_body() {
     let base_url = spawn_openai_compatible_response(
         "HTTP/1.1 400 Bad Request\r\ncontent-type: text/plain\r\ncontent-length: 29\r\n\r\nupstream rejected json_object",
     )
@@ -103,7 +103,8 @@ async fn openai_compatible_http_error_includes_status_url_and_body_excerpt() {
 
     assert!(error.contains("400 Bad Request"), "{error}");
     assert!(error.contains("/chat/completions"), "{error}");
-    assert!(error.contains("upstream rejected json_object"), "{error}");
+    assert!(error.contains("body_len=29"), "{error}");
+    assert!(!error.contains("upstream rejected json_object"), "{error}");
 }
 
 #[tokio::test]

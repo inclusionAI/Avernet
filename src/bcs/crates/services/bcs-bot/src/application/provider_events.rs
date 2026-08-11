@@ -511,7 +511,7 @@ impl ProviderBotEventService for ProviderBotEvents {
                     node_id = %correlation.node_id,
                     attempt = %correlation.attempt,
                     consumed = %outcome.consumed,
-                    message_text = %command.message_text,
+                    message_len = command.message_text.len(),
                     "provider callback: dispatched state-machine bot event"
                 );
                 return Ok(ProviderBotEventOutcome {
@@ -536,7 +536,7 @@ impl ProviderBotEventService for ProviderBotEvents {
             bcs_session_id = ?context_bcs_session_id,
             target_bot_id = %context_bot_id,
             state = ?command.state,
-            message_text = %command.message_text,
+            message_len = command.message_text.len(),
             "provider callback: resolved run context"
         );
         let now = now_ms();
@@ -616,7 +616,7 @@ impl ProviderBotEventService for ProviderBotEvents {
             terminal = %is_terminal,
             delivered_count = %outcome.delivered_count,
             failed_count = %outcome.failed_count,
-            message_text = %command.message_text,
+            message_len = command.message_text.len(),
             "provider callback: dispatched bot event"
         );
 
