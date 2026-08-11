@@ -986,8 +986,14 @@ emoji: "🧑‍💻"
 
     #[test]
     fn test_load_merchant_operations_manager_context() {
-        let profile_dir = PathBuf::from(
-            "/Users/wenyang/proj/alpharisk/Avernet/scripts/4bots_merchant_operations_profile"
+        // Resolve the profile directory from the crate root so this test works on
+        // CI/Linux runners as well as local macOS dev machines.
+        let profile_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../../scripts/4bots_merchant_operations_profile");
+        assert!(
+            profile_dir.exists(),
+            "profile directory should exist: {}",
+            profile_dir.display()
         );
         let ctx = load_bot_context(&profile_dir, "店长日常运营").expect("load should succeed");
 
