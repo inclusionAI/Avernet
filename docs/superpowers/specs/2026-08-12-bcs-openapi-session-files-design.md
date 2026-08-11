@@ -1,8 +1,8 @@
 # BCS OpenAPI V1 Session Files Design
 
-**Status:** Confirmed for implementation  
-**Date:** 2026-08-12  
-**Tracking issue:** [#980](https://github.com/inclusionAI/Avernet/issues/980)  
+**Status:** Confirmed for implementation
+**Date:** 2026-08-12
+**Tracking issue:** [#980](https://github.com/inclusionAI/Avernet/issues/980)
 **Deferred work:** [#978](https://github.com/inclusionAI/Avernet/issues/978), [#979](https://github.com/inclusionAI/Avernet/issues/979)
 
 ## 1. Goal
