@@ -44,13 +44,28 @@ marketplace catalogue identical for every caller in the tenant. They still
 require an authenticated caller — that is ``require_principal``'s job, not this
 parameter's.
 
-Today the request's id and the credential's must still agree:
-:func:`require_user_id` refuses a parameter that names anyone but the verified
-caller, so **nothing about who may call what changes** — a request with no
-verified principal is still refused, and a caller still reaches only its own
-data. That equality check is the one line delegation will relax (auth design
-§15); until then it is what keeps the parameter from being a way to read someone
-else's bots.
+How the parameter is *authorized*, and why it splits
+----------------------------------------------------
+
+The parameter is acquired the same way for everyone; what differs is what it is
+checked against, and that follows from whether the credential names a person:
+
+- **A caller naming an end user** must name *itself*. :func:`require_user_id`
+  refuses anything else with a ``403``. Unchanged, and it is the whole of the
+  "nothing else changes" promise for human callers.
+- **An application acting alone** names no end user, so there is nothing to
+  compare with. Its ``user_id`` is authorized against the **grant** instead —
+  "has this person delegated to this application, for this bot?" — which happens
+  in :data:`GrantCheckedDep` below, because only there is the bot known.
+
+This is the split :func:`require_user_id`'s own docstring predicted: acquisition
+here, adjudication one step later. It is why the parameter had to exist before
+the caller did — an operation whose contract never mentioned a user has nowhere
+to put one when the identity set stops carrying it.
+
+The parameter is **never trusted on its own**. An application naming a user who
+granted it nothing is refused exactly as one naming a bot that does not exist,
+so guessing a ``user_id`` buys nothing.
 
 The owner id scopes reads/writes to the caller's own bots *within* the tenant
 (the tenant guard confines data to the tenant; this confines it to the caller).
@@ -65,24 +80,36 @@ rule independent of whether a given handler remembers to call this function.
 
 The "carries no user_id" branch below is therefore unreachable for a verified
 caller, and stays only as the fail-closed answer for a hand-constructed
-principal. The tolerance of a bare string or a mapping is what let this helper
-survive the stub-to-real swap unchanged.
+principal. A mapping is accepted alongside the real verified caller so test
+stand-ins keep working; a bare id string used to be too, and was removed once
+nothing — production or test — produced one.
 """
 
 from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import Depends, Query
+from fastapi import Depends, Query, Request
 
+from agentclaw.community.adapters.http.openapi_v1.admission import (
+    ADMISSION,
+    BODY_BOT_ID_OPERATIONS,
+    OWNER_ADDRESSED_OPERATIONS,
+    SKILL_SCOPED_OPERATIONS,
+    ActingCaller,
+    AdmissionMode,
+)
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     Principal,
     require_principal,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
+    GrantNotResolvableError,
     MissingPrincipalError,
     UserIdMismatchError,
 )
+from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
+from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -94,23 +121,30 @@ USER_ID_QUERY = "user_id"
 #: parameter reads identically across all 56 of them.
 USER_ID_DESCRIPTION = (
     "The end user this request acts for. Every read and write is scoped to it. "
-    "It must currently be the authenticated caller's own id; naming another "
-    "user is refused (403)."
+    "A caller authenticated as a person must name themselves; naming another "
+    "user is refused (403). An application calling with its own credential and "
+    "no end user names the user who authorized it, and reaches only what that "
+    "user has authorized it for — anything else is answered exactly as if it "
+    "did not exist (404)."
 )
 
 
 def caller_owner_id(principal: Principal) -> str:
     """Return the caller's owner id, or raise :class:`MissingPrincipalError`.
 
-    Accepts either a bare id string or an object/mapping exposing ``user_id``,
-    so it fits whatever shape the auth workstream's verified principal takes.
+    Accepts an object or a mapping exposing ``user_id``. Production always
+    supplies the first — ``Principal`` *is*
+    :class:`~...core.gateway_principal.VerifiedCaller` — and the mapping form is
+    what test stand-ins use, which is why it stays.
+
+    A **bare id string** used to be accepted too, from when the principal was a
+    stub. Nothing produced one by the time the real verifier landed, and nothing
+    did afterwards: not production, and not a single test. Removed rather than
+    carried, because a tolerance no caller exercises is not flexibility — it is
+    an untested branch in the function that decides who a request acts for.
     """
     if principal is None:
         raise MissingPrincipalError("no authenticated caller")
-    if isinstance(principal, str):
-        if not principal:
-            raise MissingPrincipalError("empty caller id")
-        return principal
     user_id = (
         principal.get("user_id")
         if isinstance(principal, dict)
@@ -121,17 +155,45 @@ def caller_owner_id(principal: Principal) -> str:
     return str(user_id)
 
 
-#: How much of a rejected id reaches the log. Long enough to identify a
-#: misconfigured partner integration, short enough that a caller cannot choose
-#: how many bytes each refusal costs.
-_LOGGED_ID_LIMIT = 128
+def caller_names_a_user(principal: Principal) -> bool:
+    """Whether the credential names an end user, tolerantly.
+
+    Read together with :func:`caller_app_id`: "names no user" is not on its own
+    a reason to relax anything, because every *unusable* credential also names
+    no user. Only "names no user **and** names an application" is the app-only
+    caller. See the branch in :func:`require_user_id`.
+
+    Mirrors :func:`caller_owner_id`'s tolerance rather than reading
+    ``VerifiedCaller.has_user`` directly, and for the same reason that helper
+    has it: this module accepts a mapping as well as the real verified caller,
+    so a test stand-in keeps working. Reading the attribute alone would make
+    every such stand-in look like an application acting alone — which is the one
+    shape that skips the id comparison, so the failure would be a silently
+    *weaker* check rather than an error.
+
+    A real :class:`VerifiedCaller` answers from ``has_user``. Anything else is
+    asked the question that actually matters: does it yield an owner id?
+    """
+    if principal is None:
+        return False
+    has_user = getattr(principal, "has_user", None)
+    if isinstance(has_user, bool):
+        return has_user
+    try:
+        return bool(caller_owner_id(principal))
+    except MissingPrincipalError:
+        return False
 
 
-def _for_log(user_id: str) -> str:
-    """The rejected id as one escaped, bounded token."""
-    if len(user_id) <= _LOGGED_ID_LIMIT:
-        return repr(user_id)
-    return f"{user_id[:_LOGGED_ID_LIMIT]!r}…(+{len(user_id) - _LOGGED_ID_LIMIT})"
+def caller_app_id(principal: Principal) -> int | None:
+    """The calling application's id, or ``None``, tolerantly.
+
+    ``None`` means "no application on this credential" — a human caller, or a
+    stand-in that does not model one. Both are the same answer here: no grant
+    governs the request.
+    """
+    app_id = getattr(principal, "app_id", None)
+    return app_id if isinstance(app_id, int) else None
 
 
 async def require_user_id(
@@ -147,7 +209,7 @@ async def require_user_id(
             # id is longer than it *even when the value matches the signed
             # principal*, locking them out of all 56 operations. That is a change
             # to who may call, which this change promises not to make. The log
-            # line below is bounded instead — see ``_for_log``.
+            # line below is bounded instead — see ``log_safe.for_log``.
             alias=USER_ID_QUERY,
             min_length=1,
             description=USER_ID_DESCRIPTION,
@@ -164,20 +226,41 @@ async def require_user_id(
       validation failure, enveloped by the app-level handler;
     - a parameter naming someone other than the caller → ``403``.
 
-    The last one is the whole of the "nothing else changes" promise. A request
-    can only ever be scoped to the caller, exactly as when the id was read off
-    the principal; the parameter states that scope instead of leaving it implied.
-    When an App may act for a user (auth design §15), this function stops
-    comparing the two ids and asks whether the delegation was granted — and no
-    handler, schema or path changes, because none of them ever named the user.
+    The third is the whole of the "nothing else changes" promise for a caller
+    that names a person: such a request can only ever be scoped to itself,
+    exactly as when the id was read off the principal.
+
+    **The branch this docstring used to promise is now here.** For a caller
+    naming no end user — an application acting alone — there is no second id to
+    compare with, so the comparison is skipped and the parameter is authorized
+    against the delegation instead. That check needs the bot, which this
+    dependency does not have, so it happens one step later in
+    :data:`GrantCheckedDep`. Nothing else moved: no handler, schema or path
+    changed, because none of them ever named the user.
+
+    Skipping the comparison is not skipping a check. An application that reaches
+    an operation without also taking the grant-checked dependency would be
+    unauthorized, which is exactly what the route inventory test refuses to
+    allow — see ``admission.py``.
     """
+    if caller_app_id(principal) is not None and not caller_names_a_user(principal):
+        # An application acting alone. It names the user it acts for; whether it
+        # may is the grant's answer, not this function's.
+        #
+        # The comparison is skipped only when an application is **positively
+        # identified**. Testing "names no user" alone would be fail-open: a
+        # ``None`` principal, an empty mapping, a blank id — every unusable
+        # credential also names no user, and each would have been waved through
+        # here instead of refused below. Requiring a visible ``app_id`` means an
+        # unrecognised principal falls to ``caller_owner_id`` and its 401.
+        return user_id
     caller = caller_owner_id(principal)
     if user_id != caller:
         # Both ids are logged because the response cannot carry them: it is a
         # fixed "Forbidden", so this line is an operator's only record of which
         # user a partner integration asked for.
         #
-        # The rejected value goes through ``_for_log``, and that is not
+        # The rejected value goes through ``log_safe.for_log``, and that is not
         # decoration. This branch runs *only* when the parameter is not the
         # caller's, so by construction the value is one the caller chose and the
         # server refused — arbitrary text, unbounded now that the request-level
@@ -190,7 +273,7 @@ async def require_user_id(
         logger.warning(
             "%s=%s does not match the verified caller %s",
             USER_ID_QUERY,
-            _for_log(user_id),
+            for_log(user_id),
             caller,
         )
         raise UserIdMismatchError("request user id is not the verified caller")
@@ -203,3 +286,226 @@ async def require_user_id(
 #: like ``PrincipalDep``: it is the same dependency everywhere, and a second
 #: spelling of it is a second thing to keep in step with delegation.
 UserIdDep = Annotated[str, Depends(require_user_id)]
+
+
+async def require_acting_caller(
+    request: Request,
+    principal: Annotated[Principal, Depends(require_principal)],
+    user_id: UserIdDep,
+) -> ActingCaller:
+    """Who this request acts for, and what governs it.
+
+    Built once per request and shared by everything downstream, so the two
+    questions — "as whom?" and "under what authority?" — are answered together
+    rather than rediscovered at each use.
+
+    **The grant reader is resolved only for an application, and only then.** It
+    is pulled from the app's injector here rather than declared as an injected
+    parameter, because a declared one would be resolved on *every* request to
+    every operation that takes this dependency — making the grant service a hard
+    requirement of routes that will never consult it, and of every test app that
+    mounts one. A human caller carries ``app_id=None`` and no reader at all,
+    which is what makes it structurally impossible for one to be resolved
+    against a grant.
+    """
+    # **Only a caller with no human on the wire is governed by a grant.** A
+    # request carrying a user *and* an app is a human request — the gateway
+    # forwards the whole identity set it resolved, so an App rides along on
+    # every route that declares it (bot logs, the authorization group, anything
+    # under a ``user: required, app: optional`` rule). Keying off the presence
+    # of an app alone would put all of those through a grant lookup and refuse
+    # the ones with no grant: a large, silent regression for callers who did
+    # nothing but present the credential the gateway asked them for.
+    app_id = None if caller_names_a_user(principal) else caller_app_id(principal)
+    return ActingCaller(
+        user_id=user_id,
+        app_id=app_id,
+        grants=_grant_reader(request) if app_id is not None else None,
+    )
+
+
+def _grant_reader(request: Request) -> BotAppGrantServiceProtocol | None:
+    """The grant service for this app, or ``None`` when it is not wired.
+
+    ``None`` is not a shrug: :meth:`ActingCaller.require_bot` refuses outright
+    when it has no reader, so an application caller on an app without the grant
+    service is denied rather than admitted unchecked. Returning ``None`` here
+    and failing closed there keeps the two concerns apart — this one knows how
+    to find the service, that one knows what its absence means.
+    """
+    injector = getattr(request.app.state, "injector", None)
+    if injector is None:
+        return None
+    try:
+        return injector.get(BotAppGrantServiceProtocol)
+    except Exception:  # noqa: BLE001 — any resolution failure is "not wired"
+        logger.warning(
+            "no %s bound; an application caller cannot be authorized on this app",
+            BotAppGrantServiceProtocol.__name__,
+        )
+        return None
+
+
+#: The acting caller, for handlers that need to know what governs the request.
+ActingCallerDep = Annotated[ActingCaller, Depends(require_acting_caller)]
+
+#: Where a bot id may be found on the wire, in the order it is looked for.
+#:
+#: Path before query, deliberately: a path segment *names* the addressed
+#: resource, while a query parameter is scope alongside it. On the operations
+#: that carry both spellings the path is the one that identifies the bot, and
+#: reading the query first would let a caller aim the grant check at one bot
+#: while the handler acted on another.
+_BOT_ID_KEY = "bot_id"
+
+#: Where the addressed owner is found, when the request names one.
+#:
+#: Query only. Every group that takes it — engine-runtime, and the bot-scoped
+#: authorization operations — declares it as a query parameter, for the reason
+#: ``user_id`` is one: it says who the call is *for*, not what resource is being
+#: addressed in the path.
+_OWNER_ID_KEY = "owner_id"
+
+
+async def require_granted_bot(
+    request: Request,
+    caller: ActingCallerDep,
+) -> str:
+    """Authorize the addressed bot for an application caller; a no-op for a human.
+
+    Returns the resolved **owner** of the addressed bot — which the
+    engine-runtime groups need and the user-scoped groups discard. One lookup,
+    one place, whichever group is asking.
+
+    For a human caller this asks nothing at all: the operation's own owner-scoped
+    resolve already refuses a bot that is not theirs, and re-deciding it here
+    would risk a second, different answer.
+
+    For an application it is the authorization: no live grant for
+    ``(app, bot, delegating user)`` raises :class:`GrantNotResolvableError`,
+    which the app maps to a ``404`` byte-identical to a nonexistent bot.
+
+    Seven operations cannot be checked here — one carries its bot in the body,
+    four name a skill, and two name a bot but address an owner under their own
+    parameter name. They are **named in the table**, not detected by their
+    shape. This dependency defers for exactly those, and their handlers bind the
+    grant to the ``(bot, owner)`` they actually act on before acting. Naming
+    them is what keeps "the dependency could not tell" from becoming a way
+    through: any *other* operation arriving here without a bot id is refused.
+
+    TODO(#960): those seven are an inconsistency — two mechanisms doing one
+    job — and the exception has already cost one real defect, since a
+    handler-side check is a place the check and the resolution can drift apart.
+    #960 tracks removing it: make the address uniform on the skills group, move
+    the body-carried ``bot_id``, or resolve the skill before the check. Any
+    replacement has to keep the property this list exists for — an operation
+    that cannot be checked is refused, not waved through.
+    """
+    if _defers_to_its_handler(request):
+        return caller.user_id
+    addressed_owner = _addressed_owner(request, caller.user_id)
+    bot_id = request.path_params.get(_BOT_ID_KEY) or request.query_params.get(
+        _BOT_ID_KEY
+    )
+    if not bot_id:
+        if not caller.is_application:
+            # A human caller on an operation that scopes some other way. Nothing
+            # to check, and nothing this dependency can usefully return.
+            return caller.user_id
+        raise GrantNotResolvableError(
+            "no bot id on a grant-checked request; the operation must resolve "
+            "its own bot before acting"
+        )
+    return caller.require_bot(str(bot_id), owner_id=addressed_owner)
+
+
+def _addressed_owner(request: Request, caller_id: str) -> str:
+    """Whose bot this request addresses — never a guess, and never ``None``.
+
+    ``bot_id`` does not identify a bot; ``(owner_id, bot_id)`` does. So the
+    grant lookup needs an owner, and every operation on this surface already
+    knows one:
+
+    - The **user-scoped groups** resolve through ``get_by_id_and_owner`` with
+      the delegating user. The owner is the caller, full stop, and **nothing on
+      the wire may say otherwise** — see below.
+    - The **engine-runtime groups** publish an ``owner_id`` query parameter that
+      defaults to the caller, and adjudicate it in ``resolve_owner_id``. There
+      the request is entitled to name an owner, so this reads the same value the
+      operation will act on.
+
+    **The mode decides whether the wire is consulted at all, and that gate is
+    load-bearing.** ``request.query_params`` is the raw parsed query string, not
+    the parameters a route declares, so an operation that never publishes
+    ``owner_id`` will still hand one over if a client appends it. Trusting it
+    unconditionally let an application aim the *check* at a bot it held a grant
+    on while the *handler* — reading only its own ``user_id`` — resolved and
+    acted on the delegating user's own, different, ungranted bot of the same id.
+    A grant on anyone's ``default`` became access to the delegator's ``default``.
+
+    That failure is this surface's oldest one, in a new place: the check and the
+    resolution must never be able to mean different bots. Reading the wire only
+    where the operation itself reads it keeps them the same value by
+    construction.
+
+    An operation this cannot classify answers with the caller's own id, the
+    stricter side — it has not been placed in a mode and is refused a moment
+    later anyway.
+    """
+    route = request.scope.get("route")
+    path = getattr(route, "path", None)
+    if path is None:
+        return caller_id
+    if ADMISSION.get((request.method, path)) is not AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT:
+        return caller_id
+    return request.query_params.get(_OWNER_ID_KEY) or caller_id
+
+
+def _defers_to_its_handler(request: Request) -> bool:
+    """Whether this operation resolves its own bot, per ``admission.py``.
+
+    :func:`require_granted_bot` needs the addressed bot to look a grant up, and
+    reads it off the path or query string. Seven operations do not put it
+    where it can be seen, so the check moves into their handlers:
+
+    - ``POST /bots/routines`` — the bot id is in the **request body**. A shared
+      dependency would have to consume and re-buffer the raw stream and know
+      this operation's field name, which is per-operation knowledge it exists
+      not to have.
+    - the four ``skills/{skill_id}`` routes — the request names a **skill**.
+      Which bot it belongs to is only known after reading the skill record.
+    - ``GET /bots/skills`` and ``POST /bots/skills/upload`` — these *do* carry a
+      ``bot_id``, but they act on ``owner_entity_id or actor_id``, so the bot
+      they address is not the one a generic reader would infer.
+
+    **Deferring is about *where* the check runs, never *whether*.** All seven
+    stay in grant-checked modes, and the inventory test asserts it, so they
+    cannot quietly become exempt.
+
+    **An allow-list rather than a shape test**, because "the request carries no
+    ``bot_id``" is wrong in both directions. It over-matches the first five: it
+    equally describes every mistake that would look like them — a renamed
+    parameter, a route placed in a grant-checked mode by accident — and would
+    wave those through unchecked, where naming the seven sends them to the
+    refusal below. And it misses the last two entirely, since they do carry a
+    ``bot_id``; a shape test would let the shared dependency check them against
+    the caller's own bot instead of the owner the handler acts on, which is
+    exactly the defect review found on this group.
+
+    So the exception list cannot grow by accident: adding to it is an edit to a
+    table the inventory test reads.
+    """
+    route = request.scope.get("route")
+    path = getattr(route, "path", None)
+    if path is None:
+        return False
+    key = (request.method, path)
+    return (
+        key in BODY_BOT_ID_OPERATIONS
+        or key in SKILL_SCOPED_OPERATIONS
+        or key in OWNER_ADDRESSED_OPERATIONS
+    )
+
+
+#: What a grant-checked handler declares to have its bot authorized.
+GrantCheckedDep = Annotated[str, Depends(require_granted_bot)]

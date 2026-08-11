@@ -21,6 +21,7 @@ internal_dependencies:
   - agentclaw.community.core.auth
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_chat
+  - agentclaw.community.core.bot_app_grant.models  # SQLite ORM side-effect import for bot→app authorization tables
   - agentclaw.community.core.bot_dormant   # SQLite ORM side-effect import for local table creation
   - agentclaw.community.core.caller_identity.models  # SQLite ORM side-effect import for caller identity tables
   - agentclaw.community.core.user_list.models  # SQLite ORM side-effect import for user-list tables

@@ -101,6 +101,18 @@ jobs:
             libssl-dev \
             libsqlite3-dev
 
+      - name: Set up Python
+        if: steps.changes.outputs.skip-bcs != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python tooling
+        if: steps.changes.outputs.skip-bcs != 'true'
+        run: |
+          python -m pip install --upgrade pip uv
+          uv --version
+
       - name: Install Rust toolchain
         if: steps.changes.outputs.skip-bcs != 'true'
         run: |
@@ -176,7 +188,7 @@ jobs:
         # not interesting.
         continue-on-error: true
         run: |
-          ./scripts/singlebox.sh --standalone stop bcs_bots || true
+          ./scripts/singlebox.sh --standalone stop bcs_bots bcsfuse || true
 
       - name: Upload e2e coverage artifacts
         if: always() && steps.changes.outputs.skip-bcs != 'true'

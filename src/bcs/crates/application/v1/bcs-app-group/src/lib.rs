@@ -1412,7 +1412,6 @@ impl GroupService for GroupServiceImpl {
                 human_actor_id: legacy_human_actor_id,
                 group_id: command.group_id.clone(),
                 bot_id,
-                role: Some(role_name(default_participant_role(group.group_strategy)).to_string()),
             })
             .await
             .map_err(map_group_error)?;
@@ -1635,13 +1634,6 @@ fn map_create_collaboration(
         CollaborationConfiguration::StateMachine(configuration) => {
             (GroupStrategy::StateMachine, None, Some(configuration))
         }
-    }
-}
-
-fn default_participant_role(strategy: GroupStrategy) -> bcs_service_api::ParticipantRole {
-    match strategy {
-        GroupStrategy::ManagerWorker => bcs_service_api::ParticipantRole::Worker,
-        _ => bcs_service_api::ParticipantRole::Consultant,
     }
 }
 

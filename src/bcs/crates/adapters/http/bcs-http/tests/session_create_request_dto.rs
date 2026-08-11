@@ -1,7 +1,7 @@
 //! Contract tests for the `group_context_delivery` field of
 //! `CreateSessionRequest` (`POST /groups/{id}/sessions`).
 //!
-//! The field chooses whether the driver bot's `[GROUP CONTEXT]` message is
+//! The field chooses whether the driver bot's `<GroupContext>` message is
 //! actively sent (`"send"`, default, asks the driver to respond) or silently
 //! injected (`"inject"`). Other participants always receive `chat.inject`.
 
