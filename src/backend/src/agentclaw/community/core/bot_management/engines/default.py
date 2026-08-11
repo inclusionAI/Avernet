@@ -34,6 +34,16 @@ class DefaultProvisioningStrategy(EngineProvisioningStrategy):
     def extract_runtime_token(self, ctx: BotProvisioningContext) -> str | None:
         return None
 
+    def uses_adapter_chat_session_lifecycle(self, ctx: BotProvisioningContext) -> bool:
+        return True
+
+    def build_local_chat_session_key(
+        self, ctx: BotProvisioningContext, *, user_id: str
+    ) -> str:
+        raise NotImplementedError(
+            f"engine {ctx.active_engine or self.engine_type} uses adapter chat session lifecycle"
+        )
+
     def on_bot_created(self, ctx: BotProvisioningContext) -> None:
         return None
 

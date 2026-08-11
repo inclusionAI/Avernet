@@ -9,6 +9,9 @@ from agentclaw.community.core.bot_management.engines import (
 from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
     AicodingProvisioningStrategy,
 )
+from agentclaw.community.core.bot_management.engines.default import (
+    DefaultProvisioningStrategy,
+)
 from agentclaw.community.core.bot_management.engines.registry import (
     get_engine_provisioning_registry,
 )
@@ -56,6 +59,100 @@ def test_resolve_baas_engine_bucket_keeps_normal_cc_on_claude_code():
         == "claude_code"
     )
 
+
+
+def test_default_strategy_uses_adapter_chat_session_lifecycle():
+    strategy = DefaultProvisioningStrategy("openclaw")
+    ctx = BotProvisioningContext(
+        active_engine="openclaw",
+        template_type=None,
+        bot_id="b1",
+        owner_id="u1",
+        bot_type="service",
+        template_config=None,
+    )
+
+    assert strategy.uses_adapter_chat_session_lifecycle(ctx) is True
+
+
+def test_aicoding_strategy_skips_adapter_chat_session_lifecycle():
+    strategy = AicodingProvisioningStrategy("aicoding")
+    ctx = BotProvisioningContext(
+        active_engine="aicoding",
+        template_type="personalCoding",
+        bot_id="b1",
+        owner_id="u1",
+        bot_type="personal",
+        template_config={"template_key": "personalCoding", "template_uid": "uid"},
+    )
+
+    assert strategy.uses_adapter_chat_session_lifecycle(ctx) is False
+
+
+def test_claude_code_strategy_skips_adapter_chat_session_lifecycle():
+    strategy = AicodingProvisioningStrategy("claude_code")
+    ctx = BotProvisioningContext(
+        active_engine="claude_code",
+        template_type="normalCC",
+        bot_id="b1",
+        owner_id="u1",
+        bot_type="personal",
+        template_config={"template_key": "normalCC", "template_uid": "uid"},
+    )
+
+    assert strategy.uses_adapter_chat_session_lifecycle(ctx) is False
+
+def test_aicoding_strategy_builds_caller_agent_local_session_key():
+    strategy = AicodingProvisioningStrategy("aicoding")
+    ctx = BotProvisioningContext(
+        active_engine="aicoding",
+        template_type="personalCoding",
+        bot_id="agent-1",
+        owner_id="u1",
+        bot_type="personal",
+        template_config=None,
+    )
+
+    session_key = strategy.build_local_chat_session_key(ctx, user_id="caller-1")
+
+    assert session_key.startswith("user:caller-1:session:")
+    assert session_key.endswith(":agent:agent-1")
+
+
+def test_claude_code_strategy_builds_legacy_local_session_key():
+    strategy = AicodingProvisioningStrategy("claude_code")
+    ctx = BotProvisioningContext(
+        active_engine="claude_code",
+        template_type="normalCC",
+        bot_id="agent-1",
+        owner_id="u1",
+        bot_type="personal",
+        template_config=None,
+    )
+
+    session_key = strategy.build_local_chat_session_key(ctx, user_id="caller-1")
+
+    assert session_key.startswith("session:")
+    assert session_key.endswith(":user:caller-1")
+    assert ":agent:" not in session_key
+
+
+def test_default_strategy_rejects_local_session_key():
+    strategy = DefaultProvisioningStrategy("openclaw")
+    ctx = BotProvisioningContext(
+        active_engine="openclaw",
+        template_type=None,
+        bot_id="agent-1",
+        owner_id="u1",
+        bot_type="service",
+        template_config=None,
+    )
+
+    try:
+        strategy.build_local_chat_session_key(ctx, user_id="caller-1")
+    except NotImplementedError:
+        return
+    raise AssertionError("expected default strategy to reject local session key")
 
 def test_aicoding_strategy_personal_coding_model_runtime_and_token():
     strategy = AicodingProvisioningStrategy("aicoding")
