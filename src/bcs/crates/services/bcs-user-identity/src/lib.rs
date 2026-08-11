@@ -11,7 +11,7 @@ use bcs_service_api::{UserIdentity, UserIdentityRepoPort};
 use tracing::warn;
 
 pub mod memory;
-pub use memory::{generate_user_id, MemoryUserIdentityRepo};
+pub use memory::{generate_user_id, MemoryUserCredentialRepo, MemoryUserIdentityRepo};
 
 pub type MysqlUserIdentityRepo = DbUserIdentityStore;
 pub type SqliteUserIdentityRepo = DbUserIdentityStore;

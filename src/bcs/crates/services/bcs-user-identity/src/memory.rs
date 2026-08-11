@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use tokio::sync::RwLock;
 
-use bcs_service_api::{UserIdentity, UserIdentityRepoPort};
+use bcs_service_api::{
+    UserCredential, UserCredentialRepoPort, UserIdentity, UserIdentityRepoPort,
+};
 
 /// Generate an internal user id: 12 base62 chars (no prefix), drawn from the
 /// OS CSPRNG via `uuid` v4 so ids are unpredictable, not just unique.
@@ -152,6 +154,66 @@ impl UserIdentityRepoPort for MemoryUserIdentityRepo {
     }
 }
 
+type CredentialKey = (String, String); // (username, env)
+
+/// In-memory `UserCredentialRepoPort` for tests/dev. Credentials do not
+/// survive a restart. Mirrors `MemoryUserIdentityRepo`'s lock strategy.
+#[derive(Default)]
+pub struct MemoryUserCredentialRepo {
+    by_username: RwLock<HashMap<CredentialKey, UserCredential>>,
+    by_user_id: RwLock<std::collections::HashSet<(String, String)>>, // (user_id, env)
+}
+
+impl MemoryUserCredentialRepo {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+#[async_trait]
+impl UserCredentialRepoPort for MemoryUserCredentialRepo {
+    async fn create_credential(
+        &self,
+        user_id: &str,
+        username: &str,
+        password_hash: &str,
+        env: &str,
+    ) -> Result<(), String> {
+        let key = (username.to_string(), env.to_string());
+        let user_key = (user_id.to_string(), env.to_string());
+        let mut by_username = self.by_username.write().await;
+        if by_username.contains_key(&key) {
+            return Err("duplicate".to_string());
+        }
+        let mut by_user_id = self.by_user_id.write().await;
+        if by_user_id.contains(&user_key) {
+            return Err("duplicate".to_string());
+        }
+        by_user_id.insert(user_key);
+        by_username.insert(
+            key,
+            UserCredential {
+                user_id: user_id.to_string(),
+                username: username.to_string(),
+                password_hash: password_hash.to_string(),
+                env: env.to_string(),
+            },
+        );
+        Ok(())
+    }
+
+    async fn find_for_login(
+        &self,
+        username: &str,
+        env: &str,
+    ) -> Result<Option<UserCredential>, String> {
+        let by_username = self.by_username.read().await;
+        Ok(by_username
+            .get(&(username.to_string(), env.to_string()))
+            .cloned())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -221,5 +283,59 @@ mod tests {
         assert_eq!(found.auth_source, "github");
         assert_eq!(found.external_user_name.as_deref(), Some("Bob"));
         assert_eq!(found.avatar.as_deref(), Some("https://gh.img"));
+    }
+
+    #[tokio::test]
+    async fn credential_create_then_find() {
+        let repo = MemoryUserCredentialRepo::new();
+        repo.create_credential("u1", "alice", "phc-hash", "dev")
+            .await
+            .unwrap();
+        let cred = repo.find_for_login("alice", "dev").await.unwrap().unwrap();
+        assert_eq!(cred.user_id, "u1");
+        assert_eq!(cred.password_hash, "phc-hash");
+    }
+
+    #[tokio::test]
+    async fn credential_duplicate_username_rejected() {
+        let repo = MemoryUserCredentialRepo::new();
+        repo.create_credential("u1", "alice", "h", "dev").await.unwrap();
+        let err = repo
+            .create_credential("u2", "alice", "h", "dev")
+            .await
+            .unwrap_err();
+        assert_eq!(err, "duplicate");
+    }
+
+    #[tokio::test]
+    async fn credential_duplicate_user_id_rejected() {
+        let repo = MemoryUserCredentialRepo::new();
+        repo.create_credential("u1", "alice", "h", "dev").await.unwrap();
+        let err = repo
+            .create_credential("u1", "alice2", "h", "dev")
+            .await
+            .unwrap_err();
+        assert_eq!(err, "duplicate");
+    }
+
+    #[tokio::test]
+    async fn credential_find_unknown_returns_none() {
+        let repo = MemoryUserCredentialRepo::new();
+        assert!(repo.find_for_login("nobody", "dev").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn credential_env_partitioned() {
+        let repo = MemoryUserCredentialRepo::new();
+        repo.create_credential("u1", "alice", "h", "dev").await.unwrap();
+        repo.create_credential("u2", "alice", "h", "prod").await.unwrap();
+        assert_eq!(
+            repo.find_for_login("alice", "dev").await.unwrap().unwrap().user_id,
+            "u1"
+        );
+        assert_eq!(
+            repo.find_for_login("alice", "prod").await.unwrap().unwrap().user_id,
+            "u2"
+        );
     }
 }
