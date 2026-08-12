@@ -6,6 +6,7 @@ from datetime import datetime
 from types import SimpleNamespace
 from typing import List
 
+import httpx
 import pytest
 from fastapi import HTTPException, Request, Response
 
@@ -1698,6 +1699,51 @@ async def test_preview_413_when_over_the_cap():
     assert json.loads(resp.body)["message"] == "File too large for preview"
 
 
+def _http_status(code: int) -> httpx.HTTPStatusError:
+    """The error a baas provider re-raises from the upstream file API."""
+    request = httpx.Request("POST", "http://baas/api/file/read")
+    return httpx.HTTPStatusError(
+        f"HTTP {code}", request=request, response=httpx.Response(code, request=request)
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("handler", [download_file, preview_file])
+async def test_read_404s_when_the_provider_reports_the_file_missing(handler):
+    """The baas providers re-raise the upstream status rather than returning
+    ``None`` for a missing file, and that loudness is load-bearing at the device
+    — a swallowed 401 once read as "file gone" and silently dropped promoted
+    files. It stops being a failure only here, where 404 is a documented
+    answer."""
+    with pytest.raises(HTTPException) as exc:
+        await handler(
+            path="gone.txt",
+            owner_id="u1",
+            bot_id="bot-x",
+            bot_repo=_StubBotRepo(),
+            file_svc=_StubReadFileService({}, read_raises=_http_status(404)),
+            request=_request_without_trace(),
+        )
+
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code", [401, 500, 503])
+async def test_read_does_not_swallow_other_upstream_statuses(code):
+    """Only 404 is an ordinary answer. Anything else is an upstream fault and
+    must stay unmapped, which is what a 500 reports."""
+    with pytest.raises(httpx.HTTPStatusError):
+        await download_file(
+            path="a.txt",
+            owner_id="u1",
+            bot_id="bot-x",
+            bot_repo=_StubBotRepo(),
+            file_svc=_StubReadFileService({}, read_raises=_http_status(code)),
+            request=_request_without_trace(),
+        )
+
+
 @pytest.mark.asyncio
 async def test_download_413_when_the_device_refuses_an_oversized_file():
     """Two distinct classes share the name ``FileTooLargeError`` — the device
@@ -2359,8 +2405,12 @@ async def test_upload_records_the_uploader_for_the_console():
     )
 
     assert env.code == CODE_CREATED
-    assert env.data.resource_id  # the record id, not the empty fallback
     assert env.data.path == "docs/a.txt"
+    # The row is written but never read back: the response is built from the
+    # workspace, so it reports the same empty id and null source/timestamps a
+    # listing of this file would. See
+    # ``test_upload_reports_the_file_the_way_a_listing_would``.
+    assert env.data.resource_id == ""
     row = list(repo._rows.values())[-1]
     assert row["user_id"] == "u1"
     assert row["created_by"] == "u1"
@@ -2368,6 +2418,36 @@ async def test_upload_records_the_uploader_for_the_console():
     assert row["attributes"]["path"] == "docs/a.txt"  # full workspace-relative
     assert row["attributes"]["parent_path"] == "docs"  # dirname, for the console
     assert row["source"] == "upload"
+
+
+@pytest.mark.asyncio
+async def test_upload_reports_the_file_the_way_a_listing_would():
+    """The row is the publish pipeline's input, not something this API reads
+    back. Sourcing the response from it would make the upload the one file
+    response shaped differently from every other — and the id it echoed could
+    not address anything anyway, since files are path-addressed and
+    ``GET /{resource_id}`` 404s a file row."""
+    factory, _ = _real_factory_with_inmemory_repo()
+
+    env = await upload_resource(
+        path="docs/a.txt",
+        content=b"file bytes",
+        owner_id="u1",
+        bot_id="bot-x",
+        factory=factory,
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubFileService(),
+        request=_request_without_trace(),
+    )
+
+    assert env.data.resource_id == ""
+    assert env.data.source is None
+    assert env.data.gmt_create is None
+    assert env.data.gmt_modified is None
+    # What the caller can actually use: the path, which every file endpoint takes.
+    assert env.data.path == "docs/a.txt"
+    assert env.data.name == "a.txt"
+    assert env.data.size == len(b"file bytes")
 
 
 @pytest.mark.asyncio

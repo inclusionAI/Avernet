@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
+import httpx
 from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
 
 from agentclaw.community.api.resource_service import ResourceServiceFactoryProtocol
@@ -480,7 +481,7 @@ async def upload_resource(
     # disk and the duplicate check answers 409. So the write is rolled back and
     # the request fails: a retry then finds a clean slate and succeeds.
     try:
-        record = await factory.create(bot_id=bot_id).record_uploaded_file(
+        await factory.create(bot_id=bot_id).record_uploaded_file(
             path=info["path"],
             size=info.get("size", len(content)),
             user_id=owner_id,
@@ -519,9 +520,23 @@ async def upload_resource(
                 )
         raise HTTPException(status_code=502, detail="Upload storage failed")
 
-    data = _to_openapi_resource(record)
-    data.path = info["path"]
-    return created(data, request)
+    # Built from the workspace, not from the row that was just written — the row
+    # is the publish pipeline's input, not a source this API reads back. Reading
+    # it would make the upload the one file response shaped differently from
+    # every other: a listing of this same file reports an empty ``resource_id``
+    # and no source or timestamps, and the id echoed here could not address
+    # anything anyway, since every file operation is path-addressed and
+    # ``GET /{resource_id}`` 404s a file row. ``path`` is the usable handle.
+    return created(
+        Resource(
+            resource_id="",
+            name=info["name"],
+            type=ResourceType.FILE,
+            size=info.get("size", len(content)),
+            path=info["path"],
+        ),
+        request,
+    )
 
 
 # ── file operations, addressed by workspace-relative path ────────────
@@ -563,6 +578,19 @@ async def _read_file_or_404(
         # match. Re-raised as the mapped type rather than adding a second entry,
         # so there is one answer for "too large" regardless of who noticed.
         raise FileTooLargeError(str(exc)) from exc
+    except httpx.HTTPStatusError as exc:
+        # The baas providers deliberately re-raise the upstream status rather
+        # than returning ``None`` for a missing file
+        # (``baas_device_filesystem.py:68``) — a swallowed 401 once returned
+        # empty content that callers read as "file gone", silently dropping
+        # promoted files, so that loudness is load-bearing and must not be
+        # changed at the device. It is only *here* that a 404 stops being a
+        # failure and becomes an ordinary answer: this route documents 404 for a
+        # path that is not there. Every other status stays unmapped and surfaces
+        # as a 500, which is what an upstream fault is.
+        if exc.response.status_code != 404:
+            raise
+        raise HTTPException(status_code=404, detail="Resource not found") from exc
     # ``None`` is absent; ``b""`` is a file that exists but has no bytes, which
     # the legacy contract also treated as nothing to serve.
     if not content:
