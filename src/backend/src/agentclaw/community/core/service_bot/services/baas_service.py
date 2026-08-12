@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import base64
 import json
+import re
 import time
 
 import httpx
@@ -128,18 +129,33 @@ DEFAULT_READ_ONLY_RULES = [
 
 
 
+#: The encoded script body inside the emitted user stage — everything between
+#: ``echo `` and `` | base64 -d``. Only this is redacted: the shell around it is
+#: platform-authored and is what makes these log lines worth reading.
+_ENCODED_BODY_RE = re.compile(r"echo ([A-Za-z0-9+/=]+) \| base64 -d")
+
+
+def _elide_encoded_body(match: "re.Match[str]") -> str:
+    """Replace an encoded body with its *decoded* size."""
+    encoded = match.group(1)
+    # 4 base64 chars per 3 bytes, minus padding — the caller's actual size.
+    decoded_len = len(encoded) // 4 * 3 - encoded.count("=")
+    return f"echo <startup script elided, {decoded_len} bytes> | base64 -d"
+
+
 def _redact_payload_for_log(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Shallow copy of a create payload with only the *user stage* elided.
+    """Shallow copy of a create payload with the *script body* elided.
 
     ``after_create_cmd_hook`` is mostly the platform's own boot chain, which is
-    exactly what someone reads these logs to debug — so the platform half stays
-    verbatim. Only the per-bot script segment (issue #926) is replaced: the
+    exactly what someone reads these logs to debug — so everything the platform
+    authored stays verbatim, including the ``if``/``fi``/``exit`` scaffolding
+    around the user stage. Only the caller's encoded body is replaced: the
     published contract's "no secrets in a script body" is advice, not an
     enforcement mechanism, and these payloads are logged at INFO on every
     create, release and restart.
 
-    ``_USER_STAGE_MARKER`` is the seam. A hook without one has no user stage and
-    is logged unchanged, so this is a no-op for every bot without a script.
+    A hook with no encoded body is returned unchanged, so this is a no-op for
+    every bot without a script.
     """
     config = payload.get("config")
     if not isinstance(config, dict):
@@ -149,18 +165,18 @@ def _redact_payload_for_log(payload: Dict[str, Any]) -> Dict[str, Any]:
         return payload
 
     hook = deploy.get("after_create_cmd_hook")
-    if not isinstance(hook, str) or _USER_STAGE_MARKER not in hook:
+    if not isinstance(hook, str):
         return payload
 
-    platform, _, user_stage = hook.partition(_USER_STAGE_MARKER)
+    elided, count = _ENCODED_BODY_RE.subn(_elide_encoded_body, hook)
+    if not count:
+        return payload
+
     redacted = dict(payload)
     redacted["config"] = dict(config)
     redacted["config"]["deploy_config"] = {
         **deploy,
-        "after_create_cmd_hook": (
-            f"{platform}{_USER_STAGE_MARKER}"
-            f"<startup script elided, {len(user_stage)} chars>"
-        ),
+        "after_create_cmd_hook": elided,
     }
     return redacted
 

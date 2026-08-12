@@ -430,9 +430,15 @@ class TestPayloadLogRedaction:
         ).decode()
         assert encoded not in str(redacted)
         assert "<startup script elided" in logged
-        # The platform chain — what these logs exist to debug — survives.
+        # The reported size is the caller's script, not the wrapper.
+        assert "46 bytes" in logged
+        # Everything the platform authored survives — the boot chain and the
+        # scaffolding around the user stage.
         assert "bootstrap_minimal.sh" in logged
         assert "start_service.sh" in logged
+        assert "su admin -c" in logged
+        assert 'if [ "$__OCB_RC" -eq 0 ]' in logged
+        assert "exit $__OCB_RC" in logged
         # Original untouched, siblings preserved.
         assert redacted["config"]["deploy_config"]["ttl_in_minutes"] == 60
         assert encoded in payload["config"]["deploy_config"]["after_create_cmd_hook"]
