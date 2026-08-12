@@ -708,7 +708,26 @@ class TestDeleteBot:
 
         result = svc.delete_bot("mybot", "user001")
         assert result is True
-        svc._cleanup_service.cleanup_single_bot_data.assert_called_once_with("mybot", "user001")
+        svc._cleanup_service.cleanup_single_bot_data.assert_called_once_with(
+            "mybot", "user001", entity_id="staff_user001"
+        )
+
+    def test_cleanup_is_keyed_by_entity_not_owner(self):
+        """The startup script is stored under ``entity_id``, which is only
+        *usually* the owner id — under a team entity they differ. Passing
+        ``user_id`` in its place would look right in every single-user test and
+        silently miss the row for every team-owned bot.
+        """
+        svc = _make_service()
+        bot = _make_bot(bot_id="mybot", binding_id=None, entity_id="team_42")
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._passport_plugin.destroy_passport.return_value = None
+        svc._repository.soft_delete_by_owner.return_value = True
+        svc._cleanup_service.cleanup_single_bot_data.return_value = {}
+
+        assert svc.delete_bot("mybot", "user001") is True
+        _, kwargs = svc._cleanup_service.cleanup_single_bot_data.call_args
+        assert kwargs["entity_id"] == "team_42"
 
     def test_cleanup_failure_does_not_block_delete(self):
         svc = _make_service()

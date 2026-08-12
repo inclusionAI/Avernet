@@ -969,6 +969,16 @@ that one design choice, and none of it is visible in the OpenAPI document.
   Both are the same shape: the refusal covers the cases visible in the bot
   record, and a provisioning path that bypasses the shared start sequence is not
   one of them.
+- **Deleting the bot deletes its script.** Bot deletion is a soft update, so
+  nothing cascades to the script row — it is swept explicitly, alongside the
+  bot's skills and skill sets. Two reasons it is not left behind: the body is
+  stored decoded, so an orphan row keeps plaintext executable content past the
+  life of its owner; and a `bot_id` may be supplied by the caller on create
+  while soft-deleted bots read as absent, so a reused id would otherwise inherit
+  the previous bot's script and run it on every start. As with the other sweeps,
+  a failure here is logged and does not block the deletion. The legacy
+  `default`-bot delete is a restart rather than a deletion and keeps its script,
+  matching how its skills and config are already preserved.
 - **Re-running on restart is inherited, not guaranteed by this feature.** The
   script re-runs wherever the platform's own start sequence re-runs. On a
   provider whose restart is destroy-and-create that is every restart; on one

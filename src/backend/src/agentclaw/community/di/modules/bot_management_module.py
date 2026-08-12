@@ -55,6 +55,7 @@ from agentclaw.community.api.bot_startup_script_service import (
     BotStartupScriptServiceProtocol,
 )
 from agentclaw.community.core.bot_startup_script.protocols import (
+    StartupScriptPurgeProtocol,
     TeclawEngineTestProtocol,
 )
 from agentclaw.community.core.bot_startup_script.services.startup_script_service import (
@@ -203,6 +204,14 @@ class BotManagementModule(Module):
         )
         binder.bind(
             BotStartupScriptServiceProtocol,
+            to=BotStartupScriptService,
+            scope=singleton,
+        )
+        # The delete side, handed to ``BotCleanupService`` so a deleted bot takes
+        # its stored script with it. Narrow on purpose: the deletion path removes
+        # scripts, it never reads or writes one.
+        binder.bind(
+            StartupScriptPurgeProtocol,
             to=BotStartupScriptService,
             scope=singleton,
         )

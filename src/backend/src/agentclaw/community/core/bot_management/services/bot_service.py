@@ -3469,7 +3469,9 @@ class BotService:
             # default bot 是用户的默认 Bot，删除它通常是"重启"逻辑，应保留技能和配置
             if bot_id != "default":
                 try:
-                    self._cleanup_bot_associated_data(bot_id, user_id)
+                    self._cleanup_bot_associated_data(
+                        bot_id, user_id, entity_id=str(bot.get("entity_id") or "")
+                    )
                     logger.info(f"[bot_service.delete_bot] Cleaned up associated data for bot {bot_id}")
                 except Exception as cleanup_error:
                     # 清理失败不影响删除结果，只记录日志
@@ -3565,15 +3567,18 @@ class BotService:
                 exc_info=True,
             )
 
-    def _cleanup_bot_associated_data(self, bot_id: str, user_id: str) -> Dict[str, Any]:
+    def _cleanup_bot_associated_data(
+        self, bot_id: str, user_id: str, *, entity_id: str
+    ) -> Dict[str, Any]:
         """
-        清理 Bot 关联的脏数据（技能、技能集、资源等）
+        清理 Bot 关联的脏数据（技能、技能集、资源、启动脚本等）
 
         注意：此方法仅应在确认 Bot 真正被删除时调用（非 default bot 的重启场景）
 
         Args:
             bot_id: Bot ID
             user_id: 用户ID
+            entity_id: Bot 所属实体 ID（启动脚本按它加 bot_id 存储）
 
         Returns:
             清理结果统计
@@ -3589,7 +3594,9 @@ class BotService:
 
         try:
             # 使用 cleanup_service 清理单个 bot 的数据
-            cleanup_result = self._cleanup_service.cleanup_single_bot_data(bot_id, user_id)
+            cleanup_result = self._cleanup_service.cleanup_single_bot_data(
+                bot_id, user_id, entity_id=entity_id
+            )
 
             result["skills_deleted"] = cleanup_result.get("skills_deleted", 0)
             result["skill_sets_deleted"] = cleanup_result.get("skill_sets_deleted", 0)

@@ -45,3 +45,23 @@ class TeclawEngineTestProtocol(Protocol):
     def is_teclaw(self, active_engine: str | None) -> bool:
         """Whether a bot with this engine runs in a teclaw container."""
         ...
+
+
+class StartupScriptPurgeProtocol(Protocol):
+    """Drop a bot's stored script when the bot itself is deleted.
+
+    Separate from the reader for the same reason the reader is separate from the
+    service: the bot-deletion path needs to *remove* a script, never read one or
+    write one, so that is all it is handed.
+
+    This exists because a stored script is the only per-bot row this feature
+    adds, and bot deletion is a soft update — no cascade reaches it. Without a
+    sweep the row outlives its bot indefinitely, which is both plaintext
+    executable content retained past its owner and, if a bot id is ever reused,
+    a script the new bot's owner never wrote.
+    """
+
+    @abstractmethod
+    def delete(self, *, entity_id: str, bot_id: str) -> bool:
+        """Remove the bot's script. Idempotent — absent is success."""
+        ...
