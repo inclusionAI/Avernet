@@ -205,7 +205,7 @@ V1 Group application/test files are changed.
 **Step 3: Commit the implementation**
 
 ```bash
-git add docs/plans/2026-08-12-groups-visibility-filter.md \
+git add src/bcs/docs/plans/2026-08-12-groups-visibility-filter.md \
   src/bcs/api-contracts/v1/openapi/groups.yaml \
   src/bcs/crates/service-api/bcs-service-api/src/application/v1/group.rs \
   src/bcs/crates/adapters/http/bcs-api-http \
