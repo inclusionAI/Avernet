@@ -593,6 +593,53 @@ async def test_list_empty_workspace_returns_empty_page():
 
 
 @pytest.mark.asyncio
+async def test_list_of_an_absent_directory_is_an_empty_page_not_a_500():
+    """The baas providers re-raise the upstream 404 instead of answering
+    "nothing there", while providers returning ``None`` already produce an empty
+    page — so without normalizing, the same request is a 500 on one and an empty
+    page on the others."""
+
+    class _MissingDirService:
+        async def list_dir(self, **_kw):
+            raise _http_status(404)
+
+    env = await list_resources(
+        page=PageParams(page=1, page_size=10),
+        owner_id="u1",
+        bot_id="bot-x",
+        path="nope",
+        factory=_StubFactory(_StubService([])),
+        bot_repo=_StubBotRepo(),
+        file_svc=_MissingDirService(),
+        request=_request_without_trace(),
+    )
+
+    assert env.data.total == 0
+    assert env.data.items == []
+
+
+@pytest.mark.asyncio
+async def test_list_does_not_swallow_other_upstream_statuses():
+    """Only 404 is an ordinary answer; an upstream fault must still surface."""
+
+    class _FailingDirService:
+        async def list_dir(self, **_kw):
+            raise _http_status(503)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await list_resources(
+            page=PageParams(page=1, page_size=10),
+            owner_id="u1",
+            bot_id="bot-x",
+            path="docs",
+            factory=_StubFactory(_StubService([])),
+            bot_repo=_StubBotRepo(),
+            file_svc=_FailingDirService(),
+            request=_request_without_trace(),
+        )
+
+
+@pytest.mark.asyncio
 async def test_list_rejects_a_directory_escaping_the_workspace():
     file_svc = _StubListFileService([])
 

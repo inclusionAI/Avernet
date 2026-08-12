@@ -244,13 +244,25 @@ async def list_resources(
     entries: list[Resource] = []
     if type is None or type in (ResourceType.FILE, ResourceType.FOLDER):
         entity_type, entity_id, engine_type = _file_coords(bot_id, owner_id, bot_repo)
-        listed = await file_svc.list_dir(
-            entity_type=entity_type,
-            entity_id=entity_id,
-            bot_id=bot_id,
-            engine_type=engine_type,
-            path=safe,
-        )
+        try:
+            listed = await file_svc.list_dir(
+                entity_type=entity_type,
+                entity_id=entity_id,
+                bot_id=bot_id,
+                engine_type=engine_type,
+                path=safe,
+            )
+        except httpx.HTTPStatusError as exc:
+            # Same normalization the read path does, for the same reason: the
+            # baas providers re-raise an upstream 404 rather than answering
+            # "nothing there", and that loudness is load-bearing at the device.
+            # An absent directory is an ordinary answer here, and the providers
+            # that return ``None`` already produce an empty page for it — so
+            # without this the same request is a 500 on baas and an empty page
+            # everywhere else. Every other status still propagates.
+            if exc.response.status_code != 404:
+                raise
+            listed = []
         for entry in listed or []:
             is_dir = bool(entry.get("is_dir"))
             entry_type = ResourceType.FOLDER if is_dir else ResourceType.FILE
