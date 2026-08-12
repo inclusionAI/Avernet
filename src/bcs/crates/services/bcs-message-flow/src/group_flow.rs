@@ -345,17 +345,35 @@ pub(crate) async fn try_persist_group_message(
     }
 }
 
-fn persisted_inbound_content(content: &str, attachments: Option<&[Attachment]>) -> Value {
-    let Some(attachments) = attachments.filter(|items| !items.is_empty()) else {
+/// Persist the sender's original text verbatim so human-facing history keeps
+/// `@mention` markers visible (mention tokens are only stripped from bot-bound
+/// deliveries, via `RoutingDecision::cleaned_message`). Non-empty `mentions`
+/// ride along so frontends can render mention chips after a history reload.
+fn persisted_inbound_content(
+    content: &str,
+    attachments: Option<&[Attachment]>,
+    mentions: &[String],
+) -> Value {
+    let attachments = attachments.filter(|items| !items.is_empty());
+    if attachments.is_none() && mentions.is_empty() {
         return Value::String(content.to_string());
-    };
-    serde_json::json!({
-        "text": content,
-        "attachments": attachments
+    }
+    let mut stored = serde_json::json!({ "text": content });
+    if let Some(attachments) = attachments {
+        stored["attachments"] = attachments
             .iter()
             .map(Attachment::stable_metadata)
-            .collect::<Vec<_>>(),
-    })
+            .collect::<Vec<_>>()
+            .into();
+    }
+    if !mentions.is_empty() {
+        stored["mentions"] = mentions
+            .iter()
+            .map(|mention| Value::String(mention.clone()))
+            .collect::<Vec<_>>()
+            .into();
+    }
+    stored
 }
 
 #[cfg(test)]
@@ -377,12 +395,32 @@ mod attachment_persistence_tests {
             expires_at: None,
         };
 
-        let persisted = persisted_inbound_content("look", Some(&[attachment]));
+        let persisted = persisted_inbound_content("look", Some(&[attachment]), &[]);
 
         assert_eq!(persisted["text"], "look");
         assert_eq!(persisted["attachments"][0]["attachment_id"], "att-1");
         assert!(persisted["attachments"][0].get("url").is_none());
         assert!(!persisted.to_string().contains("token=temporary"));
+    }
+
+    #[test]
+    fn mention_text_is_persisted_verbatim_with_structured_mentions() {
+        let persisted = persisted_inbound_content(
+            "@Driver please review",
+            None,
+            &["bot-driver".to_string()],
+        );
+
+        assert_eq!(persisted["text"], "@Driver please review");
+        assert_eq!(persisted["mentions"][0], "bot-driver");
+        assert!(persisted.get("attachments").is_none());
+    }
+
+    #[test]
+    fn plain_text_without_attachments_or_mentions_stays_a_string() {
+        let persisted = persisted_inbound_content("plain chat", None, &[]);
+
+        assert_eq!(persisted, serde_json::Value::String("plain chat".to_string()));
     }
 }
 
@@ -516,7 +554,7 @@ pub async fn handle_web_send(
         &cmd.from_actor_id,
         sender_type,
         "chat",
-        persisted_inbound_content(&decision.cleaned_message, cmd.attachments.as_deref()),
+        persisted_inbound_content(&cmd.message, cmd.attachments.as_deref(), &cmd.mentions),
         cmd.idempotency_key.as_deref(),
         None,
         "", // run_id: user messages don't associate with bot runs
@@ -2622,7 +2660,9 @@ fn log_routing_digest(
     mode: MessageLogMode,
     route_source: &'static str,
 ) {
-    let content = MessageLogContent::from_text(&decision.cleaned_message);
+    // Log the sender's original text so the digest joins with `message_received`;
+    // the @-stripped `cleaned_message` only applies to bot-bound deliveries.
+    let content = MessageLogContent::from_text(&cmd.message);
     let targets_summary: Vec<MessageLogTargetSummary> = decision
         .targets
         .iter()
