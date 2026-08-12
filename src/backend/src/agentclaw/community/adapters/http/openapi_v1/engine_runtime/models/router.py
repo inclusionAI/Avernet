@@ -73,6 +73,7 @@ async def list_models(
     )
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        caller_id=user_id,
         method="GET", path="/api/models",
     )
     # The engine wraps this one: data is {"models": [...], "total": n}, not a
@@ -122,6 +123,7 @@ async def get_model(
     )
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        caller_id=user_id,
         method="GET",
         path=f"/api/models/{model_id}",
     )

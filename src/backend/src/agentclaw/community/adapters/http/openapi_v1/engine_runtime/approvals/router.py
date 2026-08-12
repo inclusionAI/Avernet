@@ -109,6 +109,7 @@ async def get_approval_mode(
     )
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        caller_id=user_id,
         method="POST",
         path="/api/approvals/mode/get",
         # The verified caller (never accepted from the body); the engine
@@ -142,6 +143,7 @@ async def set_approval_mode(
     )
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        caller_id=user_id,
         method="POST",
         path="/api/approvals/mode/set",
         body={
@@ -193,6 +195,7 @@ async def list_approval_modes(
     )
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        caller_id=user_id,
         method="GET",
         path="/api/engine/capabilities",
     )

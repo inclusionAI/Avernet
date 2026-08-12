@@ -194,12 +194,6 @@ class TestMultiInstanceDistribution:
             counts[selected.device_uuid] += 1
         return list(counts.values())
 
-    def test_virtual_nodes_was_bumped_to_two_hundred(self):
-        """The ring-width bump is the contract: a later tuning that reverts
-        it silently would re-open the defect. Pin the value here so the
-        algorithm lever cannot drift without a deliberate change."""
-        assert _VIRTUAL_NODES == 200
-
     def test_a_single_affinity_key_pins_everything_to_one_instance(self):
         """The "改造前" pathology: if every caller hashes under the same key
         (the pre-fix owner-keyed affinity), the consistent-hash ring selects
@@ -228,17 +222,16 @@ class TestMultiInstanceDistribution:
         # floor on a 60-key / 5-device run is at least 5 hits.
         assert min(counts) >= 5, f"starved device: {counts}"
         # No device takes more than 35% — the production report had 31.1%, and a
-        # 5-device / 60-key run on the 200-vnode ring stays comfortably
-        # below that on the realistic (per-caller) key set.
+        # 5-device / 60-key run stays comfortably below that on the realistic
+        # (per-caller) key set.
         assert max(counts) / self.N_KEYS < 0.35, f"hot device: {counts}"
 
     def test_per_caller_stddev_is_dramatically_lower_than_single_key(self):
         """The spec's "stddev 显著低于改造前" criterion. The single-key
         baseline (改造前: owner-keyed affinity) has stddev ~26.8 because all
-        60 hits pile onto one device. The per-caller distribution on the
-        200-vnode ring has stddev in the low single digits — a >5x
-        reduction, deterministic on the consistent-hash algorithm and the
-        60-key set the spec names."""
+        60 hits pile onto one device. The per-caller distribution has
+        stddev in the low single digits — a >5x reduction, deterministic
+        on the consistent-hash algorithm and the 60-key set the spec names."""
         devices = self._build_devices()
         single_key = self._distribution(devices, ["owner-1"] * self.N_KEYS)
         per_caller = self._distribution(

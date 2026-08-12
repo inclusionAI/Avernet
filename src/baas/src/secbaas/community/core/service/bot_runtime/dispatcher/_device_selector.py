@@ -22,13 +22,12 @@ logger = get_logger("core-service")
 
 # Virtual nodes per physical device for even hash distribution.
 #
-# Tuned from 100 → 200 to reduce the small-instance / small-key-set bias
-# observed in production (5 instances, 61 requests
-# spread 19/7/9/12/14). With 5 devices × 100 vnodes, MD5 landing variance
-# alone skews the per-device share enough to look like routing injustice; the
-# doubled ring averages out that variance without changing the algorithm or
-# its stateless contract.
-_VIRTUAL_NODES = 200
+# Left at 100: changing the vnode count reshapes the entire ring, so a
+# rolling deploy with mixed old/new BaaS processes would remap a large
+# share of affinity keys to different instances mid-session. Any ring
+# change needs an explicit migration (ring version pin / atomic / dual
+# ring), not a bump hidden in an unrelated PR.
+_VIRTUAL_NODES = 100
 
 
 def build_ring(

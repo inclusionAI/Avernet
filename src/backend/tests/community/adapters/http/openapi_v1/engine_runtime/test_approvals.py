@@ -189,3 +189,41 @@ def test_a_collaborator_is_served_and_a_stranger_is_the_masked_404(
     )
     assert refused["message"] == "Not found"
     assert len(relay.calls) == 1
+
+
+def test_every_approval_route_threads_the_verified_caller_as_caller_id(
+    make_client, relay
+):
+    """Cross-route consistency (review P1-1): every approvals route forwards
+    the authenticated caller as ``caller_id`` — not the owner — so a
+    collaborator operating another owner's service bot sends its approval
+    request to the same instance its connection/session request landed on.
+    Without this the approval/state response could land on a different
+    instance than the event that created it. A handler that later drops the
+    kwarg fails this directly."""
+    relay.set_bot_type("service")
+    relay.add_operator("u-collab")
+    client = make_client(router, caller="u-collab")
+
+    relay.results = [EngineResult(data={"mode": "on-miss", "sessionKey": SESSION})]
+    ok(client.get(f"{BASE}/mode", params={"session_key": SESSION, "owner_id": OWNER}))
+
+    relay.results = [
+        EngineResult(data={"ok": True, "mode": "never", "sessionKey": SESSION})
+    ]
+    ok(
+        client.put(
+            f"{BASE}/mode",
+            json={"session_key": SESSION, "mode": "never"},
+            params={"owner_id": OWNER},
+        )
+    )
+
+    relay.results = [EngineResult(data={"supported": ["approval.set"]})]
+    ok(client.get(f"{BASE}/modes", params={"owner_id": OWNER}))
+
+    assert relay.calls, "no route forwarded"
+    assert all(c["caller_id"] == "u-collab" for c in relay.calls), [
+        (c["path"], c.get("caller_id")) for c in relay.calls
+    ]
+    assert all(c["owner_id"] == OWNER for c in relay.calls)

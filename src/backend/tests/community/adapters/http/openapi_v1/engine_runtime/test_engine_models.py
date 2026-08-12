@@ -256,6 +256,38 @@ def test_a_service_bot_is_served_at_its_draft_device(
     assert all(c["stage"] == "draft" for c in relay.calls)
 
 
+@pytest.mark.parametrize(
+    ("group", "path"),
+    [
+        ("engine", f"/openapi/v1/bots/engine/{BOT}/status"),
+        ("engine", f"/openapi/v1/bots/engine/{BOT}/capabilities"),
+        ("engine", f"/openapi/v1/bots/engine/{BOT}/available"),
+        ("models", f"/openapi/v1/bots/models/{BOT}"),
+        ("models", f"/openapi/v1/bots/models/{BOT}/openai/gpt-5.3"),
+    ],
+)
+def test_every_engine_and_models_route_threads_the_verified_caller_as_caller_id(
+    make_client, relay, group, path
+):
+    """Cross-route consistency (review P1-1): every read-only engine/models
+    route forwards the authenticated caller as ``caller_id`` — not the
+    owner — so a collaborator's engine/model read lands on the same instance
+    its connection/session request did. A handler that later drops the kwarg
+    fails this exactly, at the route it dropped it on."""
+    relay.set_bot_type("service")
+    relay.add_operator("u-collab")
+    router = engine_router if group == "engine" else models_router
+    client = make_client(router, caller="u-collab")
+    relay.results = [EngineResult(data={"engines": [], "models": []})]
+    resp = client.get(path, params={"owner_id": OWNER})
+    assert resp.status_code == 200, resp.json()
+    assert relay.calls, "the route never forwarded"
+    assert all(c["caller_id"] == "u-collab" for c in relay.calls), [
+        (c["path"], c.get("caller_id")) for c in relay.calls
+    ]
+    assert all(c["owner_id"] == OWNER for c in relay.calls)
+
+
 def test_a_collaborator_is_served_and_a_stranger_is_the_masked_404(
     make_client, relay
 ):

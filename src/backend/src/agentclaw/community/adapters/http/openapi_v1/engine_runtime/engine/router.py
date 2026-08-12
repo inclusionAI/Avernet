@@ -83,6 +83,7 @@ async def get_engine_status(
     # no `success` key and no `data` wrapper. The only such route wrapped here.
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        caller_id=user_id,
         method="GET", path="/api/engine/status",
         enveloped=False,
     )
@@ -125,6 +126,7 @@ async def get_engine_capabilities(
     )
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        caller_id=user_id,
         method="GET",
         path="/api/engine/capabilities",
     )
@@ -165,6 +167,7 @@ async def list_available_engines(
     )
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        caller_id=user_id,
         method="GET", path="/api/engine/list",
     )
     raw = result.data
