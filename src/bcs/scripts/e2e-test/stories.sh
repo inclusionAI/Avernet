@@ -517,7 +517,7 @@ _story_connect_with_group_session_jwt() {
     assert_not_empty "public collaboration group has an id" "$group_id"
     [[ -n "$group_id" ]] || return
 
-    api_request_headers GET "${public_prefix}/groups?view_bot_id=${BOT_PM_UUID}&kind=all&membership=all&limit=20" "" \
+    api_request_headers GET "${public_prefix}/groups?view_bot_id=${BOT_PM_UUID}&kind=all&membership=direct&limit=20" "" \
         "X-Avernet-Principal: ${principal}"
     require_status "human lists collaboration groups through the public API" "200" || true
 

@@ -10,8 +10,8 @@ use bcs_service_api::application::v1::{
     BotFinalDelivery, ChatConfiguration, CollaborationConfiguration, CollaborationGroupDetail,
     CreateGroup, CreateGroupOutcome,
     DeleteGroup, DeleteGroupParticipant, DeleteResult, GetGroup, GroupDeliveryPolicy, GroupDetail,
-    GroupService, GroupStatus, GroupStrategy, GroupVisibility, ListGroups, Page, Participant,
-    UpdateGroup, UpdateGroupParticipant,
+    GroupService, GroupStatus, GroupStrategy, GroupVisibility, ListGroups, MembershipFilter, Page,
+    Participant, UpdateGroup, UpdateGroupParticipant,
 };
 use bcs_service_api::application::v1::{
     AddSessionParticipant, CompleteSession, CreateSession, CreateSessionOutcome,
@@ -527,6 +527,88 @@ async fn group_routes_forward_the_verified_caller() {
         assert_eq!(removed.group_id, "group-1");
         assert_eq!(removed.actor_id, "bot-2");
     }
+}
+
+#[tokio::test]
+async fn list_groups_defaults_to_direct() {
+    let service = Arc::new(FakeGroupService::default());
+    let app = test_router(service.clone());
+
+    let response = app
+        .oneshot(authenticated_request(
+            "GET",
+            "/openapi/v1/collaboration/groups",
+            Value::Null,
+        ))
+        .await
+        .expect("list response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let list = service.list.lock().expect("list lock");
+    assert_eq!(
+        list.as_ref().expect("list command").membership,
+        MembershipFilter::Direct
+    );
+}
+
+#[tokio::test]
+async fn list_groups_rejects_removed_all_membership() {
+    let service = Arc::new(FakeGroupService::default());
+    let app = test_router(service);
+
+    let response = app
+        .oneshot(authenticated_request(
+            "GET",
+            "/openapi/v1/collaboration/groups?membership=all",
+            Value::Null,
+        ))
+        .await
+        .expect("list response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = response_json(response).await;
+    assert_eq!(body["data"]["error_code"], "invalid_request");
+}
+
+#[tokio::test]
+async fn list_groups_accepts_visibility() {
+    let service = Arc::new(FakeGroupService::default());
+    let app = test_router(service.clone());
+
+    let response = app
+        .oneshot(authenticated_request(
+            "GET",
+            "/openapi/v1/collaboration/groups?visibility=public",
+            Value::Null,
+        ))
+        .await
+        .expect("list response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let list = service.list.lock().expect("list lock");
+    assert_eq!(
+        list.as_ref().expect("list command").visibility,
+        Some(GroupVisibility::Public)
+    );
+}
+
+#[tokio::test]
+async fn list_groups_rejects_invalid_visibility() {
+    let service = Arc::new(FakeGroupService::default());
+    let app = test_router(service);
+
+    let response = app
+        .oneshot(authenticated_request(
+            "GET",
+            "/openapi/v1/collaboration/groups?visibility=protected",
+            Value::Null,
+        ))
+        .await
+        .expect("list response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = response_json(response).await;
+    assert_eq!(body["data"]["error_code"], "invalid_request");
 }
 
 #[tokio::test]
