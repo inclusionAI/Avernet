@@ -1062,19 +1062,30 @@ def test_startup_script_writes_never_touch_a_running_container(
     svc.restart_bot.assert_not_called()
 
 
-def test_startup_script_put_is_refused_for_a_desktop_bot(client, svc, startup_script):
+def test_startup_script_get_and_put_agree_about_a_desktop_bot(
+    client, svc, startup_script
+):
     """DesktopBotService builds its hook by calling ``_get_start_cmd`` directly,
     bypassing ``_build_create_bot_payload`` where the script is resolved — so a
     script stored for a desktop bot would never run.
 
-    Storing it anyway is the silent no-op this feature refuses everywhere else.
+    Both halves are asserted together on purpose. Gating only the write left GET
+    reporting ``supported: true`` for a bot whose next PUT was certain to fail,
+    which defeats the discovery path GET exists to provide.
     """
     svc.get_bot.return_value = {**_SUPPORTED_BOT, "bot_type": "desktop"}
+    startup_script.resolve_support.return_value = (
+        "unsupported",
+        "desktop bots build their start command outside the shared sequence",
+    )
 
     resp = client.put("/openapi/v1/bots/b1/startup-script", json={"script": "echo hi"})
-
     assert resp.status_code == 409, resp.json()
     startup_script.put.assert_not_called()
+
+    data = _ok(client.get("/openapi/v1/bots/b1/startup-script"))
+    assert data["supported"] is False
+    assert "desktop" in data["unsupported_reason"]
 
 
 def test_startup_script_audit_names_the_application_not_the_delegating_user():

@@ -167,6 +167,14 @@ def _redact_payload_for_log(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     A hook with no encoded body is returned unchanged, so this is a no-op for
     every bot without a script.
+
+    **This covers this log only.** The same hook travels on to the device
+    service, which logs ``rendered_hook[:1024]`` at INFO
+    (``_device_service.py``) — and the encoded body usually starts inside that
+    window, so its opening bytes are recoverable from *those* logs no matter
+    what happens here. Redacting there would mean changing that service; until
+    then the published contract says plainly that a body is logged in
+    recoverable form, rather than implying this function makes it safe.
     """
     config = payload.get("config")
     if not isinstance(config, dict):

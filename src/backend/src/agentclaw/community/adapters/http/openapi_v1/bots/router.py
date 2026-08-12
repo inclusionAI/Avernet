@@ -866,13 +866,10 @@ async def update_bot_startup_script(
     silent no-op the caller could not distinguish from success.
     """
     bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
-    # A desktop bot builds its start command in DesktopBotService, which calls
-    # ``_get_start_cmd`` directly and never passes through
-    # ``_build_create_bot_payload`` where the script is resolved — so a script
-    # stored here would never run. Refused rather than stored, the same rule the
-    # unsupported check enforces, and the same line this group already takes on
-    # desktop bots elsewhere.
-    _reject_unowned_lifecycle(bot)
+    # Desktop bots are refused by ``resolve_support`` itself, not by a guard
+    # here: gating only the write made GET answer ``supported: true`` for a bot
+    # whose next PUT was certain to fail, which is precisely the discovery path
+    # GET exists to provide.
     entity_id, state, reason = _startup_script_target(bot, startup_script_service)
     if state != SUPPORTED:
         raise StartupScriptUnsupportedError(reason)

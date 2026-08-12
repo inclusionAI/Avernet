@@ -919,10 +919,15 @@ that one design choice, and none of it is visible in the OpenAPI document.
   completed — nothing reaps it, so it runs until it ends or the container does.
   Interpreter is `bash`; the body runs as `admin`, the same user every platform
   step runs as.
-- **Do not put secrets in the body.** It is stored as written, and the
-  start command that carries it is logged (with the body elided, but that is
-  a mitigation, not a guarantee). There is no by-reference secret mechanism
-  yet.
+- **Do not put secrets in the body.** This is a hard requirement, not advice.
+  The body is stored as written, and it is **logged in recoverable form**: the
+  backend elides it from its own payload log, but the start command travels to
+  the device service, which logs the first 1024 characters of the rendered hook
+  at INFO — and the base64 body typically begins inside that window, so the
+  opening bytes of your script decode straight out of those logs. The
+  backend-side elision does not and cannot cover a downstream log. There is no
+  by-reference secret mechanism yet, so anything secret must reach the container
+  some other way.
 - **There is no API to read the run's result yet.** The script's output goes to
   `/home/admin/logs/startup_script.log` inside the container, and that is the
   only place to see it. A read endpoint was deliberately left out of this

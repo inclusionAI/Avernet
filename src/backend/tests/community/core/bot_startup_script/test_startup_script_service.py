@@ -167,6 +167,22 @@ class TestResolveSupport:
         assert supported == "unsupported"
         assert "teclaw" in reason
 
+    def test_a_desktop_bot_is_unsupported(self, svc):
+        """DesktopBotService calls ``_get_start_cmd`` directly, bypassing the
+        payload builder where the script is resolved — so it would never run."""
+        supported, reason = svc.resolve_support(
+            {**self._bot(), "bot_type": "desktop"}
+        )
+        assert supported == "unsupported"
+        assert "desktop" in reason
+
+    def test_one_answer_serves_both_the_read_and_the_write(self, svc):
+        """Support is computed here and nowhere else. A guard that lived only on
+        the write path would let GET advertise a bot whose PUT always fails."""
+        desktop = {**self._bot(), "bot_type": "desktop"}
+        assert svc.resolve_support(desktop) == svc.resolve_support(dict(desktop))
+        assert svc.resolve_support(desktop)[0] == "unsupported"
+
     def test_the_answer_does_not_depend_on_live_container_state(self, svc):
         """The same bot must get the same answer whatever its binding says — a
         binding that is absent, present, half-read, or on any provider.
