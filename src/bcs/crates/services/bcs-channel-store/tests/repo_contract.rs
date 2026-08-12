@@ -58,6 +58,48 @@ async fn conversation_repo_round_trips_and_reverse_lookups_session() -> ServiceR
 }
 
 #[tokio::test]
+async fn conversation_repo_lists_and_deletes_only_requested_binding() -> ServiceResult<()> {
+    let repo = MemoryConversationSessionRepo::new();
+
+    repo.upsert(conversation_map(
+        "binding_1",
+        "conv_1",
+        SessionScope::Conversation,
+        None,
+        "session_1",
+        1,
+    ))
+    .await?;
+    repo.upsert(conversation_map(
+        "binding_1",
+        "conv_2",
+        SessionScope::PerSender,
+        Some("staff_a"),
+        "session_2",
+        2,
+    ))
+    .await?;
+    repo.upsert(conversation_map(
+        "binding_2",
+        "conv_3",
+        SessionScope::Conversation,
+        None,
+        "session_3",
+        3,
+    ))
+    .await?;
+
+    let binding_1 = repo.list_by_binding("binding_1").await?;
+    assert_eq!(binding_1.len(), 2);
+
+    assert_eq!(repo.delete_by_binding("binding_1").await?, 2);
+    assert!(repo.list_by_binding("binding_1").await?.is_empty());
+    assert_eq!(repo.list_by_binding("binding_2").await?.len(), 1);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn conversation_repo_isolates_per_sender_scope_for_same_im_conversation() -> ServiceResult<()>
 {
     let repo = MemoryConversationSessionRepo::new();
