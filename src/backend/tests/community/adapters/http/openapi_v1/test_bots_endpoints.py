@@ -31,6 +31,9 @@ from agentclaw.community.api.skill_set_service_factory import (
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
+from agentclaw.community.api.bot_startup_script_service import (
+    BotStartupScriptServiceProtocol,
+)
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
@@ -103,7 +106,17 @@ def passport():
 
 
 @pytest.fixture
-def client(svc, policy, passport, engine_config, bot_repo, skill_set_factory, auth_rel):
+def startup_script():
+    m = MagicMock()
+    m.get.return_value = None
+    m.delete.return_value = True
+    # Supported by default; the unsupported cases override this per test.
+    m.resolve_support.return_value = (True, "")
+    return m
+
+
+@pytest.fixture
+def client(svc, policy, passport, engine_config, bot_repo, skill_set_factory, auth_rel, startup_script):
     class _M(Module):
         def configure(self, binder):
             binder.bind(BotServiceProtocol, to=svc)
@@ -113,6 +126,7 @@ def client(svc, policy, passport, engine_config, bot_repo, skill_set_factory, au
             binder.bind(BotRepository, to=bot_repo)
             binder.bind(SkillSetServiceFactoryProtocol, to=skill_set_factory)
             binder.bind(AuthRelationshipPlugin, to=auth_rel)
+            binder.bind(BotStartupScriptServiceProtocol, to=startup_script)
 
     app = FastAPI()
     app.include_router(router)
@@ -886,3 +900,148 @@ def test_personal_bot_delete_is_unaffected(client, svc):
     """The guard must not widen to the type this surface does manage."""
     _ok(client.delete("/openapi/v1/bots/b1"))
     svc.delete_bot.assert_called_once_with("b1", "u1")
+
+
+# ---------------------------------------------------------------------------
+# Startup script (issue #926)
+#
+# BOT above is teclaw-engined, which is one of the two unsupported cases, so
+# supported-path tests override the engine and the binding's provider.
+# ---------------------------------------------------------------------------
+
+_SUPPORTED_BOT = {
+    **BOT,
+    "active_engine": "openclaw",
+    "device_binding": {"device_id": "dev-9", "device_provider": "baas"},
+}
+
+
+def _record(script="echo hi", modifier="u1", size=7):
+    from datetime import datetime
+
+    r = MagicMock()
+    r.script = script
+    r.size_bytes = size
+    r.modifier = modifier
+    r.gmt_modified = datetime(2026, 8, 12, 3, 4, 5)
+    return r
+
+
+def test_startup_script_absent_reads_as_empty_not_an_error(client, svc, startup_script):
+    svc.get_bot.return_value = _SUPPORTED_BOT
+    startup_script.get.return_value = None
+
+    data = _ok(client.get("/openapi/v1/bots/b1/startup-script"))
+    assert data["script"] == ""
+    assert data["size_bytes"] == 0
+    assert data["updated_at"] is None
+    assert data["supported"] is True
+    assert data["unsupported_reason"] == ""
+
+
+def test_startup_script_get_returns_the_stored_body_and_audit(client, svc, startup_script):
+    svc.get_bot.return_value = _SUPPORTED_BOT
+    startup_script.get.return_value = _record(modifier="alice")
+
+    data = _ok(client.get("/openapi/v1/bots/b1/startup-script"))
+    assert data["script"] == "echo hi"
+    assert data["updated_by"] == "alice"
+    assert data["updated_at"].startswith("2026-08-12")
+
+
+def test_startup_script_put_stores_and_takes_modifier_from_the_principal(
+    client, svc, startup_script
+):
+    svc.get_bot.return_value = _SUPPORTED_BOT
+    startup_script.put.return_value = _record(script="echo new")
+
+    data = _ok(
+        client.put(
+            "/openapi/v1/bots/b1/startup-script",
+            json={"script": "echo new", "updated_by": "attacker", "size_bytes": 999},
+        )
+    )
+    assert data["script"] == "echo new"
+    # The body's audit fields are ignored; the principal is what is recorded.
+    assert startup_script.put.call_args.kwargs["modifier"] == "u1"
+    assert startup_script.put.call_args.kwargs["script"] == "echo new"
+
+
+def test_startup_script_put_is_refused_for_a_teclaw_bot(client, svc, startup_script):
+    """BOT is teclaw — provisioned without a start sequence."""
+    startup_script.resolve_support.return_value = (
+        False,
+        "teclaw bots are provisioned without a start sequence",
+    )
+    resp = client.put("/openapi/v1/bots/b1/startup-script", json={"script": "echo hi"})
+    assert resp.status_code == 409, resp.json()
+    startup_script.put.assert_not_called()
+    # The surface uses fixed messages (never str(exc)), so the *reason* is
+    # discovered from GET rather than from the refusal.
+    assert "teclaw" in _ok(client.get("/openapi/v1/bots/b1/startup-script"))[
+        "unsupported_reason"
+    ]
+
+
+def test_startup_script_put_is_refused_for_a_legacy_arca_bot(client, svc, startup_script):
+    svc.get_bot.return_value = {
+        **BOT,
+        "active_engine": "openclaw",
+        "device_binding": {"device_id": "dev-9", "device_provider": "arca"},
+    }
+    startup_script.resolve_support.return_value = (
+        False,
+        "bots on the 'arca' device provider have no start sequence",
+    )
+    resp = client.put("/openapi/v1/bots/b1/startup-script", json={"script": "echo hi"})
+    assert resp.status_code == 409, resp.json()
+    startup_script.put.assert_not_called()
+    assert "arca" in _ok(client.get("/openapi/v1/bots/b1/startup-script"))[
+        "unsupported_reason"
+    ]
+
+
+def test_startup_script_get_still_answers_for_an_unsupported_bot(
+    client, svc, startup_script
+):
+    """A caller must be able to discover *why* before attempting a write."""
+    startup_script.resolve_support.return_value = (
+        False,
+        "teclaw bots are provisioned without a start sequence",
+    )
+    data = _ok(client.get("/openapi/v1/bots/b1/startup-script"))
+    assert data["supported"] is False
+    assert "teclaw" in data["unsupported_reason"]
+
+
+def test_startup_script_put_rejects_an_oversize_body(client, svc, startup_script):
+    from agentclaw.community.core.bot_startup_script.services.startup_script_service import (
+        MAX_SCRIPT_BYTES,
+        StartupScriptTooLargeError,
+    )
+
+    svc.get_bot.return_value = _SUPPORTED_BOT
+    startup_script.put.side_effect = StartupScriptTooLargeError(MAX_SCRIPT_BYTES + 1)
+
+    resp = client.put("/openapi/v1/bots/b1/startup-script", json={"script": "x"})
+    assert resp.status_code == 413, resp.json()
+
+
+def test_startup_script_delete_is_idempotent(client, svc, startup_script):
+    svc.get_bot.return_value = _SUPPORTED_BOT
+    startup_script.delete.return_value = False
+
+    data = _ok(client.delete("/openapi/v1/bots/b1/startup-script"))
+    assert data["deleted"] is True
+
+
+def test_startup_script_requires_ownership(client, svc):
+    svc.get_bot.side_effect = BotNotFoundError("nope")
+    assert client.get("/openapi/v1/bots/b1/startup-script").status_code == 404
+    assert (
+        client.put(
+            "/openapi/v1/bots/b1/startup-script", json={"script": "x"}
+        ).status_code
+        == 404
+    )
+    assert client.delete("/openapi/v1/bots/b1/startup-script").status_code == 404

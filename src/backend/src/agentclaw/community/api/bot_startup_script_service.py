@@ -46,6 +46,10 @@ class BotStartupScriptServiceProtocol(Protocol):
         """Clear the script. Idempotent."""
         ...
 
+    def resolve_support(self, bot: dict) -> tuple[bool, str]:
+        """Return ``(supported, reason)``; ``reason`` is "" when supported."""
+        ...
+
     def get_body(self, *, entity_id: str, bot_id: str) -> str:
         """Return the script body, or ``""`` when the bot has none."""
         ...

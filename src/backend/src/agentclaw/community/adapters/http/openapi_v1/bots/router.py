@@ -31,7 +31,10 @@ from agentclaw.community.adapters.http.openapi_v1.clusters import (
     cluster_for_engine,
     validate_engine_cluster,
 )
-from agentclaw.community.adapters.http.openapi_v1.errors import UnsupportedEngineError
+from agentclaw.community.adapters.http.openapi_v1.errors import (
+    StartupScriptUnsupportedError,
+    UnsupportedEngineError,
+)
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     require_principal,
 )
@@ -68,6 +71,9 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     generate_bot_id,
     validate_bot_name,
 )
+from agentclaw.community.api.bot_startup_script_service import (
+    BotStartupScriptServiceProtocol,
+)
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.core.workspace.constants import (
     DEFAULT_ENGINE_TYPE,
@@ -88,6 +94,8 @@ from .schemas import (
     BotUpdate,
     Ceiling,
     Passport,
+    StartupScript,
+    StartupScriptWrite,
 )
 
 logger = get_logger()
@@ -752,3 +760,128 @@ async def update_bot_engine_config(
         entity_type=entity_type, engine_type=engine, config=body,
     )
     return envelope(body, request)
+
+
+def _startup_script_target(
+    bot: dict[str, Any],
+    startup_script_service: BotStartupScriptServiceProtocol,
+) -> tuple[str, bool, str]:
+    """Resolve ``(entity_id, supported, unsupported_reason)`` for a bot.
+
+    ``entity_id`` is a storage key resolved here from the bot record — it is
+    never a request parameter or a response field, per the group contract.
+    """
+    entity_id = bot.get("entity_id")
+    if not entity_id:
+        raise BotNotFoundError("bot has no associated entity")
+    supported, reason = startup_script_service.resolve_support(bot)
+    return entity_id, supported, reason
+
+
+def _startup_script_payload(
+    bot_id: str,
+    record: Any,
+    supported: bool,
+    unsupported_reason: str,
+) -> StartupScript:
+    """Shape a stored record — or its absence — as the response model."""
+    return StartupScript(
+        bot_id=bot_id,
+        script=record.script if record is not None else "",
+        size_bytes=record.size_bytes if record is not None else 0,
+        updated_by=record.modifier if record is not None else "",
+        updated_at=record.gmt_modified if record is not None else None,
+        supported=supported,
+        unsupported_reason=unsupported_reason,
+    )
+
+
+@router.get(
+    "/{bot_id}/startup-script",
+    response_model=Envelope[StartupScript],
+    responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED,
+)
+@envelope_errors
+async def get_bot_startup_script(
+    bot_id: str,
+    request: Request,
+    owner_id: UserIdDep,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    startup_script_service: BotStartupScriptServiceProtocol = Injected(
+        BotStartupScriptServiceProtocol
+    ),
+) -> Envelope[StartupScript]:
+    """Read a bot's startup script.
+
+    A bot that has never had one reads as an empty script, not an error. An
+    unsupported bot still answers here — with ``supported: false`` and a reason —
+    so a caller can discover *why* before trying to write.
+    """
+    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
+    entity_id, supported, reason = _startup_script_target(bot, startup_script_service)
+    record = startup_script_service.get(entity_id=entity_id, bot_id=bot_id)
+    return envelope(
+        _startup_script_payload(bot_id, record, supported, reason), request
+    )
+
+
+@router.put(
+    "/{bot_id}/startup-script",
+    response_model=Envelope[StartupScript],
+    responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED,
+)
+@envelope_errors
+async def update_bot_startup_script(
+    bot_id: str,
+    body: StartupScriptWrite,
+    request: Request,
+    owner_id: UserIdDep,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    startup_script_service: BotStartupScriptServiceProtocol = Injected(
+        BotStartupScriptServiceProtocol
+    ),
+) -> Envelope[StartupScript]:
+    """Set or replace a bot's startup script. Takes effect on the next start.
+
+    Refused for a bot whose container cannot run one: storing it would be a
+    silent no-op the caller could not distinguish from success.
+    """
+    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
+    entity_id, supported, reason = _startup_script_target(bot, startup_script_service)
+    if not supported:
+        raise StartupScriptUnsupportedError(reason)
+    record = startup_script_service.put(
+        entity_id=entity_id,
+        bot_id=bot_id,
+        script=body.script,
+        # From the request principal, never the body.
+        modifier=owner_id,
+    )
+    return envelope(_startup_script_payload(bot_id, record, True, ""), request)
+
+
+@router.delete(
+    "/{bot_id}/startup-script",
+    response_model=Envelope[Deleted],
+    responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED,
+)
+@envelope_errors
+async def delete_bot_startup_script(
+    bot_id: str,
+    request: Request,
+    owner_id: UserIdDep,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    startup_script_service: BotStartupScriptServiceProtocol = Injected(
+        BotStartupScriptServiceProtocol
+    ),
+) -> Envelope[Deleted]:
+    """Clear a bot's startup script. Idempotent; takes effect on the next start."""
+    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
+    entity_id = bot.get("entity_id")
+    if not entity_id:
+        raise BotNotFoundError("bot has no associated entity")
+    startup_script_service.delete(entity_id=entity_id, bot_id=bot_id)
+    return deleted_envelope(request)

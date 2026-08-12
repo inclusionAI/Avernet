@@ -61,29 +61,29 @@
   - [x] Editing the script alone does not touch a running container.
 - **Depends on:** Task 2
 
-## Task 4: Public API — read, replace, clear
+## [x] Task 4: Public API — read, replace, clear
 - **Goal:** Expose the three script operations on the bots group.
 - **Files:** `src/backend/.../adapters/http/openapi_v1/bots/router.py`,
   `.../bots/schemas.py`, `.../openapi_v1/responses.py`, `.../openapi_v1/admission.py`,
   `src/backend/.../di/modules/` (registration)
 - **Done when:**
-  - [ ] `GET` / `PUT` / `DELETE /openapi/v1/bots/{bot_id}/startup-script` served.
-  - [ ] Every response uses `Envelope[T]`; errors use the standard shape.
-  - [ ] Each route declares `dependencies=_GRANT_CHECKED` and is registered in
+  - [x] `GET` / `PUT` / `DELETE /openapi/v1/bots/{bot_id}/startup-script` served.
+  - [x] Every response uses `Envelope[T]`; errors use the standard shape.
+  - [x] Each route declares `dependencies=_GRANT_CHECKED` and is registered in
         `ADMISSION` as `GRANT_CHECKED_OWN_BOT`.
-  - [ ] Ownership guard runs before any read or write; a non-operator gets 403.
-  - [ ] Oversize body → 413 whose message names the limit.
-  - [ ] `PUT` accepts only `{"script": ...}`; `updated_by` comes from the request
+  - [x] Ownership guard runs before any read or write; a non-operator gets 403.
+  - [x] Oversize body → 413 whose message names the limit.
+  - [x] `PUT` accepts only `{"script": ...}`; `updated_by` comes from the request
         principal and `updated_at` from `gmt_modified` — neither is client-supplied,
         and a body attempting to set them is ignored, not honored.
-  - [ ] `supported` / `unsupported_reason` reported per bot, covering **both**
+  - [x] `supported` / `unsupported_reason` reported per bot, covering **both**
         unsupported cases: a teclaw bot, and a bot whose binding
         `device_provider` is not `baas` (legacy ARCA-direct bots).
-  - [ ] `PUT` on an unsupported bot is **refused** with 409 and the reason as the
+  - [x] `PUT` on an unsupported bot is **refused** with 409 and the reason as the
         message; nothing is stored.
-  - [ ] `GET` on an unsupported bot still answers — empty script,
+  - [x] `GET` on an unsupported bot still answers — empty script,
         `supported: false`, reason naming the cause — rather than erroring.
-  - [ ] No `entity_id` parameter or response field anywhere (group contract);
+  - [x] No `entity_id` parameter or response field anywhere (group contract);
         it exists only as a storage key resolved server-side.
 - **Depends on:** Task 1
 

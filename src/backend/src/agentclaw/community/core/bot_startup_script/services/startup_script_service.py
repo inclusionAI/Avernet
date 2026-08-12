@@ -95,6 +95,20 @@ class BotStartupScriptService:
             env=get_current_env(), entity_id=entity_id, bot_id=bot_id
         )
 
+    def resolve_support(self, bot: dict) -> tuple[bool, str]:
+        """Return ``(supported, reason)`` for a bot; ``reason`` is "" when supported.
+
+        Lives on the service so the HTTP adapter can reach it through the
+        Service API Protocol — a router importing the rule directly would cross
+        the adapter/core boundary the architecture gate enforces.
+        """
+        from agentclaw.community.core.bot_startup_script.services._support import (
+            resolve_support,
+        )
+
+        binding = bot.get("device_binding") or {}
+        return resolve_support(bot, binding.get("device_provider"))
+
     def get_body(self, *, entity_id: str, bot_id: str) -> str:
         """Return the script body, or ``""`` when the bot has none.
 

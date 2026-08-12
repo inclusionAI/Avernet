@@ -293,7 +293,10 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: This change deliberately moved none of them. ``none`` counts operations with
 #: no ``bot_id`` at all, so it grows by one for each such operation added — the
 #: load-test endpoint is the twentieth.
-_BOT_ID_PLACEMENT = {"path": 31, "query": 18, "none": 21}
+#:
+#: ``path`` gained three with the startup-script operations (GET/PUT/DELETE
+#: on ``/bots/{bot_id}/startup-script``) — all address a bot, none moved.
+_BOT_ID_PLACEMENT = {"path": 34, "query": 18, "none": 21}
 
 
 def _schema() -> dict:
@@ -341,7 +344,7 @@ def test_the_pinned_number_of_operations_take_it():
         for path, method, operation in _operations(_schema())
         if _user_scoped(path, method) and _param(operation, USER_ID_QUERY)
     ]
-    assert len(taking) == 60
+    assert len(taking) == 63
 
 
 def test_the_exempt_operations_take_none():

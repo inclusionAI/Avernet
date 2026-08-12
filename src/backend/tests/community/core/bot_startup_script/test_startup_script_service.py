@@ -99,3 +99,46 @@ def test_get_body_returns_empty_string_after_delete(svc):
     svc.put(entity_id="ent", bot_id="bot", script="echo hello", modifier="u1")
     svc.delete(entity_id="ent", bot_id="bot")
     assert svc.get_body(entity_id="ent", bot_id="bot") == ""
+
+
+class TestResolveSupport:
+    """Support keys on the container provider, never on the bot type."""
+
+    def _bot(self, engine="openclaw", provider="baas"):
+        return {
+            "active_engine": engine,
+            "bot_type": "personal",
+            "device_binding": {"device_provider": provider},
+        }
+
+    def test_baas_backed_bot_is_supported(self, svc):
+        assert svc.resolve_support(self._bot()) == (True, "")
+
+    def test_personal_and_service_bots_get_the_same_answer(self, svc):
+        """They share one allocator and one payload builder."""
+        personal = {**self._bot(), "bot_type": "personal"}
+        service = {**self._bot(), "bot_type": "service"}
+        assert svc.resolve_support(personal) == svc.resolve_support(service)
+
+    def test_teclaw_bot_is_unsupported(self, svc):
+        supported, reason = svc.resolve_support(self._bot(engine="teclaw"))
+        assert supported is False
+        assert "teclaw" in reason
+
+    def test_teclaw_is_unsupported_even_on_the_baas_provider(self, svc):
+        """Engine is checked first: teclaw never gets a deploy_config at all."""
+        supported, reason = svc.resolve_support(
+            self._bot(engine="TeClaw", provider="baas")
+        )
+        assert supported is False
+        assert "teclaw" in reason
+
+    def test_legacy_arca_provider_is_unsupported(self, svc):
+        supported, reason = svc.resolve_support(self._bot(provider="arca"))
+        assert supported is False
+        assert "arca" in reason
+
+    def test_missing_binding_is_unsupported_rather_than_a_crash(self, svc):
+        supported, reason = svc.resolve_support({"active_engine": "openclaw"})
+        assert supported is False
+        assert reason

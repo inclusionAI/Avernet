@@ -39,9 +39,13 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     ErrorEnvelope,
     Page,
 )
+from agentclaw.community.core.bot_startup_script.services.startup_script_service import (
+    StartupScriptTooLargeError,
+)
 from agentclaw.community.adapters.http.openapi_v1.errors import (
     GrantNotResolvableError,
     ClusterMismatchError,
+    StartupScriptUnsupportedError,
     MissingPrincipalError,
     UnsupportedEngineError,
     UserIdMismatchError,
@@ -259,6 +263,12 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LocalSkillRuntimeSyncError: (502, "Skill runtime synchronization failed"),
     LocalSkillEditPausedError: (409, "Skill layout is being updated"),
     FileTooLargeError: (413, "File too large for preview"),
+    # Startup script (issue #926): the body is refused at write time so a
+    # caller learns the limit instead of hitting it inside a container.
+    StartupScriptTooLargeError: (413, "Startup script is too large"),
+    # ... and refused outright for a bot whose container cannot run one,
+    # rather than stored where it would silently never execute.
+    StartupScriptUnsupportedError: (409, "Startup script is not supported for this bot"),
     # Identity domain errors — ValueError subclasses raised by IdentityService
     # validate_entity_type / validate_file_type.
     InvalidIdentityEntityTypeError: (400, "Invalid entity type"),

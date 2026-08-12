@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -132,3 +133,43 @@ class Passport(BaseModel):
 
     bot_id: str
     passport_id: str
+
+
+class StartupScriptWrite(BaseModel):
+    """PUT body for a bot's startup script — the only client-supplied field.
+
+    Audit fields are deliberately absent: ``updated_by`` comes from the request
+    principal and ``updated_at`` from the row's own timestamp, so neither can be
+    asserted by a caller.
+    """
+
+    script: str = Field(
+        description=(
+            "Shell script run inside the bot's container on every container "
+            "start, after the platform's own boot steps. Must be idempotent — "
+            "it runs again on every start and the platform does not dedupe. "
+            "Do not put secrets in the body."
+        ),
+    )
+
+
+class StartupScript(BaseModel):
+    """A bot's stored startup script. Every field is server-derived."""
+
+    bot_id: str
+    script: str = Field(description="Empty when the bot has no stored script.")
+    size_bytes: int
+    updated_by: str = Field(description="Empty when the bot has no stored script.")
+    updated_at: datetime | None = Field(
+        default=None,
+        description="Null only when the bot has no stored script.",
+    )
+    supported: bool = Field(
+        description=(
+            "False when this bot's container cannot run a startup script. A "
+            "write is refused in that case rather than stored."
+        ),
+    )
+    unsupported_reason: str = Field(
+        description="Empty when supported; otherwise names the cause.",
+    )
