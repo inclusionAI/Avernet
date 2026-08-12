@@ -28,6 +28,37 @@ This plan moves the OpenAPI path to a **namespace-relative** wire format rather
 than to the OSS-view format, so one of the two translation layers disappears and
 the engine can enforce containment. The console path is untouched.
 
+## teclaw is already the target state
+
+teclaw is not a laggard to be migrated — it is the model being copied, and it is
+worth being precise about why, because it also reveals a second symptom of the
+same defect.
+
+`TeclawDeviceFileSystem` talks to `/api/v1/file/*` on the teclaw engine, a
+different endpoint from the `/api/file/*` that `BaasDeviceFileSystem` uses. What
+the two share is the backend-side `DeviceFileSystem` abstraction, not the wire
+protocol. teclaw's mapper is `to_engine_relative`
+(`core/config_compose/teclaw_paths.py:43`), which emits `/workspace/<rel>` — the
+leading slash is correct **there**, because the teclaw engine exposes a
+namespace-rooted logical filesystem in which `/workspace` genuinely is absolute.
+The four engines on `/api/file/*` expose the real container filesystem, where `/`
+is the real root and a leading slash would be a lie. Hence: slash-free on the
+wire for those four, and the discriminator accepts both forms so a later
+unification is free.
+
+**Second symptom.** `to_engine_relative` raises on anything not
+namespace-prefixed, and `dispatch(ctx)` hands teclaw bots exactly that mapper
+(`device_filesystem_dispatcher.py:187`). So on a teclaw bot the OpenAPI upload
+does not misplace the file — it raises, and the handler returns 502. Same root
+cause, opposite failure mode.
+
+Once the service composes `workspace/<rel>`, `to_engine_relative` accepts it and
+teclaw works with **no teclaw-specific change**. Two consequences for this plan,
+both benign: the Group D `target_path` guard lives in `BaasDeviceFileSystem`, so
+teclaw is untouched by it; and the new namespace-relative mapper must not
+displace `to_engine_relative` in `_namespaced_mapper`, which branches on provider
+before namespace and must keep doing so.
+
 ## Wire contract
 
 Backend emits `workspace/<rel>` — **no leading slash**. Engines also accept

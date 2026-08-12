@@ -85,6 +85,11 @@ on B; E depends on C; F closes out.
   it through to the service.
 - [ ] **C6.** Confirm the injected deps stay out of the served OpenAPI schema
   (the existing invariant guarded by `test_public_namespace.py`).
+- [ ] **C7.** Confirm `_namespaced_mapper` still branches on **provider before
+  namespace**, so teclaw keeps getting `to_engine_relative` and is not displaced
+  by the new mapper. Add a regression test asserting a teclaw bot's OpenAPI
+  upload maps `workspace/a.txt` → `/workspace/a.txt` — this path raises today
+  (`to_engine_relative` rejects the bare name) and should start passing.
 
 ## Group D — Rollout guard
 

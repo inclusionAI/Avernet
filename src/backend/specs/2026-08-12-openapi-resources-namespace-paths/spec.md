@@ -35,6 +35,13 @@ A related consequence of the bare-name addressing: because every uploaded file
 is treated as living at the top level, two files with the same name in different
 directories collide, and the API rejects the second as a duplicate.
 
+The same defect shows up differently depending on which runtime a bot uses.
+Bots on the runtime family that accepts a name without an anchor store the file
+in the wrong place and report success. Bots on the runtime family that already
+requires a properly anchored address reject the upload outright, so the endpoint
+fails for them today. Anchoring the address fixes both, and needs no change on
+the second family — it is already where this change is taking the first.
+
 ## Goals
 
 **G1. Uploaded files land in the bot's workspace.** A file uploaded through the
