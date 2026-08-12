@@ -1,6 +1,7 @@
 """openapi_v1 resources handler unit tests: mapping + handler behavior."""
 
 import json
+import logging
 from datetime import datetime
 from types import SimpleNamespace
 from typing import List
@@ -683,6 +684,30 @@ async def test_check_name_asks_the_records_for_a_link():
 
 
 @pytest.mark.asyncio
+async def test_check_name_requires_one_of_the_two_addressing_modes():
+    """Both parameters carry plain defaults so either may be omitted, which
+    costs FastAPI's required-parameter check. Without the handler's own rule the
+    link branch asks the repository about the empty name and answers a cheerful
+    ``exists=false`` to a request that named no resource."""
+    service = _StubService([])
+    file_svc = _StubFileService()
+
+    resp = await check_resource_name(
+        owner_id="u1",
+        bot_id="bot-x",
+        factory=_StubFactory(service),
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
+
+    # ``@envelope_errors`` maps InvalidResourcePathError to a 400 envelope.
+    assert resp.status_code == 400
+    assert service.last_call_kwargs == {}
+    assert file_svc.exists_calls == []
+
+
+@pytest.mark.asyncio
 async def test_check_name_reads_x_trace_id_from_request():
     env = await check_resource_name(
         path="a.txt",
@@ -913,6 +938,29 @@ async def test_update_link_returns_200_envelope():
     # service received the rename + url, not link_type (contract doesn't expose it)
     assert service.last_call_kwargs.get("name") == "renamed"
     assert service.last_call_kwargs.get("url") == "https://new.com"
+
+
+@pytest.mark.asyncio
+async def test_update_resource_404s_a_file_id():
+    """Completes what GET and DELETE /{resource_id} already do.
+    ``update_link_resource`` checks no type, so a stale file id would rename a
+    FILE row that nothing reads — the response would even show the new name,
+    while the workspace every file response is built from is untouched."""
+    service = _StubService(
+        [_legacy(id=7, name="a.txt", resource_type=LegacyType.FILE)]
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await update_resource(
+            resource_id="7",
+            body=ResourceUpdate(name="renamed", url=None),
+            user_id="u1",
+            bot_id="bot-x",
+            factory=_StubFactory(service),
+            request=_request_without_trace(),
+        )
+
+    assert exc.value.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -2350,6 +2398,42 @@ async def test_upload_rolls_the_file_back_when_the_record_write_fails():
 
     assert excinfo.value.status_code == 502
     assert file_svc.deleted_paths == ["a.txt"]
+
+
+@pytest.mark.asyncio
+async def test_upload_treats_a_refused_rollback_as_a_failed_one(caplog):
+    """A provider refuses by returning ``False``, not by raising, so catching
+    only exceptions would miss half of it. Both arms land in the same state —
+    file on disk, no record — and both must say so, because the next upload of
+    this path 409s against a file the operator has no record of."""
+
+    class _ExplodingFactory:
+        def create(self, *, bot_id):
+            raise RuntimeError("repo down")
+
+    class _RefusingFileService(_StubFileService):
+        async def delete(self, *, path, **_kw) -> bool:
+            self.deleted_paths.append(path)
+            return False
+
+    file_svc = _RefusingFileService()
+
+    with caplog.at_level(logging.ERROR):
+        with pytest.raises(HTTPException) as excinfo:
+            await upload_resource(
+                path="a.txt",
+                content=b"xy",
+                owner_id="u1",
+                bot_id="bot-x",
+                factory=_ExplodingFactory(),
+                bot_repo=_StubBotRepo(),
+                file_svc=file_svc,
+                request=_request_without_trace(),
+            )
+
+    assert excinfo.value.status_code == 502
+    assert file_svc.deleted_paths == ["a.txt"]
+    assert "on disk with no record" in caplog.text
 
 
 @pytest.mark.asyncio

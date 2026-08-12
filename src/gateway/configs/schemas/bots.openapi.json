@@ -10082,7 +10082,7 @@
         ]
       },
       "put": {
-        "description": "Update a resource (link rename / url change).\n\nPhase 3a: link only; ``link_type`` is intentionally not exposed on the\nopenapi contract. ValueError from the service (not found / url clash)\n→ 409 Conflict, per legacy + create parity.",
+        "description": "Update a **link** resource by record id (rename / url change).\n\n``link_type`` is intentionally not exposed on the openapi contract.\nValueError from the service (not found / url clash) → 409 Conflict, per\nlegacy + create parity.\n\nA file id 404s, completing what ``GET`` and ``DELETE /{resource_id}``\nalready do. ``update_link_resource`` checks no type, so a stale file id\nwould otherwise rename a FILE row that nothing reads — the response would\neven show the new name, while the workspace, which is what every file\nresponse is actually built from, is untouched.",
         "operationId": "update_resource_openapi_v1_bots_resources__resource_id__put",
         "parameters": [
           {

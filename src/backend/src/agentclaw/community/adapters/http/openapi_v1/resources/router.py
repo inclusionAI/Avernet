@@ -323,6 +323,13 @@ async def check_resource_name(
     check. Splitting the two surfaces entirely would be cleaner than one endpoint
     with two addressing modes, but that is a larger contract change than this one.
     """
+    # Neither addressing mode supplied. Both parameters carry plain defaults so
+    # that one may be omitted, which costs FastAPI's required-parameter check —
+    # so the "at least one" rule is enforced here instead. Without it the link
+    # branch asks the repository about the empty name and answers a cheerful
+    # ``exists=false`` to a request that named no resource at all.
+    if not name and not path:
+        raise InvalidResourcePathError("name or path is required")
     if path or type == ResourceType.FILE or type == ResourceType.FOLDER:
         safe = _safe_path(path or name)
         if not safe:
@@ -484,8 +491,15 @@ async def upload_resource(
             "[upload_resource] record failed; rolling back the file at %s",
             info["path"],
         )
+        # A refused rollback is reported by a ``False`` return, not by raising,
+        # so catching only exceptions would miss half of it. Both arms land in
+        # the same state and get the same log line: the file is on disk with no
+        # record, which is what the rollback existed to prevent, and the next
+        # upload of this path will 409 against a file the operator has no record
+        # of. Nothing is left to try, so it is a log rather than a raise — the
+        # 502 below already tells the caller the upload failed.
         try:
-            await file_svc.delete(
+            rolled_back = await file_svc.delete(
                 entity_type=entity_type,
                 entity_id=entity_id,
                 bot_id=bot_id,
@@ -493,14 +507,16 @@ async def upload_resource(
                 path=safe,
             )
         except Exception:
-            # Both halves failed. The file is on disk with no record, which is
-            # the state the rollback existed to avoid — say so loudly, because
-            # the next upload of this path will 409 against a file the operator
-            # has no record of.
             logger.exception(
                 "[upload_resource] rollback failed; %s is on disk with no record",
                 info["path"],
             )
+        else:
+            if not rolled_back:
+                logger.error(
+                    "[upload_resource] rollback refused; %s is on disk with no record",
+                    info["path"],
+                )
         raise HTTPException(status_code=502, detail="Upload storage failed")
 
     data = _to_openapi_resource(record)
@@ -766,15 +782,24 @@ async def update_resource(
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
 ) -> Envelope[Resource]:
-    """Update a resource (link rename / url change).
+    """Update a **link** resource by record id (rename / url change).
 
-    Phase 3a: link only; ``link_type`` is intentionally not exposed on the
-    openapi contract. ValueError from the service (not found / url clash)
-    → 409 Conflict, per legacy + create parity.
+    ``link_type`` is intentionally not exposed on the openapi contract.
+    ValueError from the service (not found / url clash) → 409 Conflict, per
+    legacy + create parity.
+
+    A file id 404s, completing what ``GET`` and ``DELETE /{resource_id}``
+    already do. ``update_link_resource`` checks no type, so a stale file id
+    would otherwise rename a FILE row that nothing reads — the response would
+    even show the new name, while the workspace, which is what every file
+    response is actually built from, is untouched.
     """
     del user_id  # not-yet-enforced ownership — see list_resources
     effective_bot_id = bot_id
     service = factory.create(bot_id=effective_bot_id)
+    existing = service.get_resource(resource_id)
+    if existing is not None and existing.resource_type == _LegacyType.FILE:
+        raise HTTPException(status_code=404, detail="Resource not found")
     # ResourceNotFoundError (404) / DuplicateResourceError (409) propagate to
     # @envelope_errors with fixed messages — no str(exc) leakage. The prior
     # hand-translation also wrongly mapped not-found → 409; this fixes that.
