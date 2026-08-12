@@ -101,7 +101,7 @@ X-BCN-Timestamp: <毫秒时间戳>
 - 连续 15 分钟没有收到任何字节触发 idle timeout。
 - 等待下一段字节的时间同时受 run deadline 限制；`ping` 或 comment heartbeat
   不能把连接延长到 deadline 之后。
-- 单个 SSE 帧（包括未遇到空行的累计 buffer）最大 1 MiB；超过后关闭 run 并合成
+- 单个 SSE 帧（包括未遇到空行的累计 buffer）最大 8 MiB；超过后关闭 run 并合成
   terminal error，避免异常 Provider 无界占用内存。
 - Provider 返回 JSON 时沿用原 callback fallback，不创建 SSE。
 

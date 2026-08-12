@@ -38,7 +38,7 @@ use crate::sse::{IngestKind, SeqDecision, SeqDedup, classify, parse_sse_block};
 /// run is considered stuck and closed with a synthesized error terminal (#3).
 const SSE_IDLE_TIMEOUT_MS: u64 = 15 * 60 * 1_000;
 /// Hard limit for a single SSE frame or an unterminated frame buffer.
-const SSE_MAX_FRAME_BYTES: usize = 1024 * 1024;
+const SSE_MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 /// Maximum time for an SSE request to receive response headers. Body liveness
 /// is governed separately by `SSE_IDLE_TIMEOUT_MS` after the stream is accepted.
 const SSE_RESPONSE_HEADER_TIMEOUT_MS: u64 = 125_000;
@@ -2030,7 +2030,7 @@ Connection: keep-alive\r\n\
         let (idle_wait, deadline_limited) = sse_next_read_timeout(1_000, u64::MAX);
         assert_eq!(idle_wait, Duration::from_millis(SSE_IDLE_TIMEOUT_MS));
         assert!(!deadline_limited);
-        assert_eq!(SSE_MAX_FRAME_BYTES, 1024 * 1024);
+        assert_eq!(SSE_MAX_FRAME_BYTES, 8 * 1024 * 1024);
     }
 
     #[test]

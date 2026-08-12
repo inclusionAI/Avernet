@@ -561,7 +561,7 @@ command contents beyond existing redaction rules.
 
 The process-local implementation additionally enforces a 256 KiB requested
 payload limit, 32 active interactions per run, 256 active interactions per
-session, and a 1 MiB SSE frame/buffer limit. These bounds permit multiple
+session, and an 8 MiB SSE frame/buffer limit. These bounds permit multiple
 concurrent prompts while preventing an untrusted Provider from growing memory
 without limit.
 
