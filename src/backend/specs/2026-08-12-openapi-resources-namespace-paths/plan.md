@@ -162,6 +162,35 @@ Read/delete (`349`, `426`, `462`) use `resource.path` and must go through the
 same logical composition as the write, or they will read from a different place
 than they wrote.
 
+### 1b. Mapper selection is per-provider, not per-namespace
+
+The service emits one logical form (`workspace/<rel>`) for every provider; the
+`path_mapper` — applied as the first line of each `DeviceFileSystem.write_file` —
+is what turns it into a wire address. That mapper must be chosen by **provider**,
+because the namespace-relative form is only meaningful when the far side
+understands namespaces:
+
+| provider | mapper | wire form |
+|---|---|---|
+| baas / arca | new namespace mapper | `workspace/a.txt` (passthrough) |
+| teclaw | `to_engine_relative` (unchanged) | `/workspace/a.txt` |
+| local | `build_workspace_mapper` (unchanged) | `/aidesktop/.../workspace/a.txt` |
+
+**`local` must keep the absolute form.** `LocalDeviceFileSystem` falls back to
+`_pathlib_write_file` whenever there is no BaaS binding
+(`device_filesystem_resolver.py:138` — an ARCA binding with no active sandbox,
+and the singlebox path), and that method is a bare
+`Path(file_path).write_bytes()` on the **backend** host. A namespace-relative
+path there lands in the backend process's working directory — the same defect
+this change exists to remove, relocated from the engine host to the backend host.
+
+Keeping `build_workspace_mapper` for `local` is correct in both of its modes:
+pathlib mode gets a real absolute host path, and baas mode sends the OSS-view
+path the engine still accepts (the old format is not being retired). It also
+avoids a problem the dispatcher cannot solve — it selects the mapper *before* the
+resolver decides which mode `LocalDeviceFileSystem` runs in, so it could not
+choose per-mode even if we wanted it to.
+
 ### 2. `openapi_v1/resources/router.py` — addressed dispatch
 
 Four handlers resolve `device_fs` via `dispatch(ctx)`: `upload_resource:271`,

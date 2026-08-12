@@ -72,6 +72,15 @@ on B; E depends on C; F closes out.
   (`device_filesystem_dispatcher.py:191`) so the OpenAPI flow can select it
   without disturbing the console flow. Record the chosen mechanism (distinct
   namespace constant vs. explicit flag on `dispatch_addressed`) in the PR body.
+- [ ] **C2a.** Select the mapper **by provider**: the new namespace mapper for
+  `baas`/`arca` only; `teclaw` keeps `to_engine_relative`; **`local` keeps
+  `build_workspace_mapper`**. `LocalDeviceFileSystem` falls back to
+  `_pathlib_write_file` — a bare `Path(...).write_bytes()` on the *backend* host —
+  whenever there is no BaaS binding, so a namespace-relative path there lands in
+  the backend's CWD and reproduces this exact bug one host over.
+- [ ] **C2b.** Regression test: a `local`-provider bot's OpenAPI upload still
+  receives an absolute host path at the `DeviceFileSystem` boundary, in both
+  pathlib and baas modes.
 - [ ] **C3.** Add a local helper in `openapi_v1/resources/router.py` resolving
   `(entity_type, entity_id, engine_type)`, modelled on the console router's
   `_resolve_params` (`adapters/http/resources/file_router.py:71`): inject
