@@ -21,11 +21,6 @@ from typing import Callable, Optional
 
 from injector import inject
 
-# Imported for real, not under TYPE_CHECKING: injector resolves constructor
-# annotations at runtime, so a string-only name raises _BindingNotYetAvailable.
-from agentclaw.community.core.bot_management.services.teclaw_provision_service import (
-    TeclawProvisionService,
-)
 
 from agentclaw.community.core.bot_startup_script.repository.models import (
     BotStartupScriptRecord,
@@ -35,6 +30,7 @@ from agentclaw.community.api.bot_startup_script_service import (
 )
 from agentclaw.community.core.bot_startup_script.protocols import (
     StartupScriptReaderProtocol,
+    TeclawEngineTestProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import (
     BotStartupScriptRepositoryProtocol,
@@ -51,6 +47,18 @@ logger = get_logger()
 #: (~4/3 of this) well inside a single ``execute_command`` payload, which is how
 #: the body reaches the container.
 MAX_SCRIPT_BYTES = 64 * 1024
+
+#: Column width of ``ac_bot_startup_script.modifier``.
+#:
+#: The audit actor is composed by the caller and can legitimately exceed this:
+#: an application's actor carries the delegating user's id, and ``owner_id`` is
+#: itself a 1024-character column, so ``app:7:on-behalf-of:<1024 chars>`` is
+#: reachable without anything being malformed. Persisting it unbounded fails an
+#: otherwise valid write at the database.
+#:
+#: Bounded here rather than at the one caller that composes a prefix today, so
+#: every caller is covered by construction.
+MAX_MODIFIER_CHARS = 1024
 
 
 class StartupScriptTooLargeError(ValueError):
@@ -78,13 +86,14 @@ class BotStartupScriptService(
     def __init__(
         self,
         repository: BotStartupScriptRepositoryProtocol,
-        teclaw_provision_service_provider: Callable[[], TeclawProvisionService],
+        teclaw_engine_test_provider: Callable[[], TeclawEngineTestProtocol],
     ) -> None:
         self._repository = repository
-        # Lazy (cycle-safe), for the same reason ``BotService`` holds it this
-        # way: TeclawProvisionService pulls in BaasService, whose graph reaches
-        # back here — this service is BaasService's startup-script reader.
-        self._teclaw_provision_provider = teclaw_provision_service_provider
+        # Lazy *and* narrow. Lazy for the reason ``BotService`` holds it this
+        # way — teclaw provisioning pulls in BaasService, whose graph reaches
+        # back here. Narrow because importing the concrete class closes an
+        # import cycle at module load; see ``TeclawEngineTestProtocol``.
+        self._teclaw_provision_provider = teclaw_engine_test_provider
 
     def get(
         self, *, entity_id: str, bot_id: str
@@ -115,7 +124,13 @@ class BotStartupScriptService(
             bot_id=bot_id,
             script=script,
             size_bytes=size_bytes,
-            modifier=modifier,
+            # Truncated, not rejected: an over-long actor is the platform's own
+            # composition meeting a legitimately long user id, so failing the
+            # caller's write for it would be blaming them for our formatting.
+            # The front is kept because that is where the acting identity is —
+            # a truncated tail costs some of the delegating id, never which
+            # application acted.
+            modifier=modifier[:MAX_MODIFIER_CHARS],
         )
 
     def delete(self, *, entity_id: str, bot_id: str) -> bool:

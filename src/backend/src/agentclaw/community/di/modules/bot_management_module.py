@@ -54,6 +54,9 @@ from agentclaw.community.core.repository.protocols.bot import (
 from agentclaw.community.api.bot_startup_script_service import (
     BotStartupScriptServiceProtocol,
 )
+from agentclaw.community.core.bot_startup_script.protocols import (
+    TeclawEngineTestProtocol,
+)
 from agentclaw.community.core.bot_startup_script.services.startup_script_service import (
     BotStartupScriptService,
 )
@@ -449,6 +452,21 @@ class BotManagementModule(Module):
             bot_repository=bot_repository,
             teclaw_template_uuid=baas_config.teclaw_template_uuid,
         )
+
+    @singleton
+    @provider
+    @inject
+    def teclaw_engine_test_factory(
+        self, injector: Injector
+    ) -> Callable[[], TeclawEngineTestProtocol]:
+        """The narrow engine test BotStartupScriptService depends on.
+
+        Same lazy shape as the factory below, and deliberately a *separate*
+        binding: that service cannot name ``TeclawProvisionService`` in its
+        annotations without closing an import cycle, so the composition root is
+        where the concrete class and the narrow contract meet.
+        """
+        return lambda: injector.get(TeclawProvisionService)
 
     @singleton
     @provider

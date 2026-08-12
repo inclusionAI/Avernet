@@ -260,3 +260,56 @@ class TestTenantIsolation:
         from agentclaw.community.utils.avernet_tenant_guard import _GUARDED_MODELS
 
         assert BotStartupScriptModel in _GUARDED_MODELS
+
+
+def test_the_service_imports_standalone():
+    """Importing this module first must not raise.
+
+    It briefly depended on ``TeclawProvisionService`` directly, which reaches
+    ``service_bot`` → ``bot_service`` → ``default_image_policy_listener`` and
+    back into the still-initialising ``teclaw_provision_service``. The suite hid
+    it completely — something always imported that chain first — so only a
+    standalone import catches it. That cycle is pre-existing and not this
+    feature's to fix; what this pins is that the feature does not add a new
+    entry point into it.
+    """
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from agentclaw.community.core.bot_startup_script.services"
+            ".startup_script_service import BotStartupScriptService",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+class TestModifierWidth:
+    """``modifier`` is varchar(1024) and the actor is composed, not raw."""
+
+    def test_an_over_long_actor_is_truncated_not_rejected(self, svc):
+        """`app:{id}:on-behalf-of:{owner_id}` can exceed the column on its own,
+        because owner_id is itself a 1024-character field. Failing the write
+        would blame the caller for the platform's formatting."""
+        from agentclaw.community.core.bot_startup_script.services import (
+            startup_script_service as mod,
+        )
+
+        actor = "app:7:on-behalf-of:" + "u" * 2000
+        record = svc.put(
+            entity_id="ent", bot_id="bot", script="echo hi", modifier=actor
+        )
+        assert len(record.modifier) == mod.MAX_MODIFIER_CHARS
+        # The acting application survives; only the delegating tail is lost.
+        assert record.modifier.startswith("app:7:on-behalf-of:")
+
+    def test_an_ordinary_actor_is_stored_verbatim(self, svc):
+        record = svc.put(
+            entity_id="ent", bot_id="bot", script="echo hi", modifier="alice"
+        )
+        assert record.modifier == "alice"
