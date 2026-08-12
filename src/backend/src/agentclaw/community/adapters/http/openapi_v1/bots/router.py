@@ -32,6 +32,7 @@ from agentclaw.community.adapters.http.openapi_v1.clusters import (
     validate_engine_cluster,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
+    StartupScriptSupportUnknownError,
     StartupScriptUnsupportedError,
     UnsupportedEngineError,
 )
@@ -72,6 +73,8 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     validate_bot_name,
 )
 from agentclaw.community.api.bot_startup_script_service import (
+    SUPPORTED,
+    UNKNOWN,
     BotStartupScriptRunReaderProtocol,
     BotStartupScriptServiceProtocol,
 )
@@ -767,8 +770,8 @@ async def update_bot_engine_config(
 def _startup_script_target(
     bot: dict[str, Any],
     startup_script_service: BotStartupScriptServiceProtocol,
-) -> tuple[str, bool, str]:
-    """Resolve ``(entity_id, supported, unsupported_reason)`` for a bot.
+) -> tuple[str, str, str]:
+    """Resolve ``(entity_id, support_state, reason)`` for a bot.
 
     ``entity_id`` is a storage key resolved here from the bot record — it is
     never a request parameter or a response field, per the group contract.
@@ -776,15 +779,15 @@ def _startup_script_target(
     entity_id = bot.get("entity_id")
     if not entity_id:
         raise BotNotFoundError("bot has no associated entity")
-    supported, reason = startup_script_service.resolve_support(bot)
-    return entity_id, supported, reason
+    state, reason = startup_script_service.resolve_support(bot)
+    return entity_id, state, reason
 
 
 def _startup_script_payload(
     bot_id: str,
     record: Any,
-    supported: bool,
-    unsupported_reason: str,
+    state: str,
+    reason: str,
 ) -> StartupScript:
     """Shape a stored record — or its absence — as the response model."""
     return StartupScript(
@@ -793,8 +796,11 @@ def _startup_script_payload(
         size_bytes=record.size_bytes if record is not None else 0,
         updated_by=record.modifier if record is not None else "",
         updated_at=record.gmt_modified if record is not None else None,
-        supported=supported,
-        unsupported_reason=unsupported_reason,
+        # UNKNOWN reads as not-supported here rather than inventing a third
+        # value in the response: GET must stay answerable, and the reason says
+        # the check was inconclusive. A *write* is what distinguishes them.
+        supported=state == SUPPORTED,
+        unsupported_reason=reason,
     )
 
 
@@ -821,11 +827,9 @@ async def get_bot_startup_script(
     so a caller can discover *why* before trying to write.
     """
     bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
-    entity_id, supported, reason = _startup_script_target(bot, startup_script_service)
+    entity_id, state, reason = _startup_script_target(bot, startup_script_service)
     record = startup_script_service.get(entity_id=entity_id, bot_id=bot_id)
-    return envelope(
-        _startup_script_payload(bot_id, record, supported, reason), request
-    )
+    return envelope(_startup_script_payload(bot_id, record, state, reason), request)
 
 
 @router.put(
@@ -851,8 +855,12 @@ async def update_bot_startup_script(
     silent no-op the caller could not distinguish from success.
     """
     bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
-    entity_id, supported, reason = _startup_script_target(bot, startup_script_service)
-    if not supported:
+    entity_id, state, reason = _startup_script_target(bot, startup_script_service)
+    if state == UNKNOWN:
+        # Retryable — do not tell the owner of a healthy bot that it can never
+        # run a script just because a binding lookup was inconclusive.
+        raise StartupScriptSupportUnknownError(reason)
+    if state != SUPPORTED:
         raise StartupScriptUnsupportedError(reason)
     record = startup_script_service.put(
         entity_id=entity_id,
@@ -861,7 +869,7 @@ async def update_bot_startup_script(
         # From the request principal, never the body.
         modifier=owner_id,
     )
-    return envelope(_startup_script_payload(bot_id, record, True, ""), request)
+    return envelope(_startup_script_payload(bot_id, record, SUPPORTED, ""), request)
 
 
 @router.delete(

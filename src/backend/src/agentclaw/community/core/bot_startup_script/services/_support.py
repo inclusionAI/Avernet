@@ -23,10 +23,22 @@ _PROVIDERS_WITH_A_START_SEQUENCE = frozenset(
 )
 
 
+#: Kept byte-identical to the re-export in ``api/bot_startup_script_service.py``,
+#: which the HTTP adapter branches on (core must not import that layer).
+SUPPORTED = "supported"
+UNSUPPORTED = "unsupported"
+UNKNOWN = "unknown"
+
+
 def resolve_support(
     bot: dict[str, Any], device_provider: str | None
-) -> tuple[bool, str]:
-    """Return ``(supported, reason)`` for a bot; ``reason`` is "" when supported.
+) -> tuple[str, str]:
+    """Return ``(state, reason)`` — one of SUPPORTED / UNSUPPORTED / UNKNOWN.
+
+    Three states rather than two because "this bot can never run a script"
+    and "we could not find out right now" call for different answers: the
+    first is a permanent refusal, the second is retryable and must not tell
+    an owner their healthy bot is unsupported.
 
     Two real deployments cannot run one, and neither is hypothetical:
 
@@ -43,7 +55,7 @@ def resolve_support(
 
     engine = str(bot.get("active_engine") or "").strip().lower()
     if engine == TECLAW_DEVICE_PROVIDER:
-        return False, "teclaw bots are provisioned without a start sequence"
+        return UNSUPPORTED, "teclaw bots are provisioned without a start sequence"
 
     if device_provider is None:
         # Two different situations reach here and they must not be conflated.
@@ -54,16 +66,18 @@ def resolve_support(
         #
         # A bot that HAS a binding_id but arrived without a provider is a
         # swallowed lookup (``get_bot`` wraps that read in a warning-only
-        # try/except). Allowing that would let a legacy arca bot store a script
-        # that never runs, which is the failure this check exists to prevent.
+        # try/except). Allowing it would let a legacy arca bot store a script
+        # that never runs; refusing it permanently would tell the owner of a
+        # healthy bot that it can never run one. Neither — say so, and let the
+        # caller retry.
         if bot.get("binding_id"):
-            return False, "device provider is unavailable for this bot"
-        return True, ""
+            return UNKNOWN, "the bot's device provider could not be determined"
+        return SUPPORTED, ""
 
     if device_provider not in _PROVIDERS_WITH_A_START_SEQUENCE:
         return (
-            False,
+            UNSUPPORTED,
             f"bots on the {device_provider!r} device provider have no start sequence",
         )
 
-    return True, ""
+    return SUPPORTED, ""

@@ -45,6 +45,7 @@ from agentclaw.community.core.bot_startup_script.services.startup_script_service
 from agentclaw.community.adapters.http.openapi_v1.errors import (
     GrantNotResolvableError,
     ClusterMismatchError,
+    StartupScriptSupportUnknownError,
     StartupScriptUnsupportedError,
     MissingPrincipalError,
     UnsupportedEngineError,
@@ -269,6 +270,9 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # ... and refused outright for a bot whose container cannot run one,
     # rather than stored where it would silently never execute.
     StartupScriptUnsupportedError: (409, "Startup script is not supported for this bot"),
+    # Retryable, and deliberately not the 409 above: an inconclusive check
+    # must not tell an owner their healthy bot can never run a script.
+    StartupScriptSupportUnknownError: (503, "Startup script support could not be determined"),
     # Identity domain errors — ValueError subclasses raised by IdentityService
     # validate_entity_type / validate_file_type.
     InvalidIdentityEntityTypeError: (400, "Invalid entity type"),

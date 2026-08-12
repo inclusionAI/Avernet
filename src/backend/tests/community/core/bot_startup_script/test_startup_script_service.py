@@ -112,7 +112,7 @@ class TestResolveSupport:
         }
 
     def test_baas_backed_bot_is_supported(self, svc):
-        assert svc.resolve_support(self._bot()) == (True, "")
+        assert svc.resolve_support(self._bot()) == ("supported", "")
 
     def test_personal_and_service_bots_get_the_same_answer(self, svc):
         """They share one allocator and one payload builder."""
@@ -122,7 +122,7 @@ class TestResolveSupport:
 
     def test_teclaw_bot_is_unsupported(self, svc):
         supported, reason = svc.resolve_support(self._bot(engine="teclaw"))
-        assert supported is False
+        assert supported == "unsupported"
         assert "teclaw" in reason
 
     def test_teclaw_is_unsupported_even_on_the_baas_provider(self, svc):
@@ -130,12 +130,12 @@ class TestResolveSupport:
         supported, reason = svc.resolve_support(
             self._bot(engine="TeClaw", provider="baas")
         )
-        assert supported is False
+        assert supported == "unsupported"
         assert "teclaw" in reason
 
     def test_legacy_arca_provider_is_unsupported(self, svc):
         supported, reason = svc.resolve_support(self._bot(provider="arca"))
-        assert supported is False
+        assert supported == "unsupported"
         assert "arca" in reason
 
     def test_a_bot_with_no_binding_yet_is_supported(self, svc):
@@ -143,19 +143,19 @@ class TestResolveSupport:
         most wants to attach a script. Refusing there blocks the main use case,
         and every non-teclaw bot created today is baas-backed anyway."""
         supported, reason = svc.resolve_support({"active_engine": "openclaw"})
-        assert supported is True
+        assert supported == "supported"
         assert reason == ""
 
     def test_teclaw_with_no_binding_is_still_unsupported(self, svc):
         """Engine is checked before the provider, so the gap does not swallow it."""
         supported, reason = svc.resolve_support({"active_engine": "teclaw"})
-        assert supported is False
+        assert supported == "unsupported"
         assert "teclaw" in reason
 
     def test_the_local_provider_is_supported(self, svc):
         """LocalDeviceService allocates through _build_create_bot_payload
         (local_device_service.py:252), so it delivers the script like baas."""
-        assert svc.resolve_support(self._bot(provider="local")) == (True, "")
+        assert svc.resolve_support(self._bot(provider="local")) == ("supported", "")
 
     def test_a_swallowed_binding_lookup_is_refused_not_assumed_supported(self, svc):
         """get_bot wraps the binding read in a warning-only try/except, so a
@@ -165,8 +165,10 @@ class TestResolveSupport:
         supported, reason = svc.resolve_support(
             {"active_engine": "openclaw", "binding_id": 77}
         )
-        assert supported is False
+        # "unknown", not "unsupported" — the check was inconclusive, and a
+        # healthy bot must not be told it can never run a script.
+        assert supported == "unknown"
         assert reason
 
     def test_no_binding_id_at_all_is_still_supported(self, svc):
-        assert svc.resolve_support({"active_engine": "openclaw"}) == (True, "")
+        assert svc.resolve_support({"active_engine": "openclaw"}) == ("supported", "")

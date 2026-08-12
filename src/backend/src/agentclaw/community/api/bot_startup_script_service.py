@@ -26,6 +26,13 @@ if TYPE_CHECKING:
     )
 
 
+#: Support states returned by ``resolve_support``. Re-exported here so the
+#: HTTP adapter can branch on them without importing a core service module.
+SUPPORTED = "supported"
+UNSUPPORTED = "unsupported"
+UNKNOWN = "unknown"
+
+
 @runtime_checkable
 class BotStartupScriptServiceProtocol(Protocol):
     """Read, replace and clear a bot's startup script."""
@@ -46,8 +53,8 @@ class BotStartupScriptServiceProtocol(Protocol):
         """Clear the script. Idempotent."""
         ...
 
-    def resolve_support(self, bot: dict) -> tuple[bool, str]:
-        """Return ``(supported, reason)``; ``reason`` is "" when supported."""
+    def resolve_support(self, bot: dict) -> tuple[str, str]:
+        """Return ``(state, reason)`` — "supported" / "unsupported" / "unknown"."""
         ...
 
     def get_body(self, *, entity_id: str, bot_id: str) -> str:

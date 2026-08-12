@@ -112,7 +112,7 @@ def startup_script():
     m.get.return_value = None
     m.delete.return_value = True
     # Supported by default; the unsupported cases override this per test.
-    m.resolve_support.return_value = (True, "")
+    m.resolve_support.return_value = ("supported", "")
     return m
 
 
@@ -992,7 +992,7 @@ def test_startup_script_put_rejects_an_attempt_to_set_audit_fields(
 def test_startup_script_put_is_refused_for_a_teclaw_bot(client, svc, startup_script):
     """BOT is teclaw — provisioned without a start sequence."""
     startup_script.resolve_support.return_value = (
-        False,
+        "unsupported",
         "teclaw bots are provisioned without a start sequence",
     )
     resp = client.put("/openapi/v1/bots/b1/startup-script", json={"script": "echo hi"})
@@ -1012,7 +1012,7 @@ def test_startup_script_put_is_refused_for_a_legacy_arca_bot(client, svc, startu
         "device_binding": {"device_id": "dev-9", "device_provider": "arca"},
     }
     startup_script.resolve_support.return_value = (
-        False,
+        "unsupported",
         "bots on the 'arca' device provider have no start sequence",
     )
     resp = client.put("/openapi/v1/bots/b1/startup-script", json={"script": "echo hi"})
@@ -1028,7 +1028,7 @@ def test_startup_script_get_still_answers_for_an_unsupported_bot(
 ):
     """A caller must be able to discover *why* before attempting a write."""
     startup_script.resolve_support.return_value = (
-        False,
+        "unsupported",
         "teclaw bots are provisioned without a start sequence",
     )
     data = _ok(client.get("/openapi/v1/bots/b1/startup-script"))
@@ -1107,3 +1107,17 @@ def test_last_start_requires_ownership(client, svc):
     assert (
         client.get("/openapi/v1/bots/b1/startup-script/last-start").status_code == 404
     )
+
+
+def test_startup_script_put_is_retryable_when_support_is_inconclusive(
+    client, svc, startup_script
+):
+    """A swallowed binding lookup must not be reported as a permanent 409."""
+    svc.get_bot.return_value = _SUPPORTED_BOT
+    startup_script.resolve_support.return_value = (
+        "unknown",
+        "the bot's device provider could not be determined",
+    )
+    resp = client.put("/openapi/v1/bots/b1/startup-script", json={"script": "echo hi"})
+    assert resp.status_code == 503, resp.json()
+    startup_script.put.assert_not_called()

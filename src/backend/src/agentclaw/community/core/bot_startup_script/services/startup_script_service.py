@@ -95,8 +95,8 @@ class BotStartupScriptService:
             env=get_current_env(), entity_id=entity_id, bot_id=bot_id
         )
 
-    def resolve_support(self, bot: dict) -> tuple[bool, str]:
-        """Return ``(supported, reason)`` for a bot; ``reason`` is "" when supported.
+    def resolve_support(self, bot: dict) -> tuple[str, str]:
+        """Return ``(state, reason)`` — SUPPORTED / UNSUPPORTED / UNKNOWN.
 
         Lives on the service so the HTTP adapter can reach it through the
         Service API Protocol — a router importing the rule directly would cross
