@@ -2,7 +2,7 @@
 
 > Status legend: `[ ]` todo · `[~]` in-progress · `[x]` done · `[!]` blocked
 
-## Task 1: Store a bot's startup script
+## [x] Task 1: Store a bot's startup script
 - **Goal:** Persist one script per bot with the audit fields the public API needs.
 - **Files:** `src/backend/.../core/bot_startup_script/sql/2026_08_10_bot_startup_script.sql`,
   `.../core/bot_startup_script/repository/models.py` (ORM model),
@@ -11,18 +11,18 @@
   `.../core/bot_startup_script/services/startup_script_service.py`,
   `src/backend/.../api/bot_startup_script_service.py`
 - **Done when:**
-  - [ ] DDL matches `plan.md`; table created on a clean SQLite and MySQL boot.
-  - [ ] The repository contract lives under `core/repository/protocols/bot/` with
+  - [x] DDL matches `plan.md`; table created on a clean SQLite and MySQL boot.
+  - [x] The repository contract lives under `core/repository/protocols/bot/` with
         `@abstractmethod` on every member, and the implementation under
         `core/repository/implementations/bot/` declares it as a base — so omitting
         a member fails at construction, per `core/repository/README.md:8`.
-  - [ ] `get` on a bot that never set one returns an empty record, not an error.
-  - [ ] `put` stores body, `size_bytes` and the modifier; over-limit raises a typed
+  - [x] `get` on a bot that never set one returns an empty record, not an error.
+  - [x] `put` stores body, `size_bytes` and the modifier; over-limit raises a typed
         error naming the limit.
-  - [ ] `delete` is idempotent.
-  - [ ] `get_body` returns `""` for an unset bot — the payload path must never
+  - [x] `delete` is idempotent.
+  - [x] `get_body` returns `""` for an unset bot — the payload path must never
         branch on `None`.
-  - [ ] Protocol declares real signatures; the concrete service does **not**
+  - [x] Protocol declares real signatures; the concrete service does **not**
         inherit it; the pair is registered in `_PAIRS`
         (`test_service_api_conformance.py:76`).
 - **Depends on:** —

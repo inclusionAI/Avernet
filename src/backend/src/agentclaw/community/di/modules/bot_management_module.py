@@ -47,7 +47,16 @@ from agentclaw.community.core.repository.protocols.bot import RenderScreenReposi
 from agentclaw.community.core.bot_management.render_screen.services.render_screen_service import (
     RenderScreenService,
 )
-from agentclaw.community.core.repository.protocols.bot import BotRestartLockRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import (
+    BotRestartLockRepositoryProtocol,
+    BotStartupScriptRepositoryProtocol,
+)
+from agentclaw.community.api.bot_startup_script_service import (
+    BotStartupScriptServiceProtocol,
+)
+from agentclaw.community.core.bot_startup_script.services.startup_script_service import (
+    BotStartupScriptService,
+)
 from agentclaw.community.core.bot_app_grant.services import (
     BotAppGrantService,
 )
@@ -109,6 +118,7 @@ from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
 from agentclaw.community.core.repository.implementations.bot.bot import BotRepository as UnifiedBotRepository
 from agentclaw.community.core.repository.implementations.bot.restart_lock import BotRestartLockRepository
+from agentclaw.community.core.repository.implementations.bot.startup_script import BotStartupScriptRepository
 from agentclaw.community.core.repository.implementations.bot.render_screen import RenderScreenRepository as UnifiedRenderScreenRepository
 from agentclaw.community.core.repository.implementations.bot.template import TemplateRepository as UnifiedTemplateRepository
 
@@ -173,6 +183,24 @@ class BotManagementModule(Module):
         binder.bind(
             BotRestartLockRepositoryProtocol,
             to=BotRestartLockRepository,
+            scope=singleton,
+        )
+        # BotStartupScriptRepository: single unified ORM impl, same shape as the
+        # restart lock above — UNIQUE(env, entity_id, bot_id) on
+        # ac_bot_startup_script, one script per bot at most.
+        binder.bind(
+            BotStartupScriptRepositoryProtocol,
+            to=BotStartupScriptRepository,
+            scope=singleton,
+        )
+        # The Service API Protocol resolves to the same singleton as the concrete
+        # class, so routers can Inject the Protocol per the http-adapter rule.
+        binder.bind(
+            BotStartupScriptService, to=BotStartupScriptService, scope=singleton
+        )
+        binder.bind(
+            BotStartupScriptServiceProtocol,
+            to=BotStartupScriptService,
             scope=singleton,
         )
         # TemplateService: constructed with injected TemplateRepository.
