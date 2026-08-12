@@ -553,3 +553,26 @@ class TestAKeyThatChangedHands:
         assert svc.get_body(entity_id="ent", bot_id="bot", bot_incarnation=2) == (
             "second"
         )
+
+
+def test_the_supersession_failure_is_part_of_the_service_api_surface():
+    """The adapter maps this to a 404, so it must be a declared contract rather
+    than a core detail an adapter happens to import.
+
+    An implementation that raised something else for the same condition would
+    turn the documented 404 into a 500, and nothing would catch it — the test
+    doubles construct the concrete error directly.
+    """
+    from agentclaw.community.api import bot_startup_script_service as api
+
+    assert hasattr(api, "StartupScriptSupersededError")
+    assert "StartupScriptSupersededError" in api.__all__
+    # Same type, not a parallel definition — an adapter catching the api name
+    # must catch what the repository actually raises.
+    from agentclaw.community.core.bot_startup_script.errors import (
+        StartupScriptSupersededError,
+    )
+
+    assert api.StartupScriptSupersededError is StartupScriptSupersededError
+    # And the contract says so where an implementer would look.
+    assert "SupersededError" in api.BotStartupScriptServiceProtocol.put.__doc__

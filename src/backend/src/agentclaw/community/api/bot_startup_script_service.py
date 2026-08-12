@@ -29,6 +29,15 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
+# Re-exported, not redefined: the *repository* raises this, and ``core`` may not
+# import ``api``, so the type has to live in core. Naming it here makes it part
+# of the Service API's declared surface rather than a core detail an adapter
+# happens to know about — an implementation that swallowed it, or raised
+# something else, would turn this route's documented 404 into a 500.
+from agentclaw.community.core.bot_startup_script.errors import (
+    StartupScriptSupersededError,
+)
+
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_startup_script.repository.models import (
         BotStartupScriptRecord,
@@ -104,6 +113,7 @@ __all__ = [
     "BotStartupScriptServiceProtocol",
     "MAX_SCRIPT_BYTES",
     "StartupScriptNotEncodableError",
+    "StartupScriptSupersededError",
     "StartupScriptTooLargeError",
     "SUPPORTED",
     "UNSUPPORTED",
@@ -140,6 +150,15 @@ class BotStartupScriptServiceProtocol(Protocol):
 
         The stored row is stamped with ``bot_incarnation``, which is what every
         later read checks it against.
+
+        Raises :class:`StartupScriptSupersededError` when the stored row already
+        belongs to a *later* incarnation — the writer's bot was deleted and its
+        identifier handed on mid-request. **Every implementation must raise that
+        type for that condition**, because callers are entitled to distinguish
+        it: the public route answers it as a 404 on the named bot, and an
+        implementation that raised something else would turn that into a 500.
+        Storing the body anyway is not a permitted alternative; it would destroy
+        the current owner's script.
         """
         ...
 

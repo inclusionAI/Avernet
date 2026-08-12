@@ -18,8 +18,6 @@ from typing import Any
 from agentclaw.community.api.bot_startup_script_service import (
     SUPPORTED,
     BotStartupScriptServiceProtocol,
-)
-from agentclaw.community.core.bot_startup_script.errors import (
     StartupScriptSupersededError,
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol

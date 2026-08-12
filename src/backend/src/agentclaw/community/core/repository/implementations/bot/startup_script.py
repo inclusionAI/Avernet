@@ -48,8 +48,20 @@ def _script_key(*, env: str, entity_id: str, bot_id: str) -> str:
     cap before the other two are counted. Hashing gives a fixed 64-character
     key while the real columns keep their true widths.
 
-    NUL-separated so ``("a", "bc")`` and ``("ab", "c")`` cannot collide by
-    concatenation; no id may contain a NUL.
+    **Length-prefixed, not delimiter-joined.** A separator only disambiguates
+    while the separator cannot occur inside a component, and nothing enforces
+    that: ``create_bot`` takes caller-supplied ``bot_id``/``entity_id`` and
+    neither is validated against control characters. Under the old NUL-joined
+    form ``(entity_id="a\0b", bot_id="c")`` and ``(entity_id="a", bot_id="b\0c")``
+    hashed identically, so one bot's write landed on another bot's row — and
+    with the incarnation stamp in place the victim's own next write is then
+    refused as stale, locking it out of its own script rather than merely
+    clobbering it once.
+
+    Prefixing each component with its length is injective for *every* input, so
+    the key stops depending on an invariant nobody upholds. Rejecting control
+    characters at the identifier boundary is still worth doing, but it is now
+    defence in depth rather than what makes this function correct.
 
     Every read filters on this rather than on the three columns it is built
     from. That is not a micro-optimisation: once the uniqueness key moved here,
@@ -58,7 +70,7 @@ def _script_key(*, env: str, entity_id: str, bot_id: str) -> str:
     means there is exactly one index to maintain instead of a unique key plus a
     lookup key that could drift apart.
     """
-    joined = "\0".join((env, entity_id, bot_id))
+    joined = "".join(f"{len(part)}:{part}" for part in (env, entity_id, bot_id))
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
 

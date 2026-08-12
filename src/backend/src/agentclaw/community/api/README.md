@@ -55,6 +55,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_app_grant.models    # BotAppGrantRecord — typed in bot_app_grant_service.py (real signatures, so the conformance gate can compare them)
   - agentclaw.community.core.bot_chat.schemas        # ConversationDetail, HealthCheckData — typed in bot_chat_service.py
   - agentclaw.community.core.bot_startup_script.repository.models  # BotStartupScriptRecord — typed in bot_startup_script_service.py (real signatures, so the conformance gate can compare them)
+  - agentclaw.community.core.bot_startup_script.errors  # StartupScriptSupersededError — re-exported so the Protocol declares the failure its callers must distinguish; defined in core because the repository raises it and core may not import api
   - agentclaw.community.core.caller_identity.contracts  # Caller identity API DTOs and stable errors
   - agentclaw.community.core.caller_identity.credential  # CallerToken — typed in caller_credential.py
   - agentclaw.community.core.caller_identity.protocols  # Caller collaborators — typed in caller_identity_service.py
