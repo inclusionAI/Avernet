@@ -568,6 +568,7 @@ sequenceDiagram
     else MISS
         D-->>ORC: list[TaskNode](assignee 仍 None,标 miss_events)
         ORC->>ORC: on_miss:闸门→miss_events→plan→add→消费
+    end
     ORC->>R: start_run(toDoTaskList)
     R-->>ORC: list[Boolean]
     R->>X: 按 run_mode 投递
