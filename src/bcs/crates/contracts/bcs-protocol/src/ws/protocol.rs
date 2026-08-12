@@ -494,7 +494,7 @@ pub struct GroupContextInput {
     pub driver_bot: String,
     pub originator: String,
     pub participants: Vec<GroupContextParticipant>,
-    /// BCS session layer id (`{group_id}:{8_hex}`). None when not pinned to a session.
+    /// Canonical BCS session id. None when not pinned to a session.
     pub bcs_session_id: Option<String>,
 }
 
@@ -542,6 +542,8 @@ impl GroupContext {
 /// Parameters for chat.send request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatSendParams {
+    /// Canonical BCS session id for protocol v3+, or the legacy group-derived
+    /// key for older/unpinned deliveries.
     pub session_key: String,
     pub bcs_group_id: String,
     pub message: MessageContent,
@@ -551,7 +553,7 @@ pub struct ChatSendParams {
     pub timeout_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub idempotency_key: Option<String>,
-    /// BCS session layer id (`{group_id}:{8_hex}`). None when not pinned to a session.
+    /// BCS session layer id. None when not pinned to a session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bcs_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -572,7 +574,8 @@ pub struct ChatSendResponse {
 /// The bot receives the message for context but should NOT respond.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatInjectParams {
-    /// Session key for client identification.
+    /// Canonical BCS session id for protocol v3+, or the legacy group-derived
+    /// key for older/unpinned deliveries.
     pub session_key: String,
     /// BCS group ID for this session.
     pub bcs_group_id: String,
@@ -582,7 +585,7 @@ pub struct ChatInjectParams {
     pub channel: ChannelInfo,
     /// Group context explaining why this bot received the message.
     pub session_context: GroupContext,
-    /// BCS session layer id (`{group_id}:{8_hex}`). None when not pinned to a session.
+    /// BCS session layer id. None when not pinned to a session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bcs_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -872,6 +875,22 @@ pub fn build_session_key(wire_id: &str) -> String {
     format!("group:{}{}", prefix, take)
 }
 
+/// Select the engine-facing session discriminator for a delivery frame.
+/// Protocol v3 bots receive the canonical BCS session id; older bots keep the
+/// historical group-derived key.
+fn delivery_session_key(
+    wire_id: &str,
+    bcs_session_id: Option<&str>,
+    supports_session_field: bool,
+) -> String {
+    if supports_session_field {
+        if let Some(session_id) = bcs_session_id {
+            return session_id.to_string();
+        }
+    }
+    build_session_key(wire_id)
+}
+
 fn canonical_generated_group_id(rest: &str) -> Option<&str> {
     let group_id = rest.split_once(':').map_or(rest, |(group_id, _)| group_id);
     let token = group_id
@@ -927,7 +946,7 @@ pub fn build_chat_inject_frame(
     );
     let supports_session_field = protocol_version >= 3;
     let wire_id = legacy_aware_wire_group_id(session_id, bcs_session_id, supports_session_field);
-    let session_key = build_session_key(wire_id);
+    let session_key = delivery_session_key(wire_id, bcs_session_id, supports_session_field);
     let inject = ChatInjectParams {
         session_key,
         bcs_group_id: wire_id.to_string(),
@@ -1008,7 +1027,7 @@ pub fn build_chat_send_frame(
     // bcs_group_id for backward compat (old BCN plugins key on it).
     let supports_session_field = protocol_version >= 3;
     let wire_id = legacy_aware_wire_group_id(session_id, bcs_session_id, supports_session_field);
-    let session_key = build_session_key(wire_id);
+    let session_key = delivery_session_key(wire_id, bcs_session_id, supports_session_field);
     let send = ChatSendParams {
         session_key,
         bcs_group_id: wire_id.to_string(),
@@ -1080,7 +1099,7 @@ pub fn build_direct_chat_send_frame(
     );
     let supports_session_field = protocol_version >= 3;
     let wire_id = legacy_aware_wire_group_id(session_id, bcs_session_id, supports_session_field);
-    let session_key = build_session_key(wire_id);
+    let session_key = delivery_session_key(wire_id, bcs_session_id, supports_session_field);
     let send = ChatSendParams {
         session_key,
         bcs_group_id: wire_id.to_string(),
@@ -1148,7 +1167,7 @@ pub fn build_direct_chat_inject_frame(
     );
     let supports_session_field = protocol_version >= 3;
     let wire_id = legacy_aware_wire_group_id(session_id, bcs_session_id, supports_session_field);
-    let session_key = build_session_key(wire_id);
+    let session_key = delivery_session_key(wire_id, bcs_session_id, supports_session_field);
     let inject = ChatInjectParams {
         session_key,
         bcs_group_id: wire_id.to_string(),
@@ -2051,6 +2070,7 @@ mod tests {
                 assert_eq!(p.bcs_group_id, "grp-test");
                 // bcs_session_id is set explicitly
                 assert_eq!(p.bcs_session_id.as_deref(), Some("grp-test:abc12345"));
+                assert_eq!(p.session_key, "grp-test:abc12345");
                 assert_eq!(p.channel.user_id.as_deref(), Some("Bot1"));
                 assert_eq!(p.channel.actor_id.as_deref(), Some("b1"));
                 assert_eq!(p.channel.actor_name.as_deref(), Some("Bot1"));
@@ -2074,6 +2094,7 @@ mod tests {
                 assert_eq!(p.bcs_group_id, "grp-test:abc12345");
                 // bcs_session_id is NOT set (None → not serialized due to skip_serializing_if)
                 assert_eq!(p.bcs_session_id, None);
+                assert_eq!(p.session_key, "group:grp-test");
             }
             _ => panic!("expected Request frame"),
         }
@@ -2141,6 +2162,7 @@ mod tests {
             BcsFrame::Request(req) => {
                 let p: ChatInjectParams = serde_json::from_value(req.params.unwrap()).unwrap();
                 assert_eq!(p.bcs_session_id.as_deref(), Some("grp-test:abc12345"));
+                assert_eq!(p.session_key, "grp-test:abc12345");
                 assert_eq!(p.channel.user_id.as_deref(), Some("Bot1"));
                 assert_eq!(p.channel.actor_id.as_deref(), Some("b1"));
                 assert_eq!(p.channel.actor_name.as_deref(), Some("Bot1"));

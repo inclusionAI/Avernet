@@ -929,6 +929,10 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
         version: 12,
         name: "group_participant_tags",
     },
+    SqliteMigration {
+        version: 13,
+        name: "expand_session_ids",
+    },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -1225,6 +1229,9 @@ async fn apply_sqlite_migration_body(
         10 => migrate_sqlite_eventing_plaintext_endpoint(db).await,
         11 => ensure_sqlite_group_opening_message_column(db).await,
         12 => add_sqlite_group_participant_tags_schema(db).await,
+        // SQLite stores session identifiers as unbounded TEXT, so version 13
+        // records dialect parity with the MySQL/OceanBase VARCHAR expansion.
+        13 => Ok(()),
         _ => Ok(()),
     }
 }
@@ -1577,6 +1584,11 @@ mod tests {
                     12,
                     "group_participant_tags".to_string(),
                     "sqlite".to_string()
+                ),
+                (
+                    13,
+                    "expand_session_ids".to_string(),
+                    "sqlite".to_string()
                 )
             ]
         );
@@ -1589,7 +1601,7 @@ mod tests {
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 12);
+        assert_eq!(report.pending_versions.len(), 13);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
         assert!(report.pending_versions[0].statements.is_empty());
@@ -1628,6 +1640,8 @@ mod tests {
         assert_eq!(report.pending_versions[10].name, "group_opening_message");
         assert_eq!(report.pending_versions[11].version, 12);
         assert_eq!(report.pending_versions[11].name, "group_participant_tags");
+        assert_eq!(report.pending_versions[12].version, 13);
+        assert_eq!(report.pending_versions[12].name, "expand_session_ids");
         Ok(())
     }
 
@@ -1684,6 +1698,11 @@ mod tests {
                     12,
                     "group_participant_tags".to_string(),
                     "sqlite".to_string()
+                ),
+                (
+                    13,
+                    "expand_session_ids".to_string(),
+                    "sqlite".to_string()
                 )
             ]
         );
@@ -1711,7 +1730,11 @@ mod tests {
                 .iter()
                 .map(|migration| (migration.version, migration.name.as_str()))
                 .collect::<Vec<_>>(),
-            vec![(11, "group_opening_message"), (12, "group_participant_tags")]
+            vec![
+                (11, "group_opening_message"),
+                (12, "group_participant_tags"),
+                (13, "expand_session_ids"),
+            ]
         );
 
         run_sqlite_migrations(&db).await?;
@@ -1725,8 +1748,8 @@ mod tests {
         assert_eq!(
             migration_rows(&db).await?.last(),
             Some(&(
-                12,
-                "group_participant_tags".to_string(),
+                13,
+                "expand_session_ids".to_string(),
                 "sqlite".to_string()
             ))
         );

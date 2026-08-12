@@ -65,8 +65,8 @@ pub use group::{
 };
 pub use group_id::{
     GENERATED_SESSION_ID_SUFFIX_CHARS, GROUP_ID_PREFIX, GroupIdBuildError,
-    MAX_GENERATED_GROUP_ID_CHARS, MAX_SESSION_ID_CHARS, channel_group_id,
-    generated_group_id,
+    MAX_CHANNEL_TYPE_CHARS, MAX_GENERATED_GROUP_ID_CHARS, MAX_SESSION_ID_CHARS,
+    channel_group_id, generated_group_id, is_valid_channel_type,
 };
 pub use message::{
     AuditEntry, BCS_STATE_MACHINE_MESSAGE_SENDER, BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
