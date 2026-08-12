@@ -25,6 +25,8 @@ from agentclaw.community.core.bot_startup_script.repository.models import (
 from agentclaw.community.core.repository.protocols.bot import (
     BotStartupScriptRepositoryProtocol,
 )
+from datetime import datetime
+
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.log import get_logger
@@ -148,6 +150,14 @@ class BotStartupScriptRepository(
                 row.script = script
                 row.size_bytes = size_bytes
                 row.modifier = modifier
+                # Stamped explicitly, not left to the column's ``onupdate``.
+                # SQLAlchemy emits no UPDATE at all when every assigned value
+                # equals what is already there, so re-submitting an identical
+                # script would leave ``gmt_modified`` showing the *earlier*
+                # write — and the published contract says every write records
+                # who changed it and when. A caller who re-applies the same
+                # body has still written.
+                row.gmt_modified = datetime.now()
             db.flush()
             db.refresh(row)
             logger.info(

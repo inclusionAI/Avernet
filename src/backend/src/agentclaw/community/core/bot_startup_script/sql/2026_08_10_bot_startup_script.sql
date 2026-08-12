@@ -17,7 +17,12 @@
 CREATE TABLE `ac_bot_startup_script` (
   `id`            bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',
   `env`           varchar(20)   NOT NULL COMMENT '环境标识: prod/pre/dev',
-  `entity_id`     varchar(1024) NOT NULL COMMENT '实体ID（bot 的 entity_id）',
+  -- 256, not 1024: this column is in the uniqueness key below, and under
+  -- utf8mb4 a 1024-char column costs 4096 bytes there on its own — past
+  -- InnoDB's 3072-byte index-key cap, so the CREATE TABLE would be rejected
+  -- outright. 256 matches ac_bot_app_grant's keyed identity columns, which
+  -- document the same constraint. Budget: 64+20+256+256 chars = 2384 bytes.
+  `entity_id`     varchar(256)  NOT NULL COMMENT '实体ID（bot 的 entity_id）',
   `bot_id`        varchar(256)  NOT NULL COMMENT 'Bot ID',
   `script`        mediumtext    NOT NULL COMMENT '脚本正文（清空即删行）',
   `size_bytes`    int(11)       NOT NULL COMMENT '脚本正文字节数（UTF-8）',

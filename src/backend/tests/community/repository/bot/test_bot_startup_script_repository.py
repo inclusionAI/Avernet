@@ -218,3 +218,38 @@ def test_upsert_does_not_retry_forever(monkeypatch):
             size_bytes=7,
             modifier="u1",
         )
+
+
+def test_rewriting_an_identical_script_still_moves_the_audit_timestamp(repo):
+    """Re-submitting the same body is still a write, and the contract says every
+    write records who changed it and when.
+
+    SQLAlchemy emits no UPDATE when every assigned value already equals the
+    stored one, so without an explicit stamp ``gmt_modified`` would keep showing
+    the earlier request's time.
+    """
+    first = repo.upsert(
+        env="dev",
+        entity_id="ent",
+        bot_id="bot",
+        script="echo hi",
+        size_bytes=7,
+        modifier="alice",
+    )
+
+    again = repo.upsert(
+        env="dev",
+        entity_id="ent",
+        bot_id="bot",
+        script="echo hi",
+        size_bytes=7,
+        modifier="alice",
+    )
+
+    assert again.script == first.script, "the body is genuinely unchanged"
+    # Strictly later, not merely "not None": the whole failure mode is a stamp
+    # that stays put, and datetime.now() is microsecond-resolution so two
+    # back-to-back writes are distinguishable.
+    assert again.gmt_modified > first.gmt_modified, (
+        "an identical rewrite left the audit timestamp on the earlier write"
+    )

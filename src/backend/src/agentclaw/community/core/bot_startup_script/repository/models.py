@@ -61,8 +61,10 @@ class BotStartupScriptModel(Base):
         default=get_current_env,
         comment="环境标识: prod/pre/dev",
     )
+    # 256, not 1024 — it is part of the uniqueness key, and a 1024-char utf8mb4
+    # column would put that key past InnoDB's 3072-byte cap. See the DDL.
     entity_id = Column(
-        String(1024), nullable=False, comment="实体ID（bot 的 entity_id）"
+        String(256), nullable=False, comment="实体ID（bot 的 entity_id）"
     )
     bot_id = Column(String(256), nullable=False, comment="Bot ID")
     script = Column(Text, nullable=False, comment="脚本正文（清空即删行）")

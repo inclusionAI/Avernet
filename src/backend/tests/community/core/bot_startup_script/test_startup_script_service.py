@@ -313,3 +313,32 @@ class TestModifierWidth:
             entity_id="ent", bot_id="bot", script="echo hi", modifier="alice"
         )
         assert record.modifier == "alice"
+
+
+def test_the_uniqueness_key_fits_innodbs_index_limit():
+    """A utf8mb4 index key is capped at 3072 bytes; over it, MySQL refuses the
+    CREATE TABLE outright — the table simply would not exist in production.
+
+    SQLite does not enforce this, so the whole local suite and every SQLite-
+    backed test would pass against a table that can never be created. Hence an
+    arithmetic check rather than a boot test.
+    """
+    from agentclaw.community.core.bot_startup_script.repository.models import (
+        BotStartupScriptModel,
+    )
+
+    unique = [
+        c
+        for c in BotStartupScriptModel.__table__.constraints
+        if c.__class__.__name__ == "UniqueConstraint"
+    ]
+    assert unique, "the table must keep a uniqueness constraint"
+
+    for constraint in unique:
+        chars = sum(
+            getattr(col.type, "length", 0) or 0 for col in constraint.columns
+        )
+        assert chars * 4 <= 3072, (
+            f"{constraint.name} is {chars} chars = {chars * 4} utf8mb4 bytes, "
+            f"over InnoDB's 3072-byte index-key limit"
+        )
