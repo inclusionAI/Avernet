@@ -284,6 +284,7 @@ class AsyncChatClient:
         auth_token: str | None = None,
         app_id: str | None = None,
         chat_metadata: dict[str, str] | None = None,
+        attachments: list[Any] | None = None,
     ) -> tuple[str, list[Any]]:
         """发送消息并等待 chat 完成
 
@@ -378,6 +379,7 @@ class AsyncChatClient:
                         app_id=app_id,
                         timeout_ms=int(timeout * 1000) if timeout else None,
                         chat_metadata=chat_metadata,
+                        attachments=attachments,
                     )
                 except ChatRequestError as e:
                     logger.error(
@@ -433,6 +435,7 @@ class AsyncChatClient:
         auth_token: str | None = None,
         app_id: str | None = None,
         chat_metadata: dict[str, str] | None = None,
+        attachments: list[Any] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """流式发送消息，逐 chunk 产出 StreamChunk。
 
@@ -503,6 +506,7 @@ class AsyncChatClient:
                         app_id=app_id,
                         timeout_ms=int(timeout * 1000) if timeout else None,
                         chat_metadata=chat_metadata,
+                        attachments=attachments,
                     )
                 except ChatRequestError as e:
                     logger.error(
@@ -538,6 +542,7 @@ class AsyncChatClient:
         session_key: str | None = None,
         auth_token: str | None = None,
         chat_metadata: dict[str, str] | None = None,
+        attachments: list[Any] | None = None,
     ) -> None:
         """注入消息到已有会话，不等待响应
 
@@ -573,6 +578,7 @@ class AsyncChatClient:
                 message=message,
                 auth_token=auth_token,
                 chat_metadata=chat_metadata,
+                attachments=attachments,
             )
             logger.info(
                 "[inject] injected message not wait, return as soon as possible"

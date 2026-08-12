@@ -19,6 +19,11 @@ def mock_repository():
     repo.get_session = MagicMock(return_value=None)
     repo.save_session = MagicMock()
     repo.delete_session = MagicMock(return_value=True)
+    repo.add_owned_session = MagicMock()
+    repo.list_owned_sessions = MagicMock(return_value=[])
+    repo.get_owned_session = MagicMock(return_value=None)
+    repo.delete_owned_session = MagicMock(return_value=True)
+    repo.delete_all_owned_sessions = MagicMock(return_value=0)
     return repo
 
 

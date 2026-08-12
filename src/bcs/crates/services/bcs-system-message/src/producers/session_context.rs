@@ -185,7 +185,13 @@ fn initial_group_context_message(
     };
 
     let sections = vec![
-        group_info_section(group, Some(session_id), Some(topic), recipient, "自由聊天"),
+        group_info_section(
+            group,
+            Some(session_id),
+            Some(topic).filter(|t| !t.is_empty()),
+            recipient,
+            "自由聊天",
+        ),
         format!("## 参与者:\n{}", participant_table(group)),
         format!(
             "## 工具说明 ({})\n{}",
@@ -227,7 +233,13 @@ fn manager_worker_initial_message(
     let task = if is_manager { task_input } else { None };
 
     let sections = vec![
-        group_info_section(group, Some(session_id), Some(topic), recipient, "manager_worker"),
+        group_info_section(
+            group,
+            Some(session_id),
+            Some(topic).filter(|t| !t.is_empty()),
+            recipient,
+            "manager_worker",
+        ),
         format!("## 参与者:\n{}", participant_table(group)),
         skill_section(),
         task_section(task),

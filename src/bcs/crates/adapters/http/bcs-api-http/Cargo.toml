@@ -14,6 +14,9 @@ workspace = true
 async-trait = { workspace = true }
 axum = { workspace = true }
 bcs-service-api = { workspace = true }
+bcs-storage-api = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
 jsonwebtoken = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -23,6 +26,7 @@ thiserror = { workspace = true }
 time = { workspace = true, features = ["parsing"] }
 tracing = { workspace = true }
 ulid = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

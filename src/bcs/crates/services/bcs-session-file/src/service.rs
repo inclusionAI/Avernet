@@ -282,6 +282,7 @@ impl SessionFileService for SessionFileServiceImpl {
             file: row,
             client_target_json,
             expires_at: prepared.expires_at,
+            proxy_upload: matches!(prepared.client_target, ClientUploadTarget::ProxyViaBcs),
         })
     }
 
@@ -1107,6 +1108,7 @@ mod tests {
     async fn prepare_single_returns_proxy_url_and_pending_row() {
         let (s, _, repo) = build_svc(local_caps());
         let r = s.prepare_upload(sample_prepare(100)).await.unwrap();
+        assert!(r.proxy_upload);
         // row is Pending
         let row = repo.get("g1:abcd1234", &r.file.file_id).await.unwrap().unwrap();
         assert_eq!(row.status, FileStatus::Pending);

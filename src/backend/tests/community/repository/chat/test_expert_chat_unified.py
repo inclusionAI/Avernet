@@ -7,9 +7,11 @@ against the real ``SqliteDB.orm_session``. No ZDAS-skipped test — the
 prod round-trip is a manual Pre acceptance gate.
 """
 from contextlib import contextmanager
+from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy import Column, MetaData, Table, UniqueConstraint, create_engine
+from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.repository.implementations.chat.expert_chat import ExpertChatRepository
@@ -18,36 +20,44 @@ pytestmark = pytest.mark.integration
 
 
 def _create_schema(engine):
-    """Private MetaData copy of AcExpertChatBotSession — copies
-    server_default (DB-side timestamps) and the uk_user_bot_owner_env
-    unique constraint (the upsert's conflict target)."""
+    """Create private copies of both expert-chat session tables."""
     from agentclaw.community.core.expert_chat.sqlite_models import (
         AcExpertChatBotSession,
+        AcExpertChatOwnedSession,
     )
 
-    src = AcExpertChatBotSession.__table__
     md = MetaData()
-    Table(
-        src.name,
-        md,
-        *[
-            Column(
-                c.name,
-                c.type,
-                primary_key=c.primary_key,
-                nullable=c.nullable,
-                autoincrement=c.autoincrement,
-                server_default=c.server_default.arg
-                if c.server_default is not None
-                else None,
-            )
-            for c in src.columns
-        ],
-        UniqueConstraint(
-            "user_id", "bot_id", "owner_id", "env",
-            name="uk_user_bot_owner_env",
+    for model, unique_columns, unique_name in (
+        (
+            AcExpertChatBotSession,
+            ("user_id", "bot_id", "owner_id", "env"),
+            "uk_user_bot_owner_env",
         ),
-    )
+        (
+            AcExpertChatOwnedSession,
+            ("user_id", "bot_id", "owner_id", "env", "session_key"),
+            "uk_user_bot_owner_env_session",
+        ),
+    ):
+        src = model.__table__
+        Table(
+            src.name,
+            md,
+            *[
+                Column(
+                    c.name,
+                    c.type,
+                    primary_key=c.primary_key,
+                    nullable=c.nullable,
+                    autoincrement=c.autoincrement,
+                    server_default=c.server_default.arg
+                    if c.server_default is not None
+                    else None,
+                )
+                for c in src.columns
+            ],
+            UniqueConstraint(*unique_columns, name=unique_name),
+        )
     md.create_all(engine)
 
 
@@ -149,6 +159,70 @@ def test_delete_session_rowcount(repo):
     assert repo.delete_session("u1", "b1", "o1") is True
     assert repo.get_session("u1", "b1", "o1") is None
     assert repo.delete_session("u1", "missing", "o1") is False
+
+
+def test_owned_sessions_are_isolated_and_searchable(repo):
+    first = repo.add_owned_session("u1", "b1", "o1", "session:first")
+    second = repo.add_owned_session("u1", "b1", "o1", "session:second")
+    repo.add_owned_session("u2", "b1", "o1", "session:other-user")
+
+    assert first["id"] != second["id"]
+    assert [
+        row["session_key"] for row in repo.list_owned_sessions("u1", "b1", "o1")
+    ] == ["session:second", "session:first"]
+    assert (
+        repo.get_owned_session("u1", "b1", "o1", "session:second")["session_key"]
+        == "session:second"
+    )
+    assert repo.get_owned_session("u1", "b1", "o1", "session:other-user") is None
+
+
+def test_owned_session_upsert_reactivates_soft_deleted_row(repo):
+    original = repo.add_owned_session("u1", "b1", "o1", "session:one")
+    assert repo.delete_owned_session("u1", "b1", "o1", "session:one") is True
+    assert repo.list_owned_sessions("u1", "b1", "o1") == []
+
+    restored = repo.add_owned_session("u1", "b1", "o1", "session:one")
+    assert restored["id"] == original["id"]
+    assert restored["status"] == "ACTIVE"
+
+
+def test_owned_session_uses_mysql_atomic_upsert_contract():
+    db_session = MagicMock()
+    db_session.get_bind.return_value.dialect = mysql.dialect()
+    db_session.execute.return_value.lastrowid = 42
+    stored_row = MagicMock()
+    stored_row.to_dict.return_value = {
+        "id": 42,
+        "session_key": "session:one",
+        "status": "ACTIVE",
+    }
+    db_session.get.return_value = stored_row
+
+    class _MysqlDB:
+        @contextmanager
+        def orm_session(self):
+            yield db_session
+
+    repository = ExpertChatRepository(_MysqlDB())
+
+    result = repository.add_owned_session("u1", "b1", "o1", "session:one")
+
+    statement = db_session.execute.call_args.args[0]
+    compiled = str(statement.compile(dialect=db_session.get_bind().dialect))
+    assert "ON DUPLICATE KEY UPDATE" in compiled
+    db_session.get.assert_called_once_with(repository.OwnedSessionModel, 42)
+    assert result == stored_row.to_dict.return_value
+
+
+def test_delete_all_owned_sessions_only_affects_requested_bot(repo):
+    repo.add_owned_session("u1", "b1", "o1", "session:one")
+    repo.add_owned_session("u1", "b1", "o1", "session:two")
+    repo.add_owned_session("u1", "b2", "o1", "session:three")
+
+    assert repo.delete_all_owned_sessions("u1", "b1", "o1") == 2
+    assert repo.list_owned_sessions("u1", "b1", "o1") == []
+    assert len(repo.list_owned_sessions("u1", "b2", "o1")) == 1
 
 
 def test_real_sqlitedb_orm_session_commits(tmp_path, monkeypatch):

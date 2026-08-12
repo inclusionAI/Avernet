@@ -199,6 +199,10 @@ modules:
         - DELETE /api/v1/expert-chats/{bot_id}/{owner_id}
         - POST /api/v1/expert-chats/{bot_id}/{owner_id}/session
         - DELETE /api/v1/expert-chats/{bot_id}/{owner_id}/session
+        - GET /api/v1/expert-chats/{bot_id}/{owner_id}/sessions
+        - POST /api/v1/expert-chats/{bot_id}/{owner_id}/sessions
+        - POST /api/v1/expert-chats/{bot_id}/{owner_id}/sessions/connect
+        - DELETE /api/v1/expert-chats/{bot_id}/{owner_id}/sessions
         - POST /api/v1/expert-chats/caller-connection
     plugin_api:
       status: not_applicable

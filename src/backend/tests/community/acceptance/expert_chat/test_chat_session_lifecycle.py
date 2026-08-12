@@ -48,3 +48,5 @@ def test_expert_chat_session_reaches_live_singlebox_engine(live_backend, accepta
         raise
 
     assert result_ctx["expert_session_reused"] == result_ctx["expert_session"]
+    assert result_ctx["expert_session_second"] != result_ctx["expert_session"]
+    assert result_ctx["expert_session_connected"] == result_ctx["expert_session_second"]

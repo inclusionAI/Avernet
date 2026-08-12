@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from secbaas.community.api.bcn import (
+    Attachment,
     BotRef,
     ChatHistoryInput,
     ChatInjectInput,
@@ -139,6 +140,17 @@ def _make_chat_history_input(**kwargs):
     )
     defaults.update(kwargs)
     return ChatHistoryInput(**defaults)
+
+
+def _make_attachment(attachment_id="att_1", **overrides) -> Attachment:
+    """Build a domain Attachment dataclass for test inputs."""
+    return Attachment(
+        attachment_id=attachment_id,
+        type="image",
+        file_name="test.png",
+        url=f"https://cdn.example.com/{attachment_id}",
+        **overrides,
+    )
 
 
 # ==================== handle_chat_send tests ====================
@@ -314,3 +326,88 @@ def test_build_bcn_metadata_ignore_result(service):
 def test_build_bcn_metadata_request_type(service):
     meta = service._build_bcn_metadata("sess-1", "group-1", request_type="chat")
     assert meta["request_type"] == "chat"
+
+
+# ==================== attachment passthrough tests ====================
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_send_with_attachments(service, mock_bot_runner):
+    """Service passes attachments from ChatSendInput to bot_runner.deliver_message."""
+    att1 = _make_attachment(attachment_id="att_1")
+    att2 = _make_attachment(attachment_id="att_2")
+    inp = _make_chat_send_input(attachments=[att1, att2])
+    result = await service.handle_chat_send(inp)
+    assert result.ok is True
+    # Wait for the background asyncio.create_task to run
+    await asyncio.sleep(0.01)
+
+    mock_bot_runner.deliver_message.assert_awaited_once()
+    kwargs = mock_bot_runner.deliver_message.call_args.kwargs
+    attachments = kwargs.get("attachments")
+    assert attachments is not None, (
+        "deliver_message must be called with attachments kwarg"
+    )
+    assert len(attachments) == 2
+    assert attachments[0].attachment_id == "att_1"
+    assert attachments[1].attachment_id == "att_2"
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_send_without_attachments(service, mock_bot_runner):
+    """Service calls deliver_message without attachments when ChatSendInput.attachments is None."""
+    inp = _make_chat_send_input()  # attachments defaults to None
+    result = await service.handle_chat_send(inp)
+    assert result.ok is True
+    await asyncio.sleep(0.01)
+
+    mock_bot_runner.deliver_message.assert_awaited_once()
+    kwargs = mock_bot_runner.deliver_message.call_args.kwargs
+    assert kwargs.get("attachments") is None, (
+        "attachments kwarg must be None when not set"
+    )
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_inject_with_attachments(service, mock_bot_runner):
+    """Service passes attachments from ChatInjectInput to bot_runner.inject_message."""
+    att = _make_attachment(attachment_id="att_1")
+    inp = _make_chat_inject_input(attachments=[att])
+    result = await service.handle_chat_inject(inp)
+    assert result.ok is True
+    await asyncio.sleep(0.01)
+
+    mock_bot_runner.inject_message.assert_awaited_once()
+    kwargs = mock_bot_runner.inject_message.call_args.kwargs
+    attachments = kwargs.get("attachments")
+    assert attachments is not None, (
+        "inject_message must be called with attachments kwarg"
+    )
+    assert len(attachments) == 1
+    assert attachments[0].attachment_id == "att_1"
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_send_stream_with_attachments(service, mock_bot_runner):
+    """Service passes attachments from ChatSendInput to bot_runner.deliver_message_stream."""
+
+    async def _async_gen():
+        yield MagicMock()
+
+    mock_bot_runner.deliver_message_stream = AsyncMock(
+        return_value=("run-001", "sess-001", _async_gen())
+    )
+
+    att = _make_attachment(attachment_id="att_1")
+    inp = _make_chat_send_input(attachments=[att])
+    stream = await service.handle_chat_send_stream(inp)
+    assert stream is not None
+
+    mock_bot_runner.deliver_message_stream.assert_awaited_once()
+    kwargs = mock_bot_runner.deliver_message_stream.call_args.kwargs
+    attachments = kwargs.get("attachments")
+    assert attachments is not None, (
+        "deliver_message_stream must be called with attachments kwarg"
+    )
+    assert len(attachments) == 1
+    assert attachments[0].attachment_id == "att_1"

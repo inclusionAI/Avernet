@@ -10,8 +10,10 @@
 //! authorization rules defined by the V1 contract.
 
 mod connection;
+mod file;
 
 pub use connection::GroupSessionConnectionServiceImpl;
+pub use file::SessionFileApplicationServiceImpl;
 
 use std::collections::HashSet;
 use std::sync::Arc;

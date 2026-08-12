@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from secbaas.community.api.bcn import Attachment
 from secbaas.community.api.bot_runtime import (
     BotBindingInfo,
     BotChatContext,
@@ -909,12 +910,12 @@ class TestShouldCleanupChunks:
         dispatcher = _dispatcher_with_config(config_service=mock_service)
         assert dispatcher._should_cleanup_chunks() is True
 
-    def test_config_none_returns_false(self):
-        """When config record does not exist (None), cleanup is disabled."""
+    def test_config_none_returns_true(self):
+        """When config record does not exist (None), cleanup is enabled by default."""
         mock_service = MagicMock()
         mock_service.get_config.return_value = None
         dispatcher = _dispatcher_with_config(config_service=mock_service)
-        assert dispatcher._should_cleanup_chunks() is False
+        assert dispatcher._should_cleanup_chunks() is True
 
     def test_config_value_empty_returns_false(self):
         """When conf_value is empty string, cleanup is disabled."""
@@ -937,12 +938,12 @@ class TestShouldCleanupChunks:
         dispatcher = _dispatcher_with_config(config_service=mock_service)
         assert dispatcher._should_cleanup_chunks() is False
 
-    def test_config_read_exception_returns_false(self):
-        """When get_config raises, cleanup is disabled (fail-safe)."""
+    def test_config_read_exception_returns_true(self):
+        """When get_config raises, cleanup is enabled by default (fail-open)."""
         mock_service = MagicMock()
         mock_service.get_config.side_effect = RuntimeError("db down")
         dispatcher = _dispatcher_with_config(config_service=mock_service)
-        assert dispatcher._should_cleanup_chunks() is False
+        assert dispatcher._should_cleanup_chunks() is True
 
 
 # ----------------------------- accepts -----------------------------
@@ -987,3 +988,116 @@ class TestCleanupChunks:
         )
         # should not raise
         dispatcher._cleanup_chunks("run-1")
+
+
+# ----------------------------- Attachment reconstruction from meta (D-04 Step B) -----------------------------
+
+
+async def test_executor_rebuilds_attachments_from_meta():
+    """Worker reads attachments from queue record meta and rebuilds Attachment dataclass objects."""
+    repo = MagicMock()
+    plugin = MagicMock()
+    selector = MagicMock()
+
+    repo.get_by_run_id.return_value = _run(
+        run_id="r1",
+        bot_id="bot-1:ent",
+        metadata={
+            "app_id": "a",
+            "app_type": "T",
+            "tenant": "t",
+            "request_type": "chat",
+        },
+    )
+    plugin.get_binding = AsyncMock(return_value=_binding_data())
+
+    bot_svc = MagicMock()
+    bot_svc.create_session = AsyncMock(return_value=MagicMock(session_id="sess-new"))
+    bot_svc.send_message = AsyncMock(return_value=BotResponse(content="ok", usage=None))
+    selector.select.return_value = bot_svc
+
+    executor = BotRunRequestExecutor(
+        repo, plugin, selector, MagicMock(), MagicMock(), _api_key_repo()
+    )
+    await executor.execute(
+        _queue_rec(
+            run_id="r1",
+            bot_id="bot-1:ent",
+            session_id="sess-1",
+            meta={
+                "attachments": [
+                    {
+                        "attachment_id": "att_1",
+                        "type": "image",
+                        "file_name": "f1.png",
+                        "url": "https://cdn.example.com/f1",
+                    },
+                    {
+                        "attachment_id": "att_2",
+                        "type": "image",
+                        "file_name": "f2.png",
+                        "url": "https://cdn.example.com/f2",
+                    },
+                ],
+            },
+        )
+    )
+
+    bot_svc.send_message.assert_awaited_once()
+    call_kwargs = bot_svc.send_message.call_args.kwargs
+    attachments = call_kwargs["attachments"]
+
+    assert len(attachments) == 2
+    # Verify rebuilt objects are domain Attachment dataclass instances
+    assert isinstance(attachments[0], Attachment)
+    assert attachments[0].attachment_id == "att_1"
+    assert attachments[0].type == "image"
+    assert attachments[0].file_name == "f1.png"
+    assert attachments[0].url == "https://cdn.example.com/f1"
+
+    assert isinstance(attachments[1], Attachment)
+    assert attachments[1].attachment_id == "att_2"
+
+    # Verify repo state updates still called
+    repo.update_status.assert_called_once_with("r1", "RUNNING")
+    repo.update_result.assert_called_once()
+
+
+async def test_executor_handles_missing_attachments_in_meta():
+    """Worker does not crash when queue record meta has no 'attachments' key."""
+    repo = MagicMock()
+    plugin = MagicMock()
+    selector = MagicMock()
+
+    repo.get_by_run_id.return_value = _run(
+        run_id="r1",
+        bot_id="bot-1:ent",
+        metadata={
+            "app_id": "a",
+            "app_type": "T",
+            "tenant": "t",
+            "request_type": "chat",
+        },
+    )
+    plugin.get_binding = AsyncMock(return_value=_binding_data())
+
+    bot_svc = MagicMock()
+    bot_svc.create_session = AsyncMock(return_value=MagicMock(session_id="sess-new"))
+    bot_svc.send_message = AsyncMock(return_value=BotResponse(content="ok", usage=None))
+    selector.select.return_value = bot_svc
+
+    executor = BotRunRequestExecutor(
+        repo, plugin, selector, MagicMock(), MagicMock(), _api_key_repo()
+    )
+    await executor.execute(
+        _queue_rec(run_id="r1", bot_id="bot-1:ent", session_id="sess-1")
+    )
+
+    bot_svc.send_message.assert_awaited_once()
+    call_kwargs = bot_svc.send_message.call_args.kwargs
+    # attachments should be None when meta has no attachments key
+    assert call_kwargs["attachments"] is None
+
+    # Verify repo state updates still called normally
+    repo.update_status.assert_called_once_with("r1", "RUNNING")
+    repo.update_result.assert_called_once()

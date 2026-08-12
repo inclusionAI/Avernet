@@ -81,6 +81,44 @@ class EngineProvisioningStrategy(ABC):
         """Return the token value that should be forwarded to container init."""
 
     @abstractmethod
+    def uses_adapter_chat_session_lifecycle(self, ctx: BotProvisioningContext) -> bool:
+        """Whether ExpertChat should manage chat sessions through Adapter APIs.
+
+        ``True`` preserves the legacy OpenClaw adapter lifecycle: create, pre-check,
+        and delete call ``/api/sessions`` on the device adapter. Engines that create
+        sessions lazily through their relay/runtime should return ``False`` so
+        ExpertChat only keeps its local session key.
+        """
+
+    @abstractmethod
+    def build_local_chat_session_key(
+        self, ctx: BotProvisioningContext, *, user_id: str
+    ) -> str:
+        """Build the local session key for relay-managed chat sessions.
+
+        Only strategies with ``uses_adapter_chat_session_lifecycle(ctx) == False``
+        should be asked to construct this key. The concrete engine strategy owns
+        the wire format instead of ExpertChat branching on engine literals.
+        Versioned service-bot formats are documented in
+        ``src/backend/specs/2026-08-10-expert-chat-service-bot-session-keys/spec.md``.
+        """
+
+    @abstractmethod
+    def apply_restart_extra_configs(
+        self,
+        ctx: BotProvisioningContext,
+        extra_configs: Dict[str, Any] | None,
+        *,
+        template_service: Any,
+    ) -> None:
+        """Apply engine-owned values from the restart extension envelope.
+
+        Concrete engines own their keys, validation, and side effects.
+        Unsupported engines should no-op so the core restart path remains
+        engine-agnostic and backward compatible.
+        """
+
+    @abstractmethod
     def on_bot_created(self, ctx: BotProvisioningContext) -> None:
         """Post-create hook. Default strategies should no-op."""
 

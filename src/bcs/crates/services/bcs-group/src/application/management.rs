@@ -1059,10 +1059,6 @@ impl GroupManagementService for GroupManagement {
                 .await;
         }
 
-        let topic = cmd
-            .topic
-            .as_deref()
-            .unwrap_or_else(|| group.label.as_deref().unwrap_or(""));
         let initial_session_kind = match requested_strategy {
             GroupStrategy::StateMachine => SessionKind::ServiceInvocation,
             GroupStrategy::Chat | GroupStrategy::ManagerWorker => SessionKind::Chat,
@@ -1089,6 +1085,16 @@ impl GroupManagementService for GroupManagement {
             participant.mode = Some(ParticipantMode::Present);
             initial_session_participants.push(participant);
         }
+        // `目标` (reason) sourcing mirrors the create-session HTTP path:
+        // session input (as text) → group.context → group.label, empty when
+        // all are absent (the `目标` line is then omitted). Computed before the
+        // create call because `initial_session_input` is moved into it below.
+        let reason = bcs_service_api::resolve_session_topic(
+            initial_session_input.as_ref(),
+            group.context.as_deref(),
+            group.label.as_deref(),
+        )
+        .unwrap_or_default();
         let initial_session_id;
         let context_injected = match self
             .session_management
@@ -1122,7 +1128,6 @@ impl GroupManagementService for GroupManagement {
                     let sid = outcome.session.id.clone();
                     let gid = group.id.clone();
                     let session_participants = outcome.session.participants.clone();
-                    let reason = topic.to_string();
                     self.system_message
                         .notify(
                             &gid,
