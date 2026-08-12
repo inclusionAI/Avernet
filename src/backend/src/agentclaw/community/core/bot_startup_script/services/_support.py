@@ -46,10 +46,18 @@ def resolve_support(
         return False, "teclaw bots are provisioned without a start sequence"
 
     if device_provider is None:
-        # No binding yet — a bot is PENDING between create and its first start,
-        # and that is precisely when an owner wants to attach a script. The
-        # provider is not knowable here, and refusing would block the main use
-        # case; every non-teclaw bot created today is baas-backed.
+        # Two different situations reach here and they must not be conflated.
+        #
+        # A bot with no binding at all is PENDING between create and its first
+        # start — precisely when an owner wants to attach a script, and every
+        # non-teclaw bot created today is baas-backed, so allow it.
+        #
+        # A bot that HAS a binding_id but arrived without a provider is a
+        # swallowed lookup (``get_bot`` wraps that read in a warning-only
+        # try/except). Allowing that would let a legacy arca bot store a script
+        # that never runs, which is the failure this check exists to prevent.
+        if bot.get("binding_id"):
+            return False, "device provider is unavailable for this bot"
         return True, ""
 
     if device_provider not in _PROVIDERS_WITH_A_START_SEQUENCE:

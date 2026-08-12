@@ -14,7 +14,21 @@ def _reader(devices=None, raises=None):
     if raises is not None:
         baas.get_publish_progress.side_effect = raises
     else:
-        baas.get_publish_progress.return_value = {"device_details": devices or []}
+        # device_details is a list of BATCHES; the device records nest under
+        # each batch's "devices". Fixtures must mirror the producer, not the
+        # shape the consumer wishes for — getting this wrong is what made two
+        # earlier rounds of tests pass against broken code.
+        baas.get_publish_progress.return_value = {
+            "device_details": [
+                {
+                    "batch_id": 1,
+                    "batch_index": 0,
+                    "stage": "online",
+                    "status": "COMPLETED",
+                    "devices": devices or [],
+                }
+            ]
+        }
     return BotStartupScriptRunReader(baas), baas
 
 
@@ -79,20 +93,38 @@ def test_baas_failure_returns_empty_rather_than_500():
     assert reader.last_start(publish_id=42) == []
 
 
-def test_reads_the_device_details_key_baas_actually_returns():
-    """get_publish_progress(include_devices=True) returns device_details.
-
-    The first version read "devices" and therefore returned [] in production
-    while its tests passed against a fabricated key.
-    """
+def test_flattens_batches_into_device_records():
+    """device_details holds BatchDeviceProgress, devices nest one level down."""
     baas = MagicMock()
     baas.get_publish_progress.return_value = {
-        "device_details": [_device(exit_code=0, stdout="ok")]
+        "device_details": [
+            {"batch_id": 1, "devices": [_device("d1", exit_code=0, stdout="a")]},
+            {"batch_id": 2, "devices": [_device("d2", exit_code=0, stdout="b")]},
+        ]
     }
-    assert len(BotStartupScriptRunReader(baas).last_start(publish_id=42)) == 1
+    results = BotStartupScriptRunReader(baas).last_start(publish_id=42)
+    assert [r.instance_id for r in results] == ["d1", "d2"]
 
 
-def test_still_reads_a_devices_key_if_one_is_returned():
+def test_batches_never_leak_through_as_phantom_devices():
+    """Iterating device_details directly yielded one empty pending entry per
+    batch — a batch has no device_uuid and no result_message."""
+    baas = MagicMock()
+    baas.get_publish_progress.return_value = {
+        "device_details": [
+            {"batch_id": 1, "batch_index": 0, "status": "COMPLETED", "devices": []}
+        ]
+    }
+    assert BotStartupScriptRunReader(baas).last_start(publish_id=42) == []
+
+
+def test_failed_status_wins_even_when_the_exit_code_is_zero():
+    """BaaS writes result_status=FAILED with exit_code=0 on destroy/stop."""
+    reader, _ = _reader([_device("d1", "FAILED", exit_code=0)])
+    assert reader.last_start(publish_id=42)[0].status == "failed"
+
+
+def test_tolerates_a_flat_device_list():
     baas = MagicMock()
     baas.get_publish_progress.return_value = {"devices": [_device(exit_code=0)]}
     assert len(BotStartupScriptRunReader(baas).last_start(publish_id=42)) == 1

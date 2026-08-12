@@ -156,3 +156,17 @@ class TestResolveSupport:
         """LocalDeviceService allocates through _build_create_bot_payload
         (local_device_service.py:252), so it delivers the script like baas."""
         assert svc.resolve_support(self._bot(provider="local")) == (True, "")
+
+    def test_a_swallowed_binding_lookup_is_refused_not_assumed_supported(self, svc):
+        """get_bot wraps the binding read in a warning-only try/except, so a
+        bot can arrive with a binding_id but no provider. Treating that like
+        "no binding yet" would let a legacy arca bot store a script that never
+        runs — the exact failure this check exists to prevent."""
+        supported, reason = svc.resolve_support(
+            {"active_engine": "openclaw", "binding_id": 77}
+        )
+        assert supported is False
+        assert reason
+
+    def test_no_binding_id_at_all_is_still_supported(self, svc):
+        assert svc.resolve_support({"active_engine": "openclaw"}) == (True, "")

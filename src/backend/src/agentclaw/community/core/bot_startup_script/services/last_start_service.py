@@ -65,21 +65,54 @@ def _parse_result_message(raw: Any) -> tuple[int | None, str, str, bool]:
     return parsed.get("exit_code"), stdout, stderr, truncated
 
 
-def _status_of(device: dict[str, Any], exit_code: int | None) -> StartStatus:
-    """Exit code wins over the publish status where the two disagree.
+def _iter_devices(progress: dict[str, Any]) -> list[dict[str, Any]]:
+    """Flatten ``device_details`` — a list of BATCHES — into device records.
 
-    The publish record tracks the *workflow*, and the hook is dispatched with
-    nohup, so a device can be marked SUCCESS while the start command it
-    launched exited non-zero. Reporting "success" alongside exit_code 127 is
-    exactly the contradiction a caller would have to debug around.
+    ``get_publish_progress(include_devices=True)`` returns
+    ``device_details: list[BatchDeviceProgress]``, and the device records live
+    under each batch's ``devices`` (``DeviceOperationResult``). Iterating
+    ``device_details`` directly yields batches, which have no ``device_uuid``
+    and no ``result_message`` — one phantom pending entry per batch. Read the
+    producer, not the name.
+
+    A flat list is tolerated so a caller or fixture supplying one still works.
     """
-    if exit_code is not None:
-        return "success" if exit_code == 0 else "failed"
+    batches = progress.get("device_details")
+    if not isinstance(batches, list):
+        batches = progress.get("devices") or []
+
+    devices: list[dict[str, Any]] = []
+    for entry in batches:
+        if not isinstance(entry, dict):
+            continue
+        nested = entry.get("devices")
+        if isinstance(nested, list):
+            devices.extend(d for d in nested if isinstance(d, dict))
+        elif "device_uuid" in entry or "result_status" in entry:
+            devices.append(entry)
+    return devices
+
+
+def _status_of(device: dict[str, Any], exit_code: int | None) -> StartStatus:
+    """Either signal can independently mean failure; success needs both.
+
+    Neither one is authoritative on its own, and letting either win alone gets
+    it wrong in a different direction:
+
+    * The hook is dispatched with nohup, so a device can be recorded SUCCESS
+      while the start command it launched exited non-zero.
+    * BaaS also writes ``result_status=FAILED`` alongside ``exit_code=0`` on the
+      destroy and stop paths (``_publish_service.py:3266``, ``:3426``), so a
+      failed operation would read as success if the exit code decided.
+
+    So: any failure signal means failed, and "success" requires that nothing
+    dissents.
+    """
     raw = str(device.get("result_status") or "").upper()
-    if raw == "SUCCESS":
-        return "success"
-    if raw == "FAILED":
+    if raw == "FAILED" or (exit_code is not None and exit_code != 0):
         return "failed"
+    if raw == "SUCCESS" or exit_code == 0:
+        return "success"
     return "pending"
 
 
@@ -111,15 +144,8 @@ class BotStartupScriptRunReader:
             )
             return []
 
-        # ``device_details`` is the key BaaS actually returns for
-        # include_devices=True (see publish_flow/device_binding_mixin.py:81).
-        # ``devices`` is accepted too rather than assumed absent.
-        payload = progress or {}
-        devices = payload.get("device_details") or payload.get("devices") or []
         results: list[StartInstanceResult] = []
-        for device in devices:
-            if not isinstance(device, dict):
-                continue
+        for device in _iter_devices(progress or {}):
             exit_code, stdout, stderr, truncated = _parse_result_message(
                 device.get("result_message")
             )
