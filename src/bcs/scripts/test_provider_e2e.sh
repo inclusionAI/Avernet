@@ -5,7 +5,7 @@
 #   1. POST   /providers                     (provider 注册, static_bearer)
 #   2. PATCH  /providers/{id}                (provider 编辑: name + webhook_url)
 #   3. POST   /providers/{id}/bots           (provider bot 注册)
-#   4. POST   /bots/{provider_bot}/chat      (provider bot 单聊 + auto-callback)
+#   4. POST   /bots/{provider_bot}/chat-async (provider bot 单聊 + auto-callback)
 #   5. POST   /groups + /groups/{id}/chat    (拉群 + 群聊 @provider bot)
 #
 # Usage:
@@ -59,7 +59,7 @@ BCS_URL="http://127.0.0.1:${BCS_PORT}"
 MOCK_PROVIDER_URL="http://127.0.0.1:${MOCK_PROVIDER_PORT}"
 MOCK_WEBHOOK_URL="${MOCK_PROVIDER_URL}/webhook"
 
-# Caller identity for /bots/onboard, /bots/{id}/visibility, /bots/{id}/chat,
+# Caller identity for /bots/onboard, /bots/{id}/visibility, /bots/{id}/chat-async,
 # /groups, /groups/{id}/chat. Same user_id is used as owner of both the
 # driver bot and the provider bot so set_visibility passes the owner check.
 MOCK_USER_ID="${MOCK_USER_ID:-12345678}"
@@ -345,7 +345,7 @@ pass "Driver bot ready: $DRIVER_BOT_UUID"
 step "Step 4: 1:1 chat (driver → provider bot)..."
 curl -sS --noproxy '*' -X POST "$MOCK_PROVIDER_URL/reset" >/dev/null
 
-CHAT_RESP=$(curl -sS --noproxy '*' -X POST "$BCS_URL/bots/$PROVIDER_BOT_UUID/chat" \
+CHAT_RESP=$(curl -sS --noproxy '*' -X POST "$BCS_URL/bots/$PROVIDER_BOT_UUID/chat-async" \
     -H "X-Mock-User-Id: $MOCK_USER_ID" \
     -H "Authorization: Bearer $DRIVER_TOKEN" \
     -H 'Content-Type: application/json' \

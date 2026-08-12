@@ -589,11 +589,16 @@ async fn test_1to1_chat_http_to_ws() {
 
     let chat_task = tokio::spawn(async move {
         sender_client
-            .chat(
+            .chat_async(
                 &receiver_bot_id,
                 "Hello from Bot A",
                 Some(&sender_bot_id),
-                Some(200),
+                None,
+                &[],
+                None,
+                None,
+                2_000,
+                false,
             )
             .await
     });
@@ -606,57 +611,6 @@ async fn test_1to1_chat_http_to_ws() {
     let _ = chat_task.await.expect("chat task should join");
 }
 
-#[tokio::test]
-async fn test_legacy_chat_times_out_when_bot_silent() {
-    let _ = tracing_subscriber::fmt::try_init();
-    let temp_dir = create_temp_bots_dir();
-    let bots_dir = temp_dir.path().to_path_buf();
-    let (addr, _handle) = start_test_server(&bots_dir).await;
-
-    tokio::time::sleep(Duration::from_millis(50)).await;
-
-    let (_sender_ws, sender_bot_id, sender_client) =
-        connect_and_onboard_public_bot(addr, "SenderBot").await;
-    let (mut receiver_ws, receiver_bot_id, _receiver_client) =
-        connect_and_onboard_public_bot(addr, "ReceiverBot").await;
-
-    let started = std::time::Instant::now();
-    let chat_task = tokio::spawn(async move {
-        sender_client
-            .chat(
-                &receiver_bot_id,
-                "Hello from sender",
-                Some(&sender_bot_id),
-                Some(200),
-            )
-            .await
-    });
-
-    let frame = recv_chat_send_frame(&mut receiver_ws)
-        .await
-        .expect("Receiver bot should receive chat.send");
-    assert_eq!(frame["method"], "chat.send");
-
-    let err = chat_task
-        .await
-        .expect("chat task should join")
-        .expect_err("silent bot should cause timeout");
-    let elapsed = started.elapsed();
-
-    assert!(err.to_string().contains("Timeout waiting for bot response"));
-    assert!(
-        elapsed < Duration::from_secs(3),
-        "timeout should follow request window, got {:?}",
-        elapsed
-    );
-}
-
-
-// ============================================================================
-// Group Lifecycle Tests
-// ============================================================================
-
-/// Test group creation and listing.
 #[tokio::test]
 async fn test_group_create_and_list() {
     let _ = tracing_subscriber::fmt::try_init();
