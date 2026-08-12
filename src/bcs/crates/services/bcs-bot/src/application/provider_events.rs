@@ -306,10 +306,9 @@ impl ProviderBotEvents {
             return self.message_flow.ingest_provider_event(command).await;
         };
         if correlation.assignee_bot_id != command.event.bot_id {
-            return Err(ServiceError::InvalidOperation {
-                message: "provider event bot does not match state-machine delivery".to_string(),
-                request_id: Some(command.event.run_id),
-            });
+            return Err(ServiceError::Forbidden(
+                "provider event bot does not match state-machine delivery".to_string(),
+            ));
         }
 
         let mut event = command.event;
