@@ -19,7 +19,7 @@ change, no OCB dependency in this scope.
 - [x] **A2.** Inject `ResourceFileService` into the router. Confirm it and
   `BotRepository` stay out of the served OpenAPI schema — the existing invariant
   guarded by `test_public_namespace.py`.
-- [ ] **A3.** `Resource` **response** schema (`openapi_v1/resources/schemas.py`) —
+- [x] **A3.** `Resource` **response** schema (`openapi_v1/resources/schemas.py`) —
   the model returned by list, get, and the upload response; not a request
   parameter. Add optional `path: str | None`, the **full** workspace-relative
   path (`a/b/c.txt`).
