@@ -4,18 +4,19 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from engine.community.api.transport.ws_server import (
     EngineWebSocketServer,
-    _parse_chat_file_materializations,
     _materialized_path_redaction_targets,
+    _parse_chat_file_materializations,
     _redact_materialized_paths,
+    get_server,
+    reset_server,
 )
+from engine.community.core.engine.context import AuthContext
 from engine.community.core.resource_materialization.models import (
     ChatAttachmentMaterializationRequest,
     MaterializationResult,
 )
-from engine.community.core.engine.context import AuthContext
 from engine.community.core.resource_references.models import ResolvedResourceContext
 from engine.community.core.resource_references.service import ResourceReferenceError
 from engine.community.kernel.frames import EventFrame
@@ -81,6 +82,18 @@ def test_parse_remote_file_requires_trusted_materialization_context():
         },
     )
     assert requests[0].attachment_id == "att-1"
+
+
+def test_get_server_attaches_late_materialization_dependency():
+    reset_server()
+    first = get_server()
+    materialization_service = MagicMock()
+
+    second = get_server(materialization_service)
+
+    assert second is first
+    assert second._resource_materialization_service is materialization_service
+    reset_server()
 
 
 @pytest.mark.asyncio
@@ -207,6 +220,57 @@ async def test_stream_rolls_back_batch_and_emits_safe_terminal_error(fake_engine
     )
     payload = websocket.send_text.await_args.args[0]
     assert "ATTACHMENT_MATERIALIZATION_HASH_MISMATCH" in payload
+    assert "token=secret" not in payload
+
+
+@pytest.mark.asyncio
+async def test_stream_rolls_back_materialized_file_when_reference_rewrite_fails(
+    fake_engine,
+):
+    reference_service = MagicMock()
+    reference_service.rewrite.side_effect = ResourceReferenceError(
+        "cross_session_resource"
+    )
+    materialization_service = MagicMock()
+    materialization_service.materialize_chat_attachment = AsyncMock(
+        return_value=MaterializationResult(
+            resource_id="sr_ready",
+            transfer_id="tmp_one",
+            task_id="chat_one",
+            task_version=1,
+            ready=True,
+        )
+    )
+    materialization_service.remove_chat_materialization = AsyncMock()
+    server = EngineWebSocketServer(
+        resource_reference_service=reference_service,
+        resource_materialization_service=materialization_service,
+    )
+    websocket = SimpleNamespace(send_text=AsyncMock())
+    fake_engine.chat.stream = MagicMock()
+    request = ChatAttachmentMaterializationRequest(
+        attachment_id="att-1",
+        session_key="session-1",
+        filename="file.txt",
+        temporary_url="https://files.example/object?token=secret",
+        scope_key_hash="a" * 64,
+    )
+
+    await server._stream_chat_events(
+        websocket,
+        "conn-1",
+        "session-1",
+        "",
+        None,
+        chat_attachment_requests=[request],
+    )
+
+    fake_engine.chat.stream.assert_not_called()
+    materialization_service.remove_chat_materialization.assert_awaited_once_with(
+        "sr_ready"
+    )
+    payload = websocket.send_text.await_args.args[0]
+    assert "cross_session_resource" in payload
     assert "token=secret" not in payload
 
 

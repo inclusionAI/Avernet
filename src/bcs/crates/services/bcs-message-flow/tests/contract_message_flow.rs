@@ -3686,6 +3686,16 @@ async fn temporary_file_attachment_is_sent_only_to_active_chat_send() {
         .expect("chat.inject params");
     assert_eq!(send["attachments"][0]["type"], "file");
     assert!(inject.get("attachments").is_none());
+
+    let events = support.frontend_delivery.events().await;
+    assert_eq!(events.len(), 1);
+    let event: serde_json::Value = serde_json::from_str(&events[0]).unwrap();
+    let attachment = &event["payload"]["message"]["attachments"][0];
+    assert_eq!(attachment["attachment_id"], "file_2");
+    assert_eq!(attachment["type"], "file");
+    assert!(attachment.get("url").is_none(), "event: {event}");
+    assert!(attachment.get("expires_at").is_none(), "event: {event}");
+    assert!(!events[0].contains("download.example.com"));
 }
 
 #[tokio::test]

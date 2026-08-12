@@ -103,7 +103,9 @@ async def test_session_pull_rejects_non_allowlisted_share_host_before_download(
 @pytest.mark.asyncio
 async def test_temporary_url_pull_checks_host_dns_and_size(tmp_path: Path):
     async def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.host == "files.example"
+        assert request.url.host == "93.184.216.34"
+        assert request.headers["host"] == "files.example"
+        assert request.extensions["sni_hostname"] == "files.example"
         return httpx.Response(200, content=b"file-bytes")
 
     client = HttpTemporaryUrlPullClient(
@@ -127,6 +129,31 @@ async def test_temporary_url_pull_checks_host_dns_and_size(tmp_path: Path):
         await client.pull(request, destination)
 
     assert destination.read_bytes() == b"file-bytes"
+
+
+@pytest.mark.asyncio
+async def test_temporary_url_pull_pins_validated_ip_before_request(tmp_path: Path):
+    requests = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, content=b"safe")
+
+    client = HttpTemporaryUrlPullClient(
+        allowed_hosts=frozenset({"files.example"}),
+        transport=httpx.MockTransport(handler),
+    )
+    with patch(
+        "engine.community.plugins.resource_materialization.socket.getaddrinfo",
+        return_value=[(2, 1, 6, "", ("93.184.216.34", 443))],
+    ) as resolve:
+        await client.pull(_chat_request(), tmp_path / "file.part")
+
+    resolve.assert_called_once()
+    assert len(requests) == 1
+    assert requests[0].url.host == "93.184.216.34"
+    assert requests[0].headers["host"] == "files.example"
+    assert requests[0].extensions["sni_hostname"] == "files.example"
 
 
 @pytest.mark.asyncio

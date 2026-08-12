@@ -1231,13 +1231,28 @@ class EngineWebSocketServer:
             ):
                 # Reference validation includes controlled workspace file hashing.
                 # Keep that I/O off the WebSocket event loop.
-                resolved = await asyncio.to_thread(
-                    self._resource_reference_service.rewrite,
-                    prompt=message,
-                    session_key=session_key,
-                    resource_references=resource_references,
-                    prompt_file_refs=prompt_file_refs,
-                )
+                try:
+                    resolved = await asyncio.to_thread(
+                        self._resource_reference_service.rewrite,
+                        prompt=message,
+                        session_key=session_key,
+                        resource_references=resource_references,
+                        prompt_file_refs=prompt_file_refs,
+                    )
+                except asyncio.CancelledError:
+                    if self._resource_materialization_service is not None:
+                        for resource_id in materialized_resource_ids:
+                            await self._resource_materialization_service.remove_chat_materialization(
+                                resource_id
+                            )
+                    raise
+                except Exception:
+                    if self._resource_materialization_service is not None:
+                        for resource_id in materialized_resource_ids:
+                            await self._resource_materialization_service.remove_chat_materialization(
+                                resource_id
+                            )
+                    raise
                 chat_request.query = resolved.prompt
                 merged_extra = dict(chat_request.extraParams or {})
                 merged_extra["materializedFiles"] = resolved.materialized_files
@@ -1587,6 +1602,11 @@ def get_server(
         _server = EngineWebSocketServer(
             resource_materialization_service=resource_materialization_service
         )
+    elif (
+        resource_materialization_service is not None
+        and _server._resource_materialization_service is None
+    ):
+        _server._resource_materialization_service = resource_materialization_service
     return _server
 
 

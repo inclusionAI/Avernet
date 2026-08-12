@@ -9,11 +9,10 @@ import logging
 import socket
 from collections.abc import Mapping
 from pathlib import Path
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import aiofiles
 import httpx
-
 from engine.community.core.resource_materialization.models import (
     ChatAttachmentMaterializationRequest,
     MaterializationRequest,
@@ -187,37 +186,42 @@ class HttpTemporaryUrlPullClient:
     ) -> None:
         host, port = self._validate_url(request.temporary_url)
         resolved_ips = await self._resolve_public_ips(host, port)
+        pinned_ip = min(resolved_ips)
+        parsed_url = urlsplit(request.temporary_url)
+        pinned_host = f"[{pinned_ip}]" if ":" in pinned_ip else pinned_ip
+        host_header = parsed_url.netloc
+        pinned_url = urlunsplit(
+            (
+                parsed_url.scheme,
+                f"{pinned_host}:{port}",
+                parsed_url.path,
+                parsed_url.query,
+                "",
+            )
+        )
         timeout = httpx.Timeout(
             connect=min(self._timeout_seconds, 10.0),
             read=self._timeout_seconds,
             write=30.0,
             pool=30.0,
         )
-        # COSEC: the capability host is exact-allowlisted, all current DNS
-        # answers are public, credentials are forbidden, and redirects are
-        # disabled so an unvalidated second hop cannot reach an internal host.
+        # COSEC: connect to the already-validated public IP so DNS cannot be
+        # rebound between validation and the first request byte. Host and SNI
+        # retain the allowlisted hostname for HTTP routing and certificate checks.
         async with (
             httpx.AsyncClient(
                 timeout=timeout,
                 follow_redirects=False,
                 transport=self._transport,
             ) as client,
-            client.stream("GET", request.temporary_url) as response,
+            client.stream(
+                "GET",
+                pinned_url,
+                headers={"host": host_header},
+                extensions={"sni_hostname": host},
+            ) as response,
         ):
             response.raise_for_status()
-            if self._transport is None:
-                network_stream = response.extensions.get("network_stream")
-                peer = (
-                    network_stream.get_extra_info("server_addr")
-                    if network_stream is not None
-                    else None
-                )
-                if (
-                    not isinstance(peer, tuple)
-                    or not peer
-                    or str(peer[0]) not in resolved_ips
-                ):
-                    raise ValueError("temporary URL peer address could not be verified")
             content_length = response.headers.get("content-length")
             if content_length is not None:
                 try:
