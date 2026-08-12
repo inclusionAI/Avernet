@@ -64,9 +64,16 @@
         `ADMISSION` as `GRANT_CHECKED_OWN_BOT`.
   - [ ] Ownership guard runs before any read or write; a non-operator gets 403.
   - [ ] Oversize body → 413 whose message names the limit.
-  - [ ] `supported` / `unsupported_reason` reported per bot; a teclaw bot reads
-        as unsupported.
-  - [ ] No `entity_id` parameter anywhere (group contract).
+  - [ ] `PUT` accepts only `{"script": ...}`; `updated_by` comes from the request
+        principal and `updated_at` from `gmt_modified` — neither is client-supplied,
+        and a body attempting to set them is ignored, not honored.
+  - [ ] `supported` / `unsupported_reason` reported per bot, covering **both**
+        unsupported cases: a teclaw bot, and a bot whose binding
+        `device_provider` is not `baas` (legacy ARCA-direct bots).
+  - [ ] An unsupported bot can still store a script (`PUT` succeeds) but reads
+        back `supported: false` with the reason naming the cause.
+  - [ ] No `entity_id` parameter or response field anywhere (group contract);
+        it exists only as a storage key resolved server-side.
 - **Depends on:** Task 1
 
 ## Task 5: Public API — read the last container start

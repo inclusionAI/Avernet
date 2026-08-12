@@ -44,9 +44,15 @@ CREATE TABLE `ac_bot_startup_script` (
   `gmt_create`    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `gmt_modified`  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_env_bot` (`env`, `bot_id`)
+  UNIQUE KEY `uk_env_entity_id_bot_id` (`env`, `entity_id`, `bot_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Bot 启动脚本';
 ```
+
+The key is `(env, entity_id, bot_id)`, matching `ac_bot_restart_lock`
+(`bot_management/repository/models.py:84`) — the repo's existing per-bot side
+table. `entity_id` is a **storage** key only: it is resolved server-side from the
+bot record and never appears as a request parameter or a response field, per the
+group contract.
 
 No run-record table: run results come from the existing publish records.
 
@@ -70,12 +76,17 @@ script alone, and the name should not promise otherwise.
 
 ```python
 # src/backend/.../adapters/http/openapi_v1/bots/schemas.py (new)
+class StartupScriptWrite(BaseModel):
+    """PUT request body — the ONLY client-supplied field."""
+    script: str
+
 class StartupScript(BaseModel):
+    """Response only. Every field below is server-derived."""
     bot_id: str
     script: str            # "" when never set — absence is not an error
     size_bytes: int
-    updated_by: str
-    updated_at: datetime
+    updated_by: str        # from the request principal at write time, never the body
+    updated_at: datetime   # from gmt_modified, never the body
     supported: bool
     unsupported_reason: str  # "" when supported
 
@@ -185,6 +196,30 @@ forbidden — `api/README.md:21`); register the pair instead:
 +     (BotStartupScriptServiceProtocol, BotStartupScriptService),
 ```
 
+Support is answered per bot, from the binding, and both unsupported cases are
+real deployments rather than hypotheticals:
+
+```python
+# src/backend/.../core/bot_startup_script/services/_support.py (new)
+def resolve_support(bot: dict, binding: DeviceBinding | None) -> tuple[bool, str]:
+    """Only bots whose container is provisioned through the shared start
+    sequence can run a script — i.e. device_provider == "baas"."""
+    if is_teclaw_bot(bot.get("active_engine")):
+        # TeclawProvisionService.provision skips DeviceService.apply_device
+        # (bot_service.py:1445), so there is no deploy_config to carry a script.
+        return False, "teclaw bots are provisioned without a start sequence"
+    provider = getattr(binding, "device_provider", None)
+    if provider != BAAS_DEVICE_PROVIDER:
+        # Legacy bots created before the BaaS rollout talk to ARCA directly and
+        # never build an after_create_cmd_hook through _build_create_bot_payload.
+        return False, f"bots on the {provider!r} device provider have no start sequence"
+    return True, ""
+```
+
+`PUT` still **stores** for an unsupported bot rather than refusing, so a script
+can be staged; `supported: false` plus a reason is what stops the caller
+believing it ran. `last-start` returns an empty list for those bots.
+
 `last_start` reads what already exists — no new storage:
 
 ```python
@@ -234,6 +269,14 @@ None. `base64` is stdlib.
   script goes last, guarded, and cannot participate in the chain's outcome.
 - **`|| true` without capturing the platform status.** Simplest to write and
   silently breaks FAILED detection for every bot with a script.
+- **`@abstractmethod` on the Service API Protocol.** Rejected as inert, not
+  unsafe: it does not break DI or the constitution (`Protocol`'s metaclass already
+  derives from `ABCMeta`), but it only has force on **explicit subclasses**, and
+  the constitution forbids the concrete service from inheriting the Protocol at
+  all (`api/README.md:21`). Nothing would ever be checked. Zero of the ~60
+  Protocols under `api/` use it today. The enforcement that does bite is the
+  `_PAIRS` registry, which compares parameter names, kinds, defaults and
+  coroutine status — strictly more than `@abstractmethod` would.
 - **Passing the body as a shell-quoted string instead of base64.** `shlex.quote`
   would survive Python composition, but the body still meets BaaS's
   `_safe_format_hook` placeholder substitution before it runs. base64 is inert to
