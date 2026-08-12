@@ -4188,6 +4188,7 @@ impl BcsServer {
         {
             let a2a_chat = self.state.services.a2a_chat.clone();
             let bot_run_context = self.state.services.bot_run_context.clone();
+            let provider_bot_events = self.state.services.provider_bot_events.clone();
             let retention_ms = self.config.async_chat_run_retention_ms;
             tokio::spawn(async move {
                 let mut ticker = tokio::time::interval(std::time::Duration::from_secs(10));
@@ -4218,6 +4219,13 @@ impl BcsServer {
                         info!(
                             removed = removed_contexts,
                             "bot_run_context: cleanup_expired"
+                        );
+                    }
+                    let removed_provider_events = provider_bot_events.cleanup_expired(now_ms).await;
+                    if removed_provider_events > 0 {
+                        info!(
+                            removed = removed_provider_events,
+                            "provider_event: cleanup_expired"
                         );
                     }
                 }

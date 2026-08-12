@@ -242,6 +242,10 @@ pub trait ProviderBotEventService: Send + Sync {
         &self,
         command: ProviderBotCoordinationCommand,
     ) -> Result<ProviderBotCoordinationOutcome, ProviderBotEventError>;
+
+    async fn cleanup_expired(&self, _now_ms: u64) -> usize {
+        0
+    }
 }
 
 #[async_trait]
