@@ -15150,7 +15150,7 @@
               "application/json": {
                 "example": {
                   "code": 413000,
-                  "message": "Startup script exceeds the 65536-byte limit",
+                  "message": "Startup script exceeds the 24576-byte limit",
                   "request_id": ""
                 },
                 "schema": {
