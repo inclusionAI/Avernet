@@ -361,6 +361,45 @@ class ResourceService:
                 logger.warning("[delete_resource] device_fs delete failed: %s", e)
         return self._repo.delete(resource_id)
 
+    async def record_uploaded_file(
+        self,
+        *,
+        path: str,
+        size: int,
+        user_id: Optional[str] = None,
+        created_by: Optional[str] = None,
+        source: str = "upload",
+    ) -> Resource:
+        """Record a file that is already present in the workspace.
+
+        The bytes are written through the device seam before this runs, so the
+        row is enrichment rather than the fact of existence: it carries what the
+        filesystem cannot know — who uploaded the file, when, and that it arrived
+        by upload rather than being produced by the bot. It is also what the
+        publish pipeline reads to build a released bot's manifest, which is why
+        an upload writes one at all.
+
+        ``name`` and ``parent_path`` are derived from ``path`` rather than asked
+        for: ``name`` is non-optional on the model, and the console's listing
+        filters rows by ``parent_path``. Both are a ``basename``/``dirname`` off
+        the single path the caller gave.
+        """
+        leaf = path.rsplit("/", 1)[-1]
+        parent = path.rsplit("/", 1)[0] if "/" in path else ""
+        record = create_file_resource(
+            name=leaf,
+            path=path,
+            parent_path=parent,
+            size=size,
+            user_id=user_id,
+            created_by=created_by,
+            source=source,
+            bolt_id=self._bot_id,
+        )
+        stored = self._repo.create(record.to_dict())
+        record.id = stored.get("id")
+        return record
+
     async def upload_file(
         self,
         *,

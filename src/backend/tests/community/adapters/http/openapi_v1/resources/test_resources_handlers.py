@@ -2021,68 +2021,108 @@ class _FailingDeviceFs:
 
 
 @pytest.mark.asyncio
-async def test_upload_returns_502_when_device_fs_write_fails():
+async def test_upload_returns_502_when_the_device_write_fails():
     factory, repo = _real_factory_with_inmemory_repo()
-
-    resolver = _StubResolver()
-    dispatcher = _StubDispatcher(_FailingDeviceFs())
     rows_before = len(repo._rows)
 
     with pytest.raises(HTTPException) as exc:
         await upload_resource(
-            name="hello.txt",
+            path="hello.txt",
             content=b"file bytes",
             owner_id="u1",
             bot_id="bot-x",
             factory=factory,
-            resolver=resolver,
-            device_fs_dispatcher=dispatcher,
+            bot_repo=_StubBotRepo(),
+            file_svc=_StubFileService(raises=RuntimeError("device unreachable")),
             request=_request_without_trace(),
         )
     assert exc.value.status_code == 502
     assert "Upload storage failed" in exc.value.detail
-    # No DB row created — write failure short-circuited before repo.create.
+    # No row written: the record is created only after the bytes land, so a
+    # failed upload leaves neither a file nor a row pointing at one.
     assert len(repo._rows) == rows_before
 
 
 @pytest.mark.asyncio
-async def test_upload_409_takes_precedence_over_502_path():
-    """When both conditions hold (duplicate name AND a failing device_fs),
-    the slim service runs check_name_exists FIRST (before write_file), so
-    the 409 surfaces — not the 502. Pins the service's ordering invariance."""
-    from datetime import datetime
-
+async def test_upload_records_the_uploader_for_the_console():
+    """The console's resource list shows an owner off this shared table, so an
+    upload that wrote no ``user_id`` would appear there with a blank one."""
     factory, repo = _real_factory_with_inmemory_repo()
 
-    resolver = _StubResolver()
-    dispatcher = _StubDispatcher(_FailingDeviceFs())
-    # Seed a bot-x FILE row whose name collides with the upload below.
-    # user_id MUST match the principal's user_id ("u1") — the slim service's
-    # check_name_exists filters by user_id, so a mismatch would miss the
-    # collision and let the upload fall through to the 502 write path.
-    ts = datetime(2026, 7, 28, 10, 0).isoformat()
-    repo.create(
-        {
-            "name": "hello.txt",
-            "resource_type": "file",
-            "status": "active",
-            "gmt_created": ts,
-            "gmt_modified": ts,
-            "attributes": {"path": "hello.txt", "size": 1},
-            "user_id": "u1",
-            "bolt_id": "bot-x",
-        }
+    env = await upload_resource(
+        path="docs/a.txt",
+        content=b"file bytes",
+        owner_id="u1",
+        bot_id="bot-x",
+        factory=factory,
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubFileService(),
+        request=_request_without_trace(),
     )
 
+    assert env.code == CODE_CREATED
+    assert env.data.resource_id  # the record id, not the empty fallback
+    assert env.data.path == "docs/a.txt"
+    row = list(repo._rows.values())[-1]
+    assert row["user_id"] == "u1"
+    assert row["created_by"] == "u1"
+    assert row["name"] == "a.txt"  # leaf
+    assert row["attributes"]["path"] == "docs/a.txt"  # full workspace-relative
+    assert row["attributes"]["parent_path"] == "docs"  # dirname, for the console
+    assert row["source"] == "upload"
+
+
+@pytest.mark.asyncio
+async def test_upload_succeeds_even_if_the_record_write_fails():
+    """The bytes are in the workspace by then, so the file exists. Failing the
+    request would report a failure for a file that is demonstrably there — and
+    the retry would hit the duplicate check."""
+
+    class _ExplodingFactory:
+        def create(self, *, bot_id):
+            raise RuntimeError("repo down")
+
+    env = await upload_resource(
+        path="a.txt",
+        content=b"xy",
+        owner_id="u1",
+        bot_id="bot-x",
+        factory=_ExplodingFactory(),
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubFileService(),
+        request=_request_without_trace(),
+    )
+
+    assert env.code == CODE_CREATED
+    assert env.data.path == "a.txt"
+    assert env.data.resource_id == ""  # no record, so no id
+    assert env.data.size == 2
+
+
+@pytest.mark.asyncio
+async def test_upload_409_takes_precedence_over_502_path():
+    """With both conditions live (occupied path AND a failing device), the
+    occupancy check runs first, so the 409 surfaces — not the 502. Pins the
+    ordering: an upload must never attempt a write it would refuse anyway.
+
+    Occupancy is now decided by the workspace rather than by a row, so the seed
+    is a file present on the device, not a record.
+    """
+    factory, repo = _real_factory_with_inmemory_repo()
+    rows_before = len(repo._rows)
+
     resp = await upload_resource(
-        name="hello.txt",
+        path="hello.txt",
         content=b"x",
         owner_id="u1",
         bot_id="bot-x",
         factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubFileService(
+            existing={"hello.txt"}, raises=RuntimeError("device unreachable")
+        ),
         request=_request_without_trace(),
     )
     assert resp.status_code == 409
     assert json.loads(resp.body)["message"] == "Resource already exists"
+    assert len(repo._rows) == rows_before

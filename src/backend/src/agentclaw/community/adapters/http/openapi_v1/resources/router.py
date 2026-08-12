@@ -308,6 +308,7 @@ async def upload_resource(
     content: Annotated[bytes, Body(media_type="application/octet-stream")],
     request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
+    factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
     file_svc: ResourceFileService = Injected(ResourceFileService),
 ) -> Envelope[Resource]:
@@ -369,17 +370,35 @@ async def upload_resource(
         logger.exception("[upload_resource] device write failed")
         raise HTTPException(status_code=502, detail="Upload storage failed")
 
-    return created(
-        Resource(
-            resource_id="",
-            name=info["name"],
-            type=ResourceType.FILE,
-            source="upload",
-            size=info.get("size", len(content)),
-            path=info["path"],
-        ),
-        request,
+    # The bytes are in the workspace now, so the file exists whatever happens
+    # next: the record carries only what the filesystem cannot know (uploader,
+    # upload time, upload-vs-bot-created) and what the publish pipeline reads.
+    # Failing the request here would report "upload failed" for a file that is
+    # demonstrably there, and a retry would then hit the duplicate check.
+    data = Resource(
+        resource_id="",
+        name=info["name"],
+        type=ResourceType.FILE,
+        source="upload",
+        size=info.get("size", len(content)),
+        path=info["path"],
     )
+    try:
+        record = await factory.create(bot_id=bot_id).record_uploaded_file(
+            path=info["path"],
+            size=info.get("size", len(content)),
+            user_id=owner_id,
+            created_by=owner_id,
+        )
+    except Exception:
+        logger.exception(
+            "[upload_resource] enrichment record failed; file is written at %s",
+            info["path"],
+        )
+    else:
+        data = _to_openapi_resource(record)
+        data.path = info["path"]
+    return created(data, request)
 
 
 @router.get("/{resource_id}", response_model=Envelope[Resource])

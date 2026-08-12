@@ -58,7 +58,7 @@ change, no OCB dependency in this scope.
   dispatches addressed) after the A5 sanitization. **One parameter.** No
   `parent_path`, and no separate name: the directory is part of the path, and
   `path` is the same spelling every other file endpoint uses.
-- [ ] **B2.** After a successful upload, write the enrichment record
+- [x] **B2.** After a successful upload, write the enrichment record
   best-effort — **including `user_id` and `created_by` from the caller**.
   `ResourceFileService` writes no records, so the router owns this; omitting the
   uploader would make OpenAPI uploads appear in the console's resource list with
