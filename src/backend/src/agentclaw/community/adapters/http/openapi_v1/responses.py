@@ -81,6 +81,7 @@ from agentclaw.community.core.bot_inventory.errors import (
     BotInventoryPermissionError,
     BotInventoryUpstreamError,
 )
+from agentclaw.community.core.bot_dormant.activate_service import InvalidBotStateError
 from agentclaw.community.core.devices.services.device_context import (
     ConnInfoBuildError,
     DeviceNotBoundError,
@@ -239,6 +240,8 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     ),
     BotOperationNotAllowedError: (409, "Operation not supported for this bot"),
     BotInventoryOperationNotAllowedError: (409, "Operation not supported for this bot"),
+    # Dormant activate: a bot that is not RECYCLED cannot be reactivated.
+    InvalidBotStateError: (409, "Operation not supported for this bot"),
     BotInventoryPermissionError: (404, "Not found"),
     BotInventoryUpstreamError: (502, "Desktop service error"),
     ClusterMismatchError: (400, "engine and cluster_name do not match"),

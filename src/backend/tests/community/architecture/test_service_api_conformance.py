@@ -39,6 +39,9 @@ import inspect
 import pytest
 
 from agentclaw.community.api.bot_inventory_service import BotInventoryServiceProtocol
+from agentclaw.community.api.bot_dormant_service import (
+    BotDormantActivateServiceProtocol,
+)
 from agentclaw.community.api.bot_startup_script_service import (
     BotStartupScriptServiceProtocol,
 )
@@ -63,6 +66,7 @@ from agentclaw.community.api.local_skill_state_service import (
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
 )
+from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService
 from agentclaw.community.core.bot_inventory.protocols import (
     BotInventoryBotPort,
     DesktopBotInventoryPort,
@@ -104,6 +108,7 @@ _PAIRS = [
     (BotInventoryServiceProtocol, BotInventoryService),
     (BotStartupScriptServiceProtocol, BotStartupScriptService),
     (LocalBotWorkflowServiceProtocol, LocalBotWorkflowService),
+    (BotDormantActivateServiceProtocol, ActivateBotService),
     (BotInventoryBotPort, BotService),
     (DesktopBotInventoryPort, DesktopBotService),
     (EngineConfigServiceProtocol, EngineConfigService),

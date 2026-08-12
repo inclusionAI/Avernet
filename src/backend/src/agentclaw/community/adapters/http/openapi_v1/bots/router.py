@@ -13,6 +13,7 @@ internal router does.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -80,6 +81,7 @@ from agentclaw.community.api.bot_startup_script_service import (
     SUPPORTED,
     BotStartupScriptServiceProtocol,
 )
+from agentclaw.community.api.data_init_service import DataInitServiceProtocol
 from agentclaw.community.core.workspace.constants import (
     DEFAULT_ENGINE_TYPE,
     _get_engine_types,
@@ -89,6 +91,7 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
+from .engine_config import _engine_config_target
 from .startup_script_support import (
     _startup_script_payload,
     _startup_script_target,
@@ -99,10 +102,13 @@ from .schemas import (
     BotAuthPending,
     BotAuthStatus,
     BotCreate,
+    BotSpaceRef,
     BotStatus,
     BotType,
     BotUpdate,
     Ceiling,
+    DataInitRequest,
+    DataInitResult,
     Passport,
     StartupScript,
     StartupScriptWrite,
@@ -130,20 +136,66 @@ _REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
 
 router = APIRouter(prefix="/openapi/v1/bots", tags=["bots"])
 
+# Post-filter fetch bounds for the new workshop filters (deploy_mode/service/space)
+# on ``GET /openapi/v1/bots``. The legacy filters go straight to the service, which
+# pages natively; the new ones are not understood downstream, so the handler fetches
+# a window and post-filters. These bounds keep one list call from scanning an
+# unbounded set, the same rationale as ``BotInventoryService.MAX_CLOUD_ROWS``.
+_LIST_POSTFILTER_PAGES = 5
+_LIST_POSTFILTER_MAX = 500
+
 
 def _to_bot(d: dict[str, Any]) -> Bot:
     """Adapt an internal bot ``to_dict()`` record to the public ``Bot`` schema."""
     engine = d.get("active_engine") or ""
+    bot_type = d.get("bot_type") or ""
     return Bot(
         bot_id=d["bot_id"],
         bot_name=d.get("bot_name") or "",
         bot_desc=d.get("bot_desc") or "",
         engine=engine,
         cluster_name=cluster_for_engine(engine),
-        bot_type=d.get("bot_type") or "",
+        bot_type=bot_type,
         status=d.get("status") or "",
         owner_entity_id=d.get("owner_id") or "",
+        # desktop → local; everything else (personal/service) is cloud-provisioned
+        # — local Bots have their own /openapi/v1/bots/local surface and never
+        # appear here, so the only thing this distinguishes today is bot_type.
+        deploy_mode="local" if bot_type == "desktop" else "cloud",
+        space=_bot_space_ref(d, d.get("owner_id") or ""),
     )
+
+
+def _resolve_bot_space(bot: dict[str, Any], owner_id: str) -> dict[str, str]:
+    """Resolve ``(space_id, name, kind)`` from ``ac_bots.space_id`` (struct).
+
+    Reads the structured ``space_id`` column on ``ac_bots`` — NOT ``bot.ext``
+    (the contract owner rejected the transient ext path). A NULL space falls
+    back to the personal space ``personal:{owner_id}`` so the personal view
+    always contains the bot; ``name``/``kind`` mirror the same fallback the
+    inventory ``NoopBusinessSpaceContext`` uses.
+    """
+    space_id = bot.get("space_id")
+    if not space_id:
+        return {"space_id": f"personal:{owner_id}", "name": "Personal", "kind": "personal"}
+    return {"space_id": str(space_id), "name": str(space_id), "kind": "personal"}
+
+
+def _bot_space_ref(bot: dict[str, Any], owner_id: str) -> BotSpaceRef | None:
+    """Build the public ``Bot.space`` ref, or None when no owner to resolve against."""
+    if not owner_id:
+        return None
+    s = _resolve_bot_space(bot, owner_id)
+    return BotSpaceRef(space_id=s["space_id"], name=s["name"], kind=s["kind"])
+
+
+def _row_matches_space(bot: dict[str, Any], owner_id: str, space_id: str) -> bool:
+    """Whether ``bot`` belongs to space ``space_id`` for list filtering.
+
+    Same source as the per-bot ``space`` derivation (``ac_bots.space_id`` +
+    personal fallback), so list-filter and detail-derive read one value.
+    """
+    return _resolve_bot_space(bot, owner_id)["space_id"] == space_id
 
 
 def _auth_status_error(status: str, request: Request) -> JSONResponse:
@@ -366,47 +418,69 @@ async def list_bots(
             "exactly (e.g. 'ACTIVE'; see the Bot schema for the vocabulary)."
         ),
     ] = None,
+    deploy_mode: str | None = None,
+    service: str | None = None,
+    space: str | None = None,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[Page[Bot]]:
-    """List the user's bots (filter + paginate), narrowed to what may be reached.
+    """List the caller's bots, narrowed to the caller's authorized scope.
 
-    For a human caller this is their own bots, unfiltered — unchanged.
-
-    For an **application** the result is narrowed to the bots that user granted
-    it. Filtering here rather than in the service keeps the narrowing beside the
-    thing it protects, and it is applied **before** paginating: filtering a page
-    after the fact would return short pages and, worse, let a caller infer how
-    many bots it was *not* granted from the gaps. The count reports the narrowed
-    set for the same reason.
+    Human callers see their own bots. Application callers see only owned bots
+    explicitly granted by the delegating user. The grant restriction is passed
+    to the service before pagination and is also preserved when workshop-only
+    filters require a bounded post-filter window.
 
     An application granted nothing gets an empty page, not an error: naming no
-    bot, this operation has nothing to mask.
+    bot, this operation has nothing to mask. The complete view of delegated
+    bots, including bots the user does not own, is the authorized-bots listing.
 
-    Note this listing can never show a bot the user does not own, for an
-    application any more than for the user — it is owner-scoped underneath. The
-    complete view of what an application may reach, including bots delegated by
-    a collaborator, is the authorized-bots listing.
+    ``keyword``/``engine``/``status`` are native service filters.
+    ``deploy_mode``/``service``/``space`` are workshop filters applied here
+    because the underlying service does not own those presentation concerns.
     """
-    # ``owned_by_delegator``: this query is owner-scoped, and ``bot_id`` is not
-    # unique across owners — filtering it by a set holding someone else's
-    # ``default`` would match the delegating user's own ``default`` and return
-    # a bot nobody granted.
     granted = caller.granted_bot_ids(owned_by_delegator=True)
     if granted is not None and not granted:
-        # Granted nothing: answer without asking the service for a page it
-        # would have to discard entirely.
         return page(0, [], request)
+
+    if deploy_mode == "local":
+        return page(0, [], request)
+
+    effective_deploy_mode: str | None = None if deploy_mode == "cloud" else deploy_mode
+    if effective_deploy_mode is None and service is None and space is None:
+        result = bot_service.list_bots_by_conditions(
+            owner_id=owner_id,
+            bot_name=keyword,
+            engine=engine,
+            status=status,
+            page=page_params.page,
+            page_size=page_params.page_size,
+            bot_ids=sorted(granted) if granted is not None else None,
+        )
+        items = [_to_bot(b) for b in result["items"]]
+        return page(result["total"], items, request)
+
+    fetch_size = min(page_params.page_size * _LIST_POSTFILTER_PAGES, _LIST_POSTFILTER_MAX)
     result = bot_service.list_bots_by_conditions(
         owner_id=owner_id,
         bot_name=keyword,
         engine=engine,
         status=status,
-        page=page_params.page,
-        page_size=page_params.page_size,
+        page=1,
+        page_size=fetch_size,
         bot_ids=sorted(granted) if granted is not None else None,
     )
-    items = [_to_bot(b) for b in result["items"]]
-    return page(result["total"], items, request)
+    rows = list(result.get("items", []))
+    if service == "yes":
+        rows = [b for b in rows if (b.get("bot_type") or "") == "service"]
+    elif service == "no":
+        rows = [b for b in rows if (b.get("bot_type") or "") != "service"]
+    if space is not None:
+        rows = [b for b in rows if _row_matches_space(b, owner_id, space)]
+    items = [_to_bot(b) for b in rows]
+    total = len(items)
+    start = (page_params.page - 1) * page_params.page_size
+    page_items = items[start : start + page_params.page_size]
+    return page(total, page_items, request)
 
 
 @router.get(
@@ -806,7 +880,20 @@ async def get_bot_passport(
     if not passport_id:
         # No passport issued for this bot yet — a missing sub-resource is a 404.
         raise BotNotFoundError(f"passport not found: {bot_id}")
-    return envelope(Passport(bot_id=bot_id, passport_id=passport_id), request)
+    # License fields are forwarded exactly as the legacy ``/api`` passport
+    # endpoint forwarded the plugin dict verbatim — both implementations
+    # currently return ``None`` for them, so they carry the same "unknown until
+    # the data source backfills" value here. ``passport_id`` is still the key
+    # existence signal; license fields are presentation only.
+    return envelope(
+        Passport(
+            bot_id=bot_id,
+            passport_id=passport_id,
+            expire_at=info.get("expire_at"),
+            certificate_url=info.get("certificate_url"),
+        ),
+        request,
+    )
 
 
 def _audit_actor(caller: ActingCaller, owner_id: str) -> str:
@@ -934,4 +1021,70 @@ async def delete_bot_startup_script(
     startup_script_service.delete(entity_id=entity_id, bot_id=bot_id)
     return deleted_envelope(request)
 
+
+@router.post(
+    "/{bot_id}/data-init",
+    response_model=Envelope[DataInitResult],
+    responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED,
+)
+@envelope_errors
+async def trigger_bot_data_init(
+    bot_id: str,
+    body: DataInitRequest,
+    request: Request,
+    owner_id: UserIdDep,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    data_init_service: DataInitServiceProtocol = Injected(DataInitServiceProtocol),
+) -> Envelope[DataInitResult]:
+    """Trigger a personal-cloud bot's cold-start data initialization.
+
+    Mirrors the legacy ``POST /api/bots/{bot_id}/data-init``: fire-and-forget
+    — the LLM-driven init runs in the background and the caller returns with an
+    ``in_progress`` state, while the frontend polls ``Bot.ext.data_init_status``
+    for progress (the same field the legacy ``GET /api/bots/by-owner`` exposed).
+
+    Personal cloud bots only: a desktop bot has its own desktop/BaaS provisioning
+    and is never in the device-ACTIVE / SKILL.md-pulling path this orchestrates,
+    and a service bot's data lifecycle is owned by the service line. Both are
+    refused with 409 rather than routed through ``DataInitService``.
+    """
+    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard (→ 404)
+    bot_type = bot.get("bot_type") or ""
+    if bot_type == "desktop":
+        raise BotOperationNotAllowedError(
+            "local bots do not support data initialization"
+        )
+    if bot_type == "service":
+        raise BotOperationNotAllowedError(
+            "service bot data lifecycle is owned by the publish flow"
+        )
+    if bot_type != "personal":
+        raise BotOperationNotAllowedError(
+            f"data initialization is not supported for bot_type: {bot_type or 'unknown'}"
+        )
+    # ``_engine_config_target`` resolves (entity_id, entity_type, engine) from the
+    # bot record and raises BotNotFoundError (→ 404) when the bot has no entity,
+    # which is the same precondition data-init needs.
+    entity_id, entity_type, _engine = _engine_config_target(bot)
+    # Fire-and-forget, exactly as the legacy handler does: ``trigger_init`` is
+    # async and owns its own idempotency + retry + status machine, so releasing
+    # it to the loop lets the HTTP request return ``in_progress`` immediately.
+    asyncio.ensure_future(
+        data_init_service.trigger_init(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            entity_id=entity_id,
+            entity_type=entity_type,
+            force=body.force,
+        )
+    )
+    return envelope(
+        DataInitResult(
+            bot_id=bot_id,
+            status="in_progress",
+            message="data initialization dispatched",
+        ),
+        request,
+    )
 

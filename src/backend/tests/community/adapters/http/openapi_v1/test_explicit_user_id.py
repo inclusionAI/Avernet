@@ -309,18 +309,11 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: ``path`` moved 31 → 34 with the startup-script operations (GET/PUT/DELETE on
 #: ``/bots/{bot_id}/startup-script``) — all three address a bot, none moved.
 #:
-#: Then bot-first addressing moved 34/16/21 → 54/1/16, and this counter stopped
-#: meaning what its name says: ``bot_id`` is no longer untouched, it was the
-#: point. Every operation that acts on one bot now names it in the path, so the
-#: only ``query`` left is ``GET /bots/logs/traces``, where ``bot_id`` is a
-#: filter over a tenant-level trace query rather than an address — the one
-#: placement the rule deliberately keeps. ``none`` fell 21 → 16 because the five
-#: operations that named no bot at all (the resources and routines collection
-#: roots, skills list and upload) now do.
-#:
-#: The inventory and local Bot workshop groups then added seven bot-addressed
-#: operations and five account-level operations.
-_BOT_ID_PLACEMENT = {"path": 61, "query": 1, "none": 21}
+#: Then bot-first addressing moved 34/16/21 → 54/1/16. Every operation acting
+#: on one bot now names it in the path; the only query placement left is the
+#: Bot Logs trace filter. Inventory/local added seven path and five account-level
+#: operations; dormant activation and data initialization added two more paths.
+_BOT_ID_PLACEMENT = {"path": 63, "query": 1, "none": 21}
 
 
 def _schema() -> dict:
@@ -397,10 +390,10 @@ def test_the_pinned_number_of_operations_take_it():
         for path, method, operation in _current_operations(_schema())
         if _user_scoped(path, method) and _param(operation, USER_ID_QUERY)
     ]
-    # 60 on the merge base, +3 for the startup-script operations, +2 for the
-    # resources file endpoints re-addressed by workspace path (#1000), then -4
-    # for the files-only resources group and +12 for inventory/local workshop.
-    assert len(taking) == 73
+    # 60 on the merge base, +3 for startup scripts, +2 for re-addressed
+    # resource files, -4 for files-only resources, +12 for inventory/local,
+    # and +2 for dormant activation and data initialization.
+    assert len(taking) == 75
 
 
 def test_the_exempt_operations_take_none():

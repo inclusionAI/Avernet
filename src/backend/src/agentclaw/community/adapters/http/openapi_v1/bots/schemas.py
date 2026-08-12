@@ -103,6 +103,22 @@ class Bot(BaseModel):
         description="The user who owns the bot — echoes the user_id the "
         "request named."
     )
+    # Workshop card enrichment. ``deploy_mode`` is derived from ``bot_type``
+    # (desktop → local; else cloud), while ``space`` comes from the structured
+    # bot space with the personal-space fallback.
+    deploy_mode: Literal["cloud", "local"] = "cloud"
+    space: "BotSpaceRef | None" = None
+
+
+class BotSpaceRef(BaseModel):
+    """Minimal business-space reference surfaced on ``Bot.space``."""
+
+    space_id: str
+    name: str
+    kind: str = "personal"
+
+
+Bot.model_rebuild()
 
 
 class BotCreate(BaseModel):
@@ -296,7 +312,16 @@ class Ceiling(BaseModel):
 
 
 class Passport(BaseModel):
-    """Agent Passport (identity credential) summary."""
+    """Agent Passport (identity credential) summary.
+
+    Mirrors the legacy ``GET /api/bots/{bot_id}/passport`` which forwarded the
+    PassportPlugin dict verbatim — ``useBot.ts`` reads ``agent_id``/``agent_code``
+    via ``passport_id`` and ``expire_at``/``certificate_url`` for the license
+    card (PRD §10.6). The license fields stay optional/nullable because both
+    Passport implementations currently return ``None`` for them; the contract is
+    exposed now so the frontend wiring and the data-source backfill can land
+    independently.
+    """
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -313,6 +338,12 @@ class Passport(BaseModel):
         "identity credential downstream services authenticate the bot "
         "against. An opaque string whose shape is deployment-defined; it may "
         "equal the bot_id."
+    )
+    expire_at: str | None = Field(
+        default=None, description="License expiration time when reported."
+    )
+    certificate_url: str | None = Field(
+        default=None, description="License certificate URL when reported."
     )
 
 
@@ -382,3 +413,30 @@ class StartupScript(BaseModel):
     unsupported_reason: str = Field(
         description="Empty when supported; otherwise names the cause.",
     )
+
+
+class DataInitRequest(BaseModel):
+    """Body for ``POST /openapi/v1/bots/{bot_id}/data-init``.
+
+    Mirrors the legacy ``POST /api/bots/{bot_id}/data-init`` body. ``force``
+    re-runs initialization even if it already completed.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    force: bool = False
+
+
+class DataInitResult(BaseModel):
+    """Result of triggering Bot cold-start data initialization.
+
+    The handler returns the synchronous ``in_progress`` dispatch state — the
+    LLM-driven init runs fire-and-forget in the background, and the frontend
+    polls ``GET /openapi/v1/bots`` (``Bot.ext.data_init_status``) for progress,
+    matching the legacy ``/api`` contract.
+    """
+
+    bot_id: str
+    status: str
+    message: str | None = None
+

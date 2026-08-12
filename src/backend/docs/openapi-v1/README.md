@@ -936,7 +936,7 @@ literals the routes actually publish:
 ```text
 approvals  authorized  ceiling  check-name  connection  engine  identity
 inventory  loadtest  local  logs  mcp  models  resources  routines  sessions
-skills
+skills  dormant
 ```
 
 Nine of those fifteen — `approvals`, `connection`, `engine`, `identity`,

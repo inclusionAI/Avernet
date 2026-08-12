@@ -35,7 +35,7 @@
 | 列 | 取值 |
 |---|---|
 | **归类** | `已有` = 现网存在、工坊直接复用；`升级` = 现网存在、需纯加法增强（不动 required）；`新增` = 现网不存在、新建端点 |
-| **完成状态** | `已落地` = router 代码已存在并注册；`待升级` = 现网在但加法未做；`已落地(本分支)` = 本开发分支新建并注册；`已设计未建` = 本机技术设计已定形但未写 router；`未开工` = 仅系分有端点计划 |
+| **完成状态** | `已完成` = 存量原有端点，现网在跑（非本次迭代产出）；`已开发` = 本次本地迭代新建并已注册 router；`待升级` = 现网在但加法未做；`已设计未建` = 本机技术设计已定形但未写 router；`未开工` = 仅系分有端点计划 |
 | **阶段** | 系分 §7 排期：P0(8/07–8/15) / P1(8/15–8/22) / P2(8/22–8/29) / P3(8/29–8/31)；`—` = 现网已上线、无排期 |
 
 ### 0.5 命名已决定（2026-08-12）
@@ -51,89 +51,89 @@
 | # | 模块 | 接口功能 | 全路径（Method 在首） | 归类 | 完成状态 | 阶段 | 委托 / 备注 |
 |---|---|---|---|---|---|---|---|
 | 1 | bots | 创建 Bot（personal\|service，拒 desktop） | `POST /openapi/v1/bots` | 升级 | 待升级 | P0 | 加可选 `init_config` 入参；委托 `BotService` |
-| 2 | bots | 列表 | `GET /openapi/v1/bots` | 升级 | 待升级 | P0 | 加 `deploy_mode`/`service`/`space` 可选筛选 |
-| 3 | bots | 重名校验 | `GET /openapi/v1/bots/check-name` | 已有 | 已落地 | — | 租户级，无 `user_id` |
-| 4 | bots | 配额上限 | `GET /openapi/v1/bots/ceiling` | 已有 | 已落地 | — | — |
-| 5 | bots | Bot 详情 | `GET /openapi/v1/bots/{bot_id}` | 已有 | 已落地 | — | 见 #14「Bot 响应体」行 |
-| 6 | bots | 改名 / 描述 | `PUT /openapi/v1/bots/{bot_id}` | 已有 | 已落地 | — | engine 不可改 |
-| 7 | bots | 删除 Bot | `DELETE /openapi/v1/bots/{bot_id}` | 已有 | 已落地 | — | **拒 desktop + service** |
-| 8 | bots | 重启进程 | `POST /openapi/v1/bots/{bot_id}/restart` | 已有 | 已落地 | — | **拒 desktop**；≠重启引擎 |
-| 9 | bots | 授权轮询 / 完成创建 | `GET /openapi/v1/bots/{bot_id}/auth-status` | 已有 | 已落地 | — | 202 流在此 ISSUED 时真正落库 |
-| 10 | bots | 就绪布尔 | `GET /openapi/v1/bots/{bot_id}/status` | 已有 | 已落地 | — | **≠健康分** |
-| 11 | bots | Agent Passport / 许可证 | `GET /openapi/v1/bots/{bot_id}/passport` | 升级 | 待升级 | P0 | 加 `expire_at`/`certificate_url`；卡片 `idcard`=许可证，无新端点 |
-| 12 | bots | 读引擎配置 | `GET /openapi/v1/bots/{bot_id}/engine-config` | 已有 | 已落地 | — | — |
-| 13 | bots | 写引擎配置 | `PUT /openapi/v1/bots/{bot_id}/engine-config` | 已有 | 已落地 | — | — |
-| 14 | bots | _（schema）Bot 响应体_ | 影响 #1/#2/#5/#6/#8 等所有返回 `Bot` 的端点 | 升级 | 待升级 | P0 | 加**可选可空** `deploy_mode`/`space`/`health_score`/`display_state`/`version`/`containers`/`license`；不动三个 required |
-| 15 | engine | 引擎运行态 | `GET /openapi/v1/bots/engine/{bot_id}/status` | 已有 | 已落地 | — | engine_runtime/engine |
-| 16 | engine | 引擎能力 | `GET /openapi/v1/bots/engine/{bot_id}/capabilities` | 已有 | 已落地 | — | — |
-| 17 | engine | 可用引擎列表 | `GET /openapi/v1/bots/engine/{bot_id}/available` | 已有 | 已落地 | — | 创建表单引擎候选 |
-| 18 | sessions | 会话列表 | `GET /openapi/v1/bots/sessions/{bot_id}` | 已有 | 已落地 | — | 编辑页调试对话 |
-| 19 | sessions | 新建会话 | `POST /openapi/v1/bots/sessions/{bot_id}` | 已有 | 已落地 | — | — |
-| 20 | sessions | 会话详情 | `GET /openapi/v1/bots/sessions/{bot_id}/{session_id}` | 已有 | 已落地 | — | — |
-| 21 | sessions | 更新会话 | `PATCH /openapi/v1/bots/sessions/{bot_id}/{session_id}` | 已有 | 已落地 | — | — |
-| 22 | sessions | 删除会话 | `DELETE /openapi/v1/bots/sessions/{bot_id}/{session_id}` | 已有 | 已落地 | — | — |
-| 23 | sessions | 消息列表 | `GET /openapi/v1/bots/sessions/{bot_id}/{session_id}/messages` | 已有 | 已落地 | — | — |
-| 24 | sessions | 清空消息 | `DELETE /openapi/v1/bots/sessions/{bot_id}/{session_id}/messages` | 已有 | 已落地 | — | — |
-| 25 | routines | 定时任务列表 | `GET /openapi/v1/bots/routines` | 已有 | 已落地 | — | 工作 Tab「定时任务」 |
-| 26 | routines | 新建任务 | `POST /openapi/v1/bots/routines` | 已有 | 已落地 | — | — |
-| 27 | routines | 任务详情 | `GET /openapi/v1/bots/routines/{routine_id}` | 已有 | 已落地 | — | — |
-| 28 | routines | 更新任务 | `PATCH /openapi/v1/bots/routines/{routine_id}` | 已有 | 已落地 | — | — |
-| 29 | routines | 删除任务 | `DELETE /openapi/v1/bots/routines/{routine_id}` | 已有 | 已落地 | — | — |
-| 30 | routines | 手动触发 | `POST /openapi/v1/bots/routines/{routine_id}/run` | 已有 | 已落地 | — | — |
-| 31 | routines | 执行历史 | `GET /openapi/v1/bots/routines/{routine_id}/runs` | 已有 | 已落地 | — | — |
-| 32 | models | 模型列表 | `GET /openapi/v1/bots/models/{bot_id}` | 已有 | 已落地 | — | — |
-| 33 | models | 模型详情 | `GET /openapi/v1/bots/models/{bot_id}/{model_id}` | 已有 | 已落地 | — | `{model_id}` 实为 path 参数 |
-| 34 | identity | MD / 身份文件列表 | `GET /openapi/v1/bots/identity/{bot_id}` | 已有 | 已落地 | — | 「MD 管理」入口 |
+| 2 | bots | 列表 | `GET /openapi/v1/bots` | 升级 | 已开发 | P0 | 加 `deploy_mode`/`service`/`space` 三筛选器(可空);全不传→老路径零影响;任一传→handler 后过滤分页(MAX 500);`deploy_mode=cloud` 等价不传、`=local` 返空(本地走 `/bots/local`);`space` 走 **`ac_bots.space_id` 结构化列**(NULL→personal fallback,**不走 ext**)。大集合建议改用 `/bots/inventory` |
+| 3 | bots | 重名校验 | `GET /openapi/v1/bots/check-name` | 已有 | 已完成 | — | 租户级，无 `user_id` |
+| 4 | bots | 配额上限 | `GET /openapi/v1/bots/ceiling` | 已有 | 已完成 | — | — |
+| 5 | bots | Bot 详情 | `GET /openapi/v1/bots/{bot_id}` | 已有 | 已完成 | — | 见 #14「Bot 响应体」行 |
+| 6 | bots | 改名 / 描述 | `PUT /openapi/v1/bots/{bot_id}` | 已有 | 已完成 | — | engine 不可改 |
+| 7 | bots | 删除 Bot | `DELETE /openapi/v1/bots/{bot_id}` | 已有 | 已完成 | — | **拒 desktop + service** |
+| 8 | bots | 重启进程 | `POST /openapi/v1/bots/{bot_id}/restart` | 已有 | 已完成 | — | **拒 desktop**；≠重启引擎 |
+| 9 | bots | 授权轮询 / 完成创建 | `GET /openapi/v1/bots/{bot_id}/auth-status` | 已有 | 已完成 | — | 202 流在此 ISSUED 时真正落库 |
+| 10 | bots | 就绪布尔 | `GET /openapi/v1/bots/{bot_id}/status` | 已有 | 已完成 | — | **≠健康分** |
+| 11 | bots | Agent Passport / 许可证 | `GET /openapi/v1/bots/{bot_id}/passport` | 升级 | 已开发 | P0 | 加 `expire_at`/`certificate_url` 两可选可空字段;从 `info.get()` 透传,与老 `/api` passport 直返 plugin dict 等价;`passport_id` 仍是存在性信号,license 字段仅展示。两 Passport 实现当前返 None,字段契约先行,数据上游补值后自动透传 |
+| 12 | bots | 读引擎配置 | `GET /openapi/v1/bots/{bot_id}/engine-config` | 已有 | 已完成 | — | — |
+| 13 | bots | 写引擎配置 | `PUT /openapi/v1/bots/{bot_id}/engine-config` | 已有 | 已完成 | — | — |
+| 14 | bots | _（schema）Bot 响应体_ | 影响 #1/#2/#5/#6/#8 等所有返回 `Bot` 的端点 | 升级 | 已开发 | P0 | **结构化方案落地**：加 `deploy_mode`(从 `bot_type` 派生) + `space`(`BotSpaceRef` 结构,从 **`ac_bots.space_id` 结构化列**派生,**不走 `bot.ext`**;NULL → personal `personal:{owner_id}` fallback);新建独立 `BotSpaceRef` 类(不跨 import inventory 组件)。`space_id` 列已加(`plugin_api/models.py:87` `Column(String(128), nullable=True)` + `to_dict` 补)。`display_state`/`health_score`/`containers`/`version`/`license` 不加进 `Bot` —— 属 `BotInventoryItem`(#67) 聚合卡片 |
+| 15 | engine | 引擎运行态 | `GET /openapi/v1/bots/engine/{bot_id}/status` | 已有 | 已完成 | — | engine_runtime/engine |
+| 16 | engine | 引擎能力 | `GET /openapi/v1/bots/engine/{bot_id}/capabilities` | 已有 | 已完成 | — | — |
+| 17 | engine | 可用引擎列表 | `GET /openapi/v1/bots/engine/{bot_id}/available` | 已有 | 已完成 | — | 创建表单引擎候选 |
+| 18 | sessions | 会话列表 | `GET /openapi/v1/bots/sessions/{bot_id}` | 已有 | 已完成 | — | 编辑页调试对话 |
+| 19 | sessions | 新建会话 | `POST /openapi/v1/bots/sessions/{bot_id}` | 已有 | 已完成 | — | — |
+| 20 | sessions | 会话详情 | `GET /openapi/v1/bots/sessions/{bot_id}/{session_id}` | 已有 | 已完成 | — | — |
+| 21 | sessions | 更新会话 | `PATCH /openapi/v1/bots/sessions/{bot_id}/{session_id}` | 已有 | 已完成 | — | — |
+| 22 | sessions | 删除会话 | `DELETE /openapi/v1/bots/sessions/{bot_id}/{session_id}` | 已有 | 已完成 | — | — |
+| 23 | sessions | 消息列表 | `GET /openapi/v1/bots/sessions/{bot_id}/{session_id}/messages` | 已有 | 已完成 | — | — |
+| 24 | sessions | 清空消息 | `DELETE /openapi/v1/bots/sessions/{bot_id}/{session_id}/messages` | 已有 | 已完成 | — | — |
+| 25 | routines | 定时任务列表 | `GET /openapi/v1/bots/routines` | 已有 | 已完成 | — | 工作 Tab「定时任务」 |
+| 26 | routines | 新建任务 | `POST /openapi/v1/bots/routines` | 已有 | 已完成 | — | — |
+| 27 | routines | 任务详情 | `GET /openapi/v1/bots/routines/{routine_id}` | 已有 | 已完成 | — | — |
+| 28 | routines | 更新任务 | `PATCH /openapi/v1/bots/routines/{routine_id}` | 已有 | 已完成 | — | — |
+| 29 | routines | 删除任务 | `DELETE /openapi/v1/bots/routines/{routine_id}` | 已有 | 已完成 | — | — |
+| 30 | routines | 手动触发 | `POST /openapi/v1/bots/routines/{routine_id}/run` | 已有 | 已完成 | — | — |
+| 31 | routines | 执行历史 | `GET /openapi/v1/bots/routines/{routine_id}/runs` | 已有 | 已完成 | — | — |
+| 32 | models | 模型列表 | `GET /openapi/v1/bots/models/{bot_id}` | 已有 | 已完成 | — | — |
+| 33 | models | 模型详情 | `GET /openapi/v1/bots/models/{bot_id}/{model_id}` | 已有 | 已完成 | — | `{model_id}` 实为 path 参数 |
+| 34 | identity | MD / 身份文件列表 | `GET /openapi/v1/bots/identity/{bot_id}` | 已有 | 已完成 | — | 「MD 管理」入口 |
 | 35 | identity | 读单个 MD | `GET /openapi/v1/bots/identity/{bot_id}/{file_type}` | 升级 | 待升级 | P2 | `file_type` 是否覆盖 13 个 MD 待核；未覆盖加法补枚举 |
 | 36 | identity | 写单个 MD | `PUT /openapi/v1/bots/identity/{bot_id}/{file_type}` | 升级 | 待升级 | P2 | 同上 |
-| 37 | bot_logs | 对话 trace 检索 | `GET /openapi/v1/bots/logs/traces` | 已有 | 已落地 | — | **≠运行日志抽屉**；`user_id` 此处是「被查人」非「调用者」 |
-| 38 | bot_logs | trace 详情 | `GET /openapi/v1/bots/logs/traces/{trace_id}` | 已有 | 已落地 | — | — |
-| 39 | bot_logs | 会话 trace | `GET /openapi/v1/bots/logs/sessions/{session_key}/traces` | 已有 | 已落地 | — | — |
-| 40 | bot_logs | 群 trace | `GET /openapi/v1/bots/logs/groups/{group_id}/traces` | 已有 | 已落地 | — | — |
-| 41 | bot_logs | 任务 trace | `GET /openapi/v1/bots/logs/tasks/{biz_scene}/{biz_task_id}/traces` | 已有 | 已落地 | — | — |
-| 42 | resources | 资源列表 | `GET /openapi/v1/bots/resources` | 已有 | 已落地 | — | **≠容器文件目录树** |
-| 43 | resources | 资源重名校验 | `GET /openapi/v1/bots/resources/check-name` | 已有 | 已落地 | — | — |
-| 44 | resources | 新建资源 | `POST /openapi/v1/bots/resources` | 已有 | 已落地 | — | — |
-| 45 | resources | 上传资源 | `POST /openapi/v1/bots/resources/upload` | 已有 | 已落地 | — | — |
-| 46 | resources | 资源详情 | `GET /openapi/v1/bots/resources/{resource_id}` | 已有 | 已落地 | — | — |
-| 47 | resources | 更新资源 | `PUT /openapi/v1/bots/resources/{resource_id}` | 已有 | 已落地 | — | — |
-| 48 | resources | 删除资源 | `DELETE /openapi/v1/bots/resources/{resource_id}` | 已有 | 已落地 | — | — |
-| 49 | resources | 下载 | `GET /openapi/v1/bots/resources/{resource_id}/download` | 已有 | 已落地 | — | — |
-| 50 | resources | 预览 | `GET /openapi/v1/bots/resources/{resource_id}/preview` | 已有 | 已落地 | — | — |
-| 51 | approvals | 审批模式 | `GET /openapi/v1/bots/approvals/{bot_id}/mode` | 已有 | 已落地 | — | 关联「发布配置」 |
-| 52 | approvals | 设置审批模式 | `PUT /openapi/v1/bots/approvals/{bot_id}/mode` | 已有 | 已落地 | — | — |
-| 53 | approvals | 可用模式列表 | `GET /openapi/v1/bots/approvals/{bot_id}/modes` | 已有 | 已落地 | — | — |
-| 54 | connection | 引擎连接诊断 | `GET /openapi/v1/bots/connection/{bot_id}` | 已有 | 已落地 | — | — |
-| 55 | skills | 本地 Skill 列表 | `GET /openapi/v1/bots/skills` | 已有 | 已落地 | — | 仅本地 Skill |
-| 56 | skills | Skill 详情 | `GET /openapi/v1/bots/skills/{skill_id}` | 已有 | 已落地 | — | — |
-| 57 | skills | 上传本地 Skill | `POST /openapi/v1/bots/skills/upload` | 已有 | 已落地 | — | — |
-| 58 | skills | 激活 Skill | `POST /openapi/v1/bots/skills/{skill_id}/activate` | 已有 | 已落地 | — | — |
-| 59 | skills | 停用 Skill | `POST /openapi/v1/bots/skills/{skill_id}/deactivate` | 已有 | 已落地 | — | — |
-| 60 | skills | 删除 Skill | `DELETE /openapi/v1/bots/skills/{skill_id}` | 已有 | 已落地 | — | 引用型 Skill（市场/工坊）在 #99 `skill-sets` |
-| 61 | mcp | MCP 服务目录 | `GET /openapi/v1/bots/mcp/servers` | 已有 | 已落地 | — | 仅服务级目录 |
-| 62 | mcp | 租户列表 | `GET /openapi/v1/bots/mcp/tenants` | 已有 | 已落地 | — | — |
-| 63 | mcp | 服务详情 | `GET /openapi/v1/bots/mcp/servers/{server_code}` | 已有 | 已落地 | — | — |
-| 64 | mcp | 权限 | `GET /openapi/v1/bots/mcp/servers/{server_code}/permissions` | 已有 | 已落地 | — | — |
-| 65 | mcp | 读配置 | `GET /openapi/v1/bots/mcp/servers/{server_code}/config` | 已有 | 已落地 | — | — |
-| 66 | mcp | 写配置 | `PUT /openapi/v1/bots/mcp/servers/{server_code}/config` | 已有 | 已落地 | — | per-bot 绑定 + caller 在 #99 `skill-sets/mcps` |
-| 67 | inventory | 个人云端 + 本地清单分页 | `GET /openapi/v1/bots/inventory` | 新增 | 已落地(本分支) | P0 | 系分原称 `/openapi/v1/bots/workshop`；`BotInventoryService` 聚合 `BotService` + `DesktopBotService` |
-| 68 | inventory | 单清单项 | `GET /openapi/v1/bots/inventory/{bot_id}` | 新增 | 已落地(本分支) | P0 | 系分原称 `/openapi/v1/bots/workshop/{bot_id}`（card） |
-| 69 | inventory | 可用动作集 | `GET /openapi/v1/bots/inventory/{bot_id}/actions` | 新增 | 已落地(本分支) | P0 | 驱动 §0.2 按钮渲染；系分原称 `/openapi/v1/bots/workshop/{bot_id}/actions` |
-| 70 | local | 设备列表 | `GET /openapi/v1/bots/local/devices` | 新增 | 已落地(本分支) | P0 | 创建选 machine；`DesktopBotServiceProtocol.list_devices` |
-| 71 | local | 设备目录树 | `GET /openapi/v1/bots/local/devices/{machine_id}/files` | 新增 | 已落地(本分支) | P0 | 选挂载目录；`list_directory` |
-| 72 | local | 创建本地 Bot（201 / 202） | `POST /openapi/v1/bots/local` | 新增 | 已落地(本分支) | P0 | 委托 `DesktopBotService`；含 `machine_id`/`mount_path`/`init_config` |
-| 73 | local | 本地 Bot 列表 | `GET /openapi/v1/bots/local` | 新增 | 已落地(本分支) | P0 | inventory 已覆盖，可选 |
-| 74 | local | 本地 Bot 详情 | `GET /openapi/v1/bots/local/{bot_id}` | 新增 | 已落地(本分支) | P0 | — |
-| 75 | local | 授权轮询 + 完成创建 | `GET /openapi/v1/bots/local/{bot_id}/auth-status` | 新增 | 已落地(本分支) | P0 | `create_after_authorization` |
-| 76 | local | 重启本地 Bot | `POST /openapi/v1/bots/local/{bot_id}/restart` | 新增 | 已落地(本分支) | P0 | 委托 desktop restart |
-| 77 | local | 删除本地 Bot | `DELETE /openapi/v1/bots/local/{bot_id}` | 新增 | 已落地(本分支) | P0 | 委托 desktop delete |
-| 78 | local | 打开目录 | `POST /openapi/v1/bots/local/{bot_id}/open-folder` | 新增 | 已落地(本分支) | P0 | `open_folder` |
+| 37 | bot_logs | 对话 trace 检索 | `GET /openapi/v1/bots/logs/traces` | 已有 | 已完成 | — | **≠运行日志抽屉**；`user_id` 此处是「被查人」非「调用者」 |
+| 38 | bot_logs | trace 详情 | `GET /openapi/v1/bots/logs/traces/{trace_id}` | 已有 | 已完成 | — | — |
+| 39 | bot_logs | 会话 trace | `GET /openapi/v1/bots/logs/sessions/{session_key}/traces` | 已有 | 已完成 | — | — |
+| 40 | bot_logs | 群 trace | `GET /openapi/v1/bots/logs/groups/{group_id}/traces` | 已有 | 已完成 | — | — |
+| 41 | bot_logs | 任务 trace | `GET /openapi/v1/bots/logs/tasks/{biz_scene}/{biz_task_id}/traces` | 已有 | 已完成 | — | — |
+| 42 | resources | 资源列表 | `GET /openapi/v1/bots/resources` | 已有 | 已完成 | — | **≠容器文件目录树** |
+| 43 | resources | 资源重名校验 | `GET /openapi/v1/bots/resources/check-name` | 已有 | 已完成 | — | — |
+| 44 | resources | 新建资源 | `POST /openapi/v1/bots/resources` | 已有 | 已完成 | — | — |
+| 45 | resources | 上传资源 | `POST /openapi/v1/bots/resources/upload` | 已有 | 已完成 | — | — |
+| 46 | resources | 资源详情 | `GET /openapi/v1/bots/resources/{resource_id}` | 已有 | 已完成 | — | — |
+| 47 | resources | 更新资源 | `PUT /openapi/v1/bots/resources/{resource_id}` | 已有 | 已完成 | — | — |
+| 48 | resources | 删除资源 | `DELETE /openapi/v1/bots/resources/{resource_id}` | 已有 | 已完成 | — | — |
+| 49 | resources | 下载 | `GET /openapi/v1/bots/resources/{resource_id}/download` | 已有 | 已完成 | — | — |
+| 50 | resources | 预览 | `GET /openapi/v1/bots/resources/{resource_id}/preview` | 已有 | 已完成 | — | — |
+| 51 | approvals | 审批模式 | `GET /openapi/v1/bots/approvals/{bot_id}/mode` | 已有 | 已完成 | — | 关联「发布配置」 |
+| 52 | approvals | 设置审批模式 | `PUT /openapi/v1/bots/approvals/{bot_id}/mode` | 已有 | 已完成 | — | — |
+| 53 | approvals | 可用模式列表 | `GET /openapi/v1/bots/approvals/{bot_id}/modes` | 已有 | 已完成 | — | — |
+| 54 | connection | 引擎连接诊断 | `GET /openapi/v1/bots/connection/{bot_id}` | 已有 | 已完成 | — | — |
+| 55 | skills | 本地 Skill 列表 | `GET /openapi/v1/bots/skills` | 已有 | 已完成 | — | 仅本地 Skill |
+| 56 | skills | Skill 详情 | `GET /openapi/v1/bots/skills/{skill_id}` | 已有 | 已完成 | — | — |
+| 57 | skills | 上传本地 Skill | `POST /openapi/v1/bots/skills/upload` | 已有 | 已完成 | — | — |
+| 58 | skills | 激活 Skill | `POST /openapi/v1/bots/skills/{skill_id}/activate` | 已有 | 已完成 | — | — |
+| 59 | skills | 停用 Skill | `POST /openapi/v1/bots/skills/{skill_id}/deactivate` | 已有 | 已完成 | — | — |
+| 60 | skills | 删除 Skill | `DELETE /openapi/v1/bots/skills/{skill_id}` | 已有 | 已完成 | — | 引用型 Skill（市场/工坊）在 #99 `skill-sets` |
+| 61 | mcp | MCP 服务目录 | `GET /openapi/v1/bots/mcp/servers` | 已有 | 已完成 | — | 仅服务级目录 |
+| 62 | mcp | 租户列表 | `GET /openapi/v1/bots/mcp/tenants` | 已有 | 已完成 | — | — |
+| 63 | mcp | 服务详情 | `GET /openapi/v1/bots/mcp/servers/{server_code}` | 已有 | 已完成 | — | — |
+| 64 | mcp | 权限 | `GET /openapi/v1/bots/mcp/servers/{server_code}/permissions` | 已有 | 已完成 | — | — |
+| 65 | mcp | 读配置 | `GET /openapi/v1/bots/mcp/servers/{server_code}/config` | 已有 | 已完成 | — | — |
+| 66 | mcp | 写配置 | `PUT /openapi/v1/bots/mcp/servers/{server_code}/config` | 已有 | 已完成 | — | per-bot 绑定 + caller 在 #99 `skill-sets/mcps` |
+| 67 | inventory | 个人云端 + 本地清单分页 | `GET /openapi/v1/bots/inventory` | 新增 | 已开发 | P0 | 系分原称 `/openapi/v1/bots/workshop`；`BotInventoryService` 聚合 `BotService` + `DesktopBotService` |
+| 68 | inventory | 单清单项 | `GET /openapi/v1/bots/inventory/{bot_id}` | 新增 | 已开发 | P0 | 系分原称 `/openapi/v1/bots/workshop/{bot_id}`（card） |
+| 69 | inventory | 可用动作集 | `GET /openapi/v1/bots/inventory/{bot_id}/actions` | 新增 | 已开发 | P0 | 驱动 §0.2 按钮渲染；系分原称 `/openapi/v1/bots/workshop/{bot_id}/actions` |
+| 70 | local | 设备列表 | `GET /openapi/v1/bots/local/devices` | 新增 | 已开发 | P0 | 创建选 machine；`DesktopBotServiceProtocol.list_devices` |
+| 71 | local | 设备目录树 | `GET /openapi/v1/bots/local/devices/{machine_id}/files` | 新增 | 已开发 | P0 | 选挂载目录；`list_directory` |
+| 72 | local | 创建本地 Bot（201 / 202） | `POST /openapi/v1/bots/local` | 新增 | 已开发 | P0 | 委托 `DesktopBotService`；含 `machine_id`/`mount_path`/`init_config` |
+| 73 | local | 本地 Bot 列表 | `GET /openapi/v1/bots/local` | 新增 | 已开发 | P0 | inventory 已覆盖，可选 |
+| 74 | local | 本地 Bot 详情 | `GET /openapi/v1/bots/local/{bot_id}` | 新增 | 已开发 | P0 | — |
+| 75 | local | 授权轮询 + 完成创建 | `GET /openapi/v1/bots/local/{bot_id}/auth-status` | 新增 | 已开发 | P0 | `create_after_authorization` |
+| 76 | local | 重启本地 Bot | `POST /openapi/v1/bots/local/{bot_id}/restart` | 新增 | 已开发 | P0 | 委托 desktop restart |
+| 77 | local | 删除本地 Bot | `DELETE /openapi/v1/bots/local/{bot_id}` | 新增 | 已开发 | P0 | 委托 desktop delete |
+| 78 | local | 打开目录 | `POST /openapi/v1/bots/local/{bot_id}/open-folder` | 新增 | 已开发 | P0 | `open_folder` |
 | 79 | diagnostics | 运行日志流 | `GET /openapi/v1/bots/diagnostics/{bot_id}/runtime-logs` | 新增 | 已设计未建 | P0 | ≠`/logs` trace；BaaS 白名单路径，`tail`/`level` 限制 |
 | 80 | diagnostics | 重启引擎 | `POST /openapi/v1/bots/diagnostics/{bot_id}/engine-restart` | 新增 | 已设计未建 | P0 | ≠`switch-engine`；桥接 engine `/api/engine/restart` |
 | 81 | diagnostics | 健康分 + 等级 | `GET /openapi/v1/bots/diagnostics/{bot_id}/health` | 新增 | 已设计未建 | P2 | 聚合 harness；仅 oc + 云端 |
 | 82 | diagnostics | 触发健康检查 | `POST /openapi/v1/bots/diagnostics/{bot_id}/health-check` | 新增 | 已设计未建 | P2 | 仅 oc + 云端，policy 拦 |
-| 83 | dormant | 激活沉寂 Bot | `POST /openapi/v1/bots/dormant/{bot_id}/activate` | 新增 | 已设计未建 | P0 | 30 天·仅非服务·本地豁免·蒙层非状态；委托 `bot_dormant` |
-| 84 | bots | 初始化配置 | `POST /openapi/v1/bots/{bot_id}/data-init` | 新增 | 未开工 | P0 | 或以 `init_config` 可选入参加法到 #1 `POST /openapi/v1/bots` |
+| 83 | dormant | 激活沉寂 Bot | `POST /openapi/v1/bots/dormant/{bot_id}/activate` | 新增 | 已开发 | P0 | 委托 `BotDormantActivateServiceProtocol.activate`（`ActivateBotService`）；handler 做 `bot_type==personal`+cloud 裁决（desktop/service→409）+ owner guard（`get_bot`→404）；`InvalidBotStateError`→409。30 天·仅非服务·本地豁免·蒙层非状态 |
+| 84 | bots | 初始化配置 | `POST /openapi/v1/bots/{bot_id}/data-init` | 新增 | 已开发 | P0 | 委托 `DataInitServiceProtocol.trigger_init`（async, fire-and-forget）；**跟老 `/api/bots/{id}/data-init` 1:1**（body `{force:bool}`，前端轮询 `ext.data_init_status`）。仅 personal+cloud（desktop/service→409）。**决策见 §5**：不碰创建链路、"初始化配置"checkbox 由前端在 Bot 真正存在后单独发此端点触发 |
 | 85 | lifecycle | 开启服务化（personal→service） | `POST /openapi/v1/bots/lifecycle/{bot_id}/upgrade` | 新增 | 未开工 | P1 | 委托 `upgrade_bot_type`；改 service 去反向，不动契约 |
 | 86 | lifecycle | 发布态 / 版本 / 阶段 | `GET /openapi/v1/bots/lifecycle/{bot_id}` | 新增 | 未开工 | P1 | 委托 `publish_flow_service` |
 | 87 | lifecycle | 草稿→预发 / 预发→上线 | `POST /openapi/v1/bots/lifecycle/{bot_id}/advance` | 新增 | 未开工 | P1 | body `{stage: staging\|online}` |
@@ -166,15 +166,15 @@
 
 | 维度 | 数量 | 说明 |
 |---|---|---|
-| **总端点 / 操作数** | **107** | 含 1 个 schema 行（#14） |
+| **总端点 / 操作数** | **105** 端点行 + 1 schema 行（#14） + 1 分组行（#90 lifecycle approval 两方法并写） | 表行 105；口径见下 |
 | 按归类 · 已有 | 60 | 现网存在、工坊直接复用 |
-| 按归类 · 升级 | 6 | #1 create、#2 list、#11 passport、#14 Bot 响应体、#35/#36 identity |
-| 按归类 · 新增 | 41 | 本次改版新建 |
-| 按完成 · 已落地 | 60 | 现网已有 |
-| 按完成 · 已落地(本分支) | 12 | inventory 3 + local 9 |
-| 按完成 · 待升级 | 6 | 现网在但加法未做 |
-| 按完成 · 已设计未建 | 9 | diagnostics 4 + dormant 1 + edit-lock 3 + editors 1 |
-| 按完成 · 未开工 | 20 | data-init/lifecycle/containers/evaluation/skill-sets/files/flow/channels/nodes/render-screens/spaces/migrate |
+| 按归类 · 升级 | 5 | #1 create、#2 list、#11 passport、#14 Bot 响应体、#35/#36 identity（#14 计入升级） |
+| 按归类 · 新增 | 40 | 本次改版新建 |
+| 按完成 · 已完成 | 60 | 存量原有端点，现网在跑 |
+| 按完成 · 已开发 | 17 | inventory 3（#67–69） + local 9（#70–78） + dormant 1（#83） + data-init 1（#84） + list 升级 1（#2） + passport 升级 1（#11） + Bot 响应体 1（#14） |
+| 按完成 · 待升级 | 2 | 现网在但加法未做（#1 create 加 `init_config` 决策暂缓、#35/#36 identity） |
+| 按完成 · 已设计未建 | 8 | diagnostics 4 + edit-lock 3 + editors 1 |
+| 按完成 · 未开工 | 18 | lifecycle/containers/evaluation/skill-sets/files/flow/channels/nodes/render-screens/spaces/migrate 等 |
 | 按阶段 · P0 | 26 | 壳层 + 本地 + 诊断(运行日志/重启引擎) + 沉寂 + 容器 + 列表/创建升级 + data-init |
 | 按阶段 · P1 | 12 | lifecycle 推进 + 服务化 + 评测 + 编辑锁/协作者 |
 | 按阶段 · P2 | 14 | skill-sets + files + flow + channels + 审批 + 健康检查 + MD 管理 + nodes/副屏 |
@@ -208,3 +208,5 @@
 - 本地 Bot「重启引擎」+「运行日志」本期灰掉（desktop 无能力），后续桌面端补。
 - 回收：30 天无对话→回收，仅非服务，本地豁免，蒙层非状态（改 `bot_dormant` service 逻辑，不动契约）。
 - 容器：BaaS 无实例 metrics 接口，#91 返回 `summary`+`instances[id,node,status]`，cpu/mem 留空。
+- **data-init 触发时机（2026-08-12 融志确认，跟老 `/api` 逻辑）**：`POST /openapi/v1/bots/{bot_id}/data-init`(#84) 是老 `POST /api/bots/{id}/data-init` 的纯委托暴露——**独立端点、创建后由前端在 Bot 真正存在后再发一次触发**，fire-and-forget 异步（ACTIVE）/标记 pending（PENDING），前端轮询 `ext.data_init_status` 拿进度。**不给 #1 `POST /bots` 加 `init_config` 入参、不碰创建链路**，规避 §14 "同步创建 vs 202 授权完成两路径 `init_config` 语义不一致"风险。创建弹窗的"初始化配置"checkbox 是前端编排决策（勾选→创建成功/授权完成后再发 #84），后端创建时无任何 init 副作用。
+- **业务空间走 `ac_bots.space_id` 结构化列、不走 `bot.ext`（2026-08-12 融志拍板+已落地）**：`space` 维度（DEMO §0.1 三筛选器之一、`Bot.space` 富字段、系分 §3-K 空间/迁移）**全部以 `ac_bots` 表结构化 `space_id` 单列为准**（形态 A：单列 `String(128)` `nullable=True`，DDL 由融志加上、ORM 列已加在 `plugin_api/models.py:87` + `to_dict()` 补 `space_id`）。三处同源切到位：① `#2 list_bots` 加 `space` query 后过滤读 `bot.get("space_id")`；② `#14 Bot.space` 派生读 `bot.get("space_id")` 建独立 `BotSpaceRef`；③ `#67 noop_business_space.bot_space` 从 `bot.get("space_id")` 取（去掉 `ext.get("space_id")`），NULL 仍 fallback 到 `personal:{owner_id}` 兼容存量行。**`ext.space_id` 在 `Bot`/`inventory/noop` 三处读取路径全部废弃**；`ext` 仅留作其他无关字段。`space` 实体 owner/name/kind 由空间 owner 表存，不在 `ac_bots` 冗余（kind 一律 `personal` fallback 占位，等空间 owner 提供 prod 接入再补 kind 来源）。

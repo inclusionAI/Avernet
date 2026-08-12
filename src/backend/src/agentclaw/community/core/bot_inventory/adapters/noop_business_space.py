@@ -28,17 +28,21 @@ class NoopBusinessSpaceContext(BusinessSpaceContextProtocol):
     def bot_space(
         self, *, bot: Mapping[str, Any], owner_id: str
     ) -> BusinessSpaceRef | None:
-        ext = bot.get("ext") or {}
-        space_id = ext.get("space_id") if isinstance(ext, Mapping) else None
-        space_kind = ext.get("space_kind") if isinstance(ext, Mapping) else None
-        space_name = ext.get("space_name") if isinstance(ext, Mapping) else None
-        if space_id:
-            return BusinessSpaceRef(
-                space_id=str(space_id),
-                name=str(space_name or space_id),
-                kind=str(space_kind or "personal"),
-            )
-        return self._personal(owner_id)
+        # Read the structured ``ac_bots.space_id`` column — NOT ``bot.ext`` (the
+        # contract owner rejected the transient ext path). A NULL space falls
+        # back to the personal space so the personal view always contains the
+        # bot; name/kind are not duplicated on ac_bots, so name resolves to the
+        # space id and kind to ``personal``, the same way the bots router's
+        # ``BotSpaceRef`` derivation does. (Returning None for NULL would make a
+        # legacy personal bot invisible in its own personal view.)
+        space_id = bot.get("space_id")
+        if not space_id:
+            return self._personal(owner_id)
+        return BusinessSpaceRef(
+            space_id=str(space_id),
+            name=str(space_id),
+            kind="personal",
+        )
 
     def assert_bot_visible_in_current_space(
         self, *, bot: Mapping[str, Any], owner_id: str, current_space: BusinessSpaceRef

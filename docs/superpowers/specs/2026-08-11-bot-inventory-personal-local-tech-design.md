@@ -462,11 +462,12 @@ def require_personal_cloud_bot(bot: Mapping[str, Any]) -> None:
 | GET | `/openapi/v1/bots/{bot_id}/passport` | Passport | 保留 |
 | GET/PUT | `/openapi/v1/bots/{bot_id}/engine-config` | 引擎配置 | 保留 |
 
-**可选加法**：`BotCreate.init_config: bool = False`。
+**data-init 不并入创建入参（2026-08-12 融志决定，跟老 `/api` 逻辑）**：**不**给 `BotCreate` 加 `init_config` 字段，**不**在 create handler / `create_bot_with_authorization` / `complete_bot_authorization` 里塞 data-init 副作用。data-init 走独立端点 `POST /openapi/v1/bots/{bot_id}/data-init`（见 §7.x / OpenAPI 清单 #84），是老 `POST /api/bots/{bot_id}/data-init` 的纯委托暴露：
 
-- 加字段是 backward-compatible，但要同步 `bots.openapi.json` 和 `_compat`。
-- handler 在 bot 创建完成后调用 data-init 能力；若创建走 202 Passport 授权等待，则必须在 `auth-status` 完成创建路径也能应用同一语义，否则同一请求参数在同步 / 异步创建上语义不一致。
-- 如果 data-init 是 async service，router 不应静默吞写失败；失败要通过 domain error 映射为错误 envelope。
+- 老端点语义：fire-and-forget 异步（ACTIVE）/标记 `ext.data_init_status="pending"`（PENDING），前端轮询 `ext.data_init_status` 取进度，body 仅 `{force: bool}`。
+- 触发时机由前端控制：创建成功（201 同步）或 `auth-status` ISSUED 后（202 异步落库后）再单独发一次 #84。后端不因此在 create 链路做任何分支。
+- 这样规避 §14「同步创建 vs 202 授权完成两路径 `init_config` 语义不一致」风险；创建链路零改动，与"不影响原有代码逻辑"一致。
+- 新端点委托 `DataInitServiceProtocol.trigger_init`，失败经 domain error 映射为错误 envelope（不静默吞）。
 
 ### 7.4 `local`：本地 Bot
 
@@ -498,8 +499,9 @@ class LocalBotCreate(BaseModel):
     machine_id: str
     mount_path: str | None = None
     avatar_url: str | None = None
-    init_config: bool = False
 ```
+
+> 本地 Bot 创建**不**带 `init_config`：老 `/api/desktop/bots` 创建链路本无 data-init 钩子，跟老逻辑即不引入。data-init（#84）只服务云端 Bot，且为独立端点。
 
 本地 Bot 创建可能也需要 Passport 授权，因此推荐沿用 `openapi_v1/bots` 的 201 / 202 双态模型：
 
@@ -795,7 +797,7 @@ class BotInventoryModule:
 4. 新增 `openapi_v1/local`：创建、列表、重启、删除、打开目录、设备列表。
 5. 新增 `openapi_v1/diagnostics`：个人云端运行日志、引擎重启、健康检查。
 6. 新增 `openapi_v1/dormant`：个人云端激活。
-7. 可选加 `BotCreate.init_config`，但必须处理同步创建与 Passport 异步完成两条路径一致性。
+7. data-init 走独立端点 `POST /openapi/v1/bots/{bot_id}/data-init`（#84）；**不**给 `BotCreate`/`LocalBotCreate` 加 `init_config`，**不**在 create / `complete_bot_authorization` 链路塞 data-init 副作用（跟老 `/api` 逻辑，见 §7.3）。
 8. 更新 OpenAPI schema 与兼容测试。
 
 ### P1：治理能力
@@ -817,7 +819,7 @@ class BotInventoryModule:
 | 风险 | 决策 / 缓解 |
 | --- | --- |
 | `local` 创建授权流不清晰 | 不在 handler 拼状态机；先补 Service API 或复用 desktop 现有授权流程 |
-| `init_config` 在 202 授权路径丢语义 | 要么同步完成路径一起支持，要么 P0 不加该字段 |
+| `init_config` 在 202 授权路径丢语义 | **已决定（2026-08-12）：不给 `BotCreate`/`LocalBotCreate` 加 `init_config`，不在创建链路塞 data-init 副作用；data-init 走独立端点 #84，由前端在 Bot 真正存在后触发。规避此风险** |
 | `bot_logs` 现有组 `user_id` 语义特殊 | 借鉴另一版方案，新增 `diagnostics` 承载用户级运行日志，不塞进 `bot_logs` |
 | `engine_runtime/engine` restart 语义敏感 | 借鉴另一版方案，使用 `/diagnostics/{bot_id}/engine-restart`，避免和 Bot restart / engine surface 排除清单冲突 |
 | 业务空间正式 API 未就绪 | 本模块只能个人业务空间 fallback；若产品要求团队/业务空间切换，必须依赖空间 owner 提供 prod API |

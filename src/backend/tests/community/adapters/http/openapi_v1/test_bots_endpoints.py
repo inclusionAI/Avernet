@@ -160,6 +160,33 @@ def test_get_bot(client):
     assert data["engine"] == "teclaw"
     assert data["cluster_name"] == "ANDC"  # derived from engine
     assert data["owner_entity_id"] == "u1"
+    # deploy_mode is derived from bot_type (PRD §0.1): personal/service → cloud.
+    assert data["deploy_mode"] == "cloud"
+
+
+def test_get_bot_deploy_mode_local_for_desktop(svc, client):
+    # A desktop bot surfacing through GET /bots/{bot_id} (the read path does not
+    # refuse desktop — only delete/restart do) derives deploy_mode=local.
+    svc.get_bot.return_value = {
+        **BOT, "bot_type": "desktop", "active_engine": "openclaw",
+    }
+    data = _ok(client.get("/openapi/v1/bots/b1"))
+    assert data["deploy_mode"] == "local"
+
+
+def test_get_bot_space_falls_back_to_personal_when_column_null(client):
+    # Existing rows (pre-``ac_bots.space_id``) carry NULL on the column; the
+    # public face falls back to the personal space ``personal:{owner_id}``.
+    data = _ok(client.get("/openapi/v1/bots/b1"))
+    assert data["space"]["space_id"] == "personal:u1"
+    assert data["space"]["kind"] == "personal"
+    assert data["space"]["name"] == "Personal"
+
+
+def test_get_bot_space_reads_structured_column(svc, client):
+    svc.get_bot.return_value = {**BOT, "space_id": "team:9"}
+    data = _ok(client.get("/openapi/v1/bots/b1"))
+    assert data["space"]["space_id"] == "team:9"
 
 
 def test_list_bots(client):
@@ -210,7 +237,23 @@ def test_status(client):
 
 def test_passport(client):
     data = _ok(client.get("/openapi/v1/bots/b1/passport"))
-    assert data == {"bot_id": "b1", "passport_id": "ac-1"}
+    # passport_id (agent_code/agent_id) is the existence signal; the license
+    # fields stay nullable when the PassportPlugin did not return them.
+    assert data["bot_id"] == "b1"
+    assert data["passport_id"] == "ac-1"
+    assert data["expire_at"] is None
+    assert data["certificate_url"] is None
+
+
+def test_passport_forwards_license_fields(client, passport):
+    passport.query_agent_passport.return_value = {
+        "agent_code": "ac-1",
+        "expire_at": "2027-01-01T00:00:00Z",
+        "certificate_url": "https://cert/ac-1",
+    }
+    data = _ok(client.get("/openapi/v1/bots/b1/passport"))
+    assert data["expire_at"] == "2027-01-01T00:00:00Z"
+    assert data["certificate_url"] == "https://cert/ac-1"
 
 
 def test_passport_missing_is_404(client, passport):
@@ -716,7 +759,11 @@ def test_passport_accepts_the_local_plugin_identifier(client, passport):
         "agent_id": "b1", "agent_code": None, "mcps": [],
     }
     data = _ok(client.get("/openapi/v1/bots/b1/passport"))
-    assert data == {"bot_id": "b1", "passport_id": "b1"}
+    # ``agent_id`` sets passport_id; license fields stay null when absent.
+    assert data["bot_id"] == "b1"
+    assert data["passport_id"] == "b1"
+    assert data["expire_at"] is None
+    assert data["certificate_url"] is None
 
 
 def test_passport_prefers_agent_code_when_both_present(client, passport):
