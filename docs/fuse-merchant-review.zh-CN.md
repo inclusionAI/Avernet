@@ -63,13 +63,14 @@ Fuse 结论**不自动写回群聊**，只作为店主本人的参考浮窗；�
 确保已启动 BCS、前端、bcsfuse 和 4 个经营 Bot：
 
 ```bash
-export BOTS_PROFILE_DIR=scripts/4bots_merchant_operations_profile
-./scripts/singlebox.sh --standalone start bcs_frontend
+./scripts/singlebox.sh --standalone start bcs_frontend --profile-dir scripts/4bots_merchant_operations_profile
 ./scripts/singlebox.sh --standalone start bcsfuse
-./scripts/singlebox.sh --standalone start bots --profile-dir "$BOTS_PROFILE_DIR"
+./scripts/singlebox.sh --standalone start bots --profile-dir scripts/4bots_merchant_operations_profile
 ```
 
-> 需要先导出 `BOTS_PROFILE_DIR`：BCS 启动时会把它作为 `bots_base_dir` 写进运行时配置，这样后续 bots onboard 时 bcs-fusion 才能找到 `IDENTITY.md`、`SOUL.md` 等 profile 文件并同步给 bcsfuse。
+> `--profile-dir` 需要同时传给 `bcs_frontend` 和 `bots`：BCS 启动时会把它作为 `bots_base_dir` 写进运行时配置，这样 bcs-fusion 才能找到 `IDENTITY.md`、`SOUL.md` 等 profile 文件并同步给 bcsfuse。
+>
+> 如果某个 profile 不需要 Fuse，把 `bots.json` 里的 `bcsfuse.fusion_enable` 设为 `false`（或移除该字段），启动时就不会自动开启 `fusion_enable`。
 
 > 从本改动开始，`singlebox` 在 bots 启动成功并 onboard 后，会自动为当前 profile 的 4 个 Bot 开启 `fusion_enable`。启动日志里应能看到 `Profile fusion enabled for ...`。
 
@@ -166,7 +167,9 @@ Fuse 结论目前**只停留在浮窗**，不会自动发到群聊里。推荐�
 
 ## 7. 想用 curl 手动触发
 
-前端浮窗底层调用的是 `POST /bcnfuse/api/v1/groups/{group_id}/fuse`。你也可以直接 curl：
+前端浮窗底层调用的是 `POST /bcnfuse/api/v1/groups/{group_id}/fuse`。你也可以直接 curl，但 **G9 需要从请求 Cookie 里拿到 BCN 会话身份才能读取群聊上下文**。
+
+> 直接运行下面的示例（没带 Cookie）通常只会得到 `context_messages_count=0`。如果希望 curl 也能拿到上下文，请从浏览器当前会话复制 Cookie，再加 `-H "Cookie: <你的 Cookie 字符串>"`。
 
 ```bash
 GROUP_ID="你的群 group_id"
