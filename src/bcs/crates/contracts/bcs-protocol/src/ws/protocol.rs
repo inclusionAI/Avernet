@@ -2059,9 +2059,10 @@ mod tests {
     fn build_chat_send_frame_with_bcs_session_id_and_high_version() {
         let ctx = test_group_context_input();
         let tags = vec!["tenant-a".to_string(), "scene-review".to_string()];
+        let session_id = "grp-test:channel_dingtalk_abc12345";
         let frame = build_chat_send_frame(
             "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target", &tags,
-            &None, &None, false, 3, None, None, Some("grp-test:abc12345"),
+            &None, &None, false, 3, None, None, Some(session_id),
         );
         match frame {
             BcsFrame::Request(req) => {
@@ -2069,8 +2070,8 @@ mod tests {
                 // v>=3: bcs_group_id stays the real group id
                 assert_eq!(p.bcs_group_id, "grp-test");
                 // bcs_session_id is set explicitly
-                assert_eq!(p.bcs_session_id.as_deref(), Some("grp-test:abc12345"));
-                assert_eq!(p.session_key, "grp-test:abc12345");
+                assert_eq!(p.bcs_session_id.as_deref(), Some(session_id));
+                assert_eq!(p.session_key, session_id);
                 assert_eq!(p.channel.user_id.as_deref(), Some("Bot1"));
                 assert_eq!(p.channel.actor_id.as_deref(), Some("b1"));
                 assert_eq!(p.channel.actor_name.as_deref(), Some("Bot1"));
@@ -2112,6 +2113,7 @@ mod tests {
                 let p: ChatSendParams = serde_json::from_value(req.params.unwrap()).unwrap();
                 assert_eq!(p.bcs_group_id, "grp-test");
                 assert_eq!(p.bcs_session_id, None);
+                assert_eq!(p.session_key, "group:grp-test");
             }
             _ => panic!("expected Request frame"),
         }
@@ -2154,15 +2156,16 @@ mod tests {
     #[test]
     fn build_chat_inject_frame_with_bcs_session_id() {
         let ctx = test_group_context_input();
+        let session_id = "grp-test:channel_dingtalk_abc12345";
         let frame = build_chat_inject_frame(
             "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target",
-            &None, false, 3, None, None, Some("grp-test:abc12345"),
+            &None, false, 3, None, None, Some(session_id),
         );
         match frame {
             BcsFrame::Request(req) => {
                 let p: ChatInjectParams = serde_json::from_value(req.params.unwrap()).unwrap();
-                assert_eq!(p.bcs_session_id.as_deref(), Some("grp-test:abc12345"));
-                assert_eq!(p.session_key, "grp-test:abc12345");
+                assert_eq!(p.bcs_session_id.as_deref(), Some(session_id));
+                assert_eq!(p.session_key, session_id);
                 assert_eq!(p.channel.user_id.as_deref(), Some("Bot1"));
                 assert_eq!(p.channel.actor_id.as_deref(), Some("b1"));
                 assert_eq!(p.channel.actor_name.as_deref(), Some("Bot1"));
