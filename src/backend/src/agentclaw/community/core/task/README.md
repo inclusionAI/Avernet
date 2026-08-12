@@ -16,18 +16,32 @@
 | adapters/http/ | `community/adapters/http/task/` | HTTP transport(thin:router+schema,不持 domain policy) |
 | di/modules/ | `community/di/modules/task_module.py` | composition root(DI 接线) |
 
-## core/task/ 子目录职责
+## core/task/ 目录树
 
-| 子目录 | 职责 | 核心文件 |
-|---|---|---|
-| `domain/` | shared kernel:纯领域模型 + 统一 errors(零依赖) | `models.py` / `errors.py` |
-| `task_center/` | TaskService facade + ExecutionEngine 编排核 | `task_service.py` / `engine.py` |
-| `task_graph/` | TaskGraphService 图谱 SSOT(7+2 API) | `task_graph_service.py` |
-| `task_plan/` | TaskPlanner 规划编排壳 + DecomposerPort seam | `planner.py`(/`protocols.py`) |
-| `task_dispatch/` | TaskDispatcher 搜推 + BotDiscoverPort seam | `dispatcher.py`(/`protocols.py`) |
-| `task_runner/` | TaskRunner 三模态 + 回投适配 | `runner.py` / `callback_adapter.py` |
-| `task_harness/` | TaskHarness 旁路巡检复位 | `harness.py` |
-| `task_mining/` | 占位(另一位同学的任务挖掘模块,本框架不实现) | — |
+```text
+core/task/
+├── README.md                      # 本目录规范文档
+├── domain/                        # shared kernel:纯领域模型 + 统一 errors(零依赖,无 services)
+│   ├── models.py                  #   领域 dataclass/enum + 中间类型(patch/criteria/op_result/callback_data)
+│   └── errors.py                  #   统一错误(全框架唯一 errors 收口)
+├── task_center/                   # TaskService facade + ExecutionEngine 编排核(非独立模块)
+│   ├── task_service.py            #   facade 2 API(execute / get_task_dashboard)
+│   └── engine.py                  #   ExecutionEngine:on_* 事件驱动 + 状态条件(a/b/c)推进
+├── task_graph/                    # TaskGraphService 图谱 SSOT(7+2 API,独立模块)
+│   └── task_graph_service.py      #   原子变更唯一网关 + relations 分解树派生查询
+├── task_plan/                     # TaskPlanner 规划编排壳 + DecomposerPort seam(可插拔)
+│   └── planner.py                 #   plan(graph) → 委托 decompose(零 case 知识);protocols.py 延后
+├── task_dispatch/                 # TaskDispatcher 搜推分发 + BotDiscoverPort seam(可插拔)
+│   └── dispatcher.py              #   dispatch(toDoList) → 填 run_mode/assignee 返 list[TaskNode];protocols.py 延后
+├── task_runner/                   # TaskRunner 三模态执行 + 回投适配
+│   ├── runner.py                  #   start_run(批量)三模态自适应 + query_status/detail/result/bot_tasks
+│   └── callback_adapter.py        #   TaskCallbackData → TaskNodePatch → engine.on_report
+├── task_harness/                  # TaskHarness 旁路常驻巡检
+│   └── harness.py                 #   周期巡检超时/崩溃 → 复位 PENDING 重投(不抢正向)
+└── task_mining/                   # 占位(另一位同学的任务挖掘模块,本框架不实现)
+```
+
+> seam Protocol(`task_plan/protocols.py` `DecomposerPort` / `task_dispatch/protocols.py` `BotDiscoverPort` + `SearchResult`/`GroupFormation`)首批延后,待 stub/真实实现就位时落;`__init__.py` 各目录均有,树中省略。
 
 ## 内部层惯例(本模块约定)
 
