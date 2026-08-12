@@ -564,8 +564,6 @@ impl A2aChatService for A2aChat {
                     context: runtime_context_for_direct_chat(&target_bot),
                     task_id: None,
                     run_id: Some(run_id.clone()),
-                    issued_at: now_ms as i64,
-                    ttl_ms: timeout_ms as i64,
                 })
                 .await;
             match authz_context {

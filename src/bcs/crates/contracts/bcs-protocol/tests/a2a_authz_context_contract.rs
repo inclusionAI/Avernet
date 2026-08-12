@@ -18,20 +18,18 @@ fn a2a_authz_context_contract_uses_unified_grants_only() {
             A2aAuthzGrantRef {
                 kind: A2aAuthzGrantKind::PermissionProfile,
                 ref_id: "profile-default".to_string(),
-                revision: 7,
-                digest: "sha256:profile".to_string(),
+                revision: Some(7),
+                digest: Some("sha256:profile".to_string()),
                 source: A2aAuthzGrantSource::EdgeGrant,
             },
             A2aAuthzGrantRef {
                 kind: A2aAuthzGrantKind::Rules,
                 ref_id: "rules-grant-1".to_string(),
-                revision: 3,
-                digest: "sha256:rules".to_string(),
+                revision: None,
+                digest: None,
                 source: A2aAuthzGrantSource::EdgeGrant,
             },
         ],
-        issued_at: 1_786_080_000_000,
-        expires_at: 1_786_080_060_000,
         signature: Some("sig".to_string()),
     };
 
@@ -57,6 +55,10 @@ fn a2a_authz_context_contract_uses_unified_grants_only() {
     );
     assert_eq!(encoded["grants"][1]["kind"], "rules");
     assert_eq!(encoded["grants"][1]["source"], "edge_grant");
+    assert!(encoded["grants"][1].get("revision").is_none());
+    assert!(encoded["grants"][1].get("digest").is_none());
+    assert!(encoded.get("issued_at").is_none());
+    assert!(encoded.get("expires_at").is_none());
 
     let decoded: A2aAuthzContext =
         serde_json::from_value(encoded).expect("authz context should deserialize");

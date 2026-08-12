@@ -205,7 +205,7 @@ pub use types::{
     BotControlPlaneDescriptor, BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery,
     BotControlPlanePatch, BotControlPlaneRecord,
     Capability, CapabilitySource, CapabilityStatus, Decision, EdgeGrant, EdgeGrantStatus,
-    GrantKind, GrantRef, GrantSource, GrantStatus, PermissionProfile, PermissionProfileStatus,
+    GrantKind, GrantRef, GrantSource, GrantStatus, OriginatorPolicyType, PermissionProfile, PermissionProfileStatus,
     PermissionRequest, PermissionRequestKind, PermissionRequestStatus, Rule, RuleDecision,
     RuleEffect, RulesGrantMaterial, RuntimeContext,
     BotDeliveryTarget, CallbackChannelConfig, CallbackConfig, CoordinationMode,

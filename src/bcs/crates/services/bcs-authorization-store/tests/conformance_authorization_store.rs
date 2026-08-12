@@ -5,8 +5,8 @@ use bcs_authorization_store::{
 use bcs_service_api::{
     AuthzContext, AuthzContextType, AuthzDecisionLog, AuthzGrantRef, AuthzRuntimeContext,
     Capability, CapabilitySource, CapabilityStatus, Decision, EdgeGrant, GrantKind, GrantSource,
-    GrantStatus, PermissionProfile, PermissionProfileStatus, PermissionRequest,
-    PermissionRequestKind, PermissionRequestStatus, Rule, RuleEffect,
+    GrantStatus, OriginatorPolicyType, PermissionProfile, PermissionProfileStatus,
+    PermissionRequest, PermissionRequestKind, PermissionRequestStatus, Rule, RuleEffect,
 };
 use serde_json::json;
 
@@ -92,7 +92,7 @@ async fn edge_grant_contract(repo: &dyn EdgeGrantRepoPort) {
     repo.insert_edge_grant(edge_grant("grant-1", GrantStatus::Approved))
         .await
         .expect("insert approved grant");
-    repo.insert_edge_grant(edge_grant("grant-2", GrantStatus::Pending))
+    repo.insert_edge_grant(edge_grant("grant-2", GrantStatus::Revoked))
         .await
         .expect("insert pending grant");
 
@@ -125,8 +125,14 @@ async fn permission_request_contract(repo: &dyn PermissionRequestRepoPort) {
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].request_id, "request-1");
 
-    repo.update_permission_request_status("request-1", PermissionRequestStatus::Rejected)
-        .await
+    repo.update_permission_request_status(
+        "request-1",
+        PermissionRequestStatus::Rejected,
+        Some("owner-a"),
+        Some("not enough context"),
+        Some(30),
+    )
+    .await
         .expect("update request status");
 
     let updated = repo
@@ -135,6 +141,30 @@ async fn permission_request_contract(repo: &dyn PermissionRequestRepoPort) {
         .expect("get request")
         .expect("request exists");
     assert_eq!(updated.status, PermissionRequestStatus::Rejected);
+    assert_eq!(updated.decided_by.as_deref(), Some("owner-a"));
+    assert_eq!(updated.decision_reason.as_deref(), Some("not enough context"));
+    assert_eq!(updated.decided_at, Some(30));
+
+    repo.backfill_permission_request_edge_id("request-1", "grant-1")
+        .await
+        .expect("backfill edge id");
+    let history = repo
+        .list_permission_requests_by_edge_id("grant-1")
+        .await
+        .expect("list request history");
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].request_id, "request-1");
+
+    let missing = repo
+        .update_permission_request_status(
+            "missing",
+            PermissionRequestStatus::Rejected,
+            Some("owner-a"),
+            None,
+            Some(31),
+        )
+        .await;
+    assert!(missing.is_err(), "missing request updates must fail");
 }
 
 async fn authz_decision_log_contract(repo: &dyn AuthzDecisionLogRepoPort) {
@@ -211,25 +241,16 @@ fn edge_grant(edge_id: &str, status: GrantStatus) -> EdgeGrant {
         grant_kind: GrantKind::PermissionProfile,
         grant_ref_id: "profile-v2".to_string(),
         rules: None,
-        rules_revision: None,
-        rules_digest: None,
         status,
-        request_id: Some("request-1".to_string()),
-        requested_by: "requester-a".to_string(),
-        approved_by: Some("approver-a".to_string()),
-        revoked_by: None,
-        reason: Some("reason".to_string()),
-        expires_at: None,
-        created_at: if edge_id == "grant-1" { 10 } else { 20 },
-        updated_at: if edge_id == "grant-1" { 11 } else { 21 },
-        approved_at: Some(12),
-        revoked_at: None,
+        originator_policy_type: OriginatorPolicyType::Any,
+        originator_policy_data: None,
     }
 }
 
 fn permission_request(request_id: &str, status: PermissionRequestStatus) -> PermissionRequest {
     PermissionRequest {
         request_id: request_id.to_string(),
+        edge_id: None,
         env: "dev".to_string(),
         from_id: "from-a".to_string(),
         to_id: "to-a".to_string(),
@@ -243,6 +264,7 @@ fn permission_request(request_id: &str, status: PermissionRequestStatus) -> Perm
         decided_by: None,
         created_at: if request_id == "request-1" { 10 } else { 20 },
         updated_at: if request_id == "request-1" { 11 } else { 21 },
+        decided_at: None,
     }
 }
 
@@ -261,12 +283,10 @@ fn authz_context() -> AuthzContext {
         grants: vec![AuthzGrantRef {
             kind: GrantKind::PermissionProfile,
             ref_id: "profile-v2".to_string(),
-            revision: 2,
-            digest: "digest-2".to_string(),
+            revision: Some(2),
+            digest: Some("digest-2".to_string()),
             source: GrantSource::EdgeGrant,
         }],
-        issued_at: 5,
-        expires_at: 30,
         signature: None,
     }
 }

@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use serde_json::json;
@@ -10,27 +11,16 @@ use bcs_service_api::port::repo::{
 use bcs_service_api::{
     AuthzContext, AuthzContextBuilderCoreService, AuthzContextType, AuthzDecisionLog,
     AuthzGrantRef, BuildA2aAuthzContextRequest, Decision, EdgeGrant, GrantKind, GrantSource,
-    PermissionProfile, RuntimeContext, ServiceError, ServiceResult,
+    OriginatorPolicyType, PermissionProfile, RuntimeContext, ServiceError, ServiceResult,
 };
 
-#[derive(Debug, Clone, Copy)]
-pub struct AuthzContextBuilderServiceConfig {
-    pub default_ttl_ms: i64,
-}
-
-impl Default for AuthzContextBuilderServiceConfig {
-    fn default() -> Self {
-        Self {
-            default_ttl_ms: 5 * 60 * 1000,
-        }
-    }
-}
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AuthzContextBuilderServiceConfig {}
 
 pub struct AuthzContextBuilderService {
     edge_grants: Arc<dyn EdgeGrantRepoPort>,
     permission_profiles: Arc<dyn PermissionProfileRepoPort>,
     decision_logs: Arc<dyn AuthzDecisionLogRepoPort>,
-    config: AuthzContextBuilderServiceConfig,
 }
 
 impl AuthzContextBuilderService {
@@ -51,28 +41,19 @@ impl AuthzContextBuilderService {
         edge_grants: Arc<dyn EdgeGrantRepoPort>,
         permission_profiles: Arc<dyn PermissionProfileRepoPort>,
         decision_logs: Arc<dyn AuthzDecisionLogRepoPort>,
-        config: AuthzContextBuilderServiceConfig,
+        _config: AuthzContextBuilderServiceConfig,
     ) -> Self {
         Self {
             edge_grants,
             permission_profiles,
             decision_logs,
-            config,
         }
     }
 
     async fn grant_ref_from_edge(
         &self,
         grant: &EdgeGrant,
-        issued_at: i64,
     ) -> ServiceResult<Option<AuthzGrantRef>> {
-        if grant
-            .expires_at
-            .is_some_and(|expires_at| expires_at <= issued_at)
-        {
-            return Ok(None);
-        }
-
         match grant.grant_kind {
             GrantKind::PermissionProfile => {
                 let profile = self
@@ -86,27 +67,13 @@ impl AuthzContextBuilderService {
                     })?;
                 Ok(Some(profile_ref(&profile, GrantSource::EdgeGrant)))
             }
-            GrantKind::Rules => {
-                let revision = grant.rules_revision.ok_or_else(|| {
-                    ServiceError::Forbidden(format!(
-                        "rules grant '{}' is missing revision",
-                        grant.edge_id
-                    ))
-                })?;
-                let digest = grant.rules_digest.clone().ok_or_else(|| {
-                    ServiceError::Forbidden(format!(
-                        "rules grant '{}' is missing digest",
-                        grant.edge_id
-                    ))
-                })?;
-                Ok(Some(AuthzGrantRef {
-                    kind: GrantKind::Rules,
-                    ref_id: grant.grant_ref_id.clone(),
-                    revision,
-                    digest,
-                    source: GrantSource::EdgeGrant,
-                }))
-            }
+            GrantKind::Rules => Ok(Some(AuthzGrantRef {
+                kind: GrantKind::Rules,
+                ref_id: grant.grant_ref_id.clone(),
+                revision: None,
+                digest: None,
+                source: GrantSource::EdgeGrant,
+            })),
         }
     }
 
@@ -160,10 +127,8 @@ impl AuthzContextBuilderService {
                 grant_refs: context.grants.clone(),
                 context_json: Some(json!({
                     "context": context.context,
-                    "issued_at": context.issued_at,
-                    "expires_at": context.expires_at,
                 })),
-                created_at: context.issued_at,
+                created_at: now_millis(),
             })
             .await
     }
@@ -175,11 +140,6 @@ impl AuthzContextBuilderCoreService for AuthzContextBuilderService {
         &self,
         request: BuildA2aAuthzContextRequest,
     ) -> ServiceResult<AuthzContext> {
-        let ttl_ms = if request.ttl_ms > 0 {
-            request.ttl_ms
-        } else {
-            self.config.default_ttl_ms
-        };
         let mut context = AuthzContext {
             task_id: request.task_id,
             run_id: request.run_id,
@@ -189,8 +149,6 @@ impl AuthzContextBuilderCoreService for AuthzContextBuilderService {
             originator: request.originator,
             context: request.context,
             grants: Vec::new(),
-            issued_at: request.issued_at,
-            expires_at: request.issued_at + ttl_ms,
             signature: None,
         };
 
@@ -199,7 +157,10 @@ impl AuthzContextBuilderCoreService for AuthzContextBuilderService {
             .list_approved_active_edge_grants(&context.from_id, &context.to_id, &context.env)
             .await?;
         for grant in edge_grants {
-            if let Some(grant_ref) = self.grant_ref_from_edge(&grant, context.issued_at).await? {
+            if !originator_policy_allows(&grant, context.originator.as_deref(), &context.from_id) {
+                continue;
+            }
+            if let Some(grant_ref) = self.grant_ref_from_edge(&grant).await? {
                 push_unique(&mut context.grants, grant_ref);
             }
         }
@@ -243,12 +204,32 @@ impl AuthzContextBuilderCoreService for AuthzContextBuilderService {
     }
 }
 
+
+fn originator_policy_allows(grant: &EdgeGrant, originator: Option<&str>, from_id: &str) -> bool {
+    match grant.originator_policy_type {
+        OriginatorPolicyType::Any => true,
+        OriginatorPolicyType::SameAsFrom => originator == Some(from_id),
+        OriginatorPolicyType::Specific => {
+            let Some(originator) = originator else {
+                return false;
+            };
+            grant
+                .originator_policy_data
+                .as_ref()
+                .and_then(|data| data.get("allowed_originators"))
+                .and_then(|allowed| allowed.as_array())
+                .is_some_and(|allowed| allowed.iter().any(|value| value.as_str() == Some(originator)))
+        }
+        OriginatorPolicyType::Owner => false,
+    }
+}
+
 fn profile_ref(profile: &PermissionProfile, source: GrantSource) -> AuthzGrantRef {
     AuthzGrantRef {
         kind: GrantKind::PermissionProfile,
         ref_id: profile.permission_profile_id.clone(),
-        revision: profile.revision,
-        digest: profile.digest.clone(),
+        revision: Some(profile.revision),
+        digest: Some(profile.digest.clone()),
         source,
     }
 }
@@ -268,4 +249,11 @@ fn push_unique(grants: &mut Vec<AuthzGrantRef>, grant_ref: AuthzGrantRef) {
     {
         grants.push(grant_ref);
     }
+}
+
+fn now_millis() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or(0)
 }

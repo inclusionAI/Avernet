@@ -50,11 +50,7 @@ pub struct PermissionGrantDecisionView {
     pub grant_kind: GrantKind,
     pub grant_ref_id: String,
     pub rules: Option<Vec<Rule>>,
-    pub rules_revision: Option<i64>,
-    pub rules_digest: Option<String>,
     pub status: GrantStatus,
-    pub request_id: Option<String>,
-    pub expires_at: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -112,8 +108,6 @@ pub struct ResolvePermissionProfileCommand {
 pub struct ResolveRulesGrantCommand {
     pub caller_actor_id: String,
     pub rules_grant_ref: String,
-    pub revision: i64,
-    pub digest: String,
     pub to_id: String,
     pub authz_context_id: Option<String>,
     pub run_id: Option<String>,

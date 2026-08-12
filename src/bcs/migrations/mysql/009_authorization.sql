@@ -43,25 +43,17 @@ CREATE TABLE IF NOT EXISTS bcs_authz_edge_grants (
     grant_kind VARCHAR(64) NOT NULL,
     grant_ref_id VARCHAR(128) NOT NULL,
     rules JSON DEFAULT NULL,
-    rules_revision BIGINT DEFAULT NULL,
-    rules_digest VARCHAR(128) DEFAULT NULL,
     status VARCHAR(32) NOT NULL,
-    request_id VARCHAR(128) DEFAULT NULL,
-    requested_by VARCHAR(128) NOT NULL,
-    approved_by VARCHAR(128) DEFAULT NULL,
-    revoked_by VARCHAR(128) DEFAULT NULL,
-    reason TEXT DEFAULT NULL,
-    expires_at BIGINT DEFAULT NULL,
-    created_at BIGINT NOT NULL,
-    updated_at BIGINT NOT NULL,
-    approved_at BIGINT DEFAULT NULL,
-    revoked_at BIGINT DEFAULT NULL,
+    originator_policy_type VARCHAR(64) NOT NULL,
+    originator_policy_data JSON DEFAULT NULL,
     PRIMARY KEY (edge_id)
 );
 CREATE INDEX idx_authz_edge_grants_lookup ON bcs_authz_edge_grants(from_id, to_id, env, status);
+CREATE INDEX idx_authz_edge_grants_rules_ref ON bcs_authz_edge_grants(grant_ref_id, grant_kind);
 
 CREATE TABLE IF NOT EXISTS bcs_authz_permission_requests (
     request_id VARCHAR(128) NOT NULL,
+    edge_id VARCHAR(128) DEFAULT NULL,
     env VARCHAR(32) NOT NULL,
     from_id VARCHAR(128) NOT NULL,
     to_id VARCHAR(128) NOT NULL,
@@ -75,10 +67,12 @@ CREATE TABLE IF NOT EXISTS bcs_authz_permission_requests (
     decided_by VARCHAR(128) DEFAULT NULL,
     created_at BIGINT NOT NULL,
     updated_at BIGINT NOT NULL,
+    decided_at BIGINT DEFAULT NULL,
     PRIMARY KEY (request_id)
 );
 CREATE INDEX idx_authz_permission_requests_to_status ON bcs_authz_permission_requests(to_id, status);
 CREATE INDEX idx_authz_permission_requests_env_from ON bcs_authz_permission_requests(env, from_id);
+CREATE INDEX idx_authz_permission_requests_edge_id ON bcs_authz_permission_requests(edge_id, created_at);
 
 CREATE TABLE IF NOT EXISTS bcs_authz_decision_logs (
     decision_id VARCHAR(128) NOT NULL,

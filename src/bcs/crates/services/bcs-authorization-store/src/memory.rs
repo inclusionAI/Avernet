@@ -9,9 +9,9 @@ use bcs_service_api::port::repo::{
     PermissionProfileRepoPort, PermissionRequestRepoPort,
 };
 use bcs_service_api::{
-    AuthzContext, AuthzContextType, AuthzDecisionLog, Capability, EdgeGrant, GrantStatus,
-    PermissionProfile, PermissionProfileStatus, PermissionRequest, PermissionRequestStatus,
-    ServiceResult,
+    AuthzContext, AuthzContextType, AuthzDecisionLog, Capability, EdgeGrant, GrantKind,
+    GrantStatus, PermissionProfile, PermissionProfileStatus, PermissionRequest,
+    PermissionRequestStatus, ServiceError, ServiceResult,
 };
 
 #[derive(Debug, Default)]
@@ -41,8 +41,6 @@ impl MemoryAuthorizationStore {
             && log.originator == context.originator.clone()
             && log.grant_refs == context.grants
             && log.context_type == Self::context_type(&context.context)
-            && log.created_at >= context.issued_at
-            && log.created_at <= context.expires_at
     }
 
     fn context_type(context: &bcs_service_api::RuntimeContext) -> AuthzContextType {
@@ -197,20 +195,49 @@ impl EdgeGrantRepoPort for MemoryAuthorizationStore {
             })
             .cloned()
             .collect::<Vec<_>>();
-        grants.sort_by(|left, right| {
-            left.created_at
-                .cmp(&right.created_at)
-                .then(left.edge_id.cmp(&right.edge_id))
-        });
+        grants.sort_by(|left, right| left.edge_id.cmp(&right.edge_id));
         Ok(grants)
     }
 
     async fn insert_edge_grant(&self, edge_grant: EdgeGrant) -> ServiceResult<EdgeGrant> {
+        validate_edge_grant(&edge_grant)?;
         self.edge_grants
             .write()
             .await
             .insert(edge_grant.edge_id.clone(), edge_grant.clone());
         Ok(edge_grant)
+    }
+
+    async fn update_edge_grant(&self, edge_grant: EdgeGrant) -> ServiceResult<EdgeGrant> {
+        validate_edge_grant(&edge_grant)?;
+        let mut store = self.edge_grants.write().await;
+        if !store.contains_key(&edge_grant.edge_id) {
+            return Err(ServiceError::InvalidOperation {
+                message: format!("edge grant '{}' not found", edge_grant.edge_id),
+                request_id: None,
+            });
+        }
+        store.insert(edge_grant.edge_id.clone(), edge_grant.clone());
+        Ok(edge_grant)
+    }
+
+    async fn get_edge_grant(&self, edge_id: &str) -> ServiceResult<Option<EdgeGrant>> {
+        Ok(self.edge_grants.read().await.get(edge_id).cloned())
+    }
+
+    async fn find_rules_edge_grant_by_ref(
+        &self,
+        rules_grant_ref: &str,
+    ) -> ServiceResult<Option<EdgeGrant>> {
+        Ok(self
+            .edge_grants
+            .read()
+            .await
+            .values()
+            .find(|grant| {
+                grant.grant_kind == GrantKind::Rules && grant.grant_ref_id == rules_grant_ref
+            })
+            .cloned())
     }
 }
 
@@ -265,12 +292,57 @@ impl PermissionRequestRepoPort for MemoryAuthorizationStore {
         &self,
         request_id: &str,
         status: PermissionRequestStatus,
+        decided_by: Option<&str>,
+        decision_reason: Option<&str>,
+        decided_at: Option<i64>,
     ) -> ServiceResult<()> {
-        if let Some(request) = self.permission_requests.write().await.get_mut(request_id) {
-            request.status = status;
-            request.updated_at = Self::now_millis();
-        }
+        let mut requests = self.permission_requests.write().await;
+        let request = requests.get_mut(request_id).ok_or_else(|| ServiceError::InvalidOperation {
+            message: format!("permission request '{}' not found", request_id),
+            request_id: Some(request_id.to_string()),
+        })?;
+        request.status = status;
+        request.decided_by = decided_by.map(ToString::to_string);
+        request.decision_reason = decision_reason.map(ToString::to_string);
+        let now = Self::now_millis();
+        request.decided_at = decided_at.or(Some(now));
+        request.updated_at = now;
         Ok(())
+    }
+
+    async fn backfill_permission_request_edge_id(
+        &self,
+        request_id: &str,
+        edge_id: &str,
+    ) -> ServiceResult<()> {
+        let mut requests = self.permission_requests.write().await;
+        let request = requests.get_mut(request_id).ok_or_else(|| ServiceError::InvalidOperation {
+            message: format!("permission request '{}' not found", request_id),
+            request_id: Some(request_id.to_string()),
+        })?;
+        request.edge_id = Some(edge_id.to_string());
+        request.updated_at = Self::now_millis();
+        Ok(())
+    }
+
+    async fn list_permission_requests_by_edge_id(
+        &self,
+        edge_id: &str,
+    ) -> ServiceResult<Vec<PermissionRequest>> {
+        let mut requests = self
+            .permission_requests
+            .read()
+            .await
+            .values()
+            .filter(|request| request.edge_id.as_deref() == Some(edge_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        requests.sort_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then(left.request_id.cmp(&right.request_id))
+        });
+        Ok(requests)
     }
 }
 
@@ -303,5 +375,23 @@ impl AuthzDecisionLogRepoPort for MemoryAuthorizationStore {
                 .then(right.decision_id.cmp(&left.decision_id))
         });
         Ok(logs)
+    }
+}
+
+fn validate_edge_grant(edge_grant: &EdgeGrant) -> ServiceResult<()> {
+    match edge_grant.grant_kind {
+        GrantKind::PermissionProfile if edge_grant.rules.is_some() => {
+            Err(ServiceError::InvalidOperation {
+                message: "permission_profile edge grants must not inline rules".to_string(),
+                request_id: None,
+            })
+        }
+        GrantKind::Rules if edge_grant.rules.as_ref().is_none_or(|rules| rules.is_empty()) => {
+            Err(ServiceError::InvalidOperation {
+                message: "rules edge grants must include non-empty rules".to_string(),
+                request_id: None,
+            })
+        }
+        _ => Ok(()),
     }
 }

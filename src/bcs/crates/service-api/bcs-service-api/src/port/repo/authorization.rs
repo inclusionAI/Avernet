@@ -52,6 +52,15 @@ pub trait EdgeGrantRepoPort: Send + Sync {
     ) -> ServiceResult<Vec<EdgeGrant>>;
 
     async fn insert_edge_grant(&self, edge_grant: EdgeGrant) -> ServiceResult<EdgeGrant>;
+
+    async fn update_edge_grant(&self, edge_grant: EdgeGrant) -> ServiceResult<EdgeGrant>;
+
+    async fn get_edge_grant(&self, edge_id: &str) -> ServiceResult<Option<EdgeGrant>>;
+
+    async fn find_rules_edge_grant_by_ref(
+        &self,
+        rules_grant_ref: &str,
+    ) -> ServiceResult<Option<EdgeGrant>>;
 }
 
 #[async_trait]
@@ -76,7 +85,21 @@ pub trait PermissionRequestRepoPort: Send + Sync {
         &self,
         request_id: &str,
         status: PermissionRequestStatus,
+        decided_by: Option<&str>,
+        decision_reason: Option<&str>,
+        decided_at: Option<i64>,
     ) -> ServiceResult<()>;
+
+    async fn backfill_permission_request_edge_id(
+        &self,
+        request_id: &str,
+        edge_id: &str,
+    ) -> ServiceResult<()>;
+
+    async fn list_permission_requests_by_edge_id(
+        &self,
+        edge_id: &str,
+    ) -> ServiceResult<Vec<PermissionRequest>>;
 }
 
 #[async_trait]

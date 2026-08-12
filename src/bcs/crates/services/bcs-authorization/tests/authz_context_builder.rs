@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
+use serde_json::json;
+
 use bcs_authorization::AuthzContextBuilderService;
 use bcs_authorization_store::MemoryAuthorizationStore;
 use bcs_service_api::{
     AuthzContextBuilderCoreService, AuthzRuntimeContext, BuildA2aAuthzContextRequest,
-    CallerContext, EdgeGrant, GrantKind, GrantSource, GrantStatus, PermissionProfile,
-    PermissionProfileStatus, Rule, RuleEffect,
+    CallerContext, EdgeGrant, GrantKind, GrantSource, GrantStatus, OriginatorPolicyType,
+    PermissionProfile, PermissionProfileStatus, Rule, RuleEffect,
 };
 
 #[tokio::test]
@@ -24,8 +26,8 @@ async fn direct_chat_uses_current_profile_revision_from_edge_grant() {
     assert_eq!(context.grants.len(), 1);
     assert_eq!(context.grants[0].kind, GrantKind::PermissionProfile);
     assert_eq!(context.grants[0].ref_id, "profile-writer");
-    assert_eq!(context.grants[0].revision, 2);
-    assert_eq!(context.grants[0].digest, "new");
+    assert_eq!(context.grants[0].revision, Some(2));
+    assert_eq!(context.grants[0].digest.as_deref(), Some("new"));
     assert_eq!(context.grants[0].source, GrantSource::EdgeGrant);
 }
 
@@ -38,8 +40,6 @@ async fn direct_chat_can_use_rules_grant() {
         "from-a",
         "to-b",
         "rules-ref-1",
-        3,
-        "rules-digest",
     )
     .await;
 
@@ -51,8 +51,8 @@ async fn direct_chat_can_use_rules_grant() {
     assert_eq!(context.grants.len(), 1);
     assert_eq!(context.grants[0].kind, GrantKind::Rules);
     assert_eq!(context.grants[0].ref_id, "rules-ref-1");
-    assert_eq!(context.grants[0].revision, 3);
-    assert_eq!(context.grants[0].digest, "rules-digest");
+    assert_eq!(context.grants[0].revision, None);
+    assert_eq!(context.grants[0].digest, None);
 }
 
 #[tokio::test]
@@ -67,7 +67,7 @@ async fn public_chat_adds_target_default_without_edge() {
 
     assert_eq!(context.grants.len(), 1);
     assert_eq!(context.grants[0].ref_id, "profile-default");
-    assert_eq!(context.grants[0].revision, 7);
+    assert_eq!(context.grants[0].revision, Some(7));
     assert_eq!(context.grants[0].source, GrantSource::PublicDefault);
 }
 
@@ -93,6 +93,60 @@ async fn collaboration_adds_target_default_without_n_squared_edge() {
             session_id: Some("session-1".to_string()),
         }
     );
+}
+
+
+#[tokio::test]
+async fn originator_policy_filters_non_matching_edge_grants() {
+    let store = Arc::new(MemoryAuthorizationStore::new());
+    seed_profile(&store, "profile-writer", 1, false, "digest").await;
+    seed_profile_edge_with_originator_policy(
+        &store,
+        "edge-1",
+        "from-a",
+        "to-b",
+        "profile-writer",
+        OriginatorPolicyType::SameAsFrom,
+        None,
+    )
+    .await;
+
+    let mut req = request(AuthzRuntimeContext::Direct);
+    req.originator = Some("human-1".to_string());
+
+    let error = service(store)
+        .build_a2a_authz_context(req)
+        .await
+        .expect_err("non-matching originator should remove the grant");
+
+    assert!(error.to_string().contains("no active authz grants"));
+}
+
+#[tokio::test]
+async fn originator_policy_specific_allows_listed_originator() {
+    let store = Arc::new(MemoryAuthorizationStore::new());
+    seed_profile(&store, "profile-writer", 1, false, "digest").await;
+    seed_profile_edge_with_originator_policy(
+        &store,
+        "edge-1",
+        "from-a",
+        "to-b",
+        "profile-writer",
+        OriginatorPolicyType::Specific,
+        Some(json!({ "allowed_originators": ["human-1"] })),
+    )
+    .await;
+
+    let mut req = request(AuthzRuntimeContext::Direct);
+    req.originator = Some("human-1".to_string());
+
+    let context = service(store)
+        .build_a2a_authz_context(req)
+        .await
+        .expect("listed originator should keep the grant");
+
+    assert_eq!(context.grants.len(), 1);
+    assert_eq!(context.grants[0].ref_id, "profile-writer");
 }
 
 #[tokio::test]
@@ -121,8 +175,6 @@ fn request(context: AuthzRuntimeContext) -> BuildA2aAuthzContextRequest {
         context,
         task_id: Some("task-1".to_string()),
         run_id: Some("run-1".to_string()),
-        issued_at: 1000,
-        ttl_ms: 60_000,
     }
 }
 
@@ -170,6 +222,27 @@ async fn seed_profile_edge(
     to_id: &str,
     profile_id: &str,
 ) {
+    seed_profile_edge_with_originator_policy(
+        store,
+        id,
+        from_id,
+        to_id,
+        profile_id,
+        OriginatorPolicyType::Any,
+        None,
+    )
+    .await;
+}
+
+async fn seed_profile_edge_with_originator_policy(
+    store: &MemoryAuthorizationStore,
+    id: &str,
+    from_id: &str,
+    to_id: &str,
+    profile_id: &str,
+    originator_policy_type: OriginatorPolicyType,
+    originator_policy_data: Option<serde_json::Value>,
+) {
     bcs_service_api::EdgeGrantRepoPort::insert_edge_grant(
         store,
         EdgeGrant {
@@ -180,19 +253,9 @@ async fn seed_profile_edge(
             grant_kind: GrantKind::PermissionProfile,
             grant_ref_id: profile_id.to_string(),
             rules: None,
-            rules_revision: None,
-            rules_digest: None,
             status: GrantStatus::Approved,
-            request_id: None,
-            requested_by: from_id.to_string(),
-            approved_by: Some("owner".to_string()),
-            revoked_by: None,
-            reason: None,
-            expires_at: None,
-            created_at: 1,
-            updated_at: 1,
-            approved_at: Some(1),
-            revoked_at: None,
+            originator_policy_type,
+            originator_policy_data,
         },
     )
     .await
@@ -205,8 +268,6 @@ async fn seed_rules_edge(
     from_id: &str,
     to_id: &str,
     rules_ref: &str,
-    revision: i64,
-    digest: &str,
 ) {
     bcs_service_api::EdgeGrantRepoPort::insert_edge_grant(
         store,
@@ -225,19 +286,9 @@ async fn seed_rules_edge(
                 description: None,
                 raw_metadata: None,
             }]),
-            rules_revision: Some(revision),
-            rules_digest: Some(digest.to_string()),
             status: GrantStatus::Approved,
-            request_id: None,
-            requested_by: from_id.to_string(),
-            approved_by: Some("owner".to_string()),
-            revoked_by: None,
-            reason: None,
-            expires_at: None,
-            created_at: 1,
-            updated_at: 1,
-            approved_at: Some(1),
-            revoked_at: None,
+            originator_policy_type: OriginatorPolicyType::Any,
+            originator_policy_data: None,
         },
     )
     .await

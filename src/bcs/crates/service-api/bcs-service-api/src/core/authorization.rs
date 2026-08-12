@@ -13,8 +13,6 @@ pub struct BuildA2aAuthzContextRequest {
     pub context: RuntimeContext,
     pub task_id: Option<String>,
     pub run_id: Option<String>,
-    pub issued_at: i64,
-    pub ttl_ms: i64,
 }
 
 #[async_trait]

@@ -1568,12 +1568,10 @@ impl AuthzContextBuilderCoreService for RecordingAuthzContextBuilder {
             grants: vec![AuthzGrantRef {
                 kind: GrantKind::PermissionProfile,
                 ref_id: "profile-target-default".to_string(),
-                revision: 9,
-                digest: "sha256:test".to_string(),
+                revision: Some(9),
+                digest: Some("sha256:test".to_string()),
                 source: GrantSource::PublicDefault,
             }],
-            issued_at: request.issued_at,
-            expires_at: request.issued_at + request.ttl_ms,
             signature: None,
         })
     }

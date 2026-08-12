@@ -111,15 +111,23 @@ pub enum GrantSource {
     CollaborationDefault,
 }
 
+
+/// Originator policy for an EdgeGrant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OriginatorPolicyType {
+    Any,
+    SameAsFrom,
+    Specific,
+    Owner,
+}
+
 /// Grant lifecycle state for authorization facts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GrantStatus {
-    Pending,
     Approved,
-    Rejected,
     Revoked,
-    Expired,
 }
 
 /// A unified grant reference carried in AuthzContext.
@@ -127,8 +135,10 @@ pub enum GrantStatus {
 pub struct AuthzGrantRef {
     pub kind: GrantKind,
     pub ref_id: String,
-    pub revision: i64,
-    pub digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub digest: Option<String>,
     pub source: GrantSource,
 }
 
@@ -174,28 +184,10 @@ pub struct EdgeGrant {
     pub grant_ref_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rules: Option<Vec<Rule>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rules_revision: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rules_digest: Option<String>,
     pub status: GrantStatus,
+    pub originator_policy_type: OriginatorPolicyType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub request_id: Option<String>,
-    pub requested_by: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub approved_by: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub revoked_by: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expires_at: Option<i64>,
-    pub created_at: i64,
-    pub updated_at: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub approved_at: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub revoked_at: Option<i64>,
+    pub originator_policy_data: Option<Value>,
 }
 
 /// Resolved rules grant material returned to a target bot for local tool authorization.
@@ -208,10 +200,6 @@ pub struct RulesGrantMaterial {
     pub env: String,
     #[serde(default)]
     pub rules: Vec<Rule>,
-    pub revision: i64,
-    pub digest: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expires_at: Option<i64>,
 }
 
 /// Permission request kind.
@@ -237,6 +225,8 @@ pub enum PermissionRequestStatus {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PermissionRequest {
     pub request_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edge_id: Option<String>,
     pub env: String,
     pub from_id: String,
     pub to_id: String,
@@ -255,6 +245,8 @@ pub struct PermissionRequest {
     pub decided_by: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decided_at: Option<i64>,
 }
 
 /// Persisted decision log for runtime authz.
@@ -294,8 +286,6 @@ pub struct AuthzContext {
     pub context: AuthzRuntimeContext,
     #[serde(default)]
     pub grants: Vec<AuthzGrantRef>,
-    pub issued_at: i64,
-    pub expires_at: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
 }
