@@ -23,6 +23,9 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
+#: Marker BaaS appends to a capped stream (its ``_TRUNCATED_SUFFIX``).
+_TRUNCATED_SUFFIX = "[truncated]"
+
 StartStatus = Literal["success", "failed", "pending"]
 
 
@@ -55,19 +58,29 @@ def _parse_result_message(raw: Any) -> tuple[int | None, str, str, bool]:
         return None, "", raw, False
     stdout = parsed.get("stdout") or ""
     stderr = parsed.get("stderr") or ""
-    truncated = "[truncated]" in stdout or "[truncated]" in stderr
+    # BaaS appends this marker when it caps a stream (its serialize_hook_result
+    # writes _TRUNCATED_SUFFIX = "[truncated]"). Anchored to the end so output
+    # that merely mentions the word is not mis-flagged.
+    truncated = stdout.endswith(_TRUNCATED_SUFFIX) or stderr.endswith(_TRUNCATED_SUFFIX)
     return parsed.get("exit_code"), stdout, stderr, truncated
 
 
 def _status_of(device: dict[str, Any], exit_code: int | None) -> StartStatus:
+    """Exit code wins over the publish status where the two disagree.
+
+    The publish record tracks the *workflow*, and the hook is dispatched with
+    nohup, so a device can be marked SUCCESS while the start command it
+    launched exited non-zero. Reporting "success" alongside exit_code 127 is
+    exactly the contradiction a caller would have to debug around.
+    """
+    if exit_code is not None:
+        return "success" if exit_code == 0 else "failed"
     raw = str(device.get("result_status") or "").upper()
     if raw == "SUCCESS":
         return "success"
     if raw == "FAILED":
         return "failed"
-    if exit_code is None:
-        return "pending"
-    return "success" if exit_code == 0 else "failed"
+    return "pending"
 
 
 class BotStartupScriptRunReader:
@@ -98,7 +111,11 @@ class BotStartupScriptRunReader:
             )
             return []
 
-        devices = (progress or {}).get("devices") or []
+        # ``device_details`` is the key BaaS actually returns for
+        # include_devices=True (see publish_flow/device_binding_mixin.py:81).
+        # ``devices`` is accepted too rather than assumed absent.
+        payload = progress or {}
+        devices = payload.get("device_details") or payload.get("devices") or []
         results: list[StartInstanceResult] = []
         for device in devices:
             if not isinstance(device, dict):

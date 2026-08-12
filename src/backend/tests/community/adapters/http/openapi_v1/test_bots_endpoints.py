@@ -966,14 +966,27 @@ def test_startup_script_put_stores_and_takes_modifier_from_the_principal(
 
     data = _ok(
         client.put(
-            "/openapi/v1/bots/b1/startup-script",
-            json={"script": "echo new", "updated_by": "attacker", "size_bytes": 999},
+            "/openapi/v1/bots/b1/startup-script", json={"script": "echo new"}
         )
     )
     assert data["script"] == "echo new"
-    # The body's audit fields are ignored; the principal is what is recorded.
+    # The principal is what gets recorded — never anything from the body.
     assert startup_script.put.call_args.kwargs["modifier"] == "u1"
     assert startup_script.put.call_args.kwargs["script"] == "echo new"
+
+
+def test_startup_script_put_rejects_an_attempt_to_set_audit_fields(
+    client, svc, startup_script
+):
+    """extra="forbid": a caller asserting updated_by fails validation rather
+    than getting a 200 with their value silently dropped."""
+    svc.get_bot.return_value = _SUPPORTED_BOT
+    resp = client.put(
+        "/openapi/v1/bots/b1/startup-script",
+        json={"script": "echo new", "updated_by": "attacker"},
+    )
+    assert resp.status_code == 422, resp.json()
+    startup_script.put.assert_not_called()
 
 
 def test_startup_script_put_is_refused_for_a_teclaw_bot(client, svc, startup_script):

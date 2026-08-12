@@ -11,6 +11,15 @@ from typing import Any
 
 from agentclaw.community.core.devices.services.device_service import (
     BAAS_DEVICE_PROVIDER,
+    LOCAL_DEVICE_PROVIDER,
+)
+
+#: Providers whose containers are built by ``_build_create_bot_payload``, and
+#: therefore carry the start command the script is appended to. ``local`` is
+#: here because ``LocalDeviceService`` calls that same builder
+#: (local_device_service.py:252) — it delivers the script like ``baas`` does.
+_PROVIDERS_WITH_A_START_SEQUENCE = frozenset(
+    {BAAS_DEVICE_PROVIDER, LOCAL_DEVICE_PROVIDER}
 )
 
 
@@ -36,11 +45,17 @@ def resolve_support(
     if engine == TECLAW_DEVICE_PROVIDER:
         return False, "teclaw bots are provisioned without a start sequence"
 
-    if device_provider != BAAS_DEVICE_PROVIDER:
-        named = device_provider or "unknown"
+    if device_provider is None:
+        # No binding yet — a bot is PENDING between create and its first start,
+        # and that is precisely when an owner wants to attach a script. The
+        # provider is not knowable here, and refusing would block the main use
+        # case; every non-teclaw bot created today is baas-backed.
+        return True, ""
+
+    if device_provider not in _PROVIDERS_WITH_A_START_SEQUENCE:
         return (
             False,
-            f"bots on the {named!r} device provider have no start sequence",
+            f"bots on the {device_provider!r} device provider have no start sequence",
         )
 
     return True, ""

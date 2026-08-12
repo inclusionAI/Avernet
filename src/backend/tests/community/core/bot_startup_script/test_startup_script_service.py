@@ -138,7 +138,21 @@ class TestResolveSupport:
         assert supported is False
         assert "arca" in reason
 
-    def test_missing_binding_is_unsupported_rather_than_a_crash(self, svc):
+    def test_a_bot_with_no_binding_yet_is_supported(self, svc):
+        """A bot is PENDING between create and first start — the moment an owner
+        most wants to attach a script. Refusing there blocks the main use case,
+        and every non-teclaw bot created today is baas-backed anyway."""
         supported, reason = svc.resolve_support({"active_engine": "openclaw"})
+        assert supported is True
+        assert reason == ""
+
+    def test_teclaw_with_no_binding_is_still_unsupported(self, svc):
+        """Engine is checked before the provider, so the gap does not swallow it."""
+        supported, reason = svc.resolve_support({"active_engine": "teclaw"})
         assert supported is False
-        assert reason
+        assert "teclaw" in reason
+
+    def test_the_local_provider_is_supported(self, svc):
+        """LocalDeviceService allocates through _build_create_bot_payload
+        (local_device_service.py:252), so it delivers the script like baas."""
+        assert svc.resolve_support(self._bot(provider="local")) == (True, "")

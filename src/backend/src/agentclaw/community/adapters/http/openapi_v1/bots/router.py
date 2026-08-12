@@ -889,6 +889,31 @@ async def delete_bot_startup_script(
     return deleted_envelope(request)
 
 
+def _last_publish_id(bot: dict[str, Any]) -> int | None:
+    """Find the publish whose devices carry the last start's result.
+
+    The create path writes ``publish_id`` into the binding's ``device_props``
+    (``baas_device_service.py:396``), while the publish flow records the
+    workflow as ``baas_publish_id``. Both spellings are read because a bot that
+    has been published carries the second and a freshly created one the first;
+    keying on either alone leaves a whole class of bot reporting nothing.
+    """
+    binding = bot.get("device_binding") or {}
+    props = binding.get("device_props") or {}
+    for candidate in (
+        props.get("publish_id"),
+        props.get("baas_publish_id"),
+        binding.get("baas_publish_id"),
+        bot.get("baas_publish_id"),
+    ):
+        if candidate:
+            try:
+                return int(candidate)
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
 @router.get(
     "/{bot_id}/startup-script/last-start",
     response_model=Envelope[list[StartInstanceResult]],
@@ -915,9 +940,7 @@ async def get_bot_startup_script_last_start(
     or for a bot that cannot run a script at all.
     """
     bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
-    binding = bot.get("device_binding") or {}
-    props = binding.get("device_props") or {}
-    results = run_reader.last_start(publish_id=props.get("publish_id"))
+    results = run_reader.last_start(publish_id=_last_publish_id(bot))
     return envelope(
         [
             StartInstanceResult(

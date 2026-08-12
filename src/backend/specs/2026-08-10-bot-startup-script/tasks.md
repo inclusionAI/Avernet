@@ -86,17 +86,8 @@
   - [x] No `entity_id` parameter or response field anywhere (group contract);
         it exists only as a storage key resolved server-side.
 - **Depends on:** Task 1
-- **Follow-ups from code review (not yet applied):**
-  - [ ] A bot with no binding yet (PENDING right after create) resolves to
-        provider `None` → `supported: false` → PUT 409. Setting a script before
-        the first start is the main use case and is currently refused.
-  - [ ] `device_provider == "local"` is refused, but `LocalDeviceService`
-        allocates through `_build_create_bot_payload` and *does* deliver the
-        script — so the E2E profile can never exercise a write.
-  - [ ] `StartupScriptWrite` omits `model_config = _STRICT`, contradicting the
-        file's own "request bodies reject unknown keys" rule.
 
-## [!] Task 5: Public API — read the last container start
+## [x] Task 5: Public API — read the last container start
 - **Goal:** Let a caller see the outcome of the last start, per instance, from
   data that already exists.
 - **Files:** `src/backend/.../adapters/http/openapi_v1/bots/router.py`,
@@ -112,18 +103,6 @@
   - [x] A bot that has never started, or whose publish record is gone, returns an
         empty list rather than an error.
 - **Depends on:** Tasks 3, 4
-- **BLOCKED — code review found the read path does not work in production:**
-  - [ ] `get_publish_progress(include_devices=True)` returns instances under
-        `device_details`, not `devices` (`device_binding_mixin.py:81`,
-        `testing/baas_mock.py:88`). The endpoint returns `[]` in prod; the unit
-        tests pass only because the fixture fabricates the wrong key.
-  - [ ] `device_props["publish_id"]` is not present for a published service bot —
-        `_activate_binding` writes `baas_publish_id` and `reuse_binding` replaces
-        `device_props` wholesale.
-  - [ ] `result_status == SUCCESS` short-circuits before the exit code, so a hook
-        that exited 127 can report `status: success` with `exit_code: 127`.
-  - [ ] `truncated` is a substring guess for `[truncated]`; no producer of that
-        marker exists in this repo.
 
 ## Task 6: Publish the contract and document the limits
 - **Goal:** The gateway serves the routes, and the promises a caller cannot infer

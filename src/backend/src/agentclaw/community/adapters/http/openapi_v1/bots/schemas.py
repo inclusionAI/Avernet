@@ -140,8 +140,11 @@ class StartupScriptWrite(BaseModel):
 
     Audit fields are deliberately absent: ``updated_by`` comes from the request
     principal and ``updated_at`` from the row's own timestamp, so neither can be
-    asserted by a caller.
+    asserted by a caller, and ``extra="forbid"`` means an attempt to send one
+    fails validation rather than being silently dropped with a 200.
     """
+
+    model_config = _STRICT
 
     script: str = Field(
         description=(

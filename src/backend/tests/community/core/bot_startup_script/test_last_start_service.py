@@ -14,7 +14,7 @@ def _reader(devices=None, raises=None):
     if raises is not None:
         baas.get_publish_progress.side_effect = raises
     else:
-        baas.get_publish_progress.return_value = {"devices": devices or []}
+        baas.get_publish_progress.return_value = {"device_details": devices or []}
     return BotStartupScriptRunReader(baas), baas
 
 
@@ -77,3 +77,36 @@ def test_baas_failure_returns_empty_rather_than_500():
     """Reading 'what happened last time' must not fail the request."""
     reader, _ = _reader(raises=RuntimeError("baas down"))
     assert reader.last_start(publish_id=42) == []
+
+
+def test_reads_the_device_details_key_baas_actually_returns():
+    """get_publish_progress(include_devices=True) returns device_details.
+
+    The first version read "devices" and therefore returned [] in production
+    while its tests passed against a fabricated key.
+    """
+    baas = MagicMock()
+    baas.get_publish_progress.return_value = {
+        "device_details": [_device(exit_code=0, stdout="ok")]
+    }
+    assert len(BotStartupScriptRunReader(baas).last_start(publish_id=42)) == 1
+
+
+def test_still_reads_a_devices_key_if_one_is_returned():
+    baas = MagicMock()
+    baas.get_publish_progress.return_value = {"devices": [_device(exit_code=0)]}
+    assert len(BotStartupScriptRunReader(baas).last_start(publish_id=42)) == 1
+
+
+def test_exit_code_wins_over_a_contradicting_publish_status():
+    """The hook is nohup'd, so the workflow can read SUCCESS while it failed."""
+    reader, _ = _reader([_device("d1", "SUCCESS", exit_code=127, stderr="boom")])
+    r = reader.last_start(publish_id=42)[0]
+    assert r.status == "failed" and r.exit_code == 127
+
+
+def test_truncation_marker_is_anchored_to_the_end():
+    reader, _ = _reader([
+        _device("d1", "SUCCESS", exit_code=0, stdout="mentions [truncated] mid-line")
+    ])
+    assert reader.last_start(publish_id=42)[0].truncated is False
