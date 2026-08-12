@@ -1,7 +1,7 @@
 # Spec — 任务目标驱动的任务动态规划执行框架 (Goal-Driven Dynamic-Planning Task Execution Framework)
 
 > **权威源(冲突时以此为准)**:
-> - 最新领域模型(用户给定 classDiagram,2026-08-11):`TaskInfo`/`TaskSpec`(metadata/context/goal,**无 SLA**)/`TaskExecutionGraph`(**含 `run_id`/`relations: list[Relation]`**)/`TaskNode`(**含 `task_id`/`node_run_graph`/`decomposed_by`(结构父,根 None)**,**无 `depends_on` 字段**);结构归属(decomposed_by)与数据依赖(relations DEPENDENCY)解耦/`Relation`({src_id,dst_id,type,extend_props})/`RuntimeInfo`(**`run_mode` 为 str,无 `collab_mode`**)/`AcceptanceCriteria`(id/description)/`AcceptanceResult`({verdict,acceptances_metric,gaps},**无 verifier**)/`Status` **6 态**(PENDING/PLANNING/RUNNING/DONE/FAILED/HUNG)/`AcceptanceVerdict`/`RelationType`(DEPENDENCY)。
+> - 最新领域模型(用户给定 classDiagram,2026-08-11):`TaskInfo`/`TaskSpec`(metadata/context/goal,**无 SLA**)/`TaskExecutionGraph`(**含 `run_id`/`relations: list[Relation]`**)/`TaskNode`(**含 `task_id`/`node_run_graph`;结构归属由 `relations` 分解树表达,无 `decomposed_by`/`depends_on` 字段**)/`Relation`({src_id=结构父,dst_id=结构子,type,extend_props};DEPENDENCY=分解树单入)/`RuntimeInfo`(**`run_mode` 为 str,无 `collab_mode`**)/`AcceptanceCriteria`(id/description)/`AcceptanceResult`({verdict,acceptances_metric,gaps},**无 verifier**)/`Status` **6 态**(PENDING/PLANNING/RUNNING/DONE/FAILED/HUNG)/`AcceptanceVerdict`/`RelationType`(DEPENDENCY)。
 > - 流程架构图 `apoi9lcedw9u8ivq`:管理态任务中心 + 运行态任务图谱/规划/派发/执行 + 旁路任务Harness + 执行主体 Bot/协作群/BBS/Human/工具。
 > - 5 个模块设计文档(权威 API 契约):任务中心 `yugg6dorsxo8sgmp`、任务图谱 `lunk1txfuv6gtwk2`、任务规划 `uuq2tlue91q4lkal`、任务派发 `ue1ie0g3supwo2uf`、任务执行 `lxg2mwgmtfqg6d95`。
 > - 行为基线 case 剧本 `gwqie46v7hzr1w6h`(存储行业尽调,三阶段覆盖三模态)。
@@ -15,7 +15,7 @@
 
 需要一个**以目标(Goal + Acceptance)为唯一收敛判据、能跨 单 Bot / 协作群 / BBS 三种执行模态自驱跑完「理解 → 规划 → 派发 → 执行 → 验收 → 重规划」闭环**的任务动态规划执行框架,且必须**严格按最新设计的领域模型与六模块架构实现**。
 
-领域模型收敛为:**`Relation` 一等公民(`TaskNode` 不持 `depends_on`)**、**6 态 `Status`(含 `PLANNING`)**、`TaskNode` 加 `task_id`/`node_run_graph`/`decomposed_by`(结构父)、`TaskExecutionGraph` 加 `run_id`/`relations`(数据依赖);两者解耦、`RuntimeInfo.run_mode` 为 str(无 `collab_mode`)、无 `SLA`/`Scope`/`CollabMode` 枚举、`AcceptanceResult` 无 `verifier`;5 个模块文档进一步明确:`TaskService` 2 facade(`execute`/`get_task_dashboard`)、`TaskGraphService` 独立图谱模块(7 API:4 核心+3 派生只读)、`TaskPlanner.plan` 与 `TaskGraphService.add_task_nodes` 有显式状态触发条件(a/b/c)、`TaskDispatcher.dispatch` 决定"谁来做"写 `assignee`、`TaskRunner.start_run` 一个入口三模态自适应、`TaskLoopCallback` PUSH 回投。代码库按此从零重新实现。
+领域模型收敛为:**`Relation` 一等公民(`TaskNode` 不持 `depends_on`)**、**6 态 `Status`(含 `PLANNING`)**、`TaskNode` 含 `task_id`/`node_run_graph`、`TaskExecutionGraph` 含 `run_id`/`relations`(分解树,承载结构归属;数据流由批规划+结构父聚合上下文承载)、`RuntimeInfo.run_mode` 为 str(无 `collab_mode`)、无 `SLA`/`Scope`/`CollabMode` 枚举、`AcceptanceResult` 无 `verifier`;5 个模块文档进一步明确:`TaskService` 2 facade(`execute`/`get_task_dashboard`)、`TaskGraphService` 独立图谱模块(7 API:4 核心+3 派生只读)、`TaskPlanner.plan` 与 `TaskGraphService.add_task_nodes` 有显式状态触发条件(a/b/c)、`TaskDispatcher.dispatch` 决定"谁来做"写 `assignee`、`TaskRunner.start_run` 一个入口三模态自适应、`TaskLoopCallback` PUSH 回投。代码库按此从零重新实现。
 
 ## Solution
 
@@ -25,7 +25,7 @@
    - 规格面:`TaskInfo`(入口,带 `source_channel_type/id` + `execution_config`)→ `TaskSpec`(metadata/context/goal,**无 SLA**)→ `Metadata`(**含 `task_id`**/title/instruction)、`Context`(background/**`extend_props`**)、`Goal`(objective/`acceptances: list[AcceptanceCriteria]`)、`AcceptanceCriteria`(id/description)。
    - 运行态:`TaskExecutionGraph`(**`run_id`**/loop_round/status/output/**`tasks`**/**`relations: list[Relation]`**/extend_props)、`TaskNode`(node_id/**`task_id`**/status/task_spec/run_info/**`node_run_graph`**)、`Relation`({src_id,dst_id,**`type: RelationType`**,extend_props})、`RuntimeInfo`(**`run_mode: str`**/assignee/start_time/end_time/output/acceptance_result/extend_props,**无 collab_mode**)、`AcceptanceResult`(verdict/`acceptances_metric`/gaps,**无 verifier**)。
    - 枚举:`Status` **6 态**(PENDING/**PLANNING**/RUNNING/DONE/FAILED/HUNG)、`AcceptanceVerdict`(PASS/FAIL)、`RelationType`(DEPENDENCY)。
-   - **结构归属 vs 数据依赖解耦(B1)**:`TaskNode.decomposed_by` 表结构归属(产自 decompose 谁,根 None);`Relation{type=DEPENDENCY}` 表数据依赖(多入 DAG),存于 `TaskExecutionGraph.relations`。`TaskNode` 不持 `depends_on` 字段。结构子查询/验收/传播读 decomposed_by;就绪判定/投影取上游读 relations。
+   - **分解树统一承载结构归属**:`Relation{type=DEPENDENCY}` 在 `TaskExecutionGraph.relations` 表分解树(单入:每非根节点恰好 1 条入边=结构父,`src_id`=父,`dst_id`=子)。`TaskNode` 不持 `decomposed_by`/`depends_on` 字段——结构归属、验收、传播一律从 `relations` 派生。无跨兄弟直接数据边;数据流由步进式批规划顺序 + 执行时结构父聚合上下文承载。就绪=被 `add_task_nodes` 加入即就绪,无 `dependencies_satisfied` 闸门。
    - **`PLANNING` 新态**:承担"待规划/委托中"语义(节点已被/将被分解委托子执行)。
 2. **六模块 = 流程架构图 + 5 模块文档**:
    - **任务中心 `TaskService`**(对外 facade,2 API):`execute(task_info)→TaskOpResult` / `get_task_dashboard(task_id,node_id?)→TaskExecutionGraph`。内部由编排核协调其余模块。
@@ -49,7 +49,7 @@
 > 行为级约束(非实现细节;具体类/API/状态机见 `plan.md`,状态流转表见 §5.4)。
 
 - **完成判据唯一**:`Goal + Acceptance` 为唯一收敛 oracle;验收结论(`verdict`/`gaps`/`acceptances_metric`)是模型字段、在图内;`gaps` 驱动补救规划,不游离、不入 `plan` 参数。
-- **结构归属 vs 数据依赖解耦(B1)**:`TaskNode.decomposed_by`(str|None,根=None)表结构归属(严格单父分解树,产自 `decompose(谁)`);`Relation{type=DEPENDENCY}` 在 `TaskExecutionGraph.relations` 表数据依赖(多入 DAG)。`TaskNode` 不持 `depends_on` 字段。结构子查询/验收/传播读 `decomposed_by`;`dependencies_satisfied`/`depth`(数据维度)/投影取上游读 `relations`;两者正交,decomposed_by 可≠数据父。
+- **分解树统一承载结构归属**:`Relation{type=DEPENDENCY}` 在 `TaskExecutionGraph.relations` 表分解树(单入:每非根节点恰好 1 条入边=结构父)。`TaskNode` 不持 `decomposed_by`/`depends_on` 字段。结构子(`get_child_tasks`)/结构父(`get_parent_task`)/验收/传播/`depth` 均从 `relations` 派生;无跨兄弟直接数据边,数据流由步进式批规划 + 执行时结构父聚合上下文承载。就绪=被 add 即就绪,无 `dependencies_satisfied` 闸门。
 - **状态 6 态,`PLANNING` 显式承载"待规划/委托中"**:`PENDING`/`PLANNING`/`RUNNING`/`DONE`/`FAILED`/`HUNG`;节点被分解委托子执行时进 `PLANNING`(而非靠"有分解子"结构派生隐式判);`phase`/`NodeType`/`Edge` 退出模型。
 - **事件驱动 + 状态条件触发**:模块调用由图谱状态变化事件驱动,且 `plan`/`add_task_nodes` 有显式状态触发条件(a/b/c + plan 三条件);不在单条反应式 fixpoint 泵里跑完所有步。
 - **规划纯逻辑、不含物理执行信息**:`plan` 产 `list[TaskNode]` 只含逻辑行动(目标/验收/依赖),不含谁来做;派发才决定执行者。
@@ -69,8 +69,8 @@
 ## User Stories
 
 1. 作为运营方,我想代码领域模型与最新 classDiagram 一致(`Relation` 一等公民、6 态含 `PLANNING`、`run_mode` str、无 `collab_mode`/`SLA`/`Scope`/`RunMode` 枚举、`AcceptanceResult` 无 verifier),这样设计与实现不漂移。
-2. 作为运营方,我想数据依赖用 `Relation{type=DEPENDENCY}` 存于 `TaskExecutionGraph.relations`,结构归属用 `TaskNode.decomposed_by`,`TaskNode` 不持 `depends_on`,这样数据依赖可带 `extend_props`、结构归属 O(1) 查父子、两者解耦模型更规整。
-3. 作为运营方,我想 `TaskNode` 含 `task_id`/`node_run_graph`/`decomposed_by`(结构父,根=None),这样节点知道归属哪张图、结构父是谁、facade 写操作可据此定位。
+2. 作为运营方,我想结构归属用 `Relation{type=DEPENDENCY}` 分解树(单入)存于 `TaskExecutionGraph.relations`,`TaskNode` 不持 `decomposed_by`/`depends_on`,这样关系可带 `extend_props`、父子查询从 relations 派生、模型更规整。
+3. 作为运营方,我想 `TaskNode` 含 `task_id`/`node_run_graph`(结构父由 `relations` 分解树派生,无 `decomposed_by` 字段),这样节点知道归属哪张图、结构父可从 relations 查得、facade 写操作可据此定位。
 4. 作为运营方,我想状态有 `PLANNING` 显式承载"待规划/委托中",这样状态机不与结构派生混淆、`add_task_nodes` 条件 c 可直接判 `PLANNING`。
 5. 作为运营方,我想 `TaskExecutionGraph` 含 `run_id`(运行实例唯一 ID),这样多次执行同一 task_spec 可区分实例。
 6. 作为运营方,我想 `AcceptanceCriteria` 只保留 `id`/`description`(不再用 `tag`/`type` 兼承 scope 枚举),这样验收项定义最精简。
@@ -117,7 +117,7 @@
 
 - **主 seam(单一)**:singlebox 端到端(按新设计搭建 singlebox 编排)。一条 case 跑完 `execute→initialize_graph→plan(委托 decompose 按三阶段 AC 拆)→add_task_nodes(条件 a)→dispatch(决定谁来做)→start_run(SINGLE_BOT/COOP_GROUP/BBS 自适应)→TaskLoopCallback.report_result 回投→任一专题 FAIL+gaps→plan(条件 b)→add_task_nodes(补救子挂该节点下)→二次 PASS→传播治愈→图 status=DONE`。断言 `get_task_dashboard` 终态 + 事件日志可重放 + 经历三模态至少各一(含一次动态拉协作群)。**理想 seam 数=1**。
 - **补充 seam(仅 E2E 覆盖不到处)**:
-  - 图谱原子变更 seam:`TaskGraphService` 内部契约(状态流转合法性、`add_task_nodes` 条件 a/b/c 触发校验、`relations` 依赖派生 `dependencies_satisfied`/`depth`、`PLANNING` 语义),做契约断言。
+  - 图谱原子变更 seam:`TaskGraphService` 内部契约(状态流转合法性、`add_task_nodes` 条件 a/b/c 触发校验、`relations` 分解树派生 `depth`/`get_child_tasks`/`get_parent_task`、就绪=被add即就绪、`PLANNING` 语义),做契约断言。
   - Harness 自愈 seam:SLA 超时/崩溃→`update_task_node_info(HUNG/FAILED)` 旁路,独立常驻 seam。
   - Planner/Dispatcher 纯逻辑 seam:`plan` 给定图谱产固定 `list[TaskNode]`、`dispatch` 给定 toDo 产派发决策,纯函数式断言(无执行主体)。
 
@@ -138,7 +138,7 @@
 ## Further Notes
 
 - **代码库声明**:代码库按本 spec 从零重新实现。技术设计见 `plan.md`,实现计划见 `tasks.md`。
-- **结构归属 vs 数据依赖(B1 解耦)**:`TaskNode.decomposed_by`(str|None,根=None)表结构归属(严格单父分解树);`Relation{type=DEPENDENCY}` 在 `TaskExecutionGraph.relations` 表数据依赖(多入 DAG)。`TaskNode` 不持 `depends_on`。结构子查询/验收/传播读 `decomposed_by`;`dependencies_satisfied`/投影取上游读 `relations`;`depth` 数据维度从 `relations` 递归。5 文档 `depends_on` 字样语义拆分:结构归属→`decomposed_by`,数据依赖→`relations`。
+- **分解树统一承载结构归属**:`Relation{type=DEPENDENCY}` 在 `TaskExecutionGraph.relations` 表分解树(单入:`src_id`=结构父,`dst_id`=结构子)。`TaskNode` 不持 `decomposed_by`/`depends_on`。结构子(`get_child_tasks`)/结构父(`get_parent_task`)/验收/传播读 `relations`;`depth` 从 `relations` 分解树递归。5 文档 `depends_on` 字样语义统一收口到 `relations` 分解树(无单独结构归属字段)。
 - **`PLANNING` 语义**:节点被分解、委托子节点执行时进 `PLANNING`(显式状态);`add_task_nodes` 条件 c 直接判 `PLANNING`。子全 PASS → 传播该节点 DONE。
 - **`collab_mode`**:`RuntimeInfo` 无 `collab_mode` 字段;协作群协作方式(chat/manager_worker/state_machine)作 `TaskRunner.form_coop_group(GroupFormation)` 内部参数(对齐 BCS `GroupStrategy`),不进模型持久字段。`run_mode` 为 str("single_bot"/"coop_group"/"bbs")。
 - **枚举精简**:`TaskSpec` 无 `SLA`(SLA 超时由 Harness 周期巡检 + `execution_config` 承载);`AcceptanceCriteria` 只 `id`/`description`(无 `tag`/`type`);`RuntimeInfo.run_mode` 为 str。
@@ -151,7 +151,7 @@
 - **MISS 信号设计**:MISS 的节点仍 PENDING(没执行过);用 `RuntimeInfo.extend_props.miss_events: list[str]` 记运行期事件(像崩溃栈),plan 读它自发现补救目标,引擎即写即消费,不跨持久化为状态。比加状态干净。
 - **深度闸门**:FAIL/MISS 拆解前引擎查核内派生深度(从 `relations.type=DEPENDENCY` 递归),达 `execution_config.MAX_DEPTH` → `HUNG`,不进规划器。
 - **reroute 局部化**:补救挂该 FAIL/PLANNING 节点本体下,未触下游在依赖满足前从未入图,无下游可复位;自动 reroute 不调级联回滚。
-- **输入/验收上下文**:store 不提供投影 API;执行/验收上下文由 `TaskRunner` 内部用图谱查询组合自算(验收只按 `(task_id,node_id)` 上报节点:有结构子→验收模式聚合结构子 output,无结构子→执行模式聚合上游父 output;无 NODE/SUBTREE/TASK scope 区分,见 `plan.md` §3.5)。
+- **输入/验收上下文**:store 不提供投影 API;执行/验收上下文由 `TaskRunner` 内部用 `get_child_tasks`/`get_parent_task` 组合自算(验收只按 `(task_id,node_id)` 上报节点:有结构子→验收模式聚合结构子(子树)output;无结构子→执行模式聚合结构父 P 的聚合上下文={P.task_spec/goal + P 已 DONE 结构子(本节点兄弟)output};无 NODE/SUBTREE/TASK scope 区分,见 `plan.md` §3.5)。
 - **回投坑点**:`output` MERGE 只浅合并一层(patch 覆盖);`extend_props_patch` 扁平传不可再包一层。
 - **Harness 与主链解耦**:Harness 是旁路常驻、只读图谱+反向 `update_task_node_info`,不参与正向规划/派发;主链故障由 Harness 复位后,下一轮事件自然续驱。
 - **`loop_round` 审计**:reroute(补救非根节点)时 `TaskExecutionGraph.loop_round++`;补救拓扑元信息可入 `extend_props` 供审计/看板。

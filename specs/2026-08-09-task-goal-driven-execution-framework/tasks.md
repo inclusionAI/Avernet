@@ -29,17 +29,17 @@ M2 依赖 M1/M3/M4 接口(可 seam/double);M5 集成;M6 验证。
 ## M0 — 领域模型(先落模型)
 - T0.1 新 `models.py`:枚举 `Status` 6 态(PENDING/PLANNING/RUNNING/DONE/FAILED/HUNG)、`AcceptanceVerdict`、`RelationType`(DEPENDENCY)。
 - T0.2 规格面 dataclass:`Metadata`(task_id/title/instruction)、`Context`(background/extend_props)、`AcceptanceCriteria`(id/description)、`Goal`、`TaskSpec`(无 SLA)、`TaskInfo`。
-- T0.3 运行态 dataclass:`AcceptanceResult`(verdict/acceptances_metric/gaps,无 verifier)、`RuntimeInfo`(run_mode:str/assignee/start_time/end_time/output/acceptance_result/extend_props,无 collab_mode)、`Relation`(src_id/dst_id/type/extend_props)、`TaskNode`(node_id/task_id/status/task_spec/run_info/node_run_graph/**`decomposed_by`(str|None,根=None)**,无 depends_on)、`TaskExecutionGraph`(run_id/loop_round/status/output/tasks/relations/extend_props)。
+- T0.3 运行态 dataclass:`AcceptanceResult`(verdict/acceptances_metric/gaps,无 verifier)、`RuntimeInfo`(run_mode:str/assignee/start_time/end_time/output/acceptance_result/extend_props,无 collab_mode)、`Relation`(src_id=结构父/dst_id=结构子/type=DEPENDENCY/extend_props;分解树单入)、`TaskNode`(node_id/task_id/status/task_spec/run_info/node_run_graph;**无 decomposed_by/depends_on**;结构归属由 relations 派生)、`TaskExecutionGraph`(run_id/loop_round/status/output/tasks/relations/extend_props)。
 - T0.4 中间类型:`TaskNodePatch`、`TaskNodeQueryCriteria`、`TaskOpResult`、`NodeOpResult`、`TaskCallbackData`(loop_task_id/workflow_type/workflow_id/instance_id/result)。
-- T0.5 派生规则注释(B1 解耦):① 结构子(decompose_children)从 `TaskNode.decomposed_by` 查;② dependencies_satisfied/depth(数据维度)/compute_parent_tasks 从 `relations.type=DEPENDENCY` 派生;③ 传播读结构子,就绪读数据依赖。
-- ✅ 验收:模型与最新 classDiagram 1:1;`grep` 无 `depends_on`/`collab_mode`/`SLA`/`Scope`/`RunMode`/`CollabMode`/`verifier`/`NodeRuntimePatch`/`TaskGraphInfo` 残留;TaskNode 含 `decomposed_by` 字段(根=None)。
+- T0.5 派生规则注释(分解树统一):① 结构子(`get_child_tasks`)与结构父(`get_parent_task`)均从 `relations` 分解树(src→dst 单入)派生;② `depth` 从 relations 递归;③ 传播读结构子(`get_child_tasks`),就绪=被 add 即就绪(无 `dependencies_satisfied` 闸门);④ 数据流由步进式批规划+结构父聚合上下文承载,无跨兄弟数据边。
+- ✅ 验收:模型与最新 classDiagram 1:1;`grep` 无 `depends_on`/`decomposed_by`/`collab_mode`/`SLA`/`Scope`/`RunMode`/`CollabMode`/`verifier`/`NodeRuntimePatch`/`TaskGraphInfo` 残留;TaskNode 无 `decomposed_by` 字段(结构归属由 relations 分解树派生)。
 
 ## M1 — TaskGraphService(独立图谱 SSOT,7 API:4 核心+3 派生只读)
 - T1.1 `TaskGraphService.initialize_graph(task_info) -> TaskExecutionGraph`:建图(run_id 分配,根 PENDING);幂等冲突。
 - T1.2 `add_task_nodes(tasks) -> TaskExecutionGraph`:并子图;DEPENDENCY 关系写入 `graph.relations`;父节点进 PLANNING;单层同构硬约束(本批前序依赖仅指向已存节点,本批内不互依);触发条件 a/b/c 校验(编排核调前判,store 双检)。
 - T1.3 `update_task_node_info(patch) -> NodeOpResult`:节点级原子写;唯一翻态依据=patch.acceptance_result(PASS→DONE/FAIL+gaps→FAILED/FAIL无gaps→HUNG/STUCK→HUNG);派发写 run_mode/assignee+RUNNING;幂等。
 - T1.4 `query_task_dashboard(task_id, node_id=None) -> TaskExecutionGraph`:只读看板(整图/子树投影)。
-- T1.5 派生查询(只读):升公开 `query_task_nodes`/`decompose_children_tasks`/`compute_parent_tasks`;保持内部 `_node_depth`/`_execution_config`(仅编排核用)。均从 `relations` 派生。
+- T1.5 派生查询(只读):升公开 `query_task_nodes`/`get_child_tasks`/`get_parent_task`;保持内部 `_node_depth`/`_execution_config`(仅编排核用)。均从 `relations` 分解树派生;就绪扫描 criteria={status=PENDING}(无 dependencies_satisfied)。
 - T1.x 单测:状态流转合法性、add a/b/c 条件触发校验、relations 依赖派生(deps_satisfied/depth)、PLANNING 语义、传播规则、单层同构护栏。
 
 ## M2 — 编排核 on_*(事件驱动 + 状态条件)
@@ -71,7 +71,7 @@ M2 依赖 M1/M3/M4 接口(可 seam/double);M5 集成;M6 验证。
   - T4.5 `TaskRunner.query_status(task_id)->Status` / `query_detail(TaskNode)->TaskNode` / `query_result(TaskNode)->TaskNode` / `query_bot_tasks(bot_id)->list[TaskNode]`。
   - T4.6 `TaskRunner.form_coop_group(GroupFormation)->group_id`:(内部)HIT_MULTI_BOTS 动态拉协作群,复用 BCS(`group_strategy=collab_mode`;state_machine 注入 workflow yaml);群自闭环持 `SubDagRef(bcs_run_id)`。Avernet BCS local/mock;prod wiring 属 corp。
   - T4.7 `TaskLoopCallback`:PUSH 回投;`TaskCallbackData{loop_task_id,workflow_type,workflow_id,instance_id,result}`;`start_run(data)`(进度)/`report_result(data)`(完成/失败);适配层把 data 组装成 TaskNodePatch(task_id/node_id 从 loop_task_id 映射;acceptance_result 从 success/data;output_patch=fold data;fail_detail→extend_props_patch)→ 编排核 on_report(patch)。
-  - T4.8 上下文组装:`start_run` 内部 `_build_context(task_id,node)` 用 `compute_parent_tasks`/`decompose_children_tasks`(升为公开)组合自动判定——有结构子→验收模式聚合结构子(子树)DONE output+goal;无结构子→执行模式聚合上游 DEPENDENCY 父 output。无 NODE/SUBTREE/TASK scope 入参,验收只按 (task_id,node_id) 上报节点。
+  - T4.8 上下文组装:`start_run` 内部 `_build_context(task_id,node)` 用 `get_child_tasks`/`get_parent_task` 组合自动判定——有结构子(`get_child_tasks` 非空)→验收模式聚合结构子(子树)DONE output+node.goal;无结构子→执行模式取结构父 P=`get_parent_task`,聚合 P 的聚合上下文={P.task_spec/goal + P 已DONE结构子(本节点兄弟)output}+本节点 task_spec。无 NODE/SUBTREE/TASK scope 入参,验收只按 (task_id,node_id) 上报节点;数据流经结构父中转,无跨兄弟数据边。
   - T4b.x 单测:start_run 三 run_mode 分发(含 BBS 只挂悬赏)、query_*回填、TaskLoopCallback.report_result→on_report 适配映射、form_coop_group BCS local/mock 契约、BBS 自主回投用例、_build_context 验收/执行双模式自动切换。
 
 ## M5 — TaskHarness + TaskService facade
@@ -97,7 +97,7 @@ M2 依赖 M1/M3/M4 接口(可 seam/double);M5 集成;M6 验证。
 - `DecomposerPort` 生产实现(plan_bot agent/LLM SKILL,corp);Avernet 只发 stub/singlebox。
 - 线上真实搜推(M4a,corp)。
 - 人工 `abandon_task`/`rollback_to_node` facade(5 模块文档未提供;预留 `on_harness`/人工事件位点,待确认后补)。
-- `relations` 在汇聚/多入边下派生正确性(M1 单测锚定)。
+- `relations` 分解树(单入)下 `get_child_tasks`/`get_parent_task`/`depth`/就绪派生正确性(M1 单测锚定)。
 - `run_id` 生成策略(M1:递增 or UUID;singlebox 用递增)。
 - `PLANNING` 传播治愈语义(FAILED+补救子全PASS→DONE)需 M2 单测锚定(确认"非DONE含FAILED可治愈")。
 
