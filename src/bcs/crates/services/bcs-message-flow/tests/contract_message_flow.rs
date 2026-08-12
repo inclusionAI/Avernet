@@ -3688,3 +3688,71 @@ async fn web_send_event_omits_attachments_key_for_empty_attachment_list() {
         "event: {event}"
     );
 }
+
+#[tokio::test]
+async fn web_send_persists_raw_mention_text_while_bots_receive_cleaned_text() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let repo = Arc::new(RecordingMessageRepo::default());
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_message_repo(repo.clone());
+
+    flow.handle_web_send(WebSendCommand {
+        caller: CallerContext::Human(HumanActor {
+            actor_id: "human_1".to_string(),
+            staff_no: "1".to_string(),
+        }),
+        group_id: "group-1".to_string(),
+        session_id: None,
+        from_actor_id: "human_1".to_string(),
+        from_name: Some("Human One".to_string()),
+        message: "@Driver please review".to_string(),
+        mentions: vec!["bot-driver".to_string()],
+        attachments: None,
+        thinking: None,
+        idempotency_key: None,
+        source_im_message_id: None,
+        sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
+    })
+    .await
+    .unwrap();
+
+    // Human-facing history keeps the sender's text verbatim and stores the
+    // structured mention targets for rendering.
+    let appended = repo.appended().await;
+    assert_eq!(appended.len(), 1);
+    assert_eq!(appended[0].content["text"], "@Driver please review");
+    assert_eq!(appended[0].content["mentions"][0], "bot-driver");
+    assert!(appended[0].content.get("attachments").is_none());
+
+    // Bot-bound deliveries still get the @-stripped routing text.
+    let frames = support.bot_delivery.frames().await;
+    assert_eq!(frames.len(), 2);
+    for frame in frames {
+        let BcsFrame::Request(req) = frame else {
+            panic!("expected request frame");
+        };
+        let params = req.params.as_ref().expect("params");
+        let text = params["message"]["content"][0]["text"]
+            .as_str()
+            .expect("text");
+        assert!(text.contains("Driver please review"), "text: {text}");
+        assert!(!text.contains("@Driver"), "text: {text}");
+    }
+
+    // The realtime workbench event already echoes the raw text and mentions.
+    let events = support.frontend_delivery.events().await;
+    assert_eq!(events.len(), 1);
+    let event: serde_json::Value = serde_json::from_str(&events[0]).unwrap();
+    assert_eq!(
+        event["payload"]["message"]["content"][0]["text"],
+        "@Driver please review"
+    );
+    assert_eq!(event["payload"]["message"]["mentions"][0], "bot-driver");
+}
