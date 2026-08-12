@@ -9,34 +9,78 @@ from injector import Injector, Module
 from agentclaw.community.core.expert_chat.errors import (
     BotNotFoundError,
     BotNotActiveError,
+    BotNotPublishedError,
+    ChatPermissionError,
     ConnectionError,
+    SessionCreateError,
 )
-from agentclaw.community.core.expert_chat.services.expert_chat_service import ExpertChatService
+from agentclaw.community.core.expert_chat.services.expert_chat_service import (
+    ExpertChatService,
+)
 
 
 @pytest.fixture
 def mock_expert_chat_service():
     """Mock ExpertChatService for testing."""
     service = MagicMock(spec=ExpertChatService)
-    service.add_chat_bot = MagicMock(return_value={
-        "id": 1,
-        "user_id": "test_user",
-        "bot_id": "test_bot",
-        "owner_id": "test_owner",
-        "status": "ACTIVE"
-    })
+    service.add_chat_bot = MagicMock(
+        return_value={
+            "id": 1,
+            "user_id": "test_user",
+            "bot_id": "test_bot",
+            "owner_id": "test_owner",
+            "status": "ACTIVE",
+        }
+    )
     service.list_chat_bots = MagicMock(return_value=[])
     service.remove_chat_bot = AsyncMock(return_value=True)
-    service.get_chat_session = AsyncMock(return_value={
-        "session_key": "session:test",
-        "is_new": True,
-        "connection": {
-            "type": "websocket",
-            "url": "http://localhost:8080",
-            "engine_type": "openclaw"
+    service.get_chat_session = AsyncMock(
+        return_value={
+            "session_key": "session:test",
+            "is_new": True,
+            "connection": {
+                "type": "websocket",
+                "url": "http://localhost:8080",
+                "engine_type": "openclaw",
+            },
         }
-    })
+    )
     service.delete_chat_session = AsyncMock(return_value=True)
+    service.list_chat_sessions = AsyncMock(
+        return_value={
+            "total": 1,
+            "items": [
+                {
+                    "id": "session:test",
+                    "title": "Test session",
+                    "user_id": "test_user",
+                    "agent_id": "test_bot",
+                    "model": None,
+                    "permission_mode": None,
+                    "cwd": None,
+                    "gmt_created": "2026-08-10T10:00:00Z",
+                    "gmt_modified": "2026-08-10T10:01:00Z",
+                    "message_count": 1,
+                    "last_message": {"role": "user", "content": "hello"},
+                }
+            ],
+        }
+    )
+    service.create_chat_session = AsyncMock(
+        return_value={
+            "session_key": "session:new",
+            "is_new": True,
+            "connection": {"type": "local"},
+        }
+    )
+    service.connect_chat_session = AsyncMock(
+        return_value={
+            "session_key": "session:test",
+            "is_new": False,
+            "connection": {"type": "local"},
+        }
+    )
+    service.delete_owned_chat_session = AsyncMock(return_value=True)
     return service
 
 
@@ -167,6 +211,24 @@ class TestRemoveChatBot:
         assert data["success"] is True
         mock_service.remove_chat_bot.assert_called_once()
 
+    def test_remove_chat_bot_connection_error_is_retryable(self, client_with_mock):
+        """Keep runtime cleanup failures distinguishable from generic errors."""
+        client, mock_service = client_with_mock
+        mock_service.remove_chat_bot.side_effect = ConnectionError(
+            "Bot服务正在启动，请稍后重试",
+            error_code="5001",
+        )
+
+        response = client.delete("/api/v1/expert-chats/test_bot/test_owner")
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "success": False,
+            "message": "Bot服务正在启动，请稍后重试",
+            "error_code": 5001,
+            "data": None,
+        }
+
 
 class TestGetChatSession:
     """Tests for POST /api/v1/expert-chats/{bot_id}/{owner_id}/session endpoint."""
@@ -212,3 +274,225 @@ class TestDeleteChatSession:
         data = response.json()
         assert data["success"] is True
         mock_service.delete_chat_session.assert_called_once()
+
+    def test_delete_chat_session_maps_unexpected_error(self, client_with_mock):
+        client, mock_service = client_with_mock
+        mock_service.delete_chat_session.side_effect = RuntimeError("unexpected")
+
+        response = client.delete("/api/v1/expert-chats/test_bot/test_owner/session")
+
+        assert response.status_code == 200
+        assert response.json()["error_code"] == 5999
+
+
+class TestMultiChatSessions:
+    """Tests for the multi-session expert-chat endpoints."""
+
+    def test_list_sessions_passes_filters_and_authenticated_user(
+        self, client_with_mock
+    ):
+        client, mock_service = client_with_mock
+        client.cookies.set("IAM_TOKEN", "test-iam-token")
+
+        response = client.get(
+            "/api/v1/expert-chats/test_bot/test_owner/sessions",
+            params={
+                "session_key": "session:test",
+                "favorite_only": "true",
+                "limit": 10,
+                "offset": 2,
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["data"]["items"][0]["last_message"]["content"] == "hello"
+        mock_service.list_chat_sessions.assert_awaited_once_with(
+            user_id="test_user",
+            bot_id="test_bot",
+            owner_id="test_owner",
+            session_key="session:test",
+            favorite_only=True,
+            limit=10,
+            offset=2,
+            iam_token="test-iam-token",
+        )
+
+    def test_list_sessions_rejects_invalid_limit(self, client_with_mock):
+        client, mock_service = client_with_mock
+
+        response = client.get(
+            "/api/v1/expert-chats/test_bot/test_owner/sessions?limit=101"
+        )
+
+        assert response.status_code == 422
+        mock_service.list_chat_sessions.assert_not_awaited()
+
+    def test_create_session(self, client_with_mock):
+        client, mock_service = client_with_mock
+
+        response = client.post("/api/v1/expert-chats/test_bot/test_owner/sessions")
+
+        assert response.status_code == 200
+        assert response.json()["data"]["session_key"] == "session:new"
+        mock_service.create_chat_session.assert_awaited_once_with(
+            user_id="test_user",
+            bot_id="test_bot",
+            owner_id="test_owner",
+            iam_token=None,
+        )
+
+    def test_connect_session(self, client_with_mock):
+        client, mock_service = client_with_mock
+
+        response = client.post(
+            "/api/v1/expert-chats/test_bot/test_owner/sessions/connect",
+            json={"session_key": "session:test"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["is_new"] is False
+        mock_service.connect_chat_session.assert_awaited_once_with(
+            user_id="test_user",
+            bot_id="test_bot",
+            owner_id="test_owner",
+            session_key="session:test",
+            iam_token=None,
+        )
+
+    def test_delete_session(self, client_with_mock):
+        client, mock_service = client_with_mock
+
+        response = client.delete(
+            "/api/v1/expert-chats/test_bot/test_owner/sessions",
+            params={"session_key": "session:test"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["success"] is True
+        mock_service.delete_owned_chat_session.assert_awaited_once_with(
+            user_id="test_user",
+            bot_id="test_bot",
+            owner_id="test_owner",
+            session_key="session:test",
+        )
+
+    def test_delete_unowned_session_returns_not_found(self, client_with_mock):
+        client, mock_service = client_with_mock
+        mock_service.delete_owned_chat_session.side_effect = BotNotFoundError(
+            "Session不存在或不属于当前用户"
+        )
+
+        response = client.delete(
+            "/api/v1/expert-chats/test_bot/test_owner/sessions",
+            params={"session_key": "session:other"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is False
+        assert data["error_code"] == 404
+
+    @pytest.mark.parametrize(
+        ("error", "expected_code"),
+        [
+            (BotNotFoundError("missing"), 404),
+            (BotNotActiveError("inactive"), 400),
+            (BotNotPublishedError("unpublished"), 4001),
+            (ChatPermissionError("forbidden"), 403),
+            (ConnectionError("offline", error_code="5001"), 5001),
+            (RuntimeError("unexpected"), 5999),
+        ],
+    )
+    def test_list_sessions_maps_service_errors(
+        self, client_with_mock, error, expected_code
+    ):
+        client, mock_service = client_with_mock
+        mock_service.list_chat_sessions.side_effect = error
+
+        response = client.get("/api/v1/expert-chats/test_bot/test_owner/sessions")
+
+        assert response.status_code == 200
+        assert response.json()["error_code"] == expected_code
+
+    @pytest.mark.parametrize(
+        ("error", "expected_code"),
+        [
+            (BotNotFoundError("missing"), 404),
+            (BotNotActiveError("inactive"), 400),
+            (BotNotPublishedError("unpublished"), 4001),
+            (ChatPermissionError("forbidden"), 403),
+            (SessionCreateError("failed", error_code="5003"), 5003),
+            (RuntimeError("unexpected"), 5999),
+        ],
+    )
+    def test_create_session_maps_service_errors(
+        self, client_with_mock, error, expected_code
+    ):
+        client, mock_service = client_with_mock
+        mock_service.create_chat_session.side_effect = error
+
+        response = client.post("/api/v1/expert-chats/test_bot/test_owner/sessions")
+
+        assert response.status_code == 200
+        assert response.json()["error_code"] == expected_code
+
+    @pytest.mark.parametrize(
+        ("error", "expected_code"),
+        [
+            (BotNotFoundError("missing"), 404),
+            (BotNotActiveError("inactive"), 400),
+            (BotNotPublishedError("unpublished"), 4001),
+            (ChatPermissionError("forbidden"), 403),
+            (ConnectionError("offline", error_code="5001"), 5001),
+            (RuntimeError("unexpected"), 5999),
+        ],
+    )
+    def test_connect_session_maps_service_errors(
+        self, client_with_mock, error, expected_code
+    ):
+        client, mock_service = client_with_mock
+        mock_service.connect_chat_session.side_effect = error
+
+        response = client.post(
+            "/api/v1/expert-chats/test_bot/test_owner/sessions/connect",
+            json={"session_key": "session:test"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["error_code"] == expected_code
+
+    def test_delete_session_maps_unexpected_error(self, client_with_mock):
+        client, mock_service = client_with_mock
+        mock_service.delete_owned_chat_session.side_effect = RuntimeError("unexpected")
+
+        response = client.delete(
+            "/api/v1/expert-chats/test_bot/test_owner/sessions",
+            params={"session_key": "session:test"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["error_code"] == 5999
+
+    @pytest.mark.parametrize(
+        ("error", "expected_code"),
+        [
+            (BotNotActiveError("inactive"), 400),
+            (ChatPermissionError("forbidden"), 403),
+            (ConnectionError("offline", error_code="5001"), 5001),
+        ],
+    )
+    def test_delete_session_maps_access_errors(
+        self, client_with_mock, error, expected_code
+    ):
+        client, mock_service = client_with_mock
+        mock_service.delete_owned_chat_session.side_effect = error
+
+        response = client.delete(
+            "/api/v1/expert-chats/test_bot/test_owner/sessions",
+            params={"session_key": "session:test"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["error_code"] == expected_code
