@@ -3962,6 +3962,7 @@ class BotService:
         bot_id: str,
         user_id: str,
         nick_name: Optional[str] = None,
+        extra_configs: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Restart a bot by releasing current device and allocating a new one.
@@ -3970,6 +3971,7 @@ class BotService:
             bot_id: Bot ID
             user_id: User ID for permission check (must be the owner)
             nick_name: Nick name for device allocation (optional, defaults to user_id)
+            extra_configs: Optional engine-agnostic restart extension envelope
 
         Returns:
             Updated bot record with PENDING status (device allocation in progress)
@@ -4027,6 +4029,36 @@ class BotService:
             raise BotInvalidLifecycleStateError(
                 bot_id=bot_id,
                 current_status=bot_status or "UNKNOWN",
+            )
+
+        # Delegate optional engine-owned restart inputs after lifecycle guards
+        # pass and before device allocation consumes persisted configuration.
+        try:
+            from agentclaw.community.core.bot_management.engines import (
+                resolve_provisioning,
+            )
+
+            ctx, strategy = resolve_provisioning(
+                bot_id=bot_id,
+                owner_id=str(bot.get("owner_id") or ""),
+                bot_type=str(bot.get("bot_type") or ""),
+                active_engine=bot.get("active_engine"),
+                template_type=bot.get("template_type"),
+                template_config=None,
+            )
+            strategy.apply_restart_extra_configs(
+                ctx,
+                extra_configs,
+                template_service=self._template_service,
+            )
+        except Exception as exc:
+            # Optional engine extensions must never block the existing restart path.
+            logger.warning(
+                "[bot_service.restart_bot] applying restart extra configs failed; "
+                "continue with stored config: bot_id=%s error=%s",
+                bot_id,
+                exc,
+                exc_info=True,
             )
 
         env = get_current_env()

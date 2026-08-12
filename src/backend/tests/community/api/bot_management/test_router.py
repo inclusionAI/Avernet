@@ -810,6 +810,44 @@ class TestRestartBot:
         assert resp.status_code == 200
         assert resp.json()["success"] is True
 
+    def test_forwards_engine_agnostic_extra_configs(self, client):
+        tc, svc, _ = client
+        extra_configs = {
+            "template_config": {
+                "template_key": "architect",
+                "template_version_id": 101,
+            }
+        }
+
+        resp = tc.post(
+            "/api/bots/default/restart",
+            json={"extra_configs": extra_configs},
+        )
+
+        assert resp.status_code == 200
+        svc.restart_bot.assert_called_once_with(
+            bot_id="default",
+            user_id="test_user",
+            nick_name="Test User",
+            extra_configs=extra_configs,
+        )
+
+    def test_ignores_unknown_legacy_body_fields(self, client):
+        tc, svc, _ = client
+
+        resp = tc.post(
+            "/api/bots/default/restart",
+            json={"template_config": {"template_version_id": 101}},
+        )
+
+        assert resp.status_code == 200
+        svc.restart_bot.assert_called_once_with(
+            bot_id="default",
+            user_id="test_user",
+            nick_name="Test User",
+            extra_configs=None,
+        )
+
     def test_bot_not_found(self, client):
         tc, svc, _ = client
         svc.restart_bot.side_effect = BotNotFoundError("nope")

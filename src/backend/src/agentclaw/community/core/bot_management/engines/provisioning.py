@@ -104,6 +104,21 @@ class EngineProvisioningStrategy(ABC):
         """
 
     @abstractmethod
+    def apply_restart_extra_configs(
+        self,
+        ctx: BotProvisioningContext,
+        extra_configs: Dict[str, Any] | None,
+        *,
+        template_service: Any,
+    ) -> None:
+        """Apply engine-owned values from the restart extension envelope.
+
+        Concrete engines own their keys, validation, and side effects.
+        Unsupported engines should no-op so the core restart path remains
+        engine-agnostic and backward compatible.
+        """
+
+    @abstractmethod
     def on_bot_created(self, ctx: BotProvisioningContext) -> None:
         """Post-create hook. Default strategies should no-op."""
 
