@@ -442,6 +442,11 @@ async def _read_file_or_404(
 async def download_file(
     owner_id: UserIdDep,
     path: str,
+    # Required by ``@envelope_errors`` to locate the request: without it the
+    # decorator cannot build an error envelope and re-raises instead, so a
+    # rejected path would surface as a 500 rather than a 400. The success path
+    # still returns raw bytes, not an envelope.
+    request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     bot_repo: BotRepository = Injected(BotRepository),
     file_svc: ResourceFileService = Injected(ResourceFileService),

@@ -23,12 +23,14 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
 from agentclaw.community.adapters.http.openapi_v1.resources.router import (
     _to_openapi_resource,
     check_resource_name,
+    create_directory,
     create_resource,
+    delete_file,
     delete_resource,
-    download_resource,
+    download_file,
     get_resource,
     list_resources,
-    preview_resource,
+    preview_file,
     update_resource,
     upload_resource,
 )
@@ -992,8 +994,6 @@ async def test_delete_returns_200_envelope_with_deleted_true():
         owner_id="u1",
         bot_id="bot-x",
         factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
         request=_request_without_trace(),
     )
 
@@ -1003,8 +1003,9 @@ async def test_delete_returns_200_envelope_with_deleted_true():
     assert env.data is not None
     assert isinstance(env.data, Deleted)
     assert env.data.deleted is True
-    # device_fs resolved by the dispatcher was forwarded to the service
-    assert service.last_call_device_fs is device_fs
+    # No device is threaded any more: this endpoint is link-only, and a link has
+    # no file to remove. Files are deleted through DELETE ""?path=.
+    assert service.last_call_device_fs is None
     # service received the resource_id (no device_provider/sandbox_id on
     # the slim contract — device_fs is the sole device boundary)
     assert service.last_call_kwargs.get("resource_id") == "1"
@@ -1034,7 +1035,11 @@ async def test_no_handler_can_fall_back_to_a_bot_derived_owner():
         for route in _api_routes(build_public_router())
         if route.path.startswith("/openapi/v1/bots/resources")
     ]
-    assert len(mounted) == 9, [r.path for r in mounted]
+    # 11 routes: the id-addressed download and preview were replaced by the
+    # path-addressed download / preview / delete / mkdir. The count is a
+    # tripwire — a resources route added without the shared user_id dependency
+    # is exactly the silent owner fallback this guard exists to prevent.
+    assert len(mounted) == 11, [r.path for r in mounted]
 
     def guarded(dependant) -> bool:
         return dependant.call is require_user_id or any(
@@ -1074,8 +1079,6 @@ async def test_delete_raises_404_when_resource_missing():
             owner_id="u1",
             bot_id="bot-a",
             factory=factory,
-            resolver=resolver,
-            device_fs_dispatcher=dispatcher,
             request=_request_without_trace(),
         )
 
@@ -1093,8 +1096,6 @@ async def test_delete_reads_x_trace_id_from_request():
         owner_id="u1",
         bot_id="bot-a",
         factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
         request=request,
     )
 
@@ -1285,155 +1286,212 @@ async def test_upload_reads_x_trace_id_from_request():
 
     assert env.request_id == "trace-up-1"
 
-
-# ── download_resource (Phase 3 Task 4 — third real device_fs handler) ─
+# ── file read: download / preview, addressed by workspace path ───────
 #
-# Same device_fs resolution chain as Task 2 delete / Task 3 upload
-# (principal → owner_id → resolver.resolve_for_bot →
-# dispatcher.dispatch → device_fs). Like upload, download does NOT call
-# get_device_info (that's a delete-only concern for picking arca/local).
-# download_resource on the concrete service is ASYNC — the handler must
-# ``await`` it. Service returns (bytes, mime) or None → 404 (not-found /
-# not-a-file / is-directory / read-failure all collapse to 404 — service
-# already filters non-file / directory, so the handler's None branch is
-# exercised by the resource-missing case). Download returns a raw
-# ``Response`` with no envelope, so there is no x-trace-id assertion.
+# These replaced the id-addressed ``/{resource_id}/download`` and
+# ``/preview``. A record id cannot address a file the bot created itself, and
+# the record no longer decides existence, so the workspace path is the address.
+# The handlers reach the device through ``ResourceFileService``, so the tests
+# assert on the workspace-relative path handed to that seam.
+
+
+class _StubReadFileService(_StubFileService):
+    """Adds a readable workspace to the upload stub."""
+
+    def __init__(self, files: dict[str, bytes] | None = None):
+        super().__init__(existing=set((files or {}).keys()))
+        self._files = dict(files or {})
+        self.read_paths: List[str] = []
+        self.deleted_paths: List[str] = []
+        self.made_dirs: List[str] = []
+
+    async def exists(self, *, path, **_kw) -> bool:
+        """Occupancy follows the stored bytes, so an upload then a delete leave
+        the workspace in the state the handlers expect."""
+        self.exists_calls.append(path)
+        return path in self._files
+
+    async def upload_file(self, **kwargs) -> dict:
+        info = await super().upload_file(**kwargs)
+        self._files[info["path"]] = kwargs["data"]
+        return info
+
+    async def read_file(self, *, path, enforce_download_limit=False, **_kw):
+        self.read_paths.append(path)
+        return self._files.get(path)
+
+    async def delete(self, *, path, **_kw):
+        self.deleted_paths.append(path)
+        self._files.pop(path, None)
+
+    async def create_directory(self, *, path, **_kw):
+        self.made_dirs.append(path)
 
 
 @pytest.mark.asyncio
-async def test_download_returns_raw_bytes_with_mime_type():
-    service = _StubService([])
-    factory, resolver, dispatcher, device_fs = _delete_deps(service=service)
+async def test_download_returns_raw_bytes_for_a_workspace_path():
+    file_svc = _StubReadFileService({"docs/a.txt": b"file bytes"})
 
-    response = await download_resource(
-        resource_id="1",
+    response = await download_file(
+        path="docs/a.txt",
         owner_id="u1",
         bot_id="bot-x",
-        factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
-    )
-
-    # Raw Response (no envelope): body is the bytes, media_type is the mime.
-    assert isinstance(response, Response)
-    assert response.body == b"file content"
-    assert response.media_type == "application/pdf"
-    # device_fs resolved by the dispatcher was forwarded to the service.
-    assert service.last_call_device_fs is device_fs
-    # bot_id flowed through to factory.create.
-    assert factory.created_bot_ids == ["bot-x"]
-
-
-@pytest.mark.asyncio
-async def test_download_raises_404_when_service_returns_none():
-    # service.download_resource returns None for resource_id == "0"
-    # (simulates not-found / not-a-file / is-directory / read-failure —
-    # the service collapses all to None and the handler maps to 404).
-    service = _StubService([])
-    factory, resolver, dispatcher, _ = _delete_deps(service=service)
-
-    with pytest.raises(HTTPException) as exc:
-        await download_resource(
-            resource_id="0",
-            owner_id="u1",
-            bot_id="bot-a",
-            factory=factory,
-            resolver=resolver,
-            device_fs_dispatcher=dispatcher,
-        )
-
-    assert exc.value.status_code == 404
-    assert "not downloadable" in exc.value.detail
-
-
-# ── preview_resource (Phase 3 Task 5 — fourth real device_fs handler) ─
-#
-# Same device_fs resolution chain as delete / upload / download
-# (principal → owner_id → resolver.resolve_for_bot →
-# dispatcher.dispatch → device_fs). Like download / upload, preview does
-# NOT call get_device_info (that's a delete-only concern for picking
-# arca/local). preview_resource
-# on the concrete service is ASYNC — the handler must ``await`` it. Service
-# returns a dict {content, content_type, size} or None → 404 (not-found /
-# not-a-file / is-directory / read-failure / empty all collapse to 404 —
-# service filters non-file / directory / empty). ValueError (content > 1
-# MB cap) → 413 (legacy parity). Unlike download (raw Response), preview
-# returns an enveloped Preview schema so the caller gets a structured
-# content_type + content pair.
-
-
-@pytest.mark.asyncio
-async def test_preview_returns_envelope_with_content_and_type():
-    service = _StubService([])
-    factory, resolver, dispatcher, device_fs = _delete_deps(service=service)
-
-    env = await preview_resource(
-        resource_id="1",
-        owner_id="u1",
-        bot_id="bot-x",
-        factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
         request=_request_without_trace(),
     )
 
-    assert isinstance(env, Envelope)
-    assert env.code == CODE_OK
-    assert env.message == "OK"
-    assert env.data is not None
-    assert isinstance(env.data, Preview)
-    assert env.data.resource_id == "1"
-    assert env.data.content_type == "text/plain"
-    assert env.data.content == "preview body"
-    # preview_url is intentionally left unset (no signed-URL path in Phase 3).
-    assert env.data.preview_url is None
-    # device_fs resolved by the dispatcher was forwarded to the service.
-    assert service.last_call_device_fs is device_fs
-    # bot_id flowed through to factory.create.
-    assert factory.created_bot_ids == ["bot-x"]
+    assert isinstance(response, Response)
+    assert response.body == b"file bytes"
+    assert response.media_type == "application/octet-stream"
+    # The address reaching the engine seam is workspace-relative.
+    assert file_svc.read_paths == ["docs/a.txt"]
 
 
 @pytest.mark.asyncio
-async def test_preview_raises_404_when_service_returns_none():
-    # service.preview_resource returns None for resource_id == "0" (simulates
-    # not-found / not-a-file / is-directory / read-failure / empty — the
-    # service collapses all to None and the handler maps to 404).
-    service = _StubService([])
-    factory, resolver, dispatcher, _ = _delete_deps(service=service)
-
+async def test_download_404_when_the_file_is_absent():
     with pytest.raises(HTTPException) as exc:
-        await preview_resource(
-            resource_id="0",
+        await download_file(
+            path="nope.txt",
             owner_id="u1",
-            bot_id="bot-a",
-            factory=factory,
-            resolver=resolver,
-            device_fs_dispatcher=dispatcher,
+            bot_id="bot-x",
+            bot_repo=_StubBotRepo(),
+            file_svc=_StubReadFileService({}),
             request=_request_without_trace(),
         )
-
     assert exc.value.status_code == 404
-    assert "not previewable" in exc.value.detail
 
 
 @pytest.mark.asyncio
-async def test_preview_raises_413_when_too_large():
-    # service.preview_resource raises ValueError for resource_id == "too-large"
-    # (simulates content > 1 MB cap); the handler maps ValueError → 413.
-    service = _StubService([])
-    factory, resolver, dispatcher, _ = _delete_deps(service=service)
+async def test_download_rejects_a_path_escaping_the_workspace():
+    file_svc = _StubReadFileService({})
 
-    resp = await preview_resource(
-        resource_id="too-large",
+    resp = await download_file(
+        path="../../etc/passwd",
         owner_id="u1",
-        bot_id="bot-a",
-        factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
         request=_request_without_trace(),
     )
+
+    assert resp.status_code == 400
+    assert file_svc.read_paths == []  # nothing was read
+
+
+@pytest.mark.asyncio
+async def test_preview_returns_decoded_content():
+    env = await preview_file(
+        path="a.txt",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubReadFileService({"a.txt": b"hello"}),
+        request=_request_without_trace(),
+    )
+
+    assert env.code == CODE_OK
+    assert env.data.content == "hello"
+    assert env.data.content_type == "application/octet-stream"
+
+
+@pytest.mark.asyncio
+async def test_preview_413_when_over_the_cap():
+    big = b"x" * (1_048_576 + 1)
+
+    resp = await preview_file(
+        path="big.bin",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubReadFileService({"big.bin": big}),
+        request=_request_without_trace(),
+    )
+
+    # A 413, not a truncated preview: a caller must never receive a prefix it
+    # could mistake for the whole file.
     assert resp.status_code == 413
     assert json.loads(resp.body)["message"] == "File too large for preview"
+
+
+@pytest.mark.asyncio
+async def test_preview_decodes_invalid_utf8_rather_than_failing():
+    env = await preview_file(
+        path="mixed.bin",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubReadFileService({"mixed.bin": b"ok\xff"}),
+        request=_request_without_trace(),
+    )
+    assert env.data.content.startswith("ok")
+
+
+# ── file delete + mkdir, addressed by workspace path ─────────────────
+
+
+@pytest.mark.asyncio
+async def test_delete_file_removes_it_from_the_workspace():
+    file_svc = _StubReadFileService({"docs/a.txt": b"x"})
+
+    class _NoopFactory:
+        def create(self, *, bot_id):
+            return SimpleNamespace(
+                delete_file_record=lambda **kw: _async_true()
+            )
+
+    env = await delete_file(
+        path="docs/a.txt",
+        owner_id="u1",
+        bot_id="bot-x",
+        factory=_NoopFactory(),
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
+
+    assert env.data.deleted is True
+    assert file_svc.deleted_paths == ["docs/a.txt"]
+
+
+@pytest.mark.asyncio
+async def test_delete_file_404_when_absent():
+    with pytest.raises(HTTPException) as exc:
+        await delete_file(
+            path="gone.txt",
+            owner_id="u1",
+            bot_id="bot-x",
+            factory=SimpleNamespace(create=lambda **kw: None),
+            bot_repo=_StubBotRepo(),
+            file_svc=_StubReadFileService({}),
+            request=_request_without_trace(),
+        )
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_mkdir_creates_a_directory_without_a_record():
+    file_svc = _StubReadFileService({})
+
+    env = await create_directory(
+        path="docs/spec",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
+
+    assert env.code == CODE_CREATED
+    assert env.data.type == OpenapiType.FOLDER
+    assert env.data.path == "docs/spec"
+    # Physical only — no record, so no record id.
+    assert env.data.resource_id == ""
+    assert file_svc.made_dirs == ["docs/spec"]
+
+
+async def _async_true() -> bool:
+    return True
 
 
 # ── End-to-end integration (review #8) ──────────────────────────────
@@ -1618,114 +1676,81 @@ async def test_real_factory_service_supports_all_handler_methods_e2e():
     )
     assert env.data.total >= 1
     assert any(item.resource_id == link_id for item in env.data.items)
-
-    # 4. upload a FILE (exercises factory.create → service.upload_file —
-    #    the new slim method; device_fs.write_file is called by real service
-    #    logic, and the real repo stores the FILE record).
+    # 4. upload a FILE by workspace path (real factory writes the enrichment
+    #    record; the engine seam is stubbed, since a device is not under test).
+    file_svc = _StubReadFileService({})
     env = await upload_resource(
-        name="hello.txt",
+        path="docs/hello.txt",
         content=b"file bytes",
         owner_id="u1",
         bot_id="bot-x",
         factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
         request=_request_without_trace(),
     )
     assert env.code == CODE_CREATED
-    file_id = env.data.resource_id
     assert env.data.type == OpenapiType.FILE
+    assert env.data.path == "docs/hello.txt"
     assert env.data.size == len(b"file bytes")
-    # real service really invoked device_fs.write_file
-    assert device_fs.written == [("hello.txt", b"file bytes")]
+    # The real repo stored the record, with the uploader the console reads.
+    file_row = list(repo._rows.values())[-1]
+    assert file_row["attributes"]["path"] == "docs/hello.txt"
+    assert file_row["user_id"] == "u1"
 
-    # 5. download the FILE (exercises factory.create →
-    #    service.download_resource — new slim method; device_fs.read_file
-    #    round-trips the bytes written in step 4).
-    response = await download_resource(
-        resource_id=file_id,
+    # 5. download it back by the same path the upload reported — the address a
+    #    client actually round-trips.
+    response = await download_file(
+        path=env.data.path,
         owner_id="u1",
         bot_id="bot-x",
-        factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
     )
     assert response.body == b"file bytes"
-    assert response.media_type == "application/octet-stream"
 
-    # 6. preview the FILE (exercises factory.create →
-    #    service.preview_resource — new slim method; real service decodes
-    #    the bytes and returns the {content, content_type, size} dict).
-    env = await preview_resource(
-        resource_id=file_id,
+    # 6. preview it.
+    env_p = await preview_file(
+        path="docs/hello.txt",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
+    assert env_p.data.content == "file bytes"
+
+    # 7. delete it — the file goes, and the real record goes with it.
+    rows_before = len([r for r in repo._rows.values() if r.get("status") != "deleted"])
+    env_d = await delete_file(
+        path="docs/hello.txt",
         owner_id="u1",
         bot_id="bot-x",
         factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
         request=_request_without_trace(),
     )
-    assert env.code == CODE_OK
-    assert env.data.content == "file bytes"
-    assert env.data.content_type == "application/octet-stream"
+    assert env_d.data.deleted is True
+    assert file_svc.deleted_paths == ["docs/hello.txt"]
+    rows_after = len([r for r in repo._rows.values() if r.get("status") != "deleted"])
+    assert rows_after == rows_before - 1
 
-    # 7. delete the FILE (exercises factory.create → service.delete_resource
-    #    — new slim method; real service awaits device_fs.delete_file for the
-    #    FILE resource, then soft-deletes the repo row).
-    env = await delete_resource(
-        resource_id=file_id,
+    # 8. the path is free again, so the same upload succeeds rather than 409ing.
+    env2 = await upload_resource(
+        path="docs/hello.txt",
+        content=b"again",
         owner_id="u1",
         bot_id="bot-x",
         factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
         request=_request_without_trace(),
     )
-    assert env.code == CODE_OK
-    assert env.data.deleted is True
-    # real service really invoked device_fs.delete_file with the stored path
-    assert device_fs.deleted_paths == ["hello.txt"]
-    # second delete → service reports False (already soft-deleted row still
-    # resolves, but a missing-id delete returns False). Drive a bogus id
-    # directly to exercise the not-found → 404 path.
-    with pytest.raises(HTTPException) as exc:
-        await delete_resource(
-            resource_id="999999",
-            owner_id="u1",
-            bot_id="bot-x",
-            factory=factory,
-            resolver=resolver,
-            device_fs_dispatcher=dispatcher,
-            request=_request_without_trace(),
-        )
-    assert exc.value.status_code == 404
-
-    # 8. duplicate-name upload surfaces ValueError → 409 through the REAL
-    #    slim service's check_name_exists path (repo.list_resources really
-    #    sees the prior FILE row).
-    resp = await upload_resource(
-        name="hello.txt",
-        content=b"dup",
-        owner_id="u1",
-        bot_id="bot-x",
-        factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
-        request=_request_without_trace(),
-    )
-    assert resp.status_code == 409
-    assert json.loads(resp.body)["message"] == "Resource already exists"
+    assert env2.code == CODE_CREATED
 
 
-# ── Fix #1 (review round-2): enum mapping contract ──────────────────
-#
-# Round-1 wired the openapi ResourceType→legacy ResourceType seam as
-# ``type.value if type else None`` — passing a STRING where the slim
-# service expects the legacy ResourceType ENUM (the service internally
-# does ``resource_type.value``). Strings have no ``.value`` →
-# AttributeError. These tests pin the new ``_legacy_type_for`` contract:
-# the value handed to the service IS the legacy enum (identity check,
-# not just str equality which would pass either way).
 
 
 @pytest.mark.asyncio
@@ -1924,8 +1949,6 @@ async def test_delete_resource_returns_404_for_cross_bot_resource_id():
             owner_id="u1",
             bot_id="bot-x",
             factory=factory,
-            resolver=resolver,
-            device_fs_dispatcher=dispatcher,
             request=_request_without_trace(),
         )
     assert exc.value.status_code == 404
@@ -1934,48 +1957,29 @@ async def test_delete_resource_returns_404_for_cross_bot_resource_id():
     row = repo.get_by_id(foreign_id)
     assert row.get("status") == "active"
 
-
 @pytest.mark.asyncio
-async def test_download_resource_returns_404_for_cross_bot_resource_id():
-    factory, repo = _real_factory_with_inmemory_repo()
-    foreign_id = _seed_foreign_resource(repo)
+async def test_file_reads_are_scoped_to_the_requested_bot():
+    """Replaces the cross-bot ``resource_id`` isolation tests for download and
+    preview.
 
-    resolver = _StubResolver()
-    dispatcher = _StubDispatcher(_StubDeviceFs())
+    Those guarded against reading another bot's file by passing its record id.
+    Path addressing removes the vector rather than guarding it: there is no
+    foreign id to pass, and the workspace is resolved from the requested
+    ``bot_id``, so a caller can only ever read inside the bot it named. This
+    pins that scoping — the bot from the request is what reaches the seam.
+    """
+    file_svc = _StubReadFileService({"a.txt": b"x"})
 
-    with pytest.raises(HTTPException) as exc:
-        await download_resource(
-            resource_id=foreign_id,
-            owner_id="u1",
-            bot_id="bot-x",
-            factory=factory,
-            resolver=resolver,
-            device_fs_dispatcher=dispatcher,
-        )
-    assert exc.value.status_code == 404
-    assert "not downloadable" in exc.value.detail
+    await download_file(
+        path="a.txt",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
 
-
-@pytest.mark.asyncio
-async def test_preview_resource_returns_404_for_cross_bot_resource_id():
-    factory, repo = _real_factory_with_inmemory_repo()
-    foreign_id = _seed_foreign_resource(repo)
-
-    resolver = _StubResolver()
-    dispatcher = _StubDispatcher(_StubDeviceFs())
-
-    with pytest.raises(HTTPException) as exc:
-        await preview_resource(
-            resource_id=foreign_id,
-            owner_id="u1",
-            bot_id="bot-x",
-            factory=factory,
-            resolver=resolver,
-            device_fs_dispatcher=dispatcher,
-            request=_request_without_trace(),
-        )
-    assert exc.value.status_code == 404
-    assert "not previewable" in exc.value.detail
+    assert file_svc.read_paths == ["a.txt"]
 
 
 @pytest.mark.asyncio

@@ -87,7 +87,7 @@ change, no OCB dependency in this scope.
 - [x] **B5.** Add `DELETE ""?path=` → `ResourceFileService.delete` (which routes
   file vs. directory), then remove any matching record. Missing record is not an
   error; missing file is 404.
-- [~] **B6.** Narrow `GET /{resource_id}` and `DELETE /{resource_id}` to links
+- [x] **B6.** Narrow `GET /{resource_id}` and `DELETE /{resource_id}` to links
   only; a file id no longer resolves.
 - [ ] **B7.** `GET /check-name`: for files, take `path` and resolve via
   `device_fs.exists` instead of the repo; links keep `name` and the repo check.
