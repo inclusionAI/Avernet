@@ -46,7 +46,7 @@ change, no OCB dependency in this scope.
   any `..` segment with `ValueError`; strip leading slashes and empty segments.
   **Do not change `ResourceFileService`'s own filter** (`resource_file_service.py:409`)
   — the console needs its leniency for whole-folder upload.
-- [ ] **A6.** Confirm `@envelope_errors` maps a bare `ValueError` to 400, not
+- [x] **A6.** Confirm `@envelope_errors` maps a bare `ValueError` to 400, not
   500 — check `adapters/http/openapi_v1/responses.py`. If not, raise a mapped
   error type.
 

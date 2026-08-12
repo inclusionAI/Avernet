@@ -41,6 +41,16 @@ class FileTooLargeError(ValueError):
     """Raised when a preview's content exceeds the configured max preview size."""
 
 
+class InvalidResourcePathError(ValueError):
+    """Raised when a caller-supplied path is not addressable inside the workspace.
+
+    A named subclass rather than a bare ``ValueError`` because
+    ``responses.ENVELOPE_ERRORS`` maps types, not base classes: an unmapped
+    exception is re-raised and surfaces as a 500, so a caller sending ``..`` in a
+    path would be told the server broke rather than that their input was wrong.
+    """
+
+
 class ResourceService:
     """Manage resources backed by `ResourceRepositoryProtocol`."""
 
