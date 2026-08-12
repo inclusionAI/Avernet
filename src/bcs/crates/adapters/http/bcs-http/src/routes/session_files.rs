@@ -21,10 +21,14 @@ use bytes::Bytes;
 use futures::Stream;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use bcs_domain::{ActorKind, ActorRef, FileStatus, Participant, SessionFile, SystemMessageEvent};
+use bcs_domain::{ActorKind, ActorRef, FileStatus, SessionFile};
 use bcs_service_api::application::session_files::{
     CapabilitiesView, DeleteFileCommand, PrepareUploadCommand, SessionFileUseCaseError,
     ShareMintCommand,
+};
+use bcs_service_api::application::v1::{
+    ApplicationError, AuthenticatedBotIdentity, AuthenticatedCaller, AuthenticatedUserIdentity,
+    CompleteSessionFile, SessionFileActorKind, SessionFileStatus, SessionFileView,
 };
 use bcs_service_api::port::repo::SessionFileListParams;
 use serde::Deserialize;
@@ -153,6 +157,34 @@ fn to_dto(f: &SessionFile) -> SessionFileDto {
     }
 }
 
+fn application_file_to_dto(file: &SessionFileView) -> SessionFileDto {
+    SessionFileDto {
+        file_id: file.file_id.clone(),
+        session_id: file.session_id.clone(),
+        file_name: file.file_name.clone(),
+        mime_type: file.mime_type.clone(),
+        size: file.size,
+        sha256: file.sha256.clone(),
+        owner: ActorRefDto {
+            actor_kind: match file.owner.actor_kind {
+                SessionFileActorKind::Bot => "Bot".to_string(),
+                SessionFileActorKind::Human => "Human".to_string(),
+            },
+            actor_id: file.owner.actor_id.clone(),
+        },
+        storage_backend: file.storage_backend.clone(),
+        status: match file.status {
+            SessionFileStatus::Pending => "Pending",
+            SessionFileStatus::Ready => "Ready",
+            SessionFileStatus::Deleting => "Deleting",
+            SessionFileStatus::Failed => "Failed",
+        }
+        .to_string(),
+        created_at: file.created_at,
+        updated_at: file.updated_at,
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct PrepareRequest {
     pub file_name: String,
@@ -221,6 +253,28 @@ fn err_to_response(err: SessionFileUseCaseError) -> Response {
         .into_response()
 }
 
+fn application_err_to_response(err: ApplicationError) -> Response {
+    use ApplicationError::*;
+    let (code, status) = match &err {
+        InvalidInput { .. } => ("INVALID_INPUT", StatusCode::BAD_REQUEST),
+        Unauthenticated => ("UNAUTHORIZED", StatusCode::UNAUTHORIZED),
+        Forbidden(_) | ForbiddenCode { .. } => ("FORBIDDEN", StatusCode::FORBIDDEN),
+        NotFound { .. } => ("FILE_NOT_FOUND", StatusCode::NOT_FOUND),
+        Conflict { .. } => ("INVALID_TRANSITION", StatusCode::CONFLICT),
+        Gone { .. } => ("GONE", StatusCode::GONE),
+        QuotaExceeded { .. } => ("QUOTA_EXCEEDED", StatusCode::TOO_MANY_REQUESTS),
+        PayloadTooLarge { .. } => ("PAYLOAD_TOO_LARGE", StatusCode::PAYLOAD_TOO_LARGE),
+        Unprocessable { .. } => ("INVALID_STATE", StatusCode::UNPROCESSABLE_ENTITY),
+        BadGateway { .. } => ("STORAGE_BACKEND", StatusCode::BAD_GATEWAY),
+        Internal(_) => ("INTERNAL", StatusCode::INTERNAL_SERVER_ERROR),
+    };
+    (
+        status,
+        Json(json!({ "error": code, "message": err.to_string() })),
+    )
+        .into_response()
+}
+
 fn unauthorized() -> Response {
     (
         StatusCode::UNAUTHORIZED,
@@ -262,6 +316,39 @@ fn caller_to_actor_ref(caller: &GroupChatCaller) -> ActorRef {
         GroupChatCaller::Human(h) => ActorRef {
             actor_kind: ActorKind::Human,
             actor_id: h.actor_id.clone(),
+        },
+    }
+}
+
+fn application_caller(caller: &GroupChatCaller) -> AuthenticatedCaller {
+    match caller {
+        GroupChatCaller::Bot { bot_uuid } => AuthenticatedCaller {
+            // The legacy bearer path authenticates exactly one Bot. Owner
+            // consistency applies only when Gateway supplies User and Bot
+            // identities together, so this adapter does not need a registry
+            // lookup merely to reconstruct an unused owner claim.
+            tenant: Some("legacy".to_string()),
+            user: None,
+            bot: Some(AuthenticatedBotIdentity {
+                bot_uuid: bot_uuid.clone(),
+                owner_id: String::new(),
+                app_id: 0,
+                agent_code: "legacy".to_string(),
+            }),
+            app: None,
+            access_key: None,
+        },
+        GroupChatCaller::Human(human) => AuthenticatedCaller {
+            tenant: None,
+            user: Some(AuthenticatedUserIdentity {
+                id: human.staff_no.clone(),
+                username: human.staff_no.clone(),
+                display_name: human.nick_name.clone(),
+                full_name: None,
+            }),
+            bot: None,
+            app: None,
+            access_key: None,
         },
     }
 }
@@ -451,21 +538,27 @@ pub async fn complete_upload(
         Ok(c) => c,
         Err(_) => return unauthorized(),
     };
-    let sess = match ensure_session_member(&state, &sid, &caller).await {
-        Some(s) => s,
-        None => return forbidden_not_participant(),
+    if ensure_session_member(&state, &sid, &caller).await.is_none() {
+        return forbidden_not_participant();
+    }
+    let Some(application) = state.session_file_application.as_ref() else {
+        return application_err_to_response(ApplicationError::internal(
+            "session file application service is not configured",
+        ));
     };
-    match state
-        .services
-        .session_files
-        .complete_upload(&sid, &file_id)
-        .await
-    {
-        Ok(f) => {
-            notify_file_uploaded(&state, &sess, &sid, &caller, &f).await;
-            (StatusCode::OK, Json(json!(to_dto(&f)))).into_response()
-        }
-        Err(e) => err_to_response(e),
+    let command = CompleteSessionFile {
+        caller: application_caller(&caller),
+        session_id: sid.clone(),
+        file_id: file_id.clone(),
+        notification_content_url: file_download_url(&state, &sid, &file_id),
+    };
+    match application.complete(command).await {
+        Ok(file) => (
+            StatusCode::OK,
+            Json(json!(application_file_to_dto(&file))),
+        )
+            .into_response(),
+        Err(error) => application_err_to_response(error),
     }
 }
 
@@ -730,24 +823,6 @@ pub async fn shared_file_content(
 // Helpers
 // ---------------------------------------------------------------
 
-fn human_readable_size(bytes: u64) -> String {
-    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
-    if bytes < 1024 {
-        return format!("{bytes} B");
-    }
-    let mut size = bytes as f64;
-    let mut unit = 0usize;
-    while size >= 1024.0 && unit < UNITS.len() - 1 {
-        size /= 1024.0;
-        unit += 1;
-    }
-    if size.fract() == 0.0 {
-        format!("{:.0} {}", size, UNITS[unit])
-    } else {
-        format!("{:.1} {}", size, UNITS[unit])
-    }
-}
-
 fn file_download_url(state: &HttpAppState, sid: &str, file_id: &str) -> String {
     let base = state
         .bcs_endpoint
@@ -759,70 +834,6 @@ fn file_download_url(state: &HttpAppState, sid: &str, file_id: &str) -> String {
         urlencoding::encode(sid),
         file_id,
     )
-}
-
-fn file_upload_receivers(
-    participants: &[Participant],
-    uploader_actor_id: &str,
-) -> Vec<Participant> {
-    participants
-        .iter()
-        .filter(|p| p.is_bot() && p.bot_uuid != uploader_actor_id)
-        .cloned()
-        .collect()
-}
-
-async fn uploader_display_name(
-    state: &HttpAppState,
-    caller: &GroupChatCaller,
-) -> (&'static str, String) {
-    match caller {
-        GroupChatCaller::Bot { bot_uuid } => {
-            let name = state
-                .services
-                .registry
-                .get(bot_uuid)
-                .await
-                .and_then(|b| b.capabilities.name.clone())
-                .unwrap_or_else(|| bot_uuid.clone());
-            ("Bot", name)
-        }
-        GroupChatCaller::Human(h) => {
-            let name = h.nick_name.clone().unwrap_or_else(|| h.staff_no.clone());
-            ("用户", name)
-        }
-    }
-}
-
-async fn notify_file_uploaded(
-    state: &HttpAppState,
-    sess: &bcs_service_api::Session,
-    sid: &str,
-    caller: &GroupChatCaller,
-    file: &SessionFile,
-) {
-    let (prefix, name) = uploader_display_name(state, caller).await;
-    let readable = human_readable_size(file.size);
-    let url = file_download_url(state, sid, &file.file_id);
-    let message = format!(
-        "{} {} 上传了一个文件 {} ({}，{})，下载链接：{}",
-        prefix, name, file.file_name, file.file_id, readable, url,
-    );
-    let uploader_actor_id = caller_to_actor_ref(caller).actor_id;
-    let receivers = file_upload_receivers(&sess.participants, &uploader_actor_id);
-    if receivers.is_empty() {
-        return;
-    }
-    let event = SystemMessageEvent::GenericNotification {
-        group_id: sess.group_id.clone(),
-        message,
-        receivers,
-    };
-    let _ = state
-        .services
-        .system_message
-        .notify(&sess.group_id, event, sid, &sess.participants)
-        .await;
 }
 
 // ---------------------------------------------------------------
@@ -839,7 +850,7 @@ mod tests {
     use bcs_bot::BotCore;
     use bcs_bot_store::MemoryBotRepo;
     use bcs_domain::{
-        ActorKind as DomainActorKind, FileStatus, Session, SessionStatus, SystemMessageEvent,
+        ActorKind as DomainActorKind, FileStatus, SystemMessageEvent,
     };
     use bcs_group::GroupCore;
     use bcs_group_store::MemoryGroupRepo;
@@ -861,7 +872,6 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
     use tower::ServiceExt;
-    use crate::routes::group_messages::HttpGroupCaller;
     use async_trait::async_trait;
     use tokio::sync::Mutex;
 
@@ -910,18 +920,6 @@ mod tests {
             agent_code: None,
             agent_token: None,
         }
-    }
-
-    #[test]
-    fn human_readable_size_formats_bytes() {
-        assert_eq!(human_readable_size(0), "0 B");
-        assert_eq!(human_readable_size(500), "500 B");
-        assert_eq!(human_readable_size(1023), "1023 B");
-        assert_eq!(human_readable_size(1024), "1 KB");
-        assert_eq!(human_readable_size(12288), "12 KB");
-        assert_eq!(human_readable_size(12345), "12.1 KB");
-        assert_eq!(human_readable_size(1_048_576), "1 MB");
-        assert_eq!(human_readable_size(1_572_864), "1.5 MB");
     }
 
     #[test]
@@ -981,7 +979,7 @@ mod tests {
         let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(PathBuf::from(
             bot_dir.path(),
         )));
-        let registry = BotCore::with_repo(bot_repo.clone());
+        let registry = Arc::new(BotCore::with_repo(bot_repo.clone()));
         registry
             .register_with_owner_and_token(
                 "bot-a".into(),
@@ -1003,7 +1001,7 @@ mod tests {
 
         // Group: g1 with bot_a and bot_b as participants, bot_a as driver.
         let group_repo = Arc::new(MemoryGroupRepo::new());
-        let group_core = GroupCore::with_repo(group_repo.clone());
+        let group_core = Arc::new(GroupCore::with_repo(group_repo.clone()));
         let group = Group {
             id: "g1".into(),
             label: None,
@@ -1056,8 +1054,10 @@ mod tests {
             .await
             .expect("create session");
 
-        let session_management =
-            SessionManagementServiceImpl::new(session_repo.clone(), group_repo.clone());
+        let session_management = Arc::new(SessionManagementServiceImpl::new(
+            session_repo.clone(),
+            group_repo.clone(),
+        ));
 
         // SessionFileService with FakeStoragePlugin (local caps) + in-memory repo.
         let storage: Arc<dyn bcs_storage_api::StoragePlugin> =
@@ -1082,15 +1082,25 @@ mod tests {
             Arc::new(SessionFileServiceImpl::new(file_cfg));
 
         let system_messages = Arc::new(RecordingSystemMessage::default());
+        let session_file_application = Arc::new(
+            bcs_app_session::SessionFileApplicationServiceImpl::new(
+                session_files.clone(),
+                session_management.clone(),
+                group_core.clone(),
+                registry.clone(),
+                system_messages.clone(),
+            ),
+        );
         let services = Services::builder()
-            .registry(Arc::new(registry))
-            .group(Arc::new(group_core))
-            .session_management(Arc::new(session_management))
+            .registry(registry)
+            .group(group_core)
+            .session_management(session_management)
             .session_files(session_files)
             .system_message(system_messages.clone())
             .build_for_test();
 
-        let state = HttpAppState::new(services);
+        let state = HttpAppState::new(services)
+            .with_session_file_application(Some(session_file_application));
 
         // Sanity: the session exists and the bots resolve.
         assert!(
@@ -1620,83 +1630,6 @@ mod tests {
         assert_eq!(body.get("size").and_then(|v| v.as_u64()), Some(size));
     }
 
-    #[test]
-    fn file_upload_receivers_excludes_uploader_bot() {
-        let ps = vec![
-            Participant::bot("bot-a", ParticipantRole::Driver),
-            Participant::bot("bot-b", ParticipantRole::Consultant),
-        ];
-        let r = file_upload_receivers(&ps, "bot-a");
-        let ids: Vec<&str> = r.iter().map(|p| p.bot_uuid.as_str()).collect();
-        assert_eq!(ids, vec!["bot-b"]);
-    }
-
-    #[test]
-    fn file_upload_receivers_keeps_all_bots_when_uploader_is_human() {
-        let ps = vec![
-            Participant::bot("bot-a", ParticipantRole::Driver),
-            Participant::bot("bot-b", ParticipantRole::Consultant),
-            Participant::human("human_alice", ParticipantRole::Observer),
-        ];
-        let r = file_upload_receivers(&ps, "human_alice");
-        let mut ids: Vec<&str> = r.iter().map(|p| p.bot_uuid.as_str()).collect();
-        ids.sort();
-        assert_eq!(ids, vec!["bot-a", "bot-b"]);
-    }
-
-    #[test]
-    fn file_upload_receivers_empty_when_uploader_is_only_bot() {
-        let ps = vec![Participant::bot("bot-a", ParticipantRole::Driver)];
-        let r = file_upload_receivers(&ps, "bot-a");
-        assert!(r.is_empty());
-    }
-
-    #[tokio::test]
-    async fn uploader_display_name_bot_uses_registry_name() {
-        let app = build_test_app().await;
-        let (prefix, name) = uploader_display_name(
-            &app.state,
-            &GroupChatCaller::Bot { bot_uuid: "bot-a".into() },
-        )
-        .await;
-        assert_eq!(prefix, "Bot");
-        assert_eq!(name, "test-bot"); // empty_caps() sets name Some("test-bot")
-    }
-
-    #[tokio::test]
-    async fn uploader_display_name_bot_falls_back_to_id_when_unregistered() {
-        let app = build_test_app().await;
-        let (prefix, name) = uploader_display_name(
-            &app.state,
-            &GroupChatCaller::Bot { bot_uuid: "ghost-bot".into() },
-        )
-        .await;
-        assert_eq!(prefix, "Bot");
-        assert_eq!(name, "ghost-bot");
-    }
-
-    #[tokio::test]
-    async fn uploader_display_name_human_uses_nick_or_staff_no() {
-        let app = build_test_app().await;
-        let with_nick = GroupChatCaller::Human(HttpGroupCaller {
-            actor_id: "human_alice".into(),
-            staff_no: "alice".into(),
-            nick_name: Some("Alice".into()),
-        });
-        let (prefix, name) = uploader_display_name(&app.state, &with_nick).await;
-        assert_eq!(prefix, "用户");
-        assert_eq!(name, "Alice");
-
-        let no_nick = GroupChatCaller::Human(HttpGroupCaller {
-            actor_id: "human_alice".into(),
-            staff_no: "alice".into(),
-            nick_name: None,
-        });
-        let (prefix, name) = uploader_display_name(&app.state, &no_nick).await;
-        assert_eq!(prefix, "用户");
-        assert_eq!(name, "alice");
-    }
-
     #[tokio::test]
     async fn complete_upload_fires_generic_notification_to_other_bots() {
         let app = build_test_app().await;
@@ -1800,111 +1733,4 @@ mod tests {
         (file_id, file_status)
     }
 
-    fn mk_session(group_id: &str, participants: Vec<Participant>) -> Session {
-        Session {
-            id: format!("{group_id}:00000001"),
-            group_id: group_id.to_string(),
-            session_title: None,
-            env: None,
-            status: SessionStatus::Running,
-            session_kind: SessionKind::Chat,
-            participants,
-            group_version: Some(1),
-            caller_id: None,
-            input: None,
-            output: None,
-            error_message: None,
-            callback_status: None,
-            activation_count: 1,
-            caller_principal: None,
-            created_by: None,
-            created_at: 0,
-            updated_at: 0,
-            completed_at: None,
-            meta: None,
-            current_msg_seq: 0,
-            participant_join_seq: None,
-            collected_at: None,
-        }
-    }
-
-    fn mk_session_file(sid: &str, name: &str, size: u64) -> SessionFile {
-        SessionFile {
-            file_id: "fid-1".into(),
-            session_id: sid.into(),
-            file_name: name.into(),
-            mime_type: "text/plain".into(),
-            size,
-            sha256: None,
-            owner: ActorRef {
-                actor_kind: ActorKind::Bot,
-                actor_id: "bot-a".into(),
-            },
-            storage_backend: "local".into(),
-            object_handle: String::new(),
-            status: FileStatus::Ready,
-            created_at: 0,
-            updated_at: 0,
-        }
-    }
-
-    #[tokio::test]
-    async fn notify_file_uploaded_skips_when_no_other_bots() {
-        let app = build_test_app().await;
-        // A session whose only bot is the uploader (bot-a).
-        let sess = mk_session(
-            "g1",
-            vec![Participant::bot("bot-a", ParticipantRole::Driver)],
-        );
-        let caller = GroupChatCaller::Bot { bot_uuid: "bot-a".into() };
-        let file = mk_session_file(&app.sid, "solo.txt", 7);
-        notify_file_uploaded(&app.state, &sess, &app.sid, &caller, &file).await;
-
-        let notifications = app.system_messages.notifications.lock().await;
-        assert!(
-            notifications.is_empty(),
-            "guard must skip notify when there are no other bots (avoid self-inject)"
-        );
-    }
-
-    #[tokio::test]
-    async fn notify_file_uploaded_human_uploader_notifies_all_bots_with_user_prefix() {
-        let app = build_test_app().await;
-        let sess = mk_session(
-            "g1",
-            vec![
-                Participant::bot("bot-a", ParticipantRole::Driver),
-                Participant::bot("bot-b", ParticipantRole::Consultant),
-            ],
-        );
-        let caller = GroupChatCaller::Human(HttpGroupCaller {
-            actor_id: "human_alice".into(),
-            staff_no: "alice".into(),
-            nick_name: Some("Alice".into()),
-        });
-        // 2048 bytes -> "2 KB".
-        let file = mk_session_file(&app.sid, "doc.md", 2048);
-        notify_file_uploaded(&app.state, &sess, &app.sid, &caller, &file).await;
-
-        let notifications = app.system_messages.notifications.lock().await;
-        assert_eq!(notifications.len(), 1);
-        match &notifications[0] {
-            SystemMessageEvent::GenericNotification {
-                group_id,
-                message,
-                receivers,
-            } => {
-                assert_eq!(group_id, "g1");
-                assert!(
-                    message.starts_with("用户 Alice 上传了一个文件 doc.md "),
-                    "message: {message}"
-                );
-                let mut ids: Vec<String> =
-                    receivers.iter().map(|p| p.bot_uuid.clone()).collect();
-                ids.sort();
-                assert_eq!(ids, vec!["bot-a".to_string(), "bot-b".to_string()]);
-            }
-            other => panic!("expected GenericNotification, got {other:?}"),
-        }
-    }
 }

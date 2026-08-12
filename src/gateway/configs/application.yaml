@@ -239,6 +239,19 @@ user_config:
       user: required
       app: required
 
+    # Session-file use cases let BCN choose Human or Bot as the effective Actor.
+    # Gateway therefore best-effort resolves and signs every relevant identity;
+    # BCN's HumanOrOwnedBot policy rejects "none" and mismatched User/Bot owner
+    # claims before the application facade authorizes the Session and file.
+    "/openapi/v1/collaboration/sessions/{session_id}/files/**":
+      user: optional
+      app: optional
+      bot: optional
+
+    # A share token is the complete credential for this one download route.
+    # BCN verifies it and deliberately returns the same 404 for every failure.
+    "GET /openapi/v1/collaboration/sessions/shared-file/content": {}
+
     "/openapi/v1/bcsfuse/**":
       user: required
 

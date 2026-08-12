@@ -36,6 +36,15 @@ EXPECTED_OPERATIONS = {
     ("patch", "/openapi/v1/collaboration/sessions/{session_id}"),
     ("delete", "/openapi/v1/collaboration/sessions/{session_id}"),
     ("get", "/openapi/v1/collaboration/sessions/{session_id}/messages"),
+    ("get", "/openapi/v1/collaboration/sessions/{session_id}/files"),
+    ("post", "/openapi/v1/collaboration/sessions/{session_id}/files"),
+    ("get", "/openapi/v1/collaboration/sessions/{session_id}/files/{file_id}"),
+    ("delete", "/openapi/v1/collaboration/sessions/{session_id}/files/{file_id}"),
+    ("get", "/openapi/v1/collaboration/sessions/{session_id}/files/{file_id}/content"),
+    ("put", "/openapi/v1/collaboration/sessions/{session_id}/files/{file_id}/content"),
+    ("post", "/openapi/v1/collaboration/sessions/{session_id}/files/{file_id}/complete"),
+    ("post", "/openapi/v1/collaboration/sessions/{session_id}/files/{file_id}/share"),
+    ("get", "/openapi/v1/collaboration/sessions/shared-file/content"),
     ("post", "/openapi/v1/collaboration/sessions/{session_id}/token"),
     ("get", "/openapi/v1/collaboration/messages/ws"),
     ("post", "/openapi/v1/collaboration/sessions/{session_id}/participants"),
@@ -63,7 +72,7 @@ def _actual_operations():
     }
 
 
-def test_contract_contains_exactly_the_32_approved_operations() -> None:
+def test_contract_contains_exactly_the_41_approved_operations() -> None:
     assert _actual_operations() == EXPECTED_OPERATIONS
 
 
@@ -81,10 +90,20 @@ def test_operations_use_the_approved_gateway_security_boundary() -> None:
         for method, operation in path_item.items():
             if method.lower() not in HTTP_METHODS:
                 continue
+            operation_key = (method.lower(), path)
+            public_operations = {
+                ("get", "/openapi/v1/collaboration/messages/ws"),
+                ("get", "/openapi/v1/collaboration/sessions/shared-file/content"),
+            }
+            file_operations = {
+                item for item in EXPECTED_OPERATIONS
+                if "/files" in item[1]
+            }
             expected = (
                 {}
-                if (method.lower(), path)
-                == ("get", "/openapi/v1/collaboration/messages/ws")
+                if operation_key in public_operations
+                else {"user": "optional", "app": "optional", "bot": "optional"}
+                if operation_key in file_operations
                 else {"user": "required", "app": "required"}
             )
             assert operation["x-avernet-security"] == expected, (
