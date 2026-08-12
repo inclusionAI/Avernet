@@ -14,7 +14,7 @@ from secbaas.community.core.utils.env_utils import get_current_env
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.secret import SecretStorePlugin
 
-logger = get_logger(__name__)
+logger = get_logger("plugin-sandbox-arca")
 
 _ARCA_PROXY_HOST_MAP: dict[str, ConfigPath] = {
     "dev": ConfigPath.AGENTCLAW_PROXY_HOST_DEV,
