@@ -308,6 +308,10 @@ class AcBindingSandboxHandler:
                     refresh_fail_count=0,
                 )
             else:
+                logger.warning(
+                    f"[AcBindingSandboxHandler] Renew TTL extension returned failure "
+                    f"for {sandbox_id}: {ttl_info.error or 'TTL extension failed'}"
+                )
                 return RenewTtlResult(
                     table_id=table_id,
                     table_type=TableType.AC_BINDING,
@@ -445,6 +449,9 @@ class BaasSandboxHandler:
         # STOPPED 状态不续期
         if row.get("status") == "STOPPED":
             dp = _parse_device_props(row.get("provider_device_props"))
+            logger.info(
+                f"[BaasSandboxHandler] Skip renew TTL for stopped device id={table_id}"
+            )
             return RenewTtlResult(
                 table_id=table_id,
                 table_type=TableType.BAAS,
@@ -487,6 +494,10 @@ class BaasSandboxHandler:
                     refresh_fail_count=0,
                 )
             else:
+                logger.warning(
+                    f"[BaasSandboxHandler] Renew TTL extension returned failure "
+                    f"for {sandbox_id}: {ttl_info.error or 'TTL extension failed'}"
+                )
                 return RenewTtlResult(
                     table_id=table_id,
                     table_type=TableType.BAAS,
