@@ -50,15 +50,10 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 from agentclaw.community.core.bot_management.services.engine_resolver import (
     resolve_engine_for_bot,
 )
-from agentclaw.community.core.devices.services.device_context_resolver import (
-    DeviceContextResolver,
-)
-from agentclaw.community.core.devices.services.device_filesystem_dispatcher import (
-    DeviceFilesystemDispatcher,
-)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.resources.service import (
     DuplicateResourceError,
+    FileTooLargeError,
     InvalidResourcePathError,
 )
 from agentclaw.community.core.services.resource_file_service import ResourceFileService
@@ -127,6 +122,10 @@ def _to_openapi_resource(legacy: _LegacyResource) -> Resource:
         gmt_create=legacy.gmt_created.isoformat() if legacy.gmt_created else None,
         gmt_modified=legacy.gmt_modified.isoformat() if legacy.gmt_modified else None,
     )
+
+
+#: Preview cap, legacy parity with the former service-level default.
+_PREVIEW_MAX_BYTES = 1_048_576
 
 
 def _safe_path(path: str) -> str:
@@ -401,6 +400,182 @@ async def upload_resource(
     return created(data, request)
 
 
+# ── file operations, addressed by workspace-relative path ────────────
+#
+# These are declared before ``/{resource_id}`` so their literal segments win the
+# match, exactly as ``/check-name`` and ``/upload`` already do. A file has no
+# record id to address it by — the workspace is the source of truth, and a file
+# the bot created itself never had a record at all — so ``?path=`` is the
+# address, matching the console's own file surface.
+
+
+async def _read_file_or_404(
+    file_svc: ResourceFileService,
+    *,
+    bot_id: str,
+    owner_id: str,
+    bot_repo: BotRepository,
+    path: str,
+) -> bytes:
+    """Bytes at ``path``, or 404. Shared by download and preview."""
+    safe = _safe_path(path)
+    if not safe:
+        raise InvalidResourcePathError("path is required")
+    entity_type, entity_id, engine_type = _file_coords(bot_id, owner_id, bot_repo)
+    content = await file_svc.read_file(
+        entity_type=entity_type,
+        entity_id=entity_id,
+        bot_id=bot_id,
+        engine_type=engine_type,
+        path=safe,
+        enforce_download_limit=True,
+    )
+    # ``None`` is absent; ``b""`` is a file that exists but has no bytes, which
+    # the legacy contract also treated as nothing to serve.
+    if not content:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    return content
+
+
+@router.get("/download", responses={200: {"content": {"application/octet-stream": {}}}})
+@envelope_errors
+async def download_file(
+    owner_id: UserIdDep,
+    path: str,
+    bot_id: str = Query(..., description="Bot ID this resource belongs to."),
+    bot_repo: BotRepository = Injected(BotRepository),
+    file_svc: ResourceFileService = Injected(ResourceFileService),
+) -> Response:
+    """Stream a file's bytes from the bot's workspace, addressed by path.
+
+    Raw bytes, not an envelope — the body is the file. Replaces the former
+    ``/{resource_id}/download``: a record id cannot address a file the bot
+    created itself, and the record is no longer what decides existence.
+    """
+    content = await _read_file_or_404(
+        file_svc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo, path=path
+    )
+    return Response(content=content, media_type="application/octet-stream")
+
+
+@router.get("/preview", response_model=Envelope[Preview])
+@envelope_errors
+async def preview_file(
+    owner_id: UserIdDep,
+    path: str,
+    request: Request,
+    bot_id: str = Query(..., description="Bot ID this resource belongs to."),
+    bot_repo: BotRepository = Injected(BotRepository),
+    file_svc: ResourceFileService = Injected(ResourceFileService),
+) -> Envelope[Preview]:
+    """A file's content as text, addressed by path.
+
+    Capped at 1 MB (legacy parity) — over that is a 413, not a truncated preview,
+    so a caller is never handed a prefix it might mistake for the whole file.
+    """
+    content = await _read_file_or_404(
+        file_svc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo, path=path
+    )
+    if len(content) > _PREVIEW_MAX_BYTES:
+        raise FileTooLargeError(
+            f"File too large for preview (max {_PREVIEW_MAX_BYTES} bytes)"
+        )
+    return envelope(
+        Preview(
+            resource_id="",
+            content_type="application/octet-stream",
+            # ``replace`` rather than raising: a preview of a mostly-text file
+            # with a stray byte is useful; a 500 is not.
+            content=content.decode("utf-8", errors="replace"),
+        ),
+        request,
+    )
+
+
+@router.delete("", response_model=Envelope[Deleted])
+@envelope_errors
+async def delete_file(
+    owner_id: UserIdDep,
+    path: str,
+    request: Request,
+    bot_id: str = Query(..., description="Bot ID this resource belongs to."),
+    factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
+    bot_repo: BotRepository = Injected(BotRepository),
+    file_svc: ResourceFileService = Injected(ResourceFileService),
+) -> Envelope[Deleted]:
+    """Delete a file or directory from the bot's workspace, addressed by path.
+
+    The workspace is authoritative, so the file goes first and any matching
+    record follows. A record that is not there is not an error — a file the bot
+    created never had one — but a file that is not there is a 404.
+    """
+    safe = _safe_path(path)
+    if not safe:
+        raise InvalidResourcePathError("path is required")
+    entity_type, entity_id, engine_type = _file_coords(bot_id, owner_id, bot_repo)
+    if not await file_svc.exists(
+        entity_type=entity_type,
+        entity_id=entity_id,
+        bot_id=bot_id,
+        engine_type=engine_type,
+        path=safe,
+    ):
+        raise HTTPException(status_code=404, detail="Resource not found")
+    await file_svc.delete(
+        entity_type=entity_type,
+        entity_id=entity_id,
+        bot_id=bot_id,
+        engine_type=engine_type,
+        path=safe,
+    )
+    try:
+        await factory.create(bot_id=bot_id).delete_file_record(path=safe)
+    except Exception:
+        logger.exception(
+            "[delete_file] record cleanup failed; file is gone at %s", safe
+        )
+    return deleted_envelope(request)
+
+
+@router.post("/mkdir", status_code=201, response_model=Envelope[Resource])
+@envelope_errors
+async def create_directory(
+    owner_id: UserIdDep,
+    path: str,
+    request: Request,
+    bot_id: str = Query(..., description="Bot ID this resource belongs to."),
+    bot_repo: BotRepository = Injected(BotRepository),
+    file_svc: ResourceFileService = Injected(ResourceFileService),
+) -> Envelope[Resource]:
+    """Create a directory in the bot's workspace.
+
+    Physical only — no FOLDER record is written, and ``POST ""`` with
+    ``type=FOLDER`` still returns 501. Directories exist on the filesystem and
+    are reported by listing it; giving them records would reintroduce exactly
+    the record-vs-filesystem divergence this change removes.
+    """
+    safe = _safe_path(path)
+    if not safe:
+        raise InvalidResourcePathError("path is required")
+    entity_type, entity_id, engine_type = _file_coords(bot_id, owner_id, bot_repo)
+    await file_svc.create_directory(
+        entity_type=entity_type,
+        entity_id=entity_id,
+        bot_id=bot_id,
+        engine_type=engine_type,
+        path=safe,
+    )
+    return created(
+        Resource(
+            resource_id="",
+            name=safe.rsplit("/", 1)[-1],
+            type=ResourceType.FOLDER,
+            path=safe,
+        ),
+        request,
+    )
+
+
 @router.get("/{resource_id}", response_model=Envelope[Resource])
 @envelope_errors
 async def get_resource(
@@ -451,7 +626,6 @@ async def update_resource(
     )
     return envelope(_to_openapi_resource(r), request)
 
-
 @router.delete("/{resource_id}", response_model=Envelope[Deleted])
 @envelope_errors
 async def delete_resource(
@@ -460,110 +634,22 @@ async def delete_resource(
     request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
-    resolver: DeviceContextResolver = Injected(DeviceContextResolver),
-    device_fs_dispatcher: DeviceFilesystemDispatcher = Injected(
-        DeviceFilesystemDispatcher
-    ),
 ) -> Envelope[Deleted]:
-    """Delete a resource (file → device FS, link/folder → DB soft-delete).
+    """Delete a **link** resource by record id.
 
-    owner_id comes from the request's ``user_id`` parameter (``UserIdDep``),
-    fail-closed. device_fs is resolved per-bot ONLY for FILE resources — a
-    link/folder soft-delete never touches device_fs, so it must not fail on an
-    unbound bot (``resolve_for_bot`` raises DeviceNotBoundError when there is no
-    binding). The injected deps (factory, resolver, device_fs_dispatcher) stay
-    out of the served OpenAPI schema — see test_public_namespace.py.
+    Files are no longer addressed this way — they live in the workspace and are
+    deleted through ``DELETE ""?path=``. A link has no file, so the record is
+    the resource and the record id is the only address it can have. A file id
+    sent here resolves to nothing and 404s, which is also the right answer for
+    a stale id from before the change.
+
+    No device is touched, so this must not require a bound one: the former
+    unconditional ``resolve_for_bot`` raised DeviceNotBoundError (409) on an
+    unbound bot even for a link, which is the follow-up that removing the file
+    branch resolves.
     """
-    effective_bot_id = bot_id
-    # Follow-up (#4): device_fs resolution is unconditional — a link/folder
-    # soft-delete never touches device_fs but the handler can't tell the type
-    # until the service reads the row, so an unbound bot raises
-    # DeviceNotBoundError (→409) even for a link delete. The clean fix moves
-    # the lazy device_fs dispatch into the service (it knows is_file); left as
-    # a service-layer follow-up with totalfrank's comment, not a router
-    # get_resource work-around (2× reads + breaks the stub-service test shape).
-    ctx = resolver.resolve_for_bot(effective_bot_id, owner_id)
-    device_fs = device_fs_dispatcher.dispatch(ctx)
-    service = factory.create(bot_id=effective_bot_id)
-    # delete_resource is ASYNC. Returns False when the record is missing → 404.
-    ok = await service.delete_resource(resource_id, device_fs=device_fs)
+    service = factory.create(bot_id=bot_id)
+    ok = await service.delete_resource(resource_id, device_fs=None)
     if not ok:
         raise HTTPException(status_code=404, detail="Resource not found")
     return deleted_envelope(request)
-
-
-@router.get(
-    "/{resource_id}/download",
-    responses={200: {"content": {"application/octet-stream": {}}}},
-)
-@envelope_errors
-async def download_resource(
-    resource_id: str,
-    owner_id: UserIdDep,
-    bot_id: str = Query(..., description="Bot ID this resource belongs to."),
-    factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
-    resolver: DeviceContextResolver = Injected(DeviceContextResolver),
-    device_fs_dispatcher: DeviceFilesystemDispatcher = Injected(
-        DeviceFilesystemDispatcher
-    ),
-) -> Response:
-    """Download a resource's bytes (raw, not enveloped).
-
-    owner_id comes from the request's ``user_id`` parameter (``UserIdDep``),
-    fail-closed — mirroring the bots router. device_fs is resolved per-bot
-    (unconditional today; see #4 follow-up — only a file has bytes, but the
-    handler can't tell the type before the service reads the row). Service
-    returns ``(bytes, mime)`` or ``None`` → 404.
-    """
-    effective_bot_id = bot_id
-    ctx = resolver.resolve_for_bot(effective_bot_id, owner_id)
-    device_fs = device_fs_dispatcher.dispatch(ctx)
-    service = factory.create(bot_id=effective_bot_id)
-    result = await service.download_resource(resource_id, device_fs=device_fs)
-    if result is None:
-        raise HTTPException(
-            status_code=404, detail="Resource not found or not downloadable"
-        )
-    content, content_type = result
-    return Response(content=content, media_type=content_type)
-
-
-@router.get("/{resource_id}/preview", response_model=Envelope[Preview])
-@envelope_errors
-async def preview_resource(
-    resource_id: str,
-    owner_id: UserIdDep,
-    request: Request,
-    bot_id: str = Query(..., description="Bot ID this resource belongs to."),
-    factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
-    resolver: DeviceContextResolver = Injected(DeviceContextResolver),
-    device_fs_dispatcher: DeviceFilesystemDispatcher = Injected(
-        DeviceFilesystemDispatcher
-    ),
-) -> Envelope[Preview]:
-    """Get a resource preview (text-ified content, enveloped).
-
-    owner_id comes from the request's ``user_id`` parameter (``UserIdDep``),
-    fail-closed — mirroring the bots router. device_fs is resolved per-bot
-    (unconditional today; see #4 follow-up). FileTooLargeError (content > 1 MB)
-    → 413 via @envelope_errors; a None result is not-found / not-a-file /
-    read-failure → 404.
-    """
-    effective_bot_id = bot_id
-    ctx = resolver.resolve_for_bot(effective_bot_id, owner_id)
-    device_fs = device_fs_dispatcher.dispatch(ctx)
-    service = factory.create(bot_id=effective_bot_id)
-    result = await service.preview_resource(resource_id, device_fs=device_fs)
-    if result is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Resource not found or not previewable",
-        )
-    return envelope(
-        Preview(
-            resource_id=resource_id,
-            content_type=result["content_type"],
-            content=result["content"],
-        ),
-        request,
-    )

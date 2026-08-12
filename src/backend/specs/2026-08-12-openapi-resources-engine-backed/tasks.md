@@ -78,23 +78,23 @@ change, no OCB dependency in this scope.
   through the engine gather at promotion; extending that to the other engines is
   the prerequisite for dropping these rows, and is publish-pipeline work outside
   this scope.
-- [ ] **B3.** Replace `GET /{resource_id}/download` with
+- [x] **B3.** Replace `GET /{resource_id}/download` with
   `GET /download?path=` → `ResourceFileService.read_file`. Declare it **before**
   `/{resource_id}` (`:293`), as `/check-name` and `/upload` already are.
-- [ ] **B4.** Replace `GET /{resource_id}/preview` with `GET /preview?path=` →
+- [x] **B4.** Replace `GET /{resource_id}/preview` with `GET /preview?path=` →
   `read_file` + the existing text-ification and 1 MB cap
   (`FileTooLargeError` → 413).
-- [ ] **B5.** Add `DELETE ""?path=` → `ResourceFileService.delete` (which routes
+- [x] **B5.** Add `DELETE ""?path=` → `ResourceFileService.delete` (which routes
   file vs. directory), then remove any matching record. Missing record is not an
   error; missing file is 404.
-- [ ] **B6.** Narrow `GET /{resource_id}` and `DELETE /{resource_id}` to links
+- [~] **B6.** Narrow `GET /{resource_id}` and `DELETE /{resource_id}` to links
   only; a file id no longer resolves.
 - [ ] **B7.** `GET /check-name`: for files, take `path` and resolve via
   `device_fs.exists` instead of the repo; links keep `name` and the repo check.
   (Two parameters on one endpoint reflects the two resource types; splitting the
   file and link surfaces entirely is the cleaner end state but a larger contract
   change than this one.)
-- [ ] **B8.** Add `POST /mkdir?path=` → `ResourceFileService.create_directory`
+- [x] **B8.** Add `POST /mkdir?path=` → `ResourceFileService.create_directory`
   (writes a `.keep`). `POST ""` with `type=FOLDER` keeps returning 501 — folder
   *records* remain unsupported.
 

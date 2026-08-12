@@ -361,6 +361,24 @@ class ResourceService:
                 logger.warning("[delete_resource] device_fs delete failed: %s", e)
         return self._repo.delete(resource_id)
 
+    async def delete_file_record(self, *, path: str) -> bool:
+        """Drop the record for a workspace file, if there is one.
+
+        Returns whether a row was removed. Absence is normal, not an error: a
+        file the bot created itself never had a record, and the workspace — not
+        this table — decides what exists.
+        """
+        for item in self._repo.list_resources(
+            resource_type=ResourceType.FILE.value,
+            parent_path=None,
+            user_id=None,
+            bolt_id=self._bot_id,
+        ):
+            if (item.get("attributes") or {}).get("path") == path:
+                self._repo.delete(str(item.get("id")))
+                return True
+        return False
+
     async def record_uploaded_file(
         self,
         *,
