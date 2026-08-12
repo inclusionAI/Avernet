@@ -461,3 +461,51 @@ class TestFileServiceArcaPath:
         assert not (tmp_path / "report.txt").exists()
 
 
+
+
+# ---------------------------------------------------------------------------
+# delete_file_record
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteFileRecord:
+    """The row for a workspace file, dropped by path rather than by id.
+
+    The return value matters because it is the only signal the drop happened:
+    the router calls this before removing the file, so a ``True`` that merely
+    means "a row matched the scan" would claim a drop the repository refused.
+    """
+
+    @staticmethod
+    def _repo_with_file(path: str) -> MagicMock:
+        repo = _mock_repo()
+        repo.list_resources.return_value = [
+            {"id": 7, "attributes": {"path": path}},
+        ]
+        return repo
+
+    @pytest.mark.asyncio
+    async def test_returns_the_repositorys_answer_not_the_scan_result(self):
+        """A row can vanish between the scan and the update. Reporting the scan
+        would say a row was removed when the repository removed nothing."""
+        repo = self._repo_with_file("docs/a.txt")
+        repo.delete.return_value = False
+
+        assert await _make_service(repo).delete_file_record(path="docs/a.txt") is False
+        repo.delete.assert_called_once_with("7")
+
+    @pytest.mark.asyncio
+    async def test_reports_a_dropped_row(self):
+        repo = self._repo_with_file("docs/a.txt")
+        repo.delete.return_value = True
+
+        assert await _make_service(repo).delete_file_record(path="docs/a.txt") is True
+
+    @pytest.mark.asyncio
+    async def test_no_matching_row_is_not_an_error(self):
+        """A file the bot created itself never had a record — absence is the
+        normal case, not a failure, so nothing is deleted and nothing raises."""
+        repo = self._repo_with_file("docs/a.txt")
+
+        assert await _make_service(repo).delete_file_record(path="other.txt") is False
+        repo.delete.assert_not_called()

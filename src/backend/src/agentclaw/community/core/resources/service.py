@@ -364,9 +364,15 @@ class ResourceService:
     async def delete_file_record(self, *, path: str) -> bool:
         """Drop the record for a workspace file, if there is one.
 
-        Returns whether a row was removed. Absence is normal, not an error: a
-        file the bot created itself never had a record, and the workspace — not
-        this table — decides what exists.
+        Returns whether a row was removed — the repository's own answer, not a
+        restatement of "a row matched". The two differ when the row disappears
+        between the scan and the update, and reporting the scan result would
+        claim a drop that never happened.
+
+        A ``False`` is not an error, which is why the caller does not check it:
+        absence is the desired end state either way. A file the bot created
+        itself never had a record, and the workspace — not this table — decides
+        what exists.
         """
         for item in self._repo.list_resources(
             resource_type=ResourceType.FILE.value,
@@ -375,8 +381,7 @@ class ResourceService:
             bolt_id=self._bot_id,
         ):
             if (item.get("attributes") or {}).get("path") == path:
-                self._repo.delete(str(item.get("id")))
-                return True
+                return self._repo.delete(str(item.get("id")))
         return False
 
     async def record_uploaded_file(
@@ -391,11 +396,15 @@ class ResourceService:
         """Record a file that is already present in the workspace.
 
         The bytes are written through the device seam before this runs, so the
-        row is enrichment rather than the fact of existence: it carries what the
-        filesystem cannot know — who uploaded the file, when, and that it arrived
-        by upload rather than being produced by the bot. It is also what the
-        publish pipeline reads to build a released bot's manifest, which is why
-        an upload writes one at all.
+        row is not the fact of existence — the workspace is. What it is, is the
+        publish pipeline's input: that pipeline builds a released bot's manifest
+        from these rows, so a file with no row publishes as a bot silently
+        missing it. That makes the write load-bearing rather than decorative,
+        and a failure here fails the upload (the caller rolls the file back).
+
+        It also carries what the filesystem cannot know — who uploaded the file,
+        when, and that it arrived by upload rather than being produced by the
+        bot — which the console surfaces. This API does not.
 
         ``name`` and ``parent_path`` are derived from ``path`` rather than asked
         for: ``name`` is non-optional on the model, and the console's listing

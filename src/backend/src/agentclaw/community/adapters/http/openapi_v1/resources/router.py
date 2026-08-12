@@ -59,7 +59,10 @@ from agentclaw.community.core.resources.service import (
     FileTooLargeError,
     InvalidResourcePathError,
 )
-from agentclaw.community.core.services.resource_file_service import ResourceFileService
+from agentclaw.community.core.services.resource_file_service import (
+    ResourceFileService,
+    is_readonly,
+)
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 
@@ -603,6 +606,13 @@ async def delete_file(
     safe = _safe_path(path)
     if not safe:
         raise InvalidResourcePathError("path is required")
+    # Same read-only policy the console's delete enforces
+    # (``adapters/http/resources/file_router.py:381``) — dotfiles and the
+    # workspace-root identity files. Addressing by path is what makes these
+    # reachable at all: they never had a resource record, so the old
+    # id-addressed delete could not name them and needed no guard.
+    if is_readonly(safe):
+        raise HTTPException(status_code=403, detail="Cannot delete read-only file")
     entity_type, entity_id, engine_type = _file_coords(bot_id, owner_id, bot_repo)
     if not await file_svc.exists(
         entity_type=entity_type,
@@ -620,13 +630,20 @@ async def delete_file(
     # which the retry tolerates (a missing record is not an error) while it
     # retries the file.
     await factory.create(bot_id=bot_id).delete_file_record(path=safe)
-    await file_svc.delete(
+    # The providers report a refused delete by returning False rather than
+    # raising, so discarding this would answer ``deleted=true`` over a file
+    # still sitting in the workspace. 502 rather than the console's 404: the
+    # existence check above already ran, so False here means the device refused,
+    # not that the path was absent. The record is gone by now, which the retry
+    # tolerates — a missing record is not an error — while it retries the file.
+    if not await file_svc.delete(
         entity_type=entity_type,
         entity_id=entity_id,
         bot_id=bot_id,
         engine_type=engine_type,
         path=safe,
-    )
+    ):
+        raise HTTPException(status_code=502, detail="Delete storage failed")
     return deleted_envelope(request)
 
 

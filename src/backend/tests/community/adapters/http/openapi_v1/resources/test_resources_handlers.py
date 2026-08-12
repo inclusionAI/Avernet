@@ -1552,11 +1552,13 @@ class _StubReadFileService(_StubFileService):
             raise self.read_raises
         return self._files.get(path)
 
-    async def delete(self, *, path, **_kw):
+    async def delete(self, *, path, **_kw) -> bool:
         self.deleted_paths.append(path)
         if self.delete_raises is not None:
             raise self.delete_raises
-        self._files.pop(path, None)
+        # The real service answers False when the device refused, so the stub
+        # reports the removal rather than returning None.
+        return self._files.pop(path, None) is not None
 
     async def create_directory(self, *, path, **_kw):
         self.made_dirs.append(path)
@@ -1769,6 +1771,62 @@ async def test_delete_file_leaves_the_file_when_the_record_drop_fails():
         )
 
     assert file_svc.deleted_paths == []  # the bytes are still there to retry
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", [".env", "AGENTS.md", "docs/.hidden"])
+async def test_delete_file_403s_a_read_only_path(path):
+    """Same policy the console's delete enforces. Addressing by path is what
+    makes these reachable at all — they never had a resource record, so the old
+    id-addressed delete could not name them."""
+    file_svc = _StubReadFileService({".env": b"x", "AGENTS.md": b"x"})
+
+    with pytest.raises(HTTPException) as exc:
+        await delete_file(
+            path=path,
+            owner_id="u1",
+            bot_id="bot-x",
+            factory=SimpleNamespace(create=lambda **kw: None),
+            bot_repo=_StubBotRepo(),
+            file_svc=file_svc,
+            request=_request_without_trace(),
+        )
+
+    assert exc.value.status_code == 403
+    assert file_svc.deleted_paths == []
+
+
+@pytest.mark.asyncio
+async def test_delete_file_502_when_the_device_refuses():
+    """The providers report a refused delete by returning False rather than
+    raising, so discarding it would answer ``deleted=true`` over a file still
+    sitting in the workspace."""
+
+    class _RefusingFileService(_StubReadFileService):
+        async def delete(self, *, path, **_kw) -> bool:
+            self.deleted_paths.append(path)
+            return False
+
+    file_svc = _RefusingFileService({"docs/a.txt": b"x"})
+
+    class _NoopFactory:
+        def create(self, *, bot_id):
+            return SimpleNamespace(delete_file_record=lambda **kw: _async_true())
+
+    with pytest.raises(HTTPException) as exc:
+        await delete_file(
+            path="docs/a.txt",
+            owner_id="u1",
+            bot_id="bot-x",
+            factory=_NoopFactory(),
+            bot_repo=_StubBotRepo(),
+            file_svc=file_svc,
+            request=_request_without_trace(),
+        )
+
+    # 502, not the console's 404: the existence check already ran, so False here
+    # means the device refused rather than the path being absent.
+    assert exc.value.status_code == 502
 
 
 @pytest.mark.asyncio
