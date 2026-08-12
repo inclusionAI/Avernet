@@ -61,7 +61,7 @@ from src.domain.models.fusion_result import (
     FusionTiming,
 )
 from src.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
-from src.domain.models.profile_fusion import FusionContext
+from src.domain.models.profile_fusion import FusionContext, GroupConversationSummary
 from src.infra.context import submit_with_context
 
 if TYPE_CHECKING:
@@ -659,7 +659,6 @@ class GroupFusionService:
         Returns:
             FusionResult: 融合结果（G9 模式）
         """
-        from src.domain.models.profile_fusion import GroupConversationSummary
         from src.utils.fuse_util import generate_fusion_id, worker_profile_to_dict
 
         start_time = time.time()
@@ -826,6 +825,7 @@ class GroupFusionService:
                 rewritten_question=request.question,
                 original_question=request.question,
                 context_summary="",
+                key_messages=[],
                 context_messages_count=0,
                 success=False,
                 error_message="Conversation summary failed or timed out",
@@ -835,13 +835,14 @@ class GroupFusionService:
         step1_elapsed = time.time() - step1_start
         logger.info("[G9-FUSE] Step1(并发)总耗时: %.3fs (实际并行执行)", step1_elapsed)
 
-        # ========== Step 2: 构建 Prompt（包含改写问题和会话摘要）==========
+        # ========== Step 2: 构建 Prompt（包含改写问题、会话摘要和关键群消息）==========
         step2_start = time.time()
         system_prompt, user_prompt = self._fusion_expert_chat_service.build_prompts(
             fused_profile=fused_profile,
             original_question=request.question,
             rewritten_question=conv_summary.rewritten_question,
             context_summary=conv_summary.context_summary,
+            key_messages=conv_summary.key_messages,
         )
         step2_elapsed = time.time() - step2_start
         logger.info("[G9-FUSE] Step2(Prompt构建)完成: 耗时=%.3fs", step2_elapsed)
@@ -941,14 +942,13 @@ class GroupFusionService:
         """
         import asyncio
 
-        from src.domain.models.profile_fusion import GroupConversationSummary
-
         if self._group_context_service is None:
             logger.info("[G9-FUSE] GroupContextService 未注入，跳过会话总结")
             return GroupConversationSummary(
                 rewritten_question=question,
                 original_question=question,
                 context_summary="",
+                key_messages=[],
                 context_messages_count=0,
                 success=False,
                 error_message="GroupContextService not injected",
@@ -970,6 +970,7 @@ class GroupFusionService:
                 rewritten_question=question,
                 original_question=question,
                 context_summary="",
+                key_messages=[],
                 context_messages_count=0,
                 success=False,
                 error_message=str(e),
