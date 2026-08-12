@@ -1489,7 +1489,19 @@ async def test_upload_keeps_the_directories_carried_by_the_path():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("path", [".private.md", "docs/.private.md", "AGENTS.md"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".private.md",
+        "docs/.private.md",
+        "AGENTS.md",
+        # Protected *ancestors*: the leaf is an ordinary name, but creating
+        # the path brings a hidden directory into existence along the way.
+        ".private/file.md",
+        "docs/.private/sub.md",
+        "AGENTS.md/sub.txt",
+    ],
+)
 async def test_upload_403s_a_read_only_path(path):
     """The surface must not be talked into making something it then refuses to
     manage: listings hide dotfiles and the root identity files, and delete
@@ -1514,14 +1526,15 @@ async def test_upload_403s_a_read_only_path(path):
 
 
 @pytest.mark.asyncio
-async def test_mkdir_403s_a_dot_prefixed_directory():
+@pytest.mark.parametrize("path", [".hidden", "docs/.hidden", ".hidden/deep"])
+async def test_mkdir_403s_a_dot_prefixed_directory_at_any_depth(path):
     """Same reason as the upload guard — a hidden directory would be invisible
     to listing and refused by delete."""
     file_svc = _StubReadFileService({})
 
     with pytest.raises(HTTPException) as exc:
         await create_directory(
-            path=".hidden",
+            path=path,
             owner_id="u1",
             bot_id="bot-x",
             bot_repo=_StubBotRepo(),

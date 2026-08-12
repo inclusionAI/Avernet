@@ -198,9 +198,20 @@ def _reject_read_only(safe: str) -> None:
     nor remove. Uploading a workspace-root identity file would also overwrite
     the bot's own configuration through a resource endpoint, which is not what
     this surface is for.
+
+    Every ancestor is checked, not just the whole path. ``is_readonly`` looks at
+    the final segment only, so ``.private/file.md`` passes it — the leaf is an
+    ordinary name — while creating it brings a hidden ``.private`` directory into
+    existence along the way. Removing the visible descendant afterwards would
+    then leave a directory this API created and can neither list nor delete.
     """
-    if is_readonly(safe):
-        raise HTTPException(status_code=403, detail="Cannot write to a read-only path")
+    segments = safe.split("/")
+    for depth in range(len(segments)):
+        ancestor = "/".join(segments[: depth + 1])
+        if is_readonly(ancestor):
+            raise HTTPException(
+                status_code=403, detail="Cannot write to a read-only path"
+            )
 
 
 def _file_coords(
