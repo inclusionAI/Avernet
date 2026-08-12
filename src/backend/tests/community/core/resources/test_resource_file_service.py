@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agentclaw.community.core.services.resource_file_service import (
+    ListingUnavailableError,
     ResourceFileService,
     is_readonly,
 )
@@ -445,11 +446,29 @@ async def test_upload_preserve_structure_keeps_nested_path_strips_traversal():
 
 
 @pytest.mark.asyncio
-async def test_list_dir_returns_empty_when_device_returns_none():
+async def test_list_dir_refuses_to_report_a_failed_listing_as_empty():
+    """``None`` is a *failed* listing, not an empty one — teclaw returns it for
+    any error, and the promotion path already refuses to conflate the two
+    (``deploy/teclaw_file_promotion.py:116``) because a swallowed listing error
+    ships an artifact missing files. Flattening it to ``[]`` here told a caller
+    their workspace was empty when the engine was simply unreachable."""
     device_fs = MagicMock()
-    device_fs.list_dir = AsyncMock(return_value=None)  # dir does not exist
+    device_fs.list_dir = AsyncMock(return_value=None)
     svc, _ = _svc(provider="arca", device_fs=device_fs)
-    assert await svc.list_dir(**_COORDS, path="nope") == []
+
+    with pytest.raises(ListingUnavailableError):
+        await svc.list_dir(**_COORDS, path="nope")
+
+
+@pytest.mark.asyncio
+async def test_list_dir_reports_a_genuinely_empty_directory_as_empty():
+    """``[]`` is the empty directory, and it must stay distinguishable from the
+    failure above — that distinction is the whole point."""
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(return_value=[])
+    svc, _ = _svc(provider="arca", device_fs=device_fs)
+
+    assert await svc.list_dir(**_COORDS, path="empty-dir") == []
 
 
 # ── publish-stage resolution (resolve_for_binding) ───────────────────────────

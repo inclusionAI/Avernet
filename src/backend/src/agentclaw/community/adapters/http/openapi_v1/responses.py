@@ -93,6 +93,9 @@ from agentclaw.community.core.mcp.errors import (
     McpServerNotFoundError,
     McpSyncFailedError,
 )
+from agentclaw.community.core.services.resource_file_service import (
+    ListingUnavailableError,
+)
 from agentclaw.community.core.resources.service import (
     DuplicateResourceError,
     FileTooLargeError,
@@ -253,6 +256,10 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # echoing the caller's path back, or naming the segment that failed, turns a
     # rejection into a probe for how addresses are resolved.
     InvalidResourcePathError: (400, "Invalid resource path"),
+    # A listing the engine could not answer. 502 rather than an empty page:
+    # reporting "no files" for an unreachable workspace is the one answer a
+    # caller must never be given by a surface that claims to read the disk.
+    ListingUnavailableError: (502, "Workspace listing unavailable"),
     LocalSkillNotFoundError: (404, "Not found"),
     LocalSkillOwnerAmbiguousError: (409, "Ambiguous Local Skill owner"),
     LocalSkillInvalidPackageError: (400, "Invalid Skill package"),

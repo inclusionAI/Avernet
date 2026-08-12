@@ -94,6 +94,16 @@ def is_readonly(path: str) -> bool:
     return False
 
 
+class ListingUnavailableError(Exception):
+    """A directory listing failed — distinct from the directory being empty.
+
+    Exists so callers cannot accidentally read "the engine did not answer" as
+    "there are no files here". Every consumer of a workspace listing has to tell
+    those apart: the publish pipeline would ship an artifact missing files, and
+    a resource API would tell a user their work is gone.
+    """
+
+
 class ResourceFileService:
     """Provider-agnostic resource-file operations over the ``workspace`` namespace."""
 
@@ -233,8 +243,21 @@ class ResourceFileService:
         )
 
         entries = await device_fs.list_dir(self._logical(path))
+        # ``None`` is a *failed* listing, not an empty one — the providers
+        # distinguish the two deliberately, and ``[]`` is a genuinely empty
+        # directory. Flattening ``None`` to ``[]`` here reported an unreachable
+        # engine as a workspace with no files in it, which is the worst possible
+        # answer for a surface whose whole premise is that it reports what is
+        # really on disk. The teclaw promotion path already refuses to conflate
+        # them for exactly this reason, and says so at its call site
+        # (``deploy/teclaw_file_promotion.py:116``): a swallowed listing error
+        # ships an artifact missing files, and there is no DB mirror to fall
+        # back on.
         if entries is None:
-            return []
+            raise ListingUnavailableError(
+                f"listing failed for {self._logical(path)!r} (engine unreachable "
+                "or refused) — refusing to report it as empty"
+            )
 
         items: list[dict[str, Any]] = []
         for e in entries:
