@@ -57,9 +57,14 @@ with a clear client error.
 the name; nested directories are created as needed. The
 same-name-in-different-directories collision disappears as a consequence.
 
-**G6. Records still carry what the filesystem cannot know** — who uploaded a
-file, when, and whether it arrived by upload or was produced by the bot — as
-enrichment on top of the filesystem, never as the arbiter of existence.
+**G6. No runtime read consults a file record.** *(Revised mid-implementation.)*
+Originally the record was to enrich responses with what the filesystem cannot
+know — uploader, upload time, upload-vs-bot-created. That was dropped: since a
+bot generates files itself, there is often no uploader to report, and a response
+field present for some files and absent for others is worse than absent for all.
+The record is still written, but for exactly one consumer — the publish pipeline,
+which builds a released bot's manifest from it and would otherwise lose files
+silently. Every field of a file in a response now comes from the workspace.
 
 **G7. Link resources are unaffected.** A link has no file; it remains
 record-backed and record-addressed.
@@ -124,9 +129,17 @@ exposure would cost a deprecation cycle.
    subsequent listing does not show it.
 8. Listing shows directories, uploaded files, and bot-created files, alongside
    link resources.
-9. An uploaded file reports its uploader and upload time; a bot-created file
-   reports those as absent rather than failing.
-10. The endpoint's coverage-baseline entry is removed and replaced by real cases.
+9. ~~An uploaded file reports its uploader and upload time~~ — **superseded by
+   G6.** No file reports an uploader, a source, or timestamps: all files are
+   reported identically from the workspace, with an empty `resource_id`. The
+   uploader is still recorded, and the console still surfaces it from the shared
+   table; this API simply does not.
+10. ~~The coverage-baseline entry is removed and replaced by real cases~~ —
+    **not achievable on this surface.** The endpoint-case runner authenticates
+    with `x-user-id` while `/openapi/v1` requires a gateway-signed principal and
+    the harness has no minter, so a case could assert nothing but a 401. The new
+    routes are baselined for that documented reason, tracked by #651, and are
+    covered by handler tests instead.
 
 ## Deferred to a follow-up
 
