@@ -1,9 +1,12 @@
 """Unit tests for BotStartupScriptService — the rules the repository doesn't own."""
+import json
+
 import pytest
 
 from agentclaw.community.core.bot_startup_script.services.startup_script_service import (
     MAX_SCRIPT_BYTES,
     BotStartupScriptService,
+    StartupScriptNotEncodableError,
     StartupScriptTooLargeError,
 )
 
@@ -376,3 +379,16 @@ def test_the_size_cap_leaves_the_base64_body_inside_a_mysql_text_column():
         f"{MAX_SCRIPT_BYTES} raw expands to {encoded} base64 bytes, which does "
         f"not leave usable room inside a {mysql_text_limit}-byte TEXT column"
     )
+
+
+def test_a_lone_surrogate_is_refused_rather_than_crashing(svc):
+    """JSON permits ``"\\ud800"`` and Pydantic's ``str`` passes it through; only
+    the UTF-8 encode fails. Unmapped, that turns caller-controlled input into a
+    500 — and the same encode feeds base64 downstream, so the body is unusable
+    either way."""
+    lone_surrogate = json.loads('{"s": "\\ud800"}')["s"]
+
+    with pytest.raises(StartupScriptNotEncodableError):
+        svc.put(
+            entity_id="ent", bot_id="bot", script=lone_surrogate, modifier="alice"
+        )

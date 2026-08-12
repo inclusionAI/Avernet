@@ -28,6 +28,7 @@ from agentclaw.community.core.bot_startup_script.repository.models import (
 from agentclaw.community.api.bot_startup_script_service import (
     MAX_SCRIPT_BYTES,
     BotStartupScriptServiceProtocol,
+    StartupScriptNotEncodableError,
     StartupScriptTooLargeError,
 )
 from agentclaw.community.core.bot_startup_script.protocols import (
@@ -49,6 +50,7 @@ __all__ = [
     "BotStartupScriptService",
     "MAX_SCRIPT_BYTES",
     "MAX_MODIFIER_CHARS",
+    "StartupScriptNotEncodableError",
     "StartupScriptTooLargeError",
 ]
 
@@ -102,8 +104,17 @@ class BotStartupScriptService(
 
         Raises:
             StartupScriptTooLargeError: When the body exceeds the size cap.
+            StartupScriptNotEncodableError: When the body is not encodable UTF-8.
         """
-        size_bytes = len(script.encode("utf-8"))
+        try:
+            encoded = script.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            # A lone surrogate survives JSON decoding and Pydantic's ``str``,
+            # and only fails here. Left unmapped it is a 500 for input the
+            # caller controls; the body is also unusable downstream, where the
+            # same encode feeds base64.
+            raise StartupScriptNotEncodableError() from exc
+        size_bytes = len(encoded)
         if size_bytes > MAX_SCRIPT_BYTES:
             raise StartupScriptTooLargeError(size_bytes)
         return self._repository.upsert(

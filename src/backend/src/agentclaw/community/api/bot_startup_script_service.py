@@ -86,9 +86,24 @@ class StartupScriptTooLargeError(ValueError):
         self.limit_bytes = MAX_SCRIPT_BYTES
 
 
+class StartupScriptNotEncodableError(ValueError):
+    """Raised when a submitted script is not encodable UTF-8.
+
+    JSON permits an escaped lone surrogate (``"\\ud800"``) and Pydantic's ``str``
+    passes it through, but encoding one raises — so without this the size check
+    downstream turns client-controlled input into a 500. Refused as a bad
+    request instead, beside the size cap and for the same reason: a body problem
+    should be answered at write time, not become an unhandled crash.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("startup script is not encodable as UTF-8")
+
+
 __all__ = [
     "BotStartupScriptServiceProtocol",
     "MAX_SCRIPT_BYTES",
+    "StartupScriptNotEncodableError",
     "StartupScriptTooLargeError",
     "SUPPORTED",
     "UNSUPPORTED",

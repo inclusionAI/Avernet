@@ -41,6 +41,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
 )
 from agentclaw.community.api.bot_startup_script_service import (
     MAX_SCRIPT_BYTES,
+    StartupScriptNotEncodableError,
     StartupScriptTooLargeError,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
@@ -270,6 +271,9 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # the message cannot drift from what the service actually enforces — and
     # unlike ``str(exc)`` it carries no caller data or internal path, which is
     # what the fixed-message rule above is protecting against.
+    # A body JSON accepted but UTF-8 cannot encode — a lone surrogate. The
+    # caller's input, so a 400, not the 500 an unmapped encode error would give.
+    StartupScriptNotEncodableError: (400, "Startup script is not valid UTF-8"),
     StartupScriptTooLargeError: (
         413,
         f"Startup script exceeds the {MAX_SCRIPT_BYTES}-byte limit",
