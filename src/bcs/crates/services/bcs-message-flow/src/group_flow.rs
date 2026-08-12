@@ -2224,12 +2224,17 @@ async fn frame_for_target(
     );
     let context_projection =
         context_projection_for_delivery(flow, group, cmd.session_id.as_deref()).await;
-    let wire_attachments = cmd.attachments.as_ref().map(|attachments| {
-        attachments
+    let wire_attachments = cmd.attachments.as_ref().and_then(|attachments| {
+        let attachments = attachments
             .iter()
+            .filter(|attachment| {
+                target.delivery_type == DeliveryType::Send
+                    || attachment.attachment_type != bcs_domain::AttachmentType::File
+            })
             .cloned()
             .map(WireAttachment::from)
-            .collect()
+            .collect::<Vec<_>>();
+        (!attachments.is_empty()).then_some(attachments)
     });
     match target.delivery_type {
         DeliveryType::Send => {
@@ -2553,14 +2558,19 @@ async fn build_workbench_user_event(flow: &BcsMessageFlow, cmd: &WebSendCommand)
     serde_json::to_string(&frame).unwrap_or_default()
 }
 
-/// Echo the inbound attachments verbatim (including the client-provided
-/// `url`/`expires_at`, which stays in **milliseconds**) so other frontends can
-/// render images without waiting for a history refresh. Returns `None` when
-/// there are no attachments, so the event omits the `attachments` key entirely
-/// (older frontends unaffected).
+/// Echo image capabilities so frontends can render them immediately, while
+/// exposing only stable metadata for files whose URL is target-bot-only.
 fn echo_event_attachments(attachments: Option<&[Attachment]>) -> Option<Value> {
     let attachments = attachments.filter(|items| !items.is_empty())?;
-    serde_json::to_value(attachments).ok()
+    let sanitized = attachments
+        .iter()
+        .map(|attachment| match attachment.attachment_type {
+            bcs_domain::AttachmentType::Image => serde_json::to_value(attachment).ok(),
+            // COSEC: file URLs are bearer capabilities scoped to active chat.send.
+            bcs_domain::AttachmentType::File => Some(attachment.stable_metadata()),
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(Value::Array(sanitized))
 }
 
 fn effective_message_log_session_id<'a>(group_id: &'a str, session_id: Option<&'a str>) -> &'a str {

@@ -53,6 +53,7 @@ pub struct ChatEvent {
     pub stop_reason: Option<String>,
     pub error_message: Option<String>,
     pub error_kind: Option<String>,
+    pub error_code: Option<String>,
     pub message: Option<Value>,
     pub raw: Value,
 }

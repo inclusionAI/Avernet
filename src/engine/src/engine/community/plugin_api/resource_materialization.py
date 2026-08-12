@@ -1,10 +1,12 @@
 """Plugin contracts crossed by the Engine materialization service."""
+
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from engine.community.core.resource_materialization.models import (
+    ChatAttachmentMaterializationRequest,
     MaterializationRequest,
     MaterializationResult,
 )
@@ -32,3 +34,14 @@ class BackendMaterializationCallbackClient(Protocol):
     """Report a terminal materialization result to Backend."""
 
     async def report(self, result: MaterializationResult) -> None: ...
+
+
+@runtime_checkable
+class TemporaryUrlPullClient(Protocol):
+    """Download one validated short-lived capability into a caller-owned file."""
+
+    async def pull(
+        self,
+        request: ChatAttachmentMaterializationRequest,
+        destination: Path,
+    ) -> None: ...

@@ -7,16 +7,20 @@ from injector import Binder, Module, inject, provider, singleton
 from engine.community.core.resource_materialization.service import (
     ResourceMaterializationService,
 )
+from engine.community.config import load_temporary_url_settings
 from engine.community.core.session_files.export_service import SessionFileExportService
 from engine.community.core.session_files.service import SessionFileService
 from engine.community.plugin_api.resource_materialization import (
     BaasMaterializationClient,
     BackendMaterializationCallbackClient,
+    TemporaryUrlPullClient,
 )
 from engine.community.plugin_api.session_file_export import BaasSessionFileClient
 from engine.community.plugins.resource_materialization import (
     NotConfiguredBaasMaterializationClient,
     NotConfiguredBackendMaterializationCallbackClient,
+    HttpTemporaryUrlPullClient,
+    NotConfiguredTemporaryUrlPullClient,
 )
 from engine.community.plugins.session_file_export import (
     NotConfiguredBaasSessionFileClient,
@@ -30,6 +34,21 @@ class ResourceMaterializationModule(Module):
         binder.bind(
             BaasMaterializationClient,
             to=NotConfiguredBaasMaterializationClient,
+            scope=singleton,
+        )
+        settings = load_temporary_url_settings()
+        temporary_client: TemporaryUrlPullClient
+        if settings.allowed_hosts:
+            temporary_client = HttpTemporaryUrlPullClient(
+                allowed_hosts=settings.allowed_hosts,
+                max_bytes=settings.max_bytes,
+                timeout_seconds=settings.timeout_seconds,
+            )
+        else:
+            temporary_client = NotConfiguredTemporaryUrlPullClient()
+        binder.bind(
+            TemporaryUrlPullClient,
+            to=temporary_client,
             scope=singleton,
         )
         binder.bind(
@@ -50,10 +69,12 @@ class ResourceMaterializationModule(Module):
         self,
         pull_client: BaasMaterializationClient,
         callback_client: BackendMaterializationCallbackClient,
+        temporary_url_pull_client: TemporaryUrlPullClient,
     ) -> ResourceMaterializationService:
         return ResourceMaterializationService(
             pull_client=pull_client,
             callback_client=callback_client,
+            temporary_url_pull_client=temporary_url_pull_client,
         )
 
     @singleton

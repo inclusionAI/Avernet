@@ -11,8 +11,9 @@ use tracing::{info, warn};
 
 use bcs_channel_api::{ChannelInboundSink, ChannelProvider, ChannelProviderRegistry};
 use bcs_domain::{
-    ActorKind, BindingStatus, BindingTarget, ChannelBinding, ChannelType, ConversationSessionMap,
-    Group, GroupChatScope, GroupKind, GroupStrategy, HumanInputNotificationMode,
+    ActorKind, Attachment, AttachmentType, BindingStatus, BindingTarget, ChannelBinding,
+    ChannelType, ConversationSessionMap, Group, GroupChatScope, GroupKind, GroupStrategy,
+    HumanInputNotificationMode,
     HumanInputRequest, HumanInputRequestStatus, ImParticipantMap, Participant, ParticipantMode,
     ParticipantRole, Session, SessionKind, SessionScope, SessionStatus, SystemMessageEvent,
     Visibility, channel_group_id,
@@ -948,6 +949,7 @@ impl ChannelService for BcsChannelService {
         msg.im_user_id = normalize_required(&msg.im_user_id, "im_user_id")
             .map_err(|error| invalid_inbound(error))?
             .to_string();
+        validate_inbound_content(&msg)?;
         let account_ref = msg.account_ref.clone();
         info!(
             channel_type = %msg.channel_type,
@@ -985,6 +987,17 @@ impl ChannelService for BcsChannelService {
             target_kind = binding_target_kind(&binding.target),
             "channel inbound: binding resolved"
         );
+        if has_temporary_file_attachment(msg.attachments.as_deref())
+            && msg.channel_type == "dingtalk"
+            && msg.conversation_type == "2"
+            && binding.group_chat_scope != Some(GroupChatScope::PerSender)
+        {
+            return Err(ChannelInboundError::new(
+                ChannelInboundFailureKind::UnsupportedAttachment,
+                false,
+                "DingTalk file attachments require a direct or per-sender session",
+            ));
+        }
         let dedup_key = inbound_dedup_key(&msg.channel_type, &account_ref, &msg.msg_id);
         if let Some(key) = dedup_key.as_deref() {
             if !self.inbound_dedup.claim(key).await {
@@ -1481,6 +1494,39 @@ impl ChannelService for BcsChannelService {
         self.delete_binding_locked(&binding).await?;
         Ok(())
     }
+}
+
+fn validate_inbound_content(msg: &InboundMessage) -> Result<(), ChannelInboundError> {
+    let attachments = msg.attachments.as_deref().unwrap_or_default();
+    if attachments.iter().any(|attachment| !valid_attachment(attachment)) {
+        return Err(ChannelInboundError::new(
+            ChannelInboundFailureKind::InvalidInbound,
+            false,
+            "attachment metadata is incomplete",
+        ));
+    }
+    if msg.text.trim().is_empty() && attachments.is_empty() {
+        return Err(ChannelInboundError::new(
+            ChannelInboundFailureKind::InvalidInbound,
+            false,
+            "message text and attachments are both empty",
+        ));
+    }
+    Ok(())
+}
+
+fn valid_attachment(attachment: &Attachment) -> bool {
+    !attachment.attachment_id.trim().is_empty()
+        && !attachment.file_name.trim().is_empty()
+        && !attachment.url.trim().is_empty()
+}
+
+fn has_temporary_file_attachment(attachments: Option<&[Attachment]>) -> bool {
+    attachments.is_some_and(|items| {
+        items
+            .iter()
+            .any(|attachment| attachment.attachment_type == AttachmentType::File)
+    })
 }
 
 #[async_trait]
@@ -4096,6 +4142,74 @@ mod tests {
         assert_eq!(
             attachments[0]["url"],
             "https://download.example.com/image?token=temporary"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn dingtalk_file_attachment_requires_dm_or_per_sender_scope() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        harness
+            .service
+            .create_binding(CreateBindingCommand {
+                channel_type: channel_type(),
+                account_ref: "robot_1".to_string(),
+                target: BindingTarget::Group {
+                    group_id: "group_1".to_string(),
+                },
+                group_chat_scope: Some(GroupChatScope::ConversationShared),
+                outbound_visibility: Visibility::FullTranscript,
+                env: "dev".to_string(),
+                created_by: Some("creator".to_string()),
+                config: dingtalk_config("robot_1"),
+            })
+            .await?;
+        let mut inbound = group_inbound("conv_group", "u1", Some("张三"), "msg-file", true);
+        inbound.text.clear();
+        inbound.attachments = Some(vec![serde_json::from_value(serde_json::json!({
+            "attachment_id": "att-file",
+            "type": "file",
+            "file_name": "design.pdf",
+            "url": "https://download.example.com/temporary"
+        }))?]);
+
+        let error = harness.service.handle_inbound(inbound).await.unwrap_err();
+
+        assert_eq!(error.kind, ChannelInboundFailureKind::UnsupportedAttachment);
+        assert!(harness.message_flow.web_sends.lock().await.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn per_sender_accepts_pure_file_message_without_fabricated_text() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        let mut binding = active_binding(
+            "binding_per_sender_file",
+            "robot_1",
+            BindingTarget::Group {
+                group_id: "group_1".to_string(),
+            },
+            Visibility::FullTranscript,
+        );
+        binding.group_chat_scope = Some(GroupChatScope::PerSender);
+        harness.binding_repo.create(binding).await?;
+        let mut inbound = group_inbound("conv_group", "u1", Some("张三"), "msg-file", true);
+        inbound.text.clear();
+        inbound.attachments = Some(vec![serde_json::from_value(serde_json::json!({
+            "attachment_id": "att-file",
+            "type": "file",
+            "file_name": "design.pdf",
+            "url": "https://download.example.com/temporary"
+        }))?]);
+
+        harness.service.handle_inbound(inbound).await?;
+
+        let sends = harness.message_flow.web_sends.lock().await;
+        assert_eq!(sends.len(), 1);
+        assert_eq!(sends[0].message, "");
+        assert_eq!(
+            sends[0].attachments.as_ref().unwrap()[0].attachment_type,
+            bcs_domain::AttachmentType::File
         );
         Ok(())
     }

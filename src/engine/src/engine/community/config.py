@@ -59,6 +59,32 @@ class EngineProcessSettings:
         return len(self.start_cmd) > 0
 
 
+@dataclass(frozen=True)
+class TemporaryUrlSettings:
+    allowed_hosts: frozenset[str]
+    max_bytes: int
+    timeout_seconds: float
+
+
+def load_temporary_url_settings() -> TemporaryUrlSettings:
+    hosts = frozenset(
+        host.strip().lower()
+        for host in os.getenv("ENGINE_TEMPORARY_URL_ALLOWED_HOSTS", "").split(",")
+        if host.strip()
+    )
+    max_bytes = int(
+        os.getenv("ENGINE_TEMPORARY_URL_MAX_BYTES", str(100 * 1024 * 1024))
+    )
+    timeout_seconds = float(os.getenv("ENGINE_TEMPORARY_URL_TIMEOUT_SECONDS", "60"))
+    if max_bytes <= 0 or timeout_seconds <= 0:
+        raise ValueError("temporary URL limits must be positive")
+    return TemporaryUrlSettings(
+        allowed_hosts=hosts,
+        max_bytes=max_bytes,
+        timeout_seconds=timeout_seconds,
+    )
+
+
 def _to_bool(value: Any, default: bool) -> bool:
     if isinstance(value, bool):
         return value

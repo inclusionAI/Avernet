@@ -3584,6 +3584,19 @@ fn image_attachment() -> bcs_domain::Attachment {
     }
 }
 
+fn file_attachment() -> bcs_domain::Attachment {
+    bcs_domain::Attachment {
+        attachment_id: "file_2".to_string(),
+        attachment_type: bcs_domain::AttachmentType::File,
+        file_name: "design.pdf".to_string(),
+        mime_type: Some("application/pdf".to_string()),
+        size: None,
+        sha256: None,
+        url: "https://download.example.com/temporary".to_string(),
+        expires_at: None,
+    }
+}
+
 fn human_web_send(message: &str, attachments: Option<Vec<bcs_domain::Attachment>>) -> WebSendCommand {
     WebSendCommand {
         caller: CallerContext::Human(HumanActor {
@@ -3639,6 +3652,50 @@ async fn web_send_event_echoes_attachments_verbatim() {
     assert_eq!(atts[0]["expires_at"], 1_786_346_756_000_u64);
     // Existing content shape is untouched.
     assert_eq!(event["payload"]["message"]["content"][0]["text"], "看图");
+}
+
+#[tokio::test]
+async fn temporary_file_attachment_is_sent_only_to_active_chat_send() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    );
+
+    flow.handle_web_send(human_web_send("", Some(vec![file_attachment()])))
+        .await
+        .unwrap();
+
+    let frames = support.bot_delivery.frames().await;
+    let send = frames
+        .iter()
+        .find_map(|frame| match frame {
+            BcsFrame::Request(request) if request.method == "chat.send" => request.params.as_ref(),
+            _ => None,
+        })
+        .expect("chat.send params");
+    let inject = frames
+        .iter()
+        .find_map(|frame| match frame {
+            BcsFrame::Request(request) if request.method == "chat.inject" => request.params.as_ref(),
+            _ => None,
+        })
+        .expect("chat.inject params");
+    assert_eq!(send["attachments"][0]["type"], "file");
+    assert!(inject.get("attachments").is_none());
+
+    let events = support.frontend_delivery.events().await;
+    assert_eq!(events.len(), 1);
+    let event: serde_json::Value = serde_json::from_str(&events[0]).unwrap();
+    let attachment = &event["payload"]["message"]["attachments"][0];
+    assert_eq!(attachment["attachment_id"], "file_2");
+    assert_eq!(attachment["type"], "file");
+    assert!(attachment.get("url").is_none(), "event: {event}");
+    assert!(attachment.get("expires_at").is_none(), "event: {event}");
+    assert!(!events[0].contains("download.example.com"));
 }
 
 #[tokio::test]

@@ -6,13 +6,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
 from engine.community.core.resource_materialization.models import (
+    ChatAttachmentMaterializationRequest,
     MaterializationRequest,
 )
 from engine.community.core.resource_materialization.service import (
     ResourceMaterializationService,
     ResourceNotMaterializedError,
+    build_session_file_relative_path,
 )
 
 
@@ -28,12 +29,160 @@ class _PullClient:
         destination.write_bytes(self.content)
 
 
+class _FailingPullClient:
+    async def pull(self, request, destination: Path) -> None:
+        raise RuntimeError("temporary download failed with a secret URL")
+
+
 class _CallbackClient:
     def __init__(self) -> None:
         self.results = []
 
     async def report(self, result) -> None:
         self.results.append(result)
+
+
+def test_session_file_path_builder_matches_backend_layout():
+    relative = build_session_file_relative_path(
+        scope_key_hash="a" * 64,
+        session_key_hash="b" * 64,
+        resource_id="sr_contract",
+        filename="design.pdf",
+    )
+
+    assert relative.as_posix() == (
+        f".teamclaw/session-files/{'a' * 64}/{'b' * 64}/sr_contract/design.pdf"
+    )
+
+
+@pytest.mark.asyncio
+async def test_chat_attachment_reuses_materializer_without_backend_callback(
+    tmp_path: Path,
+):
+    content = b"design"
+    pull = _PullClient(content)
+    callback = _CallbackClient()
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(b"unused"),
+        callback_client=callback,
+        temporary_url_pull_client=pull,
+        workspace_root_provider=lambda: tmp_path,
+    )
+    request = ChatAttachmentMaterializationRequest(
+        attachment_id="att-1",
+        session_key="session-1",
+        filename="design.pdf",
+        temporary_url="https://files.example/temporary?secret=redacted",
+        scope_key_hash="a" * 64,
+        size_bytes=len(content),
+        content_hash=hashlib.sha256(content).hexdigest(),
+    )
+
+    result = await service.materialize_chat_attachment(request)
+
+    assert result.ready is True
+    assert callback.results == []
+    entry = service.manifest_store.get(result.resource_id)
+    assert entry is not None
+    assert entry.source_kind == "temporary_url"
+    assert entry.source_attachment_id == "att-1"
+    assert (
+        entry.source_url_hash
+        == hashlib.sha256(request.temporary_url.encode("utf-8")).hexdigest()
+    )
+    assert request.temporary_url not in service.manifest_store.path.read_text()
+
+
+def _chat_request(**overrides) -> ChatAttachmentMaterializationRequest:
+    values = {
+        "attachment_id": "att-1",
+        "session_key": "session-1",
+        "filename": "design.pdf",
+        "temporary_url": "https://files.example/object?token=secret",
+        "scope_key_hash": "a" * 64,
+    }
+    values.update(overrides)
+    return ChatAttachmentMaterializationRequest(**values)
+
+
+@pytest.mark.asyncio
+async def test_chat_attachment_rejects_expired_url_before_download(tmp_path: Path):
+    pull = _PullClient(b"unused")
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(b"unused"),
+        callback_client=_CallbackClient(),
+        temporary_url_pull_client=pull,
+        workspace_root_provider=lambda: tmp_path,
+    )
+
+    result = await service.materialize_chat_attachment(_chat_request(expires_at_ms=1))
+
+    assert result.ready is False
+    assert result.error_code == "temporary_url_expired"
+    assert pull.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_chat_attachment_fails_closed_without_temporary_url_client(
+    tmp_path: Path,
+):
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(b"unused"),
+        callback_client=_CallbackClient(),
+        workspace_root_provider=lambda: tmp_path,
+    )
+
+    result = await service.materialize_chat_attachment(_chat_request())
+
+    assert result.ready is False
+    assert result.error_code == "temporary_url_pull_not_configured"
+
+
+@pytest.mark.asyncio
+async def test_chat_attachment_maps_download_exception_to_safe_failure(
+    tmp_path: Path,
+    caplog,
+):
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(b"unused"),
+        callback_client=_CallbackClient(),
+        temporary_url_pull_client=_FailingPullClient(),
+        workspace_root_provider=lambda: tmp_path,
+    )
+
+    result = await service.materialize_chat_attachment(_chat_request())
+
+    assert result.ready is False
+    assert result.error_code == "pull_failed"
+    assert "token=secret" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_remove_chat_materialization_removes_manifest_and_file(tmp_path: Path):
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(b"unused"),
+        callback_client=_CallbackClient(),
+        temporary_url_pull_client=_PullClient(b"design"),
+        workspace_root_provider=lambda: tmp_path,
+    )
+    result = await service.materialize_chat_attachment(_chat_request())
+    target = Path(result.canonical_bot_absolute_path)
+
+    await service.remove_chat_materialization(result.resource_id)
+
+    assert not target.exists()
+    assert service.manifest_store.get(result.resource_id) is None
+
+
+@pytest.mark.asyncio
+async def test_remove_chat_materialization_ignores_unknown_resource(tmp_path: Path):
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(b"unused"),
+        callback_client=_CallbackClient(),
+        workspace_root_provider=lambda: tmp_path,
+    )
+
+    await service.remove_chat_materialization("sr_unknown")
 
 
 class _FailingCallbackClient:
