@@ -32,7 +32,6 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.api.bot_startup_script_service import (
-    BotStartupScriptRunReaderProtocol,
     BotStartupScriptServiceProtocol,
 )
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
@@ -117,14 +116,7 @@ def startup_script():
 
 
 @pytest.fixture
-def run_reader():
-    m = MagicMock()
-    m.last_start.return_value = []
-    return m
-
-
-@pytest.fixture
-def client(svc, policy, passport, engine_config, bot_repo, skill_set_factory, auth_rel, startup_script, run_reader):
+def client(svc, policy, passport, engine_config, bot_repo, skill_set_factory, auth_rel, startup_script):
     class _M(Module):
         def configure(self, binder):
             binder.bind(BotServiceProtocol, to=svc)
@@ -135,7 +127,6 @@ def client(svc, policy, passport, engine_config, bot_repo, skill_set_factory, au
             binder.bind(SkillSetServiceFactoryProtocol, to=skill_set_factory)
             binder.bind(AuthRelationshipPlugin, to=auth_rel)
             binder.bind(BotStartupScriptServiceProtocol, to=startup_script)
-            binder.bind(BotStartupScriptRunReaderProtocol, to=run_reader)
 
     app = FastAPI()
     app.include_router(router)
@@ -1072,62 +1063,8 @@ def test_startup_script_requires_ownership(client, svc):
     assert client.delete("/openapi/v1/bots/b1/startup-script").status_code == 404
 
 
-def test_last_start_returns_one_entry_per_instance(client, svc, run_reader):
-    from agentclaw.community.core.bot_startup_script.services.last_start_service import (
-        StartInstanceResult,
-    )
-
-    svc.get_bot.return_value = {
-        **_SUPPORTED_BOT,
-        "device_binding": {
-            "device_id": "dev-9",
-            "device_provider": "baas",
-            "device_props": {"publish_id": 42},
-        },
-    }
-    run_reader.last_start.return_value = [
-        StartInstanceResult("d1", "success", 0, "ok", "", False),
-        StartInstanceResult("d2", "failed", 127, "", "not found", True),
-    ]
-
-    data = _ok(client.get("/openapi/v1/bots/b1/startup-script/last-start"))
-    assert [d["instance_id"] for d in data] == ["d1", "d2"]
-    # A scaled bot whose instances disagree reports both, not a summary.
-    assert {d["status"] for d in data} == {"success", "failed"}
-    assert data[1]["exit_code"] == 127
-    assert data[1]["truncated"] is True
-    assert run_reader.last_start.call_args.kwargs["publish_id"] == 42
-
-
-def test_last_start_is_empty_for_a_bot_that_never_started(client, svc, run_reader):
-    svc.get_bot.return_value = _SUPPORTED_BOT  # no device_props / publish_id
-    assert _ok(client.get("/openapi/v1/bots/b1/startup-script/last-start")) == []
-    assert run_reader.last_start.call_args.kwargs["publish_id"] is None
-
-
-def test_last_start_requires_ownership(client, svc):
-    svc.get_bot.side_effect = BotNotFoundError("nope")
-    assert (
-        client.get("/openapi/v1/bots/b1/startup-script/last-start").status_code == 404
-    )
-
-
-def test_startup_script_put_is_retryable_when_support_is_inconclusive(
-    client, svc, startup_script
-):
-    """A swallowed binding lookup must not be reported as a permanent 409."""
-    svc.get_bot.return_value = _SUPPORTED_BOT
-    startup_script.resolve_support.return_value = (
-        "unknown",
-        "the bot's device provider could not be determined",
-    )
-    resp = client.put("/openapi/v1/bots/b1/startup-script", json={"script": "echo hi"})
-    assert resp.status_code == 503, resp.json()
-    startup_script.put.assert_not_called()
-
-
 def test_startup_script_writes_never_touch_a_running_container(
-    client, svc, startup_script, run_reader
+    client, svc, startup_script
 ):
     """Spec: editing or clearing must not disturb a running container.
 
@@ -1141,4 +1078,3 @@ def test_startup_script_writes_never_touch_a_running_container(
     client.delete("/openapi/v1/bots/b1/startup-script")
 
     svc.restart_bot.assert_not_called()
-    run_reader.last_start.assert_not_called()

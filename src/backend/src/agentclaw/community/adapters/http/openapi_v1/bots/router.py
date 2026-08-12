@@ -76,7 +76,6 @@ from agentclaw.community.core.bot_management.services.bot_service import (
 from agentclaw.community.api.bot_startup_script_service import (
     SUPPORTED,
     UNKNOWN,
-    BotStartupScriptRunReaderProtocol,
     BotStartupScriptServiceProtocol,
 )
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
@@ -99,7 +98,6 @@ from .schemas import (
     BotUpdate,
     Ceiling,
     Passport,
-    StartInstanceResult,
     StartupScript,
     StartupScriptWrite,
 )
@@ -898,69 +896,3 @@ async def delete_bot_startup_script(
     return deleted_envelope(request)
 
 
-def _last_publish_id(bot: dict[str, Any]) -> int | None:
-    """Find the publish whose devices carry the last start's result.
-
-    The create path writes ``publish_id`` into the binding's ``device_props``
-    (``baas_device_service.py:396``), while the publish flow records the
-    workflow as ``baas_publish_id``. Both spellings are read because a bot that
-    has been published carries the second and a freshly created one the first;
-    keying on either alone leaves a whole class of bot reporting nothing.
-    """
-    binding = bot.get("device_binding") or {}
-    props = binding.get("device_props") or {}
-    for candidate in (
-        props.get("publish_id"),
-        props.get("baas_publish_id"),
-        binding.get("baas_publish_id"),
-        bot.get("baas_publish_id"),
-    ):
-        if candidate:
-            try:
-                return int(candidate)
-            except (TypeError, ValueError):
-                continue
-    return None
-
-
-@router.get(
-    "/{bot_id}/startup-script/last-start",
-    response_model=Envelope[list[StartInstanceResult]],
-    responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
-)
-@envelope_errors
-async def get_bot_startup_script_last_start(
-    bot_id: str,
-    request: Request,
-    owner_id: UserIdDep,
-    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    run_reader: BotStartupScriptRunReaderProtocol = Injected(
-        BotStartupScriptRunReaderProtocol
-    ),
-) -> Envelope[list[StartInstanceResult]]:
-    """Read the outcome of the bot's last container start, one entry per instance.
-
-    This covers the **whole start sequence**, not the script alone — the script
-    is appended to the platform's own start command, so the two share one exit
-    status. Hence ``last-start`` rather than ``runs``.
-
-    Empty when the bot has never started, when its publish record has aged out,
-    or for a bot that cannot run a script at all.
-    """
-    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
-    results = run_reader.last_start(publish_id=_last_publish_id(bot))
-    return envelope(
-        [
-            StartInstanceResult(
-                instance_id=r.instance_id,
-                status=r.status,
-                exit_code=r.exit_code,
-                stdout=r.stdout,
-                stderr=r.stderr,
-                truncated=r.truncated,
-            )
-            for r in results
-        ],
-        request,
-    )

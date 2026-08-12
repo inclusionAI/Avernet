@@ -892,7 +892,6 @@ the other six: this is what "done" looks like per category.
 | GET | `/openapi/v1/bots/{bot_id}/startup-script` | Read the bot's startup script | `Envelope[StartupScript]` |
 | PUT | `/openapi/v1/bots/{bot_id}/startup-script` | Set/replace it; takes effect next start | `Envelope[StartupScript]` |
 | DELETE | `/openapi/v1/bots/{bot_id}/startup-script` | Clear it | `Envelope[Deleted]` |
-| GET | `/openapi/v1/bots/{bot_id}/startup-script/last-start` | Outcome of the last container start, per instance | `Envelope[list[StartInstanceResult]]` |
 
 #### Startup script — the promises a caller cannot infer from the schema
 
@@ -920,11 +919,13 @@ that one design choice, and none of it is visible in the OpenAPI document.
   start command that carries it is logged (with the body elided, but that is
   a mitigation, not a guarantee). There is no by-reference secret mechanism
   yet.
-- **`last-start` reports the whole start sequence, not the script alone.**
-  One command means one exit status, so the platform's boot and the caller's
-  script share a result — hence the name. The script's own output is
-  additionally written to `/home/admin/logs/startup_script.log` inside the
-  container.
+- **There is no API to read the run's result yet.** The script's output goes to
+  `/home/admin/logs/startup_script.log` inside the container, and that is the
+  only place to see it. A read endpoint was deliberately left out of this
+  change: the script shares one exit status with the platform's boot, so any
+  such endpoint reports the whole start sequence rather than the script alone,
+  and resolving *which* start to report is not solved for a published service
+  bot. Tracked as follow-up work.
 - **Two kinds of bot cannot run one, and `supported` says which:** a
   **teclaw** bot, whose container is provisioned without a start sequence at
   all, and a bot on a device provider that does not build one (legacy

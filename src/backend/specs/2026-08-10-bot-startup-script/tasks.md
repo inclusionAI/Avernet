@@ -91,22 +91,24 @@
         it exists only as a storage key resolved server-side.
 - **Depends on:** Task 1
 
-## [x] Task 5: Public API — read the last container start
-- **Goal:** Let a caller see the outcome of the last start, per instance, from
-  data that already exists.
-- **Files:** `src/backend/.../adapters/http/openapi_v1/bots/router.py`,
-  `.../core/bot_startup_script/services/_last_start.py`
-- **Done when:**
-  - [x] `GET .../startup-script/last-start` returns one entry per instance.
-  - [x] Entries are built from the binding's publish id (either spelling) →
-        `get_publish_progress(include_devices=True)` → **`device_details`** →
-        `result_message`, parsed as the JSON `serialize_hook_result` writes.
-  - [x] A scaled bot whose instances disagree reports both outcomes.
-  - [x] The response and the docs state that the result covers the **whole start
-        sequence**, not the script alone.
-  - [x] A bot that has never started, or whose publish record is gone, returns an
-        empty list rather than an error.
-- **Depends on:** Tasks 3, 4
+## ~~Task 5: Public API — read the last container start~~ — DESCOPED
+**Built, then removed at review.** The whole `last-start` surface is out of this
+change: the endpoint, `StartInstanceResult`, `BotStartupScriptRunReaderProtocol`,
+the reader service, its DI provider, its `ADMISSION` entry and its tests.
+
+The reason is a real limitation, not a preference: resolving *which* start to
+report from the bot record only works for a personal bot or a **draft** service
+bot. A published service bot does not carry the publish this reads, so the
+endpoint would answer emptily for a whole class of bot while looking like it
+worked — the same silent-wrong-answer failure the rest of this feature is careful
+to avoid.
+
+Getting create / update / delete right first, and treating the run result as
+follow-up work with its own design, is the correct order. The docs now state
+plainly that there is no API to read a run's result and that the container log is
+the only place to see it.
+
+- **Depends on:** —
 
 ## [x] Task 6: Publish the contract and document the limits
 - **Goal:** The gateway serves the routes, and the promises a caller cannot infer
@@ -114,16 +116,16 @@
 - **Files:** `src/gateway/configs/schemas/bots.openapi.json`,
   `src/backend/docs/openapi-v1/README.md`, `README.zh-CN.md`
 - **Done when:**
-  - [x] Schema regenerated with `dump_openapi.py`; all four operations present with
+  - [x] Schema regenerated with `dump_openapi.py`; all three operations present with
         security metadata; `src/gateway/tests/fixtures/bots.openapi.json` **not**
         regenerated.
   - [x] Docs state: runs on every start the platform composes and must be
         idempotent; the size limit and the timeout; that a failure degrades rather
-        than blocks; that secrets must not be placed in the body; that the reported
-        result covers the whole start sequence.
+        than blocks; that secrets must not be placed in the body; and that there is
+        no API to read a run's result — the container log is the only place.
   - [x] Docs state the two limits plainly — the script does not re-run on providers
         whose restart is in-place, and teclaw bots cannot run it at all.
-- **Depends on:** Tasks 4, 5
+- **Depends on:** Task 4
 
 ## [x] Task 7: Tests & Verification
 - **Goal:** Ensure the feature meets the spec's acceptance criteria.
@@ -131,7 +133,7 @@
 - **Done when:**
   - [x] Every acceptance criterion in `spec.md` maps to a passing test.
   - [x] Backend and gateway module CI gates pass (`OCB_PRE_PUSH_RUN_CI=1`).
-  - [x] All four endpoints carry happy **and** error cases in
+  - [x] All three endpoints carry happy **and** error cases in
         `tests/community/endpoints/test_openapi_startup_script.py`, so the flow
         coverage gate is satisfied by tests rather than by a
         `coverage_baseline.txt` entry — that file is byte-identical to `dev`.
@@ -149,8 +151,8 @@
 - **Group A — Storage and composition:** Tasks 1, 2, 3
   - Theme: The script is stored and reaches the container, safely, on every start
     the platform composes.
-- **Group B — Public surface:** Tasks 4, 5
-  - Theme: Owners can manage the script and see what the last start did.
+- **Group B — Public surface:** Task 4 (Task 5 descoped at review)
+  - Theme: Owners can manage the script.
 - **Group C — Contract publication:** Task 6
   - Theme: The gateway serves it and the limits are written down.
 - **Group D — Verification:** Task 7

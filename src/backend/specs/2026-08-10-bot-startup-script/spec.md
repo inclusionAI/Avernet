@@ -41,8 +41,6 @@ and is deferred until someone needs it.
   that a bot that is serving is a bot that is provisioned.
 - As a bot owner, I want a failed or slow script to leave my agent running, so
   that a bad script costs me a feature and not the bot.
-- As a bot owner, I want to see the result of the last container start, so that a
-  failed start is visible to me at all.
 - As a bot owner, I want to know that the script is stored but cannot run for my
   bot, rather than believing provisioning happened when it did not.
 
@@ -64,9 +62,12 @@ and is deferred until someone needs it.
 - [x] The script body cannot alter the platform's boot steps, whatever it
       contains — including quotes, shell metacharacters, heredoc delimiters, and
       placeholder-shaped text.
-- [x] A caller can read the result of the last container start for each of the
-      bot's instances, and the API states plainly that this result covers the
-      whole start sequence rather than the script alone.
+- [~] ~~A caller can read the result of the last container start for each of the
+      bot's instances.~~ **Descoped at review.** Built, then removed: resolving
+      which start to report from the bot record works only for a personal bot or
+      a *draft* service bot, so a published service bot would get an empty answer
+      indistinguishable from a real one. The contract now states that no such API
+      exists and that the container log is the only place to see a run's output.
 - [x] The published contract states that the script runs on every start the
       platform composes and must therefore be idempotent; the platform does not
       attempt to detect or suppress repeat runs.
@@ -86,15 +87,16 @@ and is deferred until someone needs it.
 - Public API to read, replace, and clear a bot's startup script.
 - Appending the stored script to the platform's start sequence, isolated so its
   failure and its runtime cannot affect the boot.
-- A read path for the last container-start result per instance.
 - An explicit answer for bots the script cannot run for.
 
 ## Out of Scope
 
-- **Separating the script's exit status and output from the platform's.** This is
-  the accepted cost of reusing the existing hook; a caller reads one combined
-  result. A separate execution stage with its own result channel is the follow-up
-  if this proves insufficient.
+- **Any API for reading a run's result.** Descoped at review, and the reason is
+  not only the combined exit status: identifying *which* start to report from the
+  bot record works for a personal bot and a draft service bot, but not for a
+  published one. Both problems belong to the same follow-up — a result channel
+  with its own design — and the container log
+  (`/home/admin/logs/startup_script.log`) is the only place to look until then.
 - **Re-running on providers whose restart does not re-run the start sequence.**
   The script inherits the existing behavior exactly: it re-runs wherever the
   platform's own boot sequence re-runs, and does not where it does not. Today
@@ -119,5 +121,7 @@ and is deferred until someone needs it.
   restrictions, or does provisioning need its own allowance?
 - Does the operator bar for writing the script equal the bar for restarting a
   bot, or is it higher — the script is arbitrary code inside the container.
-- Is the combined start result enough for a caller to debug a failed install in
-  practice, or does the follow-up separation need to be scheduled now?
+- How should a run's result be exposed at all, given that identifying the start
+  to report is unsolved for a published service bot and that the script shares one
+  exit status with the platform's boot? (The read path was descoped from this
+  change for exactly this reason.)

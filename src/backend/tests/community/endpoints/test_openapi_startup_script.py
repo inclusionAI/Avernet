@@ -1,6 +1,6 @@
 """Endpoint-framework coverage for the public startup-script operations (#926).
 
-Four routes, exercised through the assembled public app rather than a mocked
+Three routes, exercised through the assembled public app rather than a mocked
 router: the real gateway-principal verification, the ownership guard, the
 support resolver, the size cap, and the repository round-trip.
 
@@ -322,34 +322,3 @@ def delete_startup_script_absent_is_idempotent():
 )
 def delete_startup_script_unknown_bot():
     """Idempotence covers an absent script, not an absent bot."""
-
-
-# ── last-start ─────────────────────────────────────────────────────────────
-
-
-@endpoint_test(
-    method="GET",
-    path="/openapi/v1/bots/{bot_id}/startup-script/last-start",
-    scenario="empty_for_a_bot_that_never_started",
-    input=CaseInput(
-        path_params={"bot_id": _BOT_ID}, query_params=_QUERY, headers=_HEADERS
-    ),
-    seed=_seed_bot,
-    expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": []}),
-)
-def last_start_empty():
-    """No publish id means nothing to report — an empty list, not an error."""
-
-
-@endpoint_test(
-    method="GET",
-    path="/openapi/v1/bots/{bot_id}/startup-script/last-start",
-    scenario="unknown_bot",
-    input=CaseInput(
-        path_params={"bot_id": "no-such-bot"}, query_params=_QUERY, headers=_HEADERS
-    ),
-    seed=_seed_no_bot,
-    expect=ExpectError(status=404, json_contains={"data": None}),
-)
-def last_start_unknown_bot():
-    """The ownership guard runs before the publish lookup."""

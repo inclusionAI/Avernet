@@ -178,21 +178,3 @@ class StartupScript(BaseModel):
     )
 
 
-class StartInstanceResult(BaseModel):
-    """One instance's outcome for a bot's last container start.
-
-    Covers the **whole start sequence** — the platform's boot steps and the
-    bot's startup script share one exit status, because the script is appended
-    to the platform's own start command.
-    """
-
-    instance_id: str
-    status: Literal["success", "failed", "pending"]
-    exit_code: int | None = Field(
-        default=None, description="Null while the start is still pending."
-    )
-    stdout: str
-    stderr: str
-    truncated: bool = Field(
-        description="True when the platform capped the captured output."
-    )

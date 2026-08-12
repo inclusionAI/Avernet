@@ -1,5 +1,12 @@
 # Plan: Per-Bot Startup Script
 
+> **DESCOPED AT REVIEW — the `last-start` endpoint.** Everything below about
+> `last-start`, `StartInstanceResult` and the run reader was built and then
+> removed: resolving which start to report from the bot record only works for a
+> personal bot or a *draft* service bot, so a published service bot would get an
+> empty answer that looks like a real one. Read those sections as history, not as
+> the shipped design. The three CRUD operations are unaffected.
+
 ## Approach
 
 Backend-only. The bot's script is stored in a new backend table and **appended to
