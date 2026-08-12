@@ -89,7 +89,7 @@ change, no OCB dependency in this scope.
   error; missing file is 404.
 - [x] **B6.** Narrow `GET /{resource_id}` and `DELETE /{resource_id}` to links
   only; a file id no longer resolves.
-- [ ] **B7.** `GET /check-name`: for files, take `path` and resolve via
+- [x] **B7.** `GET /check-name`: for files, take `path` and resolve via
   `device_fs.exists` instead of the repo; links keep `name` and the repo check.
   (Two parameters on one endpoint reflects the two resource types; splitting the
   file and link surfaces entirely is the cleaner end state but a larger contract

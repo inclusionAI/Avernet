@@ -277,35 +277,51 @@ async def list_resources(
 @router.get("/check-name", response_model=Envelope[NameCheck])
 @envelope_errors
 async def check_resource_name(
-    name: str,
     owner_id: UserIdDep,
     request: Request,
+    # Plain defaults rather than ``Query(...)``: FastAPI still treats them as
+    # query parameters, and the handler stays directly callable in tests without
+    # a ``Query`` sentinel standing in for a string.
+    name: str = "",
+    path: str = "",
     type: ResourceType | None = None,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
+    bot_repo: BotRepository = Injected(BotRepository),
+    file_svc: ResourceFileService = Injected(ResourceFileService),
 ) -> Envelope[NameCheck]:
-    """Check whether a resource name is available.
+    """Whether a resource already exists.
 
-    ``user_id`` is the request's own required parameter, forwarded to the
-    service — the wiring the older note here said was still pending.
-    ``parent_path`` and ``exclude_id`` from the legacy signature remain
-    unexposed on this contract and are passed as None: resources are bot-scoped,
-    so there is no parent path to qualify the name with.
+    Two parameters because there are two kinds of resource, addressed
+    differently. A **file** is checked against the workspace by ``path`` — the
+    same question the upload asks before writing, answered by the same authority,
+    so the two can never disagree. A **link** is checked by ``name`` against the
+    records, because a link has no file.
+
+    A caller supplying ``path`` gets the file check; otherwise it is the link
+    check. Splitting the two surfaces entirely would be cleaner than one endpoint
+    with two addressing modes, but that is a larger contract change than this one.
     """
-    effective_bot_id = bot_id
-    service = factory.create(bot_id=effective_bot_id)
-    # Map openapi ResourceType → legacy ResourceType enum the slim service
-    # expects. When the caller omits ``type``, default to FILE (matches the
-    # legacy handler's most common case — the openapi check-name call shape
-    # has no FOLDER equivalent).
-    legacy_type = _legacy_type_for(type) or _LegacyType.FILE
+    if path or type == ResourceType.FILE or type == ResourceType.FOLDER:
+        safe = _safe_path(path or name)
+        if not safe:
+            raise InvalidResourcePathError("path is required")
+        entity_type, entity_id, engine_type = _file_coords(bot_id, owner_id, bot_repo)
+        exists = await file_svc.exists(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            bot_id=bot_id,
+            engine_type=engine_type,
+            path=safe,
+        )
+        return envelope(NameCheck(name=safe, exists=exists), request)
+
+    service = factory.create(bot_id=bot_id)
     # owner_id is the request's own ``user_id`` — fail-closed, since neither a
-    # missing parameter nor one naming another user reaches this line. The slim
-    # service signature REQUIRES both keyword args (no defaults), so parent_path
-    # is passed explicitly as None rather than omitted.
+    # missing parameter nor one naming another user reaches this line.
     exists = await service.check_name_exists(
         name=name,
-        resource_type=legacy_type,
+        resource_type=_LegacyType.LINK,
         parent_path=None,
         user_id=owner_id,
     )

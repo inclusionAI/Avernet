@@ -583,93 +583,97 @@ async def test_list_rejects_a_directory_escaping_the_workspace():
     assert resp.status_code == 400
     assert file_svc.listed == []
 
-
-# ── check_resource_name handler wiring (Phase 1 Task 3) ──────────────────
-#
-# Same direct-handler-invocation pattern as Task 2: bypass FastAPI DI,
-# supply a stub factory. `_StubService.check_name_exists` returns True iff
-# `name == "taken"`, exercising both exists-branches with one stub.
+# ── check_resource_name: files ask the workspace, links ask the records ──
 
 
 @pytest.mark.asyncio
-async def test_check_name_returns_envelope_with_exists_false_for_available():
-    service = _StubService([])
-    factory = _StubFactory(service)
+async def test_check_name_asks_the_workspace_for_a_file_path():
+    """Same question the upload asks before writing, answered by the same
+    authority — so the two can never disagree."""
+    file_svc = _StubFileService(existing={"docs/a.txt"})
 
     env = await check_resource_name(
-        name="available",
+        path="docs/a.txt",
         owner_id="u1",
-        type=None,
         bot_id="bot-x",
-        factory=factory,
-        request=_request_without_trace(),
-    )
-
-    assert isinstance(env, Envelope)
-    assert env.code == CODE_OK
-    assert env.message == "OK"
-    assert env.data is not None
-    assert isinstance(env.data, NameCheck)
-    assert env.data.name == "available"
-    assert env.data.exists is False
-
-
-@pytest.mark.asyncio
-async def test_check_name_returns_exists_true_for_taken():
-    service = _StubService([])
-    factory = _StubFactory(service)
-
-    env = await check_resource_name(
-        name="taken",
-        owner_id="u1",
-        type=None,
-        bot_id=None,
-        factory=factory,
+        factory=_StubFactory(_StubService([])),
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
         request=_request_without_trace(),
     )
 
     assert env.data.exists is True
-    assert env.data.name == "taken"
+    assert file_svc.exists_calls == ["docs/a.txt"]
+
+
+@pytest.mark.asyncio
+async def test_check_name_reports_a_free_path_as_available():
+    env = await check_resource_name(
+        path="docs/new.txt",
+        owner_id="u1",
+        bot_id="bot-x",
+        factory=_StubFactory(_StubService([])),
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubFileService(existing=set()),
+        request=_request_without_trace(),
+    )
+    assert env.data.exists is False
+
+
+@pytest.mark.asyncio
+async def test_check_name_rejects_a_path_escaping_the_workspace():
+    file_svc = _StubFileService()
+
+    resp = await check_resource_name(
+        path="../../etc/passwd",
+        owner_id="u1",
+        bot_id="bot-x",
+        factory=_StubFactory(_StubService([])),
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
+
+    assert resp.status_code == 400
+    assert file_svc.exists_calls == []
+
+
+@pytest.mark.asyncio
+async def test_check_name_asks_the_records_for_a_link():
+    """A link has no file, so the record is the only place to look."""
+    service = _StubService([])
+    file_svc = _StubFileService()
+
+    env = await check_resource_name(
+        name="wiki",
+        type=OpenapiType.LINK,
+        owner_id="u1",
+        bot_id="bot-x",
+        factory=_StubFactory(service),
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
+
+    assert env.data.name == "wiki"
+    assert service.last_call_kwargs.get("resource_type") == LegacyType.LINK
+    assert service.last_call_kwargs.get("user_id") == "u1"
+    # No device round trip for a link check.
+    assert file_svc.exists_calls == []
 
 
 @pytest.mark.asyncio
 async def test_check_name_reads_x_trace_id_from_request():
-    factory = _StubFactory(_StubService([]))
-    request = _request_with_trace("trace-xyz")
-
     env = await check_resource_name(
-        name="available",
+        path="a.txt",
         owner_id="u1",
-        type=None,
-        bot_id="bot-a",
-        factory=factory,
-        request=request,
+        bot_id="bot-x",
+        factory=_StubFactory(_StubService([])),
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubFileService(),
+        request=_request_with_trace("trace-cn-1"),
     )
-
-    assert env.request_id == "trace-xyz"
-
-
-@pytest.mark.asyncio
-async def test_check_name_passes_type_value_to_service_when_provided():
-    service = _StubService([])
-    factory = _StubFactory(service)
-
-    await check_resource_name(
-        name="available",
-        owner_id="u1",
-        type=OpenapiType.FILE,
-        bot_id="bot-a",
-        factory=factory,
-        request=_request_without_trace(),
-    )
-
-    # Fix #1: passed value is the legacy ResourceType enum (str-subclass —
-    # equality with "file" still holds). parent_path stays None; user_id is
-    # sourced from the verified principal (caller_owner_id → "u1").
-    assert service.last_call_kwargs.get("resource_type") == "file"
-    assert service.last_call_kwargs.get("parent_path") is None
-    assert service.last_call_kwargs.get("user_id") == "u1"
-
+    assert env.request_id == "trace-cn-1"
 
 # ── get_resource handler wiring (Phase 1 Task 4) ─────────────────────────
 #
@@ -1867,43 +1871,6 @@ async def test_real_factory_service_supports_all_handler_methods_e2e():
         request=_request_without_trace(),
     )
     assert env2.code == CODE_CREATED
-
-@pytest.mark.asyncio
-async def test_check_name_passes_legacy_enum_to_service_when_provided():
-    service = _StubService([])
-    factory = _StubFactory(service)
-
-    await check_resource_name(
-        name="available",
-        owner_id="u1",
-        type=OpenapiType.FILE,
-        bot_id="bot-a",
-        factory=factory,
-        request=_request_without_trace(),
-    )
-
-    passed = service.last_call_kwargs.get("resource_type")
-    assert passed is LegacyType.FILE
-    assert passed is not OpenapiType.FILE
-
-
-@pytest.mark.asyncio
-async def test_check_name_defaults_to_legacy_file_enum_when_type_absent():
-    service = _StubService([])
-    factory = _StubFactory(service)
-
-    await check_resource_name(
-        name="available",
-        owner_id="u1",
-        type=None,
-        bot_id="bot-a",
-        factory=factory,
-        request=_request_without_trace(),
-    )
-
-    # ``or _LegacyType.FILE`` is the documented default for the no-type case.
-    assert service.last_call_kwargs.get("resource_type") is LegacyType.FILE
-
 
 # ── Fix #2 (review round-2): cross-bot ownership isolation ──────────
 #
