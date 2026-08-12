@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
+import base64
 import json
 import time
 
@@ -71,6 +72,20 @@ logger = get_logger()
 
 
 ENGINE_DIR_MOUNT_WHITELIST_BUSINESS_CODE = "nas_mount"
+
+#: Where the per-bot startup script is written inside the container, and where
+#: its output is captured (issue #926).
+STARTUP_SCRIPT_PATH = "/tmp/ocb_startup_script.sh"
+STARTUP_SCRIPT_LOG = "/home/admin/logs/startup_script.log"
+
+#: Wall-clock cap on the user stage.
+#:
+#: Sized against the create budget on the other side of the callback: the
+#: backend's publish poller gives up at _CREATE_PUBLISH_TIMEOUT_SECONDS (600s,
+#: baas_publish_task_handlers.py) and the device only reports once this whole
+#: sequence exits. Half that budget leaves room for the platform steps and for
+#: the callback's own retries.
+STARTUP_SCRIPT_TIMEOUT_SECONDS = 300
 ENGINE_DIR_MOUNT_WHITELIST_PARAM_CODE = "engine_dir_mount_whitelist"
 
 
@@ -2217,6 +2232,7 @@ class BaasService:  # pragma: no cover
             version: str | None = "1",
             mount_home_dir_storage: bool = False,
             ext_info: Optional[Dict[str, Any]] = None,
+            startup_script: str = "",
     ):
         # 1、Bootstrap 补偿脚本
         bootstrap_cmp = self._get_bootstrap_cmp()
@@ -2238,9 +2254,58 @@ class BaasService:  # pragma: no cover
         # 6、 Start watchdog
         watchdog_cmd = self._get_start_watchdog_cmd()
 
-        return (
+        chain = (
             f"{bootstrap_cmp} && ({install_engine_cmd}) && "
             f" {start_cmd} && {watchdog_cmd}"
+        )
+
+        # 7、 Per-bot startup script (issue #926)
+        if not startup_script:
+            return chain
+
+        # The user stage runs LAST and cannot influence the boot's outcome.
+        #
+        # __OCB_RC is load-bearing, not defensive. The BaaS wrapper takes its
+        # EXIT_CODE from this script's *last* command, and that code is what
+        # drives the device to ACTIVE or FAILED. Ending on `... || true` would
+        # therefore report SUCCESS for every start — including boots where
+        # bootstrap failed. Capture the platform status first, run the user
+        # stage, then re-assert it.
+        return (
+            f"{chain}\n"
+            f"__OCB_RC=$?\n"
+            f'if [ "$__OCB_RC" -eq 0 ]; then\n'
+            f"{self._get_startup_script_segment(startup_script)}\n"
+            f"fi\n"
+            f"exit $__OCB_RC\n"
+        )
+
+    def _get_startup_script_segment(
+        self,
+        script: str,
+        timeout_seconds: int = STARTUP_SCRIPT_TIMEOUT_SECONDS,
+    ) -> str:
+        """Emit the user stage: decode, run under a timeout, never fail the boot.
+
+        The body is base64-encoded here rather than quoted. Two reasons, both
+        load-bearing:
+
+        1. It is never spliced into shell syntax, so no quote, ``$(...)`` or
+           heredoc delimiter in a caller's script can break out of the command
+           this method builds.
+        2. base64's alphabet has no braces, so BaaS's ``_safe_format_hook`` —
+           which regex-substitutes ``{token}`` / ``{client_id}`` across the whole
+           hook before running it — cannot reach inside the body and rewrite it.
+
+        Output goes to its own log so the script's chatter is separable from the
+        platform's inside the container, even though the two share one exit
+        status upstream.
+        """
+        encoded = base64.b64encode(script.encode("utf-8")).decode("ascii")
+        return (
+            f"  ( echo {encoded} | base64 -d > {STARTUP_SCRIPT_PATH}"
+            f" && timeout {timeout_seconds} bash {STARTUP_SCRIPT_PATH}"
+            f" >> {STARTUP_SCRIPT_LOG} 2>&1 ) || true"
         )
 
     def _get_destroy_cmd(

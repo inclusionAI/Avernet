@@ -27,21 +27,21 @@
         (`test_service_api_conformance.py:76`).
 - **Depends on:** —
 
-## Task 2: Compose the script into the start sequence
+## [x] Task 2: Compose the script into the start sequence
 - **Goal:** Append the script to `_get_start_cmd`'s output so it runs after the
   platform's boot steps and before the callback, without being able to affect them.
 - **Files:** `src/backend/.../core/service_bot/services/baas_service.py`
 - **Done when:**
-  - [ ] No stored script ⇒ the returned string is **byte-identical** to today.
-  - [ ] The body is base64-encoded in Python and never interpolated into shell
+  - [x] No stored script ⇒ the returned string is **byte-identical** to today.
+  - [x] The body is base64-encoded in Python and never interpolated into shell
         syntax; a body with quotes, `$(id)`, `HOOK_SCRIPT_EOF` and `{token}`
         round-trips byte-exact and is not placeholder-substituted by BaaS.
-  - [ ] The platform's exit status is captured to `__OCB_RC` before the script runs
+  - [x] The platform's exit status is captured to `__OCB_RC` before the script runs
         and re-asserted with `exit $__OCB_RC`, so a failing boot still reports
         non-zero **with** a script present.
-  - [ ] The script is skipped when the platform chain failed.
-  - [ ] The script runs under `timeout`, and its output goes to a dedicated log.
-  - [ ] `desktop_bot_service.py:1081` still compiles and is unaffected (the new
+  - [x] The script is skipped when the platform chain failed.
+  - [x] The script runs under `timeout`, and its output goes to a dedicated log.
+  - [x] `desktop_bot_service.py:1081` still compiles and is unaffected (the new
         parameter defaults to unset).
 - **Depends on:** Task 1
 
