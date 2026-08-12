@@ -25,6 +25,8 @@ from agentclaw.community.core.bot_startup_script.repository.models import (
 from agentclaw.community.core.repository.protocols.bot import (
     BotStartupScriptRepositoryProtocol,
 )
+from sqlalchemy.exc import IntegrityError
+
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
@@ -73,7 +75,55 @@ class BotStartupScriptRepository(
         size_bytes: int,
         modifier: str,
     ) -> BotStartupScriptRecord:
-        """写入脚本：存在则整体替换正文，不存在则插入。"""
+        """写入脚本：存在则整体替换正文，不存在则插入。
+
+        Retried once on a duplicate-key conflict. The read-then-insert below is
+        not atomic: two first writes for the same key can both see ``None``,
+        both insert, and the UNIQUE constraint then fails one of them — a 500
+        on a request that is perfectly valid and should simply have replaced.
+        Catching the conflict and going round again turns that into the update
+        the loser was always entitled to make.
+        """
+        try:
+            return self._upsert_once(
+                env=env,
+                entity_id=entity_id,
+                bot_id=bot_id,
+                script=script,
+                size_bytes=size_bytes,
+                modifier=modifier,
+            )
+        except IntegrityError:
+            # The row now exists — the racing insert committed first. The retry
+            # takes the update branch. A second failure is not a race and is
+            # left to propagate.
+            logger.info(
+                "[startup_script.upsert] insert lost a race, retrying as an "
+                "update: env=%s, entity_id=%s, bot_id=%s",
+                env,
+                entity_id,
+                bot_id,
+            )
+            return self._upsert_once(
+                env=env,
+                entity_id=entity_id,
+                bot_id=bot_id,
+                script=script,
+                size_bytes=size_bytes,
+                modifier=modifier,
+            )
+
+    def _upsert_once(
+        self,
+        *,
+        env: str,
+        entity_id: str,
+        bot_id: str,
+        script: str,
+        size_bytes: int,
+        modifier: str,
+    ) -> BotStartupScriptRecord:
+        """One read-then-write attempt. Raises ``IntegrityError`` if it races."""
         with self._db.orm_session() as db:
             row = (
                 db.query(self._Script)

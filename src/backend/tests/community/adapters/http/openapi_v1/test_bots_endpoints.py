@@ -1060,3 +1060,34 @@ def test_startup_script_writes_never_touch_a_running_container(
     client.delete("/openapi/v1/bots/b1/startup-script")
 
     svc.restart_bot.assert_not_called()
+
+
+def test_startup_script_put_is_refused_for_a_desktop_bot(client, svc, startup_script):
+    """DesktopBotService builds its hook by calling ``_get_start_cmd`` directly,
+    bypassing ``_build_create_bot_payload`` where the script is resolved — so a
+    script stored for a desktop bot would never run.
+
+    Storing it anyway is the silent no-op this feature refuses everywhere else.
+    """
+    svc.get_bot.return_value = {**_SUPPORTED_BOT, "bot_type": "desktop"}
+
+    resp = client.put("/openapi/v1/bots/b1/startup-script", json={"script": "echo hi"})
+
+    assert resp.status_code == 409, resp.json()
+    startup_script.put.assert_not_called()
+
+
+def test_startup_script_audit_names_the_application_not_the_delegating_user():
+    """``user_id`` is the *delegating* user for an application caller, which is
+    right for scoping and wrong for an audit field: recording it would attribute
+    this executable body to someone who did not write it."""
+    from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
+    from agentclaw.community.adapters.http.openapi_v1.bots.router import _audit_actor
+
+    human = ActingCaller(user_id="alice", app_id=None)
+    assert _audit_actor(human, "alice") == "alice"
+
+    app = ActingCaller(user_id="alice", app_id=7)
+    actor = _audit_actor(app, "alice")
+    assert actor != "alice", "an app's write must not read as the user's own"
+    assert "7" in actor and "alice" in actor, "name the app, keep who it acted for"

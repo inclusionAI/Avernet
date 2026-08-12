@@ -40,6 +40,7 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     require_principal,
 )
 from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
+from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     ActingCallerDep,
     UserIdDep,
@@ -764,6 +765,21 @@ async def update_bot_engine_config(
     return envelope(body, request)
 
 
+def _audit_actor(caller: ActingCaller, owner_id: str) -> str:
+    """Who to record as having changed the script.
+
+    For an application caller ``user_id`` is the *delegating* user, not the
+    caller — downstream code cannot tell an admitted application from that user,
+    which is the seam's whole point. That is right for scoping and wrong for an
+    audit field: recording it would have this executable body attributed to a
+    person who did not write it. So an application is named as itself, with the
+    user it acted for kept alongside.
+    """
+    if caller.is_application:
+        return f"app:{caller.app_id}:on-behalf-of:{owner_id}"
+    return owner_id
+
+
 def _startup_script_target(
     bot: dict[str, Any],
     startup_script_service: BotStartupScriptServiceProtocol,
@@ -838,6 +854,7 @@ async def update_bot_startup_script(
     body: StartupScriptWrite,
     request: Request,
     owner_id: UserIdDep,
+    caller: ActingCallerDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     startup_script_service: BotStartupScriptServiceProtocol = Injected(
         BotStartupScriptServiceProtocol
@@ -849,6 +866,13 @@ async def update_bot_startup_script(
     silent no-op the caller could not distinguish from success.
     """
     bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
+    # A desktop bot builds its start command in DesktopBotService, which calls
+    # ``_get_start_cmd`` directly and never passes through
+    # ``_build_create_bot_payload`` where the script is resolved — so a script
+    # stored here would never run. Refused rather than stored, the same rule the
+    # unsupported check enforces, and the same line this group already takes on
+    # desktop bots elsewhere.
+    _reject_unowned_lifecycle(bot)
     entity_id, state, reason = _startup_script_target(bot, startup_script_service)
     if state != SUPPORTED:
         raise StartupScriptUnsupportedError(reason)
@@ -856,8 +880,9 @@ async def update_bot_startup_script(
         entity_id=entity_id,
         bot_id=bot_id,
         script=body.script,
-        # From the request principal, never the body.
-        modifier=owner_id,
+        # From the verified caller, never the body — and naming the application
+        # when one is acting, not the user it acted for.
+        modifier=_audit_actor(caller, owner_id),
     )
     return envelope(_startup_script_payload(bot_id, record, SUPPORTED, ""), request)
 

@@ -153,3 +153,68 @@ def test_delete_then_reinsert_works(repo):
         script="second", size_bytes=6, modifier="u1",
     )
     assert rec.script == "second"
+
+def test_upsert_retries_as_an_update_when_the_insert_loses_a_race(monkeypatch):
+    """Two first writes for one key can both read ``None`` and both insert; the
+    UNIQUE constraint then fails one of them.
+
+    That loser was making a perfectly valid replace, so a 500 is the wrong
+    answer — it retries and takes the update branch.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    from agentclaw.community.core.repository.implementations.bot import (
+        startup_script as mod,
+    )
+
+    repo = mod.BotStartupScriptRepository.__new__(mod.BotStartupScriptRepository)
+    calls = []
+
+    def _once(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise IntegrityError("insert", {}, Exception("duplicate key"))
+        return "replaced"
+
+    monkeypatch.setattr(repo, "_upsert_once", _once)
+
+    result = mod.BotStartupScriptRepository.upsert(
+        repo,
+        env="dev",
+        entity_id="ent",
+        bot_id="bot",
+        script="echo hi",
+        size_bytes=7,
+        modifier="u1",
+    )
+
+    assert result == "replaced"
+    assert len(calls) == 2, "the conflict must be retried exactly once"
+    assert calls[0] == calls[1], "the retry must carry the same write"
+
+
+def test_upsert_does_not_retry_forever(monkeypatch):
+    """A second conflict is not a race — it propagates rather than looping."""
+    from sqlalchemy.exc import IntegrityError
+
+    from agentclaw.community.core.repository.implementations.bot import (
+        startup_script as mod,
+    )
+
+    repo = mod.BotStartupScriptRepository.__new__(mod.BotStartupScriptRepository)
+
+    def _always_conflicts(**_kwargs):
+        raise IntegrityError("insert", {}, Exception("duplicate key"))
+
+    monkeypatch.setattr(repo, "_upsert_once", _always_conflicts)
+
+    with pytest.raises(IntegrityError):
+        mod.BotStartupScriptRepository.upsert(
+            repo,
+            env="dev",
+            entity_id="ent",
+            bot_id="bot",
+            script="echo hi",
+            size_bytes=7,
+            modifier="u1",
+        )
