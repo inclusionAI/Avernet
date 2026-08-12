@@ -37,6 +37,9 @@ from typing import cast  # noqa: UP035 - injector binding key must match provide
 
 from injector import Module, inject, provider, singleton
 
+from agentclaw.community.api.bot_startup_script_service import (
+    BotStartupScriptServiceProtocol,
+)
 from agentclaw.community.api.device_service import DeviceServiceProtocol
 from agentclaw.community.api.oss_to_nas_migration_service import OssToNasMigrationServiceProtocol
 from agentclaw.community.api.oss_to_nas_switch_service import OssToNasSwitchServiceProtocol
@@ -231,6 +234,7 @@ class DevicesModule(Module):
         token_vault: TokenVault,
         task_queue_service: TaskQueueService,
         template_service: TemplateService,
+        startup_script_service: BotStartupScriptServiceProtocol,
     ) -> BaasDeviceService:
         # Explicit provider: BaasDeviceService takes ``bot_query`` /
         # ``bot_sync`` / ``mcp_sync`` typed as Protocols, which
@@ -249,6 +253,7 @@ class DevicesModule(Module):
             vault=token_vault,
             task_queue_service=task_queue_service,
             template_service=template_service,
+            startup_script_service=startup_script_service,
         )
 
     @singleton

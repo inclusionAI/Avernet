@@ -270,3 +270,17 @@ class McpSyncProtocol(Protocol):
             ``{"success": bool, "error": str|None}``.
         """
         ...
+
+
+class StartupScriptReaderProtocol(Protocol):
+    """Read a bot's stored startup script at payload-build time (issue #926).
+
+    A narrow, core-owned view of the startup-script service: the device layer
+    only ever reads a body, never writes one. Declared here rather than imported
+    from ``api`` because ``core`` must not depend on the Service API layer — the
+    same reason ``BotQueryProtocol`` and ``BotSyncProtocol`` live here.
+    """
+
+    def get_body(self, *, entity_id: str, bot_id: str) -> str:
+        """Return the bot's script body, or ``""`` when it has none."""
+        ...

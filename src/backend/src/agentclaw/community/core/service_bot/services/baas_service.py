@@ -593,6 +593,7 @@ class BaasService:  # pragma: no cover
         template_config: Optional[Dict[str, Any]] = None,
         mount_home_dir_storage: bool | None = None,
         ext_info: Optional[Dict[str, Any]] = None,
+        startup_script: str = "",
     ) -> Dict[str, Any]:
         """构建创建 Bot 的请求体。
 
@@ -658,6 +659,7 @@ class BaasService:  # pragma: no cover
             version=version,
             mount_home_dir_storage=mount_home_dir_storage,
             ext_info=ext_info,
+            startup_script=startup_script,
         )
 
         # 构建实例销毁前置hook命令

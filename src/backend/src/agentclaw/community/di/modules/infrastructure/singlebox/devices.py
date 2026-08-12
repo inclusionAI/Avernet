@@ -10,6 +10,9 @@ from injector import Binder, Module, inject, provider, singleton
 
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
+from agentclaw.community.api.bot_startup_script_service import (
+    BotStartupScriptServiceProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.token_vault import TokenVault
 from agentclaw.community.core.devices.models import (
@@ -181,6 +184,7 @@ class SingleboxDevicesModule(Module):
         token_vault: TokenVault,
         task_queue_service: TaskQueueService,
         template_service: TemplateService,
+        startup_script_service: BotStartupScriptServiceProtocol,
     ) -> BaasDeviceService:
         """Keep BaaS lifecycle wiring while projecting local engine connections."""
         return SingleboxBaasDeviceService(
@@ -194,6 +198,7 @@ class SingleboxDevicesModule(Module):
             vault=token_vault,
             task_queue_service=task_queue_service,
             template_service=template_service,
+            startup_script_service=startup_script_service,
         )
 
     @singleton

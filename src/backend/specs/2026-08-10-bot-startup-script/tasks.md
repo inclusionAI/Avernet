@@ -45,17 +45,17 @@
         parameter defaults to unset).
 - **Depends on:** Task 1
 
-## Task 3: Carry the script into the create payload
+## [x] Task 3: Carry the script into the create payload
 - **Goal:** The stored script reaches `_get_start_cmd` on every create and restart.
 - **Files:** `src/backend/.../core/devices/services/baas_device_service.py`,
   `src/backend/.../core/service_bot/services/baas_service.py`
 - **Done when:**
-  - [ ] `_allocate_via_baas` fetches the script into `payload_kwargs`, and
+  - [x] `_allocate_via_baas` fetches the script into `payload_kwargs`, and
         `_build_create_bot_payload` forwards it to `_get_start_cmd`.
-  - [ ] A bot created before its owner writes a script picks it up on the next
+  - [x] A bot created before its owner writes a script picks it up on the next
         restart, and the API docs say the first write needs a restart.
-  - [ ] Personal and service bots behave identically; only `stage` differs, as today.
-  - [ ] Editing the script alone does not touch a running container.
+  - [x] Personal and service bots behave identically; only `stage` differs, as today.
+  - [x] Editing the script alone does not touch a running container.
 - **Depends on:** Task 2
 
 ## Task 4: Public API — read, replace, clear
