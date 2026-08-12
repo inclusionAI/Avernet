@@ -5,11 +5,17 @@
 ## Task 1: Store a bot's startup script
 - **Goal:** Persist one script per bot with the audit fields the public API needs.
 - **Files:** `src/backend/.../core/bot_startup_script/sql/2026_08_10_bot_startup_script.sql`,
-  `.../core/bot_startup_script/repository/models.py`,
+  `.../core/bot_startup_script/repository/models.py` (ORM model),
+  `.../core/repository/protocols/bot/startup_script.py` (contract),
+  `.../core/repository/implementations/bot/startup_script.py` (ORM body),
   `.../core/bot_startup_script/services/startup_script_service.py`,
   `src/backend/.../api/bot_startup_script_service.py`
 - **Done when:**
   - [ ] DDL matches `plan.md`; table created on a clean SQLite and MySQL boot.
+  - [ ] The repository contract lives under `core/repository/protocols/bot/` with
+        `@abstractmethod` on every member, and the implementation under
+        `core/repository/implementations/bot/` declares it as a base — so omitting
+        a member fails at construction, per `core/repository/README.md:8`.
   - [ ] `get` on a bot that never set one returns an empty record, not an error.
   - [ ] `put` stores body, `size_bytes` and the modifier; over-limit raises a typed
         error naming the limit.
@@ -70,8 +76,10 @@
   - [ ] `supported` / `unsupported_reason` reported per bot, covering **both**
         unsupported cases: a teclaw bot, and a bot whose binding
         `device_provider` is not `baas` (legacy ARCA-direct bots).
-  - [ ] An unsupported bot can still store a script (`PUT` succeeds) but reads
-        back `supported: false` with the reason naming the cause.
+  - [ ] `PUT` on an unsupported bot is **refused** with 409 and the reason as the
+        message; nothing is stored.
+  - [ ] `GET` on an unsupported bot still answers — empty script,
+        `supported: false`, reason naming the cause — rather than erroring.
   - [ ] No `entity_id` parameter or response field anywhere (group contract);
         it exists only as a storage key resolved server-side.
 - **Depends on:** Task 1

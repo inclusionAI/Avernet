@@ -17,7 +17,9 @@ outcome nor mask a boot failure.
 
 ## Affected Components
 
-- `src/backend/.../core/bot_startup_script/` — **new** table, repository, service
+- `src/backend/.../core/bot_startup_script/` — **new** ORM model + service
+- `src/backend/.../core/repository/protocols/bot/` — **new** repository contract
+- `src/backend/.../core/repository/implementations/bot/` — **new** ORM body
 - `src/backend/.../api/bot_startup_script_service.py` — **new** Service API Protocol
 - `src/backend/.../core/service_bot/services/baas_service.py:2207` — compose the segment
 - `src/backend/.../core/devices/services/baas_device_service.py:328` — fetch the script into `payload_kwargs`
@@ -176,8 +178,36 @@ no quoting to get wrong, no metacharacters, and no `{...}` for BaaS's
          }
 ```
 
+The repository follows the consolidated layout — contract under
+`protocols/bot/`, ORM body under `implementations/bot/`, and the implementation
+declares the Protocol as a base so `@abstractmethod` binds:
+
+```python
+# src/backend/.../core/repository/protocols/bot/startup_script.py (new)
+@runtime_checkable
+class BotStartupScriptRepository(Protocol):
+    @abstractmethod
+    def get(self, *, env: str, entity_id: str, bot_id: str) -> StartupScriptRecord | None: ...
+    @abstractmethod
+    def upsert(self, *, env: str, entity_id: str, bot_id: str,
+               script: str, size_bytes: int, modifier: str) -> StartupScriptRecord: ...
+    @abstractmethod
+    def delete(self, *, env: str, entity_id: str, bot_id: str) -> None: ...
+```
+
+```python
+# src/backend/.../core/repository/implementations/bot/startup_script.py (new)
+class BotStartupScriptRepositoryImpl(
+    BotStartupScriptRepository,      # ← the base is what gives @abstractmethod force
+):
+    @inject
+    def __init__(self, db: DatabasePlugin) -> None: ...
+```
+
 ```python
 # src/backend/.../api/bot_startup_script_service.py (new — Service API Protocol)
+# No @abstractmethod here: the concrete service must not inherit this Protocol
+# (core → api is forbidden), so it would bind nothing. See Alternatives Considered.
 # Impl: core/bot_startup_script/services/startup_script_service.py::BotStartupScriptService
 @runtime_checkable
 class BotStartupScriptServiceProtocol(Protocol):
@@ -216,9 +246,16 @@ def resolve_support(bot: dict, binding: DeviceBinding | None) -> tuple[bool, str
     return True, ""
 ```
 
-`PUT` still **stores** for an unsupported bot rather than refusing, so a script
-can be staged; `supported: false` plus a reason is what stops the caller
-believing it ran. `last-start` returns an empty list for those bots.
+`PUT` on an unsupported bot is **refused**, not stored — a stored script that can
+never run is the silent no-op this design exists to prevent, and staging one
+ahead of a migration is not a real workflow. `GET` still answers (empty script,
+`supported: false`, reason), and `last-start` returns an empty list.
+
+```jsonc
+// PUT /openapi/v1/bots/{bot_id}/startup-script → 409 on an unsupported bot
+{ "code": 409001, "message": "teclaw bots are provisioned without a start sequence",
+  "data": null, "request_id": "…" }
+```
 
 `last_start` reads what already exists — no new storage:
 
@@ -269,14 +306,22 @@ None. `base64` is stdlib.
   script goes last, guarded, and cannot participate in the chain's outcome.
 - **`|| true` without capturing the platform status.** Simplest to write and
   silently breaks FAILED detection for every bot with a script.
-- **`@abstractmethod` on the Service API Protocol.** Rejected as inert, not
-  unsafe: it does not break DI or the constitution (`Protocol`'s metaclass already
-  derives from `ABCMeta`), but it only has force on **explicit subclasses**, and
-  the constitution forbids the concrete service from inheriting the Protocol at
-  all (`api/README.md:21`). Nothing would ever be checked. Zero of the ~60
-  Protocols under `api/` use it today. The enforcement that does bite is the
-  `_PAIRS` registry, which compares parameter names, kinds, defaults and
-  coroutine status — strictly more than `@abstractmethod` would.
+- **`@abstractmethod`: used in the repository layer, not in `api/`.** The two
+  layers have opposite conventions and both are deliberate.
+  `core/repository/README.md:8` states it outright — protocols carry
+  "`@abstractmethod` throughout" and implementations "each declaring its
+  Protocol(s) as a base" (e.g. `DeviceRepository(DeviceBindingRepository)` at
+  `implementations/devices/device.py:145`). Inheritance is legal there because
+  both sides live inside `core`, and `@abstractmethod` does real work: a missing
+  member fails at construction naming itself, rather than as an `AttributeError`
+  at the call site.
+  `api/` is the inverse: the concrete service must **not** inherit its Protocol,
+  because that would force a `core → api` import the layering rule forbids
+  (`api/README.md:21`), and zero of the ~60 Protocols there use `@abstractmethod`
+  — it would bind nothing. Conformance is checked instead by the `_PAIRS`
+  registry, which compares parameter names, kinds, defaults and coroutine status.
+  So: `@abstractmethod` on the new **repository** Protocol, none on the Service
+  API Protocol.
 - **Passing the body as a shell-quoted string instead of base64.** `shlex.quote`
   would survive Python composition, but the body still meets BaaS's
   `_safe_format_hook` placeholder substitution before it runs. base64 is inert to
