@@ -1121,3 +1121,21 @@ def test_startup_script_put_is_retryable_when_support_is_inconclusive(
     resp = client.put("/openapi/v1/bots/b1/startup-script", json={"script": "echo hi"})
     assert resp.status_code == 503, resp.json()
     startup_script.put.assert_not_called()
+
+
+def test_startup_script_writes_never_touch_a_running_container(
+    client, svc, startup_script, run_reader
+):
+    """Spec: editing or clearing must not disturb a running container.
+
+    The write path stores a row and stops — no restart, no exec, no publish.
+    Asserted against the services that could reach a container.
+    """
+    svc.get_bot.return_value = _SUPPORTED_BOT
+    startup_script.put.return_value = _record(script="echo new")
+
+    client.put("/openapi/v1/bots/b1/startup-script", json={"script": "echo new"})
+    client.delete("/openapi/v1/bots/b1/startup-script")
+
+    svc.restart_bot.assert_not_called()
+    run_reader.last_start.assert_not_called()

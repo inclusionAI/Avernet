@@ -125,13 +125,13 @@
         whose restart is in-place, and teclaw bots cannot run it at all.
 - **Depends on:** Tasks 4, 5
 
-## Task 7: Tests & Verification
+## [x] Task 7: Tests & Verification
 - **Goal:** Ensure the feature meets the spec's acceptance criteria.
 - **Files:** `src/backend/tests/...`
 - **Done when:**
-  - [ ] Every acceptance criterion in `spec.md` maps to a passing test.
-  - [ ] Backend and gateway module CI gates pass (`OCB_PRE_PUSH_RUN_CI=1`).
-  - [ ] A bot with no script produces a byte-identical start sequence — asserted,
+  - [x] Every acceptance criterion in `spec.md` maps to a passing test.
+  - [x] Backend and gateway module CI gates pass (`OCB_PRE_PUSH_RUN_CI=1`).
+  - [x] A bot with no script produces a byte-identical start sequence — asserted,
         not assumed.
 - **Depends on:** Task 6
 

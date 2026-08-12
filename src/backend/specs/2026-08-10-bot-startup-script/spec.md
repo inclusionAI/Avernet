@@ -48,37 +48,37 @@ and is deferred until someone needs it.
 
 ## Acceptance Criteria
 
-- [ ] A bot has at most one startup script. It can be read, replaced, and
+- [x] A bot has at most one startup script. It can be read, replaced, and
       cleared through the public API, and a bot that has never had one reads as
       empty rather than as an error.
-- [ ] Replacing or clearing the script does not disturb a running container. The
+- [x] Replacing or clearing the script does not disturb a running container. The
       change takes effect the next time the platform composes a start sequence
       for that bot — that is, on the next create or restart.
-- [ ] The script runs as part of the container's start sequence, after the
+- [x] The script runs as part of the container's start sequence, after the
       platform's own boot steps have completed and **before** the bot is
       reported ready.
-- [ ] A non-zero exit, a crash, or a timeout in the script does not change the
+- [x] A non-zero exit, a crash, or a timeout in the script does not change the
       outcome of the container start. The bot reaches its normal running state.
-- [ ] The script is stopped at a stated timeout, and the timeout is small enough
+- [x] The script is stopped at a stated timeout, and the timeout is small enough
       that the whole start sequence stays within the platform's start budget.
-- [ ] The script body cannot alter the platform's boot steps, whatever it
+- [x] The script body cannot alter the platform's boot steps, whatever it
       contains — including quotes, shell metacharacters, heredoc delimiters, and
       placeholder-shaped text.
-- [ ] A caller can read the result of the last container start for each of the
+- [x] A caller can read the result of the last container start for each of the
       bot's instances, and the API states plainly that this result covers the
       whole start sequence rather than the script alone.
-- [ ] The published contract states that the script runs on every start the
+- [x] The published contract states that the script runs on every start the
       platform composes and must therefore be idempotent; the platform does not
       attempt to detect or suppress repeat runs.
-- [ ] The published contract states which bots the script cannot run for, and the
+- [x] The published contract states which bots the script cannot run for, and the
       API reports that per bot rather than storing a script that silently never
       runs.
-- [ ] Only a bot's operators may read or write its startup script, subject to the
+- [x] Only a bot's operators may read or write its startup script, subject to the
       same authorization every other own-bot operation in the group carries, and
       every write records who changed it and when.
-- [ ] A script larger than the published size limit is refused at write time with
+- [x] A script larger than the published size limit is refused at write time with
       a message naming the limit, rather than failing later at run time.
-- [ ] A bot with no stored script produces a start sequence byte-identical to
+- [x] A bot with no stored script produces a start sequence byte-identical to
       today's.
 
 ## In Scope
