@@ -57,6 +57,7 @@ from agentclaw.community.core.devices.services.device_filesystem_dispatcher impo
     DeviceFilesystemDispatcher,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.resources.service import InvalidResourcePathError
 from agentclaw.community.core.services.resource_file_service import ResourceFileService
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
@@ -123,6 +124,31 @@ def _to_openapi_resource(legacy: _LegacyResource) -> Resource:
         gmt_create=legacy.gmt_created.isoformat() if legacy.gmt_created else None,
         gmt_modified=legacy.gmt_modified.isoformat() if legacy.gmt_modified else None,
     )
+
+
+def _safe_path(path: str) -> str:
+    """Normalize a caller-supplied workspace-relative path, or reject it.
+
+    Rejects any ``..`` segment outright instead of filtering it out. The console's
+    ``ResourceFileService.upload_file`` drops such segments silently
+    (``core/services/resource_file_service.py:409``) because it has to accept
+    whatever a browser sends for a whole-folder drag-upload; an explicit API has
+    no such caller, and quietly rewriting an address to a *different* valid one is
+    worse than refusing it — the caller is told nothing, and the file lands
+    somewhere they did not name.
+
+    This is the only barrier: neither ``build_workspace_mapper`` (which composes
+    with ``Path.__truediv__``, leaving ``..`` intact) nor the engine's
+    ``_convert_path`` normalizes or asserts containment. Engine-side bounding is
+    tracked in #1002.
+
+    Leading slashes and empty / ``.`` segments are normalized away rather than
+    rejected: they are noise, not an attempt to leave the workspace.
+    """
+    segments = [s for s in path.split("/") if s and s != "."]
+    if any(s == ".." for s in segments):
+        raise InvalidResourcePathError(f"path escapes the workspace: {path!r}")
+    return "/".join(segments)
 
 
 def _file_coords(

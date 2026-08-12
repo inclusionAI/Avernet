@@ -42,7 +42,7 @@ change, no OCB dependency in this scope.
   `created_at`/`updated_at`. Renaming resources alone moves it from the majority
   to the minority and deepens an existing split — an API-wide rename is worth
   doing, in its own issue.
-- [ ] **A5.** Add a path-sanitization helper used by every file handler: reject
+- [x] **A5.** Add a path-sanitization helper used by every file handler: reject
   any `..` segment with `ValueError`; strip leading slashes and empty segments.
   **Do not change `ResourceFileService`'s own filter** (`resource_file_service.py:409`)
   — the console needs its leniency for whole-folder upload.
