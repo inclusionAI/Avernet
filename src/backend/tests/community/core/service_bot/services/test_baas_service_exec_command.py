@@ -10,6 +10,7 @@ from agentclaw.community.core.service_bot.services.baas_service import BaasServi
 def _make_service(http_client=None) -> tuple[BaasService, MagicMock]:
     mock_http = http_client or MagicMock()
     svc = BaasService(
+        startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base="http://baas-test:8080",
         tenant="test_tenant",
         template_uuid="legacy-uuid",

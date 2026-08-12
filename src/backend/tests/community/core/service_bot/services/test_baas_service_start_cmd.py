@@ -15,6 +15,7 @@ from agentclaw.community.plugins.local.http_client import LocalHttpClient
 def _make_service() -> BaasService:
     """Build a ``BaasService`` with mocks — all deps are required now."""
     return BaasService(
+        startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base="http://test",
         tenant="test",
         template_uuid="test",
@@ -374,8 +375,33 @@ class TestStartupScriptReachesEveryStartPath:
         assert "__OCB_RC" not in hook
         reader.get_body.assert_not_called()
 
-    def test_no_reader_bound_composes_todays_chain(self):
+    def test_a_bot_with_nothing_stored_composes_todays_chain(self):
+        """The rollback path: clearing the script restores the old command."""
         assert "__OCB_RC" not in self._hook(_make_service())
+
+    def test_the_reader_is_required_at_construction(self):
+        """Optional, a composition that forgets to wire the reader constructs
+        fine and then skips the stored script on every start — invisibly, which
+        is the exact failure this feature exists to prevent. Required, the same
+        mistake is a TypeError naming the argument."""
+        with pytest.raises(TypeError, match="startup_script_reader"):
+            BaasService(
+                baas_api_base="http://test",
+                tenant="test",
+                template_uuid="test",
+                bot_repo=MagicMock(),
+                bot_publish_repo=MagicMock(),
+                system_config_service=MagicMock(),
+                storage_path=MagicMock(),
+                device_binding_repo=MagicMock(),
+                default_ttl_minutes=10080,
+                sandbox_registry=MagicMock(),
+                http_client=LocalHttpClient(),
+                general_http_client=LocalHttpClient(base_url=""),
+                secret_resolver=MagicMock(),
+                common_whitelist_service=MagicMock(),
+                outbound_rule_provider=MagicMock(),
+            )
 
     def test_a_lookup_failure_fails_the_start_rather_than_omitting_the_script(self):
         """Swallowing this produced a bot that starts, reports ready, and is
@@ -392,11 +418,15 @@ class TestStartupScriptReachesEveryStartPath:
         with pytest.raises(RuntimeError):
             svc._resolve_startup_script(entity_id="ent-1", bot_id="bot-1")
 
-    def test_an_unwired_reader_is_not_a_failure(self):
-        """``""`` still means "no script" for the two non-error cases."""
-        assert _make_service()._resolve_startup_script(
-            entity_id="ent-1", bot_id="bot-1"
-        ) == ""
+    def test_a_bot_with_no_identity_is_not_a_failure(self):
+        """``""`` still means "no script" for the remaining non-error case.
+
+        An unwired reader is no longer one of them — it cannot be constructed.
+        """
+        svc, reader = self._service_with_script()
+        assert svc._resolve_startup_script(entity_id="", bot_id="bot-1") == ""
+        assert svc._resolve_startup_script(entity_id="ent-1", bot_id="") == ""
+        reader.get_body.assert_not_called()
 
     def test_missing_entity_id_resolves_to_no_script(self):
         svc, _ = self._service_with_script()

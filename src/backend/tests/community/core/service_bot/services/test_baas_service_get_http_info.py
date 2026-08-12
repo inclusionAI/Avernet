@@ -37,6 +37,7 @@ def http():
 def baas_service(fake_binding_repo, http):
     """BaasService wired with LocalHttpClient; only device_binding_repo is meaningfully used by get_http_info."""
     return BaasService(
+        startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base="http://baas.fake",
         tenant="team_claw",
         template_uuid="tpl",

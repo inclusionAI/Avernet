@@ -463,9 +463,9 @@ class BaasService:  # pragma: no cover
         secret_resolver: SecretResolver,
         common_whitelist_service: "CommonWhiteListService",
         outbound_rule_provider: "OutboundRuleProvider",
+        startup_script_reader: "StartupScriptReaderProtocol",
         personal_bot_template_uuid: Optional[str] = None,
         theta_master_key_secret: str = "",
-        startup_script_reader: "StartupScriptReaderProtocol | None" = None,
     ):
         """初始化 BaasService。
 
@@ -520,6 +520,12 @@ class BaasService:  # pragma: no cover
         # can only be written *after* a bot exists — so restart is the path that
         # actually delivers it. Threading a parameter through every caller is
         # how that path gets missed.
+        #
+        # Required, not optional. An optional reader means any composition that
+        # forgets to wire it still constructs, and then every start silently
+        # skips a stored script — the same invisible-unprovisioned failure this
+        # feature guards against elsewhere. Required, that mistake is a
+        # TypeError naming the argument at construction.
         self._startup_script_reader = startup_script_reader
 
     def post_bots_api(
@@ -2412,10 +2418,12 @@ class BaasService:  # pragma: no cover
         operation was failing anyway, so propagating costs little and buys a
         start that is either provisioned or visibly failed.
 
-        ``""`` still means "no script" — an unwired reader or a bot with no
-        identity, neither of which is an error.
+        ``""`` still means "no script" — either the bot has no identity to look
+        one up by, or the reader has none stored. Neither is an error. An
+        unwired reader is no longer among these cases: it is now a constructor
+        argument, so it cannot be missing here.
         """
-        if self._startup_script_reader is None or not entity_id or not bot_id:
+        if not entity_id or not bot_id:
             return ""
         return self._startup_script_reader.get_body(
             entity_id=entity_id, bot_id=bot_id

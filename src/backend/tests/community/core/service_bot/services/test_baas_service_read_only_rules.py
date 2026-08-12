@@ -20,6 +20,7 @@ def _make_registry() -> EngineSandboxRegistry:
 
 def _make_service(bot_repo=None) -> BaasService:
     return BaasService(
+        startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base="http://test",
         tenant="test",
         template_uuid="test",

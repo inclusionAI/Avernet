@@ -37,6 +37,7 @@ def _make_storage_path() -> MagicMock:
 
 def _make_service(storage_path=None, bot_repo=None, common_whitelist_service=None) -> BaasService:
     return BaasService(
+        startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base="http://test",
         tenant="test",
         template_uuid="test",
@@ -218,6 +219,7 @@ class TestSetupSessionsDirEngineAware:
         registry.register(custom_provider)
 
         service = BaasService(
+            startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
             baas_api_base="http://test",
             tenant="test",
             template_uuid="test",

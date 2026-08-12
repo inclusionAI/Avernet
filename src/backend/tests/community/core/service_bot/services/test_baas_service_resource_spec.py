@@ -35,6 +35,7 @@ def test_deploy_config_to_dict_includes_docker_image():
 def _make_service():
     from agentclaw.community.core.service_bot.services.baas_service import BaasService
     return BaasService(
+        startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base="http://test",
         tenant="test",
         template_uuid="legacy-uuid",
