@@ -185,6 +185,11 @@ _CORE_SERVICE_NAMES_OK: frozenset[str] = frozenset({
     # Startup script (issue #926): the size cap belongs to the service, and
     # responses.py maps the refusal to 413.
     "StartupScriptTooLargeError",
+    # ...and interpolates the cap itself into that 413's message, which the
+    # published contract promises will name the limit. A module-level int is
+    # pure data by the "domain types" clause above — importing it is what keeps
+    # the message from drifting away from the value actually enforced.
+    "MAX_SCRIPT_BYTES",
     "InvalidIdentityEntityTypeError", "InvalidIdentityFileTypeError",
     "BotServiceError", "BotInvalidLifecycleStateError", "BotNotFoundError", "BotPermissionError",
     "BotLimitExceededError", "BotNameExistsError", "BotNameInvalidError",

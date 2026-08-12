@@ -1047,6 +1047,9 @@ def test_startup_script_put_rejects_an_oversize_body(client, svc, startup_script
 
     resp = client.put("/openapi/v1/bots/b1/startup-script", json={"script": "x"})
     assert resp.status_code == 413, resp.json()
+    # The docs promise the 413 names the limit; a bare "too large" would leave
+    # a caller bisecting their script to find the permitted size.
+    assert str(MAX_SCRIPT_BYTES) in resp.json()["message"]
 
 
 def test_startup_script_delete_is_idempotent(client, svc, startup_script):

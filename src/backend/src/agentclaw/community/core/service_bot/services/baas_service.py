@@ -98,6 +98,17 @@ _USER_STAGE_MARKER = "\n__OCB_RC=$?\n"
 #: sequence exits. Half that budget leaves room for the platform steps and for
 #: the callback's own retries.
 STARTUP_SCRIPT_TIMEOUT_SECONDS = 300
+
+#: Grace period between ``timeout``'s TERM and its KILL.
+#:
+#: ``timeout N`` alone sends TERM and then *waits* — a script that traps or
+#: ignores TERM keeps the hook alive indefinitely, and nothing upstream would
+#: cut it short (see the ``after_create_hook_wait_seconds`` note in
+#: ``_build_create_bot_payload``: BaaS accepts that value and ignores it, and
+#: the wrapper is nohup'd). ``-k`` follows up with KILL, which cannot be
+#: caught, so the cap holds against a hostile or merely buggy script. The grace
+#: is short but non-zero so a well-behaved trap can still flush its own log.
+STARTUP_SCRIPT_KILL_GRACE_SECONDS = 10
 ENGINE_DIR_MOUNT_WHITELIST_PARAM_CODE = "engine_dir_mount_whitelist"
 
 
@@ -719,9 +730,11 @@ class BaasService:  # pragma: no cover
                 mount_home_dir_storage=mount_home_dir_storage,
             )
 
-        # Per-bot startup script: an explicit argument wins (the device path
-        # already has it, and tests pin exact bodies); otherwise resolve it here
-        # so every caller — create, release, and restart — delivers it.
+        # Per-bot startup script. No production caller passes one — create,
+        # release, restart and both device services all take the ``None`` branch
+        # — so resolving here is what makes every one of those paths deliver the
+        # script. The parameter exists for tests that pin an exact body; keep it
+        # honest by not reading it as evidence of a live caller.
         if startup_script is None:
             startup_script = self._resolve_startup_script(
                 entity_id=entity_id, bot_id=bot_id
@@ -2396,6 +2409,7 @@ class BaasService:  # pragma: no cover
         self,
         script: str,
         timeout_seconds: int = STARTUP_SCRIPT_TIMEOUT_SECONDS,
+        kill_grace_seconds: int = STARTUP_SCRIPT_KILL_GRACE_SECONDS,
     ) -> str:
         """Emit the user stage: decode, run under a timeout, never fail the boot.
 
@@ -2430,7 +2444,8 @@ class BaasService:  # pragma: no cover
         inner = (
             "f=$(mktemp)"
             f' && echo {encoded} | base64 -d > "$f"'
-            f' && timeout {timeout_seconds} bash "$f" >> {STARTUP_SCRIPT_LOG} 2>&1'
+            f" && timeout -k {kill_grace_seconds} {timeout_seconds}"
+            f' bash "$f" >> {STARTUP_SCRIPT_LOG} 2>&1'
             '; rm -f "$f"'
         )
         return f"  su admin -c '{inner}' || true"

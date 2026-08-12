@@ -912,8 +912,10 @@ that one design choice, and none of it is visible in the OpenAPI document.
   the boot's outcome, and it is skipped entirely if the boot itself failed.
 - **Limits:** body ≤ **64 KiB** (413 above that, naming the limit); each run
   capped at **300s** by `timeout`, sized against the 600s publish budget the
-  start reports into. Interpreter is `bash`; the body runs as `admin`, the
-  same user every platform step runs as.
+  start reports into. The cap is enforced as TERM at 300s followed by an
+  uncatchable KILL **10s** later, so a script that traps or ignores TERM cannot
+  hold the start open past **310s**. Interpreter is `bash`; the body runs as
+  `admin`, the same user every platform step runs as.
 - **Do not put secrets in the body.** It is stored as written, and the
   start command that carries it is logged (with the body elided, but that is
   a mitigation, not a guarantee). There is no by-reference secret mechanism

@@ -40,6 +40,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Page,
 )
 from agentclaw.community.core.bot_startup_script.services.startup_script_service import (
+    MAX_SCRIPT_BYTES,
     StartupScriptTooLargeError,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
@@ -265,8 +266,15 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LocalSkillEditPausedError: (409, "Skill layout is being updated"),
     FileTooLargeError: (413, "File too large for preview"),
     # Startup script (issue #926): the body is refused at write time so a
-    # caller learns the limit instead of hitting it inside a container.
-    StartupScriptTooLargeError: (413, "Startup script is too large"),
+    # caller learns the limit instead of hitting it inside a container. The
+    # limit is interpolated from the constant rather than typed as a literal so
+    # the message cannot drift from what the service actually enforces — and
+    # unlike ``str(exc)`` it carries no caller data or internal path, which is
+    # what the fixed-message rule above is protecting against.
+    StartupScriptTooLargeError: (
+        413,
+        f"Startup script exceeds the {MAX_SCRIPT_BYTES}-byte limit",
+    ),
     # ... and refused outright for a bot whose container cannot run one,
     # rather than stored where it would silently never execute.
     StartupScriptUnsupportedError: (409, "Startup script is not supported for this bot"),

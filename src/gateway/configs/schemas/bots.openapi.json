@@ -15239,6 +15239,21 @@
             },
             "description": "Conflicts with current state"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 413000,
+                  "message": "Startup script exceeds the 65536-byte limit",
+                  "request_id": ""
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Script body exceeds the size limit."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -15268,6 +15283,21 @@
               }
             },
             "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Startup script support could not be determined",
+                  "request_id": ""
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Whether this bot can run a startup script could not be determined. Retryable — unlike the 409, it is not a verdict."
           }
         },
         "summary": "Update Bot Startup Script",

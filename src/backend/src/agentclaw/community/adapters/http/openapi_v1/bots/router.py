@@ -22,6 +22,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     USER_SCOPED_403,
     Deleted,
     Envelope,
+    ErrorEnvelope,
     NameCheck,
     Page,
     PageParamsDep,
@@ -65,6 +66,11 @@ from agentclaw.community.core.bot_management.create_flow import (
     create_bot_with_authorization,
 )
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
+# The published size limit, imported rather than retyped so the OpenAPI example
+# below cannot drift from the value the service enforces.
+from agentclaw.community.core.bot_startup_script.services.startup_script_service import (
+    MAX_SCRIPT_BYTES,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
@@ -835,7 +841,46 @@ async def get_bot_startup_script(
 @router.put(
     "/{bot_id}/startup-script",
     response_model=Envelope[StartupScript],
-    responses=USER_SCOPED_403,
+    # 413 and 503 are reachable only from this operation, and the base
+    # ERROR_RESPONSES set does not carry them — without these entries a client
+    # generated from the published schema has no case for either. The 409 for an
+    # unsupported bot is already in the base set.
+    responses={
+        **USER_SCOPED_403,
+        413: {
+            "model": ErrorEnvelope,
+            "description": "Script body exceeds the size limit.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": 413000,
+                        "message": (
+                            f"Startup script exceeds the {MAX_SCRIPT_BYTES}-byte limit"
+                        ),
+                        "data": None,
+                        "request_id": "",
+                    }
+                }
+            },
+        },
+        503: {
+            "model": ErrorEnvelope,
+            "description": (
+                "Whether this bot can run a startup script could not be "
+                "determined. Retryable — unlike the 409, it is not a verdict."
+            ),
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": 503000,
+                        "message": "Startup script support could not be determined",
+                        "data": None,
+                        "request_id": "",
+                    }
+                }
+            },
+        },
+    },
     dependencies=_GRANT_CHECKED,
 )
 @envelope_errors

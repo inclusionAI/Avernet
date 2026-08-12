@@ -269,22 +269,51 @@ class TestStartupScriptSegment:
 
     def test_user_stage_runs_under_a_timeout(self):
         from agentclaw.community.core.service_bot.services.baas_service import (
+            STARTUP_SCRIPT_KILL_GRACE_SECONDS,
             STARTUP_SCRIPT_TIMEOUT_SECONDS,
         )
 
-        assert f"timeout {STARTUP_SCRIPT_TIMEOUT_SECONDS} bash" in self._cmd("echo hi")
+        assert (
+            f"timeout -k {STARTUP_SCRIPT_KILL_GRACE_SECONDS} "
+            f"{STARTUP_SCRIPT_TIMEOUT_SECONDS} bash"
+        ) in self._cmd("echo hi")
+
+    def test_the_timeout_cannot_be_defeated_by_trapping_term(self):
+        """``timeout N`` alone sends TERM and then waits forever if the script
+        traps it — and nothing upstream bounds the hook (BaaS ignores
+        ``after_create_hook_wait_seconds`` and the wrapper is nohup'd), so this
+        one flag is the whole guarantee that a start terminates."""
+        from agentclaw.community.core.service_bot.services.baas_service import (
+            STARTUP_SCRIPT_KILL_GRACE_SECONDS,
+        )
+
+        cmd = self._cmd("trap '' TERM; sleep 100000\n")
+        assert "timeout -k " in cmd
+        assert STARTUP_SCRIPT_KILL_GRACE_SECONDS > 0
 
     def test_timeout_leaves_headroom_in_the_create_budget(self):
         """The device only reports once this sequence exits; the poller gives
-        up at 600s (_CREATE_PUBLISH_TIMEOUT_SECONDS)."""
+        up at 600s (_CREATE_PUBLISH_TIMEOUT_SECONDS).
+
+        Two bounds, because there are two cases. A script that exits or accepts
+        TERM is capped at the deadline, and that is the one sized at half the
+        budget so the platform steps and the callback's retries have the other
+        half. A script that *traps* TERM runs to the KILL instead; that case
+        only has to remain bounded and clear of the poller, not stay under
+        half.
+        """
         from agentclaw.community.core.service_bot.services.baas_service import (
+            STARTUP_SCRIPT_KILL_GRACE_SECONDS,
             STARTUP_SCRIPT_TIMEOUT_SECONDS,
         )
         from agentclaw.community.core.devices.services.baas_publish_task_handlers import (
             _CREATE_PUBLISH_TIMEOUT_SECONDS,
         )
 
-        assert STARTUP_SCRIPT_TIMEOUT_SECONDS < _CREATE_PUBLISH_TIMEOUT_SECONDS / 2 + 1
+        assert STARTUP_SCRIPT_TIMEOUT_SECONDS <= _CREATE_PUBLISH_TIMEOUT_SECONDS / 2
+
+        hard_cap = STARTUP_SCRIPT_TIMEOUT_SECONDS + STARTUP_SCRIPT_KILL_GRACE_SECONDS
+        assert hard_cap < _CREATE_PUBLISH_TIMEOUT_SECONDS
 
     def test_output_goes_to_its_own_log(self):
         cmd = self._cmd("echo hi")
