@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Generator
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -94,11 +95,7 @@ class _EarlyResponseTransport(httpx.AsyncBaseTransport):
         self._response_stream = response_stream
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            413,
-            request=request,
-            stream=self._response_stream,
-        )
+        return httpx.Response(413, request=request, stream=self._response_stream)
 
 
 class _ChallengeAuth(httpx.Auth):
@@ -109,6 +106,16 @@ class _ChallengeAuth(httpx.Auth):
         if response.status_code == 401:
             request.headers["authorization"] = "Bearer challenge-response"
             yield request
+
+
+@dataclass(frozen=True)
+class _SeenRequest:
+    path: str
+    headers: dict[str, str]
+    body: bytes
+
+
+_ResponseFactory = Callable[[_SeenRequest], tuple[int, list[tuple[bytes, bytes]]]]
 
 
 def test_strip_hop_by_hop_removes_connection_headers() -> None:
@@ -175,21 +182,43 @@ def _client(
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app))  # type: ignore[arg-type]
 
 
-def _request_body_app(
-    seen_headers: dict[str, str], seen_body: bytearray
+def _record_requests(
+    seen: list[_SeenRequest],
+    response: _ResponseFactory = lambda _: (204, []),
 ) -> Callable[[Scope, Receive, Send], Awaitable[None]]:
     async def app(scope: Scope, receive: Receive, send: Send) -> None:
-        for key, value in scope["headers"]:
-            seen_headers[key.decode()] = value.decode()
+        body = bytearray()
         while True:
             message = await receive()
-            seen_body.extend(message.get("body", b""))
+            body.extend(message.get("body", b""))
             if not message.get("more_body", False):
                 break
-        await send({"type": "http.response.start", "status": 204, "headers": []})
+        request = _SeenRequest(
+            path=scope["path"],
+            headers={key.decode(): value.decode() for key, value in scope["headers"]},
+            body=bytes(body),
+        )
+        seen.append(request)
+        status, headers = response(request)
+        await send(
+            {"type": "http.response.start", "status": status, "headers": headers}
+        )
         await send({"type": "http.response.body", "body": b""})
 
     return app
+
+
+async def _forward_to_asgi(
+    request: ForwardRequest,
+    app: Callable[[Scope, Receive, Send], Awaitable[None]],
+    **client_options: Any,
+) -> tuple[int, list[tuple[str, str]]]:
+    transport = httpx.ASGITransport(app=app)  # type: ignore[arg-type]
+    async with httpx.AsyncClient(transport=transport, **client_options) as client:
+        forwarder = HttpxForwarder(client=client)
+        async with forwarder.forward(request) as response:
+            _ = [chunk async for chunk in response.body]
+            return response.status_code, response.headers
 
 
 async def test_forward_streams_multichunk_body_and_status() -> None:
@@ -224,169 +253,136 @@ async def test_request_hop_by_hop_headers_stripped_before_send() -> None:
     assert seen["x-a"] == "1"
 
 
-async def test_streamed_request_preserves_declared_content_length() -> None:
-    seen_headers: dict[str, str] = {}
-    seen_body = bytearray()
-    body = _RecordingBody([b"abc", b"def"])
-    async with _client(_request_body_app(seen_headers, seen_body)) as client:
-        forwarder = HttpxForwarder(client=client)
-        request = ForwardRequest(
-            method="PUT",
+@pytest.mark.parametrize(
+    ("method", "headers", "chunks", "expected_body", "expected_framing"),
+    [
+        (
+            "PUT",
+            {"content-length": "6"},
+            [b"abc", b"def"],
+            b"abcdef",
+            {"content-length": "6", "transfer-encoding": None},
+        ),
+        (
+            "POST",
+            {},
+            [b"abc", b"def"],
+            b"abcdef",
+            {"content-length": None, "transfer-encoding": "chunked"},
+        ),
+        (
+            "POST",
+            {},
+            None,
+            b"",
+            {"content-length": "0", "transfer-encoding": None},
+        ),
+    ],
+    ids=["declared-length", "unknown-length", "empty"],
+)
+async def test_request_body_framing(
+    method: str,
+    headers: dict[str, str],
+    chunks: list[bytes] | None,
+    expected_body: bytes,
+    expected_framing: dict[str, str | None],
+) -> None:
+    seen: list[_SeenRequest] = []
+    body = _RecordingBody(chunks) if chunks is not None else None
+    await _forward_to_asgi(
+        ForwardRequest(
+            method=method,
             url="http://up/upload",
-            headers={"content-length": "6"},
+            headers=headers,
             body=body,
-        )
-        async with forwarder.forward(request) as response:
-            _ = [chunk async for chunk in response.body]
+        ),
+        _record_requests(seen),
+    )
 
-    assert bytes(seen_body) == b"abcdef"
-    assert seen_headers["content-length"] == "6"
-    assert "transfer-encoding" not in seen_headers
-    assert body.closed
-
-
-async def test_streamed_request_without_declared_length_uses_chunked_framing() -> None:
-    seen_headers: dict[str, str] = {}
-    seen_body = bytearray()
-    body = _RecordingBody([b"abc", b"def"])
-    async with _client(_request_body_app(seen_headers, seen_body)) as client:
-        forwarder = HttpxForwarder(client=client)
-        request = ForwardRequest(
-            method="POST",
-            url="http://up/upload",
-            body=body,
-        )
-        async with forwarder.forward(request) as response:
-            _ = [chunk async for chunk in response.body]
-
-    assert bytes(seen_body) == b"abcdef"
-    assert "content-length" not in seen_headers
-    assert seen_headers["transfer-encoding"] == "chunked"
-    assert body.closed
+    assert seen[0].body == expected_body
+    assert {
+        name: seen[0].headers.get(name) for name in expected_framing
+    } == expected_framing
+    if body is not None:
+        assert body.closed
 
 
 async def test_one_shot_request_body_is_not_replayed_across_redirects() -> None:
-    visited: list[tuple[str, bytes]] = []
+    seen: list[_SeenRequest] = []
 
-    async def app(scope: Scope, receive: Receive, send: Send) -> None:
-        body = bytearray()
-        while True:
-            message = await receive()
-            body.extend(message.get("body", b""))
-            if not message.get("more_body", False):
-                break
-        visited.append((scope["path"], bytes(body)))
-        if scope["path"] == "/source":
-            await send(
-                {
-                    "type": "http.response.start",
-                    "status": 307,
-                    "headers": [(b"location", b"/target")],
-                }
-            )
-        else:
-            await send({"type": "http.response.start", "status": 200, "headers": []})
-        await send({"type": "http.response.body", "body": b""})
+    def redirect(request: _SeenRequest) -> tuple[int, list[tuple[bytes, bytes]]]:
+        return (
+            (307, [(b"location", b"/target")])
+            if request.path == "/source"
+            else (200, [])
+        )
 
-    transport = httpx.ASGITransport(app=app)  # type: ignore[arg-type]
-    async with httpx.AsyncClient(transport=transport, follow_redirects=True) as client:
-        forwarder = HttpxForwarder(client=client)
-        request = ForwardRequest(
+    status, _ = await _forward_to_asgi(
+        ForwardRequest(
             method="PUT",
             url="http://up/source",
             headers={"content-length": "7"},
             body=_RecordingBody([b"payload"]),
-        )
-        async with forwarder.forward(request) as response:
-            assert response.status_code == 307
+        ),
+        _record_requests(seen, redirect),
+        follow_redirects=True,
+    )
 
-    assert visited == [("/source", b"payload")]
+    assert status == 307
+    assert [(request.path, request.body) for request in seen] == [
+        ("/source", b"payload")
+    ]
 
 
 async def test_one_shot_request_body_is_not_replayed_by_client_auth() -> None:
-    visited: list[tuple[str | None, bytes]] = []
+    seen: list[_SeenRequest] = []
 
-    async def app(scope: Scope, receive: Receive, send: Send) -> None:
-        body = bytearray()
-        while True:
-            message = await receive()
-            body.extend(message.get("body", b""))
-            if not message.get("more_body", False):
-                break
-        headers = dict(scope["headers"])
-        authorization = headers.get(b"authorization")
-        visited.append(
-            (
-                authorization.decode() if authorization is not None else None,
-                bytes(body),
-            )
+    def challenge(request: _SeenRequest) -> tuple[int, list[tuple[bytes, bytes]]]:
+        status = (
+            200
+            if request.headers.get("authorization") == "Bearer challenge-response"
+            else 401
         )
-        status = 200 if authorization == b"Bearer challenge-response" else 401
-        await send({"type": "http.response.start", "status": status, "headers": []})
-        await send({"type": "http.response.body", "body": b""})
+        return status, []
 
-    transport = httpx.ASGITransport(app=app)  # type: ignore[arg-type]
-    async with httpx.AsyncClient(transport=transport, auth=_ChallengeAuth()) as client:
-        forwarder = HttpxForwarder(client=client)
-        request = ForwardRequest(
+    status, _ = await _forward_to_asgi(
+        ForwardRequest(
             method="PUT",
             url="http://up/upload",
             headers={"content-length": "7"},
             body=_RecordingBody([b"payload"]),
-        )
-        async with forwarder.forward(request) as response:
-            assert response.status_code == 401
+        ),
+        _record_requests(seen, challenge),
+        auth=_ChallengeAuth(),
+    )
 
-    assert visited == [(None, b"payload")]
-
-
-async def test_empty_request_body_remains_fixed_length_and_unchunked() -> None:
-    seen_headers: dict[str, str] = {}
-    seen_body = bytearray()
-    async with _client(_request_body_app(seen_headers, seen_body)) as client:
-        forwarder = HttpxForwarder(client=client)
-        request = ForwardRequest(
-            method="POST",
-            url="http://up/upload",
-            body=None,
-        )
-        async with forwarder.forward(request) as response:
-            _ = [chunk async for chunk in response.body]
-
-    assert bytes(seen_body) == b""
-    assert seen_headers["content-length"] == "0"
-    assert "transfer-encoding" not in seen_headers
+    assert status == 401
+    assert [
+        (request.headers.get("authorization"), request.body) for request in seen
+    ] == [(None, b"payload")]
 
 
-async def test_request_body_closes_when_transport_fails_before_consuming_it() -> None:
+@pytest.mark.parametrize(
+    ("url", "transport", "error"),
+    [
+        ("http://up/upload", _FailingTransport(), httpx.ConnectError),
+        ("http://[::1", _FailingTransport(), httpx.InvalidURL),
+    ],
+    ids=["transport-failure", "invalid-metadata"],
+)
+async def test_request_body_closes_when_send_fails(
+    url: str,
+    transport: httpx.AsyncBaseTransport,
+    error: type[Exception],
+) -> None:
     body = _RecordingBody([b"payload"])
-    async with httpx.AsyncClient(transport=_FailingTransport()) as client:
+    async with httpx.AsyncClient(transport=transport) as client:
         forwarder = HttpxForwarder(client=client)
-        request = ForwardRequest(
-            method="POST",
-            url="http://up/upload",
-            body=body,
-        )
-        with pytest.raises(httpx.ConnectError, match="upstream unavailable"):
-            async with forwarder.forward(request):
+        with pytest.raises(error):
+            async with forwarder.forward(
+                ForwardRequest(method="POST", url=url, body=body)
+            ):
                 pass
-
-    assert body.closed
-
-
-async def test_request_body_closes_when_httpx_rejects_request_metadata() -> None:
-    body = _RecordingBody([b"payload"])
-    async with httpx.AsyncClient(transport=_FailingTransport()) as client:
-        forwarder = HttpxForwarder(client=client)
-        request = ForwardRequest(
-            method="POST",
-            url="http://[::1",
-            body=body,
-        )
-        with pytest.raises(httpx.InvalidURL):
-            async with forwarder.forward(request):
-                pass
-
     assert body.closed
 
 
@@ -397,12 +393,9 @@ async def test_upstream_early_response_closes_both_streams() -> None:
         transport=_EarlyResponseTransport(response_stream)
     ) as client:
         forwarder = HttpxForwarder(client=client)
-        request = ForwardRequest(
-            method="POST",
-            url="http://up/upload",
-            body=body,
-        )
-        async with forwarder.forward(request) as response:
+        async with forwarder.forward(
+            ForwardRequest(method="POST", url="http://up/upload", body=body)
+        ) as response:
             assert response.status_code == 413
 
     assert body.closed
@@ -435,12 +428,9 @@ async def test_request_body_closes_when_upstream_send_is_cancelled() -> None:
     body = _RecordingBody([b"payload"])
     async with httpx.AsyncClient(transport=_BlockingTransport(send_started)) as client:
         forwarder = HttpxForwarder(client=client)
-        request = ForwardRequest(
-            method="POST",
-            url="http://up/upload",
-            body=body,
+        context = forwarder.forward(
+            ForwardRequest(method="POST", url="http://up/upload", body=body)
         )
-        context = forwarder.forward(request)
         entering = asyncio.create_task(context.__aenter__())
         await asyncio.wait_for(send_started.wait(), timeout=1)
         entering.cancel()
