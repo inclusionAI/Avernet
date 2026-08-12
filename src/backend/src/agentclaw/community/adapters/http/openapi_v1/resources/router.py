@@ -118,8 +118,10 @@ def _to_openapi_resource(legacy: _LegacyResource) -> Resource:
         source=legacy.source,
         url=legacy.url,
         size=legacy.size if legacy.resource_type == _LegacyType.FILE else None,
-        gmt_create=legacy.gmt_created.isoformat() if legacy.gmt_created else "",
-        gmt_modified=legacy.gmt_modified.isoformat() if legacy.gmt_modified else "",
+        # ``None``, not ``""``: the field is nullable now, and an empty string is
+        # a sentinel pretending to be a timestamp. Absent means absent.
+        gmt_create=legacy.gmt_created.isoformat() if legacy.gmt_created else None,
+        gmt_modified=legacy.gmt_modified.isoformat() if legacy.gmt_modified else None,
     )
 
 

@@ -33,7 +33,7 @@ change, no OCB dependency in this scope.
   **No `parent_path` field** — a `dirname` off `path`. `name` stays because a
   link has one and no path, and the schema is shared. Do **not** add an uploader
   field; the console surfaces it, this API does not.
-- [ ] **A4.** Relax `gmt_create` / `gmt_modified` to `str | None` — the engine's
+- [x] **A4.** Relax `gmt_create` / `gmt_modified` to `str | None` — the engine's
   listing carries no timestamps (`FileEntry`, `core/file/models.py:34`), so a
   bot-created file has none.
   **Keep the names.** They are DB-flavoured, but they are the prevailing
