@@ -514,7 +514,17 @@ class FusionExpertChatService:
 
         # Allow environment override for demo / long-scenario use cases.
         # Defaults to 4096 to stay safe in token-constrained deployments.
-        fusion_max_tokens = int(os.environ.get("FUSION_CHAT_MAX_TOKENS", "4096"))
+        env_max_tokens = os.environ.get("FUSION_CHAT_MAX_TOKENS", "4096")
+        try:
+            fusion_max_tokens = int(env_max_tokens)
+            if not 1 <= fusion_max_tokens <= 128000:
+                raise ValueError
+        except ValueError:
+            logger.warning(
+                "[FusionChat] Invalid FUSION_CHAT_MAX_TOKENS=%r, using default 4096",
+                env_max_tokens,
+            )
+            fusion_max_tokens = 4096
 
         llm_request = LLMRequest(
             task_spec=task_spec,

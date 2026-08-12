@@ -82,12 +82,22 @@ class GroupContextService:
         self._context_limit = context_limit
         # Allow demo scenarios with long SOP messages to keep more content per
         # message without truncating to the conservative default.
-        self._max_content_length = int(
-            os.environ.get(
-                "FUSION_CONTEXT_MAX_MESSAGE_LENGTH",
-                str(self._MAX_CONTENT_LENGTH),
-            )
+        env_max_content_length = os.environ.get(
+            "FUSION_CONTEXT_MAX_MESSAGE_LENGTH",
+            str(self._MAX_CONTENT_LENGTH),
         )
+        try:
+            parsed = int(env_max_content_length)
+            if parsed < 1:
+                raise ValueError
+            self._max_content_length = parsed
+        except ValueError:
+            logger.warning(
+                "[GroupContext] Invalid FUSION_CONTEXT_MAX_MESSAGE_LENGTH=%r, using default %d",
+                env_max_content_length,
+                self._MAX_CONTENT_LENGTH,
+            )
+            self._max_content_length = self._MAX_CONTENT_LENGTH
 
     async def summarize(
         self,
