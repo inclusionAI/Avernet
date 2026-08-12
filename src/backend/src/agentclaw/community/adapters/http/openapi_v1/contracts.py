@@ -12,6 +12,12 @@ from typing import Annotated
 from fastapi import Depends, Query
 from pydantic import BaseModel, Field
 
+# The published startup-script size limit, imported rather than retyped so the
+# example in STARTUP_SCRIPT_WRITE_RESPONSES cannot drift from the enforced value.
+from agentclaw.community.core.bot_startup_script.services.startup_script_service import (
+    MAX_SCRIPT_BYTES,
+)
+
 # Standard codes = HTTP status (3 digits) + business subcode (3 digits).
 CODE_OK = 200000
 CODE_CREATED = 201000
@@ -91,6 +97,51 @@ USER_SCOPED_403: dict[int | str, dict[str, object]] = {
         "model": ErrorEnvelope,
         "description": "The user_id names a user the authenticated caller may "
         "not act for",
+    },
+}
+
+# The two extra failures the startup-script **write** can produce. Kept here
+# beside the other per-route sets rather than inline in the bots router, which
+# sits against the 1000-line module cap.
+#
+# Neither is in ``ERROR_RESPONSES``: that dict is applied surface-wide, and no
+# other operation can answer 413 or 503. Without these entries both statuses are
+# reachable but invisible to a client generated from the published schema — the
+# 409 for an unsupported bot is already carried by the base set.
+STARTUP_SCRIPT_WRITE_RESPONSES: dict[int | str, dict[str, object]] = {
+    **USER_SCOPED_403,
+    413: {
+        "model": ErrorEnvelope,
+        "description": "Script body exceeds the size limit.",
+        "content": {
+            "application/json": {
+                "example": {
+                    "code": 413000,
+                    "message": (
+                        f"Startup script exceeds the {MAX_SCRIPT_BYTES}-byte limit"
+                    ),
+                    "data": None,
+                    "request_id": "",
+                }
+            }
+        },
+    },
+    503: {
+        "model": ErrorEnvelope,
+        "description": (
+            "Whether this bot can run a startup script could not be determined. "
+            "Retryable — unlike the 409, it is not a verdict."
+        ),
+        "content": {
+            "application/json": {
+                "example": {
+                    "code": 503000,
+                    "message": "Startup script support could not be determined",
+                    "data": None,
+                    "request_id": "",
+                }
+            }
+        },
     },
 }
 
