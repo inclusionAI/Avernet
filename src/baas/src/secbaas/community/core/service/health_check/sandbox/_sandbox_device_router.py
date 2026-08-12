@@ -442,6 +442,18 @@ class BaasSandboxHandler:
         if row is None:
             raise ValueError(f"Device record not found: id={table_id}")
 
+        # STOPPED 状态不续期
+        if row.get("status") == "STOPPED":
+            dp = _parse_device_props(row.get("provider_device_props"))
+            return RenewTtlResult(
+                table_id=table_id,
+                table_type=TableType.BAAS,
+                device_id=row.get("provider_device_id"),
+                success=False,
+                refresh_fail_count=dp.get("refresh_fail_count", 0),
+                error="Device is stopped",
+            )
+
         # baas_device 表的 provider_device_id 就是 sandbox_id
         sandbox_id = row.get("provider_device_id")
         if not sandbox_id:
