@@ -341,6 +341,32 @@ class ResourceFileService:
             self._logical(path), enforce_download_limit=enforce_download_limit
         )
 
+    async def exists(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+        path: str,
+        publish_id: str | None = None,
+        device_uuid: str | None = None,
+    ) -> bool:
+        """Whether ``path`` is present in the bot's workspace, provider-blind.
+
+        Same addressing as every other method here — the caller passes a
+        workspace-relative path and never learns the container's layout.
+        """
+        ctx = self._resolve_ctx(
+            bot_id=bot_id, entity_id=entity_id, publish_id=publish_id,
+            device_uuid=device_uuid,
+        )
+        device_fs = self._device_fs(
+            ctx, entity_type=entity_type, entity_id=entity_id,
+            bot_id=bot_id, engine_type=engine_type,
+        )
+        return await device_fs.exists(self._logical(path))
+
     async def create_directory(
         self,
         *,

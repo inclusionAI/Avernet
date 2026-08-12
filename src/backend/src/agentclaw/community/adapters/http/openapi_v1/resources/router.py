@@ -57,7 +57,10 @@ from agentclaw.community.core.devices.services.device_filesystem_dispatcher impo
     DeviceFilesystemDispatcher,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.resources.service import InvalidResourcePathError
+from agentclaw.community.core.resources.service import (
+    DuplicateResourceError,
+    InvalidResourcePathError,
+)
 from agentclaw.community.core.services.resource_file_service import ResourceFileService
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
@@ -301,45 +304,82 @@ async def create_resource(
 @envelope_errors
 async def upload_resource(
     owner_id: UserIdDep,
-    name: str,
+    path: str,
     content: Annotated[bytes, Body(media_type="application/octet-stream")],
     request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
-    factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
-    resolver: DeviceContextResolver = Injected(DeviceContextResolver),
-    device_fs_dispatcher: DeviceFilesystemDispatcher = Injected(
-        DeviceFilesystemDispatcher
-    ),
+    bot_repo: BotRepository = Injected(BotRepository),
+    file_svc: ResourceFileService = Injected(ResourceFileService),
 ) -> Envelope[Resource]:
-    """Upload a file's raw bytes as a new resource.
+    """Upload a file's raw bytes into the bot's workspace.
 
-    device_fs is resolved per-bot; upload_file is async and raises
-    DuplicateResourceError on duplicate name → 409 (via @envelope_errors).
-    owner_id comes from the request's ``user_id`` parameter (``UserIdDep``),
+    ``path`` is workspace-relative and carries its own directories
+    (``docs/spec/a.txt``); intermediate ones are created by the engine. There is
+    no separate name or parent-directory parameter — the directory is part of the
+    path, and ``path`` is the same spelling every other file endpoint uses.
+
+    The write goes through ``ResourceFileService``, the same service the console
+    uses, so both surfaces compose the workspace address identically and cannot
+    drift. ``owner_id`` comes from the request's ``user_id`` (``UserIdDep``),
     fail-closed — mirroring the bots router.
     """
-    effective_bot_id = bot_id
-    ctx = resolver.resolve_for_bot(effective_bot_id, owner_id)
-    device_fs = device_fs_dispatcher.dispatch(ctx)
-    service = factory.create(bot_id=effective_bot_id)
+    safe = _safe_path(path)
+    if not safe:
+        raise InvalidResourcePathError("path is required")
+    entity_type, entity_id, engine_type = _file_coords(bot_id, owner_id, bot_repo)
+    # Duplicate detection against the workspace, not the record table. Uploading
+    # to an occupied path would otherwise overwrite silently, since the engine's
+    # upload is a plain write. Asking the filesystem also fixes the old false
+    # positive: two files with the same leaf name in different directories were
+    # one row-level ``(name, parent_path)`` collision, and are now two distinct
+    # paths.
+    if await file_svc.exists(
+        entity_type=entity_type,
+        entity_id=entity_id,
+        bot_id=bot_id,
+        engine_type=engine_type,
+        path=safe,
+    ):
+        raise DuplicateResourceError(f"Resource already exists: {safe}")
     try:
-        r = await service.upload_file(
+        info = await file_svc.upload_file(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            bot_id=bot_id,
+            engine_type=engine_type,
+            target_dir="",
+            filename=safe,
             data=content,
-            filename=name,
-            user_id=owner_id,
-            device_fs=device_fs,
+            # ``safe`` already carries its directories, so the structure-preserving
+            # branch is the one that must run; the other would flatten it to a
+            # basename and silently drop the caller's directories.
+            preserve_structure=True,
         )
-    except ValueError:
-        # DuplicateResourceError propagates to @envelope_errors → 409.
-        raise
+    except ValueError as exc:
+        # Extension allow-list and size cap, raised as bare ValueError by the
+        # service. Unmapped by ENVELOPE_ERRORS, so without this it would surface
+        # as a 500 — the caller's input was wrong, not the server. The public
+        # message is the status phrase by house convention; the real reason is
+        # logged here so it is still diagnosable.
+        logger.warning("[upload_resource] rejected upload: %s", exc)
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception:
-        # device_fs.write_file failure → 502 Bad Gateway. The slim service lets
-        # the write exception bubble (no longer swallowed) so the handler is the
-        # single translation point: file write failed, no DB record created.
-        # Fixed message (never str(exc)) so internal details don't leak.
-        logger.exception("[upload_resource] device_fs write failed")
+        # Device write failure → 502. No record is written below, so a failed
+        # upload leaves neither bytes nor a row.
+        logger.exception("[upload_resource] device write failed")
         raise HTTPException(status_code=502, detail="Upload storage failed")
-    return created(_to_openapi_resource(r), request)
+
+    return created(
+        Resource(
+            resource_id="",
+            name=info["name"],
+            type=ResourceType.FILE,
+            source="upload",
+            size=info.get("size", len(content)),
+            path=info["path"],
+        ),
+        request,
+    )
 
 
 @router.get("/{resource_id}", response_model=Envelope[Resource])

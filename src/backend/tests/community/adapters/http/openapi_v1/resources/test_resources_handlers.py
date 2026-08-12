@@ -914,6 +914,52 @@ class _StubDeviceFs:
         return b"device-fs bytes"
 
 
+class _StubFileService:
+    """Stands in for ``ResourceFileService`` — the engine seam the file handlers
+    now delegate to.
+
+    Records the workspace-relative paths it is handed, so a test can assert what
+    address reached the device without reaching a device at all. ``existing``
+    seeds the workspace for the duplicate check; ``raises`` makes ``upload_file``
+    fail, standing in for the allow-list / size rejections (``ValueError``) and
+    for a device write failure (anything else).
+    """
+
+    def __init__(self, *, existing: set[str] | None = None, raises: Exception | None = None):
+        self.existing: set[str] = set(existing or ())
+        self.raises = raises
+        self.upload_calls: List[dict] = []
+        self.exists_calls: List[str] = []
+
+    async def exists(self, *, path, **_kw) -> bool:
+        self.exists_calls.append(path)
+        return path in self.existing
+
+    async def upload_file(self, **kwargs) -> dict:
+        self.upload_calls.append(kwargs)
+        if self.raises is not None:
+            raise self.raises
+        rel = kwargs["filename"]
+        return {
+            "name": rel.rsplit("/", 1)[-1],
+            "path": rel,
+            "size": len(kwargs["data"]),
+        }
+
+
+class _StubBotRepo:
+    """Minimal ``BotRepository`` for ``_file_coords`` → ``resolve_engine_for_bot``."""
+
+    def __init__(self, active_engine: str = "aicoding"):
+        self._bot = {"active_engine": active_engine}
+
+    def get_by_id_and_owner(self, bot_id, owner_id):
+        return self._bot
+
+    def get_by_id(self, bot_id):
+        return self._bot
+
+
 _DEFAULT_BOT = {"owner_id": "own-a", "bot_id": "b"}
 _DEFAULT_DEVICE_INFO = {"device_provider": "arca", "sandbox_id": "sb-1"}
 
@@ -1071,18 +1117,16 @@ async def test_delete_reads_x_trace_id_from_request():
 
 
 @pytest.mark.asyncio
-async def test_upload_returns_201_envelope_and_threads_device_fs():
-    service = _StubService([])
-    factory, resolver, dispatcher, device_fs = _delete_deps(service=service)
+async def test_upload_hands_the_workspace_relative_path_to_the_engine_seam():
+    file_svc = _StubFileService()
 
     env = await upload_resource(
-        name="hello.txt",
+        path="hello.txt",
         content=b"file bytes",
         owner_id="u1",
         bot_id="bot-x",
-        factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
         request=_request_without_trace(),
     )
 
@@ -1090,57 +1134,153 @@ async def test_upload_returns_201_envelope_and_threads_device_fs():
     assert env.code == CODE_CREATED
     assert env.message == "Created"
     assert env.data is not None
-    assert env.data.resource_id == "1"
     assert env.data.name == "hello.txt"
+    assert env.data.path == "hello.txt"
     assert env.data.type == OpenapiType.FILE
     assert env.data.size == len(b"file bytes")
-    # device_fs resolved by the dispatcher was forwarded to the service
-    assert service.last_call_device_fs is device_fs
-    # upload_file received the file bytes + filename
-    assert service.last_call_kwargs.get("data") == b"file bytes"
-    assert service.last_call_kwargs.get("filename") == "hello.txt"
-    # owner_id from the verified principal ({"user_id": "u1"}) → user_id
-    # (slim upload_file has no created_by param — created_by is omitted
-    # from the slim contract)
-    assert service.last_call_kwargs.get("user_id") == "u1"
-    # bot_id flowed through to factory.create
-    assert factory.created_bot_ids == ["bot-x"]
+    # The address that reached the engine seam is workspace-relative — never a
+    # bare name (which resolved against the engine's CWD) and never a composed
+    # container path.
+    call = file_svc.upload_calls[0]
+    assert call["filename"] == "hello.txt"
+    assert call["target_dir"] == ""
+    assert call["data"] == b"file bytes"
+    assert call["bot_id"] == "bot-x"
+    # engine_type defaulted from the bot's active_engine
+    assert call["engine_type"] == "aicoding"
 
 
 @pytest.mark.asyncio
-async def test_upload_raises_409_on_duplicate_name():
-    # upload_file raises ValueError for filename == "taken"
-    service = _StubService([])
-    factory, resolver, dispatcher, _ = _delete_deps(service=service)
+async def test_upload_keeps_the_directories_carried_by_the_path():
+    file_svc = _StubFileService()
+
+    env = await upload_resource(
+        path="docs/spec/a.txt",
+        content=b"x",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
+
+    assert env.data.path == "docs/spec/a.txt"
+    assert env.data.name == "a.txt"  # the leaf, not the whole path
+    assert file_svc.upload_calls[0]["filename"] == "docs/spec/a.txt"
+    # The structure-preserving branch must run, or the service flattens the
+    # path to its basename and the caller's directories vanish.
+    assert file_svc.upload_calls[0]["preserve_structure"] is True
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_a_path_escaping_the_workspace():
+    file_svc = _StubFileService()
 
     resp = await upload_resource(
-        name="taken",
+        path="../../etc/passwd",
         content=b"x",
         owner_id="u1",
         bot_id="bot-a",
-        factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
         request=_request_without_trace(),
     )
+
+    assert resp.status_code == 400
+    assert json.loads(resp.body)["message"] == "Invalid resource path"
+    # Rejected before anything reached the device.
+    assert file_svc.upload_calls == []
+
+
+@pytest.mark.asyncio
+async def test_upload_409_when_the_path_is_already_taken():
+    file_svc = _StubFileService(existing={"taken.txt"})
+
+    resp = await upload_resource(
+        path="taken.txt",
+        content=b"x",
+        owner_id="u1",
+        bot_id="bot-a",
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
+
     assert resp.status_code == 409
     assert json.loads(resp.body)["message"] == "Resource already exists"
+    # Occupancy is decided by the workspace, and nothing was overwritten.
+    assert file_svc.exists_calls == ["taken.txt"]
+    assert file_svc.upload_calls == []
+
+
+@pytest.mark.asyncio
+async def test_upload_same_leaf_name_in_two_directories_does_not_collide():
+    """The old row-level ``(name, parent_path)`` check reported these as a
+    duplicate; two distinct paths are two distinct files."""
+    file_svc = _StubFileService(existing={"a/x.txt"})
+
+    env = await upload_resource(
+        path="b/x.txt",
+        content=b"x",
+        owner_id="u1",
+        bot_id="bot-a",
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
+
+    assert env.code == CODE_CREATED
+    assert env.data.path == "b/x.txt"
+
+
+@pytest.mark.asyncio
+async def test_upload_400_when_the_service_rejects_the_file():
+    """Extension allow-list / size cap surface as a bare ValueError from the
+    service; unmapped, they would have surfaced as a 500."""
+    file_svc = _StubFileService(raises=ValueError("File type not allowed"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await upload_resource(
+            path="a.exe",
+            content=b"x",
+            owner_id="u1",
+            bot_id="bot-a",
+            bot_repo=_StubBotRepo(),
+            file_svc=file_svc,
+            request=_request_without_trace(),
+        )
+
+    assert excinfo.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_upload_502_when_the_device_write_fails():
+    file_svc = _StubFileService(raises=RuntimeError("device unreachable"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await upload_resource(
+            path="a.txt",
+            content=b"x",
+            owner_id="u1",
+            bot_id="bot-a",
+            bot_repo=_StubBotRepo(),
+            file_svc=file_svc,
+            request=_request_without_trace(),
+        )
+
+    assert excinfo.value.status_code == 502
 
 
 @pytest.mark.asyncio
 async def test_upload_reads_x_trace_id_from_request():
-    factory, resolver, dispatcher, _ = _delete_deps()
-    request = _request_with_trace("trace-up-1")
-
     env = await upload_resource(
-        name="hello.txt",
+        path="hello.txt",
         content=b"x",
         owner_id="u1",
         bot_id="bot-a",
-        factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
-        request=request,
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubFileService(),
+        request=_request_with_trace("trace-up-1"),
     )
 
     assert env.request_id == "trace-up-1"

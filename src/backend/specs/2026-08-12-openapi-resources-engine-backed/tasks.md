@@ -52,7 +52,7 @@ change, no OCB dependency in this scope.
 
 ## Group B — File endpoints on the engine
 
-- [ ] **B1.** `POST /upload`: rename the `name` query parameter to `path` — the
+- [x] **B1.** `POST /upload`: rename the `name` query parameter to `path` — the
   workspace-relative path, directories included — and delegate to
   `ResourceFileService.upload_file` (which composes `workspace/<rel>` and
   dispatches addressed) after the A5 sanitization. **One parameter.** No
