@@ -66,6 +66,12 @@ The record is still written, but for exactly one consumer — the publish pipeli
 which builds a released bot's manifest from it and would otherwise lose files
 silently. Every field of a file in a response now comes from the workspace.
 
+Because that one consumer is load-bearing, the write is not best-effort: an
+upload whose record cannot be written rolls the file back and fails. Reporting
+success would publish a bot silently missing that file, and the obvious repair —
+uploading it again — cannot work, since the file would be on disk and the
+duplicate check would answer 409.
+
 **G7. Link resources are unaffected.** A link has no file; it remains
 record-backed and record-addressed.
 

@@ -134,31 +134,48 @@ change, no OCB dependency in this scope.
 
 ## Group D — Tests
 
-- [ ] **D1.** Endpoint cases replacing `coverage_baseline.txt:346`: happy upload
-  asserting the logical path reaching `device_fs`, nested-name upload, `..`
-  rejection, disallowed extension.
-- [ ] **D2.** Round trip: upload → list → download → delete → list, asserting the
-  file is gone.
-- [ ] **D3.** Bot-created file: present on the device with no record — listed,
+- [x] **D1.** Handler cases replacing `coverage_baseline.txt:346`: happy upload
+  asserting the logical path reaching the engine seam, nested-path upload, `..`
+  rejection, service rejection (allow-list / size) → 400.
+  *Handler tests, not endpoint cases* — see the success-criteria note: the
+  endpoint-case runner has no gateway-principal minter, so a case on
+  `/openapi/v1` could assert nothing but a 401 (#651).
+- [x] **D2.** Round trip: upload → list → download → delete → list, asserting the
+  file is gone (`test_real_factory_service_supports_all_handler_methods_e2e`).
+- [x] **D3.** Bot-created file: present on the device with no record — listed,
   downloaded, and deleted, with empty `resource_id` and null timestamps.
-- [ ] **D4.** Links unaffected: create / update / get / delete by record id.
-- [ ] **D5.** Provider coverage at the `DeviceFileSystem` boundary: baas/arca →
-  OSS-view absolute; teclaw → `/workspace/<rel>` (raises today, should start
-  passing); local → absolute host path in pathlib and baas modes.
-- [ ] **D6.** Enrichment failure: a repo error during record creation leaves the
-  upload successful.
+- [x] **D4.** Links unaffected: create / update / get / delete by record id, and
+  a **file** id rejected on both record-addressed routes.
+- [ ] **D5.** ~~Provider coverage at the `DeviceFileSystem` boundary~~ —
+  **dropped as out of scope.** This PR changes no path mapper: it reuses
+  `ResourceFileService`, which composes the same address the console already
+  composes and dispatches through the same `build_workspace_mapper`. Per-provider
+  boundary assertions (teclaw's `/workspace/<rel>`, the local host path) belong
+  with the wire-format change in #1002, which is what actually moves them.
+- [x] **D6.** ~~Enrichment failure leaves the upload successful~~ — **inverted by
+  review.** The record is the publish pipeline's input, not enrichment, so the
+  upload now rolls the file back and fails (502): `record_uploaded_file` failing,
+  and that *plus* the rollback failing.
 
 ## Group E — Close-out
 
-- [ ] **E1.** Remove line 346 of
-  `src/backend/tests/community/framework/coverage_baseline.txt` **by hand**.
-  Do not regenerate — `--regen` drops the hand-written header notes.
-- [ ] **E2.** Run the module gates: `OCB_PRE_PUSH_RUN_CI=1` per the pre-push
-  contract in `AGENTS.md`, against `origin/dev`'s merge base.
-- [ ] **E3.** Update the PR body to the final scope, including the contract
+- [x] **E1.** Edit `src/backend/tests/community/framework/coverage_baseline.txt`
+  **by hand** — the removed routes out, the new ones in with the #651 note. Do
+  not regenerate; `--regen` drops the hand-written header notes.
+- [x] **E2.** Module gates. Run on CI rather than locally: the pinned mirror in
+  `uv.lock` is unreachable from this environment, so the pre-push hook's `uv`
+  path cannot resolve. The equivalent suites were run against a from-PyPI venv
+  (`openapi_v1`, `framework`, `core/resources`, `core/services` — 916 passing)
+  and CI runs the real gates on the PR.
+- [x] **E3.** Publish the reshaped contract to the gateway's catalog
+  (`src/gateway/configs/schemas/bots.openapi.json`) — it is a build output, so
+  regenerate with `dump_openapi.py` and republish with
+  `gate_and_publish_openapi.py --allow-breaking`. Without this the gateway keeps
+  serving the removed `/{resource_id}/download` and `/{resource_id}/preview`.
+- [x] **E4.** Update the PR body to the final scope, including the contract
   change (four operations re-shaped, file record ids stop resolving) and the
   "NOT PUBLIC-READY" justification for making it now. Mark ready for review.
-- [x] **E4.** Follow-up issue for the deferred engine-side work: **#1002**
+- [x] **E5.** Follow-up issue for the deferred engine-side work: **#1002**
   (opened up front; its body cross-links #1000).
 
 ---
