@@ -70,5 +70,20 @@ class StartupScriptPurgeProtocol(Protocol):
 
     @abstractmethod
     def delete(self, *, entity_id: str, bot_id: str) -> bool:
-        """Remove the bot's script. Idempotent — absent is success."""
+        """Remove the bot's script. Idempotent — absent is success.
+
+        Unconditional: used before the soft delete, while the bot is still
+        alive and the identifier cannot belong to anyone else.
+        """
+        ...
+
+    @abstractmethod
+    def delete_written_by(
+        self, *, entity_id: str, bot_id: str, bot_incarnation: int
+    ) -> bool:
+        """Remove the script only if that incarnation still owns it.
+
+        Used *after* the soft delete, where the identifier is free again and a
+        recreated bot may already have stored a script of its own.
+        """
         ...

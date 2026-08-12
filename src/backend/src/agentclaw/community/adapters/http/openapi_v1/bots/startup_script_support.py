@@ -19,6 +19,9 @@ from agentclaw.community.api.bot_startup_script_service import (
     SUPPORTED,
     BotStartupScriptServiceProtocol,
 )
+from agentclaw.community.core.bot_startup_script.errors import (
+    StartupScriptSupersededError,
+)
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
@@ -145,3 +148,36 @@ def _abandon_write_if_the_bot_died(
         entity_id=entity_id, bot_id=bot_id, bot_incarnation=bot_incarnation
     )
     raise BotNotFoundError(f"Bot not found: {bot_id}")
+
+
+def _store_or_404_if_superseded(
+    startup_script_service: BotStartupScriptServiceProtocol,
+    *,
+    entity_id: str,
+    bot_id: str,
+    script: str,
+    bot_incarnation: int,
+    modifier: str,
+):
+    """Store the script, answering 404 when a later bot already owns the key.
+
+    The store refuses a write whose bot is older than the row's current owner:
+    the writer's bot was deleted and its identifier handed on mid-request, and
+    overwriting would destroy the new owner's script.
+
+    That is the same situation as the bot simply being gone, and it gets the
+    same answer. The caller did nothing wrong — they addressed a bot that
+    stopped existing while they were talking to it — so a 404 on that bot is
+    both true and the outcome they can act on, where a 500 would suggest a
+    fault on our side and invite a retry that will never succeed.
+    """
+    try:
+        return startup_script_service.put(
+            entity_id=entity_id,
+            bot_id=bot_id,
+            script=script,
+            bot_incarnation=bot_incarnation,
+            modifier=modifier,
+        )
+    except StartupScriptSupersededError as exc:
+        raise BotNotFoundError(f"Bot not found: {bot_id}") from exc

@@ -40,6 +40,9 @@ def _make_bot(
     template_type: str | None = None,
 ) -> dict:
     result = {
+        # ac_bots' primary key: which incarnation of this bot_id this is. The
+        # post-delete sweep is conditional on it, so it has to be present.
+        "id": 4242,
         "bot_id": bot_id,
         "owner_id": owner_id,
         "status": status,
@@ -765,9 +768,17 @@ class TestDeleteBot:
 
         assert svc.delete_bot("mybot", "user001") is True
 
-        assert svc._cleanup_service.purge_startup_script.call_count == 2
-        for call in svc._cleanup_service.purge_startup_script.call_args_list:
-            assert call.kwargs == {"entity_id": "team_42", "bot_id": "mybot"}
+        # First purge, before the destructive steps: unconditional, because the
+        # bot is still alive and nothing else can hold the identifier.
+        svc._cleanup_service.purge_startup_script.assert_called_once_with(
+            entity_id="team_42", bot_id="mybot"
+        )
+        # Second sweep, after the soft delete: restricted to the deleted bot's
+        # own incarnation. The identifier is free by then, so an unconditional
+        # delete could remove a recreated bot's script.
+        svc._cleanup_service.purge_startup_script_written_by.assert_called_once_with(
+            entity_id="team_42", bot_id="mybot", bot_incarnation=4242
+        )
 
     def test_a_racing_script_write_is_swept_and_reported(self):
         """The second sweep finding a row means the race actually happened —

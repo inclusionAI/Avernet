@@ -61,6 +61,22 @@ class BotCleanupService:
         """
         return self._startup_script_purge.delete(entity_id=entity_id, bot_id=bot_id)
 
+    def purge_startup_script_written_by(
+        self, *, entity_id: str, bot_id: str, bot_incarnation: int
+    ) -> bool:
+        """删除启动脚本，但**仅当它仍属于该 incarnation**。失败同样上抛。
+
+        用于软删之后的第二次清扫。那时 Bot 已经不在了，标识符因此是空闲的：
+        它可以被重建，而新 Bot 完全可能在这次清扫之前合法地写入自己的脚本。
+        无条件删除会把它一并抹掉——一个 Bot 的删除毁掉另一个 Bot 的数据。
+
+        软删**之前**的那次清扫不需要这个条件：那时 Bot 还活着，标识符不可能
+        已经属于别人。
+        """
+        return self._startup_script_purge.delete_written_by(
+            entity_id=entity_id, bot_id=bot_id, bot_incarnation=bot_incarnation
+        )
+
     def cleanup_single_bot_data(self, bot_id: str, user_id: str) -> Dict[str, Any]:
         """清理单个 Bot 的关联数据。
 

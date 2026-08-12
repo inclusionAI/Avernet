@@ -27,6 +27,18 @@ class FakeRepo:
             BotStartupScriptRecord,
         )
 
+        from agentclaw.community.core.bot_startup_script.errors import (
+            StartupScriptSupersededError,
+        )
+
+        existing = self.rows.get((env, entity_id, bot_id))
+        if existing is not None and existing.bot_incarnation > bot_incarnation:
+            # Mirrors the real repository: a write from a bot older than the
+            # row's current owner is refused rather than applied.
+            raise StartupScriptSupersededError(
+                stored_incarnation=existing.bot_incarnation,
+                writing_incarnation=bot_incarnation,
+            )
         rec = BotStartupScriptRecord(
             id=1, env=env, entity_id=entity_id, bot_id=bot_id,
             script=script, size_bytes=size_bytes, modifier=modifier,
@@ -482,3 +494,62 @@ class TestAStaleRowIsInert:
 
         assert svc.delete(entity_id="ent", bot_id="bot") is True
         assert svc.get_body(entity_id="ent", bot_id="bot", bot_incarnation=1) == ""
+
+
+class TestAKeyThatChangedHands:
+    """Writes and deletes on a key whose owner can change between admission and
+    execution. Each of these was an unconditional operation that would have hit
+    a bot other than the one the request was addressed to."""
+
+    def test_an_older_bots_write_cannot_overwrite_a_newer_ones_script(self, svc):
+        """A stale PUT must not clobber the current owner.
+
+        Worse than the overwrite itself: it would also stamp the row back to the
+        dead incarnation, so the stale request's own withdrawal would then
+        delete it and the new bot would be left with nothing.
+        """
+        from agentclaw.community.core.bot_startup_script.errors import (
+            StartupScriptSupersededError,
+        )
+
+        svc.put(
+            entity_id="ent",
+            bot_id="bot",
+            script="echo mine",
+            modifier="u2",
+            bot_incarnation=2,
+        )
+
+        with pytest.raises(StartupScriptSupersededError):
+            svc.put(
+                entity_id="ent",
+                bot_id="bot",
+                script="echo stale",
+                modifier="u1",
+                bot_incarnation=1,
+            )
+
+        assert svc.get_body(entity_id="ent", bot_id="bot", bot_incarnation=2) == (
+            "echo mine"
+        )
+
+    def test_the_current_owner_can_still_replace_its_own_script(self, svc):
+        """The rule is "older than the row", not "different from the row"."""
+        svc.put(
+            entity_id="ent",
+            bot_id="bot",
+            script="first",
+            modifier="u1",
+            bot_incarnation=2,
+        )
+        svc.put(
+            entity_id="ent",
+            bot_id="bot",
+            script="second",
+            modifier="u1",
+            bot_incarnation=2,
+        )
+
+        assert svc.get_body(entity_id="ent", bot_id="bot", bot_incarnation=2) == (
+            "second"
+        )

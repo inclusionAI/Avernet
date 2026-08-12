@@ -22,6 +22,9 @@ from agentclaw.community.core.bot_startup_script.repository.models import (
     BotStartupScriptModel,
     BotStartupScriptRecord,
 )
+from agentclaw.community.core.bot_startup_script.errors import (
+    StartupScriptSupersededError,
+)
 from agentclaw.community.core.repository.protocols.bot import (
     BotStartupScriptRepositoryProtocol,
 )
@@ -181,6 +184,19 @@ class BotStartupScriptRepository(
                     ),
                 )
                 db.add(row)
+            elif row.bot_incarnation > bot_incarnation:
+                # A newer bot already owns this key, so this write is stale: its
+                # bot was deleted and the identifier handed on while the request
+                # was in flight. Overwriting would lose the current owner's
+                # script *and* stamp the row back to the dead incarnation, which
+                # would then let the stale request's own withdrawal delete it.
+                #
+                # ``ac_bots.id`` is an autoincrement primary key, so "greater"
+                # really does mean "later" — this is an ordering, not a guess.
+                raise StartupScriptSupersededError(
+                    stored_incarnation=int(row.bot_incarnation),
+                    writing_incarnation=int(bot_incarnation),
+                )
             else:
                 row.script = script
                 row.size_bytes = size_bytes

@@ -2429,21 +2429,40 @@ class BaasService:  # pragma: no cover
         row left at the same ``(entity_id, bot_id)`` by an earlier bot reads as
         ``""`` rather than being executed here.
 
-        A bot record with no ``id`` raises instead of degrading to ``""``. It
-        cannot happen — the column is a NOT NULL autoincrement primary key and
-        ``to_dict`` always carries it — but the two ways of being wrong are not
-        equally bad: guessing would either run a body this bot may not own or
-        silently drop one it does, and both are the invisible failures this
-        method already refuses for read errors.
+        **The incarnation is looked up when the record does not carry one**, and
+        that case is normal rather than defensive. Records from
+        ``BotService.get_bot`` come through ``to_dict`` and always have ``id``,
+        but the device-allocation callers hand-build a bot dict and call this
+        *before* any ``ac_bots`` row exists — there is no id to carry yet. They
+        cannot be made to supply one, and they must not be made to guess: the
+        same allocation runs both for a brand-new bot and for one that already
+        exists (``bot_id or "default"``), so a blanket ``""`` there would
+        silently drop a real script on every device allocation for an existing
+        bot.
+
+        Asking the repository answers both cases with the same question:
+
+        * a row exists — resolve against its ``id``, which is the incarnation
+          about to be started;
+        * no row — the bot is being created, and nothing can have stored a
+          script for it, because a write requires the bot to already exist. So
+          ``""`` here is provable rather than assumed.
+
+        A lookup failure propagates, like the read below it.
         """
         if not entity_id or not bot_id:
             return ""
         bot_incarnation = bot.get("id")
         if bot_incarnation is None:
-            raise ValueError(
-                f"bot record has no id, cannot resolve its startup script safely: "
-                f"bot_id={bot_id}"
-            )
+            persisted = self._bot_repo.get_by_id_and_entity(bot_id, entity_id)
+            if persisted is None:
+                return ""
+            bot_incarnation = persisted.get("id")
+            if bot_incarnation is None:
+                raise ValueError(
+                    f"persisted bot has no id, cannot resolve its startup "
+                    f"script safely: bot_id={bot_id}"
+                )
         return self._startup_script_reader.get_body(
             entity_id=entity_id, bot_id=bot_id, bot_incarnation=int(bot_incarnation)
         )

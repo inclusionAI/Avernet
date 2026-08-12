@@ -120,6 +120,12 @@ def _seed_teclaw_bot(world) -> None:
 
 def _seed_bot_with_script(world) -> None:
     _seed_bot(world)
+    # Read the incarnation back rather than inventing one: the row is pinned to
+    # the writing bot's ac_bots.id, and a stored script whose stamp does not
+    # match the live bot reads as absent — which is exactly the behaviour these
+    # end-to-end cases exist to check, so a made-up id would make them pass for
+    # the wrong reason.
+    seeded = world.get(BotRepository).get_by_id_and_entity(_BOT_ID, _OWNER)
     world.get(BotStartupScriptRepositoryProtocol).upsert(
         env=get_current_env(),
         entity_id=_OWNER,
@@ -127,6 +133,7 @@ def _seed_bot_with_script(world) -> None:
         script=_SCRIPT,
         size_bytes=len(_SCRIPT.encode("utf-8")),
         modifier=_OWNER,
+        bot_incarnation=seeded["id"],
     )
 
 

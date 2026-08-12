@@ -443,6 +443,45 @@ class TestStartupScriptReachesEveryStartPath:
         )
         reader.get_body.assert_not_called()
 
+    def test_a_bot_being_created_resolves_to_no_script(self):
+        """The device-allocation callers hand-build a bot dict and call this
+        *before* any ac_bots row exists, so there is no id to carry.
+
+        Nothing can have stored a script for a bot that does not exist yet — a
+        write requires the bot to already be there — so "" is provable here, not
+        assumed. Pinned because requiring the id outright broke every singlebox
+        and BaaS device bot creation.
+        """
+        svc, reader = self._service_with_script()
+        svc._bot_repo.get_by_id_and_entity.return_value = None
+        prospective = {k: v for k, v in self._BOT.items() if k != "id"}
+
+        assert (
+            svc._resolve_startup_script(
+                entity_id="ent-1", bot_id="bot-1", bot=prospective
+            )
+            == ""
+        )
+        reader.get_body.assert_not_called()
+
+    def test_an_existing_bot_allocated_a_device_still_gets_its_script(self):
+        """The same allocation runs for a bot that already exists (``bot_id or
+        "default"``), so a blanket "" would silently drop a real script on every
+        device allocation. The incarnation is looked up instead."""
+        svc, reader = self._service_with_script("echo provisioned")
+        svc._bot_repo.get_by_id_and_entity.return_value = {"id": 909}
+        prospective = {k: v for k, v in self._BOT.items() if k != "id"}
+
+        assert (
+            svc._resolve_startup_script(
+                entity_id="ent-1", bot_id="bot-1", bot=prospective
+            )
+            == "echo provisioned"
+        )
+        reader.get_body.assert_called_once_with(
+            entity_id="ent-1", bot_id="bot-1", bot_incarnation=909
+        )
+
     def test_a_bot_record_with_no_id_raises_rather_than_guessing(self):
         """Which incarnation is asking decides whether a stored row is theirs.
 
@@ -452,6 +491,7 @@ class TestStartupScriptReachesEveryStartPath:
         already refuses for read errors.
         """
         svc, reader = self._service_with_script()
+        svc._bot_repo.get_by_id_and_entity.return_value = {"bot_id": "bot-1"}
         bot_without_id = {k: v for k, v in self._BOT.items() if k != "id"}
 
         with pytest.raises(ValueError, match="no id"):

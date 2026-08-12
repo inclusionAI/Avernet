@@ -90,6 +90,7 @@ from agentclaw.community.plugin_api.passport import PassportPlugin
 from .startup_script_support import (
     _abandon_write_if_the_bot_died,
     _bot_incarnation,
+    _store_or_404_if_superseded,
     _startup_script_payload,
     _startup_script_target,
 )
@@ -852,7 +853,8 @@ async def update_bot_startup_script(
     if state != SUPPORTED:
         raise StartupScriptUnsupportedError(reason)
     bot_incarnation = _bot_incarnation(bot)
-    record = startup_script_service.put(
+    record = _store_or_404_if_superseded(
+        startup_script_service,
         entity_id=entity_id,
         bot_id=bot_id,
         script=body.script,
@@ -893,7 +895,15 @@ async def delete_bot_startup_script(
     entity_id = bot.get("entity_id")
     if not entity_id:
         raise BotNotFoundError("bot has no associated entity")
-    startup_script_service.delete(entity_id=entity_id, bot_id=bot_id)
+    # Conditional on the incarnation the guard above validated. A DELETE that
+    # is admitted and then delayed while its bot is deleted and the identifier
+    # recreated would otherwise clear the *new* bot's script and report success
+    # — the caller's own request destroying a stranger's data. Nothing of ours
+    # left to remove is still success: clearing is idempotent, and our bot's
+    # script is certainly not there.
+    startup_script_service.delete_written_by(
+        entity_id=entity_id, bot_id=bot_id, bot_incarnation=_bot_incarnation(bot)
+    )
     return deleted_envelope(request)
 
 

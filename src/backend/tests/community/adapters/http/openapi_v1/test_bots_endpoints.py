@@ -1050,6 +1050,41 @@ def test_a_put_that_lands_on_a_recreated_bot_is_refused(
     )
 
 
+def test_a_put_superseded_by_a_newer_bot_is_a_404(client, svc, startup_script):
+    """The store refuses a stale write; the caller learns their bot is gone.
+
+    404 rather than 500: nothing failed on our side, and a retry would never
+    succeed — the bot they addressed stopped existing mid-request.
+    """
+    from agentclaw.community.core.bot_startup_script.errors import (
+        StartupScriptSupersededError,
+    )
+
+    svc.get_bot.return_value = _SUPPORTED_BOT
+    startup_script.put.side_effect = StartupScriptSupersededError(
+        stored_incarnation=78, writing_incarnation=77
+    )
+
+    resp = client.put(
+        "/openapi/v1/bots/b1/startup-script", json={"script": "echo stale"}
+    )
+
+    assert resp.status_code == 404
+
+
+def test_delete_only_clears_the_incarnation_it_was_admitted_for(
+    client, svc, startup_script
+):
+    """An admitted DELETE delayed past a delete-and-recreate must not clear the
+    newcomer's script."""
+    _ok(client.delete("/openapi/v1/bots/b1/startup-script"))
+
+    startup_script.delete_written_by.assert_called_once_with(
+        entity_id="u1", bot_id="b1", bot_incarnation=77
+    )
+    startup_script.delete.assert_not_called()
+
+
 def test_startup_script_put_rejects_an_attempt_to_set_audit_fields(
     client, svc, startup_script
 ):

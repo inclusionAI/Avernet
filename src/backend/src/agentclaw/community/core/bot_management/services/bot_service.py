@@ -3619,8 +3619,25 @@ class BotService:
         deletion has really happened by then, so a caller who retries is told
         "no such bot" — confusing, but honest, where reporting success over a
         row that survived is a wrong answer nobody can later discover.
+
+        **Restricted to the deleted bot's own incarnation**, unlike the first
+        purge. By the time this runs the bot is gone, so the identifier is free:
+        it can be recreated, and that new bot can legitimately store a script of
+        its own before this sweep fires. Clearing the key unconditionally would
+        delete it — the deletion of one bot destroying a different bot's data.
+        The first purge needs no such condition because the bot is still alive
+        there, so nothing else can hold the identifier yet.
         """
-        if self._purge_startup_script(bot_id, bot):
+        entity_id = str(bot.get("entity_id") or "")
+        deleted_incarnation = bot.get("id")
+        if not entity_id or deleted_incarnation is None:
+            return
+        removed = self._cleanup_service.purge_startup_script_written_by(
+            entity_id=entity_id,
+            bot_id=bot_id,
+            bot_incarnation=int(deleted_incarnation),
+        )
+        if removed:
             logger.warning(
                 "[bot_service.delete_bot] removed a startup script written on "
                 "bot %s while it was being deleted",
