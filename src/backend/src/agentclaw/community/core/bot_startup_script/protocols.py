@@ -8,6 +8,7 @@ satisfies it structurally.
 """
 from __future__ import annotations
 
+from abc import abstractmethod
 from typing import Protocol
 
 
@@ -18,6 +19,7 @@ class StartupScriptReaderProtocol(Protocol):
     so the write side stays out of reach of the code that builds shell strings.
     """
 
+    @abstractmethod
     def get_body(self, *, entity_id: str, bot_id: str) -> str:
         """Return the bot's script body, or ``""`` when it has none."""
         ...

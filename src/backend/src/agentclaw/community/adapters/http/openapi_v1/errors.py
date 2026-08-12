@@ -93,13 +93,3 @@ class StartupScriptUnsupportedError(Exception):
     this refusal, because the surface's messages are fixed by contract.
     """
 
-
-class StartupScriptSupportUnknownError(Exception):
-    """The bot's device provider could not be determined right now.
-
-    Distinct from :class:`StartupScriptUnsupportedError` on purpose: that one
-    says "this bot can never run a script", which an owner would reasonably act
-    on. This one says the check was inconclusive and the request is worth
-    retrying, so a transient binding-lookup failure does not get reported as a
-    permanent product limitation.
-    """

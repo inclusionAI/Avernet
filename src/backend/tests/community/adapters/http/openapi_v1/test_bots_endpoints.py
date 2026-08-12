@@ -996,24 +996,6 @@ def test_startup_script_put_is_refused_for_a_teclaw_bot(client, svc, startup_scr
     ]
 
 
-def test_startup_script_put_is_refused_for_a_legacy_arca_bot(client, svc, startup_script):
-    svc.get_bot.return_value = {
-        **BOT,
-        "active_engine": "openclaw",
-        "device_binding": {"device_id": "dev-9", "device_provider": "arca"},
-    }
-    startup_script.resolve_support.return_value = (
-        "unsupported",
-        "bots on the 'arca' device provider have no start sequence",
-    )
-    resp = client.put("/openapi/v1/bots/b1/startup-script", json={"script": "echo hi"})
-    assert resp.status_code == 409, resp.json()
-    startup_script.put.assert_not_called()
-    assert "arca" in _ok(client.get("/openapi/v1/bots/b1/startup-script"))[
-        "unsupported_reason"
-    ]
-
-
 def test_startup_script_get_still_answers_for_an_unsupported_bot(
     client, svc, startup_script
 ):

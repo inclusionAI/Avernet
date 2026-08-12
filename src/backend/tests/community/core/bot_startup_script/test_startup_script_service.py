@@ -33,9 +33,25 @@ class FakeRepo:
         return self.rows.pop((env, entity_id, bot_id), None) is not None
 
 
+class _FakeTeclaw:
+    """Stands in for TeclawProvisionService — the canonical engine authority.
+
+    Mirrors its real ``is_teclaw``: a configured set, matched case-insensitively,
+    not a literal comparison. The service must delegate here rather than compare
+    engine strings itself.
+    """
+
+    def __init__(self, engine_types=("teclaw",)):
+        self._types = {e.strip().lower() for e in engine_types}
+
+    def is_teclaw(self, active_engine):
+        engine = (active_engine or "").strip().lower()
+        return bool(engine) and engine in self._types
+
+
 @pytest.fixture
 def svc():
-    return BotStartupScriptService(FakeRepo())
+    return BotStartupScriptService(FakeRepo(), lambda: _FakeTeclaw())
 
 
 def test_get_returns_none_when_never_set(svc):
@@ -102,7 +118,12 @@ def test_get_body_returns_empty_string_after_delete(svc):
 
 
 class TestResolveSupport:
-    """Support keys on the container provider, never on the bot type."""
+    """Support is a property of the engine, asked of the engine's authority.
+
+    Two things it deliberately does not consider: the bot type (personal and
+    service share one allocator) and the bot's live container (so the answer is
+    stable before the first start and while a lookup is failing).
+    """
 
     def _bot(self, engine="openclaw", provider="baas"):
         return {
@@ -111,7 +132,7 @@ class TestResolveSupport:
             "device_binding": {"device_provider": provider},
         }
 
-    def test_baas_backed_bot_is_supported(self, svc):
+    def test_an_ordinary_bot_is_supported(self, svc):
         assert svc.resolve_support(self._bot()) == ("supported", "")
 
     def test_personal_and_service_bots_get_the_same_answer(self, svc):
@@ -125,50 +146,101 @@ class TestResolveSupport:
         assert supported == "unsupported"
         assert "teclaw" in reason
 
-    def test_teclaw_is_unsupported_even_on_the_baas_provider(self, svc):
-        """Engine is checked first: teclaw never gets a deploy_config at all."""
-        supported, reason = svc.resolve_support(
-            self._bot(engine="TeClaw", provider="baas")
+    def test_the_engine_test_is_delegated_not_reimplemented(self):
+        """A configured teclaw-like engine must be refused without editing this
+        feature. If support ever compares engine strings itself again, this fails.
+        """
+        svc = BotStartupScriptService(
+            FakeRepo(), lambda: _FakeTeclaw(engine_types=("teclaw", "teclaw_next"))
         )
-        assert supported == "unsupported"
-        assert "teclaw" in reason
-
-    def test_legacy_arca_provider_is_unsupported(self, svc):
-        supported, reason = svc.resolve_support(self._bot(provider="arca"))
-        assert supported == "unsupported"
-        assert "arca" in reason
+        assert svc.resolve_support(self._bot(engine="teclaw_next"))[0] == "unsupported"
+        # ...and the authority's own casing rules apply, not ours.
+        assert svc.resolve_support(self._bot(engine="TeClaw_Next"))[0] == "unsupported"
 
     def test_a_bot_with_no_binding_yet_is_supported(self, svc):
         """A bot is PENDING between create and first start — the moment an owner
-        most wants to attach a script. Refusing there blocks the main use case,
-        and every non-teclaw bot created today is baas-backed anyway."""
-        supported, reason = svc.resolve_support({"active_engine": "openclaw"})
-        assert supported == "supported"
-        assert reason == ""
+        most wants to attach a script."""
+        assert svc.resolve_support({"active_engine": "openclaw"}) == ("supported", "")
 
     def test_teclaw_with_no_binding_is_still_unsupported(self, svc):
-        """Engine is checked before the provider, so the gap does not swallow it."""
         supported, reason = svc.resolve_support({"active_engine": "teclaw"})
         assert supported == "unsupported"
         assert "teclaw" in reason
 
-    def test_the_local_provider_is_supported(self, svc):
-        """LocalDeviceService allocates through _build_create_bot_payload
-        (local_device_service.py:252), so it delivers the script like baas."""
-        assert svc.resolve_support(self._bot(provider="local")) == ("supported", "")
+    def test_the_answer_does_not_depend_on_live_container_state(self, svc):
+        """The same bot must get the same answer whatever its binding says — a
+        binding that is absent, present, half-read, or on any provider.
 
-    def test_a_swallowed_binding_lookup_is_refused_not_assumed_supported(self, svc):
-        """get_bot wraps the binding read in a warning-only try/except, so a
-        bot can arrive with a binding_id but no provider. Treating that like
-        "no binding yet" would let a legacy arca bot store a script that never
-        runs — the exact failure this check exists to prevent."""
-        supported, reason = svc.resolve_support(
-            {"active_engine": "openclaw", "binding_id": 77}
+        This is the property the previous provider-keyed version lacked: it
+        needed a third "could not determine" state purely because a lookup could
+        fail, which made an unrelated blip look like a verdict about the bot.
+        """
+        answers = {
+            svc.resolve_support(bot)
+            for bot in (
+                {"active_engine": "openclaw"},
+                {"active_engine": "openclaw", "binding_id": 77},
+                self._bot(provider="baas"),
+                self._bot(provider="local"),
+                self._bot(provider="arca"),
+                {"active_engine": "openclaw", "device_binding": {}},
+            )
+        }
+        assert answers == {("supported", "")}
+
+    def test_there_is_no_third_state(self, svc):
+        """Only SUPPORTED and UNSUPPORTED exist now; nothing returns "unknown"."""
+        from agentclaw.community.core.bot_startup_script.services import _support
+
+        assert not hasattr(_support, "UNKNOWN")
+
+
+class TestTenantIsolation:
+    """``ac_bots`` is tenant-guarded, so a bot_id is unique only within a tenant.
+
+    Legacy "default" bots are documented as carrying residual cross-tenant
+    collision on that identifier (``bots/router.py``). Without the tenant in this
+    table's key, two such bots share one script row — so one tenant could read or
+    overwrite the other's script, and the overwritten body would execute in the
+    other tenant's container on its next start.
+    """
+
+    def test_the_model_declares_a_mapped_tenant_column(self):
+        """The guard registrar rejects a model without one, but it is registered
+        at import time — this asserts the column is *mapped*, which is the thing
+        that makes the guard's WHERE clause real rather than ``WHERE 1 = 1``."""
+        from sqlalchemy import inspect as sa_inspect
+
+        from agentclaw.community.core.bot_startup_script.repository.models import (
+            BotStartupScriptModel,
         )
-        # "unknown", not "unsupported" — the check was inconclusive, and a
-        # healthy bot must not be told it can never run a script.
-        assert supported == "unknown"
-        assert reason
 
-    def test_no_binding_id_at_all_is_still_supported(self, svc):
-        assert svc.resolve_support({"active_engine": "openclaw"}) == ("supported", "")
+        assert "avernet_tenant" in sa_inspect(BotStartupScriptModel).columns
+
+    def test_the_unique_key_includes_the_tenant(self):
+        """Two tenants colliding on (env, entity_id, bot_id) must be able to
+        hold separate rows — a key without the tenant makes the second write
+        overwrite the first."""
+        from agentclaw.community.core.bot_startup_script.repository.models import (
+            BotStartupScriptModel,
+        )
+
+        unique = [
+            c
+            for c in BotStartupScriptModel.__table__.constraints
+            if c.__class__.__name__ == "UniqueConstraint"
+        ]
+        assert unique, "the table must keep a uniqueness constraint"
+        assert any(
+            "avernet_tenant" in {col.name for col in c.columns} for c in unique
+        ), "the tenant must be part of the uniqueness key"
+
+    def test_the_model_is_registered_with_the_tenant_guard(self):
+        """Registration is what confines reads and stamps inserts; the column
+        alone does nothing."""
+        from agentclaw.community.core.bot_startup_script.repository.models import (
+            BotStartupScriptModel,
+        )
+        from agentclaw.community.utils.avernet_tenant_guard import _GUARDED_MODELS
+
+        assert BotStartupScriptModel in _GUARDED_MODELS

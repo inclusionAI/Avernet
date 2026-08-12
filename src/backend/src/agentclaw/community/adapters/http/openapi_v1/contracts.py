@@ -100,14 +100,14 @@ USER_SCOPED_403: dict[int | str, dict[str, object]] = {
     },
 }
 
-# The two extra failures the startup-script **write** can produce. Kept here
-# beside the other per-route sets rather than inline in the bots router, which
-# sits against the 1000-line module cap.
+# The extra failure the startup-script **write** can produce. Kept here beside
+# the other per-route sets rather than inline in the bots router, which sits
+# against the 1000-line module cap.
 #
-# Neither is in ``ERROR_RESPONSES``: that dict is applied surface-wide, and no
-# other operation can answer 413 or 503. Without these entries both statuses are
-# reachable but invisible to a client generated from the published schema — the
-# 409 for an unsupported bot is already carried by the base set.
+# It is not in ``ERROR_RESPONSES``: that dict is applied surface-wide, and no
+# other operation can answer 413. Without this entry the status is reachable but
+# invisible to a client generated from the published schema — the 409 for an
+# unsupported bot is already carried by the base set.
 STARTUP_SCRIPT_WRITE_RESPONSES: dict[int | str, dict[str, object]] = {
     **USER_SCOPED_403,
     413: {
@@ -120,23 +120,6 @@ STARTUP_SCRIPT_WRITE_RESPONSES: dict[int | str, dict[str, object]] = {
                     "message": (
                         f"Startup script exceeds the {MAX_SCRIPT_BYTES}-byte limit"
                     ),
-                    "data": None,
-                    "request_id": "",
-                }
-            }
-        },
-    },
-    503: {
-        "model": ErrorEnvelope,
-        "description": (
-            "Whether this bot can run a startup script could not be determined. "
-            "Retryable — unlike the 409, it is not a verdict."
-        ),
-        "content": {
-            "application/json": {
-                "example": {
-                    "code": 503000,
-                    "message": "Startup script support could not be determined",
                     "data": None,
                     "request_id": "",
                 }

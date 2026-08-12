@@ -22,6 +22,9 @@ from sqlalchemy import (
 from sqlalchemy.sql import func
 
 from agentclaw.community.core.base import Base
+from agentclaw.community.utils.avernet_tenant_guard import (
+    register_avernet_tenant_guard,
+)
 from agentclaw.community.utils.env_utils import get_current_env
 
 # SQLite only auto-increments columns declared as exactly "INTEGER PRIMARY KEY".
@@ -66,6 +69,19 @@ class BotStartupScriptModel(Base):
     size_bytes = Column(Integer, nullable=False, comment="脚本正文字节数（UTF-8）")
     modifier = Column(String(1024), nullable=False, comment="审计：最后写入者")
 
+    # Data-isolation tenant. Load-bearing, not boilerplate: ``ac_bots`` is
+    # itself tenant-guarded, so a bot_id is unique *within* a tenant — legacy
+    # "default" bots are documented as carrying residual cross-tenant collision
+    # on their identifier (bots/router.py). Without this column two tenants
+    # whose (entity_id, bot_id) collide would share one script row, so one
+    # tenant could read or overwrite the other's script and have it execute in
+    # the other's container on its next start.
+    #
+    # server_default (not a Python default=) so create_all emits the same
+    # DEFAULT 'teamclaw' the out-of-band prod DDL applies; the context-aware
+    # value on ORM inserts comes from the before_insert guard registered below.
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
+
     gmt_create = Column(
         DateTime, default=func.now(), nullable=False, comment="创建时间"
     )
@@ -79,7 +95,11 @@ class BotStartupScriptModel(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "env", "entity_id", "bot_id", name="uk_env_entity_id_bot_id"
+            "avernet_tenant",
+            "env",
+            "entity_id",
+            "bot_id",
+            name="uk_tenant_env_entity_id_bot_id",
         ),
     )
 
@@ -96,3 +116,10 @@ class BotStartupScriptModel(Base):
             gmt_create=self.gmt_create,
             gmt_modified=self.gmt_modified,
         )
+
+
+# Confines every read to the request's tenant and stamps it on insert. The
+# registrar validates that the mapped column exists — see
+# ``utils/avernet_tenant_guard`` for why that check is the thing standing
+# between a bad declaration here and a cross-tenant read.
+register_avernet_tenant_guard(BotStartupScriptModel)

@@ -33,7 +33,6 @@ from agentclaw.community.adapters.http.openapi_v1.clusters import (
     validate_engine_cluster,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
-    StartupScriptSupportUnknownError,
     StartupScriptUnsupportedError,
     UnsupportedEngineError,
 )
@@ -75,7 +74,6 @@ from agentclaw.community.core.bot_management.services.bot_service import (
 )
 from agentclaw.community.api.bot_startup_script_service import (
     SUPPORTED,
-    UNKNOWN,
     BotStartupScriptServiceProtocol,
 )
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
@@ -795,9 +793,6 @@ def _startup_script_payload(
         size_bytes=record.size_bytes if record is not None else 0,
         updated_by=record.modifier if record is not None else "",
         updated_at=record.gmt_modified if record is not None else None,
-        # UNKNOWN reads as not-supported here rather than inventing a third
-        # value in the response: GET must stay answerable, and the reason says
-        # the check was inconclusive. A *write* is what distinguishes them.
         supported=state == SUPPORTED,
         unsupported_reason=reason,
     )
@@ -855,10 +850,6 @@ async def update_bot_startup_script(
     """
     bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
     entity_id, state, reason = _startup_script_target(bot, startup_script_service)
-    if state == UNKNOWN:
-        # Retryable — do not tell the owner of a healthy bot that it can never
-        # run a script just because a binding lookup was inconclusive.
-        raise StartupScriptSupportUnknownError(reason)
     if state != SUPPORTED:
         raise StartupScriptUnsupportedError(reason)
     record = startup_script_service.put(

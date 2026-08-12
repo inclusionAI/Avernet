@@ -77,11 +77,18 @@
         principal and `updated_at` from `gmt_modified` — neither is client-supplied,
         and `extra="forbid"` fails a body that tries to set them (422) rather than
         dropping the value behind a 200.
-  - [x] `supported` / `unsupported_reason` reported per bot: teclaw is refused,
-        as is any provider without a start sequence. `baas` and `local` both
-        qualify (each allocates through `_build_create_bot_payload`), and a bot
-        with no binding yet is supported — refusing it would block the main
-        use case, attaching a script before the first start.
+  - [x] `supported` / `unsupported_reason` reported per bot. Support is a
+        property of the **engine**, asked of `TeclawProvisionService.is_teclaw`
+        (the single definition) rather than compared as a string here, and it
+        never consults the bot's live container — so the answer is stable before
+        the first start and during a lookup failure. Reworked at review: the
+        earlier version keyed on the resolved `device_provider` and needed a
+        third "inconclusive" state (503) purely to cover that lookup failing.
+  - [x] Storage is scoped by `avernet_tenant` — column, guard registration and
+        uniqueness key — because `ac_bots` is itself tenant-scoped, so a
+        `bot_id` is unique only within a tenant. Without it two tenants
+        colliding on `(entity_id, bot_id)` would share one row and each could
+        overwrite the other's script.
   - [x] `PUT` on an unsupported bot is **refused** with 409; nothing is stored.
         The reason is served by `GET`, not the refusal — this surface's error
         messages are fixed by contract and never `str(exc)`.

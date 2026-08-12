@@ -4,18 +4,37 @@ Owns the rules the repository deliberately does not: the size cap, the
 env scoping, and the "absent is not an error" contract that the payload-build
 path depends on.
 
-The concrete service does **not** inherit ``BotStartupScriptServiceProtocol``
-— that would force a ``core -> api`` import the layering rule forbids.
-Conformance is structural, checked by ``test_service_api_conformance.py``.
+The service **inherits** ``BotStartupScriptServiceProtocol``, whose members are
+``@abstractmethod``: dropping one fails at construction naming it rather than at
+some later call site. ``PublishApprovalService`` takes the same core-implements-
+api shape. ``test_service_api_conformance.py`` still checks full signatures on
+top, which inheritance alone does not.
+
+``StartupScriptReaderProtocol`` — the narrow read-only view ``BaasService`` holds
+while composing a start command — is inherited for the same reason. It stays a
+separate, smaller contract on purpose: the code that builds shell strings should
+not be able to reach the write side.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Callable, Optional
 
 from injector import inject
 
+# Imported for real, not under TYPE_CHECKING: injector resolves constructor
+# annotations at runtime, so a string-only name raises _BindingNotYetAvailable.
+from agentclaw.community.core.bot_management.services.teclaw_provision_service import (
+    TeclawProvisionService,
+)
+
 from agentclaw.community.core.bot_startup_script.repository.models import (
     BotStartupScriptRecord,
+)
+from agentclaw.community.api.bot_startup_script_service import (
+    BotStartupScriptServiceProtocol,
+)
+from agentclaw.community.core.bot_startup_script.protocols import (
+    StartupScriptReaderProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import (
     BotStartupScriptRepositoryProtocol,
@@ -50,12 +69,22 @@ class StartupScriptTooLargeError(ValueError):
         self.limit_bytes = MAX_SCRIPT_BYTES
 
 
-class BotStartupScriptService:
+class BotStartupScriptService(
+    BotStartupScriptServiceProtocol, StartupScriptReaderProtocol
+):
     """Read, replace and clear a bot's startup script."""
 
     @inject
-    def __init__(self, repository: BotStartupScriptRepositoryProtocol) -> None:
+    def __init__(
+        self,
+        repository: BotStartupScriptRepositoryProtocol,
+        teclaw_provision_service_provider: Callable[[], TeclawProvisionService],
+    ) -> None:
         self._repository = repository
+        # Lazy (cycle-safe), for the same reason ``BotService`` holds it this
+        # way: TeclawProvisionService pulls in BaasService, whose graph reaches
+        # back here — this service is BaasService's startup-script reader.
+        self._teclaw_provision_provider = teclaw_provision_service_provider
 
     def get(
         self, *, entity_id: str, bot_id: str
@@ -96,18 +125,21 @@ class BotStartupScriptService:
         )
 
     def resolve_support(self, bot: dict) -> tuple[str, str]:
-        """Return ``(state, reason)`` — SUPPORTED / UNSUPPORTED / UNKNOWN.
+        """Return ``(state, reason)`` — SUPPORTED or UNSUPPORTED.
 
         Lives on the service so the HTTP adapter can reach it through the
         Service API Protocol — a router importing the rule directly would cross
         the adapter/core boundary the architecture gate enforces.
+
+        The engine test is delegated to :class:`TeclawProvisionService`, the
+        single definition of "runs in a teclaw container", rather than being
+        re-derived here.
         """
         from agentclaw.community.core.bot_startup_script.services._support import (
             resolve_support,
         )
 
-        binding = bot.get("device_binding") or {}
-        return resolve_support(bot, binding.get("device_provider"))
+        return resolve_support(bot, self._teclaw_provision_provider().is_teclaw)
 
     def get_body(self, *, entity_id: str, bot_id: str) -> str:
         """Return the script body, or ``""`` when the bot has none.
