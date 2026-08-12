@@ -913,8 +913,12 @@ that one design choice, and none of it is visible in the OpenAPI document.
   capped at **300s** by `timeout`, sized against the 600s publish budget the
   start reports into. The cap is enforced as TERM at 300s followed by an
   uncatchable KILL **10s** later, so a script that traps or ignores TERM cannot
-  hold the start open past **310s**. Interpreter is `bash`; the body runs as
-  `admin`, the same user every platform step runs as.
+  hold the start open past **310s**. The cap bounds **the start**, not your
+  descendants: a process the script deliberately backgrounds (`something &`)
+  outlives it, because the script itself has exited and the start has already
+  completed — nothing reaps it, so it runs until it ends or the container does.
+  Interpreter is `bash`; the body runs as `admin`, the same user every platform
+  step runs as.
 - **Do not put secrets in the body.** It is stored as written, and the
   start command that carries it is logged (with the body elided, but that is
   a mitigation, not a guarantee). There is no by-reference secret mechanism
