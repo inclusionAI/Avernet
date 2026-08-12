@@ -68,10 +68,12 @@ on B; E depends on C; F closes out.
   `build_workspace_mapper` (`core/services/resource_addressing.py:38`).
   **Do not modify `build_workspace_mapper`** — the console path calls it and must
   keep emitting OSS-view paths.
-- [ ] **C2.** Wire it into `DeviceFilesystemDispatcher._namespaced_mapper`
-  (`device_filesystem_dispatcher.py:191`) so the OpenAPI flow can select it
-  without disturbing the console flow. Record the chosen mechanism (distinct
-  namespace constant vs. explicit flag on `dispatch_addressed`) in the PR body.
+- [ ] **C2.** Thread an explicit `addressing` parameter — `"oss_view"` (default)
+  or `"engine_relative"` — from `dispatch_addressed`
+  (`device_filesystem_dispatcher.py:240`) into `_namespaced_mapper` (`:193`), and
+  select the new mapper on it. The default must leave every existing call site
+  byte-identical. Keep the `provider == "teclaw"` check first (`:213`) so teclaw
+  continues to get `to_engine_relative` under both addressing modes.
 - [ ] **C2a.** Select the mapper **by provider**: the new namespace mapper for
   `baas`/`arca` only; `teclaw` keeps `to_engine_relative`; **`local` keeps
   `build_workspace_mapper`**. `LocalDeviceFileSystem` falls back to

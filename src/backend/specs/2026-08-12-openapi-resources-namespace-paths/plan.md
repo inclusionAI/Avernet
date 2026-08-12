@@ -211,15 +211,37 @@ bot's `active_engine`, and default `entity_type` to `"staff"` (matching
 `resource_file_service.upload_file`'s signature, line 383). A small local helper
 keeps this out of all four handler bodies.
 
-`build_workspace_mapper` currently composes the OSS-view absolute path. It must
-instead return the namespace-relative form for these engines. **Decision:** add a
-new mapper rather than change `build_workspace_mapper` — the console path calls
-the same function and must keep emitting OSS-view. The dispatcher's
-`_namespaced_mapper` (`device_filesystem_dispatcher.py:191`) selects by
-`namespace`; extend the selection so the OpenAPI flow can opt into the relative
-mapper without disturbing the console flow. Simplest shape: a distinct namespace
-constant or an explicit flag on `dispatch_addressed`; pick during implementation
-and record the choice in the PR.
+**Mapper selection needs a third input.** The mapper is *injected* into the
+device filesystem, not baked into it — `BaasDeviceFileSystem` holds whatever
+callable it was constructed with and has no addressing knowledge of its own. So
+reusing the same class for the OpenAPI flow does not force the absolute form;
+it just needs a different callable.
+
+The difficulty is that console and OpenAPI call `dispatch_addressed` with the
+**same namespace** and often the **same provider**, yet need different mappers.
+Selection can therefore no longer be a function of `(provider, namespace)`. Add
+an explicit `addressing` parameter — `"oss_view"` (default) or
+`"engine_relative"` — threaded from `dispatch_addressed`
+(`device_filesystem_dispatcher.py:240`) into `_namespaced_mapper` (`:193`):
+
+```python
+def _namespaced_mapper(provider, namespace, addressing, *, entity_type, ...):
+    if provider == "teclaw":
+        return to_engine_relative               # already engine-relative in both modes  (:213)
+    if addressing == "engine_relative" and provider in ("baas", "arca"):
+        return build_workspace_relative_mapper()   # validates the workspace/ prefix, then passes through
+    ...                                         # existing branches unchanged: local + all console callers
+```
+
+The default keeps every existing call site byte-identical. Rejected alternative:
+a distinct namespace constant — mechanically equivalent, but it misnames what
+actually varies (the caller's addressing contract, not the namespace) and would
+leave the dispatcher's `(provider, namespace)` model quietly false.
+
+`build_workspace_mapper` itself is **not modified** — the console path calls it
+and must keep emitting OSS-view. The new mapper validates the `workspace/` prefix
+the same way (raising on a non-namespace input) rather than passing anything
+through blindly.
 
 `upload_resource` gains a `parent_path` query parameter — name chosen for
 consistency with the service signature and the stored attribute, over the
