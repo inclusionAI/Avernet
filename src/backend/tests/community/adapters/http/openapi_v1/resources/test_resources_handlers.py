@@ -1489,6 +1489,51 @@ async def test_upload_keeps_the_directories_carried_by_the_path():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("path", [".private.md", "docs/.private.md", "AGENTS.md"])
+async def test_upload_403s_a_read_only_path(path):
+    """The surface must not be talked into making something it then refuses to
+    manage: listings hide dotfiles and the root identity files, and delete
+    refuses them, so accepting the upload would leave an entry this API can
+    neither show nor remove."""
+    file_svc = _StubFileService()
+
+    with pytest.raises(HTTPException) as exc:
+        await upload_resource(
+            path=path,
+            content=b"x",
+            owner_id="u1",
+            bot_id="bot-x",
+            factory=_StubFactory(_StubService([])),
+            bot_repo=_StubBotRepo(),
+            file_svc=file_svc,
+            request=_request_without_trace(),
+        )
+
+    assert exc.value.status_code == 403
+    assert file_svc.upload_calls == []
+
+
+@pytest.mark.asyncio
+async def test_mkdir_403s_a_dot_prefixed_directory():
+    """Same reason as the upload guard — a hidden directory would be invisible
+    to listing and refused by delete."""
+    file_svc = _StubReadFileService({})
+
+    with pytest.raises(HTTPException) as exc:
+        await create_directory(
+            path=".hidden",
+            owner_id="u1",
+            bot_id="bot-x",
+            bot_repo=_StubBotRepo(),
+            file_svc=file_svc,
+            request=_request_without_trace(),
+        )
+
+    assert exc.value.status_code == 403
+    assert file_svc.made_dirs == []
+
+
+@pytest.mark.asyncio
 async def test_upload_rejects_a_path_escaping_the_workspace():
     file_svc = _StubFileService()
 

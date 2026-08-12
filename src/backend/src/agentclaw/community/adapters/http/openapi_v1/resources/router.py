@@ -188,6 +188,21 @@ def _safe_path(path: str) -> str:
     return "/".join(segments)
 
 
+def _reject_read_only(safe: str) -> None:
+    """Refuse a path the read-only policy protects, with the console's 403.
+
+    Applied to **creation** as well as deletion, so that the surface cannot be
+    talked into making something it then refuses to manage: a listing hides
+    dotfiles and the root identity files, and delete refuses them, so an upload
+    or mkdir that accepted one would leave an entry this API can neither show
+    nor remove. Uploading a workspace-root identity file would also overwrite
+    the bot's own configuration through a resource endpoint, which is not what
+    this surface is for.
+    """
+    if is_readonly(safe):
+        raise HTTPException(status_code=403, detail="Cannot write to a read-only path")
+
+
 def _file_coords(
     bot_id: str, owner_id: str, bot_repo: BotRepository
 ) -> tuple[str, str, str]:
@@ -416,7 +431,12 @@ async def create_resource(
     return created(_to_openapi_resource(r), request)
 
 
-@router.post("/upload", status_code=201, response_model=Envelope[Resource])
+@router.post(
+    "/upload",
+    status_code=201,
+    response_model=Envelope[Resource],
+    responses=_READ_ONLY_RESPONSE,
+)
 @envelope_errors
 async def upload_resource(
     owner_id: UserIdDep,
@@ -443,6 +463,7 @@ async def upload_resource(
     safe = _safe_path(path)
     if not safe:
         raise InvalidResourcePathError("path is required")
+    _reject_read_only(safe)
     entity_type, entity_id, engine_type = _file_coords(bot_id, owner_id, bot_repo)
     # Duplicate detection against the workspace, not the record table. Uploading
     # to an occupied path would otherwise overwrite silently, since the engine's
@@ -755,7 +776,12 @@ async def delete_file(
     return deleted_envelope(request)
 
 
-@router.post("/mkdir", status_code=201, response_model=Envelope[Resource])
+@router.post(
+    "/mkdir",
+    status_code=201,
+    response_model=Envelope[Resource],
+    responses=_READ_ONLY_RESPONSE,
+)
 @envelope_errors
 async def create_directory(
     owner_id: UserIdDep,
@@ -775,6 +801,7 @@ async def create_directory(
     safe = _safe_path(path)
     if not safe:
         raise InvalidResourcePathError("path is required")
+    _reject_read_only(safe)
     entity_type, entity_id, engine_type = _file_coords(bot_id, owner_id, bot_repo)
     await file_svc.create_directory(
         entity_type=entity_type,
