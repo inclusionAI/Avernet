@@ -72,6 +72,7 @@ def test_get_is_scoped_by_env_entity_and_bot(repo):
     repo.upsert(
         env="dev", entity_id="ent_a", bot_id="bot_1",
         script="echo a", size_bytes=6, modifier="u1",
+        bot_incarnation=1,
     )
     # Same bot id, different entity or env, is a different row.
     assert repo.get(env="dev", entity_id="ent_b", bot_id="bot_1") is None
@@ -85,6 +86,7 @@ def test_upsert_inserts_and_returns_record(repo):
     rec = repo.upsert(
         env="dev", entity_id="ent_a", bot_id="bot_1",
         script="echo hello", size_bytes=10, modifier="u1",
+        bot_incarnation=1,
     )
     assert rec.id is not None
     assert rec.script == "echo hello"
@@ -97,10 +99,12 @@ def test_upsert_replaces_body_rather_than_inserting_a_second_row(repo):
     repo.upsert(
         env="dev", entity_id="ent_a", bot_id="bot_1",
         script="old", size_bytes=3, modifier="u1",
+        bot_incarnation=1,
     )
     rec = repo.upsert(
         env="dev", entity_id="ent_a", bot_id="bot_1",
         script="new body", size_bytes=8, modifier="u2",
+        bot_incarnation=1,
     )
     assert rec.script == "new body"
     assert rec.size_bytes == 8
@@ -115,6 +119,7 @@ def test_upsert_preserves_a_body_with_shell_metacharacters(repo):
     repo.upsert(
         env="dev", entity_id="ent_a", bot_id="bot_1",
         script=body, size_bytes=len(body.encode()), modifier="u1",
+        bot_incarnation=1,
     )
     assert repo.get(env="dev", entity_id="ent_a", bot_id="bot_1").script == body
 
@@ -125,6 +130,7 @@ def test_delete_removes_the_row(repo):
     repo.upsert(
         env="dev", entity_id="ent_a", bot_id="bot_1",
         script="echo a", size_bytes=6, modifier="u1",
+        bot_incarnation=1,
     )
     assert repo.delete(env="dev", entity_id="ent_a", bot_id="bot_1") is True
     assert repo.get(env="dev", entity_id="ent_a", bot_id="bot_1") is None
@@ -136,6 +142,7 @@ def test_delete_is_idempotent(repo):
     repo.upsert(
         env="dev", entity_id="ent_a", bot_id="bot_1",
         script="echo a", size_bytes=6, modifier="u1",
+        bot_incarnation=1,
     )
     assert repo.delete(env="dev", entity_id="ent_a", bot_id="bot_1") is True
     assert repo.delete(env="dev", entity_id="ent_a", bot_id="bot_1") is False
@@ -146,11 +153,13 @@ def test_delete_then_reinsert_works(repo):
     repo.upsert(
         env="dev", entity_id="ent_a", bot_id="bot_1",
         script="first", size_bytes=5, modifier="u1",
+        bot_incarnation=1,
     )
     repo.delete(env="dev", entity_id="ent_a", bot_id="bot_1")
     rec = repo.upsert(
         env="dev", entity_id="ent_a", bot_id="bot_1",
         script="second", size_bytes=6, modifier="u1",
+        bot_incarnation=1,
     )
     assert rec.script == "second"
 
@@ -186,6 +195,7 @@ def test_upsert_retries_as_an_update_when_the_insert_loses_a_race(monkeypatch):
         script="echo hi",
         size_bytes=7,
         modifier="u1",
+        bot_incarnation=1,
     )
 
     assert result == "replaced"
@@ -217,6 +227,7 @@ def test_upsert_does_not_retry_forever(monkeypatch):
             script="echo hi",
             size_bytes=7,
             modifier="u1",
+            bot_incarnation=1,
         )
 
 
@@ -246,6 +257,7 @@ def test_rewriting_an_identical_script_still_moves_the_audit_timestamp(repo):
         script="echo hi",
         size_bytes=7,
         modifier="alice",
+        bot_incarnation=1,
     )
 
     aged = datetime.now() - timedelta(days=1)
@@ -261,6 +273,7 @@ def test_rewriting_an_identical_script_still_moves_the_audit_timestamp(repo):
         script="echo hi",
         size_bytes=7,
         modifier="alice",
+        bot_incarnation=1,
     )
 
     assert again.script == "echo hi", "the body is genuinely unchanged"
@@ -281,6 +294,7 @@ def test_a_full_width_entity_id_round_trips(repo):
         script="echo hi",
         size_bytes=7,
         modifier="alice",
+        bot_incarnation=1,
     )
 
     assert stored.entity_id == entity_id
@@ -325,6 +339,7 @@ def test_every_read_filters_on_the_indexed_surrogate(repo):
             script="echo hi",
             size_bytes=7,
             modifier="alice",
+            bot_incarnation=1,
         )
         statements.clear()
         repo.get(env="dev", entity_id="ent", bot_id="bot")

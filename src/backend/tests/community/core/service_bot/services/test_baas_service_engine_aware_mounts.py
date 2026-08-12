@@ -253,6 +253,7 @@ class TestBuildCreateBotPayloadStorageWhitelist:
     def _build_payload(self, service: BaasService):
         return service._build_create_bot_payload(
             bot={
+                "id": 501,
                 "bot_id": "b1",
                 "bot_name": "bot-one",
                 "entity_id": "u1",
@@ -380,6 +381,7 @@ class TestBuildCreateBotPayloadStorageWhitelist:
 
         payload = service._build_create_bot_payload(
             bot={
+                "id": 501,
                 "bot_id": "b1",
                 "bot_name": "bot-one",
                 "entity_id": "u1",
@@ -523,6 +525,7 @@ def test_build_create_bot_payload_rewrites_migration_path_to_opt_when_mount_home
     )
     payload = service._build_create_bot_payload(
         bot={
+            "id": 501,
             "bot_id": "b1",
             "bot_name": "bot-one",
             "entity_id": "u1",
@@ -552,6 +555,7 @@ def test_build_create_bot_payload_rewrites_opt_migration_path_back_to_home_admin
     )
     payload = service._build_create_bot_payload(
         bot={
+            "id": 501,
             "bot_id": "b1",
             "bot_name": "bot-one",
             "entity_id": "u1",

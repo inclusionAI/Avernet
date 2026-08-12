@@ -42,6 +42,7 @@ class BotStartupScriptRecord(BaseModel):
     script: str = Field(..., description="脚本正文")
     size_bytes: int = Field(..., description="脚本正文字节数（UTF-8）")
     modifier: str = Field(..., description="最后写入者")
+    bot_incarnation: int = Field(..., description="写入时 ac_bots.id（bot 的具体一次存在）")
     gmt_create: datetime = Field(default_factory=datetime.now, description="创建时间")
     gmt_modified: datetime = Field(default_factory=datetime.now, description="修改时间")
 
@@ -73,6 +74,27 @@ class BotStartupScriptModel(Base):
     script = Column(Text, nullable=False, comment="脚本正文（清空即删行）")
     size_bytes = Column(Integer, nullable=False, comment="脚本正文字节数（UTF-8）")
     modifier = Column(String(1024), nullable=False, comment="审计：最后写入者")
+
+    #: ``ac_bots.id`` of the bot this script was written for — the specific
+    #: *incarnation*, not the reusable identifier.
+    #:
+    #: The logical key (env, entity_id, bot_id) is not stable across a bot's
+    #: lifetime: deletion is a soft update and ``create_bot`` accepts a
+    #: caller-supplied ``bot_id``, so the same key can be handed to a brand-new
+    #: bot later. ``ac_bots.id`` is an autoincrement primary key, so the
+    #: recreated bot gets a different one — it is what distinguishes "this bot"
+    #: from "a later bot wearing the same name".
+    #:
+    #: This makes a stale row **inert** instead of dangerous. Every read
+    #: compares it against the bot being read for and ignores a row that does
+    #: not match, so a script can only ever execute on the bot that stored it —
+    #: including when a cleanup path failed, was skipped, or lost a race. The
+    #: sweeps and the write-time re-check remain, but they are now hygiene
+    #: rather than the only thing standing between a reused identifier and
+    #: someone else's executable content.
+    bot_incarnation = Column(
+        BigInteger, nullable=False, comment="写入时 ac_bots.id（bot 的具体一次存在）"
+    )
 
     # Data-isolation tenant. Load-bearing, not boilerplate: ``ac_bots`` is
     # itself tenant-guarded, so a bot_id is unique *within* a tenant — legacy
@@ -130,6 +152,7 @@ class BotStartupScriptModel(Base):
             script=self.script,
             size_bytes=self.size_bytes,
             modifier=self.modifier,
+            bot_incarnation=self.bot_incarnation,
             gmt_create=self.gmt_create,
             gmt_modified=self.gmt_modified,
         )

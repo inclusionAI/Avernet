@@ -44,6 +44,10 @@ bots_router = importlib.import_module(
 )
 
 BOT = {
+    # ``id`` is ac_bots' primary key — which *incarnation* of "b1" this is.
+    # A bot_id can be deleted and reused, the primary key cannot, so the
+    # startup-script row is pinned to this rather than to bot_id.
+    "id": 77,
     "bot_id": "b1", "bot_name": "N", "bot_desc": "D", "active_engine": "teclaw",
     "bot_type": "personal", "status": "ACTIVE", "owner_id": "u1",
     "entity_id": "u1", "entity_type": "staff",
@@ -990,29 +994,60 @@ def test_startup_script_put_that_loses_a_race_with_deletion_is_a_404(
     )
 
     assert resp.status_code == 404
-    startup_script.delete.assert_called_once_with(entity_id="u1", bot_id="b1")
-
-
-def test_a_lost_race_still_404s_when_the_row_cannot_be_withdrawn(
-    client, svc, startup_script
-):
-    """The deletion's second sweep is the backstop — it runs after our write, so
-    the row is still reachable by it. Failing to undo our own write must not
-    turn the lost race into a 200.
-    """
-    from agentclaw.community.core.bot_management.services.bot_service import (
-        BotNotFoundError,
+    startup_script.delete_written_by.assert_called_once_with(
+        entity_id="u1", bot_id="b1", bot_incarnation=77
     )
 
+
+def test_a_withdrawal_that_cannot_complete_is_not_reported_as_a_clean_loss(
+    client, svc, startup_script
+):
+    """A failed withdrawal must not answer 404.
+
+    404 says the write did not take effect. If the row could not be removed,
+    that is false: executable content is still sitting under an identifier that
+    can be handed to another bot. The deletion's second sweep is only a backstop
+    while that deleter is still running — when the write landed *after* both
+    sweeps, nothing else is coming for this row, so the failure has to be
+    visible rather than dressed up as the tidy outcome.
+    """
     svc.get_bot.side_effect = [_SUPPORTED_BOT, BotNotFoundError("gone")]
     startup_script.put.return_value = _record(script="echo new")
-    startup_script.delete.side_effect = RuntimeError("db down")
+    startup_script.delete_written_by.side_effect = RuntimeError("db down")
+
+    # Surfaces rather than being logged and swallowed. The public app turns an
+    # unhandled error into a 500; what this pins is that the failure is not
+    # quietly converted into the 404 a clean withdrawal would have produced.
+    with pytest.raises(RuntimeError, match="db down"):
+        client.put(
+            "/openapi/v1/bots/b1/startup-script", json={"script": "echo new"}
+        )
+
+
+def test_a_put_that_lands_on_a_recreated_bot_is_refused(
+    client, svc, startup_script
+):
+    """Same bot_id, different bot — the write does not belong to the newcomer.
+
+    ``create_bot`` takes a caller-supplied ``bot_id`` and deletion is a soft
+    update, so an in-flight write can find the id alive again while belonging to
+    a bot its caller never addressed. Checking only that *a* bot exists would
+    hand that bot someone else's executable content.
+    """
+    recreated = {**_SUPPORTED_BOT, "id": 78}
+    svc.get_bot.side_effect = [_SUPPORTED_BOT, recreated]
+    startup_script.put.return_value = _record(script="echo new")
 
     resp = client.put(
         "/openapi/v1/bots/b1/startup-script", json={"script": "echo new"}
     )
 
     assert resp.status_code == 404
+    # Withdrawn against *our* incarnation, so the recreated bot's own script —
+    # if it has since written one — is not collateral.
+    startup_script.delete_written_by.assert_called_once_with(
+        entity_id="u1", bot_id="b1", bot_incarnation=77
+    )
 
 
 def test_startup_script_put_rejects_an_attempt_to_set_audit_fields(

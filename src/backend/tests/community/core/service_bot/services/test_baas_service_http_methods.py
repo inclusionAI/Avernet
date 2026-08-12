@@ -78,6 +78,7 @@ class TestBaasServiceHttpMethods:
         result = service.upgrade_bot(
             bot_uuid="BOT-1",
             bot={
+                "id": 501,
                 "bot_id": "bot-1",
                 "bot_name": "Bot 1",
                 "entity_id": "user-1",

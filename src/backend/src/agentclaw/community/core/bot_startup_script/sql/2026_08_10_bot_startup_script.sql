@@ -26,6 +26,13 @@ CREATE TABLE `ac_bot_startup_script` (
   `script`        mediumtext    NOT NULL COMMENT '脚本正文（清空即删行）',
   `size_bytes`    int(11)       NOT NULL COMMENT '脚本正文字节数（UTF-8）',
   `modifier`      varchar(1024) NOT NULL COMMENT '审计：最后写入者',
+  -- ac_bots.id of the bot this script was written for: the specific incarnation,
+  -- not the reusable identifier. (env, entity_id, bot_id) is not stable across a
+  -- bot's lifetime — deletion is a soft update and create_bot accepts a
+  -- caller-supplied bot_id, so the same key can later belong to a different bot.
+  -- Every read compares this and ignores a row that does not match, so a stale
+  -- row is inert rather than executable on whoever inherits the identifier.
+  `bot_incarnation` bigint(20) unsigned NOT NULL COMMENT '写入时 ac_bots.id',
   `avernet_tenant` varchar(64)  NOT NULL DEFAULT 'teamclaw' COMMENT '数据隔离租户',
   -- Bounded surrogate for the logical key (env, entity_id, bot_id). entity_id
   -- alone is 4096 utf8mb4 bytes, past InnoDB's 3072-byte index-key cap, so the

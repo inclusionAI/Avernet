@@ -87,6 +87,12 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
+from .startup_script_support import (
+    _abandon_write_if_the_bot_died,
+    _bot_incarnation,
+    _startup_script_payload,
+    _startup_script_target,
+)
 from .schemas import (
     Bot,
     BotAuthPending,
@@ -780,90 +786,6 @@ def _audit_actor(caller: ActingCaller, owner_id: str) -> str:
     return owner_id
 
 
-def _startup_script_target(
-    bot: dict[str, Any],
-    startup_script_service: BotStartupScriptServiceProtocol,
-) -> tuple[str, str, str]:
-    """Resolve ``(entity_id, support_state, reason)`` for a bot.
-
-    ``entity_id`` is a storage key resolved here from the bot record — it is
-    never a request parameter or a response field, per the group contract.
-    """
-    entity_id = bot.get("entity_id")
-    if not entity_id:
-        raise BotNotFoundError("bot has no associated entity")
-    state, reason = startup_script_service.resolve_support(bot)
-    return entity_id, state, reason
-
-
-def _startup_script_payload(
-    bot_id: str,
-    record: Any,
-    state: str,
-    reason: str,
-) -> StartupScript:
-    """Shape a stored record — or its absence — as the response model."""
-    return StartupScript(
-        bot_id=bot_id,
-        script=record.script if record is not None else "",
-        size_bytes=record.size_bytes if record is not None else 0,
-        updated_by=record.modifier if record is not None else "",
-        updated_at=record.gmt_modified if record is not None else None,
-        supported=state == SUPPORTED,
-        unsupported_reason=reason,
-    )
-
-
-def _abandon_write_if_the_bot_died(
-    bot_id: str,
-    entity_id: str,
-    owner_id: str,
-    bot_service: BotServiceProtocol,
-    startup_script_service: BotStartupScriptServiceProtocol,
-) -> None:
-    """Re-check liveness *after* the write, and undo it if the bot is gone.
-
-    The existence check above and the write are separate steps, so a deletion
-    can run entirely between them. The deletion's own two purges do not cover
-    this on their own: they stop a *later* request from passing its check, but
-    they cannot cancel a request that already passed one and is still in
-    flight. That request can commit at any point afterwards, past both sweeps.
-
-    Re-checking after the write is what closes it, and the ordering is the
-    whole argument:
-
-    * a deleter that commits **after** our write finds our row in its
-      post-delete sweep and removes it;
-    * a deleter that committed **before** this check is seen right here, and we
-      remove our own row.
-
-    There is no third case, so no interleaving leaves the row behind. It costs
-    one read on the write path instead of a lock held across every script write
-    — the same trade ``_sweep_grants_that_raced_the_deletion`` documents for the
-    equivalent grant race.
-
-    Losing the race is a ``404``, not a success: the bot the caller addressed no
-    longer exists, and reporting a stored script for it would be the same silent
-    wrong answer this feature keeps closing elsewhere.
-    """
-    try:
-        bot_service.get_bot(bot_id, owner_id)
-        return
-    except BotNotFoundError:
-        pass
-
-    # Best-effort: the deletion's second sweep is the backstop if this fails,
-    # and it runs after our write, so the row is still reachable by it.
-    try:
-        startup_script_service.delete(entity_id=entity_id, bot_id=bot_id)
-    except Exception:  # pragma: no cover - defensive
-        logger.exception(
-            "[startup_script] failed to withdraw a script written on bot %s "
-            "while it was being deleted",
-            bot_id,
-        )
-    raise BotNotFoundError(f"Bot not found: {bot_id}")
-
 
 @router.get(
     "/{bot_id}/startup-script",
@@ -889,7 +811,12 @@ async def get_bot_startup_script(
     """
     bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
     entity_id, state, reason = _startup_script_target(bot, startup_script_service)
-    record = startup_script_service.get(entity_id=entity_id, bot_id=bot_id)
+    # Scoped to this bot's own incarnation, so GET reports exactly what a start
+    # would run: a row left behind by an earlier holder of this id is not this
+    # bot's script and reads as absent here too.
+    record = startup_script_service.get(
+        entity_id=entity_id, bot_id=bot_id, bot_incarnation=_bot_incarnation(bot)
+    )
     return envelope(_startup_script_payload(bot_id, record, state, reason), request)
 
 
@@ -924,16 +851,23 @@ async def update_bot_startup_script(
     entity_id, state, reason = _startup_script_target(bot, startup_script_service)
     if state != SUPPORTED:
         raise StartupScriptUnsupportedError(reason)
+    bot_incarnation = _bot_incarnation(bot)
     record = startup_script_service.put(
         entity_id=entity_id,
         bot_id=bot_id,
         script=body.script,
+        bot_incarnation=bot_incarnation,
         # From the verified caller, never the body — and naming the application
         # when one is acting, not the user it acted for.
         modifier=_audit_actor(caller, owner_id),
     )
     _abandon_write_if_the_bot_died(
-        bot_id, entity_id, owner_id, bot_service, startup_script_service
+        bot_id,
+        entity_id,
+        owner_id,
+        bot_incarnation,
+        bot_service,
+        startup_script_service,
     )
     return envelope(_startup_script_payload(bot_id, record, SUPPORTED, ""), request)
 

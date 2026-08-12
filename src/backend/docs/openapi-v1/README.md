@@ -989,15 +989,29 @@ that one design choice, and none of it is visible in the OpenAPI document.
 
   The sweeps alone are not enough, because they cannot cancel a request that
   already passed its check and is still in flight — that one can commit after
-  both of them. So the write **re-checks liveness after storing** and withdraws
-  itself if the bot is gone. The pair of rules is what closes the race: a
-  deletion committing *after* the write finds the row in its post-delete sweep,
-  and a deletion that committed *before* the re-check is caught by that
-  re-check. There is no third interleaving.
+  both of them. So the write **re-checks the bot after storing** and withdraws
+  its row if the bot is gone. A `PUT` that loses this race answers **404**: the
+  bot it addressed no longer exists, so reporting a stored script for it would
+  be a wrong answer rather than a successful write. If the withdrawal itself
+  cannot complete, that failure surfaces instead of being reported as a clean
+  404 — the second sweep is a backstop only while that deletion is still
+  running, and a write landing after it has finished has nothing else coming
+  for its row.
 
-  A `PUT` that loses this race answers **404** — the bot it addressed no longer
-  exists, so reporting a stored script for it would be a wrong answer, not a
-  successful write.
+  The re-check compares **which bot**, not whether the id resolves. `bot_id` is
+  reusable, so an in-flight write can find the id alive again while it belongs
+  to a different bot; each row is therefore pinned to the writing bot's
+  `ac_bots.id`, which does not repeat.
+
+  **A stale row cannot execute even if every one of those paths fails.** Each
+  read compares the row's stamp against the bot doing the read and ignores a
+  row that does not match, so a script only ever runs on the bot that stored
+  it. `GET` answers by the same rule, so what the API reports and what a
+  container would run cannot disagree: a bot that inherited an uncleaned row
+  reads as having no script, because it has none. The sweeps and the re-check
+  remain — an orphan is still plaintext executable content nobody should be
+  storing — but they are hygiene, not the only thing standing between a reused
+  identifier and someone else's code.
 
   The legacy `default`-bot delete is a restart rather than a deletion and keeps
   its script through both sweeps, matching how its skills and config are already

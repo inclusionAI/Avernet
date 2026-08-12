@@ -20,8 +20,15 @@ class StartupScriptReaderProtocol(Protocol):
     """
 
     @abstractmethod
-    def get_body(self, *, entity_id: str, bot_id: str) -> str:
-        """Return the bot's script body, or ``""`` when it has none."""
+    def get_body(self, *, entity_id: str, bot_id: str, bot_incarnation: int) -> str:
+        """Return the bot's script body, or ``""`` when it has none.
+
+        ``bot_incarnation`` is the ``ac_bots.id`` of the bot being started. A
+        stored row names the incarnation that wrote it, and one written for an
+        earlier holder of the same identifier reads as ``""`` — the caller is
+        composing a command that will execute this body, and it must only ever
+        execute the body this bot stored.
+        """
         ...
 
 

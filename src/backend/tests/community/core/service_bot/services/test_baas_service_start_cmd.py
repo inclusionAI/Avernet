@@ -334,6 +334,7 @@ class TestStartupScriptReachesEveryStartPath:
     path gets missed — resolution happens centrally instead."""
 
     _BOT = {
+        "id": 501,
         "bot_id": "bot-1",
         "bot_name": "b",
         "entity_id": "ent-1",
@@ -366,7 +367,9 @@ class TestStartupScriptReachesEveryStartPath:
         svc, reader = self._service_with_script()
         hook = self._hook(svc)
         assert _b64.b64encode(b"echo provisioned").decode() in hook
-        reader.get_body.assert_called_once_with(entity_id="ent-1", bot_id="bot-1")
+        reader.get_body.assert_called_once_with(
+            entity_id="ent-1", bot_id="bot-1", bot_incarnation=501
+        )
 
     def test_explicit_empty_string_wins_over_the_reader(self):
         """An explicit argument is a deliberate override, not 'unset'."""
@@ -416,7 +419,9 @@ class TestStartupScriptReachesEveryStartPath:
         svc._startup_script_reader = reader
 
         with pytest.raises(RuntimeError):
-            svc._resolve_startup_script(entity_id="ent-1", bot_id="bot-1")
+            svc._resolve_startup_script(
+            entity_id="ent-1", bot_id="bot-1", bot=self._BOT
+        )
 
     def test_a_bot_with_no_identity_is_not_a_failure(self):
         """``""`` still means "no script" for the remaining non-error case.
@@ -424,13 +429,42 @@ class TestStartupScriptReachesEveryStartPath:
         An unwired reader is no longer one of them — it cannot be constructed.
         """
         svc, reader = self._service_with_script()
-        assert svc._resolve_startup_script(entity_id="", bot_id="bot-1") == ""
-        assert svc._resolve_startup_script(entity_id="ent-1", bot_id="") == ""
+        assert (
+            svc._resolve_startup_script(
+                entity_id="", bot_id="bot-1", bot=self._BOT
+            )
+            == ""
+        )
+        assert (
+            svc._resolve_startup_script(
+                entity_id="ent-1", bot_id="", bot=self._BOT
+            )
+            == ""
+        )
+        reader.get_body.assert_not_called()
+
+    def test_a_bot_record_with_no_id_raises_rather_than_guessing(self):
+        """Which incarnation is asking decides whether a stored row is theirs.
+
+        Not knowing it is not the same as having no script: returning ``""``
+        would silently skip a script the bot does own, and picking a placeholder
+        could run one it does not. Both are the invisible failures this path
+        already refuses for read errors.
+        """
+        svc, reader = self._service_with_script()
+        bot_without_id = {k: v for k, v in self._BOT.items() if k != "id"}
+
+        with pytest.raises(ValueError, match="no id"):
+            svc._resolve_startup_script(
+                entity_id="ent-1", bot_id="bot-1", bot=bot_without_id
+            )
         reader.get_body.assert_not_called()
 
     def test_missing_entity_id_resolves_to_no_script(self):
         svc, _ = self._service_with_script()
-        assert svc._resolve_startup_script(entity_id="", bot_id="bot-1") == ""
+        assert svc._resolve_startup_script(
+        entity_id="", bot_id="bot-1", bot=self._BOT
+    ) == ""
 
 
 class TestStartupScriptPrivilege:

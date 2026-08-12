@@ -116,21 +116,51 @@ class BotStartupScriptServiceProtocol(Protocol):
 
     @abstractmethod
     def get(
-        self, *, entity_id: str, bot_id: str
+        self, *, entity_id: str, bot_id: str, bot_incarnation: int
     ) -> Optional[BotStartupScriptRecord]:
-        """Return the stored script, or ``None`` when the bot has none."""
+        """Return the stored script, or ``None`` when the bot has none.
+
+        ``bot_incarnation`` is the ``ac_bots.id`` of the bot asking. A row
+        stored by an earlier bot that held the same ``bot_id`` is not this
+        bot's script and reads as ``None``.
+        """
         ...
 
     @abstractmethod
     def put(
-        self, *, entity_id: str, bot_id: str, script: str, modifier: str
+        self,
+        *,
+        entity_id: str,
+        bot_id: str,
+        script: str,
+        modifier: str,
+        bot_incarnation: int,
     ) -> BotStartupScriptRecord:
-        """Store or replace the script; raises when it exceeds the size cap."""
+        """Store or replace the script; raises when it exceeds the size cap.
+
+        The stored row is stamped with ``bot_incarnation``, which is what every
+        later read checks it against.
+        """
         ...
 
     @abstractmethod
     def delete(self, *, entity_id: str, bot_id: str) -> bool:
-        """Clear the script. Idempotent."""
+        """Clear the script. Idempotent.
+
+        Unconditional — clears whichever incarnation's row is at the key.
+        """
+        ...
+
+    @abstractmethod
+    def delete_written_by(
+        self, *, entity_id: str, bot_id: str, bot_incarnation: int
+    ) -> bool:
+        """Withdraw a row only if that incarnation still owns it.
+
+        For a write taking back its own row after finding its bot deleted; the
+        condition keeps it from removing a script a recreated bot has since
+        stored at the same key.
+        """
         ...
 
     @abstractmethod
@@ -139,6 +169,10 @@ class BotStartupScriptServiceProtocol(Protocol):
         ...
 
     @abstractmethod
-    def get_body(self, *, entity_id: str, bot_id: str) -> str:
-        """Return the script body, or ``""`` when the bot has none."""
+    def get_body(self, *, entity_id: str, bot_id: str, bot_incarnation: int) -> str:
+        """Return the script body, or ``""`` when the bot has none.
+
+        ``""`` also covers a row belonging to an earlier incarnation — this is
+        the read whose result is executed, so it must never return one.
+        """
         ...

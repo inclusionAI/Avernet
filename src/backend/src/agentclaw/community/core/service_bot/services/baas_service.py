@@ -751,7 +751,7 @@ class BaasService:  # pragma: no cover
         # honest by not reading it as evidence of a live caller.
         if startup_script is None:
             startup_script = self._resolve_startup_script(
-                entity_id=entity_id, bot_id=bot_id
+                entity_id=entity_id, bot_id=bot_id, bot=bot
             )
 
         # 构建 sandbox 成功后执行的命令
@@ -2397,7 +2397,9 @@ class BaasService:  # pragma: no cover
             f"exit $__OCB_RC\n"
         )
 
-    def _resolve_startup_script(self, *, entity_id: str, bot_id: str) -> str:
+    def _resolve_startup_script(
+        self, *, entity_id: str, bot_id: str, bot: dict
+    ) -> str:
         """Read the bot's stored startup script, or ``""`` when it has none.
 
         **A read failure propagates.** It used to be swallowed, on the reasoning
@@ -2422,11 +2424,28 @@ class BaasService:  # pragma: no cover
         one up by, or the reader has none stored. Neither is an error. An
         unwired reader is no longer among these cases: it is now a constructor
         argument, so it cannot be missing here.
+
+        The read is scoped to this bot's own incarnation (``ac_bots.id``), so a
+        row left at the same ``(entity_id, bot_id)`` by an earlier bot reads as
+        ``""`` rather than being executed here.
+
+        A bot record with no ``id`` raises instead of degrading to ``""``. It
+        cannot happen — the column is a NOT NULL autoincrement primary key and
+        ``to_dict`` always carries it — but the two ways of being wrong are not
+        equally bad: guessing would either run a body this bot may not own or
+        silently drop one it does, and both are the invisible failures this
+        method already refuses for read errors.
         """
         if not entity_id or not bot_id:
             return ""
+        bot_incarnation = bot.get("id")
+        if bot_incarnation is None:
+            raise ValueError(
+                f"bot record has no id, cannot resolve its startup script safely: "
+                f"bot_id={bot_id}"
+            )
         return self._startup_script_reader.get_body(
-            entity_id=entity_id, bot_id=bot_id
+            entity_id=entity_id, bot_id=bot_id, bot_incarnation=int(bot_incarnation)
         )
 
     def _get_startup_script_segment(
