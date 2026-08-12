@@ -1,5 +1,12 @@
 """Framework-neutral request/response models for the Forwarder SPI.
 
+Forwarder Plugin API contract version: **2**. Version 1 represented an inbound
+body as fully-buffered ``ForwardRequest.content: bytes``. Version 2 replaces that
+field with the closeable, one-shot ``ForwardRequest.body`` stream so large
+uploads can propagate backpressure instead of consuming memory proportional to
+the complete payload. The Python class names remain stable; the contract version
+describes their semantics rather than creating parallel ``V1``/``V2`` types.
+
 The delivery adapter translates request metadata and a one-shot body stream into
 a :class:`ForwardRequest`, then streams a :class:`ForwardResponse` back. Neither
 type depends on a web framework, so transport implementations remain replaceable.
@@ -73,6 +80,8 @@ class ForwardRequest:
     """A request to forward to an upstream, addressed by absolute URL.
 
     ``body`` is either absent or a closeable, one-shot asynchronous byte stream.
+    It intentionally cannot be supplied as buffered ``content``: buffering would
+    defeat backpressure and make Gateway memory usage grow with upload size.
     Once a forwarder's context manager is entered, that forwarder owns the body
     and must close it after sending finishes, fails, or is cancelled.
     """
