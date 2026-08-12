@@ -9,20 +9,25 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
-from gateway.community.adapters.web._forward import _ALL_METHODS, forward_request
+from gateway.community.adapters.web._forward import (
+    _ALL_METHODS,
+    _request_body,
+    forward_request,
+)
 from gateway.community.bootstrap._principal_signer import build_principal_signer
 from gateway.community.config import ConfigLoader, UserConfig
 from gateway.community.core.forwarding import DomainMap
 from gateway.community.plugins.forwarder.httpx import HttpxForwarder
 from gateway.community.plugins.secret_resolver.community import CommunitySecretResolver
 from gateway.community.spi.auth import AuthError
+from gateway.community.spi.forwarder import ForwardRequest
 
 Scope = dict[str, Any]
 Receive = Callable[[], Awaitable[dict[str, Any]]]
@@ -133,6 +138,40 @@ class _FakeAuth:
         return {}
 
 
+class _FailingRequestStream:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def __aiter__(self) -> _FailingRequestStream:
+        return self
+
+    async def __anext__(self) -> bytes:
+        raise RuntimeError("client disconnected")
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+class _RequestWithStream:
+    def __init__(self, stream: _FailingRequestStream) -> None:
+        self._stream = stream
+
+    def stream(self) -> _FailingRequestStream:
+        return self._stream
+
+
+class _EntryFailureForwarder:
+    def __init__(self, error: BaseException) -> None:
+        self._error = error
+        self.request: ForwardRequest | None = None
+
+    @asynccontextmanager
+    async def forward(self, request: ForwardRequest) -> AsyncIterator[None]:
+        self.request = request
+        raise self._error
+        yield
+
+
 def _build(
     upstream_app: Callable[[Scope, Receive, Send], Awaitable[None]] = _stub_upstream,
 ) -> tuple[FastAPI, _FakeAuth]:
@@ -201,6 +240,55 @@ async def test_auth_failure_does_not_consume_request_body() -> None:
 
     assert response.status_code == 401
     assert not body_consumed
+
+
+async def test_request_body_read_failure_closes_source_and_propagates() -> None:
+    stream = _FailingRequestStream()
+    request = cast(Request, _RequestWithStream(stream))
+
+    with pytest.raises(RuntimeError, match="client disconnected"):
+        await _request_body(request)
+
+    assert stream.closed
+
+
+async def test_forwarder_entry_failure_closes_body_before_returning_502() -> None:
+    forwarder = _EntryFailureForwarder(RuntimeError("upstream unavailable"))
+    app, _ = _build()
+    app.state.forwarder = forwarder
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://gateway"
+    ) as client:
+        response = await client.post(
+            "/openapi/v1/bots/upload", content=b"raw-bytes-payload"
+        )
+
+    assert response.status_code == 502
+    assert response.json()["code"] == 502001
+    assert forwarder.request is not None
+    assert forwarder.request.body is not None
+    with pytest.raises(StopAsyncIteration):
+        await anext(forwarder.request.body)
+
+
+async def test_forwarder_entry_cancellation_closes_body_and_propagates() -> None:
+    forwarder = _EntryFailureForwarder(asyncio.CancelledError())
+    app, _ = _build()
+    app.state.forwarder = forwarder
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://gateway"
+    ) as client:
+        with pytest.raises(asyncio.CancelledError):
+            await client.post("/openapi/v1/bots/upload", content=b"raw-bytes-payload")
+
+    assert forwarder.request is not None
+    assert forwarder.request.body is not None
+    with pytest.raises(StopAsyncIteration):
+        await anext(forwarder.request.body)
 
 
 def test_successful_forward_streams_body_and_preserves_cookies() -> None:
