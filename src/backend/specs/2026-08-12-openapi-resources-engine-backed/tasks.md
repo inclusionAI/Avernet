@@ -11,7 +11,7 @@ change, no OCB dependency in this scope.
 
 ## Group A — Wiring and schema
 
-- [ ] **A1.** Add a local helper in `openapi_v1/resources/router.py` resolving
+- [x] **A1.** Add a local helper in `openapi_v1/resources/router.py` resolving
   `(entity_type, entity_id, engine_type)`, modelled on the console router's
   `_resolve_params` (`adapters/http/resources/file_router.py:71`): inject
   `BotRepository`, default `engine_type` via `resolve_engine_for_bot` to the
@@ -156,8 +156,8 @@ change, no OCB dependency in this scope.
 - [ ] **E3.** Update the PR body to the final scope, including the contract
   change (four operations re-shaped, file record ids stop resolving) and the
   "NOT PUBLIC-READY" justification for making it now. Mark ready for review.
-- [ ] **E4.** Open the follow-up issue for the deferred engine-side work (see
-  `plan.md` → Follow-up) and link it from #1000.
+- [x] **E4.** Follow-up issue for the deferred engine-side work: **#1002**
+  (opened up front; its body cross-links #1000).
 
 ---
 

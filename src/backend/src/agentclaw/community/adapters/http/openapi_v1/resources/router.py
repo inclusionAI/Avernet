@@ -47,12 +47,16 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
     page as page_envelope,
 )
+from agentclaw.community.core.bot_management.services.engine_resolver import (
+    resolve_engine_for_bot,
+)
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
 from agentclaw.community.core.devices.services.device_filesystem_dispatcher import (
     DeviceFilesystemDispatcher,
 )
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 
@@ -116,6 +120,25 @@ def _to_openapi_resource(legacy: _LegacyResource) -> Resource:
         gmt_create=legacy.gmt_created.isoformat() if legacy.gmt_created else "",
         gmt_modified=legacy.gmt_modified.isoformat() if legacy.gmt_modified else "",
     )
+
+
+def _file_coords(
+    bot_id: str, owner_id: str, bot_repo: BotRepository
+) -> tuple[str, str, str]:
+    """``(entity_type, entity_id, engine_type)`` for the file endpoints.
+
+    ``ResourceFileService`` addresses a bot's workspace by these three
+    coordinates, and ``DeviceContext`` carries none of them — it holds
+    provider / conn_info / binding only. Mirrors the console router's
+    ``_resolve_params`` (``adapters/http/resources/file_router.py:71``): the
+    entity is the bot owner, and ``engine_type`` defaults to the bot's
+    ``active_engine``. ``entity_type`` is ``"staff"``, matching
+    ``ResourceFileService``'s own default.
+    """
+    engine_type = resolve_engine_for_bot(
+        bot_id=bot_id, owner_id=owner_id, override=None, bot_repo=bot_repo
+    )
+    return ("staff", owner_id, engine_type)
 
 
 router = APIRouter(prefix="/openapi/v1/bots/resources", tags=["resources"])
