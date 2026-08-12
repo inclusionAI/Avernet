@@ -151,8 +151,10 @@ prepare_bcs_runtime_config() {
     if [ -n "$bcs_bot_profile_dir" ]; then
         local escaped_bcs_bot_profile_dir
         escaped_bcs_bot_profile_dir="$(toml_sed_replacement "$bcs_bot_profile_dir")"
-        # Use # as the sed delimiter because the path contains /.
-        sed_args+=("-e" "s#^bots_base_dir = \".*\"$#bots_base_dir = \"${escaped_bcs_bot_profile_dir}\"#")
+        # Use # as the sed delimiter because the path contains /. Escape the
+        # trailing $ because # would otherwise make it "$#" (positional param
+        # count) inside the double-quoted script.
+        sed_args+=("-e" "s#^bots_base_dir = \".*\"\$#bots_base_dir = \"${escaped_bcs_bot_profile_dir}\"#")
     fi
     if [ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]; then
         local escaped_e2e_judge_url

@@ -759,10 +759,17 @@ main() {
     fi
     if [ -n "${BOTS_PROFILE_DIR:-}" ]; then
         for svc in "${services[@]}"; do
-            if [ "$svc" != "bots" ]; then
-                log_error "--profile-dir only supports the bots target, for example: ./scripts/singlebox.sh $(singlebox_mode_option) start bots --profile-dir <dir>"
-                exit 1
-            fi
+            # --profile-dir / BOTS_PROFILE_DIR is primarily for the bots target,
+            # but bcs_frontend and bcsfuse are allowed because they are started
+            # before bots and need the same profile dir to be wired into BCS.
+            case "$svc" in
+                bots|bcs_frontend|bcsfuse)
+                    ;;
+                *)
+                    log_error "--profile-dir only supports the bots target (or bcs_frontend/bcsfuse when the same profile dir is needed), for example: ./scripts/singlebox.sh $(singlebox_mode_option) start bots --profile-dir <dir>"
+                    exit 1
+                    ;;
+            esac
         done
     fi
     if [ "$STANDALONE_MODE" = true ]; then
