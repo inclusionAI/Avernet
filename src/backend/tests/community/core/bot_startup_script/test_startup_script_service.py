@@ -356,3 +356,23 @@ def test_the_uniqueness_key_fits_innodbs_index_limit():
             f"{constraint.name} is {chars} chars = {chars * 4} utf8mb4 bytes, "
             f"over InnoDB's 3072-byte index-key limit"
         )
+
+
+def test_the_size_cap_leaves_the_base64_body_inside_a_mysql_text_column():
+    """The hook carrying the body is persisted into a ``Text`` column downstream
+    (``baas_bot.extra_config`` / ``baas_publish.extra_config``), which is 65,535
+    bytes on MySQL. base64 costs 4/3, so a cap chosen without that arithmetic
+    lets a caller store a script that is accepted and then fails to persist on
+    the next restart — after the write already reported success.
+    """
+    import math
+
+    from agentclaw.community.api.bot_startup_script_service import MAX_SCRIPT_BYTES
+
+    encoded = math.ceil(MAX_SCRIPT_BYTES / 3) * 4
+    mysql_text_limit = 65_535
+    # Room for the platform's own hook plus the other extra_config fields.
+    assert encoded + 8192 < mysql_text_limit, (
+        f"{MAX_SCRIPT_BYTES} raw expands to {encoded} base64 bytes, which does "
+        f"not leave usable room inside a {mysql_text_limit}-byte TEXT column"
+    )

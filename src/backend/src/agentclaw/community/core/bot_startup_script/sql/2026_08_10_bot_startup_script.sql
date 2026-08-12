@@ -36,6 +36,8 @@ CREATE TABLE `ac_bot_startup_script` (
   `gmt_create`    datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `gmt_modified`  datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_tenant_script_key` (`avernet_tenant`, `script_key`),
-  KEY `idx_env_entity_bot` (`env`, `bot_id`)
+  -- The only index, and every read uses it: the repository filters on
+  -- script_key rather than on the three columns it hashes, so there is no
+  -- second lookup key here to drift out of step with the ORM model.
+  UNIQUE KEY `uk_tenant_script_key` (`avernet_tenant`, `script_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Bot 启动脚本';

@@ -906,10 +906,13 @@ that one design choice, and none of it is visible in the OpenAPI document.
 - **Editing takes effect on the next start, never on a running container.**
   A script written after a bot was created reaches a container only once that
   bot restarts. The first write therefore always needs a restart.
-- **A failure degrades rather than blocks.** A non-zero exit, a crash, or a
-  timeout leaves the agent running: the script is guarded so it cannot change
-  the boot's outcome, and it is skipped entirely if the boot itself failed.
-- **Limits:** body ≤ **64 KiB** (413 above that, naming the limit); each run
+- **A failure degrades rather than blocks — the script's *execution*, that is.**
+  A non-zero exit, a crash, or a timeout leaves the agent running: the script is
+  guarded so it cannot change the boot's outcome, and it is skipped entirely if
+  the boot itself failed. That is not a promise to start anyway if the platform
+  *cannot read* your stored script: a start that could not resolve it fails
+  rather than bringing up a bot that looks ready and is not provisioned.
+- **Limits:** body ≤ **24 KiB** (413 above that, naming the limit); each run
   capped at **300s** by `timeout`, sized against the 600s publish budget the
   start reports into. The cap is enforced as TERM at 300s followed by an
   uncatchable KILL **10s** later, so a script that traps or ignores TERM cannot

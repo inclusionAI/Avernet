@@ -6,6 +6,8 @@ setup_supervisor_sync_service.sh).
 """
 from unittest.mock import MagicMock
 
+import pytest
+
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.plugins.local.http_client import LocalHttpClient
 
@@ -375,12 +377,26 @@ class TestStartupScriptReachesEveryStartPath:
     def test_no_reader_bound_composes_todays_chain(self):
         assert "__OCB_RC" not in self._hook(_make_service())
 
-    def test_lookup_failure_does_not_break_the_start(self):
+    def test_a_lookup_failure_fails_the_start_rather_than_omitting_the_script(self):
+        """Swallowing this produced a bot that starts, reports ready, and is
+        silently unprovisioned — indistinguishable from one with no script.
+
+        "Degrades rather than blocks" is about the script's own execution, not
+        about quietly dropping a script that exists.
+        """
         svc = _make_service()
         reader = MagicMock()
         reader.get_body.side_effect = RuntimeError("db down")
         svc._startup_script_reader = reader
-        assert svc._resolve_startup_script(entity_id="ent-1", bot_id="bot-1") == ""
+
+        with pytest.raises(RuntimeError):
+            svc._resolve_startup_script(entity_id="ent-1", bot_id="bot-1")
+
+    def test_an_unwired_reader_is_not_a_failure(self):
+        """``""`` still means "no script" for the two non-error cases."""
+        assert _make_service()._resolve_startup_script(
+            entity_id="ent-1", bot_id="bot-1"
+        ) == ""
 
     def test_missing_entity_id_resolves_to_no_script(self):
         svc, _ = self._service_with_script()

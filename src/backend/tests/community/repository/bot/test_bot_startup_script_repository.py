@@ -297,3 +297,42 @@ def test_the_surrogate_key_separates_ids_that_would_concatenate_alike(repo):
         env="dev", entity_id="ab", bot_id="c"
     )
     assert len(_script_key(env="dev", entity_id="e", bot_id="b")) == 64
+
+
+def test_every_read_filters_on_the_indexed_surrogate(repo):
+    """Reads must key on ``script_key``, the table's only index.
+
+    When the uniqueness key moved to the surrogate, ``(env, entity_id, bot_id)``
+    stopped having an index behind it — so a read still filtering on those three
+    would be a full scan. Pinned by asserting the emitted SQL, because a plain
+    round-trip test passes either way.
+    """
+    statements: list[str] = []
+
+    from sqlalchemy import event
+
+    engine = repo._db.orm_session().__enter__().get_bind()
+
+    @event.listens_for(engine, "before_cursor_execute")
+    def _record(conn, cursor, statement, params, context, executemany):
+        statements.append(statement)
+
+    try:
+        repo.upsert(
+            env="dev",
+            entity_id="ent",
+            bot_id="bot",
+            script="echo hi",
+            size_bytes=7,
+            modifier="alice",
+        )
+        statements.clear()
+        repo.get(env="dev", entity_id="ent", bot_id="bot")
+    finally:
+        event.remove(engine, "before_cursor_execute", _record)
+
+    selects = [s for s in statements if s.lstrip().upper().startswith("SELECT")]
+    assert selects, "expected the read to emit a SELECT"
+    assert any("script_key" in s for s in selects), (
+        f"read did not filter on the indexed surrogate: {selects}"
+    )

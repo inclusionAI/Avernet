@@ -47,6 +47,13 @@ def _script_key(*, env: str, entity_id: str, bot_id: str) -> str:
 
     NUL-separated so ``("a", "bc")`` and ``("ab", "c")`` cannot collide by
     concatenation; no id may contain a NUL.
+
+    Every read filters on this rather than on the three columns it is built
+    from. That is not a micro-optimisation: once the uniqueness key moved here,
+    ``(env, entity_id, bot_id)`` had no index behind it at all, so filtering on
+    the surrogate is what keeps a lookup on the one index the table has. It also
+    means there is exactly one index to maintain instead of a unique key plus a
+    lookup key that could drift apart.
     """
     joined = "\0".join((env, entity_id, bot_id))
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()
@@ -75,9 +82,8 @@ class BotStartupScriptRepository(
             row = (
                 db.query(self._Script)
                 .filter(
-                    self._Script.env == env,
-                    self._Script.entity_id == entity_id,
-                    self._Script.bot_id == bot_id,
+                    self._Script.script_key
+                    == _script_key(env=env, entity_id=entity_id, bot_id=bot_id)
                 )
                 .one_or_none()
             )
@@ -146,9 +152,8 @@ class BotStartupScriptRepository(
             row = (
                 db.query(self._Script)
                 .filter(
-                    self._Script.env == env,
-                    self._Script.entity_id == entity_id,
-                    self._Script.bot_id == bot_id,
+                    self._Script.script_key
+                    == _script_key(env=env, entity_id=entity_id, bot_id=bot_id)
                 )
                 .one_or_none()
             )
@@ -204,9 +209,8 @@ class BotStartupScriptRepository(
             deleted = (
                 db.query(self._Script)
                 .filter(
-                    self._Script.env == env,
-                    self._Script.entity_id == entity_id,
-                    self._Script.bot_id == bot_id,
+                    self._Script.script_key
+                    == _script_key(env=env, entity_id=entity_id, bot_id=bot_id)
                 )
                 .delete(synchronize_session=False)
             )

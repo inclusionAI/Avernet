@@ -2394,24 +2394,32 @@ class BaasService:  # pragma: no cover
     def _resolve_startup_script(self, *, entity_id: str, bot_id: str) -> str:
         """Read the bot's stored startup script, or ``""`` when it has none.
 
-        Never raises: a storage hiccup must not block provisioning or a restart.
-        The bot picks the script up on the next start instead.
+        **A read failure propagates.** It used to be swallowed, on the reasoning
+        that a new feature should not be able to break provisioning — but the
+        result of swallowing is a bot that starts, reports ready, and is not
+        provisioned, indistinguishable from one that never had a script. That is
+        the silent-wrong-answer failure this feature guards against everywhere
+        else, and the published contract says a stored script runs on **every**
+        start the platform composes.
+
+        "A failure degrades rather than blocks" is about the script's own
+        execution — a bad script costs a feature, not the bot. It was never
+        about quietly omitting a script that exists.
+
+        The blast radius is narrower than it looks: this is one indexed read on
+        the backend's own database, and every other step of a create or restart
+        reads that same database. A failure here almost certainly means the
+        operation was failing anyway, so propagating costs little and buys a
+        start that is either provisioned or visibly failed.
+
+        ``""`` still means "no script" — an unwired reader or a bot with no
+        identity, neither of which is an error.
         """
         if self._startup_script_reader is None or not entity_id or not bot_id:
             return ""
-        try:
-            return self._startup_script_reader.get_body(
-                entity_id=entity_id, bot_id=bot_id
-            )
-        except Exception as exc:  # noqa: BLE001 - a start must not fail on this
-            logger.warning(
-                "[BaasService._resolve_startup_script] lookup failed, continuing "
-                "without a script: entity_id=%s, bot_id=%s, error=%s",
-                entity_id,
-                bot_id,
-                exc,
-            )
-            return ""
+        return self._startup_script_reader.get_body(
+            entity_id=entity_id, bot_id=bot_id
+        )
 
     def _get_startup_script_segment(
         self,

@@ -50,10 +50,22 @@ UNSUPPORTED = "unsupported"
 #: in the service and re-exporting it here closed an ``api`` ↔ ``core`` import
 #: cycle. Defining it once, on the contract, is what avoids both.
 #:
-#: 64 KiB is far above any real provisioning script and keeps the base64 form
-#: (~4/3 of this) well inside a single ``execute_command`` payload, which is how
-#: the body reaches the container.
-MAX_SCRIPT_BYTES = 64 * 1024
+#: Derived from where the body actually has to fit, not chosen for roundness.
+#:
+#: The script rides inside ``after_create_cmd_hook``, and the device service
+#: serialises that hook into ``baas_bot.extra_config`` and
+#: ``baas_publish.extra_config`` — both ``Text`` columns, which is 65,535 bytes
+#: on MySQL/OceanBase. base64 costs 4/3, so the raw cap has to leave room for
+#: the expansion *and* for the rest of that JSON (template config, mounts, env).
+#:
+#:     24 KiB raw -> 32,768 base64 -> ~34.8 KB of hook, ~30 KB left for the rest.
+#:
+#: 64 KiB was the first value here and does not survive that arithmetic: it
+#: expands to 87,384 bytes and overflows the column on its own, so a script
+#: written near the advertised limit would be accepted and then fail to persist
+#: on the next restart or republish — after the write had already succeeded.
+#: 24 KiB is still far above any real provisioning script.
+MAX_SCRIPT_BYTES = 24 * 1024
 
 
 class StartupScriptTooLargeError(ValueError):
