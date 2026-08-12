@@ -50,6 +50,9 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 from agentclaw.community.core.bot_management.services.engine_resolver import (
     resolve_engine_for_bot,
 )
+from agentclaw.community.core.devices.services.device_filesystem import (
+    FileTooLargeError as DeviceFileTooLargeError,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.resources.service import (
     DuplicateResourceError,
@@ -126,24 +129,6 @@ def _to_openapi_resource(legacy: _LegacyResource) -> Resource:
 
 #: Preview cap, legacy parity with the former service-level default.
 _PREVIEW_MAX_BYTES = 1_048_576
-
-
-def _entry_path(listed_dir: str, entry: dict) -> str:
-    """Workspace-relative path of a listing entry.
-
-    The device reports ``relative_path`` relative to the *listed* directory, not
-    to the workspace root — listing ``a/b`` yields ``c.txt`` — so it has to be
-    rejoined with the directory that was listed. teclaw returns no
-    ``relative_path`` at all, hence the fallback to the entry name, which is
-    equivalent for the non-recursive listings this endpoint does. Mirrors
-    ``resource_file_service._rel_path``.
-
-    The entry's own ``path`` is deliberately unused: it is the engine-view
-    absolute container path (``/home/admin/.aicoding/workspace/...``) and must
-    not cross a public API.
-    """
-    leaf = entry.get("relative_path") or entry.get("name", "")
-    return f"{listed_dir}/{leaf}" if listed_dir else leaf
 
 
 def _safe_path(path: str) -> str:
@@ -248,7 +233,12 @@ async def list_resources(
                     name=entry.get("name", ""),
                     type=entry_type,
                     size=entry.get("size") if not is_dir else None,
-                    path=_entry_path(safe, entry),
+                    # ``ResourceFileService.list_dir`` already returns a
+                    # workspace-relative ``path`` (it applies ``_rel_path``
+                    # itself) and keeps the engine-view container path under a
+                    # separate ``absolute_path``. Recomputing it here would
+                    # discard the correct value in favour of a reconstruction.
+                    path=entry.get("path", ""),
                 )
             )
 
@@ -445,19 +435,12 @@ async def upload_resource(
         logger.exception("[upload_resource] device write failed")
         raise HTTPException(status_code=502, detail="Upload storage failed")
 
-    # The bytes are in the workspace now, so the file exists whatever happens
-    # next: the record carries only what the filesystem cannot know (uploader,
-    # upload time, upload-vs-bot-created) and what the publish pipeline reads.
-    # Failing the request here would report "upload failed" for a file that is
-    # demonstrably there, and a retry would then hit the duplicate check.
-    data = Resource(
-        resource_id="",
-        name=info["name"],
-        type=ResourceType.FILE,
-        source="upload",
-        size=info.get("size", len(content)),
-        path=info["path"],
-    )
+    # The record is not decoration: the publish pipeline builds a released bot's
+    # manifest from it, so bytes without a row publish as a bot silently missing
+    # that file. Reporting 201 and moving on would leave exactly that, and the
+    # obvious repair — upload it again — cannot work, because the file is now on
+    # disk and the duplicate check answers 409. So the write is rolled back and
+    # the request fails: a retry then finds a clean slate and succeeds.
     try:
         record = await factory.create(bot_id=bot_id).record_uploaded_file(
             path=info["path"],
@@ -467,12 +450,30 @@ async def upload_resource(
         )
     except Exception:
         logger.exception(
-            "[upload_resource] enrichment record failed; file is written at %s",
+            "[upload_resource] record failed; rolling back the file at %s",
             info["path"],
         )
-    else:
-        data = _to_openapi_resource(record)
-        data.path = info["path"]
+        try:
+            await file_svc.delete(
+                entity_type=entity_type,
+                entity_id=entity_id,
+                bot_id=bot_id,
+                engine_type=engine_type,
+                path=safe,
+            )
+        except Exception:
+            # Both halves failed. The file is on disk with no record, which is
+            # the state the rollback existed to avoid — say so loudly, because
+            # the next upload of this path will 409 against a file the operator
+            # has no record of.
+            logger.exception(
+                "[upload_resource] rollback failed; %s is on disk with no record",
+                info["path"],
+            )
+        raise HTTPException(status_code=502, detail="Upload storage failed")
+
+    data = _to_openapi_resource(record)
+    data.path = info["path"]
     return created(data, request)
 
 
@@ -498,14 +499,23 @@ async def _read_file_or_404(
     if not safe:
         raise InvalidResourcePathError("path is required")
     entity_type, entity_id, engine_type = _file_coords(bot_id, owner_id, bot_repo)
-    content = await file_svc.read_file(
-        entity_type=entity_type,
-        entity_id=entity_id,
-        bot_id=bot_id,
-        engine_type=engine_type,
-        path=safe,
-        enforce_download_limit=True,
-    )
+    try:
+        content = await file_svc.read_file(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            bot_id=bot_id,
+            engine_type=engine_type,
+            path=safe,
+            enforce_download_limit=True,
+        )
+    except DeviceFileTooLargeError as exc:
+        # Two distinct classes share the name ``FileTooLargeError``: the device
+        # filesystem raises its own, and only the resources one is in
+        # ENVELOPE_ERRORS. Without this the documented 413 escapes as a 500 —
+        # ENVELOPE_ERRORS maps concrete types, so a same-named sibling is not a
+        # match. Re-raised as the mapped type rather than adding a second entry,
+        # so there is one answer for "too large" regardless of who noticed.
+        raise FileTooLargeError(str(exc)) from exc
     # ``None`` is absent; ``b""`` is a file that exists but has no bytes, which
     # the legacy contract also treated as nothing to serve.
     if not content:
@@ -586,9 +596,9 @@ async def delete_file(
 ) -> Envelope[Deleted]:
     """Delete a file or directory from the bot's workspace, addressed by path.
 
-    The workspace is authoritative, so the file goes first and any matching
-    record follows. A record that is not there is not an error — a file the bot
-    created never had one — but a file that is not there is a 404.
+    The workspace decides existence, so a file that is not there is a 404. A
+    record that is not there is not an error — a file the bot created never had
+    one.
     """
     safe = _safe_path(path)
     if not safe:
@@ -602,6 +612,14 @@ async def delete_file(
         path=safe,
     ):
         raise HTTPException(status_code=404, detail="Resource not found")
+    # Record first, file second — the reverse order cannot recover. Deleting the
+    # file first and then failing to drop the record leaves the manifest pointing
+    # at a path with no bytes, and the retry is refused 404 because the file is
+    # already gone, so nothing can clear it. This way a record failure changes
+    # nothing and the retry works; a file failure leaves a record already gone,
+    # which the retry tolerates (a missing record is not an error) while it
+    # retries the file.
+    await factory.create(bot_id=bot_id).delete_file_record(path=safe)
     await file_svc.delete(
         entity_type=entity_type,
         entity_id=entity_id,
@@ -609,12 +627,6 @@ async def delete_file(
         engine_type=engine_type,
         path=safe,
     )
-    try:
-        await factory.create(bot_id=bot_id).delete_file_record(path=safe)
-    except Exception:
-        logger.exception(
-            "[delete_file] record cleanup failed; file is gone at %s", safe
-        )
     return deleted_envelope(request)
 
 
@@ -666,14 +678,21 @@ async def get_resource(
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
 ) -> Envelope[Resource]:
-    """Get a resource."""
+    """Get a **link** resource by record id.
+
+    A file id 404s here, mirroring ``DELETE /{resource_id}``: serving a file
+    from its record would report size and name from a row that nothing keeps in
+    step with the workspace, which is the divergence this change removes. A
+    file's address is its path — ``GET ""?path=`` lists it, ``GET /download``
+    and ``GET /preview`` serve it.
+    """
     del user_id  # not-yet-enforced ownership — see list_resources
     effective_bot_id = bot_id
     service = factory.create(bot_id=effective_bot_id)
     # NOTE: ``get_resource`` on the concrete service is SYNC (unlike
     # ``check_name_exists`` which is async) — do NOT `await` it.
     r = service.get_resource(resource_id)
-    if r is None:
+    if r is None or r.resource_type == _LegacyType.FILE:
         raise HTTPException(status_code=404, detail="Resource not found")
     return envelope(_to_openapi_resource(r), request)
 
@@ -730,6 +749,16 @@ async def delete_resource(
     branch resolves.
     """
     service = factory.create(bot_id=bot_id)
+    # Refuse a FILE row explicitly. ``delete_resource`` would otherwise accept
+    # one, skip the device because ``device_fs`` is None, soft-delete the row and
+    # report success — so a stale file id would still "work" while leaving the
+    # workspace file in place, which is precisely the record-says-one-thing,
+    # workspace-says-another divergence this change exists to remove. 404 rather
+    # than a distinct status: to this route a file id is simply not a resource it
+    # addresses, and the file's own address is ``DELETE ""?path=``.
+    existing = service.get_resource(resource_id)
+    if existing is not None and existing.resource_type == _LegacyType.FILE:
+        raise HTTPException(status_code=404, detail="Resource not found")
     ok = await service.delete_resource(resource_id, device_fs=None)
     if not ok:
         raise HTTPException(status_code=404, detail="Resource not found")

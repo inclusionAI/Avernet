@@ -3677,19 +3677,44 @@
         "type": "object"
       },
       "Resource": {
-        "description": "A resource record (storage location is not exposed).",
+        "description": "A resource: a file or folder in the bot's workspace, or an external link.\n\nThe container's own storage layout is never exposed — ``path`` is relative to\nthe workspace root, not the engine-view absolute path the device returns.",
         "properties": {
           "gmt_create": {
-            "title": "Gmt Create",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gmt Create"
           },
           "gmt_modified": {
-            "title": "Gmt Modified",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gmt Modified"
           },
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
           },
           "resource_id": {
             "title": "Resource Id",
@@ -3735,9 +3760,7 @@
         "required": [
           "resource_id",
           "name",
-          "type",
-          "gmt_create",
-          "gmt_modified"
+          "type"
         ],
         "title": "Resource",
         "type": "object"
@@ -8601,8 +8624,142 @@
       }
     },
     "/openapi/v1/bots/resources": {
+      "delete": {
+        "description": "Delete a file or directory from the bot's workspace, addressed by path.\n\nThe workspace decides existence, so a file that is not there is a 404. A\nrecord that is not there is not an error — a file the bot created never had\none.",
+        "operationId": "delete_file_openapi_v1_bots_resources_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Bot ID this resource belongs to.",
+            "in": "query",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "Bot ID this resource belongs to.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Deleted_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Delete File",
+        "tags": [
+          "resources"
+        ]
+      },
       "get": {
-        "description": "List resources (filter + paginate).",
+        "description": "List a directory of the bot's workspace, plus the bot's link resources.\n\nFiles and folders come from the **workspace**, never from records. That is\nwhat makes a file the bot produced itself a first-class resource: it has no\nrecord and never will, and a record-backed listing simply could not see it.\nIt also removes the divergence the other direction — a record whose bytes are\nnot where it claims can no longer be reported as a file that exists.\n\nLinks are the exception, and not an inconsistency: a link has no file and no\npresence on any device, so the record *is* the resource. They are read from\nthe repo and appended.\n\n``path`` selects the directory (empty = workspace root). Listing is\nnon-recursive, which bounds the device round trip this endpoint now makes.",
         "operationId": "list_resources_openapi_v1_bots_resources_get",
         "parameters": [
           {
@@ -8613,6 +8770,18 @@
             "schema": {
               "description": "Bot ID this resource belongs to.",
               "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Directory to list, relative to the workspace root.",
+            "in": "query",
+            "name": "path",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Directory to list, relative to the workspace root.",
+              "title": "Path",
               "type": "string"
             }
           },
@@ -8907,15 +9076,26 @@
     },
     "/openapi/v1/bots/resources/check-name": {
       "get": {
-        "description": "Check whether a resource name is available.\n\n``user_id`` is the request's own required parameter, forwarded to the\nservice — the wiring the older note here said was still pending.\n``parent_path`` and ``exclude_id`` from the legacy signature remain\nunexposed on this contract and are passed as None: resources are bot-scoped,\nso there is no parent path to qualify the name with.",
+        "description": "Whether a resource already exists.\n\nTwo parameters because there are two kinds of resource, addressed\ndifferently. A **file** is checked against the workspace by ``path`` — the\nsame question the upload asks before writing, answered by the same authority,\nso the two can never disagree. A **link** is checked by ``name`` against the\nrecords, because a link has no file.\n\nA caller supplying ``path`` gets the file check; otherwise it is the link\ncheck. Splitting the two surfaces entirely would be cleaner than one endpoint\nwith two addressing modes, but that is a larger contract change than this one.",
         "operationId": "check_resource_name_openapi_v1_bots_resources_check_name_get",
         "parameters": [
           {
             "in": "query",
             "name": "name",
-            "required": true,
+            "required": false,
             "schema": {
+              "default": "",
               "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Path",
               "type": "string"
             }
           },
@@ -9057,17 +9237,424 @@
         ]
       }
     },
+    "/openapi/v1/bots/resources/download": {
+      "get": {
+        "description": "Stream a file's bytes from the bot's workspace, addressed by path.\n\nRaw bytes, not an envelope — the body is the file. Replaces the former\n``/{resource_id}/download``: a record id cannot address a file the bot\ncreated itself, and the record is no longer what decides existence.",
+        "operationId": "download_file_openapi_v1_bots_resources_download_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Bot ID this resource belongs to.",
+            "in": "query",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "Bot ID this resource belongs to.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "application/octet-stream": {}
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Download File",
+        "tags": [
+          "resources"
+        ]
+      }
+    },
+    "/openapi/v1/bots/resources/mkdir": {
+      "post": {
+        "description": "Create a directory in the bot's workspace.\n\nPhysical only — no FOLDER record is written, and ``POST \"\"`` with\n``type=FOLDER`` still returns 501. Directories exist on the filesystem and\nare reported by listing it; giving them records would reintroduce exactly\nthe record-vs-filesystem divergence this change removes.",
+        "operationId": "create_directory_openapi_v1_bots_resources_mkdir_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Bot ID this resource belongs to.",
+            "in": "query",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "Bot ID this resource belongs to.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Resource_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Create Directory",
+        "tags": [
+          "resources"
+        ]
+      }
+    },
+    "/openapi/v1/bots/resources/preview": {
+      "get": {
+        "description": "A file's content as text, addressed by path.\n\nCapped at 1 MB (legacy parity) — over that is a 413, not a truncated preview,\nso a caller is never handed a prefix it might mistake for the whole file.",
+        "operationId": "preview_file_openapi_v1_bots_resources_preview_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Bot ID this resource belongs to.",
+            "in": "query",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "Bot ID this resource belongs to.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Preview_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Preview File",
+        "tags": [
+          "resources"
+        ]
+      }
+    },
     "/openapi/v1/bots/resources/upload": {
       "post": {
-        "description": "Upload a file's raw bytes as a new resource.\n\ndevice_fs is resolved per-bot; upload_file is async and raises\nDuplicateResourceError on duplicate name → 409 (via @envelope_errors).\nowner_id comes from the request's ``user_id`` parameter (``UserIdDep``),\nfail-closed — mirroring the bots router.",
+        "description": "Upload a file's raw bytes into the bot's workspace.\n\n``path`` is workspace-relative and carries its own directories\n(``docs/spec/a.txt``); intermediate ones are created by the engine. There is\nno separate name or parent-directory parameter — the directory is part of the\npath, and ``path`` is the same spelling every other file endpoint uses.\n\nThe write goes through ``ResourceFileService``, the same service the console\nuses, so both surfaces compose the workspace address identically and cannot\ndrift. ``owner_id`` comes from the request's ``user_id`` (``UserIdDep``),\nfail-closed — mirroring the bots router.",
         "operationId": "upload_resource_openapi_v1_bots_resources_upload_post",
         "parameters": [
           {
             "in": "query",
-            "name": "name",
+            "name": "path",
             "required": true,
             "schema": {
-              "title": "Name",
+              "title": "Path",
               "type": "string"
             }
           },
@@ -9207,7 +9794,7 @@
     },
     "/openapi/v1/bots/resources/{resource_id}": {
       "delete": {
-        "description": "Delete a resource (file → device FS, link/folder → DB soft-delete).\n\nowner_id comes from the request's ``user_id`` parameter (``UserIdDep``),\nfail-closed. device_fs is resolved per-bot ONLY for FILE resources — a\nlink/folder soft-delete never touches device_fs, so it must not fail on an\nunbound bot (``resolve_for_bot`` raises DeviceNotBoundError when there is no\nbinding). The injected deps (factory, resolver, device_fs_dispatcher) stay\nout of the served OpenAPI schema — see test_public_namespace.py.",
+        "description": "Delete a **link** resource by record id.\n\nFiles are no longer addressed this way — they live in the workspace and are\ndeleted through ``DELETE \"\"?path=``. A link has no file, so the record is\nthe resource and the record id is the only address it can have. A file id\nsent here resolves to nothing and 404s, which is also the right answer for\na stale id from before the change.\n\nNo device is touched, so this must not require a bound one: the former\nunconditional ``resolve_for_bot`` raised DeviceNotBoundError (409) on an\nunbound bot even for a link, which is the follow-up that removing the file\nbranch resolves.",
         "operationId": "delete_resource_openapi_v1_bots_resources__resource_id__delete",
         "parameters": [
           {
@@ -9341,7 +9928,7 @@
         ]
       },
       "get": {
-        "description": "Get a resource.",
+        "description": "Get a **link** resource by record id.\n\nA file id 404s here, mirroring ``DELETE /{resource_id}``: serving a file\nfrom its record would report size and name from a row that nothing keeps in\nstep with the workspace, which is the divergence this change removes. A\nfile's address is its path — ``GET \"\"?path=`` lists it, ``GET /download``\nand ``GET /preview`` serve it.",
         "operationId": "get_resource_openapi_v1_bots_resources__resource_id__get",
         "parameters": [
           {
@@ -9614,277 +10201,6 @@
           }
         },
         "summary": "Update Resource",
-        "tags": [
-          "resources"
-        ]
-      }
-    },
-    "/openapi/v1/bots/resources/{resource_id}/download": {
-      "get": {
-        "description": "Download a resource's bytes (raw, not enveloped).\n\nowner_id comes from the request's ``user_id`` parameter (``UserIdDep``),\nfail-closed — mirroring the bots router. device_fs is resolved per-bot\n(unconditional today; see #4 follow-up — only a file has bytes, but the\nhandler can't tell the type before the service reads the row). Service\nreturns ``(bytes, mime)`` or ``None`` → 404.",
-        "operationId": "download_resource_openapi_v1_bots_resources__resource_id__download_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "resource_id",
-            "required": true,
-            "schema": {
-              "title": "Resource Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Bot ID this resource belongs to.",
-            "in": "query",
-            "name": "bot_id",
-            "required": true,
-            "schema": {
-              "description": "Bot ID this resource belongs to.",
-              "title": "Bot Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-              "minLength": 1,
-              "title": "User Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              },
-              "application/octet-stream": {}
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Invalid request"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Missing or invalid credentials"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "The user_id names a user the authenticated caller may not act for"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Not found — also returned when the resource exists but does not belong to the caller"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Conflicts with current state"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Request failed validation"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Internal error"
-          },
-          "502": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Upstream service error"
-          }
-        },
-        "summary": "Download Resource",
-        "tags": [
-          "resources"
-        ]
-      }
-    },
-    "/openapi/v1/bots/resources/{resource_id}/preview": {
-      "get": {
-        "description": "Get a resource preview (text-ified content, enveloped).\n\nowner_id comes from the request's ``user_id`` parameter (``UserIdDep``),\nfail-closed — mirroring the bots router. device_fs is resolved per-bot\n(unconditional today; see #4 follow-up). FileTooLargeError (content > 1 MB)\n→ 413 via @envelope_errors; a None result is not-found / not-a-file /\nread-failure → 404.",
-        "operationId": "preview_resource_openapi_v1_bots_resources__resource_id__preview_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "resource_id",
-            "required": true,
-            "schema": {
-              "title": "Resource Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Bot ID this resource belongs to.",
-            "in": "query",
-            "name": "bot_id",
-            "required": true,
-            "schema": {
-              "description": "Bot ID this resource belongs to.",
-              "title": "Bot Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-              "minLength": 1,
-              "title": "User Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Envelope_Preview_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Invalid request"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Missing or invalid credentials"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "The user_id names a user the authenticated caller may not act for"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Not found — also returned when the resource exists but does not belong to the caller"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Conflicts with current state"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Request failed validation"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Internal error"
-          },
-          "502": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Upstream service error"
-          }
-        },
-        "summary": "Preview Resource",
         "tags": [
           "resources"
         ]
