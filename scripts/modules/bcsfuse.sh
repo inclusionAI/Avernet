@@ -35,12 +35,14 @@ bcsfuse_load_env() {
     export BCSFUSE_PROVIDER_MODE="${BCSFUSE_PROVIDER_MODE:-dev}"
     export BCSFUSE_SERVER_PORT="${BCSFUSE_PORT:-8765}"
 
-    # Compat mapping: reuse OPENCLAW_OPENAI_* if bcsfuse vars not set
-    # This lets users configure one set of API keys for both bots and bcsfuse
-    [ -z "${LLM_BASE_URL:-}" ] && [ -n "${OPENCLAW_OPENAI_BASE_URL:-}" ] && export LLM_BASE_URL="${OPENCLAW_OPENAI_BASE_URL}" || true
-    [ -z "${LLM_AUTH_TOKEN:-}" ] && [ -n "${OPENCLAW_OPENAI_API_KEY:-}" ] && export LLM_AUTH_TOKEN="${OPENCLAW_OPENAI_API_KEY}" || true
-    [ -z "${EMBEDDING_BASE_URL:-}" ] && [ -n "${OPENCLAW_OPENAI_BASE_URL:-}" ] && export EMBEDDING_BASE_URL="${OPENCLAW_OPENAI_BASE_URL}" || true
-    [ -z "${EMBEDDING_AUTH_TOKEN:-}" ] && [ -n "${OPENCLAW_OPENAI_API_KEY:-}" ] && export EMBEDDING_AUTH_TOKEN="${OPENCLAW_OPENAI_API_KEY}" || true
+    # Compat mapping: reuse OPENCLAW_OPENAI_* if bcsfuse vars are unset or still
+    # hold the template placeholder "change_me". This lets users configure one
+    # set of API keys for both bots and bcsfuse without manually editing the
+    # generated .runtime/env/.env.local after setup.
+    { [ -z "${LLM_BASE_URL:-}" ] || [ "${LLM_BASE_URL}" = "change_me" ]; } && [ -n "${OPENCLAW_OPENAI_BASE_URL:-}" ] && export LLM_BASE_URL="${OPENCLAW_OPENAI_BASE_URL}" || true
+    { [ -z "${LLM_AUTH_TOKEN:-}" ] || [ "${LLM_AUTH_TOKEN}" = "change_me" ]; } && [ -n "${OPENCLAW_OPENAI_API_KEY:-}" ] && export LLM_AUTH_TOKEN="${OPENCLAW_OPENAI_API_KEY}" || true
+    { [ -z "${EMBEDDING_BASE_URL:-}" ] || [ "${EMBEDDING_BASE_URL}" = "change_me" ]; } && [ -n "${OPENCLAW_OPENAI_BASE_URL:-}" ] && export EMBEDDING_BASE_URL="${OPENCLAW_OPENAI_BASE_URL}" || true
+    { [ -z "${EMBEDDING_AUTH_TOKEN:-}" ] || [ "${EMBEDDING_AUTH_TOKEN}" = "change_me" ]; } && [ -n "${OPENCLAW_OPENAI_API_KEY:-}" ] && export EMBEDDING_AUTH_TOKEN="${OPENCLAW_OPENAI_API_KEY}" || true
 
     # Default LLM feature flags to enabled when an LLM endpoint is configured.
     # The fusion parity layer gates real-LLM routing on LLM_ENABLED/ENABLE_REAL_LLM,
