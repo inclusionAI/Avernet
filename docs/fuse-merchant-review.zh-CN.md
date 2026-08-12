@@ -72,7 +72,7 @@ Fuse 结论**不自动写回群聊**，只作为店主本人的参考浮窗；�
 >
 > 如果某个 profile 不需要 Fuse，把 `bots.json` 里的 `bcsfuse.fusion_enable` 设为 `false`（或移除该字段），启动时就不会自动开启 `fusion_enable`。
 
-> 从本改动开始，`singlebox` 在 bots 启动成功并 onboard 后，会自动为当前 profile 的 4 个 Bot 开启 `fusion_enable`。启动日志里应能看到 `Profile fusion enabled for ...`。
+> 当 `bots.json` 里设置了 `bcsfuse.fusion_enable: true` 时，`singlebox` 在 bots 启动成功并 onboard 后，会自动为当前 profile 的 Bot 开启 `fusion_enable`，启动日志里应能看到 `Profile fusion enabled for ...`。
 
 检查 fuse 是否就绪：
 
