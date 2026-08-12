@@ -49,9 +49,9 @@ Literal routes must be declared **before** `/{resource_id}`, as `/check-name`
 | method + path | today | after |
 |---|---|---|
 | `GET ""` | repo only | engine listing + record enrichment + repo links |
-| `GET /check-name` | repo | `device_fs.exists` for files; repo for links |
+| `GET /check-name` | repo, by `name` | `device_fs.exists` by `path` for files; repo by `name` for links |
 | `POST ""` | create link (repo) | unchanged |
-| `POST /upload` | FS write + row | `ResourceFileService.upload_file` + best-effort row |
+| `POST /upload?path=` | took `name` | `ResourceFileService.upload_file` + best-effort row |
 | `GET /download?path=` | was `/{resource_id}/download` | `ResourceFileService.read_file` |
 | `GET /preview?path=` | was `/{resource_id}/preview` | `ResourceFileService.read_file` + text-ify |
 | `DELETE ""?path=` | was `DELETE /{resource_id}` | `ResourceFileService.delete` + row cleanup |
@@ -59,6 +59,13 @@ Literal routes must be declared **before** `/{resource_id}`, as `/check-name`
 | `GET /{resource_id}` | any resource | **links only** |
 | `PUT /{resource_id}` | link update | unchanged |
 | `DELETE /{resource_id}` | any resource | **links only** |
+
+**One parameter, one name.** Every file endpoint takes `path` — the
+workspace-relative path, directories included. Upload's existing `name` is
+renamed: it stops being a name the moment it accepts `a/b/c.txt`, and a single
+spelling across upload / download / preview / delete / list / mkdir removes the
+chance of the two drifting. There is no `parent_path` parameter anywhere; the
+directory is part of the path.
 
 ## Changes
 
@@ -96,6 +103,14 @@ Order matters and is already correct in principle: bytes first, record second, s
 a failed write never leaves a record. Record creation becomes **best-effort** —
 a failure to persist enrichment must not fail an upload whose bytes landed, since
 the file is now genuinely there and will be listed regardless. Log and continue.
+
+**The record must carry the uploader.** `ResourceFileService` writes no records —
+it is purely a device-filesystem service — so the router owns this write, and it
+must populate `user_id` and `created_by` from the caller. The console's resource
+list exposes the owner (`ResourceListItem.user_id`,
+`adapters/http/resources/schemas.py:99`) off the same shared `ac_resource` table,
+so an OpenAPI upload that omitted it would appear in the console with a blank
+owner. The OpenAPI response does not expose the uploader and is not gaining it.
 
 **Why the record is written at all.** The row is not merely enrichment for this
 API — the publish pipeline reads it. `config_composer.py:105` builds a published
@@ -149,9 +164,14 @@ and must now return directories.
 
 `openapi_v1/resources/schemas.py`:
 
-- add optional `path: str | None` — the full workspace-relative path. Not
-  `parent_path` and not a separate directory field: both they and `name` are a
-  `dirname`/`basename` off `path`, so exposing them would be redundant.
+- add optional `path: str | None` — the full workspace-relative path. No
+  `parent_path` field: it is a `dirname` off `path`.
+- `name` stays, despite being a `basename` off `path` for files, because a
+  **link** has a name and no path — the schema is shared across both resource
+  types and links would otherwise lose their only label. That residual overlap
+  for files is the floor for a single shared model; removing it means splitting
+  the schema into file and link variants, which is a larger contract change than
+  this one and not proposed here.
 - relax `gmt_create` / `gmt_modified` to `str | None` — the engine's listing
   carries no timestamps (`FileEntry` is `name/path/relative_path/is_dir/size`,
   `core/file/models.py:34`), so a bot-created file has none. The console already

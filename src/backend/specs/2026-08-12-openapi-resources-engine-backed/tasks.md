@@ -21,8 +21,9 @@ change, no OCB dependency in this scope.
   guarded by `test_public_namespace.py`.
 - [ ] **A3.** Schema (`openapi_v1/resources/schemas.py`): add optional
   `path: str | None` to `Resource` — the full workspace-relative path
-  (`a/b/c.txt`). **No `parent_path` on the response**: it and `name` are both
-  derivable from `path`, so exposing them would be redundant.
+  (`a/b/c.txt`). **No `parent_path` field** — it is a `dirname` off `path`.
+  `name` stays: a link has a name and no path, and the schema is shared. Do
+  **not** add an uploader field; the console surfaces it, this API does not.
 - [ ] **A4.** Relax `gmt_create` / `gmt_modified` to `str | None` — the engine's
   listing carries no timestamps (`FileEntry`, `core/file/models.py:34`), so a
   bot-created file has none.
@@ -36,12 +37,19 @@ change, no OCB dependency in this scope.
 
 ## Group B — File endpoints on the engine
 
-- [ ] **B1.** `POST /upload`: delegate to `ResourceFileService.upload_file`
-  (which composes `workspace/<rel>` and dispatches addressed), after the A5
-  sanitization. Keep the existing `name` parameter; it may carry a relative path.
-  **No new parameter.**
+- [ ] **B1.** `POST /upload`: rename the `name` query parameter to `path` — the
+  workspace-relative path, directories included — and delegate to
+  `ResourceFileService.upload_file` (which composes `workspace/<rel>` and
+  dispatches addressed) after the A5 sanitization. **One parameter.** No
+  `parent_path`, and no separate name: the directory is part of the path, and
+  `path` is the same spelling every other file endpoint uses.
 - [ ] **B2.** After a successful upload, write the enrichment record
-  best-effort. `path` (workspace-relative) is the key our flow needs; `name` is
+  best-effort — **including `user_id` and `created_by` from the caller**.
+  `ResourceFileService` writes no records, so the router owns this; omitting the
+  uploader would make OpenAPI uploads appear in the console's resource list with
+  a blank owner (`ResourceListItem.user_id`,
+  `adapters/http/resources/schemas.py:99`, off the same shared table).
+  `path` (workspace-relative) is the key our flow needs; `name` is
   non-optional on the model (`core/resources/models.py:36`); `parent_path` is
   written only for consistency with the console, whose legacy listing filters
   rows by it (`core/repository/implementations/platform/resource.py:112`) — our
@@ -66,8 +74,11 @@ change, no OCB dependency in this scope.
   error; missing file is 404.
 - [ ] **B6.** Narrow `GET /{resource_id}` and `DELETE /{resource_id}` to links
   only; a file id no longer resolves.
-- [ ] **B7.** `GET /check-name`: for files, resolve via `device_fs.exists`
-  instead of the repo; links keep the repo check.
+- [ ] **B7.** `GET /check-name`: for files, take `path` and resolve via
+  `device_fs.exists` instead of the repo; links keep `name` and the repo check.
+  (Two parameters on one endpoint reflects the two resource types; splitting the
+  file and link surfaces entirely is the cleaner end state but a larger contract
+  change than this one.)
 - [ ] **B8.** Add `POST /mkdir?path=` → `ResourceFileService.create_directory`
   (writes a `.keep`). `POST ""` with `type=FOLDER` keeps returning 501 — folder
   *records* remain unsupported.
