@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, call as mock_call, patch
 
 import pytest
 
+from agentclaw.community.core.bot_management.services import bot_service as bot_service_module
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
     DefaultBotTeclawNotAllowedError,
@@ -725,9 +726,10 @@ class TestDeleteBot:
         svc._repository.soft_delete_by_owner.return_value = True
 
         assert svc.delete_bot("mybot", "user001") is True
-        svc._cleanup_service.purge_startup_script.assert_called_once_with(
-            entity_id="team_42", bot_id="mybot"
-        )
+        assert svc._cleanup_service.purge_startup_script.call_args_list[0].kwargs == {
+            "entity_id": "team_42",
+            "bot_id": "mybot",
+        }
 
     def test_a_failed_script_purge_aborts_the_delete_with_the_bot_intact(self):
         """Unlike the skill sweeps, this one is not allowed to fail quietly: the
@@ -745,6 +747,61 @@ class TestDeleteBot:
 
         svc._repository.soft_delete_by_owner.assert_not_called()
         svc._passport_plugin.destroy_passport.assert_not_called()
+
+    def test_the_script_is_purged_again_after_the_soft_delete(self):
+        """A PUT that passed its existence check just before the delete began
+        can land *after* the first purge, recreating the orphan. The second
+        sweep closes that window: once the soft delete commits, no later PUT
+        can pass its check, so nothing new can appear after this point.
+
+        Same two-sweep shape the app-grant revocation already uses on the
+        identical race.
+        """
+        svc = _make_service()
+        bot = _make_bot(bot_id="mybot", binding_id=None, entity_id="team_42")
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._passport_plugin.destroy_passport.return_value = None
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        assert svc.delete_bot("mybot", "user001") is True
+
+        assert svc._cleanup_service.purge_startup_script.call_count == 2
+        for call in svc._cleanup_service.purge_startup_script.call_args_list:
+            assert call.kwargs == {"entity_id": "team_42", "bot_id": "mybot"}
+
+    def test_a_racing_script_write_is_swept_and_reported(self):
+        """The second sweep finding a row means the race actually happened —
+        worth a warning rather than being inferred later from an orphan.
+        """
+        svc = _make_service()
+        bot = _make_bot(bot_id="mybot", binding_id=None)
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._passport_plugin.destroy_passport.return_value = None
+        svc._repository.soft_delete_by_owner.return_value = True
+        # Nothing stored when the delete began; a PUT lands in the window.
+        svc._cleanup_service.purge_startup_script.side_effect = [False, True]
+
+        with patch.object(bot_service_module, "logger") as mock_logger:
+            assert svc.delete_bot("mybot", "user001") is True
+
+        assert any(
+            "while it was being deleted" in str(c.args[0])
+            for c in mock_logger.warning.call_args_list
+        )
+
+    def test_the_default_bot_is_exempt_from_both_sweeps(self):
+        """That delete is a restart; the script survives it as the skills and
+        config already do. Neither sweep may touch it.
+        """
+        svc = _make_service()
+        bot = _make_bot(bot_id="default", binding_id=None)
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._passport_plugin.destroy_passport.return_value = None
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        svc.delete_bot("default", "user001")
+
+        svc._cleanup_service.purge_startup_script.assert_not_called()
 
     def test_a_bot_with_no_entity_has_no_script_to_purge(self):
         """The write path requires both halves of the key, so a bot with no

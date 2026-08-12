@@ -981,9 +981,19 @@ that one design choice, and none of it is visible in the OpenAPI document.
   deletion with failures logged and tolerated — this removal runs **before**
   anything destructive and its failures **propagate**. A deletion that could not
   clear the script fails with the bot still intact and retryable, rather than
-  returning success over a row that can still execute. The legacy `default`-bot
-  delete is a restart rather than a deletion and keeps its script, matching how
-  its skills and config are already preserved.
+  returning success over a row that can still execute.
+
+  It runs a **second** time after the soft delete, mirroring the app-grant
+  revocation's two-sweep handling of the same race. `PUT` checks that the bot
+  exists and writes as a separate step, so a write that passed its check just
+  before the deletion began can land after the first removal; once the soft
+  delete commits, no later `PUT` can pass that check, so the second sweep closes
+  the window rather than narrowing it. A `PUT` that loses this race is reported
+  as successful and its row is then removed — write-then-delete, not a rejection.
+
+  The legacy `default`-bot delete is a restart rather than a deletion and keeps
+  its script through both sweeps, matching how its skills and config are already
+  preserved.
 - **Re-running on restart is inherited, not guaranteed by this feature.** The
   script re-runs wherever the platform's own start sequence re-runs. On a
   provider whose restart is destroy-and-create that is every restart; on one
