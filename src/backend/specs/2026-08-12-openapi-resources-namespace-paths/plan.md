@@ -143,7 +143,13 @@ Today it is purely repo-backed (`router.py:124`). New shape:
    and must not be exposed (`_rel_path`, `resource_file_service.py:200`, already
    prefers `relative_path` for this reason).
 3. Join to DB rows by workspace-relative path to attach `resource_id`. Entries
-   with no row get an empty `resource_id`.
+   with no row get an empty `resource_id`. The join is **in-memory**: `path` and
+   `parent_path` live inside the `attributes` JSON text column
+   (`core/repository/implementations/platform/resource.py:123,79`), not in
+   queryable columns, and the repo already filters `parent_path` in Python over
+   materialized rows (`:112`). This is consistent with today's behavior — the
+   handler notes that `list_resources` reads the full repo row-set — but it is
+   why the join cannot be pushed down and why pagination moves into the handler.
 4. Append LINK resources from the repo — they have no filesystem presence.
 5. Paginate the merged list in the handler; `total` becomes the merged length.
    The existing service-level `limit`/`offset` push-down no longer covers the
