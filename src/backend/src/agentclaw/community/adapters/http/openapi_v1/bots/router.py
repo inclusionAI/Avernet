@@ -72,6 +72,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     validate_bot_name,
 )
 from agentclaw.community.api.bot_startup_script_service import (
+    BotStartupScriptRunReaderProtocol,
     BotStartupScriptServiceProtocol,
 )
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
@@ -94,6 +95,7 @@ from .schemas import (
     BotUpdate,
     Ceiling,
     Passport,
+    StartInstanceResult,
     StartupScript,
     StartupScriptWrite,
 )
@@ -885,3 +887,48 @@ async def delete_bot_startup_script(
         raise BotNotFoundError("bot has no associated entity")
     startup_script_service.delete(entity_id=entity_id, bot_id=bot_id)
     return deleted_envelope(request)
+
+
+@router.get(
+    "/{bot_id}/startup-script/last-start",
+    response_model=Envelope[list[StartInstanceResult]],
+    responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED,
+)
+@envelope_errors
+async def get_bot_startup_script_last_start(
+    bot_id: str,
+    request: Request,
+    owner_id: UserIdDep,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    run_reader: BotStartupScriptRunReaderProtocol = Injected(
+        BotStartupScriptRunReaderProtocol
+    ),
+) -> Envelope[list[StartInstanceResult]]:
+    """Read the outcome of the bot's last container start, one entry per instance.
+
+    This covers the **whole start sequence**, not the script alone — the script
+    is appended to the platform's own start command, so the two share one exit
+    status. Hence ``last-start`` rather than ``runs``.
+
+    Empty when the bot has never started, when its publish record has aged out,
+    or for a bot that cannot run a script at all.
+    """
+    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
+    binding = bot.get("device_binding") or {}
+    props = binding.get("device_props") or {}
+    results = run_reader.last_start(publish_id=props.get("publish_id"))
+    return envelope(
+        [
+            StartInstanceResult(
+                instance_id=r.instance_id,
+                status=r.status,
+                exit_code=r.exit_code,
+                stdout=r.stdout,
+                stderr=r.stderr,
+                truncated=r.truncated,
+            )
+            for r in results
+        ],
+        request,
+    )

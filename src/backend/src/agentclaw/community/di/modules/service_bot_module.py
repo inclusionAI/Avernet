@@ -33,7 +33,11 @@ from injector import Binder, Injector, Module, inject, provider, singleton
 from agentclaw.community.api.baas_service import BaasServiceProtocol
 from agentclaw.community.api.bot_build_service import BotBuildServiceProtocol
 from agentclaw.community.api.bot_startup_script_service import (
+    BotStartupScriptRunReaderProtocol,
     BotStartupScriptServiceProtocol,
+)
+from agentclaw.community.core.bot_startup_script.services.last_start_service import (
+    BotStartupScriptRunReader,
 )
 from agentclaw.community.api.bot_publish_service import BotPublishServiceProtocol
 from agentclaw.community.api.channel_service import ChannelServiceProtocol
@@ -128,6 +132,21 @@ logger = get_logger()
 
 class ServiceBotModule(Module):
     """Production bindings for service_bot."""
+
+    @singleton
+    @provider
+    @inject
+    def bot_startup_script_run_reader(
+        self, baas_service: BaasService
+    ) -> BotStartupScriptRunReaderProtocol:
+        """Reads publish progress for the last-start endpoint.
+
+        An explicit provider rather than ``binder.bind(..., to=Class)``: the
+        reader takes ``BaasService``, which is the reverse of the script reader
+        ``BaasService`` itself holds, so its constructor is deliberately not
+        annotated with an injectable type.
+        """
+        return BotStartupScriptRunReader(baas_service)
 
     def configure(self, binder: Binder) -> None:
         binder.bind(WorkspacePathFactory, to=WorkspacePathFactory, scope=singleton)

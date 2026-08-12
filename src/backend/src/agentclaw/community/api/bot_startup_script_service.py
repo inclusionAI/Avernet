@@ -53,3 +53,16 @@ class BotStartupScriptServiceProtocol(Protocol):
     def get_body(self, *, entity_id: str, bot_id: str) -> str:
         """Return the script body, or ``""`` when the bot has none."""
         ...
+
+
+@runtime_checkable
+class BotStartupScriptRunReaderProtocol(Protocol):
+    """Read the outcome of a bot's last container start.
+
+    Separate from :class:`BotStartupScriptServiceProtocol` because ``BaasService``
+    depends on that one; a single service holding both would close a cycle.
+    """
+
+    def last_start(self, *, publish_id: int | None) -> list:
+        """One result per instance; empty when nothing is known."""
+        ...

@@ -87,20 +87,20 @@
         it exists only as a storage key resolved server-side.
 - **Depends on:** Task 1
 
-## Task 5: Public API — read the last container start
+## [x] Task 5: Public API — read the last container start
 - **Goal:** Let a caller see the outcome of the last start, per instance, from
   data that already exists.
 - **Files:** `src/backend/.../adapters/http/openapi_v1/bots/router.py`,
   `.../core/bot_startup_script/services/_last_start.py`
 - **Done when:**
-  - [ ] `GET .../startup-script/last-start` returns one entry per instance.
-  - [ ] Entries are built from the binding's `publish_id` →
+  - [x] `GET .../startup-script/last-start` returns one entry per instance.
+  - [x] Entries are built from the binding's `publish_id` →
         `get_publish_progress(include_devices=True)` → `result_message`, parsed as
         the JSON `serialize_hook_result` writes.
-  - [ ] A scaled bot whose instances disagree reports both outcomes.
-  - [ ] The response and the docs state that the result covers the **whole start
+  - [x] A scaled bot whose instances disagree reports both outcomes.
+  - [x] The response and the docs state that the result covers the **whole start
         sequence**, not the script alone.
-  - [ ] A bot that has never started, or whose publish record is gone, returns an
+  - [x] A bot that has never started, or whose publish record is gone, returns an
         empty list rather than an error.
 - **Depends on:** Tasks 3, 4
 
