@@ -8700,7 +8700,7 @@
                 }
               }
             },
-            "description": "The user_id names a user the authenticated caller may not act for"
+            "description": "The path is read-only — a dotfile, or a workspace-root identity file — or the user_id names a user the authenticated caller may not act for."
           },
           "404": {
             "content": {
@@ -9335,6 +9335,16 @@
             },
             "description": "Conflicts with current state"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "File exceeds the size the provider will serve, or the 1 MB preview cap."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -9606,6 +9616,16 @@
               }
             },
             "description": "Conflicts with current state"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "File exceeds the size the provider will serve, or the 1 MB preview cap."
           },
           "422": {
             "content": {

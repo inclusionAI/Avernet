@@ -35,6 +35,7 @@ from agentclaw.community.api.resource_service import ResourceServiceFactoryProto
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Deleted,
     Envelope,
+    ErrorEnvelope,
     NameCheck,
     Page,
     PageParamsDep,
@@ -132,6 +133,33 @@ def _to_openapi_resource(legacy: _LegacyResource) -> Resource:
 
 #: Preview cap, legacy parity with the former service-level default.
 _PREVIEW_MAX_BYTES = 1_048_576
+
+# Per-route failures, declared where they happen. ``contracts.ERROR_RESPONSES``
+# is applied surface-wide and deliberately holds only the statuses every route
+# can answer; a status one group produces belongs here, the way ``skills``
+# declares its own 413 and ``USER_SCOPED_403`` declares its 403. Without these
+# the published schema omits responses these routes really do return, so a
+# generated client cannot model them.
+_TOO_LARGE_RESPONSE: dict[int | str, dict[str, object]] = {
+    413: {
+        "model": ErrorEnvelope,
+        "description": "File exceeds the size the provider will serve, or the "
+        "1 MB preview cap.",
+    },
+}
+# The group is already user-scoped, so it carries ``USER_SCOPED_403`` from
+# assembly and a route-level 403 *replaces* that entry rather than adding to it.
+# Delete can answer 403 for either reason, so the description has to name both —
+# stating only the new one would silently drop the meaning every other route
+# here documents.
+_READ_ONLY_RESPONSE: dict[int | str, dict[str, object]] = {
+    403: {
+        "model": ErrorEnvelope,
+        "description": "The path is read-only — a dotfile, or a workspace-root "
+        "identity file — or the user_id names a user the authenticated caller "
+        "may not act for.",
+    },
+}
 
 
 def _safe_path(path: str) -> str:
@@ -526,7 +554,13 @@ async def _read_file_or_404(
     return content
 
 
-@router.get("/download", responses={200: {"content": {"application/octet-stream": {}}}})
+@router.get(
+    "/download",
+    responses={
+        200: {"content": {"application/octet-stream": {}}},
+        **_TOO_LARGE_RESPONSE,
+    },
+)
 @envelope_errors
 async def download_file(
     owner_id: UserIdDep,
@@ -552,7 +586,11 @@ async def download_file(
     return Response(content=content, media_type="application/octet-stream")
 
 
-@router.get("/preview", response_model=Envelope[Preview])
+@router.get(
+    "/preview",
+    response_model=Envelope[Preview],
+    responses=_TOO_LARGE_RESPONSE,
+)
 @envelope_errors
 async def preview_file(
     owner_id: UserIdDep,
@@ -586,7 +624,11 @@ async def preview_file(
     )
 
 
-@router.delete("", response_model=Envelope[Deleted])
+@router.delete(
+    "",
+    response_model=Envelope[Deleted],
+    responses=_READ_ONLY_RESPONSE,
+)
 @envelope_errors
 async def delete_file(
     owner_id: UserIdDep,

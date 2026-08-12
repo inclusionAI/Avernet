@@ -362,10 +362,20 @@ class ResourceService:
         return self._repo.delete(resource_id)
 
     async def delete_file_record(self, *, path: str) -> bool:
-        """Drop the record for a workspace file, if there is one.
+        """Drop the record for a workspace path, and for anything beneath it.
 
-        Returns whether a row was removed — the repository's own answer, not a
-        restatement of "a row matched". The two differ when the row disappears
+        The subtree half is what a directory delete needs: removing a directory
+        removes its files too, so rows for ``docs/a.txt`` must go when ``docs``
+        does. Left behind, they stay in the publish pipeline's manifest pointing
+        at bytes that no longer exist, and nothing can clear them — the retry is
+        refused 404 because the directory is already gone.
+
+        The caller does not have to say which it is. A file path has no
+        descendants (nothing can live under ``a.txt/``), so the prefix arm is
+        inert for it and one method covers both.
+
+        Returns whether anything was removed — the repository's own answer, not
+        a restatement of "a row matched". The two differ when a row disappears
         between the scan and the update, and reporting the scan result would
         claim a drop that never happened.
 
@@ -374,15 +384,20 @@ class ResourceService:
         itself never had a record, and the workspace — not this table — decides
         what exists.
         """
+        prefix = f"{path}/"
+        removed = False
         for item in self._repo.list_resources(
             resource_type=ResourceType.FILE.value,
             parent_path=None,
             user_id=None,
             bolt_id=self._bot_id,
         ):
-            if (item.get("attributes") or {}).get("path") == path:
-                return self._repo.delete(str(item.get("id")))
-        return False
+            row_path = (item.get("attributes") or {}).get("path")
+            if row_path == path or (row_path or "").startswith(prefix):
+                # Every match is dropped, not just the first: a directory has as
+                # many rows as it has files.
+                removed = self._repo.delete(str(item.get("id"))) or removed
+        return removed
 
     async def record_uploaded_file(
         self,
