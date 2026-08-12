@@ -14,14 +14,13 @@ fn default_limit() -> u64 {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MembershipQuery {
-    All,
     Direct,
     SessionOnly,
 }
 
 impl Default for MembershipQuery {
     fn default() -> Self {
-        Self::All
+        Self::Direct
     }
 }
 
@@ -47,6 +46,7 @@ pub struct ListGroupsQuery {
     #[serde(default = "default_limit")]
     pub limit: u64,
     pub q: Option<String>,
+    pub visibility: Option<GroupVisibility>,
     pub view_bot_id: Option<String>,
     #[serde(default)]
     pub membership: MembershipQuery,
@@ -66,7 +66,6 @@ pub struct DeleteGroupQuery {
 impl ListGroupsQuery {
     pub fn membership_filter(&self) -> MembershipFilter {
         match self.membership {
-            MembershipQuery::All => MembershipFilter::All,
             MembershipQuery::Direct => MembershipFilter::Direct,
             MembershipQuery::SessionOnly => MembershipFilter::SessionOnly,
         }

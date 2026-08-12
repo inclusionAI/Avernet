@@ -14,6 +14,8 @@
 
 **Files:**
 - Modify: `src/bcs/api-contracts/v1/openapi/groups.yaml`
+- Modify: `src/gateway/configs/schemas/bcn.openapi.json`
+- Modify: `src/bcs/tests/openapi/test_group_v1_contract.py`
 - Modify: `src/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/dto/group.rs`
 - Modify: `src/bcs/crates/adapters/http/bcs-api-http/tests/group_routes.rs`
 
@@ -55,6 +57,8 @@ impl Default for MembershipQuery {
 
 Map only those two variants to the existing application enum. In OpenAPI,
 remove `all` from the membership enum and change its default to `direct`.
+Regenerate the Gateway schema snapshot with `scripts/dump_openapi.py` after
+the contract is complete.
 
 **Step 4: Run the focused tests and verify GREEN**
 
@@ -62,7 +66,11 @@ Run:
 
 ```bash
 cargo test -p bcs-api-http --test group_routes list_groups_ -- --nocapture
-python3 scripts/validate_openapi_contract.py
+python3 scripts/validate_openapi_contract.py --root api-contracts/v1
+uv run --with pytest --with pyyaml pytest \
+  tests/openapi/test_group_v1_contract.py -q
+python3 scripts/dump_openapi.py --root api-contracts/v1 \
+  ../gateway/configs/schemas/bcn.openapi.json
 ```
 
 Expected: all matching tests pass and the contract validator exits zero.
@@ -176,7 +184,9 @@ Expected: both tests pass.
 cd src/bcs
 cargo test -p bcs-api-http --test group_routes
 cargo test -p bcs-app-group --test v1_group_service
-python3 scripts/validate_openapi_contract.py
+python3 scripts/validate_openapi_contract.py --root api-contracts/v1
+cd ../gateway && uv run pytest \
+  tests/unit/core/forwarding/test_served_openapi.py::test_served_openapi_aggregates_bcn_with_existing_domains -q
 ```
 
 Expected: all commands exit zero with no test failures.

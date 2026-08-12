@@ -25,15 +25,18 @@ GroupsPath:
         in: query
         schema:
           type: string
+      - name: visibility
+        in: query
+        schema:
+          $ref: ../domain-models.yaml#/GroupVisibility
       - name: membership
         in: query
         schema:
           type: string
           enum:
-            - all
             - direct
             - session_only
-          default: all
+          default: direct
       - name: kind
         in: query
         schema:
@@ -55,8 +58,9 @@ GroupsPath:
       "200":
         description: >-
           Groups ordered by created_at descending (group_id ascending
-          tie-breaker) after selected View Actor relation, strategy, kind, and
-          search filtering and deduplication, then paginated with offset/limit.
+          tie-breaker) after selected View Actor membership, visibility,
+          strategy, kind, and search filtering and deduplication, then
+          paginated with offset/limit.
           Omitting view_bot_id selects the authenticated Human Actor. An explicit
           Human Actor must be that same User; an explicit Bot must be owned by
           the authenticated User. Both items and total are scoped before

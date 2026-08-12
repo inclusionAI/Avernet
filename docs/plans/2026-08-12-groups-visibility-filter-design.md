@@ -57,6 +57,8 @@ introduced.
 - HTTP route tests verify `visibility` forwarding, the default direct
   membership, explicit `session_only`, and rejection of `membership=all` and
   invalid visibility.
+- OpenAPI contract tests pin the published query set, membership enum/default,
+  and resolved visibility values.
 - Application tests verify public/private filtering occurs before total and
   pagination and works for the supported membership modes.
 - The focused HTTP and application test suites provide regression coverage for
