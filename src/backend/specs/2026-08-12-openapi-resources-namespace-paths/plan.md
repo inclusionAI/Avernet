@@ -1,325 +1,196 @@
-# Plan — Namespace-relative addressing for OpenAPI bot resources
+# Plan — Fix file addressing for OpenAPI bot resources
 
 Spec: [`spec.md`](./spec.md) · Issue: [inclusionAI/Avernet#1000](https://github.com/inclusionAI/Avernet/issues/1000)
 
-## Background: the two addressing schemes
+## Root cause
 
-Backend → engine file access goes through `/api/file/*` on the engine. Today the
-backend sends an OSS-view absolute path:
+Backend → engine file access goes through `/api/file/*` (`/api/v1/file/*` for
+teclaw). The console path composes an OSS-view absolute path:
 
 ```
 /aidesktop/aidesktop_{env}/bolt_data/{entity_type}_{entity_id}/{bot_id}/{engine_type}/workspace/<rel>
 ```
 
-composed by `build_workspace_mapper` (`core/services/resource_addressing.py:38`)
-→ `get_bot_engine_dir` (`core/workspace/path_factory.py:117`). That tree does not
-exist inside the container; each engine's `_convert_path` folds the prefix onto
-its own root (community openclaw: `plugins/openclaw/_file.py:34` →
-`/home/admin/.openclaw/`).
+via `build_workspace_mapper` (`core/services/resource_addressing.py:38`) →
+`get_bot_engine_dir` (`core/workspace/path_factory.py:117`). That tree does not
+exist in the container; each engine's `_convert_path` folds the prefix onto its
+own root (community openclaw: `plugins/openclaw/_file.py:34`).
 
-The OpenAPI path skips composition entirely: `openapi_v1/resources/router.py:271`
-uses the generic `dispatch(ctx)` whose mapper is `_passthrough_mapper`
-(`device_filesystem_dispatcher.py:174`, the identity function), and
-`core/resources/service.py:381` sets `file_path = filename`. A bare `111.txt`
-reaches the engine, matches no rewrite rule, and `Path("111.txt")` resolves
-against the engine process CWD.
+The OpenAPI path **uses the same device-filesystem seam** — the backend log shows
+`[DEVICE-PLUGIN-DEBUG] → BaasDeviceFileSystem(...)` followed by
+`[BaasDeviceFileSystem.write_file] ... file=111.txt` — but bypasses the
+addressing, in two independent places:
 
-This plan moves the OpenAPI path to a **namespace-relative** wire format rather
-than to the OSS-view format, so one of the two translation layers disappears and
-the engine can enforce containment. The console path is untouched.
+1. `openapi_v1/resources/router.py:271` calls `dispatch(ctx)` (generic flow),
+   whose mapper for a non-teclaw provider is `_passthrough_mapper`
+   (`device_filesystem_dispatcher.py:174`) — the identity function.
+2. `core/resources/service.py:381` sets `file_path = filename`, so a bare
+   `111.txt` enters the seam with no namespace on it.
 
-## teclaw is already the target state
+Both are needed for the failure. A real mapper with a bare-name input raises —
+which is exactly what happens on teclaw, where `to_engine_relative` rejects it,
+so the endpoint 502s there instead of misplacing the file. An anchored input
+through the identity mapper would still go out unchanged.
 
-teclaw is not a laggard to be migrated — it is the model being copied, and it is
-worth being precise about why, because it also reveals a second symptom of the
-same defect.
+The fix is therefore to compose the address the console already composes:
+`dispatch_addressed(namespace=WORKSPACE_NS, …)` plus a `workspace/`-prefixed
+logical path. **No new mapper, no engine change, no cross-repo coordination.**
 
-`TeclawDeviceFileSystem` talks to `/api/v1/file/*` on the teclaw engine, a
-different endpoint from the `/api/file/*` that `BaasDeviceFileSystem` uses. What
-the two share is the backend-side `DeviceFileSystem` abstraction, not the wire
-protocol. teclaw's mapper is `to_engine_relative`
-(`core/config_compose/teclaw_paths.py:43`), which emits `/workspace/<rel>` — the
-leading slash is correct **there**, because the teclaw engine exposes a
-namespace-rooted logical filesystem in which `/workspace` genuinely is absolute.
-The four engines on `/api/file/*` expose the real container filesystem, where `/`
-is the real root and a leading slash would be a lie. Hence: slash-free on the
-wire for those four, and the discriminator accepts both forms so a later
-unification is free.
+## Why the mapper is not the whole fix
 
-**Second symptom.** `to_engine_relative` raises on anything not
-namespace-prefixed, and `dispatch(ctx)` hands teclaw bots exactly that mapper
-(`device_filesystem_dispatcher.py:187`). So on a teclaw bot the OpenAPI upload
-does not misplace the file — it raises, and the handler returns 502. Same root
-cause, opposite failure mode.
+The `path_mapper` is *injected into* the device filesystem, not baked into it —
+`BaasDeviceFileSystem` holds whatever callable it was constructed with. Selecting
+the right one gets the file to the workspace on all three providers:
 
-Once the service composes `workspace/<rel>`, `to_engine_relative` accepts it and
-teclaw works with **no teclaw-specific change**. Two consequences for this plan,
-both benign: the Group D `target_path` guard lives in `BaasDeviceFileSystem`, so
-teclaw is untouched by it; and the new namespace-relative mapper must not
-displace `to_engine_relative` in `_namespaced_mapper`, which branches on provider
-before namespace and must keep doing so.
+| provider | mapper | wire form |
+|---|---|---|
+| baas / arca | `build_workspace_mapper` | `/aidesktop/…/workspace/<rel>` → engine rewrites |
+| teclaw | `to_engine_relative` (`_namespaced_mapper` checks provider first, `:213`) | `/workspace/<rel>` |
+| local | `build_workspace_mapper` | absolute host path — pathlib mode writes to the backend's own disk |
 
-## Wire contract
+But it does **not** bound the write. `build_workspace_mapper` composes with
+`Path.__truediv__`, which does not normalize `..`:
 
-Backend emits `workspace/<rel>` — **no leading slash**. Engines also accept
-`/workspace/<rel>` (normalize by dropping empty segments) so a future
-unification with teclaw's format (`to_engine_relative`,
-`core/config_compose/teclaw_paths.py:43`, which does emit a leading slash) is
-free, but the backend only ever emits the slash-free form.
-
-**Engine discriminator — purely additive:**
-
-```python
-_NAMESPACES = ("workspace", "identity", "config")
-
-parts = [p for p in target.split("/") if p and p != "."]
-if parts and parts[0] in _NAMESPACES:
-    → namespace-relative branch
-else:
-    → every existing branch, unchanged
+```
+rel  = "../../etc/passwd"
+     → /aidesktop/…/claude_code/workspace/../../etc/passwd
 ```
 
-Only strings whose first segment is exactly one of those three names are
-claimed. This must not be inverted into "doesn't start with `/aidesktop` ⇒
-relative": live callers pass hardcoded container-absolute paths
-(`skill_symlink_verify_service.py:56` → `/home/admin/.openclaw/workspace/skills`;
-`identity_addressing.py:30` → `/home/admin/.claude_code/workspace/.claude`), and
-an inverted rule would silently re-interpret all of them.
+The engine's regex still matches that prefix and rewrites it to
+`/home/admin/.aicoding/workspace/../../etc/passwd`; `write_bytes` then lets the
+OS resolve the `..` out. Deeper prefixes climb further. Nothing on the engine
+side normalizes or asserts containment.
 
-Only `workspace` is implemented. `identity` and `config` are recognized and
-raise — never falling through to passthrough, which is what makes today's silent
-CWD write possible.
-
-**Namespace root, community openclaw:** `OPENCLAW_WORKSPACE_DIR` when set
-(singlebox, injected per-bot at spawn — see `workspace_root_strict`), else
-`/home/admin/.openclaw/workspace`. This reuses the existing singlebox branch's
-anchor rather than inventing a second one.
-
-**Containment:** resolve both sides before comparing, because the root itself can
-be a symlink.
-
-```python
-final = (root / "/".join(rest)).resolve()
-if not final.is_relative_to(root.resolve()):
-    raise ValueError(...)
-```
-
-Corp engines (`aicoding`, `claude_code`, `hermes`) implement the same contract in
-OCB; their roots are `/home/admin/.{aicoding,claude_code,hermes}/workspace`.
-Out of scope here, tracked on the issue.
-
-## Rollout safety
-
-Engine ships first. The backend needs to survive the reverse order without
-silently misplacing files, and cannot probe for support: there is no
-capability-query client in the backend today (`core/engine_runtime/errors.py:34`
-describes the endpoint but nothing fetches it), and adding one would introduce a
-cross-repo ordering dependency, since the `Capability` enum lives in this repo
-while the corp declarations live in OCB.
-
-Instead, use the response the engine already returns. `api/file/router.py:72`
-echoes `data.target_path`, which is `str(final_path)` — the **resolved** path. An
-engine that has not learned the new format passes `workspace/111.txt` through
-unchanged and echoes it back relative; an updated engine echoes an absolute path.
-A `startswith("/")` check distinguishes them with no extra round trip.
-
-The guard belongs in `BaasDeviceFileSystem.write_file`
-(`core/devices/services/baas_device_filesystem.py:82`) — the engine seam itself —
-conditioned on the path sent being namespace-relative. It is a no-op for the
-console path, which sends absolute paths.
-
-Failure mode on an un-updated engine: the file is written to the engine's CWD
-(an orphan), `write_file` raises, the handler maps it to 502, and **no resource
-record is created**. Loud, and no phantom row.
+**So input validation is mandatory, not optional, and is the only barrier in
+this iteration.** Runtime-side containment is the deferred half.
 
 ## Changes
 
-### 1. `core/resources/service.py` — sanitize + compose
+### 1. `core/resources/service.py` — validate and compose
 
 `upload_file` (line 354) currently sets `file_path = filename` with no
 validation. Replace with:
 
-- `name` must be a leaf: reject on any `/` with `ValueError` (explicit contract →
-  error, not the console's silent `basename` truncation, which exists there only
-  to support whole-folder drag-upload).
-- `parent_path`: drop empty segments and `.`; reject any `..`; reject a leading
-  `/` (or strip it — decide in implementation, prefer reject for symmetry).
-- Extension allow-list and size cap, matching `ALLOWED_EXTENSIONS` / `MAX_FILE_SIZE`
-  (`core/resources/services/file_service.py:21`). Import rather than redefine.
-- `file_path = f"{parent_path}/{name}"` when a directory is given, else `name` —
-  workspace-relative, matching the console's `rel_path` semantics
-  (`file_service.py:430`). **The DB column keeps storing a workspace-relative
-  path; no migration.**
-- The `workspace/` prefix is *not* added here. It is the device-filesystem
-  boundary's job — same split as the console path, where
-  `resource_file_service._logical()` adds it at the call site of `device_fs`.
+- Sanitize, mirroring the console's `preserve_structure` filter
+  (`core/services/resource_file_service.py:409`):
+  ```python
+  safe = "/".join(p for p in filename.lstrip("/").split("/") if p and p != "..")
+  ```
+  Reject rather than silently drop when the input contained a `..` segment — an
+  explicit API should error, not quietly rewrite the caller's path.
+- Enforce the extension allow-list and size cap. Import `ALLOWED_EXTENSIONS` /
+  `MAX_FILE_SIZE` from `core/resources/services/file_service.py:21` rather than
+  redefining them.
+- Derive the three record fields from that one input, matching what the console
+  writes to the same table (`core/resources/services/resource_service.py:359`):
+
+  | field | value for `a/b/c.txt` | role |
+  |---|---|---|
+  | `name` | `c.txt` | user-facing leaf |
+  | `path` | `a/b/c.txt` | where the bytes are — read and delete use it |
+  | `parent_path` | `a/b` | uniqueness key |
+
+  There is no new API parameter: the caller sends `name` only, and it may carry
+  a relative path. The engine creates intermediate directories itself
+  (`final_path.parent.mkdir(parents=True, exist_ok=True)` in every engine's
+  `upload`).
 
 `check_name_exists` already keys on `(name, type, parent_path, user)` and is
-already called with `parent_path=parent_path or None` (line 375), so passing a
-real `parent_path` fixes the cross-directory false-409 with no further change.
+already called with `parent_path=parent_path or None` (line 375), so populating
+`parent_path` fixes the cross-directory false-409 with no further change.
 
-Read/delete (`349`, `426`, `462`) use `resource.path` and must go through the
+The `workspace/` prefix is **not** added here — that is the device-filesystem
+boundary's job, same split the console uses, where
+`resource_file_service._logical()` adds it at the `device_fs` call site.
+
+Read and delete (`349`, `426`, `462`) use `resource.path` and must go through the
 same logical composition as the write, or they will read from a different place
 than they wrote.
-
-### 1b. Mapper selection is per-provider, not per-namespace
-
-The service emits one logical form (`workspace/<rel>`) for every provider; the
-`path_mapper` — applied as the first line of each `DeviceFileSystem.write_file` —
-is what turns it into a wire address. That mapper must be chosen by **provider**,
-because the namespace-relative form is only meaningful when the far side
-understands namespaces:
-
-| provider | mapper | wire form |
-|---|---|---|
-| baas / arca | new namespace mapper | `workspace/a.txt` (passthrough) |
-| teclaw | `to_engine_relative` (unchanged) | `/workspace/a.txt` |
-| local | `build_workspace_mapper` (unchanged) | `/aidesktop/.../workspace/a.txt` |
-
-**`local` must keep the absolute form.** `LocalDeviceFileSystem` falls back to
-`_pathlib_write_file` whenever there is no BaaS binding
-(`device_filesystem_resolver.py:138` — an ARCA binding with no active sandbox,
-and the singlebox path), and that method is a bare
-`Path(file_path).write_bytes()` on the **backend** host. A namespace-relative
-path there lands in the backend process's working directory — the same defect
-this change exists to remove, relocated from the engine host to the backend host.
-
-Keeping `build_workspace_mapper` for `local` is correct in both of its modes:
-pathlib mode gets a real absolute host path, and baas mode sends the OSS-view
-path the engine still accepts (the old format is not being retired). It also
-avoids a problem the dispatcher cannot solve — it selects the mapper *before* the
-resolver decides which mode `LocalDeviceFileSystem` runs in, so it could not
-choose per-mode even if we wanted it to.
 
 ### 2. `openapi_v1/resources/router.py` — addressed dispatch
 
 Four handlers resolve `device_fs` via `dispatch(ctx)`: `upload_resource:271`,
-`delete_resource`, `download_resource`, `preview_resource`. All four switch to:
-
-```python
-device_fs_dispatcher.dispatch_addressed(
-    ctx, namespace=WORKSPACE_NS,
-    entity_type=..., entity_id=..., bot_id=..., engine_type=...,
-)
-```
+`delete_resource`, `download_resource`, `preview_resource`. All four switch to
+`dispatch_addressed(ctx, namespace=WORKSPACE_NS, …)` — the existing method, with
+the existing mappers. Nothing about the dispatcher changes.
 
 `DeviceContext` carries only `provider/conn_info/binding_id/bot_id/user_id/bot_type`
 — no `entity_id`/`entity_type`/`engine_type`. Follow the console router's
 `_resolve_params` (`adapters/http/resources/file_router.py:71`): inject
 `BotRepository`, use `resolve_engine_for_bot` to default `engine_type` to the
 bot's `active_engine`, and default `entity_type` to `"staff"` (matching
-`resource_file_service.upload_file`'s signature, line 383). A small local helper
-keeps this out of all four handler bodies.
-
-**Mapper selection needs a third input.** The mapper is *injected* into the
-device filesystem, not baked into it — `BaasDeviceFileSystem` holds whatever
-callable it was constructed with and has no addressing knowledge of its own. So
-reusing the same class for the OpenAPI flow does not force the absolute form;
-it just needs a different callable.
-
-The difficulty is that console and OpenAPI call `dispatch_addressed` with the
-**same namespace** and often the **same provider**, yet need different mappers.
-Selection can therefore no longer be a function of `(provider, namespace)`. Add
-an explicit `addressing` parameter — `"oss_view"` (default) or
-`"engine_relative"` — threaded from `dispatch_addressed`
-(`device_filesystem_dispatcher.py:240`) into `_namespaced_mapper` (`:193`):
-
-```python
-def _namespaced_mapper(provider, namespace, addressing, *, entity_type, ...):
-    if provider == "teclaw":
-        return to_engine_relative               # already engine-relative in both modes  (:213)
-    if addressing == "engine_relative" and provider in ("baas", "arca"):
-        return build_workspace_relative_mapper()   # validates the workspace/ prefix, then passes through
-    ...                                         # existing branches unchanged: local + all console callers
-```
-
-The default keeps every existing call site byte-identical. Rejected alternative:
-a distinct namespace constant — mechanically equivalent, but it misnames what
-actually varies (the caller's addressing contract, not the namespace) and would
-leave the dispatcher's `(provider, namespace)` model quietly false.
-
-`build_workspace_mapper` itself is **not modified** — the console path calls it
-and must keep emitting OSS-view. The new mapper validates the `workspace/` prefix
-the same way (raising on a non-namespace input) rather than passing anything
-through blindly.
-
-`upload_resource` gains a `parent_path` query parameter — name chosen for
-consistency with the service signature and the stored attribute, over the
-console's `path` and the friendlier `dir`.
+`resource_file_service.upload_file`, line 383). A small local helper keeps this
+out of all four handler bodies.
 
 ### 3. Resource schema — additive fields
 
 `openapi_v1/resources/schemas.py` `Resource` exposes no path today, so a
-filesystem-backed listing cannot express directories or locate an entry.
-Add optional `path: str | None` and `parent_path: str | None`, and a
-`parent_path` query parameter on `list_resources` for browsing a subdirectory.
+filesystem-backed listing cannot express directories or locate an entry. Add
+optional `path: str | None` and `parent_path: str | None`, and a `parent_path`
+query parameter on `list_resources` for browsing a subdirectory. (This one *is* a
+listing parameter — unrelated to the upload input, which carries its own path.)
 Both additions are additive; no existing field changes.
 
 ### 4. `list_resources` — filesystem-backed
 
 Today it is purely repo-backed (`router.py:124`). New shape:
 
-1. List the workspace directory via the addressed `device_fs` (non-recursive,
-   `parent_path`-scoped) — same call the console listing makes
+1. List the workspace via the addressed `device_fs` (non-recursive,
+   `parent_path`-scoped) — the same call the console listing makes
    (`resource_file_service.list_dir:235`).
 2. Map entries: directories → `ResourceType.FOLDER`, files → `FILE`. Use each
-   entry's `relative_path`, not `path`; the absolute `path` is engine-view and
-   must not be exposed (`_rel_path`, `resource_file_service.py:200`, already
+   entry's `relative_path`, never the absolute `path`; the latter is engine-view
+   and must not be exposed (`_rel_path`, `resource_file_service.py:200`, already
    prefers `relative_path` for this reason).
 3. Join to DB rows by workspace-relative path to attach `resource_id`. Entries
-   with no row get an empty `resource_id` (spec: listing-visibility only).
+   with no row get an empty `resource_id`.
 4. Append LINK resources from the repo — they have no filesystem presence.
 5. Paginate the merged list in the handler; `total` becomes the merged length.
-   The existing service-level `limit`/`offset` push-down no longer applies to
-   the file half.
+   The existing service-level `limit`/`offset` push-down no longer covers the
+   file half.
 
-Type filtering (`_legacy_type_for`) still applies: `FOLDER` currently short-circuits
-to an empty page (`router.py:141`) and must now return directories instead.
-
-### 5. `plugins/openclaw/_file.py` — namespace branch
-
-Add the discriminator and namespace resolution ahead of the existing three
-branches in `_convert_path` (line 34), leaving all three byte-identical. Reject
-bare relative paths (currently they reach passthrough → CWD, which is the root
-defect) with `ValueError` → 400 via `_map_fs_error` (`api/file/router.py:48`).
-
-`api/file/router.py` also logs nothing on upload — it declares
-`log = logging.getLogger("api-file")` (line 28) and never uses it. Add one INFO
-line recording the requested `target_path` and the resolved `result.target_path`;
-its absence is what made this bug a container expedition.
+Type filtering (`_legacy_type_for`) still applies: `FOLDER` currently
+short-circuits to an empty page (`router.py:141`) and must now return
+directories.
 
 ## Testing
 
-- **Service** — sanitization matrix (separator in `name`, `..` in `parent_path`,
-  leading `/`, disallowed extension, oversize), and path composition with and
-  without a directory.
-- **Router** — endpoint cases replacing the `coverage_baseline.txt:346` entry
-  (`POST /openapi/v1/bots/resources/upload: missing [happy, error]`): a happy
-  upload asserting the logical path handed to `device_fs`, and a rejection case.
-  Remove the baseline line rather than regenerating the file — it carries
-  hand-written notes that `--regen` drops (see its header).
-- **Device filesystem** — the `target_path` guard: relative path sent + relative
-  echo → raises; relative sent + absolute echo → passes; absolute sent (console)
-  → guard inert.
-- **Listing** — merged view: a DB-backed file, a bot-created file with no row, a
-  directory, and a link, all in one page.
-- **Engine** — `_convert_path` matrix: `workspace/foo.txt`, `/workspace/foo.txt`,
-  `workspace` (root), `workspace/../../etc/passwd` (raises), `identity/x` and
-  `config/x` (raise, not-yet-supported), `111.txt` bare (raises), plus regression
-  on all three existing branches with unchanged assertions.
+- **Service** — sanitization matrix (`..` at various depths, leading `/`,
+  disallowed extension, oversize) and the name/path/parent_path split for both a
+  flat and a nested name.
+- **Router** — endpoint cases replacing the `coverage_baseline.txt:346` entry: a
+  happy upload asserting the logical path handed to `device_fs`, a nested-name
+  upload, and a rejection case. Remove the baseline line **by hand** — the file
+  carries hand-written notes that `--regen` drops (see its header).
+- **Provider coverage** — assert the composed address per provider: baas/arca
+  gets the OSS-view path, teclaw gets `/workspace/<rel>` (this path raises today,
+  since `to_engine_relative` rejects the bare name, and should start passing),
+  local gets an absolute host path.
+- **Listing** — one page containing a DB-backed file, a bot-created file with no
+  row, a directory, and a link.
 
 ## Risks
 
-**Behavior change: bare relative paths now rejected.** The only known emitter is
-the broken OpenAPI flow. Confirm by grepping `/api/file/*` callers before
-landing; if a real dependant exists, downgrade to a WARNING and keep the old
-behavior.
+**Listing performance and availability.** The merged listing does a device round
+trip where the old one hit only the DB. Non-recursive and `parent_path`-scoped
+keeps it bounded, but an unbound or unreachable bot now affects an endpoint that
+was previously local.
 
-**Listing performance.** The merged listing does a device round trip per call
-where the old one hit only the DB. Non-recursive and `parent_path`-scoped keeps
-it bounded, but it is a new remote dependency on a previously local endpoint —
-an unbound or unreachable bot now affects listing.
+**Pagination semantics change** on a public endpoint: `total` becomes the merged
+length and paging moves into the handler.
 
-**Cross-repo skew.** Corp engines must land the same contract before the backend
-ships. The `target_path` guard makes skew fail loudly rather than silently, which
-is the mitigation, not a reason to relax the ordering.
+**No defense in depth until the follow-up.** Caller-input validation is the only
+barrier against traversal in this iteration; the engine still normalizes nothing.
+The follow-up closes that.
+
+## Follow-up (separate issue, needs OCB)
+
+Move the wire format to a short, engine-resolved namespace-relative address
+(`workspace/<rel>`), with each engine resolving it against its own root,
+asserting containment, and rejecting unanchored names. Requires matching changes
+in `corp/engines/{aicoding,claude_code,hermes}/file.py` plus
+`plugins/openclaw/_file.py`, an engine-first rollout, and a `target_path`
+absoluteness guard in `BaasDeviceFileSystem.write_file` so a mid-rollout skew
+fails loudly instead of silently. teclaw already uses this model
+(`to_engine_relative` → `/workspace/<rel>` on `/api/v1/file/*`) and needs no
+change.
