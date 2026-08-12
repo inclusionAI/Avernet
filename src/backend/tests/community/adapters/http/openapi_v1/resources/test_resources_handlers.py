@@ -361,130 +361,227 @@ class _StubFactory:
         self.created_bot_ids.append(bot_id)
         return self._service
 
-
 @pytest.mark.asyncio
-async def test_list_resources_returns_envelope_with_page():
-    service = _StubService([_legacy(id=1, name="r1"), _legacy(id=2, name="r2")])
-    factory = _StubFactory(service)
+async def test_list_returns_workspace_entries_not_records():
+    """Files and folders come from the workspace. A record-backed listing could
+    not see a file the bot produced itself — it has no record and never will."""
+    file_svc = _StubListFileService([
+        {"name": "notes.md", "relative_path": "notes.md", "is_dir": False, "size": 12,
+         "path": "/home/admin/.aicoding/workspace/notes.md"},
+        {"name": "docs", "relative_path": "docs", "is_dir": True, "size": 0,
+         "path": "/home/admin/.aicoding/workspace/docs"},
+    ])
 
     env = await list_resources(
-        page=PageParams(page=1, page_size=20),
-        user_id="u1",
-        bot_id="bot-a",
+        page=PageParams(),
+        owner_id="u1",
+        bot_id="bot-x",
+        path="",
         type=None,
-        factory=factory,
+        factory=_StubFactory(_StubService([])),
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
         request=_request_without_trace(),
     )
 
-    assert isinstance(env, Envelope)
-    assert env.code == CODE_OK
-    assert env.message == "OK"
-    assert env.data is not None
-    assert isinstance(env.data, Page)
     assert env.data.total == 2
-    assert len(env.data.items) == 2
-    assert env.data.items[0].resource_id == "1"
-    assert env.data.items[1].resource_id == "2"
-    # mapping: legacy LINK → openapi LINK, source/url flattened
+    by_name = {i.name: i for i in env.data.items}
+    assert by_name["notes.md"].type == OpenapiType.FILE
+    assert by_name["notes.md"].path == "notes.md"
+    assert by_name["notes.md"].size == 12
+    assert by_name["docs"].type == OpenapiType.FOLDER
+    # No record backs a workspace entry.
+    assert all(i.resource_id == "" for i in env.data.items)
+    assert all(i.gmt_create is None for i in env.data.items)
+
+
+@pytest.mark.asyncio
+async def test_list_joins_the_listed_directory_onto_entry_paths():
+    """The device reports ``relative_path`` relative to the listed directory, so
+    listing ``a/b`` must yield ``a/b/c.txt`` — the address a client hands back."""
+    file_svc = _StubListFileService([
+        {"name": "c.txt", "relative_path": "c.txt", "is_dir": False, "size": 1,
+         "path": "/home/admin/.aicoding/workspace/a/b/c.txt"},
+    ])
+
+    env = await list_resources(
+        page=PageParams(),
+        owner_id="u1",
+        bot_id="bot-x",
+        path="a/b",
+        type=None,
+        factory=_StubFactory(_StubService([])),
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
+
+    assert env.data.items[0].path == "a/b/c.txt"
+    assert file_svc.listed == ["a/b"]
+
+
+@pytest.mark.asyncio
+async def test_list_never_exposes_the_container_path():
+    """The entry's own ``path`` is the engine-view absolute container path and
+    must not cross a public API."""
+    file_svc = _StubListFileService([
+        {"name": "c.txt", "relative_path": "c.txt", "is_dir": False, "size": 1,
+         "path": "/home/admin/.aicoding/workspace/c.txt"},
+    ])
+
+    env = await list_resources(
+        page=PageParams(), owner_id="u1", bot_id="bot-x", path="", type=None,
+        factory=_StubFactory(_StubService([])), bot_repo=_StubBotRepo(),
+        file_svc=file_svc, request=_request_without_trace(),
+    )
+
+    assert "/home/admin" not in (env.data.items[0].path or "")
+
+
+@pytest.mark.asyncio
+async def test_list_appends_links_which_have_no_file():
+    """A link has no file and no device presence, so the record is the resource."""
+    link = _legacy(id="l1", name="wiki")
+    file_svc = _StubListFileService([
+        {"name": "a.txt", "relative_path": "a.txt", "is_dir": False, "size": 1},
+    ])
+
+    env = await list_resources(
+        page=PageParams(), owner_id="u1", bot_id="bot-x", path="", type=None,
+        factory=_StubFactory(_StubService([link])), bot_repo=_StubBotRepo(),
+        file_svc=file_svc, request=_request_without_trace(),
+    )
+
+    kinds = {i.type for i in env.data.items}
+    assert kinds == {OpenapiType.FILE, OpenapiType.LINK}
+    assert env.data.total == 2
+
+
+@pytest.mark.asyncio
+async def test_list_includes_legacy_url_rows_as_links():
+    """Two legacy types collapse into openapi LINK — ``LINK`` and the older
+    ``URL`` — so narrowing the repo query to either one silently drops the
+    other. Rows are fetched unfiltered and narrowed by the *mapped* type."""
+    url_row = _legacy(id="u9", name="yuque-doc", resource_type=LegacyType.URL)
+
+    env = await list_resources(
+        page=PageParams(), owner_id="u1", bot_id="bot-x", path="", type=None,
+        factory=_StubFactory(_StubService([url_row])), bot_repo=_StubBotRepo(),
+        file_svc=_StubListFileService([]), request=_request_without_trace(),
+    )
+
+    assert [i.name for i in env.data.items] == ["yuque-doc"]
     assert env.data.items[0].type == OpenapiType.LINK
-    assert env.data.items[0].url == "https://example.com"
 
 
 @pytest.mark.asyncio
-async def test_list_resources_paginates_items():
-    service = _StubService(
-        [
-            _legacy(id=1, name="r1"),
-            _legacy(id=2, name="r2"),
-            _legacy(id=3, name="r3"),
-        ]
-    )
-    factory = _StubFactory(service)
+async def test_list_never_reports_file_rows():
+    """A record is not evidence a file exists — that is the divergence this
+    change removes. File rows are excluded; the workspace half is authoritative."""
+    file_row = _legacy(id="f1", name="ghost.txt", resource_type=LegacyType.FILE,
+                       attributes={"path": "ghost.txt"})
 
     env = await list_resources(
-        page=PageParams(page=2, page_size=1),
-        user_id="u1",
-        bot_id="bot-a",
-        type=None,
-        factory=factory,
+        page=PageParams(), owner_id="u1", bot_id="bot-x", path="", type=None,
+        factory=_StubFactory(_StubService([file_row])), bot_repo=_StubBotRepo(),
+        file_svc=_StubListFileService([]), request=_request_without_trace(),
+    )
+
+    assert env.data.items == []
+
+
+@pytest.mark.asyncio
+async def test_list_folder_filter_returns_directories():
+    """FOLDER used to short-circuit to an empty page — there were no folder rows
+    to return. Directories are real on the filesystem, so it now returns them."""
+    file_svc = _StubListFileService([
+        {"name": "docs", "relative_path": "docs", "is_dir": True, "size": 0},
+        {"name": "a.txt", "relative_path": "a.txt", "is_dir": False, "size": 1},
+    ])
+
+    env = await list_resources(
+        page=PageParams(), owner_id="u1", bot_id="bot-x", path="",
+        type=OpenapiType.FOLDER,
+        factory=_StubFactory(_StubService([_legacy(id="l1", name="wiki")])),
+        bot_repo=_StubBotRepo(), file_svc=file_svc,
         request=_request_without_trace(),
     )
 
-    # total reflects the full list; current page slice holds the 2nd item only
-    assert env.data.total == 3
-    assert [item.resource_id for item in env.data.items] == ["2"]
+    assert [i.name for i in env.data.items] == ["docs"]
 
 
 @pytest.mark.asyncio
-async def test_list_resources_passes_type_filter_value_to_service():
-    service = _StubService([])
-    factory = _StubFactory(service)
+async def test_list_link_filter_does_not_touch_the_device():
+    file_svc = _StubListFileService([
+        {"name": "a.txt", "relative_path": "a.txt", "is_dir": False, "size": 1},
+    ])
 
-    await list_resources(
-        page=PageParams(),
-        user_id="u1",
-        bot_id="bot-a",
+    env = await list_resources(
+        page=PageParams(), owner_id="u1", bot_id="bot-x", path="",
         type=OpenapiType.LINK,
-        factory=factory,
+        factory=_StubFactory(_StubService([_legacy(id="l1", name="wiki")])),
+        bot_repo=_StubBotRepo(), file_svc=file_svc,
         request=_request_without_trace(),
     )
 
-    # Fix #1: the openapi enum is mapped to the legacy ResourceType enum at
-    # the handler seam (the slim service does ``.value`` internally — passing
-    # the openapi enum's ``.value`` string broke at filter time). ``LegacyType``
-    # subclasses ``str``, so this assertion still passes via str equality, but
-    # the stricter ``is`` check lives in ``test_list_resources_passes_legacy_enum_to_service``.
-    assert service.last_call_kwargs.get("resource_type") == "link"
+    assert [i.type for i in env.data.items] == [OpenapiType.LINK]
+    assert file_svc.listed == []  # no device round trip for a link-only listing
 
 
 @pytest.mark.asyncio
-async def test_list_resources_reads_x_trace_id_from_request():
-    factory = _StubFactory(_StubService([]))
-    request = _request_with_trace("trace-abc")
+async def test_list_paginates_across_both_sources():
+    file_svc = _StubListFileService([
+        {"name": f"f{n}.txt", "relative_path": f"f{n}.txt", "is_dir": False, "size": 1}
+        for n in range(3)
+    ])
 
     env = await list_resources(
-        page=PageParams(),
-        user_id="u1",
-        bot_id="bot-a",
-        type=None,
-        factory=factory,
-        request=request,
-    )
-
-    assert env.request_id == "trace-abc"
-
-
-@pytest.mark.asyncio
-async def test_list_resources_request_id_empty_when_no_request_context():
-    factory = _StubFactory(_StubService([]))
-
-    env = await list_resources(
-        page=PageParams(),
-        user_id="u1",
-        bot_id="bot-a",
-        type=None,
-        factory=factory,
+        page=PageParams(page=2, page_size=2),
+        owner_id="u1", bot_id="bot-x", path="", type=None,
+        factory=_StubFactory(_StubService([_legacy(id="l1", name="wiki")])),
+        bot_repo=_StubBotRepo(), file_svc=file_svc,
         request=_request_without_trace(),
     )
 
-    assert env.request_id == ""
+    # total spans the merged view; the page is the slice.
+    assert env.data.total == 4
+    assert len(env.data.items) == 2
 
 
 @pytest.mark.asyncio
-async def test_list_resources_empty_result_returns_empty_page():
-    factory = _StubFactory(_StubService([]))
-
+async def test_list_reads_x_trace_id_from_request():
     env = await list_resources(
-        page=PageParams(),
-        user_id="u1",
-        bot_id="bot-a",
-        type=None,
-        factory=factory,
-        request=_request_without_trace(),
+        page=PageParams(), owner_id="u1", bot_id="bot-x", path="", type=None,
+        factory=_StubFactory(_StubService([])), bot_repo=_StubBotRepo(),
+        file_svc=_StubListFileService([]),
+        request=_request_with_trace("trace-list-1"),
     )
+    assert env.request_id == "trace-list-1"
 
+
+@pytest.mark.asyncio
+async def test_list_empty_workspace_returns_empty_page():
+    env = await list_resources(
+        page=PageParams(), owner_id="u1", bot_id="bot-x", path="", type=None,
+        factory=_StubFactory(_StubService([])), bot_repo=_StubBotRepo(),
+        file_svc=_StubListFileService([]), request=_request_without_trace(),
+    )
     assert env.data.total == 0
     assert env.data.items == []
+
+
+@pytest.mark.asyncio
+async def test_list_rejects_a_directory_escaping_the_workspace():
+    file_svc = _StubListFileService([])
+
+    resp = await list_resources(
+        page=PageParams(), owner_id="u1", bot_id="bot-x", path="../../etc",
+        type=None, factory=_StubFactory(_StubService([])), bot_repo=_StubBotRepo(),
+        file_svc=file_svc, request=_request_without_trace(),
+    )
+
+    assert resp.status_code == 400
+    assert file_svc.listed == []
 
 
 # ── check_resource_name handler wiring (Phase 1 Task 3) ──────────────────
@@ -947,6 +1044,24 @@ class _StubFileService:
             "path": rel,
             "size": len(kwargs["data"]),
         }
+
+
+class _StubListFileService:
+    """Stands in for ``ResourceFileService`` on the listing path.
+
+    Returns a fixed directory listing in the device's own shape — including the
+    engine-view absolute ``path`` the handler must not expose — and records which
+    directories were listed, so a test can assert the device is consulted, or
+    left alone, as expected.
+    """
+
+    def __init__(self, entries: List[dict]):
+        self._entries = entries
+        self.listed: List[str] = []
+
+    async def list_dir(self, *, path, **_kw) -> List[dict]:
+        self.listed.append(path)
+        return self._entries
 
 
 class _StubBotRepo:
@@ -1664,14 +1779,17 @@ async def test_real_factory_service_supports_all_handler_methods_e2e():
     assert env.data.type == OpenapiType.LINK
     assert env.data.url == "https://x.com"
 
-    # 3. list (exercises factory.create → service.list_resources — confirms
-    #    the persisted row is visible to the real repo).
+    # 3. list — the link comes from the real repo (a link has no file), and the
+    #    workspace half comes from the device.
     env = await list_resources(
         page=PageParams(),
-        user_id="u1",
+        owner_id="u1",
         bot_id="bot-x",
+        path="",
         type=None,
         factory=factory,
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubListFileService([]),
         request=_request_without_trace(),
     )
     assert env.data.total >= 1
@@ -1749,101 +1867,6 @@ async def test_real_factory_service_supports_all_handler_methods_e2e():
         request=_request_without_trace(),
     )
     assert env2.code == CODE_CREATED
-
-
-
-
-@pytest.mark.asyncio
-async def test_list_resources_passes_legacy_enum_to_service():
-    service = _StubService([])
-    factory = _StubFactory(service)
-
-    await list_resources(
-        page=PageParams(),
-        user_id="u1",
-        bot_id="bot-a",
-        type=OpenapiType.LINK,
-        factory=factory,
-        request=_request_without_trace(),
-    )
-
-    passed = service.last_call_kwargs.get("resource_type")
-    assert passed is LegacyType.LINK
-    assert passed is not OpenapiType.LINK
-
-
-@pytest.mark.asyncio
-async def test_list_resources_passes_none_when_type_filter_absent():
-    service = _StubService([])
-    factory = _StubFactory(service)
-
-    await list_resources(
-        page=PageParams(),
-        user_id="u1",
-        bot_id="bot-a",
-        type=None,
-        factory=factory,
-        request=_request_without_trace(),
-    )
-
-    # _legacy_type_for(None) returns None — no filter.
-    assert service.last_call_kwargs.get("resource_type") is None
-
-
-@pytest.mark.asyncio
-async def test_list_resources_openapi_folder_has_no_legacy_counterpart():
-    """openapi FOLDER has no legacy enum equivalent. List with type=FOLDER
-    MUST return an empty page — NOT fall through to resource_type=None which
-    the slim service treats as "no filter" and would surface every row
-    (FILE/LINK) under a FOLDER query. This pins that guard (the bug:
-    unfiltered list leaked all rows when asked for FOLDER)."""
-    # Real factory + repo seeded with FILE and LINK rows (NOT empty) — an
-    # unfiltered list would return them; a correct FOLDER filter returns none.
-    factory, repo = _real_factory_with_inmemory_repo()
-    repo.create(
-        Resource(
-            id=1,
-            name="f1",
-            resource_type=LegacyType.FILE,
-            attributes={"path": "/f", "size": 5},
-            bolt_id="bot-a",
-        ).to_dict()
-    )
-    repo.create(
-        create_link_resource(
-            name="l1",
-            url="https://x.com",
-            link_type="external",
-            id=2,
-            bolt_id="bot-a",
-        ).to_dict()
-    )
-
-    # Sanity: an unfiltered list DOES see both rows (proves the repo is
-    # non-empty and the leak would surface them without the FOLDER guard).
-    unfiltered = await list_resources(
-        page=PageParams(),
-        user_id="u1",
-        bot_id="bot-a",
-        type=None,
-        factory=factory,
-        request=_request_without_trace(),
-    )
-    assert unfiltered.data.total >= 2
-
-    # type=FOLDER must NOT leak those rows — empty page, not "all".
-    env = await list_resources(
-        page=PageParams(),
-        user_id="u1",
-        bot_id="bot-a",
-        type=OpenapiType.FOLDER,
-        factory=factory,
-        request=_request_without_trace(),
-    )
-    assert env.code == CODE_OK
-    assert env.data.total == 0
-    assert env.data.items == []
-
 
 @pytest.mark.asyncio
 async def test_check_name_passes_legacy_enum_to_service_when_provided():

@@ -100,12 +100,12 @@ change, no OCB dependency in this scope.
 
 ## Group C — Listing
 
-- [ ] **C1.** Add a `path` query parameter to `list_resources` — the directory to
+- [x] **C1.** Add a `path` query parameter to `list_resources` — the directory to
   list, relative to the workspace root, empty for the root. Named `path` to match
   the console (`adapters/http/resources/file_router.py:202`); it is a listing
   input and has nothing to do with the DB `parent_path` attribute.
-- [ ] **C2.** List via `ResourceFileService.list_dir(path=path)`, non-recursive.
-- [ ] **C3.** Convert each listing entry into one `Resource`. `list_dir` returns
+- [x] **C2.** List via `ResourceFileService.list_dir(path=path)`, non-recursive.
+- [x] **C3.** Convert each listing entry into one `Resource`. `list_dir` returns
   a dict per directory entry — `name`, `path`, `relative_path`, `is_dir`, `size`
   — which maps to: `type` = `FOLDER` when `is_dir` else `FILE`, `name` = the
   entry's `name`, `size` = the entry's `size`, and `path` = **the listed
@@ -118,16 +118,18 @@ change, no OCB dependency in this scope.
   **Never use the entry's own `path`** — that is the engine-view absolute
   container path (`/home/admin/.aicoding/workspace/...`) and must not be exposed
   through a public API.
-- [ ] **C4.** Enrich from records, matched on workspace-relative path. In-memory
-  join — `path`/`parent_path` live in the `attributes` JSON column
-  (`core/repository/implementations/platform/resource.py:123,79`), and the repo
-  already filters `parent_path` in Python (`:112`).
-- [ ] **C5.** Entries with no record: empty `resource_id`, null `source` and
+- [x] **C4.** ~~Enrich from records~~ — **dropped by decision.** No runtime read
+  touches a file record: every field of a workspace entry comes from the device,
+  and the record is written solely as the publish pipeline's input. Files
+  therefore report an empty `resource_id` and null `source`/timestamps
+  uniformly, rather than only when a record happens to be missing. Links are the
+  one repo read that remains, because a link has no file.
+- [x] **C5.** Entries with no record: empty `resource_id`, null `source` and
   timestamps.
-- [ ] **C6.** Append LINK resources from the repo.
-- [ ] **C7.** Paginate the merged list in the handler; `total` is the merged
+- [x] **C6.** Append LINK resources from the repo.
+- [x] **C7.** Paginate the merged list in the handler; `total` is the merged
   length. The service-level `limit`/`offset` push-down no longer covers files.
-- [ ] **C8.** `FOLDER` must stop short-circuiting to an empty page (`:141`) and
+- [x] **C8.** `FOLDER` must stop short-circuiting to an empty page (`:141`) and
   return directories.
 
 ## Group D — Tests

@@ -128,6 +128,24 @@ def _to_openapi_resource(legacy: _LegacyResource) -> Resource:
 _PREVIEW_MAX_BYTES = 1_048_576
 
 
+def _entry_path(listed_dir: str, entry: dict) -> str:
+    """Workspace-relative path of a listing entry.
+
+    The device reports ``relative_path`` relative to the *listed* directory, not
+    to the workspace root — listing ``a/b`` yields ``c.txt`` — so it has to be
+    rejoined with the directory that was listed. teclaw returns no
+    ``relative_path`` at all, hence the fallback to the entry name, which is
+    equivalent for the non-recursive listings this endpoint does. Mirrors
+    ``resource_file_service._rel_path``.
+
+    The entry's own ``path`` is deliberately unused: it is the engine-view
+    absolute container path (``/home/admin/.aicoding/workspace/...``) and must
+    not cross a public API.
+    """
+    leaf = entry.get("relative_path") or entry.get("name", "")
+    return f"{listed_dir}/{leaf}" if listed_dir else leaf
+
+
 def _safe_path(path: str) -> str:
     """Normalize a caller-supplied workspace-relative path, or reject it.
 
@@ -179,39 +197,81 @@ router = APIRouter(prefix="/openapi/v1/bots/resources", tags=["resources"])
 @envelope_errors
 async def list_resources(
     page: PageParamsDep,
-    user_id: UserIdDep,
+    owner_id: UserIdDep,
     request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
+    path: str = Query(
+        "", description="Directory to list, relative to the workspace root."
+    ),
     type: ResourceType | None = None,
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
+    bot_repo: BotRepository = Injected(BotRepository),
+    file_svc: ResourceFileService = Injected(ResourceFileService),
 ) -> Envelope[Page[Resource]]:
-    """List resources (filter + paginate)."""
-    # Declared but not used — and that is a gap, not a design. These four
-    # handlers scope on the caller-supplied ``bot_id`` and the tenant guard, and
-    # never check that the caller owns that bot; see
-    # ``specs/2026-08-02-public-api-user-only-principal/``. They take the
-    # parameter because they are user-scoped in principle, so closing the gap
-    # later is a change to this function and not to the public contract. This is
-    # NOT the ``check_bot_name`` / MCP-catalogue case, which has no user
-    # dimension at all and therefore takes no ``user_id``.
-    del user_id
-    effective_bot_id = bot_id
-    service = factory.create(bot_id=effective_bot_id)
-    if type is not None and _legacy_type_for(type) is None:
-        # type is an openapi type with no legacy mapping (FOLDER) → no rows
-        return page_envelope(0, [], request)
-    legacy_type = _legacy_type_for(type)
+    """List a directory of the bot's workspace, plus the bot's link resources.
+
+    Files and folders come from the **workspace**, never from records. That is
+    what makes a file the bot produced itself a first-class resource: it has no
+    record and never will, and a record-backed listing simply could not see it.
+    It also removes the divergence the other direction — a record whose bytes are
+    not where it claims can no longer be reported as a file that exists.
+
+    Links are the exception, and not an inconsistency: a link has no file and no
+    presence on any device, so the record *is* the resource. They are read from
+    the repo and appended.
+
+    ``path`` selects the directory (empty = workspace root). Listing is
+    non-recursive, which bounds the device round trip this endpoint now makes.
+    """
+    safe = _safe_path(path)
+    entries: list[Resource] = []
+    if type is None or type in (ResourceType.FILE, ResourceType.FOLDER):
+        entity_type, entity_id, engine_type = _file_coords(bot_id, owner_id, bot_repo)
+        listed = await file_svc.list_dir(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            bot_id=bot_id,
+            engine_type=engine_type,
+            path=safe,
+        )
+        for entry in listed or []:
+            is_dir = bool(entry.get("is_dir"))
+            entry_type = ResourceType.FOLDER if is_dir else ResourceType.FILE
+            if type is not None and entry_type != type:
+                continue
+            entries.append(
+                Resource(
+                    # No record backs a workspace entry, so there is no id to
+                    # report and no source or timestamps to report either — the
+                    # device's listing carries none.
+                    resource_id="",
+                    name=entry.get("name", ""),
+                    type=entry_type,
+                    size=entry.get("size") if not is_dir else None,
+                    path=_entry_path(safe, entry),
+                )
+            )
+
+    if type is None or type == ResourceType.LINK:
+        service = factory.create(bot_id=bot_id)
+        # Unfiltered on the repo side, then narrowed by the *mapped* type. Two
+        # legacy types collapse into openapi LINK — ``LINK`` and the older
+        # ``URL`` — so filtering the query on either one alone silently drops
+        # the other. FILE rows are excluded here rather than merged: for files
+        # the workspace is authoritative, and a row whose bytes are not where it
+        # claims must not be reported as a file that exists.
+        entries.extend(
+            _to_openapi_resource(r)
+            for r in service.list_resources()
+            if _TYPE_MAP.get(r.resource_type) == ResourceType.LINK
+        )
+
+    # Paginated here rather than pushed down: the page spans two sources, one of
+    # which is a directory listing with no offset to push a bound into.
     start = (page.page - 1) * page.page_size
-    # Push the page bound down to the service so we only materialise Resource /
-    # openapi models for the requested page, not the full set (the service still
-    # reads the full repo row-set today — a repo-level LIMIT/COUNT is the deeper
-    # follow-up). total uses the repo count, not the page length.
-    items = service.list_resources(
-        resource_type=legacy_type, limit=page.page_size, offset=start
+    return page_envelope(
+        len(entries), entries[start : start + page.page_size], request
     )
-    page_items = [_to_openapi_resource(r) for r in items]
-    total = service.count_resources(resource_type=legacy_type)
-    return page_envelope(total, page_items, request)
 
 
 @router.get("/check-name", response_model=Envelope[NameCheck])
