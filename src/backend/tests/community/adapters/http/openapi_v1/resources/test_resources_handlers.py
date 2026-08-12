@@ -1745,6 +1745,38 @@ async def test_read_does_not_swallow_other_upstream_statuses(code):
 
 
 @pytest.mark.asyncio
+async def test_download_serves_an_empty_file_rather_than_404ing_it():
+    """An empty file exists and appears in a listing, so 404ing it would be the
+    workspace and the API disagreeing about what exists — the divergence this
+    change removes. Only ``None`` means absent."""
+    resp = await download_file(
+        path="empty.txt",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubReadFileService({"empty.txt": b""}),
+        request=_request_without_trace(),
+    )
+
+    assert isinstance(resp, Response)
+    assert resp.body == b""
+
+
+@pytest.mark.asyncio
+async def test_preview_of_an_empty_file_is_empty_not_missing():
+    env = await preview_file(
+        path="empty.txt",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubReadFileService({"empty.txt": b""}),
+        request=_request_without_trace(),
+    )
+
+    assert env.data.content == ""
+
+
+@pytest.mark.asyncio
 async def test_download_413_when_the_device_refuses_an_oversized_file():
     """Two distinct classes share the name ``FileTooLargeError`` — the device
     filesystem's and the resources one — and ENVELOPE_ERRORS maps concrete

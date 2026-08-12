@@ -598,9 +598,12 @@ async def _read_file_or_404(
         if exc.response.status_code != 404:
             raise
         raise HTTPException(status_code=404, detail="Resource not found") from exc
-    # ``None`` is absent; ``b""`` is a file that exists but has no bytes, which
-    # the legacy contract also treated as nothing to serve.
-    if not content:
+    # ``None`` is absent. ``b""`` is a file that exists and happens to be empty,
+    # and it is served as one: an empty file appears in a listing, so answering
+    # 404 for it would be the workspace and the API disagreeing about what
+    # exists — the exact divergence this change removes. The legacy contract
+    # conflated the two, which is a reason to fix it here, not to copy it.
+    if content is None:
         raise HTTPException(status_code=404, detail="Resource not found")
     return content
 

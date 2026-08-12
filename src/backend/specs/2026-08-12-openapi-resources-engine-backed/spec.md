@@ -94,12 +94,28 @@ its coverage-baseline entry.
 
 ### Contract change
 
-Files are addressed by path rather than by record id, so four operations change
-shape: download, preview, delete, and single-resource lookup. This mirrors the
-console, whose file operations are already path-addressed.
+Files are addressed by path rather than by record id, so three operations change
+shape: download, preview, and delete. This mirrors the console, whose file
+operations are already path-addressed.
 
 Record ids remain the addressing scheme for links. Record ids that previously
-referred to files stop resolving.
+referred to files stop resolving — on `GET`, `PUT` and `DELETE /{resource_id}`
+alike, so that no record-addressed operation still accepts a file.
+
+**Single-file lookup is dropped rather than re-addressed.** *(Corrected during
+review — this section originally claimed four operations changed shape, which
+overstated what shipped.)* `GET /{resource_id}` stops resolving a file and gets
+no `?path=` counterpart, so a client wanting one file's metadata lists its
+parent directory and takes the entry, whose `path` is the same key every other
+file endpoint accepts. Nothing is unavailable — a listing entry carries every
+field a single-file response would — but it costs an extra call and client-side
+filtering, and that is a real if modest reduction from the record-addressed
+lookup this replaces.
+
+Adding `GET /stat?path=` would close it and is cheap. It is left out because it
+would widen a public contract beyond what the issue asked for, on a surface still
+gated as not-public-ready; the call belongs to the issue owner rather than to
+this change.
 
 This is a breaking change to a surface that is **not yet exposed to external
 callers** — the router carries a standing "NOT PUBLIC-READY" gate pending the
