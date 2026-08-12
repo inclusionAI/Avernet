@@ -935,18 +935,24 @@ that one design choice, and none of it is visible in the OpenAPI document.
   such endpoint reports the whole start sequence rather than the script alone,
   and resolving *which* start to report is not solved for a published service
   bot. Tracked as follow-up work.
-- **A teclaw bot cannot run one, and `supported` says so:** its container is
-  provisioned without a start sequence at all, so there is nothing for a script
-  to ride on. A write is refused with **409** rather than stored where it would
-  silently never run; `GET` still answers, carrying the reason.
+- **Two kinds of bot cannot run one, and `supported` says which.** A write to
+  either is refused with **409** rather than stored where it would silently
+  never run; `GET` still answers for them, carrying the reason, so a caller can
+  find out before attempting the write.
 
-  Support is answered from the bot's **engine** alone and never from its live
-  container, so the answer is the same before the first start, during a
-  restart, and while an unrelated lookup is failing. One consequence worth
-  stating: a legacy ARCA-direct bot — created before the BaaS rollout, whose
-  container is not built through the shared start sequence — is *not* refused,
-  so a script stored on one will not run. Every bot created today is
-  BaaS-backed unless it is teclaw.
+  - a **teclaw** bot (any engine the platform provisions as teclaw) — its
+    container is provisioned without a start sequence at all, so there is
+    nothing for a script to ride on;
+  - a **desktop** bot (`bot_type == "desktop"`) — its start command is built on
+    a separate path that does not carry the stored script.
+
+  Support is answered from the bot's **engine and type** and never from its live
+  container, so the answer is the same before the first start, during a restart,
+  and while an unrelated lookup is failing. One consequence worth stating: a
+  legacy ARCA-direct bot — created before the BaaS rollout, whose container is
+  not built through the shared start sequence — is *not* refused, so a script
+  stored on one will not run. Every bot created today is BaaS-backed unless it
+  is teclaw or desktop.
 - **Re-running on restart is inherited, not guaranteed by this feature.** The
   script re-runs wherever the platform's own start sequence re-runs. On a
   provider whose restart is destroy-and-create that is every restart; on one
