@@ -33,6 +33,7 @@ from agentclaw.community.core.task.domain.models import (
 # acceptance 驱动(skill 回投):RUNNING->DONE(PASS)/FAILED(FAIL+gaps)
 _ACCEPTANCE_TRANSITIONS: dict[Status, set[Status]] = {
     Status.RUNNING: {Status.DONE, Status.FAILED},
+    Status.PLANNING: {Status.DONE, Status.FAILED},  # 根终验 PASS/FAIL 从 PLANNING 委托态回投
 }
 # status 直驱(框架内部:派发/复位/传播)
 #   PENDING->RUNNING(派发) / RUNNING->PENDING(Harness 复位) / PLANNING->DONE(传播)
