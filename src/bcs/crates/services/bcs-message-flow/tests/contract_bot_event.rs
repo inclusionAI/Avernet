@@ -1978,6 +1978,60 @@ async fn manager_worker_task_dispatch_authorizes_manager_role_not_driver_bot_fie
 }
 
 #[tokio::test]
+async fn manager_worker_unknown_target_emits_public_group_notice() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    support.registry.insert_named_actor("bot-manager", "Manager").await;
+    support.registry.insert_named_actor("bot-worker", "Worker").await;
+    let mut group = support.group.get("group-1").await.unwrap();
+    group.driver_bot = "control-plane-owner".to_string();
+    group.group_strategy = GroupStrategy::ManagerWorker;
+    let mut manager = Participant::bot("bot-manager", ParticipantRole::Manager);
+    manager.bot_name = Some("Manager".to_string());
+    let mut worker = Participant::bot("bot-worker", ParticipantRole::Worker);
+    worker.bot_name = Some("Worker".to_string());
+    group.participants = vec![manager, worker];
+    support.group.upsert(group).await.unwrap();
+    let system_message = Arc::new(RecordingSystemMessage::default());
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_system_message(system_message.clone());
+
+    let error = flow
+        .handle_task_dispatch(TaskDispatchCommand {
+            driver_bot_id: "bot-manager".to_string(),
+            group_id: "group-1".to_string(),
+            target_bot_id: "Wrong Worker".to_string(),
+            target_bot_name: None,
+            payload: json!({
+                "message": "do work",
+                "bcs_session_id": "group-1:abcdef12",
+            }),
+        })
+        .await
+        .expect_err("unknown worker must reject task dispatch");
+
+    assert!(matches!(error, ServiceError::BotNotFound(bot) if bot == "Wrong Worker"));
+    assert!(support.bot_delivery.kinds().await.is_empty());
+    let notifications = system_message.notifications.lock().await;
+    assert_eq!(notifications.len(), 1);
+    assert_eq!(notifications[0].session_id, "group-1:abcdef12");
+    match &notifications[0].event {
+        SystemMessageEvent::GenericNotification { message, receivers, .. } => {
+            assert!(message.contains("未找到 worker \"Wrong Worker\""));
+            assert!(message.contains("Worker (bot-worker)"));
+            assert!(message.contains("任务未派发"));
+            assert!(receivers.is_empty(), "empty receivers broadcasts the public notice");
+        }
+        other => panic!("expected GenericNotification, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn agent_tool_result_coordination_echo_dispatches_task() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let mut group = support.group.get("group-1").await.unwrap();

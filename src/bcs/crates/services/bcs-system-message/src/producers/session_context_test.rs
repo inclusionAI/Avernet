@@ -276,6 +276,7 @@ async fn manager_worker_session_context_backfills_placeholder_names() {
         .find(|message| message.recipients == vec![manager_id.clone()])
         .expect("manager receives context");
     assert_eq!(manager_message.delivery_type, DeliveryType::Send);
+    assert_eq!(manager_message.persist, bcs_domain::PersistMode::Public);
     assert!(manager_message.message.contains(
         "|Demo Worker的分身|20260416_a5clr6ig:12345678|manager|"
     ));
@@ -395,6 +396,7 @@ async fn manager_worker_worker_reminder_lists_only_worker_tool() {
         .find(|message| message.recipients == vec![worker_id.clone()])
         .expect("worker receives context");
 
+    assert_eq!(worker_message.persist, bcs_domain::PersistMode::PerRecipient);
     assert!(worker_message.message.contains("bcs_send_task_message"));
     assert!(worker_message.message.contains(
         "本群为任务群，你是子 Bot。收到主 Bot 派发的任务后直接处理并回复"
@@ -604,4 +606,3 @@ async fn manager_worker_ignores_driver_delivery_override() {
         .expect("worker receives context");
     assert_eq!(worker_message.delivery_type, DeliveryType::Inject);
 }
-

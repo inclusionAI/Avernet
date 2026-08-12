@@ -521,8 +521,8 @@ async fn dispatch_manager_worker_session_context_persists_worker_private_context
 
     let manager_context = appended
         .iter()
-        .find(|msg| msg.owner_bot_id.as_deref() == Some("bot-manager"))
-        .expect("manager-owned context record");
+        .find(|msg| msg.owner_bot_id.is_none())
+        .expect("public manager context record");
     assert_eq!(manager_context.group_id, group.id);
     assert_eq!(manager_context.session_id, session_id);
     assert_eq!(manager_context.sender_id, "system");
@@ -584,13 +584,9 @@ async fn dispatch_manager_worker_session_context_persists_each_worker_private_co
 
     let appended = message_repo.appended().await;
     assert_eq!(appended.len(), 3);
-    assert!(
-        appended.iter().all(|msg| msg.owner_bot_id.is_some()),
-        "no global (owner=None) record; each bot owns its context copy"
-    );
     let manager_ctx = appended.iter()
-        .find(|msg| msg.owner_bot_id.as_deref() == Some("bot-manager"))
-        .expect("manager copy");
+        .find(|msg| msg.owner_bot_id.is_none())
+        .expect("public manager copy");
     assert!(content_text(manager_ctx).contains("你的角色: manager"));
     for worker_id in ["bot-worker-a", "bot-worker-b"] {
         let worker_context = appended.iter()
