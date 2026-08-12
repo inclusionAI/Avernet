@@ -1,7 +1,7 @@
 """Composition root for engine provisioning strategies."""
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any, Protocol, TYPE_CHECKING
 
 from .aicoding.strategy import (
     AICODING_ENGINE_TYPE,
@@ -13,6 +13,16 @@ from .aicoding.strategy import (
 from .aicoding.mcp_defaults import AicodingMcpDefaultsResolver
 from .default import DefaultProvisioningStrategy
 from .provisioning import BotProvisioningContext, EngineProvisioningStrategy
+
+from agentclaw.community.log import get_logger
+
+
+if TYPE_CHECKING:
+    # Neutral contract only — never import core/devices here (the engine
+    # composition root must not reverse-couple into device internals).
+    from agentclaw.community.plugin_api.secret_resolver import SecretResolver
+
+logger = get_logger()
 
 
 class BaasEngineBucketResolver(Protocol):
@@ -310,6 +320,69 @@ def resolve_provisioning(
     return ctx, strategy
 
 
+def resolve_outbound_rule_envelope(
+    *,
+    bot_id: str,
+    owner_id: str,
+    bot_query: Any,
+    template_service: Any | None,
+    secret_resolver: "SecretResolver | None",
+    theta_master_key_secret: str = "",
+) -> dict[str, Any] | None:
+    """Resolve the engine-owned outbound-rule envelope for a bot at bootstrap.
+
+    Mirrors the create-chain provisioning resolution (``resolve_provisioning``
+    -> ``EngineProvisioningStrategy.build_extra_properties``) so that bootstrap
+    rebuilding an outbound rule preserves a Bot's custom egress-key instead of
+    falling back to the deployment default credential. Engine-specific knowledge
+    (e.g. theta-key decryption) still lives only in each engine strategy; this
+    function is engine-agnostic orchestration: fetch bot -> fetch template_config
+    -> dispatch to the resolved strategy -> return the generic envelope
+    (``{"outbound_api_key": ...}``). Returns ``None`` (legacy default-credential
+    fallback, zero regression) when there is no custom key, a dependency is
+    missing, or resolution fails.
+
+    ``bot_query`` duck-types ``BotQueryProtocol.get_by_id_and_owner`` and
+    ``template_service`` duck-types ``TemplateConfigReader.get_template_config``;
+    typed as ``Any`` so the neutral composition root does not reverse-import
+    ``core/devices`` (see architecture review).
+    """
+    if template_service is None:
+        return None
+    bot = bot_query.get_by_id_and_owner(bot_id, owner_id)
+    if not bot:
+        return None
+    try:
+        template_config = template_service.get_template_config(bot_id)
+    except Exception as e:
+        logger.warning(
+            "[engines.resolve_outbound_rule_envelope] get_template_config "
+            "failed: bot_id=%s, error=%s", bot_id, e)
+        return None
+    try:
+        ctx, strategy = resolve_provisioning(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            bot_type=bot.get("bot_type", ""),
+            active_engine=bot.get("active_engine"),
+            template_type=bot.get("template_type"),
+            template_config=template_config,
+        )
+        return strategy.build_extra_properties(
+            ctx,
+            secret_resolver=secret_resolver,
+            theta_master_key_secret=theta_master_key_secret,
+        )
+    except Exception as e:  # pragma: no cover - defensive: resolve_provisioning
+        # and each registered strategy's build_extra_properties never raise for
+        # any real bot (they fail-open internally); this only fires on a future
+        # broken engine/strategy or registry corruption. Fail-safe to None.
+        logger.warning(
+            "[engines.resolve_outbound_rule_envelope] resolve failed: "
+            "bot_id=%s, error=%s", bot_id, e)
+        return None
+
+
 __all__ = [
     "AICODING_ENGINE_TYPE",
     "BaasEngineBucketResolver",
@@ -326,4 +399,5 @@ __all__ = [
     "resolve_baas_engine_bucket",
     "resolve_default_capabilities_engine_bucket",
     "resolve_provisioning",
+    "resolve_outbound_rule_envelope",
 ]
