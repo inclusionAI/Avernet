@@ -281,10 +281,8 @@ def test_mutating_not_found_masked(client, svc):
 
 # ----- create + auth-status (Task 8) ---------------------------------------
 
-# openclaw is in the default SUPPORTED_ENGINE_TYPES registry; teclaw is NOT
-# (it is only available where ENGINE_TYPES is configured to include it), so the
-# create path's engine check would reject it here. Tests that specifically need
-# the teclaw/ANDC pairing patch the registry.
+# openclaw and teclaw are both in the default SUPPORTED_ENGINE_TYPES registry.
+# Tests that need a narrower registry still patch _get_engine_types explicitly.
 _CREATE_BODY = {
     "bot_name": "NewBot", "bot_desc": "d", "engine": "openclaw",
     "cluster_name": "ACRA", "bot_type": "personal",
