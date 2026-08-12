@@ -20,7 +20,9 @@ change, no OCB dependency in this scope.
   `BotRepository` stay out of the served OpenAPI schema — the existing invariant
   guarded by `test_public_namespace.py`.
 - [ ] **A3.** Schema (`openapi_v1/resources/schemas.py`): add optional
-  `path: str | None` and `parent_path: str | None` to `Resource`.
+  `path: str | None` to `Resource` — the full workspace-relative path
+  (`a/b/c.txt`). **No `parent_path` on the response**: it and `name` are both
+  derivable from `path`, so exposing them would be redundant.
 - [ ] **A4.** Relax `gmt_create` / `gmt_modified` to `str | None` — the engine's
   listing carries no timestamps (`FileEntry`, `core/file/models.py:34`), so a
   bot-created file has none.
@@ -39,9 +41,13 @@ change, no OCB dependency in this scope.
   sanitization. Keep the existing `name` parameter; it may carry a relative path.
   **No new parameter.**
 - [ ] **B2.** After a successful upload, write the enrichment record
-  best-effort — `name` = leaf, `path` = workspace-relative, `parent_path` =
-  directory, matching `core/resources/services/resource_service.py:359`. A repo
-  failure must **not** fail the upload; log and continue.
+  best-effort. `path` (workspace-relative) is the key our flow needs; `name` is
+  non-optional on the model (`core/resources/models.py:36`); `parent_path` is
+  written only for consistency with the console, whose legacy listing filters
+  rows by it (`core/repository/implementations/platform/resource.py:112`) — our
+  own duplicate check moves to the filesystem in B7, so nothing here reads it.
+  All three derive from the one path. A repo failure must **not** fail the
+  upload; log and continue.
 - [ ] **B3.** Replace `GET /{resource_id}/download` with
   `GET /download?path=` → `ResourceFileService.read_file`. Declare it **before**
   `/{resource_id}` (`:293`), as `/check-name` and `/upload` already are.
@@ -61,10 +67,11 @@ change, no OCB dependency in this scope.
 
 ## Group C — Listing
 
-- [ ] **C1.** Add a `parent_path` query parameter to `list_resources` for
-  browsing a subdirectory.
-- [ ] **C2.** List via `ResourceFileService.list_dir(path=parent_path or "")`,
-  non-recursive.
+- [ ] **C1.** Add a `path` query parameter to `list_resources` — the directory to
+  list, relative to the workspace root, empty for the root. Named `path` to match
+  the console (`adapters/http/resources/file_router.py:202`); it is a listing
+  input and has nothing to do with the DB `parent_path` attribute.
+- [ ] **C2.** List via `ResourceFileService.list_dir(path=path)`, non-recursive.
 - [ ] **C3.** Map entries: directories → `ResourceType.FOLDER`, files → `FILE`.
   Use `relative_path`, never the engine-view absolute `path`
   (`resource_file_service._rel_path:200`).

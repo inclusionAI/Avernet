@@ -97,13 +97,22 @@ a failed write never leaves a record. Record creation becomes **best-effort** �
 a failure to persist enrichment must not fail an upload whose bytes landed, since
 the file is now genuinely there and will be listed regardless. Log and continue.
 
-Fields as before (`core/resources/services/resource_service.py:359` writes the
-same shape to the same table): `name` = leaf, `path` = workspace-relative,
-`parent_path` = directory.
+**On the three record fields.** `name`, `path`, and `parent_path` are all
+derivable from one workspace-relative path, and after this change only `path`
+earns its place in our flow. `parent_path`'s single functional consumer was
+duplicate detection (`check_name_exists` filters on it), which moves to the
+filesystem in B7. It is still written, because the console's legacy listing
+filters rows by it (`core/repository/implementations/platform/resource.py:112`)
+and both flows share the table; `name` is separately non-optional on the model
+(`core/resources/models.py:36`). Both are a `basename`/`dirname` off `path`, not
+independent inputs — and neither is exposed on the response schema.
 
 ### 4. Listing — merge filesystem with records
 
-1. `ResourceFileService.list_dir(path=parent_path or "")` — non-recursive.
+1. `ResourceFileService.list_dir(path=path)` — non-recursive. The query
+   parameter is `path` (the directory to list, empty for the root), matching the
+   console (`adapters/http/resources/file_router.py:202`). It is a listing input,
+   unrelated to the DB `parent_path` attribute.
 2. Map entries: directories → `ResourceType.FOLDER`, files → `FILE`. Use
    `relative_path`, never the engine-view absolute `path`
    (`resource_file_service._rel_path:200`).
@@ -124,7 +133,9 @@ and must now return directories.
 
 `openapi_v1/resources/schemas.py`:
 
-- add optional `path: str | None` and `parent_path: str | None`
+- add optional `path: str | None` — the full workspace-relative path. Not
+  `parent_path` and not a separate directory field: both they and `name` are a
+  `dirname`/`basename` off `path`, so exposing them would be redundant.
 - relax `gmt_create` / `gmt_modified` to `str | None` — the engine's listing
   carries no timestamps (`FileEntry` is `name/path/relative_path/is_dir/size`,
   `core/file/models.py:34`), so a bot-created file has none. The console already
@@ -163,7 +174,7 @@ resolving for files. Mitigated by the surface's standing "NOT PUBLIC-READY" gate
 
 **Listing availability.** Listing becomes a device round trip; an unbound or
 unreachable bot now affects an endpoint that was previously local. Non-recursive
-and `parent_path`-scoped bounds it.
+and scoped to one directory bounds it.
 
 **Metadata degradation.** Bot-created files report null timestamps and source.
 Accepted per the metadata decision; the alternative was adding mtime to the
