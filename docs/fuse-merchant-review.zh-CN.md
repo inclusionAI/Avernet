@@ -63,10 +63,13 @@ Fuse 结论**不自动写回群聊**，只作为店主本人的参考浮窗；�
 确保已启动 BCS、前端、bcsfuse 和 4 个经营 Bot：
 
 ```bash
+export BOTS_PROFILE_DIR=scripts/4bots_merchant_operations_profile
 ./scripts/singlebox.sh --standalone start bcs_frontend
 ./scripts/singlebox.sh --standalone start bcsfuse
-./scripts/singlebox.sh --standalone start bots --profile-dir scripts/4bots_merchant_operations_profile
+./scripts/singlebox.sh --standalone start bots --profile-dir "$BOTS_PROFILE_DIR"
 ```
+
+> 需要先导出 `BOTS_PROFILE_DIR`：BCS 启动时会把它作为 `bots_base_dir` 写进运行时配置，这样后续 bots onboard 时 bcs-fusion 才能找到 `IDENTITY.md`、`SOUL.md` 等 profile 文件并同步给 bcsfuse。
 
 > 从本改动开始，`singlebox` 在 bots 启动成功并 onboard 后，会自动为当前 profile 的 4 个 Bot 开启 `fusion_enable`。启动日志里应能看到 `Profile fusion enabled for ...`。
 
