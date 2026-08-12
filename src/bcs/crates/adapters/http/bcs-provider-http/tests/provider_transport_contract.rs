@@ -22,7 +22,8 @@ use bcs_service_api::{
     BotDeliveryCommand, BotDeliveryPort, BotEventCommand, BotEventOutcome, BotRunContext,
     BotRunContextPort, ChatAbortCommand, ChatAbortOutcome, ChatEventState, GroupCallbackCommand,
     GroupCallbackOutcome, GroupHistoryBotRequestPort, MessageFlowService,
-    ProviderEventIngestCommand, ProviderEventSource, ProviderRunTransport, ServiceResult,
+    ProviderEventIngestCommand, ProviderEventIngestService, ProviderEventSource,
+    ProviderRunTransport, ServiceResult,
     DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
     TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome,
     TaskRunAliasRegistration, WebSendCommand, WebSendOutcome,
@@ -1215,6 +1216,16 @@ impl MessageFlowService for RecordingMessageFlow {
         _cmd: TaskCompleteCommand,
     ) -> ServiceResult<TaskCompleteOutcome> {
         unreachable!("not used by this contract")
+    }
+}
+
+#[async_trait::async_trait]
+impl ProviderEventIngestService for RecordingMessageFlow {
+    async fn ingest_provider_event(
+        &self,
+        cmd: ProviderEventIngestCommand,
+    ) -> ServiceResult<BotEventOutcome> {
+        MessageFlowService::ingest_provider_event(self, cmd).await
     }
 }
 

@@ -10,8 +10,9 @@ use bcs_service_api::{
     ProviderBotCoreService, ProviderBotEventCommand, ProviderBotEventCredential,
     ProviderBotEventError, ProviderBotEventOutcome, ProviderBotEventService,
     ProviderCoordinationConfig, ProviderCoordinationEventKind, ProviderCoordinationIntent,
-    ProviderEventIngestCommand, ProviderEventSource, ProviderRunTransport, RuntimeBotIdentity,
-    ServiceError, TaskCompleteCommand, TaskDispatchCommand, TaskMessageCommand,
+    ProviderEventIngestCommand, ProviderEventIngestService, ProviderEventSource,
+    ProviderRunTransport, RuntimeBotIdentity, ServiceError, ServiceResult, TaskCompleteCommand,
+    TaskDispatchCommand, TaskMessageCommand, apply_provider_event_text, ChatResponseMode,
 };
 use serde_json::{Map, Value, json};
 use tokio::sync::Mutex;
@@ -112,6 +113,7 @@ pub struct ProviderBotEvents {
     collaboration_runtime: Option<Arc<dyn CollaborationRuntimeService>>,
     coordination_seen: Arc<Mutex<HashMap<String, u64>>>,
     state_machine_terminals_inflight: Arc<StdMutex<HashSet<StateMachineTerminalKey>>>,
+    state_machine_visible_text: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl ProviderBotEvents {
@@ -127,6 +129,7 @@ impl ProviderBotEvents {
             collaboration_runtime: None,
             coordination_seen: Arc::new(Mutex::new(HashMap::new())),
             state_machine_terminals_inflight: Arc::new(StdMutex::new(HashSet::new())),
+            state_machine_visible_text: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -287,6 +290,113 @@ impl ProviderBotEvents {
         }
         Ok(())
     }
+
+    async fn ingest_event(
+        &self,
+        command: ProviderEventIngestCommand,
+    ) -> ServiceResult<bcs_service_api::BotEventOutcome> {
+        let Some(runtime) = self.collaboration_runtime.as_ref() else {
+            return self.message_flow.ingest_provider_event(command).await;
+        };
+        let Some(correlation) = runtime
+            .lookup_delivery_correlation(&command.event.run_id)
+            .await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        else {
+            return self.message_flow.ingest_provider_event(command).await;
+        };
+        if correlation.assignee_bot_id != command.event.bot_id {
+            return Err(ServiceError::InvalidOperation {
+                message: "provider event bot does not match state-machine delivery".to_string(),
+                request_id: Some(command.event.run_id),
+            });
+        }
+
+        let mut event = command.event;
+        let terminal = matches!(event.state,
+            ChatEventState::Final | ChatEventState::Error | ChatEventState::Aborted);
+        let visible_text = {
+            let mut runs = self.state_machine_visible_text.lock().await;
+            let accumulated = runs.entry(event.run_id.clone()).or_default();
+            apply_provider_event_text(accumulated, &event.event_type, &event.event_payload,
+                &event.state, ChatResponseMode::AfterLastToolCall);
+            let visible_text = accumulated.clone();
+            if terminal { runs.remove(&event.run_id); }
+            visible_text
+        };
+        if matches!(event.event_type.as_str(), "chat" | "chat.event")
+            && matches!(event.state, ChatEventState::Delta | ChatEventState::Final)
+            && !visible_text.is_empty()
+        {
+            inject_visible_text(&mut event.event_payload, &visible_text);
+        }
+
+        let runtime_command = HandleBotTerminalEventCommand {
+            bot_id: event.bot_id.clone(),
+            run_id: event.run_id.clone(),
+            event_type: event.event_type.clone(),
+            event_payload: event.event_payload.clone(),
+            state: event.state.clone(),
+            bcs_session_id: event.bcs_session_id.clone(),
+        };
+        if event.state == ChatEventState::Final {
+            let inflight_key = (correlation.state_machine_run_id.clone(),
+                correlation.node_id.clone(), correlation.attempt);
+            if self.state_machine_terminals_inflight.lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .insert(inflight_key.clone())
+            {
+                let runtime = runtime.clone();
+                let inflight_guard = StateMachineTerminalInflightGuard {
+                    inflight: self.state_machine_terminals_inflight.clone(),
+                    key: inflight_key,
+                };
+                tokio::spawn(async move {
+                    let _inflight_guard = inflight_guard;
+                    if let Err(error) = runtime.handle_bot_terminal_event(runtime_command).await {
+                        error!(%error, "provider ingest: async state-machine final failed");
+                    }
+                });
+            }
+            return Ok(provider_state_machine_outcome());
+        }
+
+        let outcome = runtime.handle_bot_terminal_event(runtime_command).await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        Ok(if outcome.consumed { provider_state_machine_outcome() }
+            else { provider_state_machine_miss_outcome() })
+    }
+}
+
+fn inject_visible_text(payload: &mut Value, text: &str) {
+    if let Some(object) = payload.as_object_mut() {
+        object.insert("message".to_string(),
+            json!({"content": [{"type": "text", "text": text}]}));
+    }
+}
+
+fn provider_state_machine_outcome() -> bcs_service_api::BotEventOutcome {
+    bcs_service_api::BotEventOutcome {
+        bot_deliveries: Vec::new(), frontend_deliveries: Vec::new(),
+        unregistered_run_ids: Vec::new(), mentions: Vec::new(),
+        delivered_count: 1, failed_count: 0, delivery_results: Vec::new(),
+    }
+}
+
+fn provider_state_machine_miss_outcome() -> bcs_service_api::BotEventOutcome {
+    bcs_service_api::BotEventOutcome {
+        failed_count: 1, delivered_count: 0, ..provider_state_machine_outcome()
+    }
+}
+
+#[async_trait]
+impl ProviderEventIngestService for ProviderBotEvents {
+    async fn ingest_provider_event(
+        &self,
+        command: ProviderEventIngestCommand,
+    ) -> ServiceResult<bcs_service_api::BotEventOutcome> {
+        self.ingest_event(command).await
+    }
 }
 
 #[async_trait]
@@ -382,6 +492,33 @@ impl ProviderBotEventService for ProviderBotEvents {
         };
         if ingest_event_type == "chat.event" {
             normalize_chat_error_payload(&mut ingest_payload);
+        }
+
+        if let Some(runtime) = self.collaboration_runtime.as_ref()
+            && runtime.lookup_delivery_correlation(&command.run_id).await
+                .map_err(map_collaboration_runtime_error)?.is_some()
+        {
+            let identity = self.authenticate_event(&command).await?;
+            let outcome = self.ingest_event(ProviderEventIngestCommand {
+                source: ProviderEventSource::Callback,
+                event: BotEventCommand {
+                    bot_id: identity.bot_uuid,
+                    run_id: command.run_id.clone(),
+                    group_id: String::new(),
+                    event_type: ingest_event_type,
+                    event_payload: ingest_payload,
+                    state: command.state.clone(),
+                    bcs_session_id: None,
+                },
+            }).await.map_err(map_service_error)?;
+            if is_terminal {
+                self.bot_run_context.mark_terminal(&command.run_id).await;
+                self.bot_run_context.mark_provider_transport_terminal(&command.run_id).await;
+            }
+            return Ok(ProviderBotEventOutcome {
+                delivered_count: outcome.delivered_count,
+                failed_count: outcome.failed_count,
+            });
         }
 
         let has_registered_context = self
@@ -599,8 +736,7 @@ impl ProviderBotEventService for ProviderBotEvents {
         let run_id = command.run_id.clone();
         let identity_bot_uuid = identity.bot_uuid.clone();
         let outcome_result = self
-            .message_flow
-            .ingest_provider_event(ProviderEventIngestCommand {
+            .ingest_event(ProviderEventIngestCommand {
                 source: ProviderEventSource::Callback,
                 event: BotEventCommand {
                     bot_id: identity_bot_uuid.clone(),

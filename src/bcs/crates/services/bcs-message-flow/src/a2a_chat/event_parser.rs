@@ -1,4 +1,4 @@
-use bcs_service_api::ChatResponseMode;
+use bcs_service_api::{ChatEventState, ChatResponseMode, apply_provider_event_text};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DrainOutcome {
@@ -90,16 +90,16 @@ pub fn drain_chat_event_with_mode(
 
             match state {
                 "delta" => {
-                    if let Some(text) = chat_event_delta_text(event.payload.as_ref())
-                        .or_else(|| chat_event_text(event.payload.as_ref()))
-                    {
-                        accumulated.push_str(text);
+                    if let Some(payload) = event.payload.as_ref() {
+                        apply_provider_event_text(accumulated, "chat.event", payload,
+                            &ChatEventState::Delta, response_mode);
                     }
                     DrainOutcome::Continue
                 }
                 "final" => {
-                    if let Some(text) = chat_event_text(event.payload.as_ref()) {
-                        merge_final_text(accumulated, text, response_mode);
+                    if let Some(payload) = event.payload.as_ref() {
+                        apply_provider_event_text(accumulated, "chat.event", payload,
+                            &ChatEventState::Final, response_mode);
                     }
                     DrainOutcome::Final
                 }
@@ -110,8 +110,14 @@ pub fn drain_chat_event_with_mode(
                     DrainOutcome::Error(error)
                 }
                 "tool_call_start" | "tool_call_end" => {
-                    if response_mode == ChatResponseMode::AfterLastToolCall {
-                        accumulated.clear();
+                    if let Some(payload) = event.payload.as_ref() {
+                        let state = if state == "tool_call_start" {
+                            ChatEventState::ToolCallStart
+                        } else {
+                            ChatEventState::ToolCallEnd
+                        };
+                        apply_provider_event_text(accumulated, "chat.event", payload,
+                            &state, response_mode);
                     }
                     DrainOutcome::Continue
                 }
@@ -119,14 +125,9 @@ pub fn drain_chat_event_with_mode(
             }
         }
         "agent" => {
-            let stream = event
-                .payload
-                .as_ref()
-                .and_then(|payload| payload.get("stream"))
-                .and_then(|stream| stream.as_str())
-                .unwrap_or("");
-            if response_mode == ChatResponseMode::AfterLastToolCall && stream == "tool" {
-                accumulated.clear();
+            if let Some(payload) = event.payload.as_ref() {
+                apply_provider_event_text(accumulated, "agent", payload,
+                    &ChatEventState::ToolCallEnd, response_mode);
             }
             DrainOutcome::Continue
         }
@@ -183,92 +184,4 @@ fn chat_event_text(payload: Option<&serde_json::Value>) -> Option<&str> {
         .and_then(|content| content.first())
         .and_then(|block| block.get("text"))
         .and_then(|text| text.as_str())
-}
-
-fn chat_event_delta_text(payload: Option<&serde_json::Value>) -> Option<&str> {
-    payload
-        .and_then(|payload| payload.get("delta_text").or_else(|| payload.get("deltaText")))
-        .and_then(|text| text.as_str())
-}
-
-fn merge_final_text(accumulated: &mut String, text: &str, response_mode: ChatResponseMode) {
-    if text.is_empty() {
-        return;
-    }
-    if accumulated.is_empty() {
-        accumulated.push_str(text);
-        return;
-    }
-
-    match response_mode {
-        ChatResponseMode::Full => {
-            if final_snapshot_starts_with(text, accumulated.as_str()) {
-                accumulated.clear();
-                accumulated.push_str(text);
-            } else {
-                accumulated.push_str(text);
-            }
-        }
-        ChatResponseMode::AfterLastToolCall => {
-            if final_snapshot_ends_with(text, accumulated.as_str()) {
-                return;
-            }
-            if let Some(deduped) =
-                dedupe_repeated_trailing_delta(text, accumulated.as_str())
-            {
-                accumulated.clear();
-                accumulated.push_str(&deduped);
-                return;
-            }
-            if final_snapshot_starts_with(text, accumulated.as_str()) {
-                accumulated.clear();
-                accumulated.push_str(text);
-            } else {
-                accumulated.push_str(text);
-            }
-        }
-    }
-}
-
-fn final_snapshot_starts_with(text: &str, accumulated: &str) -> bool {
-    if text.starts_with(accumulated) {
-        return true;
-    }
-    text.replace("\n\n", "").starts_with(accumulated)
-}
-
-fn final_snapshot_ends_with(text: &str, accumulated: &str) -> bool {
-    if text == accumulated || text.ends_with(accumulated) {
-        return true;
-    }
-    let compacted = text.replace("\n\n", "");
-    compacted == accumulated || compacted.ends_with(accumulated)
-}
-
-fn dedupe_repeated_trailing_delta(text: &str, accumulated: &str) -> Option<String> {
-    let boundaries = accumulated
-        .char_indices()
-        .map(|(idx, _)| idx)
-        .chain(std::iter::once(accumulated.len()))
-        .collect::<Vec<_>>();
-    for segment_start in boundaries.iter().copied().rev().skip(1) {
-        let segment_len = accumulated.len() - segment_start;
-        if segment_len == 0 || segment_len * 2 > accumulated.len() {
-            continue;
-        }
-        let previous_start = accumulated.len() - segment_len * 2;
-        if !boundaries.contains(&previous_start) {
-            continue;
-        }
-        let repeated = &accumulated[previous_start..segment_start];
-        let trailing = &accumulated[segment_start..];
-        if repeated != trailing {
-            continue;
-        }
-        let deduped = &accumulated[..segment_start];
-        if final_snapshot_ends_with(text, deduped) {
-            return Some(deduped.to_string());
-        }
-    }
-    None
 }

@@ -1819,7 +1819,6 @@ impl Default for BcsServerState {
         ));
         let group_fusion = Arc::new(BcsGroupFusion::new(sessions.clone(), fusion.clone()));
         let message_flow = maybe_wrap_message_flow(&config, message_flow);
-        provider_transport.set_ingest(message_flow.clone(), bot_run_context.clone());
         let collaboration_store = Arc::new(MemoryCollaborationStore::new());
         let judge_evaluator: Arc<dyn JudgeEvaluatorPort> = Arc::new(NoopJudgeEvaluator::default());
         let (session_channel_outbound_slot, session_channel_outbound) =
@@ -1893,7 +1892,7 @@ impl Default for BcsServerState {
         )
         .expect("default channel runtime must initialize");
         let channel_service = channel_runtime.service.clone();
-        let provider_bot_events: Arc<dyn ProviderBotEventService> = Arc::new(
+        let provider_bot_events_impl = Arc::new(
             ProviderBotEvents::new(
                 provider_bot_core.clone(),
                 bot_run_context.clone(),
@@ -1901,6 +1900,10 @@ impl Default for BcsServerState {
             )
             .with_collaboration_runtime(collaboration_runtime.clone()),
         );
+        let provider_event_ingest: Arc<dyn bcs_service_api::ProviderEventIngestService> =
+            provider_bot_events_impl.clone();
+        let provider_bot_events: Arc<dyn ProviderBotEventService> = provider_bot_events_impl;
+        provider_transport.set_ingest(provider_event_ingest, bot_run_context.clone());
         let services = ServicesBuilder::default()
             .registry(bot_registry.clone())
             .group(sessions)
@@ -3225,7 +3228,6 @@ impl BcsServer {
 
         // Build services bundle
         let message_flow = maybe_wrap_message_flow(&config, message_flow);
-        provider_transport.set_ingest(message_flow.clone(), bot_run_context.clone());
         let channel_runtime = build_channel_runtime(
             &config,
             channel_slot,
@@ -3241,7 +3243,7 @@ impl BcsServer {
         )
         .expect("in-memory channel runtime must initialize");
         let channel_service = channel_runtime.service.clone();
-        let provider_bot_events: Arc<dyn ProviderBotEventService> = Arc::new(
+        let provider_bot_events_impl = Arc::new(
             ProviderBotEvents::new(
                 provider_bot_core.clone(),
                 bot_run_context.clone(),
@@ -3249,6 +3251,10 @@ impl BcsServer {
             )
             .with_collaboration_runtime(collaboration_runtime.clone()),
         );
+        let provider_event_ingest: Arc<dyn bcs_service_api::ProviderEventIngestService> =
+            provider_bot_events_impl.clone();
+        let provider_bot_events: Arc<dyn ProviderBotEventService> = provider_bot_events_impl;
+        provider_transport.set_ingest(provider_event_ingest, bot_run_context.clone());
         let services = ServicesBuilder::default()
             .registry(bot_registry.clone())
             .group(sessions)
@@ -3821,7 +3827,6 @@ impl BcsServer {
 
         // Build services bundle
         let message_flow = maybe_wrap_message_flow(&config, message_flow);
-        provider_transport.set_ingest(message_flow.clone(), bot_run_context.clone());
         let channel_repos = if channel_bridge_enabled(&config) {
             channel_repos_with_storage(&infrastructure_plugins).await?
         } else {
@@ -3842,7 +3847,7 @@ impl BcsServer {
         )?;
         let channel_service = channel_runtime.service.clone();
         register_channel_lifecycles(&lifecycle, &channel_runtime.lifecycles);
-        let provider_bot_events: Arc<dyn ProviderBotEventService> = Arc::new(
+        let provider_bot_events_impl = Arc::new(
             ProviderBotEvents::new(
                 provider_bot_core.clone(),
                 bot_run_context.clone(),
@@ -3850,6 +3855,10 @@ impl BcsServer {
             )
             .with_collaboration_runtime(collaboration_runtime.clone()),
         );
+        let provider_event_ingest: Arc<dyn bcs_service_api::ProviderEventIngestService> =
+            provider_bot_events_impl.clone();
+        let provider_bot_events: Arc<dyn ProviderBotEventService> = provider_bot_events_impl;
+        provider_transport.set_ingest(provider_event_ingest, bot_run_context.clone());
         let services = ServicesBuilder::default()
             .registry(bot_registry.clone())
             .group(sessions)
