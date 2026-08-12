@@ -241,10 +241,32 @@ def test_sync_on_change_service_bot_uses_online_binding():
 
     writer.sync_on_change(bot_id="bot-1", owner_id="owner-1", admins=["u1"])
 
-    # online binding resolved via resolve_for_binding (service bot has a publish record)
-    assert resolver.resolve_for_binding_calls == [(99, "owner-1", "bot-1")]
-    assert resolver.resolve_for_bot_calls == []
+    # service bot has a publish record → online binding (99) IS resolved, alongside
+    # the draft binding (ac_bots.binding_id via resolve_for_bot). Both legs run; see
+    # test_sync_on_change_dual_syncs_draft_and_online_for_republished_bot for the
+    # full two-container assertion.
+    assert (99, "owner-1", "bot-1") in resolver.resolve_for_binding_calls
+    assert resolver.resolve_for_bot_calls == [("bot-1", "owner-1")]
     assert "ADMINS=u1" in fs.write_calls[-1][1].decode()
+
+
+def test_sync_on_change_dual_syncs_draft_and_online_for_republished_bot():
+    # A published-then-re-drafted bot has TWO running containers: the draft
+    # (ac_bots.binding_id, via resolve_for_bot) and the online (ext.binding.online,
+    # via resolve_for_binding). A collaborator change must reach BOTH — syncing
+    # only the online one regresses draft-state admin edits.
+    fs = FakeDeviceFileSystem({_DEVICE_CREDENTIALS_PATH: _credentials()})
+    writer, resolver, dispatcher = _make_writer(fs=fs, admins=["u1"], online_binding_id=99)
+
+    writer.sync_on_change(bot_id="bot-1", owner_id="owner-1", admins=["u1"])
+
+    # draft binding (ac_bots.binding_id) AND online binding (99) both resolved
+    assert resolver.resolve_for_bot_calls == [("bot-1", "owner-1")]
+    assert resolver.resolve_for_binding_calls == [(99, "owner-1", "bot-1")]
+    # two writes — one per container — each with the ADMINS line
+    assert len(fs.write_calls) == 2
+    for _path, content in fs.write_calls:
+        assert "ADMINS=u1" in content.decode()
 
 
 def test_sync_on_change_no_publish_record_falls_back_to_resolve_for_bot():

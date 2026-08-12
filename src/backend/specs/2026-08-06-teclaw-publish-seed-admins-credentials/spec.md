@@ -94,11 +94,15 @@ restart/re-publish needed.
       and seed replay-converges: re-entering the ACTIVE binding replays both, and
       both are idempotent (token = REPLACE; `.credentials` = read-modify-write).
 - [ ] When a collaborator admin is added/removed on an already-published teclaw
-      service bot, `on_collaboration_changed` resolves the bot's **online**
-      binding (`get_latest_success_by_source_bot_id` → `ext.binding.online` →
-      `resolve_for_binding`) and updates the running container's `.credentials`
-      `ADMINS=` line. Because the engine hot-reloads `.credentials`, the change
-      takes effect immediately — no restart/re-publish.
+      service bot, `on_collaboration_changed` syncs `ADMINS=` to **every running
+      container** of the bot: the draft binding (`ac_bots.binding_id` via
+      `resolve_for_bot`) AND the online binding (`ext.binding.online` via
+      `resolve_for_binding`), independently (each error swallowed). A
+      published-then-re-drafted bot has both containers live at once, so syncing
+      only one regressed the other (draft-only → online had no admins;
+      online-only → draft edits didn't reach the draft container). Because the
+      engine hot-reloads `.credentials`, the change takes effect immediately on
+      each container — no restart/re-publish.
 - [ ] Bots with no publish record (ARCA / personal / desktop) keep today's
       `resolve_for_bot` resolution and are byte-for-byte unchanged.
 - [ ] No mocking in the new/extended tests (per commit `da9bf087`); use real

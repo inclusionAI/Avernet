@@ -180,30 +180,56 @@ class DeviceCredentialsAdminsWriter:
         self._write_for_binding(binding_id, bot_id, owner_id, admins)
 
     def sync_on_change(self, bot_id: str, owner_id: str, admins: List[str]) -> None:
-        """Update the running container's ``ADMINS=`` on a collaborator change.
+        """Sync ``ADMINS=`` to EVERY running container of the bot on a change.
 
-        Service bot → resolve the online binding (``ext.binding.online``) and
-        write via ``resolve_for_binding``; otherwise fall back to
-        ``resolve_for_bot`` (ARCA/personal/desktop). All errors are swallowed
-        (warned) — a collaborator change must never break the main flow.
+        A published-then-re-drafted bot has two running containers at once: the
+        draft (``ac_bots.binding_id``, resolved via ``resolve_for_bot``) and the
+        online (``ext.binding.online``, resolved via ``resolve_for_binding``).
+        Syncing only one regresses the other: draft-only left the online container
+        without admins (the original bug), and online-only skipped the draft
+        container so draft-state admin edits didn't take effect. So write to both,
+        independently — each error is swallowed (a collaborator change must never
+        break the main flow).
+
+        For bots with no publish record (personal/desktop/ARCA-instance) there is
+        no online binding, so only the ``resolve_for_bot`` leg runs (today's
+        behavior).
+        """
+        self._write_safe(
+            "draft", lambda: self._write_for_bot(bot_id, owner_id, admins), bot_id
+        )
+        online_binding_id = self._resolve_online_binding_id(bot_id)
+        if online_binding_id is not None:
+            self._write_safe(
+                "online",
+                lambda: self._write_for_binding(
+                    online_binding_id, bot_id, owner_id, admins
+                ),
+                bot_id,
+            )
+
+    def _write_safe(
+        self, target: str, write: "Callable[[], None]", bot_id: str
+    ) -> None:
+        """Run one credentials write, swallowing any error.
+
+        info on no-running-device (draft/online binding not active), warn on
+        transport failure — never let a .credentials write break the collaborator
+        change main flow.
         """
         try:
-            online_binding_id = self._resolve_online_binding_id(bot_id)
-            if online_binding_id is not None:
-                self._write_for_binding(online_binding_id, bot_id, owner_id, admins)
-            else:
-                self._write_for_bot(bot_id, owner_id, admins)
+            write()
         except (DeviceNotBoundError, UnknownProviderError) as e:
             logger.info(
-                "[credentials_admins_writer] bot 无运行设备，跳过 credentials 同步: "
+                "[credentials_admins_writer] %s 绑定无运行设备，跳过 credentials 同步: "
                 "bot_id=%s, reason=%s",
-                bot_id, e,
+                target, bot_id, e,
             )
         except Exception as e:  # noqa: BLE001 - 协作者变更主流程不可因写 .credentials 失败而中断
             logger.warning(
-                "[credentials_admins_writer] 同步 .credentials 失败(已忽略): "
+                "[credentials_admins_writer] 同步 %s .credentials 失败(已忽略): "
                 "bot_id=%s, error=%s",
-                bot_id, e,
+                target, bot_id, e,
             )
 
     # ── internals ──────────────────────────────────────────────────────────
