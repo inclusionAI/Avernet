@@ -966,6 +966,55 @@ def test_startup_script_put_stores_and_takes_modifier_from_the_principal(
     assert startup_script.put.call_args.kwargs["script"] == "echo new"
 
 
+def test_startup_script_put_that_loses_a_race_with_deletion_is_a_404(
+    client, svc, startup_script
+):
+    """A PUT can pass its existence check and then stall while the bot is
+    deleted, committing after *both* of the deletion's purges. The deletion
+    sweeps cannot cancel a request that already passed its check, so the write
+    re-checks liveness afterwards and withdraws itself.
+
+    404, not success: the bot the caller addressed is gone, and reporting a
+    stored script for it would be the silent wrong answer this feature keeps
+    closing elsewhere.
+    """
+    from agentclaw.community.core.bot_management.services.bot_service import (
+        BotNotFoundError,
+    )
+
+    svc.get_bot.side_effect = [_SUPPORTED_BOT, BotNotFoundError("gone")]
+    startup_script.put.return_value = _record(script="echo new")
+
+    resp = client.put(
+        "/openapi/v1/bots/b1/startup-script", json={"script": "echo new"}
+    )
+
+    assert resp.status_code == 404
+    startup_script.delete.assert_called_once_with(entity_id="u1", bot_id="b1")
+
+
+def test_a_lost_race_still_404s_when_the_row_cannot_be_withdrawn(
+    client, svc, startup_script
+):
+    """The deletion's second sweep is the backstop — it runs after our write, so
+    the row is still reachable by it. Failing to undo our own write must not
+    turn the lost race into a 200.
+    """
+    from agentclaw.community.core.bot_management.services.bot_service import (
+        BotNotFoundError,
+    )
+
+    svc.get_bot.side_effect = [_SUPPORTED_BOT, BotNotFoundError("gone")]
+    startup_script.put.return_value = _record(script="echo new")
+    startup_script.delete.side_effect = RuntimeError("db down")
+
+    resp = client.put(
+        "/openapi/v1/bots/b1/startup-script", json={"script": "echo new"}
+    )
+
+    assert resp.status_code == 404
+
+
 def test_startup_script_put_rejects_an_attempt_to_set_audit_fields(
     client, svc, startup_script
 ):

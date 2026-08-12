@@ -984,12 +984,20 @@ that one design choice, and none of it is visible in the OpenAPI document.
   returning success over a row that can still execute.
 
   It runs a **second** time after the soft delete, mirroring the app-grant
-  revocation's two-sweep handling of the same race. `PUT` checks that the bot
-  exists and writes as a separate step, so a write that passed its check just
-  before the deletion began can land after the first removal; once the soft
-  delete commits, no later `PUT` can pass that check, so the second sweep closes
-  the window rather than narrowing it. A `PUT` that loses this race is reported
-  as successful and its row is then removed — write-then-delete, not a rejection.
+  revocation's two-sweep handling of the same race, which stops a *later* `PUT`
+  from passing its existence check.
+
+  The sweeps alone are not enough, because they cannot cancel a request that
+  already passed its check and is still in flight — that one can commit after
+  both of them. So the write **re-checks liveness after storing** and withdraws
+  itself if the bot is gone. The pair of rules is what closes the race: a
+  deletion committing *after* the write finds the row in its post-delete sweep,
+  and a deletion that committed *before* the re-check is caught by that
+  re-check. There is no third interleaving.
+
+  A `PUT` that loses this race answers **404** — the bot it addressed no longer
+  exists, so reporting a stored script for it would be a wrong answer, not a
+  successful write.
 
   The legacy `default`-bot delete is a restart rather than a deletion and keeps
   its script through both sweeps, matching how its skills and config are already
