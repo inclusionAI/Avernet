@@ -131,6 +131,13 @@
 - **Done when:**
   - [x] Every acceptance criterion in `spec.md` maps to a passing test.
   - [x] Backend and gateway module CI gates pass (`OCB_PRE_PUSH_RUN_CI=1`).
+  - [x] All four endpoints carry happy **and** error cases in
+        `tests/community/endpoints/test_openapi_startup_script.py`, so the flow
+        coverage gate is satisfied by tests rather than by a
+        `coverage_baseline.txt` entry — that file is byte-identical to `dev`.
+        The "blocked on the #651 principal minter" note does not apply here: a
+        case mints its own gateway principal, and a **user** principal suffices
+        because `require_granted_bot` is a no-op for a human caller.
   - [x] A bot with no script produces a byte-identical start sequence — asserted,
         not assumed.
 - **Depends on:** Task 6
