@@ -26,7 +26,9 @@ from agentclaw.community.core.bot_startup_script.repository.models import (
     BotStartupScriptRecord,
 )
 from agentclaw.community.api.bot_startup_script_service import (
+    MAX_SCRIPT_BYTES,
     BotStartupScriptServiceProtocol,
+    StartupScriptTooLargeError,
 )
 from agentclaw.community.core.bot_startup_script.protocols import (
     StartupScriptReaderProtocol,
@@ -41,12 +43,14 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
 
-#: Maximum stored script size, in UTF-8 bytes.
-#:
-#: 64 KiB is far above any real provisioning script and keeps the base64 form
-#: (~4/3 of this) well inside a single ``execute_command`` payload, which is how
-#: the body reaches the container.
-MAX_SCRIPT_BYTES = 64 * 1024
+#: Re-exported so existing importers of this module keep working. The
+#: definitions live on the contract in ``api/`` — see there for why.
+__all__ = [
+    "BotStartupScriptService",
+    "MAX_SCRIPT_BYTES",
+    "MAX_MODIFIER_CHARS",
+    "StartupScriptTooLargeError",
+]
 
 #: Column width of ``ac_bot_startup_script.modifier``.
 #:
@@ -59,22 +63,6 @@ MAX_SCRIPT_BYTES = 64 * 1024
 #: Bounded here rather than at the one caller that composes a prefix today, so
 #: every caller is covered by construction.
 MAX_MODIFIER_CHARS = 1024
-
-
-class StartupScriptTooLargeError(ValueError):
-    """Raised when a submitted script exceeds :data:`MAX_SCRIPT_BYTES`.
-
-    The message names the limit and the actual size — a caller should not have
-    to guess by bisecting their script.
-    """
-
-    def __init__(self, size_bytes: int) -> None:
-        super().__init__(
-            f"startup script is {size_bytes} bytes, "
-            f"which exceeds the {MAX_SCRIPT_BYTES}-byte limit"
-        )
-        self.size_bytes = size_bytes
-        self.limit_bytes = MAX_SCRIPT_BYTES
 
 
 class BotStartupScriptService(

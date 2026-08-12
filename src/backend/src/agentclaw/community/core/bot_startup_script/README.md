@@ -64,10 +64,17 @@ script row, and either tenant could overwrite the other's script and have it
 registration and the tenant's place in the uniqueness key are all one mechanism;
 none of the three works alone.
 
-The uniqueness key is also budgeted against InnoDB's 3072-byte index limit,
-which is why `entity_id` is 256 rather than 1024. SQLite does not enforce that
-limit, so the whole local suite would pass against a table MySQL refuses to
-create; an arithmetic test guards it instead.
+The uniqueness key is budgeted against InnoDB's 3072-byte index limit, which is
+why it is keyed on `(avernet_tenant, script_key)` — a sha256 of
+`(env, entity_id, bot_id)` — rather than on those columns directly. `entity_id`
+alone is 1024 utf8mb4 characters, 4096 bytes, past the cap on its own.
+
+Narrowing `entity_id` to fit was the first attempt and was wrong: it matched the
+column to the index instead of to `ac_bots.entity_id`, so a bot with a longer
+entity id could not have a script stored at all. Hashing bounds the key and
+leaves the column matching its source. SQLite enforces neither the index limit
+nor `VARCHAR` widths, so neither failure was visible locally; an arithmetic test
+guards the index budget.
 
 ## Where the HTTP seam is
 

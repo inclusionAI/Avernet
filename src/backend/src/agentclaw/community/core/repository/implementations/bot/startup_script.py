@@ -25,15 +25,31 @@ from agentclaw.community.core.bot_startup_script.repository.models import (
 from agentclaw.community.core.repository.protocols.bot import (
     BotStartupScriptRepositoryProtocol,
 )
-from datetime import datetime
+import hashlib
 
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.sql import func
 
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
 
 logger = get_logger()
+
+
+def _script_key(*, env: str, entity_id: str, bot_id: str) -> str:
+    """Bounded surrogate for the uniqueness key.
+
+    The logical key is (env, entity_id, bot_id); ``entity_id`` alone is 1024
+    utf8mb4 characters, which is 4096 bytes — past InnoDB's 3072-byte index-key
+    cap before the other two are counted. Hashing gives a fixed 64-character
+    key while the real columns keep their true widths.
+
+    NUL-separated so ``("a", "bc")`` and ``("ab", "c")`` cannot collide by
+    concatenation; no id may contain a NUL.
+    """
+    joined = "\0".join((env, entity_id, bot_id))
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
 
 class BotStartupScriptRepository(
@@ -144,6 +160,9 @@ class BotStartupScriptRepository(
                     script=script,
                     size_bytes=size_bytes,
                     modifier=modifier,
+                    script_key=_script_key(
+                        env=env, entity_id=entity_id, bot_id=bot_id
+                    ),
                 )
                 db.add(row)
             else:
@@ -157,7 +176,15 @@ class BotStartupScriptRepository(
                 # write — and the published contract says every write records
                 # who changed it and when. A caller who re-applies the same
                 # body has still written.
-                row.gmt_modified = datetime.now()
+                #
+                # ``func.now()``, not ``datetime.now()``: this column's default
+                # and onupdate are both DB time, as is gmt_create and as is
+                # every sibling repository that force-touches a timestamp. App
+                # time here would give one audit column two clock sources, and
+                # a server clock trailing the DB's would let gmt_modified land
+                # before gmt_create. A SQL expression also never compares equal
+                # to the stored scalar, so it forces the dirty mark just as well.
+                row.gmt_modified = func.now()
             db.flush()
             db.refresh(row)
             logger.info(

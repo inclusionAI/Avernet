@@ -40,6 +40,48 @@ if TYPE_CHECKING:
 SUPPORTED = "supported"
 UNSUPPORTED = "unsupported"
 
+#: Maximum stored script size, in UTF-8 bytes.
+#:
+#: Declared here, in the contract, rather than in the service that enforces it.
+#: Both sides need it and they sit on opposite sides of the boundary: the HTTP
+#: layer documents the limit in the published 413 and maps the refusal, while
+#: the core service is what actually refuses. Putting it in the service made a
+#: shared adapter contract module import a concrete implementation; putting it
+#: in the service and re-exporting it here closed an ``api`` ↔ ``core`` import
+#: cycle. Defining it once, on the contract, is what avoids both.
+#:
+#: 64 KiB is far above any real provisioning script and keeps the base64 form
+#: (~4/3 of this) well inside a single ``execute_command`` payload, which is how
+#: the body reaches the container.
+MAX_SCRIPT_BYTES = 64 * 1024
+
+
+class StartupScriptTooLargeError(ValueError):
+    """Raised when a submitted script exceeds :data:`MAX_SCRIPT_BYTES`.
+
+    The message names the limit and the actual size — a caller should not have
+    to guess by bisecting their script. Lives beside the limit for the same
+    reason: the adapter maps it to a 413 and must be able to name it without
+    reaching into the service.
+    """
+
+    def __init__(self, size_bytes: int) -> None:
+        super().__init__(
+            f"startup script is {size_bytes} bytes, "
+            f"which exceeds the {MAX_SCRIPT_BYTES}-byte limit"
+        )
+        self.size_bytes = size_bytes
+        self.limit_bytes = MAX_SCRIPT_BYTES
+
+
+__all__ = [
+    "BotStartupScriptServiceProtocol",
+    "MAX_SCRIPT_BYTES",
+    "StartupScriptTooLargeError",
+    "SUPPORTED",
+    "UNSUPPORTED",
+]
+
 
 @runtime_checkable
 class BotStartupScriptServiceProtocol(Protocol):

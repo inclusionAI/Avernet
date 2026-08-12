@@ -39,7 +39,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     ErrorEnvelope,
     Page,
 )
-from agentclaw.community.core.bot_startup_script.services.startup_script_service import (
+from agentclaw.community.api.bot_startup_script_service import (
     MAX_SCRIPT_BYTES,
     StartupScriptTooLargeError,
 )

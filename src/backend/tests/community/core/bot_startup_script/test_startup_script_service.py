@@ -233,6 +233,20 @@ class TestTenantIsolation:
 
         assert "avernet_tenant" in sa_inspect(BotStartupScriptModel).columns
 
+    def test_a_full_width_entity_id_still_fits(self):
+        """``ac_bots.entity_id`` is 1024 chars, so this column must be too.
+
+        It was briefly narrowed to 256 to fit the uniqueness key, which traded
+        an index problem for a truncation one: a bot with a longer entity id
+        could not have a script stored at all. The key is bounded by a hashed
+        surrogate now, so the column matches its source.
+        """
+        from agentclaw.community.core.bot_startup_script.repository.models import (
+            BotStartupScriptModel,
+        )
+
+        assert BotStartupScriptModel.__table__.c.entity_id.type.length == 1024
+
     def test_the_unique_key_includes_the_tenant(self):
         """Two tenants colliding on (env, entity_id, bot_id) must be able to
         hold separate rows — a key without the tenant makes the second write

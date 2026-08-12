@@ -61,10 +61,13 @@ class BotStartupScriptModel(Base):
         default=get_current_env,
         comment="环境标识: prod/pre/dev",
     )
-    # 256, not 1024 — it is part of the uniqueness key, and a 1024-char utf8mb4
-    # column would put that key past InnoDB's 3072-byte cap. See the DDL.
+    # 1024, matching ``ac_bots.entity_id`` exactly. Narrowing it to fit the
+    # uniqueness key was a mistake: a bot whose entity_id is legitimately
+    # longer than the narrowed width could not have a script stored at all,
+    # trading an index problem for a data-truncation one. The key is bounded by
+    # ``script_key`` below instead, so this column is free to match its source.
     entity_id = Column(
-        String(256), nullable=False, comment="实体ID（bot 的 entity_id）"
+        String(1024), nullable=False, comment="实体ID（bot 的 entity_id）"
     )
     bot_id = Column(String(256), nullable=False, comment="Bot ID")
     script = Column(Text, nullable=False, comment="脚本正文（清空即删行）")
@@ -84,6 +87,20 @@ class BotStartupScriptModel(Base):
     # value on ORM inserts comes from the before_insert guard registered below.
     avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
 
+    #: Bounded surrogate for the uniqueness key: sha256 of the logical key.
+    #:
+    #: The logical key is (env, entity_id, bot_id), and ``entity_id`` alone is
+    #: 1024 utf8mb4 characters — 4096 bytes, past InnoDB's 3072-byte index-key
+    #: cap on its own. Indexing a fixed-width digest instead keeps the wide
+    #: columns at their true widths while the constraint stays enforceable.
+    #:
+    #: Written by the repository, never by a caller. Hex sha256 is 64 ASCII
+    #: characters, and the tenant is carried alongside rather than hashed in, so
+    #: the isolation boundary stays visible in the key itself.
+    script_key = Column(
+        String(64), nullable=False, comment="唯一键代理：sha256(env|entity_id|bot_id)"
+    )
+
     gmt_create = Column(
         DateTime, default=func.now(), nullable=False, comment="创建时间"
     )
@@ -98,10 +115,8 @@ class BotStartupScriptModel(Base):
     __table_args__ = (
         UniqueConstraint(
             "avernet_tenant",
-            "env",
-            "entity_id",
-            "bot_id",
-            name="uk_tenant_env_entity_id_bot_id",
+            "script_key",
+            name="uk_tenant_script_key",
         ),
     )
 

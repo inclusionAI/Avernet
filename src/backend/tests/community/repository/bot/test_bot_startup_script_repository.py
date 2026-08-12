@@ -227,8 +227,19 @@ def test_rewriting_an_identical_script_still_moves_the_audit_timestamp(repo):
     SQLAlchemy emits no UPDATE when every assigned value already equals the
     stored one, so without an explicit stamp ``gmt_modified`` would keep showing
     the earlier request's time.
+
+    The row is aged directly in the DB first rather than relying on two writes
+    landing in different clock ticks: the stamp is DB time, which is
+    second-granular on SQLite, so a back-to-back pair could share a timestamp
+    and make this assertion flaky rather than wrong.
     """
-    first = repo.upsert(
+    from datetime import datetime, timedelta
+
+    from agentclaw.community.core.bot_startup_script.repository.models import (
+        BotStartupScriptModel,
+    )
+
+    repo.upsert(
         env="dev",
         entity_id="ent",
         bot_id="bot",
@@ -236,6 +247,12 @@ def test_rewriting_an_identical_script_still_moves_the_audit_timestamp(repo):
         size_bytes=7,
         modifier="alice",
     )
+
+    aged = datetime.now() - timedelta(days=1)
+    with repo._db.orm_session() as db:
+        row = db.query(BotStartupScriptModel).one()
+        row.gmt_modified = aged
+        db.flush()
 
     again = repo.upsert(
         env="dev",
@@ -246,10 +263,37 @@ def test_rewriting_an_identical_script_still_moves_the_audit_timestamp(repo):
         modifier="alice",
     )
 
-    assert again.script == first.script, "the body is genuinely unchanged"
-    # Strictly later, not merely "not None": the whole failure mode is a stamp
-    # that stays put, and datetime.now() is microsecond-resolution so two
-    # back-to-back writes are distinguishable.
-    assert again.gmt_modified > first.gmt_modified, (
+    assert again.script == "echo hi", "the body is genuinely unchanged"
+    assert again.gmt_modified > aged, (
         "an identical rewrite left the audit timestamp on the earlier write"
     )
+
+
+def test_a_full_width_entity_id_round_trips(repo):
+    """A 1024-character entity_id is valid in ac_bots, so it must be storable
+    here — the case the narrowed column would have rejected outright."""
+    entity_id = "e" * 1024
+
+    stored = repo.upsert(
+        env="dev",
+        entity_id=entity_id,
+        bot_id="bot",
+        script="echo hi",
+        size_bytes=7,
+        modifier="alice",
+    )
+
+    assert stored.entity_id == entity_id
+    assert repo.get(env="dev", entity_id=entity_id, bot_id="bot") is not None
+
+
+def test_the_surrogate_key_separates_ids_that_would_concatenate_alike(repo):
+    """NUL-separated, so ("a","bc") and ("ab","c") cannot collide."""
+    from agentclaw.community.core.repository.implementations.bot.startup_script import (
+        _script_key,
+    )
+
+    assert _script_key(env="dev", entity_id="a", bot_id="bc") != _script_key(
+        env="dev", entity_id="ab", bot_id="c"
+    )
+    assert len(_script_key(env="dev", entity_id="e", bot_id="b")) == 64

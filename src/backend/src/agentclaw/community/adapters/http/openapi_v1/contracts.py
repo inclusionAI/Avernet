@@ -14,9 +14,8 @@ from pydantic import BaseModel, Field
 
 # The published startup-script size limit, imported rather than retyped so the
 # example in STARTUP_SCRIPT_WRITE_RESPONSES cannot drift from the enforced value.
-from agentclaw.community.core.bot_startup_script.services.startup_script_service import (
-    MAX_SCRIPT_BYTES,
-)
+# From ``api/`` — the Service API seam — not the core service module it lives in.
+from agentclaw.community.api.bot_startup_script_service import MAX_SCRIPT_BYTES
 
 # Standard codes = HTTP status (3 digits) + business subcode (3 digits).
 CODE_OK = 200000
