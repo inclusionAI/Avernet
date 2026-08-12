@@ -215,16 +215,59 @@ def test_foreign_bot_raises_before_resolving_a_device():
 
 
 def test_the_resolved_owner_is_passed_as_the_operator():
-    """The operator id is routing and bookkeeping downstream, and it must be
-    the resolved owner even when a collaborator holds the channel: some
-    device-service implementations apply collaborator-blind permission models
-    to it, and the BaaS path keys instance affinity on it — per-caller values
-    would pin two operators of one (bot, stage) to different instances."""
+    """The operator id drives multi-instance affinity downstream, and it must
+    be the authenticated caller — owner-keyed affinity pinned every
+    collaborator of one (bot, stage) onto the single instance the owner's
+    id hashed to (the production multi-instance distribution defect), so the affinity field keys on
+    ``caller_id`` instead. When the caller *is* the owner (the default
+    owner-scoped request) this is the resolved owner, and the audit fields
+    below continue to carry it.
+
+    The audit / bookkeeping fields (``staff``, ``nick_name``,
+    ``operator_name``) stay on the resolved owner regardless: the device
+    permission row and audit trail belong to the bot's owner; a
+    collaborator-operated bot does not become the collaborator's bot.
+    """
     devices = _Devices()
     _build(_svc(devices=devices))
     assert devices.kwargs["operator"].staff_id == OWNER
+    assert devices.kwargs["operator"].staff == OWNER
+    assert devices.kwargs["operator"].nick_name == OWNER
+    assert devices.kwargs["operator"].operator_name == OWNER
     assert devices.kwargs["binding_id"] == 42
     assert devices.kwargs["ttl"] == CONNECTION_TTL_SECONDS
+
+
+def test_the_authenticated_caller_drives_instance_affinity_not_the_owner():
+    """A collaborator operating another owner's bot must hash onto the
+    multi-instance ring under **their** id, not the owner's. The owner's id
+    would pin every operator of one (bot, stage) onto a single instance —
+    the regression the production multi-instance distribution defect logged. The audit fields stay on
+    the owner: the bot remains the owner's and the device permission row
+    names the owner, even when a collaborator holds the channel."""
+    collaborators = _Collaborators({(100, "u-collab"): PermissionLevel.MEMBER})
+    devices = _Devices()
+    _build(_svc(devices=devices, collaborators=collaborators), caller_id="u-collab")
+
+    # Affinity follows the caller; audit/bookkeeping stays on the resolved owner.
+    assert devices.kwargs["operator"].staff_id == "u-collab"
+    assert devices.kwargs["operator"].staff == OWNER
+    assert devices.kwargs["operator"].nick_name == OWNER
+    assert devices.kwargs["operator"].operator_name == OWNER
+
+
+def test_repeated_calls_from_one_caller_keep_one_affinity_key():
+    """Same caller reconnecting must keep hitting the same instance — the
+    change is from owner-pinned to caller-sticky, not from sticky to random,
+    so a caller's sessions stay on one device while different callers
+    spread."""
+    collaborators = _Collaborators({(100, "u-collab"): PermissionLevel.MEMBER})
+    seen = []
+    for _ in range(5):
+        devices = _Devices()
+        _build(_svc(devices=devices, collaborators=collaborators), caller_id="u-collab")
+        seen.append(devices.kwargs["operator"].staff_id)
+    assert seen == ["u-collab"] * 5
 
 
 def test_relay_mode_is_requested_so_the_provider_returns_a_finished_url():

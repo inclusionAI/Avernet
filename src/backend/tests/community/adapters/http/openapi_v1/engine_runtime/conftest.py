@@ -81,7 +81,7 @@ class FakeRelay:
     async def call(
         self, *, bot_id, owner_id, method, path,
         body=None, params=None, timeout=None, enveloped=True, facts=None,
-        stage,
+        stage, caller_id=None,
     ) -> EngineResult:
         # Record the ATTEMPT first, then resolve. Ordering it the other way
         # made "no device was touched" tautological: a foreign bot raises in
@@ -100,7 +100,7 @@ class FakeRelay:
                 "bot_id": bot_id, "owner_id": owner_id, "method": method,
                 "path": path, "body": body, "params": params,
                 "timeout": timeout, "enveloped": enveloped,
-                "stage": stage,
+                "stage": stage, "caller_id": caller_id,
             }
         )
         if self.raises is not None:

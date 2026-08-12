@@ -673,6 +673,73 @@ async def test_personal_bot_still_resolves_by_bot():
 
 
 @pytest.mark.asyncio
+async def test_caller_id_flows_into_the_published_device_affinity():
+    """The BaaS multi-instance affinity key on a service bot's published stage
+    must follow the authenticated caller, not the owner. Keying on the owner
+    pinned every collaborator of one (bot, stage) onto the single instance
+    the owner's id hashed to — the production multi-instance distribution defect — so the relay
+    forwards ``caller_id`` as the ``operator_id`` argument to
+    ``resolve_for_binding_invoke`` (which becomes
+    ``conn_info["device_affinity"]`` on the BaaS path).
+    """
+    resolver = _Resolver()
+    repo = _PublishRepo(
+        {100: [_PublishRecord({"binding": {"online": 42}})]}
+    )
+    await _relay(
+        bot_service=_service_bot_service(100),
+        resolver=resolver,
+        publish_repo=repo,
+    ).call(
+        bot_id=BOT, owner_id=OWNER, stage="online", method="GET",
+        path="/api/models", caller_id="collab-1",
+    )
+
+    # ``operator_id`` (the second tuple element) is the caller, not the owner.
+    assert resolver.binding_calls == [(42, "collab-1", BOT)]
+    assert resolver.calls == []
+
+
+@pytest.mark.asyncio
+async def test_caller_id_none_falls_back_to_owner_keyed_affinity():
+    """Owner-scoped and ungated routes pass ``caller_id=None``; the relay
+    keeps the historical owner-keyed behavior so existing call sites and
+    tests that omit the parameter are unchanged."""
+    resolver = _Resolver()
+    repo = _PublishRepo(
+        {100: [_PublishRecord({"binding": {"online": 42}})]}
+    )
+    await _relay(
+        bot_service=_service_bot_service(100),
+        resolver=resolver,
+        publish_repo=repo,
+    ).call(
+        bot_id=BOT, owner_id=OWNER, stage="online", method="GET",
+        path="/api/models",
+    )
+
+    assert resolver.binding_calls == [(42, OWNER, BOT)]
+
+
+@pytest.mark.asyncio
+async def test_personal_bot_path_ignores_caller_id_for_affinity():
+    """A personal bot resolves through ``resolve_for_bot`` (by-bot), which
+    takes ``user_id`` separately from any affinity routing; ``caller_id``
+    has no role on this path. Passing it must not raise or change the
+    resolution — the kwarg is for the published-stage branch only.
+    """
+    resolver = _Resolver()
+    await _relay(resolver=resolver).call(
+        bot_id=BOT, owner_id=OWNER, stage="draft", method="GET",
+        path="/api/models", caller_id="collab-1",
+    )
+
+    # by-bot entry point: caller_id is not threaded into resolve_for_bot.
+    assert resolver.calls == [(BOT, OWNER)]
+    assert resolver.binding_calls == []
+
+
+@pytest.mark.asyncio
 async def test_service_bot_without_a_published_runtime_is_stage_not_live():
     """No live online record is a dead stage, never a fall back to the draft.
 

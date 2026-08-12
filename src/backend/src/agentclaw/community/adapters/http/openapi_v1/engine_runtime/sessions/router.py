@@ -326,6 +326,7 @@ async def list_sessions(
         params["session_key"] = session_key
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        caller_id=user_id,
         method="GET", path="/api/sessions",
         params=params,
     )
@@ -357,6 +358,7 @@ async def create_session(
     )
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        caller_id=user_id,
         method="POST", path="/api/sessions",
         body={
             "title": body.title,
@@ -399,6 +401,7 @@ async def get_session(
     )
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        caller_id=user_id,
         method="GET",
         path=f"/api/sessions/{session_id}",
     )
@@ -433,6 +436,7 @@ async def update_session(
     payload = {k: v for k, v in body.model_dump().items() if v is not None}
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        caller_id=user_id,
         method="POST",
         # QUERY params, not a body. The engine declares this route's fields as
         # bare scalar arguments, which FastAPI binds from the query string —
@@ -468,6 +472,7 @@ async def delete_session(
     )
     await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        caller_id=user_id,
         method="DELETE",
         path=f"/api/sessions/{session_id}",
     )
@@ -506,6 +511,7 @@ async def list_session_messages(
     _require_within_depth(page)
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        caller_id=user_id,
         method="GET",
         path=f"/api/sessions/{session_id}/messages",
         # The history route tail-limits rather than paginating, so the offset is
@@ -542,6 +548,7 @@ async def clear_session_messages(
     )
     await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        caller_id=user_id,
         method="DELETE",
         path=f"/api/sessions/{session_id}/messages",
     )

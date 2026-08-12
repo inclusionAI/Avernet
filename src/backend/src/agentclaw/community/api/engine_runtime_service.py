@@ -60,6 +60,7 @@ class EngineRuntimeRelayProtocol(Protocol):
         enveloped: bool = True,
         facts: BotFacts | None = None,
         stage: str,
+        caller_id: str | None = None,
     ) -> EngineResult:
         """Issue ``method path`` against the addressed bot's engine adapter.
 
@@ -77,6 +78,14 @@ class EngineRuntimeRelayProtocol(Protocol):
         handler gated on and the stage it forwards to cannot silently
         diverge. Ignored by a personal bot — refusing a published stage on
         one is the gate's job, before any device work.
+
+        ``caller_id`` is the authenticated principal when it differs from
+        ``owner_id`` (a collaborator operating a bot they do not own). It
+        flows into the BaaS multi-instance affinity key on the published-stage
+        path, so requests from different callers on one (bot, stage)
+        distribute across instances instead of pinning to the single instance
+        the owner's id would hash to. ``None`` keeps the historical
+        owner-keyed behavior for owner-scoped and ungated routes.
         """
         ...
 

@@ -504,6 +504,41 @@ def test_the_owners_own_request_is_still_served(client, relay):
     assert relay.paths == ["/api/sessions"]
 
 
+@pytest.mark.parametrize(
+    "method,suffix",
+    [
+        ("get", ""), ("post", ""), ("get", f"/{SESSION_ID}"),
+        ("patch", f"/{SESSION_ID}"), ("delete", f"/{SESSION_ID}"),
+        ("get", f"/{SESSION_ID}/messages"), ("delete", f"/{SESSION_ID}/messages"),
+    ],
+)
+def test_the_verified_caller_flows_into_the_relay_as_caller_id(
+    make_client, relay, method, suffix
+):
+    """Multi-instance affinity keys on the caller, and the relay only knows
+    the caller when the sessions router threads it through ``caller_id``.
+    A collaborator operating another owner's bot must forward their own id,
+    not the owner's — the production multi-instance distribution defect pinned every collaborator
+    onto the owner's chosen instance otherwise.
+
+    Each of the seven sessions routes is swept so a future handler that
+    forgets the kwarg on one of them fails this exactly, not via an
+    unrelated downstream test.
+    """
+    relay.set_bot_type("service")
+    relay.add_operator("u-collab")
+    client = make_client(router, caller="u-collab")
+    kwargs = {"json": {"title": "T"}} if method in ("post", "patch") else {}
+    kwargs["params"] = {"owner_id": OWNER}
+    resp = getattr(client, method)(f"{_base()}{suffix}", **kwargs)
+    assert resp.status_code in (200, 201), resp.json()
+    assert relay.calls, "the route never forwarded"
+    assert all(c["caller_id"] == "u-collab" for c in relay.calls)
+    # The addressed owner stays the bot's owner — the affinity change is a
+    # different axis from the owner the request names.
+    assert all(c["owner_id"] == OWNER for c in relay.calls)
+
+
 # ── isolation ────────────────────────────────────────────────────────────────
 
 

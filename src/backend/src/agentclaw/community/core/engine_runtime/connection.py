@@ -209,20 +209,29 @@ class EngineConnectionService:
             bot_pk=bot_pk, bot_id=resolved_id, owner_id=owner_id, stage=stage
         )
 
-        # Composed as the **resolved owner**, deliberately, even when the
-        # admitted caller is a collaborator. The adjudication above is this
-        # surface's authorization; downstream, the operator id is routing and
-        # bookkeeping, and two provider behaviors make the owner the only
-        # correct value there: some device-service implementations apply
-        # permission models of their own that know nothing of collaborators
-        # (they would refuse a caller our gate admitted, as a misleading
-        # "not ready"), and the BaaS path feeds this id into instance
-        # affinity — keyed per caller, two operators of the same (bot, stage)
-        # could be pinned to different instances while the HTTP relay path
-        # resolves with the owner. Who actually held the channel is on the
-        # gate's log line and stamped into the sessions the caller creates.
+        # ``staff_id`` is keyed on the **authenticated caller**, deliberately,
+        # even when the request addresses a bot the caller does not own. The
+        # adjudication above is this surface's authorization; downstream, the
+        # BaaS path feeds ``operator.staff_id`` into multi-instance affinity
+        # (``BaasDeviceService.get_device_connection`` →
+        # ``device_affinity=operator.staff_id``), and keying that on the owner
+        # pinned every collaborator of one (bot, stage) onto the single
+        # instance the owner's id hashed to — the production multi-instance distribution defect The
+        # caller has already been admitted as the bot's operator by
+        # :func:`require_bot_operator`; using the caller id here distributes
+        # multi-instance requests per caller while keeping one caller sticky
+        # across reconnects.
+        #
+        # The audit / bookkeeping fields (``staff``, ``nick_name``,
+        # ``operator_name``) stay on the **resolved owner** — the bot is the
+        # owner's, the device permission row is the owner's, and the device
+        # service's collaborator-aware permission check uses ``staff_id`` (a
+        # collaborator falls through to ``check_collaborator_permission``,
+        # which our gate already proved them guilty of holding). Who actually
+        # held the channel is on the gate's log line and stamped into the
+        # sessions the caller creates.
         operator = OperatorContext(
-            staff_id=resolved_owner,
+            staff_id=caller_id,
             staff=resolved_owner,
             nick_name=resolved_owner,
             operator_name=resolved_owner,

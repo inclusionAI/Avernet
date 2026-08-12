@@ -166,7 +166,12 @@ class EngineRuntimeRelay:
         return await asyncio.to_thread(self.resolve_bot, bot_id, owner_id, caller_id)
 
     def _resolve_device(
-        self, bot_id: str, owner_id: str, facts: BotFacts, stage: str
+        self,
+        bot_id: str,
+        owner_id: str,
+        facts: BotFacts,
+        stage: str,
+        caller_id: str | None = None,
     ) -> DeviceContext:
         """Resolve the bot's device, translating "not reachable" to one error.
 
@@ -181,6 +186,11 @@ resolve_stage_bind_id`. The draft lookup is the same owner-scoped
         the stage entirely — it has only its workspace, and the *refusal* of a
         published stage on one is the gate's job
         (``require_operable_bot``), before any device work.
+
+        ``caller_id`` flows into the published-stage device resolution as
+        the affinity key (see :meth:`_resolve_published_device`); ``None``
+        keeps the historical owner-keyed behavior for owner-scoped and
+        ungated routes.
 
         ``DeviceNotBoundError`` (never provisioned, released, or malformed
         publish data) and ``ConnInfoBuildError`` (the provider could not build
@@ -204,7 +214,9 @@ resolve_stage_bind_id`. The draft lookup is the same owner-scoped
             # bot, not an unmapped error from the record scan.
             require_stage_addressable(facts.bot_type, stage)
             if facts.bot_type == _SERVICE_BOT_TYPE and stage != STAGE_DRAFT:
-                return self._resolve_published_device(facts, owner_id, stage)
+                return self._resolve_published_device(
+                    facts, owner_id, stage, caller_id=caller_id
+                )
             return self._resolver.resolve_for_bot(bot_id, owner_id)
         except (DeviceNotBoundError, ConnInfoBuildError) as exc:
             raise EngineDeviceNotReadyError(
@@ -214,7 +226,12 @@ resolve_stage_bind_id`. The draft lookup is the same owner-scoped
             raise
 
     def _resolve_published_device(
-        self, facts: BotFacts, owner_id: str, stage: str
+        self,
+        facts: BotFacts,
+        owner_id: str,
+        stage: str,
+        *,
+        caller_id: str | None = None,
     ) -> DeviceContext:
         """Resolve a ``service`` bot through a published stage's runtime binding.
 
@@ -229,6 +246,16 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
         different devices. A stage with no live record raises
         ``EngineStageNotLiveError`` there; no fallback to the draft binding,
         and none between stages.
+
+        ``caller_id`` is used as the BaaS multi-instance affinity key on this
+        resolution path — the ``operator_id`` argument to
+        ``resolve_for_binding_invoke`` becomes ``conn_info["device_affinity"]``,
+        which ``BaasService.get_ws_info`` feeds into the consistent-hashing
+        ring. Keying on the caller (rather than the owner, as before) is what
+        distributes multi-instance requests across the live replicas instead
+        of pinning every collaborator onto the owner's single chosen instance
+        (the production multi-instance distribution defect). ``None`` keeps the historical
+        owner-keyed behavior.
         """
         bind_id = resolve_stage_bind_id(
             self._publish_repo,
@@ -238,16 +265,22 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
             stage=stage,
             env=get_current_env(),
         )
+        affinity_id = caller_id if caller_id is not None else owner_id
         # ``…_invoke`` rather than ``resolve_for_binding``: for the multi-instance
         # providers a published bot runs on, the transport fetches the address per
         # binding at call time and this only has to carry the routing fields. It
         # falls through to full resolution for the providers that need it.
         return self._resolver.resolve_for_binding_invoke(
-            bind_id, owner_id, bot_id=facts.bot_id
+            bind_id, affinity_id, bot_id=facts.bot_id
         )
 
     def _resolve_bot_and_device(
-        self, bot_id: str, owner_id: str, facts: BotFacts | None, stage: str
+        self,
+        bot_id: str,
+        owner_id: str,
+        facts: BotFacts | None,
+        stage: str,
+        caller_id: str | None = None,
     ) -> DeviceContext:
         """Prove ownership, then resolve the device — one worker-thread hop.
 
@@ -255,14 +288,17 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
         order is the isolation order: ``resolve_bot`` raises for a bot the
         caller may not operate, before any device is touched. On this path the
         caller *is* the owner: a route that serves someone other than the
-        bot's owner must adjudicate the real caller first and pass ``facts``.
+        bot's owner must adjudicate the real caller first and pass ``facts``
+        (and ``caller_id`` so the affinity key follows the actual caller).
         """
         resolved = (
             facts
             if facts is not None
             else self.resolve_bot(bot_id, owner_id, owner_id)
         )
-        return self._resolve_device(bot_id, owner_id, resolved, stage)
+        return self._resolve_device(
+            bot_id, owner_id, resolved, stage, caller_id=caller_id
+        )
 
     # ── forwarding ────────────────────────────────────────────────────────
 
@@ -279,6 +315,7 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
         enveloped: bool = True,
         facts: BotFacts | None = None,
         stage: str,
+        caller_id: str | None = None,
     ) -> EngineResult:
         """Issue ``method path`` against the addressed bot's engine adapter.
 
@@ -328,9 +365,23 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
         the whole body becomes the payload. It is an explicit per-route fact
         rather than sniffing for a ``success`` key, because a body that happens
         to lack one is exactly the malformed case that must still fail.
+
+        ``caller_id`` is the authenticated principal when it differs from
+        ``owner_id`` (a collaborator operating a bot they do not own). It
+        flows into the BaaS multi-instance affinity key on the
+        published-stage path, so requests from different callers on one
+        (bot, stage) distribute across instances instead of pinning to
+        the single instance the owner's id would hash to. ``None`` keeps
+        the historical owner-keyed behavior for owner-scoped and ungated
+        routes.
         """
         ctx = await asyncio.to_thread(
-            self._resolve_bot_and_device, bot_id, owner_id, facts, stage
+            self._resolve_bot_and_device,
+            bot_id,
+            owner_id,
+            facts,
+            stage,
+            caller_id,
         )
         raw = await self._invoke(ctx, method, path, body, params, timeout)
         return self._normalise(raw, bot_id=bot_id, path=path, enveloped=enveloped)
