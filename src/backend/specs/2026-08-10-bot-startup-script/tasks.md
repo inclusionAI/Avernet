@@ -75,12 +75,16 @@
   - [x] Oversize body → 413 whose message names the limit.
   - [x] `PUT` accepts only `{"script": ...}`; `updated_by` comes from the request
         principal and `updated_at` from `gmt_modified` — neither is client-supplied,
-        and a body attempting to set them is ignored, not honored.
-  - [x] `supported` / `unsupported_reason` reported per bot, covering **both**
-        unsupported cases: a teclaw bot, and a bot whose binding
-        `device_provider` is not `baas` (legacy ARCA-direct bots).
-  - [x] `PUT` on an unsupported bot is **refused** with 409 and the reason as the
-        message; nothing is stored.
+        and `extra="forbid"` fails a body that tries to set them (422) rather than
+        dropping the value behind a 200.
+  - [x] `supported` / `unsupported_reason` reported per bot: teclaw is refused,
+        as is any provider without a start sequence. `baas` and `local` both
+        qualify (each allocates through `_build_create_bot_payload`), and a bot
+        with no binding yet is supported — refusing it would block the main
+        use case, attaching a script before the first start.
+  - [x] `PUT` on an unsupported bot is **refused** with 409; nothing is stored.
+        The reason is served by `GET`, not the refusal — this surface's error
+        messages are fixed by contract and never `str(exc)`.
   - [x] `GET` on an unsupported bot still answers — empty script,
         `supported: false`, reason naming the cause — rather than erroring.
   - [x] No `entity_id` parameter or response field anywhere (group contract);
@@ -94,9 +98,9 @@
   `.../core/bot_startup_script/services/_last_start.py`
 - **Done when:**
   - [x] `GET .../startup-script/last-start` returns one entry per instance.
-  - [x] Entries are built from the binding's `publish_id` →
-        `get_publish_progress(include_devices=True)` → `result_message`, parsed as
-        the JSON `serialize_hook_result` writes.
+  - [x] Entries are built from the binding's publish id (either spelling) →
+        `get_publish_progress(include_devices=True)` → **`device_details`** →
+        `result_message`, parsed as the JSON `serialize_hook_result` writes.
   - [x] A scaled bot whose instances disagree reports both outcomes.
   - [x] The response and the docs state that the result covers the **whole start
         sequence**, not the script alone.
