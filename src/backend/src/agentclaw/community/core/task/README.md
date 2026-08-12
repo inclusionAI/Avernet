@@ -9,7 +9,7 @@
 
 | 层 | 路径 | 职责 |
 |---|---|---|
-| api/ | `community/api/task/` | 对外 Service API Protocols(transport-agnostic) |
+| api/ | `community/api/task_service.py` + `community/api/task_loop_callback.py` | 对外 Service API Protocols(transport-agnostic,扁平 api 层一文件一 Protocol) |
 | core/ | `community/core/task/` | 业务实现(transport-agnostic,禁 transport import) |
 | adapters/http/ | `community/adapters/http/task/` | HTTP transport(thin:router+schema,不持 domain policy) |
 | di/modules/ | `community/di/modules/task_module.py` | composition root(DI 接线) |
