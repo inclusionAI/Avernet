@@ -16,7 +16,7 @@ change, no OCB dependency in this scope.
   `_resolve_params` (`adapters/http/resources/file_router.py:71`): inject
   `BotRepository`, default `engine_type` via `resolve_engine_for_bot` to the
   bot's `active_engine`, default `entity_type` to `"staff"`.
-- [ ] **A2.** Inject `ResourceFileService` into the router. Confirm it and
+- [x] **A2.** Inject `ResourceFileService` into the router. Confirm it and
   `BotRepository` stay out of the served OpenAPI schema — the existing invariant
   guarded by `test_public_namespace.py`.
 - [ ] **A3.** `Resource` **response** schema (`openapi_v1/resources/schemas.py`) —

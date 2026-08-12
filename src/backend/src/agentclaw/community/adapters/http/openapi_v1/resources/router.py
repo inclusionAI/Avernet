@@ -57,6 +57,7 @@ from agentclaw.community.core.devices.services.device_filesystem_dispatcher impo
     DeviceFilesystemDispatcher,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.services.resource_file_service import ResourceFileService
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 
