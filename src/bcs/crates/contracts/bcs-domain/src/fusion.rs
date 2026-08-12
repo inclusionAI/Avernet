@@ -19,6 +19,10 @@ pub struct ContextBotSummary {
     pub rules: Option<String>,
     #[serde(default)]
     pub memory: Option<String>,
+    #[serde(default)]
+    pub tools: Option<String>,
+    #[serde(default)]
+    pub agents: Option<String>,
 }
 
 impl ContextBotSummary {

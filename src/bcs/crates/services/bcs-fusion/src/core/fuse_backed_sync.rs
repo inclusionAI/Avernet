@@ -150,6 +150,12 @@ fn build_contents_from_context(ctx: &ContextBotSummary) -> HashMap<String, Strin
     if let Some(ref memory) = ctx.memory {
         contents.insert("memory.md".to_string(), memory.clone());
     }
+    if let Some(ref tools) = ctx.tools {
+        contents.insert("tools.md".to_string(), tools.clone());
+    }
+    if let Some(ref agents) = ctx.agents {
+        contents.insert("agents.md".to_string(), agents.clone());
+    }
     contents
 }
 
@@ -163,6 +169,8 @@ mod tests {
         soul: Option<&str>,
         rules: Option<&str>,
         memory: Option<&str>,
+        tools: Option<&str>,
+        agents: Option<&str>,
     ) -> ContextBotSummary {
         ContextBotSummary {
             bot_uuid: "test-bot".into(),
@@ -172,13 +180,15 @@ mod tests {
             soul: soul.map(String::from),
             rules: rules.map(String::from),
             memory: memory.map(String::from),
+            tools: tools.map(String::from),
+            agents: agents.map(String::from),
         }
     }
 
     #[test]
     fn test_build_sync_request_basic() {
         let config = BcsFuseConfig::default();
-        let ctx = make_context(None, Some("I am helpful"), None, None);
+        let ctx = make_context(None, Some("I am helpful"), None, None, None, None);
         let req = build_sync_request(
             &config,
             "bot1",
@@ -215,6 +225,8 @@ mod tests {
             None,
             Some("rules text"),
             Some("memory text"),
+            Some("tools text"),
+            Some("agents text"),
         );
         let req = build_sync_request(&config, "bot2", "Bot2", None, &[], &[], &ctx, "protected");
 
@@ -222,12 +234,14 @@ mod tests {
         assert_eq!(contents.get("identity.md").unwrap(), "identity text");
         assert_eq!(contents.get("rules.md").unwrap(), "rules text");
         assert_eq!(contents.get("memory.md").unwrap(), "memory text");
+        assert_eq!(contents.get("tools.md").unwrap(), "tools text");
+        assert_eq!(contents.get("agents.md").unwrap(), "agents text");
         assert!(!contents.contains_key("soul.md")); // soul goes to soul_md, not contents
     }
 
     #[test]
     fn test_build_contents_from_context_empty() {
-        let ctx = make_context(None, None, None, None);
+        let ctx = make_context(None, None, None, None, None, None);
         let contents = build_contents_from_context(&ctx);
         assert!(contents.is_empty());
     }
@@ -250,7 +264,7 @@ mod tests {
             ..Default::default()
         };
         let client = FuseClient::new(&config).expect("client builds");
-        let ctx = make_context(None, None, None, None);
+        let ctx = make_context(None, None, None, None, None, None);
         let req = build_sync_request(&config, "bot1", "Bot One", None, &[], &[], &ctx, "public");
 
         let started = std::time::Instant::now();
@@ -309,7 +323,7 @@ mod tests {
             ..Default::default()
         };
         let client = FuseClient::new(&config)?;
-        let ctx = make_context(None, None, None, None);
+        let ctx = make_context(None, None, None, None, None, None);
         let req = build_sync_request(&config, "bot1", "Bot One", None, &[], &[], &ctx, "public");
 
         sync_worker_with_retry(&config, &client, "bot1", &req).await;
@@ -328,7 +342,7 @@ mod tests {
             ..Default::default()
         };
         let client = FuseClient::new(&config)?;
-        let ctx = make_context(None, None, None, None);
+        let ctx = make_context(None, None, None, None, None, None);
         let req = build_sync_request(&config, "bot1", "Bot One", None, &[], &[], &ctx, "public");
 
         sync_worker_with_retry(&config, &client, "bot1", &req).await;

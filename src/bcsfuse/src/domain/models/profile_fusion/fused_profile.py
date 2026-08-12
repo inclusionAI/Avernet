@@ -215,6 +215,20 @@ class FusedProfile(BaseModel):
                     memory_text = memory_text[:1000] + "..."
                 expert_section.append(f"\n**经验知识**:\n{memory_text}")
 
+            # 工具配置（详细展示）
+            if expert.tools:
+                tools_text = expert.tools
+                if len(tools_text) > 1000:
+                    tools_text = tools_text[:1000] + "..."
+                expert_section.append(f"\n**工具配置**:\n{tools_text}")
+
+            # 工作空间配置（详细展示）
+            if expert.agents:
+                agents_text = expert.agents
+                if len(agents_text) > 1000:
+                    agents_text = agents_text[:1000] + "..."
+                expert_section.append(f"\n**工作空间配置**:\n{agents_text}")
+
             # 技能
             if expert.skills:
                 expert_section.append(f"\n**专业技能**: {', '.join(expert.skills[:15])}")
@@ -263,6 +277,8 @@ class FusedProfile(BaseModel):
                 soul=profile.soul_md,
                 identity=profile.contents.get("identity.md"),
                 memory=profile.contents.get("memory.md"),
+                tools=profile.contents.get("tools.md"),
+                agents=profile.contents.get("agents.md"),
                 skills=[s.name for s in profile.skill_sets],
             )
             expert_profiles.append(expert)

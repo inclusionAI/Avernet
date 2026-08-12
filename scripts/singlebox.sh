@@ -397,7 +397,7 @@ show_help() {
     echo "  --bcn-plugin-source source|npm  BCN plugin source: build from repo (source, default) or install"
     echo "                                  @avernet-plugin/openclaw-channel-bcn (npm). Env: BCN_PLUGIN_SOURCE,"
     echo "                                  BCN_PLUGIN_VERSION (npm mode, default latest)"
-    echo "  --profile-dir DIR            Bot persona source dir for 'bots' target; requires DIR/bots.json"
+    echo "  --profile-dir DIR            Bot persona source dir for 'bots' (and 'bcs_frontend'/'bcsfuse' when the same dir is needed); requires DIR/bots.json"
     echo "  --bcs-auto-onboard            Legacy compatibility flag; use bcs_bots for BCS + bots"
     echo "  --no-bcs-auto-onboard         Legacy compatibility flag; use bcs for BCS-only"
     echo "  --with-bcs-coverage           Build instrumented bcs (target/cov-e2e) for e2e line coverage"
@@ -426,6 +426,7 @@ show_help() {
     echo "  $0 restart bcs                 Restart only the BCS server"
     echo "  $0 restart bots                Restart only the 5 local bot gateways"
     echo "  $0 start bots --profile-dir scripts/8bots_micro_merchant_profile"
+    echo "  $0 start bcs_frontend --profile-dir scripts/4bots_merchant_operations_profile"
     echo "  $0 restart bcs_bots            Restart BCS + 5 local bot gateways"
     echo "  $0 clean bcs                   Clean only local BCS runtime data"
     echo "  $0 clean bots                  Clean only local bot profiles/workspaces"
@@ -759,10 +760,17 @@ main() {
     fi
     if [ -n "${BOTS_PROFILE_DIR:-}" ]; then
         for svc in "${services[@]}"; do
-            if [ "$svc" != "bots" ]; then
-                log_error "--profile-dir only supports the bots target, for example: ./scripts/singlebox.sh $(singlebox_mode_option) start bots --profile-dir <dir>"
-                exit 1
-            fi
+            # --profile-dir / BOTS_PROFILE_DIR is primarily for the bots target,
+            # but bcs_frontend and bcsfuse are allowed because they are started
+            # before bots and need the same profile dir to be wired into BCS.
+            case "$svc" in
+                bots|bcs_frontend|bcsfuse)
+                    ;;
+                *)
+                    log_error "--profile-dir only supports the bots target (or bcs_frontend/bcsfuse when the same profile dir is needed), for example: ./scripts/singlebox.sh $(singlebox_mode_option) start bots --profile-dir <dir>"
+                    exit 1
+                    ;;
+            esac
         done
     fi
     if [ "$STANDALONE_MODE" = true ]; then
