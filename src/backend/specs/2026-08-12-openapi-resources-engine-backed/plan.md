@@ -97,6 +97,22 @@ a failed write never leaves a record. Record creation becomes **best-effort** �
 a failure to persist enrichment must not fail an upload whose bytes landed, since
 the file is now genuinely there and will be listed regardless. Log and continue.
 
+**Why the record is written at all.** The row is not merely enrichment for this
+API — the publish pipeline reads it. `config_composer.py:105` builds a published
+bot's manifest from `ac_resource` file rows via `collector.resources()`, so an
+upload that writes no row produces a published bot missing that file. That is the
+same silent-loss failure this change exists to remove, relocated downstream.
+
+teclaw is already exempt (`collector.resources()` returns `[]` for it) because
+its files reach the next version through the engine gather at promotion instead
+of a DB mirror. Extending that model to the other engines is the prerequisite for
+ever dropping these rows; it is a change to the publish pipeline, not a side
+effect of this one. Until then the write stays — best-effort, never authoritative
+for existence.
+
+Dropping the table outright would also remove **link** resources entirely: a link
+has no file and exists only as a row.
+
 **On the three record fields.** `name`, `path`, and `parent_path` are all
 derivable from one workspace-relative path, and after this change only `path`
 earns its place in our flow. `parent_path`'s single functional consumer was

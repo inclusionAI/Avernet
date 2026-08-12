@@ -48,6 +48,13 @@ change, no OCB dependency in this scope.
   own duplicate check moves to the filesystem in B7, so nothing here reads it.
   All three derive from the one path. A repo failure must **not** fail the
   upload; log and continue.
+  **Do not remove this write.** The publish pipeline reads `ac_resource` file
+  rows to build a published bot's manifest (`config_composer.py:105` via
+  `collector.resources()`), so an upload with no row yields a published bot
+  missing that file. teclaw is exempt because its files reach the next version
+  through the engine gather at promotion; extending that to the other engines is
+  the prerequisite for dropping these rows, and is publish-pipeline work outside
+  this scope.
 - [ ] **B3.** Replace `GET /{resource_id}/download` with
   `GET /download?path=` → `ResourceFileService.read_file`. Declare it **before**
   `/{resource_id}` (`:293`), as `/check-name` and `/upload` already are.
