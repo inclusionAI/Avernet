@@ -182,6 +182,9 @@ _CORE_SERVICE_MODULE_EXEMPT_SUFFIX: tuple[str, ...] = (
 _CORE_SERVICE_NAMES_OK: frozenset[str] = frozenset({
     # Errors raised by services that the router translates to HTTP:
     "FileTooLargeError",
+    # Startup script (issue #926): the size cap belongs to the service, and
+    # responses.py maps the refusal to 413.
+    "StartupScriptTooLargeError",
     "InvalidIdentityEntityTypeError", "InvalidIdentityFileTypeError",
     "BotServiceError", "BotInvalidLifecycleStateError", "BotNotFoundError", "BotPermissionError",
     "BotLimitExceededError", "BotNameExistsError", "BotNameInvalidError",
