@@ -159,6 +159,30 @@ ship first.
 What is given up in the interim is defense in depth: caller-input validation is
 the only barrier against traversal, rather than the first of two.
 
+## Known limitation: the duplicate check is not atomic with the write
+
+Two uploads racing on the same absent path can both pass the occupancy check
+before either writes, and the engine's write is an unconditional overwrite — so
+both answer 201, two rows are written, and only the later bytes survive.
+
+This is unchanged in kind from before: the previous code asked the record table
+the same question with the same gap between asking and writing. What this change
+alters is only *who* is asked, from a table that could disagree with the disk to
+the disk itself.
+
+It is not closed here because neither remedy exists at this seam.
+`DeviceFileSystem` has no conditional-create — `write_file` is a plain write, and
+every provider implements it as one — so there is nothing to make the check and
+the write one operation. Serializing per path would need a lock spanning backend
+replicas, which this service has no such facility for, and taking one per upload
+path would be a significant piece of infrastructure for a race that costs a
+last-writer-wins overwrite between two callers deliberately targeting the same
+path.
+
+The real fix is an exclusive-create flag on the engine's write API, which makes
+the check redundant rather than better-timed. That is engine-side work in the
+same repository as the wire-format change above, and belongs with it.
+
 ## Open questions
 
 None blocking.

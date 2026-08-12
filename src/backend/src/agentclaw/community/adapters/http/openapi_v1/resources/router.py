@@ -438,6 +438,13 @@ async def upload_resource(
     # positive: two files with the same leaf name in different directories were
     # one row-level ``(name, parent_path)`` collision, and are now two distinct
     # paths.
+    #
+    # Not atomic with the write, and knowingly so: two uploads racing on the same
+    # absent path can both pass here, and last writer wins. That gap is unchanged
+    # from the record-table version this replaces — only the authority being asked
+    # changed. Closing it needs an exclusive-create on the engine's write API,
+    # since ``DeviceFileSystem`` has no conditional-create to make the check and
+    # the write one operation; see the spec's known-limitation section.
     if await file_svc.exists(
         entity_type=entity_type,
         entity_id=entity_id,
