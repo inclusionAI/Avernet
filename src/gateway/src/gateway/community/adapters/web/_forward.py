@@ -17,7 +17,7 @@ principal at the forwarder seam.
 from __future__ import annotations
 
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import replace
 
 from fastapi import Request
@@ -140,6 +140,56 @@ _PRINCIPAL_HEADER = "X-Avernet-Principal"
 _INBOUND_STRIP = frozenset({"host", "x-avernet-principal"})
 
 
+class _StreamingRequestBody:
+    """One-shot, closeable view over a Starlette request stream.
+
+    The first non-empty chunk is prefetched so an actually empty request can be
+    represented as ``None`` in the Forwarder SPI. Only that single ASGI chunk
+    is retained; every later chunk is pulled on demand by the upstream client.
+    """
+
+    def __init__(self, first_chunk: bytes, source: AsyncGenerator[bytes, None]) -> None:
+        self._first_chunk = first_chunk
+        self._source = source
+        self._closed = False
+
+    def __aiter__(self) -> _StreamingRequestBody:
+        return self
+
+    async def __anext__(self) -> bytes:
+        if self._closed:
+            raise StopAsyncIteration
+        if self._first_chunk:
+            chunk = self._first_chunk
+            self._first_chunk = b""
+            return chunk
+        while True:
+            chunk = await anext(self._source)
+            if chunk:
+                return chunk
+
+    async def aclose(self) -> None:
+        if not self._closed:
+            self._closed = True
+            await self._source.aclose()
+
+
+async def _request_body(request: Request) -> _StreamingRequestBody | None:
+    """Return a streaming body, or ``None`` when the request is truly empty."""
+    source = request.stream()
+    try:
+        while True:
+            first_chunk = await anext(source)
+            if first_chunk:
+                return _StreamingRequestBody(first_chunk, source)
+    except StopAsyncIteration:
+        await source.aclose()
+        return None
+    except BaseException:
+        await source.aclose()
+        raise
+
+
 async def _attach_identities(
     forward: ForwardRequest,
     identities: dict[PrincipalType, Principal],
@@ -183,7 +233,6 @@ async def forward_request(request: Request) -> Response:
         logger.warning("auth failed for %s %s: %s", request.method, path, exc)
         return _error(401, 1, str(exc))
 
-    body = await request.body()
     try:
         forward = await _attach_identities(
             ForwardRequest(
@@ -196,7 +245,6 @@ async def forward_request(request: Request) -> Response:
                     for k, v in request.headers.items()
                     if k.lower() not in _INBOUND_STRIP
                 },
-                content=body,
             ),
             identities,
             signer=request.app.state.principal_signer,
@@ -206,10 +254,15 @@ async def forward_request(request: Request) -> Response:
         logger.exception("principal signing failed")
         return _error(500, 1, "principal signing failed")
 
-    cm = request.app.state.forwarder.forward(forward)
+    forward = replace(forward, body=await _request_body(request))
     try:
+        cm = request.app.state.forwarder.forward(forward)
         upstream = await cm.__aenter__()
-    except Exception:
+    except BaseException as exc:
+        if forward.body is not None:
+            await forward.body.aclose()
+        if not isinstance(exc, Exception):
+            raise
         logger.warning(
             "upstream unavailable for %s %s", request.method, path, exc_info=True
         )

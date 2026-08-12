@@ -18,14 +18,16 @@ class Forwarder(Protocol):
             async for chunk in response.body:
                 ...
 
-    Implementations:
-    - HttpxForwarder: httpx-backed, streams raw bytes (open-source default).
-    - a sofa flavor (enterprise) may add pooling/observability at this seam;
-      the auth workstream attaches the signed principal here.
+    ``ForwardRequest.body`` is one-shot. Once this context manager is entered,
+    the implementation owns any body stream and closes it after the send
+    completes, fails, or is cancelled. Implementations must not retry by
+    replaying it.
+
+    The current implementation is ``HttpxForwarder``, the httpx-backed default.
     """
 
     def forward(
         self, request: ForwardRequest
     ) -> AbstractAsyncContextManager[ForwardResponse]:
-        """Open a streaming forward to the upstream named by ``request.url``."""
+        """Open a streaming forward and take ownership of its request body."""
         ...

@@ -8,7 +8,7 @@ dropped in both directions.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import httpx
@@ -45,28 +45,48 @@ class HttpxForwarder(Forwarder):
         return self._client
 
     @asynccontextmanager
-    async def forward(self, request: ForwardRequest) -> AsyncIterator[ForwardResponse]:
+    async def forward(
+        self, request: ForwardRequest
+    ) -> AsyncGenerator[ForwardResponse, None]:
         client = self._get_client()
-        upstream = client.build_request(
-            request.method,
-            request.url,
-            headers=strip_hop_by_hop(request.headers),
-            content=request.content,
+        declared_content_length = next(
+            (
+                value
+                for name, value in request.headers.items()
+                if name.lower() == "content-length"
+            ),
+            "unknown",
         )
         logger.info(
-            "forwarding request %s %s headers_len=%d content_len=%d",
+            "forwarding request %s %s headers_len=%d declared_content_length=%s",
             request.method,
             request.url,
             len(request.headers),
-            len(request.content),
+            declared_content_length,
         )
         try:
-            response = await client.send(upstream, stream=True)
+            upstream = client.build_request(
+                request.method,
+                request.url,
+                headers=strip_hop_by_hop(request.headers),
+                content=request.body,
+            )
+            # A request body is a one-shot stream. Never inherit client auth or
+            # redirect policy: challenges and 307/308 both require replay.
+            response = await client.send(
+                upstream,
+                stream=True,
+                auth=None,
+                follow_redirects=False,
+            )
         except Exception:
             logger.exception(
                 "upstream send failed for %s %s", request.method, request.url
             )
             raise
+        finally:
+            if request.body is not None:
+                await request.body.aclose()
         logger.info(
             "upstream response status=%d headers=%s",
             response.status_code,

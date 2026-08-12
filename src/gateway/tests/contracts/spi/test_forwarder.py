@@ -6,10 +6,12 @@ end to end (``MockTransport`` pre-materialises the body and can't stream).
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+import asyncio
+from collections.abc import AsyncIterator, Awaitable, Callable, Generator
 from typing import Any
 
 import httpx
+import pytest
 
 from gateway.community.plugins.forwarder.httpx import HttpxForwarder
 from gateway.community.spi.forwarder import (
@@ -23,6 +25,90 @@ from gateway.community.spi.forwarder import (
 Scope = dict[str, Any]
 Receive = Callable[[], Awaitable[dict[str, Any]]]
 Send = Callable[[dict[str, Any]], Awaitable[None]]
+
+
+class _RecordingBody:
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = iter(chunks)
+        self.closed = False
+
+    def __aiter__(self) -> _RecordingBody:
+        return self
+
+    async def __anext__(self) -> bytes:
+        if self.closed:
+            raise StopAsyncIteration
+        try:
+            return next(self._chunks)
+        except StopIteration:
+            raise StopAsyncIteration from None
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+class _FailingTransport(httpx.AsyncBaseTransport):
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("upstream unavailable", request=request)
+
+
+class _BlockingTransport(httpx.AsyncBaseTransport):
+    def __init__(self, send_started: asyncio.Event) -> None:
+        self._send_started = send_started
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        self._send_started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+
+class _RecordingResponseStream(httpx.AsyncByteStream):
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = chunks
+        self.closed = False
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        for chunk in self._chunks:
+            yield chunk
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+class _BlockingResponseStream(httpx.AsyncByteStream):
+    def __init__(self, read_started: asyncio.Event) -> None:
+        self._read_started = read_started
+        self.closed = False
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        self._read_started.set()
+        await asyncio.Event().wait()
+        yield b"unreachable"
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+class _EarlyResponseTransport(httpx.AsyncBaseTransport):
+    def __init__(self, response_stream: _RecordingResponseStream) -> None:
+        self._response_stream = response_stream
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            413,
+            request=request,
+            stream=self._response_stream,
+        )
+
+
+class _ChallengeAuth(httpx.Auth):
+    def auth_flow(
+        self, request: httpx.Request
+    ) -> Generator[httpx.Request, httpx.Response, None]:
+        response = yield request
+        if response.status_code == 401:
+            request.headers["authorization"] = "Bearer challenge-response"
+            yield request
 
 
 def test_strip_hop_by_hop_removes_connection_headers() -> None:
@@ -89,6 +175,23 @@ def _client(
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app))  # type: ignore[arg-type]
 
 
+def _request_body_app(
+    seen_headers: dict[str, str], seen_body: bytearray
+) -> Callable[[Scope, Receive, Send], Awaitable[None]]:
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
+        for key, value in scope["headers"]:
+            seen_headers[key.decode()] = value.decode()
+        while True:
+            message = await receive()
+            seen_body.extend(message.get("body", b""))
+            if not message.get("more_body", False):
+                break
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    return app
+
+
 async def test_forward_streams_multichunk_body_and_status() -> None:
     seen: dict[str, str] = {}
     app = _app(seen, chunks=[b"data: a\n\n", b"data: b\n\n"])
@@ -113,12 +216,238 @@ async def test_request_hop_by_hop_headers_stripped_before_send() -> None:
             method="POST",
             url="http://up/openapi/v1/bots",
             headers={"te": "trailers", "x-a": "1"},
-            content=b"{}",
+            body=_RecordingBody([b"{}"]),
         )
         async with forwarder.forward(req) as response:
             _ = [chunk async for chunk in response.body]
     assert "te" not in seen
     assert seen["x-a"] == "1"
+
+
+async def test_streamed_request_preserves_declared_content_length() -> None:
+    seen_headers: dict[str, str] = {}
+    seen_body = bytearray()
+    body = _RecordingBody([b"abc", b"def"])
+    async with _client(_request_body_app(seen_headers, seen_body)) as client:
+        forwarder = HttpxForwarder(client=client)
+        request = ForwardRequest(
+            method="PUT",
+            url="http://up/upload",
+            headers={"content-length": "6"},
+            body=body,
+        )
+        async with forwarder.forward(request) as response:
+            _ = [chunk async for chunk in response.body]
+
+    assert bytes(seen_body) == b"abcdef"
+    assert seen_headers["content-length"] == "6"
+    assert "transfer-encoding" not in seen_headers
+    assert body.closed
+
+
+async def test_streamed_request_without_declared_length_uses_chunked_framing() -> None:
+    seen_headers: dict[str, str] = {}
+    seen_body = bytearray()
+    body = _RecordingBody([b"abc", b"def"])
+    async with _client(_request_body_app(seen_headers, seen_body)) as client:
+        forwarder = HttpxForwarder(client=client)
+        request = ForwardRequest(
+            method="POST",
+            url="http://up/upload",
+            body=body,
+        )
+        async with forwarder.forward(request) as response:
+            _ = [chunk async for chunk in response.body]
+
+    assert bytes(seen_body) == b"abcdef"
+    assert "content-length" not in seen_headers
+    assert seen_headers["transfer-encoding"] == "chunked"
+    assert body.closed
+
+
+async def test_one_shot_request_body_is_not_replayed_across_redirects() -> None:
+    visited: list[tuple[str, bytes]] = []
+
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
+        body = bytearray()
+        while True:
+            message = await receive()
+            body.extend(message.get("body", b""))
+            if not message.get("more_body", False):
+                break
+        visited.append((scope["path"], bytes(body)))
+        if scope["path"] == "/source":
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 307,
+                    "headers": [(b"location", b"/target")],
+                }
+            )
+        else:
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    transport = httpx.ASGITransport(app=app)  # type: ignore[arg-type]
+    async with httpx.AsyncClient(transport=transport, follow_redirects=True) as client:
+        forwarder = HttpxForwarder(client=client)
+        request = ForwardRequest(
+            method="PUT",
+            url="http://up/source",
+            headers={"content-length": "7"},
+            body=_RecordingBody([b"payload"]),
+        )
+        async with forwarder.forward(request) as response:
+            assert response.status_code == 307
+
+    assert visited == [("/source", b"payload")]
+
+
+async def test_one_shot_request_body_is_not_replayed_by_client_auth() -> None:
+    visited: list[tuple[str | None, bytes]] = []
+
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
+        body = bytearray()
+        while True:
+            message = await receive()
+            body.extend(message.get("body", b""))
+            if not message.get("more_body", False):
+                break
+        headers = dict(scope["headers"])
+        authorization = headers.get(b"authorization")
+        visited.append(
+            (
+                authorization.decode() if authorization is not None else None,
+                bytes(body),
+            )
+        )
+        status = 200 if authorization == b"Bearer challenge-response" else 401
+        await send({"type": "http.response.start", "status": status, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    transport = httpx.ASGITransport(app=app)  # type: ignore[arg-type]
+    async with httpx.AsyncClient(transport=transport, auth=_ChallengeAuth()) as client:
+        forwarder = HttpxForwarder(client=client)
+        request = ForwardRequest(
+            method="PUT",
+            url="http://up/upload",
+            headers={"content-length": "7"},
+            body=_RecordingBody([b"payload"]),
+        )
+        async with forwarder.forward(request) as response:
+            assert response.status_code == 401
+
+    assert visited == [(None, b"payload")]
+
+
+async def test_empty_request_body_remains_fixed_length_and_unchunked() -> None:
+    seen_headers: dict[str, str] = {}
+    seen_body = bytearray()
+    async with _client(_request_body_app(seen_headers, seen_body)) as client:
+        forwarder = HttpxForwarder(client=client)
+        request = ForwardRequest(
+            method="POST",
+            url="http://up/upload",
+            body=None,
+        )
+        async with forwarder.forward(request) as response:
+            _ = [chunk async for chunk in response.body]
+
+    assert bytes(seen_body) == b""
+    assert seen_headers["content-length"] == "0"
+    assert "transfer-encoding" not in seen_headers
+
+
+async def test_request_body_closes_when_transport_fails_before_consuming_it() -> None:
+    body = _RecordingBody([b"payload"])
+    async with httpx.AsyncClient(transport=_FailingTransport()) as client:
+        forwarder = HttpxForwarder(client=client)
+        request = ForwardRequest(
+            method="POST",
+            url="http://up/upload",
+            body=body,
+        )
+        with pytest.raises(httpx.ConnectError, match="upstream unavailable"):
+            async with forwarder.forward(request):
+                pass
+
+    assert body.closed
+
+
+async def test_request_body_closes_when_httpx_rejects_request_metadata() -> None:
+    body = _RecordingBody([b"payload"])
+    async with httpx.AsyncClient(transport=_FailingTransport()) as client:
+        forwarder = HttpxForwarder(client=client)
+        request = ForwardRequest(
+            method="POST",
+            url="http://[::1",
+            body=body,
+        )
+        with pytest.raises(httpx.InvalidURL):
+            async with forwarder.forward(request):
+                pass
+
+    assert body.closed
+
+
+async def test_upstream_early_response_closes_both_streams() -> None:
+    body = _RecordingBody([b"not-consumed"])
+    response_stream = _RecordingResponseStream([b"too large"])
+    async with httpx.AsyncClient(
+        transport=_EarlyResponseTransport(response_stream)
+    ) as client:
+        forwarder = HttpxForwarder(client=client)
+        request = ForwardRequest(
+            method="POST",
+            url="http://up/upload",
+            body=body,
+        )
+        async with forwarder.forward(request) as response:
+            assert response.status_code == 413
+
+    assert body.closed
+    assert response_stream.closed
+
+
+async def test_cancelled_response_consumer_closes_upstream_stream() -> None:
+    read_started = asyncio.Event()
+    response_stream = _BlockingResponseStream(read_started)
+    async with httpx.AsyncClient(
+        transport=_EarlyResponseTransport(response_stream)
+    ) as client:
+        forwarder = HttpxForwarder(client=client)
+        context = forwarder.forward(
+            ForwardRequest(method="GET", url="http://up/download")
+        )
+        response = await context.__aenter__()
+        reading = asyncio.create_task(anext(response.body))
+        await asyncio.wait_for(read_started.wait(), timeout=1)
+        reading.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await reading
+        await context.__aexit__(None, None, None)
+
+    assert response_stream.closed
+
+
+async def test_request_body_closes_when_upstream_send_is_cancelled() -> None:
+    send_started = asyncio.Event()
+    body = _RecordingBody([b"payload"])
+    async with httpx.AsyncClient(transport=_BlockingTransport(send_started)) as client:
+        forwarder = HttpxForwarder(client=client)
+        request = ForwardRequest(
+            method="POST",
+            url="http://up/upload",
+            body=body,
+        )
+        context = forwarder.forward(request)
+        entering = asyncio.create_task(context.__aenter__())
+        await asyncio.wait_for(send_started.wait(), timeout=1)
+        entering.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await entering
+
+    assert body.closed
 
 
 async def test_response_hop_by_hop_headers_stripped() -> None:

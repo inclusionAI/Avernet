@@ -3,6 +3,7 @@
 from ._models import (
     HOP_BY_HOP_HEADERS,
     ForwardRequest,
+    ForwardRequestBody,
     ForwardResponse,
     strip_hop_by_hop,
     strip_hop_by_hop_items,
@@ -12,6 +13,7 @@ from ._protocols import Forwarder
 __all__ = [
     "HOP_BY_HOP_HEADERS",
     "ForwardRequest",
+    "ForwardRequestBody",
     "ForwardResponse",
     "Forwarder",
     "strip_hop_by_hop",

@@ -6,6 +6,7 @@ Wires the real streaming ``HttpxForwarder`` against a stub upstream ASGI app, a
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any
@@ -85,7 +86,7 @@ async def _stub_upstream(scope: Scope, receive: Receive, send: Send) -> None:
             {"type": "http.response.body", "body": b"data: 1\n\n", "more_body": True}
         )
         await send({"type": "http.response.body", "body": b"data: 2\n\n"})
-    elif path == "/openapi/v1/bots/upload" and method == "POST":
+    elif path == "/openapi/v1/bots/upload" and method in {"POST", "PUT", "PATCH"}:
         await send(
             {
                 "type": "http.response.start",
@@ -132,8 +133,10 @@ class _FakeAuth:
         return {}
 
 
-def _build() -> tuple[FastAPI, _FakeAuth]:
-    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=_stub_upstream))  # type: ignore[arg-type]
+def _build(
+    upstream_app: Callable[[Scope, Receive, Send], Awaitable[None]] = _stub_upstream,
+) -> tuple[FastAPI, _FakeAuth]:
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=upstream_app))  # type: ignore[arg-type]
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -180,6 +183,26 @@ def test_auth_failure_returns_401_before_forward() -> None:
     assert resp.json()["code"] == 401001
 
 
+async def test_auth_failure_does_not_consume_request_body() -> None:
+    body_consumed = False
+
+    async def body() -> AsyncIterator[bytes]:
+        nonlocal body_consumed
+        body_consumed = True
+        yield b"must-not-be-read"
+
+    app, auth = _build()
+    auth.fail = True
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://gateway"
+    ) as client:
+        response = await client.post("/openapi/v1/bots/upload", content=body())
+
+    assert response.status_code == 401
+    assert not body_consumed
+
+
 def test_successful_forward_streams_body_and_preserves_cookies() -> None:
     app, _ = _build()
     with TestClient(app) as client:
@@ -198,12 +221,76 @@ def test_sse_streaming_forward() -> None:
     assert resp.text == "data: 1\n\ndata: 2\n\n"
 
 
-def test_upload_body_forwarded_verbatim() -> None:
+@pytest.mark.parametrize("method", ["POST", "PUT", "PATCH"])
+def test_upload_body_forwarded_verbatim(method: str) -> None:
     app, _ = _build()
     with TestClient(app) as client:
-        resp = client.post("/openapi/v1/bots/upload", content=b"raw-bytes-payload")
+        resp = client.request(
+            method, "/openapi/v1/bots/upload", content=b"raw-bytes-payload"
+        )
     assert resp.status_code == 200
     assert resp.content == b"raw-bytes-payload"
+
+
+async def test_upload_reaches_upstream_before_complete_body_arrives() -> None:
+    first_chunk_seen = asyncio.Event()
+    release_second_chunk = asyncio.Event()
+    seen_body = bytearray()
+
+    async def upstream(scope: Scope, receive: Receive, send: Send) -> None:
+        message = await receive()
+        seen_body.extend(message.get("body", b""))
+        first_chunk_seen.set()
+        while message.get("more_body", False):
+            message = await receive()
+            seen_body.extend(message.get("body", b""))
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": bytes(seen_body)})
+
+    async def client_body() -> AsyncIterator[bytes]:
+        yield b"first-"
+        await release_second_chunk.wait()
+        yield b"second"
+
+    app, _ = _build(upstream)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://gateway"
+    ) as client:
+        request = asyncio.create_task(
+            client.post("/openapi/v1/bots/upload", content=client_body())
+        )
+        try:
+            await asyncio.wait_for(first_chunk_seen.wait(), timeout=1)
+        finally:
+            release_second_chunk.set()
+        response = await request
+
+    assert response.status_code == 200
+    assert response.content == b"first-second"
+
+
+@pytest.mark.parametrize("method", ["GET", "DELETE"])
+def test_empty_request_body_is_forwarded_without_chunked_framing(method: str) -> None:
+    seen_headers: dict[str, str] = {}
+
+    async def upstream(scope: Scope, receive: Receive, send: Send) -> None:
+        for key, value in scope["headers"]:
+            seen_headers[key.decode()] = value.decode()
+        while True:
+            message = await receive()
+            assert message.get("body", b"") == b""
+            if not message.get("more_body", False):
+                break
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    app, _ = _build(upstream)
+    with TestClient(app) as client:
+        response = client.request(method, "/openapi/v1/bots/empty")
+
+    assert response.status_code == 204
+    assert "transfer-encoding" not in seen_headers
 
 
 def test_collaboration_get_forwards_the_verbatim_path() -> None:
