@@ -59,6 +59,7 @@ class NotifyEntry(BaseModel):
     subject: dict[str, Any] | None = None
     command: str | None = None
     cwd: str | None = None
+    uiHints: dict[str, Any] | None = None
     status: str
     createdAtMs: int
     expiresAtMs: int | None = None
