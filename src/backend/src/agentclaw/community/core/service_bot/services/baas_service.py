@@ -61,6 +61,7 @@ from agentclaw.community.kernel.device_dto import (
 )
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.devices.protocols import StartupScriptReaderProtocol
     from agentclaw.community.plugin_api.outbound_rules import OutboundRuleProvider
     from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
@@ -118,6 +119,34 @@ DEFAULT_READ_ONLY_RULES = [
         "rule_type": "glob",
     },
 ]
+
+
+
+def _redact_payload_for_log(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Shallow copy of a create payload with the start command elided.
+
+    ``after_create_cmd_hook`` carries the bot's own startup script (issue #926).
+    The published contract tells callers not to put secrets in a script body,
+    but a contract is not an enforcement mechanism, and these payloads are
+    logged at INFO on every create, release and restart. Log its length instead
+    of the command — enough to tell "a script was attached" from "none was",
+    without copying a caller's script into the log.
+    """
+    config = payload.get("config")
+    if not isinstance(config, dict):
+        return payload
+    deploy = config.get("deploy_config")
+    if not isinstance(deploy, dict) or "after_create_cmd_hook" not in deploy:
+        return payload
+
+    hook = deploy.get("after_create_cmd_hook") or ""
+    redacted = dict(payload)
+    redacted["config"] = dict(config)
+    redacted["config"]["deploy_config"] = {
+        **deploy,
+        "after_create_cmd_hook": f"<elided {len(hook)} chars>",
+    }
+    return redacted
 
 
 class BaasServiceError(Exception):
@@ -759,6 +788,12 @@ class BaasService:  # pragma: no cover
         # (与 desktop_bot_service._build_create_bot_payload 同款姿势)
         deploy_config = BotDeployConfig(
             after_create_cmd_hook=start_up_cmd,
+            # NOTE: this does not bound the hook. BaaS threads it into
+            # dispatch_start_hook as ``hook_timeout`` and then ignores it
+            # (``# noqa: ARG001 - kept for API compatibility``); the wrapper is
+            # nohup'd and runs unbounded. So it does not contradict
+            # STARTUP_SCRIPT_TIMEOUT_SECONDS, which is enforced by ``timeout``
+            # in the command itself — and it is why that one has to be.
             after_create_hook_wait_seconds=10,
             before_destroy_cmd_hook=destroy_cmd,
             before_destroy_hook_wait_seconds=10,
@@ -928,7 +963,8 @@ class BaasService:  # pragma: no cover
 
         logger.info(
             f"[BaasService.create_bot] "
-            f"Upgrading bot in BaaS: operator={owner_id}, request_id={request_id}, payload={payload}"
+            f"Upgrading bot in BaaS: operator={owner_id}, request_id={request_id}, "
+            f"payload={_redact_payload_for_log(payload)}"
         )
 
         try:
@@ -3279,7 +3315,8 @@ class BaasService:  # pragma: no cover
 
         logger.info(
             f"[BaasService.upgrade_bot] "
-            f"Upgrading bot in BaaS: bot_uuid={bot_uuid}, operator={owner_id}, request_id={request_id}, payload={payload}"
+            f"Upgrading bot in BaaS: bot_uuid={bot_uuid}, operator={owner_id}, "
+            f"request_id={request_id}, payload={_redact_payload_for_log(payload)}"
         )
 
         # 调用 BaaS 层 API

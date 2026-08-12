@@ -389,3 +389,42 @@ class TestStartupScriptPrivilege:
         inner = user_stage[start : user_stage.index("' || true")]
         assert "'" not in inner
         assert "rm -rf" not in inner  # the body survives only as base64
+
+
+class TestPayloadLogRedaction:
+    """Create payloads are logged at INFO and carry the user's script."""
+
+    def test_hook_is_elided_from_the_logged_payload(self):
+        from agentclaw.community.core.service_bot.services.baas_service import (
+            _redact_payload_for_log,
+        )
+
+        payload = {
+            "name": "b",
+            "config": {
+                "entity_id": "ent-1",
+                "deploy_config": {
+                    "after_create_cmd_hook": "bootstrap && SECRET_TOKEN=abc123",
+                    "ttl_in_minutes": 60,
+                },
+            },
+        }
+        redacted = _redact_payload_for_log(payload)
+
+        hook = redacted["config"]["deploy_config"]["after_create_cmd_hook"]
+        assert "SECRET_TOKEN" not in str(redacted)
+        assert hook.startswith("<elided ")
+        # Everything else still logged, and the original is untouched.
+        assert redacted["config"]["deploy_config"]["ttl_in_minutes"] == 60
+        assert redacted["name"] == "b"
+        assert payload["config"]["deploy_config"]["after_create_cmd_hook"].startswith(
+            "bootstrap"
+        )
+
+    def test_payload_without_a_deploy_config_passes_through(self):
+        from agentclaw.community.core.service_bot.services.baas_service import (
+            _redact_payload_for_log,
+        )
+
+        payload = {"name": "b", "operator": "u1"}
+        assert _redact_payload_for_log(payload) == payload

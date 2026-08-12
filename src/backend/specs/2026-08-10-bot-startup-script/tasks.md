@@ -50,8 +50,11 @@
 - **Files:** `src/backend/.../core/devices/services/baas_device_service.py`,
   `src/backend/.../core/service_bot/services/baas_service.py`
 - **Done when:**
-  - [x] `_allocate_via_baas` fetches the script into `payload_kwargs`, and
-        `_build_create_bot_payload` forwards it to `_get_start_cmd`.
+  - [x] `_build_create_bot_payload` resolves the script centrally and forwards it
+        to `_get_start_cmd`, so create, service-bot release **and** `upgrade_bot`
+        (restart) all deliver it. Resolving in `_allocate_via_baas` instead was
+        the first attempt and missed the restart path — the only path that can
+        deliver a script, since one is written after the bot exists.
   - [x] A bot created before its owner writes a script picks it up on the next
         restart, and the API docs say the first write needs a restart.
   - [x] Personal and service bots behave identically; only `stage` differs, as today.

@@ -50,7 +50,6 @@ if TYPE_CHECKING:
         BotQueryProtocol,
         BotSyncProtocol,
         McpSyncProtocol,
-        StartupScriptReaderProtocol,
     )
     from agentclaw.community.core.service_bot.services.baas_service import BaasService
     from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
@@ -107,7 +106,6 @@ class BaasDeviceService(DeviceService):
         vault: "TokenVault | None" = None,
         task_queue_service: "TaskQueueService | None" = None,
         template_service: TemplateConfigReader | None = None,
-        startup_script_service: "StartupScriptReaderProtocol | None" = None,
     ):
         super().__init__(
             repository=repository,
@@ -127,33 +125,7 @@ class BaasDeviceService(DeviceService):
         self._container_initializer = BaasContainerInitializer(baas_service)
         self._template_resolver = template_resolver
         self._template_service = template_service
-        # Optional: deployments that have not bound the service yet compose the
-        # start command exactly as before (empty script -> unchanged chain).
-        self._startup_script_service = startup_script_service
         logger.info("[BaasDeviceService] Initialized")
-
-    def _resolve_startup_script(self, *, entity_id: str, bot_id: str) -> str:
-        """Read the bot's stored startup script, or ``""`` when it has none.
-
-        Never raises: a storage hiccup must not block provisioning a container.
-        A bot that loses its script for one create picks it up on the next
-        restart, which is strictly better than failing the create outright.
-        """
-        if self._startup_script_service is None:
-            return ""
-        try:
-            return self._startup_script_service.get_body(
-                entity_id=entity_id, bot_id=bot_id
-            )
-        except Exception as exc:  # noqa: BLE001 - provisioning must not fail here
-            logger.warning(
-                "[_resolve_startup_script] lookup failed, continuing without a "
-                "script: entity_id=%s, bot_id=%s, error=%s",
-                entity_id,
-                bot_id,
-                exc,
-            )
-            return ""
 
     # ------------------------------------------------------------------
     # provider=baas lifecycle hooks (apply_device template method)
@@ -371,12 +343,11 @@ class BaasDeviceService(DeviceService):
                 "template_config": template_config,
                 # 个人 Bot / 服务 Bot 草稿没有 migration_path，但启动仍按 NAS home 目录运行。
                 "mount_home_dir_storage": True,
-                # Per-bot startup script (issue #926). Read at payload-build
-                # time, so a script written after this create only takes effect
-                # on the next restart — which is the documented contract.
-                "startup_script": self._resolve_startup_script(
-                    entity_id=entity_id, bot_id=bolt_id
-                ),
+                # The per-bot startup script (issue #926) is NOT passed here.
+                # BaasService resolves it centrally in
+                # _build_create_bot_payload so create, release and restart all
+                # deliver it; passing "" from a failed lookup here would read
+                # as a deliberate override and silently suppress it.
             }
             if effective_bot_type == "service":
                 payload_kwargs["stage"] = PublishStage.DRAFT.value
