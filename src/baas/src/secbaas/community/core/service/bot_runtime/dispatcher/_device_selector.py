@@ -10,6 +10,7 @@ Design decisions (per design.md):
 """
 
 import hashlib
+import os
 import random
 from typing import TYPE_CHECKING
 
@@ -20,28 +21,78 @@ if TYPE_CHECKING:
 
 logger = get_logger("core-service")
 
-# Virtual nodes per physical device for even hash distribution
-_VIRTUAL_NODES = 100
+# Virtual nodes per physical device for even hash distribution on the
+# consistent-hash ring. Bots typically run only a handful of replicas, and
+# consistent hashing with too few virtual nodes spreads load unevenly across
+# such small fleets. A higher virtual-node count reduces the per-node share
+# variance so each replica receives a closer-to-average slice of the hash
+# space. The ring still remaps keys when the active device set changes, as
+# expected from consistent hashing.
+#
+# Operators may tune the count per deployment without a code change via the
+# ``SECBAAS_DEVICE_SELECTOR_VIRTUAL_NODES`` environment variable; invalid or
+# sub-minimum values fall back to the default.
+_DEFAULT_VIRTUAL_NODES = 200
+_MIN_VIRTUAL_NODES = 1
+
+_ENV_VIRTUAL_NODES = "SECBAAS_DEVICE_SELECTOR_VIRTUAL_NODES"
+
+
+def _resolve_virtual_nodes(raw: str | None, default: int) -> int:
+    """Resolve and validate the configured virtual-node count.
+
+    Non-integer, empty, or sub-minimum values fall back to ``default`` so a
+    misconfiguration can never produce an empty or degenerate ring.
+
+    Args:
+        raw: The raw environment value, or ``None`` when unset.
+        default: The default count used when ``raw`` is absent or invalid.
+
+    Returns:
+        A validated virtual-node count of at least ``_MIN_VIRTUAL_NODES``.
+    """
+    if raw is None or raw == "":
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    if value < _MIN_VIRTUAL_NODES:
+        return default
+    return value
+
+
+# Resolved once at import time from the environment; ``build_ring`` also
+# accepts an explicit override so callers and tests can vary it in-process.
+_VIRTUAL_NODES = _resolve_virtual_nodes(
+    os.environ.get(_ENV_VIRTUAL_NODES), _DEFAULT_VIRTUAL_NODES
+)
 
 
 def build_ring(
     active_devices: list["DeviceRecord"],
+    virtual_nodes: int | None = None,
 ) -> list[tuple[int, "DeviceRecord"]]:
     """Build a consistent hash ring from active devices.
 
-    Each physical device is placed on the ring _VIRTUAL_NODES times
-    using different hash seeds (``{device_uuid}:{vnode_index}``) for
-    even distribution, especially with small device counts.
+    Each physical device is placed on the ring ``virtual_nodes`` times
+    (defaulting to the module-level ``_VIRTUAL_NODES``) using different hash
+    seeds (``{device_uuid}:{vnode_index}``) for even distribution, especially
+    with small device counts.
 
     Args:
         active_devices: List of ACTIVE device records
+        virtual_nodes: Optional override for virtual nodes per device;
+            defaults to the configured ``_VIRTUAL_NODES``.
 
     Returns:
         Sorted list of (hash_value, DeviceRecord) tuples forming the ring
     """
+    if virtual_nodes is None:
+        virtual_nodes = _VIRTUAL_NODES
     ring: list[tuple[int, DeviceRecord]] = []
     for d in active_devices:
-        for vnode in range(_VIRTUAL_NODES):
+        for vnode in range(virtual_nodes):
             seed = f"{d.device_uuid}:{vnode}"
             h = int(hashlib.md5(seed.encode()).hexdigest(), 16)
             ring.append((h, d))
@@ -88,6 +139,7 @@ def select_by_affinity(
 def select_active_device(
     devices: list["DeviceRecord"],
     device_affinity: str | None = None,
+    virtual_nodes: int | None = None,
 ) -> "DeviceRecord | None":
     """Select an ACTIVE device from the list.
 
@@ -101,6 +153,8 @@ def select_active_device(
     Args:
         devices: List of device records
         device_affinity: Optional affinity key for sticky device selection
+        virtual_nodes: Optional override for virtual nodes per device on the
+            consistent-hash ring; defaults to the configured ``_VIRTUAL_NODES``.
 
     Returns:
         A selected ACTIVE device, or None if no ACTIVE devices
@@ -109,7 +163,7 @@ def select_active_device(
     if not active_devices:
         return None
     if device_affinity is not None:
-        ring = build_ring(active_devices)
+        ring = build_ring(active_devices, virtual_nodes=virtual_nodes)
         return select_by_affinity(ring, device_affinity)
     return random.choice(active_devices)
 
@@ -117,6 +171,7 @@ def select_active_device(
 def select_available_device(
     devices: list["DeviceRecord"],
     device_affinity: str | None = None,
+    virtual_nodes: int | None = None,
 ) -> "DeviceRecord | None":
     """Select an available device from the list with a relaxed status filter.
 
@@ -149,6 +204,8 @@ def select_available_device(
     Args:
         devices: List of device records to select from.
         device_affinity: Optional affinity key for sticky device selection.
+        virtual_nodes: Optional override for virtual nodes per device on the
+            consistent-hash ring; defaults to the configured ``_VIRTUAL_NODES``.
 
     Returns:
         A selected available device, or ``None`` if no device matches the
@@ -160,6 +217,6 @@ def select_available_device(
     if not available_devices:
         return None
     if device_affinity is not None:
-        ring = build_ring(available_devices)
+        ring = build_ring(available_devices, virtual_nodes=virtual_nodes)
         return select_by_affinity(ring, device_affinity)
     return random.choice(available_devices)

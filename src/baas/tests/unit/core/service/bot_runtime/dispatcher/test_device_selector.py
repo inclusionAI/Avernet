@@ -9,6 +9,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from secbaas.community.core.service.bot_runtime.dispatcher._device_selector import (
+    _resolve_virtual_nodes,
+    build_ring,
     select_active_device,
     select_available_device,
 )
@@ -154,3 +156,88 @@ class TestSelectActiveDeviceRegression:
         ]
         result = select_active_device(devices)
         assert result is None
+
+
+# ==================== Virtual Node Configuration Tests ====================
+
+
+class TestVirtualNodesConfig:
+    """Tests for the configurable virtual-node count on the routing ring."""
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            (None, 200),
+            ("", 200),
+            ("not-an-int", 200),
+            ("0", 200),
+            ("-5", 200),
+            ("1", 1),
+            ("64", 64),
+            ("500", 500),
+        ],
+    )
+    def test_resolve_virtual_nodes_validation(self, raw, expected):
+        """Invalid/empty/sub-minimum values fall back to the default."""
+        assert _resolve_virtual_nodes(raw, default=200) == expected
+
+    def test_build_ring_size_scales_with_virtual_nodes(self):
+        """build_ring places each device on the ring virtual_nodes times."""
+        devices = [
+            _make_device("dev-a", "ACTIVE"),
+            _make_device("dev-b", "ACTIVE"),
+            _make_device("dev-c", "ACTIVE"),
+        ]
+        ring = build_ring(devices, virtual_nodes=64)
+        assert len(ring) == 3 * 64
+        # Ring is sorted by hash value.
+        hashes = [h for h, _ in ring]
+        assert hashes == sorted(hashes)
+
+    def test_build_ring_default_uses_module_constant(self):
+        """build_ring without an override uses the configured default count."""
+        from secbaas.community.core.service.bot_runtime.dispatcher import (
+            _device_selector as selector,
+        )
+
+        devices = [_make_device("dev-only", "ACTIVE")]
+        ring = build_ring(devices)
+        assert len(ring) == 1 * selector._VIRTUAL_NODES
+
+    def test_more_virtual_nodes_reduce_skew_on_small_fleet(self):
+        """A higher virtual-node count evens out load on a small device fleet.
+
+        This is the routing-algorithm property behind the reported uneven
+        multi-instance distribution: with only a few physical replicas the
+        consistent-hash ring partitions unevenly unless each device owns many
+        virtual nodes.
+        """
+        devices = [
+            _make_device(f"dev-{i}", "ACTIVE") for i in range(5)
+        ]
+        sample_size = 6000
+
+        def distribution(virtual_nodes: int) -> dict[str, int]:
+            counts = {d.device_uuid: 0 for d in devices}
+            for i in range(sample_size):
+                picked = select_active_device(
+                    devices,
+                    device_affinity=f"session-{i}",
+                    virtual_nodes=virtual_nodes,
+                )
+                counts[picked.device_uuid] += 1
+            return counts
+
+        few = distribution(virtual_nodes=1)
+        many = distribution(virtual_nodes=200)
+
+        def spread(counts: dict[str, int]) -> int:
+            return max(counts.values()) - min(counts.values())
+
+        # The all-replicas-identical degenerate ring (1 vnode per device) is
+        # far more skewed than the 200-vnode ring over the same keys.
+        assert spread(few) > spread(many)
+        # And the 200-vnode ring stays within a reasonable band of the mean.
+        mean = sample_size / len(devices)
+        assert max(many.values()) <= mean * 1.20
+        assert min(many.values()) >= mean * 0.80
