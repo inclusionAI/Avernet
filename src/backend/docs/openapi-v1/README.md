@@ -951,11 +951,24 @@ that one design choice, and none of it is visible in the OpenAPI document.
 
   Support is answered from the bot's **engine and type** and never from its live
   container, so the answer is the same before the first start, during a restart,
-  and while an unrelated lookup is failing. One consequence worth stating: a
-  legacy ARCA-direct bot — created before the BaaS rollout, whose container is
-  not built through the shared start sequence — is *not* refused, so a script
-  stored on one will not run. Every bot created today is BaaS-backed unless it
-  is teclaw or desktop.
+  and while an unrelated lookup is failing. That choice has a cost, and there
+  are two known cases where `supported: true` is optimistic — in both, the
+  script is stored and the write accepted, but nothing runs it:
+
+  - a legacy **ARCA-direct** bot, created before the BaaS rollout, whose
+    container is not built through the shared start sequence. Every bot created
+    today is BaaS-backed unless it is teclaw or desktop;
+  - a deployment whose containers come from a **`LOCAL`-type BaaS template**
+    (single-machine / singlebox installs). The backend composes and sends the
+    hook exactly as it does for any other bot, but BaaS skips hook dispatch for
+    `LOCAL` and hands off to a `container_ready` callback that does not run it.
+    Whether a given install is affected depends on its BaaS template's
+    configured type, which is deployment data rather than a property of the bot,
+    so this check — answered from the bot record alone — cannot see it.
+
+  Both are the same shape: the refusal covers the cases visible in the bot
+  record, and a provisioning path that bypasses the shared start sequence is not
+  one of them.
 - **Re-running on restart is inherited, not guaranteed by this feature.** The
   script re-runs wherever the platform's own start sequence re-runs. On a
   provider whose restart is destroy-and-create that is every restart; on one

@@ -42,6 +42,24 @@ built through ``_build_create_bot_payload`` — is no longer refused, so its own
 can store a script that will not run. Every bot created today is baas-backed
 unless it is teclaw, so this affects pre-existing bots only, and the trade buys
 an answer that does not depend on live state.
+
+A second case answers ``supported`` optimistically for the same reason, and is
+worth naming because it is not a pre-existing-bot problem: a deployment
+provisioning from a **``LOCAL``-type BaaS template** (a single-machine /
+singlebox install). This one is not a backend gap — the payload is built and the
+hook sent exactly as for any other bot, and BaaS then drops it:
+``_device_service.py`` returns before dispatch when ``provider_type == "LOCAL"``,
+deferring to a ``container_ready`` callback that completes the publish record and
+never runs the hook.
+
+It is not refused here because it is not visible here. ``provider_type`` is
+derived from the BaaS *template's* configured type, which is deployment data; the
+bot record carries no field distinguishing a LOCAL-templated install from any
+other baas-backed one. Refusing it would mean asking BaaS about the template on
+every support check — reintroducing exactly the live-state dependency, and the
+third "we could not find out" state, that this function was rewritten to remove.
+Closing it properly belongs on the BaaS side, where the LOCAL branch already
+knows it is skipping the hook.
 """
 from __future__ import annotations
 
