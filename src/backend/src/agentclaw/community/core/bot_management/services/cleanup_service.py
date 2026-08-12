@@ -39,17 +39,37 @@ class BotCleanupService:
         self._skill_set_repo = skill_set_repo
         self._startup_script_purge = startup_script_purge
 
-    def cleanup_single_bot_data(
-        self, bot_id: str, user_id: str, *, entity_id: str
-    ) -> Dict[str, Any]:
+    def purge_startup_script(self, *, entity_id: str, bot_id: str) -> bool:
+        """删除 Bot 存储的启动脚本。**失败向上抛，不吞。**
+
+        与下面 ``cleanup_single_bot_data`` 里的技能清理不同，这一项刻意不走
+        "记录日志然后继续"：
+
+        * 残留的不是惰性元数据，而是**明文可执行内容**。而且 ``create_bot``
+          允许调用方指定 ``bot_id``、软删的 Bot 又被视为不存在，所以同一个
+          ``(entity_id, bot_id)`` 一旦被重建，这段脚本会在新 Bot 的每次启动里
+          执行——一个新主人从没写过的脚本。
+        * 本仓库对同类清理已经有先例：``delete_bot`` 里的 app grant 回收同样
+          "先于一切破坏性步骤、失败直接抛"，理由写在那里——失败时 Bot 还完好，
+          最坏的结果只是脚本被删而 Bot 存活，重新 PUT 即可恢复。
+        * 本 PR 自己也已经做过同一个判断：``_resolve_startup_script`` 原本吞掉
+          读失败，现在改为上抛，理由是吞掉只会得到"启动了、报告就绪、其实没配置"
+          的静默错误状态。删除侧吞掉失败是同一个形状。
+
+        真被卡住的风险比看上去小：这次写入和软删打的是**同一个后端数据库**，
+        写不进去通常意味着这次删除本来也会失败。
+        """
+        return self._startup_script_purge.delete(entity_id=entity_id, bot_id=bot_id)
+
+    def cleanup_single_bot_data(self, bot_id: str, user_id: str) -> Dict[str, Any]:
         """清理单个 Bot 的关联数据。
+
+        启动脚本**不在**这里清理——它由 ``purge_startup_script`` 在软删之前
+        单独处理，失败要上抛。见那里的说明。
 
         Args:
             bot_id: Bot ID
             user_id: 用户 ID
-            entity_id: 拥有该 Bot 的实体 ID。启动脚本按 ``(entity_id, bot_id)``
-                存储，``user_id`` 只是*通常*等于它（团队实体下并不相等），
-                所以这里必须单独传入，不能拿 ``user_id`` 顶替。
 
         Returns:
             清理结果统计
@@ -60,7 +80,6 @@ class BotCleanupService:
             "skills_deleted": 0,
             "skill_sets_deleted": 0,
             "resources_deleted": 0,
-            "startup_script_deleted": False,
             "errors": [],
         }
 
@@ -80,31 +99,9 @@ class BotCleanupService:
             logger.error(f"[BotCleanupService] {error_msg}")
             result["errors"].append(error_msg)
 
-        # 3. 清理启动脚本（issue #926）
-        #
-        # Bot 删除是软删除，没有任何级联能删掉这一行；不扫就会永久残留：
-        # 明文可执行内容活得比它的 Bot 还久，而且 create_bot 允许调用方指定
-        # bot_id、软删的 Bot 又被视为不存在——同一个 (entity_id, bot_id) 一旦
-        # 被重建，新 Bot 每次启动都会执行上一个 Bot 的脚本。
-        #
-        # entity_id 为空说明这只 Bot 根本没有身份可用来存脚本（写入路径要求
-        # 两者都在），不是错误，跳过即可。
-        if entity_id:
-            try:
-                result["startup_script_deleted"] = self._startup_script_purge.delete(
-                    entity_id=entity_id, bot_id=bot_id
-                )
-            except Exception as e:
-                # 与上面两步一致：清理失败只记录，不阻断删除。残留一行的代价，
-                # 远小于让一次清理失败把 Bot 卡在"删不掉"的状态。
-                error_msg = f"Cleanup startup_script error for bot {bot_id}: {e}"
-                logger.error(f"[BotCleanupService] {error_msg}")
-                result["errors"].append(error_msg)
-
         logger.info(
             f"[BotCleanupService] Cleanup completed for bot {bot_id}: "
-            f"skills={result['skills_deleted']}, skill_sets={result['skill_sets_deleted']}, "
-            f"startup_script={result['startup_script_deleted']}"
+            f"skills={result['skills_deleted']}, skill_sets={result['skill_sets_deleted']}"
         )
 
         return result

@@ -709,25 +709,55 @@ class TestDeleteBot:
         result = svc.delete_bot("mybot", "user001")
         assert result is True
         svc._cleanup_service.cleanup_single_bot_data.assert_called_once_with(
-            "mybot", "user001", entity_id="staff_user001"
+            "mybot", "user001"
         )
 
-    def test_cleanup_is_keyed_by_entity_not_owner(self):
-        """The startup script is stored under ``entity_id``, which is only
-        *usually* the owner id — under a team entity they differ. Passing
-        ``user_id`` in its place would look right in every single-user test and
-        silently miss the row for every team-owned bot.
+    def test_the_startup_script_is_purged_keyed_by_entity_not_owner(self):
+        """The script is stored under ``entity_id``, which is only *usually* the
+        owner id — under a team entity they differ. Passing ``user_id`` in its
+        place would look right in every single-owner test and silently miss the
+        row for every team-owned bot.
         """
         svc = _make_service()
         bot = _make_bot(bot_id="mybot", binding_id=None, entity_id="team_42")
         svc._repository.get_by_id_and_owner.return_value = bot
         svc._passport_plugin.destroy_passport.return_value = None
         svc._repository.soft_delete_by_owner.return_value = True
-        svc._cleanup_service.cleanup_single_bot_data.return_value = {}
 
         assert svc.delete_bot("mybot", "user001") is True
-        _, kwargs = svc._cleanup_service.cleanup_single_bot_data.call_args
-        assert kwargs["entity_id"] == "team_42"
+        svc._cleanup_service.purge_startup_script.assert_called_once_with(
+            entity_id="team_42", bot_id="mybot"
+        )
+
+    def test_a_failed_script_purge_aborts_the_delete_with_the_bot_intact(self):
+        """Unlike the skill sweeps, this one is not allowed to fail quietly: the
+        leftover is executable content that would run on the next owner of the
+        same bot id. It runs before the destructive steps, so a failure leaves
+        the bot whole and the caller sees the error.
+        """
+        svc = _make_service()
+        bot = _make_bot(bot_id="mybot", binding_id=None)
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._cleanup_service.purge_startup_script.side_effect = RuntimeError("db down")
+
+        with pytest.raises(BotServiceError):
+            svc.delete_bot("mybot", "user001")
+
+        svc._repository.soft_delete_by_owner.assert_not_called()
+        svc._passport_plugin.destroy_passport.assert_not_called()
+
+    def test_a_bot_with_no_entity_has_no_script_to_purge(self):
+        """The write path requires both halves of the key, so a bot with no
+        entity id never had a script — nothing to delete, no id to invent.
+        """
+        svc = _make_service()
+        bot = _make_bot(bot_id="mybot", binding_id=None, entity_id="")
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._passport_plugin.destroy_passport.return_value = None
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        assert svc.delete_bot("mybot", "user001") is True
+        svc._cleanup_service.purge_startup_script.assert_not_called()
 
     def test_cleanup_failure_does_not_block_delete(self):
         svc = _make_service()

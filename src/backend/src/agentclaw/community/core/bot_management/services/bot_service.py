@@ -3418,6 +3418,31 @@ class BotService:
                     bot_id,
                 )
 
+            # Drop the stored startup script, here and not in the post-delete
+            # cleanup, for the same reason the grant sweep is here: a failure
+            # aborts while the bot is still intact.
+            #
+            # It is not filed with the skills and skill sets below because it is
+            # not the same kind of leftover. Those are inert metadata; this is
+            # plaintext executable content, and `create_bot` takes a
+            # caller-supplied `bot_id` while soft-deleted bots read as absent —
+            # so a surviving row runs on the *next* owner of that id, on every
+            # start, having never been written by them.
+            #
+            # Failures propagate, matching how this feature already treats a
+            # failed script read (`_resolve_startup_script`): swallowing a
+            # failure against the script store buys a silently wrong state, not
+            # resilience. The wedged-bot risk is smaller than it looks — this
+            # write and the soft delete hit the same database, so a purge that
+            # cannot write almost certainly precedes a deletion that would have
+            # failed anyway.
+            #
+            # The `default` bot is exempt on the same grounds its skills and
+            # config are: that delete is a restart, and the script is meant to
+            # survive it.
+            if bot_id != "default":
+                self._purge_startup_script(bot_id, bot)
+
             # Release device if binding exists (包括 ACTIVE 和 PENDING 状态)
             binding_id = bot.get("binding_id")
             if binding_id:
@@ -3469,9 +3494,7 @@ class BotService:
             # default bot 是用户的默认 Bot，删除它通常是"重启"逻辑，应保留技能和配置
             if bot_id != "default":
                 try:
-                    self._cleanup_bot_associated_data(
-                        bot_id, user_id, entity_id=str(bot.get("entity_id") or "")
-                    )
+                    self._cleanup_bot_associated_data(bot_id, user_id)
                     logger.info(f"[bot_service.delete_bot] Cleaned up associated data for bot {bot_id}")
                 except Exception as cleanup_error:
                     # 清理失败不影响删除结果，只记录日志
@@ -3567,18 +3590,36 @@ class BotService:
                 exc_info=True,
             )
 
-    def _cleanup_bot_associated_data(
-        self, bot_id: str, user_id: str, *, entity_id: str
-    ) -> Dict[str, Any]:
+    def _purge_startup_script(self, bot_id: str, bot: Dict[str, Any]) -> None:
+        """Delete the bot's stored startup script. Failures propagate.
+
+        Keyed by ``entity_id``, not the owner id. The two are usually equal —
+        this file says so in several places — but under a team entity they are
+        not, and using the owner would look correct in every single-owner case
+        while missing the row for every team-owned bot.
+
+        A bot with no ``entity_id`` never had a script: the write path requires
+        both halves of the key. There is nothing to delete and no id to invent.
         """
-        清理 Bot 关联的脏数据（技能、技能集、资源、启动脚本等）
+        entity_id = str(bot.get("entity_id") or "")
+        if not entity_id:
+            return
+        self._cleanup_service.purge_startup_script(
+            entity_id=entity_id, bot_id=bot_id
+        )
+
+    def _cleanup_bot_associated_data(self, bot_id: str, user_id: str) -> Dict[str, Any]:
+        """
+        清理 Bot 关联的脏数据（技能、技能集、资源等）
 
         注意：此方法仅应在确认 Bot 真正被删除时调用（非 default bot 的重启场景）
+
+        启动脚本不在此列：它在软删*之前*由 ``_purge_startup_script`` 单独删除，
+        失败要阻断删除而不是记录后继续。见那里的说明。
 
         Args:
             bot_id: Bot ID
             user_id: 用户ID
-            entity_id: Bot 所属实体 ID（启动脚本按它加 bot_id 存储）
 
         Returns:
             清理结果统计
@@ -3594,9 +3635,7 @@ class BotService:
 
         try:
             # 使用 cleanup_service 清理单个 bot 的数据
-            cleanup_result = self._cleanup_service.cleanup_single_bot_data(
-                bot_id, user_id, entity_id=entity_id
-            )
+            cleanup_result = self._cleanup_service.cleanup_single_bot_data(bot_id, user_id)
 
             result["skills_deleted"] = cleanup_result.get("skills_deleted", 0)
             result["skill_sets_deleted"] = cleanup_result.get("skill_sets_deleted", 0)
