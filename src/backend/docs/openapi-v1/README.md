@@ -870,8 +870,8 @@ adding the route without moving the name fails there rather than in review.
 All responses use the `Envelope[T]` / `Page[T]` shapes from
 `openapi_v1/contracts.py` unless noted (binary streams bypass the envelope).
 
-### ✅ totalfrank · P1 — bots (13 endpoints) · `openapi_v1/bots/router.py` — **IMPLEMENTED (PR #494)**
-All 13 wired to the internal bot services. Kept here as the reference shape for
+### ✅ totalfrank · P1 — bots (17 endpoints) · `openapi_v1/bots/router.py` — **IMPLEMENTED (PR #494; startup script #926)**
+All 17 wired to the internal bot services. Kept here as the reference shape for
 the other six: this is what "done" looks like per category.
 
 | Method | Path | Purpose | Success |
@@ -889,6 +889,51 @@ the other six: this is what "done" looks like per category.
 | GET | `/openapi/v1/bots/{bot_id}/passport` | Get the bot's Agent Passport | `Envelope[Passport]` |
 | GET | `/openapi/v1/bots/{bot_id}/engine-config` | Read engine config (free-form JSON) | `Envelope[dict]` |
 | PUT | `/openapi/v1/bots/{bot_id}/engine-config` | Write engine config (free-form JSON) | `Envelope[dict]` |
+| GET | `/openapi/v1/bots/{bot_id}/startup-script` | Read the bot's startup script | `Envelope[StartupScript]` |
+| PUT | `/openapi/v1/bots/{bot_id}/startup-script` | Set/replace it; takes effect next start | `Envelope[StartupScript]` |
+| DELETE | `/openapi/v1/bots/{bot_id}/startup-script` | Clear it | `Envelope[Deleted]` |
+| GET | `/openapi/v1/bots/{bot_id}/startup-script/last-start` | Outcome of the last container start, per instance | `Envelope[list[StartInstanceResult]]` |
+
+#### Startup script — the promises a caller cannot infer from the schema
+
+The script is **appended to the container's start sequence**, after the
+platform's own boot steps (bootstrap, engine install, service start,
+watchdog) and before the start is reported. Everything below follows from
+that one design choice, and none of it is visible in the OpenAPI document.
+
+- **It runs on every start the platform composes, and the platform does not
+  dedupe — so it must be idempotent.** Create, restart and republish each
+  compose a fresh start command and run the script again.
+- **Editing takes effect on the next start, never on a running container.**
+  A script written after a bot was created reaches a container only once that
+  bot restarts. The first write therefore always needs a restart.
+- **A failure degrades rather than blocks.** A non-zero exit, a crash, or a
+  timeout leaves the agent running: the script is guarded so it cannot change
+  the boot's outcome, and it is skipped entirely if the boot itself failed.
+- **Limits:** body ≤ **64 KiB** (413 above that, naming the limit); each run
+  capped at **300s** by `timeout`, sized against the 600s publish budget the
+  start reports into. Interpreter is `bash`; the body runs as `admin`, the
+  same user every platform step runs as.
+- **Do not put secrets in the body.** It is stored as written, and the
+  start command that carries it is logged (with the body elided, but that is
+  a mitigation, not a guarantee). There is no by-reference secret mechanism
+  yet.
+- **`last-start` reports the whole start sequence, not the script alone.**
+  One command means one exit status, so the platform's boot and the caller's
+  script share a result — hence the name. The script's own output is
+  additionally written to `/home/admin/logs/startup_script.log` inside the
+  container.
+- **Two kinds of bot cannot run one, and `supported` says which:** a
+  **teclaw** bot, whose container is provisioned without a start sequence at
+  all, and a bot on a device provider that does not build one (legacy
+  ARCA-direct bots). A write to either is refused with **409** rather than
+  stored where it would silently never run; `GET` still answers, carrying the
+  reason. A **503** means the check was inconclusive — retry it.
+- **Re-running on restart is inherited, not guaranteed by this feature.** The
+  script re-runs wherever the platform's own start sequence re-runs. On a
+  provider whose restart is destroy-and-create that is every restart; on one
+  that restarts a container in place, the sequence does not re-run and
+  neither does the script.
 
 _Deliberately **not** exposed on bots: `engine_options` on create (nothing
 downstream reads `BotCreateSpec.extra_properties` yet, so advertising it would

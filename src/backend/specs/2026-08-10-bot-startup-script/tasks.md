@@ -108,20 +108,20 @@
         empty list rather than an error.
 - **Depends on:** Tasks 3, 4
 
-## Task 6: Publish the contract and document the limits
+## [x] Task 6: Publish the contract and document the limits
 - **Goal:** The gateway serves the routes, and the promises a caller cannot infer
   from the schema are written down.
 - **Files:** `src/gateway/configs/schemas/bots.openapi.json`,
   `src/backend/docs/openapi-v1/README.md`, `README.zh-CN.md`
 - **Done when:**
-  - [ ] Schema regenerated with `dump_openapi.py`; all four operations present with
+  - [x] Schema regenerated with `dump_openapi.py`; all four operations present with
         security metadata; `src/gateway/tests/fixtures/bots.openapi.json` **not**
         regenerated.
-  - [ ] Docs state: runs on every start the platform composes and must be
+  - [x] Docs state: runs on every start the platform composes and must be
         idempotent; the size limit and the timeout; that a failure degrades rather
         than blocks; that secrets must not be placed in the body; that the reported
         result covers the whole start sequence.
-  - [ ] Docs state the two limits plainly — the script does not re-run on providers
+  - [x] Docs state the two limits plainly — the script does not re-run on providers
         whose restart is in-place, and teclaw bots cannot run it at all.
 - **Depends on:** Tasks 4, 5
 
