@@ -19,14 +19,29 @@ change, no OCB dependency in this scope.
 - [ ] **A2.** Inject `ResourceFileService` into the router. Confirm it and
   `BotRepository` stay out of the served OpenAPI schema — the existing invariant
   guarded by `test_public_namespace.py`.
-- [ ] **A3.** Schema (`openapi_v1/resources/schemas.py`): add optional
-  `path: str | None` to `Resource` — the full workspace-relative path
-  (`a/b/c.txt`). **No `parent_path` field** — it is a `dirname` off `path`.
-  `name` stays: a link has a name and no path, and the schema is shared. Do
-  **not** add an uploader field; the console surfaces it, this API does not.
+- [ ] **A3.** `Resource` **response** schema (`openapi_v1/resources/schemas.py`) —
+  the model returned by list, get, and the upload response; not a request
+  parameter. Add optional `path: str | None`, the **full** workspace-relative
+  path (`a/b/c.txt`).
+  It is the addressing key: a client takes it from a listing and passes it
+  verbatim to `?path=` on download / preview / delete. It is deliberately *not*
+  the directory — making `path` mean `a/b` would be `parent_path` under another
+  name, and would force every client to rejoin it with `name` before it could
+  address anything.
+  So for a file: `path` = `a/b/c.txt`, `name` = `c.txt`. For a link: `name` is
+  the label, `path` is null.
+  **No `parent_path` field** — a `dirname` off `path`. `name` stays because a
+  link has one and no path, and the schema is shared. Do **not** add an uploader
+  field; the console surfaces it, this API does not.
 - [ ] **A4.** Relax `gmt_create` / `gmt_modified` to `str | None` — the engine's
   listing carries no timestamps (`FileEntry`, `core/file/models.py:34`), so a
   bot-created file has none.
+  **Keep the names.** They are DB-flavoured, but they are the prevailing
+  convention across `openapi_v1` (`engine_runtime/sessions/schemas.py:54,105`,
+  `routines/schemas.py:28`); only `skills/schemas.py:20` uses
+  `created_at`/`updated_at`. Renaming resources alone moves it from the majority
+  to the minority and deepens an existing split — an API-wide rename is worth
+  doing, in its own issue.
 - [ ] **A5.** Add a path-sanitization helper used by every file handler: reject
   any `..` segment with `ValueError`; strip leading slashes and empty segments.
   **Do not change `ResourceFileService`'s own filter** (`resource_file_service.py:409`)
@@ -90,9 +105,19 @@ change, no OCB dependency in this scope.
   the console (`adapters/http/resources/file_router.py:202`); it is a listing
   input and has nothing to do with the DB `parent_path` attribute.
 - [ ] **C2.** List via `ResourceFileService.list_dir(path=path)`, non-recursive.
-- [ ] **C3.** Map entries: directories → `ResourceType.FOLDER`, files → `FILE`.
-  Use `relative_path`, never the engine-view absolute `path`
-  (`resource_file_service._rel_path:200`).
+- [ ] **C3.** Convert each listing entry into one `Resource`. `list_dir` returns
+  a dict per directory entry — `name`, `path`, `relative_path`, `is_dir`, `size`
+  — which maps to: `type` = `FOLDER` when `is_dir` else `FILE`, `name` = the
+  entry's `name`, `size` = the entry's `size`, and `path` = **the listed
+  directory joined with the entry's `relative_path`**.
+  The join is needed because the engine reports `relative_path` relative to the
+  *listed* directory, not to the workspace root: listing `a/b` yields
+  `relative_path="c.txt"`, and the response `path` must be `a/b/c.txt`.
+  `resource_file_service._rel_path:193` already implements exactly this,
+  including its fallback to `name` for teclaw, which returns no `relative_path`.
+  **Never use the entry's own `path`** — that is the engine-view absolute
+  container path (`/home/admin/.aicoding/workspace/...`) and must not be exposed
+  through a public API.
 - [ ] **C4.** Enrich from records, matched on workspace-relative path. In-memory
   join — `path`/`parent_path` live in the `attributes` JSON column
   (`core/repository/implementations/platform/resource.py:123,79`), and the repo
