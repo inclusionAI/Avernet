@@ -61,7 +61,9 @@ from agentclaw.community.kernel.device_dto import (
 )
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.devices.protocols import StartupScriptReaderProtocol
+    from agentclaw.community.core.bot_startup_script.protocols import (
+        StartupScriptReaderProtocol,
+    )
     from agentclaw.community.plugin_api.outbound_rules import OutboundRuleProvider
     from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
@@ -74,14 +76,18 @@ logger = get_logger()
 
 ENGINE_DIR_MOUNT_WHITELIST_BUSINESS_CODE = "nas_mount"
 
-#: Where the per-bot startup script is written inside the container, and where
-#: its output is captured (issue #926).
+#: Where the per-bot startup script's output is captured (issue #926).
 #:
-#: Under admin's home rather than /tmp: the stage runs as ``admin``, and a
-#: world-writable drop path would let any other user in the container
-#: pre-create or swap the file between the write and the exec.
-STARTUP_SCRIPT_PATH = "/home/admin/.ocb_startup_script.sh"
+#: The body itself goes to a ``mktemp`` file and is removed after the run. Two
+#: reasons it must not be a fixed path under /home/admin: that directory is
+#: NAS-mounted for many bots, so a fixed path would persist a plaintext body
+#: across restarts and outlive a DELETE of the script; and an unpredictable
+#: name owned by ``admin`` cannot be pre-created by anyone else.
 STARTUP_SCRIPT_LOG = "/home/admin/logs/startup_script.log"
+
+#: Separates the platform boot chain from the per-bot user stage, and the marker
+#: log redaction splits on so the platform half stays readable.
+_USER_STAGE_MARKER = "\n__OCB_RC=$?\n"
 
 #: Wall-clock cap on the user stage.
 #:
@@ -123,28 +129,38 @@ DEFAULT_READ_ONLY_RULES = [
 
 
 def _redact_payload_for_log(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Shallow copy of a create payload with the start command elided.
+    """Shallow copy of a create payload with only the *user stage* elided.
 
-    ``after_create_cmd_hook`` carries the bot's own startup script (issue #926).
-    The published contract tells callers not to put secrets in a script body,
-    but a contract is not an enforcement mechanism, and these payloads are
-    logged at INFO on every create, release and restart. Log its length instead
-    of the command — enough to tell "a script was attached" from "none was",
-    without copying a caller's script into the log.
+    ``after_create_cmd_hook`` is mostly the platform's own boot chain, which is
+    exactly what someone reads these logs to debug — so the platform half stays
+    verbatim. Only the per-bot script segment (issue #926) is replaced: the
+    published contract's "no secrets in a script body" is advice, not an
+    enforcement mechanism, and these payloads are logged at INFO on every
+    create, release and restart.
+
+    ``_USER_STAGE_MARKER`` is the seam. A hook without one has no user stage and
+    is logged unchanged, so this is a no-op for every bot without a script.
     """
     config = payload.get("config")
     if not isinstance(config, dict):
         return payload
     deploy = config.get("deploy_config")
-    if not isinstance(deploy, dict) or "after_create_cmd_hook" not in deploy:
+    if not isinstance(deploy, dict):
         return payload
 
-    hook = deploy.get("after_create_cmd_hook") or ""
+    hook = deploy.get("after_create_cmd_hook")
+    if not isinstance(hook, str) or _USER_STAGE_MARKER not in hook:
+        return payload
+
+    platform, _, user_stage = hook.partition(_USER_STAGE_MARKER)
     redacted = dict(payload)
     redacted["config"] = dict(config)
     redacted["config"]["deploy_config"] = {
         **deploy,
-        "after_create_cmd_hook": f"<elided {len(hook)} chars>",
+        "after_create_cmd_hook": (
+            f"{platform}{_USER_STAGE_MARKER}"
+            f"<startup script elided, {len(user_stage)} chars>"
+        ),
     }
     return redacted
 
@@ -2330,8 +2346,8 @@ class BaasService:  # pragma: no cover
         # bootstrap failed. Capture the platform status first, run the user
         # stage, then re-assert it.
         return (
-            f"{chain}\n"
-            f"__OCB_RC=$?\n"
+            f"{chain}"
+            f"{_USER_STAGE_MARKER}"
             f'if [ "$__OCB_RC" -eq 0 ]; then\n'
             f"{self._get_startup_script_segment(startup_script)}\n"
             f"fi\n"
@@ -2383,20 +2399,23 @@ class BaasService:  # pragma: no cover
         """
         encoded = base64.b64encode(script.encode("utf-8")).decode("ascii")
         # Runs as ``admin``, like every platform step (``_get_bootstrap_cmp``
-        # and friends all use ``su admin -c``). Two reasons this matters:
-        # the hook itself runs as root, so an unwrapped user stage would give a
-        # caller root inside their container and leave root-owned files behind
-        # under /home/admin; and the drop path lives in admin's own home rather
-        # than a world-writable /tmp, so admin cannot pre-create the file to
-        # win a race against a root-side redirect.
+        # and friends all use ``su admin -c``). The hook itself runs as root, so
+        # an unwrapped user stage would hand a caller root inside their own
+        # container and leave root-owned files behind under /home/admin.
         #
-        # Single-quoting is safe here: everything interpolated is either a
-        # fixed path or base64 (alphabet [A-Za-z0-9+/=]), so the body cannot
-        # contain a quote that closes this string.
+        # The body goes to ``mktemp`` and is removed afterwards: a fixed path
+        # under the NAS-mounted home would persist a plaintext script across
+        # restarts and survive a DELETE of it.
+        #
+        # Single-quoting is safe here: everything interpolated is either a fixed
+        # path or base64 (alphabet [A-Za-z0-9+/=]), so the body cannot contain a
+        # quote that closes this string. ``$f`` is expanded by the su'd shell at
+        # runtime, not by this f-string.
         inner = (
-            f"echo {encoded} | base64 -d > {STARTUP_SCRIPT_PATH}"
-            f" && timeout {timeout_seconds} bash {STARTUP_SCRIPT_PATH}"
-            f" >> {STARTUP_SCRIPT_LOG} 2>&1"
+            "f=$(mktemp)"
+            f' && echo {encoded} | base64 -d > "$f"'
+            f' && timeout {timeout_seconds} bash "$f" >> {STARTUP_SCRIPT_LOG} 2>&1'
+            '; rm -f "$f"'
         )
         return f"  su admin -c '{inner}' || true"
 

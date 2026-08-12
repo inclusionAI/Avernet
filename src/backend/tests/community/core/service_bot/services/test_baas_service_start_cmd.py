@@ -182,7 +182,7 @@ class TestStartupScriptSegment:
         cmd = self._cmd("")
         assert "__OCB_RC" not in cmd
         assert "base64 -d" not in cmd
-        assert "ocb_startup_script.sh" not in cmd
+        assert "mktemp" not in cmd
         assert "\n" not in cmd  # still the single-line string it always was
 
     # --- exit-status handling ----------------------------------------------
@@ -375,7 +375,10 @@ class TestStartupScriptPrivilege:
         """A /tmp drop path lets another user pre-create the file and race the
         write, turning the exec into someone else's script."""
         cmd = self._cmd()
-        assert "/tmp/" not in cmd.split("__OCB_RC=$?")[1]
+        stage = cmd.split("__OCB_RC=$?")[1]
+        assert "mktemp" in stage      # unpredictable, admin-owned
+        assert 'rm -f "$f"' in stage  # and removed after the run
+        assert "/home/admin/.ocb" not in stage  # not persisted on NAS
 
     def test_su_wrapper_cannot_be_closed_by_the_body(self):
         """Everything inside the single-quoted su string is base64 or a fixed
@@ -394,32 +397,54 @@ class TestStartupScriptPrivilege:
 class TestPayloadLogRedaction:
     """Create payloads are logged at INFO and carry the user's script."""
 
-    def test_hook_is_elided_from_the_logged_payload(self):
-        from agentclaw.community.core.service_bot.services.baas_service import (
-            _redact_payload_for_log,
-        )
-
-        payload = {
+    def _payload(self, hook: str) -> dict:
+        return {
             "name": "b",
             "config": {
                 "entity_id": "ent-1",
                 "deploy_config": {
-                    "after_create_cmd_hook": "bootstrap && SECRET_TOKEN=abc123",
+                    "after_create_cmd_hook": hook,
                     "ttl_in_minutes": 60,
                 },
             },
         }
-        redacted = _redact_payload_for_log(payload)
 
-        hook = redacted["config"]["deploy_config"]["after_create_cmd_hook"]
-        assert "SECRET_TOKEN" not in str(redacted)
-        assert hook.startswith("<elided ")
-        # Everything else still logged, and the original is untouched.
-        assert redacted["config"]["deploy_config"]["ttl_in_minutes"] == 60
-        assert redacted["name"] == "b"
-        assert payload["config"]["deploy_config"]["after_create_cmd_hook"].startswith(
-            "bootstrap"
+    def test_only_the_user_stage_is_elided(self):
+        from agentclaw.community.core.service_bot.services.baas_service import (
+            _redact_payload_for_log,
         )
+
+        hook = _make_service()._get_start_cmd(
+            bot_id="bot-1", owner_id="owner-1", entity_id="entity-1",
+            entity_type="user", migration_pat="/tmp/src", bot_type="agent",
+            engine="openclaw", stage="online", version="1",
+            startup_script="curl -H 'Authorization: Bearer SECRET_TOKEN' x",
+        )
+        payload = self._payload(hook)
+        redacted = _redact_payload_for_log(payload)
+        logged = redacted["config"]["deploy_config"]["after_create_cmd_hook"]
+
+        import base64 as _b64
+        encoded = _b64.b64encode(
+            b"curl -H 'Authorization: Bearer SECRET_TOKEN' x"
+        ).decode()
+        assert encoded not in str(redacted)
+        assert "<startup script elided" in logged
+        # The platform chain — what these logs exist to debug — survives.
+        assert "bootstrap_minimal.sh" in logged
+        assert "start_service.sh" in logged
+        # Original untouched, siblings preserved.
+        assert redacted["config"]["deploy_config"]["ttl_in_minutes"] == 60
+        assert encoded in payload["config"]["deploy_config"]["after_create_cmd_hook"]
+
+    def test_hook_without_a_user_stage_is_logged_verbatim(self):
+        """A no-script bot's payload must log exactly as it does today."""
+        from agentclaw.community.core.service_bot.services.baas_service import (
+            _redact_payload_for_log,
+        )
+
+        payload = self._payload("bootstrap && start_service.sh")
+        assert _redact_payload_for_log(payload) == payload
 
     def test_payload_without_a_deploy_config_passes_through(self):
         from agentclaw.community.core.service_bot.services.baas_service import (
