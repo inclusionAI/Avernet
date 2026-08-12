@@ -162,8 +162,21 @@ class TestStartupScriptSegment:
     # --- the no-script guarantee -------------------------------------------
 
     def test_no_script_is_byte_identical_to_the_bare_chain(self):
-        """Every existing bot must compose exactly the string it composes today."""
-        assert self._cmd("") == self._cmd()
+        """Every existing bot must compose exactly the string it composes today.
+
+        Reconstructed from the four helpers rather than compared against
+        another call to the same function — comparing ``_cmd("")`` with
+        ``_cmd()`` passes even if both are wrong.
+        """
+        svc = _make_service()
+        expected = (
+            f"{svc._get_bootstrap_cmp()} && ({svc._get_install_engine_cmd()}) && "
+            f" {svc._get_start_sandbox_service_cmd(
+                'openclaw', '/tmp/src', 'agent', 'bot-1', 'owner-1',
+                'entity-1', 'user', 'online', '1', False, None,
+            )} && {svc._get_start_watchdog_cmd()}"
+        )
+        assert self._cmd("") == expected
 
     def test_no_script_adds_nothing_from_the_user_stage(self):
         cmd = self._cmd("")
@@ -281,3 +294,98 @@ class TestStartupScriptSegment:
     def test_user_stage_comes_after_the_whole_platform_chain(self):
         cmd = self._cmd("echo hi")
         assert cmd.index("start_service.sh") < cmd.index("base64 -d")
+
+
+class TestStartupScriptReachesEveryStartPath:
+    """A script is written *after* a bot exists, so restart is the path that
+    actually delivers it. Threading a parameter through callers is how that
+    path gets missed — resolution happens centrally instead."""
+
+    _BOT = {
+        "bot_id": "bot-1",
+        "bot_name": "b",
+        "entity_id": "ent-1",
+        "entity_type": "staff",
+        "active_engine": "openclaw",
+        "bot_type": "personal",
+    }
+
+    def _service_with_script(self, body: str = "echo provisioned"):
+        svc = _make_service()
+        reader = MagicMock()
+        reader.get_body.return_value = body
+        svc._startup_script_reader = reader
+        return svc, reader
+
+    def _hook(self, svc, **kwargs) -> str:
+        payload = svc._build_create_bot_payload(
+            bot=dict(self._BOT),
+            owner_id="owner-1",
+            request_id="req-1",
+            device_count=1,
+            migration_path="",
+            **kwargs,
+        )
+        return payload["config"]["deploy_config"]["after_create_cmd_hook"]
+
+    def test_payload_builder_resolves_the_script_when_not_passed(self):
+        import base64 as _b64
+
+        svc, reader = self._service_with_script()
+        hook = self._hook(svc)
+        assert _b64.b64encode(b"echo provisioned").decode() in hook
+        reader.get_body.assert_called_once_with(entity_id="ent-1", bot_id="bot-1")
+
+    def test_explicit_empty_string_wins_over_the_reader(self):
+        """An explicit argument is a deliberate override, not 'unset'."""
+        svc, reader = self._service_with_script()
+        hook = self._hook(svc, startup_script="")
+        assert "__OCB_RC" not in hook
+        reader.get_body.assert_not_called()
+
+    def test_no_reader_bound_composes_todays_chain(self):
+        assert "__OCB_RC" not in self._hook(_make_service())
+
+    def test_lookup_failure_does_not_break_the_start(self):
+        svc = _make_service()
+        reader = MagicMock()
+        reader.get_body.side_effect = RuntimeError("db down")
+        svc._startup_script_reader = reader
+        assert svc._resolve_startup_script(entity_id="ent-1", bot_id="bot-1") == ""
+
+    def test_missing_entity_id_resolves_to_no_script(self):
+        svc, _ = self._service_with_script()
+        assert svc._resolve_startup_script(entity_id="", bot_id="bot-1") == ""
+
+
+class TestStartupScriptPrivilege:
+    """The hook runs as root; the user stage must not."""
+
+    def _cmd(self, body: str = "echo hi") -> str:
+        return _make_service()._get_start_cmd(
+            bot_id="bot-1", owner_id="owner-1", entity_id="entity-1",
+            entity_type="user", migration_pat="/tmp/src", bot_type="agent",
+            engine="openclaw", stage="online", version="1", startup_script=body,
+        )
+
+    def test_user_stage_runs_as_admin_like_every_platform_step(self):
+        assert "su admin -c '" in self._cmd()
+
+    def test_drop_path_is_not_world_writable(self):
+        """A /tmp drop path lets another user pre-create the file and race the
+        write, turning the exec into someone else's script."""
+        cmd = self._cmd()
+        assert "/tmp/" not in cmd.split("__OCB_RC=$?")[1]
+
+    def test_su_wrapper_cannot_be_closed_by_the_body(self):
+        """Everything inside the single-quoted su string is base64 or a fixed
+        path, so a body full of quotes cannot break out of it."""
+        body = "echo 'quoted'; rm -rf /"
+        cmd = self._cmd(body)
+        # Slice from the user stage: the platform's bootstrap step is itself a
+        # `su admin -c '...'`, so the first match is not the one under test.
+        user_stage = cmd[cmd.index("__OCB_RC=$?") :]
+        start = user_stage.index("su admin -c '") + len("su admin -c '")
+        inner = user_stage[start : user_stage.index("' || true")]
+        assert "'" not in inner
+        assert "rm -rf" not in inner  # the body survives only as base64

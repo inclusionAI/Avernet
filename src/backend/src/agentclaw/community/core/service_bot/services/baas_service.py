@@ -75,7 +75,11 @@ ENGINE_DIR_MOUNT_WHITELIST_BUSINESS_CODE = "nas_mount"
 
 #: Where the per-bot startup script is written inside the container, and where
 #: its output is captured (issue #926).
-STARTUP_SCRIPT_PATH = "/tmp/ocb_startup_script.sh"
+#:
+#: Under admin's home rather than /tmp: the stage runs as ``admin``, and a
+#: world-writable drop path would let any other user in the container
+#: pre-create or swap the file between the write and the exec.
+STARTUP_SCRIPT_PATH = "/home/admin/.ocb_startup_script.sh"
 STARTUP_SCRIPT_LOG = "/home/admin/logs/startup_script.log"
 
 #: Wall-clock cap on the user stage.
@@ -381,6 +385,7 @@ class BaasService:  # pragma: no cover
         outbound_rule_provider: "OutboundRuleProvider",
         personal_bot_template_uuid: Optional[str] = None,
         theta_master_key_secret: str = "",
+        startup_script_reader: "StartupScriptReaderProtocol | None" = None,
     ):
         """初始化 BaasService。
 
@@ -429,6 +434,13 @@ class BaasService:  # pragma: no cover
         self._common_whitelist_service = common_whitelist_service
         self._outbound_rule_provider = outbound_rule_provider
         self._theta_master_key_secret = theta_master_key_secret
+        # Per-bot startup script (issue #926). Resolved here rather than passed
+        # down by each caller: _build_create_bot_payload is reached from create,
+        # from service-bot release, and from upgrade_bot (restart), and a script
+        # can only be written *after* a bot exists — so restart is the path that
+        # actually delivers it. Threading a parameter through every caller is
+        # how that path gets missed.
+        self._startup_script_reader = startup_script_reader
 
     def post_bots_api(
         self,
@@ -593,7 +605,7 @@ class BaasService:  # pragma: no cover
         template_config: Optional[Dict[str, Any]] = None,
         mount_home_dir_storage: bool | None = None,
         ext_info: Optional[Dict[str, Any]] = None,
-        startup_script: str = "",
+        startup_script: str | None = None,
     ) -> Dict[str, Any]:
         """构建创建 Bot 的请求体。
 
@@ -644,6 +656,14 @@ class BaasService:  # pragma: no cover
             migration_path = self._normalize_migration_path_for_mount(
                 migration_path=migration_path,
                 mount_home_dir_storage=mount_home_dir_storage,
+            )
+
+        # Per-bot startup script: an explicit argument wins (the device path
+        # already has it, and tests pin exact bodies); otherwise resolve it here
+        # so every caller — create, release, and restart — delivers it.
+        if startup_script is None:
+            startup_script = self._resolve_startup_script(
+                entity_id=entity_id, bot_id=bot_id
             )
 
         # 构建 sandbox 成功后执行的命令
@@ -2282,6 +2302,28 @@ class BaasService:  # pragma: no cover
             f"exit $__OCB_RC\n"
         )
 
+    def _resolve_startup_script(self, *, entity_id: str, bot_id: str) -> str:
+        """Read the bot's stored startup script, or ``""`` when it has none.
+
+        Never raises: a storage hiccup must not block provisioning or a restart.
+        The bot picks the script up on the next start instead.
+        """
+        if self._startup_script_reader is None or not entity_id or not bot_id:
+            return ""
+        try:
+            return self._startup_script_reader.get_body(
+                entity_id=entity_id, bot_id=bot_id
+            )
+        except Exception as exc:  # noqa: BLE001 - a start must not fail on this
+            logger.warning(
+                "[BaasService._resolve_startup_script] lookup failed, continuing "
+                "without a script: entity_id=%s, bot_id=%s, error=%s",
+                entity_id,
+                bot_id,
+                exc,
+            )
+            return ""
+
     def _get_startup_script_segment(
         self,
         script: str,
@@ -2304,11 +2346,23 @@ class BaasService:  # pragma: no cover
         status upstream.
         """
         encoded = base64.b64encode(script.encode("utf-8")).decode("ascii")
-        return (
-            f"  ( echo {encoded} | base64 -d > {STARTUP_SCRIPT_PATH}"
+        # Runs as ``admin``, like every platform step (``_get_bootstrap_cmp``
+        # and friends all use ``su admin -c``). Two reasons this matters:
+        # the hook itself runs as root, so an unwrapped user stage would give a
+        # caller root inside their container and leave root-owned files behind
+        # under /home/admin; and the drop path lives in admin's own home rather
+        # than a world-writable /tmp, so admin cannot pre-create the file to
+        # win a race against a root-side redirect.
+        #
+        # Single-quoting is safe here: everything interpolated is either a
+        # fixed path or base64 (alphabet [A-Za-z0-9+/=]), so the body cannot
+        # contain a quote that closes this string.
+        inner = (
+            f"echo {encoded} | base64 -d > {STARTUP_SCRIPT_PATH}"
             f" && timeout {timeout_seconds} bash {STARTUP_SCRIPT_PATH}"
-            f" >> {STARTUP_SCRIPT_LOG} 2>&1 ) || true"
+            f" >> {STARTUP_SCRIPT_LOG} 2>&1"
         )
+        return f"  su admin -c '{inner}' || true"
 
     def _get_destroy_cmd(
             self
