@@ -233,6 +233,12 @@ Verified by `tests/community/architecture/test_module_boundaries.py` (currently
 - `client_error_status`: 4xx → int; 5xx / 2xx / missing / non-int → `None`
 - `describe_exception`: bare exception; with `__cause__`; with `request.url`
 - backoff is slept (patch `time.sleep`) and is non-negative
+- **event-loop safety:** on a running loop a transport failure yields exactly one
+  call and no `time.sleep`; off-loop the same failure still retries; a call
+  offloaded through `asyncio.to_thread` retries too (the loop runs on another
+  thread, so it is correctly not "running" there); `attempts=1` on-loop is an
+  unchanged no-op; and `_on_event_loop()` itself is exercised in all three
+  contexts — plain sync, inline coroutine, and inside `asyncio.to_thread`
 
 ### New — `tests/.../test_baas_service_get_http_info_retry.py`
 

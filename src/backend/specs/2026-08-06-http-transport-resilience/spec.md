@@ -128,7 +128,13 @@ failure the retry component exists to absorb.
 
 - Runs a caller-supplied operation and returns its result unchanged.
 - On a failure that shows no sign of having received an HTTP answer, retries up
-  to a bounded number of total attempts.
+  to a bounded number of total attempts — **but only when called from a context
+  where waiting is safe.** Called on a running event loop, it makes exactly one
+  attempt and does not wait: retrying there would park the loop for a second
+  deadline plus the backoff, stalling every unrelated request on that worker,
+  which is the very failure this component exists to absorb. Callers that want
+  the retry from async code offload the whole call to a worker thread, which is
+  both how they avoid blocking the loop and how they re-enable it.
 - On a failure that carries a client-error (4xx) response, does not retry —
   repeating a rejected request cannot succeed.
 - Waits a short, randomized interval before a retry, so that many callers tripped
@@ -143,7 +149,12 @@ failure the retry component exists to absorb.
 ### `get_http_info`
 
 - A `GET /http-info` that fails at the transport level is attempted a second
-  time before the caller sees an error.
+  time before the caller sees an error — **on the off-loop paths**, which is
+  where the motivating failure occurred: skill upload reaches it through
+  `LocalDeviceFileSystem._baas_write_file`, which runs on a worker thread.
+  Callers that reach it inline from a coroutine get one attempt and the failure
+  they would have got before this change; roughly 60 such async paths exist and
+  their pre-existing single blocking call is out of scope here.
 - A response that arrives — including an error status — is handled exactly as
   today. No new status is retried.
 - The existing per-attempt deadline is unchanged. Worst-case latency for a fully
@@ -165,8 +176,10 @@ failure the retry component exists to absorb.
 ## Success criteria
 
 - A single transport failure on `GET /http-info` no longer surfaces to the
-  caller; a multi-file skill upload survives one blip that would previously have
-  destroyed it.
+  caller **on an off-loop path**; a multi-file skill upload survives one blip
+  that would previously have destroyed it. On-loop callers are unchanged from
+  today rather than improved — deliberately, since retrying there would trade a
+  blip for a loop stall.
 - A failure carrying a 4xx response is not retried.
 - Production failure logs for this path name the underlying exception type.
 - Repeated calls through one `HttpClient` reuse a connection rather than opening

@@ -35,6 +35,23 @@ Paths are relative to `src/backend/`.
   Define `DEFAULT_ATTEMPTS = 2`, `DEFAULT_BACKOFF_SECONDS = 0.1`, and a module-
   private jitter fraction. Export the public names via `__all__`.
 
+  **Amended after review (A8).** Before the loop, degrade `attempts` to 1 when a
+  running event loop is detected — see A8. A backport that carries A5 without A8
+  reintroduces the loop-stall amplification review rejected.
+
+- [x] **A8. Make the retry loop-aware.** Add `_on_event_loop()` using
+  `asyncio.get_running_loop()` (it raises off-loop, and correctly reports no
+  running loop from inside `asyncio.to_thread`, where the loop lives on another
+  thread). When `attempts > 1` and a loop is running, log at DEBUG and set
+  `attempts = 1`, so the call makes one attempt with no `time.sleep`. Place the
+  guard *after* the `attempts`/`backoff_seconds` validation so it cannot mask
+  those `ValueError`s.
+
+  This replaced call-site-by-call-site offloading, which failed to converge
+  across three review rounds: a bounded reverse-reachability scan from
+  `get_http_info` found ~60 async functions reaching it inline. The guard makes
+  this change's amplification zero on all of them without editing any.
+
 - [x] **A6. Write `tests/community/utils/test_retry.py`** covering every bullet
   in plan.md § _Test plan → New — test_retry.py_. Patch `time.sleep` so the
   suite does not actually wait.
@@ -174,7 +191,9 @@ Paths are relative to `src/backend/`.
 
 - One retry component under `utils/`, importable by any backend module, with no
   coupling to BaaS or skill upload.
-- `get_http_info` survives a single transport blip; status handling unchanged.
+- `get_http_info` survives a single transport blip on off-loop paths (including
+  the skill-upload path that motivated this work); status handling unchanged.
+  On-loop callers get one attempt and no wait — unchanged from today, by design.
 - `HttpxClient` opens one connection pool per client instead of one per request.
 - `llm.py` has no duplicate copy of the classifier or the cause formatter, and
   its tests pass unmodified.
