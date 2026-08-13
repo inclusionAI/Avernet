@@ -155,29 +155,27 @@ class TestMigrateBotInstanceExtraSync:
         # target 子目录应被自动创建
         assert (target_dir / "claude").is_dir()
 
-    def test_raises_when_extra_source_missing(self, tmp_path: Path):
-        # 配置了 extra sync 但源不存在 → 立即报错，避免主 rsync
-        # 成功后才意外丢失配置（claude_code 的 .claude 是必备产物）。
+    def test_skips_when_extra_source_missing(self, tmp_path: Path):
+        # 配置了 extra sync 但源不存在 → 跳过该项，不影响主 rsync。
         service = _make_service()
         service._run_local_command = MagicMock(return_value=None)
 
         source_dir, target_dir = _seed_dirs(tmp_path, with_extra_source=False)
         plan = _make_plan(extra_src=".claude", extra_tgt="claude")
 
-        with pytest.raises(BotBuildMigrationError) as excinfo:
-            service._migrate_bot_instance(
-                device_id="dev1",
-                source_dir=source_dir,
-                target_dir=target_dir,
-                version_str="v1",
-                is_nas=True,
-                nas_storage_id=str(source_dir),
-                build_plan=plan,
-                provider=MagicMock(),
-            )
+        ok = service._migrate_bot_instance(
+            device_id="dev1",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            version_str="v1",
+            is_nas=True,
+            nas_storage_id=str(source_dir),
+            build_plan=plan,
+            provider=MagicMock(),
+        )
 
-        assert "Extra sync source does not exist" in str(excinfo.value)
-        # 主 rsync 必须先成功调用过一次（异常发生在 extra 之前的检查后）
+        assert ok is True
+        # 主 rsync 仍应执行
         main_calls = [
             call
             for call in service._run_local_command.call_args_list
