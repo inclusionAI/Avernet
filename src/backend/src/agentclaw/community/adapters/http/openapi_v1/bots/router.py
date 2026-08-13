@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
+    EXAMPLE_TRACE_ID,
     STARTUP_SCRIPT_WRITE_RESPONSES,
     USER_SCOPED_403,
     BotIdPath,
@@ -247,7 +248,24 @@ def _sync_passport_identity(
         202: {
             "model": Envelope[BotAuthPending],
             "description": "Needs user authorization",
-        }
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": 202000,
+                        "message": "Accepted",
+                        "data": {
+                            "bot_id": "20260813_a7k2m9p1",
+                            "iframe_url": (
+                                "https://auth.example.com/passport/consent"
+                                "?flow=f-123"
+                            ),
+                            "redirect_url": "",
+                        },
+                        "request_id": EXAMPLE_TRACE_ID,
+                    }
+                }
+            },
+        },
     },
 )
 @envelope_errors
@@ -608,6 +626,20 @@ async def restart_bot(
             "model": Envelope[BotAuthStatus],
             "description": "Authorization did not complete; `data.status` "
             "carries the terminal state (e.g. REJECTED, EXPIRED)",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": 400000,
+                        "message": "Authorization did not complete",
+                        "data": {
+                            "status": "REJECTED",
+                            "message": None,
+                            "bot": None,
+                        },
+                        "request_id": EXAMPLE_TRACE_ID,
+                    }
+                }
+            },
         },
     },
     dependencies=_GRANT_CHECKED,

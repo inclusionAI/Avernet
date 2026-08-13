@@ -18,6 +18,7 @@ from agentclaw.community.adapters.http.middleware import AvernetTenantMiddleware
 from tests.community.adapters.http.openapi_v1.conftest import (
     user_scoped_client,
 )
+from agentclaw.community.adapters.http.openapi_v1.contracts import EXAMPLE_TRACE_ID
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     PRINCIPAL_HEADER,
     require_principal,
@@ -366,10 +367,12 @@ def test_openapi_declares_exactly_the_six_ratified_skills_operations():
     assert {"200", "201", "413"} <= set(upload["responses"])
     assert set(upload["requestBody"]["content"]) == {"application/zip"}
     error_example = upload["responses"]["413"]["content"]["application/json"]["example"]
+    # request_id carries the surface-wide illustrative trace id, so rendered
+    # samples show a realistic value instead of an empty placeholder.
     assert {**error_example, "data": error_example.get("data")} == {
         "code": 413101,
         "message": "Skill package is too large",
-        "request_id": "",
+        "request_id": EXAMPLE_TRACE_ID,
         "data": None,
     }
     error_schema = upload["responses"]["413"]["content"]["application/json"]["schema"]

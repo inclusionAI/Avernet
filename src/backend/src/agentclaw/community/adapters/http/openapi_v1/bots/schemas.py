@@ -49,16 +49,17 @@ _ENGINE_DESC = (
 
 # The status vocabulary is a pass-through of the stored lifecycle state, and the
 # listing can also surface bots whose lifecycle is driven elsewhere (desktop
-# bots, dormancy reclaim), so the set is open: the three main states are
-# documented as primary and the rest as possible, rather than publishing a
-# closed enum that a legitimately-listed bot would violate.
+# bots, dormancy reclaim), so the set is open: every value those lifecycles
+# emit today is listed with its meaning, but it is not published as a schema
+# `enum` — a closed set would make a legitimately-listed bot invalid the day a
+# lifecycle adds a state.
 _BOT_STATUS_DESC = (
-    "Lifecycle status. Primary states: 'PENDING' — created, its device is "
-    "still being provisioned; 'ACTIVE' — the device is up; 'FAILED' — device "
-    "provisioning failed (delete and recreate, or restart). Bots managed by "
-    "other lifecycles can also report 'OFFLINE', 'RELEASING', 'RELEASED', "
-    "'RECYCLED' or 'REACTIVATING'; treat any value other than 'ACTIVE' as "
-    "not ready for work."
+    "Lifecycle status. Values: 'PENDING' — created, its device is still "
+    "being provisioned; 'ACTIVE' — running and reachable; 'FAILED' — device "
+    "provisioning failed (restart, or delete and recreate); 'OFFLINE', "
+    "'RELEASING', 'RELEASED' — desktop-bot lifecycle states; 'RECYCLED', "
+    "'REACTIVATING' — dormant-bot reclaim states. New lifecycles can add "
+    "values, so treat any value other than 'ACTIVE' as not ready for work."
 )
 
 

@@ -40,6 +40,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     NameCheck,
     Page,
     PageParamsDep,
+    error_example,
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
@@ -146,6 +147,7 @@ _TOO_LARGE_RESPONSE: dict[int | str, dict[str, object]] = {
         "model": ErrorEnvelope,
         "description": "File exceeds the size the provider will serve, or the "
         "1 MB preview cap.",
+        **error_example(413, "File too large for preview"),
     },
 }
 # The group is already user-scoped, so it carries ``USER_SCOPED_403`` from
@@ -159,6 +161,7 @@ _READ_ONLY_RESPONSE: dict[int | str, dict[str, object]] = {
         "description": "The path is read-only — a dotfile, or a workspace-root "
         "identity file — or the user_id names a user the authenticated caller "
         "may not act for.",
+        **error_example(403, "Forbidden"),
     },
 }
 

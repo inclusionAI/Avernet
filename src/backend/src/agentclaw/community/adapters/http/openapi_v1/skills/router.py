@@ -13,6 +13,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Body, Path, Query, Request, Response
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
+    EXAMPLE_TRACE_ID,
     Deleted,
     Envelope,
     ErrorEnvelope,
@@ -218,7 +219,7 @@ async def get_skill(
                         "code": 413101,
                         "message": "Skill package is too large",
                         "data": None,
-                        "request_id": "",
+                        "request_id": EXAMPLE_TRACE_ID,
                     }
                 }
             },
