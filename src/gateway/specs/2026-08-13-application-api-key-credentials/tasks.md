@@ -23,21 +23,25 @@
         secbaas implementation loaded from disk.
 - **Depends on:** —
 
-## Task 2: Add the API-key columns, retain the legacy credential column
+## Task 2 `[x]`: Add the API-key columns, retain the legacy credential column
 - **Goal:** Add `api_key_hash` + `api_key_prefix` (nullable, prefix unique) to
   the ORM row and canonical DDL, keeping `token` as a nullable deprecated column
   so existing rows keep authenticating.
 - **Files:** `src/gateway/src/gateway/community/core/app/_orm.py`,
   `src/gateway/migrations/mysql/001_init_schema.sql`
 - **Done when:**
-  - [ ] `AppRow` has `api_key_hash: str | None` and `api_key_prefix: str | None`
+  - [x] `AppRow` has `api_key_hash: str | None` and `api_key_prefix: str | None`
         (unique); `token` becomes `str | None`, still unique, marked deprecated
         in a comment naming what must happen before removal.
-  - [ ] DDL matches: both new columns `DEFAULT NULL`,
+  - [x] DDL matches: both new columns `DEFAULT NULL`,
         `uk_avernet_application_api_key_prefix` added,
         `uk_avernet_application_token` retained, comments updated.
-  - [ ] The schema change is additive only — no existing column is dropped or
+  - [x] The schema change is additive only — no existing column is dropped or
         made stricter, so it can be applied before the code ships.
+  - [x] Verified against a live SQLite schema: both uniqueness constraints
+        reject duplicates, and an API-key row plus multiple legacy rows (all
+        with `NULL` prefixes) coexist — the multi-`NULL` behavior the
+        empty-string sentinel would have broken.
 - **Depends on:** —
 
 ## Task 3: Rework `AppRepository` + the `AppRegistry` port for API-key verification

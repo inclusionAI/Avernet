@@ -17,22 +17,26 @@
 -- (`avernet_tenant`), and the access-key registry (`avernet_access_key_token`).
 
 -- Table: avernet_application
--- 第三方应用注册表：按 opaque `token`(签名 JWT) 查找；`id` 为应用稳定身份。
+-- 第三方应用注册表：按 `api_key_prefix`(API Key 前 8 位)定位、再比对 `api_key_hash`；
+-- `id` 为应用稳定身份。每行只填一种凭证：新行填 api_key_*，迁移前的旧行填 `token`。
 CREATE TABLE IF NOT EXISTS `avernet_application` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',
   `gmt_create` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `gmt_modified` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
   `app_name` varchar(256) NOT NULL COMMENT '应用名称',
   `app_type` varchar(64) NOT NULL DEFAULT 'UNKNOWN' COMMENT '应用类型',
-  `token` varchar(1024) NOT NULL COMMENT '应用访问令牌(签名 JWT)，opaque 查找键',
+  `api_key_hash` varchar(256) DEFAULT NULL COMMENT 'API Key 哈希(PBKDF2-SHA256，格式 base64(salt):base64(dk))',
+  `api_key_prefix` varchar(8) DEFAULT NULL COMMENT 'API Key 前 8 位，查找键(哈希加盐，无法按哈希查找)',
+  `token` varchar(1024) DEFAULT NULL COMMENT '[废弃] 旧版应用令牌(明文签名 JWT)，过渡期精确匹配查找键；待废弃日志静默后随查找路径一并删除',
   `owners` varchar(1024) NOT NULL COMMENT '应用归属(开发者/组织)',
   `tenant` varchar(64) NOT NULL COMMENT '所属租户(逻辑引用 avernet_tenant.name)',
-  `status` varchar(32) NOT NULL DEFAULT 'ACTIVE' COMMENT '状态(ACTIVE/INACTIVE)',
+  `status` varchar(32) NOT NULL DEFAULT 'ACTIVE' COMMENT '状态(ACTIVE/INACTIVE)，仅 ACTIVE 可通过鉴权',
   `env` varchar(64) NOT NULL DEFAULT '' COMMENT '环境标识',
   `config` json DEFAULT NULL COMMENT '扩展配置(JSON)',
   `creator` varchar(128) NOT NULL DEFAULT '' COMMENT '创建人',
   `modifier` varchar(128) NOT NULL DEFAULT '' COMMENT '修改人',
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_avernet_application_api_key_prefix` (`api_key_prefix`),
   UNIQUE KEY `uk_avernet_application_token` (`token`),
   KEY `idx_avernet_application_app_name` (`app_name`)
 ) DEFAULT CHARSET = utf8mb4 COMMENT = '第三方应用注册表';
