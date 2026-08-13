@@ -115,9 +115,11 @@ and is deferred until someone needs it.
 ## Open Questions
 
 - ~~What is the size limit for a script body, and the timeout for a run?~~
-  **Answered.** 24 KiB and 300s (TERM) / 310s (KILL). The size is derived, not
-  chosen: the base64 body must fit inside the downstream `Text` column that
-  persists the hook, which is 65,535 bytes on MySQL.
+  **Answered.** 24 KiB and 300s (TERM) / 310s (KILL). The size is a safety
+  bound on a body that ends up in a device boot chain, not a figure derived
+  from storage: an earlier answer here said it was derived from a 65,535-byte
+  `Text` column, but production persists the hook in `mediumtext`
+  (16,777,215 bytes), where 24 KiB occupies 0.2% after base64.
 - Which interpreters are permitted — is the script always run by a shell, or may
   it declare its own interpreter?
 - Is network egress during a run expected to work under a bot's existing outbound

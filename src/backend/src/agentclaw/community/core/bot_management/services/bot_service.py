@@ -3646,8 +3646,14 @@ class BotService:
         A bot with no ``entity_id`` never had a script: the write path requires
         both halves of the key. There is nothing to delete and no id to invent.
 
-        Runs before the soft delete, while the bot is still intact, so a failure
-        aborts the deletion rather than leaving the script behind unnoticed.
+        Two call sites, and their failure semantics differ because the bot is in
+        a different state at each. The first runs before the soft delete, while
+        the bot is still intact, so a failure aborts the deletion and leaves it
+        retryable. The second is
+        :meth:`_sweep_startup_script_that_raced_the_deletion`, after the soft
+        delete, catching a write that landed in the gap between the two; a
+        failure there surfaces as well, but the bot is already gone by then, so
+        it cannot abort anything.
         """
         entity_id = str(bot.get("entity_id") or "")
         if not entity_id:
