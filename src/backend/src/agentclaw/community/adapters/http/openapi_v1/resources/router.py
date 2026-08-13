@@ -96,6 +96,18 @@ _OPENAPI_TO_LEGACY_TYPE: dict[ResourceType, _LegacyType] = {
     ResourceType.LINK: _LegacyType.LINK,
 }
 
+# _LINK_TYPE_SPLIT — one defect three link operations inherit, recorded once.
+# `create_url_resource` writes legacy URL, so every link here is a URL row. The
+# repository's uniqueness helpers filter strictly on the type they are handed,
+# and two are handed LINK: `check_name_exists` from the name-check endpoint, and
+# `check_link_url_exists` (hard-coded LINK) from link update. Both query a set
+# disjoint from what create wrote, so promises built on them fail both ways — a
+# clash missed, or one reported against rows create ignores. Create's own name
+# check passes URL, so it binds, but only across URL rows. The fix is the "URL
+# fan-out" (openapi LINK covering both legacy types), which changes what these
+# endpoints answer and so belongs to the resources contract, not to a
+# documentation change. Until then each description states what it enforces.
+
 
 def _legacy_type_for(openapi_type: ResourceType | None) -> _LegacyType | None:
     """Map an openapi ResourceType to the legacy ResourceType the slim service expects.
@@ -368,22 +380,9 @@ async def check_resource_name(
     accepted. Treat create's answer as the authoritative one and handle the
     409; the file check above has no such gap.
     """
-    # The link mismatch is real, not a caveat invented for the docstring: this
-    # maps openapi LINK to legacy ResourceType.LINK, while `create_url_resource`
-    # checks and writes legacy ResourceType.URL — which is what every link
-    # created through this surface is. `check_name_exists` filters strictly on
-    # the type it is given, so the two query disjoint sets. Hence both
-    # directions: the check misses every link create wrote (false negative), and
-    # a legacy LINK row from elsewhere answers taken for a name create would
-    # accept (false positive). Fixing it means deciding whether LINK fans out to
-    # both legacy types here (the "URL fan-out" follow-up noted on
-    # _OPENAPI_TO_LEGACY_TYPE), which is a behaviour change to the resources
-    # contract and not this change's to make. Until then the endpoint says what
-    # it actually does.
-    #
-    # parent_path / exclude_id from the service signature stay off this contract
-    # and are passed as None: resources are bot-scoped, so there is no parent
-    # path to qualify the name with.
+    # The link branch queries LINK while create writes URL — see _LINK_TYPE_SPLIT.
+    # parent_path / exclude_id stay off this contract and pass None: resources
+    # are bot-scoped, so there is no parent path to qualify a name with.
     # Neither addressing mode supplied. Both parameters carry plain defaults so
     # that one may be omitted, which costs FastAPI's required-parameter check —
     # so the "at least one" rule is enforced here instead. Without it the link
@@ -431,8 +430,11 @@ async def create_resource(
     Only `link` resources are created here, and `url` is required for them. The
     other two kinds have their own endpoints: send a file's bytes to the upload
     endpoint (`type=file` here is refused with 400) and create a folder through
-    the mkdir endpoint (`type=folder` here is refused with 501). A name already
-    used within the bot is refused (409).
+    the mkdir endpoint (`type=folder` here is refused with 501).
+
+    A name already used by another link created here is refused (409). The
+    check does not span the whole bot: a file, a folder, or a link recorded by
+    another path can hold the same name without blocking this create.
     """
     del user_id  # not-yet-enforced ownership — see list_resources
     if body.type == ResourceType.FILE:
@@ -504,10 +506,9 @@ async def upload_resource(
     path from a listing can be passed straight back. A path already in use
     within the workspace is refused (409).
     """
-    # The write goes through ResourceFileService, the same service the console
-    # uses, so both surfaces compose the workspace address identically and
-    # cannot drift. owner_id comes from the request's user_id (UserIdDep),
-    # fail-closed — mirroring the bots router.
+    # ResourceFileService is the console's writer too, so both surfaces compose
+    # the workspace address identically. owner_id is the request's own user_id
+    # (UserIdDep), fail-closed — mirroring the bots router.
     safe = _safe_path(path)
     if not safe:
         raise InvalidResourcePathError("path is required")
@@ -857,9 +858,8 @@ async def create_directory(
     Creating one through the create endpoint with `type=folder` is refused
     (501); this is the endpoint for it.
     """
-    # Deliberately no FOLDER record: giving directories records would
-    # reintroduce exactly the record-vs-filesystem divergence this group's move
-    # to the workspace removes.
+    # Deliberately no FOLDER record: it would reintroduce the
+    # record-vs-filesystem divergence this group's move to the workspace removes.
     safe = _safe_path(path)
     if not safe:
         raise InvalidResourcePathError("path is required")
@@ -927,21 +927,17 @@ async def update_resource(
     Links only, addressed by `resource_id`. A file's identifier answers 404 —
     files live in the workspace and are not renamed through this endpoint.
 
-    A URL already used by another link is refused (409). A **name** is not
-    checked here, unlike on create: renaming a link to a name another link
-    already uses succeeds, so two links can end up sharing a name. Check the
-    name yourself first if you need it to stay unique.
+    **Nothing is checked for uniqueness here.** A name is never compared at all,
+    and the URL comparison misses every link this API created, so renaming a
+    link onto another's name, or pointing it at another's URL, succeeds. Two
+    links can end up sharing either. Check first yourself if it matters.
     """
-    # The asymmetry is the service's, not this contract's: `update_link_resource`
-    # assigns `name` unconditionally and only runs `check_link_url_exists` for a
-    # changed URL. Adding the name check there would refuse renames that
-    # currently succeed, which is a resources-contract decision rather than one
-    # a documentation change makes silently — the same ruling the link
-    # name-check preflight got.
+    # `update_link_resource` assigns `name` unconditionally, and its URL guard
+    # is `check_link_url_exists`, which is hard-coded to LINK — see
+    # _LINK_TYPE_SPLIT. A 409 is still possible from a legacy LINK row, so the
+    # status stays documented on the operation; it just cannot be relied on.
     #
     # link_type is intentionally not exposed on the openapi contract.
-    # ValueError from the service (not found / url clash) → 409 Conflict, per
-    # legacy + create parity.
     #
     # A file id 404s, completing what GET and DELETE /{resource_id} already do.
     # `update_link_resource` checks no type, so a stale file id would otherwise

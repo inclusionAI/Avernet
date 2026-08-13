@@ -210,8 +210,14 @@ class BotStatus(BaseModel):
     """Runtime readiness of a bot."""
 
     status: str = Field(description=_STATUS_DESC)
+    # `is_bot_ready` reads `status` — plus, for application bots, whether the
+    # repository clone finished — and never consults `device_binding`. So this
+    # can be true alongside a null `device_id`; the two are independent reads of
+    # the same record, not a claim and its evidence.
     is_ready: bool = Field(
-        description="True when the bot has a bound device and can take work."
+        description="True when the bot's own state says it can take work. This "
+        "does not assert that a device is bound — read `device_id` for that, "
+        "and expect it to be null on a ready bot that has none."
     )
     device_id: str | None = Field(
         default=None, description="Device currently bound to the bot; null when "

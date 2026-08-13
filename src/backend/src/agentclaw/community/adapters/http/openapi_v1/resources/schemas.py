@@ -120,9 +120,13 @@ class ResourceCreate(BaseModel):
         }
     )
 
+    # Narrower than it looks: `create_url_resource` checks the name against URL
+    # rows only — see _LINK_TYPE_SPLIT in router.py.
     name: str = Field(
-        description="Name for the new resource. A name already in use within "
-        "the bot is refused with 409."
+        description="Name for the new resource. A name already used by another "
+        "link created here is refused with 409, but the check does not span "
+        "the whole bot: a file, a folder, or a link recorded by another path "
+        "can hold the same name without blocking this create."
     )
     type: ResourceType = Field(description=_TYPE_DESC)
     url: str | None = Field(
@@ -142,15 +146,20 @@ class ResourceUpdate(BaseModel):
         json_schema_extra={"example": {"name": "Q3 notes (final)"}}
     )
 
+    # Neither field is usefully guarded: `update_link_resource` never compares
+    # the name, and its URL guard is `check_link_url_exists`, hard-coded to LINK
+    # while every link created here is a URL row — see _LINK_TYPE_SPLIT in
+    # router.py.
     name: str | None = Field(
         default=None,
-        description="New name; omit to keep. Not checked for uniqueness — "
-        "unlike on create, a name another link already uses is accepted.",
+        description="New name; omit to keep. Not checked for uniqueness at "
+        "all — a name another link already uses is accepted.",
     )
     url: str | None = Field(
         default=None,
-        description="New target URL; omit to keep. A URL another link already "
-        "uses is refused (409).",
+        description="New target URL; omit to keep. The uniqueness check here "
+        "does not see links created through this API, so a URL another such "
+        "link already uses is accepted rather than refused.",
     )
 
 

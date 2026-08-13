@@ -381,7 +381,7 @@
             "title": "Device Id"
           },
           "is_ready": {
-            "description": "True when the bot has a bound device and can take work.",
+            "description": "True when the bot's own state says it can take work. This does not assert that a device is bound — read `device_id` for that, and expect it to be null on a ready bot that has none.",
             "title": "Is Ready",
             "type": "boolean"
           },
@@ -3937,7 +3937,7 @@
         },
         "properties": {
           "name": {
-            "description": "Name for the new resource. A name already in use within the bot is refused with 409.",
+            "description": "Name for the new resource. A name already used by another link created here is refused with 409, but the check does not span the whole bot: a file, a folder, or a link recorded by another path can hold the same name without blocking this create.",
             "title": "Name",
             "type": "string"
           },
@@ -4002,7 +4002,7 @@
                 "type": "null"
               }
             ],
-            "description": "New name; omit to keep. Not checked for uniqueness — unlike on create, a name another link already uses is accepted.",
+            "description": "New name; omit to keep. Not checked for uniqueness at all — a name another link already uses is accepted.",
             "title": "Name"
           },
           "url": {
@@ -4014,7 +4014,7 @@
                 "type": "null"
               }
             ],
-            "description": "New target URL; omit to keep. A URL another link already uses is refused (409).",
+            "description": "New target URL; omit to keep. The uniqueness check here does not see links created through this API, so a URL another such link already uses is accepted rather than refused.",
             "title": "Url"
           }
         },
@@ -9207,7 +9207,7 @@
         ]
       },
       "post": {
-        "description": "Create a link resource.\n\nOnly `link` resources are created here, and `url` is required for them. The\nother two kinds have their own endpoints: send a file's bytes to the upload\nendpoint (`type=file` here is refused with 400) and create a folder through\nthe mkdir endpoint (`type=folder` here is refused with 501). A name already\nused within the bot is refused (409).",
+        "description": "Create a link resource.\n\nOnly `link` resources are created here, and `url` is required for them. The\nother two kinds have their own endpoints: send a file's bytes to the upload\nendpoint (`type=file` here is refused with 400) and create a folder through\nthe mkdir endpoint (`type=folder` here is refused with 501).\n\nA name already used by another link created here is refused (409). The\ncheck does not span the whole bot: a file, a folder, or a link recorded by\nanother path can hold the same name without blocking this create.",
         "operationId": "create_resource_openapi_v1_bots_resources_post",
         "parameters": [
           {
@@ -10351,7 +10351,7 @@
         ]
       },
       "put": {
-        "description": "Rename a link resource or change its target URL.\n\nLinks only, addressed by `resource_id`. A file's identifier answers 404 —\nfiles live in the workspace and are not renamed through this endpoint.\n\nA URL already used by another link is refused (409). A **name** is not\nchecked here, unlike on create: renaming a link to a name another link\nalready uses succeeds, so two links can end up sharing a name. Check the\nname yourself first if you need it to stay unique.",
+        "description": "Rename a link resource or change its target URL.\n\nLinks only, addressed by `resource_id`. A file's identifier answers 404 —\nfiles live in the workspace and are not renamed through this endpoint.\n\n**Nothing is checked for uniqueness here.** A name is never compared at all,\nand the URL comparison misses every link this API created, so renaming a\nlink onto another's name, or pointing it at another's URL, succeeds. Two\nlinks can end up sharing either. Check first yourself if it matters.",
         "operationId": "update_resource_openapi_v1_bots_resources__resource_id__put",
         "parameters": [
           {
