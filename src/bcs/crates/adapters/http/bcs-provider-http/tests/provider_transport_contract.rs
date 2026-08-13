@@ -1,6 +1,9 @@
 use std::{
     collections::BTreeMap,
-    sync::{Arc, Mutex as StdMutex, OnceLock},
+    sync::{
+        Arc, Mutex as StdMutex, OnceLock,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::Duration,
 };
 
@@ -19,7 +22,9 @@ use bcs_service_api::{
     BotDeliveryCommand, BotDeliveryPort, BotEventCommand, BotEventOutcome, BotRunContext,
     BotRunContextPort, ChatAbortCommand, ChatAbortOutcome, ChatEventState, GroupCallbackCommand,
     GroupCallbackOutcome, GroupHistoryBotRequestPort, MessageFlowService,
-    ProviderTransportPreference, ServiceResult, DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
+    ProviderEventIngestCommand, ProviderEventIngestService, ProviderEventSource,
+    ProviderRunTransport, ServiceResult,
+    DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
     TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome,
     TaskRunAliasRegistration, WebSendCommand, WebSendOutcome,
 };
@@ -90,7 +95,6 @@ async fn provider_delivery_injects_current_gateway_span_context() {
                 })),
             )),
             delivery_kind: BotDeliveryKind::Send,
-            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .instrument(span)
@@ -128,7 +132,6 @@ async fn provider_delivery_applies_configured_bypass_headers() {
                 })),
             )),
             delivery_kind: BotDeliveryKind::Send,
-            provider_transport: Default::default(),
             provider_bypass_headers: vec![(
                 "x-sandbox-bypass".to_string(),
                 "sandbox-route-1".to_string(),
@@ -167,7 +170,6 @@ async fn provider_delivery_ignores_reserved_bypass_headers() {
                 })),
             )),
             delivery_kind: BotDeliveryKind::Send,
-            provider_transport: Default::default(),
             provider_bypass_headers: vec![
                 ("authorization".to_string(), "Bearer attacker".to_string()),
                 ("bcn-message-id".to_string(), "attacker-message-id".to_string()),
@@ -318,7 +320,6 @@ async fn provider_delivery_posts_bearer_token_and_chat_send_body() {
                 })),
             )),
             delivery_kind: BotDeliveryKind::Send,
-            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await
@@ -387,7 +388,6 @@ async fn provider_delivery_forwards_extensions_when_present() {
                 })),
             )),
             delivery_kind: BotDeliveryKind::Send,
-            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await
@@ -420,7 +420,6 @@ async fn provider_delivery_rejects_private_webhook_url_before_request() {
                 })),
             )),
             delivery_kind: BotDeliveryKind::Send,
-            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await
@@ -445,7 +444,6 @@ async fn provider_delivery_logs_policy_rejection_with_provider_url_ip_and_reason
                 Some(json!({ "bcs_group_id": "group-1", "message": { "text": "hello" } })),
             )),
             delivery_kind: BotDeliveryKind::Send,
-            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await
@@ -508,7 +506,6 @@ async fn provider_delivery_protocol2_sse_ingests_events() {
                 })),
             )),
             delivery_kind: BotDeliveryKind::Send,
-            provider_transport: ProviderTransportPreference::CallbackSse,
             provider_bypass_headers: Vec::new(),
         })
         .await
@@ -538,6 +535,14 @@ async fn provider_delivery_protocol2_sse_ingests_events() {
     assert_eq!(events[2].state, ChatEventState::Final);
     assert_eq!(events[2].event_payload["state"], "final");
     drop(events);
+    assert!(
+        message_flow
+            .sources
+            .lock()
+            .await
+            .iter()
+            .all(|source| *source == ProviderEventSource::Sse)
+    );
     assert!(run_context.get_context("run-sse").await.unwrap().terminal);
 
     server.abort();
@@ -550,14 +555,16 @@ async fn provider_delivery_protocol2_task_kinds_sse_ingest_events() {
 
     let message_flow = Arc::new(RecordingMessageFlow::default());
     let run_context = Arc::new(RecordingRunContext::default());
-    let transport = HttpProviderTransport::allowing_private_networks_for_tests();
-    transport.set_ingest(message_flow.clone(), run_context.clone());
-
     for (suffix, delivery_kind) in [
         ("dispatch", BotDeliveryKind::TaskDispatch),
         ("message", BotDeliveryKind::TaskMessage),
         ("result", BotDeliveryKind::TaskResult),
     ] {
+        // Keep each table row transport-independent. The SSE reader owns the
+        // response connection after `deliver` returns, so sharing one HTTP/2
+        // client here would couple the next row to the prior reader teardown.
+        let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+        transport.set_ingest(message_flow.clone(), run_context.clone());
         let run_id = format!("task-{suffix}-sse");
         run_context
             .put_context(BotRunContext {
@@ -571,8 +578,9 @@ async fn provider_delivery_protocol2_task_kinds_sse_ingest_events() {
             .await;
         let event_offset = message_flow.events.lock().await.len();
 
-        let result = transport
-            .deliver(BotDeliveryCommand {
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            transport.deliver(BotDeliveryCommand {
                 target: provider_target_with_protocol(webhook_url.clone(), "2.0"),
                 run_id: run_id.clone(),
                 frame: BcsFrame::Request(RequestFrame::new(
@@ -588,11 +596,12 @@ async fn provider_delivery_protocol2_task_kinds_sse_ingest_events() {
                     })),
                 )),
                 delivery_kind,
-                provider_transport: ProviderTransportPreference::CallbackSse,
                 provider_bypass_headers: Vec::new(),
-            })
-            .await
-            .unwrap();
+            }),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("{suffix} SSE delivery timed out"))
+        .unwrap();
 
         assert!(result.delivered);
         tokio::time::timeout(Duration::from_secs(1), async {
@@ -657,7 +666,6 @@ async fn provider_delivery_falls_back_to_actor_id_for_sender_name() {
                 })),
             )),
             delivery_kind: BotDeliveryKind::Send,
-            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await
@@ -865,7 +873,6 @@ async fn provider_delivery_posts_chat_inject_body_with_bcn_group_id() {
                 })),
             )),
             delivery_kind: BotDeliveryKind::Inject,
-            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await
@@ -910,7 +917,6 @@ async fn provider_delivery_rejects_chat_send_when_frame_id_differs_from_run_id()
                 })),
             )),
             delivery_kind: BotDeliveryKind::Send,
-            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await
@@ -968,6 +974,14 @@ async fn capture_sse() -> Response {
     Response::builder()
         .header("content-type", "text/event-stream; charset=utf-8")
         .body(Body::from(body))
+        .unwrap()
+}
+
+async fn capture_invalid_ack(State(request_count): State<Arc<AtomicUsize>>) -> Response {
+    request_count.fetch_add(1, Ordering::SeqCst);
+    Response::builder()
+        .header("content-type", "application/json")
+        .body(Body::from("not-json"))
         .unwrap()
 }
 
@@ -1061,6 +1075,7 @@ fn provider_target_with_protocol(webhook_url: String, protocol_version: &str) ->
 #[derive(Default)]
 struct RecordingRunContext {
     contexts: RwLock<std::collections::HashMap<String, BotRunContext>>,
+    provider_transports: RwLock<std::collections::HashMap<String, ProviderRunTransport>>,
 }
 
 #[async_trait::async_trait]
@@ -1097,11 +1112,48 @@ impl BotRunContextPort for RecordingRunContext {
     }
 
     async fn release_terminal(&self, _run_id: &str) {}
+
+    async fn begin_provider_transport(&self, run_id: &str, _deadline_ms: u64) -> bool {
+        let mut transports = self.provider_transports.write().await;
+        if transports.contains_key(run_id) {
+            return false;
+        }
+        transports.insert(run_id.to_string(), ProviderRunTransport::Negotiating);
+        true
+    }
+
+    async fn bind_provider_transport(
+        &self,
+        run_id: &str,
+        transport: ProviderRunTransport,
+    ) -> bool {
+        self.provider_transports
+            .write()
+            .await
+            .insert(run_id.to_string(), transport);
+        true
+    }
+
+    async fn get_provider_transport(&self, run_id: &str) -> Option<ProviderRunTransport> {
+        self.provider_transports.read().await.get(run_id).copied()
+    }
+
+    async fn mark_provider_transport_terminal(&self, run_id: &str) {
+        self.provider_transports
+            .write()
+            .await
+            .insert(run_id.to_string(), ProviderRunTransport::Terminal);
+    }
+
+    async fn clear_provider_transport(&self, run_id: &str) {
+        self.provider_transports.write().await.remove(run_id);
+    }
 }
 
 #[derive(Default)]
 struct RecordingMessageFlow {
     events: Mutex<Vec<BotEventCommand>>,
+    sources: Mutex<Vec<ProviderEventSource>>,
 }
 
 #[async_trait::async_trait]
@@ -1122,6 +1174,14 @@ impl MessageFlowService for RecordingMessageFlow {
             failed_count: 0,
             delivery_results: Vec::new(),
         })
+    }
+
+    async fn ingest_provider_event(
+        &self,
+        cmd: ProviderEventIngestCommand,
+    ) -> ServiceResult<BotEventOutcome> {
+        self.sources.lock().await.push(cmd.source);
+        self.handle_bot_event(cmd.event).await
     }
 
     async fn handle_group_callback(
@@ -1156,6 +1216,16 @@ impl MessageFlowService for RecordingMessageFlow {
         _cmd: TaskCompleteCommand,
     ) -> ServiceResult<TaskCompleteOutcome> {
         unreachable!("not used by this contract")
+    }
+}
+
+#[async_trait::async_trait]
+impl ProviderEventIngestService for RecordingMessageFlow {
+    async fn ingest_provider_event(
+        &self,
+        cmd: ProviderEventIngestCommand,
+    ) -> ServiceResult<BotEventOutcome> {
+        MessageFlowService::ingest_provider_event(self, cmd).await
     }
 }
 
@@ -1198,7 +1268,6 @@ async fn provider_delivery_2_0_inject_accepts_json_ack() {
                 })),
             )),
             delivery_kind: BotDeliveryKind::Inject,
-            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await
@@ -1216,14 +1285,17 @@ async fn provider_delivery_2_0_inject_accepts_json_ack() {
 }
 
 #[tokio::test]
-async fn provider_delivery_2_0_chat_send_with_sse_preference_advertises_sse() {
+async fn provider_delivery_2_0_chat_send_advertises_sse_and_binds_json_fallback() {
     let captured: CapturedState = Arc::new(Mutex::new(None));
     let app = Router::new()
         .route("/webhook", post(capture_ack))
         .with_state(captured.clone());
     let (webhook_url, server) = spawn_server(app).await;
 
+    let message_flow = Arc::new(RecordingMessageFlow::default());
+    let run_context = Arc::new(RecordingRunContext::default());
     let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+    transport.set_ingest(message_flow, run_context.clone());
     let result = transport
         .deliver(BotDeliveryCommand {
             target: provider_target_v2(webhook_url),
@@ -1238,7 +1310,6 @@ async fn provider_delivery_2_0_chat_send_with_sse_preference_advertises_sse() {
                 })),
             )),
             delivery_kind: BotDeliveryKind::Send,
-            provider_transport: ProviderTransportPreference::CallbackSse,
             provider_bypass_headers: Vec::new(),
         })
         .await
@@ -1253,7 +1324,52 @@ async fn provider_delivery_2_0_chat_send_with_sse_preference_advertises_sse() {
     );
     assert_eq!(request.transport.as_deref(), Some("sse"));
     assert_eq!(request.body["method"], "chat.send");
+    assert_eq!(
+        run_context.get_provider_transport("run-sse").await,
+        Some(ProviderRunTransport::Callback)
+    );
 
+    server.abort();
+}
+
+#[tokio::test]
+async fn provider_delivery_invalid_json_ack_fails_without_second_post() {
+    let request_count = Arc::new(AtomicUsize::new(0));
+    let app = Router::new()
+        .route("/webhook", post(capture_invalid_ack))
+        .with_state(request_count.clone());
+    let (webhook_url, server) = spawn_server(app).await;
+    let message_flow = Arc::new(RecordingMessageFlow::default());
+    let run_context = Arc::new(RecordingRunContext::default());
+    let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+    transport.set_ingest(message_flow, run_context.clone());
+
+    let result = transport
+        .deliver(BotDeliveryCommand {
+            target: provider_target_v2(webhook_url),
+            run_id: "run-invalid-ack".to_string(),
+            frame: BcsFrame::Request(RequestFrame::new(
+                "run-invalid-ack",
+                "chat.send",
+                Some(json!({
+                    "bcs_session_id": "group-1:feedbeef",
+                    "bcs_group_id": "group-1",
+                    "message": { "text": "hello" }
+                })),
+            )),
+            delivery_kind: BotDeliveryKind::Send,
+            provider_bypass_headers: Vec::new(),
+        })
+        .await;
+
+    assert!(result.is_err());
+    assert_eq!(request_count.load(Ordering::SeqCst), 1);
+    assert!(
+        run_context
+            .get_provider_transport("run-invalid-ack")
+            .await
+            .is_none()
+    );
     server.abort();
 }
 
@@ -1286,7 +1402,6 @@ async fn provider_delivery_2_0_task_kinds_accept_json_callback_fallback() {
                     })),
                 )),
                 delivery_kind,
-                provider_transport: ProviderTransportPreference::CallbackSse,
                 provider_bypass_headers: Vec::new(),
             })
             .await
@@ -1331,7 +1446,6 @@ async fn provider_delivery_2_0_inject_propagates_json_rejection() {
                 })),
             )),
             delivery_kind: BotDeliveryKind::Inject,
-            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await

@@ -35,12 +35,12 @@ class TaskDispatcher:
         """(非公开)替换策略池。engine ``_build_dispatcher`` 工厂方法/corp 子类注入用。"""
         self._strategies = list(strategies)
 
-    def dispatch(self, toDoTaskList: list[TaskNode]) -> list[TaskNode]:
+    async def dispatch(self, toDoTaskList: list[TaskNode]) -> list[TaskNode]:
         """入参=待派发节点;返回=填充执行者信息后的 list[TaskNode](对齐派发文档签名)。
-        不写图、不起 run;per node first-match 策略 apply SearchResult → 填 node.run_info:
+        不写图、不起 run;per node first-match 策略 await apply SearchResult → 填 node.run_info:
         HIT_SINGLE→single_bot/bot_id;HIT_GROUP→coop_group/group_id;
         HIT_MULTI_BOTS→coop_group/pending_group_formation(assignee 留空,编排核拉群填);MISS→不填+标 miss_events。
-        BBS 节点(run_mode 已 "bbs")→ 退化直接维持。"""
+        BBS 节点(run_mode 已 "bbs")→ 退化直接维持。协程化:catalog 搜推是耗时 IO,await 不阻塞编排核。"""
         graph = self._graph.query_task_dashboard(
             toDoTaskList[0].task_id if toDoTaskList else ""
         ) if toDoTaskList else None
@@ -49,7 +49,7 @@ class TaskDispatcher:
             if node.run_info.run_mode == "bbs":
                 out.append(node)  # BBS 节点退化维持
                 continue
-            result = self._select_and_apply(node, graph)
+            result = await self._select_and_apply(node, graph)
             if result.outcome == SearchOutcome.HIT_SINGLE:
                 node.run_info.run_mode = "single_bot"
                 node.run_info.assignee = result.bot_id
@@ -65,12 +65,12 @@ class TaskDispatcher:
             out.append(node)
         return out
 
-    def _select_and_apply(self, node: TaskNode, graph: TaskExecutionGraph | None):
-        """first-match-wins 选策略 apply。graph 为 None 时走兜底 MISS。"""
+    async def _select_and_apply(self, node: TaskNode, graph: TaskExecutionGraph | None):
+        """first-match-wins 选策略 await apply。graph 为 None 时走兜底 MISS。"""
         import agentclaw.community.core.task.task_dispatch.strategies as _s
         if graph is None:
             return _s.SearchResult(outcome=_s.SearchOutcome.MISS, miss_reason="no_graph")
         for strategy in sorted(self._strategies, key=lambda r: r.priority):
-            if strategy.matches(node, graph):
-                return strategy.apply(node, graph)
+            if await strategy.matches(node, graph):
+                return await strategy.apply(node, graph)
         return _s.SearchResult(outcome=_s.SearchOutcome.MISS, miss_reason="no_strategy")

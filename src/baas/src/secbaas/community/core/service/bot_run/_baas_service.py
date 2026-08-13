@@ -867,17 +867,20 @@ class BaasBotService(BotService):
 
     @staticmethod
     def _strip_ws_url_to_base(ws_url: str, ws_path_suffix: str) -> str:
-        """wss:// → https:// 并 strip 指定 WS path 后缀。"""
+        """Map a WebSocket URL to its HTTP peer and strip the WS path suffix."""
         if ws_url.startswith("wss://"):
             base = ws_url[6:]
+            scheme = "https"
         elif ws_url.startswith("ws://"):
             base = ws_url[5:]
+            scheme = "http"
         else:
             base = ws_url
+            scheme = "https"
         # The target is embedded in the path: /proxypass/{target}/api/openclaw/ws
         if base.endswith(ws_path_suffix):
             base = base[: -len(ws_path_suffix)]
-        return f"https://{base}"
+        return f"{scheme}://{base}"
 
     def _create_session_client(
         self, conn_info: WsConnectionInfo, engine_type: str = "openclaw"

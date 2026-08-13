@@ -22,7 +22,7 @@ use bcs_service_api::{
     MessageLogContent, MessageLogEventType, MessageLogMode, MessageLogStatus,
     MessageLogTargetSummary, MESSAGE_LOG_SCHEMA_VERSION, message_log_json,
     MessageFlowService, MessageRole, Participant, ParticipantMode, ParticipantRole, PersistentGroupSendCommand,
-    PersistentGroupSendOutcome, ProviderStreamGrayList, ProviderTransportPreference,
+    PersistentGroupSendOutcome, ProviderStreamGrayList,
     RouteParticipantOverlay, RoutingDecision, RoutingCoreService, RoutingTarget, ServiceError, ServiceResult,
     SessionManagementService, ChannelService,
     SystemMessageEvent, SystemMessageService,
@@ -55,6 +55,8 @@ pub struct BcsMessageFlow {
     pub system_message: Option<Arc<dyn SystemMessageService>>,
     pub message_repo: Option<Arc<dyn MessageRepoPort>>,
     pub message_tracker: Arc<crate::message_tracker::MessageTracker>,
+    /// Deprecated compatibility setting. Transport selection is owned by the
+    /// HTTP Provider adapter and this value is no longer consulted.
     pub provider_stream_gray_list: Option<Arc<ProviderStreamGrayList>>,
     pub channel: Arc<OnceLock<Arc<dyn ChannelService>>>,
     pub bot_terminal_observer: Arc<dyn BotTerminalObserverPort>,
@@ -139,42 +141,6 @@ impl BcsMessageFlow {
     ) -> Self {
         self.provider_stream_gray_list = Some(gray_list);
         self
-    }
-
-    pub(crate) async fn provider_transport_preference(
-        &self,
-        target_bot_id: &str,
-        delivery_kind: &BotDeliveryKind,
-        delivery_target: &BotDeliveryTarget,
-    ) -> ProviderTransportPreference {
-        if !matches!(
-            delivery_kind,
-            BotDeliveryKind::Send
-                | BotDeliveryKind::TaskDispatch
-                | BotDeliveryKind::TaskMessage
-                | BotDeliveryKind::TaskResult
-        ) {
-            return ProviderTransportPreference::Callback;
-        }
-        if !matches!(
-            delivery_target,
-            BotDeliveryTarget::HttpProvider { protocol_version, .. } if protocol_version == "2.0"
-        ) {
-            return ProviderTransportPreference::Callback;
-        }
-        let Some(gray_list) = &self.provider_stream_gray_list else {
-            return ProviderTransportPreference::Callback;
-        };
-        let created_by = self
-            .registry
-            .get(target_bot_id)
-            .await
-            .and_then(|bot| bot.created_by);
-        if gray_list.contains(created_by.as_deref()) {
-            ProviderTransportPreference::CallbackSse
-        } else {
-            ProviderTransportPreference::Callback
-        }
     }
 
     pub fn with_interceptor<I>(mut self, interceptor: I) -> Self
@@ -662,9 +628,6 @@ pub async fn handle_web_send(
         // in the Phase-5 follow-up list (Modify semantics completeness).
 
         let delivery_kind = bot_delivery_kind(delivery_type);
-        let provider_transport = flow
-            .provider_transport_preference(&target_bot_id, &delivery_kind, &delivery_target)
-            .await;
         let source_im_message_id = cmd
             .source_im_message_id
             .as_deref()
@@ -685,7 +648,6 @@ pub async fn handle_web_send(
                 run_id: run_id.clone(),
                 frame,
                 delivery_kind,
-                provider_transport,
                 provider_bypass_headers: cmd.provider_bypass_headers.clone(),
             })
             .await;
@@ -1136,9 +1098,6 @@ pub async fn handle_persistent_group_send(
         )
         .await;
         let delivery_kind = bot_delivery_kind(target.delivery_type);
-        let provider_transport = flow
-            .provider_transport_preference(&target.bot_uuid, &delivery_kind, &delivery_target)
-            .await;
         let result = flow
             .bot_delivery
             .deliver(BotDeliveryCommand {
@@ -1146,7 +1105,6 @@ pub async fn handle_persistent_group_send(
                 run_id: run_id.clone(),
                 frame,
                 delivery_kind,
-                provider_transport,
                 provider_bypass_headers: Vec::new(),
             })
             .await;
@@ -1549,9 +1507,6 @@ pub async fn handle_group_callback(
         .await;
 
         let delivery_kind = bot_delivery_kind(delivery_type);
-        let provider_transport = flow
-            .provider_transport_preference(&target_bot_id, &delivery_kind, &delivery_target)
-            .await;
         let delivery = flow
             .bot_delivery
             .deliver(BotDeliveryCommand {
@@ -1559,7 +1514,6 @@ pub async fn handle_group_callback(
                 run_id: run_id.clone(),
                 frame,
                 delivery_kind,
-                provider_transport,
                 provider_bypass_headers: Vec::new(),
             })
             .await;
@@ -1687,7 +1641,6 @@ pub async fn handle_chat_abort(
                 run_id: delivery_run_id,
                 frame: build_chat_abort_frame(&session_key, cmd.run_id.as_deref()),
                 delivery_kind: BotDeliveryKind::Abort,
-                provider_transport: Default::default(),
                 provider_bypass_headers: Vec::new(),
             })
             .await;

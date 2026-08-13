@@ -117,15 +117,20 @@ impl SystemMessageProducerService for SessionContextMessageProducer {
                 recipients: vec![participant.bot_uuid.clone()],
                 message: context_message,
                 delivery_type,
-                // Personalized per-bot context: persist per recipient so each
-                // bot's history view reads its own copy; not visible to human
-                // viewers (their filter is owner_bot_id IS NULL).
-                persist: PersistMode::PerRecipient,
+                // In manager-worker groups the manager's messages are public
+                // history, so keep its initial context on the same visibility
+                // boundary for human viewers. Worker contexts remain private
+                // because they contain recipient-specific instructions.
+                persist: if is_manager_worker && participant.role == ParticipantRole::Manager {
+                    PersistMode::Public
+                } else {
+                    PersistMode::PerRecipient
+                },
             });
         }
-        // SessionContext does not emit a user-facing WS message: the bot
-        // context messages are delivered per-recipient and persisted with
-        // owner=recipient, but no session-level frontend broadcast is produced.
+        // SessionContext does not emit a user-facing WS message. Bot contexts
+        // are delivered per recipient; persistence follows the visibility
+        // policy above, without a separate frontend broadcast.
         let user_message: Option<String> = None;
         (messages, user_message)
     }

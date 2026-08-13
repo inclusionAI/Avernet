@@ -66,26 +66,34 @@ pub async fn handle_bot_event(
     if cmd.state == ChatEventState::Delta
         && matches!(cmd.event_type.as_str(), "chat" | "chat.event")
     {
-        if !cmd.group_id.is_empty() {
-            match extract_delta_text(&cmd.event_payload) {
-                Some(delta) if !delta.is_empty() => {
-                    flow.message_tracker
-                        .append_chat_delta(&cmd.run_id, delta)
-                        .await;
-                    // Inject the segment-accumulated text as `message` so the
-                    // frontend SDK (which reads message.content[].text, not
-                    // delta_text) can render the streaming reply.
-                    if let Some(acc) = flow.message_tracker.peek_chat_buf(&cmd.run_id).await {
-                        inject_synthesized_message(&mut cmd.event_payload, &acc);
-                    }
+        match extract_delta_text(&cmd.event_payload) {
+            Some(delta) if !delta.is_empty() => {
+                flow.message_tracker
+                    .append_chat_delta(&cmd.run_id, delta)
+                    .await;
+                // Inject the segment-accumulated text as `message` so every
+                // consumer, including direct A2A runs, sees the same shape.
+                if let Some(acc) = flow.message_tracker.peek_chat_buf(&cmd.run_id).await {
+                    inject_synthesized_message(&mut cmd.event_payload, &acc);
                 }
-                Some(_) => {}
-                None => {
-                    let msg_text = extract_message_text(&cmd.event_payload);
-                    if !msg_text.is_empty() {
-                        persist_streaming_chat(flow, &cmd, msg_text).await;
-                    }
+            }
+            Some(_) => {}
+            None => {
+                let msg_text = extract_message_text(&cmd.event_payload);
+                if !msg_text.is_empty() {
+                    persist_streaming_chat(flow, &cmd, msg_text).await;
                 }
+            }
+        }
+    }
+
+    if cmd.state == ChatEventState::Final
+        && matches!(cmd.event_type.as_str(), "chat" | "chat.event")
+        && extract_message_text(&cmd.event_payload).is_empty()
+    {
+        if let Some(accumulated) = flow.message_tracker.peek_chat_buf(&cmd.run_id).await {
+            if !accumulated.is_empty() {
+                inject_synthesized_message(&mut cmd.event_payload, &accumulated);
             }
         }
     }
@@ -716,9 +724,6 @@ async fn relay_final_chat_event(
         // build_send_frame / build_inject_frame signatures. Tracked in the
         // Phase-5 follow-up list (Modify semantics completeness).
         let delivery_kind = bot_delivery_kind(target.delivery_type);
-        let provider_transport = flow
-            .provider_transport_preference(&target.bot_uuid, &delivery_kind, &delivery_target)
-            .await;
         let delivery = flow
             .bot_delivery
             .deliver(BotDeliveryCommand {
@@ -726,7 +731,6 @@ async fn relay_final_chat_event(
                 run_id: run_id.clone(),
                 frame,
                 delivery_kind,
-                provider_transport,
                 provider_bypass_headers: Vec::new(),
             })
             .await;
@@ -854,9 +858,6 @@ async fn handle_task_bot_event(
         .resolve_delivery_target(&entry.driver_bot)
         .await?;
     let delivery_kind = BotDeliveryKind::TaskResult;
-    let provider_transport = flow
-        .provider_transport_preference(&entry.driver_bot, &delivery_kind, &delivery_target)
-        .await;
     let result = flow
         .bot_delivery
         .deliver(BotDeliveryCommand {
@@ -864,7 +865,6 @@ async fn handle_task_bot_event(
             run_id: manager_result_run_id.clone(),
             frame,
             delivery_kind,
-            provider_transport,
             provider_bypass_headers: Vec::new(),
         })
         .await?;

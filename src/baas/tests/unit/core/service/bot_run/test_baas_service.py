@@ -813,7 +813,7 @@ class TestBuildBaseUrl:
         assert result == "https://gateway.example.com/proxypass/ARCA_sb1:20003"
 
     def test_non_wss_url(self):
-        """ws:// URL is converted to https:// (non-TLS) with WS path stripped."""
+        """ws:// URL is converted to http:// with WS path stripped."""
         conn_info = WsConnectionInfo(
             ws_url="ws://localhost:8080/api/openclaw/ws",
             token="t",
@@ -821,7 +821,7 @@ class TestBuildBaseUrl:
             expires_at=datetime.now(tz=UTC),
         )
         result = BaasBotService._build_base_url(conn_info, "openclaw")
-        assert result == "https://localhost:8080"
+        assert result == "http://localhost:8080"
 
     def test_plain_http_url_no_ws_prefix(self):
         """Plain URL without ws:// or wss:// prefix handled gracefully."""

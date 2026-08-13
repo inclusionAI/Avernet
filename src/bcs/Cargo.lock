@@ -648,6 +648,7 @@ dependencies = [
  "bcs-db-local",
  "bcs-organization",
  "bcs-organization-store",
+ "bcs-protocol",
  "bcs-route-security",
  "bcs-service-api",
  "bcs-test-support",

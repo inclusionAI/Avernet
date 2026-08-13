@@ -61,10 +61,10 @@ class _StubPlanningStrategy:
     def __init__(self, factory: Callable[[object], list[TaskNode]] | None = None):
         self._factory = factory or (lambda g: [])
 
-    def matches(self, graph) -> bool:
+    async def matches(self, graph) -> bool:
         return True
 
-    def apply(self, graph) -> list[TaskNode]:
+    async def apply(self, graph) -> list[TaskNode]:
         return self._factory(graph)
 
 
@@ -77,10 +77,10 @@ class _StubDispatchStrategy:
     def __init__(self, bot_id="bot1"):
         self.bot_id = bot_id
 
-    def matches(self, node, graph) -> bool:
+    async def matches(self, node, graph) -> bool:
         return True
 
-    def apply(self, node, graph):
+    async def apply(self, node, graph):
         from agentclaw.community.core.task.task_dispatch.strategies import SearchResult, SearchOutcome
         return SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id=self.bot_id)
 

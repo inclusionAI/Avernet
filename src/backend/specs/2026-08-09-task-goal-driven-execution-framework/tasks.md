@@ -5,7 +5,7 @@
 
 ## 实现原则(对齐 AGENTS.md)
 - **契约先行 / transport-agnostic**;delivery adapter 翻译协议不持领域策略;composition root 选实现。
-- **协程化(CR 反馈:任务执行是耗时任务)**:`on_execute`/`on_report`/`on_miss`/`on_harness`/`start_run`/`form_coop_group`/`report_result`/`DeliveryPort.deliver` 全链路 `async def`;编排写图(graph 内存同步)在 per-task `threading.RLock` 锁内同步(**锁内不 await**);投递/拉群/`deliver` 等耗时 IO 全 `await` 在锁外;`on_*` 锁内 collect(同步 side-effects)→ 锁外 `_drain` await run/group/miss/finish;多节点投递 gather+Semaphore(`_DELIVER_CONCURRENCY=8`)下沉 `TaskRunner.start_run` 内部;单测经 `asyncio.new_event_loop().run_until_complete` 驱动(不用 `@pytest.mark.asyncio`)。
+- **协程化(CR 反馈:任务执行是耗时任务)**:`on_execute`/`on_report`/`on_miss`/`on_harness`/`start_run`/`form_coop_group`/`report_result`/`DeliveryPort.deliver`/**`plan`/`dispatch`/策略 `matches`/`apply`** 全链路 `async def`;`plan`/`dispatch`(corp LLM/catalog 耗时 IO)在 per-task `threading.RLock` 锁内 `await`(同 task 串行,设计意图;不同 task 锁隔离);锁内不 `await` 的是高并发外部投递 IO(`start_run`/拉群/`deliver`),这些 `await` 在锁外;`on_*` 锁内 async collect(`await plan/dispatch`+同步 add/patch)→ 锁外 `_drain` await run/group/miss/finish;多节点投递 gather+Semaphore(`_DELIVER_CONCURRENCY=8`)下沉 `TaskRunner.start_run` 内部;`threading.RLock` 适用本仓一次性事件循环/跨线程回调模型(corp 单持久 loop 并发同 task 需切 `asyncio.Lock`);单测经 `asyncio.new_event_loop().run_until_complete` 驱动(不用 `@pytest.mark.asyncio`)。
 - **类型契约**:必填端到端非可选;`T|None` 仅当 `None` 是合法域态或外部输入边界。
 - **TDD / 主 seam 优先**:P8 singlebox E2E 最高 seam;P1–P7 契约单测补 E2E 覆盖不到的分支。
 - **写网关收口**:图谱原子变更只走 `TaskGraphService` 8 API(5 核心写/读 + 3 派生只读);旁路同写口。
@@ -57,7 +57,7 @@ M2 依赖 M1/M3/M4 接口(可 seam/double);M5 集成;M6 验证。
 
 ## M3 — TaskPlanner 编排壳 + 内置策略池(零参)
 - T3.1 `PlanningStrategy` Protocol:`matches(graph)->bool` + `apply(graph)->list[TaskNode]`(引擎内置,first-match-wins;默认 `WorkflowPlanningStrategy`/`GapBasedPlanningStrategy`;status=PENDING,run_info 空,task_id 已填,node_run_graph 指向图;返回 [] 表 gap 已闭)。Avernet stub(gap 返 [];workflow 读 config 拓扑 stub);corp ocb 仓覆写 `_build_planner` 注入真实策略。
-- T3.2 `TaskPlanner.plan(graph)->list[TaskNode]`:**触发条件**(图谱有更新 ∧ 无 RUNNING 节点 ∧ 有 PLANNING 节点);不满足返回 []。读图自发现目标(FAIL 叶子/PLANNING 父),委托 decompose(graph)(seam 自负责 target-finding);规划原则硬约束(派发/执行中节点不可改含前序依赖;只对失败+子全DONE自身PLANNING父);纯读图去重;步进式 deps 满足才产。**删除**写死节点。
+- T3.2 `async TaskPlanner.plan(graph)->list[TaskNode]`:**触发条件**(图谱有更新 ∧ 无 RUNNING 节点 ∧ 有 PLANNING 节点);不满足返回 []。读图自发现目标(FAIL 叶子/PLANNING 父),委托 decompose(graph)(seam 自负责 target-finding);规划原则硬约束(派发/执行中节点不可改含前序依赖;只对失败+子全DONE自身PLANNING父);纯读图去重;步进式 deps 满足才产。**删除**写死节点。
 - T3.2a 零 case 知识:`TaskPlanner`/`ExecutionEngine` 不得出现任何节点名字面量或"终验节点"启发式(如按入图顺序判终验);终验=根节点验收(§5.4/T2.6),由 owner bot skill 回投,框架不识别特殊节点。
 - T3.3 `GapBasedPlanningStrategy`/`WorkflowPlanningStrategy`(`PlanningStrategy`)引擎内置策略池(first-match-wins,零参 TaskPlanner)。
 - T3.4 默认实现:Avernet `StubDecomposer`(测试注入 case 节点);corp `PlanBotDecomposer`(plan_bot agent/LLM SKILL,Avernet 不含红线)。

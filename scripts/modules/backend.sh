@@ -96,14 +96,14 @@ backend_start() {
             AIDESKTOP_ROOT="${LOCAL_AIDESKTOP_DIR}" \
             LOCAL_AIDESKTOP_ROOT="${LOCAL_AIDESKTOP_DIR}" \
             PYTHONPATH="${community_src}:${BACKEND_DIR}:${PYTHONPATH:-}" \
-            nohup "${backend_cmd[@]}" < /dev/null >> "${BACKEND_LOG}" 2>&1 &
+            start_in_detached_session "${backend_cmd[@]}" < /dev/null >> "${BACKEND_LOG}" 2>&1 &
         backend_pid=$!
     else
         SERVER_ENV=dev DEPLOY_PROFILE=corp CHAT_ENGINE="${CHAT_ENGINE}" \
             AIDESKTOP_ROOT="${LOCAL_AIDESKTOP_DIR}" \
             LOCAL_AIDESKTOP_ROOT="${LOCAL_AIDESKTOP_DIR}" \
             PYTHONPATH="${community_src}:${BACKEND_DIR}:${PYTHONPATH:-}" \
-            nohup "${backend_cmd[@]}" < /dev/null >> "${BACKEND_LOG}" 2>&1 &
+            start_in_detached_session "${backend_cmd[@]}" < /dev/null >> "${BACKEND_LOG}" 2>&1 &
         backend_pid=$!
     fi
 

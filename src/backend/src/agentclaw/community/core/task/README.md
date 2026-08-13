@@ -52,15 +52,19 @@ core/task/
 | `deliver` | `DeliveryPort`(Protocol) | `async def deliver(node) -> bool` |
 | `report_result` / `start_run` | `TaskLoopCallback` | `async def` |
 | `execute` | `TaskService` facade | `async def`(内部 `await engine.on_execute`) |
+| `plan` | `TaskPlanner` | `async def`(内部 `await strategy.matches/apply`) |
+| `dispatch` | `TaskDispatcher` | `async def`(内部 `await strategy.matches/apply`) |
+| `matches` / `apply` | `PlanningStrategy` / `DispatchStrategy` Protocol | `async def`(corp 为 LLM/catalog 耗时 IO) |
 
-> `TaskPlanner.plan` / `TaskDispatcher.dispatch` 是纯计算(读图 + 策略匹配),保持同步 `def`,不协程化。
+> `plan`/`dispatch`/策略 `apply` 在 corp 是 LLM 规划 / bot catalog 搜推(耗时 IO),亦 `async`,在锁内 `await`。
 
-### 锁内不 await(collect / drain 模式)
+### 锁内 await 边界(collect / drain 模式)
 
-- per-task `threading.RLock` 只保护**锁内同步编排写**:`TaskGraphService` 内存同步快操作(plan/dispatch 纯计算、graph patch、add_task_nodes)。
-- **锁内永不 `await`**:耗时 IO 全部锁外。
-- 采用 **collect / drain 模式**:`on_*` 锁内 `collect`(同步产 side-effects list:run/group/miss/finish)→ 锁外 `_drain` 统一 `await` 执行 side-effects,保证锁内纯同步、IO 全锁外。
-- 跨 task 并行;同 task_id 编排写串行(锁内),投递/拉群 IO 不受锁约束(锁外 await,可并发)。
+- per-task `threading.RLock` 保护锁内编排写:`TaskGraphService` 内存同步快操作(graph patch、add_task_nodes)+ `await plan/dispatch`(同 task 串行推进的耗时 IO,设计意图)。
+- **锁内不 `await` 的是高并发外部投递 IO**(`start_run`/BCS 拉群 `form_coop_group`/`deliver`)——这些 `await` 在锁外。
+- **collect / drain 模式**:`on_*` 锁内 `async collect`(`await plan/dispatch` + 同步 add/patch,产 side-effects list)→ 锁外 `_drain` 统一 `await` 执行 run/group/miss/finish(投递 IO),保证投递 IO 全锁外。
+- 跨 task 并行;同 task_id 编排串行(锁内);投递/拉群 IO 不受锁约束(锁外 await,可并发)。
+- **锁选型**:`threading.RLock` 适用本仓一次性事件循环 / 跨线程回调模型(跨线程正确串行)。若 corp 采用单持久 event loop 并发处理同 task 多回投(如 FastAPI async 端点),同 loop 协程重入会穿透 RLock,需切 `asyncio.Lock`(ocb 仓接入时定)。
 
 ### 投递并发下沉 runner
 

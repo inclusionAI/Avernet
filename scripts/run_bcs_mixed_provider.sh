@@ -21,7 +21,7 @@ BCS_DIR="${PROJECT_ROOT}/src/bcs"
 BCS_CLI="${BCS_DIR}/target/debug/bcs-cli"
 BRIDGE="${PROJECT_ROOT}/src/bcs/scripts/mock_provider_bridge.py"
 SINGLEBOX="${SCRIPT_DIR}/singlebox.sh"
-DEP_DIR="${SCRIPT_DIR}/.dependences"
+DEP_DIR="${SCRIPT_DIR}/.dependencies"
 LOG_DIR="${DEP_DIR}/logs"
 STATE_DIR="${DEP_DIR}/mixed_provider"
 

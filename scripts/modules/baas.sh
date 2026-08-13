@@ -7,6 +7,10 @@ _BAAS_SH_LOADED=1
 BAAS_LOG="${LOG_DIR}/baas.log"
 BAAS_APP_DIR="${BAAS_APP_DIR:-${BAAS_DIR}}"
 
+baas_mixed_claude_enabled() {
+    type -t claude_profile_enabled >/dev/null && claude_profile_enabled
+}
+
 baas_normalize_dir_path() {
     local path="$1"
 
@@ -207,9 +211,33 @@ baas_start() {
         BCN_PLUGIN_PATH="${bcn_plugin_path}"
         BCS_PORT="${BCS_PORT}"
     )
+    if baas_mixed_claude_enabled; then
+        bcs_baas_provider_prepare_runtime_tokens || {
+            log_error "Failed to prepare the local BaaS downlink credential"
+            return 1
+        }
+        local baas_downlink_token
+        baas_downlink_token="$(bcs_baas_provider_baas_token)" || return 1
+        [ -n "$baas_downlink_token" ] || {
+            log_error "Local BaaS downlink credential is empty"
+            return 1
+        }
+        baas_env_args+=(
+            SOFAPY_CONFIG_OVERLAY="mixed-claude-code"
+            BCS_BAAS_DOWNLINK_TOKEN="${baas_downlink_token}"
+        )
+        unset baas_downlink_token
+        log_info "BAAS merchant_hybrid mode: real Claude adapter and local Backend binding lookup enabled"
+    fi
     log_info "BAAS env: DATABASE_URL=${DATABASE_URL}, CHAT_ENGINE=${CHAT_ENGINE}, LOCAL_AIDESKTOP_ROOT=${LOCAL_AIDESKTOP_DIR}, BCS_PORT=${BCS_PORT}, BCN_PLUGIN_PATH=${bcn_plugin_path}"
 
-    if ! env "${baas_env_args[@]}" "${BAAS_APP_DIR}/scripts/app.sh" start --singlebox >> "${BAAS_LOG}" 2>&1; then
+    # app.sh spawns its web process in the background. Run the wrapper in a
+    # new session so that child remains alive after the singlebox command
+    # shell exits (the desktop launcher otherwise reaps it).
+    if ! (
+        export "${baas_env_args[@]}"
+        start_in_detached_session "${BAAS_APP_DIR}/scripts/app.sh" start --singlebox
+    ) >> "${BAAS_LOG}" 2>&1; then
         log_error "Failed to start BAAS. Check logs at ${BAAS_LOG}"
         return 1
     fi
@@ -254,6 +282,11 @@ baas_status() {
     else
         echo "  BAAS:      Not installed"
     fi
+}
+
+baas_ready() {
+    curl --noproxy '*' --connect-timeout 1 --max-time 2 -fsS \
+        'http://127.0.0.1:8890/health' >/dev/null 2>&1
 }
 
 baas_prereqs() {
