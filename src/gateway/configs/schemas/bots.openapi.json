@@ -4052,7 +4052,7 @@
                 "type": "null"
               }
             ],
-            "description": "New target URL; omit to keep. The uniqueness check here does not see links created through this API, so a URL another such link already uses is accepted rather than refused.",
+            "description": "New target URL; omit to keep. Checked for uniqueness, but not against the links this API creates — so a URL another such link already uses is accepted. A clash with a record created elsewhere is still refused (409).",
             "title": "Url"
           }
         },
@@ -10332,7 +10332,7 @@
         ]
       },
       "get": {
-        "description": "Get a link resource, addressed by `resource_id`.\n\nLinks only. A file's identifier answers 404: a file's address is its path,\nso list it through the collection endpoint and read it through download or\npreview.",
+        "description": "Get a resource record, addressed by `resource_id`.\n\nThis is the read for links; a file's identifier answers 404, since a file's\naddress is its path. A record of some other kind — created through a\nsurface this API does not expose — is served rather than refused, and\nreported as `link`, because `type` publishes only the three kinds this API\nnames. Read `url` and `source` before assuming it behaves like a link you\ncreated.",
         "operationId": "get_resource_openapi_v1_bots_resources__resource_id__get",
         "parameters": [
           {
@@ -10466,7 +10466,7 @@
         ]
       },
       "put": {
-        "description": "Rename a link resource or change its target URL.\n\nLinks only, addressed by `resource_id`. A file's identifier answers 404 —\nfiles live in the workspace and are not renamed through this endpoint.\n\n**Nothing is checked for uniqueness here.** A name is never compared at all,\nand the URL comparison misses every link this API created, so renaming a\nlink onto another's name, or pointing it at another's URL, succeeds. Two\nlinks can end up sharing either. Check first yourself if it matters.",
+        "description": "Rename a link resource or change its target URL.\n\nLinks only, addressed by `resource_id`. A file's identifier answers 404 —\nfiles live in the workspace and are not renamed through this endpoint.\n\n**Do not rely on uniqueness here.** A name is never compared at all. A URL\nis compared, but not against the links this API creates — so pointing one\nof your links at the URL of another succeeds. A 409 is still possible, when\nthe clash is with a record created through a different surface. Check first\nyourself if it matters.",
         "operationId": "update_resource_openapi_v1_bots_resources__resource_id__put",
         "parameters": [
           {

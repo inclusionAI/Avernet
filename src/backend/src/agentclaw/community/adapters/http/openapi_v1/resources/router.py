@@ -1,9 +1,11 @@
 """Resources group — ``/openapi/v1/bots/resources``.
 
 A unified abstraction over files and links (a Yuque doc is a ``link`` resource);
-the storage location is never exposed. All 9 handlers are wired to the slim
-``core/resources/service.py`` ``ResourceService`` via ``ResourceServiceFactory``;
-no legacy router private helper is imported (arch Rule 7 — thin adapter).
+the storage location is never exposed. Link handlers go through the slim
+``ResourceService``, file handlers through ``ResourceFileService``; no legacy
+router private helper is imported (arch Rule 7 — thin adapter). At the 1000-line
+cap: the next change needing room should split this into its two cohesive
+halves — record-addressed links and path-addressed files — not compress prose.
 
 ⚠️ STATUS: definition-only / NOT PUBLIC-READY. The handlers are wired to the
 slim ``ResourceService`` and exercise the real service at the integration level,
@@ -456,15 +458,10 @@ async def create_resource(
     service = factory.create(bot_id=effective_bot_id)
     # DuplicateResourceError propagates to @envelope_errors → 409 fixed message
     # (no str(exc) leakage, unlike the prior hand-translation).
-    r = await service.create_url_resource(
-        name=body.name,
-        url=body.url,
-        # parent_path intentionally NOT forwarded: the openapi ResourceCreate
-        # schema carries `parent_id` (a pending follow-up — its ID-vs-path
-        # semantics aren't settled). Passing a half-defined value would risk
-        # a wrong-attribute write; link scoping by bot_id is sufficient now.
-        parent_path=None,
-    )
+    # parent_path stays None: `parent_id` on the request schema is a reserved
+    # slot whose ID-vs-path semantics are unsettled, and link scoping by bot_id
+    # is sufficient now.
+    r = await service.create_url_resource(name=body.name, url=body.url, parent_path=None)
     return created(_to_openapi_resource(r), request)
 
 
@@ -892,11 +889,14 @@ async def get_resource(
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
 ) -> Envelope[Resource]:
-    """Get a link resource, addressed by `resource_id`.
+    """Get a resource record, addressed by `resource_id`.
 
-    Links only. A file's identifier answers 404: a file's address is its path,
-    so list it through the collection endpoint and read it through download or
-    preview.
+    This is the read for links; a file's identifier answers 404, since a file's
+    address is its path. A record of some other kind — created through a
+    surface this API does not expose — is served rather than refused, and
+    reported as `link`, because `type` publishes only the three kinds this API
+    names. Read `url` and `source` before assuming it behaves like a link you
+    created.
     """
     # Serving a file from its record would report size and name from a row that
     # nothing keeps in step with the workspace — the divergence this group's
@@ -927,10 +927,11 @@ async def update_resource(
     Links only, addressed by `resource_id`. A file's identifier answers 404 —
     files live in the workspace and are not renamed through this endpoint.
 
-    **Nothing is checked for uniqueness here.** A name is never compared at all,
-    and the URL comparison misses every link this API created, so renaming a
-    link onto another's name, or pointing it at another's URL, succeeds. Two
-    links can end up sharing either. Check first yourself if it matters.
+    **Do not rely on uniqueness here.** A name is never compared at all. A URL
+    is compared, but not against the links this API creates — so pointing one
+    of your links at the URL of another succeeds. A 409 is still possible, when
+    the clash is with a record created through a different surface. Check first
+    yourself if it matters.
     """
     # `update_link_resource` assigns `name` unconditionally, and its URL guard
     # is `check_link_url_exists`, which is hard-coded to LINK — see

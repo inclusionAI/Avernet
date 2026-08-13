@@ -157,9 +157,10 @@ class ResourceUpdate(BaseModel):
     )
     url: str | None = Field(
         default=None,
-        description="New target URL; omit to keep. The uniqueness check here "
-        "does not see links created through this API, so a URL another such "
-        "link already uses is accepted rather than refused.",
+        description="New target URL; omit to keep. Checked for uniqueness, but "
+        "not against the links this API creates — so a URL another such link "
+        "already uses is accepted. A clash with a record created elsewhere is "
+        "still refused (409).",
     )
 
 

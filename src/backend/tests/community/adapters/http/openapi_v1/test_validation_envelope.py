@@ -14,17 +14,26 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from agentclaw.community.adapters.http.openapi_v1 import PUBLIC_API_PREFIX
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     error_response,
+    redact_error_location,
     validation_message,
 )
 
 
 class _Body(BaseModel):
     required_field: str
+
+
+class _StrictBody(BaseModel):
+    """Mirrors the real request models, which all forbid unknown fields."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = None
 
 
 def _app() -> TestClient:
@@ -45,6 +54,10 @@ def _app() -> TestClient:
     async def _public(  # pragma: no cover - never reached
         body: _Body, user_id: str, page_size: int = 20
     ):
+        return {}
+
+    @app.post(f"{PUBLIC_API_PREFIX}/strict")
+    async def _strict(body: _StrictBody):  # pragma: no cover - never reached
         return {}
 
     @app.post("/api/bots")
@@ -150,6 +163,45 @@ def test_message_carries_no_caller_input():
     )
     assert resp.status_code == 422
     assert "s3cret-value" not in resp.text
+
+
+def test_message_does_not_echo_a_rejected_field_name():
+    """The other half of "no caller input": the caller's *key*, not its value.
+
+    Dropping ``input`` keeps values out. It does nothing about names, and a
+    strict model rejecting an unknown field reports that field in ``loc`` — so
+    a caller who puts a credential in a key would read it back in the 422.
+    """
+    resp = _app().post(
+        f"{PUBLIC_API_PREFIX}/strict",
+        json={"sk-live-0f2c-SECRET": "x"},
+    )
+    assert resp.status_code == 422
+    assert "sk-live-0f2c-SECRET" not in resp.text
+    # The path still says where to look, so the answer stays actionable.
+    assert "<field>" in resp.json()["message"]
+
+
+def test_a_rejected_field_name_cannot_forge_a_log_line():
+    """A key is caller-chosen text, so it must not carry newlines either."""
+    from agentclaw.community.adapters.http.openapi_v1.responses import (
+        redact_error_location,
+    )
+
+    forged = "a\nWARNING:start:[Public 422] validation failed on GET /admin"
+    assert "\n" not in redact_error_location(("body", forged), "extra_forbidden")
+
+
+def test_known_field_names_are_still_named():
+    """Redaction is scoped: a schema-defined path stays readable."""
+    from agentclaw.community.adapters.http.openapi_v1.responses import (
+        redact_error_location,
+    )
+
+    assert redact_error_location(("query", "user_id"), "missing") == "query.user_id"
+    assert redact_error_location(("body", "items", 3, "title"), "missing") == (
+        "body.items.3.title"
+    )
 
 
 def test_internal_validation_error_keeps_fastapi_shape():

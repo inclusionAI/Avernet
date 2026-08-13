@@ -17,6 +17,7 @@ a builder on success and let the decorator handle the mapped failures.
 from __future__ import annotations
 
 import inspect
+import re
 from functools import wraps
 from http import HTTPStatus
 from json import JSONDecodeError
@@ -475,11 +476,60 @@ def _is_json_content_type(request: Request) -> bool:
     return subtype == "application/json" or subtype.endswith("+json")
 
 
-def _error_location(loc: object) -> str:
-    """A validation error's ``loc`` tuple as a caller-readable path."""
+#: A location segment safe to echo: what a schema-defined field name looks like.
+#: Anything else in a ``loc`` came from the request — an unknown key under
+#: ``extra="forbid"``, or a map key in a free-form object — and is not echoed.
+_SAFE_LOCATION_SEGMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}\Z")
+
+#: Stands in for a segment the caller chose. Named rather than blanked so the
+#: shape of the path survives: ``body.<field>`` still says where to look.
+_REDACTED_SEGMENT = "<field>"
+
+#: The one error type whose final ``loc`` segment is caller-supplied by
+#: definition — pydantic reports the rejected key itself.
+_CALLER_NAMED_TYPES: frozenset[str] = frozenset({"extra_forbidden"})
+
+
+def _safe_segment(part: object) -> str:
+    """One ``loc`` segment, echoed only when it cannot be caller-chosen text."""
+    text = str(part)
+    if text.isdigit():  # a list index, not a name
+        return text
+    return text if _SAFE_LOCATION_SEGMENT.fullmatch(text) else _REDACTED_SEGMENT
+
+
+def _error_location(loc: object, kind: str = "") -> str:
+    """A validation error's ``loc`` tuple as a caller-readable path.
+
+    Segments are filtered, not just joined. Dropping ``input`` keeps the
+    caller's *values* out of the response; it does nothing about their *keys*,
+    and a rejected unknown field puts one straight into ``loc`` — so a caller
+    who sends ``{"sk-live-…": 1}`` to a strict model would otherwise read their
+    own credential back in the 422, and see it copied into the server log.
+
+    Two rules, because there are two ways a segment can carry request text. Any
+    segment that does not look like a schema-defined name is replaced, which
+    covers a map key inside a free-form object. And for ``extra_forbidden`` the
+    final segment *is* the rejected key whatever it looks like, so it is
+    replaced regardless — an unknown field name is by definition not one this
+    surface published.
+    """
     if not isinstance(loc, (list, tuple)) or not loc:
         return "request"
-    return ".".join(str(part) for part in loc)
+    parts = [_safe_segment(part) for part in loc]
+    if kind in _CALLER_NAMED_TYPES:
+        parts[-1] = _REDACTED_SEGMENT
+    return ".".join(parts)
+
+
+def redact_error_location(loc: object, kind: str = "") -> str:
+    """Public form of :func:`_error_location`, for the log line.
+
+    The log needs the same treatment as the response and for one more reason:
+    a rejected key is caller-chosen text, so an unredacted one can carry
+    newlines into a log file as well as secrets out of it.
+    """
+    return _error_location(loc, kind)
 
 
 def validation_message(errors: list[dict[str, object]], request: Request) -> str:
@@ -494,8 +544,8 @@ def validation_message(errors: list[dict[str, object]], request: Request) -> str
     parts: list[str] = []
     unreadable_body = False
     for error in errors:
-        loc = _error_location(error.get("loc"))
         kind = str(error.get("type") or "")
+        loc = _error_location(error.get("loc"), kind)
         if (loc, kind) in seen:
             continue
         seen.add((loc, kind))

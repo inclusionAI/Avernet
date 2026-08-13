@@ -515,6 +515,7 @@ async def _validation_error_handler(
     from agentclaw.community.adapters.http.openapi_v1 import PUBLIC_API_PREFIX
     from agentclaw.community.adapters.http.openapi_v1.responses import (
         error_response,
+        redact_error_location,
         validation_message,
     )
 
@@ -524,13 +525,26 @@ async def _validation_error_handler(
         # copy into a log file. The same filtered triple is what the caller is
         # answered with, so the log and the response agree on what went wrong
         # instead of the log being the only place it is knowable.
+        #
+        # ``loc`` is redacted rather than passed through: dropping ``input``
+        # keeps the caller's values out, but a rejected unknown field puts the
+        # caller's *key* into ``loc``. Unredacted that would copy a credential
+        # into this log line, and a key containing a newline could forge one.
         safe = [
             {"loc": e.get("loc"), "type": e.get("type"), "msg": e.get("msg")}
             for e in exc.errors()
         ]
+        # The log takes the redacted rendering; ``validation_message`` redacts
+        # the same way on the raw list. One helper, applied once on each path —
+        # applying it twice would re-render an already-rendered string and lose
+        # the location entirely.
+        logged = [
+            {**entry, "loc": redact_error_location(entry["loc"], str(entry["type"] or ""))}
+            for entry in safe
+        ]
         logger.warning(
             "[Public 422] validation failed on %s %s: %s",
-            request.method, request.url.path, safe,
+            request.method, request.url.path, logged,
         )
         return error_response(422, validation_message(safe, request), request)
     return await request_validation_exception_handler(request, exc)
