@@ -1096,6 +1096,37 @@ mod tests {
             map_group_use_case_error(GroupUseCaseError::InvalidHistoryLimit(0)).code(),
             "invalid_request"
         );
+        assert_eq!(
+            map_group_use_case_error(GroupUseCaseError::InvalidGroupId("bad".into())).code(),
+            "internal_error"
+        );
+    }
+
+    #[test]
+    fn runtime_errors_map_to_stable_v1_codes() {
+        assert_eq!(
+            map_runtime_error(CollaborationRuntimeError::Unauthenticated).code(),
+            "unauthenticated"
+        );
+        assert_eq!(
+            map_runtime_error(CollaborationRuntimeError::Forbidden("denied".into())).code(),
+            "forbidden"
+        );
+        for error in [
+            CollaborationRuntimeError::InvalidDefinition("invalid definition".into()),
+            CollaborationRuntimeError::InvalidParticipantBinding("invalid binding".into()),
+            CollaborationRuntimeError::InvalidRequest("invalid request".into()),
+        ] {
+            assert_eq!(map_runtime_error(error).code(), "invalid_request");
+        }
+        assert_eq!(
+            map_runtime_error(CollaborationRuntimeError::Conflict("running".into())).code(),
+            "conflict"
+        );
+        assert_eq!(
+            map_runtime_error(CollaborationRuntimeError::JudgeUnavailable("offline".into())).code(),
+            "internal_error"
+        );
     }
 
     #[test]

@@ -1,6 +1,7 @@
 # OpenAPI V1 Session History Legacy Message Compatibility Design
 
 **Date:** 2026-08-13
+**Scope:** BCS
 
 ## Problem
 
