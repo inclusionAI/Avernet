@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -303,3 +304,57 @@ def test_resolve_sandbox_provider_falls_back_to_default_when_retry_fails():
         (("unknown_engine",),),
         (("openclaw",),),
     ]
+
+
+def test_build_uses_original_active_engine_for_nas_source_bucket_when_routed_to_aicoding():
+    bot = {
+        "bot_id": "20260811_lklnq6d0",
+        "entity_id": "382716",
+        "entity_type": "staff",
+        "device_id": "device-1",
+        "active_engine": "claude_code",
+        "template_type": "generalCC",
+    }
+
+    mock_provider = MagicMock()
+    mock_provider.get_build_plan.return_value = EngineBuildPlan(
+        engine_type="aicoding",
+        source_root_name=".aicoding",
+        migration_subpath="aicoding",
+        workspace_subdir="workspace",
+        mcp_config_relpath="workspace/config/mcporter.json",
+        skill_source_relpath="workspace/skills",
+        skill_target_relpath="workspace/skills",
+        rsync_excludes=[],
+    )
+
+    service = _make_service()
+    service._resolve_sandbox_provider = MagicMock(return_value=mock_provider)
+    service._migrate_bot_instance = MagicMock(return_value=True)
+    service._generate_mcp_config = MagicMock(return_value=True)
+    service._generate_openclaw_stage_configs = MagicMock(return_value=True)
+    service._get_migration_path_base = MagicMock(return_value="/fake/path")
+
+    with patch(
+        "agentclaw.community.core.service_bot.services.bot_build_service.get_bot_nas_dir",
+        return_value=Path("/home/admin/.merge_nas/pre_staff_382716_claude_code_20260811_lklnq6d0"),
+    ) as mock_get_bot_nas_dir:
+        result = service.build(bot, version=2)
+
+    assert result["success"] is True
+    mock_get_bot_nas_dir.assert_called_once_with(
+        entity_id="382716",
+        bot_id="20260811_lklnq6d0",
+        engine_type="claude_code",
+        entity_type="staff",
+    )
+    service._migrate_bot_instance.assert_called_once()
+    migrate_kwargs = service._migrate_bot_instance.call_args.kwargs
+    assert migrate_kwargs["source_dir"] == Path(
+        "/home/admin/.merge_nas/pre_staff_382716_claude_code_20260811_lklnq6d0/.aicoding"
+    )
+    assert migrate_kwargs["target_dir"].parts[-3:] == (
+        "20260811_lklnq6d0",
+        "2",
+        "aicoding",
+    )
