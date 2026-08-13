@@ -561,7 +561,7 @@ const NodeGroup = styled.g`
     stroke-width: 2;
   }
 
-  &:active {report_plan(task_id, parent_node, subtasks[])
+  &:active {
     filter: drop-shadow(0 2px 6px rgba(15, 23, 42, 0.08));
   }
 `;
