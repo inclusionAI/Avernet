@@ -1,6 +1,6 @@
 """
-OrmDeviceBindingRepository unit tests for list_bindings_by_ttl_asc
-and list_baas_devices_by_ttl_asc (DeviceTtlTimer queries).
+OrmDeviceBindingRepository unit tests for list_bindings_by_id_asc
+and list_baas_devices_by_id_asc (DeviceTtlTimer queries).
 """
 
 import json
@@ -123,10 +123,10 @@ def _make_device_model(
 # ==================== Tests ====================
 
 
-class TestOrmListBindingsByTtlAsc:
-    """Tests for OrmDeviceBindingRepository.list_bindings_by_ttl_asc."""
+class TestOrmListBindingsByIdAsc:
+    """Tests for OrmDeviceBindingRepository.list_bindings_by_id_asc."""
 
-    def test_returns_records_ordered_by_ttl(
+    def test_returns_records_ordered_by_id(
         self, repository, mock_database, mock_session
     ):
         model1 = _make_binding_model(
@@ -145,7 +145,7 @@ class TestOrmListBindingsByTtlAsc:
             model2,
         ]
 
-        result = repository.list_bindings_by_ttl_asc(limit=100)
+        result = repository.list_bindings_by_id_asc(limit=100)
 
         assert len(result) == 2
         assert isinstance(result[0], DeviceBindingRecord)
@@ -155,7 +155,7 @@ class TestOrmListBindingsByTtlAsc:
     def test_returns_empty_list(self, repository, mock_database, mock_session):
         mock_session.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
 
-        result = repository.list_bindings_by_ttl_asc(limit=50)
+        result = repository.list_bindings_by_id_asc(limit=50)
 
         assert result == []
 
@@ -166,18 +166,16 @@ class TestOrmListBindingsByTtlAsc:
             None,
         ]
 
-        result = repository.list_bindings_by_ttl_asc(limit=100)
+        result = repository.list_bindings_by_id_asc(limit=100)
 
         assert len(result) == 1
         assert result[0].id == 1
 
 
-class TestOrmListBaasDevicesByTtlAsc:
-    """Tests for OrmDeviceBindingRepository.list_baas_devices_by_ttl_asc."""
+class TestOrmListBaasDevicesByIdAsc:
+    """Tests for OrmDeviceBindingRepository.list_baas_devices_by_id_asc."""
 
-    def test_returns_dicts_ordered_by_ttl(
-        self, repository, mock_database, mock_session
-    ):
+    def test_returns_dicts_ordered_by_id(self, repository, mock_database, mock_session):
         device1 = _make_device_model(
             id_val=1,
             provider_device_id="sbx-001",
@@ -194,7 +192,7 @@ class TestOrmListBaasDevicesByTtlAsc:
             device2,
         ]
 
-        result = repository.list_baas_devices_by_ttl_asc(limit=100)
+        result = repository.list_baas_devices_by_id_asc(limit=100)
 
         assert len(result) == 2
         assert isinstance(result[0], dict)
@@ -205,7 +203,7 @@ class TestOrmListBaasDevicesByTtlAsc:
     def test_returns_empty_list(self, repository, mock_database, mock_session):
         mock_session.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
 
-        result = repository.list_baas_devices_by_ttl_asc(limit=50)
+        result = repository.list_baas_devices_by_id_asc(limit=50)
 
         assert result == []
 
@@ -223,7 +221,7 @@ class TestOrmListBaasDevicesByTtlAsc:
             device
         ]
 
-        result = repository.list_baas_devices_by_ttl_asc(limit=10)
+        result = repository.list_baas_devices_by_id_asc(limit=10)
 
         assert len(result) == 1
         expected_keys = {
@@ -237,3 +235,32 @@ class TestOrmListBaasDevicesByTtlAsc:
             "is_deleted",
         }
         assert set(result[0].keys()) == expected_keys
+
+
+class TestOrmKeysetCursorPredicate:
+    """Keyset 游标谓词：仅 id > last_id 游标 + TTL<=24h 到期过滤。"""
+
+    def _captured_filter(self, mock_session):
+        return mock_session.query.return_value.filter
+
+    def test_bindings_query_has_id_cursor_and_due_ttl_filter(
+        self, repository, mock_database, mock_session
+    ):
+        mock_session.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+        repository.list_bindings_by_id_asc(last_id=99, limit=100)
+        filter_args = self._captured_filter(mock_session).call_args.args
+        sql = " ".join(str(a) for a in filter_args)
+        assert ">" in sql  # id > last_id cursor
+        assert "<=" in sql  # ttl_expiration_time <= now+24h due filter
+        assert ":" in sql  # bound-parameter placeholders present
+
+    def test_baas_query_has_id_cursor_and_due_filter(
+        self, repository, mock_database, mock_session
+    ):
+        mock_session.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+        repository.list_baas_devices_by_id_asc(last_id=7, limit=50)
+        sql = " ".join(
+            str(a) for a in self._captured_filter(mock_session).call_args.args
+        )
+        assert ">" in sql  # id > last_id cursor
+        assert "<=" in sql  # ttl_expiration_time <= now+24h due filter

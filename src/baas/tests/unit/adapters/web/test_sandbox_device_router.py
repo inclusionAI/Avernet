@@ -3,6 +3,7 @@
 Tests the router layer with mocked handler and API key validation.
 """
 
+import asyncio
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
@@ -448,3 +449,68 @@ class TestValidateApiKey:
         )
 
         assert forbidden_key.app_type not in {"health-checker"}
+
+
+class TestRenewTtlTrigger:
+    """Direct-call unit tests for POST /api/v1/sandbox-device/renew-ttl-trigger.
+
+    The adapter must stay thin: it delegates the fire-and-forget orchestration
+    to the core service ``DeviceTtlTimerTask.trigger_async`` and returns
+    immediately without awaiting the full TTL sweep.
+    """
+
+    def _call(self, task, body=None):
+        from secbaas.community.adapters.web.routers.health_checker.sandbox_device_router import (
+            RenewTtlTriggerRequest,
+            renew_ttl_trigger,
+        )
+
+        async def _run():
+            return await renew_ttl_trigger(
+                request=body,
+                device_ttl_task=task,
+                api_key_record=MagicMock(),
+            )
+
+        return asyncio.run(_run())
+
+    def test_delegates_to_trigger_async_without_run_uuid(self):
+        task = MagicMock()
+        task.trigger_async = MagicMock(return_value="uuid-gen")
+        result = self._call(task)
+        task.trigger_async.assert_called_once()
+        assert task.trigger_async.call_args.kwargs["run_uuid"] is None
+        assert result.data.triggered is True
+        assert result.data.run_uuid == "uuid-gen"
+
+    def test_delegates_to_trigger_async_with_run_uuid(self):
+        from secbaas.community.adapters.web.routers.health_checker.sandbox_device_router import (
+            RenewTtlTriggerRequest,
+        )
+
+        task = MagicMock()
+        task.trigger_async = MagicMock(return_value="run-abc")
+        result = self._call(task, RenewTtlTriggerRequest(run_uuid="run-abc"))
+        task.trigger_async.assert_called_once()
+        assert task.trigger_async.call_args.kwargs["run_uuid"] == "run-abc"
+        assert result.data.run_uuid == "run-abc"
+
+    def test_does_not_await_run_direct(self):
+        """接口不直接 await 整表扫描，只触发后台调度后立即返回。"""
+        from secbaas.community.adapters.web.routers.health_checker.sandbox_device_router import (
+            renew_ttl_trigger,
+        )
+
+        task = MagicMock()
+        task.trigger_async = MagicMock(return_value="run-1")
+        result = asyncio.run(
+            renew_ttl_trigger(
+                request=None,
+                device_ttl_task=task,
+                api_key_record=MagicMock(),
+            )
+        )
+        assert result.data.triggered is True
+        assert result.data.run_uuid == "run-1"
+        # Adapter must not orchestrate the sweep itself.
+        task.run_direct.assert_not_called()

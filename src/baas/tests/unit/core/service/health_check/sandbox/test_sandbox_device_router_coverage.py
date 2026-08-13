@@ -233,6 +233,7 @@ class TestAcBindingHandler:
         handler._binding_repo.get_by_id.return_value = record
         ttl_info = MagicMock()
         ttl_info.success = True
+        ttl_info.skipped = False
         ttl_info.new_expiration_time = datetime(2024, 6, 1, 12, 0, 0)
         handler._paas_facade.update_device_ttl = AsyncMock(return_value=ttl_info)
         result = await handler.renew_ttl(table_id=1)
@@ -248,6 +249,7 @@ class TestAcBindingHandler:
         handler._binding_repo.get_by_id.return_value = record
         ttl_info = MagicMock()
         ttl_info.success = False
+        ttl_info.skipped = False
         ttl_info.new_expiration_time = None
         ttl_info.error = "denied"
         handler._paas_facade.update_device_ttl = AsyncMock(return_value=ttl_info)
@@ -264,6 +266,26 @@ class TestAcBindingHandler:
         result = await handler.renew_ttl(table_id=1)
         assert result.success is False
         assert "err" in result.error
+
+    @pytest.mark.asyncio
+    async def test_renew_ttl_skipped_is_not_failure(self, handler):
+        """剩余时间充足被跳过时，视为非失败（success=True）并记录错误信息。"""
+        record = MagicMock()
+        record.device_props = '{"sandbox_id": "sb-1", "ttl_expiration_time": "2026-08-20 08:54:55", "refresh_fail_count": 2}'
+        handler._binding_repo.get_by_id.return_value = record
+        ttl_info = MagicMock()
+        ttl_info.success = False
+        ttl_info.skipped = True
+        ttl_info.new_expiration_time = None
+        ttl_info.error = "Already at or past target expiration"
+        handler._paas_facade.update_device_ttl = AsyncMock(return_value=ttl_info)
+        result = await handler.renew_ttl(table_id=1)
+        assert result.success is True
+        assert result.skipped is True
+        assert result.error == "Already at or past target expiration"
+        assert result.old_expiration_time == "2026-08-20 08:54:55"
+        assert result.new_expiration_time == "2026-08-20 08:54:55"
+        handler._binding_repo.update_device_props_ttl.assert_not_called()
 
 
 # ==================== BaasSandboxHandler ====================
@@ -393,6 +415,7 @@ class TestBaasHandler:
         }
         ttl_info = MagicMock()
         ttl_info.success = True
+        ttl_info.skipped = False
         ttl_info.new_expiration_time = datetime(2024, 6, 1, 12, 0, 0)
         handler._paas_facade.update_device_ttl = AsyncMock(return_value=ttl_info)
         result = await handler.renew_ttl(table_id=1)
@@ -407,6 +430,7 @@ class TestBaasHandler:
         }
         ttl_info = MagicMock()
         ttl_info.success = True
+        ttl_info.skipped = False
         ttl_info.new_expiration_time = datetime(2024, 6, 1, 12, 0, 0)
         handler._paas_facade.update_device_ttl = AsyncMock(return_value=ttl_info)
         result = await handler.renew_ttl(table_id=1)
@@ -422,12 +446,34 @@ class TestBaasHandler:
         }
         ttl_info = MagicMock()
         ttl_info.success = False
+        ttl_info.skipped = False
         ttl_info.new_expiration_time = None
         ttl_info.error = "no perm"
         handler._paas_facade.update_device_ttl = AsyncMock(return_value=ttl_info)
         result = await handler.renew_ttl(table_id=1)
         assert result.success is False
         assert result.error == "no perm"
+
+    @pytest.mark.asyncio
+    async def test_renew_ttl_skipped_is_not_failure(self, handler):
+        """剩余时间充足被跳过时，视为非失败（success=True）并记录错误信息。"""
+        handler._binding_repo.get_baas_device_by_id.return_value = {
+            "provider_device_id": "sb-1",
+            "provider_device_props": '{"ttl_expiration_time": "2026-08-20 08:54:55", "refresh_fail_count": 1}',
+        }
+        ttl_info = MagicMock()
+        ttl_info.success = False
+        ttl_info.skipped = True
+        ttl_info.new_expiration_time = None
+        ttl_info.error = "Already at or past target expiration"
+        handler._paas_facade.update_device_ttl = AsyncMock(return_value=ttl_info)
+        result = await handler.renew_ttl(table_id=1)
+        assert result.success is True
+        assert result.skipped is True
+        assert result.error == "Already at or past target expiration"
+        assert result.old_expiration_time == "2026-08-20 08:54:55"
+        assert result.new_expiration_time == "2026-08-20 08:54:55"
+        handler._binding_repo.update_baas_device_ttl_by_id.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_renew_ttl_exception(self, handler):
@@ -492,4 +538,14 @@ class TestSandboxDeviceRouter:
         h2.renew_ttl = AsyncMock(return_value=MagicMock())
         router = SandboxDeviceRouter({TableType.AC_BINDING: h1, TableType.BAAS: h2})
         await router.renew_ttl(table_type="baas", table_id=2)
-        h2.renew_ttl.assert_called_once_with(table_id=2)
+        h2.renew_ttl.assert_called_once_with(table_id=2, run_uuid=None)
+
+    @pytest.mark.asyncio
+    async def test_renew_ttl_forwards_run_uuid(self):
+        h1 = MagicMock()
+        h1.renew_ttl = AsyncMock(return_value=MagicMock())
+        h2 = MagicMock()
+        h2.renew_ttl = AsyncMock(return_value=MagicMock())
+        router = SandboxDeviceRouter({TableType.AC_BINDING: h1, TableType.BAAS: h2})
+        await router.renew_ttl(table_type="baas", table_id=2, run_uuid="abc-123")
+        h2.renew_ttl.assert_called_once_with(table_id=2, run_uuid="abc-123")

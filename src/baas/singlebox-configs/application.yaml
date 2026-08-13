@@ -79,15 +79,17 @@ user_config:
   oauth:
     base_url: "https://oauth.example.com"
 
-  # 设备 TTL 定时器配置（每 5 分钟扫描 TTL 最小的设备并续期+探活）
+  # 设备 TTL 定时器配置（每 30 分钟扫描整个到期队列并续期+探活）
   device_ttl_timer:
     enabled: true  # 是否启用定时任务
-    cron_interval_seconds: 300  # 执行间隔（秒），默认: 300（5分钟）
-    batch_size: 100  # 每类设备取 top N，默认: 100
+    cron_interval_seconds: 1800  # 执行间隔（秒），默认: 1800（30分钟）
+    batch_size: 100  # 每页拉取条数，默认: 100
+    max_page_concurrency: 10  # 每页内并发续期的最大并发数
+    query_retries: 3  # 单页查询 DB 失败时的重试次数
     lock_name: "device_ttl_timer_lock"  # 分布式锁名称
-    lock_expire_seconds: 300  # 分布式锁过期时间（秒），默认: 300（5分钟）
+    lock_expire_seconds: 1800  # 分布式锁租约（秒），须 >= cron 间隔，默认: 1800
+    lock_renew_interval_seconds: 60  # 分布式锁自动续期间隔（秒），默认: 60
     dry_run: false  # 测试模式：只打印日志
-    lock_renew_interval_seconds: 60  # 分布式锁自动续期间隔（秒），默认: 60（0 表示禁用续期）
 
   # BotRun 队列恢复配置（周期性重置心跳过期的 RUNNING 请求回 PENDING）
   bot_run_recovery:

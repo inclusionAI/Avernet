@@ -1310,6 +1310,7 @@ class TestUpdateDeviceTtl:
         result = service._update_device_ttl_sync("dev-001")
 
         assert result.success is False
+        assert result.skipped is True
         assert result.error == "Already at or past target expiration"
         assert result.old_expiration_time is not None
         assert result.new_expiration_time == result.old_expiration_time

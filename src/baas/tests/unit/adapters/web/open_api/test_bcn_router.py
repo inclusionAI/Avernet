@@ -145,8 +145,8 @@ async def test_dispatch_chat_send_passes_attachments():
             "attachments": [
                 {
                     "attachment_id": "att_1",
-                    "type": "image",
-                    "file_name": "photo.png",
+                    "type": "file",
+                    "file_name": "brief.pdf",
                     "url": "https://cdn.example.com/att_1",
                 },
             ],
@@ -159,6 +159,7 @@ async def test_dispatch_chat_send_passes_attachments():
     assert input_.attachments is not None, "ChatSendInput.attachments must not be None"
     assert len(input_.attachments) == 1
     assert input_.attachments[0].attachment_id == "att_1"
+    assert input_.attachments[0].type == "file"
     assert isinstance(input_.attachments[0], DomainAttachment), (
         "attachments must be domain dataclass instances, not Pydantic models"
     )

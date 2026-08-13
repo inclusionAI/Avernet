@@ -20,9 +20,9 @@ bots slice took).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Path, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     USER_SCOPED_403,
@@ -69,6 +69,16 @@ from .schemas import (
 )
 
 router = APIRouter(prefix="/openapi/v1/bots/mcp", tags=["mcp"])
+
+#: The path parameter naming the MCP server an operation addresses.
+ServerCodePath = Annotated[
+    str,
+    Path(
+        description="The MCP server's code, exactly as returned by the server "
+        "listing — an opaque, case-sensitive identifier, e.g. "
+        "'mcp.example.weather'."
+    ),
+]
 
 
 # The caller's own identity is used as both entity id and (staff) entity type
@@ -157,10 +167,16 @@ def _to_config(cfg: Any) -> McpConfig:
 async def list_mcp_servers(
     request: Request,
     page_params: PageParamsDep,
-    keyword: str | None = None,
+    keyword: Annotated[
+        str | None,
+        Query(
+            description="Filter: case-insensitive fuzzy match against the "
+            "server's name and code."
+        ),
+    ] = None,
     market_service: MCPMarketServiceProtocol = Injected(MCPMarketServiceProtocol),
 ) -> Envelope[Page[McpServer]]:
-    """List marketplace MCP servers (filter by ``keyword``, paginate)."""
+    """List marketplace MCP servers (filter by keyword, paginate)."""
     # No ``user_id``: this operation has no user dimension to scope by. The
     # marketplace catalogue is identical for every caller in the tenant.
     # An authenticated caller is still required — ``_PUBLIC_AUTH`` in
@@ -209,7 +225,7 @@ async def list_mcp_tenants(
 )
 @envelope_errors
 async def get_mcp_server(
-    server_code: str,
+    server_code: ServerCodePath,
     request: Request,
     market_service: MCPMarketServiceProtocol = Injected(MCPMarketServiceProtocol),
 ) -> Envelope[McpServerDetail]:
@@ -233,27 +249,27 @@ async def get_mcp_server(
 )
 @envelope_errors
 async def check_mcp_permission(
-    server_code: str,
+    server_code: ServerCodePath,
     request: Request,
     owner_id: UserIdDep,
     auth_service: MCPAuthServiceProtocol = Injected(MCPAuthServiceProtocol),
 ) -> Envelope[McpPermission]:
     """Report the caller's own permission for an MCP server.
 
-    Always the caller's own permission. The identity is the request's required
-    ``user_id``, and it is refused unless it names the verified caller — so this
-    still cannot be pointed at someone else to probe their grants, which is the
-    property the internal route's free-form ``user_id`` query param does not
-    have. The parameter states whose permission is being asked about; it does
-    not widen whose it may be.
+    Always the caller's own permission: the required user_id must name the
+    verified caller, so this cannot be pointed at someone else to probe their
+    grants.
 
-    **Fail-open, by decision (spec Open Question 1).** When the marketplace
-    lookup errors, ``check_mcp_permission_detail`` reports the caller *as
-    permitted*. This surface preserves that rather than failing closed: the
-    endpoint is advisory — the MCP server itself is the enforcement point — so a
-    wrong "yes" during an upstream outage costs one failed call, whereas failing
-    closed would make a marketplace outage look like a permission revocation.
+    Advisory, and fail-open by design: when the marketplace lookup errors,
+    the answer reports the caller as permitted — the MCP server itself is the
+    enforcement point, so a wrong "yes" during an outage costs one failed
+    call, whereas failing closed would make an outage look like a permission
+    revocation.
     """
+    # The fail-open ruling is recorded in the MCP track's spec (Open Question
+    # 1); the identity property is what the internal route's free-form user_id
+    # query param does not have — the parameter states whose permission is
+    # being asked about, it does not widen whose it may be.
     result = auth_service.check_mcp_permission_detail(owner_id, server_code)
     return envelope(
         McpPermission(
@@ -275,15 +291,15 @@ async def check_mcp_permission(
 )
 @envelope_errors
 async def get_mcp_config(
-    server_code: str,
+    server_code: ServerCodePath,
     request: Request,
     owner_id: UserIdDep,
     config_service: MCPConfigServiceProtocol = Injected(MCPConfigServiceProtocol),
 ) -> Envelope[McpConfig]:
-    """Read the caller's unified config for an MCP server (``api_key`` masked).
+    """Read the caller's unified config for an MCP server (api_key masked).
 
     A server the caller has never configured is not an error — it returns
-    ``has_config: false`` with defaults.
+    has_config false with defaults.
     """
     cfg = read_unified_config(
         user_id=owner_id, server_code=server_code, config_service=config_service
@@ -298,7 +314,7 @@ async def get_mcp_config(
 )
 @envelope_errors
 async def update_mcp_config(
-    server_code: str,
+    server_code: ServerCodePath,
     body: McpConfigWrite,
     request: Request,
     owner_id: UserIdDep,
