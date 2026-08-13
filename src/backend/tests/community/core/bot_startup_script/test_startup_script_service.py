@@ -1,4 +1,5 @@
 """Unit tests for BotStartupScriptService — the rules the repository doesn't own."""
+import inspect
 import json
 
 import pytest
@@ -212,6 +213,72 @@ class TestResolveSupport:
         from agentclaw.community.core.bot_startup_script.services import _support
 
         assert not hasattr(_support, "UNKNOWN")
+
+
+class TestTheKeyNamesOneBotForever:
+    """What replaced the per-row owner stamp, and what it rests on.
+
+    Reads here key on ``(env, entity_id, bot_id)`` with no ownership check on
+    top. That is only sound because ``ac_bots`` cannot hand that tuple to a
+    second bot, and *that* is only true while the unique key exists and bot
+    deletion stays a soft update. Both halves are asserted, because the body
+    this table returns is executed on every container start: if either stops
+    holding, a re-created bot_id inherits and runs a script its owner never
+    wrote, silently.
+
+    Pinned on the ORM model specifically. Prod carries the constraint in
+    out-of-band DDL, but local and singlebox build their schema from this model
+    — so the model going quiet is exactly how the guarantee would be lost on a
+    supported deployment while every prod-shaped test kept passing.
+    """
+
+    def test_ac_bots_constrains_the_tuple_this_table_keys_on(self):
+        from sqlalchemy import UniqueConstraint
+
+        from agentclaw.community.plugin_api.models import BotModel
+
+        keys = [
+            {c.name for c in c_.columns}
+            for c_ in BotModel.__table__.constraints
+            if isinstance(c_, UniqueConstraint)
+        ]
+        assert any(
+            {"bot_id", "entity_id", "env"} <= cols for cols in keys
+        ), (
+            "ac_bots must constrain (bot_id, entity_id, env) — the startup "
+            "script store keys on that tuple and assumes it names one bot for "
+            "the life of the data. Extra columns are fine (the declared key is "
+            "tenant-scoped); dropping any of these three is not."
+        )
+
+    def test_the_soft_delete_leaves_the_row_holding_its_key(self):
+        """A hard delete would free the tuple and undo the guarantee.
+
+        ``is_delete`` must stay *out* of the unique key, too: in it, a deleted
+        bot would stop occupying the tuple and the identifier would be free
+        again — the constraint would still exist and prove nothing.
+        """
+        from sqlalchemy import UniqueConstraint
+
+        from agentclaw.community.core.repository.implementations.bot.bot import (
+            BotRepository,
+        )
+        from agentclaw.community.plugin_api.models import BotModel
+
+        assert "is_delete" not in {
+            c.name
+            for c_ in BotModel.__table__.constraints
+            if isinstance(c_, UniqueConstraint)
+            for c in c_.columns
+        }
+
+        source = inspect.getsource(BotRepository)
+        assert "soft_delete" in source
+        assert ".delete(" not in source, (
+            "BotRepository grew a hard delete; a removed ac_bots row frees its "
+            "(bot_id, entity_id, env) for re-creation, which is what the "
+            "startup-script read path assumes cannot happen"
+        )
 
 
 class TestTenantIsolation:

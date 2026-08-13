@@ -32,11 +32,12 @@
 -- be resolving an identifier that can change hands, and the body it returns is
 -- executed on every container start.
 --
--- KNOWN GAP: that constraint is prod DDL and is not declared on the ac_bots ORM
--- model, so the create_all schema used locally and by singlebox does not
--- enforce it. There, a deleted bot_id can be re-created and would inherit this
--- row. Mirroring the constraint on the model is the fix; it needs the GLOBAL
--- vs tenant-scoped question settled first (see plugin_api/models.py).
+-- The ac_bots ORM model declares that key too, as
+-- uk_bot_id_entity_id_env_tenant, so the create_all schema used locally and by
+-- singlebox enforces it rather than relying on prod's out-of-band DDL. It is
+-- tenant-scoped where prod's may or may not be: adding the tenant can only
+-- accept more than prod does, never less, and it still matches this table's own
+-- key exactly. See plugin_api/models.py.
 --
 -- entity_id is a storage key only: it is resolved server-side from the bot
 -- record and is never a request parameter or a response field on the public API.
