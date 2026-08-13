@@ -399,6 +399,7 @@ fn coordination_from_wire(config: ProviderCoordinationConfigDto) -> ProviderCoor
         },
         mcp_server: config.mcp_server,
         mcporter_command: config.mcporter_command,
+        tool_name_mapping: config.tool_name_mapping,
     }
 }
 
