@@ -1,7 +1,7 @@
 # Application API-key credentials (secbaas-compatible)
 
 - Date: 2026-08-13
-- Status: draft (pending review)
+- Status: implemented
 - Related: `specs/2026-07-30-application-tenant-accesskey-schema/spec.md` (the
   `avernet_application` table this changes), `specs/2026-07-30-credential-issuance/spec.md`
   (the JWT app-token issuance this replaces), secbaas API-gateway key service
@@ -72,40 +72,41 @@ separate, temporary path rather than a data conversion.
 
 ## Acceptance Criteria
 
-- [ ] Registering an app returns a plaintext API key once; the key is a
+- [x] Registering an app returns a plaintext API key once; the key is a
       32-character alphanumeric (base62) string, and no plaintext credential is
       persisted anywhere.
-- [ ] A key hashed by the secbaas key service (its exact salted-hash format and
+- [x] A key hashed by the secbaas key service (its exact salted-hash format and
       parameters), inserted into the gateway registry as a migrated record,
       authenticates successfully with its original plaintext key.
-- [ ] A key freshly issued by the gateway verifies under the secbaas
+- [x] A key freshly issued by the gateway verifies under the secbaas
       verification routine, and vice versa (round-trip compatibility in both
       directions).
-- [ ] Verification resolves the record by the key's 8-character prefix and
+- [x] Verification resolves the record by the key's 8-character prefix and
       compares hashes in constant time; a wrong key with a valid prefix is
       rejected.
-- [ ] Only records in `ACTIVE` status authenticate — on **both** paths;
+- [x] Only records in `ACTIVE` status authenticate — on **both** paths;
       presenting a credential whose record is `INACTIVE` or `REVOKED` is
       rejected the same way as an unknown one (soft miss — other credential
       types may still claim the request). Note this is a behavior change for the
-      legacy path, which ignores `status` today (see Open Questions).
-- [ ] Two registered apps never share a key prefix; registration retries on
+      legacy path, which ignored `status` before this change
+      (Confirmed Decisions 1: the non-`ACTIVE` population is zero).
+- [x] Two registered apps never share a key prefix; registration retries on
       prefix collision and fails cleanly (no partial write) if a unique prefix
       cannot be found.
-- [ ] A malformed presented credential (wrong length/alphabet) is rejected
+- [x] A malformed presented credential (wrong length/alphabet) is rejected
       without a database lookup.
-- [ ] Previously issued JWT app tokens **continue to authenticate** unchanged,
+- [x] Previously issued JWT app tokens **continue to authenticate** unchanged,
       via a deprecated exact-match path, and resolve to exactly the same app
       identity as before.
-- [ ] Registration never issues a JWT again: every newly registered app gets an
+- [x] Registration never issues a JWT again: every newly registered app gets an
       API key, and the registration response returns `api_key`, not `token`.
-- [ ] The two credential populations are told apart deterministically by format
+- [x] The two credential populations are told apart deterministically by format
       (a 32-character base62 key can never be a JWT and vice versa) — no
       guess-and-fallback, no double lookup on the hot path.
-- [ ] Every authentication served by the deprecated JWT path emits a warning
+- [x] Every authentication served by the deprecated JWT path emits a warning
       log identifying the app, so remaining legacy usage is observable and the
       path can be deleted once it goes quiet.
-- [ ] Successful authentication still yields the same app identity as today
+- [x] Successful authentication still yields the same app identity as today
       (id, name, owners, type, tenant) — downstream principal contracts are
       unchanged.
 
