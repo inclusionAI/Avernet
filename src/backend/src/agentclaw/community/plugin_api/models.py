@@ -88,6 +88,21 @@ class BotModel(Base):
     # to_dict() so no current API response body changes.
     avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
 
+    # NOTE: prod carries UNIQUE uk_bot_id_entity_id_env (bot_id, entity_id, env)
+    # on this table; this model deliberately does not declare it, so the
+    # ``create_all`` schema used locally and by singlebox does not enforce it.
+    #
+    # Declaring it here was tried and reverted: prod's index list does not show
+    # whether it is GLOBAL or tenant-scoped, and
+    # ``test_every_skills_operation_is_guarded_from_another_tenant`` creates one
+    # (bot_id, entity_id, env) under two tenants — legitimate if the key is
+    # tenant-scoped, impossible if it is not. Mirroring the constraint means
+    # answering that first.
+    #
+    # It matters beyond tidiness: ``ac_bot_startup_script`` relies on that key
+    # to know its (env, entity_id, bot_id) can never be handed to a later bot.
+    # See that table's DDL.
+
     def to_dict(self) -> dict:
         """Convert to dictionary."""
         return {

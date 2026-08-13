@@ -751,7 +751,7 @@ class BaasService:  # pragma: no cover
         # honest by not reading it as evidence of a live caller.
         if startup_script is None:
             startup_script = self._resolve_startup_script(
-                entity_id=entity_id, bot_id=bot_id, bot=bot
+                entity_id=entity_id, bot_id=bot_id
             )
 
         # 构建 sandbox 成功后执行的命令
@@ -2397,9 +2397,7 @@ class BaasService:  # pragma: no cover
             f"exit $__OCB_RC\n"
         )
 
-    def _resolve_startup_script(
-        self, *, entity_id: str, bot_id: str, bot: dict
-    ) -> str:
+    def _resolve_startup_script(self, *, entity_id: str, bot_id: str) -> str:
         """Read the bot's stored startup script, or ``""`` when it has none.
 
         **A read failure propagates.** It used to be swallowed, on the reasoning
@@ -2425,46 +2423,18 @@ class BaasService:  # pragma: no cover
         unwired reader is no longer among these cases: it is now a constructor
         argument, so it cannot be missing here.
 
-        The read is scoped to this bot's own incarnation (``ac_bots.id``), so a
-        row left at the same ``(entity_id, bot_id)`` by an earlier bot reads as
-        ``""`` rather than being executed here.
-
-        **The incarnation is looked up when the record does not carry one**, and
-        that case is normal rather than defensive. Records from
-        ``BotService.get_bot`` come through ``to_dict`` and always have ``id``,
-        but the device-allocation callers hand-build a bot dict and call this
-        *before* any ``ac_bots`` row exists — there is no id to carry yet. They
-        cannot be made to supply one, and they must not be made to guess: the
-        same allocation runs both for a brand-new bot and for one that already
-        exists (``bot_id or "default"``), so a blanket ``""`` there would
-        silently drop a real script on every device allocation for an existing
-        bot.
-
-        Asking the repository answers both cases with the same question:
-
-        * a row exists — resolve against its ``id``, which is the incarnation
-          about to be started;
-        * no row — the bot is being created, and nothing can have stored a
-          script for it, because a write requires the bot to already exist. So
-          ``""`` here is provable rather than assumed.
-
-        A lookup failure propagates, like the read below it.
+        ``(entity_id, bot_id)`` is the whole lookup, and it is enough: it names
+        one bot for the life of the data, because ``ac_bots`` constrains
+        ``uk_bot_id_entity_id_env`` and its deletion is a soft update, so the
+        tuple stays occupied and no later bot can be created onto it. That is
+        what lets the device-allocation callers — which hand-build a bot dict
+        and call this *before* any ``ac_bots`` row exists — use the same read as
+        everyone else.
         """
         if not entity_id or not bot_id:
             return ""
-        bot_incarnation = bot.get("id")
-        if bot_incarnation is None:
-            persisted = self._bot_repo.get_by_id_and_entity(bot_id, entity_id)
-            if persisted is None:
-                return ""
-            bot_incarnation = persisted.get("id")
-            if bot_incarnation is None:
-                raise ValueError(
-                    f"persisted bot has no id, cannot resolve its startup "
-                    f"script safely: bot_id={bot_id}"
-                )
         return self._startup_script_reader.get_body(
-            entity_id=entity_id, bot_id=bot_id, bot_incarnation=int(bot_incarnation)
+            entity_id=entity_id, bot_id=bot_id
         )
 
     def _get_startup_script_segment(

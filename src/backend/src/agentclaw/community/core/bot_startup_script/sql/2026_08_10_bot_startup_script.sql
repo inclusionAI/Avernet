@@ -13,6 +13,31 @@
 -- script row and each tenant could overwrite the other's script, which then
 -- executes in the other's container.
 --
+-- WHY THAT KEY IS STABLE FOR THE LIFE OF THE ROW, which is what lets every read
+-- here be a plain lookup with no ownership check on top:
+--
+--   * ac_bots carries UNIQUE KEY uk_bot_id_entity_id_env (bot_id, entity_id,
+--     env), and is_delete is NOT part of it;
+--   * bot deletion is a soft update — nothing hard-deletes an ac_bots row — so
+--     a deleted bot keeps occupying that tuple.
+--
+-- So one (env, entity_id, bot_id) names at most one ac_bots row, ever. A script
+-- row cannot be inherited by a later bot, because there is no later bot: an
+-- attempt to re-create the identifier collides with the surviving row. Deleting
+-- the script when its bot is deleted is therefore hygiene (executable content
+-- should not outlive its owner), not a safety property other code depends on.
+--
+-- If uk_bot_id_entity_id_env is ever dropped or narrowed, that reasoning goes
+-- with it and this table needs an owner stamp again — the read path would then
+-- be resolving an identifier that can change hands, and the body it returns is
+-- executed on every container start.
+--
+-- KNOWN GAP: that constraint is prod DDL and is not declared on the ac_bots ORM
+-- model, so the create_all schema used locally and by singlebox does not
+-- enforce it. There, a deleted bot_id can be re-created and would inherit this
+-- row. Mirroring the constraint on the model is the fix; it needs the GLOBAL
+-- vs tenant-scoped question settled first (see plugin_api/models.py).
+--
 -- entity_id is a storage key only: it is resolved server-side from the bot
 -- record and is never a request parameter or a response field on the public API.
 CREATE TABLE `ac_bot_startup_script` (
@@ -26,13 +51,6 @@ CREATE TABLE `ac_bot_startup_script` (
   `script`        mediumtext    NOT NULL COMMENT '脚本正文（清空即删行）',
   `size_bytes`    int(11)       NOT NULL COMMENT '脚本正文字节数（UTF-8）',
   `modifier`      varchar(1024) NOT NULL COMMENT '审计：最后写入者',
-  -- ac_bots.id of the bot this script was written for: the specific incarnation,
-  -- not the reusable identifier. (env, entity_id, bot_id) is not stable across a
-  -- bot's lifetime — deletion is a soft update and create_bot accepts a
-  -- caller-supplied bot_id, so the same key can later belong to a different bot.
-  -- Every read compares this and ignores a row that does not match, so a stale
-  -- row is inert rather than executable on whoever inherits the identifier.
-  `bot_incarnation` bigint(20) unsigned NOT NULL COMMENT '写入时 ac_bots.id',
   `avernet_tenant` varchar(64)  NOT NULL DEFAULT 'teamclaw' COMMENT '数据隔离租户',
   -- Bounded surrogate for the logical key (env, entity_id, bot_id). entity_id
   -- alone is 4096 utf8mb4 bytes, past InnoDB's 3072-byte index-key cap, so the

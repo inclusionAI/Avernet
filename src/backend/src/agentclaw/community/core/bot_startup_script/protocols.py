@@ -20,15 +20,8 @@ class StartupScriptReaderProtocol(Protocol):
     """
 
     @abstractmethod
-    def get_body(self, *, entity_id: str, bot_id: str, bot_incarnation: int) -> str:
-        """Return the bot's script body, or ``""`` when it has none.
-
-        ``bot_incarnation`` is the ``ac_bots.id`` of the bot being started. A
-        stored row names the incarnation that wrote it, and one written for an
-        earlier holder of the same identifier reads as ``""`` — the caller is
-        composing a command that will execute this body, and it must only ever
-        execute the body this bot stored.
-        """
+    def get_body(self, *, entity_id: str, bot_id: str) -> str:
+        """Return the bot's script body, or ``""`` when it has none."""
         ...
 
 
@@ -63,27 +56,12 @@ class StartupScriptPurgeProtocol(Protocol):
 
     This exists because a stored script is the only per-bot row this feature
     adds, and bot deletion is a soft update — no cascade reaches it. Without a
-    sweep the row outlives its bot indefinitely, which is both plaintext
-    executable content retained past its owner and, if a bot id is ever reused,
-    a script the new bot's owner never wrote.
+    sweep the row outlives its bot indefinitely: plaintext executable content
+    retained past the owner who wrote it, and readable by anything that queries
+    the table.
     """
 
     @abstractmethod
     def delete(self, *, entity_id: str, bot_id: str) -> bool:
-        """Remove the bot's script. Idempotent — absent is success.
-
-        Unconditional: used before the soft delete, while the bot is still
-        alive and the identifier cannot belong to anyone else.
-        """
-        ...
-
-    @abstractmethod
-    def delete_written_by(
-        self, *, entity_id: str, bot_id: str, bot_incarnation: int
-    ) -> bool:
-        """Remove the script only if that incarnation still owns it.
-
-        Used *after* the soft delete, where the identifier is free again and a
-        recreated bot may already have stored a script of its own.
-        """
+        """Remove the bot's script. Idempotent — absent is success."""
         ...

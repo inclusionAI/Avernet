@@ -24,6 +24,12 @@ class BotStartupScriptRepositoryProtocol(Protocol):
     ``ac_bot_startup_script``. A bot has at most one script; clearing it deletes
     the row, so "no row" and "no script" are the same state and every read
     returns ``None`` rather than an empty body.
+
+    That key names one bot for the life of the data, so a lookup needs no
+    ownership check on top of it: ``ac_bots`` carries
+    ``uk_bot_id_entity_id_env`` and deletion there is a soft update, so a
+    deleted bot goes on occupying the tuple and no later bot can take it. See
+    the DDL in ``core/bot_startup_script/sql/`` for what depends on that.
     """
 
     @abstractmethod
@@ -47,39 +53,16 @@ class BotStartupScriptRepositoryProtocol(Protocol):
         script: str,
         size_bytes: int,
         modifier: str,
-        bot_incarnation: int,
     ) -> BotStartupScriptRecord:
         """Insert the script, or replace the body of an existing row.
 
         ``modifier`` is the acting user resolved from the request principal; it
         is never supplied by the client. Returns the stored record, whose
         ``gmt_modified`` is the server's own timestamp.
-
-        ``bot_incarnation`` is the ``ac_bots.id`` of the bot the body is being
-        stored for, stamped on inserts and updates alike so the row always
-        names its current owner.
         """
         ...
 
     @abstractmethod
     def delete(self, *, env: str, entity_id: str, bot_id: str) -> bool:
-        """Hard-delete the row. Idempotent — returns ``False`` when absent.
-
-        Unconditional by design: this is the deletion path's sweep, which must
-        remove whatever sits at the key, including a row left behind by an
-        earlier incarnation of the same identifier.
-        """
-        ...
-
-    @abstractmethod
-    def delete_written_by(
-        self, *, env: str, entity_id: str, bot_id: str, bot_incarnation: int
-    ) -> bool:
-        """Hard-delete the row **only if** ``bot_incarnation`` still owns it.
-
-        For a writer taking back its own row. The condition is what keeps that
-        withdrawal from destroying a script a recreated bot stored at the same
-        key in the meantime. ``False`` means there was nothing of that
-        incarnation's to remove.
-        """
+        """Hard-delete the row. Idempotent — returns ``False`` when absent."""
         ...

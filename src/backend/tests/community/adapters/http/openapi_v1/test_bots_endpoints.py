@@ -970,119 +970,40 @@ def test_startup_script_put_stores_and_takes_modifier_from_the_principal(
     assert startup_script.put.call_args.kwargs["script"] == "echo new"
 
 
-def test_startup_script_put_that_loses_a_race_with_deletion_is_a_404(
+def test_startup_script_put_does_not_re_check_the_bot_after_storing(
     client, svc, startup_script
 ):
-    """A PUT can pass its existence check and then stall while the bot is
-    deleted, committing after *both* of the deletion's purges. The deletion
-    sweeps cannot cancel a request that already passed its check, so the write
-    re-checks liveness afterwards and withdraws itself.
+    """One existence check, not two — the key cannot change hands mid-request.
 
-    404, not success: the bot the caller addressed is gone, and reporting a
-    stored script for it would be the silent wrong answer this feature keeps
-    closing elsewhere.
+    ``ac_bots`` constrains ``uk_bot_id_entity_id_env`` and its deletion is a
+    soft update, so a deleted bot keeps occupying ``(bot_id, entity_id, env)``
+    and no later bot can be created onto it. A write therefore cannot land on a
+    different bot than the one its guard admitted, and re-reading afterwards
+    would only cost a query to re-confirm what the schema already guarantees.
     """
-    from agentclaw.community.core.bot_management.services.bot_service import (
-        BotNotFoundError,
-    )
-
-    svc.get_bot.side_effect = [_SUPPORTED_BOT, BotNotFoundError("gone")]
+    svc.get_bot.return_value = _SUPPORTED_BOT
     startup_script.put.return_value = _record(script="echo new")
 
-    resp = client.put(
-        "/openapi/v1/bots/b1/startup-script", json={"script": "echo new"}
-    )
-
-    assert resp.status_code == 404
-    startup_script.delete_written_by.assert_called_once_with(
-        entity_id="u1", bot_id="b1", bot_incarnation=77
-    )
-
-
-def test_a_withdrawal_that_cannot_complete_is_not_reported_as_a_clean_loss(
-    client, svc, startup_script
-):
-    """A failed withdrawal must not answer 404.
-
-    404 says the write did not take effect. If the row could not be removed,
-    that is false: executable content is still sitting under an identifier that
-    can be handed to another bot. The deletion's second sweep is only a backstop
-    while that deleter is still running — when the write landed *after* both
-    sweeps, nothing else is coming for this row, so the failure has to be
-    visible rather than dressed up as the tidy outcome.
-    """
-    svc.get_bot.side_effect = [_SUPPORTED_BOT, BotNotFoundError("gone")]
-    startup_script.put.return_value = _record(script="echo new")
-    startup_script.delete_written_by.side_effect = RuntimeError("db down")
-
-    # Surfaces rather than being logged and swallowed. The public app turns an
-    # unhandled error into a 500; what this pins is that the failure is not
-    # quietly converted into the 404 a clean withdrawal would have produced.
-    with pytest.raises(RuntimeError, match="db down"):
+    data = _ok(
         client.put(
             "/openapi/v1/bots/b1/startup-script", json={"script": "echo new"}
         )
+    )
+
+    assert data["script"] == "echo new"
+    assert svc.get_bot.call_count == 1
 
 
-def test_a_put_that_lands_on_a_recreated_bot_is_refused(
-    client, svc, startup_script
-):
-    """Same bot_id, different bot — the write does not belong to the newcomer.
+def test_delete_clears_the_script_at_the_key(client, svc, startup_script):
+    """DELETE clears the bot's row outright.
 
-    ``create_bot`` takes a caller-supplied ``bot_id`` and deletion is a soft
-    update, so an in-flight write can find the id alive again while belonging to
-    a bot its caller never addressed. Checking only that *a* bot exists would
-    hand that bot someone else's executable content.
+    Unconditional is correct here for the same reason: the key names this bot
+    for the life of the data, so there is no other owner whose script could be
+    cleared by mistake.
     """
-    recreated = {**_SUPPORTED_BOT, "id": 78}
-    svc.get_bot.side_effect = [_SUPPORTED_BOT, recreated]
-    startup_script.put.return_value = _record(script="echo new")
-
-    resp = client.put(
-        "/openapi/v1/bots/b1/startup-script", json={"script": "echo new"}
-    )
-
-    assert resp.status_code == 404
-    # Withdrawn against *our* incarnation, so the recreated bot's own script —
-    # if it has since written one — is not collateral.
-    startup_script.delete_written_by.assert_called_once_with(
-        entity_id="u1", bot_id="b1", bot_incarnation=77
-    )
-
-
-def test_a_put_superseded_by_a_newer_bot_is_a_404(client, svc, startup_script):
-    """The store refuses a stale write; the caller learns their bot is gone.
-
-    404 rather than 500: nothing failed on our side, and a retry would never
-    succeed — the bot they addressed stopped existing mid-request.
-    """
-    from agentclaw.community.core.bot_startup_script.errors import (
-        StartupScriptSupersededError,
-    )
-
-    svc.get_bot.return_value = _SUPPORTED_BOT
-    startup_script.put.side_effect = StartupScriptSupersededError(
-        stored_incarnation=78, writing_incarnation=77
-    )
-
-    resp = client.put(
-        "/openapi/v1/bots/b1/startup-script", json={"script": "echo stale"}
-    )
-
-    assert resp.status_code == 404
-
-
-def test_delete_only_clears_the_incarnation_it_was_admitted_for(
-    client, svc, startup_script
-):
-    """An admitted DELETE delayed past a delete-and-recreate must not clear the
-    newcomer's script."""
     _ok(client.delete("/openapi/v1/bots/b1/startup-script"))
 
-    startup_script.delete_written_by.assert_called_once_with(
-        entity_id="u1", bot_id="b1", bot_incarnation=77
-    )
-    startup_script.delete.assert_not_called()
+    startup_script.delete.assert_called_once_with(entity_id="u1", bot_id="b1")
 
 
 def test_startup_script_put_rejects_an_attempt_to_set_audit_fields(

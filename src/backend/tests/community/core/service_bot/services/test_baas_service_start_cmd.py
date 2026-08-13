@@ -367,9 +367,7 @@ class TestStartupScriptReachesEveryStartPath:
         svc, reader = self._service_with_script()
         hook = self._hook(svc)
         assert _b64.b64encode(b"echo provisioned").decode() in hook
-        reader.get_body.assert_called_once_with(
-            entity_id="ent-1", bot_id="bot-1", bot_incarnation=501
-        )
+        reader.get_body.assert_called_once_with(entity_id="ent-1", bot_id="bot-1")
 
     def test_explicit_empty_string_wins_over_the_reader(self):
         """An explicit argument is a deliberate override, not 'unset'."""
@@ -419,9 +417,7 @@ class TestStartupScriptReachesEveryStartPath:
         svc._startup_script_reader = reader
 
         with pytest.raises(RuntimeError):
-            svc._resolve_startup_script(
-            entity_id="ent-1", bot_id="bot-1", bot=self._BOT
-        )
+            svc._resolve_startup_script(entity_id="ent-1", bot_id="bot-1")
 
     def test_a_bot_with_no_identity_is_not_a_failure(self):
         """``""`` still means "no script" for the remaining non-error case.
@@ -430,81 +426,48 @@ class TestStartupScriptReachesEveryStartPath:
         """
         svc, reader = self._service_with_script()
         assert (
-            svc._resolve_startup_script(
-                entity_id="", bot_id="bot-1", bot=self._BOT
-            )
-            == ""
+            svc._resolve_startup_script(entity_id="", bot_id="bot-1") == ""
         )
         assert (
-            svc._resolve_startup_script(
-                entity_id="ent-1", bot_id="", bot=self._BOT
-            )
-            == ""
+            svc._resolve_startup_script(entity_id="ent-1", bot_id="") == ""
         )
         reader.get_body.assert_not_called()
 
     def test_a_bot_being_created_resolves_to_no_script(self):
         """The device-allocation callers hand-build a bot dict and call this
-        *before* any ac_bots row exists, so there is no id to carry.
+        *before* any ac_bots row exists.
 
         Nothing can have stored a script for a bot that does not exist yet — a
-        write requires the bot to already be there — so "" is provable here, not
-        assumed. Pinned because requiring the id outright broke every singlebox
-        and BaaS device bot creation.
+        write requires the bot to already be there — so the ordinary read
+        answers "" without the caller needing a special case. Pinned because an
+        earlier version demanded an id here and broke every singlebox and BaaS
+        device bot creation.
         """
         svc, reader = self._service_with_script()
-        svc._bot_repo.get_by_id_and_entity.return_value = None
-        prospective = {k: v for k, v in self._BOT.items() if k != "id"}
+        reader.get_body.return_value = ""
 
         assert (
-            svc._resolve_startup_script(
-                entity_id="ent-1", bot_id="bot-1", bot=prospective
-            )
-            == ""
+            svc._resolve_startup_script(entity_id="ent-1", bot_id="bot-1") == ""
         )
-        reader.get_body.assert_not_called()
 
     def test_an_existing_bot_allocated_a_device_still_gets_its_script(self):
-        """The same allocation runs for a bot that already exists (``bot_id or
-        "default"``), so a blanket "" would silently drop a real script on every
-        device allocation. The incarnation is looked up instead."""
+        """The device-allocation callers hand-build a bot dict, with no
+        ``ac_bots`` row to read an id from, and the same allocation runs for a
+        bot that already exists (``bot_id or "default"``). They can still use
+        the ordinary read: ``(entity_id, bot_id)`` is the whole key, and it
+        names one bot for the life of the data.
+        """
         svc, reader = self._service_with_script("echo provisioned")
-        svc._bot_repo.get_by_id_and_entity.return_value = {"id": 909}
-        prospective = {k: v for k, v in self._BOT.items() if k != "id"}
 
         assert (
-            svc._resolve_startup_script(
-                entity_id="ent-1", bot_id="bot-1", bot=prospective
-            )
+            svc._resolve_startup_script(entity_id="ent-1", bot_id="bot-1")
             == "echo provisioned"
         )
-        reader.get_body.assert_called_once_with(
-            entity_id="ent-1", bot_id="bot-1", bot_incarnation=909
-        )
-
-    def test_a_bot_record_with_no_id_raises_rather_than_guessing(self):
-        """Which incarnation is asking decides whether a stored row is theirs.
-
-        Not knowing it is not the same as having no script: returning ``""``
-        would silently skip a script the bot does own, and picking a placeholder
-        could run one it does not. Both are the invisible failures this path
-        already refuses for read errors.
-        """
-        svc, reader = self._service_with_script()
-        svc._bot_repo.get_by_id_and_entity.return_value = {"bot_id": "bot-1"}
-        bot_without_id = {k: v for k, v in self._BOT.items() if k != "id"}
-
-        with pytest.raises(ValueError, match="no id"):
-            svc._resolve_startup_script(
-                entity_id="ent-1", bot_id="bot-1", bot=bot_without_id
-            )
-        reader.get_body.assert_not_called()
+        reader.get_body.assert_called_once_with(entity_id="ent-1", bot_id="bot-1")
 
     def test_missing_entity_id_resolves_to_no_script(self):
         svc, _ = self._service_with_script()
-        assert svc._resolve_startup_script(
-        entity_id="", bot_id="bot-1", bot=self._BOT
-    ) == ""
+        assert svc._resolve_startup_script(entity_id="", bot_id="bot-1") == ""
 
 
 class TestStartupScriptPrivilege:

@@ -751,14 +751,14 @@ class TestDeleteBot:
         svc._repository.soft_delete_by_owner.assert_not_called()
         svc._passport_plugin.destroy_passport.assert_not_called()
 
-    def test_the_script_is_purged_again_after_the_soft_delete(self):
-        """A PUT that passed its existence check just before the delete began
-        can land *after* the first purge, recreating the orphan. The second
-        sweep closes that window: once the soft delete commits, no later PUT
-        can pass its check, so nothing new can appear after this point.
+    def test_the_script_is_purged_once_before_the_destructive_steps(self):
+        """One purge, unconditional, while the bot is still intact.
 
-        Same two-sweep shape the app-grant revocation already uses on the
-        identical race.
+        No second sweep after the soft delete: ``ac_bots`` constrains
+        ``uk_bot_id_entity_id_env`` and the delete is a soft update, so the
+        deleted row keeps occupying the tuple and no later bot can be created
+        onto it. A row that somehow survived is unreachable rather than
+        inherited, so the purge is hygiene and one pass is enough.
         """
         svc = _make_service()
         bot = _make_bot(bot_id="mybot", binding_id=None, entity_id="team_42")
@@ -768,41 +768,15 @@ class TestDeleteBot:
 
         assert svc.delete_bot("mybot", "user001") is True
 
-        # First purge, before the destructive steps: unconditional, because the
-        # bot is still alive and nothing else can hold the identifier.
+        # Keyed by entity_id, not the owner id: the two differ under a team
+        # entity, and using the owner would miss the row for every team bot.
         svc._cleanup_service.purge_startup_script.assert_called_once_with(
             entity_id="team_42", bot_id="mybot"
         )
-        # Second sweep, after the soft delete: restricted to the deleted bot's
-        # own incarnation. The identifier is free by then, so an unconditional
-        # delete could remove a recreated bot's script.
-        svc._cleanup_service.purge_startup_script_written_by.assert_called_once_with(
-            entity_id="team_42", bot_id="mybot", bot_incarnation=4242
-        )
 
-    def test_a_racing_script_write_is_swept_and_reported(self):
-        """The second sweep finding a row means the race actually happened —
-        worth a warning rather than being inferred later from an orphan.
-        """
-        svc = _make_service()
-        bot = _make_bot(bot_id="mybot", binding_id=None)
-        svc._repository.get_by_id_and_owner.return_value = bot
-        svc._passport_plugin.destroy_passport.return_value = None
-        svc._repository.soft_delete_by_owner.return_value = True
-        # Nothing stored when the delete began; a PUT lands in the window.
-        svc._cleanup_service.purge_startup_script.side_effect = [False, True]
-
-        with patch.object(bot_service_module, "logger") as mock_logger:
-            assert svc.delete_bot("mybot", "user001") is True
-
-        assert any(
-            "while it was being deleted" in str(c.args[0])
-            for c in mock_logger.warning.call_args_list
-        )
-
-    def test_the_default_bot_is_exempt_from_both_sweeps(self):
+    def test_the_default_bot_is_exempt_from_the_purge(self):
         """That delete is a restart; the script survives it as the skills and
-        config already do. Neither sweep may touch it.
+        config already do.
         """
         svc = _make_service()
         bot = _make_bot(bot_id="default", binding_id=None)

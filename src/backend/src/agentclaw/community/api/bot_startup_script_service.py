@@ -23,20 +23,16 @@ Signatures are keyed on ``(entity_id, bot_id)`` rather than an owner: the public
 surface addresses a bot by ``bot_id`` and the caller's own identity, and the
 adapter resolves ``entity_id`` from the bot record before calling in. That keeps
 ``entity_id`` a storage key and out of the public contract.
+
+That pair identifies one bot for good, so nothing here carries an owner stamp
+alongside it: ``ac_bots`` constrains ``uk_bot_id_entity_id_env`` and its
+deletion is a soft update, so a deleted bot goes on holding the tuple and no
+later bot can be created onto it.
 """
 from __future__ import annotations
 
 from abc import abstractmethod
 from typing import Optional, Protocol, TYPE_CHECKING, runtime_checkable
-
-# Re-exported, not redefined: the *repository* raises this, and ``core`` may not
-# import ``api``, so the type has to live in core. Naming it here makes it part
-# of the Service API's declared surface rather than a core detail an adapter
-# happens to know about — an implementation that swallowed it, or raised
-# something else, would turn this route's documented 404 into a 500.
-from agentclaw.community.core.bot_startup_script.errors import (
-    StartupScriptSupersededError,
-)
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_startup_script.repository.models import (
@@ -113,7 +109,6 @@ __all__ = [
     "BotStartupScriptServiceProtocol",
     "MAX_SCRIPT_BYTES",
     "StartupScriptNotEncodableError",
-    "StartupScriptSupersededError",
     "StartupScriptTooLargeError",
     "SUPPORTED",
     "UNSUPPORTED",
@@ -126,14 +121,9 @@ class BotStartupScriptServiceProtocol(Protocol):
 
     @abstractmethod
     def get(
-        self, *, entity_id: str, bot_id: str, bot_incarnation: int
+        self, *, entity_id: str, bot_id: str
     ) -> Optional[BotStartupScriptRecord]:
-        """Return the stored script, or ``None`` when the bot has none.
-
-        ``bot_incarnation`` is the ``ac_bots.id`` of the bot asking. A row
-        stored by an earlier bot that held the same ``bot_id`` is not this
-        bot's script and reads as ``None``.
-        """
+        """Return the stored script, or ``None`` when the bot has none."""
         ...
 
     @abstractmethod
@@ -144,42 +134,13 @@ class BotStartupScriptServiceProtocol(Protocol):
         bot_id: str,
         script: str,
         modifier: str,
-        bot_incarnation: int,
     ) -> BotStartupScriptRecord:
-        """Store or replace the script; raises when it exceeds the size cap.
-
-        The stored row is stamped with ``bot_incarnation``, which is what every
-        later read checks it against.
-
-        Raises :class:`StartupScriptSupersededError` when the stored row already
-        belongs to a *later* incarnation — the writer's bot was deleted and its
-        identifier handed on mid-request. **Every implementation must raise that
-        type for that condition**, because callers are entitled to distinguish
-        it: the public route answers it as a 404 on the named bot, and an
-        implementation that raised something else would turn that into a 500.
-        Storing the body anyway is not a permitted alternative; it would destroy
-        the current owner's script.
-        """
+        """Store or replace the script; raises when it exceeds the size cap."""
         ...
 
     @abstractmethod
     def delete(self, *, entity_id: str, bot_id: str) -> bool:
-        """Clear the script. Idempotent.
-
-        Unconditional — clears whichever incarnation's row is at the key.
-        """
-        ...
-
-    @abstractmethod
-    def delete_written_by(
-        self, *, entity_id: str, bot_id: str, bot_incarnation: int
-    ) -> bool:
-        """Withdraw a row only if that incarnation still owns it.
-
-        For a write taking back its own row after finding its bot deleted; the
-        condition keeps it from removing a script a recreated bot has since
-        stored at the same key.
-        """
+        """Clear the script. Idempotent."""
         ...
 
     @abstractmethod
@@ -188,10 +149,6 @@ class BotStartupScriptServiceProtocol(Protocol):
         ...
 
     @abstractmethod
-    def get_body(self, *, entity_id: str, bot_id: str, bot_incarnation: int) -> str:
-        """Return the script body, or ``""`` when the bot has none.
-
-        ``""`` also covers a row belonging to an earlier incarnation — this is
-        the read whose result is executed, so it must never return one.
-        """
+    def get_body(self, *, entity_id: str, bot_id: str) -> str:
+        """Return the script body, or ``""`` when the bot has none."""
         ...

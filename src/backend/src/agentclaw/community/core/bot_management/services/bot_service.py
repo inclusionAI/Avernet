@@ -3424,10 +3424,8 @@ class BotService:
             #
             # It is not filed with the skills and skill sets below because it is
             # not the same kind of leftover. Those are inert metadata; this is
-            # plaintext executable content, and `create_bot` takes a
-            # caller-supplied `bot_id` while soft-deleted bots read as absent —
-            # so a surviving row runs on the *next* owner of that id, on every
-            # start, having never been written by them.
+            # the user's script in plaintext, which should not outlive the bot
+            # it was written for.
             #
             # Failures propagate, matching how this feature already treats a
             # failed script read (`_resolve_startup_script`): swallowing a
@@ -3487,9 +3485,6 @@ class BotService:
                 raise BotNotFoundError(f"Bot not found: {bot_id}")
 
             self._sweep_grants_that_raced_the_deletion(bot_id, user_id)
-
-            if bot_id != "default":
-                self._sweep_startup_script_that_raced_the_deletion(bot_id, bot)
 
             self._sync_provider_bot_delete_to_bcn(bot_id, user_id)
 
@@ -3593,57 +3588,6 @@ class BotService:
                 exc_info=True,
             )
 
-    def _sweep_startup_script_that_raced_the_deletion(
-        self, bot_id: str, bot: Dict[str, Any]
-    ) -> None:
-        """Second purge, after the soft delete. Paired with the first.
-
-        The first purge cannot close the window on its own. ``PUT`` checks that
-        the bot exists and then writes the row as a separate step, so a write
-        that passed its check just before the deletion began can land *after*
-        the first purge — leaving exactly the orphan the purge exists to
-        prevent, on a bot that is now gone.
-
-        Running it again here closes that window rather than narrowing it: once
-        ``soft_delete_by_owner`` has committed, every read filters on liveness,
-        so no later ``PUT`` can pass its existence check and no new row can
-        appear. Anything this finds was written during the deletion itself.
-
-        This mirrors the two-sweep pattern the app-grant revocation already uses
-        on the identical race, including its reason for not reaching for a lock:
-        serialising the two paths would mean holding the bot row across every
-        script write, to prevent a row that cannot be reached. The pair is
-        cheaper and closes the same gap.
-
-        Failures propagate, like the first sweep and like the grant sweep. The
-        deletion has really happened by then, so a caller who retries is told
-        "no such bot" — confusing, but honest, where reporting success over a
-        row that survived is a wrong answer nobody can later discover.
-
-        **Restricted to the deleted bot's own incarnation**, unlike the first
-        purge. By the time this runs the bot is gone, so the identifier is free:
-        it can be recreated, and that new bot can legitimately store a script of
-        its own before this sweep fires. Clearing the key unconditionally would
-        delete it — the deletion of one bot destroying a different bot's data.
-        The first purge needs no such condition because the bot is still alive
-        there, so nothing else can hold the identifier yet.
-        """
-        entity_id = str(bot.get("entity_id") or "")
-        deleted_incarnation = bot.get("id")
-        if not entity_id or deleted_incarnation is None:
-            return
-        removed = self._cleanup_service.purge_startup_script_written_by(
-            entity_id=entity_id,
-            bot_id=bot_id,
-            bot_incarnation=int(deleted_incarnation),
-        )
-        if removed:
-            logger.warning(
-                "[bot_service.delete_bot] removed a startup script written on "
-                "bot %s while it was being deleted",
-                bot_id,
-            )
-
     def _purge_startup_script(self, bot_id: str, bot: Dict[str, Any]) -> bool:
         """Delete the bot's stored startup script. Failures propagate.
 
@@ -3655,8 +3599,8 @@ class BotService:
         A bot with no ``entity_id`` never had a script: the write path requires
         both halves of the key. There is nothing to delete and no id to invent.
 
-        Returns whether a row was actually removed, which the second sweep uses
-        to report that the race really happened.
+        Runs before the soft delete, while the bot is still intact, so a failure
+        aborts the deletion rather than leaving the script behind unnoticed.
         """
         entity_id = str(bot.get("entity_id") or "")
         if not entity_id:

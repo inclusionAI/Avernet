@@ -86,33 +86,18 @@ class BotStartupScriptService(
         self._teclaw_provision_provider = teclaw_engine_test_provider
 
     def get(
-        self, *, entity_id: str, bot_id: str, bot_incarnation: int
+        self, *, entity_id: str, bot_id: str
     ) -> Optional[BotStartupScriptRecord]:
-        """Return the script *this* bot stored, or ``None``.
+        """Return the bot's stored script, or ``None``.
 
-        A row written by an earlier bot that held the same identifier is not
-        this bot's script and is reported as ``None`` — the same answer every
-        other read gives, so what the API shows and what the container runs
-        cannot disagree. See ``bot_incarnation`` on the model for why a row can
-        outlive the bot that wrote it.
+        No ownership check on top of the key: ``(env, entity_id, bot_id)`` names
+        one bot for the life of the data, because ``ac_bots`` constrains
+        ``uk_bot_id_entity_id_env`` and its deletion is a soft update, so a
+        deleted bot keeps the tuple and no later bot can be created onto it.
         """
-        record = self._repository.get(
+        return self._repository.get(
             env=get_current_env(), entity_id=entity_id, bot_id=bot_id
         )
-        if record is None:
-            return None
-        if record.bot_incarnation != bot_incarnation:
-            logger.warning(
-                "[startup_script] ignoring a script left by an earlier bot on "
-                "this identifier: entity_id=%s, bot_id=%s, written_for=%s, "
-                "reading_for=%s",
-                entity_id,
-                bot_id,
-                record.bot_incarnation,
-                bot_incarnation,
-            )
-            return None
-        return record
 
     def put(
         self,
@@ -121,7 +106,6 @@ class BotStartupScriptService(
         bot_id: str,
         script: str,
         modifier: str,
-        bot_incarnation: int,
     ) -> BotStartupScriptRecord:
         """Store or replace the script.
 
@@ -157,33 +141,12 @@ class BotStartupScriptService(
             # a truncated tail costs some of the delegating id, never which
             # application acted.
             modifier=modifier[:MAX_MODIFIER_CHARS],
-            bot_incarnation=bot_incarnation,
         )
 
     def delete(self, *, entity_id: str, bot_id: str) -> bool:
-        """Clear the script. Idempotent — clearing an absent script succeeds.
-
-        Unconditional: a caller clearing their script, and the bot-deletion
-        sweep, both want the key empty whichever incarnation last wrote it.
-        """
+        """Clear the script. Idempotent — clearing an absent script succeeds."""
         return self._repository.delete(
             env=get_current_env(), entity_id=entity_id, bot_id=bot_id
-        )
-
-    def delete_written_by(
-        self, *, entity_id: str, bot_id: str, bot_incarnation: int
-    ) -> bool:
-        """Withdraw a row on behalf of the incarnation that wrote it.
-
-        Used by a write that discovers, after storing, that its bot is gone.
-        Conditional so the withdrawal cannot remove a script a recreated bot
-        has since stored at the same key.
-        """
-        return self._repository.delete_written_by(
-            env=get_current_env(),
-            entity_id=entity_id,
-            bot_id=bot_id,
-            bot_incarnation=bot_incarnation,
         )
 
     def resolve_support(self, bot: dict) -> tuple[str, str]:
@@ -203,19 +166,12 @@ class BotStartupScriptService(
 
         return resolve_support(bot, self._teclaw_provision_provider().is_teclaw)
 
-    def get_body(self, *, entity_id: str, bot_id: str, bot_incarnation: int) -> str:
+    def get_body(self, *, entity_id: str, bot_id: str) -> str:
         """Return the script body, or ``""`` when the bot has none.
 
         The payload-build path composes a shell string and must never branch on
         ``None``; an empty body is the "no script" signal there, and
         ``_get_start_cmd`` returns its unchanged chain for it.
-
-        This is the read that actually puts a body into a container, so it is
-        the one the ``bot_incarnation`` check exists for: a row written for a
-        previous holder of this identifier reads as ``""`` and never executes,
-        whatever state the cleanup paths are in.
         """
-        record = self.get(
-            entity_id=entity_id, bot_id=bot_id, bot_incarnation=bot_incarnation
-        )
+        record = self.get(entity_id=entity_id, bot_id=bot_id)
         return record.script if record is not None else ""

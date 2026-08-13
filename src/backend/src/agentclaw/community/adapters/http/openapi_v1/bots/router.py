@@ -88,9 +88,6 @@ from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlu
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
 from .startup_script_support import (
-    _abandon_write_if_the_bot_died,
-    _bot_incarnation,
-    _store_or_404_if_superseded,
     _startup_script_payload,
     _startup_script_target,
 )
@@ -812,12 +809,7 @@ async def get_bot_startup_script(
     """
     bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
     entity_id, state, reason = _startup_script_target(bot, startup_script_service)
-    # Scoped to this bot's own incarnation, so GET reports exactly what a start
-    # would run: a row left behind by an earlier holder of this id is not this
-    # bot's script and reads as absent here too.
-    record = startup_script_service.get(
-        entity_id=entity_id, bot_id=bot_id, bot_incarnation=_bot_incarnation(bot)
-    )
+    record = startup_script_service.get(entity_id=entity_id, bot_id=bot_id)
     return envelope(_startup_script_payload(bot_id, record, state, reason), request)
 
 
@@ -852,24 +844,13 @@ async def update_bot_startup_script(
     entity_id, state, reason = _startup_script_target(bot, startup_script_service)
     if state != SUPPORTED:
         raise StartupScriptUnsupportedError(reason)
-    bot_incarnation = _bot_incarnation(bot)
-    record = _store_or_404_if_superseded(
-        startup_script_service,
+    record = startup_script_service.put(
         entity_id=entity_id,
         bot_id=bot_id,
         script=body.script,
-        bot_incarnation=bot_incarnation,
         # From the verified caller, never the body — and naming the application
         # when one is acting, not the user it acted for.
         modifier=_audit_actor(caller, owner_id),
-    )
-    _abandon_write_if_the_bot_died(
-        bot_id,
-        entity_id,
-        owner_id,
-        bot_incarnation,
-        bot_service,
-        startup_script_service,
     )
     return envelope(_startup_script_payload(bot_id, record, SUPPORTED, ""), request)
 
@@ -895,15 +876,7 @@ async def delete_bot_startup_script(
     entity_id = bot.get("entity_id")
     if not entity_id:
         raise BotNotFoundError("bot has no associated entity")
-    # Conditional on the incarnation the guard above validated. A DELETE that
-    # is admitted and then delayed while its bot is deleted and the identifier
-    # recreated would otherwise clear the *new* bot's script and report success
-    # — the caller's own request destroying a stranger's data. Nothing of ours
-    # left to remove is still success: clearing is idempotent, and our bot's
-    # script is certainly not there.
-    startup_script_service.delete_written_by(
-        entity_id=entity_id, bot_id=bot_id, bot_incarnation=_bot_incarnation(bot)
-    )
+    startup_script_service.delete(entity_id=entity_id, bot_id=bot_id)
     return deleted_envelope(request)
 
 

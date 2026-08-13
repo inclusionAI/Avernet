@@ -22,9 +22,6 @@ from agentclaw.community.core.bot_startup_script.repository.models import (
     BotStartupScriptModel,
     BotStartupScriptRecord,
 )
-from agentclaw.community.core.bot_startup_script.errors import (
-    StartupScriptSupersededError,
-)
 from agentclaw.community.core.repository.protocols.bot import (
     BotStartupScriptRepositoryProtocol,
 )
@@ -53,10 +50,8 @@ def _script_key(*, env: str, entity_id: str, bot_id: str) -> str:
     that: ``create_bot`` takes caller-supplied ``bot_id``/``entity_id`` and
     neither is validated against control characters. Under the old NUL-joined
     form ``(entity_id="a\0b", bot_id="c")`` and ``(entity_id="a", bot_id="b\0c")``
-    hashed identically, so one bot's write landed on another bot's row — and
-    with the incarnation stamp in place the victim's own next write is then
-    refused as stale, locking it out of its own script rather than merely
-    clobbering it once.
+    hashed identically, so one bot's write landed on another bot's row — two
+    live bots sharing one script, each executing whatever the other last wrote.
 
     Prefixing each component with its length is injective for *every* input, so
     the key stops depending on an invariant nobody upholds. Rejecting control
@@ -113,15 +108,8 @@ class BotStartupScriptRepository(
         script: str,
         size_bytes: int,
         modifier: str,
-        bot_incarnation: int,
     ) -> BotStartupScriptRecord:
         """写入脚本：存在则整体替换正文，不存在则插入。
-
-        ``bot_incarnation`` is re-stamped on an update as well as an insert: it
-        records who this body belongs to, and the row is being handed to the
-        writing bot whether or not one was already there. Leaving a previous
-        incarnation's stamp in place would make the new owner's own script
-        unreadable to it.
 
         Retried once on a duplicate-key conflict. The read-then-insert below is
         not atomic: two first writes for the same key can both see ``None``,
@@ -138,7 +126,6 @@ class BotStartupScriptRepository(
                 script=script,
                 size_bytes=size_bytes,
                 modifier=modifier,
-                bot_incarnation=bot_incarnation,
             )
         except IntegrityError:
             # The row now exists — the racing insert committed first. The retry
@@ -158,7 +145,6 @@ class BotStartupScriptRepository(
                 script=script,
                 size_bytes=size_bytes,
                 modifier=modifier,
-                bot_incarnation=bot_incarnation,
             )
 
     def _upsert_once(
@@ -170,7 +156,6 @@ class BotStartupScriptRepository(
         script: str,
         size_bytes: int,
         modifier: str,
-        bot_incarnation: int,
     ) -> BotStartupScriptRecord:
         """One read-then-write attempt. Raises ``IntegrityError`` if it races."""
         with self._db.orm_session() as db:
@@ -190,30 +175,15 @@ class BotStartupScriptRepository(
                     script=script,
                     size_bytes=size_bytes,
                     modifier=modifier,
-                    bot_incarnation=bot_incarnation,
                     script_key=_script_key(
                         env=env, entity_id=entity_id, bot_id=bot_id
                     ),
                 )
                 db.add(row)
-            elif row.bot_incarnation > bot_incarnation:
-                # A newer bot already owns this key, so this write is stale: its
-                # bot was deleted and the identifier handed on while the request
-                # was in flight. Overwriting would lose the current owner's
-                # script *and* stamp the row back to the dead incarnation, which
-                # would then let the stale request's own withdrawal delete it.
-                #
-                # ``ac_bots.id`` is an autoincrement primary key, so "greater"
-                # really does mean "later" — this is an ordering, not a guess.
-                raise StartupScriptSupersededError(
-                    stored_incarnation=int(row.bot_incarnation),
-                    writing_incarnation=int(bot_incarnation),
-                )
             else:
                 row.script = script
                 row.size_bytes = size_bytes
                 row.modifier = modifier
-                row.bot_incarnation = bot_incarnation
                 # Stamped explicitly, not left to the column's ``onupdate``.
                 # SQLAlchemy emits no UPDATE at all when every assigned value
                 # equals what is already there, so re-submitting an identical
@@ -259,43 +229,6 @@ class BotStartupScriptRepository(
                 env,
                 entity_id,
                 bot_id,
-                deleted,
-            )
-            return deleted > 0
-
-    def delete_written_by(
-        self, *, env: str, entity_id: str, bot_id: str, bot_incarnation: int
-    ) -> bool:
-        """Delete the row **only if** it is still the one that incarnation wrote.
-
-        This is the withdrawal a write uses to take back its own row, and the
-        condition is what stops it taking back somebody else's. Between deciding
-        to withdraw and issuing the delete, the identifier can be recreated and
-        the new bot can store a script of its own at the same key; an
-        unconditional delete would silently destroy it, turning one bot's failed
-        write into another bot's data loss.
-
-        Returns ``False`` when there is nothing of ours to remove — either the
-        row is gone already or it now belongs to a later incarnation. Both are
-        the desired end state, not failures.
-        """
-        with self._db.orm_session() as db:
-            deleted = (
-                db.query(self._Script)
-                .filter(
-                    self._Script.script_key
-                    == _script_key(env=env, entity_id=entity_id, bot_id=bot_id),
-                    self._Script.bot_incarnation == bot_incarnation,
-                )
-                .delete(synchronize_session=False)
-            )
-            logger.info(
-                "[startup_script.delete_written_by] env=%s, entity_id=%s, "
-                "bot_id=%s, bot_incarnation=%s, deleted=%s",
-                env,
-                entity_id,
-                bot_id,
-                bot_incarnation,
                 deleted,
             )
             return deleted > 0

@@ -45,10 +45,8 @@ class BotCleanupService:
         与下面 ``cleanup_single_bot_data`` 里的技能清理不同，这一项刻意不走
         "记录日志然后继续"：
 
-        * 残留的不是惰性元数据，而是**明文可执行内容**。而且 ``create_bot``
-          允许调用方指定 ``bot_id``、软删的 Bot 又被视为不存在，所以同一个
-          ``(entity_id, bot_id)`` 一旦被重建，这段脚本会在新 Bot 的每次启动里
-          执行——一个新主人从没写过的脚本。
+        * 残留的不是惰性元数据，而是**明文可执行内容**：用户写的脚本原文会在
+          Bot 删除后无限期留在库里，谁查这张表都能读到。
         * 本仓库对同类清理已经有先例：``delete_bot`` 里的 app grant 回收同样
           "先于一切破坏性步骤、失败直接抛"，理由写在那里——失败时 Bot 还完好，
           最坏的结果只是脚本被删而 Bot 存活，重新 PUT 即可恢复。
@@ -60,22 +58,6 @@ class BotCleanupService:
         写不进去通常意味着这次删除本来也会失败。
         """
         return self._startup_script_purge.delete(entity_id=entity_id, bot_id=bot_id)
-
-    def purge_startup_script_written_by(
-        self, *, entity_id: str, bot_id: str, bot_incarnation: int
-    ) -> bool:
-        """删除启动脚本，但**仅当它仍属于该 incarnation**。失败同样上抛。
-
-        用于软删之后的第二次清扫。那时 Bot 已经不在了，标识符因此是空闲的：
-        它可以被重建，而新 Bot 完全可能在这次清扫之前合法地写入自己的脚本。
-        无条件删除会把它一并抹掉——一个 Bot 的删除毁掉另一个 Bot 的数据。
-
-        软删**之前**的那次清扫不需要这个条件：那时 Bot 还活着，标识符不可能
-        已经属于别人。
-        """
-        return self._startup_script_purge.delete_written_by(
-            entity_id=entity_id, bot_id=bot_id, bot_incarnation=bot_incarnation
-        )
 
     def cleanup_single_bot_data(self, bot_id: str, user_id: str) -> Dict[str, Any]:
         """清理单个 Bot 的关联数据。
