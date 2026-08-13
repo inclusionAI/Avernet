@@ -39,7 +39,7 @@ use bcs_service_api::application::v1::{
     RejectFriendRequest, require_authenticated_user, require_human,
 };
 use bcs_service_api::{
-    BotRegistryCoreService, FriendCoreService, FriendRequestCoreService,
+    ActorKind, BotRegistryCoreService, FriendCoreService, FriendRequestCoreService,
     FriendRequest as DomainFriendRequest, FriendRequestDirection as DomainFriendRequestDirection,
     Friendship as DomainFriendship, Group as DomainGroup, GroupCoreService, GroupKind,
     GroupStatus, GroupStrategy, InviteService, InviteUseCaseError, JoinByInviteCommand,
@@ -129,15 +129,35 @@ impl InvitationFriendshipServiceImpl {
     }
 
     /// Manager of a group: driver, originator, or ManagerWorker manager.
-    /// Mirrors `bcs-app-group::can_manage_group`.
-    fn can_manage_group(principal: &Principal, group: &DomainGroup) -> bool {
+    /// A Human may also act for an owned driver/originator Bot, preserving the
+    /// legacy invitation authorization contract.
+    async fn can_manage_group(
+        &self,
+        principal: &Principal,
+        group: &DomainGroup,
+    ) -> Result<bool, ApplicationError> {
         let actor_id = principal.actor_id();
-        actor_id == group.driver_bot
+        if actor_id == group.driver_bot
             || actor_id == group.originator()
             || (group.group_strategy == GroupStrategy::ManagerWorker
                 && group.participants.iter().any(|p| {
                     p.bot_uuid == actor_id && p.role == ParticipantRole::Manager
                 }))
+        {
+            return Ok(true);
+        }
+        let Principal::Human(human) = principal else {
+            return Ok(false);
+        };
+        let owned_bots = self
+            .registry
+            .try_list_bots_by_creator(&human.subject.id)
+            .await
+            .map_err(map_service_error)?;
+        Ok(owned_bots.iter().any(|bot| {
+            bot.actor_kind == ActorKind::Bot
+                && (bot.bot_uuid == group.driver_bot || bot.bot_uuid == group.originator())
+        }))
     }
 
     async fn load_manageable_group(
@@ -156,7 +176,7 @@ impl InvitationFriendshipServiceImpl {
                     format!("Group '{group_id}' was not found"),
                 )
             })?;
-        if !Self::can_manage_group(principal, &group) {
+        if !self.can_manage_group(principal, &group).await? {
             return Err(ApplicationError::forbidden(
                 "Only the Group originator, driver, or manager may manage this Group",
             ));
@@ -265,7 +285,7 @@ impl InvitationService for InvitationFriendshipServiceImpl {
                     format!("Group '{}' was not found", session.group_id),
                 )
             })?;
-        if !Self::can_manage_group(&principal, &group) {
+        if !self.can_manage_group(&principal, &group).await? {
             return Err(ApplicationError::forbidden(
                 "Only the Group originator, driver, or manager may manage Sessions",
             ));
