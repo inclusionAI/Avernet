@@ -27,8 +27,9 @@ class TaskPlanner:
         self._graph = graph
         self._strategies = None  # list[PlanningStrategy](首批壳,待后续 PR)
 
-    def plan(self, graph: TaskExecutionGraph) -> list[TaskNode]:
-        """读图判有无可规划目标 → first-match-wins 选策略(graph 级 config 匹配)→ apply 产子 → 去重。
+    async def plan(self, graph: TaskExecutionGraph) -> list[TaskNode]:
+        """读图判有无可规划目标 → first-match-wins 选策略(graph 级 config 匹配)→ await apply 产子 → 去重。
+        协程化:策略 apply 在 corp 是 LLM 耗时 IO,锁内 await(同 task 串行,设计意图;不同 task 锁隔离)。
 
         可规划目标:① 根 PENDING(无父,初始规划);② FAILED+gaps 叶(无结构子,补救);
         ③ PLANNING 父(委托前向)。无目标 → 返回 []。plan 不接收外部 gaps,不判 RUNNING(时序由编排核管)。"""

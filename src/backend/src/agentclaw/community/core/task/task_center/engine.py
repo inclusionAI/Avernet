@@ -18,6 +18,9 @@ class ExecutionEngine:
     策略/投递后端(ocb 仓)。on_* 入参统一收口 TaskNodePatch。按事件 + 状态条件(a/b/c + plan 三条件)
     分段协调(无 single drive fixpoint 泵)。同 task_id 串行,跨 task 并行。loop_round 仅升 BBS 时 ++。
     验收 100% 走 on_report 回投(无 OwnerBotVerifyPort);BBS 投递归 runner BBS 模态(无 BbsMarketPort)。
+    协程化(任务执行耗时):on_* 全 `async def`;`plan`/`dispatch`(corp LLM/catalog IO)锁内 `await`,
+    投递/拉群 IO 锁外 `await`(详 Avernet spec/README)。`threading.RLock` 适用一次性事件循环/跨线程回调模型;
+    corp 单持久 loop 并发同 task 需切 `asyncio.Lock`(ocb 仓定)。
     """
 
     def __init__(self, graph) -> None:
@@ -29,13 +32,13 @@ class ExecutionEngine:
         self._dispatcher = None    # type: ignore[assignment]
         self._runner = None        # type: ignore[assignment]
 
-    def on_execute(self, task_id: str) -> None:
+    async def on_execute(self, task_id: str) -> None:
         """execute 事件:initialize_graph(根 PENDING)→ 触发首帧推进:
         条件 a(根 PENDING)→ plan → add_task_nodes(第一层,根进 PLANNING)
         → dispatch(返填执行者 list[TaskNode])→ update_task_node_info(RUNNING)→ start_run。"""
         raise NotImplementedError
 
-    def on_report(self, patch: TaskNodePatch) -> NodeOpResult:
+    async def on_report(self, patch: TaskNodePatch) -> NodeOpResult:
         """回投事件:patch 内含 (task_id,node_id)+ 唯一翻态依据 acceptance_result + output_patch。
         update_task_node_info 翻态(+fold output):
         PASS→DONE:查结构父 P;P=PLANNING 且全部结构子(本批兄弟)DONE ∧ 无 RUNNING(决策C)
@@ -45,7 +48,7 @@ class ExecutionEngine:
         验收 100% 走回投(engine 不主动验,无 OwnerBotVerifyPort)。返回 NodeOpResult 供适配层 ack。"""
         raise NotImplementedError
 
-    def on_miss(self, patch: TaskNodePatch) -> None:
+    async def on_miss(self, patch: TaskNodePatch) -> None:
         """dispatcher MISS → 节点仍 PENDING(miss_events 已填):
         <MAX → plan→add_task_nodes(拆细)→ 消费 miss_events → dispatch;
         ≥MAX → 自动升 BBS:remove_subtree(删 xx_node 及其下整个子树;前提:所有子都 MISS、
@@ -54,7 +57,7 @@ class ExecutionEngine:
           → 上报经 on_report。loop_round 达 BBS_MAX_DEPTH 仍执行不下去 → STUCK → HUNG(stuck)。"""
         raise NotImplementedError
 
-    def on_harness(self, patch: TaskNodePatch) -> None:
+    async def on_harness(self, patch: TaskNodePatch) -> None:
         """Harness 旁路:RUNNING 超时/崩溃 → 复位回 PENDING(update_task_node_info)→ 正常 dispatch 重投。
         不抢正向驱动;不直接写 HUNG(STUCK 走 on_miss 升 BBS 链路上限判)。"""
         raise NotImplementedError

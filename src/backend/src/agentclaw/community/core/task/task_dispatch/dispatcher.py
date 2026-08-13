@@ -27,9 +27,10 @@ class TaskDispatcher:
         self._graph = graph
         self._strategies = None  # list[DispatchStrategy](首批壳,待后续 PR)
 
-    def dispatch(self, toDoTaskList: list[TaskNode]) -> list[TaskNode]:
+    async def dispatch(self, toDoTaskList: list[TaskNode]) -> list[TaskNode]:
         """入参=待派发节点;返回=填充执行者信息后的 list[TaskNode](对齐派发文档签名)。
-        不写图、不起 run;per node first-match 策略 apply SearchResult → 填 node.run_info:
+        协程化:catalog 搜推在 corp 是耗时 IO,锁内 await。
+        不写图、不起 run;per node first-match 策略 await apply SearchResult → 填 node.run_info:
         HIT_SINGLE→single_bot/bot_id;HIT_GROUP→coop_group/group_id;
         HIT_MULTI_BOTS→coop_group/pending_group_formation(assignee 留空,编排核拉群填);
         MISS→不填+标 miss_events。BBS 节点(run_mode 已 "bbs")→ 退化直接维持。"""

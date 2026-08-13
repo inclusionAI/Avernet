@@ -3,6 +3,8 @@
 Avernet 阶段:form_coop_group stub(不真实 BCS)、start_run stub 投递(不真实 bot workflow/群/BBS)。
 三类投递后端(单 bot workflow / bcn 协作群 / BBS 广场)经 ``set_delivery`` 注入(corp ocb 仓:真实
 workflow engine/BCS/BBS 广场);缺省 stub fallback。``set_delivery``/``__init__(graph)`` 待后续 PR。
+协程化:start_run/form_coop_group 为 `async def`(投递/BCS 拉群是网络 IO);内部多节点投递并发
+gather+Semaphore(``_DELIVER_CONCURRENCY``)下沉 start_run(Avernet 实现侧;待后续 PR)。
 """
 from __future__ import annotations
 
@@ -17,7 +19,7 @@ class TaskRunner:
     (无独立 BbsMarketPort;升 BBS 只翻图态 bbs_mode,实际投递经 runner BBS 投递后端)。
     """
 
-    def start_run(self, toDoTaskList: list[TaskNode]) -> list[bool]:
+    async def start_run(self, toDoTaskList: list[TaskNode]) -> list[bool]:
         """图谱上有 TaskNode 完成派发后立即触发执行。入参批量(刚被 dispatcher patch 完
         run_mode/assignee 的节点);返回每个任务派发是否成功 list[bool]。内部按 run_mode 自适应:
         single_bot→单 bot workflow;coop_group→bcn 协作群(已有群 or 刚 form_coop_group 拉的);
@@ -40,7 +42,7 @@ class TaskRunner:
         """获取某个 Bot 下的所有任务实例列表。"""
         raise NotImplementedError
 
-    def form_coop_group(self, gf) -> str:
+    async def form_coop_group(self, gf) -> str:
         """(内部)HIT_MULTI_BOTS 动态拉协作群,复用 BCS 建群 → group_id。
         CHAT/MANAGER_WORKER/STATE_MACHINE 三模式(collab_mode=group_strategy;state_machine 注入
         workflow yaml)。gf: GroupFormation(内部参数不进 RuntimeInfo 持久字段;定义待后续 PR 落
