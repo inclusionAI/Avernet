@@ -3528,7 +3528,7 @@
         },
         "properties": {
           "exists": {
-            "description": "True when the name is already taken, so creating with it would be refused.",
+            "description": "True when the check found a match. This is the lookup's own answer, not a promise about what a subsequent create will do — whether the two agree is stated on each check's own operation description. Treat create's response as the authoritative one.",
             "title": "Exists",
             "type": "boolean"
           },
@@ -9344,7 +9344,7 @@
     },
     "/openapi/v1/bots/resources/check-name": {
       "get": {
-        "description": "Check whether a resource already exists.\n\nFiles and links are addressed differently, so this endpoint takes two\nparameters and at least one is required (400 otherwise):\n\n- A file or folder is checked by `path`, against the bot's workspace — the\n  same question upload asks before writing, answered by the same authority,\n  so the two cannot disagree. Send `path`, or send `name` with\n  `type=file` or `type=folder` and it is read as a path.\n- A link is checked by `name`, against the link records, because a link has\n  no file. This is what you get when you send `name` alone.\n\n**Not a reliable preflight for creating a link.** A link here is checked\nagainst a different set of records than the one link creation writes to, so\na name this endpoint reports as free can still be refused by create with\n409. Treat create's answer as the authoritative one and handle the 409;\nthe file check above has no such gap.",
+        "description": "Check whether a resource already exists.\n\nFiles and links are addressed differently, so this endpoint takes two\nparameters and at least one is required (400 otherwise):\n\n- A file or folder is checked by `path`, against the bot's workspace — the\n  same question upload asks before writing, answered by the same authority,\n  so the two cannot disagree. Send `path`, or send `name` with\n  `type=file` or `type=folder` and it is read as a path.\n- A link is checked by `name`, against the link records, because a link has\n  no file. This is what you get when you send `name` alone.\n\n**Not a reliable preflight for creating a link, in either direction.** A\nlink here is checked against a different set of records than the one link\ncreation writes to, so a name this endpoint reports as free can still be\nrefused by create with 409, and one it reports as taken can still be\naccepted. Treat create's answer as the authoritative one and handle the\n409; the file check above has no such gap.",
         "operationId": "check_resource_name_openapi_v1_bots_resources_check_name_get",
         "parameters": [
           {

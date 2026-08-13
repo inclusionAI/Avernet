@@ -162,9 +162,19 @@ class NameCheck(BaseModel):
         "trim or normalise it, some do not — so read this field rather than "
         "assuming the value you sent was used verbatim."
     )
+    # Neutral for the same reason as `name` above, and the link case shows why
+    # in both directions: `check_name_exists` filters strictly on the legacy
+    # resource type, so the preflight's LINK and create's URL query disjoint
+    # sets. A legacy LINK row answers exists=true while create, checking URL,
+    # would accept the same name; and every link create writes URL, so the
+    # preflight misses them and answers exists=false where create refuses.
+    # Whether this field predicts create is a property of the endpoint, not of
+    # the field, so each operation states it and this does not.
     exists: bool = Field(
-        description="True when the name is already taken, so creating with it "
-        "would be refused."
+        description="True when the check found a match. This is the lookup's "
+        "own answer, not a promise about what a subsequent create will do — "
+        "whether the two agree is stated on each check's own operation "
+        "description. Treat create's response as the authoritative one."
     )
 
 

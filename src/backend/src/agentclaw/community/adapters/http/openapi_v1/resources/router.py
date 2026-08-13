@@ -361,20 +361,25 @@ async def check_resource_name(
     - A link is checked by `name`, against the link records, because a link has
       no file. This is what you get when you send `name` alone.
 
-    **Not a reliable preflight for creating a link.** A link here is checked
-    against a different set of records than the one link creation writes to, so
-    a name this endpoint reports as free can still be refused by create with
-    409. Treat create's answer as the authoritative one and handle the 409;
-    the file check above has no such gap.
+    **Not a reliable preflight for creating a link, in either direction.** A
+    link here is checked against a different set of records than the one link
+    creation writes to, so a name this endpoint reports as free can still be
+    refused by create with 409, and one it reports as taken can still be
+    accepted. Treat create's answer as the authoritative one and handle the
+    409; the file check above has no such gap.
     """
     # The link mismatch is real, not a caveat invented for the docstring: this
     # maps openapi LINK to legacy ResourceType.LINK, while `create_url_resource`
     # checks and writes legacy ResourceType.URL — which is what every link
-    # created through this surface is. So the check scans a set that holds none
-    # of them. Fixing it means deciding whether LINK fans out to both legacy
-    # types here (the "URL fan-out" follow-up noted on _OPENAPI_TO_LEGACY_TYPE),
-    # which is a behaviour change to the resources contract and not this
-    # change's to make. Until then the endpoint says what it actually does.
+    # created through this surface is. `check_name_exists` filters strictly on
+    # the type it is given, so the two query disjoint sets. Hence both
+    # directions: the check misses every link create wrote (false negative), and
+    # a legacy LINK row from elsewhere answers taken for a name create would
+    # accept (false positive). Fixing it means deciding whether LINK fans out to
+    # both legacy types here (the "URL fan-out" follow-up noted on
+    # _OPENAPI_TO_LEGACY_TYPE), which is a behaviour change to the resources
+    # contract and not this change's to make. Until then the endpoint says what
+    # it actually does.
     #
     # parent_path / exclude_id from the service signature stay off this contract
     # and are passed as None: resources are bot-scoped, so there is no parent
