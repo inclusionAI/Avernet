@@ -99,8 +99,12 @@ Worker 首轮“需修订”可以作为 initial issue 进入 one-shot，但未�
 
 - `ONE_SHOT_INPUT_READY` 后必须完整读取当前安装的 BCS Skill、custom collaboration reference 和 schema，读到末尾后才生成 YAML。不得复制 profile 中的固定 YAML 或凭旧会话猜 schema。
 - YAML 顶层、participants、nodes、transitions、judge、human_input 和 final output 的准确结构以当次 schema 为准。
+- schema 与图结构只认 `collaboration validate` 的结构化结果；profile 附加检查必须解析 YAML 后按准确字段路径判断，禁止全文搜索、字符串切片或用节点名第一次出现位置代替节点定义。
+- 任一附加检查为 FAIL 时禁止宣称全部通过或启动 run；定义错误就修定义，检查器误报就修正检查器并重跑，不能用一句“误报”直接放行。
 - 全局和所有 bot_task 有效超时不得低于 300000ms；最终 HumanInput 不得低于 600000ms。
 - run 中不读取本地私有账本、不调用 assign-task、不发普通群消息、不调用 group/session 生命周期工具。
+- 包含最终 HumanInput 的 run 只在当前 session 已有 Present Human 后启动。无人时保留已验证 YAML/input，只发一次加入提示并等待；不得把 HumanInput 改成 bot_task、删除该节点、直接连 accepted marker 或让 manager 代答。
+- 若 run 返回“requires a Present Human”，说明预检失效或发生竞态。原样保留错误并等待人类加入，不修改图后重试；这不是允许降级验收的 schema 错误。
 - `collaborate run` 是启动激活中的最后一次工具调用。成功后结束回复，等待状态机接管；不得继续查状态或催节点。
 - 禁止 `terminate-group`、CLI `task complete`、add-member、chat、invoke、通用 subagents 和伪造 fallback。permission/validate/run 必须保留真实退出码与结构化错误。
 
@@ -109,6 +113,6 @@ Worker 首轮“需修订”可以作为 initial issue 进入 one-shot，但未�
 - 唯一 final output 必须从互斥的 `accepted_marker` 或 `blocked_marker` 生成，并逐字保留首行 `DELIVERY_DECISION=ACCEPTED|BLOCKED`。
 - ACCEPTED 只表示公开 SOP 被最终验收。没有外部系统回执时，交付状态必须为 `SOP_ACCEPTED_PENDING_EXTERNAL_EXECUTION`。
 - BLOCKED 必须列剩余硬阻断、责任方和下一次 run 的最小前置输入；不得声称方案已通过或可执行。
-- 只有同一 run terminal completed、最终 HumanInput accepted、accepted marker completed、blocked marker 未执行、final output completed 时，才允许调用原生 `bcs_task_complete`。
+- 只有同一 run terminal completed、最终 HumanInput 的真实响应者为 human actor 且 judge=accepted、accepted marker completed、blocked marker 未执行、final output completed 时，才允许调用原生 `bcs_task_complete`。人类在 session completed 后加入不能追认验收。
 - `bcs_task_complete.summary` 只含 `public_contract_version`、`run_id`、`delivery_status`、`pending_external_actions`，且最后一项必须是数组。不得包含私有信息。
 - 失败、超时、changes_requested 或证据不足时保持 session 可审计，不关闭、不终止、不补写完成证据。

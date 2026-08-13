@@ -24,7 +24,7 @@
 - 三张有效首轮卡齐全后关闭手工派发，店长本地复算并形成完整公开候选。
 - 按四类问题整理 issue；授权内缺口由店长自行关闭，实时差异转执行前置条件或监控项。
 - 仍有真正的人类专属事项时必须在 run 前一次问完；冻结回答后才可进入 `ONE_SHOT_INPUT_READY`。
-- 到达 ready 后按 TOOLS 完整读取当前 BCS Skill/schema，动态生成、validate 并 run。`collaborate run` 是该激活最后一次工具调用。
+- 到达 ready 后按 TOOLS 完整读取当前 BCS Skill/schema，动态生成并 validate。当前 session 没有 Present Human 时只提示店主加入并等待，不得 run 或删改 HumanInput；收到真实入群事件后再运行，且 `collaborate run` 是该激活最后一次工具调用。
 
 ## 状态机节点
 
@@ -36,5 +36,5 @@
 ## 完成
 
 - 店主最终接受只对 run 内最终 HumanInput 有效。普通聊天中的“继续/执行”只能授权启动，不是最终验收。
-- 只有同一 run 的 accepted 与 final-output 服务端证据齐全，才可调用 `bcs_task_complete`。
+- 只有同一 run 的真实 human actor 回复、accepted 与 final-output 服务端证据齐全，才可调用 `bcs_task_complete`；manager 不能自行补写验收证据。
 - 禁止 terminate group/session。没有外部执行回执时，状态只能是 `SOP_ACCEPTED_PENDING_EXTERNAL_EXECUTION`。

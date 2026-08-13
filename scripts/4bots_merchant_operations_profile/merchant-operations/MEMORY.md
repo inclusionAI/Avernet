@@ -16,9 +16,9 @@
 - `dispatch_receipts`、格式重试次数、三张有效业务卡、owner 包络和失效条件；
 - `manual_dispatch_closed`、当前版本/digest、issue ledger 与四项检查；
 - 每版 `closed_issues/remaining_issues/execution_preconditions/monitoring_items`；
-- privacy/schema receipts、one-shot run ID、terminal 与 completion evidence。
+- privacy/schema receipts、`present_human_preflight={actor_id,mode,observed_at,source_event}`、one-shot run ID、terminal 与 completion evidence。
 
-账本只能镜像真实工具和服务端事实，不得补造 task ID、judge outcome、HumanInput 回答或完成时间。普通聊天中的“继续/执行”只记录为启动授权，不能作为 run 内最终验收。
+账本只能镜像真实工具和服务端事实，不得补造 task ID、judge outcome、HumanInput 回答或完成时间。验收证据必须含真实 human actor、HumanInput node ID、response 与 judge outcome；事后入群、manager 输出或同名 bot_task 均无效。普通聊天中的“继续/执行”只记录为启动授权。
 
 ## 隔离与版本
 

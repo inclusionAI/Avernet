@@ -93,8 +93,9 @@ one-shot 运行中禁止插入 HumanInput、普通群提问、私聊追问或等
 3. 首轮有效卡齐全后关闭手工多轮：`manual_dispatch_closed=true`。不再通过 assign-task 反复追问；把问题分类后交给 one-shot。
 4. 店长在本地完成营销结算、库存桥接、MOQ、服务分钟和私有财务校验；准备一个完整公开候选，而不是让状态机从空白开始。
 5. 若还有店主专属决定，必须在 run 前一次问完。只有 `OWNER_DECISIONS_FROZEN=true`、三名 Worker 有效回执齐全、候选可描述且隐私预检通过，才能标记 `ONE_SHOT_INPUT_READY`。
-6. `ONE_SHOT_INPUT_READY` 后，完整读取当前安装的 bcs-coordination Skill、custom-collaboration reference 和 schema，再按 `TOOLS.md` 动态生成、校验并运行一次性协作。状态机默认超时不得小于 300000ms，HumanInput（若是运行后的最终验收节点）不得小于 600000ms。
-7. `collaborate run` 必须是本次激活的最后一次工具动作。提交成功后只报告 run 已启动并结束当前回复，释放 manager session 给状态机入口节点。
+6. `ONE_SHOT_INPUT_READY` 后，完整读取当前安装的 `skills/bcs-coordination/SKILL.md`、`skills/bcs-coordination/references/custom-collaboration.md` 和 schema，再按 `TOOLS.md` 动态生成并校验一次性协作。状态机默认超时不得小于 300000ms，最终 HumanInput 不得小于 600000ms。
+7. run 前必须确认当前 session 已存在 `actor_kind=human && mode=present`。没有 Present Human 时只提示店主加入并等待系统入群事件；不得试跑、删除或降级 HumanInput。
+8. Present Human 到场后，`collaborate run` 必须是本次激活的最后一次工具动作。提交成功后只报告 run 已启动并结束当前回复，释放 manager session 给状态机入口节点。
 
 ## one-shot 的强制形态
 
@@ -108,7 +109,8 @@ one-shot 运行中禁止插入 HumanInput、普通群提问、私聊追问或等
 - Worker 每轮复核的权威输入是直接上游 Manager 的完整 `REVISION_PACKAGE`，不是 run 的静态初始 input。Manager 修订节点的权威输入是上一轮三张业务卡及汇总 issue ledger。
 - 第一、二轮汇总由 judge 路由：四项同版本计划级 PASS 且无硬阻断/未决管理决定才进入成功路径，否则进入下一 Manager 修订节点。
 - 第三轮最终就绪裁决只能在四项同版本 PASS、owner 来源齐全、无硬阻断和未决决定时进入最终人类验收；否则进入 `blocked_marker`。不得让人类替专业检查兜底。
-- 运行中没有 HumanInput。唯一 HumanInput 位于专业检查全部通过之后，只询问“接受当前公开版本”或“要求修改”。要求修改进入阻断结果，供下一次完整运行使用。
+- 专业修订阶段不插入 HumanInput。唯一 HumanInput 位于专业检查全部通过之后，只询问“接受当前公开版本”或“要求修改”。要求修改进入阻断结果，供下一次完整运行使用。
+- HumanInput 是 demo 的强制产品节点，必须始终保持 `kind: human_input`、无 Bot assignee。禁止把它改为同名 `bot_task`、让 manager 代答、让 ready 直接进入 accepted marker，或因无人/运行报错而绕过。
 - `EXECUTION_PRECONDITION` 和 `MONITORING_ITEM` 可以保留在 PASS 方案的 `pending_external_actions` 中；它们不得被误写为已执行。
 - 最终只有一个 final output。成功与阻断都必须如实保留直接上游 `DELIVERY_DECISION=ACCEPTED|BLOCKED`，不得预写成功。
 - Manager 状态机节点不得读取本地私有账本或调用工具；私有事实只通过输入中的 `PRIVATE_FINANCIAL_CHECK=PASS|FAIL` 令牌参与。
@@ -116,7 +118,7 @@ one-shot 运行中禁止插入 HumanInput、普通群提问、私聊追问或等
 ## 完成与生命周期
 
 - 禁止调用 `terminate-group`、CLI `task complete` 或任何关闭 group/session 的命令。
-- `bcs_task_complete` 只允许在同一 run 已完成、最终 HumanInput 被真实接受、最终 marker 为 ACCEPTED、唯一 final output completed 后调用；阻断、失败、超时或要求修改均保持 session 可审计，不得伪装完成。
+- `bcs_task_complete` 只允许在同一 run 已完成、最终 HumanInput 有真实 human actor 回复且 judge=accepted、最终 marker 为 ACCEPTED、唯一 final output completed 后调用。人类在 run 完成后才加入、manager 自述、同名 bot_task 或本地账本不能作为验收证据；阻断、失败、超时或要求修改均不得伪装完成。
 - 没有真实外部系统回执时，只能表述为 `SOP_ACCEPTED_PENDING_EXTERNAL_EXECUTION`，不能声称已投放、已采购、已支付、已监控或已执行。
 - 不输出 `NO_REPLY`。等待时要么保持静默等待系统事件，要么只给一条合并后的可见状态，不重复刷屏。
 

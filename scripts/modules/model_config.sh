@@ -259,6 +259,25 @@ singlebox_model_config_apply_thinking_policy() {
         jq \
             --argjson thinking_enabled "$thinking_enabled" \
             --arg thinking_default "$thinking_default" '
+          def model_provider_id($model_ref):
+            $model_ref | split("/")[0];
+          def model_id($model_ref):
+            $model_ref | split("/")[1:] | join("/");
+          def needs_bailian_glm_thinking_override($config; $model_ref):
+            ($config.models.providers[model_provider_id($model_ref)] // {}) as $provider
+            | (($provider.api // "") == "openai-completions"
+               or ($provider.api // "") == "openai")
+              and (($provider.baseUrl // "" | ascii_downcase)
+                   | contains("aliyuncs.com/compatible-mode/"))
+              and ((model_id($model_ref) | ascii_downcase)
+                   | test("(^|/)glm-(4\\.(5|6|7)|5([.-]|$))"));
+          def set_bailian_glm_thinking_override:
+            if type != "object" then {} else . end
+            | .params = (if (.params? | type) == "object" then .params else {} end)
+            | .params.extra_body = (
+                if (.params.extra_body? | type) == "object" then .params.extra_body else {} end
+              )
+            | .params.extra_body.enable_thinking = $thinking_enabled;
           def toggle_thinking_object:
             if type != "object" then .
             else
@@ -293,7 +312,9 @@ singlebox_model_config_apply_thinking_policy() {
                    .chatTemplateKwargs.enable_thinking = $thinking_enabled
                  else . end)
             end;
-          .agents = (if (.agents? | type) == "object" then .agents else {} end)
+          . as $source_config
+          | (.agents.defaults.model.primary? // null) as $primary_model
+          | .agents = (if (.agents? | type) == "object" then .agents else {} end)
           | .agents.defaults = (
               if (.agents.defaults? | type) == "object" then .agents.defaults else {} end
             )
@@ -305,6 +326,28 @@ singlebox_model_config_apply_thinking_policy() {
                     .params |= toggle_model_params
                   else . end
                 )
+              )
+            else . end
+          | if ($primary_model | type) == "string"
+               and needs_bailian_glm_thinking_override($source_config; $primary_model) then
+              .agents.defaults.models = (
+                if (.agents.defaults.models? | type) == "object" then
+                  .agents.defaults.models
+                else
+                  {}
+                end
+              )
+              | .agents.defaults.models[$primary_model] = (
+                  (.agents.defaults.models[$primary_model] // {})
+                  | set_bailian_glm_thinking_override
+                )
+            else . end
+          | if (.agents.defaults.models? | type) == "object" then
+              .agents.defaults.models |= with_entries(
+                .key as $model_ref
+                | if needs_bailian_glm_thinking_override($source_config; $model_ref) then
+                    .value |= set_bailian_glm_thinking_override
+                  else . end
               )
             else . end
         ' "$output_file" > "$temporary_file"

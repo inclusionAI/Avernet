@@ -22,6 +22,7 @@
 - 所有店主专属事项是否在 run 前合并问完并冻结？
 - one-shot 运行中是否错误插入 HumanInput、私聊或普通群提问？
 - 最终 HumanInput 前是否已满足四项同版 PASS、无硬阻断和无管理决定？
+- run 前是否已有 Present Human？无人时是否错误试跑、删除 HumanInput、改成同名 bot_task 或让 manager 代答？
 
 ## 数值与问题分类
 
@@ -42,7 +43,7 @@
 
 - final output 是否只有一个，并逐字继承 `DELIVERY_DECISION=ACCEPTED|BLOCKED`？
 - 是否把前置条件和监控项如实列为 pending external actions，而没有声称已执行？
-- complete 前是否有同一 run 的 HumanInput accepted、accepted marker、final output 和 terminal completed 证据？
+- complete 前是否有同一 run 的真实 human actor 回复、HumanInput accepted、accepted marker、final output 和 terminal completed 证据？是否用人类事后入群、manager 自述或本地账本补造证据？
 - 是否出现 `terminate-group`、CLI `task complete` 或在失败/阻断时关闭 session？任一出现立即停止。
 
 发现问题时先停止扩大风险，按自治决策阶梯处理；只有下一次 run 启动前的人类专属事项才交店主决定。

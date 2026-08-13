@@ -4,9 +4,9 @@
 
 ## 1. 私有账本与共享 brief
 
-每个新任务先完整读取 `KNOWLEDGE.md`，在 manager workspace 建立 `.merchant-private/tasks/<task_ref>.json`，记录目标、店主决定与冻结状态、私有字段/字面值、授权矩阵、知识来源/有效期、required workers、派发回执、owner 包络/失效条件、候选版本/digest、issue ledger 及 privacy/schema/run/completion evidence。
+每个新任务先完整读取 `KNOWLEDGE.md`，建立 `.merchant-private/tasks/<task_ref>.json`，记录目标、店主决定/冻结状态、私有字段/字面值、授权、知识来源/有效期、Worker 回执、owner 包络、候选版本/digest、issue 及 privacy/schema/run/completion evidence。
 
-从账本另生成 `shared_brief`。白名单只有：`task_ref`、公开目标、公开周期、公开对象、非敏感经营事实、品质要求和各角色待解决问题。禁止财务阈值、预算/现金上限、成本、内部余量、授权阈值、私聊原话和精确推导结果。
+`shared_brief` 白名单只有：`task_ref`、公开目标/周期/对象、非敏感经营事实、品质要求和角色问题。禁止财务阈值、预算/现金上限、成本、内部余量、授权阈值、私聊原话和精确推导结果。
 
 ## 2. 发现与创建 manager-worker 群
 
@@ -52,7 +52,7 @@
 - “通过”的阻断项为“无”，正文没有相反 blocker；
 - 执行前置条件与监控项具备完整字段，而不是含混“待确认”。
 
-空回复、`NO_REPLY`、只有启动确认、仅有思考内容或结论冲突，登记 `INVALID_WORKER_OUTPUT`，自动重派一次只含原始事实、版本和五行模板的最短任务。第二次仍无效才记 `WORKER_OUTPUT_BLOCKED`。
+空回复、`NO_REPLY`、只有启动确认/思考或结论冲突，登记 `INVALID_WORKER_OUTPUT`，重派一次只含原始事实、版本和模板的最短任务；仍无效才记 `WORKER_OUTPUT_BLOCKED`。
 
 三张首轮有效卡一到齐，立即设置 `manual_dispatch_closed=true`，停止定向任务手工多轮。把各卡问题归入：`HARD_BLOCKER`、`MANAGER_DECISION`、`EXECUTION_PRECONDITION`、`MONITORING_ITEM`。
 
@@ -67,7 +67,7 @@
 
 随后形成完整 `PUBLIC_CANDIDATE v1`，并按自治决策阶梯关闭所有可以自行处理的 `MANAGER_DECISION`。
 
-若还存在真正的人类专属事项，在启动 one-shot 前一次性发出 `PRE_RUN_OWNER_DECISION_CARD`：
+若还有人类专属事项，one-shot 前一次发出 `PRE_RUN_OWNER_DECISION_CARD`：
 
 ```text
 启动前需要您一次决定：<事项集合>
@@ -83,7 +83,7 @@
 
 ## 6. permission、schema 与候选定义
 
-1. 执行 `bcs-cli --json collaborate permission --session <当前 session_id>`。只认 `allowed=true` 且 `caller_bot_id` 为当前 manager。使用真实返回，不加隐藏 stderr 或伪造 fallback。
+1. 执行 `bcs-cli --json collaborate permission --session <session_id>`。只认 `allowed=true` 且 caller 是当前 manager；不得隐藏错误或伪造 fallback。
 2. permission 通过后、写 YAML 前，使用文件读取能力完整读取当前安装的：
    - `skills/bcs-coordination/SKILL.md`
    - `skills/bcs-coordination/references/custom-collaboration.md`
@@ -105,7 +105,7 @@
 8. `ready` 才进入唯一的 `human_final_acceptance`；接受进入 `accepted_marker`，要求修改进入 `blocked_marker`；
 9. 专业检查阻断也进入同一个 `blocked_marker`；两个 marker 汇入唯一 final output。
 
-若 schema 支持把最终就绪判据直接放进第三轮汇总 judge，可省略单独 `final_readiness_check`，但判据和路径不能弱化。
+schema 若支持，可把最终就绪判据并入第三轮 judge，但不得弱化判据和路径。
 
 ### Manager 修订节点必须做什么
 
@@ -143,7 +143,7 @@
 - 只接受 `accepted/changes_requested` 两个 outcome；
 - 问题明确包含待验收 `contract_version` 和公开摘要。
 
-HumanInput 不是运行中补数机制。专业检查未通过时直接输出 BLOCKED，让店主在完整 run 后看到缺口。
+HumanInput 不用于补数；专业检查未通过时直接 BLOCKED。它是 demo 的强制节点：保持 `kind: human_input` 且无 Bot assignee；禁止删除、改成 `bot_task`、manager 代答或让 ready 直达 accepted marker。
 
 ## 8. shape、超时与隐私预检
 
@@ -158,17 +158,23 @@ HumanInput 不是运行中补数机制。专业检查未通过时直接输出 BL
 - accepted/blocked marker 互斥并汇入唯一 final output；
 - final output 复制直接上游 `DELIVERY_DECISION`，不能内置成功结论。
 
-每次 validate 前和 run 前，对完整最终 YAML 与 input 做共同隐私扫描，范围包含 metadata、instruction、judge criteria 和输入字段。任一文件变化使旧扫描失效，必须重扫。
+validate 前和 run 前都扫描完整 YAML/input，覆盖 metadata、instruction、judge criteria 和输入字段；文件变化即重扫。
 
-执行 `bcs-cli --json collaborate validate <yaml_path>`。结构化 validation error 表示定义无效，不等于 CLI 不可用。最多按当次 schema 修复两轮；不得通过删除 required Worker、修订轮、最终验收或唯一 final output 求通过。
+执行 `bcs-cli --json collaborate validate <yaml_path>`。它返回的结构化 `valid/errors/warnings/graph` 是 schema 合法性与图结构的权威结果；必须保留真实退出码并解析字段，不能从自然语言摘要推断通过。validation error 不等于 CLI 不可用。最多按 schema 修复两轮；不得删除 Worker、修订轮、最终验收或唯一 final output 求通过。
+
+profile 额外要求（例如超时下限、HumanInput 无 Bot assignee、participant 白名单）若需要本地复核，必须用 YAML 解析器读取准确字段路径：检查 `participants` 的 key、目标 node 对象的 `kind/assignee/node_timeout_ms` 等。禁止通过全文关键词、`split/index` 字符串切片或节点名称第一次出现的位置判断结构；instruction、description、transition target 中的普通文本不算结构字段。
+
+任何本地复核出现 `FAIL` 时，不得同时输出 `ALL PASS`，也不得提交 run。先对照结构化 validate 结果和解析后的字段定位原因：若定义有错则修 YAML 并重新 validate；若检查器误报则修正或移除该检查器并重新执行，记录 `LOCAL_CHECK_IMPLEMENTATION_ERROR`。只有权威 validate 通过且所有保留的本地检查都真实通过，才能进入 run。
 
 ## 9. run 提交
 
-运行前确认当前 manager-worker session 仍 running，manager 与三名 Bot roster/binding 准确。最终 HumanInput 不需要事先有 Present Human，也不得绑定 `human_001`；运行可以先完成专业节点，再由店主加入群完成末端验收。
+run 前确认 session 仍 running、Bot roster/binding 准确，并从当前 roster/context 或入群系统事件确认 `actor_kind=human && mode=present`，记录 `PRESENT_HUMAN_PREFLIGHT=PASS`。不得靠猜测、旧账本或聊天文本认定。
+
+没有 Present Human：保留 YAML/input，只提示入群并等待系统事件；不试跑、不删改 HumanInput。入群后文件未变可复用校验，否则重做 schema/隐私预检。
 
 按候选定义中的 Bot participant slots 构造 bindings，执行 `bcs-cli --json collaborate run <yaml_path> --session <session_id> ... --input @<public_input.json>`。
 
-只有结构化响应含非空 `run_id` 才算提交成功。`collaborate run` 必须是本次激活最后一次工具调用；成功后只输出一条简短状态并结束当前回复，让状态机入口获得 manager session。不得随后查 run、写账本、清理文件、发消息或调用其他工具。
+仅非空 `run_id` 算成功。若返回 `requires a Present Human`，原样报告并等待，禁止改图绕过。`collaborate run` 必须是本次激活最后一次工具调用；成功后简短报告并结束，不再查 run、写账本、清理或发消息。
 
 候选文件在 run 前必须无敏感；精确清理留到下一次独立激活。
 
@@ -183,7 +189,7 @@ HumanInput 不是运行中补数机制。专业检查未通过时直接输出 BL
 
 不得把计划批准说成真实投放、采购、支付、到货或持续监控。
 
-调用 `bcs_task_complete` 前只认同一 run 的服务端证据：run completed、最终 HumanInput completed 且 accepted、accepted marker completed、blocked marker 未执行、唯一 final output completed。summary 的键恰为 `public_contract_version`、`run_id`、`delivery_status=SOP_ACCEPTED_PENDING_EXTERNAL_EXECUTION`、数组 `pending_external_actions`。
+complete 前只认同一 run 的服务端证据：run completed、`kind=human_input` 由真实 human actor 回复且 accepted、accepted marker/final output completed、blocked marker 未执行。事后入群、bot_task、manager 自述或本地账本无效。summary 仅含 `public_contract_version`、`run_id`、`delivery_status=SOP_ACCEPTED_PENDING_EXTERNAL_EXECUTION`、数组 `pending_external_actions`。
 
 任何字段缺失、阻断、失败、超时或要求修改，都不得调用 complete，也不得 terminate group/session。
 

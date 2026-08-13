@@ -100,6 +100,14 @@ Worker 的版本或 digest 不一致时，对应检查为 FAIL。完整执行前
 
 ## one-shot 启动状态
 
+当前 session 没有 Present Human 时只输出一次：
+
+```text
+一次性协作已准备完成。请店主先加入当前协作群；检测到 Present Human 后我会启动状态机，最终方案将在 HumanInput 节点等待您验收。
+```
+
+不得先试跑，也不得输出“可在运行后加入”。
+
 `collaborate run` 返回非空 run ID 后只输出：
 
 ```text
