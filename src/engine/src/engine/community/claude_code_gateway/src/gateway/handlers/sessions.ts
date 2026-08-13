@@ -6,6 +6,7 @@ import { existsSync, statSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { createLogger } from '../../debug.js';
+import { loadRelayModelProviderEnv } from '../../model-provider-settings.js';
 import type { ConnectionContext } from '../connection-context.js';
 import type { SessionStore } from '../../store.js';
 import type { SessionRuntimeRegistry } from '../../runtime/session-runtime-registry.js';
@@ -79,6 +80,13 @@ export function resolveDefaultSessionModel(): string {
     log.debug('default session model: settings.json read failed, falling back', { error: message });
   }
 
+  const fromModelProviderSource = loadRelayModelProviderEnv().ANTHROPIC_MODEL;
+  if (fromModelProviderSource?.trim()) {
+    const model = fromModelProviderSource.trim();
+    log.debug('default session model resolved', { model, source: 'model-provider-settings-source' });
+    return model;
+  }
+
   // 排查日志：默认模型回落到硬编码兜底
   log.debug('default session model resolved', { model: FALLBACK_SESSION_MODEL, source: 'fallback' });
   return FALLBACK_SESSION_MODEL;
@@ -89,6 +97,7 @@ export function resolveDefaultSessionModel(): string {
  * Override with the `RELAY_DEFAULT_CWD` env var.
  */
 export const DEFAULT_CWD: string = process.env.RELAY_DEFAULT_CWD?.trim() || homedir();
+export const DEFAULT_PERMISSION_MODE: string | undefined = process.env.RELAY_DEFAULT_PERMISSION_MODE?.trim() || undefined;
 
 /**
  * Materialize the binding for a session. On existing bindings this is a pure
@@ -129,6 +138,7 @@ export function ensureBinding(
         acpSessionId: `cli:${randomUUID()}`,
         cwd: cwd || DEFAULT_CWD,
         model: resolveDefaultSessionModel(),
+        permissionMode: DEFAULT_PERMISSION_MODE,
         createdAt: nowIso(),
         updatedAt: nowIso(),
         title: sessionKey,

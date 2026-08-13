@@ -165,6 +165,14 @@ prepare_bcs_runtime_config() {
         )
         log_info "Enabling local Provider/Judge mock for BCS E2E"
     fi
+    if [ "${MERCHANT_HYBRID_ACTIVE:-0}" = "1" ]; then
+        # The opt-in local Provider bridge listens on 127.0.0.1. Keep private
+        # networks blocked while allowing this one local callback route.
+        sed_args+=(
+            "-e" "/^\[security.outbound_url\]/,/^\[/{s|^block_private_networks = .*|block_private_networks = true|;s|^allow_loopback = .*|allow_loopback = true|;}"
+        )
+        log_info "Allowing loopback-only BCS Provider callbacks for merchant_hybrid"
+    fi
 
     local config_file tmp_file
     for config_file in "$base_config" "$local_config"; do
@@ -175,6 +183,23 @@ prepare_bcs_runtime_config() {
         fi
         mv "$tmp_file" "$config_file" || return 1
     done
+
+    if [ "${MERCHANT_HYBRID_ACTIVE:-0}" = "1" ]; then
+        # This checkout's already-built BCS binary predates the optional
+        # OpenAPI-v1 config schema. Keep the tracked template untouched and
+        # remove only that unsupported section from the generated local copy.
+        # Without this, BCS falls back after parsing fails and misleadingly
+        # reports that no config file was supplied.
+        for config_file in "$base_config" "$local_config"; do
+            tmp_file="${config_file}.tmp"
+            if ! sed '/^\[openapi_v1\]/,/^\[/{ /^\[openapi_v1\]/d; /^\[/{ p; }; d; }' "$config_file" > "$tmp_file"; then
+                rm -f "$tmp_file"
+                return 1
+            fi
+            mv "$tmp_file" "$config_file" || return 1
+        done
+        log_info "Removed unsupported OpenAPI-v1 block from merchant_hybrid BCS runtime config"
+    fi
 
     prepare_bcs_runtime_config_resources "$config_dir" || return 1
 
@@ -807,7 +832,10 @@ start_bcs_binary() {
 
     # Start BCS service
     local bcs_bin="${BCS_BIN:-./target/debug/bcs}"
-    SERVER_ENV="${BCS_SERVER_ENV}" nohup "$bcs_bin" >> "${BCS_LOG}" 2>&1 &
+    # Pass the directory explicitly as well as exporting BCS_CONFIG_DIR.  The
+    # CLI flag avoids an inherited-environment ambiguity when this launcher is
+    # itself called from another service group.
+    SERVER_ENV="${BCS_SERVER_ENV}" start_in_detached_session "$bcs_bin" --config-dir "${bcs_config_dir}" >> "${BCS_LOG}" 2>&1 &
     local bcs_pid=$!
 
     # Verify process started successfully
