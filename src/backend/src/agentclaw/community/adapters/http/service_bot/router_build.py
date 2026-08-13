@@ -301,6 +301,7 @@ async def get_bot_rsync_excludes(
     user: AuthenticatedUser = Depends(get_current_user),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
+    registry: EngineSandboxRegistry = Injected(EngineSandboxRegistry),
 ) -> ApiResponse:
     """获取Bot的rsync excludes配置信息。
 
@@ -345,16 +346,9 @@ async def get_bot_rsync_excludes(
         # 2. 解析引擎类型
         engine_type = resolve_engine_for_bot(bot_id, owner_id, bot_repo=bot_repo)
 
-        # 3. 获取引擎默认配置
-        from agentclaw.community.core.workspace.engines.openclaw import _OPENCLAW_RSYNC_EXCLUDES
-        from agentclaw.community.core.workspace.engines.claude_code import _CLAUDE_CODE_RSYNC_EXCLUDES
-
-        if engine_type == "openclaw":
-            default_excludes = list(_OPENCLAW_RSYNC_EXCLUDES)
-        elif engine_type == "claude_code":
-            default_excludes = list(_CLAUDE_CODE_RSYNC_EXCLUDES)
-        else:
-            default_excludes = []
+        # 3. 通过引擎 provider 获取默认配置，避免在路由层硬编码具体引擎。
+        provider = registry.resolve(engine_type)
+        default_excludes = list(provider.get_build_plan().rsync_excludes)
 
         # 4. 解析Bot自定义配置
         from agentclaw.community.core.workspace.engines import parse_build_rsync_excludes_from_ext

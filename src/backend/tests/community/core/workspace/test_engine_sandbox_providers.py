@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+from agentclaw.community.core.workspace.engines.aicoding import AICodingSandboxProvider
 from agentclaw.community.core.workspace.engines.claude_code import ClaudeCodeSandboxProvider
 from agentclaw.community.core.workspace.engines.openclaw import OpenClawSandboxProvider
 from agentclaw.community.di import config as cfg
@@ -106,10 +107,6 @@ class TestClaudeCodeProvider:
 
         assert plan.extra_sync_source_relpath == ".claude"
         assert plan.extra_sync_target_relpath == "claude"
-        assert plan.extra_sync_items == (
-            (".claude", "claude"),
-            (".aicoding/workspace/skills/skills-local", "workspace/skills/skills-local"),
-        )
 
     def test_build_snapshot_excludes_pool_shared_repo(self):
         provider = ClaudeCodeSandboxProvider(workspace=_workspace())
@@ -173,6 +170,45 @@ class TestClaudeCodeProvider:
         assert "skills-repo" not in excludes, \
             'unanchored "skills-repo" exclude regressed — must use "/skills-repo"'
 
+
+
+
+@pytest.mark.unit
+class TestAICodingProvider:
+    def test_get_sessions_dir_uses_session_root_projects(self):
+        provider = AICodingSandboxProvider(workspace=_workspace())
+
+        assert provider.get_sessions_dir() == "/home/admin/.aicoding/projects"
+
+    def test_build_plan_uses_aicoding_source_root(self):
+        provider = AICodingSandboxProvider(workspace=_workspace())
+        plan = provider.get_build_plan()
+
+        assert plan.engine_type == "aicoding"
+        assert plan.source_root_name == ".aicoding"
+        assert plan.workspace_subdir == "workspace"
+        assert plan.skill_source_relpath == "workspace/skills"
+        assert plan.skill_target_relpath == "workspace/skills"
+
+    def test_build_plan_keeps_extra_sync_from_claude(self):
+        provider = AICodingSandboxProvider(workspace=_workspace())
+        plan = provider.get_build_plan()
+
+        assert plan.extra_sync_source_relpath == ".claude"
+        assert plan.extra_sync_target_relpath == "claude"
+
+    def test_default_read_only_rules_include_workspace_files(self):
+        provider = AICodingSandboxProvider(workspace=_workspace())
+        rule_paths = {r.path for r in provider.get_default_read_only_rules()}
+
+        for path in (
+            "workspace/config/mcporter.json",
+            "workspace/.claude/settings.json",
+            "workspace/.claude/models.json",
+            "workspace/.claude/config.json",
+            "workspace/skills-local",
+        ):
+            assert path in rule_paths
 
 _OPENCLAW_ROOT = cfg.WorkspaceConfig().openclaw_root
 _CLAUDE_CODE_ROOT = cfg.WorkspaceConfig().claude_code_root
@@ -500,3 +536,104 @@ class TestParseRsyncExcludesFromExt:
         ext = {"build_rsync_excludes": ["valid", {"invalid": "dict"}, ["nested"], True]}
         result = parse_build_rsync_excludes_from_ext(ext)
         assert result == ["valid"]
+
+
+@pytest.mark.unit
+class TestAICodingProviderChangedLineCoverage:
+    def test_base_path_engine_type_and_build_plan_merge(self):
+        provider = AICodingSandboxProvider(workspace=_workspace())
+
+        assert provider.engine_type == "aicoding"
+        assert provider.get_base_path() == "/home/admin/.aicoding"
+
+        plan = provider.get_build_plan([
+            "workspace/memory/",
+            "custom-aicoding/",
+        ])
+        assert plan.engine_type == "aicoding"
+        assert plan.rsync_excludes.count("workspace/memory/") == 1
+        assert plan.rsync_excludes[-1] == "custom-aicoding/"
+
+    def test_normalize_sub_path_accepts_dot_empty_and_nested_path(self):
+        provider = AICodingSandboxProvider(workspace=_workspace())
+
+        assert provider._normalize_sub_path("") == ""
+        assert provider._normalize_sub_path(".") == ""
+        assert provider._normalize_sub_path("workspace/skills") == "workspace/skills"
+
+    def test_normalize_sub_path_rejects_invalid_paths(self):
+        provider = AICodingSandboxProvider(workspace=_workspace())
+
+        with pytest.raises(ValueError):
+            provider._normalize_sub_path("bad\x00path")
+        with pytest.raises(ValueError):
+            provider._normalize_sub_path("/absolute")
+        with pytest.raises(ValueError):
+            provider._normalize_sub_path("../escape")
+
+    @pytest.mark.asyncio
+    async def test_list_directory_with_device_fs_walks_recursively(self):
+        base = cfg.WorkspaceConfig().aicoding_root
+        provider = AICodingSandboxProvider(workspace=_workspace())
+        items = await provider.list_directory(
+            recursive=True,
+            device_fs=_device_fs({
+                base: [
+                    {"name": "workspace", "is_dir": True},
+                    {"name": "README.md", "is_dir": False},
+                    {"name": "", "is_dir": False},
+                ],
+                f"{base}/workspace": [
+                    {"name": "skills", "is_dir": True},
+                ],
+                f"{base}/workspace/skills": [],
+            }),
+        )
+
+        assert {item.path for item in items} == {
+            "workspace",
+            "README.md",
+            "workspace/skills",
+        }
+
+    @pytest.mark.asyncio
+    async def test_list_directory_with_device_fs_non_recursive_keeps_top_level(self):
+        base = cfg.WorkspaceConfig().aicoding_root
+        provider = AICodingSandboxProvider(workspace=_workspace())
+        items = await provider.list_directory(
+            recursive=False,
+            device_fs=_device_fs({
+                base: [
+                    {"name": "workspace", "is_dir": True},
+                ],
+                f"{base}/workspace": [
+                    {"name": "nested.txt", "is_dir": False},
+                ],
+            }),
+        )
+
+        assert [item.path for item in items] == ["workspace"]
+
+    @pytest.mark.asyncio
+    async def test_list_directory_walks_local_filesystem(self, tmp_path):
+        root = tmp_path / ".aicoding"
+        workspace_dir = root / "workspace"
+        workspace_dir.mkdir(parents=True)
+        (workspace_dir / "file.txt").write_text("data")
+        provider = AICodingSandboxProvider(
+            workspace=cfg.WorkspaceConfig(aicoding_root=str(root)),
+        )
+
+        non_recursive = await provider.list_directory(recursive=False)
+        recursive = await provider.list_directory(recursive=True)
+
+        assert {item.path for item in non_recursive} == {"workspace"}
+        assert {item.path for item in recursive} == {"workspace", "workspace/file.txt"}
+
+    @pytest.mark.asyncio
+    async def test_list_directory_missing_local_root_returns_empty(self, tmp_path):
+        provider = AICodingSandboxProvider(
+            workspace=cfg.WorkspaceConfig(aicoding_root=str(tmp_path / "missing")),
+        )
+
+        assert await provider.list_directory() == []

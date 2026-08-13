@@ -16,6 +16,10 @@ class DefaultProvisioningStrategy(EngineProvisioningStrategy):
     def engine_type(self) -> str:
         return self._engine_type
 
+    def resolve_bot_engine(self, bot: dict[str, object]) -> str | None:
+        engine = bot.get("active_engine")
+        return engine if isinstance(engine, str) else None
+
     def build_extra_envs(self, ctx: BotProvisioningContext) -> dict[str, str] | None:
         return None
 

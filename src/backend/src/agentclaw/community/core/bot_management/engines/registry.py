@@ -160,6 +160,12 @@ class EngineProvisioningRegistry:
         """
         return self._strategies.get(engine_type, self._default)
 
+    def resolve_bot_engine(self, bot: dict[str, Any]) -> str | None:
+        """Resolve the effective runtime engine for a bot record."""
+        active_engine = bot.get("active_engine")
+        strategy = self.resolve(normalize_engine_type(active_engine, default=""))
+        return strategy.resolve_bot_engine(bot)
+
     def resolve_for_context(
         self, ctx: BotProvisioningContext
     ) -> EngineProvisioningStrategy:
@@ -205,6 +211,11 @@ _REGISTRY: EngineProvisioningRegistry = _build_default_registry()
 def get_engine_provisioning_registry() -> EngineProvisioningRegistry:
     """Return the process-wide strategy registry."""
     return _REGISTRY
+
+
+def resolve_bot_engine(bot: dict[str, Any]) -> str | None:
+    """Resolve the effective runtime engine for a bot record."""
+    return get_engine_provisioning_registry().resolve_bot_engine(bot)
 
 
 def _build_default_baas_engine_bucket_resolver_registry() -> (
@@ -477,6 +488,7 @@ __all__ = [
     "get_engine_provisioning_registry",
     "normalize_engine_type",
     "resolve_baas_engine_bucket",
+    "resolve_bot_engine",
     "resolve_default_capabilities_engine_bucket",
     "resolve_provisioning",
     "resolve_outbound_rule_envelope",
