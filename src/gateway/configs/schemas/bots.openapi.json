@@ -3104,7 +3104,7 @@
                 "type": "null"
               }
             ],
-            "description": "How the server is reached: 'SSE' or 'STREAMABLE_HTTP'. Null when the marketplace does not report one.",
+            "description": "How to reach the server: 'SSE' or 'STREAMABLE_HTTP'. Both are validated on write, so no other value can be stored. Null when none is configured.",
             "title": "Transport Protocol"
           }
         },
@@ -3275,7 +3275,7 @@
                 "type": "null"
               }
             ],
-            "description": "How the server is reached: 'SSE' or 'STREAMABLE_HTTP'. Null when the marketplace does not report one.",
+            "description": "How the server is reached, as the marketplace reports it. Not a closed set — match leniently. 'SSE' and 'STREAMABLE_HTTP' are the common values; a local server that runs as a subprocess reports 'STDIO'. Null when the marketplace does not report one.",
             "title": "Transport Protocol"
           }
         },
@@ -3346,7 +3346,7 @@
                 "type": "null"
               }
             ],
-            "description": "How the server is reached: 'SSE' or 'STREAMABLE_HTTP'. Null when the marketplace does not report one.",
+            "description": "How the server is reached, as the marketplace reports it. Not a closed set — match leniently. 'SSE' and 'STREAMABLE_HTTP' are the common values; a local server that runs as a subprocess reports 'STDIO'. Null when the marketplace does not report one.",
             "title": "Transport Protocol"
           }
         },

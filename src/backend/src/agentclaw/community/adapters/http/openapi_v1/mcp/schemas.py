@@ -19,8 +19,24 @@ _SERVER_CODE_DESC = (
     "endpoints."
 )
 
-_TRANSPORT_DESC = (
-    "How the server is reached: 'SSE' or 'STREAMABLE_HTTP'. Null when the "
+# Two descriptions, not one, because the two fields named `transport_protocol`
+# have different sources. The stored config passes through
+# `config_flow._normalize_transport_protocol`, which refuses anything outside
+# `_VALID_TRANSPORT_PROTOCOLS` — and both write paths, this API's and the
+# console's, go through it — so the closed set is enforced there. A marketplace
+# record is not written by us at all: `primary_transport_protocol` returns
+# whatever an endpoint declares, and synthesises STDIO for a local server
+# carrying `stdioConfigs`. One shared description made the marketplace field
+# claim an exhaustiveness only the config field has.
+_TRANSPORT_CONFIG_DESC = (
+    "How to reach the server: 'SSE' or 'STREAMABLE_HTTP'. Both are validated on "
+    "write, so no other value can be stored. Null when none is configured."
+)
+
+_TRANSPORT_SERVER_DESC = (
+    "How the server is reached, as the marketplace reports it. Not a closed "
+    "set — match leniently. 'SSE' and 'STREAMABLE_HTTP' are the common values; "
+    "a local server that runs as a subprocess reports 'STDIO'. Null when the "
     "marketplace does not report one."
 )
 
@@ -51,7 +67,9 @@ class McpServer(BaseModel):
         description="Networks the server is reachable from; empty when the "
         "marketplace records none.",
     )
-    transport_protocol: str | None = Field(default=None, description=_TRANSPORT_DESC)
+    transport_protocol: str | None = Field(
+        default=None, description=_TRANSPORT_SERVER_DESC
+    )
 
 
 class McpServerDetail(McpServer):
@@ -121,7 +139,9 @@ class McpConfig(BaseModel):
         "never returned in full. Null when none is stored."
     )
     endpoint_env: str = Field(description=_ENDPOINT_ENV_DESC)
-    transport_protocol: str | None = Field(default=None, description=_TRANSPORT_DESC)
+    transport_protocol: str | None = Field(
+        default=None, description=_TRANSPORT_CONFIG_DESC
+    )
     headers: dict[str, str] = Field(
         default_factory=dict, description=_HEADERS_DESC
     )
