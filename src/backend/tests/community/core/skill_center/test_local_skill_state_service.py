@@ -5,6 +5,9 @@ from __future__ import annotations
 import pytest
 
 from agentclaw.community.core.skill_center.errors import (
+    LocalSkillEditBusyError,
+    LocalSkillEditLockUnavailableError,
+    LocalSkillLayoutRollbackError,
     LocalSkillNotFoundError,
     LocalSkillNotReadyError,
     LocalSkillRuntimeSyncError,
@@ -16,6 +19,11 @@ from agentclaw.community.core.skill_center.services.local_skill_state_service im
 from agentclaw.community.core.skills_pool.models import (
     RegisteredSkillAsset,
     SkillMappingSourceLayout,
+)
+from agentclaw.community.core.skills_pool.edit_guard import (
+    SkillsPoolEditBusyError,
+    SkillsPoolEditLockUnavailableError,
+    SkillsPoolEditRollbackError,
 )
 
 
@@ -199,10 +207,15 @@ def _service(
     collaborators=None,
     on_acquire=None,
     pool_layout: bool = False,
+    guard_error=None,
 ):
     skills = _Skills(active=active, git_path=git_path)
     sets = _Sets(skills, associated=associated)
     guard = _Guard(on_acquire)
+    if guard_error is not None:
+        def fail_acquire(*, scope):
+            raise guard_error
+        guard.acquire_for_edit = fail_acquire
     runtime = _Runtime(sync_success)
     factory = _Factory(runtime)
     service = LocalSkillStateService(
@@ -217,6 +230,31 @@ def _service(
         _Layouts(pool=pool_layout),
     )
     return service, skills, sets, guard, runtime, factory
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("guard_error", "expected_error"),
+    [
+        (SkillsPoolEditBusyError("busy"), LocalSkillEditBusyError),
+        (SkillsPoolEditRollbackError("rollback"), LocalSkillLayoutRollbackError),
+        (
+            SkillsPoolEditLockUnavailableError("cache"),
+            LocalSkillEditLockUnavailableError,
+        ),
+    ],
+)
+async def test_state_change_maps_guard_failures_to_public_domain_errors(
+    guard_error, expected_error
+):
+    service, _skills, _sets, _guard, _runtime, _factory = _service(
+        guard_error=guard_error
+    )
+
+    with pytest.raises(expected_error):
+        await service.set_local_skill_active(
+            skill_id="9", actor_id="owner", active=True
+        )
 
 
 @pytest.mark.asyncio
