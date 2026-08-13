@@ -96,18 +96,20 @@
         here (plan.md, Notes on upstream follow-ups #1).
 - **Depends on:** Task 3
 
-## Task 5: Point the `app_token` strategy at the renamed port
+## Task 5 `[x]`: Point the `app_token` strategy at the renamed port
 - **Goal:** The authn strategy resolves credentials through
   `find_app_by_credential`; header extraction and soft-miss adjudication (US27)
   are unchanged.
 - **Files:** `src/gateway/src/gateway/community/plugins/authn/app_token/_strategy.py`,
   `src/gateway/tests/unit/plugins/test_app_token_strategy.py` (fake registry rename)
 - **Done when:**
-  - [ ] Strategy calls `find_app_by_credential`; docstrings describe both
+  - [x] Strategy calls `find_app_by_credential`; docstrings describe both
         credential forms and the transition window.
-  - [ ] All existing strategy behavior tests pass unmodified in substance
+  - [x] All existing strategy behavior tests pass unmodified in substance
         (Bearer precedence, dedicated header fallback, soft miss, principal
         fields) — the resolved `AppPrincipal` shape is untouched.
+  - [x] The SPI contract suite's fake registry (`tests/contracts/spi/`) tracks
+        the rename, so the port change is reflected in the contract tests too.
 - **Depends on:** Task 3
 
 ## Task 6: Rework `AppRegistrar` to mint API keys
