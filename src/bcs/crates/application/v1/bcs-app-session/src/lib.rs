@@ -27,10 +27,11 @@ use bcs_service_api::application::v1::{
     message::{ListSessionMessages, SessionMessageService},
     require_authenticated_user, require_human,
     session::{
-        AddSessionParticipant, BotParticipantMode, CompleteSession, CreateSession,
+        AddSessionParticipant, BotParticipantMode, CollectSession, CompleteSession, CreateSession,
         CreateSessionOutcome, DeleteSession, DeleteSessionParticipant, GetSession, ListSessions,
-        SessionCompletionResult, SessionDetail, SessionInput, SessionParticipant, SessionService,
-        SessionStatus as V1SessionStatus, SessionSummary, UpdateSession, UpdateSessionParticipant,
+        SessionCollectionResult, SessionCompletionResult, SessionDetail, SessionInput,
+        SessionParticipant, SessionService, SessionStatus as V1SessionStatus, SessionSummary,
+        UncollectSession, UpdateSession, UpdateSessionParticipant,
     },
 };
 use bcs_service_api::port::repo::{NewSessionParams, SessionRepoPort};
@@ -264,6 +265,41 @@ impl SessionServiceImpl {
                     format!("Session '{session_id}' was not found"),
                 )
             })?;
+        Ok(session)
+    }
+
+    async fn load_owned_participant_bot(
+        &self,
+        caller: &AuthenticatedCaller,
+        session_id: &str,
+        participant: &str,
+    ) -> Result<Session, ApplicationError> {
+        let user = require_authenticated_user(caller)?;
+        let owned = self
+            .registry
+            .try_get(participant)
+            .await
+            .map_err(map_service_error)?
+            .is_some_and(|bot| {
+                bot.actor_kind == ActorKind::Bot
+                    && bot.created_by.as_deref() == Some(user.id.as_str())
+            });
+        if !owned {
+            return Err(ApplicationError::forbidden(
+                "The target Bot is not owned by the authenticated Human",
+            ));
+        }
+
+        let session = self.load_session(session_id).await?;
+        let present = session.participants.iter().any(|entry| {
+            entry.actor_kind == ActorKind::Bot && entry.bot_uuid == participant
+        });
+        if !present {
+            return Err(ApplicationError::not_found(
+                "session_not_found",
+                format!("Session '{session_id}' was not found"),
+            ));
+        }
         Ok(session)
     }
 
@@ -709,6 +745,48 @@ impl SessionService for SessionServiceImpl {
             session_id: completed.id,
             status: V1SessionStatus::Completed,
             completed_at,
+        })
+    }
+
+    async fn collect(
+        &self,
+        command: CollectSession,
+    ) -> Result<SessionCollectionResult, ApplicationError> {
+        self.load_owned_participant_bot(
+            &command.caller,
+            &command.session_id,
+            &command.participant,
+        )
+        .await?;
+        self.sessions
+            .collect(&command.session_id, &command.participant)
+            .await
+            .map_err(map_session_error)?;
+        Ok(SessionCollectionResult {
+            session_id: command.session_id,
+            participant: command.participant,
+            collected: true,
+        })
+    }
+
+    async fn uncollect(
+        &self,
+        command: UncollectSession,
+    ) -> Result<SessionCollectionResult, ApplicationError> {
+        self.load_owned_participant_bot(
+            &command.caller,
+            &command.session_id,
+            &command.participant,
+        )
+        .await?;
+        self.sessions
+            .uncollect(&command.session_id, &command.participant)
+            .await
+            .map_err(map_session_error)?;
+        Ok(SessionCollectionResult {
+            session_id: command.session_id,
+            participant: command.participant,
+            collected: false,
         })
     }
 
