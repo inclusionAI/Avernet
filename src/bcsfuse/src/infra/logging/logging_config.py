@@ -182,7 +182,7 @@ def configure_logging(
             file_path = (
                 Path(__file__).parent.parent.parent.parent.parent.parent
                 / "scripts"
-                / ".dependences"
+                / ".dependencies"
                 / "logs"
                 / "bcsfuse.log"
             )
