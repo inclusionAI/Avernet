@@ -7,6 +7,11 @@ Service-bot domain — bot publication facade, BAAS service binding, sub-resourc
 ```yaml
 purpose: "Service-bot domain — bot publication facade, BAAS service binding, sub-resource management."
 provides:
+  - "BotProcess"
+  - "PersonalBotProcess"
+  - "ServiceBotProcess"
+  - "EmptyBotProcess"
+  - "BotProcessRegistry"
   - "BotPublishService"
   - "BaasService"
   - "ServiceBot SQLAlchemy models"
