@@ -262,15 +262,15 @@ async def test_handle_chat_send_stream_success(service, mock_bot_runner):
 async def test_handle_chat_inject_success(service, mock_bot_runner):
     result = await service.handle_chat_inject(_make_chat_inject_input())
     assert result.ok is True
-    await asyncio.sleep(0.01)
+    mock_bot_runner.inject_message.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_handle_chat_inject_failure(service, mock_bot_runner):
     mock_bot_runner.inject_message = AsyncMock(side_effect=RuntimeError("boom"))
     result = await service.handle_chat_inject(_make_chat_inject_input())
-    assert result.ok is True
-    await asyncio.sleep(0.01)
+    assert result.ok is False
+    mock_bot_runner.inject_message.assert_awaited_once()
 
 
 # ==================== handle_chat_history tests ====================
@@ -428,7 +428,6 @@ async def test_handle_chat_inject_with_attachments(service, mock_bot_runner):
     inp = _make_chat_inject_input(attachments=[att])
     result = await service.handle_chat_inject(inp)
     assert result.ok is True
-    await asyncio.sleep(0.01)
 
     mock_bot_runner.inject_message.assert_awaited_once()
     kwargs = mock_bot_runner.inject_message.call_args.kwargs

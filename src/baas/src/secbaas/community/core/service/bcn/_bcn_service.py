@@ -238,33 +238,29 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
         message_text = _extract_message_text(chat_inject_input.message)
         attachments = chat_inject_input.attachments
 
-        async def _async_inject() -> None:
-            try:
-                message_id, _session_id = await self._bot_runner.inject_message(
-                    bot_id=chat_inject_input.to_bot.provider_bot_ref,
-                    message=message_text,
-                    context=context,
-                    metadata=metadata,
-                    message_id=chat_inject_input.id,
-                    attachments=attachments,
-                )
-                logger.info(
-                    "[chat.inject] Message injected: id=%s message_id=%s session_id=%s",
-                    chat_inject_input.id,
-                    message_id,
-                    _session_id,
-                )
-            except Exception as e:
-                logger.error(
-                    "[chat.inject] inject_message failed: id=%s err=%s",
-                    chat_inject_input.id,
-                    e,
-                )
+        try:
+            message_id, _session_id = await self._bot_runner.inject_message(
+                bot_id=chat_inject_input.to_bot.provider_bot_ref,
+                message=message_text,
+                context=context,
+                metadata=metadata,
+                message_id=chat_inject_input.id,
+                attachments=attachments,
+            )
+        except Exception as e:
+            logger.error(
+                "[chat.inject] inject_message failed before acknowledgement: id=%s err=%s",
+                chat_inject_input.id,
+                e,
+            )
+            return ChatInjectResult(ok=False)
 
-        asyncio.create_task(_async_inject())
-
-        logger.info("[chat.inject] async message injected: id=%s", chat_inject_input.id)
-
+        logger.info(
+            "[chat.inject] persisted: id=%s message_id=%s session_id=%s",
+            chat_inject_input.id,
+            message_id,
+            _session_id,
+        )
         return ChatInjectResult(ok=True)
 
     async def handle_chat_history(

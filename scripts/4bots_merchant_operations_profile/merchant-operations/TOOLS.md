@@ -29,7 +29,7 @@
 
 ### 步骤 10 的 Schema 新鲜度与候选预检
 
-permission 通过后、创建或写入任何 YAML 前，使用文件读取工具依次从头到尾读取当前安装的 `bcs-coordination/SKILL.md`、`references/custom-collaboration.md` 和 `references/custom-collaboration-schema.md`；不得用 exec、搜索摘要、旧会话读取结果或 profile 本身代替。只有确认 schema 已读到末尾 `Validation errors`，并在私有账本记录 `schema_read_receipt={skill_path,reference_path,schema_path,read_at,last_heading}` 后，才标记 `ONE_SHOT_SCHEMA_LOADED`。任一文件未读到末尾时立即以 `SCHEMA_REFERENCE_UNAVAILABLE` 阻断，不创建目录、不生成候选 YAML，也不根据 validation 错误猜旧字段。
+permission 通过后、创建或写入任何 YAML 前，使用文件读取工具依次从头到尾读取当前安装的 `skills/bcs-coordination/SKILL.md`、`skills/bcs-coordination/references/custom-collaboration.md` 和 `skills/bcs-coordination/references/custom-collaboration-schema.md`；不得用 exec、搜索摘要、旧会话读取结果或 profile 本身代替。只有确认 schema 已读到末尾 `Validation errors`，并在私有账本记录 `schema_read_receipt={skill_path,reference_path,schema_path,read_at,last_heading}` 后，才标记 `ONE_SHOT_SCHEMA_LOADED`。任一文件未读到末尾时立即以 `SCHEMA_REFERENCE_UNAVAILABLE` 阻断，不创建目录、不生成候选 YAML，也不根据 validation 错误猜旧字段。
 
 候选生成后、调用 validate 前，必须完成本地 shape 预检：
 

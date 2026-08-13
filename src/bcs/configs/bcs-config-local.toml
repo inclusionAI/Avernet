@@ -18,7 +18,7 @@ provider_stream_gray_enabled = false
 # Deprecated compatibility setting; retained but no longer consulted.
 provider_stream_gray_created_by = []
 
-max_groups_as_driver = 20
+max_groups_as_driver = 200
 max_group_members = 20
 max_groups_as_member = 20
 max_group_messages = 1000

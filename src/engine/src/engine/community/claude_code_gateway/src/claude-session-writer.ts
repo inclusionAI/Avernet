@@ -22,6 +22,8 @@ const log = createLogger('server');
 const DEFAULT_PROJECTS_DIR = join(homedir(), '.claude', 'projects');
 
 function getProjectsDir(): string {
+  const configDir = process.env.RELAY_CLAUDE_CONFIG_DIR?.trim() || process.env.CLAUDE_CONFIG_DIR?.trim();
+  if (configDir) return join(configDir, 'projects');
   return process.env.CLAUDE_PROJECTS_DIR || DEFAULT_PROJECTS_DIR;
 }
 
@@ -156,13 +158,19 @@ export function appendToClaudeSessionFile(opts: {
     parentUuid,
     isSidechain: false,
     type: 'user',
-    message: { role: 'user', content: message },
+    // Claude Code stores transcript text in typed content blocks. Keeping this
+    // native shape makes a later --resume load the injected turn as context.
+    message: { role: 'user', content: [{ type: 'text', text: message }] },
     uuid,
     timestamp,
     sessionId: sdkSessionId,
     cwd,
     userType: 'external',
-    syntheticInject: true,
+    version: '2.1.80',
+    gitBranch: 'HEAD',
+    entrypoint: 'sdk-ts',
+    permissionMode: 'default',
+    promptId: randomUUID(),
   };
 
   appendFileSync(filePath, JSON.stringify(entry) + '\n', 'utf-8');

@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from hashlib import sha256
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 _SEED_TENANT = {
@@ -192,6 +194,26 @@ _SEED_TEMPLATE_DOCKER = {
     "type": "Docker",
 }
 
+# Internal BaaS context only. The loopback bridge authenticates the request
+# separately; this record lets BCN downlink build its BotChatContext.
+_SEED_BCN_API_KEY = {
+    "api_key_hash": sha256(b"singlebox-bcn-internal-context").hexdigest(),
+    "api_key_prefix": "9acXMLaU",
+    "key_name": "singlebox-bcn-provider",
+    "app_id": "singlebox-bcn-provider",
+    "app_type": "bcn",
+    "description": "Local BCS Provider downlink context",
+    "rate_limit_rpm": None,
+    "rate_limit_rpd": None,
+    "status": "ACTIVE",
+    "owner": "singlebox",
+    "tenant": "team_claw",
+    "env": "dev",
+    "creator": "singlebox",
+    "modifier": "singlebox",
+    "policy": None,
+}
+
 
 def seed_database(session: Session) -> None:
     """Insert required seed records into the database.
@@ -206,6 +228,7 @@ def seed_database(session: Session) -> None:
     )
     from secbaas.community.core.repository.tenant import TenantModel
     from secbaas.community.logger import get_logger
+    from secbaas.community.spi.database import Base
 
     logger = get_logger("bootstrap")
 
@@ -215,6 +238,16 @@ def seed_database(session: Session) -> None:
     if existing_tenant is None:
         session.add(TenantModel(**_SEED_TENANT))
         logger.info("inserted seed tenant (team_claw)")
+
+    api_key_table = Base.metadata.tables["baas_api_key"]
+    existing_bcn_key = session.execute(
+        select(api_key_table.c.api_key_prefix).where(
+            api_key_table.c.api_key_prefix == _SEED_BCN_API_KEY["api_key_prefix"]
+        )
+    ).first()
+    if existing_bcn_key is None:
+        session.execute(api_key_table.insert().values(**_SEED_BCN_API_KEY))
+        logger.info("inserted local BCS Provider downlink context")
 
     for idx, seed in enumerate(
         [

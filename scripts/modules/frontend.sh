@@ -132,8 +132,8 @@ frontend_start() {
     # the same ports the BCS backend actually binds — explicit passing covers the
     # default-assignment case where the vars aren't exported.
     # PORT controls the umi dev server listen port (default 8000, via FRONTEND_PORT).
-    tail -f /dev/null | BCS_PORT="${BCS_PORT}" BCSFUSE_PORT="${BCSFUSE_PORT}" PORT="${FRONTEND_PORT}" \
-        nohup npm run "$frontend_script" >> "${FRONTEND_LOG}" 2>&1 &
+    BCS_PORT="${BCS_PORT}" BCSFUSE_PORT="${BCSFUSE_PORT}" PORT="${FRONTEND_PORT}" \
+        start_in_detached_session bash -c 'exec 0< <(tail -f /dev/null); exec npm run "$1"' -- "$frontend_script" >> "${FRONTEND_LOG}" 2>&1 &
     local frontend_pid=$!
     echo "$frontend_pid" > "${FRONTEND_PID_FILE}"
     log_info "Process started (PID: ${frontend_pid})"
