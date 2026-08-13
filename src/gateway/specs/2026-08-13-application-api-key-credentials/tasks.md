@@ -2,7 +2,7 @@
 
 > Status legend: `[ ]` todo · `[~]` in-progress · `[x]` done · `[!]` blocked
 
-## Task 1: Copy the secbaas key generator into the gateway app domain
+## Task 1 `[x]`: Copy the secbaas key generator into the gateway app domain
 - **Goal:** Land a byte-for-byte copy of `APIKeyGenerator` in the gateway with a
   parity test pinning migration compatibility against a secbaas-produced fixture.
 - **Files:** `src/gateway/src/gateway/community/core/app/_key_gen.py` (new, copied
@@ -10,12 +10,17 @@
   `src/gateway/src/gateway/community/core/app/__init__.py` (export),
   `src/gateway/tests/unit/plugins/test_app_key_gen.py` (new)
 - **Done when:**
-  - [ ] `test_secbaas_produced_hash_verifies` passes against the pinned fixture
+  - [x] `test_secbaas_produced_hash_verifies` passes against the pinned fixture
         pair from `plan.md` (`5X1tk2yC…` / `YIrLEzbZ…`) — the migration guarantee.
-  - [ ] Generate → hash → verify round-trip passes; two hashes of one key differ
+  - [x] Generate → hash → verify round-trip passes; two hashes of one key differ
         (salt uniqueness); wrong key and garbage stored-hash are rejected.
-  - [ ] `generate()` output is 32-char base62 and passes `validate_format`.
-  - [ ] Copied module is diff-identical to the secbaas source.
+  - [x] `generate()` output is 32-char base62 and passes `validate_format`.
+  - [x] Copied module is diff-identical to the secbaas source.
+  - [x] *(added)* PBKDF2 parameters pinned explicitly by recomputing the derived
+        key from the stored salt — the digest and iteration count are not
+        recorded in the stored string, so nothing else would catch their drift.
+  - [x] *(added)* Round-trip verified in both directions against the real
+        secbaas implementation loaded from disk.
 - **Depends on:** —
 
 ## Task 2: Add the API-key columns, retain the legacy credential column
