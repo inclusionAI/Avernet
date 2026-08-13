@@ -197,17 +197,15 @@ impl BotService for BotServiceImpl {
         Self::validate_bot_id(&command.bot_id)?;
         Self::validate_pagination(command.offset, command.limit)?;
         let acting = self.load_record(&command.bot_id).await?;
-        if acting.kind != ActorKind::Bot {
-            return Err(ApplicationError::invalid(
-                "invalid_bot_kind",
-                "Candidate search requires a physical acting Bot",
-            ));
-        }
-        if acting.created_by.as_deref() != Some(staff_no.as_str()) {
-            return Err(ApplicationError::forbidden(format!(
-                "Current Human does not manage Bot '{}'",
-                command.bot_id
-            )));
+        match acting.kind {
+            ActorKind::Bot if acting.created_by.as_deref() == Some(staff_no.as_str()) => {}
+            ActorKind::Human if acting.bot_id == format!("human_{staff_no}") => {}
+            _ => {
+                return Err(ApplicationError::forbidden(format!(
+                    "Current Human cannot use Bot '{}' as the candidate perspective",
+                    command.bot_id
+                )));
+            }
         }
 
         let friend_ids = self

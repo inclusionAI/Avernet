@@ -137,9 +137,10 @@ def test_candidates_contract_matches_legacy_list_semantics() -> None:
     assert parameters["limit"]["schema"]["default"] == 20
     assert parameters["limit"]["schema"]["maximum"] == 100
     assert "acting_bot_id" not in parameters
+    assert "including Human Actor" in operation["summary"]
 
     assert operation["x-avernet-behavior"] == {
-        "acting_bot": "managed_physical_bot",
+        "acting_bot": ["managed_physical_bot", "current_human_actor"],
         "result_kind": "bot",
         "environment": "same_as_acting_bot",
         "exclude_self": True,
@@ -151,6 +152,8 @@ def test_candidates_contract_matches_legacy_list_semantics() -> None:
         "reachability_filter": "none",
         "ordering": ["created_at_desc", "bot_id_asc"],
     }
+    assert operation["responses"]["400"]["x-error-codes"] == ["invalid_request"]
+    assert operation["responses"]["403"]["x-error-codes"] == ["forbidden"]
 
     candidate = _success_data(operation)["properties"]["items"]["items"]
     assert set(candidate["required"]) == {"bot", "is_friend"}

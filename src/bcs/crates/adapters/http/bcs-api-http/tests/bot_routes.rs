@@ -282,7 +282,7 @@ async fn all_five_bot_routes_forward_verified_human_and_contract_inputs() {
         .clone()
         .oneshot(request(
             "GET",
-            "/openapi/v1/collaboration/bots/acting/candidates?purpose=collaboration&name=planner&offset=5&limit=10",
+            "/openapi/v1/collaboration/bots/human_staff-1/candidates?purpose=collaboration&name=planner&offset=5&limit=10",
             Value::Null,
         ))
         .await
@@ -351,7 +351,7 @@ async fn all_five_bot_routes_forward_verified_human_and_contract_inputs() {
         candidates.caller.user.as_ref().map(|user| user.id.as_str()),
         Some("staff-1")
     );
-    assert_eq!(candidates.bot_id, "acting");
+    assert_eq!(candidates.bot_id, "human_staff-1");
     assert_eq!(candidates.purpose, BotCandidatePurpose::Collaboration);
     assert_eq!(candidates.name.as_deref(), Some("planner"));
     assert_eq!((candidates.offset, candidates.limit), (5, 10));
