@@ -7,7 +7,7 @@
 - **契约先行 / transport-agnostic**;delivery adapter 翻译协议不持领域策略;composition root 选实现。
 - **类型契约**:必填端到端非可选;`T|None` 仅当 `None` 是合法域态或外部输入边界。
 - **TDD / 主 seam 优先**:P8 singlebox E2E 最高 seam;P1–P7 契约单测补 E2E 覆盖不到的分支。
-- **写网关收口**:图谱原子变更只走 `TaskGraphService` 7 API(4 核心写/读 + 3 派生只读);旁路同写口。
+- **写网关收口**:图谱原子变更只走 `TaskGraphService` 8 API(5 核心写/读 + 3 派生只读);旁路同写口。
 - **框架零 case 知识**:任何具体节点名(`N_overview`/`N_market` 等)只允许出现在 case 的 DecomposerPort 产出或测试 stub,**禁止出现在框架代码**。
 - **不并存两套**:合并为单一实现,删除并行包与旧模型失效代码。
 
@@ -15,7 +15,7 @@
 
 ```
 M0  领域模型(Relation/6态/瘦身后字段) + 中间类型(patch/criteria/op_result/callback_data)
- → M1  TaskGraphService 独立(7 API:4 核心+3 派生只读;relations 依赖派生)
+ → M1  TaskGraphService 独立(8 API:5 核心写/读+3 派生只读;relations 依赖派生)
  → M2  编排核 on_*(事件驱动 + 状态条件 a/b/c + plan 三条件;串行锁)
  → M3  TaskPlanner 编排壳 + DecomposerPort 委托(去硬编码)
  → M4  TaskDispatcher(搜推4态+form_coop_group)+ TaskRunner(start_run/query_*/TaskLoopCallback;BCS复用)
@@ -34,22 +34,23 @@ M2 依赖 M1/M3/M4 接口(可 seam/double);M5 集成;M6 验证。
 - T0.5 派生规则注释(分解树统一):① 结构子(`get_child_tasks`)与结构父(`get_parent_task`)均从 `relations` 分解树(src→dst 单入)派生;② `depth` 从 relations 递归;③ 传播读结构子(`get_child_tasks`),就绪=被 add 即就绪(无 `dependencies_satisfied` 闸门);④ 数据流由步进式批规划+结构父聚合上下文承载,无跨兄弟数据边。
 - ✅ 验收:模型与最新 classDiagram 1:1;`grep` 无 `depends_on`/`decomposed_by`/`collab_mode`/`SLA`/`Scope`/`RunMode`/`CollabMode`/`verifier`/`NodeRuntimePatch`/`TaskGraphInfo` 残留;TaskNode 无 `decomposed_by` 字段(结构归属由 relations 分解树派生)。
 
-## M1 — TaskGraphService(独立图谱 SSOT,7 API:4 核心+3 派生只读)
+## M1 — TaskGraphService(独立图谱 SSOT,8 API:5 核心写/读+3 派生只读)
 - T1.1 `TaskGraphService.initialize_graph(task_info) -> TaskExecutionGraph`:建图(run_id 分配,根 PENDING);幂等冲突。
 - T1.2 `add_task_nodes(tasks, parent_node_id) -> TaskExecutionGraph`:并子图(**显式传父** `parent_node_id`,方案 C);DEPENDENCY 关系写入 `graph.relations`(src=parent_node_id,dst=新子,单入);父节点进 PLANNING(`_DELEGATABLE_PARENT={PENDING,FAILED,PLANNING}`);单层同构硬约束(本批前序依赖仅指向已存节点,本批内不互依);触发条件 a/b/c 校验(编排核调前判,store 双检)。
 - T1.3 `update_task_node_info(patch) -> NodeOpResult`:节点级原子写;两张状态机——`_ACCEPTANCE_TRANSITIONS`(`RUNNING→{DONE,FAILED}`、`PLANNING→{DONE,FAILED}` 根终验)与 `_DIRECT_TRANSITIONS`(`PENDING→RUNNING` 派发、`RUNNING→PENDING` Harness 复位、`PLANNING→DONE` 传播);acceptance 驱动 PASS→DONE / FAIL+gaps→FAILED(验收 skill 强制要求给 gaps,不存在 FAIL 无 gaps);status 直驱派发写 run_mode/assignee+RUNNING;幂等。
-- T1.4 `query_task_dashboard(task_id, node_id=None) -> TaskExecutionGraph`:只读看板(整图/子树投影)。
-- T1.5 派生查询(只读):升公开 `query_task_nodes`/`get_child_tasks`/`get_parent_task`;保持内部 `_node_depth`/`_execution_config`(内层 `MAX_DEPTH`+外层 `BBS_MAX_DEPTH`);均从 `relations` 分解树派生;就绪扫描 criteria={status=PENDING}。
-- T1.6 `remove_subtree(task_id,node_id)->TaskExecutionGraph`:删节点+其下整个子树(升 BBS 清理;前提:xx_node 下所有子都 MISS、没走 RUNNING)。
-- T1.x 单测:状态流转合法性(两状态机)、add a/b/c 条件触发校验、relations 分解树派生(`get_child_tasks`/`get_parent_task`/`depth`)、PLANNING 语义(含根终验 `PLANNING→FAILED`)、传播规则、单层同构护栏。
+- T1.4 `update_task_graph_info(task_id, patch: TaskGraphPatch) -> TaskExecutionGraph`:图级原子写口(SSOT 唯一图级写网关);收口图级终态:`loop_round_increment` 原子加(升 BBS)、`status` 置图终态(`DONE` 根终验 PASS/`HUNG` STUCK)、`output_patch` 浅合并、`extend_props_patch` 浅合并(`bbs_mode`/`hung_reason`);加锁;增量 patch 未给不动。编排核升 BBS/根终验完成一律经此方法,不直写 graph 引用。
+- T1.5 `query_task_dashboard(task_id, node_id=None) -> TaskExecutionGraph`:只读看板(整图/子树投影)。
+- T1.6 派生查询(只读):升公开 `query_task_nodes`/`get_child_tasks`/`get_parent_task`;保持内部 `_node_depth`/`_execution_config`(内层 `MAX_DEPTH`+外层 `BBS_MAX_DEPTH`);均从 `relations` 分解树派生;就绪扫描 criteria={status=PENDING}。
+- T1.7 `remove_subtree(task_id,node_id)->TaskExecutionGraph`:删节点+其下整个子树(升 BBS 清理;前提:xx_node 下所有子都 MISS、没走 RUNNING)。
+- T1.8 单测:状态流转合法性(两状态机)、`update_task_graph_info` 图级写(loop_round 原子加 / status DONE/HUNG / output_patch+extend_props_patch 浅合并 / 未给字段不动 / 增量多次累积 / task not found)、add a/b/c 条件触发校验、relations 分解树派生(`get_child_tasks`/`get_parent_task`/`depth`)、PLANNING 语义(含根终验 `PLANNING→FAILED`)、传播规则、单层同构护栏。
 
 ## M2 — 编排核 on_*(事件驱动 + 状态条件)
 - T2.1 `ExecutionEngine.on_execute(task_id)`:initialize_graph 后,条件 a(根 PENDING)→ plan→add→dispatch→start_run。
 - T2.2 `on_report(patch: TaskNodePatch)`:patch 内含 (task_id,node_id)+acceptance_result+output_patch;update_task_node_info 翻态;PASS→传播→条件 c(PLANNING 父∧兄弟全DONE)→plan→add→dispatch;FAIL+gaps→闸门→条件 b→plan→add→dispatch(FAIL 无 gaps 已消灭)。返回 NodeOpResult 供 ack。
-- T2.3 `on_miss(patch: TaskNodePatch)`:patch.extend_props_patch.miss_events 由 dispatcher 填;深度闸门→<MAX: plan→add(挂该节点下)→消费→dispatch;≥MAX(MISS 深度达 `MAX_DEPTH`):**自动升 BBS**——remove_subtree(删 xx_node+子树)+loop_round+++标 BBS+经 `BbsMarketPort.publish_task` 挂广场(seam;Avernet 缺省 no-op);BBS bot 认领→自算 gap+规划子任务(run_mode=bbs)→上报→on_report 驱动;BBS 链路 loop_round≥`BBS_MAX_DEPTH`→STUCK→graph HUNG(`hung_reason=stuck`,编排核直写图级)→人介入。
+- T2.3 `on_miss(patch: TaskNodePatch)`:patch.extend_props_patch.miss_events 由 dispatcher 填;深度闸门→<MAX: plan→add(挂该节点下)→消费→dispatch;≥MAX(MISS 深度达 `MAX_DEPTH`):**自动升 BBS**——remove_subtree(删 xx_node+子树)+loop_round+++标 BBS+经 `BbsMarketPort.publish_task` 挂广场(seam;Avernet 缺省 no-op);BBS bot 认领→自算 gap+规划子任务(run_mode=bbs)→上报→on_report 驱动;BBS 链路 loop_round≥`BBS_MAX_DEPTH`→STUCK→经 `update_task_graph_info(TaskGraphPatch{status=HUNG, extend_props_patch={hung_reason:stuck}})` 收口 graph HUNG→人介入。
 - T2.4 `on_harness(patch: TaskNodePatch)`:旁路——Harness 复位 `RUNNING→PENDING`(update_task_node_info 直驱)+ 重新 `_dispatch_and_run` 重投;不直接写 HUNG(STUCK 走 on_miss/on_fail 升 BBS 链路上限判);不抢正向驱动。
 - T2.5 串行化:同 task_id 可重入锁;跨 task 并行。loop_round:仅升 BBS 时 graph.loop_round++(外层 BBS 上升轮次,正常补救不再 ++)。
-- T2.6 根终验(主动验证):`plan(root)==[]` ∧ 全非根 DONE ∧ 无 RUNNING → 经编排核 `OwnerBotVerifyPort.request_verify(task_id, root.node_id)`(seam,定义于 `task_center/engine.py`;Avernet 缺省 no-op,corp 注入 owner bot 终验 SKILL;异步非阻塞)触发 owner bot 验 root.goal 全 AC(验收模式聚合 root 结构子=全图 DONE 产出)→ owner bot 回投 on_report(patch{root,verdict})(`PLANNING→DONE`/`PLANNING→FAILED`);PASS→root DONE+编排核直写图 status=DONE;FAIL+gaps→plan(root) 补救子(根不特殊化),继续驱动。**框架代码不识别"终验节点"**,终验=根节点验收,由 owner bot skill 回投。
+- T2.6 根终验(主动验证):`plan(root)==[]` ∧ 全非根 DONE ∧ 无 RUNNING → 经编排核 `OwnerBotVerifyPort.request_verify(task_id, root.node_id)`(seam,定义于 `task_center/engine.py`;Avernet 缺省 no-op,corp 注入 owner bot 终验 SKILL;异步非阻塞)触发 owner bot 验 root.goal 全 AC(验收模式聚合 root 结构子=全图 DONE 产出)→ owner bot 回投 on_report(patch{root,verdict})(`PLANNING→DONE`/`PLANNING→FAILED`);PASS→root DONE+经 `update_task_graph_info(TaskGraphPatch{status=DONE, output_patch=…})` 收口图 status=DONE;FAIL+gaps→plan(root) 补救子(根不特殊化),继续驱动。**框架代码不识别"终验节点"**,终验=根节点验收,由 owner bot skill 回投。
 - T2.7 零 case 知识红线:framework 代码 `grep -rE 'N_overview|N_market|N_aggregate|N_verify|N_report|N_practice|dim_|n_root' src/agentclaw/community/core/task/` 必须 0 命中(节点名仅存 singlebox stub DecomposerPort 产出/测试)。
 - T2.x 单测:on_execute 首帧、on_report PASS/FAIL/根终验两分支(PASS/FAIL+gaps)、on_miss 升 BBS(自动无人工挡板)、on_harness 复位重投不抢正向、串行化、loop_round 仅升 BBS 递增、零 case grep。
 
@@ -104,7 +105,7 @@ M2 依赖 M1/M3/M4 接口(可 seam/double);M5 集成;M6 验证。
 
 ## 里程碑(M0–M6 已实现并 push;分支 `feat/task-goal-driven-collab-dev`)
 - ✅ **M0** 领域模型(先落模型)。
-- ✅ **M1** TaskGraphService 独立(7 API:4 核心+3 派生只读+relations 派生)。
+- ✅ **M1** TaskGraphService 独立(8 API:5 核心写/读+3 派生只读+relations 派生)。
 - ✅ **M2** 编排核 on_*(事件驱动 + 状态条件 a/b/c + plan 三条件)。
 - ✅ **M3** TaskPlanner 编排壳 + DecomposerPort 委托(去硬编码)。
 - ✅ **M4** Dispatcher(搜推4态+form_coop_group)+ TaskRunner(start_run/query_*/TaskLoopCallback;BCS复用),singlebox double。

@@ -11,7 +11,7 @@
 | 模块 | 性质 | 职责一句话 | 对外有 API? |
 |---|---|---|---|
 | **TaskService** | 对外 facade | 系统唯一对外入口(2 API);内部含编排核协调其余模块 | ✅ 2 个 |
-| **TaskGraphService** | 内部图谱 SSOT | 图谱原子变更唯一网关(增删改查);`relations` 依赖派生 | ❌ 内部(7 API:4 核心+3 派生只读) |
+| **TaskGraphService** | 内部图谱 SSOT | 图谱原子变更唯一网关(增删改查);`relations` 依赖派生 | ❌ 内部(8 API:5 核心写/读+3 派生只读) |
 | **TaskPlanner** | 规划编排壳(可插拔) | 读图按状态条件产逻辑子节点(不含执行信息);分解内容委托 `DecomposerPort`/规划 agent | ❌ 内部 |
 | **DecomposerPort** | 规划策略 seam | 真正的分解智能:产哪些节点。默认 LLM/规划 bot(corp);Avernet stub/singlebox | ❌ seam |
 | **TaskDispatcher** | 分发策略(可插拔) | 搜推决定"谁来做",把 `run_mode`/`assignee` 填到 `TaskNode.run_info` 后返回 `list[TaskNode]`,多 bot 动态拉协作群;**不写图、不起 run**(编排核落库+起 run) | ❌ 内部 |
@@ -25,7 +25,7 @@
 - **单一实现**:规范位置 `core/task`;继承旧 seam 命名、DI 接线(`CommunityTaskModule`)、开源边界纪律。
 - **开源边界**:Avernet 发**契约 seam + Noop/singlebox double**(本地关键词 cover 的 bot catalog、BCS local/mock 拉群、stub decomposer);真实搜推/真实执行/LLM 规划/验收 SKILL 在 corp `ocb` adapter。
 
-对外只有 `TaskService` facade 2 个 API:`execute`/`get_task_dashboard`;图谱内部 4 核心写/读 API(`initialize_graph`/`add_task_nodes`/`update_task_node_info`/`query_task_dashboard`)+ 3 派生只读查询(`query_task_nodes`/`get_child_tasks`/`get_parent_task`)由 `TaskGraphService` 独立持有(不合并进 facade)。
+对外只有 `TaskService` facade 2 个 API:`execute`/`get_task_dashboard`;图谱内部 5 核心写/读 API(`initialize_graph`/`add_task_nodes`/`update_task_node_info`/`update_task_graph_info`/`query_task_dashboard`)+ 3 派生只读查询(`query_task_nodes`/`get_child_tasks`/`get_parent_task`)由 `TaskGraphService` 独立持有(不合并进 facade)。
 
 ---
 
@@ -118,6 +118,12 @@ class RelationType(StrEnum):      DEPENDENCY    # 节点间依赖关系
     acceptance_result: AcceptanceResult | None = None   # 唯一终态翻转依据
     extend_props_patch: dict | None = None  # miss_events / hung_reason(stuck) / 崩溃栈
 
+@dataclass TaskGraphPatch:         # 图级原子写(update_task_graph_info 入参,增量 patch;未给不动)
+    loop_round_increment: int | None = None     # 原子加(升 BBS ++)
+    status: Status | None = None                # 置图级终态(DONE 根终验 PASS / HUNG STUCK)
+    output_patch: dict | None = None            # 浅合并到图 output
+    extend_props_patch: dict | None = None      # 浅合并到图 extend_props(bbs_mode / hung_reason)
+
 @dataclass TaskNodeQueryCriteria:   # 节点查询条件(内部用)
     status: Status | None = None
     node_ids: list[str] | None = None
@@ -193,16 +199,16 @@ class ExecutionEngine:   # TaskService 内部编排核(不对外)
 
 > 每个事件 on_* 分段推进,由状态条件(a/b/c + plan 三条件)把关是否进入下一阶段。同 task_id 仍串行(可重入锁)。
 
-### 3.1 `TaskGraphService`(内部图谱 SSOT,7 API:4 核心+3 派生只读,独立模块)
+### 3.1 `TaskGraphService`(内部图谱 SSOT,8 API:5 核心写/读+3 派生只读,独立模块)
 
 > `TaskGraphService` 为独立模块(对齐任务图谱文档 `lunk1txfuv6gtwk2`),`TaskService` facade 持有其引用。图谱原子变更唯一网关。
 
 ```python
 class TaskGraphService:
     """任务图谱 SSOT + 原子变更唯一网关。
-    边界:只做图结构 + 节点级状态原子写 + 派生只读查询;不含编排(不调编排核、不搜推、不规划)。
+    边界:只做图结构 + 节点级写 + **图级写**(图终态)+ 派生只读查询;不含编排(不调编排核、不搜推、不规划)。
     图级终态(图 ``status`` DONE/HUNG、图 ``output``、``loop_round``、图 ``extend_props`` 的 bbs_mode/hung_reason)
-    不走本服务写口——由编排核在返回的 graph 引用上直写(in-memory,M1);后续 ORM 适配时再收口图级写 API。"""
+    经 ``update_task_graph_info(TaskGraphPatch)`` 收口(原子、加锁、SSOT 唯一图级写口);编排核不直写返回的 graph 引用。"""
 
     def initialize_graph(self, task_info: TaskInfo) -> TaskExecutionGraph:
         """建图首帧(全局 RUNNING,只含根节点 PENDING,task_id=task_spec.metadata.id,run_id 分配);
@@ -226,6 +232,15 @@ class TaskGraphService:
           无 acceptance_result 只 fold output 不翻态(Harness 复位用 patch.status=PENDING 回退)。
           派发写:patch.run_mode(str)/assignee 落库 + 置 RUNNING。
         task_id/node_id 从 patch 内取;幂等。调用方:任务派发 skill + 任务执行 skill。"""
+
+    def update_task_graph_info(self, task_id: str, patch: "TaskGraphPatch") -> TaskExecutionGraph:
+        """图级原子写口(收口图级终态 SSOT 唯一网关)。入参 ``TaskGraphPatch``(增量 patch,未给不动):
+          ``loop_round_increment`` 非空 → ``loop_round`` 原子加(默认 +1,升 BBS 用);
+          ``status`` 非空 → 置图级终态(``DONE`` 根终验 PASS / ``HUNG`` STUCK);
+          ``output_patch`` → 浅合并到图 ``output``;
+          ``extend_props_patch`` → 浅合并到图 ``extend_props``(承载 ``bbs_mode``/``hung_reason``)。
+        加锁原子;编排核升 BBS / 根终验完成等图级终态变更一律经此方法,不直写返回的 graph 引用。
+        调用方:编排核(内部)。后续 ORM 适配只改本方法实现。"""
 
     def query_task_dashboard(self, task_id: str, node_id: str = None) -> TaskExecutionGraph:
         """只读看板快照(整图或按 node_id 子树投影)。调用方:API(经 facade get_task_dashboard)。"""
@@ -252,7 +267,7 @@ class TaskGraphService:
 
 > 派生查询:`query_task_nodes`/`get_child_tasks`/`get_parent_task` 升为公开(跨模块依赖:dispatcher/runner/planner/传播);`_node_depth`/`_execution_config` 保持内部(仅编排核用,可从已返回查询/relations/dashboard 自算)。
 > 旧 `compute_output_projection` 不在图谱;执行/验收上下文由 `TaskRunner` 内聚(内部自动判定,见 §3.5.4)。
-> **图级写归属(M1)**:`TaskGraphService` 只持节点级写(`update_task_node_info`)与图结构写(`add_task_nodes`/`remove_subtree` 的 relations)。图级终态(图 `status`=DONE/HUNG、图 `output`、`loop_round`++、`extend_props` 的 `bbs_mode`/`hung_reason`)由编排核在 `query_task_dashboard` 返回的 graph 引用上**直写**(in-memory;升 BBS 时 `loop_round++`/标 HUNG、根终验 PASS 时 `status=DONE`/`output=...`)。无 `update_task_info`/图级写 API。
+> **图级写归属(M1)**:`TaskGraphService` 持节点级写(`update_task_node_info`)+ 图结构写(`add_task_nodes`/`remove_subtree` 的 relations)+ **图级写**(图终态 `update_task_graph_info(TaskGraphPatch)`,收口 SSOT)。图级终态(图 `status`=DONE/HUNG、图 `output`、`loop_round`++、`extend_props` 的 `bbs_mode`/`hung_reason`)由编排核经 `update_task_graph_info` 写,不直写返回的 graph 引用。`TaskGraphPatch` 中间类型见 §2.1。
 
 ### 3.2 `TaskPlanner` 规划编排壳 + `DecomposerPort` 委托 seam
 
@@ -542,8 +557,8 @@ _DIRECT_TRANSITIONS(框架内部 status 直驱:派发/复位/传播):`PENDING→
 | FAILED | PLANNING | 条件 b ∧ depth<MAX → 接补救子(`add_task_nodes`;`_DELEGATABLE_PARENT` 含 FAILED) |
 | FAILED | DONE | (经 PLANNING 中转)补救子全 PASS ∧ `decompose`(本)==[] → FAILED→PLANNING(add)→PLANNING→DONE(传播治愈) |
 | HUNG | (终态,人工) | STUCK:正常+BBS 链路迭代都达上限(`MAX_DEPTH` 已升 BBS ∧ `loop_round`≥`BBS_MAX_DEPTH`)→ 人介入 |
-| 图 RUNNING | DONE | 全非根 DONE ∧ 终验 PASS → 编排核直写图 `status=DONE`(图级写非 M1 API,见 §3.1) |
-| 图 RUNNING | HUNG | STUCK → 编排核直写图 `status=HUNG`+`extend_props.hung_reason=stuck`(图级写非 M1 API) |
+| 图 RUNNING | DONE | 全非根 DONE ∧ 终验 PASS → 经 `update_task_graph_info(TaskGraphPatch{status=DONE, output_patch=…})` 收口(见 §3.1) |
+| 图 RUNNING | HUNG | STUCK → 经 `update_task_graph_info(TaskGraphPatch{status=HUNG, extend_props_patch={hung_reason:stuck}})` 收口(见 §3.1) |
 | 图 RUNNING | (不退回) | 单向;图无 FAILED,terminal FAIL 由节点 STUCK→HUNG 表达 |
 
 > 图态只有 RUNNING/DONE:建图=RUNNING;终验 PASS 后图 DONE;不设图级 FAILED。

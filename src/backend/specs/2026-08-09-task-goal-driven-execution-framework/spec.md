@@ -15,7 +15,7 @@
 
 需要一个**以目标(Goal + Acceptance)为唯一收敛判据、能跨 单 Bot / 协作群 / BBS 三种执行模态自驱跑完「理解 → 规划 → 派发 → 执行 → 验收 → 重规划」闭环**的任务动态规划执行框架,且必须**严格按最新设计的领域模型与六模块架构实现**。
 
-领域模型收敛为:**`Relation` 一等公民(`TaskNode` 不持 `depends_on`)**、**6 态 `Status`(含 `PLANNING`)**、`TaskNode` 含 `task_id`/`node_run_graph`、`TaskExecutionGraph` 含 `run_id`/`relations`(分解树,承载结构归属;数据流由批规划+结构父聚合上下文承载)、`RuntimeInfo.run_mode` 为 str(无 `collab_mode`)、无 `SLA`/`Scope`/`CollabMode` 枚举、`AcceptanceResult` 无 `verifier`;5 个模块文档进一步明确:`TaskService` 2 facade(`execute`/`get_task_dashboard`)、`TaskGraphService` 独立图谱模块(7 API:4 核心+3 派生只读)、`TaskPlanner.plan` 与 `TaskGraphService.add_task_nodes` 有显式状态触发条件(a/b/c)、`TaskDispatcher.dispatch` 决定"谁来做"写 `assignee`、`TaskRunner.start_run` 一个入口三模态自适应、`TaskLoopCallback` PUSH 回投。代码库按此从零重新实现。
+领域模型收敛为:**`Relation` 一等公民(`TaskNode` 不持 `depends_on`)**、**6 态 `Status`(含 `PLANNING`)**、`TaskNode` 含 `task_id`/`node_run_graph`、`TaskExecutionGraph` 含 `run_id`/`relations`(分解树,承载结构归属;数据流由批规划+结构父聚合上下文承载)、`RuntimeInfo.run_mode` 为 str(无 `collab_mode`)、无 `SLA`/`Scope`/`CollabMode` 枚举、`AcceptanceResult` 无 `verifier`;5 个模块文档进一步明确:`TaskService` 2 facade(`execute`/`get_task_dashboard`)、`TaskGraphService` 独立图谱模块(8 API:5 核心写/读+3 派生只读)、`TaskPlanner.plan` 与 `TaskGraphService.add_task_nodes` 有显式状态触发条件(a/b/c)、`TaskDispatcher.dispatch` 决定"谁来做"写 `assignee`、`TaskRunner.start_run` 一个入口三模态自适应、`TaskLoopCallback` PUSH 回投。代码库按此从零重新实现。
 
 ## Solution
 
@@ -29,7 +29,7 @@
    - **`PLANNING` 新态**:承担"待规划/委托中"语义(节点已被/将被分解委托子执行)。
 2. **六模块 = 流程架构图 + 5 模块文档**:
    - **任务中心 `TaskService`**(对外 facade,2 API):`execute(task_info)→TaskOpResult` / `get_task_dashboard(task_id,node_id?)→TaskExecutionGraph`。内部由编排核协调其余模块。
-   - **任务图谱 `TaskGraphService`**(内部 SSOT,7 API:4 核心+3 派生只读):`initialize_graph`/`add_task_nodes`/`update_task_node_info`/`query_task_dashboard`。图谱原子变更唯一网关。
+   - **任务图谱 `TaskGraphService`**(内部 SSOT,8 API:5 核心写/读+3 派生只读):`initialize_graph`/`add_task_nodes`/`update_task_node_info`/`update_task_graph_info`/`query_task_dashboard`。图谱原子变更唯一网关。
    - **任务规划 `TaskPlanner`**:`plan(TaskExecutionGraph)→list[TaskNode]`,按状态触发条件产逻辑子节点(不含物理执行信息),委托规划 agent/decomposer。
    - **任务派发 `TaskDispatcher`**:`dispatch(toDoTaskList)`,搜推决定"谁来做",写 `run_info.run_mode`/`assignee`,多 bot 动态拉协作群(WHAT 不锁返回签名;精确签名见 plan §3.3)。
    - **任务执行 `TaskRunner`**:`start_run(list[TaskNode])→list[Boolean]` 三模态自适应 + `query_status`/`query_detail`/`query_result`/`query_bot_tasks`;`TaskLoopCallback` PUSH 回投。
@@ -100,7 +100,7 @@
 30. 作为系统,我想 `RuntimeInfo.start_time/end_time` 由图谱流转 RUNNING 时自动维护,这样时间戳与业务解耦。
 31. 作为系统,我想崩溃堆栈/超时标记/miss 事件进 `extend_props`,这样非业务异常态增量合并不污染主字段。
 32. 作为开发者,我想对外服务集中在"任务中心"`TaskService` facade(2 API),图谱/规划/派发/执行/Harness 各管各的内部 API,这样模块边界清晰、调用方只认一处入口。
-33. 作为开发者,我想图谱原子变更收口在"任务图谱"`TaskGraphService`(7 API:4 核心+3 派生只读),这样状态流转有单一写网关、不散在各执行器。
+33. 作为开发者,我想图谱原子变更收口在"任务图谱"`TaskGraphService`(8 API:5 核心写/读+3 派生只读),这样状态流转有单一写网关、不散在各执行器。
 34. 作为开发者,我想规划(`plan` 产逻辑 Node)与派发(`dispatch` 决定谁做)与执行(`start_run` 真投递)三层分开,这样职责不混。
 35. 作为测试,我想以六模块对外契约为断言面,这样行为可回归。
 36. 作为迁移,我想 2026-08-04 的 case 推演(存储行业尽调全链路)在新模型上等价跑通,这样行为不丢。
@@ -156,7 +156,7 @@
 - **回投坑点**:`output` MERGE 只浅合并一层(patch 覆盖);`extend_props_patch` 扁平传不可再包一层。
 - **Harness 与主链解耦**:Harness 是旁路常驻、只读图谱+反向 `update_task_node_info`,不参与正向规划/派发;主链故障由 Harness 复位后,下一轮事件自然续驱。
 - **`loop_round` 审计 + 图级写归属**(外层 BBS 上升轮次):仅升 BBS 时 `TaskExecutionGraph.loop_round++`(正常补救不再 ++);达 `BBS_MAX_DEPTH`(默认 3)→ STUCK → HUNG。
-  图级终态(图 `status`=DONE/HUNG、图 `output`、`loop_round`、图 `extend_props` 的 `bbs_mode`/`hung_reason`)由编排核在 `query_task_dashboard` 返回的 graph 引用上**直写**(in-memory,M1),不经 `TaskGraphService` 写口——图谱服务只持节点级写(`update_task_node_info`)与图结构写(`add_task_nodes`/`remove_subtree` 的 relations)。
+  图级终态(图 `status`=DONE/HUNG、图 `output`、`loop_round`、图 `extend_props` 的 `bbs_mode`/`hung_reason`)由编排核经 `TaskGraphService.update_task_graph_info(TaskGraphPatch)` 图级写口收口(原子、加锁、SSOT 唯一图级写口);`TaskGraphPatch`(增量 patch:`loop_round_increment`/`status`/`output_patch`/`extend_props_patch`)是中间类型。编排核不直写返回的 graph 引用。
   Harness 旁路只**复位** `RUNNING→PENDING` 重投(不写 HUNG/FAILED;STUCK→HUNG 走编排核 on_miss/on_fail 升 BBS 链路上限判)。
 - **BBS 上升与执行**:正常链路 MISS 到 `MAX_DEPTH`→自动升 BBS(删 MISS 子树+挂任务广场);BBS bot 认领任务→加载完整上下文(已完成 output+验收 vs task_spec/goal)→自算 gap+自规划子任务(落图 `run_mode="bbs"`)→自执行→上报结果+验收→正常驱动根/子 plan;BBS 链路再迭代到 `BBS_MAX_DEPTH` 仍执行不下去→STUCK→HUNG(人介入)。广场 lease/认领机制属 corp 实现侧。
 - **开源执行边界(Avernet vs corp ocb)**:Avernet(开源仓)只发**契约 seam + Noop/singlebox double**(本地关键词 cover 的 bot catalog、BCS local/mock 拉群);真实搜推、真实 Bot/协作群/BBS 执行、LLM 规划/验收 SKILL 均**不在 Avernet**,由 corp `ocb` 仓的 adapter 落地。故 Tasks 中"实现 3 模式执行模块"在 Avernet 范畴 = 落 seam + singlebox double + BCS 复用接线;prod 接线属 corp,非 singlebox 阻塞。
