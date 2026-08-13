@@ -35,6 +35,8 @@ EXPECTED_OPERATIONS = {
     ("get", "/openapi/v1/collaboration/sessions/{session_id}"),
     ("patch", "/openapi/v1/collaboration/sessions/{session_id}"),
     ("delete", "/openapi/v1/collaboration/sessions/{session_id}"),
+    ("post", "/openapi/v1/collaboration/sessions/{session_id}/collect"),
+    ("delete", "/openapi/v1/collaboration/sessions/{session_id}/collect"),
     ("get", "/openapi/v1/collaboration/sessions/{session_id}/messages"),
     ("get", "/openapi/v1/collaboration/sessions/{session_id}/files"),
     ("post", "/openapi/v1/collaboration/sessions/{session_id}/files"),
@@ -72,7 +74,7 @@ def _actual_operations():
     }
 
 
-def test_contract_contains_exactly_the_41_approved_operations() -> None:
+def test_contract_contains_exactly_the_43_approved_operations() -> None:
     assert _actual_operations() == EXPECTED_OPERATIONS
 
 

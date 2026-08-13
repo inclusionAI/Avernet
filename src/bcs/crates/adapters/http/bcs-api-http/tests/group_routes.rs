@@ -185,6 +185,20 @@ impl SessionService for NoopSessionService {
         Err(ApplicationError::internal("session not configured"))
     }
 
+    async fn collect(
+        &self,
+        _: bcs_service_api::application::v1::CollectSession,
+    ) -> Result<bcs_service_api::application::v1::SessionCollectionResult, ApplicationError> {
+        Err(ApplicationError::internal("session not configured"))
+    }
+
+    async fn uncollect(
+        &self,
+        _: bcs_service_api::application::v1::UncollectSession,
+    ) -> Result<bcs_service_api::application::v1::SessionCollectionResult, ApplicationError> {
+        Err(ApplicationError::internal("session not configured"))
+    }
+
     async fn add_participant(
         &self,
         _command: AddSessionParticipant,
