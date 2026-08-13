@@ -16,6 +16,12 @@ verification behavior — because the existing secbaas key records will be migra
 into the gateway's application registry and must keep authenticating unchanged,
 with no key rotation or re-issue forced on their holders.
 
+Existing gateway-issued JWT app tokens keep working through a **transition
+window**: they cannot be converted into the new scheme (see Motivation), so they
+are served by a second, deprecated lookup path that is removed once their holders
+have rotated onto API keys. No credential holder — migrated or existing — is
+broken by this change.
+
 ## Motivation
 
 Today the gateway registers an app by minting a signed JWT and storing it in
@@ -32,11 +38,27 @@ gateway-issued records are indistinguishable.
 This also removes plaintext credentials from the application registry: a DB read
 can no longer reveal a usable credential.
 
+**Why existing JWTs cannot simply be re-hashed into the new columns.** Hashing
+them would work — the hash function accepts any input — but the *lookup* would
+not. The scheme locates a record by the credential's first 8 characters, which
+assumes those characters are random. A JWT's leading characters encode its
+header, which is identical for every token this gateway issues: all of them
+start with `eyJhbGci` (verified empirically against the real signer). They would
+collide as a single prefix, violating its uniqueness constraint and making
+records indistinguishable at lookup time. Existing JWT holders therefore need a
+separate, temporary path rather than a data conversion.
+
 ## User Stories
 
 - As an existing secbaas API-key holder, I want my current key to keep
   authenticating after my record is migrated into the gateway registry, so that
   migration is invisible to me and I never have to rotate.
+- As an existing gateway app-token (JWT) holder, I want my token to keep
+  authenticating after this change ships, so that I can rotate onto an API key
+  on my own schedule instead of being cut off on deploy day.
+- As a platform operator, I want to see which apps are still presenting legacy
+  JWTs, so that I know who to chase and when it is safe to delete the
+  deprecated path.
 - As a platform operator, I want newly registered apps to receive credentials in
   the same format as migrated ones, so that one verification path serves both
   populations and there is no legacy branch to maintain.
@@ -62,16 +84,27 @@ can no longer reveal a usable credential.
 - [ ] Verification resolves the record by the key's 8-character prefix and
       compares hashes in constant time; a wrong key with a valid prefix is
       rejected.
-- [ ] Only records in `ACTIVE` status authenticate; presenting a key whose
-      record is `INACTIVE` or `REVOKED` is rejected the same way as an unknown
-      key (soft miss — other credential types may still claim the request).
+- [ ] Only records in `ACTIVE` status authenticate — on **both** paths;
+      presenting a credential whose record is `INACTIVE` or `REVOKED` is
+      rejected the same way as an unknown one (soft miss — other credential
+      types may still claim the request). Note this is a behavior change for the
+      legacy path, which ignores `status` today (see Open Questions).
 - [ ] Two registered apps never share a key prefix; registration retries on
       prefix collision and fails cleanly (no partial write) if a unique prefix
       cannot be found.
 - [ ] A malformed presented credential (wrong length/alphabet) is rejected
       without a database lookup.
-- [ ] Previously issued JWT app tokens no longer authenticate (replacement, not
-      coexistence), and the registration response no longer returns a JWT.
+- [ ] Previously issued JWT app tokens **continue to authenticate** unchanged,
+      via a deprecated exact-match path, and resolve to exactly the same app
+      identity as before.
+- [ ] Registration never issues a JWT again: every newly registered app gets an
+      API key, and the registration response returns `api_key`, not `token`.
+- [ ] The two credential populations are told apart deterministically by format
+      (a 32-character base62 key can never be a JWT and vice versa) — no
+      guess-and-fallback, no double lookup on the hot path.
+- [ ] Every authentication served by the deprecated JWT path emits a warning
+      log identifying the app, so remaining legacy usage is observable and the
+      path can be deleted once it goes quiet.
 - [ ] Successful authentication still yields the same app identity as today
       (id, name, owners, type, tenant) — downstream principal contracts are
       unchanged.
@@ -79,16 +112,24 @@ can no longer reveal a usable credential.
 ## In Scope
 
 - App credential generation, storage format, lookup, and verification in the
-  gateway (replacing the JWT app-token scheme end to end: registration,
-  persistence, authentication).
+  gateway: registration switches to API keys, and API keys become the primary
+  authentication path.
 - Schema change to the application registry needed to hold the hashed key and
-  its prefix in migration-compatible form.
+  its prefix in migration-compatible form, alongside the retained legacy
+  credential column.
+- A deprecated, format-dispatched legacy path that keeps existing JWT holders
+  authenticating, with warning-level logging of every legacy resolution.
 - Honoring record status (`ACTIVE`/`INACTIVE`/`REVOKED`) at verification time.
 
 ## Out of Scope
 
 - The data migration itself (moving secbaas rows into `avernet_application` is a
   separate workstream; this feature only guarantees the target is compatible).
+- **Deleting the legacy path.** Removing the `token` column, the exact-match
+  lookup, and its tests is a deliberate follow-up, gated on the warning logs
+  going quiet — not part of this change.
+- Rotating existing holders onto API keys (outreach and re-issue are an
+  operational task; this change only makes both credentials work meanwhile).
 - Access-key (`avernet_access_key_token`) and bot credentials — their JWT
   schemes are untouched.
 - Key lifecycle management APIs (list / deactivate / revoke / rotate) — status
@@ -112,3 +153,18 @@ can no longer reveal a usable credential.
   `policy`, `description`, `owner` vs `owners`). Assumed answer: the migration
   workstream owns that mapping; this feature only fixes the credential columns'
   shape and semantics.
+- **Status gating on the legacy path is a behavior change.** Today the JWT
+  lookup ignores `status`, so a row explicitly registered `INACTIVE` still
+  authenticates. Applying the gate uniformly fixes that, but if any live holder
+  is on a non-`ACTIVE` row they would break — the one way this change could bite
+  an existing user. Assumed answer (proceeding with it): gate both paths, since
+  no gateway API sets a non-`ACTIVE` status today and rows default to `ACTIVE`.
+  Worth a quick `SELECT status, COUNT(*)` against the real table to confirm.
+- **Transition window length.** Not fixed by this spec. The deletion follow-up
+  is gated on legacy-path warnings going quiet rather than on a calendar date.
+- **Hardening the legacy column.** The retained `token` column still holds
+  plaintext JWTs — unchanged from today's risk, but not improved either. An
+  optional extra step would store `sha256(token)` as the lookup key instead
+  (deterministic, so still exact-matchable; unsalted is safe here because a JWT
+  carries far too much entropy to be dictionary-attacked). Assumed answer: skip
+  it — the window is temporary and the column is on its way out.

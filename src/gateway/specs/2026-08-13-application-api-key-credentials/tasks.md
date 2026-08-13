@@ -18,74 +18,100 @@
   - [ ] Copied module is diff-identical to the secbaas source.
 - **Depends on:** —
 
-## Task 2: Swap `avernet_application` credential columns
-- **Goal:** Replace the plaintext `token` column with `api_key_hash` +
-  `api_key_prefix` (unique) in the ORM row and the canonical MySQL DDL, using
-  `baas_api_key`'s column names for a straight migration map.
+## Task 2: Add the API-key columns, retain the legacy credential column
+- **Goal:** Add `api_key_hash` + `api_key_prefix` (nullable, prefix unique) to
+  the ORM row and canonical DDL, keeping `token` as a nullable deprecated column
+  so existing rows keep authenticating.
 - **Files:** `src/gateway/src/gateway/community/core/app/_orm.py`,
   `src/gateway/migrations/mysql/001_init_schema.sql`
 - **Done when:**
-  - [ ] `AppRow` has `api_key_hash: String(256)` and
-        `api_key_prefix: String(8), unique=True`; `token` is gone.
-  - [ ] DDL mirrors the ORM: `uk_avernet_application_api_key_prefix` replaces
-        `uk_avernet_application_token`; column comments updated.
-  - [ ] `to_record()` and module docstrings no longer mention JWT/opaque-token
-        lookup.
+  - [ ] `AppRow` has `api_key_hash: str | None` and `api_key_prefix: str | None`
+        (unique); `token` becomes `str | None`, still unique, marked deprecated
+        in a comment naming what must happen before removal.
+  - [ ] DDL matches: both new columns `DEFAULT NULL`,
+        `uk_avernet_application_api_key_prefix` added,
+        `uk_avernet_application_token` retained, comments updated.
+  - [ ] The schema change is additive only — no existing column is dropped or
+        made stricter, so it can be applied before the code ships.
 - **Depends on:** —
 
-## Task 3: Rework `AppRepository` and the `AppRegistry` port to verify API keys
+## Task 3: Rework `AppRepository` + the `AppRegistry` port for API-key verification
 - **Goal:** Resolution becomes prefix lookup + status gate + constant-time hash
-  verify inside the repository, behind a renamed SPI port method with soft-miss
+  verify inside the repository, behind a renamed port method with soft-miss
   semantics.
 - **Files:** `src/gateway/src/gateway/community/core/app/_repository.py`,
   `src/gateway/src/gateway/community/spi/app/_ports.py`,
   `src/gateway/tests/unit/plugins/test_app_registry_db.py` (rework)
 - **Done when:**
-  - [ ] Port and impl expose `find_app_by_api_key(api_key) -> RegisteredApp | None`;
+  - [ ] Port and impl expose
+        `find_app_by_credential(credential) -> RegisteredApp | None`;
         `find_app_by_token` is gone.
   - [ ] Correct plaintext key against a seeded hashed row resolves the
         `RegisteredApp`; wrong key with a valid prefix returns `None`.
   - [ ] Rows in `INACTIVE`/`REVOKED` status return `None` even with the correct key.
-  - [ ] Empty/short (`len < 8`) keys return `None` without touching the DB.
+  - [ ] Empty/short (`len < 8`) credentials return `None` without touching the DB.
+  - [ ] The stored hash and record are read inside the ORM session and verified
+        after it closes (no `DetachedInstanceError`, no session held across
+        ~62ms of PBKDF2).
   - [ ] `exists_prefix` and the reworked `store(api_key_hash=…, api_key_prefix=…)`
-        are covered by the DB-backed tests.
+        are covered by DB-backed tests.
 - **Depends on:** Task 1, Task 2
 
-## Task 4: Point the `app_token` strategy at the renamed port
-- **Goal:** The authn strategy resolves API keys through
-  `find_app_by_api_key`; header extraction and soft-miss adjudication (US27)
+## Task 4: Add the deprecated legacy-JWT path (the continuity guarantee)
+- **Goal:** Existing JWT holders keep authenticating via a format-dispatched
+  exact-match path that logs every use, so remaining legacy traffic is
+  measurable and the path can be deleted on evidence.
+- **Files:** `src/gateway/src/gateway/community/core/app/_repository.py`,
+  `src/gateway/tests/unit/plugins/test_app_legacy_token.py` (new)
+- **Done when:**
+  - [ ] A row seeded the old way (`token=<real JWT>`, `api_key_*` NULL) still
+        authenticates and yields a `RegisteredApp` identical to today's.
+  - [ ] Dispatch is by format via `validate_format`, not try-and-fallback: a
+        32-char base62 key never reaches the legacy branch, and each request
+        performs exactly one lookup.
+  - [ ] Every legacy resolution emits a WARNING naming the app (asserted with
+        `caplog`); the method docstring and column comment state the deletion
+        criteria.
+  - [ ] API-key rows and legacy rows coexist in one table, each resolving
+        through its own path.
+  - [ ] An unknown JWT returns `None` (soft miss, US27 preserved); a legacy row
+        that is not `ACTIVE` returns `None` (documented behavior change).
+- **Depends on:** Task 3
+
+## Task 5: Point the `app_token` strategy at the renamed port
+- **Goal:** The authn strategy resolves credentials through
+  `find_app_by_credential`; header extraction and soft-miss adjudication (US27)
   are unchanged.
 - **Files:** `src/gateway/src/gateway/community/plugins/authn/app_token/_strategy.py`,
   `src/gateway/tests/unit/plugins/test_app_token_strategy.py` (fake registry rename)
 - **Done when:**
-  - [ ] Strategy calls `find_app_by_api_key`; docstrings describe API keys, not
-        registry-recognised JWTs.
+  - [ ] Strategy calls `find_app_by_credential`; docstrings describe both
+        credential forms and the transition window.
   - [ ] All existing strategy behavior tests pass unmodified in substance
         (Bearer precedence, dedicated header fallback, soft miss, principal
         fields) — the resolved `AppPrincipal` shape is untouched.
 - **Depends on:** Task 3
 
-## Task 5: Rework `AppRegistrar` to mint API keys
+## Task 6: Rework `AppRegistrar` to mint API keys
 - **Goal:** Registration generates a key via `APIKeyGenerator`, retries up to 3
   times on prefix collision, persists only hash + prefix, and returns the
   plaintext once via `IssuedApp.api_key`; `PrincipalSigner` and `clock` are
-  dropped.
+  dropped, and no new JWT is ever issued.
 - **Files:** `src/gateway/src/gateway/community/core/app/_registrar.py`,
   `src/gateway/src/gateway/community/core/app/__init__.py`,
   `src/gateway/tests/unit/plugins/test_app_registrar.py` (rework — JWT claim
   tests dropped)
 - **Done when:**
   - [ ] `register(...)` returns `IssuedApp` with a 32-char base62 `api_key`; the
-        stored row holds only `api_key_hash`/`api_key_prefix` (no plaintext
-        anywhere in the DB).
+        stored row holds only `api_key_hash`/`api_key_prefix`, with `token` NULL.
   - [ ] The freshly issued key authenticates through
-        `AppRepository.find_app_by_api_key` (mint → verify closed loop).
+        `AppRepository.find_app_by_credential` (mint → verify closed loop).
   - [ ] Collision retry: a fake repository forcing `exists_prefix=True` sees 3
         generate attempts, then a clean raise with no partial write.
   - [ ] `creator` is recorded as both creator and modifier (behavior kept).
 - **Depends on:** Task 3
 
-## Task 6: Rewire bootstrap and the admin endpoint
+## Task 7: Rewire bootstrap and the admin endpoint
 - **Goal:** `build_app_registrar` loses its signer; `POST /admin/apps` returns
   `api_key` instead of `token`.
 - **Files:** `src/gateway/src/gateway/community/bootstrap/_credential_issuance.py`,
@@ -98,24 +124,27 @@
   - [ ] `POST /admin/apps` → 201 body carries `api_key` (32-char base62) and no
         `token`; nothing JWT-decodable is returned for apps.
   - [ ] The returned key immediately authenticates via
-        `AppRepository.find_app_by_api_key` (register → use closed loop over HTTP).
+        `find_app_by_credential` (register → use closed loop over HTTP).
   - [ ] Access-key admin flow (`POST /admin/access-keys`) regression-passes
         unchanged.
-- **Depends on:** Task 5
+- **Depends on:** Task 6
 
-## Task 7: Migrate integration-test seeds off plaintext tokens
-- **Goal:** Identity-pipeline and forward-route suites seed hashed keys and
-  present the plaintext, exercising the real verify path end to end.
+## Task 8: Cover both credential paths in the integration suites
+- **Goal:** Identity-pipeline and forward-route suites exercise the real verify
+  path for API keys, plus one end-to-end legacy-JWT case through the strategy.
 - **Files:** `src/gateway/tests/integration/test_identity_pipeline.py`,
   `src/gateway/tests/integration/test_forward_route.py`
 - **Done when:**
   - [ ] Seeds use `AppRow(api_key_hash=hash_key(k), api_key_prefix=k[:8], …)`
         with a 32-char key; headers present the plaintext key.
+  - [ ] One case seeds a legacy `token=` row and authenticates with the JWT
+        through the real strategy, end to end.
   - [ ] App-identity, mixed-identity (app + user), and US27 adjudication cases
-        pass; resolved principal fields (id/name/owners/type/tenant) unchanged.
-- **Depends on:** Task 4, Task 6
+        pass; resolved principal fields (id/name/owners/type/tenant) unchanged
+        on both paths.
+- **Depends on:** Task 4, Task 5, Task 7
 
-## Task 8: Full-suite verification against spec acceptance criteria
+## Task 9: Full-suite verification against spec acceptance criteria
 - **Goal:** Ensure the feature meets every `spec.md` acceptance criterion and
   repo gates pass.
 - **Files:** — (verification only)
@@ -124,11 +153,12 @@
   - [ ] `scripts/ci/python_sast_local.sh` (lint/SAST gate) green for the gateway
         module.
   - [ ] Every acceptance checkbox in `spec.md` is satisfied and checked off,
-        including: no plaintext persisted, secbaas-hash verifies, both-direction
-        round-trip, constant-time prefix verify, status gating, prefix
-        uniqueness, malformed-key cheap reject, JWT app tokens dead, principal
-        contract unchanged.
-- **Depends on:** Tasks 1–7
+        including: no plaintext persisted for new keys, secbaas-hash verifies,
+        both-direction round-trip, constant-time prefix verify, status gating,
+        prefix uniqueness, malformed-credential cheap reject, **existing JWTs
+        still authenticate**, format dispatch is total, legacy warning logged,
+        principal contract unchanged.
+- **Depends on:** Tasks 1–8
 
 ---
 
@@ -140,9 +170,10 @@
 - **Group A — Compatible key generator:** Task 1
   - Theme: Additive, independently green — the verbatim generator plus the
     pinned secbaas parity fixture that guarantees migration compatibility.
-- **Group B — Credential swap:** Tasks 2, 3, 4, 5, 6
-  - Theme: The end-to-end replacement of JWT app tokens with hashed API keys —
-    schema, repository + SPI port, authn strategy, registrar, bootstrap, admin —
-    landing as one coherent, green slice.
-- **Group C — Integration & verification:** Tasks 7, 8
-  - Theme: Real-path integration seeds and the final spec acceptance check.
+- **Group B — Credential swap with continuity:** Tasks 2, 3, 4, 5, 6, 7
+  - Theme: API keys become the primary path — schema, repository + SPI port,
+    authn strategy, registrar, bootstrap, admin — while the deprecated JWT path
+    (Task 4) keeps every existing holder authenticating. Lands as one coherent,
+    green slice in which no credential, old or new, stops working.
+- **Group C — Integration & verification:** Tasks 8, 9
+  - Theme: Both paths exercised end to end, then the final spec acceptance check.
