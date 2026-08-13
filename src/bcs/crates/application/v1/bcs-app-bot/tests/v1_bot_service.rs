@@ -233,7 +233,7 @@ async fn ownership_denial_precedes_provider_hydration() {
 }
 
 #[tokio::test]
-async fn candidates_require_a_human_owner_and_a_physical_acting_bot() {
+async fn candidates_require_a_human_owner_and_allow_the_current_human_actor() {
     let fixture = Fixture::new();
     fixture
         .add_bot("acting", "staff-1", "private", ActorStatus::Online)
@@ -243,6 +243,11 @@ async fn candidates_require_a_human_owner_and_a_physical_acting_bot() {
         .ensure_human_actor("staff-1", "Human")
         .await
         .expect("ensure human");
+    fixture
+        .repo
+        .ensure_human_actor("staff-2", "Other Human")
+        .await
+        .expect("ensure other human");
 
     let error = fixture
         .service
@@ -258,7 +263,7 @@ async fn candidates_require_a_human_owner_and_a_physical_acting_bot() {
         .expect_err("non-owner must fail");
     assert_eq!(error.code(), "forbidden");
 
-    let error = fixture
+    let page = fixture
         .service
         .list_candidates(ListBotCandidates {
             caller: human_caller("staff-1"),
@@ -269,8 +274,70 @@ async fn candidates_require_a_human_owner_and_a_physical_acting_bot() {
             limit: 20,
         })
         .await
-        .expect_err("human acting row must fail");
-    assert_eq!(error.code(), "invalid_bot_kind");
+        .expect("current human actor may select candidates");
+    assert_eq!(page.total, 0);
+
+    let error = fixture
+        .service
+        .list_candidates(ListBotCandidates {
+            caller: human_caller("staff-1"),
+            bot_id: "human_staff-2".to_string(),
+            purpose: BotCandidatePurpose::Discovery,
+            name: None,
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .expect_err("another human actor must fail");
+    assert_eq!(error.code(), "forbidden");
+}
+
+#[tokio::test]
+async fn human_actor_collaboration_candidates_include_only_private_friends() {
+    let fixture = Fixture::new();
+    fixture
+        .repo
+        .ensure_human_actor("staff-1", "Human")
+        .await
+        .expect("ensure human");
+    fixture
+        .add_bot(
+            "private-friend",
+            "staff-2",
+            "private",
+            ActorStatus::Hidden,
+        )
+        .await;
+    fixture
+        .add_bot(
+            "private-stranger",
+            "staff-3",
+            "private",
+            ActorStatus::Online,
+        )
+        .await;
+    fixture
+        .friends
+        .add_friendship("human_staff-1", "private-friend")
+        .await
+        .expect("add human friendship");
+
+    let page = fixture
+        .service
+        .list_candidates(ListBotCandidates {
+            caller: human_caller("staff-1"),
+            bot_id: "human_staff-1".to_string(),
+            purpose: BotCandidatePurpose::Collaboration,
+            name: None,
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .expect("list human candidates");
+
+    assert_eq!(page.total, 1);
+    assert_eq!(page.items[0].bot.bot_id, "private-friend");
+    assert!(page.items[0].is_friend);
 }
 
 #[tokio::test]
