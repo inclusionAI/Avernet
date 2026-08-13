@@ -78,21 +78,6 @@ class BotInventoryService:
         start = (page - 1) * page_size
         return cards[start : start + page_size], total
 
-    def get_item(
-        self,
-        *,
-        owner_id: str,
-        bot_id: str,
-        space: BusinessSpaceRef | None,
-    ) -> BotInventoryItem:
-        bot = self._get_row(bot_id=bot_id, owner_id=owner_id)
-        item = self._to_item(bot, owner_id)
-        if space is not None:
-            self._business_space.assert_bot_visible_in_current_space(
-                bot=bot, owner_id=owner_id, current_space=space
-            )
-        return item
-
     def _get_row(self, *, bot_id: str, owner_id: str) -> Mapping[str, Any]:
         try:
             return self._bot.get_bot(bot_id, owner_id)

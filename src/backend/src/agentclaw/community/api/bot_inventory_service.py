@@ -25,11 +25,3 @@ class BotInventoryServiceProtocol(Protocol):
         page: int,
         page_size: int,
     ) -> tuple[list[BotInventoryItem], int]: ...
-
-    def get_item(
-        self,
-        *,
-        owner_id: str,
-        bot_id: str,
-        space: BusinessSpaceRef | None,
-    ) -> BotInventoryItem: ...

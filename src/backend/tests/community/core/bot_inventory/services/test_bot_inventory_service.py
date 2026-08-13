@@ -55,27 +55,6 @@ def test_list_items_combines_filters_and_paginates(service) -> None:
 
 
 @pytest.mark.unit
-def test_get_item_falls_back_to_local_only_for_not_found(service) -> None:
-    inventory, bot, _ = service
-    bot.get_bot.side_effect = NotFound("missing")
-
-    item = inventory.get_item(owner_id="u1", bot_id="l1", space=None)
-
-    assert item.bot_id == "l1"
-    assert item.deploy_mode is DeployMode.LOCAL
-
-
-@pytest.mark.unit
-def test_get_item_does_not_swallow_non_not_found_errors(service) -> None:
-    inventory, bot, desktop = service
-    bot.get_bot.side_effect = RuntimeError("database unavailable")
-
-    with pytest.raises(RuntimeError, match="database unavailable"):
-        inventory.get_item(owner_id="u1", bot_id="l1", space=None)
-    desktop.list_user_bots.assert_not_called()
-
-
-@pytest.mark.unit
 def test_cloud_source_is_capped_and_logs_truncation(service, caplog) -> None:
     inventory, bot, desktop = service
     cloud_rows = [

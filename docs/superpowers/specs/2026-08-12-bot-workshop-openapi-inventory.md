@@ -1,7 +1,7 @@
 # Bot 工坊 OpenAPI 全量清单（TC 改版）
 
 - **日期**: 2026-08-12
-- **整理人**: lucas（A 线 · 个人/本地 Bot + 壳层 + 诊断/协作，契约接口人）
+- **整理人**: lucas（A 线 · 个人/本地 Bot + 壳层 + 空间消费，契约接口人）
 - **权威来源**:
   1. 语雀系分《Bot工坊 改版 — 系分方案(OpenAPI 驱动版)》2026-08-07 + §10 订正 2026-08-11（`yuque.antfin.com/securitytec/otbct4/dsame52bmg6mggwq`）
   2. 本机技术设计 `docs/superpowers/specs/2026-08-11-bot-inventory-personal-local-tech-design.md`
@@ -129,10 +129,10 @@
 | 76 | local | 重启本地 Bot | `POST /openapi/v1/bots/local/{bot_id}/restart` | 新增 | 已开发 | P0 | 委托 desktop restart |
 | 77 | local | 删除本地 Bot | `DELETE /openapi/v1/bots/local/{bot_id}` | 新增 | 已开发 | P0 | 委托 desktop delete |
 | 78 | local | 打开目录 | `POST /openapi/v1/bots/local/{bot_id}/open-folder` | 新增 | 已开发 | P0 | `open_folder` |
-| 79 | diagnostics | 运行日志流 | `GET /openapi/v1/bots/diagnostics/{bot_id}/runtime-logs` | 新增 | 已设计未建 | P0 | ≠`/logs` trace；BaaS 白名单路径，`tail`/`level` 限制 |
+| 79 | diagnostics | 运行日志流 | `GET /openapi/v1/bots/diagnostics/{bot_id}/runtime-logs` | 新增 | 已设计未建 | P0 | **已移交其他团队负责，A 线仅待跟进**；当前按指示降低优先级。≠`/logs` trace；待责任团队确认老前端 URL 后决定复用 engine runtime relay，还是通过受限 BaaS exec 实现；必须限制白名单路径及 `tail`/`level` |
 | 80 | engine | 重启引擎 | `POST /openapi/v1/bots/engine/{bot_id}/restart` | 新增 | 已开发 | P0 | **走 `engine_runtime/engine` 既有 relay 范式**(非新建 diagnostics)：复用 `EngineRuntimeRelayProtocol.call(method="POST", path="/api/engine/restart")` 转发到设备 adapter daemon (`<binding>:20003/api/engine/restart`,老前端 `agentclawproxy` 直调的那个),零新 core adapter。**≠** `POST /openapi/v1/bots/{bot_id}/restart`(#8 BaaS restart_bot,re-provision container、断 session);引擎重启只重启 engine 进程、不重置容器/session。router docstring 已订正"故意不暴露 restart"的过时论据 |
-| 81 | diagnostics | 健康分 + 等级 | `GET /openapi/v1/bots/diagnostics/{bot_id}/health` | 新增 | 已设计未建 | P2 | 聚合 harness；仅 oc + 云端 |
-| 82 | diagnostics | 触发健康检查 | `POST /openapi/v1/bots/diagnostics/{bot_id}/health-check` | 新增 | 已设计未建 | P2 | 仅 oc + 云端，policy 拦 |
+| 81 | diagnostics | 健康分 + 等级 | `GET /openapi/v1/bots/diagnostics/{bot_id}/health` | 新增 | 已设计未建 | P2 | **已移交其他团队负责，A 线仅待跟进**；数据源为 harness，仅 openclaw + 云端，不阻塞 A 线当前联调 |
+| 82 | diagnostics | 触发健康检查 | `POST /openapi/v1/bots/diagnostics/{bot_id}/health-check` | 新增 | 已设计未建 | P2 | **已移交其他团队负责，A 线仅待跟进**；同 #81，仅 openclaw + 云端，由 policy 前门拦截不支持的组合，不阻塞 A 线当前联调 |
 | 83 | bots | 激活沉寂 Bot | `POST /openapi/v1/bots/{bot_id}/activate` | 新增 | 已开发 | P0 | **并回 bots/router.py**(A 方案,§5)，`/{bot_id}` 子资源(像 `/restart`)。helper `_require_personal_cloud_bot` + 委托 `BotDormantActivateServiceProtocol.activate`(`ActivateBotService`)。`bot_type==personal`+cloud 裁决(desktop/service→409) + owner guard(`get_bot`→404);`InvalidBotStateError`→409。30 天·仅非服务·本地豁免·蒙层非状态 |
 | 84 | bots | 初始化配置 | `POST /openapi/v1/bots/{bot_id}/data-init` | 新增 | 已开发 | P0 | 已委托 `DataInitServiceProtocol.trigger_init`（async, fire-and-forget），仅 personal+cloud（desktop/service→409）。**当前仍有联调阻塞，不能视为 legacy 1:1**：OpenAPI handler 尚未像老 `/api` 一样把 Cookie `IAM_TOKEN` 写入 `bot.ext`；同时公开 `Bot` 与 `BotInventoryItem` 均不返回 `ext.data_init_status`，前端没有可执行的轮询契约。联调前须补齐凭证传递，并确定独立 status endpoint（优先）或受控状态字段；创建 checkbox 仍由前端在 Bot 真正存在后单独触发本端点 |
 | 85 | lifecycle | 开启服务化（personal→service） | `POST /openapi/v1/bots/lifecycle/{bot_id}/upgrade` | 新增 | 未开工 | P1 | 委托 `upgrade_bot_type`；改 service 去反向，不动契约 |
@@ -185,7 +185,7 @@
 | 按阶段 · P3 | 2 | #106–107 |
 
 **A/B 线归属口径（2026-08-13 修订）**：
-- **A 线（lucas）** = 个人云端 Bot + 本地 Bot + 壳层(`/all`) + 跨型诊断 + 空间消费。**已开发 15 项**（ABC 回退后 #2/#14 为存量已完成，#68/#69 已删）；待办 = diagnostics 3 项(#79/#81/#82) + identity `file_type` 13 MD 待核 2 项(P2)。#84 trigger 虽已开发，但 IAM 凭证与状态查询契约仍是联调阻塞。
+- **A 线（lucas）** = 个人云端 Bot + 本地 Bot + 壳层(`/all`) + 空间消费。**已开发 15 项**（ABC 回退后 #2/#14 为存量已完成，#68/#69 已删）。diagnostics 3 项（#79/#81/#82）已移交其他团队负责，A 线仅维护契约对账与进度跟进，不再承担实现；其中 #79 按指示降低优先级，#81/#82 为 P2 且不阻塞当前联调。#84 trigger 虽已开发，但 IAM 凭证与状态查询契约仍是 A 线联调阻塞。
 - **B 线（joseph）** = service Bot 生命周期 + 容器/评测 + 编辑页内核(skill-sets/files/flow/channels/nodes/render-screens) + 空间/迁移 + 协作(edit-lock/editors #95–98)。B 线还需明确 service Bot 如何进入工坊首页：优先扩展 `/bots/all` 为统一 read model；若选择独立 service 列表，则必须给出前端合并、分页、筛选与排序契约。
 
 ---
