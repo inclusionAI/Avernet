@@ -70,25 +70,30 @@
         than raising.
 - **Depends on:** Task 1, Task 2
 
-## Task 4: Add the deprecated legacy-JWT path (the continuity guarantee)
+## Task 4 `[x]`: Add the deprecated legacy-JWT path (the continuity guarantee)
 - **Goal:** Existing JWT holders keep authenticating via a format-dispatched
   exact-match path that logs every use, so remaining legacy traffic is
   measurable and the path can be deleted on evidence.
 - **Files:** `src/gateway/src/gateway/community/core/app/_repository.py`,
   `src/gateway/tests/unit/plugins/test_app_legacy_token.py` (new)
 - **Done when:**
-  - [ ] A row seeded the old way (`token=<real JWT>`, `api_key_*` NULL) still
+  - [x] A row seeded the old way (`token=<real JWT>`, `api_key_*` NULL) still
         authenticates and yields a `RegisteredApp` identical to today's.
-  - [ ] Dispatch is by format via `validate_format`, not try-and-fallback: a
+  - [x] Dispatch is by format via `validate_format`, not try-and-fallback: a
         32-char base62 key never reaches the legacy branch, and each request
-        performs exactly one lookup.
-  - [ ] Every legacy resolution emits a WARNING naming the app (asserted with
+        performs exactly one lookup — asserted by counting SELECTs through a
+        SQLAlchemy `before_cursor_execute` listener, for both credential forms.
+  - [x] Every legacy resolution emits a WARNING naming the app (asserted with
         `caplog`); the method docstring and column comment state the deletion
-        criteria.
-  - [ ] API-key rows and legacy rows coexist in one table, each resolving
+        criteria. The API-key path is asserted *not* to warn, or the signal
+        would be worthless.
+  - [x] API-key rows and legacy rows coexist in one table, each resolving
         through its own path.
-  - [ ] An unknown JWT returns `None` (soft miss, US27 preserved); a legacy row
+  - [x] An unknown JWT returns `None` (soft miss, US27 preserved); a legacy row
         that is not `ACTIVE` returns `None` (documented behavior change).
+  - [x] *(added)* A newline-suffixed credential authenticates on neither path —
+        the property that makes the upstream `validate_format` quirk harmless
+        here (plan.md, Notes on upstream follow-ups #1).
 - **Depends on:** Task 3
 
 ## Task 5: Point the `app_token` strategy at the renamed port

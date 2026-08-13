@@ -21,11 +21,14 @@ from typing import Any
 
 from sqlalchemy import select
 
+from gateway.community.logger import get_logger
 from gateway.community.spi.app import AppRegistry, RegisteredApp
 from gateway.community.spi.database import DataSourcePlugin
 
 from ._key_gen import APIKeyGenerator
 from ._orm import AppRow
+
+logger = get_logger("core-app")
 
 _ACTIVE = "ACTIVE"
 
@@ -46,12 +49,19 @@ class AppRepository(AppRegistry):
         self._db = db
 
     async def find_app_by_credential(self, credential: str) -> RegisteredApp | None:
-        """Resolve a presented credential to its app, or ``None`` (soft miss)."""
+        """Resolve a presented credential to its app, or ``None`` (soft miss).
+
+        Two credential forms are in play during the transition window, and they
+        are told apart by *format*, not by trying one and falling back: an API
+        key is 32 base62 characters and a JWT always contains ``.``, so the two
+        sets cannot overlap. Each call therefore makes exactly one query, and
+        neither form can be silently served by the other's path.
+        """
         if not credential or len(credential) < _PREFIX_LEN:
             return None  # too short to carry a prefix — reject without a query
         if APIKeyGenerator.validate_format(credential):
             return self._by_api_key(credential)
-        return None
+        return self._by_legacy_token(credential)
 
     def _by_api_key(self, api_key: str) -> RegisteredApp | None:
         """Locate by prefix, then verify the hash in constant time.
@@ -78,6 +88,35 @@ class AppRepository(AppRegistry):
         # reason to hold a pooled connection across it.
         if not APIKeyGenerator.verify_key(api_key, stored_hash):
             return None
+        return record
+
+    def _by_legacy_token(self, token: str) -> RegisteredApp | None:
+        """DEPRECATED — resolve a pre-API-key app by its plaintext JWT.
+
+        Kept only so credentials issued before the API-key scheme keep working
+        while their holders rotate. Every hit logs at WARNING; once that log
+        goes quiet in production, delete this method, its branch in
+        :meth:`find_app_by_credential`, ``AppRow.token``, and the column's
+        unique index.
+        """
+        with self._db.orm_session() as session:
+            row = session.scalar(
+                select(self.Model).where(
+                    self.Model.token == token,
+                    self.Model.status == _ACTIVE,
+                )
+            )
+            if row is None:
+                return None
+            record = row.to_record()
+
+        logger.warning(
+            "app authenticated with a deprecated JWT token: "
+            "id=%s app_name=%s tenant=%s — rotate this app onto an API key",
+            record.id,
+            record.app_name,
+            record.tenant,
+        )
         return record
 
     async def exists_prefix(self, api_key_prefix: str) -> bool:
