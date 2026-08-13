@@ -3,12 +3,12 @@ from agentclaw.community.core.quality.services.quality_task_service import Quali
 from agentclaw.community.core.quality.services.task_processor import (
     InvalidStatusTransitionError,
     TaskProcessor,
-    GraphStatus,
+    TaskStatus,
 )
 
 __all__ = [
     "QualityTaskService",
     "TaskProcessor",
-    "GraphStatus",
+    "TaskStatus",
     "InvalidStatusTransitionError",
 ]
