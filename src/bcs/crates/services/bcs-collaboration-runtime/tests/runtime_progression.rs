@@ -24,7 +24,7 @@ use bcs_service_api::port::repo::MessageRepoPort;
 use bcs_service_api::{
     AuthenticatedHumanCaller, BotDeliveryCommand, BotDeliveryPort, BotDeliveryResult,
     BotDeliveryTarget, BotRunContext, BotRunContextPort, CallbackChannelConfig, CallbackConfig,
-    ChatEventState,
+    ChatEventState, ProviderRunTransport,
     CollaborationEventRepoPort, CollaborationRuntimeError, CollaborationRuntimeService,
     ConfigureGroupRuntimeCommand, DefinitionYamlSource, FrontendDeliveryCommand,
     FrontendDeliveryPort, FrontendDeliveryResult, FrontendDeliveryTarget, GroupCoreService,
@@ -3986,6 +3986,26 @@ impl BotRunContextPort for RecordingBotRunContext {
     }
 
     async fn release_terminal(&self, _run_id: &str) {}
+
+    async fn begin_provider_transport(&self, _run_id: &str, _deadline_ms: u64) -> bool {
+        false
+    }
+
+    async fn bind_provider_transport(
+        &self,
+        _run_id: &str,
+        _transport: ProviderRunTransport,
+    ) -> bool {
+        false
+    }
+
+    async fn get_provider_transport(&self, _run_id: &str) -> Option<ProviderRunTransport> {
+        None
+    }
+
+    async fn mark_provider_transport_terminal(&self, _run_id: &str) {}
+
+    async fn clear_provider_transport(&self, _run_id: &str) {}
 }
 
 #[async_trait]

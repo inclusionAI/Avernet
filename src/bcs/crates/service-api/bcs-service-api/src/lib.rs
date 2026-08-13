@@ -132,7 +132,6 @@ pub use message_flow::{
     GroupChatOutcome, GroupFusionCommand, GroupFusionService, MessageDeliveryResult,
     MessageFlowService, ParticipantPerspective, PersistentGroupSendCommand,
     PersistentGroupSendOutcome, ProviderEventIngestCommand, ProviderEventSource,
-    apply_provider_event_text,
     TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand,
     TaskDispatchOutcome, TaskMessageCommand, TaskMessageOutcome, TaskRunAliasRegistration,
     WebSendCommand, WebSendOutcome,

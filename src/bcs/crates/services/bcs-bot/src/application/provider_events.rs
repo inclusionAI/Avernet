@@ -12,8 +12,11 @@ use bcs_service_api::{
     ProviderCoordinationConfig, ProviderCoordinationEventKind, ProviderCoordinationIntent,
     ProviderEventIngestCommand, ProviderEventIngestService, ProviderEventSource,
     ProviderRunTransport, RuntimeBotIdentity, ServiceError, ServiceResult, TaskCompleteCommand,
-    TaskDispatchCommand, TaskMessageCommand, apply_provider_event_text, ChatResponseMode,
+    TaskDispatchCommand, TaskMessageCommand,
     DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
+};
+use bcs_protocol::stream::{
+    ProviderTextEventState, ProviderTextResponseMode, apply_provider_event_text,
 };
 use serde_json::{Map, Value, json};
 use tokio::sync::Mutex;
@@ -346,8 +349,13 @@ impl ProviderBotEvents {
                     expires_at_ms,
                 });
             accumulated.expires_at_ms = expires_at_ms;
-            apply_provider_event_text(&mut accumulated.text, &event.event_type, &event.event_payload,
-                &event.state, ChatResponseMode::AfterLastToolCall);
+            apply_provider_event_text(
+                &mut accumulated.text,
+                &event.event_type,
+                &event.event_payload,
+                provider_text_event_state(&event.state),
+                ProviderTextResponseMode::AfterLastToolCall,
+            );
             let visible_text = accumulated.text.clone();
             if terminal { runs.remove(&event.run_id); }
             visible_text
@@ -400,6 +408,17 @@ fn inject_visible_text(payload: &mut Value, text: &str) {
     if let Some(object) = payload.as_object_mut() {
         object.insert("message".to_string(),
             json!({"content": [{"type": "text", "text": text}]}));
+    }
+}
+
+fn provider_text_event_state(state: &ChatEventState) -> ProviderTextEventState {
+    match state {
+        ChatEventState::Delta => ProviderTextEventState::Delta,
+        ChatEventState::Final => ProviderTextEventState::Final,
+        ChatEventState::Aborted => ProviderTextEventState::Aborted,
+        ChatEventState::Error => ProviderTextEventState::Error,
+        ChatEventState::ToolCallStart => ProviderTextEventState::ToolCallStart,
+        ChatEventState::ToolCallEnd => ProviderTextEventState::ToolCallEnd,
     }
 }
 

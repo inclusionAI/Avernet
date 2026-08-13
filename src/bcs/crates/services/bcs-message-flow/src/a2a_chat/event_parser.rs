@@ -1,4 +1,7 @@
-use bcs_service_api::{ChatEventState, ChatResponseMode, apply_provider_event_text};
+use bcs_protocol::stream::{
+    ProviderTextEventState, ProviderTextResponseMode, apply_provider_event_text,
+};
+use bcs_service_api::ChatResponseMode;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DrainOutcome {
@@ -69,6 +72,7 @@ pub fn drain_chat_event_with_mode(
     accumulated: &mut String,
     response_mode: ChatResponseMode,
 ) -> DrainOutcome {
+    let provider_response_mode = provider_text_response_mode(response_mode);
     let frame = match serde_json::from_str::<bcs_protocol::BcsFrame>(event_str) {
         Ok(frame) => frame,
         Err(_) => return DrainOutcome::Continue,
@@ -91,15 +95,25 @@ pub fn drain_chat_event_with_mode(
             match state {
                 "delta" => {
                     if let Some(payload) = event.payload.as_ref() {
-                        apply_provider_event_text(accumulated, "chat.event", payload,
-                            &ChatEventState::Delta, response_mode);
+                        apply_provider_event_text(
+                            accumulated,
+                            "chat.event",
+                            payload,
+                            ProviderTextEventState::Delta,
+                            provider_response_mode,
+                        );
                     }
                     DrainOutcome::Continue
                 }
                 "final" => {
                     if let Some(payload) = event.payload.as_ref() {
-                        apply_provider_event_text(accumulated, "chat.event", payload,
-                            &ChatEventState::Final, response_mode);
+                        apply_provider_event_text(
+                            accumulated,
+                            "chat.event",
+                            payload,
+                            ProviderTextEventState::Final,
+                            provider_response_mode,
+                        );
                     }
                     DrainOutcome::Final
                 }
@@ -112,12 +126,17 @@ pub fn drain_chat_event_with_mode(
                 "tool_call_start" | "tool_call_end" => {
                     if let Some(payload) = event.payload.as_ref() {
                         let state = if state == "tool_call_start" {
-                            ChatEventState::ToolCallStart
+                            ProviderTextEventState::ToolCallStart
                         } else {
-                            ChatEventState::ToolCallEnd
+                            ProviderTextEventState::ToolCallEnd
                         };
-                        apply_provider_event_text(accumulated, "chat.event", payload,
-                            &state, response_mode);
+                        apply_provider_event_text(
+                            accumulated,
+                            "chat.event",
+                            payload,
+                            state,
+                            provider_response_mode,
+                        );
                     }
                     DrainOutcome::Continue
                 }
@@ -126,8 +145,13 @@ pub fn drain_chat_event_with_mode(
         }
         "agent" => {
             if let Some(payload) = event.payload.as_ref() {
-                apply_provider_event_text(accumulated, "agent", payload,
-                    &ChatEventState::ToolCallEnd, response_mode);
+                apply_provider_event_text(
+                    accumulated,
+                    "agent",
+                    payload,
+                    ProviderTextEventState::ToolCallEnd,
+                    provider_response_mode,
+                );
             }
             DrainOutcome::Continue
         }
@@ -173,6 +197,13 @@ pub fn drain_chat_event_with_mode(
             }
             DrainOutcome::Continue
         }
+    }
+}
+
+fn provider_text_response_mode(mode: ChatResponseMode) -> ProviderTextResponseMode {
+    match mode {
+        ChatResponseMode::Full => ProviderTextResponseMode::Full,
+        ChatResponseMode::AfterLastToolCall => ProviderTextResponseMode::AfterLastToolCall,
     }
 }
 

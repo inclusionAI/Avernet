@@ -14,7 +14,7 @@ use bcs_service_api::{
     ActorStatus, AgentCredentials, BotCapabilities, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
     BotDeliveryResult, BotDeliveryTarget, BotDynamicStatus, BotRegistryCoreService,
     BotRunContext, BotRunContextPort, DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
-    EnsureHumanResult, ProviderStreamGrayList, RegisteredBot,
+    EnsureHumanResult, ProviderRunTransport, ProviderStreamGrayList, RegisteredBot,
     ServiceError, ServiceResult, SystemMessageDispatcherService, SystemMessageProducerService,
 };
 use bcs_test_support::NoopFrontendDeliveryPort;
@@ -100,6 +100,26 @@ impl BotRunContextPort for RecordingRunContext {
     }
 
     async fn release_terminal(&self, _run_id: &str) {}
+
+    async fn begin_provider_transport(&self, _run_id: &str, _deadline_ms: u64) -> bool {
+        false
+    }
+
+    async fn bind_provider_transport(
+        &self,
+        _run_id: &str,
+        _transport: ProviderRunTransport,
+    ) -> bool {
+        false
+    }
+
+    async fn get_provider_transport(&self, _run_id: &str) -> Option<ProviderRunTransport> {
+        None
+    }
+
+    async fn mark_provider_transport_terminal(&self, _run_id: &str) {}
+
+    async fn clear_provider_transport(&self, _run_id: &str) {}
 }
 
 #[derive(Default, Clone)]

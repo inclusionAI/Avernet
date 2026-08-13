@@ -2768,6 +2768,10 @@ impl BotRunContextPort for RecordingRunContext {
             .await
             .insert(run_id.to_string(), ProviderRunTransport::Terminal);
     }
+
+    async fn clear_provider_transport(&self, run_id: &str) {
+        self.provider_transports.write().await.remove(run_id);
+    }
 }
 
 #[derive(Default)]
