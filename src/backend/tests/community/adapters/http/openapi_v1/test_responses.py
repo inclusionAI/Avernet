@@ -27,6 +27,11 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
     BotPermissionError,
 )
+from agentclaw.community.core.skill_center.errors import (
+    LocalSkillEditBusyError,
+    LocalSkillEditLockUnavailableError,
+    LocalSkillLayoutRollbackError,
+)
 
 
 class _BotUpdate(BaseModel):
@@ -326,6 +331,21 @@ def _lookup(exc: Exception) -> tuple[int, str]:
         if isinstance(exc, error_type):
             return mapped
     raise AssertionError(f"{type(exc).__name__} is unmapped")
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (LocalSkillEditBusyError(), (409, "Another Skill update is in progress")),
+        (LocalSkillLayoutRollbackError(), (409, "Skill layout rollback is in progress")),
+        (
+            LocalSkillEditLockUnavailableError(),
+            (503, "Skill update service is temporarily unavailable"),
+        ),
+    ],
+)
+def test_local_skill_edit_errors_have_distinct_public_responses(error, expected):
+    assert _lookup(error) == expected
 
 
 @pytest.mark.parametrize(
