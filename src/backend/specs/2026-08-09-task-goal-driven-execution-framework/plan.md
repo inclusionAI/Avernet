@@ -154,6 +154,8 @@ class RelationType(StrEnum):      DEPENDENCY    # 节点间依赖关系
 
 > 编排核为**事件驱动 + 状态条件触发**:在 facade `execute`/回投适配后,按图谱状态条件协调 `plan→add_task_nodes→dispatch→start_run`。是 `TaskService` 内部实现细节,对外只暴露 2 facade API(§3.7)。
 
+> **协程化(CR 反馈:任务执行是耗时任务)**:全链路 `async def`——`on_execute`/`on_report`/`on_miss`/`on_harness`/`start_run`/`form_coop_group`/`report_result`/`DeliveryPort.deliver`/**`plan`/`dispatch`/策略 `matches`/`apply`** 均为协程。`plan`/`dispatch`(corp 为 LLM 规划 / bot catalog 搜推,耗时 IO)在 per-task `threading.RLock` **锁内 `await`**(同 task 串行推进的 IO,设计意图;不同 task 锁隔离互不阻塞)。锁内不 `await` 的是**高并发外部投递 IO**(`start_run`/BCS 拉群 `form_coop_group`/`deliver`)——这些 `await` 在锁外,gather+Semaphore 并发下沉 `TaskRunner.start_run` 内部(`_DELIVER_CONCURRENCY=8`)。**副作用收集模式**:`on_*` 锁内 `async collect`(`await plan/dispatch` + 同步 add/patch,产出 side-effects list)→ 锁外 `_drain` 统一 `await` 执行 run/group/miss/finish(投递 IO)。`on_report` 链路:`report_result(await) → on_report(await) → 锁内翻态+async collect → 锁外 _drain await 投递`。注:`threading.RLock` 在本仓一次性事件循环/跨线程回调模型下跨线程正确串行;若 corp 采用单持久 loop 并发处理同 task 多回投,需切 `asyncio.Lock`(ocb 仓接入时定)。
+
 > **编排核零参自建**(在 `task_center/engine.py` 内定义 Protocol,DI 注入;Avernet 缺省 no-op,singlebox/测试注入 double,corp 注入真实 adapter):
 ```python
 # (V1/V2):无 OwnerBotVerifyPort / 无 BbsMarketPort。验收 100% 走 on_report 回投;
@@ -168,11 +170,11 @@ class ExecutionEngine:   # TaskService 内部编排核(不对外)
     def __init__(self, graph, planner, dispatcher, runner,
     def __init__(self, graph) -> None: ...
 
-    def on_execute(self, task_id) -> None:
+    async def on_execute(self, task_id) -> None:
         # execute 事件:initialize_graph(根 PENDING)→ 触发首帧推进:
         #   条件 a(根 PENDING)成立 → planner.plan(graph) → graph.add_task_nodes(第一层, parent_node_id=根, 根进 PLANNING)
         #   → 条件:有新 PENDING 就绪 ∧ 无 RUNNING → dispatcher.dispatch(toDo) 返回填执行者后的 list[TaskNode](不写图不起 run)→ 编排核落库(graph.update_task_node_info run_mode/assignee/RUNNING)→ runner.start_run
-    def on_report(self, patch: TaskNodePatch) -> NodeOpResult:
+    async def on_report(self, patch: TaskNodePatch) -> NodeOpResult:
         # 回投事件:patch 内含 (task_id,node_id) + 唯一翻态依据 acceptance_result + output_patch。
         #   graph.update_task_node_info(patch) 翻态(+fold output):
         #   PASS→DONE:查结构父 P=get_parent_task(本);若 P=PLANNING 且 P 的全部结构子(get_child_tasks(P)=本批兄弟)均 DONE ∧ 无 RUNNING(决策C:等本批兄弟全 DONE 才触发父 plan):
@@ -181,7 +183,7 @@ class ExecutionEngine:   # TaskService 内部编排核(不对外)
         #   FAIL+gaps→FAILED:深度闸门(<MAX 放行)→ 条件 b(FAILED+gaps 叶子)成立 → plan → add_task_nodes(补救子, parent_node_id=该节点, 该节点进 PLANNING)→ dispatch(返 list[TaskNode] 填执行者)→ 编排核落库(RUNNING)→ start_run
         #   (FAIL 无 gaps 已消灭:验收 skill 强制要求给 gaps;STUCK 走 on_miss 升 BBS 链路上限判,不在此分支)
         # 返回 NodeOpResult(prev/new_status)供适配层 ack,不作驱动依据
-    def on_miss(self, patch: TaskNodePatch) -> None:
+    async def on_miss(self, patch: TaskNodePatch) -> None:
         # dispatcher MISS → 节点仍 PENDING,patch.extend_props_patch.miss_events 已由 dispatcher 填
         #   → 深度闸门:<MAX→ plan→add_task_nodes(拆细, parent_node_id=该节点)→ 消费 miss_events → dispatch;
         #     ≥MAX(MISS 深度达到 MAX_DEPTH)→ **自动升 BBS**:remove_subtree(task_id,xx_node)(删 xx_node 及其下整个
@@ -190,13 +192,13 @@ class ExecutionEngine:   # TaskService 内部编排核(不对外)
         #     据自能力规划子任务 → add_task_nodes(run_mode="bbs",assignee=bot_id,挂根下)→ 上报结果+验收(见 on_report)。
         #   on_report 驱动:PASS→触发根节点 plan / FAIL+gaps→触发该子任务节点 plan;都走正常 plan→decompose→dispatch→execute。
         #   BBS 链路再迭代(loop_round 达 BBS_MAX_DEPTH)仍执行不下去→STUCK→HUNG(stuck)→人介入。
-    def on_harness(self, patch: TaskNodePatch) -> None:
+    async def on_harness(self, patch: TaskNodePatch) -> None:
         # Harness 旁路:RUNNING 超时/崩溃→复位回 PENDING(update_task_node_info)→正常 dispatch 重投。
         #   不抢正向驱动;主链下一轮事件自然续驱。不直接写 HUNG(STUCK 走 on_miss 升 BBS 链路上限判)。
     # loop_round: 仅升 BBS 时 graph.loop_round++(外层 BBS 上升轮次;正常补救不再 ++)
 ```
 
-> 每个事件 on_* 分段推进,由状态条件(a/b/c + plan 三条件)把关是否进入下一阶段。同 task_id 仍串行(可重入锁)。
+> 每个事件 on_* 分段推进,由状态条件(a/b/c + plan 三条件)把关是否进入下一阶段。同 task_id 仍串行(per-task `threading.RLock`,仅保护锁内同步编排写;投递/拉群 IO 锁外 await 不受锁约束)。协程化:`on_*` 锁内 collect(同步)→ 锁外 `_drain` await run/group/miss/finish(投递 gather+Semaphore 在 runner)。
 
 ### 3.1 `TaskGraphService`(内部图谱 SSOT,8 API:5 核心写/读+3 派生只读,独立模块)
 
@@ -283,7 +285,8 @@ class PlanningStrategy(Protocol):     # 规划优化策略契约(引擎内置,fi
 class TaskPlanner:     # 编排壳,零 case 知识
     def __init__(self, graph) -> None: ...   # 零参;内置策略池 [WorkflowPlanningStrategy(prio10), GapBasedPlanningStrategy(prio99)]
     def set_strategies(self, strategies: list[PlanningStrategy]) -> None: ...   # 非公开:engine 工厂/corp 子类注入
-    def plan(self, graph: TaskExecutionGraph) -> list[TaskNode]:
+    async def plan(self, graph: TaskExecutionGraph) -> list[TaskNode]:
+        # 协程化:策略 apply 在 corp 是 LLM 耗时 IO,锁内 await(同 task 串行,设计意图)。
         # 触发条件(规划文档):图谱有更新(新增失败节点/PLANNING 节点)
         #   AND 没有派发(RUNNING)或执行中节点 AND 状态图谱有处于 PLANNING 状态的节点
         #   不满足 → 返回 [] 空跑
@@ -316,7 +319,8 @@ class TaskDispatcher:
     def __init__(self, graph) -> None: ...   # 零参;持 graph 只读 config;内置策略池 [DirectDispatchStrategy(prio10), SearchBasedDispatchStrategy(prio99)]
     def set_strategies(self, strategies: list[DispatchStrategy]) -> None: ...   # 非公开:engine 工厂/corp 注入
     # 不持 runner(HIT_MULTI_BOTS 标 pending_group_formation;拉群归编排核+runner)
-    def dispatch(self, toDoTaskList: list[TaskNode]) -> list[TaskNode]:
+    async def dispatch(self, toDoTaskList: list[TaskNode]) -> list[TaskNode]:
+        # 协程化:catalog 搜推在 corp 是耗时 IO,锁内 await。
         # 入参=待派发节点;返回=填充执行者信息后的 list[TaskNode](对齐派发文档签名);
         #   不写图、不起 run;per node 仅按 node.task_spec 搜推,把结果填 node.run_info 上:
         #   HIT_SINGLE     → node.run_info.run_mode="single_bot",  assignee=bot_id
@@ -338,12 +342,12 @@ class TaskDispatcher:
 ```python
 class PlanningStrategy(Protocol):
     rule_id: str; priority: int
-    def matches(self, graph) -> bool: ...   # 纯读:据图级 execution_config 判适用(workflow 信号)
-    def apply(self, graph) -> list[TaskNode]: ...   # 自发现 target+产子
+    async def matches(self, graph) -> bool: ...   # 纯读:据图级 execution_config 判适用(workflow 信号)
+    async def apply(self, graph) -> list[TaskNode]: ...   # 自发现 target+产子(corp LLM 耗时 IO)
 class DispatchStrategy(Protocol):
     rule_id: str; priority: int
-    def matches(self, node, graph) -> bool: ...   # 纯读:据 execution_config(bot 信号)
-    def apply(self, node, graph) -> SearchResult: ...   # 4 态
+    async def matches(self, node, graph) -> bool: ...   # 纯读:据 execution_config(bot 信号)
+    async def apply(self, node, graph) -> SearchResult: ...   # 4 态(corp catalog 搜推耗时 IO)
 # 默认策略池: TaskPlanner 内置 [WorkflowPlanningStrategy(prio10,config.workflow), GapBasedPlanningStrategy(prio99,兜底 stub 返[])]
 #            TaskDispatcher 内置 [DirectDispatchStrategy(prio10,config.bot→HIT_SINGLE), SearchBasedDispatchStrategy(prio99,兜底 stub 恒MISS)]
 # first-match-wins:planner/dispatcher.plan/dispatch 遍历按 priority 升序,首个 matches=True 的 apply
@@ -362,9 +366,9 @@ class TaskRunner:
     """将已派发 TaskNode 发送给单 bot/协作群/BBS 执行,并回收状态/详情/结果。
     调用方:编排核(经 TaskService facade 驱动)。"""
 
-    def start_run(self, toDoTaskList: list[TaskNode]) -> list[bool]:
+    async def start_run(self, toDoTaskList: list[TaskNode]) -> list[bool]:
         """图谱上有 TaskNode 完成派发后,立即触发执行。入参批量(刚被 Dispatcher patch 完 run_mode/assignee 的节点);
-        返回每个任务派发是否成功 list[bool]。内部按每节点 run_mode(str)自适应分发:
+        返回每个任务派发是否成功 list[bool]。协程化:真实投递(单 bot workflow/BCS 协作群/BBS 广场)是网络 IO,内部对批量节点经 `asyncio.gather` + `_DELIVER_CONCURRENCY`(Semaphore=8)并发投递(对齐 backend lifecycle 模式),`await` 不阻塞编排核。内部按每节点 run_mode(str)自适应分发:
           "single_bot" → 单 bot workflow(workflow_type=single_bot)
           "coop_group" → bcn 协作群(已有群 or 刚 form_coop_group 拉的群)
           "bbs"        → BBS bot 认领任务后,自己算 gap+据自能力规划子任务(add_task_nodes 落图 run_mode="bbs",assignee=bot_id)
@@ -383,8 +387,8 @@ class TaskRunner:
     def query_bot_tasks(self, bot_id: str) -> list[TaskNode]:
         """获取某个 Bot 下的所有任务实例列表。"""
 
-    def form_coop_group(self, gf: "GroupFormation") -> str:
-        """(内部)HIT_MULTI_BOTS 动态拉协作群,复用 BCS 建群 → group_id。
+    async def form_coop_group(self, gf: "GroupFormation") -> str:
+        """(内部)HIT_MULTI_BOTS 动态拉协作群,复用 BCS 建群 → group_id。协程化:BCS 建群是网络 IO,`await`(由 engine 锁外 await 调用,不阻塞编排核)。
         CHAT/MANAGER_WORKER/STATE_MACHINE 三模式(group_strategy=collab_mode;state_machine 注入 workflow yaml)。
         collab_mode 在 GroupFormation 内(内部参数),不进 RuntimeInfo 持久字段。"""
 ```
@@ -395,12 +399,13 @@ class TaskRunner:
 class TaskLoopCallback:
     """供执行实体(bot workflow 或 bcn 协作群)PUSH 回投,对接框架 update_task_node_info(经编排核 on_report)。"""
 
-    def start_run(self, data: TaskCallbackData) -> None:     # 任务开始执行(可选进度信号)
+    async def start_run(self, data: TaskCallbackData) -> None:     # 任务开始执行(可选进度信号);协程化与 report_result 链路一致
         ...
-    def report_result(self, data: TaskCallbackData) -> None: # 任务完成或失败(success/data or fail_detail)
+    async def report_result(self, data: TaskCallbackData) -> None: # 任务完成或失败(success/data or fail_detail)
         # 框架适配层把 data 组装成 TaskNodePatch(task_id/node_id 从 loop_task_id 映射;
         #              acceptance_result 从 result.success/data 映射;output_patch=fold data;
-        #              fail_detail → extend_props_patch)→ 编排核 on_report(patch) → graph.update_task_node_info(patch) → 按 verdict 翻态/传播/补救
+        #              fail_detail → extend_props_patch)→ 编排核 on_report(patch)(await) → graph.update_task_node_info(patch) → 按 verdict 翻态/传播/补救
+        # 协程化:on_report 是 async,await 不阻塞回投调用方(HTTP 适配层/外部 bot workflow)。
 ```
 
 #### 3.5.3 三模态自适应作用
@@ -446,9 +451,11 @@ class TaskService:   # facade(2 API);内部持编排核 + TaskGraphService + Pla
     def __init__(self, graph: TaskGraphService, harness=None): ...  # 零参 facade;`_build_engine()` 工厂方法自建 ExecutionEngine(零参自建 planner/dispatcher/runner);
                  # corp 子类覆写 `_build_engine` 返回 CorpEngine;回填 harness.on_harness;暴露 callback(TaskLoopCallback)。
                  # engine 对调用方不可见(无 engine property)
+                 # 协程化:execute 为 async;内部 await engine.on_execute(async 链路)。
 
-    def execute(self, task_info: TaskInfo) -> TaskOpResult:
-        # graph.initialize_graph(task_info)(根 PENDING)→ 编排核 on_execute(task_id)
+    async def execute(self, task_info: TaskInfo) -> TaskOpResult:
+        # 协程化:await on_execute(async 链路),耗时投递(BCS/真实 workflow)不阻塞调用方。
+        # graph.initialize_graph(task_info)(根 PENDING)→ 编排核 await on_execute(task_id)
         #   → 首帧推进(条件 a:根 PENDING → plan → add_task_nodes → dispatch → start_run)
         # 返回 TaskOpResult{task_id, success, run_id}
     def get_task_dashboard(self, task_id: str, node_id: str = None) -> TaskExecutionGraph:
