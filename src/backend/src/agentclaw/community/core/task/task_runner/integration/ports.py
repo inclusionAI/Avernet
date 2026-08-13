@@ -5,6 +5,9 @@ from typing import Any, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
     from agentclaw.community.core.task.domain.models import TaskCallbackData, TaskNode
+    from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import (
+        BcsCreateGroupRequest as BcsCreateGroupRequest, BcsCreateGroupResult as BcsCreateGroupResult,
+    )
 
 
 @runtime_checkable
@@ -57,8 +60,3 @@ class PromptFormatter(Protocol):
 @runtime_checkable
 class ResultSink(Protocol):
     async def report_result(self, data: "TaskCallbackData") -> None: ...
-
-
-# 前向声明(实现在 bcs_http_adapter.py,Task 7)
-class BcsCreateGroupRequest(Protocol): ...  # noqa: D204
-class BcsCreateGroupResult(Protocol): ...
