@@ -1,6 +1,8 @@
 """M5 TaskService facade 单测(对齐 tasks.md T5.2/T5.3)。
 
-组合根装配 + 2 API 契约 + callback 回投 + harness 接线 + verify_port/bbs_market 注入 seam。
+零参 facade + CaseTaskService 子类覆写 _build_engine(CaseEngine 注入 stub 策略池/投递)。
+验收 100% 回投(无 verify seam);BBS 投递归 runner(无 bbs market seam);engine 对调用方不可见。
+覆盖:2 API 契约 + callback 回投 + harness 接线 + verify/bbs 已删回归(V1/V2)+ 零 case。
 """
 from __future__ import annotations
 
@@ -8,7 +10,6 @@ import asyncio
 from typing import Callable
 
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
-
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
@@ -23,11 +24,10 @@ from agentclaw.community.core.task.domain.models import (
     TaskSpec,
 )
 from agentclaw.community.core.task.task_center.task_service import TaskService
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
 
 
-# ===== helpers =====
-def _task_info(task_id: str = "t1") -> TaskInfo:
+# ===== domain helpers =====
+def _task_info(task_id: str = "t1", max_depth: int = 3) -> TaskInfo:
     return TaskInfo(
         task_spec=TaskSpec(
             metadata=Metadata(task_id=task_id, title="T", instruction="do"),
@@ -36,6 +36,7 @@ def _task_info(task_id: str = "t1") -> TaskInfo:
         ),
         source_channel_type="bot",
         source_channel_id="b1",
+        execution_config={"MAX_DEPTH": max_depth, "BBS_MAX_DEPTH": 3},
     )
 
 
@@ -51,21 +52,35 @@ def _patch(task_id: str, node_id: str, **kw) -> TaskNodePatch:
     return TaskNodePatch(task_id=task_id, node_id=node_id, **kw)
 
 
-# ===== in-test stubs (seams) =====
-class StubDecomposer:
+# ===== adapter:包旧 stub 成 PlanningStrategy / DispatchStrategy =====
+class _StubPlanningStrategy:
+    rule_id = "stub"
+    priority = 5
+
     def __init__(self, factory: Callable[[object], list[TaskNode]] | None = None):
         self._factory = factory or (lambda g: [])
 
-    def decompose(self, graph) -> list[TaskNode]:
+    def matches(self, graph) -> bool:
+        return True
+
+    def apply(self, graph) -> list[TaskNode]:
         return self._factory(graph)
 
 
-class StubDiscover:
+class _StubDispatchStrategy:
+    from agentclaw.community.core.task.task_dispatch.strategies import SearchResult, SearchOutcome
+
+    rule_id = "stub"
+    priority = 5
+
     def __init__(self, bot_id="bot1"):
         self.bot_id = bot_id
 
-    def search(self, node: TaskNode):
-        from agentclaw.community.core.task.task_dispatch.protocols import SearchResult, SearchOutcome
+    def matches(self, node, graph) -> bool:
+        return True
+
+    def apply(self, node, graph):
+        from agentclaw.community.core.task.task_dispatch.strategies import SearchResult, SearchOutcome
         return SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id=self.bot_id)
 
 
@@ -86,33 +101,111 @@ class StubRunner:
     def query_bot_tasks(self, bot_id): return []
 
 
-class StubVerify:
-    def __init__(self):
-        self.calls: list[tuple[str, str]] = []
+# ===== CaseEngine:覆写 _build_* 注入 stub(T1=A corp 最简形态)=====
+class _CaseEngine:
+    """测试用编排核:覆写 _build_* 注入 stub planner/dispatcher/runner(模拟 corp 子类)。"""
+    from agentclaw.community.core.task.task_center.engine import ExecutionEngine as _Engine
 
-    def request_verify(self, task_id, node_id):
-        self.calls.append((task_id, node_id))
+    rule_id = "stub"
+    priority = 5
+
+    def __init__(self, graph, planner_factory, discover_bot="bot1", runner=None):
+        from agentclaw.community.core.task.task_plan.planner import TaskPlanner
+        from agentclaw.community.core.task.task_dispatch.dispatcher import TaskDispatcher
+        self._graph = graph
+        self._planner = TaskPlanner(graph)
+        self._planner.set_strategies([_StubPlanningStrategy(planner_factory)])
+        self._dispatcher = TaskDispatcher(graph)
+        self._dispatcher.set_strategies([_StubDispatchStrategy(discover_bot)])
+        self._runner = runner or StubRunner()
+        import threading
+        self._locks: dict = {}
+        self._locks_guard = threading.RLock()
+
+    # 委托给真实 ExecutionEngine 的方法(复用编排逻辑)
+    def on_execute(self, task_id):
+        from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+        ExecutionEngine.on_execute(self, task_id)
+
+    def on_report(self, patch):
+        from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+        return ExecutionEngine.on_report(self, patch)
+
+    def on_miss(self, patch):
+        from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+        ExecutionEngine.on_miss(self, patch)
+
+    def on_harness(self, patch):
+        from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+        ExecutionEngine.on_harness(self, patch)
+
+    def _root(self, task_id):
+        from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+        return ExecutionEngine._root(self, task_id)
+
+    def _on_pass(self, task_id, node_id):
+        from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+        ExecutionEngine._on_pass(self, task_id, node_id)
+
+    def _on_fail(self, task_id, node_id):
+        from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+        ExecutionEngine._on_fail(self, task_id, node_id)
+
+    def _escalate_bbs(self, task_id, node_id):
+        from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+        ExecutionEngine._escalate_bbs(self, task_id, node_id)
+
+    def _dispatch_and_run(self, task_id):
+        from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+        ExecutionEngine._dispatch_and_run(self, task_id)
+
+    def _maybe_finish_graph(self, task_id):
+        from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+        ExecutionEngine._maybe_finish_graph(self, task_id)
+
+    def _lock_for(self, task_id):
+        from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+        return ExecutionEngine._lock_for(self, task_id)
 
 
-class StubBbs:
-    def __init__(self):
-        self.calls: list[str] = []
+class _CaseTaskService(TaskService):
+    """测试用 facade:覆写 _build_engine 返回 _CaseEngine(注入 stub 策略/投递;模拟 corp)。"""
+    def __init__(self, graph, planner_factory=None, discover_bot="bot1", runner=None, harness=None):
+        self._case_planner_factory = planner_factory or (lambda g: [])
+        self._case_discover_bot = discover_bot
+        self._case_runner = runner
+        super().__init__(graph, harness=harness)
 
-    def publish_task(self, task_id):
-        self.calls.append(task_id)
+    def _build_engine(self):
+        return _CaseEngine(
+            self._graph,
+            self._case_planner_factory,
+            self._case_discover_bot,
+            self._case_runner,
+        )
 
 
 def _build_facade(svc=None, *, decomposer=None, discover=None, runner=None,
-                  harness=None, verify=None, bbs=None) -> tuple[TaskService, TaskGraphService, object, object, object, StubRunner]:
+                  harness=None, verify=None, bbs=None) -> tuple:
+    """兼容旧调用签名(verify/bbs 参数已废弃,忽略);返回 (facade, svc, planner, dispatcher, discover, runner)。"""
+    from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
     svc = svc or TaskGraphService()
-    from agentclaw.community.core.task.task_plan.planner import TaskPlanner
-    from agentclaw.community.core.task.task_dispatch.dispatcher import TaskDispatcher
-    runner = runner or StubRunner()
-    planner = TaskPlanner(StubDecomposer() if decomposer is None else decomposer)
-    dispatcher = TaskDispatcher(StubDiscover() if discover is None else discover, runner)
-    facade = TaskService(svc, planner, dispatcher, runner, harness=harness,
-                          verify_port=verify, bbs_market=bbs)
-    return facade, svc, planner, dispatcher, discover, runner
+    factory = None
+    if decomposer is not None:
+        # decomposer 可能是 _StubPlanningStrategy(有 _factory)或旧 lambda
+        f = getattr(decomposer, "_factory", None) or getattr(decomposer, "apply", None)
+        if callable(f) and not isinstance(f, type):
+            # _StubPlanningStrategy:直接复用其 apply
+            def factory(g, _d=decomposer):
+                return _d.apply(g)
+        elif callable(decomposer):
+            factory = decomposer
+    facade = _CaseTaskService(
+        svc, planner_factory=factory,
+        discover_bot=getattr(discover, "bot_id", "bot1") if discover else "bot1",
+        runner=runner, harness=harness,
+    )
+    return facade, svc, None, None, discover, facade._engine._runner
 
 
 def _run(coro):
@@ -129,8 +222,7 @@ class TestProtocolConformance:
 # ===== execute =====
 class TestExecute:
     def test_execute_first_frame(self):
-        decomposer = StubDecomposer(lambda g: [_child("c1"), _child("c2")])
-        facade, svc, *__, runner = _build_facade(decomposer=decomposer)
+        facade, svc, *__, runner = _build_facade(decomposer=lambda g: [_child("c1"), _child("c2")])
         result = _run(facade.execute(_task_info()))
         assert result.task_id == "t1"
         assert result.success is True
@@ -143,11 +235,11 @@ class TestExecute:
         assert {n.node_id for n in runner.run_calls[0]} == {"c1", "c2"}
 
     def test_execute_no_plan_still_returns_result(self):
-        facade, svc, *_ = _build_facade(decomposer=StubDecomposer(lambda g: []))
+        facade, svc, *_ = _build_facade(decomposer=lambda g: [])
         result = _run(facade.execute(_task_info()))
         assert result.success is True
         graph = svc.query_task_dashboard("t1")
-        assert svc._get_node(graph, "t1").status == Status.PENDING  # 无可规划
+        assert svc._get_node(graph, "t1").status == Status.PENDING
 
 
 # ===== get_task_dashboard =====
@@ -159,8 +251,7 @@ class TestGetDashboard:
         assert g.tasks[0].node_id == "t1"
 
     def test_subtree_projection(self):
-        decomposer = StubDecomposer(lambda g: [_child("c1")])
-        facade, svc, *_ = _build_facade(decomposer=decomposer)
+        facade, svc, *_ = _build_facade(decomposer=lambda g: [_child("c1")])
         _run(facade.execute(_task_info()))
         sub = facade.get_task_dashboard("t1", "c1")
         assert {n.node_id for n in sub.tasks} == {"c1"}
@@ -174,10 +265,8 @@ class TestCallback:
         assert isinstance(facade.callback, TaskLoopCallback)
 
     def test_report_result_flips_node_via_callback(self):
-        decomposer = StubDecomposer(lambda g: [_child("c1")])
-        facade, svc, *_ = _build_facade(decomposer=decomposer)
+        facade, svc, *_ = _build_facade(decomposer=lambda g: [_child("c1")])
         _run(facade.execute(_task_info()))
-        # c1 RUNNING → 回投 PASS
         facade.callback.report_result(TaskCallbackData(
             loop_task_id="t1::c1", workflow_type="single_bot", workflow_id=1, instance_id=9,
             result={"success": True, "data": "done"},
@@ -190,75 +279,56 @@ class TestCallback:
 class TestHarnessWiring:
     def test_execute_registers_with_harness(self):
         from agentclaw.community.core.task.task_harness.harness import TaskHarness
+        from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
         svc = TaskGraphService()
-        runner = StubRunner()
-        from agentclaw.community.core.task.task_plan.planner import TaskPlanner
-        from agentclaw.community.core.task.task_dispatch.dispatcher import TaskDispatcher
         harness = TaskHarness(svc)
-        planner = TaskPlanner(StubDecomposer(lambda g: [_child("c1")]))
-        dispatcher = TaskDispatcher(StubDiscover(), runner)
-        facade = TaskService(svc, planner, dispatcher, runner, harness=harness)
+        facade = _CaseTaskService(svc, planner_factory=lambda g: [_child("c1")], harness=harness)
         _run(facade.execute(_task_info()))
         assert "t1" in harness._registered
-        # on_harness_fn 已回填为编排核 on_harness
         assert harness._on_harness_fn == facade._engine.on_harness
 
 
-# ===== verify_port / bbs_market seams =====
-class TestSeams:
-    def test_default_verify_is_noop(self):
-        # 根终验条件:全非根 DONE + plan[] → 请求终验。no-op verify 不报错。
-        decomposer = StubDecomposer(lambda g: [])
-        facade, svc, *_ = _build_facade(decomposer=decomposer)
+# ===== V1/V2 回归:验收 100% 回投(无 verify port);BBS 投递归 runner(无 bbs market)=====
+class TestAcceptanceViaReport:
+    def test_root_terminal_pass_via_report_only(self):
+        # V1:根验收不主动触发;全子 DONE + plan[] → 根 PLANNING 等回投 → 回投 root PASS → graph DONE
+        from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+        svc = TaskGraphService()
+        # decomposer 首批产 c1,c1 DONE 后 plan[]→ 根等回投 → 回投 root PASS → DONE
+        facade = _CaseTaskService(svc, planner_factory=lambda g: [_child("c1")])
         _run(facade.execute(_task_info()))
-        # 根 PENDING,无子,plan[]→ 无终验触发(根仍 PENDING,因 plan无可规划 target 返[]不调终验)
-        # 实际:on_execute 条件a→plan[](返空)→不 add→不终验。根仍 PENDING。
-        graph = svc.query_task_dashboard("t1")
-        assert svc._get_node(graph, "t1").status == Status.PENDING
-
-    def test_injected_verify_called_on_root_terminal(self):
-        # 构造:根下 c1 DONE + plan(root)==[] → 根终验触发 injected verify
-        decomposer = StubDecomposer(lambda g: [])
-        verify = StubVerify()
-        facade, svc, *_ = _build_facade(decomposer=decomposer, verify=verify)
-        _run(facade.execute(_task_info()))
-        # 手动 add c1 并标 DONE,再回投根 PASS 模拟 — 但终验触发需经 on_pass 上行。
-        # 直接经 facade 回投 c1 PASS(c1 需 RUNNING):先 add c1 让 plan 产它。
-        # 简化:用第二个 decomposer 产 c1,回投 c1 PASS → 根 gap 闭 → 终验。
-        svc2 = TaskGraphService()
-        runner = StubRunner()
-        from agentclaw.community.core.task.task_plan.planner import TaskPlanner
-        from agentclaw.community.core.task.task_dispatch.dispatcher import TaskDispatcher
-        dec1 = StubDecomposer(lambda g: [_child("c1", "t2")])
-        planner = TaskPlanner(dec1)
-        dispatcher = TaskDispatcher(StubDiscover(), runner)
-        facade2 = TaskService(svc2, planner, dispatcher, runner, verify_port=verify)
-        _run(facade2.execute(_task_info("t2")))
-        facade2.callback.report_result(TaskCallbackData(
-            loop_task_id="t2::c1", workflow_type="single_bot", workflow_id=1, instance_id=1,
+        facade.callback.report_result(TaskCallbackData(
+            loop_task_id="t1::c1", workflow_type="single_bot", workflow_id=1, instance_id=1,
             result={"success": True, "data": "x"},
         ))
-        # c1 DONE → 根 plan[](decompose 返[]) → 根终验 → verify 调
-        assert ("t2", "t2") in verify.calls
+        # c1 DONE → 根 plan[](无新子)→ 根 PLANNING 等回投
+        graph = svc.query_task_dashboard("t1")
+        assert svc._get_node(graph, "t1").status == Status.PLANNING
+        # 模拟 owner bot 终验回投 root PASS → graph DONE(无 verify port 注入)
+        facade.callback.report_result(TaskCallbackData(
+            loop_task_id="t1::t1", workflow_type="single_bot", workflow_id=1, instance_id=2,
+            result={"success": True, "data": "root PASS"},
+        ))
+        graph = svc.query_task_dashboard("t1")
+        assert graph.status == Status.DONE
 
-    def test_injected_bbs_market_called_on_escalation(self):
-        # MAX_DEPTH=1 → c1 FAIL+gaps → depth≥MAX → 升 BBS → injected bbs.publish
+
+class TestBbsEscalationNoMarket:
+    def test_bbs_escalation_marks_bbs_mode_no_market_publish(self):
+        # V2:升 BBS 只标 bbs_mode,无 bbs market publish
+        from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
         svc = TaskGraphService()
-        runner = StubRunner()
-        from agentclaw.community.core.task.task_plan.planner import TaskPlanner
-        from agentclaw.community.core.task.task_dispatch.dispatcher import TaskDispatcher
         ti = _task_info("t3")
         ti.execution_config["MAX_DEPTH"] = 1
-        bbs = StubBbs()
-        planner = TaskPlanner(StubDecomposer(lambda g: [_child("c1", "t3")]))
-        dispatcher = TaskDispatcher(StubDiscover(), runner)
-        facade = TaskService(svc, planner, dispatcher, runner, bbs_market=bbs)
+        facade = _CaseTaskService(svc, planner_factory=lambda g: [_child("c1", "t3")])
         _run(facade.execute(ti))
         facade.callback.report_result(TaskCallbackData(
             loop_task_id="t3::c1", workflow_type="single_bot", workflow_id=1, instance_id=1,
             result={"success": False, "fail_detail": "缺x"},
         ))
-        assert "t3" in bbs.calls
+        graph = svc.query_task_dashboard("t3")
+        assert graph.extend_props.get("bbs_mode") is True
+        assert graph.loop_round == 1
 
 
 class TestZeroCase:

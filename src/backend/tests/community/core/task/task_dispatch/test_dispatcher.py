@@ -1,7 +1,8 @@
 """M4a TaskDispatcher 单测(对齐 tasks.md T4a.x)。
 
-in-test StubBotDiscover/StubRunner 注入。覆盖:四态填 TaskNode.run_info、MISS 标 miss_events、
-BBS 退化、不写图不起 run(dispatcher 不调 graph)。
+in-test 策略注入(包 StubBotDiscover 成 DispatchStrategy adapter);真实 TaskGraphService 构图。
+覆盖:四态填 TaskNode.run_info、MISS 标 miss_events、HIT_MULTI_BOTS 标 pending_group_formation(拉群归编排核)、
+BBS 退化、不写图不起 run。零参 TaskDispatcher(graph);corp 注入策略经 set_strategies。
 """
 from __future__ import annotations
 
@@ -19,11 +20,12 @@ from agentclaw.community.core.task.domain.models import (
     TaskSpec,
 )
 from agentclaw.community.core.task.task_dispatch.dispatcher import TaskDispatcher
-from agentclaw.community.core.task.task_dispatch.protocols import (
+from agentclaw.community.core.task.task_dispatch.strategies import (
     GroupFormation,
     SearchOutcome,
     SearchResult,
 )
+from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
 
 
 def _task_info(task_id: str = "t1") -> TaskInfo:
@@ -38,70 +40,71 @@ def _task_info(task_id: str = "t1") -> TaskInfo:
     )
 
 
-def _node(node_id: str = "c1", run_mode: str | None = None, assignee: str | None = None) -> TaskNode:
+def _node(node_id: str = "c1", task_id: str = "t1", run_mode: str | None = None, assignee: str | None = None) -> TaskNode:
     return TaskNode(
-        node_id=node_id, task_id="t1", status=Status.PENDING,
-        task_spec=_task_info().task_spec,
+        node_id=node_id, task_id=task_id, status=Status.PENDING,
+        task_spec=_task_info(task_id).task_spec,
         run_info=RuntimeInfo(run_mode=run_mode, assignee=assignee),
         node_run_graph=None,  # type: ignore[arg-type]
     )
 
 
-class StubBotDiscover:
+class _StubDispatchStrategy:
+    """包旧 StubBotDiscover(search(node)) 成 DispatchStrategy adapter(测试模拟 corp 策略注入)。"""
+
+    rule_id = "stub"
+    priority = 5
+
     def __init__(self, result: SearchResult):
         self._result = result
         self.search_calls: list[TaskNode] = []
 
-    def search(self, node: TaskNode) -> SearchResult:
+    def matches(self, node: TaskNode, graph) -> bool:
+        return True
+
+    def apply(self, node: TaskNode, graph) -> SearchResult:
         self.search_calls.append(node)
         return self._result
 
 
-class StubRunner:
-    def __init__(self, gid: str = "grp_dyn"):
-        self._gid = gid
-        self.form_calls: list[GroupFormation] = []
-
-    def form_coop_group(self, gf: GroupFormation) -> str:
-        self.form_calls.append(gf)
-        return self._gid
+def _dispatcher(svc, result: SearchResult) -> tuple[TaskDispatcher, _StubDispatchStrategy]:
+    strat = _StubDispatchStrategy(result)
+    d = TaskDispatcher(svc)
+    d.set_strategies([strat])
+    return d, strat
 
 
 @pytest.fixture
-def runner() -> StubRunner:
-    return StubRunner()
+def svc() -> TaskGraphService:
+    svc = TaskGraphService()
+    svc.initialize_graph(_task_info())
+    return svc
 
 
 class TestFourStates:
-    def test_hit_single(self, runner):
-        discover = StubBotDiscover(SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="bot_market"))
-        d = TaskDispatcher(discover, runner)
-        node = _node("c1")
-        out = d.dispatch([node])
+    def test_hit_single(self, svc):
+        d, _ = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="bot_market"))
+        out = d.dispatch([_node("c1")])
         assert out[0].run_info.run_mode == "single_bot"
         assert out[0].run_info.assignee == "bot_market"
 
-    def test_hit_group(self, runner):
-        discover = StubBotDiscover(SearchResult(outcome=SearchOutcome.HIT_GROUP, group_id="grp_tech"))
-        d = TaskDispatcher(discover, runner)
+    def test_hit_group(self, svc):
+        d, _ = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_GROUP, group_id="grp_tech"))
         out = d.dispatch([_node("c1")])
         assert out[0].run_info.run_mode == "coop_group"
         assert out[0].run_info.assignee == "grp_tech"
 
-    def test_hit_multi_bots_forms_group(self, runner):
+    def test_hit_multi_bots_marks_pending_group(self, svc):
         gf = GroupFormation(bot_ids=["bot_a", "bot_b"], collab_mode="manager_worker")
-        discover = StubBotDiscover(SearchResult(outcome=SearchOutcome.HIT_MULTI_BOTS, group_formation=gf))
-        d = TaskDispatcher(discover, runner)
+        d, strat = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_MULTI_BOTS, group_formation=gf))
         out = d.dispatch([_node("c1")])
         assert out[0].run_info.run_mode == "coop_group"
-        assert out[0].run_info.assignee == "grp_dyn"
-        assert len(runner.form_calls) == 1
-        assert runner.form_calls[0].bot_ids == ["bot_a", "bot_b"]
-        assert runner.form_calls[0].collab_mode == "manager_worker"
+        assert out[0].run_info.assignee is None  # 拉群归编排核,留空
+        assert out[0].run_info.extend_props.get("pending_group_formation") is gf
+        assert len(strat.search_calls) == 1
 
-    def test_miss_no_assignee_marks_events(self, runner):
-        discover = StubBotDiscover(SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_bot_match"))
-        d = TaskDispatcher(discover, runner)
+    def test_miss_no_assignee_marks_events(self, svc):
+        d, _ = _dispatcher(svc, SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_bot_match"))
         out = d.dispatch([_node("c1")])
         assert out[0].run_info.run_mode is None
         assert out[0].run_info.assignee is None
@@ -109,31 +112,24 @@ class TestFourStates:
 
 
 class TestBbsDegradation:
-    def test_bbs_node_skips_search(self, runner):
-        discover = StubBotDiscover(SearchResult(outcome=SearchOutcome.MISS))
-        d = TaskDispatcher(discover, runner)
-        # BBS 节点:run_mode 已 "bbs",assignee 已标
+    def test_bbs_node_skips_search(self, svc):
+        d, strat = _dispatcher(svc, SearchResult(outcome=SearchOutcome.MISS))
         node = _node("c1", run_mode="bbs", assignee="bot_bbs")
         out = d.dispatch([node])
-        assert out[0].run_info.run_mode == "bbs"  # 维持
+        assert out[0].run_info.run_mode == "bbs"
         assert out[0].run_info.assignee == "bot_bbs"
-        assert len(discover.search_calls) == 0  # 不调搜推
+        assert len(strat.search_calls) == 0
 
 
 class TestNoWriteGraph:
-    def test_dispatch_does_not_touch_graph(self, runner):
-        # dispatcher 不持 graph、不写图:验证 dispatch 不调任何 graph 方法
-        # (fixture 无 graph;dispatcher 仅持 discover+runner)
-        discover = StubBotDiscover(SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="b1"))
-        d = TaskDispatcher(discover, runner)
+    def test_dispatch_returns_filled_nodes_only(self, svc):
+        # dispatcher 持 graph 只读 config;不写图(不调 add/update/patch)。验证仅填充入参返回。
+        d, _ = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="b1"))
         out = d.dispatch([_node("c1"), _node("c2")])
-        assert len(out) == 2  # 仅填充入参返回,不写图
-        # 验证 dispatcher 无 _graph 属性
-        assert not hasattr(d, "_graph")
+        assert len(out) == 2
 
 
 class TestEmpty:
-    def test_empty_list(self, runner):
-        discover = StubBotDiscover(SearchResult(outcome=SearchOutcome.MISS))
-        d = TaskDispatcher(discover, runner)
+    def test_empty_list(self, svc):
+        d, _ = _dispatcher(svc, SearchResult(outcome=SearchOutcome.MISS))
         assert d.dispatch([]) == []

@@ -1,42 +1,61 @@
-"""TaskRunner 任务执行模块:三模态自适应 + 回投。对齐 plan.md §3.5 + tasks.md T4b。
+"""TaskRunner 任务执行模块:三模态投递 + 回投。对齐 plan.md §3.5 + tasks.md T4b。
 
-Avernet 阶段:form_coop_group stub(不真实 BCS)、start_run stub 投递(不真实 bot workflow/群/BBS)。
-prod BCS wiring / 真实执行在 ocb 仓。
+Avernet 阶段:form_coop_group stub(不真实 BCS)、start_run stub 投递(记日志,不真实 bot workflow/群/BBS)。
+三类投递后端经 ``set_delivery`` 注入(corp ocb 仓:真实 workflow engine/BCS/BBS 广场);缺省 stub fallback。
 """
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, Protocol
 
 from agentclaw.community.core.task.domain.models import (
     Status,
     TaskNode,
     TaskNodeQueryCriteria,
 )
-from agentclaw.community.core.task.task_dispatch.protocols import GroupFormation
+from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
+
+
+class DeliveryPort(Protocol):
+    """执行投递后端 seam(单 bot workflow / bcn 协作群 / BBS 广场)。corp 注入真实实现。"""
+
+    def deliver(self, node: TaskNode) -> bool:
+        """投递任务节点给执行主体,返回是否投递成功(完成结果经 TaskLoopCallback PUSH 回投)。"""
+        ...
 
 
 class TaskRunner:
     """将已派发 TaskNode 发送给单 bot/协作群/BBS 执行,并回收状态/详情/结果。
 
     调用方:编排核(经 TaskService facade 驱动)。一个 start_run(批量)入口三模态自适应。
+    三类投递后端经 ``set_delivery(mode, port)`` 注入(corp);缺省 stub 记投递日志返回 True。
     """
 
     def __init__(self, graph) -> None:
         """graph: TaskGraphService(派生查询 + 投递映射用)。"""
         self._graph = graph
+        self._deliveries: dict[str, DeliveryPort] = {}
         self._groups: dict[str, GroupFormation] = {}   # group_id -> GroupFormation(form_coop_group stub 记录)
-        self._run_log: list[dict[str, Any]] = []        # 投递日志(stub,不真实发起)
+        self._run_log: list[dict[str, Any]] = []        # 投递日志(stub fallback,不真实发起)
+
+    def set_delivery(self, mode: str, port: DeliveryPort) -> None:
+        """(非公开)注入执行投递后端。mode∈{"single_bot","coop_group","bbs"};corp ocb 仓注入真实实现。"""
+        self._deliveries[mode] = port
 
     def start_run(self, toDoTaskList: list[TaskNode]) -> list[bool]:
-        """图谱上有 TaskNode 完成派发后立即触发执行。入参批量(刚被 dispatcher patch 完
+        """图谱上有 TaskNode 完成派发后立即触发执行。入参批量(刚被 dispatcher/adaptor patch 完
         run_mode/assignee 的节点);返回每个任务派发是否成功 list[bool]。
-        内部按 run_mode(str)自适应分发。Avernet stub:三模态均记投递日志返回 True;
-        真实 single_bot workflow / bcn 协作群 / BBS bot 自规划 在 corp ocb 仓。"""
+        内部按 run_mode(str)自适应分发:有注入 delivery → 调 delivery.deliver;否则 stub 记日志返 True。"""
         results: list[bool] = []
         for node in toDoTaskList:
             mode = node.run_info.run_mode
-            if mode in ("single_bot", "coop_group", "bbs"):
+            if mode not in ("single_bot", "coop_group", "bbs"):
+                results.append(False)
+                continue
+            port = self._deliveries.get(mode)
+            if port is not None:
+                results.append(bool(port.deliver(node)))
+            else:
                 self._run_log.append(
                     {
                         "task_id": node.task_id,
@@ -47,8 +66,6 @@ class TaskRunner:
                     }
                 )
                 results.append(True)
-            else:
-                results.append(False)
         return results
 
     def query_status(self, task_id: str) -> Status:
@@ -68,8 +85,7 @@ class TaskRunner:
         return self.query_detail(node)
 
     def query_bot_tasks(self, bot_id: str) -> list[TaskNode]:
-        """获取某个 Bot 下的所有任务实例列表。
-        Avernet stub:需全局 task_id 索引(后续补);当前返回空列表。"""
+        """获取某个 Bot 下的所有任务实例列表。Avernet stub:返回空列表(后续补全局索引)。"""
         return []
 
     def form_coop_group(self, gf: GroupFormation) -> str:

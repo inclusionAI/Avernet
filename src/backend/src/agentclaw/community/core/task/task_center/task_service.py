@@ -1,8 +1,9 @@
 """TaskService facade(2 API):系统唯一对外入口,内部持 ExecutionEngine 编排核。对齐 plan §3.7。
 
-组合根:注入 graph/planner/dispatcher/runner(+ 可选 harness/verify_port/bbs_market),内部构造
-ExecutionEngine(verifier_port/bbs_market 缺省用 in-process no-op seam);回投经 ``callback``(TaskLoopCallback)
-适配层 → 编排核 on_report(非 facade 直暴露)。Avernet 发 stub/singlebox;corp adapter 红线(ocb 仓)。
+零参 facade:用户只传 TaskInfo。内部 ``_build_engine`` 工厂方法自建 ExecutionEngine(零参,自建
+planner/dispatcher/runner 内置策略池 + stub 投递);corp 子类覆写工厂方法注入真实策略/投递后端(ocb 仓)。
+回投经 ``callback``(TaskLoopCallback)适配层 → 编排核 on_report(非 facade 直暴露)。
+Avernet 发 stub/singlebox;corp adapter 红线在 ocb 仓。engine 对调用方不可见(无 engine property)。
 """
 from __future__ import annotations
 
@@ -14,84 +15,40 @@ from agentclaw.community.core.task.domain.models import (
     TaskInfo,
     TaskOpResult,
 )
-from agentclaw.community.core.task.task_center.engine import (
-    BbsMarketPort,
-    ExecutionEngine,
-    OwnerBotVerifyPort,
-)
+from agentclaw.community.core.task.task_center.engine import ExecutionEngine
 from agentclaw.community.core.task.task_runner.callback_adapter import (
     CallbackAdapter,
     TaskLoopCallback,
 )
 
 
-class _NoopVerifyPort:
-    """Avernet 默认终验 seam(不驱动):测试/生产注入真实 OwnerBotVerifyPort。"""
-
-    def request_verify(self, task_id: str, node_id: str) -> None:  # noqa: D401
-        """no-op:owner bot 终验由 corp adapter 注入;缺省不发起。"""
-        return None
-
-
-class _NoopBbsMarket:
-    """Avernet 默认 BBS 广场 seam(不挂单):测试/生产注入真实 BbsMarketPort。"""
-
-    def publish_task(self, task_id: str) -> None:  # noqa: D401
-        """no-op:任务广场由 corp adapter 注入;缺省不挂单。"""
-        return None
-
-
 class TaskService(TaskServiceProtocol):
-    """对外 facade(2 API);内部持 ExecutionEngine 编排核 + TaskGraphService + Planner + Dispatcher +
-    Runner + Harness(可选)+ TaskLoopCallback(回投适配)。
+    """对外 facade(2 API);内部持 ExecutionEngine 编排核 + TaskGraphService + Harness(可选)+ TaskLoopCallback。
 
-    引擎不识别"终验节点":终验=根节点验收,由 owner bot skill 回投经 ``callback``→``on_report``。
+    验收 100% 走回调回投;engine 不主动验,无 verify/bbs port。engine 对调用方不可见(无 property)。
     """
 
-    def __init__(
-        self,
-        graph,
-        planner,
-        dispatcher,
-        runner,
-        harness=None,
-        *,
-        verify_port: OwnerBotVerifyPort | None = None,
-        bbs_market: BbsMarketPort | None = None,
-    ) -> None:
-        """graph: TaskGraphService;planner: TaskPlanner;dispatcher: TaskDispatcher;runner: TaskRunner;
-        harness: TaskHarness | None;verify_port/bbs_market: 编排核 seam(缺省 no-op,Avernet 默认)。"""
+    def __init__(self, graph, harness=None) -> None:
+        """graph: TaskGraphService;harness: TaskHarness | None(旁路复位,可选)。
+        corp 接真实策略/投递:子类覆写 ``_build_engine`` 返回注入真实策略池/投递后端的 CorpEngine。"""
         self._graph = graph
-        self._planner = planner
-        self._dispatcher = dispatcher
-        self._runner = runner
         self._harness = harness
-        self._verify_port = verify_port or _NoopVerifyPort()
-        self._bbs_market = bbs_market or _NoopBbsMarket()
-        # 组合根:构造编排核(注入全部 seam)
-        self._engine = ExecutionEngine(
-            graph=self._graph,
-            planner=self._planner,
-            dispatcher=self._dispatcher,
-            runner=self._runner,
-            verify_port=self._verify_port,
-            bbs_market=self._bbs_market,
-        )
+        self._engine = self._build_engine()
         # 回投适配层:执行实体 PUSH → 适配 → 编排核 on_report
         self._callback = TaskLoopCallback(CallbackAdapter(), self._engine)
         # harness 复位重投入口回填(编排核已建,harness 才能拿到 on_harness)
         if self._harness is not None:
             self._harness.set_on_harness(self._engine.on_harness)
 
+    def _build_engine(self) -> ExecutionEngine:
+        """(corp 覆写 seam)构造编排核。默认 ExecutionEngine(graph)自建 stub 策略池/投递;
+        corp 子类返回 CorpEngine(覆写 _build_planner/_build_dispatcher/_build_runner 注入真实实现)。"""
+        return ExecutionEngine(self._graph)
+
     @property
     def callback(self) -> TaskLoopCallback:
         """供执行实体(bot workflow / bcn 协作群)PUSH 回投的入口(适配层 → 编排核 on_report)。"""
         return self._callback
-
-    @property
-    def engine(self) -> ExecutionEngine:
-        """编排核引用(测试/编排观测用;生产不应跨 facade 直接驱动)。"""
-        return self._engine
 
     async def execute(self, task_info: TaskInfo) -> TaskOpResult:
         """提交执行任务:initialize_graph(根 PENDING)→ 编排核 on_execute(首帧推进:

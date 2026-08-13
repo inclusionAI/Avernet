@@ -8,7 +8,7 @@
 - **类型契约**:必填端到端非可选;`T|None` 仅当 `None` 是合法域态或外部输入边界。
 - **TDD / 主 seam 优先**:P8 singlebox E2E 最高 seam;P1–P7 契约单测补 E2E 覆盖不到的分支。
 - **写网关收口**:图谱原子变更只走 `TaskGraphService` 8 API(5 核心写/读 + 3 派生只读);旁路同写口。
-- **框架零 case 知识**:任何具体节点名(`N_overview`/`N_market` 等)只允许出现在 case 的 DecomposerPort 产出或测试 stub,**禁止出现在框架代码**。
+- **框架零 case 知识**:任何具体节点名(`N_overview`/`N_market` 等)只允许出现在 case 的策略 stub 产出或测试 stub,**禁止出现在框架代码**。
 - **不并存两套**:合并为单一实现,删除并行包与旧模型失效代码。
 
 ## 依赖与落地序(M0 模型 → M1 图谱 → M2 编排核 → M3 planner → M4 dispatcher/runner → M5 harness/facade → M6 singlebox E2E)
@@ -17,7 +17,7 @@
 M0  领域模型(Relation/6态/瘦身后字段) + 中间类型(patch/criteria/op_result/callback_data)
  → M1  TaskGraphService 独立(8 API:5 核心写/读+3 派生只读;relations 依赖派生)
  → M2  编排核 on_*(事件驱动 + 状态条件 a/b/c + plan 三条件;串行锁)
- → M3  TaskPlanner 编排壳 + DecomposerPort 委托(去硬编码)
+ → M3  TaskPlanner 编排壳 + 内置策略池(零参,去硬编码)
  → M4  TaskDispatcher(搜推4态+form_coop_group)+ TaskRunner(start_run/query_*/TaskLoopCallback;BCS复用)
  → M5  TaskHarness 旁路 + TaskService facade 2 API
  → M6  singlebox E2E(gwqie46v7hzr1w6h 三阶段三模态)
@@ -47,26 +47,26 @@ M2 依赖 M1/M3/M4 接口(可 seam/double);M5 集成;M6 验证。
 ## M2 — 编排核 on_*(事件驱动 + 状态条件)
 - T2.1 `ExecutionEngine.on_execute(task_id)`:initialize_graph 后,条件 a(根 PENDING)→ plan→add→dispatch→start_run。
 - T2.2 `on_report(patch: TaskNodePatch)`:patch 内含 (task_id,node_id)+acceptance_result+output_patch;update_task_node_info 翻态;PASS→传播→条件 c(PLANNING 父∧兄弟全DONE)→plan→add→dispatch;FAIL+gaps→闸门→条件 b→plan→add→dispatch(FAIL 无 gaps 已消灭)。返回 NodeOpResult 供 ack。
-- T2.3 `on_miss(patch: TaskNodePatch)`:patch.extend_props_patch.miss_events 由 dispatcher 填;深度闸门→<MAX: plan→add(挂该节点下)→消费→dispatch;≥MAX(MISS 深度达 `MAX_DEPTH`):**自动升 BBS**——remove_subtree(删 xx_node+子树)+loop_round+++标 BBS+经 `BbsMarketPort.publish_task` 挂广场(seam;Avernet 缺省 no-op);BBS bot 认领→自算 gap+规划子任务(run_mode=bbs)→上报→on_report 驱动;BBS 链路 loop_round≥`BBS_MAX_DEPTH`→STUCK→经 `update_task_graph_info(TaskGraphPatch{status=HUNG, extend_props_patch={hung_reason:stuck}})` 收口 graph HUNG→人介入。
+- T2.3 `on_miss(patch: TaskNodePatch)`:patch.extend_props_patch.miss_events 由 dispatcher 填;深度闸门→<MAX: plan→add(挂该节点下)→消费→dispatch;≥MAX(MISS 深度达 `MAX_DEPTH`):**自动升 BBS**——remove_subtree(删 xx_node+子树)+loop_round+++标 BBS+标 `bbs_mode=True`(V2:无 BbsMarketPort;BBS 投递归 runner BBS 模态);BBS bot 认领→自算 gap+规划子任务(run_mode=bbs)→上报→on_report 驱动;BBS 链路 loop_round≥`BBS_MAX_DEPTH`→STUCK→经 `update_task_graph_info(TaskGraphPatch{status=HUNG, extend_props_patch={hung_reason:stuck}})` 收口 graph HUNG→人介入。
 - T2.4 `on_harness(patch: TaskNodePatch)`:旁路——Harness 复位 `RUNNING→PENDING`(update_task_node_info 直驱)+ 重新 `_dispatch_and_run` 重投;不直接写 HUNG(STUCK 走 on_miss/on_fail 升 BBS 链路上限判);不抢正向驱动。
 - T2.5 串行化:同 task_id 可重入锁;跨 task 并行。loop_round:仅升 BBS 时 graph.loop_round++(外层 BBS 上升轮次,正常补救不再 ++)。
-- T2.6 根终验(主动验证):`plan(root)==[]` ∧ 全非根 DONE ∧ 无 RUNNING → 经编排核 `OwnerBotVerifyPort.request_verify(task_id, root.node_id)`(seam,定义于 `task_center/engine.py`;Avernet 缺省 no-op,corp 注入 owner bot 终验 SKILL;异步非阻塞)触发 owner bot 验 root.goal 全 AC(验收模式聚合 root 结构子=全图 DONE 产出)→ owner bot 回投 on_report(patch{root,verdict})(`PLANNING→DONE`/`PLANNING→FAILED`);PASS→root DONE+经 `update_task_graph_info(TaskGraphPatch{status=DONE, output_patch=…})` 收口图 status=DONE;FAIL+gaps→plan(root) 补救子(根不特殊化),继续驱动。**框架代码不识别"终验节点"**,终验=根节点验收,由 owner bot skill 回投。
-- T2.7 零 case 知识红线:framework 代码 `grep -rE 'N_overview|N_market|N_aggregate|N_verify|N_report|N_practice|dim_|n_root' src/agentclaw/community/core/task/` 必须 0 命中(节点名仅存 singlebox stub DecomposerPort 产出/测试)。
+- T2.6 根验收(V1:验收 100% 回投,engine 不主动验):`plan(root)==[]` ∧ 全非根 DONE ∧ 无 RUNNING → 根保持 PLANNING 等 owner bot 经 `TaskLoopCallback.report_result` 回投 verdict(无 `OwnerBotVerifyPort`,engine 不主动触发终验 skill;owner bot 感知 gap 闭经回投落态)。PASS→root DONE+经 `update_task_graph_info(TaskGraphPatch{status=DONE, output_patch=…})` 收口图 status=DONE;FAIL+gaps→plan(root) 补救子(根不特殊化),继续驱动。**框架代码不识别"终验节点"**,终验=根节点验收,由 owner bot skill 回投。
+- T2.7 零 case 知识红线:framework 代码 `grep -rE 'N_overview|N_market|N_aggregate|N_verify|N_report|N_practice|dim_|n_root' src/agentclaw/community/core/task/` 必须 0 命中(节点名仅存 case 策略 stub 产出/测试)。
 - T2.x 单测:on_execute 首帧、on_report PASS/FAIL/根终验两分支(PASS/FAIL+gaps)、on_miss 升 BBS(自动无人工挡板)、on_harness 复位重投不抢正向、串行化、loop_round 仅升 BBS 递增、零 case grep。
 
-## M3 — TaskPlanner 编排壳 + DecomposerPort 委托
-- T3.1 `DecomposerPort` Protocol:`decompose(graph)->list[TaskNode]`(seam 读图自发现 target+产子;status=PENDING,run_info 空,task_id 已填,node_run_graph 指向图;返回 [] 表无可规划目标;decompose(root)==[] 判断属实现侧)。
+## M3 — TaskPlanner 编排壳 + 内置策略池(零参)
+- T3.1 `PlanningStrategy` Protocol:`matches(graph)->bool` + `apply(graph)->list[TaskNode]`(引擎内置,first-match-wins;默认 `WorkflowPlanningStrategy`/`GapBasedPlanningStrategy`;status=PENDING,run_info 空,task_id 已填,node_run_graph 指向图;返回 [] 表 gap 已闭)。Avernet stub(gap 返 [];workflow 读 config 拓扑 stub);corp ocb 仓覆写 `_build_planner` 注入真实策略。
 - T3.2 `TaskPlanner.plan(graph)->list[TaskNode]`:**触发条件**(图谱有更新 ∧ 无 RUNNING 节点 ∧ 有 PLANNING 节点);不满足返回 []。读图自发现目标(FAIL 叶子/PLANNING 父),委托 decompose(graph)(seam 自负责 target-finding);规划原则硬约束(派发/执行中节点不可改含前序依赖;只对失败+子全DONE自身PLANNING父);纯读图去重;步进式 deps 满足才产。**删除**写死节点。
 - T3.2a 零 case 知识:`TaskPlanner`/`ExecutionEngine` 不得出现任何节点名字面量或"终验节点"启发式(如按入图顺序判终验);终验=根节点验收(§5.4/T2.6),由 owner bot skill 回投,框架不识别特殊节点。
-- T3.3 `GapBasedPlanningRule`(`OptimizerRule`)承载编排壳,委托 `DecomposerPort`。
+- T3.3 `GapBasedPlanningStrategy`/`WorkflowPlanningStrategy`(`PlanningStrategy`)引擎内置策略池(first-match-wins,零参 TaskPlanner)。
 - T3.4 默认实现:Avernet `StubDecomposer`(测试注入 case 节点);corp `PlanBotDecomposer`(plan_bot agent/LLM SKILL,Avernet 不含红线)。
 - T3.x 单测:注入 StubDecomposer 断言机制(触发条件/去重/步进/硬契约);decompose 返回 [] → plan [];换 stub 产别结构 → 框架照常驱动。
 
 ## M4 — TaskDispatcher + TaskRunner(执行模块,按 `lxg2mwgmtfqg6d95`)
-- **M4a TaskDispatcher + BotDiscoverPort**
-  - T4.1 `BotDiscoverPort.search(node)->SearchResult`:4 态 HIT_SINGLE/HIT_GROUP/HIT_MULTI_BOTS/MISS;HIT_MULTI_BOTS 一并决出 collab_mode(填 GroupFormation,内部参数不持久)。Avernet `StubBotDiscover`(本地关键词 cover + bot catalog)。search 入参只 node(读 node.task_spec;不读 graph)。
+- **M4a TaskDispatcher + 内置策略池(零参)**
+  - T4.1 `DispatchStrategy` Protocol:`matches(node,graph)->bool` + `apply(node,graph)->SearchResult`(4 态 HIT_SINGLE/HIT_GROUP/HIT_MULTI_BOTS/MISS;HIT_MULTI_BOTS 填 GroupFormation 内部参数不持久)。默认 `DirectDispatchStrategy`(config 有 `bot`→HIT_SINGLE)/`SearchBasedDispatchStrategy`(兜底;Avernet stub 恒 MISS;corp ocb 仓覆写注入真实 catalog)。
   - T4.2 `TaskDispatcher`(不持 graph);`dispatch(toDoTaskList)->list[TaskNode]`(对齐派发文档签名):无 graph 入参、**不写图、不起 run**;search→把 run_mode(str)/assignee 填到 `TaskNode.run_info` 上返回;HIT_MULTI_BOTS→`runner.form_coop_group` 得 gid 填 node;MISS→不填执行者(仍 None),标 `run_info.extend_props.miss_events` 交编排核。编排核拿返回节点→有 assignee 的 `graph.update_task_node_info(run_mode/assignee,RUNNING)` 落库 + `runner.start_run`;标 miss_events 的走 `on_miss`。
-  - T4.3 `SearchBasedDispatchRule`(`OptimizerRule`)委托 `BotDiscoverPort`+`TaskRunner`。
+  - T4.3 `SearchBasedDispatchStrategy`/`DirectDispatchStrategy`(`DispatchStrategy`)引擎内置策略池(first-match-wins,零参 TaskDispatcher)。
   - T4a.x 单测:四态填 TaskNode.run_info(HIT_SINGLE/HIT_GROUP/HIT_MULTI_BOTS 填 run_mode/assignee、MISS 不填标 miss_events)、collab_mode 来自 search(内部)、dispatcher 不写图不起 run、编排核落库后 DISPATCHED 必 RUNNING、前序依赖双检、start_run 由编排核触发(批量)、MISS 节点 status 仍 PENDING。
 - **M4b TaskRunner + TaskLoopCallback**
   - T4.4 `TaskRunner.start_run(toDoTaskList)->list[bool]`:批量;按 run_mode(str)自适应投递 single_bot/coop_group/bbs(BBS bot 认领任务→自算 gap+规划子任务→自执行);返回每派发是否成功。
@@ -79,7 +79,7 @@ M2 依赖 M1/M3/M4 接口(可 seam/double);M5 集成;M6 验证。
 ## M5 — TaskHarness + TaskService facade
 - T5.1 `TaskHarness.run_poll_loop`:周期 `query_task_nodes(RUNNING)`→比对 start_time + sla_timeout(execution_config/extend_props)→超时/崩溃 `update_task_node_info(复位 PENDING, extend_props_patch={崩溃栈/超时})` 重投;不抢正向(STUCK 走 on_miss 升 BBS 链路上限判)。
 - T5.2 `TaskService` facade 2 API:`execute(task_info)->TaskOpResult`(initialize_graph + `engine.on_execute`;若注入 harness 则 `harness.register(task_id)`;返回含 run_id)/`get_task_dashboard(task_id,node_id=None)->TaskExecutionGraph`(query_task_dashboard)。另暴露只读属性 `callback`(TaskLoopCallback)与 `engine`。内部持编排核 + TaskGraphService + Planner + Dispatcher + Runner + Harness(+ TaskRunner/TaskLoopCallback)。
-- T5.3 `TaskService.__init__` 组合根:签名 `(graph, planner, dispatcher, runner, harness=None, *, verify_port=None, bbs_market=None)`;内部构造 `ExecutionEngine`(注入全部 seam,缺省 no-op `OwnerBotVerifyPort`/`BbsMarketPort`);回填 `harness.set_on_harness(engine.on_harness)`;构造 `TaskLoopCallback(CallbackAdapter(), engine)`。decomposer/discover 经 Planner/Dispatcher 注入;Avernet 用 stub/singlebox double,corp adapter 红线。
+- T5.3 `TaskService.__init__` 零参 facade:签名 `(graph, harness=None)`;`_build_engine()` 工厂方法自建 `ExecutionEngine(graph)`(零参自建 planner/dispatcher/runner 内置策略池+stub 投递);回填 `harness.set_on_harness(engine.on_harness)`;构造 `TaskLoopCallback(CallbackAdapter(), engine)`。strategy/delivery 经 engine `_build_*` 注入(测试/corp 经子类覆写;无 verify/bbs market port)。engine 对调用方不可见(无 engine property)。
 - T5.4 transport adapter:core transport-agnostic;context-boundary;API 版本化与 conformance(`docs/arch/protocol-contract-tests.md`)。
 - T5.x 单测:facade 2 API 契约、harness 旁路不抢正向、组合根装配。
 
@@ -96,7 +96,7 @@ M2 依赖 M1/M3/M4 接口(可 seam/double);M5 集成;M6 验证。
 ## Risks / 待实现期定的项
 - 旧 `core/task` ORM repo 与图模型适配:in-memory 优先,ORM 适配按需(M1)。
 - `form_coop_group` prod BCS wiring(M4b,corp)。
-- `DecomposerPort` 生产实现(plan_bot agent/LLM SKILL,corp);Avernet 只发 stub/singlebox。
+- `PlanningStrategy`/`DispatchStrategy` 生产实现(真实 LLM 规划/搜推 catalog,corp ocb 仓覆写 `_build_*`);Avernet 只发 stub/singlebox。
 - 线上真实搜推(M4a,corp)。
 - 人工 `abandon_task`/`rollback_to_node` facade(5 模块文档未提供;预留 `on_harness`/人工事件位点,待确认后补)。
 - `relations` 分解树(单入)下 `get_child_tasks`/`get_parent_task`/`depth`/就绪派生正确性(M1 单测锚定)。
@@ -107,7 +107,7 @@ M2 依赖 M1/M3/M4 接口(可 seam/double);M5 集成;M6 验证。
 - ✅ **M0** 领域模型(先落模型)。
 - ✅ **M1** TaskGraphService 独立(8 API:5 核心写/读+3 派生只读+relations 派生)。
 - ✅ **M2** 编排核 on_*(事件驱动 + 状态条件 a/b/c + plan 三条件)。
-- ✅ **M3** TaskPlanner 编排壳 + DecomposerPort 委托(去硬编码)。
+- ✅ **M3** TaskPlanner 编排壳 + 内置策略池(零参,去硬编码)。
 - ✅ **M4** Dispatcher(搜推4态+form_coop_group)+ TaskRunner(start_run/query_*/TaskLoopCallback;BCS复用),singlebox double。
 - ✅ **M5** Harness + TaskService facade 2 API 集成。
 - ✅ **M6** singlebox E2E,行为基线对齐 `gwqie46v7hzr1w6h`(机制不变,内容来自 stub decomposer)。

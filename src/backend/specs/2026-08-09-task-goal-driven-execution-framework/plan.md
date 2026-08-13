@@ -4,7 +4,7 @@
 
 ## 0. 一句话定位
 
-一个**事件驱动 + 状态条件触发**的任务动态规划执行框架:外部事件(提交/回投)触发 → 编排核按图谱状态条件协调 `plan→add_task_nodes→dispatch→start_run→回调→update_task_node_info` 推进;**图谱是 SSOT,所有写收口到 `TaskGraphService`**;规划/派发是可插拔的优化策略,规划的**分解内容**委托 `DecomposerPort`(默认规划 agent/bot 在 corp,Avernet 用 stub/singlebox 实现),框架本身零 case 知识。**全仓库只有一套实现**,位于规范位置 `core/task`。
+一个**事件驱动 + 状态条件触发**的任务动态规划执行框架:外部事件(提交/回投)触发 → 编排核按图谱状态条件协调 `plan→add_task_nodes→dispatch→start_run→回调→update_task_node_info` 推进;**图谱是 SSOT,所有写收口到 `TaskGraphService`**;规划/派发是可插拔的优化策略,规划/派发是引擎内置优化策略(`PlanningStrategy`/`DispatchStrategy`,默认 GapBased/Search;corp 经 ocb 仓覆写,Avernet 用 stub/singlebox 实现),框架本身零 case 知识。**全仓库只有一套实现**,位于规范位置 `core/task`。
 
 ## 1. 架构总览(六模块 + 编排核;单一实现,规范位置 `core/task`)
 
@@ -12,16 +12,16 @@
 |---|---|---|---|
 | **TaskService** | 对外 facade | 系统唯一对外入口(2 API);内部含编排核协调其余模块 | ✅ 2 个 |
 | **TaskGraphService** | 内部图谱 SSOT | 图谱原子变更唯一网关(增删改查);`relations` 依赖派生 | ❌ 内部(8 API:5 核心写/读+3 派生只读) |
-| **TaskPlanner** | 规划编排壳(可插拔) | 读图按状态条件产逻辑子节点(不含执行信息);分解内容委托 `DecomposerPort`/规划 agent | ❌ 内部 |
-| **DecomposerPort** | 规划策略 seam | 真正的分解智能:产哪些节点。默认 LLM/规划 bot(corp);Avernet stub/singlebox | ❌ seam |
+| **TaskPlanner**(零参,内置策略池) | 读图按状态条件 first-match-wins 选内置 `PlanningStrategy` 产逻辑子节点(不含执行信息) | ❌ 内部 |
+| **PlanningStrategy** | 规划优化策略(引擎内置) | 真正的分解智能:产哪些节点。默认 GapBased/Workflow;corp 覆写 `_build_planner` | ❌ 内部策略 |
 | **TaskDispatcher** | 分发策略(可插拔) | 搜推决定"谁来做",把 `run_mode`/`assignee` 填到 `TaskNode.run_info` 后返回 `list[TaskNode]`,多 bot 动态拉协作群;**不写图、不起 run**(编排核落库+起 run) | ❌ 内部 |
 | **TaskRunner** | 执行承载 | `start_run(批量)` 三模态自适应 + `query_status/detail/result/bot_tasks`;`TaskLoopCallback` 回投;`form_coop_group` 复用 BCS | ❌ 内部 |
 | **TaskHarness** | 旁路常驻 | 周期巡检超时/崩溃,写同网关,不抢正向驱动 | ❌ 内部 |
 | **(编排核)** | TaskService 内部 | 事件驱动 + 状态条件触发协调 plan/graph/dispatch/execution | ❌ 非独立模块 |
 
 **关键边界**:
-- **编排核只做"决策与转写"**,不自己改图/执行——改图经 `TaskGraphService`,执行经 `TaskDispatcher→TaskRunner`,规划经 `TaskPlanner`(再委托 `DecomposerPort`)。
-- **框架零 case 知识**:planner 是编排壳,分解内容来自 `DecomposerPort`;`N_overview`/`N_market` 等任意节点名只能出现在**case 的 DecomposerPort 产出**或**测试 stub**,绝不写死在框架代码。
+- **编排核只做"决策与转写"**,不自己改图/执行——改图经 `TaskGraphService`,执行经 `TaskDispatcher→TaskRunner`,规划经 `TaskPlanner`(内置 `PlanningStrategy` first-match-wins 选策略)。
+- **框架零 case 知识**:planner 是编排壳,分解内容来自引擎内置 `PlanningStrategy`;`N_overview`/`N_market` 等任意节点名只能出现在**case 的策略 stub 产出**或**测试 stub**,绝不写死在框架代码。
 - **单一实现**:规范位置 `core/task`;继承旧 seam 命名、DI 接线(`CommunityTaskModule`)、开源边界纪律。
 - **开源边界**:Avernet 发**契约 seam + Noop/singlebox double**(本地关键词 cover 的 bot catalog、BCS local/mock 拉群、stub decomposer);真实搜推/真实执行/LLM 规划/验收 SKILL 在 corp `ocb` adapter。
 
@@ -154,20 +154,19 @@ class RelationType(StrEnum):      DEPENDENCY    # 节点间依赖关系
 
 > 编排核为**事件驱动 + 状态条件触发**:在 facade `execute`/回投适配后,按图谱状态条件协调 `plan→add_task_nodes→dispatch→start_run`。是 `TaskService` 内部实现细节,对外只暴露 2 facade API(§3.7)。
 
-> **编排核持两个 seam**(在 `task_center/engine.py` 内定义 Protocol,DI 注入;Avernet 缺省 no-op,singlebox/测试注入 double,corp 注入真实 adapter):
+> **编排核零参自建**(在 `task_center/engine.py` 内定义 Protocol,DI 注入;Avernet 缺省 no-op,singlebox/测试注入 double,corp 注入真实 adapter):
 ```python
-class OwnerBotVerifyPort(Protocol):  # 终验 skill 触发口(D2-A seam)
-    def request_verify(self, task_id: str, node_id: str) -> None: ...  # 异步发起终验;owner bot 完成后回投 on_report
-class BbsMarketPort(Protocol):       # BBS 任务广场(D3-A seam):升 BBS 时挂任务供 bot 认领
-    def publish_task(self, task_id: str) -> None: ...
+# (V1/V2):无 OwnerBotVerifyPort / 无 BbsMarketPort。验收 100% 走 on_report 回投;
+#     BBS 投递归 runner BBS 模态(下次 dispatch→start_run 经 DeliveryPort)。
+#     引擎 __init__(graph) 零参自建;_build_planner/_build_dispatcher/_build_runner 工厂方法(corp 覆写 seam)。
 ```
 ```python
 class ExecutionEngine:   # TaskService 内部编排核(不对外)
     """事件驱动 + 状态条件触发协调 plan/graph/dispatch/execution。
-    持 TaskGraphService/TaskPlanner/TaskDispatcher/TaskRunner + OwnerBotVerifyPort(+ BbsMarketPort|None);BBS 模态统一归 run_mode="bbs"。
+    零参自建 TaskGraphService/TaskPlanner/TaskDispatcher/TaskRunner(内置策略池+stub 投递);BBS 模态统一归 run_mode="bbs"(投递归 runner,无 BbsMarketPort)。
     按事件 + 状态条件分段协调(无 single drive fixpoint 泵)。on_* 入参统一收口为 TaskNodePatch。"""
     def __init__(self, graph, planner, dispatcher, runner,
-                 verify_port: OwnerBotVerifyPort, bbs_market: BbsMarketPort | None = None): ...
+    def __init__(self, graph) -> None: ...
 
     def on_execute(self, task_id) -> None:
         # execute 事件:initialize_graph(根 PENDING)→ 触发首帧推进:
@@ -269,10 +268,10 @@ class TaskGraphService:
 > 旧 `compute_output_projection` 不在图谱;执行/验收上下文由 `TaskRunner` 内聚(内部自动判定,见 §3.5.4)。
 > **图级写归属(M1)**:`TaskGraphService` 持节点级写(`update_task_node_info`)+ 图结构写(`add_task_nodes`/`remove_subtree` 的 relations)+ **图级写**(图终态 `update_task_graph_info(TaskGraphPatch)`,收口 SSOT)。图级终态(图 `status`=DONE/HUNG、图 `output`、`loop_round`++、`extend_props` 的 `bbs_mode`/`hung_reason`)由编排核经 `update_task_graph_info` 写,不直写返回的 graph 引用。`TaskGraphPatch` 中间类型见 §2.1。
 
-### 3.2 `TaskPlanner` 规划编排壳 + `DecomposerPort` 委托 seam
+### 3.2 `TaskPlanner` 规划编排壳(零参 + 内置策略池 `PlanningStrategy`)
 
 ```python
-class DecomposerPort(Protocol):     # 分解策略 seam(非领域实体,模块层接缝;与 TaskPlanner 委托关系)
+class PlanningStrategy(Protocol):     # 规划优化策略契约(引擎内置,first-match-wins;非领域实体,模块层)
     def decompose(self, graph: TaskExecutionGraph) -> list[TaskNode]:
         """读图自行发现规划目标(FAIL 叶子 / PLANNING 父)并产"下一步可执行的子节点"
           (挂该目标下;status=PENDING,run_info 空,task_id 已填,node_run_graph 指向所属图)。
@@ -281,8 +280,9 @@ class DecomposerPort(Protocol):     # 分解策略 seam(非领域实体,模块�
           (decompose(root)==[] 的判断属实现侧:stub/corp 各自负责,框架不介入)。默认:corp 走规划
           agent(plan_bot)/LLM SKILL;Avernet stub。"""
 
-class TaskPlanner(PlannerPort):     # 编排壳,零 case 知识
-    def __init__(self, decomposer: DecomposerPort): ...
+class TaskPlanner:     # 编排壳,零 case 知识
+    def __init__(self, graph) -> None: ...   # 零参;内置策略池 [WorkflowPlanningStrategy(prio10), GapBasedPlanningStrategy(prio99)]
+    def set_strategies(self, strategies: list[PlanningStrategy]) -> None: ...   # 非公开:engine 工厂/corp 子类注入
     def plan(self, graph: TaskExecutionGraph) -> list[TaskNode]:
         # 触发条件(规划文档):图谱有更新(新增失败节点/PLANNING 节点)
         #   AND 没有派发(RUNNING)或执行中节点 AND 状态图谱有处于 PLANNING 状态的节点
@@ -297,8 +297,8 @@ class TaskPlanner(PlannerPort):     # 编排壳,零 case 知识
         # 5) 返回并集 list[TaskNode](不含物理执行信息)
 ```
 
-> **默认实现**:Avernet=`StubDecomposer`/singlebox(测试注入 case 节点名);corp=`PlanBotDecomposer`(规划 agent plan_bot,LLM/SKILL)。可经 `GapBasedPlanningRule`(§3.4)包策略。
-> **DecomposerPort 与 TaskPlanner 关系(为何不并进)**:`TaskPlanner` 是规划编排壳(判触发条件/读图发现目标/硬契约去重,零 case 知识,框架固定);`DecomposerPort` 是真正产子节点内容的 seam。分层三因:① 开源边界(Avernet 框架不绑 corp LLM,只发接口+stub,真实规划经 DI 注入);② 可测试(singlebox 注入 stub 不依赖 LLM);③ 可插拔(换 plan_bot/规则/其它 decomposer,编排壳不变)。领域模型无 DecomposerPort(非领域实体),它活在模块层 §3。
+> **默认实现**:Avernet 默认 `GapBasedPlanningStrategy`(stub 返 [])/`WorkflowPlanningStrategy`(读 config 拓扑 stub);corp 经 ocb 仓 `CorpEngine._build_planner` 覆写注入真实 LLM 规划策略(test/corp adapter 包成 `PlanningStrategy` 注入)。
+> **PlanningStrategy 与 TaskPlanner 关系(引擎内置,不开放自定义)**:`TaskPlanner` 零参构造,内置策略池(判触发条件/读图发现目标/硬契约去重,零 case 知识,框架固定);`PlanningStrategy` 是规划优化策略(`matches`/`apply`,first-match-wins by priority,类 SQL optimizer)。分层:① 开源边界(Avernet 框架不绑 corp LLM,只发 stub 策略;corp 经 ocb 仓 `_build_planner` 覆写注入真实策略版本);② 可测试(测试/corp adapter 包成 `PlanningStrategy` adapter 注入,不依赖 LLM);③ 策略版本化(引擎后续加新策略版本,不开放外部自定义)。领域模型无 PlanningStrategy(非领域实体,模块层 §3)。
 > **硬契约**:① 产的每个子其父语义已就绪可委托;② 无状态纯读图去重;步进式 deps 满足才产。`plan` 不接收外部 gaps。
 > MISS 经 `on_miss` 写 miss_events 后,编排核按条件 b 类(FAILED+gaps)路径处理(或 HUNG);PLANNING 前向目标用显式状态判。
 
@@ -307,13 +307,15 @@ class TaskPlanner(PlannerPort):     # 编排壳,零 case 知识
 > **职责**:据搜推 4 态选执行主体 + 多 bot 动态拉协作群;**把 `run_mode`(str)/`assignee` 填到 `TaskNode.run_info` 后返回 `list[TaskNode]`,不写图、不起 run**(对齐派发文档 `dispatch(toDoTaskList)->List[TaskNode]`);执行交 `TaskRunner.start_run`(由编排核拿返回节点后调用)。分层:搜推(谁做)填 TaskNode → 编排骨 `update_task_node_info`(落派发目标+RUNNING)→ `start_run`(真正发)。
 
 ```python
-class BotDiscoverPort(Protocol):    # 搜推 seam(同步 in-process)
+class DispatchStrategy(Protocol):    # 派发优化策略契约(引擎内置,first-match-wins)
     def search(self, node: TaskNode) -> "SearchResult": ...
     # -> HIT_SINGLE(bot_id) | HIT_GROUP(group_id) | HIT_MULTI_BOTS(group_formation,含 collab_mode) | MISS
     # collab_mode 在 SearchResult/GroupFormation 内(内部参数),不进 RuntimeInfo 持久
 
-class TaskDispatcher(DispatcherPort):
-    def __init__(self, discover: BotDiscoverPort, runner: "TaskRunner"): ...   # 不持 graph;不写图不起 run
+class TaskDispatcher:
+    def __init__(self, graph) -> None: ...   # 零参;持 graph 只读 config;内置策略池 [DirectDispatchStrategy(prio10), SearchBasedDispatchStrategy(prio99)]
+    def set_strategies(self, strategies: list[DispatchStrategy]) -> None: ...   # 非公开:engine 工厂/corp 注入
+    # 不持 runner(HIT_MULTI_BOTS 标 pending_group_formation;拉群归编排核+runner)
     def dispatch(self, toDoTaskList: list[TaskNode]) -> list[TaskNode]:
         # 入参=待派发节点;返回=填充执行者信息后的 list[TaskNode](对齐派发文档签名);
         #   不写图、不起 run;per node 仅按 node.task_spec 搜推,把结果填 node.run_info 上:
@@ -326,20 +328,28 @@ class TaskDispatcher(DispatcherPort):
         #                     标了 miss_events 的→ 编排核 on_miss(深度闸门)
 ```
 
-> 搜推/拉群不对外;`HIT_MULTI_BOTS` 时 `collab_mode` 由 `search` 一并决出(在 `GroupFormation` 内,作 `form_coop_group` 参数)。可经 `SearchBasedDispatchRule`(§3.4)包策略。
+> 搜推/拉群不对外;`HIT_MULTI_BOTS` 时 `collab_mode` 由 `DispatchStrategy.apply` 一并决出(在 `GroupFormation` 内,作 `form_coop_group` 参数)。引擎内置 `SearchBasedDispatchStrategy`/`DirectDispatchStrategy`(§3.4)。
 > **派发文档注**:对齐派发文档 `dispatch(toDoTaskList)->List[TaskNode]`——dispatcher 搜推后把 `run_mode`/`assignee` 填到 `TaskNode.run_info` 上返回 `list[TaskNode]`,**不写图、不起 run**;编排核拿返回节点后调 `graph.update_task_node_info(run_mode/assignee,RUNNING)` 落库 + `runner.start_run`(图谱 SSOT,dispatcher 不直接写图;返回的 TaskNode 是入参填充后副本,落库由编排核经 patch 完成)。
 
-### 3.4 可插拔策略(`OptimizerRule`, Unified Optimizer Contract)
+### 3.4 引擎内置策略(`PlanningStrategy`/`DispatchStrategy`, first-match-wins by priority)
+
+> 策略是**引擎自带能力,不开放自定义**(类 SQL optimizer rule-based):经 `execution_config` 动态匹配命中,非用户手动 SET。要优化引擎自己加新策略版本;corp 经 ocb 仓 `CorpEngine` 覆写 `_build_*` 替换策略版本。
 
 ```python
-class OptimizerRule(Protocol, Generic[PlanT, ResultT]):
+class PlanningStrategy(Protocol):
     rule_id: str; priority: int
-    def matches(self, graph, input_) -> bool: ...   # 纯读
-    def apply(self, graph, input_) -> ResultT: ...   # 可含副作用(dispatcher update RUNNING)
-class Optimizer(Generic[PlanT, ResultT]):
-    def optimize(self, graph, input_, default=None) -> ResultT | None: ...  # first-match-wins
-# 默认: GapBasedPlanningRule(委托 DecomposerPort) / SearchBasedDispatchRule(委托 BotDiscoverPort+TaskRunner)
+    def matches(self, graph) -> bool: ...   # 纯读:据图级 execution_config 判适用(workflow 信号)
+    def apply(self, graph) -> list[TaskNode]: ...   # 自发现 target+产子
+class DispatchStrategy(Protocol):
+    rule_id: str; priority: int
+    def matches(self, node, graph) -> bool: ...   # 纯读:据 execution_config(bot 信号)
+    def apply(self, node, graph) -> SearchResult: ...   # 4 态
+# 默认策略池: TaskPlanner 内置 [WorkflowPlanningStrategy(prio10,config.workflow), GapBasedPlanningStrategy(prio99,兜底 stub 返[])]
+#            TaskDispatcher 内置 [DirectDispatchStrategy(prio10,config.bot→HIT_SINGLE), SearchBasedDispatchStrategy(prio99,兜底 stub 恒MISS)]
+# first-match-wins:planner/dispatcher.plan/dispatch 遍历按 priority 升序,首个 matches=True 的 apply
 ```
+- Avernet 默认 stub(gap 返 [];search 恒 MISS);corp 真实 LLM 规划/搜推 catalog 经 ocb 仓 `CorpEngine._build_planner/_build_dispatcher` 覆写注入真实策略。`DecomposerPort`/`BotDiscoverPort` 已删(改内置策略类)。
+- TaskRunner 三类投递后端(`DeliveryPort`):single_bot/coop_group/bbs 各一;Avernet 默认 stub 记日志;corp `set_delivery` 注入真实 workflow engine/BCS/BBS 广场。
 
 ### 3.5 `TaskRunner` 任务执行模块(对齐执行文档 `lxg2mwgmtfqg6d95`)
 
@@ -433,10 +443,9 @@ class TaskHarness:
 
 ```python
 class TaskService:   # facade(2 API);内部持编排核 + TaskGraphService + Planner + Dispatcher + Runner (+ Harness)
-    def __init__(self, graph: TaskGraphService, planner: TaskPlanner,
-                 dispatcher: TaskDispatcher, runner: TaskRunner, harness=None,
-                 *, verify_port: OwnerBotVerifyPort | None = None,
-                 bbs_market: BbsMarketPort | None = None): ...  # 组合根:缺省 no-op seam;内部构造 ExecutionEngine;回填 harness.on_harness;暴露 callback(TaskLoopCallback)
+    def __init__(self, graph: TaskGraphService, harness=None): ...  # 零参 facade;`_build_engine()` 工厂方法自建 ExecutionEngine(零参自建 planner/dispatcher/runner);
+                 # corp 子类覆写 `_build_engine` 返回 CorpEngine;回填 harness.on_harness;暴露 callback(TaskLoopCallback)。
+                 # engine 对调用方不可见(无 engine property)
 
     def execute(self, task_info: TaskInfo) -> TaskOpResult:
         # graph.initialize_graph(task_info)(根 PENDING)→ 编排核 on_execute(task_id)
@@ -574,7 +583,7 @@ _DIRECT_TRANSITIONS(框架内部 status 直驱:派发/复位/传播):`PENDING→
 
 ---
 
-## 6. API 串联推演(事件驱动;节点名来自 DecomposerPort 产出,非框架写死)
+## 6. API 串联推演(事件驱动;节点名来自 case 策略 stub 产出,非框架写死)
 
 ```mermaid
 sequenceDiagram
@@ -585,7 +594,7 @@ sequenceDiagram
     participant ORC as 编排核(内部)
     participant G as TaskGraphService
     participant P as TaskPlanner(编排壳)
-    participant Dp as DecomposerPort(stub/plan_bot)
+    participant Dp as PlanningStrategy stub(case strategy)
     participant D as TaskDispatcher
     participant R as TaskRunner
     participant X as 运行主体(单Bot/协作群/BBS)
@@ -601,7 +610,7 @@ sequenceDiagram
     P-->>ORC: 去重+硬契约后 list[TaskNode]
     ORC->>G: add_task_nodes(第一层;relations登记 n_root→子,根→PLANNING)
     ORC->>D: dispatch(toDo)
-    D->>D: BotDiscoverPort.search → 4态(填 node.run_info,不写图不起 run)
+    D->>D: DispatchStrategy.apply → 4态(填 node.run_info,不写图不起 run)
     alt HIT_SINGLE
         D-->>ORC: list[TaskNode](run_mode="single_bot",assignee 已填)
         ORC->>G: update_task_node_info(run_mode/assignee,RUNNING)
@@ -651,14 +660,14 @@ sequenceDiagram
 
 ## 7. Case 端到端推演:存储行业尽调(权威剧本 `gwqie46v7hzr1w6h`;从任务输入到任务执行完成按 API 流程串联)
 
-> 剧本输入(原文):任务=「存储行业尽调:AI 基础设施驱动下企业级与数据中心存储的最新变化、竞争格局与进入机会」;目标=产出一份尽调报告;验收标准(AI 设定,由 DecomposerPort 据此拆解):
+> 剧本输入(原文):任务=「存储行业尽调:AI 基础设施驱动下企业级与数据中心存储的最新变化、竞争格局与进入机会」;目标=产出一份尽调报告;验收标准(AI 设定,由 case 策略 stub 据此拆解):
 > ① 明确是否具备中短期投资价值;② 最值得跟踪的细分赛道/公司类型/核心变量;③ 市场规模/竞争格局/技术演进/客户需求四维度系统分析;④ ≥5 条核心投资判断,每条含支持证据+风险因素+待验证问题;⑤ ≥30% 判断来自最近 3 个月信息更新。
 > 剧本三阶段(执行主体天然覆盖三模态):
 > - **阶段一·快速建立行业全貌** → 单 Bot「行业信息抓取 Bot」(single_bot)
 > - **阶段二·深度专题研究** → 4 专题各落协作群/单 bot:专题A 市场(2 子bot 协作群)、专题B 技术(3 子bot 协作群)、专题C 供应链(单 bot)、专题D 客户(3 子bot 协作群)
 > - **阶段三·一手实践经验** → BBS 悬赏 ×2(认领执行由 bot 自主)
 
-**图结构**(由 singlebox 注入的 stub DecomposerPort 按三阶段 AC 拆解产出;节点名是 stub 产出非框架写死;仅列主干,子 bot 为协作群内部不进图):
+**图结构**(由 singlebox 注入的 case 策略 stub 按三阶段 AC 拆解产出;节点名是 stub 产出非框架写死;仅列主干,子 bot 为协作群内部不进图):
 
 | node | 角色 | 结构父(relations src→dst) | 规划批次 | 执行主体(run_mode) |
 |---|---|---|---|---|
@@ -676,7 +685,7 @@ sequenceDiagram
 **逐 step 端到端 API 流程串联(记法 `node[状态]`):**
 
 1. **任务输入→建图**:`Owner-Bot SKILL` 调 `TaskService.execute(TaskInfo{spec, source_channel=bot})`→`graph.initialize_graph`(run_id 分配,根 n_root[PENDING])→编排核 `on_execute`。
-2. **初始规划(委托)**:`on_execute`→条件 a(根 PENDING)成立→`planner.plan(graph)`→委托 `DecomposerPort.decompose(graph)`:seam 读图自发现目标=根 PENDING→产 `[N_overview]`(task_id 已填)。`graph.add_task_nodes([N_overview], parent_node_id="n_root")`:relations 登记 `n_root→N_overview`(分解树单入);n_root→PLANNING(委托态)。N_overview 被 add 即就绪(PENDING,无 dependencies_satisfied 闸门)。
+2. **初始规划(委托)**:`on_execute`→条件 a(根 PENDING)成立→`planner.plan(graph)`→委托 `planner.plan(graph)`:策略读图自发现目标=根 PENDING→产 `[N_overview]`(task_id 已填)。`graph.add_task_nodes([N_overview], parent_node_id="n_root")`:relations 登记 `n_root→N_overview`(分解树单入);n_root→PLANNING(委托态)。N_overview 被 add 即就绪(PENDING,无 dependencies_satisfied 闸门)。
 3. **派发(N_overview)**:`dispatch([N_overview])`→search→`HIT_SINGLE(行业信息抓取Bot)`→`update_task_node_info(run_mode="single_bot", assignee, RUNNING)`,N_overview[RUNNING]。
 4. **开始执行**:`start_run([N_overview])`→投递单 bot workflow。派发与执行分层:dispatcher 决定谁做,start_run 真正投递。
 5. **回投(PUSH)**:单 bot 完成→`TaskLoopCallback.report_result(TaskCallbackData{loop_task_id=N_overview 映射, workflow_type=single_bot, instance_id, result{success=true, data=行业全貌}})`→适配层 `on_report`→`update_task_node_info(output=行业全貌, acceptance=PASS)`→N_overview[DONE]。
