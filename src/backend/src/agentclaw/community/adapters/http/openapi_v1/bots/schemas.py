@@ -192,9 +192,13 @@ class BotAuthStatus(BaseModel):
         description="Authorization state reported by the issuer. The bot is "
         "created once it reads ISSUED."
     )
+    # Always null: neither construction site passes it, and `AuthStatusResult`
+    # carries no message to forward. Kept on the schema because dropping a
+    # published response property is a breaking change; described for what it
+    # does rather than what it was meant to do.
     message: str | None = Field(
-        default=None, description="Why authorization is not complete; null when "
-        "there is nothing to report."
+        default=None, description="Always null. Reserved for a human-readable "
+        "reason; nothing populates it. Read `status` for the outcome."
     )
     bot: Bot | None = Field(
         default=None, description="The created bot, present only once the "

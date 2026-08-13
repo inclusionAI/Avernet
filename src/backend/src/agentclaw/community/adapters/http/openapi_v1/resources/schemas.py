@@ -28,26 +28,30 @@ class Resource(BaseModel):
     workspace is stored is not exposed: `path` is relative to the workspace root.
     """
 
+    # A file entry, which is what most reads of this model return — so the
+    # example shows the empty `resource_id` and null timestamps a workspace
+    # entry actually carries, rather than a tidier record that no response
+    # matches.
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "resource_id": "r-8231",
+                "resource_id": "",
                 "name": "a.txt",
                 "type": "file",
                 "source": None,
                 "url": None,
                 "size": 2048,
                 "path": "docs/spec/a.txt",
-                "gmt_create": "2026-07-30T09:00:00+00:00",
-                "gmt_modified": "2026-07-30T09:12:04+00:00",
+                "gmt_create": None,
+                "gmt_modified": None,
             }
         }
     )
 
     resource_id: str = Field(
         description="Identifier of this resource record. This is the address of "
-        "a link — use it in the path of the per-link endpoints. Files and "
-        "folders are addressed by `path` instead."
+        "a link — use it in the path of the per-link endpoints. Empty for a "
+        "file or folder, which is addressed by `path` instead."
     )
     name: str = Field(
         description="Resource name. For a file or folder this is the last "
@@ -75,22 +79,27 @@ class Resource(BaseModel):
         "download, preview and delete, so an entry from a listing can be passed "
         "straight back. Null for a link.",
     )
-    # Null for a file the bot created itself: the device's directory listing
-    # carries no timestamps, so these come from the resource record — which
-    # exists for an uploaded file and for a link, but not for a file that was
-    # never uploaded through this API. The names stay DB-flavoured because that
-    # is the prevailing openapi_v1 convention (sessions, routines); renaming
-    # only this group would deepen the split with skills, which uses
-    # created_at / updated_at.
+    # Links only, and not because a file has no record — an uploaded file does.
+    # Every file and folder in a response is built from the workspace listing,
+    # which carries no timestamps, and neither the listing nor the upload
+    # response joins the record back in. So an uploaded file reports null here
+    # exactly like one the bot created itself. Only `_to_openapi_resource`,
+    # which serves links, has a record to read them from.
+    #
+    # The names stay DB-flavoured because that is the prevailing openapi_v1
+    # convention (sessions, routines); renaming only this group would deepen the
+    # split with skills, which uses created_at / updated_at.
     gmt_create: str | None = Field(
         default=None,
-        description="Creation time (ISO 8601). Null for a file the bot created "
-        "itself rather than one uploaded through this API.",
+        description="Creation time (ISO 8601). Populated for a link. Null for "
+        "every file and folder — whether you uploaded it or the bot created it "
+        "— because those are read from the workspace, which records no "
+        "timestamps.",
     )
     gmt_modified: str | None = Field(
         default=None,
-        description="Last-modified time (ISO 8601). Null for a file the bot "
-        "created itself rather than one uploaded through this API.",
+        description="Last-modified time (ISO 8601). Populated for a link. Null "
+        "for every file and folder, for the same reason as `gmt_create`.",
     )
 
 

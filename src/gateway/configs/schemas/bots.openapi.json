@@ -295,7 +295,7 @@
                 "type": "null"
               }
             ],
-            "description": "Why authorization is not complete; null when there is nothing to report.",
+            "description": "Always null. Reserved for a human-readable reason; nothing populates it. Read `status` for the outcome.",
             "title": "Message"
           },
           "status": {
@@ -3826,11 +3826,9 @@
       "Resource": {
         "description": "A file or folder in the bot's workspace, or an external link.\n\nFiles and folders are addressed by `path`, links by `resource_id`. Where the\nworkspace is stored is not exposed: `path` is relative to the workspace root.",
         "example": {
-          "gmt_create": "2026-07-30T09:00:00+00:00",
-          "gmt_modified": "2026-07-30T09:12:04+00:00",
           "name": "a.txt",
           "path": "docs/spec/a.txt",
-          "resource_id": "r-8231",
+          "resource_id": "",
           "size": 2048,
           "type": "file"
         },
@@ -3844,7 +3842,7 @@
                 "type": "null"
               }
             ],
-            "description": "Creation time (ISO 8601). Null for a file the bot created itself rather than one uploaded through this API.",
+            "description": "Creation time (ISO 8601). Populated for a link. Null for every file and folder — whether you uploaded it or the bot created it — because those are read from the workspace, which records no timestamps.",
             "title": "Gmt Create"
           },
           "gmt_modified": {
@@ -3856,7 +3854,7 @@
                 "type": "null"
               }
             ],
-            "description": "Last-modified time (ISO 8601). Null for a file the bot created itself rather than one uploaded through this API.",
+            "description": "Last-modified time (ISO 8601). Populated for a link. Null for every file and folder, for the same reason as `gmt_create`.",
             "title": "Gmt Modified"
           },
           "name": {
@@ -3877,7 +3875,7 @@
             "title": "Path"
           },
           "resource_id": {
-            "description": "Identifier of this resource record. This is the address of a link — use it in the path of the per-link endpoints. Files and folders are addressed by `path` instead.",
+            "description": "Identifier of this resource record. This is the address of a link — use it in the path of the per-link endpoints. Empty for a file or folder, which is addressed by `path` instead.",
             "title": "Resource Id",
             "type": "string"
           },
