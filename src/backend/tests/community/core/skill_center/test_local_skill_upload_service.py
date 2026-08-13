@@ -10,6 +10,9 @@ from types import SimpleNamespace
 import pytest
 
 from agentclaw.community.core.skill_center.errors import (
+    LocalSkillEditBusyError,
+    LocalSkillEditLockUnavailableError,
+    LocalSkillLayoutRollbackError,
     LocalSkillInvalidPackageError,
     LocalSkillNotReadyError,
     LocalSkillRuntimeSyncError,
@@ -22,7 +25,12 @@ from agentclaw.community.core.skill_center.factories import LocalSkillPackageSto
 from agentclaw.community.core.skill_center.services import (
     local_skill_upload_service as upload_module,
 )
-from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
+from agentclaw.community.core.skills_pool.edit_guard import (
+    SkillsPoolEditBusyError,
+    SkillsPoolEditGuard,
+    SkillsPoolEditLockUnavailableError,
+    SkillsPoolEditRollbackError,
+)
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutState,
     SkillLayout,
@@ -252,10 +260,13 @@ class _Audit:
 
 
 class _Guard:
-    def __init__(self):
+    def __init__(self, error=None):
         self._lock = asyncio.Lock()
+        self._error = error
 
     async def acquire_for_edit_wait(self, **_kwargs):
+        if self._error is not None:
+            raise self._error
         await self._lock.acquire()
         return object()
 
@@ -491,6 +502,7 @@ def _service(
     bot=None,
     factory=None,
     provider="local",
+    guard=None,
 ):
     return LocalSkillUploadService(
         repo or _Repo(),
@@ -500,10 +512,39 @@ def _service(
         factory or _Factory(filesystem),
         _RuntimeFactory(),
         audit or _Audit(),
-        _Guard(),
+        guard or _Guard(),
         _Cleanup(),
         lambda: _DeviceResolver(provider),
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("guard_error", "expected_error"),
+    [
+        (SkillsPoolEditBusyError("busy"), LocalSkillEditBusyError),
+        (SkillsPoolEditRollbackError("rollback"), LocalSkillLayoutRollbackError),
+        (
+            SkillsPoolEditLockUnavailableError("cache"),
+            LocalSkillEditLockUnavailableError,
+        ),
+    ],
+)
+async def test_upload_maps_guard_failures_to_public_domain_errors(
+    guard_error, expected_error
+):
+    service = _service(
+        _Filesystem(),
+        guard=_Guard(guard_error),
+    )
+
+    with pytest.raises(expected_error):
+        await service.upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=_zip({"SKILL.md": b"name: upload-skill\ndescription: useful\n"}),
+        )
 
 
 @pytest.mark.asyncio
