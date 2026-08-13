@@ -47,6 +47,8 @@ skills、engine config、identity 文件，以及（在支持的引擎上）一�
   `engine_overrides`），URL 源由平台在组装时物化进 OSS store。
 - **GitOps 语义**：manifest 管辖的实体每个 apply 点重新收敛，声明状态获胜，
   手工漂移被纠正；未声明的实体完全不碰。
+- **私有源鉴权走租户级凭证引用**：secret 不入 manifest / script / URL，
+  凭证绑定 origin、读回掩码；fetch 全在平台侧，凭证零引擎面。
 - **script 部分维持 #935 的全部安全机制**（base64 / `su admin` / `__OCB_RC` /
   `mktemp`）与支持判定口径（teclaw、desktop 拒绝）。
 

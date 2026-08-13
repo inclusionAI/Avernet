@@ -204,16 +204,42 @@ apply report。理由：同一产品功能在两类引擎上失败表现必须�
 - 条目级大小上限、总量上限、超时、限并发；
 - 响应只按字节流处理，永不执行。
 
-### 4.5 凭证边界
+### 4.5 私有源鉴权：凭证引用（credential reference）
 
-- **manifest 静态存储的保密级别 = 既有 bot 配置（DB）**，高于 script
-  （script 因下发链路日志可见，维持 #935「体内无密」结论不变）。
-- 但 **source URL 中不得携带长期凭证**：v1 的口径是用户源站以网络 ACL 或
-  签名 URL 自保护。签名 URL 有过期问题，只适合一次性场景，不适合「每个
-  apply 点重取」，文档如实告知。对私有源的正经凭证通道（引用平台凭证存储）
-  是独立的后续设计，不搭本期便车。
-- **MCP 凭证永不进 manifest**：manifest 只写 `server_code` 引用平台 MCP
-  注册表；凭证照现状由平台持有、compose 时按 `McpServerRef` 现有机制内联。
+fetch 是平台发出的普通 HTTPS GET，所以私有源鉴权的问题是「平台以什么身份
+去取」。原则先立住：**secret 永远不出现在 manifest / script / source URL
+里**——manifest 会被 GET 原样读回、出现在变更审计里；script 的下发链路
+日志可见（#935「体内无密」结论维持不变）。鉴权通过**引用**完成：
+
+1. **凭证是租户级命名对象**，独立于任何一个 bot 存储（同一个 CMS token
+   服务整批 bot，正是要消灭按 bot 重复配置）。经独立 API 写入
+   （见 §6），字段：`header_name`（如 `Authorization`）、`secret`（完整
+   头值，如 `Bearer eyJ…`）、`allowed_origins`（见下）。**写后不可读回**：
+   GET 只返回掩码元数据（`has_secret`、`header_name`、`allowed_origins`、
+   `updated_at`），与现有 MCP 统一配置「`api_key` 存储、读时掩码、用时
+   注入」是同一生命周期模式（`openapi_v1/mcp/router.py` 现状）——不是
+   平台新增的能力类别。
+2. **manifest 条目以名字引用**：带 `source` 的条目加可选字段
+   `auth: <credential-name>`，fetch 时平台把该凭证注入为请求头。
+3. **凭证绑定 origin**：`allowed_origins` 在凭证创建时声明（scheme +
+   host + port 精确匹配）。fetch 目标不在名单内 → 该条目直接 `failed`
+   （配置错误，明确报出，不是静默不带凭证）。这一条防的是持凭证引用权的
+   manifest 编辑者把 `source` 指向自己的服务器套取 token。同理，**跨
+   origin 重定向直接失败**——不是剥离凭证后继续，失败更不易被误用。
+4. **生命周期**：轮换 = 重新 PUT 同名凭证，下一个 apply 点自然用新值
+   （不触发 apply，惰性口径一致）；删除仍被引用的凭证 → 引用条目 apply
+   时 `failed`（「credential X 不存在」）。apply report 只记凭证**名**，
+   永不记值。存储侧按平台 secret 规格加密落库。
+5. **引擎面为零**：fetch 全在平台侧完成，凭证不下发容器、不进 artifact
+   （`StoreRef` 契约本就是 "location only — never credentials"）。MCP
+   凭证的 compose 时内联是既有契约、与本机制无关，照现状不变。
+
+无鉴权基线仍然成立：公开源、网络 ACL 自保护的源、签名 URL（有过期问题，
+只适合一次性场景）都不需要凭证引用。v1 注入方式仅支持请求头；query 参数
+型、mTLS 列入 v2 评估（开放问题 O8）。
+
+**MCP 凭证永不进 manifest**：manifest 只写 `server_code` 引用平台 MCP
+注册表；凭证照现状由平台持有、compose 时按 `McpServerRef` 现有机制内联。
 
 ## 5. 能力模型与版本化
 
@@ -248,6 +274,9 @@ apply report。理由：同一产品功能在两类引擎上失败表现必须�
 | `GET /openapi/v1/bots/{bot_id}/provisioning/capabilities` | 该 bot 的逐类别支持表 |
 | `POST /openapi/v1/bots/{bot_id}/provisioning/apply` | 显式 apply（可带 `dry_run=true` 返回计划不执行） |
 | `GET /openapi/v1/bots/{bot_id}/provisioning/last-apply` | 最近一次 apply report |
+| `PUT /openapi/v1/provisioning/credentials/{name}` | 写入/轮换租户级命名凭证（`header_name` / `secret` / `allowed_origins`，§4.5）。租户级路径——凭证不属于单个 bot |
+| `GET /openapi/v1/provisioning/credentials[/{name}]` | 列表 / 单个，仅掩码元数据，**永不返回 secret** |
+| `DELETE /openapi/v1/provisioning/credentials/{name}` | 删除；仍被引用时引用条目在下次 apply 记 `failed` |
 
 兼容性：既有 `GET/PUT/DELETE /openapi/v1/bots/{bot_id}/startup-script`
 （#935）保留，成为置备文档 `script` 部分的别名视图（write-through），行为
@@ -285,8 +314,8 @@ planning 决定；模块边界按 `context-boundary-format.md` 出 README。
 
 | 期 | 内容 |
 | --- | --- |
-| **v1** | manifest 五类（mcp / resources / skills / engine_config / identity）+ script 归编到置备文档；平台侧 apply + guarded fetcher；能力表；apply report；teclaw 经 artifact 组装生效 |
-| **v2 候选** | 条目级结果上报（teclaw 唯一可能的契约增量）；strict 就绪门控；`apply_once`；skill-center 引用源（`center://uuid@version`）；容器内 op CLI（服务 script 用户体验：`install-skill` 等意图层命令，ARCA 系实现）；私有源凭证通道；模板级 manifest（一份声明应用于多个 bot） |
+| **v1** | manifest 五类（mcp / resources / skills / engine_config / identity）+ script 归编到置备文档；平台侧 apply + guarded fetcher；租户级凭证引用（§4.5，仅请求头注入）；能力表；apply report；teclaw 经 artifact 组装生效 |
+| **v2 候选** | 条目级结果上报（teclaw 唯一可能的契约增量）；strict 就绪门控；`apply_once`；skill-center 引用源（`center://uuid@version`）；容器内 op CLI（服务 script 用户体验：`install-skill` 等意图层命令，ARCA 系实现）；凭证注入的扩展形态（query 参数 / mTLS，O8）；模板级 manifest（一份声明应用于多个 bot） |
 
 ## 10. 实现注意（backend 内部，不涉及引擎侧改动）
 

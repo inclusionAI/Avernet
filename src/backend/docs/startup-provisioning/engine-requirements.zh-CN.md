@@ -90,6 +90,7 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
 | O5 | strict 就绪门控（置备失败 = 不就绪）是否 v2 做 | v2 再议，两家族必须同步 | 平台 + 两引擎家族 |
 | O6 | 模板级 manifest（一份声明 → 多个 bot） | v2；v1 仅 bot 级 | 业务 |
 | O7 | `center://` skill-center 引用源 | v2 | backend |
+| O8 | 凭证注入方式是否需要请求头之外的形态（query 参数 token / mTLS） | v1 仅请求头；有真实业务源依赖再评估 | backend + 业务 |
 
 ## 6. 业务方前提确认清单
 
@@ -104,7 +105,9 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
    跑」（v1 明确不做，需 teclaw 侧出现执行通道后另行评估）？
 4. **生效时机**：「下次重建生效」（默认惰性）够不够？「立即生效」的显式
    apply（O3）是否 v1 必须？
-5. **凭证现实**：内容源目前是否依赖鉴权？v1 的口径（网络 ACL / 签名 URL，
-   无长期凭证）是否可落地？
+5. **凭证现实**：内容源目前用什么鉴权？v1 的凭证引用（design §4.5）仅
+   支持请求头注入（如 `Authorization: Bearer …`）；若你们的源依赖 query
+   参数 token 或 mTLS，请提出（对应开放问题 O8）。无鉴权基线（公开源 /
+   网络 ACL / 签名 URL）不受影响。
 6. **更新频率与体量**：源内容多大、多久变一次？用于校准限额（O4）与
    fetch 预算。

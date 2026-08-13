@@ -44,8 +44,45 @@ script:                        # 命令式部分，能力门控（teclaw / deskt
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
 | `digest` | 无 | `sha256:…`。校验 fetch 内容，不匹配按 fetch 失败处理（钉扎可复现） |
+| `auth` | 无 | 租户级命名凭证的引用（§2.1）；仅对 `source` 条目有效。fetch 时注入为请求头 |
 | `on_fetch_failure` | `keep_last` | `keep_last` / `skip` / `fail`（design §4.3） |
 | `apply_once` | —— | **v1 保留字，拒绝写入**；v2 语义见 design §3.2 |
+
+### 2.1 凭证引用 `auth`
+
+私有源的鉴权走**引用**，secret 永不出现在 manifest 里（设计论证与安全
+规则见 design §4.5）。凭证是租户级命名对象，一次性写入：
+
+```text
+PUT /openapi/v1/provisioning/credentials/cms
+{
+  "header_name": "Authorization",
+  "secret": "Bearer eyJhbGciOi…",
+  "allowed_origins": ["https://cms.example.com"]
+}
+```
+
+manifest 条目引用它：
+
+```yaml
+resources:
+  - path: data/faq.csv
+    source: https://cms.example.com/kb/faq.csv
+    auth: cms
+```
+
+校验与行为：
+
+- `auth` 引用的凭证不存在 → PUT manifest 时警告、apply 时该条目 `failed`
+  （「credential cms 不存在」）；
+- fetch 目标 URL 的 origin 不在该凭证的 `allowed_origins` 内 → 条目
+  `failed`（防凭证被 `source` 改指处套取）；跨 origin 重定向直接失败；
+- GET 凭证只返回掩码元数据（`has_secret` / `header_name` /
+  `allowed_origins` / `updated_at`）；
+- 轮换 = 重 PUT 同名凭证，下一个 apply 点生效，不触发 apply；
+- apply report 只记凭证名，永不记值。
+
+v1 仅支持请求头注入；query 参数型、mTLS 见开放问题 O8。
 
 ## 3. 类别定义
 
@@ -192,7 +229,9 @@ report。
 
 - **机制层文件操作**：不提供「往任意路径写文件」的条目类型。资源均以逻辑
   名/类型声明，物理位置永远是引擎的决定。
-- **secrets**：不提供凭证存储或引用；source URL 不得含长期凭证。
+- **内联 secrets**：manifest / script 体内与 source URL 中不得出现任何
+  凭证；私有源鉴权一律走凭证引用（§2.1），secret 只存在于租户凭证存储、
+  写后不可读回。
 - **`engine_ext`**：不可经 manifest 读写。
 - **删除资产**：manifest 只管理声明集合与 managed 标记，不级联删除用户
   资产。

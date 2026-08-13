@@ -12,6 +12,19 @@ teclaw）。他们的内容资产维护在自己的 CMS 服务上：人设 md、
 质检 skill、常见问题数据。今天每新开一个 bot 或每次内容更新，他们要按顺序
 手工调 4~5 个 open API；容器重建后 bot 立即可用但内容可能滞后。
 
+CMS 是私有源，先做一次性的租户级凭证注册（fetch 时注入为 `Authorization`
+头，且只会发给 `cms.example.com`；secret 写后不可读回——
+`manifest-schema.zh-CN.md` §2.1）：
+
+```text
+PUT /openapi/v1/provisioning/credentials/cms
+{
+  "header_name": "Authorization",
+  "secret": "Bearer eyJhbGciOi…",
+  "allowed_origins": ["https://cms.example.com"]
+}
+```
+
 置备文档写一次，每个 bot 的每次拉起自动完成全部动作：
 
 ```yaml
@@ -26,8 +39,10 @@ manifest:
   identity:
     - type: SOUL.md
       source: https://cms.example.com/bots/${OCB_BOT_ID}/soul.md
+      auth: cms
     - type: RULES.md
       source: https://cms.example.com/kb/service-rules.md
+      auth: cms
     - type: SAFETY.md
       content: |
         # 安全边界
@@ -36,11 +51,13 @@ manifest:
   resources:
     - path: data/faq.csv
       source: https://cms.example.com/kb/faq.csv
+      auth: cms
       on_fetch_failure: keep_last
 
   skills:
     - name: quality-check
       source: https://cms.example.com/skills/quality-check.zip
+      auth: cms
       digest: "sha256:9f2c…"          # 质检逻辑要求可复现，钉住版本
 
   mcp:
@@ -126,11 +143,15 @@ endpoint, transport, headers}`，凭证按现状于 compose 时从平台配置�
 resources:
   - path: data/faq.csv                    # workspace 相对路径，寻址规则与现有 API 完全一致
     source: https://cms.example.com/kb/faq.csv
+    auth: cms                             # 租户级命名凭证的引用（schema §2.1）
     on_fetch_failure: keep_last           # CMS 抖动时沿用上一版，不阻塞拉起
 ```
 
-**apply 做什么**：fetch → 与上次物化的 digest 比对 → 变化则经现有
-resource 写路径落盘并记 `updated`，未变记 `unchanged`。
+**apply 做什么**：fetch 就是平台 guarded fetcher 对该 URL 的一次 HTTPS
+GET；`auth: cms` 让它带上凭证 `cms` 声明的请求头（凭证在创建时绑定了
+`allowed_origins`，只会发给 `cms.example.com`，secret 不出现在 manifest
+里）→ 与上次物化的 digest 比对 → 变化则经现有 resource 写路径落盘并记
+`updated`，未变记 `unchanged`。
 
 **交付**：ARCA 系写入 bot 工作区（现有 device filesystem 路径，NAS 持久，
 重建即见）；teclaw 物化进 bot-data store 后以
@@ -160,6 +181,7 @@ README.md 兜底）。要求：全量 bot 生效、版本一致、可审计当�
 skills:
   - name: quality-check
     source: https://cms.example.com/skills/quality-check.zip
+    auth: cms
     digest: "sha256:9f2c…"      # 声明即锁版：digest 变了才算新版本
 ```
 
@@ -228,8 +250,10 @@ README，物理文件为 `<type>.md`——`openapi_v1/identity/schemas.py`）。
 identity:
   - type: SOUL.md
     source: https://cms.example.com/bots/${OCB_BOT_ID}/soul.md   # 平台注入变量按 bot 取内容
+    auth: cms
   - type: RULES.md
     source: https://cms.example.com/kb/service-rules.md
+    auth: cms
   - type: SAFETY.md
     content: |
       # 安全边界
