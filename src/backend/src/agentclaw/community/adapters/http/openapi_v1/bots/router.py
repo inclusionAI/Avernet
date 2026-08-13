@@ -90,6 +90,7 @@ from agentclaw.community.plugin_api.passport import PassportPlugin
 from .startup_script_support import (
     _startup_script_payload,
     _startup_script_target,
+    _withdraw_the_write_if_the_bot_was_deleted,
 )
 from .schemas import (
     Bot,
@@ -831,7 +832,13 @@ async def update_bot_startup_script(
         BotStartupScriptServiceProtocol
     ),
 ) -> Envelope[StartupScript]:
-    """Set or replace a bot's startup script. Takes effect on the next start.
+    """Set or replace a bot's startup script.
+
+    Takes effect the next time the platform **composes** a start command. A
+    restart or republish of the bot does that; a targeted device restart
+    (``POST /api/v1/devices/{binding_id}/restart``) and a scale-out do not —
+    they reuse the deploy config stored at the last compose, so a replica or a
+    restarted instance can still run the previously published script.
 
     Refused for a bot whose container cannot run one: storing it would be a
     silent no-op the caller could not distinguish from success.
@@ -852,6 +859,9 @@ async def update_bot_startup_script(
         # when one is acting, not the user it acted for.
         modifier=_audit_actor(caller, owner_id),
     )
+    _withdraw_the_write_if_the_bot_was_deleted(
+        bot_id, entity_id, owner_id, bot_service, startup_script_service
+    )
     return envelope(_startup_script_payload(bot_id, record, SUPPORTED, ""), request)
 
 
@@ -871,7 +881,13 @@ async def delete_bot_startup_script(
         BotStartupScriptServiceProtocol
     ),
 ) -> Envelope[Deleted]:
-    """Clear a bot's startup script. Idempotent; takes effect on the next start."""
+    """Clear a bot's startup script. Idempotent.
+
+    Takes effect the next time the platform composes a start command — see the
+    PUT for which starts do and do not recompose. Clearing does not reach an
+    already-running container, and does not reach a targeted device restart or
+    a scale-out replica until the bot is next restarted or republished.
+    """
     bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
     entity_id = bot.get("entity_id")
     if not entity_id:

@@ -970,16 +970,14 @@ def test_startup_script_put_stores_and_takes_modifier_from_the_principal(
     assert startup_script.put.call_args.kwargs["script"] == "echo new"
 
 
-def test_startup_script_put_does_not_re_check_the_bot_after_storing(
+def test_a_put_whose_bot_is_still_there_stores_and_returns_200(
     client, svc, startup_script
 ):
-    """One existence check, not two — the key cannot change hands mid-request.
+    """The ordinary path: the re-check finds the same bot and the write stands.
 
-    ``ac_bots`` constrains ``uk_bot_id_entity_id_env`` and its deletion is a
-    soft update, so a deleted bot keeps occupying ``(bot_id, entity_id, env)``
-    and no later bot can be created onto it. A write therefore cannot land on a
-    different bot than the one its guard admitted, and re-reading afterwards
-    would only cost a query to re-confirm what the schema already guarantees.
+    Two ``get_bot`` calls, not one — the second is the post-write re-check, and
+    it costs one read on the write path rather than a lock held across every
+    script write.
     """
     svc.get_bot.return_value = _SUPPORTED_BOT
     startup_script.put.return_value = _record(script="echo new")
@@ -991,7 +989,78 @@ def test_startup_script_put_does_not_re_check_the_bot_after_storing(
     )
 
     assert data["script"] == "echo new"
-    assert svc.get_bot.call_count == 1
+    assert svc.get_bot.call_count == 2
+    startup_script.delete.assert_not_called()
+
+
+def test_a_put_that_loses_the_race_with_deletion_is_withdrawn_and_404s(
+    client, svc, startup_script
+):
+    """A PUT can pass its existence check and then write after the deletion's
+    purge has already run, putting a row back for a bot that is gone.
+
+    Nothing will ever execute that row — the unique key means no later bot can
+    hold this key — but it is the caller's script text outliving the bot they
+    deleted, which is exactly what the pre-delete purge propagates failures to
+    avoid. So the write takes itself back, and the caller is told the bot is
+    gone rather than that their script was stored on it.
+    """
+    svc.get_bot.side_effect = [_SUPPORTED_BOT, BotNotFoundError("gone")]
+    startup_script.put.return_value = _record(script="echo new")
+
+    resp = client.put(
+        "/openapi/v1/bots/b1/startup-script", json={"script": "echo new"}
+    )
+
+    assert resp.status_code == 404
+    # Unconditional now: the key cannot have changed hands, so the only row
+    # that can be here is the one this request just wrote.
+    startup_script.delete.assert_called_once_with(entity_id="u1", bot_id="b1")
+
+
+def test_a_withdrawal_that_cannot_complete_is_not_reported_as_a_clean_404(
+    client, svc, startup_script
+):
+    """404 says the write did not take effect. If the row could not be removed
+    that is false, and nothing else is coming for it once the deletion has
+    finished — so the failure surfaces instead of being dressed up."""
+    svc.get_bot.side_effect = [_SUPPORTED_BOT, BotNotFoundError("gone")]
+    startup_script.put.return_value = _record(script="echo new")
+    startup_script.delete.side_effect = RuntimeError("db down")
+
+    with pytest.raises(RuntimeError, match="db down"):
+        client.put(
+            "/openapi/v1/bots/b1/startup-script", json={"script": "echo new"}
+        )
+
+
+def test_the_write_contract_does_not_promise_starts_that_never_recompose(
+    client, svc, startup_script
+):
+    """A targeted device restart and a scale-out reuse the deploy config stored
+    at the last compose, so an edit does not reach them.
+
+    The published description has to say so. "Takes effect on the next start"
+    read as a promise this feature cannot keep on those two paths, and a caller
+    who deleted a script would reasonably believe a device restart removed it.
+    """
+    # Asserted on the *published* description, not the docstring: that string is
+    # what a caller reads, and it is what promised more than the feature does.
+    from fastapi import FastAPI
+
+    from agentclaw.community.adapters.http.openapi_v1 import build_public_router
+
+    app = FastAPI()
+    app.include_router(build_public_router())
+    ops = app.openapi()["paths"]["/openapi/v1/bots/{bot_id}/startup-script"]
+
+    put_doc = ops["put"]["description"]
+    assert "composes" in put_doc
+    assert "scale-out" in put_doc and "devices/{binding_id}/restart" in put_doc
+    assert "next start." not in put_doc
+
+    delete_doc = ops["delete"]["description"]
+    assert "composes" in delete_doc and "scale-out" in delete_doc
 
 
 def test_delete_clears_the_script_at_the_key(client, svc, startup_script):
