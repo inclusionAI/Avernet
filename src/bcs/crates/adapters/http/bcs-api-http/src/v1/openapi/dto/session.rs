@@ -87,6 +87,18 @@ pub struct DeleteSessionQuery {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct CollectSessionRequest {
+    pub participant: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UncollectSessionQuery {
+    pub participant: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ListSessionsQuery {
     #[serde(default)]
     pub view_bot_id: Option<String>,

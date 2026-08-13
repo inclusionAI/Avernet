@@ -164,6 +164,18 @@ impl SessionService for NoopSessionService {
     ) -> Result<SessionCompletionResult, ApplicationError> {
         Err(ApplicationError::internal("not configured"))
     }
+    async fn collect(
+        &self,
+        _: CollectSession,
+    ) -> Result<SessionCollectionResult, ApplicationError> {
+        Err(ApplicationError::internal("not configured"))
+    }
+    async fn uncollect(
+        &self,
+        _: UncollectSession,
+    ) -> Result<SessionCollectionResult, ApplicationError> {
+        Err(ApplicationError::internal("not configured"))
+    }
     async fn add_participant(
         &self,
         _: AddSessionParticipant,
