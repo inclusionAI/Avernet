@@ -247,3 +247,59 @@ class TestBotBuildServiceRsyncExcludesConfig:
             pass
 
         service._sandbox_registry.resolve.assert_any_call("aicoding")
+
+
+def test_resolve_sandbox_provider_retries_repo_resolved_engine_before_default():
+    service = BotBuildService.__new__(BotBuildService)
+    service._bot_repository = MagicMock()
+    service._bot_repository.get_by_id_and_owner.return_value = {
+        "bot_id": "bot-1",
+        "owner_id": "owner-1",
+        "active_engine": "claude_code",
+        "template_type": "normalCC",
+    }
+    service._bot_repository.get_by_id.return_value = service._bot_repository.get_by_id_and_owner.return_value
+
+    default_provider = MagicMock(name="default_provider")
+    repo_provider = MagicMock(name="repo_provider")
+    service._sandbox_registry = MagicMock()
+    service._sandbox_registry.resolve.side_effect = [RuntimeError("missing routed provider"), repo_provider]
+
+    provider = service._resolve_sandbox_provider({
+        "bot_id": "bot-1",
+        "owner_id": "owner-1",
+        "active_engine": "unknown_engine",
+    })
+
+    assert provider is repo_provider
+    assert service._sandbox_registry.resolve.call_args_list == [
+        (("unknown_engine",),),
+        (("claude_code",),),
+    ]
+    default_provider.assert_not_called()
+
+
+def test_resolve_sandbox_provider_falls_back_to_default_when_retry_fails():
+    service = BotBuildService.__new__(BotBuildService)
+    service._bot_repository = MagicMock()
+    service._bot_repository.get_by_id_and_owner.side_effect = RuntimeError("repo unavailable")
+    service._bot_repository.get_by_id.side_effect = RuntimeError("repo unavailable")
+
+    default_provider = MagicMock(name="default_provider")
+    service._sandbox_registry = MagicMock()
+    service._sandbox_registry.resolve.side_effect = [
+        RuntimeError("missing first provider"),
+        default_provider,
+    ]
+
+    provider = service._resolve_sandbox_provider({
+        "bot_id": "bot-1",
+        "entity_id": "owner-1",
+        "active_engine": "unknown_engine",
+    })
+
+    assert provider is default_provider
+    assert service._sandbox_registry.resolve.call_args_list == [
+        (("unknown_engine",),),
+        (("openclaw",),),
+    ]
