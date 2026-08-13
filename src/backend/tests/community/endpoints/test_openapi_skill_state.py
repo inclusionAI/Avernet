@@ -19,6 +19,9 @@ from agentclaw.community.core.skill_center.services.local_skill_state_service im
 )
 from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.repository.protocols.skills_pool import (
+    SkillsPoolLayoutRepositoryProtocol,
+)
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
@@ -61,6 +64,12 @@ class _Runtime:
         self.success = success
 
     def sync_runtime(self) -> bool:
+        return self.success
+
+    async def publish_mappings(self, **_kwargs) -> bool:
+        return self.success
+
+    async def verify_mappings(self, **_kwargs) -> bool:
         return self.success
 
 
@@ -152,6 +161,7 @@ def _seed_state(world, *, runtime_success: bool) -> None:
         world.get(SkillSetRepository).add_default_skill_exclusion(
             _OWNER, _BOT_ID, int(skill_set["id"]), int(skill["id"])
         )
+    runtime_factory = _RuntimeFactory(runtime_success)
     world.injector.binder.bind(
         LocalSkillStateServiceProtocol,
         to=LocalSkillStateService(
@@ -159,8 +169,11 @@ def _seed_state(world, *, runtime_success: bool) -> None:
             world.get(SkillSetRepository),
             world.get(BotRepository),
             world.get(CollaboratorServiceProtocol),
-            _RuntimeFactory(runtime_success),
+            runtime_factory,
             _Guard(),
+            runtime_factory._runtime,
+            world.get(SkillRepository),
+            world.get(SkillsPoolLayoutRepositoryProtocol),
         ),
         scope=None,
     )
