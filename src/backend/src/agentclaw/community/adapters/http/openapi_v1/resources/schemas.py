@@ -138,17 +138,49 @@ class ResourceUpdate(BaseModel):
 
 
 class Preview(BaseModel):
-    """A readable rendering of a resource's content."""
+    """A file's content, read as text.
 
-    resource_id: str = Field(description="Resource this preview is of.")
+    Read `content`; the other three fields are constants this endpoint does not
+    vary, kept on the schema for compatibility. They are described for what they
+    actually are rather than what their names suggest.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "resource_id": "",
+                "content_type": "application/octet-stream",
+                "preview_url": None,
+                "content": "# Q3 notes\n\nRevenue is up 4%.\n",
+            }
+        }
+    )
+
+    # All three constants below are what the handler passes, verbatim. Describing
+    # them as varying — which they did before files moved to the workspace —
+    # would publish a contract no response can satisfy.
+    resource_id: str = Field(
+        description="Always empty. A preview is addressed by `path`, not by a "
+        "resource identifier."
+    )
     content_type: str = Field(
-        description="Media type of the previewed content, e.g. 'text/markdown'."
+        description="Always 'application/octet-stream'. This endpoint does not "
+        "detect the file's real media type — do not branch on this value."
     )
     preview_url: str | None = Field(
-        default=None, description="Where the preview can be fetched instead of "
-        "being read inline; null when the content is inline."
+        default=None,
+        description="Always null. The content is returned inline, never as a "
+        "URL to fetch it from.",
     )
+    # Left nullable rather than tightened to required. It is always populated on
+    # a 200, but moving a response property into `required` is what the
+    # compatibility gate calls `property-now-required`, and this change is not
+    # entitled to spend an --allow-breaking on a description fix. The
+    # description states the guarantee the shape no longer carries.
     content: str | None = Field(
-        default=None, description="The previewed content as text; null when only "
-        "a preview URL is available."
+        default=None,
+        description="The file's content, decoded as UTF-8. Always present on a "
+        "200 — never null, despite being nullable in the schema. Bytes that are "
+        "not valid UTF-8 are replaced rather than refused, so a mostly-text "
+        "file still previews.",
     )

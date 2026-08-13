@@ -61,6 +61,19 @@ _BOT_TYPE_RESPONSE_DESC = (
     "but not create or manage. Empty when the record carries no type."
 )
 
+# Read-side only, and deliberately open. The handlers forward the record's
+# status verbatim, and a desktop bot — readable here, though not creatable —
+# runs a wider lifecycle than the three states a bot created through this API
+# passes through.
+_STATUS_DESC = (
+    "Lifecycle status. Not a closed set — match leniently. A bot created "
+    "through this API reports PENDING while it is coming up, then ACTIVE, or "
+    "FAILED if it could not start. A desktop bot, which this API can read but "
+    "not create, also reports OFFLINE when it is up but unreachable, and "
+    "RELEASING or RELEASED while it is being torn down. Empty when the record "
+    "carries no status."
+)
+
 
 class Bot(BaseModel):
     """An agent (bot) record."""
@@ -89,7 +102,7 @@ class Bot(BaseModel):
     engine: str = Field(description=_ENGINE_DESC)
     cluster_name: ClusterName = Field(description=_CLUSTER_DESC)
     bot_type: str = Field(description=_BOT_TYPE_RESPONSE_DESC)
-    status: str = Field(description="Lifecycle status: PENDING | ACTIVE | FAILED.")
+    status: str = Field(description=_STATUS_DESC)
     owner_entity_id: str = Field(description="The user this bot belongs to.")
 
 
@@ -192,7 +205,7 @@ class BotAuthStatus(BaseModel):
 class BotStatus(BaseModel):
     """Runtime readiness of a bot."""
 
-    status: str = Field(description="Lifecycle status: PENDING | ACTIVE | FAILED.")
+    status: str = Field(description=_STATUS_DESC)
     is_ready: bool = Field(
         description="True when the bot has a bound device and can take work."
     )

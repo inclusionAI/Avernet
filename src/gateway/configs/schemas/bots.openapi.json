@@ -227,7 +227,7 @@
             "type": "string"
           },
           "status": {
-            "description": "Lifecycle status: PENDING | ACTIVE | FAILED.",
+            "description": "Lifecycle status. Not a closed set — match leniently. A bot created through this API reports PENDING while it is coming up, then ACTIVE, or FAILED if it could not start. A desktop bot, which this API can read but not create, also reports OFFLINE when it is up but unreachable, and RELEASING or RELEASED while it is being torn down. Empty when the record carries no status.",
             "title": "Status",
             "type": "string"
           }
@@ -386,7 +386,7 @@
             "type": "boolean"
           },
           "status": {
-            "description": "Lifecycle status: PENDING | ACTIVE | FAILED.",
+            "description": "Lifecycle status. Not a closed set — match leniently. A bot created through this API reports PENDING while it is coming up, then ACTIVE, or FAILED if it could not start. A desktop bot, which this API can read but not create, also reports OFFLINE when it is up but unreachable, and RELEASING or RELEASED while it is being torn down. Empty when the record carries no status.",
             "title": "Status",
             "type": "string"
           }
@@ -3774,7 +3774,12 @@
         "type": "object"
       },
       "Preview": {
-        "description": "A readable rendering of a resource's content.",
+        "description": "A file's content, read as text.\n\nRead `content`; the other three fields are constants this endpoint does not\nvary, kept on the schema for compatibility. They are described for what they\nactually are rather than what their names suggest.",
+        "example": {
+          "content": "# Q3 notes\n\nRevenue is up 4%.\n",
+          "content_type": "application/octet-stream",
+          "resource_id": ""
+        },
         "properties": {
           "content": {
             "anyOf": [
@@ -3785,11 +3790,11 @@
                 "type": "null"
               }
             ],
-            "description": "The previewed content as text; null when only a preview URL is available.",
+            "description": "The file's content, decoded as UTF-8. Always present on a 200 — never null, despite being nullable in the schema. Bytes that are not valid UTF-8 are replaced rather than refused, so a mostly-text file still previews.",
             "title": "Content"
           },
           "content_type": {
-            "description": "Media type of the previewed content, e.g. 'text/markdown'.",
+            "description": "Always 'application/octet-stream'. This endpoint does not detect the file's real media type — do not branch on this value.",
             "title": "Content Type",
             "type": "string"
           },
@@ -3802,11 +3807,11 @@
                 "type": "null"
               }
             ],
-            "description": "Where the preview can be fetched instead of being read inline; null when the content is inline.",
+            "description": "Always null. The content is returned inline, never as a URL to fetch it from.",
             "title": "Preview Url"
           },
           "resource_id": {
-            "description": "Resource this preview is of.",
+            "description": "Always empty. A preview is addressed by `path`, not by a resource identifier.",
             "title": "Resource Id",
             "type": "string"
           }
