@@ -14,6 +14,7 @@ from agentclaw.community.core.service_bot.services.baas_service import BaasServi
 
 def _make_service(personal_bot_template_uuid: str = "TEMPLATE-poolab") -> BaasService:
     return BaasService(
+        startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base="http://test",
         tenant="test",
         template_uuid="legacy-uuid",

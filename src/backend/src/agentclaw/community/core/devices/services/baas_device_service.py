@@ -46,7 +46,11 @@ from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.token_vault import TokenVault
-    from agentclaw.community.core.devices.protocols import BotQueryProtocol, BotSyncProtocol, McpSyncProtocol
+    from agentclaw.community.core.devices.protocols import (
+        BotQueryProtocol,
+        BotSyncProtocol,
+        McpSyncProtocol,
+    )
     from agentclaw.community.core.service_bot.services.baas_service import BaasService
     from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
     from agentclaw.community.plugin_api.secret_resolver import SecretResolver
@@ -350,6 +354,11 @@ class BaasDeviceService(DeviceService):
                 "template_config": template_config,
                 # 个人 Bot / 服务 Bot 草稿没有 migration_path，但启动仍按 NAS home 目录运行。
                 "mount_home_dir_storage": True,
+                # The per-bot startup script (issue #926) is NOT passed here.
+                # BaasService resolves it centrally in
+                # _build_create_bot_payload so create, release and restart all
+                # deliver it; passing "" from a failed lookup here would read
+                # as a deliberate override and silently suppress it.
             }
             if effective_bot_type == "service":
                 payload_kwargs["stage"] = PublishStage.DRAFT.value

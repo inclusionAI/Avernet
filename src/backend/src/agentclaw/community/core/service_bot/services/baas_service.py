@@ -21,7 +21,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
+import base64
 import json
+import re
 import time
 
 import httpx
@@ -60,6 +62,9 @@ from agentclaw.community.kernel.device_dto import (
 )
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.bot_startup_script.protocols import (
+        StartupScriptReaderProtocol,
+    )
     from agentclaw.community.plugin_api.outbound_rules import OutboundRuleProvider
     from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
@@ -71,6 +76,39 @@ logger = get_logger()
 
 
 ENGINE_DIR_MOUNT_WHITELIST_BUSINESS_CODE = "nas_mount"
+
+#: Where the per-bot startup script's output is captured (issue #926).
+#:
+#: The body itself goes to a ``mktemp`` file and is removed after the run. Two
+#: reasons it must not be a fixed path under /home/admin: that directory is
+#: NAS-mounted for many bots, so a fixed path would persist a plaintext body
+#: across restarts and outlive a DELETE of the script; and an unpredictable
+#: name owned by ``admin`` cannot be pre-created by anyone else.
+STARTUP_SCRIPT_LOG = "/home/admin/logs/startup_script.log"
+
+#: Separates the platform boot chain from the per-bot user stage, and the marker
+#: log redaction splits on so the platform half stays readable.
+_USER_STAGE_MARKER = "\n__OCB_RC=$?\n"
+
+#: Wall-clock cap on the user stage.
+#:
+#: Sized against the create budget on the other side of the callback: the
+#: backend's publish poller gives up at _CREATE_PUBLISH_TIMEOUT_SECONDS (600s,
+#: baas_publish_task_handlers.py) and the device only reports once this whole
+#: sequence exits. Half that budget leaves room for the platform steps and for
+#: the callback's own retries.
+STARTUP_SCRIPT_TIMEOUT_SECONDS = 300
+
+#: Grace period between ``timeout``'s TERM and its KILL.
+#:
+#: ``timeout N`` alone sends TERM and then *waits* — a script that traps or
+#: ignores TERM keeps the hook alive indefinitely, and nothing upstream would
+#: cut it short (see the ``after_create_hook_wait_seconds`` note in
+#: ``_build_create_bot_payload``: BaaS accepts that value and ignores it, and
+#: the wrapper is nohup'd). ``-k`` follows up with KILL, which cannot be
+#: caught, so the cap holds against a hostile or merely buggy script. The grace
+#: is short but non-zero so a well-behaved trap can still flush its own log.
+STARTUP_SCRIPT_KILL_GRACE_SECONDS = 10
 ENGINE_DIR_MOUNT_WHITELIST_PARAM_CODE = "engine_dir_mount_whitelist"
 
 
@@ -99,6 +137,67 @@ DEFAULT_READ_ONLY_RULES = [
         "rule_type": "glob",
     },
 ]
+
+
+
+#: The encoded script body inside the emitted user stage — everything between
+#: ``echo `` and `` | base64 -d``. Only this is redacted: the shell around it is
+#: platform-authored and is what makes these log lines worth reading.
+_ENCODED_BODY_RE = re.compile(r"echo ([A-Za-z0-9+/=]+) \| base64 -d")
+
+
+def _elide_encoded_body(match: "re.Match[str]") -> str:
+    """Replace an encoded body with its *decoded* size."""
+    encoded = match.group(1)
+    # 4 base64 chars per 3 bytes, minus padding — the caller's actual size.
+    decoded_len = len(encoded) // 4 * 3 - encoded.count("=")
+    return f"echo <startup script elided, {decoded_len} bytes> | base64 -d"
+
+
+def _redact_payload_for_log(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Shallow copy of a create payload with the *script body* elided.
+
+    ``after_create_cmd_hook`` is mostly the platform's own boot chain, which is
+    exactly what someone reads these logs to debug — so everything the platform
+    authored stays verbatim, including the ``if``/``fi``/``exit`` scaffolding
+    around the user stage. Only the caller's encoded body is replaced: the
+    published contract's "no secrets in a script body" is advice, not an
+    enforcement mechanism, and these payloads are logged at INFO on every
+    create, release and restart.
+
+    A hook with no encoded body is returned unchanged, so this is a no-op for
+    every bot without a script.
+
+    **This covers this log only.** The same hook travels on to the device
+    service, which logs ``rendered_hook[:1024]`` at INFO
+    (``_device_service.py``) — and the encoded body usually starts inside that
+    window, so its opening bytes are recoverable from *those* logs no matter
+    what happens here. Redacting there would mean changing that service; until
+    then the published contract says plainly that a body is logged in
+    recoverable form, rather than implying this function makes it safe.
+    """
+    config = payload.get("config")
+    if not isinstance(config, dict):
+        return payload
+    deploy = config.get("deploy_config")
+    if not isinstance(deploy, dict):
+        return payload
+
+    hook = deploy.get("after_create_cmd_hook")
+    if not isinstance(hook, str):
+        return payload
+
+    elided, count = _ENCODED_BODY_RE.subn(_elide_encoded_body, hook)
+    if not count:
+        return payload
+
+    redacted = dict(payload)
+    redacted["config"] = dict(config)
+    redacted["config"]["deploy_config"] = {
+        **deploy,
+        "after_create_cmd_hook": elided,
+    }
+    return redacted
 
 
 class BaasServiceError(Exception):
@@ -364,6 +463,7 @@ class BaasService:  # pragma: no cover
         secret_resolver: SecretResolver,
         common_whitelist_service: "CommonWhiteListService",
         outbound_rule_provider: "OutboundRuleProvider",
+        startup_script_reader: "StartupScriptReaderProtocol",
         personal_bot_template_uuid: Optional[str] = None,
         theta_master_key_secret: str = "",
     ):
@@ -414,6 +514,19 @@ class BaasService:  # pragma: no cover
         self._common_whitelist_service = common_whitelist_service
         self._outbound_rule_provider = outbound_rule_provider
         self._theta_master_key_secret = theta_master_key_secret
+        # Per-bot startup script (issue #926). Resolved here rather than passed
+        # down by each caller: _build_create_bot_payload is reached from create,
+        # from service-bot release, and from upgrade_bot (restart), and a script
+        # can only be written *after* a bot exists — so restart is the path that
+        # actually delivers it. Threading a parameter through every caller is
+        # how that path gets missed.
+        #
+        # Required, not optional. An optional reader means any composition that
+        # forgets to wire it still constructs, and then every start silently
+        # skips a stored script — the same invisible-unprovisioned failure this
+        # feature guards against elsewhere. Required, that mistake is a
+        # TypeError naming the argument at construction.
+        self._startup_script_reader = startup_script_reader
 
     def post_bots_api(
         self,
@@ -578,6 +691,7 @@ class BaasService:  # pragma: no cover
         template_config: Optional[Dict[str, Any]] = None,
         mount_home_dir_storage: bool | None = None,
         ext_info: Optional[Dict[str, Any]] = None,
+        startup_script: str | None = None,
     ) -> Dict[str, Any]:
         """构建创建 Bot 的请求体。
 
@@ -630,6 +744,16 @@ class BaasService:  # pragma: no cover
                 mount_home_dir_storage=mount_home_dir_storage,
             )
 
+        # Per-bot startup script. No production caller passes one — create,
+        # release, restart and both device services all take the ``None`` branch
+        # — so resolving here is what makes every one of those paths deliver the
+        # script. The parameter exists for tests that pin an exact body; keep it
+        # honest by not reading it as evidence of a live caller.
+        if startup_script is None:
+            startup_script = self._resolve_startup_script(
+                entity_id=entity_id, bot_id=bot_id
+            )
+
         # 构建 sandbox 成功后执行的命令
         start_up_cmd = self._get_start_cmd(
             bot_id=bot_id,
@@ -643,6 +767,7 @@ class BaasService:  # pragma: no cover
             version=version,
             mount_home_dir_storage=mount_home_dir_storage,
             ext_info=ext_info,
+            startup_script=startup_script,
         )
 
         # 构建实例销毁前置hook命令
@@ -722,6 +847,12 @@ class BaasService:  # pragma: no cover
         # (与 desktop_bot_service._build_create_bot_payload 同款姿势)
         deploy_config = BotDeployConfig(
             after_create_cmd_hook=start_up_cmd,
+            # NOTE: this does not bound the hook. BaaS threads it into
+            # dispatch_start_hook as ``hook_timeout`` and then ignores it
+            # (``# noqa: ARG001 - kept for API compatibility``); the wrapper is
+            # nohup'd and runs unbounded. So it does not contradict
+            # STARTUP_SCRIPT_TIMEOUT_SECONDS, which is enforced by ``timeout``
+            # in the command itself — and it is why that one has to be.
             after_create_hook_wait_seconds=10,
             before_destroy_cmd_hook=destroy_cmd,
             before_destroy_hook_wait_seconds=10,
@@ -891,7 +1022,8 @@ class BaasService:  # pragma: no cover
 
         logger.info(
             f"[BaasService.create_bot] "
-            f"Upgrading bot in BaaS: operator={owner_id}, request_id={request_id}, payload={payload}"
+            f"Upgrading bot in BaaS: operator={owner_id}, request_id={request_id}, "
+            f"payload={_redact_payload_for_log(payload)}"
         )
 
         try:
@@ -2217,6 +2349,7 @@ class BaasService:  # pragma: no cover
             version: str | None = "1",
             mount_home_dir_storage: bool = False,
             ext_info: Optional[Dict[str, Any]] = None,
+            startup_script: str = "",
     ):
         # 1、Bootstrap 补偿脚本
         bootstrap_cmp = self._get_bootstrap_cmp()
@@ -2238,10 +2371,116 @@ class BaasService:  # pragma: no cover
         # 6、 Start watchdog
         watchdog_cmd = self._get_start_watchdog_cmd()
 
-        return (
+        chain = (
             f"{bootstrap_cmp} && ({install_engine_cmd}) && "
             f" {start_cmd} && {watchdog_cmd}"
         )
+
+        # 7、 Per-bot startup script (issue #926)
+        if not startup_script:
+            return chain
+
+        # The user stage runs LAST and cannot influence the boot's outcome.
+        #
+        # __OCB_RC is load-bearing, not defensive. The BaaS wrapper takes its
+        # EXIT_CODE from this script's *last* command, and that code is what
+        # drives the device to ACTIVE or FAILED. Ending on `... || true` would
+        # therefore report SUCCESS for every start — including boots where
+        # bootstrap failed. Capture the platform status first, run the user
+        # stage, then re-assert it.
+        return (
+            f"{chain}"
+            f"{_USER_STAGE_MARKER}"
+            f'if [ "$__OCB_RC" -eq 0 ]; then\n'
+            f"{self._get_startup_script_segment(startup_script)}\n"
+            f"fi\n"
+            f"exit $__OCB_RC\n"
+        )
+
+    def _resolve_startup_script(self, *, entity_id: str, bot_id: str) -> str:
+        """Read the bot's stored startup script, or ``""`` when it has none.
+
+        **A read failure propagates.** It used to be swallowed, on the reasoning
+        that a new feature should not be able to break provisioning — but the
+        result of swallowing is a bot that starts, reports ready, and is not
+        provisioned, indistinguishable from one that never had a script. That is
+        the silent-wrong-answer failure this feature guards against everywhere
+        else, and the published contract says a stored script runs on **every**
+        start the platform composes.
+
+        "A failure degrades rather than blocks" is about the script's own
+        execution — a bad script costs a feature, not the bot. It was never
+        about quietly omitting a script that exists.
+
+        The blast radius is narrower than it looks: this is one indexed read on
+        the backend's own database, and every other step of a create or restart
+        reads that same database. A failure here almost certainly means the
+        operation was failing anyway, so propagating costs little and buys a
+        start that is either provisioned or visibly failed.
+
+        ``""`` still means "no script" — either the bot has no identity to look
+        one up by, or the reader has none stored. Neither is an error. An
+        unwired reader is no longer among these cases: it is now a constructor
+        argument, so it cannot be missing here.
+
+        ``(entity_id, bot_id)`` is the whole lookup, and it is enough: it names
+        one bot for the life of the data, because ``ac_bots`` constrains
+        ``uk_bot_id_entity_id_env`` and its deletion is a soft update, so the
+        tuple stays occupied and no later bot can be created onto it. That is
+        what lets the device-allocation callers — which hand-build a bot dict
+        and call this *before* any ``ac_bots`` row exists — use the same read as
+        everyone else.
+        """
+        if not entity_id or not bot_id:
+            return ""
+        return self._startup_script_reader.get_body(
+            entity_id=entity_id, bot_id=bot_id
+        )
+
+    def _get_startup_script_segment(
+        self,
+        script: str,
+        timeout_seconds: int = STARTUP_SCRIPT_TIMEOUT_SECONDS,
+        kill_grace_seconds: int = STARTUP_SCRIPT_KILL_GRACE_SECONDS,
+    ) -> str:
+        """Emit the user stage: decode, run under a timeout, never fail the boot.
+
+        The body is base64-encoded here rather than quoted. Two reasons, both
+        load-bearing:
+
+        1. It is never spliced into shell syntax, so no quote, ``$(...)`` or
+           heredoc delimiter in a caller's script can break out of the command
+           this method builds.
+        2. base64's alphabet has no braces, so BaaS's ``_safe_format_hook`` —
+           which regex-substitutes ``{token}`` / ``{client_id}`` across the whole
+           hook before running it — cannot reach inside the body and rewrite it.
+
+        Output goes to its own log so the script's chatter is separable from the
+        platform's inside the container, even though the two share one exit
+        status upstream.
+        """
+        encoded = base64.b64encode(script.encode("utf-8")).decode("ascii")
+        # Runs as ``admin``, like every platform step (``_get_bootstrap_cmp``
+        # and friends all use ``su admin -c``). The hook itself runs as root, so
+        # an unwrapped user stage would hand a caller root inside their own
+        # container and leave root-owned files behind under /home/admin.
+        #
+        # The body goes to ``mktemp`` and is removed afterwards: a fixed path
+        # under the NAS-mounted home would persist a plaintext script across
+        # restarts and survive a DELETE of it.
+        #
+        # Single-quoting is safe here: everything interpolated is either a fixed
+        # path or base64 (alphabet [A-Za-z0-9+/=]), so the body cannot contain a
+        # quote that closes this string. ``$f`` is expanded by the su'd shell at
+        # runtime, not by this f-string.
+        inner = (
+            "f=$(mktemp)"
+            f' && echo {encoded} | base64 -d > "$f"'
+            f" && timeout -k {kill_grace_seconds} {timeout_seconds}"
+            f' bash "$f" >> {STARTUP_SCRIPT_LOG} 2>&1'
+            '; rm -f "$f"'
+        )
+        return f"  su admin -c '{inner}' || true"
 
     def _get_destroy_cmd(
             self
@@ -3158,7 +3397,8 @@ class BaasService:  # pragma: no cover
 
         logger.info(
             f"[BaasService.upgrade_bot] "
-            f"Upgrading bot in BaaS: bot_uuid={bot_uuid}, operator={owner_id}, request_id={request_id}, payload={payload}"
+            f"Upgrading bot in BaaS: bot_uuid={bot_uuid}, operator={owner_id}, "
+            f"request_id={request_id}, payload={_redact_payload_for_log(payload)}"
         )
 
         # 调用 BaaS 层 API

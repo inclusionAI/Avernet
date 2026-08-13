@@ -87,6 +87,7 @@ provides:
   - BotFriendRepositoryProtocol
   - BotRepository
   - BotRestartLockRepositoryProtocol
+  - BotStartupScriptRepositoryProtocol
   - CollaboratorRepositoryProtocol
   - RenderScreenRepository
   - TemplateRepository
@@ -146,6 +147,7 @@ provides:
   - BotCollabLogRepository
   - BotFriendRepository
   - BotRestartLockRepository
+  - BotStartupScriptRepository
   - CollaboratorRepository
   # chat
   - BotChatDbRepository
@@ -190,6 +192,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_collaborator
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.bot_public
+  - agentclaw.community.core.bot_startup_script
   - agentclaw.community.core.caller_identity
   - agentclaw.community.core.channel
   - agentclaw.community.core.common_config

@@ -19,6 +19,7 @@ from fastapi import APIRouter, Body, Depends, Request
 from fastapi.responses import JSONResponse
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
+    STARTUP_SCRIPT_WRITE_RESPONSES,
     USER_SCOPED_403,
     Deleted,
     Envelope,
@@ -31,11 +32,15 @@ from agentclaw.community.adapters.http.openapi_v1.clusters import (
     cluster_for_engine,
     validate_engine_cluster,
 )
-from agentclaw.community.adapters.http.openapi_v1.errors import UnsupportedEngineError
+from agentclaw.community.adapters.http.openapi_v1.errors import (
+    StartupScriptUnsupportedError,
+    UnsupportedEngineError,
+)
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     require_principal,
 )
 from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
+from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     ActingCallerDep,
     UserIdDep,
@@ -68,6 +73,10 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     generate_bot_id,
     validate_bot_name,
 )
+from agentclaw.community.api.bot_startup_script_service import (
+    SUPPORTED,
+    BotStartupScriptServiceProtocol,
+)
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.core.workspace.constants import (
     DEFAULT_ENGINE_TYPE,
@@ -78,6 +87,11 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
+from .startup_script_support import (
+    _startup_script_payload,
+    _startup_script_target,
+    _withdraw_the_write_if_the_bot_was_deleted,
+)
 from .schemas import (
     Bot,
     BotAuthPending,
@@ -88,6 +102,8 @@ from .schemas import (
     BotUpdate,
     Ceiling,
     Passport,
+    StartupScript,
+    StartupScriptWrite,
 )
 
 logger = get_logger()
@@ -783,3 +799,138 @@ async def update_bot_engine_config(
         entity_type=entity_type, engine_type=engine, config=body,
     )
     return envelope(body, request)
+
+
+def _audit_actor(caller: ActingCaller, owner_id: str) -> str:
+    """Who to record as having changed the script.
+
+    For an application caller ``user_id`` is the *delegating* user, not the
+    caller — downstream code cannot tell an admitted application from that user,
+    which is the seam's whole point. That is right for scoping and wrong for an
+    audit field: recording it would have this executable body attributed to a
+    person who did not write it. So an application is named as itself, with the
+    user it acted for kept alongside.
+    """
+    if caller.is_application:
+        return f"app:{caller.app_id}:on-behalf-of:{owner_id}"
+    return owner_id
+
+
+
+@router.get(
+    "/{bot_id}/startup-script",
+    response_model=Envelope[StartupScript],
+    responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED,
+)
+@envelope_errors
+async def get_bot_startup_script(
+    bot_id: str,
+    request: Request,
+    owner_id: UserIdDep,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    startup_script_service: BotStartupScriptServiceProtocol = Injected(
+        BotStartupScriptServiceProtocol
+    ),
+) -> Envelope[StartupScript]:
+    """Read a bot's startup script.
+
+    A bot that has never had one reads as an empty script, not an error. A bot
+    whose container cannot run one still answers here — with `supported: false`
+    and a reason in `unsupported_reason` — so you can discover why before
+    attempting a write that would be refused.
+    """
+    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
+    entity_id, state, reason = _startup_script_target(bot, startup_script_service)
+    record = startup_script_service.get(entity_id=entity_id, bot_id=bot_id)
+    return envelope(_startup_script_payload(bot_id, record, state, reason), request)
+
+
+@router.put(
+    "/{bot_id}/startup-script",
+    response_model=Envelope[StartupScript],
+    responses=STARTUP_SCRIPT_WRITE_RESPONSES,
+    dependencies=_GRANT_CHECKED,
+)
+@envelope_errors
+async def update_bot_startup_script(
+    bot_id: str,
+    body: StartupScriptWrite,
+    request: Request,
+    owner_id: UserIdDep,
+    caller: ActingCallerDep,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    startup_script_service: BotStartupScriptServiceProtocol = Injected(
+        BotStartupScriptServiceProtocol
+    ),
+) -> Envelope[StartupScript]:
+    """Set or replace a bot's startup script.
+
+    Storing a script does not run it. It takes effect the next time the platform
+    composes a start command for the bot, which restarting or republishing the
+    bot does.
+
+    Not every start composes one. A targeted device restart
+    (`devices/{binding_id}/restart`) and a scale-out adding a replica both reuse
+    the deploy configuration captured at the last compose, so either can still
+    run the script that was stored before this write. Restart or republish the
+    bot if you need the new script in force everywhere.
+
+    Refused (409) for a bot whose container cannot run one — read the script
+    first to check `supported`. Storing it in that case would be a silent no-op
+    indistinguishable from success. A body over the size limit is refused (413).
+    """
+    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
+    # Desktop bots are refused by ``resolve_support`` itself, not by a guard
+    # here: gating only the write made GET answer ``supported: true`` for a bot
+    # whose next PUT was certain to fail, which is precisely the discovery path
+    # GET exists to provide.
+    entity_id, state, reason = _startup_script_target(bot, startup_script_service)
+    if state != SUPPORTED:
+        raise StartupScriptUnsupportedError(reason)
+    record = startup_script_service.put(
+        entity_id=entity_id,
+        bot_id=bot_id,
+        script=body.script,
+        # From the verified caller, never the body — and naming the application
+        # when one is acting, not the user it acted for.
+        modifier=_audit_actor(caller, owner_id),
+    )
+    _withdraw_the_write_if_the_bot_was_deleted(
+        bot_id, entity_id, owner_id, bot_service, startup_script_service
+    )
+    return envelope(_startup_script_payload(bot_id, record, SUPPORTED, ""), request)
+
+
+@router.delete(
+    "/{bot_id}/startup-script",
+    response_model=Envelope[Deleted],
+    responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED,
+)
+@envelope_errors
+async def delete_bot_startup_script(
+    bot_id: str,
+    request: Request,
+    owner_id: UserIdDep,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    startup_script_service: BotStartupScriptServiceProtocol = Injected(
+        BotStartupScriptServiceProtocol
+    ),
+) -> Envelope[Deleted]:
+    """Clear a bot's startup script. Idempotent.
+
+    Clearing a script does not reach an already-running container. It takes
+    effect when the platform next composes a start command, on the same schedule
+    a write does: a targeted device restart and a scale-out replica reuse the
+    deploy configuration captured at the last compose, so either can still run
+    the script you cleared until the bot is restarted or republished.
+    """
+    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
+    entity_id = bot.get("entity_id")
+    if not entity_id:
+        raise BotNotFoundError("bot has no associated entity")
+    startup_script_service.delete(entity_id=entity_id, bot_id=bot_id)
+    return deleted_envelope(request)
+
+

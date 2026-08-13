@@ -26,7 +26,7 @@ from secbaas.community.api.bot_runtime import BotChatContext, BotRunner
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.repository.api_gateway import APIKeyRepository
 from secbaas.community.core.repository.bot_run import BotRunRepository
-from secbaas.community.core.service.bcn.uplink import UplinkClient
+from secbaas.community.core.service.bcn.uplink import BcnUplinkCallback, UplinkClient
 from secbaas.community.logger import get_logger
 
 logger = get_logger("core-service")
@@ -74,6 +74,7 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
         self._bcn_api_key_prefix = bcn_api_key_prefix
         self._uplink_client = uplink_client
         self._run_repository = run_repository
+        self._uplink_callback = BcnUplinkCallback(uplink_client, run_repository)
 
     async def handle_chat_send(self, chat_send_input: ChatSendInput) -> ChatSendResult:
         """处理 chat.send 请求
@@ -141,11 +142,16 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
                     _session_id,
                 )
             except Exception as e:
-                logger.error(
+                logger.exception(
                     "[chat.send] deliver_message failed: run_id=%s err=%s",
                     chat_send_input.run_id,
                     e,
                 )
+                self._run_repository.update_error(
+                    run_id=chat_send_input.run_id,
+                    error="Message delivery failed",
+                )
+                await self._uplink_callback(chat_send_input.run_id)
 
         asyncio.create_task(_async_deliver())
 

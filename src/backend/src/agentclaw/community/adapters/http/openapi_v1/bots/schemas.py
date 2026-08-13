@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -239,3 +240,55 @@ class Passport(BaseModel):
 
     bot_id: str = Field(description="Bot the credential belongs to.")
     passport_id: str = Field(description="Identifier of the issued credential.")
+
+
+class StartupScriptWrite(BaseModel):
+    """Write a bot's startup script. The script is the only field you send.
+
+    The audit fields on the read model are deliberately absent here:
+    `updated_by` comes from the authenticated caller and `updated_at` from the
+    stored row, so neither can be asserted by a request. Sending either is a
+    422 rather than a silently-dropped field.
+    """
+
+    # `_request_body` rather than a bare strict config: it carries the example
+    # too, and a request model without one renders as an empty editor in an API
+    # console — the failure this change exists to remove.
+    model_config = _request_body(
+        {"script": "#!/bin/sh\nset -e\napt-get install -y --no-install-recommends jq\n"}
+    )
+
+    script: str = Field(
+        description=(
+            "Shell script run inside the bot's container on every container "
+            "start, after the platform's own boot steps. Must be idempotent — "
+            "it runs again on every start and the platform does not dedupe. "
+            "Do not put secrets in the body."
+        ),
+    )
+
+
+class StartupScript(BaseModel):
+    """A bot's stored startup script. Every field is server-derived."""
+
+    bot_id: str = Field(description="Bot this script belongs to.")
+    script: str = Field(description="Empty when the bot has no stored script.")
+    size_bytes: int = Field(
+        description="Size of the stored script in bytes; 0 when there is none."
+    )
+    updated_by: str = Field(description="Empty when the bot has no stored script.")
+    updated_at: datetime | None = Field(
+        default=None,
+        description="Null only when the bot has no stored script.",
+    )
+    supported: bool = Field(
+        description=(
+            "False when this bot's container cannot run a startup script. A "
+            "write is refused in that case rather than stored."
+        ),
+    )
+    unsupported_reason: str = Field(
+        description="Empty when supported; otherwise names the cause.",
+    )
+
+

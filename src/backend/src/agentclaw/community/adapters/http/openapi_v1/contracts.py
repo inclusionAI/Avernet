@@ -12,6 +12,11 @@ from typing import Annotated
 from fastapi import Depends, Query
 from pydantic import BaseModel, ConfigDict, Field
 
+# The published startup-script size limit, imported rather than retyped so the
+# example in STARTUP_SCRIPT_WRITE_RESPONSES cannot drift from the enforced value.
+# From ``api/`` — the Service API seam — not the core service module it lives in.
+from agentclaw.community.api.bot_startup_script_service import MAX_SCRIPT_BYTES
+
 # Standard codes = HTTP status (3 digits) + business subcode (3 digits).
 CODE_OK = 200000
 CODE_CREATED = 201000
@@ -93,6 +98,34 @@ USER_SCOPED_403: dict[int | str, dict[str, object]] = {
         "model": ErrorEnvelope,
         "description": "The user_id names a user the authenticated caller may "
         "not act for",
+    },
+}
+
+# The extra failure the startup-script **write** can produce. Kept here beside
+# the other per-route sets rather than inline in the bots router, which sits
+# against the 1000-line module cap.
+#
+# It is not in ``ERROR_RESPONSES``: that dict is applied surface-wide, and no
+# other operation can answer 413. Without this entry the status is reachable but
+# invisible to a client generated from the published schema — the 409 for an
+# unsupported bot is already carried by the base set.
+STARTUP_SCRIPT_WRITE_RESPONSES: dict[int | str, dict[str, object]] = {
+    **USER_SCOPED_403,
+    413: {
+        "model": ErrorEnvelope,
+        "description": "Script body exceeds the size limit.",
+        "content": {
+            "application/json": {
+                "example": {
+                    "code": 413000,
+                    "message": (
+                        f"Startup script exceeds the {MAX_SCRIPT_BYTES}-byte limit"
+                    ),
+                    "data": None,
+                    "request_id": "",
+                }
+            }
+        },
     },
 }
 

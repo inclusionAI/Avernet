@@ -509,6 +509,52 @@ class TestAiohttpBotServicePluginGetBinding:
         assert exc_info.value.code == ErrorCode.PLATFORM_UNAVAILABLE
 
     @pytest.mark.asyncio
+    async def test_get_binding_retries_transient_timeout(self):
+        """A transient timeout is retried once before a successful response."""
+        plugin = AiohttpBotServicePlugin(
+            base_url="https://agentclaw.example.com",
+        )
+
+        api_response = {
+            "success": True,
+            "message": "查询成功",
+            "error_code": None,
+            "data": {
+                "bot_id": "bot_001",
+                "owner_id": "owner_001",
+                "bot_type": "service",
+                "engine_type": "openclaw",
+                "binding_id": 202,
+                "device_provider": "baas",
+                "device_id": "device-001",
+            },
+        }
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value=api_response)
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(
+            side_effect=[TimeoutError("timed out"), mock_response]
+        )
+        mock_session.closed = False
+        mock_session.close = AsyncMock()
+        plugin._session = mock_session
+
+        with patch(
+            "secbaas.community.plugins.bot_service.real._plugin.asyncio.sleep",
+            new=AsyncMock(),
+        ) as mock_sleep:
+            result = await plugin.get_binding("bot_001", "owner_001", "online")
+
+        assert result.binding_id == 202
+        assert mock_session.get.call_count == 2
+        mock_sleep.assert_awaited_once()
+        await plugin.close()
+
+    @pytest.mark.asyncio
     async def test_get_binding_timeout_raises_platform_unavailable(self):
         """TimeoutError → PaasError(PLATFORM_UNAVAILABLE)."""
         plugin = AiohttpBotServicePlugin(

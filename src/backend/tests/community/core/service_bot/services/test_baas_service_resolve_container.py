@@ -17,6 +17,7 @@ from agentclaw.community.plugins.local.http_client import LocalHttpClient
 
 def _make_service() -> BaasService:
     return BaasService(
+        startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base="http://baas.test",
         tenant="tnt",
         template_uuid="tpl",

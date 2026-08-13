@@ -38,6 +38,9 @@ import inspect
 
 import pytest
 
+from agentclaw.community.api.bot_startup_script_service import (
+    BotStartupScriptServiceProtocol,
+)
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.api.engine_connection_service import (
     EngineConnectionServiceProtocol,
@@ -57,6 +60,9 @@ from agentclaw.community.api.local_skill_state_service import (
 )
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
+)
+from agentclaw.community.core.bot_startup_script.services.startup_script_service import (
+    BotStartupScriptService,
 )
 from agentclaw.community.core.engine_runtime.connection import EngineConnectionService
 from agentclaw.community.core.engine_runtime.relay import EngineRuntimeRelay
@@ -79,6 +85,7 @@ from agentclaw.community.core.skill_center.services.local_skill_delete_service i
 # (Protocol, ConcreteService) pairs whose Protocol declares real signatures.
 _PAIRS = [
     (BotAppGrantServiceProtocol, BotAppGrantService),
+    (BotStartupScriptServiceProtocol, BotStartupScriptService),
     (EngineConfigServiceProtocol, EngineConfigService),
     (EngineRuntimeRelayProtocol, EngineRuntimeRelay),
     (EngineConnectionServiceProtocol, EngineConnectionService),
