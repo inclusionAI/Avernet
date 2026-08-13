@@ -13,6 +13,7 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
     NodeOpResult,
     Status,
+    TaskGraphPatch,
     TaskNode,
     TaskNodePatch,
     TaskNodeQueryCriteria,
@@ -182,19 +183,29 @@ class ExecutionEngine:
 
     # ===== 升 BBS =====
     def _escalate_bbs(self, task_id: str, node_id: str) -> None:
-        """自动升 BBS(无人工挡板):remove_subtree(删 xx_node+子树)+ loop_round++ + 标 BBS + 挂广场。
-        loop_round ≥ BBS_MAX_DEPTH → STUCK → graph HUNG(人介入)。"""
-        graph = self._graph.query_task_dashboard(task_id)
+        """自动升 BBS(无人工挡板):remove_subtree(删 xx_node+子树)+ 经图级写口 loop_round++ + 标 BBS + 挂广场。
+        loop_round ≥ BBS_MAX_DEPTH → STUCK → graph HUNG(人介入)。图级写收口 update_task_graph_info(SSOT)。"""
         self._graph.remove_subtree(task_id, node_id)
-        graph.loop_round += 1  # in-memory 直接改(仅升 BBS ++)
+        # 先 ++ loop_round,再读最新值判 STUCK(写口返回最新图)
+        graph = self._graph.update_task_graph_info(
+            task_id, TaskGraphPatch(loop_round_increment=1)
+        )
         cfg = self._graph._execution_config(task_id)
         bbs_max = cfg["BBS_MAX_DEPTH"]
         if graph.loop_round >= bbs_max:
-            # STUCK → graph HUNG(人介入);node 已删,标 graph 级
-            graph.status = Status.HUNG
-            graph.extend_props["hung_reason"] = "stuck"
+            # STUCK → graph HUNG(人介入);node 已删,标 graph 级(经图级写口)
+            self._graph.update_task_graph_info(
+                task_id,
+                TaskGraphPatch(
+                    status=Status.HUNG,
+                    extend_props_patch={"hung_reason": "stuck"},
+                ),
+            )
         else:
-            graph.extend_props["bbs_mode"] = True
+            self._graph.update_task_graph_info(
+                task_id,
+                TaskGraphPatch(extend_props_patch={"bbs_mode": True}),
+            )
             if self._bbs_market is not None:
                 self._bbs_market.publish_task(task_id)
 
@@ -248,7 +259,11 @@ class ExecutionEngine:
         self._verify_port.request_verify(task_id, root.node_id)
 
     def _maybe_finish_graph(self, task_id: str) -> None:
-        """根 PASS(终验通过)→ 全图 DONE。in-memory 直接改 graph.status(后续 ORM 经 M1 API)。"""
-        graph = self._graph.query_task_dashboard(task_id)
-        graph.status = Status.DONE
-        graph.output = {"result": "all_done"}
+        """根 PASS(终验通过)→ 全图 DONE。图级写收口 update_task_graph_info(SSOT 唯一网关)。"""
+        self._graph.update_task_graph_info(
+            task_id,
+            TaskGraphPatch(
+                status=Status.DONE,
+                output_patch={"result": "all_done"},
+            ),
+        )

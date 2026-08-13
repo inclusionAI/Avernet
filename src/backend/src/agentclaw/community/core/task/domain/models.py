@@ -157,6 +157,21 @@ class TaskNodePatch:
 
 
 @dataclass
+class TaskGraphPatch:
+    """图级原子写(``update_task_graph_info`` 入参);收口图级终态(图 ``status``/``loop_round``/``output``/``extend_props``)。
+
+    所有字段可选(增量 patch):未给的字段不动。``loop_round_increment`` 非空时执行原子加(默认 +1);
+    ``status`` 非空时置图级终态;``output_patch`` 浅合并到图 ``output``;``extend_props_patch`` 浅合并到图
+    ``extend_props``(承载 ``bbs_mode``/``hung_reason`` 等)。
+    """
+
+    loop_round_increment: int | None = None
+    status: Status | None = None
+    output_patch: dict[str, Any] | None = None
+    extend_props_patch: dict[str, Any] | None = None
+
+
+@dataclass
 class TaskNodeQueryCriteria:
     """节点查询条件(内部用)。"""
 

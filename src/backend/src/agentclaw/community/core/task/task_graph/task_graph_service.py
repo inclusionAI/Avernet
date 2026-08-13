@@ -23,6 +23,7 @@ from agentclaw.community.core.task.domain.models import (
     RuntimeInfo,
     Status,
     TaskExecutionGraph,
+    TaskGraphPatch,
     TaskInfo,
     TaskNode,
     TaskNodePatch,
@@ -249,6 +250,22 @@ class TaskGraphService:
                 prev_status=prev_status,
                 new_status=node.status,
             )
+
+    def update_task_graph_info(self, task_id: str, patch: TaskGraphPatch) -> TaskExecutionGraph:
+        """图级原子写口:收口图级终态(``status``=DONE/HUNG、``loop_round`` 原子加、``output`` 浅合并、
+        ``extend_props`` 浅合并承载 ``bbs_mode``/``hung_reason``)。图谱 SSOT 唯一图级写口;编排核升 BBS /
+        根终验完成等图级终态变更一律经此方法,不直写返回的 graph 引用。所有字段增量:未给不动。"""
+        with self._lock_for(task_id):
+            graph = self._require_graph(task_id)
+            if patch.loop_round_increment is not None:
+                graph.loop_round += patch.loop_round_increment
+            if patch.status is not None:
+                graph.status = patch.status
+            if patch.output_patch is not None:
+                graph.output.update(patch.output_patch)
+            if patch.extend_props_patch is not None:
+                graph.extend_props.update(patch.extend_props_patch)
+            return graph
 
     def query_task_dashboard(self, task_id: str, node_id: str | None = None) -> TaskExecutionGraph:
         """只读看板快照。node_id=None 返回整图引用;指定 node_id 返回该节点子树投影(新构造对象)。"""

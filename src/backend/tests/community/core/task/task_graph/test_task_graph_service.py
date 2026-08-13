@@ -29,6 +29,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodePatch,
     TaskNodeQueryCriteria,
     TaskSpec,
+    TaskGraphPatch,
 )
 from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
 
@@ -303,6 +304,78 @@ class TestRemoveSubtree:
 
 
 # ===== execution_config / not found =====
+class TestUpdateTaskGraphInfo:
+    """图级原子写口 update_task_graph_info(收口图级终态)。"""
+
+    def test_loop_round_increment(self, svc: TaskGraphService, graph):
+        g = svc.update_task_graph_info("t1", TaskGraphPatch(loop_round_increment=1))
+        assert g.loop_round == 1
+        svc.update_task_graph_info("t1", TaskGraphPatch(loop_round_increment=2))
+        assert svc.query_task_dashboard("t1").loop_round == 3  # 原子加 2
+
+    def test_status_done(self, svc: TaskGraphService, graph):
+        g = svc.update_task_graph_info("t1", TaskGraphPatch(status=Status.DONE))
+        assert g.status == Status.DONE
+        assert svc.query_task_dashboard("t1").status == Status.DONE
+
+    def test_status_hung(self, svc: TaskGraphService, graph):
+        g = svc.update_task_graph_info("t1", TaskGraphPatch(status=Status.HUNG))
+        assert g.status == Status.HUNG
+
+    def test_output_patch_merge(self, svc: TaskGraphService, graph):
+        assert graph.output == {}
+        svc.update_task_graph_info("t1", TaskGraphPatch(output_patch={"result": "all_done"}))
+        g = svc.update_task_graph_info("t1", TaskGraphPatch(output_patch={"extra": "x"}))
+        assert g.output == {"result": "all_done", "extra": "x"}  # 浅合并累积
+
+    def test_extend_props_patch_merge(self, svc: TaskGraphService, graph):
+        svc.update_task_graph_info("t1", TaskGraphPatch(extend_props_patch={"bbs_mode": True}))
+        svc.update_task_graph_info("t1", TaskGraphPatch(extend_props_patch={"hung_reason": "stuck"}))
+        g = svc.query_task_dashboard("t1")
+        assert g.extend_props.get("bbs_mode") is True
+        assert g.extend_props.get("hung_reason") == "stuck"  # 浅合并累积
+
+    def test_combined_atomic_write(self, svc: TaskGraphService, graph):
+        """一次 patch 多字段原子写(升 BBS 后 STUCK 场景)。"""
+        svc.remove_subtree("t1", "t1")  # 清空,模拟升 BBS remove
+        # 重建空图场景不可能(remove_root 后无根),改直接 patch
+        svc2 = TaskGraphService()
+        svc2.initialize_graph(_task_info("tX"))
+        svc2.update_task_graph_info(
+            "tX",
+            TaskGraphPatch(
+                loop_round_increment=1,
+                status=Status.HUNG,
+                extend_props_patch={"hung_reason": "stuck"},
+                output_patch={"result": "stuck"},
+            ),
+        )
+        g = svc2.query_task_dashboard("tX")
+        assert g.loop_round == 1
+        assert g.status == Status.HUNG
+        assert g.extend_props["hung_reason"] == "stuck"
+        assert g.output["result"] == "stuck"
+
+    def test_omitted_fields_untouched(self, svc: TaskGraphService, graph):
+        """未给字段不动(增量 patch)。"""
+        assert graph.loop_round == 0
+        assert graph.output == {}
+        svc.update_task_graph_info("t1", TaskGraphPatch(status=Status.DONE))
+        g = svc.query_task_dashboard("t1")
+        assert g.loop_round == 0  # 未给 loop_round_increment,不动
+        assert g.output == {}     # 未给 output_patch,不动
+
+    def test_task_not_found(self, svc: TaskGraphService):
+        with pytest.raises(TaskNotFoundError):
+            svc.update_task_graph_info("nope", TaskGraphPatch(status=Status.DONE))
+
+    def test_concurrent_safe(self, svc: TaskGraphService, graph):
+        """加锁原子加并发安全(简化:顺序多次加不丢)。"""
+        for _ in range(100):
+            svc.update_task_graph_info("t1", TaskGraphPatch(loop_round_increment=1))
+        assert svc.query_task_dashboard("t1").loop_round == 100
+
+
 class TestMisc:
     def test_execution_config_default(self, svc: TaskGraphService, graph):
         cfg = svc._execution_config("t1")
