@@ -1,6 +1,6 @@
 # Manifest Schema v1（草案）
 
-> 状态：DRAFT（对接讨论稿）。设计论证见 `design.zh-CN.md`；本文只定义文档
+> 状态：DRAFT（讨论稿）。设计论证见 `design.zh-CN.md`；本文只定义文档
 > 形状、校验规则与到各引擎的映射。字段名以定稿评审为准。
 
 ## 1. 顶层结构
@@ -55,7 +55,7 @@ script:                        # 命令式部分，能力门控（teclaw / deskt
 | mcp | MCP 启用配置（现 `openapi_v1/mcp` 同源服务） | 现有 per-MCP push（`/api/mcp`） | `mcp.servers[]`（`McpServerRef`，凭证 compose 时内联，现状机制） |
 | resources | resource 记录（现 `openapi_v1/resources` 同源服务） | 现有 resource 交付 | `resources[]`（`ResourceRef {store,path}`） |
 | skills | 本地 skill 记录（现 skills upload 同源服务） | 现有 skill 交付 / NAS | `skills[]`（`SkillRef, scope=user`） |
-| engine_config | engine config（`EngineConfigServiceProtocol.write_bot_config`） | 现有 provider-blind 写 | `engine_overrides`（**对接确认项 T3**） |
+| engine_config | engine config（`EngineConfigServiceProtocol.write_bot_config`） | 现有 provider-blind 写 | `engine_overrides`（**待确认项 T3**） |
 | identity | identity 文件记录（现 `openapi_v1/identity` 同源服务） | 现有 identity 交付 | `identity_files[]`（`FileRef`） |
 | script | script 存储（#935 现状） | `after_create_cmd_hook` 启动链 | **不支持，写入时拒绝** |
 
@@ -152,7 +152,7 @@ script:
 - 顺序保证：在 manifest 实体交付完成后执行（design §3.4），脚本可以假定
   声明的 skill / identity 已就位。
 - 能力：ARCA 系支持；teclaw、desktop、LOCAL/singlebox、ARCA-direct 遗留
-  形态写入时拒绝（fail closed，见 `engine-alignment.zh-CN.md` 矩阵）。
+  形态写入时拒绝（fail closed，见 `engine-requirements.zh-CN.md` 矩阵）。
 
 ## 4. 变量替换
 

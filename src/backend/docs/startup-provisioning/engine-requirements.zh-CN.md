@@ -1,7 +1,7 @@
-# 引擎对接：工作量、能力矩阵与待确认清单
+# 引擎侧要求：工作量、能力矩阵与待确认清单
 
-> 状态：DRAFT（对接讨论稿）。给对接会议用：每个引擎/形态要做什么、要确认
-> 什么、以及尚未定案的问题。设计论证见 `design.zh-CN.md`。
+> 状态：DRAFT（讨论稿）。内容：每个引擎/形态要做什么、要确认什么、以及
+> 尚未定案的问题。设计论证见 `design.zh-CN.md`。
 
 ## 1. 先说结论：各方工作量
 
@@ -11,7 +11,7 @@
 | teclaw | **零改动**（3 项确认，见 §3） | artifact schema 不动、组装管线不动、不加出网要求 |
 | ARCA 系引擎（openclaw / claude_code / aicoding / hermes / moltis） | **零改动**（1 项确认，见 §4） | 声明式走平台实体 + 现有交付；script 走 #935 现状 |
 | BaaS | **零改动** | 启动链、hook 派发均不变 |
-| 业务方 | 回答 §6 的 checklist | 决定 v1 边界是否够用 |
+| 业务方 | 回答 §6 的确认清单 | 决定 v1 边界是否够用 |
 
 本设计的刻意目标就是把新增集中在平台侧：manifest 编译产物落在各引擎**今天
 已经消费的通道**里（teclaw：`BotConfigArtifact` 现有词汇表；ARCA 系：现有
@@ -57,7 +57,7 @@ manifest 结果（apply 先于组装），不存在「起来之后逐个补打�
   的编译目标——`BotConfigArtifact.engine_overrides` 是否是正确的槽位？
   该字段现状为空对象，需确认贵侧消费语义（逐键覆盖引擎默认配置）与我们的
   合并语义（design/manifest-schema §3.4）一致。若贵侧认为应走其他通道，
-  在对接会上定。
+  由 teclaw 与 backend 共同定。
 
 v2 才可能涉及的唯一契约增量：**条目级应用结果上报**（哪个 skill 装成功了）。
 v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化环节的
@@ -72,7 +72,8 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
   先于「script 阶段执行」（design §3.4 的顺序保证——脚本可以假定声明的
   skill / identity 已就位）。identity / skills 的交付若依赖 NAS 持久化，
   重建后天然满足；若存在依赖「对活容器 push」的实体类别，需与 backend 一起
-  确认其在启动链中的时点（backend 实现注意项 design §10.1，会前先内部核）。
+  确认其在启动链中的时点（backend 实现注意项 design §10.1，由 backend
+  先行内部确认）。
 
 可选（v2，非本期承诺）：容器内 op CLI（`install-skill` 等意图层命令，封装
 对本机引擎适配器 API 的调用 + 就绪等待 + 重试），提升 script 用户的体验。
@@ -90,7 +91,7 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
 | O6 | 模板级 manifest（一份声明 → 多个 bot） | v2；v1 仅 bot 级 | 业务 |
 | O7 | `center://` skill-center 引用源 | v2 | backend |
 
-## 6. 业务方 checklist（对接前请确认）
+## 6. 业务方前提确认清单
 
 1. **源的可达性**：你们的内容源（skill zip、md 所在服务）**平台侧可达吗**？
    manifest 的源统一由平台 fetch（design §4.1）；只有沙箱网络可达的源只能

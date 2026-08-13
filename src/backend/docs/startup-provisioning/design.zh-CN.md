@@ -1,6 +1,6 @@
 # Startup Provisioning 设计
 
-> 状态：DRAFT（对接讨论稿）。术语与文档地图见 `README.zh-CN.md`。
+> 状态：DRAFT（讨论稿）。术语与文档地图见 `README.zh-CN.md`。
 
 ## 1. 背景与动机
 
@@ -65,7 +65,7 @@ reconcile / quarantine 机制不认识它们，**可能把它们当作 drift 清
 - teclaw 侧工作量归零：artifact 组装管线照旧读平台状态，连「新增一个组装
   输入」都不需要；
 - ARCA 系声明式部分也不需要容器内动作，声明式 manifest 成为纯平台侧能力，
-  引擎对接面缩到最小。
+  引擎侧不需要任何新增实现。
 
 **硬性规则：apply 只允许通过既有 core 服务写实体，永远不允许绕过它们直接写
 文件系统或设备。** 这是防止状态分叉的那道闸，实现评审时按此检查。
@@ -143,7 +143,7 @@ SOUL.md、新实例从 manifest 长出来，同一个 bot 两个实例人设不�
   `created / updated / unchanged / skipped / failed`。
 - teclaw 侧：**不是新增义务**。artifact 本来就是整包重投的（update、restart
   重拉都会把同一份文档再给引擎），其契约今天就隐含收敛应用；本设计只是把它
-  显式写进对接文档（见 `engine-alignment.zh-CN.md` 确认项 T2）。
+  显式写为契约（见 `engine-requirements.zh-CN.md` 确认项 T2）。
 
 ### 3.4 类别间顺序与并发
 
@@ -167,7 +167,7 @@ manifest 条目的内容来源三选一：`source`（URL）、`content`（内联
   `{store, path}` 引用——不给 teclaw 容器加任何新的出网要求。
 - 对 ARCA 系：fetch 后经现有实体服务落库、走现有交付。
 
-推论（必须写进业务 checklist）：**manifest 的源必须平台侧可达**。只有沙箱
+推论（列入业务方前提确认清单）：**manifest 的源必须平台侧可达**。只有沙箱
 网络可达的源属于 script 的领域（ARCA-only）。这是刻意选择：统一的
 fetcher、统一的 SSRF 防护、统一的新鲜度语义，换一条明确的能力边界。
 
@@ -228,7 +228,7 @@ apply report。理由：同一产品功能在两类引擎上失败表现必须�
 
 判定结果同时堵上 #935 已知的静默坑：ARCA-direct 遗留 bot、LOCAL/singlebox
 的 script 判定为不支持（而非静默不执行）；manifest 因为是平台侧 apply，
-在这些形态上反而可以支持（见 `engine-alignment.zh-CN.md` 矩阵）。
+在这些形态上反而可以支持（见 `engine-requirements.zh-CN.md` 矩阵）。
 
 ### 5.2 版本
 
@@ -288,7 +288,7 @@ planning 决定；模块边界按 `context-boundary-format.md` 出 README。
 | **v1** | manifest 五类（mcp / resources / skills / engine_config / identity）+ script 归编到置备文档；平台侧 apply + guarded fetcher；能力表；apply report；teclaw 经 artifact 组装生效 |
 | **v2 候选** | 条目级结果上报（teclaw 唯一可能的契约增量）；strict 就绪门控；`apply_once`；skill-center 引用源（`center://uuid@version`）；容器内 op CLI（服务 script 用户体验：`install-skill` 等意图层命令，ARCA 系实现）；私有源凭证通道；模板级 manifest（一份声明应用于多个 bot） |
 
-## 10. 实现注意（backend 内部，不影响引擎对接）
+## 10. 实现注意（backend 内部，不涉及引擎侧改动）
 
 1. **ARCA 系物化时序**：apply 在 compose 前完成实体落库；物理交付依赖现有
    机制（NAS 持久 + 对活容器的 push）。新建容器场景需确认「manifest 实体
