@@ -364,7 +364,7 @@ SessionMessagesPath:
   get:
     operationId: list_session_messages
     tags: ["Collaboration / Sessions"]
-    summary: List session message history (cursor-based).
+    summary: List session message history.
     x-avernet-security:
       user: required
       app: required
@@ -373,14 +373,13 @@ SessionMessagesPath:
       - name: before
         in: query
         description: >-
-          Opaque composite cursor (`"created_at:session_seq"`, e.g.
-          `"1234567890:42"`) exclusive bound. When set, only messages strictly
-          before this (created_at, session_seq) lexicographic position are
-          returned, so messages sharing a created_at at a page boundary are
-          not skipped. Omit on the first page; pass the response's next_cursor
-          to fetch the next page.
+          Exclusive millisecond timestamp bound compatible with the legacy
+          Session history API. When set, only messages before this timestamp
+          are returned.
         schema:
-          type: string
+          type: integer
+          format: int64
+          minimum: 0
       - name: limit
         in: query
         schema:
@@ -393,14 +392,14 @@ SessionMessagesPath:
       "200":
         description: >-
           Messages visible to the selected Session Participant, ordered by
-          created_at descending and session_seq descending (legacy behavior),
-          with cursor-based pagination. Omitting view_bot_id selects the
-          authenticated Human Participant; creator or manager status does not
-          create an implicit manager view.
+          legacy history semantics. Omitting view_bot_id selects the
+          authenticated Human Participant; creator or manager status does
+          not create an implicit manager view. The success Envelope data is
+          the same GroupMessage array returned by the legacy API.
         content:
           application/json:
             schema:
-              $ref: ../domain-models.yaml#/SessionMessagePageEnvelope
+              $ref: ../domain-models.yaml#/SessionMessagesEnvelope
       "400":
         description: Invalid filter.
         x-error-codes:
