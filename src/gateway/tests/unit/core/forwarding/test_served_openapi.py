@@ -127,6 +127,21 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
     assert "put" in paths[
         "/openapi/v1/collaboration/sessions/{session_id}/files/{file_id}/content"
     ]
+    message_data = paths[
+        "/openapi/v1/collaboration/sessions/{session_id}/messages"
+    ]["get"]["responses"]["200"]["content"]["application/json"]["schema"][
+        "properties"
+    ]["data"]
+    assert message_data["type"] == "array"
+    assert {
+        "historyMeta",
+        "metadata",
+        "attachments",
+        "role",
+        "bot_name",
+        "run_id",
+    }.issubset(message_data["items"]["properties"])
+    assert {"messages", "next_cursor", "has_more"}.isdisjoint(message_data)
     collaboration_http_security = {"user": "required", "app": "required"}
     assert paths["/openapi/v1/collaboration/bots/mine"]["get"][
         "x-avernet-security"

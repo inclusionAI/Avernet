@@ -2,12 +2,13 @@ use async_trait::async_trait;
 use bcs_service_api::application::v1::{
     ActorKind, AddSessionParticipant, ApplicationError, AuthenticatedCaller,
     AuthenticatedUserIdentity, BotParticipantMode, CompleteSession, CreateSession,
-    CreateSessionOutcome, DeleteResult, DeleteSession,
-    DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions, MessageSenderKind,
-    Page, ParticipantMode, SessionCompletionResult, SessionDetail, SessionMessage,
-    SessionMessageKind, SessionMessagePage, SessionMessageService, SessionParticipant,
-    SessionService, SessionStatus, UpdateSession, UpdateSessionParticipant,
+    CreateSessionOutcome, DeleteResult, DeleteSession, DeleteSessionParticipant, GetSession,
+    ListSessionMessages, ListSessions, Page, ParticipantMode, SessionCompletionResult,
+    SessionDetail, SessionMessageService, SessionParticipant, SessionService, SessionStatus,
+    UpdateSession, UpdateSessionParticipant,
 };
+use bcs_service_api::types::{AttachmentType, MessageAttachment};
+use bcs_service_api::{GroupMessage, GroupMessageType, MessageRole};
 
 fn human_caller() -> AuthenticatedCaller {
     AuthenticatedCaller {
@@ -28,7 +29,10 @@ struct NoopSessionService;
 
 #[async_trait]
 impl SessionService for NoopSessionService {
-    async fn create(&self, _command: CreateSession) -> Result<CreateSessionOutcome, ApplicationError> {
+    async fn create(
+        &self,
+        _command: CreateSession,
+    ) -> Result<CreateSessionOutcome, ApplicationError> {
         Err(ApplicationError::internal("not implemented"))
     }
 
@@ -84,12 +88,8 @@ impl SessionMessageService for NoopSessionMessageService {
     async fn list(
         &self,
         _query: ListSessionMessages,
-    ) -> Result<SessionMessagePage, ApplicationError> {
-        Ok(SessionMessagePage {
-            messages: Vec::new(),
-            next_cursor: None,
-            has_more: false,
-        })
+    ) -> Result<Vec<GroupMessage>, ApplicationError> {
+        Ok(Vec::new())
     }
 }
 
@@ -174,22 +174,41 @@ fn session_commands_carry_caller_and_no_raw_credentials() {
 }
 
 #[test]
-fn session_message_uses_id_not_message_id() {
-    let message = SessionMessage {
+fn session_message_service_uses_legacy_group_message_wire_shape() {
+    let message = GroupMessage {
         id: "m1".into(),
-        session_seq: 3,
-        sender_id: "bot-1".into(),
-        sender_type: MessageSenderKind::Bot,
-        kind: SessionMessageKind::Text,
+        timestamp: 99,
+        sender: "bot-1".into(),
         content: "hello".into(),
-        created_at: 99,
+        message_type: GroupMessageType::Bot,
+        bot_name: Some("Worker".into()),
+        role: MessageRole::Assistant,
+        run_id: "run-1".into(),
+        history_meta: Some(serde_json::json!({"assistantAggregation": true})),
+        metadata: Some(serde_json::json!({"tool": "search"})),
+        attachments: Some(vec![MessageAttachment {
+            attachment_id: "att-1".into(),
+            attachment_type: AttachmentType::Image,
+            file_name: "result.png".into(),
+            mime_type: Some("image/png".into()),
+            size: Some(42),
+            sha256: Some("abcd".into()),
+            url: Some("https://download.example/result.png".into()),
+            expires_at: Some(123),
+        }]),
     };
-    let json = serde_json::to_value(&message).expect("serialize SessionMessage");
+    let json = serde_json::to_value(&message).expect("serialize GroupMessage");
     assert_eq!(json["id"], "m1");
-    assert_eq!(json["session_seq"], 3);
-    assert_eq!(json["sender_type"], "bot");
-    assert_eq!(json["kind"], "text");
-    assert!(json.get("message_id").is_none());
+    assert_eq!(json["timestamp"], 99);
+    assert_eq!(json["sender"], "bot-1");
+    assert_eq!(json["message_type"], "bot");
+    assert_eq!(json["role"], "assistant");
+    assert_eq!(json["historyMeta"]["assistantAggregation"], true);
+    assert_eq!(json["metadata"]["tool"], "search");
+    assert_eq!(json["attachments"][0]["type"], "image");
+    assert!(json.get("session_seq").is_none());
+    assert!(json.get("sender_id").is_none());
+    assert!(json.get("created_at").is_none());
 }
 
 #[test]
@@ -251,10 +270,11 @@ fn authenticated_caller_can_be_carried_in_session_command() {
     let command = ListSessionMessages {
         caller: human_caller(),
         session_id: "s1".into(),
-        before: None,
+        before: Some(123),
         limit: 10,
         view_bot_id: None,
     };
     assert_eq!(command.caller.user.expect("User").id, "staff-1");
     assert_eq!(command.session_id, "s1");
+    assert_eq!(command.before, Some(123));
 }

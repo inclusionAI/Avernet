@@ -4,32 +4,33 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Request, StatusCode};
-use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
 use bcs_api_http::v1::openapi::SessionFileUrlProjector;
+use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
+use bcs_service_api::application::v1::{
+    AcceptFriendRequest, AcceptInvitation, CreateBotFriendRequest, CreateGroupInvitation,
+    CreateSessionInvitation, DeleteBotFriendship, FriendRequest, Friendship, FriendshipService,
+    Invitation, InvitationAcceptResult, InvitationService, ListBotFriendRequests,
+    ListBotFriendships, RejectFriendRequest,
+};
 use bcs_service_api::application::v1::{
     AddGroupParticipant, AddSessionParticipant, ApplicationError, AuthenticatedAppIdentity,
     AuthenticatedBotIdentity, AuthenticatedCaller, AuthenticatedUserIdentity, BotParticipantMode,
-    CompleteSession, CreateGroup, CreateSession,
-    CreateSessionOutcome,
-    DeleteGroup, DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant,
-    GetGroup, GetSession, GroupDetail, GroupService, GroupSummary, ListGroups,
-    ListSessionMessages, ListSessions, MessageSenderKind, Page, SessionCompletionResult,
-    SessionDetail, SessionMessage, SessionMessageKind, SessionMessagePage, SessionMessageService, SessionParticipant,
-    SessionService, SessionStatus, SessionSummary, UpdateGroup, UpdateGroupParticipant,
-    UpdateSession, UpdateSessionParticipant,
+    CompleteSession, CreateGroup, CreateSession, CreateSessionOutcome, DeleteGroup,
+    DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant, GetGroup,
+    GetSession, GroupDetail, GroupService, GroupSummary, ListGroups, ListSessionMessages,
+    ListSessions, Page, SessionCompletionResult, SessionDetail, SessionMessageService,
+    SessionParticipant, SessionService, SessionStatus, SessionSummary, UpdateGroup,
+    UpdateGroupParticipant, UpdateSession, UpdateSessionParticipant,
 };
-use bcs_service_api::application::v1::{
-    AcceptFriendRequest, AcceptInvitation, CreateBotFriendRequest, CreateGroupInvitation,
-    CreateSessionInvitation, Friendship, FriendshipService, FriendRequest, Invitation,
-    InvitationAcceptResult, InvitationService, ListBotFriendRequests, ListBotFriendships,
-    RejectFriendRequest, DeleteBotFriendship,
+use bcs_service_api::types::{AttachmentType, MessageAttachment};
+use bcs_service_api::{
+    ActorKind, GroupMessage, GroupMessageType, MessageRole, ParticipantMode, ParticipantRole,
 };
-use bcs_service_api::{ActorKind, ParticipantMode, ParticipantRole};
-use serde_json::{Value, json};
-use tower::ServiceExt;
-use futures::StreamExt;
 use bcs_storage_api::byte_stream_from_bytes;
 use bytes::Bytes;
+use futures::StreamExt;
+use serde_json::{Value, json};
+use tower::ServiceExt;
 
 struct FakeSessionFileService;
 
@@ -56,9 +57,7 @@ fn session_file_view() -> bcs_service_api::application::v1::SessionFileView {
 }
 
 #[async_trait]
-impl bcs_service_api::application::v1::SessionFileApplicationService
-    for FakeSessionFileService
-{
+impl bcs_service_api::application::v1::SessionFileApplicationService for FakeSessionFileService {
     async fn prepare(
         &self,
         _command: bcs_service_api::application::v1::PrepareSessionFile,
@@ -126,10 +125,12 @@ impl bcs_service_api::application::v1::SessionFileApplicationService
         &self,
         _command: bcs_service_api::application::v1::DownloadSessionFile,
     ) -> Result<bcs_service_api::application::v1::SessionFileContent, ApplicationError> {
-        Ok(bcs_service_api::application::v1::SessionFileContent::Redirect {
+        Ok(
+            bcs_service_api::application::v1::SessionFileContent::Redirect {
             download_url: "https://storage.example.com/file-1".into(),
             expires_at: 3600,
-        })
+            },
+        )
     }
 
     async fn share(
@@ -148,11 +149,13 @@ impl bcs_service_api::application::v1::SessionFileApplicationService
     ) -> Result<bcs_service_api::application::v1::SessionFileContent, ApplicationError> {
         match command.token.as_str() {
             "good-token" => {
-                return Ok(bcs_service_api::application::v1::SessionFileContent::Stream {
+                return Ok(
+                    bcs_service_api::application::v1::SessionFileContent::Stream {
                     file: session_file_view(),
                     body: byte_stream_from_bytes(Bytes::from_static(b"abc")),
                     inline: command.show,
-                });
+                    },
+                );
             }
             "backend-error" => {
                 return Err(ApplicationError::bad_gateway(
@@ -483,9 +486,6 @@ impl SessionService for FakeSessionService {
 #[derive(Default)]
 struct FakeSessionMessageService {
     listed: Mutex<Option<ListSessionMessages>>,
-    /// Optional override returned by `list` to exercise non-default
-    /// `next_cursor` / `has_more` combinations (VYQHI composite cursor).
-    page_override: Mutex<Option<SessionMessagePage>>,
 }
 
 #[async_trait]
@@ -493,37 +493,35 @@ impl SessionMessageService for FakeSessionMessageService {
     async fn list(
         &self,
         query: ListSessionMessages,
-    ) -> Result<SessionMessagePage, ApplicationError> {
+    ) -> Result<Vec<GroupMessage>, ApplicationError> {
         *self.listed.lock().expect("list messages lock") = Some(query.clone());
-        if let Some(page) = self.page_override.lock().expect("page override lock").take() {
-            return Ok(page);
-        }
-        Ok(SessionMessagePage {
-            messages: vec![
-                SessionMessage {
-                    id: "msg-1".into(),
-                    session_seq: 1,
-                    sender_id: "bot-1".into(),
-                    sender_type: MessageSenderKind::Bot,
-                    kind: SessionMessageKind::Text,
-                    content: "hello".into(),
-                    created_at: 10,
-                },
-                SessionMessage {
-                    id: "msg-2".into(),
-                    session_seq: 2,
-                    sender_id: "bot-2".into(),
-                    sender_type: MessageSenderKind::Bot,
-                    kind: SessionMessageKind::Text,
-                    content: "world".into(),
-                    created_at: 20,
-                },
-            ],
-            // Cursor-based page shape: no total/offset/limit round-trip.
-            next_cursor: None,
-            has_more: false,
-        })
+        Ok(rich_group_messages())
     }
+}
+
+fn rich_group_messages() -> Vec<GroupMessage> {
+    vec![GroupMessage {
+        id: "msg-1".into(),
+        timestamp: 1_786_590_000_000,
+        sender: "bot-1".into(),
+        content: "hello".into(),
+        message_type: GroupMessageType::Bot,
+        bot_name: Some("Worker".into()),
+        role: MessageRole::Assistant,
+        run_id: "run-1".into(),
+        history_meta: Some(json!({"assistantAggregation": true})),
+        metadata: Some(json!({"tool": "search"})),
+        attachments: Some(vec![MessageAttachment {
+            attachment_id: "att-1".into(),
+            attachment_type: AttachmentType::Image,
+            file_name: "result.png".into(),
+            mime_type: Some("image/png".into()),
+            size: Some(42),
+            sha256: Some("abcd".into()),
+            url: Some("https://download.example/result.png".into()),
+            expires_at: Some(1_786_590_060),
+        }]),
+    }]
 }
 
 // ---------------------------------------------------------------------------
@@ -580,7 +578,8 @@ fn test_session_router_for_caller(
     message: Arc<FakeSessionMessageService>,
     authenticated_caller: AuthenticatedCaller,
 ) -> axum::Router {
-    router(ApiState::new(
+    router(
+        ApiState::new(
         Arc::new(NoopGroupService),
         session,
         message,
@@ -596,7 +595,8 @@ fn test_session_router_for_caller(
             "https://gateway.example.com/openapi/v1/collaboration".into(),
         )
         .expect("valid base"),
-    ))
+        ),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -767,7 +767,10 @@ async fn shared_file_content_is_public_and_token_failures_are_uniform_not_found(
         .await
         .expect("public success response");
     assert_eq!(success.status(), StatusCode::OK);
-    assert_eq!(success.headers()["content-disposition"], "inline; filename=\"report.txt\"");
+    assert_eq!(
+        success.headers()["content-disposition"],
+        "inline; filename=\"report.txt\""
+    );
     assert_eq!(
         to_bytes(success.into_body(), usize::MAX).await.unwrap(),
         Bytes::from_static(b"abc")
@@ -925,7 +928,10 @@ async fn create_session_returns_created_and_forwards_principal() {
         assert_eq!(caller_user_id(&created.caller), "staff-1");
         assert_eq!(created.group_id, "group-1");
         assert_eq!(created.title.as_deref(), Some("Planning"));
-        assert_eq!(created.input.as_ref().unwrap().query.as_deref(), Some("how to coordinate?"));
+        assert_eq!(
+            created.input.as_ref().unwrap().query.as_deref(),
+            Some("how to coordinate?")
+        );
     }
 }
 
@@ -1082,7 +1088,7 @@ async fn complete_session_route_is_not_mounted() {
 }
 
 #[tokio::test]
-async fn list_session_messages_returns_cursor_page() {
+async fn list_session_messages_wraps_legacy_group_message_array_in_envelope() {
     let session = Arc::new(FakeSessionService::default());
     let message = Arc::new(FakeSessionMessageService::default());
     let app = test_session_router(session, message.clone());
@@ -1098,9 +1104,15 @@ async fn list_session_messages_returns_cursor_page() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_json(response).await;
     assert_eq!(body["code"], 20_000);
-    assert_eq!(body["data"]["messages"].as_array().unwrap().len(), 2);
-    assert_eq!(body["data"]["has_more"], false);
-    assert!(body["data"]["next_cursor"].is_null());
+    assert_eq!(body["message"], "OK");
+    assert_eq!(
+        body["data"],
+        serde_json::to_value(rich_group_messages()).expect("serialize legacy response")
+    );
+    assert!(body["data"].is_array());
+    assert_eq!(body["data"][0]["role"], "assistant");
+    assert_eq!(body["data"][0]["historyMeta"]["assistantAggregation"], true);
+    assert_eq!(body["data"][0]["attachments"][0]["type"], "image");
     {
         let listed = message.listed.lock().expect("list messages lock");
         let listed = listed.as_ref().expect("list messages command");
@@ -1112,17 +1124,15 @@ async fn list_session_messages_returns_cursor_page() {
 }
 
 #[tokio::test]
-async fn list_session_messages_passes_opaque_before_cursor_through() {
+async fn list_session_messages_passes_before_timestamp_through() {
     let session = Arc::new(FakeSessionService::default());
     let message = Arc::new(FakeSessionMessageService::default());
     let app = test_session_router(session, message.clone());
 
-    // The composite cursor token is opaque to the route layer; it must be
-    // passed straight through to the service unchanged.
     let response = app
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/collaboration/sessions/session-1/messages?before=1234567890:42&limit=10",
+            "/openapi/v1/collaboration/sessions/session-1/messages?before=1234567890&limit=10",
             Value::Null,
         ))
         .await
@@ -1132,7 +1142,7 @@ async fn list_session_messages_passes_opaque_before_cursor_through() {
         let listed = message.listed.lock().expect("list messages lock");
         let listed = listed.as_ref().expect("list messages command");
         assert_eq!(listed.session_id, "session-1");
-        assert_eq!(listed.before.as_deref(), Some("1234567890:42"));
+        assert_eq!(listed.before, Some(1_234_567_890));
         assert_eq!(listed.limit, 10);
     }
 }
@@ -1165,40 +1175,23 @@ async fn list_session_messages_passes_view_bot_id_through() {
 }
 
 #[tokio::test]
-async fn list_session_messages_surfaces_next_cursor_when_has_more() {
+async fn list_session_messages_rejects_non_numeric_before_timestamp() {
     let session = Arc::new(FakeSessionService::default());
     let message = Arc::new(FakeSessionMessageService::default());
-    {
-        // Configure the fake to return a non-default composite cursor page.
-        let page = SessionMessagePage {
-            messages: vec![SessionMessage {
-                id: "msg-9".into(),
-                session_seq: 9,
-                sender_id: "bot-1".into(),
-                sender_type: MessageSenderKind::Bot,
-                kind: SessionMessageKind::Text,
-                content: "later".into(),
-                created_at: 9_000,
-            }],
-            next_cursor: Some("9000:9".to_string()),
-            has_more: true,
-        };
-        *message.page_override.lock().expect("page override lock") = Some(page);
-    }
     let app = test_session_router(session, message.clone());
 
     let response = app
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/collaboration/sessions/session-1/messages?limit=1",
+            "/openapi/v1/collaboration/sessions/session-1/messages?before=not-a-timestamp",
             Value::Null,
         ))
         .await
         .expect("list messages response");
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let body = response_json(response).await;
-    assert_eq!(body["data"]["has_more"], true);
-    assert_eq!(body["data"]["next_cursor"], "9000:9");
+    assert_eq!(body["data"]["error_code"], "invalid_request");
+    assert!(message.listed.lock().expect("list messages lock").is_none());
 }
 
 #[tokio::test]
@@ -1221,7 +1214,10 @@ async fn add_session_participant_returns_participant() {
     assert_eq!(body["data"]["actor_id"], "bot-2");
     assert_eq!(body["data"]["mode"], "auto");
     {
-        let added = session.added_participant.lock().expect("add participant lock");
+        let added = session
+            .added_participant
+            .lock()
+            .expect("add participant lock");
         let added = added.as_ref().expect("add participant command");
         assert_eq!(caller_user_id(&added.caller), "staff-1");
         assert_eq!(added.session_id, "session-1");
@@ -1248,7 +1244,10 @@ async fn update_session_participant_returns_updated_mode() {
     assert_eq!(body["code"], 20_000);
     assert_eq!(body["data"]["mode"], "muted");
     {
-        let updated = session.updated_participant.lock().expect("update participant lock");
+        let updated = session
+            .updated_participant
+            .lock()
+            .expect("update participant lock");
         let updated = updated.as_ref().expect("update participant command");
         assert_eq!(caller_user_id(&updated.caller), "staff-1");
         assert_eq!(updated.session_id, "session-1");
@@ -1276,7 +1275,10 @@ async fn remove_session_participant_returns_deleted() {
     assert_eq!(body["code"], 20_000);
     assert_eq!(body["data"]["deleted"], true);
     {
-        let removed = session.removed_participant.lock().expect("remove participant lock");
+        let removed = session
+            .removed_participant
+            .lock()
+            .expect("remove participant lock");
         let removed = removed.as_ref().expect("remove participant command");
         assert_eq!(caller_user_id(&removed.caller), "staff-1");
         assert_eq!(removed.session_id, "session-1");

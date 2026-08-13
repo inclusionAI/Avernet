@@ -188,7 +188,10 @@ struct NoopMessageService;
 
 #[async_trait]
 impl SessionMessageService for NoopMessageService {
-    async fn list(&self, _: ListSessionMessages) -> Result<SessionMessagePage, ApplicationError> {
+    async fn list(
+        &self,
+        _: ListSessionMessages,
+    ) -> Result<Vec<bcs_service_api::GroupMessage>, ApplicationError> {
         Err(ApplicationError::internal("not configured"))
     }
 }

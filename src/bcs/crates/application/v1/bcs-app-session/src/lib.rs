@@ -19,32 +19,28 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bcs_domain::{PersistedMessage, SenderType};
-use bcs_message::MessageService;
-use bcs_service_api::application::v1::{
-    message::{
-        ListSessionMessages, MessageSenderKind, SessionMessage, SessionMessageKind,
-        SessionMessagePage, SessionMessageService,
-    },
-    session::{
-        AddSessionParticipant, BotParticipantMode, CompleteSession, CreateSession,
-        CreateSessionOutcome, DeleteSession, DeleteSessionParticipant, GetSession, ListSessions,
-        SessionCompletionResult, SessionDetail, SessionInput, SessionParticipant,
-        SessionService, SessionStatus as V1SessionStatus, SessionSummary, UpdateSession,
-        UpdateSessionParticipant,
-    },
-    ApplicationError, AuthenticatedCaller, DeleteResult, HumanPrincipal, Page, Principal,
-    require_authenticated_user, require_human,
-};
 use bcs_service_api::application::session::{
     CreateOrReactivateCommand, SessionManagementService, SessionUseCaseError,
 };
-use bcs_service_api::port::repo::{MessageRepoPort, NewSessionParams, SessionRepoPort};
+use bcs_service_api::application::v1::{
+    ApplicationError, AuthenticatedCaller, DeleteResult, HumanPrincipal, Page, Principal,
+    message::{ListSessionMessages, SessionMessageService},
+    require_authenticated_user, require_human,
+    session::{
+        AddSessionParticipant, BotParticipantMode, CompleteSession, CreateSession,
+        CreateSessionOutcome, DeleteSession, DeleteSessionParticipant, GetSession, ListSessions,
+        SessionCompletionResult, SessionDetail, SessionInput, SessionParticipant, SessionService,
+        SessionStatus as V1SessionStatus, SessionSummary, UpdateSession, UpdateSessionParticipant,
+    },
+};
+use bcs_service_api::port::repo::{NewSessionParams, SessionRepoPort};
 use bcs_service_api::{
-    backfill_participant_names, ActorKind, ActorStatus, BotRegistryCoreService,
-    FriendCoreService, Group as DomainGroup, GroupCoreService, GroupStrategy, GroupUseCaseError,
+    ActorKind, ActorStatus, BotRegistryCoreService, CallerContext, CollaborationRuntimeError,
+    CollaborationRuntimeService, FriendCoreService, Group as DomainGroup, GroupCoreService,
+    GroupMessage, GroupMessageHistoryService, GroupStrategy, GroupUseCaseError, HumanActor,
     Participant, ParticipantMode, ParticipantRole, RegisteredBot, RelationCoreService,
-    ServiceError, Session, SessionKind, SessionStatus as DomainSessionStatus,
+    ServiceError, Session, SessionHistoryCommand, SessionKind,
+    SessionStatus as DomainSessionStatus, backfill_participant_names,
 };
 
 #[derive(Debug, Clone)]
@@ -57,10 +53,9 @@ pub struct SessionServiceConfig {
 
 /// OpenAPI v1 Session facade.
 ///
-/// Holds the legacy [`SessionManagementService`] for lifecycle delegation plus
-/// its own `Arc<dyn SessionRepoPort>` / `Arc<dyn MessageRepoPort>` for the V1
-/// `count_by_group` (total) and `list_session_messages_by_seq` (chronological
-/// history) paths that are not exposed on the legacy application trait.
+/// Holds the legacy [`SessionManagementService`] for lifecycle delegation,
+/// `SessionRepoPort` for V1 list/count queries, and transport-neutral history
+/// services for Session message reads.
 pub struct SessionServiceImpl {
     sessions: Arc<dyn SessionManagementService>,
     groups: Arc<dyn GroupCoreService>,
@@ -68,7 +63,8 @@ pub struct SessionServiceImpl {
     friends: Arc<dyn FriendCoreService>,
     relation: Arc<dyn RelationCoreService>,
     session_repo: Arc<dyn SessionRepoPort>,
-    message_repo: Arc<dyn MessageRepoPort>,
+    history: Arc<dyn GroupMessageHistoryService>,
+    collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
     config: SessionServiceConfig,
 }
 
@@ -81,7 +77,8 @@ impl SessionServiceImpl {
         friends: Arc<dyn FriendCoreService>,
         relation: Arc<dyn RelationCoreService>,
         session_repo: Arc<dyn SessionRepoPort>,
-        message_repo: Arc<dyn MessageRepoPort>,
+        history: Arc<dyn GroupMessageHistoryService>,
+        collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
         config: SessionServiceConfig,
     ) -> Self {
         Self {
@@ -91,7 +88,8 @@ impl SessionServiceImpl {
             friends,
             relation,
             session_repo,
-            message_repo,
+            history,
+            collaboration_runtime,
             config,
         }
     }
@@ -194,7 +192,8 @@ impl SessionServiceImpl {
         }
         match principal {
             Principal::Human(human) => {
-                self.human_can_act_as_any(human, vec![created_by.to_string()]).await
+                self.human_can_act_as_any(human, vec![created_by.to_string()])
+                    .await
             }
             Principal::Bot(_) => Ok(false),
         }
@@ -268,10 +267,7 @@ impl SessionServiceImpl {
         Ok(session)
     }
 
-    async fn load_bot(
-        &self,
-        bot_uuid: &str,
-    ) -> Result<RegisteredBot, ApplicationError> {
+    async fn load_bot(&self, bot_uuid: &str) -> Result<RegisteredBot, ApplicationError> {
         self.registry
             .try_get(bot_uuid)
             .await
@@ -302,15 +298,16 @@ impl SessionServiceImpl {
                 "The explicit Human View Actor must identify the authenticated User",
             ));
         }
-        let bot = self.load_bot(requested).await.map_err(|error| match error {
+        let bot = self
+            .load_bot(requested)
+            .await
+            .map_err(|error| match error {
             ApplicationError::NotFound { .. } => {
                 ApplicationError::forbidden("The explicit View Actor is not authorized")
             }
             other => other,
         })?;
-        if bot.actor_kind == ActorKind::Bot
-            && bot.created_by.as_deref() == Some(user.id.as_str())
-        {
+        if bot.actor_kind == ActorKind::Bot && bot.created_by.as_deref() == Some(user.id.as_str()) {
             Ok(requested.to_string())
         } else {
             Err(ApplicationError::forbidden(
@@ -326,14 +323,9 @@ impl SessionServiceImpl {
     ) -> Result<bool, ApplicationError> {
         let user = require_authenticated_user(caller)?;
         let human_actor_id = format!("human_{}", user.id);
-        if session
-            .participants
-            .iter()
-            .any(|participant| {
-                participant.actor_kind == ActorKind::Human
-                    && participant.bot_uuid == human_actor_id
-            })
-        {
+        if session.participants.iter().any(|participant| {
+            participant.actor_kind == ActorKind::Human && participant.bot_uuid == human_actor_id
+        }) {
             return Ok(true);
         }
         let owned_bot_ids = self
@@ -345,10 +337,7 @@ impl SessionServiceImpl {
             .filter(|bot| bot.actor_kind == ActorKind::Bot)
             .map(|bot| bot.bot_uuid)
             .collect::<HashSet<_>>();
-        Ok(session
-            .participants
-            .iter()
-            .any(|participant| {
+        Ok(session.participants.iter().any(|participant| {
                 participant.actor_kind == ActorKind::Bot
                     && owned_bot_ids.contains(&participant.bot_uuid)
             }))
@@ -510,7 +499,10 @@ impl SessionService for SessionServiceImpl {
 
         // Ensure the inherited group driver is present in the roster with the
         // Driver role, preserving legacy routing expectations for sessions.
-        match participants.iter().position(|p| p.bot_uuid == group.driver_bot) {
+        match participants
+            .iter()
+            .position(|p| p.bot_uuid == group.driver_bot)
+        {
             Some(index) => participants[index].role = ParticipantRole::Driver,
             None => participants.push(Participant::bot(
                 group.driver_bot.clone(),
@@ -648,7 +640,8 @@ impl SessionService for SessionServiceImpl {
                     .as_deref()
                     .is_some_and(|creator| creator == acting_actor_id)
         } else {
-            self.can_manage_session(&principal, &session, &group).await?
+            self.can_manage_session(&principal, &session, &group)
+                .await?
         };
         if !can_delete {
             return Err(ApplicationError::forbidden(
@@ -706,7 +699,7 @@ impl SessionService for SessionServiceImpl {
                         return Err(ApplicationError::not_found(
                             "session_not_found",
                             format!("Session '{}' was not found", command.session_id),
-                        ))
+                        ));
                     }
                 },
             }
@@ -840,7 +833,7 @@ impl SessionMessageService for SessionServiceImpl {
     async fn list(
         &self,
         query: ListSessionMessages,
-    ) -> Result<SessionMessagePage, ApplicationError> {
+    ) -> Result<Vec<GroupMessage>, ApplicationError> {
         if query.limit == 0 || query.limit > 100 {
             return Err(ApplicationError::invalid(
                 "invalid_request",
@@ -860,63 +853,39 @@ impl SessionMessageService for SessionServiceImpl {
                 "The selected View Actor is not a Session Participant",
             ));
         }
-        // VSN7A/VUlai/VHxMU — reuse the legacy `bcs-message` visibility helper
-        // (single source of truth) so the V1 session list applies the EXACT
-        // same scoping the group history path does: the full 3-state
-        // `MessageOwnerFilter` (incl. ManagerWorker manager-viewer
-        // `PublicOrOwner`) and the spec §5.2 new-participant
-        // `visible_from_seq` cutoff. The V1 facade no longer reimplements
-        // these predicates.
         let group = self.load_group(&session.group_id).await?;
-        let (owner_filter, visible_from_seq) =
-            MessageService::compute_session_history_query(
-                &group,
-                &session,
-                Some(&view_actor_id),
-                NEW_PARTICIPANT_VISIBLE_LIMIT as u64,
-            )
-            .map_err(map_group_use_case_error)?;
-        // Cursor-based direct read (legacy `created_at DESC, session_seq DESC`);
-        // `has_more` + `next_cursor` replace the separate COUNT(*) estimate.
-        // VYQHI: the cursor is the opaque composite `"created_at:session_seq"`
-        // string; decode it here into the `(created_at, session_seq)` tuple the
-        // repo expects, and re-encode the repo's tuple `next_cursor` for the
-        // V1 page response.
-        let before = decode_cursor(query.before).map_err(|e| {
-            ApplicationError::invalid("invalid_request", format!("invalid before cursor: {e}"))
-        })?;
-        let page = self
-            .message_repo
-            .list_session_history(
-                &query.session_id,
-                owner_filter,
-                visible_from_seq,
-                before,
-                query.limit as u32,
-            )
+
+        if group.group_strategy == GroupStrategy::StateMachine {
+            return self
+                .collaboration_runtime
+                .get_state_machine_session_history(&query.session_id, query.limit, query.before)
             .await
-            .map_err(map_service_error)?;
-        let messages = page.messages.iter().map(project_message).collect::<Vec<_>>();
-        Ok(SessionMessagePage {
-            messages,
-            next_cursor: encode_cursor(page.next_cursor),
-            has_more: page.has_more,
+                .map(|result| result.map_or_else(Vec::new, |result| result.messages))
+                .map_err(map_runtime_error);
+        }
+
+        let user = require_authenticated_user(&query.caller)?;
+        let result = self
+            .history
+            .get_session_history(SessionHistoryCommand {
+                caller: CallerContext::Human(HumanActor {
+                    actor_id: format!("human_{}", user.id),
+                    staff_no: user.id.clone(),
+                }),
+                group_id: session.group_id.clone(),
+                session_id: query.session_id,
+                session_participants: session.participants,
+                view_bot_id: Some(view_actor_id),
+                limit: query.limit,
+                before: query.before,
         })
+            .await
+            .map_err(map_group_use_case_error)?;
+        Ok(result.messages)
     }
 }
 
 // ── projection helpers ────────────────────────────────────────────────
-
-/// Visibility window applied to message history for a viewer that joined
-/// late (spec §5.2: a participant sees at most the N messages preceding their
-/// join point). Passed into the shared legacy `bcs-message`
-/// `MessageService::compute_session_history_query` helper so the V1 session
-/// list reuses the same scoping the group history path does; the V1 facade no
-/// longer reimplements the predicate math (VUlai). Mirrors the bootstrap
-/// default `new_participant_visible_limit`
-/// (`config.rs::default_new_participant_visible_limit`); kept as a const here
-/// because the V1 session facade does not (yet) own its own history config.
-const NEW_PARTICIPANT_VISIBLE_LIMIT: i64 = 100;
 
 fn project_participant(participant: &Participant) -> SessionParticipant {
     // Vey7i: pass `actor_kind` and the 4-value domain `ParticipantMode`
@@ -974,74 +943,6 @@ fn project_summary(session: &Session) -> SessionSummary {
     }
 }
 
-fn project_message(message: &PersistedMessage) -> SessionMessage {
-    SessionMessage {
-        id: message.message_id.clone(),
-        session_seq: message.session_seq,
-        sender_id: message.sender_id.clone(),
-        sender_type: project_sender_kind(message.sender_type),
-        kind: project_message_kind(&message.message_type, message.sender_type),
-        content: project_content(&message.content),
-        created_at: message.created_at,
-    }
-}
-
-fn project_sender_kind(sender: SenderType) -> MessageSenderKind {
-    match sender {
-        SenderType::Bot => MessageSenderKind::Bot,
-        SenderType::Human => MessageSenderKind::Human,
-        SenderType::System => MessageSenderKind::System,
-    }
-}
-
-/// A message is `System` when sent by a System sender or persisted with a
-/// `system` message type; everything else is `Text`.
-fn project_message_kind(message_type: &str, sender: SenderType) -> SessionMessageKind {
-    if sender == SenderType::System || message_type == "system" {
-        SessionMessageKind::System
-    } else {
-        SessionMessageKind::Text
-    }
-}
-
-fn project_content(content: &serde_json::Value) -> String {
-    match content {
-        serde_json::Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }
-}
-
-// ── cursor codec (VYQHI composite cursor) ───────────────────────────
-
-/// Encode the repo's composite `(created_at, session_seq)` cursor into the
-/// opaque V1 wire string `"created_at:session_seq"` (e.g. `"1234567890:42"`).
-/// `None` stays `None` (no next page).
-fn encode_cursor(cursor: Option<(u64, i64)>) -> Option<String> {
-    cursor.map(|(created_at, session_seq)| format!("{created_at}:{session_seq}"))
-}
-
-/// Decode the opaque V1 wire cursor string `"created_at:session_seq"` back
-/// into the `(created_at, session_seq)` tuple the repo expects. `None`
-/// passes through. Returns an error message string on a malformed token so
-/// the caller can surface an `invalid_request` 400.
-fn decode_cursor(before: Option<String>) -> Result<Option<(u64, i64)>, String> {
-    match before {
-        None => Ok(None),
-        Some(token) => {
-            let (ts, seq) = token
-                .split_once(':')
-                .ok_or_else(|| format!("missing ':' separator in {token:?}"))?;
-            let created_at: u64 = ts
-                .parse()
-                .map_err(|_| format!("non-numeric created_at in {token:?}"))?;
-            let session_seq: i64 = seq
-                .parse()
-                .map_err(|_| format!("non-numeric session_seq in {token:?}"))?;
-            Ok(Some((created_at, session_seq)))
-        }
-    }
-}
-
 fn map_v1_mode_to_domain(mode: BotParticipantMode) -> ParticipantMode {
     match mode {
         BotParticipantMode::Auto => ParticipantMode::Auto,
@@ -1053,27 +954,27 @@ fn map_v1_mode_to_domain(mode: BotParticipantMode) -> ParticipantMode {
 
 fn map_session_error(error: SessionUseCaseError) -> ApplicationError {
     match error {
-        SessionUseCaseError::NotFound(sid) => {
-            ApplicationError::not_found("session_not_found", format!("Session '{sid}' was not found"))
-        }
+        SessionUseCaseError::NotFound(sid) => ApplicationError::not_found(
+            "session_not_found",
+            format!("Session '{sid}' was not found"),
+        ),
         SessionUseCaseError::InvalidParams(message) => {
             ApplicationError::invalid("invalid_request", message)
         }
         SessionUseCaseError::CallbackPending(message) => {
             ApplicationError::conflict("conflict", message)
         }
-        SessionUseCaseError::Conflict(message) => {
-            ApplicationError::conflict("conflict", message)
-        }
+        SessionUseCaseError::Conflict(message) => ApplicationError::conflict("conflict", message),
         SessionUseCaseError::Internal(service_error) => map_service_error(service_error),
     }
 }
 
 fn map_service_error(error: ServiceError) -> ApplicationError {
     match error {
-        ServiceError::SessionNotFound(sid) => {
-            ApplicationError::not_found("session_not_found", format!("Session '{sid}' was not found"))
-        }
+        ServiceError::SessionNotFound(sid) => ApplicationError::not_found(
+            "session_not_found",
+            format!("Session '{sid}' was not found"),
+        ),
         ServiceError::GroupNotFound(id) => {
             ApplicationError::not_found("group_not_found", format!("Group '{id}' was not found"))
         }
@@ -1095,11 +996,24 @@ fn map_service_error(error: ServiceError) -> ApplicationError {
     }
 }
 
+fn map_runtime_error(error: CollaborationRuntimeError) -> ApplicationError {
+    match error {
+        CollaborationRuntimeError::Unauthenticated => ApplicationError::Unauthenticated,
+        CollaborationRuntimeError::Forbidden(message) => ApplicationError::forbidden(message),
+        CollaborationRuntimeError::InvalidDefinition(message)
+        | CollaborationRuntimeError::InvalidParticipantBinding(message)
+        | CollaborationRuntimeError::InvalidRequest(message) => {
+            ApplicationError::invalid("invalid_request", message)
+        }
+        CollaborationRuntimeError::Conflict(message) => {
+            ApplicationError::conflict("conflict", message)
+        }
+        other => ApplicationError::internal(other.to_string()),
+    }
+}
+
 /// Map the legacy `GroupUseCaseError` returned by the shared
-/// `MessageService::compute_session_history_query` helper into the stable V1
-/// `ApplicationError` surface. The only realistic branch from the helper is
-/// `Service(InvalidOperation)` (a non-participant view_bot_id); everything else
-/// falls back to a generic `invalid_request`.
+/// Session-history application service into the stable V1 error surface.
 fn map_group_use_case_error(error: GroupUseCaseError) -> ApplicationError {
     match error {
         GroupUseCaseError::Service(service_error) => map_service_error(service_error),
@@ -1130,9 +1044,9 @@ mod tests {
             "conflict"
         );
         assert_eq!(
-            map_session_error(SessionUseCaseError::Internal(ServiceError::SessionNotFound(
-                "s2".into()
-            )))
+            map_session_error(SessionUseCaseError::Internal(
+                ServiceError::SessionNotFound("s2".into())
+            ))
             .code(),
             "session_not_found"
         );
@@ -1170,7 +1084,10 @@ mod tests {
                 query: Some("hello".into())
             })
         );
-        assert_eq!(project_input(&Some(serde_json::json!({ "query": 42 }))), None);
+        assert_eq!(
+            project_input(&Some(serde_json::json!({ "query": 42 }))),
+            None
+        );
         assert_eq!(project_input(&None), None);
     }
 

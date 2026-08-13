@@ -5,21 +5,21 @@
 //! / MemorySessionRepo / MemoryMessageRepo), mirroring the sibling
 //! `bcs-app-group` test harness.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use bcs_app_session::{SessionServiceConfig, SessionServiceImpl};
 use bcs_bot::BotCore;
 use bcs_bot_store::PersistentBotRepo;
 use bcs_cache_local::InMemoryCachePlugin;
 use bcs_db_api::{
-    DbError, DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbStatement,
-    DbTransactionStep, DbTransactionStepResult,
+    DbError, DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbStatement, DbTransactionStep,
+    DbTransactionStepResult,
 };
-use bcs_domain::{NewMessage, SenderType};
+use bcs_domain::{AttachmentType, MessageAttachment};
 use bcs_friend::FriendCore;
 use bcs_group::{GroupCore, MemoryGroupRepo};
-use bcs_message_store::MemoryMessageRepo;
 use bcs_relation::RelationCore;
 use bcs_service_api::application::v1::{
     AddSessionParticipant, AuthenticatedBotIdentity, AuthenticatedCaller,
@@ -28,20 +28,169 @@ use bcs_service_api::application::v1::{
     SessionMessageService, SessionParticipantInput, SessionService,
     SessionStatus as V1SessionStatus, UpdateSession, UpdateSessionParticipant,
 };
-use bcs_service_api::port::repo::{MessageRepoPort, NewSessionParams, SessionRepoPort};
+use bcs_service_api::port::repo::{NewSessionParams, SessionRepoPort};
 use bcs_service_api::{
-    ActorKind, BotCapabilities, BotRegistryCoreService, Group, GroupCoreService, GroupStrategy,
-    Participant, ParticipantMode, ParticipantRole, SessionKind,
+    ActorKind, BotCapabilities, BotRegistryCoreService, CallerContext,
+    CancelStateMachineRunCommand, CollaborationDefinition, CollaborationRuntimeError,
+    CollaborationRuntimeService, ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome, Group,
+    GroupCoreService, GroupHistoryCommand, GroupHistoryResult, GroupMessage,
+    GroupMessageHistoryService, GroupMessageType, GroupStrategy, GroupUseCaseError,
+    HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, HumanActor, MessageRole,
+    Participant, ParticipantMode, ParticipantRole, SessionHistoryCommand, SessionHistoryResult,
+    SessionKind, StartStateMachineRunCommand, StartStateMachineRunOutcome,
+    StateMachineDeliveryCorrelation, StateMachineRunView,
 };
 use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
-use bcs_app_session::{SessionServiceConfig, SessionServiceImpl};
+
+#[derive(Default)]
+struct RecordingHistoryService {
+    session_calls: Mutex<Vec<SessionHistoryCommand>>,
+    messages: Mutex<Vec<GroupMessage>>,
+}
+
+#[async_trait]
+impl GroupMessageHistoryService for RecordingHistoryService {
+    async fn get_history(
+        &self,
+        _cmd: GroupHistoryCommand,
+    ) -> Result<GroupHistoryResult, GroupUseCaseError> {
+        panic!("group history is not used by SessionServiceImpl")
+    }
+
+    async fn get_session_history(
+        &self,
+        cmd: SessionHistoryCommand,
+    ) -> Result<SessionHistoryResult, GroupUseCaseError> {
+        let messages = self.messages.lock().expect("messages lock").clone();
+        self.session_calls
+            .lock()
+            .expect("history lock")
+            .push(cmd.clone());
+        Ok(SessionHistoryResult {
+            session_id: cmd.session_id,
+            messages,
+            limit: cmd.limit,
+            before: cmd.before,
+            next_before: None,
+        })
+    }
+}
+
+#[derive(Default)]
+struct RecordingRuntime {
+    history_calls: Mutex<Vec<(String, u64, Option<u64>)>>,
+    history_result: Mutex<Option<SessionHistoryResult>>,
+}
+
+#[async_trait]
+impl CollaborationRuntimeService for RecordingRuntime {
+    async fn start_state_machine_run(
+        &self,
+        _cmd: StartStateMachineRunCommand,
+    ) -> Result<StartStateMachineRunOutcome, CollaborationRuntimeError> {
+        panic!("start_state_machine_run is not used by SessionServiceImpl")
+    }
+
+    async fn get_state_machine_run(
+        &self,
+        _run_id: &str,
+    ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
+        Ok(None)
+    }
+
+    async fn get_state_machine_session_history(
+        &self,
+        session_id: &str,
+        limit: u64,
+        before: Option<u64>,
+    ) -> Result<Option<SessionHistoryResult>, CollaborationRuntimeError> {
+        self.history_calls
+            .lock()
+            .expect("runtime history lock")
+            .push((session_id.to_string(), limit, before));
+        Ok(self
+            .history_result
+            .lock()
+            .expect("runtime result lock")
+            .clone())
+    }
+
+    async fn cancel_state_machine_run(
+        &self,
+        _cmd: CancelStateMachineRunCommand,
+    ) -> Result<StateMachineRunView, CollaborationRuntimeError> {
+        panic!("cancel_state_machine_run is not used by SessionServiceImpl")
+    }
+
+    async fn lookup_delivery_correlation(
+        &self,
+        _run_id: &str,
+    ) -> Result<Option<StateMachineDeliveryCorrelation>, CollaborationRuntimeError> {
+        Ok(None)
+    }
+
+    async fn register_delivery_alias(
+        &self,
+        _delivery_request_id: &str,
+        _bot_delivery_run_id: String,
+    ) -> Result<(), CollaborationRuntimeError> {
+        Ok(())
+    }
+
+    async fn handle_bot_terminal_event(
+        &self,
+        _cmd: HandleBotTerminalEventCommand,
+    ) -> Result<HandleBotTerminalEventOutcome, CollaborationRuntimeError> {
+        panic!("handle_bot_terminal_event is not used by SessionServiceImpl")
+    }
+
+    async fn upsert_definition(
+        &self,
+        _definition: CollaborationDefinition,
+    ) -> Result<(), CollaborationRuntimeError> {
+        Ok(())
+    }
+
+    async fn configure_group_runtime(
+        &self,
+        _cmd: ConfigureGroupRuntimeCommand,
+    ) -> Result<ConfigureGroupRuntimeOutcome, CollaborationRuntimeError> {
+        panic!("configure_group_runtime is not used by SessionServiceImpl")
+    }
+}
+
+fn rich_group_message() -> GroupMessage {
+    GroupMessage {
+        id: "message-1".into(),
+        timestamp: 1_786_590_000_000,
+        sender: "worker-a".into(),
+        content: "done".into(),
+        message_type: GroupMessageType::Bot,
+        bot_name: Some("Worker A".into()),
+        role: MessageRole::Assistant,
+        run_id: "run-1".into(),
+        history_meta: Some(serde_json::json!({"assistantAggregation": true})),
+        metadata: Some(serde_json::json!({"tool": "search"})),
+        attachments: Some(vec![MessageAttachment {
+            attachment_id: "attachment-1".into(),
+            attachment_type: AttachmentType::Image,
+            file_name: "result.png".into(),
+            mime_type: Some("image/png".into()),
+            size: Some(42),
+            sha256: Some("abcd".into()),
+            url: Some("https://download.example/result.png".into()),
+            expires_at: Some(1_786_590_060),
+        }]),
+    }
+}
 
 struct Fixture {
     service: SessionServiceImpl,
     groups: Arc<GroupCore>,
     bots: Arc<BotCore>,
-    message_repo: Arc<MemoryMessageRepo>,
+    history: Arc<RecordingHistoryService>,
+    runtime: Arc<RecordingRuntime>,
     session_repo: Arc<dyn SessionRepoPort>,
 }
 
@@ -57,7 +206,8 @@ impl Fixture {
         let relation = Arc::new(RelationCore::memory());
         let friends = Arc::new(FriendCore::memory().with_relation(relation.clone()));
         let session_repo: Arc<dyn SessionRepoPort> = Arc::new(MemorySessionRepo::new());
-        let message_repo = Arc::new(MemoryMessageRepo::new());
+        let history = Arc::new(RecordingHistoryService::default());
+        let runtime = Arc::new(RecordingRuntime::default());
         let sessions = Arc::new(SessionManagementServiceImpl::new(
             session_repo.clone(),
             group_repo,
@@ -69,7 +219,8 @@ impl Fixture {
             friends,
             relation,
             session_repo.clone(),
-            message_repo.clone(),
+            history.clone(),
+            runtime.clone(),
             SessionServiceConfig {
                 relation_env: "dev".to_string(),
             },
@@ -78,7 +229,8 @@ impl Fixture {
             service,
             groups,
             bots,
-            message_repo,
+            history,
+            runtime,
             session_repo,
         }
     }
@@ -102,12 +254,7 @@ impl Fixture {
     }
 
     async fn store_group(&self, group_id: &str, driver: &str, context: Option<&str>) {
-        self.store_group_with_originator(
-            group_id,
-            driver,
-            &format!("human_{driver}"),
-            context,
-        )
+        self.store_group_with_originator(group_id, driver, &format!("human_{driver}"), context)
         .await;
     }
 
@@ -155,6 +302,18 @@ impl Fixture {
         group.label = Some(group_id.to_string());
         group.group_strategy = GroupStrategy::ManagerWorker;
         group.context = context.map(str::to_string);
+        self.groups.upsert(group).await.expect("store group");
+    }
+
+    async fn store_state_machine_group(&self, group_id: &str, driver: &str) {
+        let mut group = Group::new(
+            group_id,
+            driver,
+            vec![Participant::bot(driver, ParticipantRole::Driver)],
+        );
+        group.originator = Some("human_staff-1".into());
+        group.label = Some(group_id.to_string());
+        group.group_strategy = GroupStrategy::StateMachine;
         self.groups.upsert(group).await.expect("store group");
     }
 }
@@ -244,29 +403,6 @@ async fn create_session(
         .expect("create session")
 }
 
-/// Append a single message owned by `owner` (Some = worker-private, None =
-/// public) into `session_id`. `created_at` is passed through so multi-message
-/// DESC ordering is deterministic; the repo assigns `session_seq` in append
-/// order (1, 2, 3, ...).
-async fn seed_message(fixture: &Fixture, session_id: &str, owner: Option<&str>, created_at: u64) {
-    fixture
-        .message_repo
-        .append_message(NewMessage {
-            group_id: "g1".into(),
-            session_id: session_id.to_string(),
-            sender_id: "driver".into(),
-            sender_type: SenderType::Bot,
-            message_type: "text".into(),
-            content: serde_json::Value::String(format!("msg-{created_at}")),
-            client_msg_id: None,
-            owner_bot_id: owner.map(str::to_string),
-            created_at,
-            run_id: String::new(),
-        })
-        .await
-        .expect("append message");
-}
-
 #[tokio::test]
 async fn create_as_manager_succeeds_and_projects_participants() {
     let fixture = Fixture::new().await;
@@ -331,7 +467,9 @@ async fn create_with_explicit_input_does_not_fall_back() {
     for bot in ["driver", "expert"] {
         fixture.add_bot(bot).await;
     }
-    fixture.store_group("g1", "driver", Some("ignored context")).await;
+    fixture
+        .store_group("g1", "driver", Some("ignored context"))
+        .await;
 
     let outcome = create_session(
         &fixture,
@@ -510,10 +648,7 @@ async fn session_list_uses_only_the_selected_authorized_view_actor() {
         .await
         .expect("omission selects the authenticated Human");
     assert_eq!(default_human.total, 1);
-    let explicit_human = SessionService::list(
-        &fixture.service,
-        list(Some("human_alice".into())),
-    )
+    let explicit_human = SessionService::list(&fixture.service, list(Some("human_alice".into())))
     .await
     .expect("the authenticated Human is a valid explicit view");
     assert_eq!(explicit_human.total, 1);
@@ -523,10 +658,7 @@ async fn session_list_uses_only_the_selected_authorized_view_actor() {
     assert_eq!(owned_bot.total, 1);
 
     for invalid_view in ["human_bob", "unowned", "missing"] {
-        let error = SessionService::list(
-            &fixture.service,
-            list(Some(invalid_view.into())),
-        )
+        let error = SessionService::list(&fixture.service, list(Some(invalid_view.into())))
         .await
         .expect_err("an unauthorized explicit view never falls back to Human");
         assert!(matches!(
@@ -597,10 +729,7 @@ async fn session_detail_accepts_human_or_exact_owned_bot_participation_only() {
 #[tokio::test]
 async fn session_detail_propagates_owned_bot_lookup_database_failure() {
     let bots = Arc::new(BotCore::with_repo(Arc::new(
-        PersistentBotRepo::with_plugins(
-            Arc::new(InMemoryCachePlugin::new()),
-            Arc::new(FailingDb),
-        ),
+        PersistentBotRepo::with_plugins(Arc::new(InMemoryCachePlugin::new()), Arc::new(FailingDb)),
     )));
     let fixture = Fixture::new_with_bots(bots).await;
     fixture.store_group("g1", "driver", None).await;
@@ -610,10 +739,7 @@ async fn session_detail_propagates_owned_bot_lookup_database_failure() {
         .create(
             "g1",
             NewSessionParams {
-                participants: vec![Participant::bot(
-                    "owned",
-                    ParticipantRole::Consultant,
-                )],
+                participants: vec![Participant::bot("owned", ParticipantRole::Consultant)],
                 group_version: Some(group.version),
                 ..Default::default()
             },
@@ -848,211 +974,171 @@ async fn complete_is_idempotent() {
 }
 
 #[tokio::test]
-async fn list_messages_returns_descending_with_cursor() {
+async fn list_messages_delegates_and_returns_legacy_group_messages_unchanged() {
     let fixture = Fixture::new().await;
-    for bot in ["driver", "expert"] {
-        fixture.add_bot(bot).await;
-    }
+    fixture.add_bot("driver").await;
     fixture.store_group("g1", "driver", None).await;
-    let outcome = create_session(
-        &fixture,
-        bot_principal("driver"),
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
         "g1",
-        "driver",
-        vec![participant_input("expert", None)],
-        None,
-        None,
+            NewSessionParams {
+                session_kind: SessionKind::Chat,
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::human("human_staff-1", ParticipantRole::Observer),
+                ],
+                group_version: Some(group.version),
+                ..Default::default()
+            },
     )
-    .await;
-    let session_id = outcome.session.session_id.clone();
-
-    for i in 0..3u32 {
-        fixture
-            .message_repo
-            .append_message(NewMessage {
-                group_id: "g1".into(),
-                session_id: session_id.clone(),
-                sender_id: "driver".into(),
-                sender_type: SenderType::Bot,
-                message_type: "text".into(),
-                content: serde_json::Value::String(format!("msg-{i}")),
-                client_msg_id: None,
-                owner_bot_id: None,
-                created_at: (i as u64) * 10,
-                run_id: String::new(),
-            })
             .await
-            .expect("append message");
-    }
+        .expect("seed session");
+    let expected = rich_group_message();
+    *fixture.history.messages.lock().expect("messages lock") = vec![expected.clone()];
 
-    let page = SessionMessageService::list(
+    let messages = SessionMessageService::list(
         &fixture.service,
         ListSessionMessages {
-            caller: bot_principal("driver"),
-            session_id: session_id.clone(),
-            before: None,
-            limit: 50,
-            view_bot_id: Some("driver".into()),
+            caller: human_principal("staff-1"),
+            session_id: session.id.clone(),
+            before: Some(1_786_590_000_000),
+            limit: 25,
+            view_bot_id: None,
         },
     )
     .await
     .expect("list messages");
 
-    assert_eq!(page.messages.len(), 3);
-    // cursor-based page: no total/offset/limit round-trip.
-    assert!(!page.has_more);
-    assert!(page.next_cursor.is_none());
-    // created_at DESC, session_seq DESC (legacy direct-read order).
-    for window in page.messages.windows(2) {
-        assert!(
-            window[0].session_seq > window[1].session_seq,
-            "messages must be ordered by session_seq DESC"
+    assert_eq!(
+        serde_json::to_value(&messages).expect("serialize messages"),
+        serde_json::to_value([expected]).expect("serialize expected")
         );
-    }
-    assert_eq!(page.messages[0].content, "msg-2");
-    assert_eq!(page.messages[2].content, "msg-0");
+    let calls = fixture.history.session_calls.lock().expect("history lock");
+    let call = calls.last().expect("history call");
+    assert_eq!(call.group_id, "g1");
+    assert_eq!(call.session_id, session.id);
+    assert_eq!(call.view_bot_id.as_deref(), Some("human_staff-1"));
+    assert_eq!(call.limit, 25);
+    assert_eq!(call.before, Some(1_786_590_000_000));
     assert_eq!(
-        page.messages[0].sender_type,
-        bcs_service_api::application::v1::MessageSenderKind::Bot
+        call.caller,
+        CallerContext::Human(HumanActor {
+            actor_id: "human_staff-1".into(),
+            staff_no: "staff-1".into(),
+        })
     );
 }
 
 #[tokio::test]
-async fn list_messages_composite_cursor_no_skip_tied_created_at() {
-    // VYQHI regression: messages sharing a created_at at a page boundary must
-    // not be skipped when following the opaque composite string cursor.
+async fn list_messages_rejects_invalid_limit_before_calling_history() {
     let fixture = Fixture::new().await;
-    for bot in ["driver", "expert"] {
-        fixture.add_bot(bot).await;
-    }
+    fixture.add_bot("driver").await;
     fixture.store_group("g1", "driver", None).await;
     let outcome = create_session(
         &fixture,
         bot_principal("driver"),
         "g1",
         "driver",
-        vec![participant_input("expert", None)],
+        Vec::new(),
         None,
         None,
     )
     .await;
-    let session_id = outcome.session.session_id.clone();
-
-    // Seed five messages ALL with the same created_at; session_seq breaks ties.
-    for i in 0..5u32 {
-        fixture
-            .message_repo
-            .append_message(NewMessage {
-                group_id: "g1".into(),
-                session_id: session_id.clone(),
-                sender_id: "driver".into(),
-                sender_type: SenderType::Bot,
-                message_type: "text".into(),
-                content: serde_json::Value::String(format!("m{i}")),
-                client_msg_id: None,
-                owner_bot_id: None,
-                created_at: 7_000,
-                run_id: String::new(),
-            })
-            .await
-            .expect("append message");
-    }
-
-    // Page 1 (limit 2): newest two by (created_at DESC, session_seq DESC) →
-    // seqs 5, 4; has_more; opaque next_cursor encodes "7000:4".
-    let page = SessionMessageService::list(
-        &fixture.service,
-        ListSessionMessages {
-            caller: bot_principal("driver"),
-            session_id: session_id.clone(),
-            before: None,
-            limit: 2,
-            view_bot_id: Some("driver".into()),
-        },
-    )
-    .await
-    .expect("list messages page 1");
-    assert!(page.has_more);
-    assert_eq!(page.next_cursor.as_deref(), Some("7000:4"));
-    assert_eq!(
-        page.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
-        vec![5, 4]
-    );
-
-    // Page 2: pass the opaque next_cursor back as before → seqs 3, 2.
-    let page = SessionMessageService::list(
-        &fixture.service,
-        ListSessionMessages {
-            caller: bot_principal("driver"),
-            session_id: session_id.clone(),
-            before: page.next_cursor,
-            limit: 2,
-            view_bot_id: Some("driver".into()),
-        },
-    )
-    .await
-    .expect("list messages page 2");
-    assert!(page.has_more);
-    assert_eq!(page.next_cursor.as_deref(), Some("7000:2"));
-    assert_eq!(
-        page.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
-        vec![3, 2]
-    );
-
-    // Page 3: follow again → seq 1, no more.
-    let page = SessionMessageService::list(
-        &fixture.service,
-        ListSessionMessages {
-            caller: bot_principal("driver"),
-            session_id,
-            before: page.next_cursor,
-            limit: 2,
-            view_bot_id: Some("driver".into()),
-        },
-    )
-    .await
-    .expect("list messages page 3");
-    assert!(!page.has_more);
-    assert!(page.next_cursor.is_none());
-    assert_eq!(
-        page.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
-        vec![1]
-    );
-}
-
-#[tokio::test]
-async fn list_messages_rejects_malformed_before_cursor() {
-    let fixture = Fixture::new().await;
-    for bot in ["driver", "expert"] {
-        fixture.add_bot(bot).await;
-    }
-    fixture.store_group("g1", "driver", None).await;
-    let outcome = create_session(
-        &fixture,
-        bot_principal("driver"),
-        "g1",
-        "driver",
-        vec![participant_input("expert", None)],
-        None,
-        None,
-    )
-    .await;
-
     let error = SessionMessageService::list(
         &fixture.service,
         ListSessionMessages {
             caller: bot_principal("driver"),
-            session_id: outcome.session.session_id.clone(),
-            before: Some("not-a-cursor".to_string()),
-            limit: 10,
+            session_id: outcome.session.session_id,
+            before: None,
+            limit: 0,
             view_bot_id: Some("driver".into()),
         },
     )
     .await
-    .expect_err("malformed cursor should 400");
+    .expect_err("zero limit should be invalid");
     assert_eq!(error.code(), "invalid_request");
+    assert!(
+        fixture
+            .history
+            .session_calls
+            .lock()
+            .expect("history lock")
+            .is_empty()
+    );
 }
 
+#[tokio::test]
+async fn state_machine_session_history_uses_runtime_and_returns_messages_unchanged() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    fixture.store_state_machine_group("g1", "driver").await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+        "g1",
+            NewSessionParams {
+                session_kind: SessionKind::Chat,
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::human("human_staff-1", ParticipantRole::Observer),
+                ],
+                group_version: Some(group.version),
+                ..Default::default()
+            },
+    )
+        .await
+        .expect("seed state-machine session");
+    let expected = rich_group_message();
+    *fixture
+        .runtime
+        .history_result
+        .lock()
+        .expect("runtime result lock") = Some(SessionHistoryResult {
+        session_id: session.id.clone(),
+        messages: vec![expected.clone()],
+        limit: 20,
+        before: Some(1_786_590_000_000),
+        next_before: None,
+    });
+
+    let messages = SessionMessageService::list(
+        &fixture.service,
+        ListSessionMessages {
+            caller: human_principal("staff-1"),
+            session_id: session.id.clone(),
+            before: Some(1_786_590_000_000),
+            limit: 20,
+            view_bot_id: None,
+        },
+    )
+    .await
+    .expect("state-machine history");
+
+    assert_eq!(
+        serde_json::to_value(messages).expect("serialize messages"),
+        serde_json::to_value([expected]).expect("serialize expected")
+    );
+    assert_eq!(
+        fixture
+            .runtime
+            .history_calls
+            .lock()
+            .expect("runtime history lock")
+            .as_slice(),
+        &[(session.id, 20, Some(1_786_590_000_000))]
+    );
+    assert!(
+        fixture
+            .history
+            .session_calls
+            .lock()
+            .expect("history lock")
+            .is_empty()
+    );
+}
 
 #[tokio::test]
 async fn human_owner_of_group_driver_can_add_session_participant_without_human_membership() {
@@ -1187,7 +1273,11 @@ async fn chat_manager_role_does_not_grant_session_management_to_human_owner() {
     group
         .participants
         .push(Participant::bot("manager", ParticipantRole::Manager));
-    fixture.groups.upsert(group.clone()).await.expect("store group");
+    fixture
+        .groups
+        .upsert(group.clone())
+        .await
+        .expect("store group");
     let session = fixture
         .session_repo
         .create(
@@ -1507,10 +1597,7 @@ async fn session_only_participant_can_list_sessions() {
     // Guard: newcomer must be session-only (not in group.participants).
     let group = fixture.groups.get("g1").await.expect("group exists");
     assert!(
-        !group
-            .participants
-            .iter()
-            .any(|p| p.bot_uuid == "newcomer"),
+        !group.participants.iter().any(|p| p.bot_uuid == "newcomer"),
         "newcomer must be session-only (not in group.participants)"
     );
 
@@ -1598,10 +1685,7 @@ async fn session_only_participant_list_sessions_scoped() {
     // group.participants).
     let group = fixture.groups.get("g1").await.expect("group exists");
     assert!(
-        !group
-            .participants
-            .iter()
-            .any(|p| p.bot_uuid == "newcomer"),
+        !group.participants.iter().any(|p| p.bot_uuid == "newcomer"),
         "newcomer must be session-only (not in group.participants)"
     );
 
@@ -1633,13 +1717,24 @@ async fn create_session_inherits_parent_group_participants_without_request_roste
         fixture.add_bot(bot).await;
     }
     fixture
-        .store_manager_worker_group_with_originator("g1", "driver", &["expert"], "human_driver", None)
+        .store_manager_worker_group_with_originator(
+            "g1",
+            "driver",
+            &["expert"],
+            "human_driver",
+            None,
+        )
         .await;
     let mut group = fixture.groups.get("g1").await.expect("group exists");
-    group
-        .participants
-        .push(Participant::human("human_driver", ParticipantRole::Observer));
-    fixture.groups.upsert(group).await.expect("store Human participant");
+    group.participants.push(Participant::human(
+        "human_driver",
+        ParticipantRole::Observer,
+    ));
+    fixture
+        .groups
+        .upsert(group)
+        .await
+        .expect("store Human participant");
 
     let outcome = fixture
         .service
@@ -1652,7 +1747,13 @@ async fn create_session_inherits_parent_group_participants_without_request_roste
         .await
         .expect("session should inherit parent group roster");
 
-    assert!(outcome.session.participants.iter().any(|p| p.actor_id == "expert"));
+    assert!(
+        outcome
+            .session
+            .participants
+            .iter()
+            .any(|p| p.actor_id == "expert")
+    );
     let inherited_human = outcome
         .session
         .participants
@@ -1660,18 +1761,18 @@ async fn create_session_inherits_parent_group_participants_without_request_roste
         .find(|p| p.actor_id == "human_driver")
         .expect("Human Group participant should be inherited into Session");
     assert_eq!(inherited_human.actor_kind, ActorKind::Human);
-    assert!(outcome
+    assert!(
+        outcome
         .session
         .participants
         .iter()
-        .any(|p| p.actor_id == "driver" && p.role == ParticipantRole::Driver));
+            .any(|p| p.actor_id == "driver" && p.role == ParticipantRole::Driver)
+    );
 }
 
-/// Build the ManagerWorker session used by every view_bot_id authz test: a
-/// Chat-kind session seeded with three owner-tagged messages — public at
-/// seq 1, worker-a's at seq 2, worker-b's at seq 3. Callers must first store
-/// the group (ManagerWorker, with worker-a / worker-b as Worker participants)
-/// and register the bots.
+/// Build the ManagerWorker session used by every view_bot_id authorization
+/// test. Message visibility itself belongs to the injected history service;
+/// these facade tests only verify the selected actor passed to that service.
 async fn setup_manager_worker_session(fixture: &Fixture) -> String {
     let group = fixture.groups.get("g1").await.expect("group exists");
     let session = fixture
@@ -1695,11 +1796,7 @@ async fn setup_manager_worker_session(fixture: &Fixture) -> String {
         )
         .await
         .expect("seed manager-worker session");
-    let session_id = session.id.clone();
-    seed_message(fixture, &session_id, None, 10).await;
-    seed_message(fixture, &session_id, Some("worker-a"), 20).await;
-    seed_message(fixture, &session_id, Some("worker-b"), 30).await;
-    session_id
+    session.id
 }
 
 #[tokio::test]
@@ -1754,7 +1851,7 @@ async fn human_caller_can_explicitly_select_an_owned_bot_message_view() {
         .await;
     let session_id = setup_manager_worker_session(&fixture).await;
 
-    let page = SessionMessageService::list(
+    let messages = SessionMessageService::list(
         &fixture.service,
         ListSessionMessages {
             caller: bot_principal("worker-a"),
@@ -1767,9 +1864,12 @@ async fn human_caller_can_explicitly_select_an_owned_bot_message_view() {
     .await
     .expect("list messages");
 
-    // Explicit owned Bot resolves to Eq("worker-a") scoping.
-    assert_eq!(page.messages.len(), 1);
-    assert_eq!(page.messages[0].session_seq, 2);
+    assert!(messages.is_empty());
+    let calls = fixture.history.session_calls.lock().expect("history lock");
+    assert_eq!(
+        calls.last().expect("history call").view_bot_id.as_deref(),
+        Some("worker-a")
+    );
 }
 
 #[tokio::test]
@@ -1824,7 +1924,7 @@ async fn omitted_human_message_view_equals_the_human_participant_view() {
         .await;
     let session_id = setup_manager_worker_session(&fixture).await;
 
-    let page = SessionMessageService::list(
+    let messages = SessionMessageService::list(
         &fixture.service,
         ListSessionMessages {
             caller: human_principal("staff-1"),
@@ -1837,10 +1937,12 @@ async fn omitted_human_message_view_equals_the_human_participant_view() {
     .await
     .expect("list messages");
 
-    // Omitted selects human_staff-1. Human ManagerWorker views are Public
-    // (IsNull), so only the public message is visible.
-    assert_eq!(page.messages.len(), 1);
-    assert_eq!(page.messages[0].session_seq, 1);
+    assert!(messages.is_empty());
+    let calls = fixture.history.session_calls.lock().expect("history lock");
+    assert_eq!(
+        calls.last().expect("history call").view_bot_id.as_deref(),
+        Some("human_staff-1")
+    );
 }
 
 #[tokio::test]
@@ -1860,7 +1962,7 @@ async fn human_view_session_messages_as_self_human() {
         .await;
     let session_id = setup_manager_worker_session(&fixture).await;
 
-    let page = SessionMessageService::list(
+    let messages = SessionMessageService::list(
         &fixture.service,
         ListSessionMessages {
             caller: human_principal("staff-1"),
@@ -1873,10 +1975,12 @@ async fn human_view_session_messages_as_self_human() {
     .await
     .expect("list messages");
 
-    // `"human_<self>"` → resolved Some; `manager_worker_history_view`
-    // special-cases the `human_` prefix to Public → IsNull → public message.
-    assert_eq!(page.messages.len(), 1);
-    assert_eq!(page.messages[0].session_seq, 1);
+    assert!(messages.is_empty());
+    let calls = fixture.history.session_calls.lock().expect("history lock");
+    assert_eq!(
+        calls.last().expect("history call").view_bot_id.as_deref(),
+        Some("human_staff-1")
+    );
 }
 
 #[tokio::test]
@@ -1902,7 +2006,7 @@ async fn human_view_session_messages_as_owned_bot() {
         .await;
     let session_id = setup_manager_worker_session(&fixture).await;
 
-    let page = SessionMessageService::list(
+    let messages = SessionMessageService::list(
         &fixture.service,
         ListSessionMessages {
             caller: human_principal("staff-1"),
@@ -1915,10 +2019,12 @@ async fn human_view_session_messages_as_owned_bot() {
     .await
     .expect("human views as owned bot");
 
-    // Ownership verified → Some("worker-a"); worker-a is a Worker →
-    // owner_filter=Eq("worker-a") → worker-a's message.
-    assert_eq!(page.messages.len(), 1);
-    assert_eq!(page.messages[0].session_seq, 2);
+    assert!(messages.is_empty());
+    let calls = fixture.history.session_calls.lock().expect("history lock");
+    assert_eq!(
+        calls.last().expect("history call").view_bot_id.as_deref(),
+        Some("worker-a")
+    );
 }
 
 #[tokio::test]
