@@ -91,7 +91,7 @@ fn is_unified_ideograph(ch: char) -> bool {
     )
 }
 
-fn is_display_name_mention_boundary(name: &str, remainder: &str) -> bool {
+fn is_display_name_mention_boundary(remainder: &str) -> bool {
     let Some(next) = remainder.chars().next() else {
         return true;
     };
@@ -121,7 +121,7 @@ fn is_display_name_mention_boundary(name: &str, remainder: &str) -> bool {
                 | '}'
                 | '》'
         )
-        || (name.chars().any(is_unified_ideograph) && is_unified_ideograph(next))
+        || is_unified_ideograph(next)
 }
 
 // ---------------------------------------------------------------------------
@@ -257,7 +257,7 @@ impl MessageRouter {
                         return None;
                     }
                     let remainder = &after_at[name.len()..];
-                    if is_display_name_mention_boundary(name, remainder) {
+                    if is_display_name_mention_boundary(remainder) {
                         Some((participant, name))
                     } else {
                         None
@@ -1279,7 +1279,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_ascii_display_name_still_requires_a_boundary() {
+    async fn test_ascii_display_name_allows_adjacent_chinese_message_text() {
+        let router = MessageRouter::new();
+        let mut session = create_test_session();
+        session.participants[1].bot_name = Some("xxx".to_string());
+
+        let decision = router.route(&session, "@xxx你好", None).await;
+
+        assert_eq!(decision.mentions, vec!["consultant".to_string()]);
+        let consultant_target = decision
+            .targets
+            .iter()
+            .find(|target| target.bot_uuid == "consultant")
+            .unwrap();
+        assert_eq!(consultant_target.delivery_type, DeliveryType::Send);
+    }
+
+    #[tokio::test]
+    async fn test_ascii_display_name_rejects_adjacent_ascii_text() {
         let router = MessageRouter::new();
         let mut session = create_test_session();
         session.participants[1].bot_name = Some("dev".to_string());
