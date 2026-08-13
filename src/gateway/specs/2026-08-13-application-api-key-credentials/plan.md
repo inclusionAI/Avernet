@@ -271,12 +271,10 @@ signing).
   measurable, so deletion is gated on evidence rather than memory. Spec lists
   the deletion as an explicit follow-up, and both the column comment and the
   method docstring say what has to happen before removal.
-- **Risk:** Uniform `ACTIVE` gating breaks a live holder whose row is not
-  `ACTIVE` — the one way this change can bite an existing user, since the legacy
-  lookup ignores `status` today.
-  **Mitigation:** No gateway API sets a non-`ACTIVE` status and rows default to
-  `ACTIVE`, so the population should be empty; spec's Open Questions calls for a
-  `SELECT status, COUNT(*)` against the real table to confirm before rollout.
+- **Risk:** ~~Uniform `ACTIVE` gating breaks a live holder whose row is not
+  `ACTIVE`, since the legacy lookup ignores `status` today.~~ **Retired** —
+  confirmed against the real table that the non-`ACTIVE` population is zero, so
+  no live holder is affected (spec §Confirmed Decisions 1).
 
 ## Alternatives Considered
 
@@ -309,9 +307,9 @@ signing).
   transition window is the cost of that guarantee.
 - **`sha256(token)` as the legacy lookup key**, so no plaintext remains during
   the window — viable (deterministic, so still exact-matchable; unsalted is safe
-  for a high-entropy JWT), but deferred: it adds a column and a backfill for a
-  path already scheduled for deletion, and leaves today's risk unchanged rather
-  than worse. Recorded in the spec's Open Questions.
+  for a high-entropy JWT), but **decided against**: it adds a column and a
+  backfill for a path already scheduled for deletion, and leaves today's risk
+  unchanged rather than worse (spec §Confirmed Decisions 2).
 - **Pin verification to `env` like secbaas
   (`get_by_prefix_and_status(..., env=...)`)** — deferred: the gateway authn
   path has no environment concept; spec's Open Question records the assumption

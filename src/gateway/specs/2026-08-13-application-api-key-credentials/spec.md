@@ -141,6 +141,18 @@ separate, temporary path rather than a data conversion.
   the gateway has no environment concept in its authn path — see Open
   Questions).
 
+## Confirmed Decisions
+
+1. **Gate `status` uniformly on both paths.** Confirmed against the real table:
+   the non-`ACTIVE` population is zero, so applying the `ACTIVE` gate to the
+   legacy path breaks no live holder. This closes the only way this change could
+   have bitten an existing user, and fixes a latent gap where a row explicitly
+   registered `INACTIVE` still authenticated.
+2. **Do not harden the retained `token` column.** The plaintext JWTs stay as-is
+   for the window rather than moving to a `sha256(token)` lookup key: the risk
+   is unchanged from today's, not worsened, and the column is scheduled for
+   deletion. Not worth a column plus a backfill on a path already on its way out.
+
 ## Open Questions
 
 - **Env pinning at verification.** secbaas restricts verification to records in
@@ -153,18 +165,7 @@ separate, temporary path rather than a data conversion.
   `policy`, `description`, `owner` vs `owners`). Assumed answer: the migration
   workstream owns that mapping; this feature only fixes the credential columns'
   shape and semantics.
-- **Status gating on the legacy path is a behavior change.** Today the JWT
-  lookup ignores `status`, so a row explicitly registered `INACTIVE` still
-  authenticates. Applying the gate uniformly fixes that, but if any live holder
-  is on a non-`ACTIVE` row they would break — the one way this change could bite
-  an existing user. Assumed answer (proceeding with it): gate both paths, since
-  no gateway API sets a non-`ACTIVE` status today and rows default to `ACTIVE`.
-  Worth a quick `SELECT status, COUNT(*)` against the real table to confirm.
 - **Transition window length.** Not fixed by this spec. The deletion follow-up
   is gated on legacy-path warnings going quiet rather than on a calendar date.
-- **Hardening the legacy column.** The retained `token` column still holds
-  plaintext JWTs — unchanged from today's risk, but not improved either. An
-  optional extra step would store `sha256(token)` as the lookup key instead
-  (deterministic, so still exact-matchable; unsalted is safe here because a JWT
-  carries far too much entropy to be dictionary-attacked). Assumed answer: skip
-  it — the window is temporary and the column is on its way out.
+(Both remaining questions are deferrable — neither changes the design or blocks
+implementation.)
