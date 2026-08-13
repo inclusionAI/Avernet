@@ -23,6 +23,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodePatch,
     TaskSpec,
 )
+from agentclaw.community.core.task.task_center.engine import ExecutionEngine
 from agentclaw.community.core.task.task_center.task_service import TaskService
 
 
@@ -88,11 +89,11 @@ class StubRunner:
     def __init__(self):
         self.run_calls: list[list[TaskNode]] = []
 
-    def start_run(self, toDoTaskList: list[TaskNode]) -> list[bool]:
+    async def start_run(self, toDoTaskList: list[TaskNode]) -> list[bool]:
         self.run_calls.append(list(toDoTaskList))
         return [True] * len(toDoTaskList)
 
-    def form_coop_group(self, gf):
+    async def form_coop_group(self, gf):
         return "grp_stub"
 
     def query_status(self, task_id): return Status.PENDING
@@ -102,70 +103,29 @@ class StubRunner:
 
 
 # ===== CaseEngine:覆写 _build_* 注入 stub(T1=A corp 最简形态)=====
-class _CaseEngine:
-    """测试用编排核:覆写 _build_* 注入 stub planner/dispatcher/runner(模拟 corp 子类)。"""
-    from agentclaw.community.core.task.task_center.engine import ExecutionEngine as _Engine
-
-    rule_id = "stub"
-    priority = 5
-
+class _CaseEngine(ExecutionEngine):
+    """测试用编排核:继承 ExecutionEngine 覆写 _build_* 注入 stub 策略/投递(T1=A corp 最简形态)。
+    不手动委托 on_*/_dispatch_and_run——直接继承 async 编排逻辑(collect/drain 模式)。"""
     def __init__(self, graph, planner_factory, discover_bot="bot1", runner=None):
+        self._case_planner_factory = planner_factory
+        self._case_discover_bot = discover_bot
+        self._case_runner = runner
+        super().__init__(graph)
+
+    def _build_planner(self):
         from agentclaw.community.core.task.task_plan.planner import TaskPlanner
+        p = TaskPlanner(self._graph)
+        p.set_strategies([_StubPlanningStrategy(self._case_planner_factory)])
+        return p
+
+    def _build_dispatcher(self):
         from agentclaw.community.core.task.task_dispatch.dispatcher import TaskDispatcher
-        self._graph = graph
-        self._planner = TaskPlanner(graph)
-        self._planner.set_strategies([_StubPlanningStrategy(planner_factory)])
-        self._dispatcher = TaskDispatcher(graph)
-        self._dispatcher.set_strategies([_StubDispatchStrategy(discover_bot)])
-        self._runner = runner or StubRunner()
-        import threading
-        self._locks: dict = {}
-        self._locks_guard = threading.RLock()
+        d = TaskDispatcher(self._graph)
+        d.set_strategies([_StubDispatchStrategy(self._case_discover_bot)])
+        return d
 
-    # 委托给真实 ExecutionEngine 的方法(复用编排逻辑)
-    def on_execute(self, task_id):
-        from agentclaw.community.core.task.task_center.engine import ExecutionEngine
-        ExecutionEngine.on_execute(self, task_id)
-
-    def on_report(self, patch):
-        from agentclaw.community.core.task.task_center.engine import ExecutionEngine
-        return ExecutionEngine.on_report(self, patch)
-
-    def on_miss(self, patch):
-        from agentclaw.community.core.task.task_center.engine import ExecutionEngine
-        ExecutionEngine.on_miss(self, patch)
-
-    def on_harness(self, patch):
-        from agentclaw.community.core.task.task_center.engine import ExecutionEngine
-        ExecutionEngine.on_harness(self, patch)
-
-    def _root(self, task_id):
-        from agentclaw.community.core.task.task_center.engine import ExecutionEngine
-        return ExecutionEngine._root(self, task_id)
-
-    def _on_pass(self, task_id, node_id):
-        from agentclaw.community.core.task.task_center.engine import ExecutionEngine
-        ExecutionEngine._on_pass(self, task_id, node_id)
-
-    def _on_fail(self, task_id, node_id):
-        from agentclaw.community.core.task.task_center.engine import ExecutionEngine
-        ExecutionEngine._on_fail(self, task_id, node_id)
-
-    def _escalate_bbs(self, task_id, node_id):
-        from agentclaw.community.core.task.task_center.engine import ExecutionEngine
-        ExecutionEngine._escalate_bbs(self, task_id, node_id)
-
-    def _dispatch_and_run(self, task_id):
-        from agentclaw.community.core.task.task_center.engine import ExecutionEngine
-        ExecutionEngine._dispatch_and_run(self, task_id)
-
-    def _maybe_finish_graph(self, task_id):
-        from agentclaw.community.core.task.task_center.engine import ExecutionEngine
-        ExecutionEngine._maybe_finish_graph(self, task_id)
-
-    def _lock_for(self, task_id):
-        from agentclaw.community.core.task.task_center.engine import ExecutionEngine
-        return ExecutionEngine._lock_for(self, task_id)
+    def _build_runner(self):
+        return self._case_runner or StubRunner()
 
 
 class _CaseTaskService(TaskService):
@@ -267,10 +227,10 @@ class TestCallback:
     def test_report_result_flips_node_via_callback(self):
         facade, svc, *_ = _build_facade(decomposer=lambda g: [_child("c1")])
         _run(facade.execute(_task_info()))
-        facade.callback.report_result(TaskCallbackData(
+        _run(facade.callback.report_result(TaskCallbackData(
             loop_task_id="t1::c1", workflow_type="single_bot", workflow_id=1, instance_id=9,
             result={"success": True, "data": "done"},
-        ))
+        )))
         graph = svc.query_task_dashboard("t1")
         assert svc._get_node(graph, "c1").status == Status.DONE
 
@@ -297,18 +257,18 @@ class TestAcceptanceViaReport:
         # decomposer 首批产 c1,c1 DONE 后 plan[]→ 根等回投 → 回投 root PASS → DONE
         facade = _CaseTaskService(svc, planner_factory=lambda g: [_child("c1")])
         _run(facade.execute(_task_info()))
-        facade.callback.report_result(TaskCallbackData(
+        _run(facade.callback.report_result(TaskCallbackData(
             loop_task_id="t1::c1", workflow_type="single_bot", workflow_id=1, instance_id=1,
             result={"success": True, "data": "x"},
-        ))
+        )))
         # c1 DONE → 根 plan[](无新子)→ 根 PLANNING 等回投
         graph = svc.query_task_dashboard("t1")
         assert svc._get_node(graph, "t1").status == Status.PLANNING
         # 模拟 owner bot 终验回投 root PASS → graph DONE(无 verify port 注入)
-        facade.callback.report_result(TaskCallbackData(
+        _run(facade.callback.report_result(TaskCallbackData(
             loop_task_id="t1::t1", workflow_type="single_bot", workflow_id=1, instance_id=2,
             result={"success": True, "data": "root PASS"},
-        ))
+        )))
         graph = svc.query_task_dashboard("t1")
         assert graph.status == Status.DONE
 
@@ -322,10 +282,10 @@ class TestBbsEscalationNoMarket:
         ti.execution_config["MAX_DEPTH"] = 1
         facade = _CaseTaskService(svc, planner_factory=lambda g: [_child("c1", "t3")])
         _run(facade.execute(ti))
-        facade.callback.report_result(TaskCallbackData(
+        _run(facade.callback.report_result(TaskCallbackData(
             loop_task_id="t3::c1", workflow_type="single_bot", workflow_id=1, instance_id=1,
             result={"success": False, "fail_detail": "缺x"},
-        ))
+        )))
         graph = svc.query_task_dashboard("t3")
         assert graph.extend_props.get("bbs_mode") is True
         assert graph.loop_round == 1

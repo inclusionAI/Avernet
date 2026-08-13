@@ -7,6 +7,7 @@ on_harness 复位重投、loop_round 仅升 BBS++、零 case grep。
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Callable
 
 import pytest
@@ -55,6 +56,11 @@ def _patch(task_id: str, node_id: str, **kw) -> TaskNodePatch:
     return TaskNodePatch(task_id=task_id, node_id=node_id, **kw)
 
 
+def _run(coro):
+    """同步驱动 async 编排方法(on_* 协程化后,单测经此 helper 跑)。"""
+    return asyncio.new_event_loop().run_until_complete(coro)
+
+
 # ===== stubs =====
 class StubPlanner:
     def __init__(self, factory: Callable[[object], list[TaskNode]] | None = None):
@@ -89,11 +95,11 @@ class StubRunner:
         self.run_calls: list[list[TaskNode]] = []
         self._groups = []
 
-    def start_run(self, toDoTaskList: list[TaskNode]) -> list[bool]:
+    async def start_run(self, toDoTaskList: list[TaskNode]) -> list[bool]:
         self.run_calls.append(list(toDoTaskList))
         return [True] * len(toDoTaskList)
 
-    def form_coop_group(self, gf):
+    async def form_coop_group(self, gf):
         self._groups.append(gf)
         return "grp_stub"
 
@@ -147,7 +153,7 @@ class TestOnExecute:
         planner = StubPlanner(lambda g: [_child("c1"), _child("c2")])
         runner = StubRunner()
         eng = _engine(svc, planner=planner, runner=runner)
-        eng.on_execute("t1")
+        _run(eng.on_execute("t1"))
         assert svc._get_node(graph, "t1").status == Status.PLANNING
         assert svc._get_node(graph, "c1").status == Status.RUNNING
         assert svc._get_node(graph, "c2").status == Status.RUNNING
@@ -156,14 +162,14 @@ class TestOnExecute:
 
     def test_no_plan_no_op(self, svc, graph):
         eng = _engine(svc, planner=StubPlanner(lambda g: []))
-        eng.on_execute("t1")
+        _run(eng.on_execute("t1"))
         assert svc._get_node(graph, "t1").status == Status.PENDING
 
     def test_not_pending_root_no_op(self, svc, graph):
         svc.update_task_node_info(_patch("t1", "t1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         planner = StubPlanner(lambda g: [_child("c1")])
         eng = _engine(svc, planner=planner)
-        eng.on_execute("t1")
+        _run(eng.on_execute("t1"))
         assert planner.plan_calls == 0
 
 
@@ -177,7 +183,7 @@ class TestOnReportPass:
     def test_pass_partial_siblings_wait(self, svc, graph):
         self._setup_running_children(svc, graph, 2)
         eng = _engine(svc, planner=StubPlanner(lambda g: [_child("c_proceed")]))
-        eng.on_report(_patch("t1", "c0", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS)))
+        _run(eng.on_report(_patch("t1", "c0", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))))
         assert svc._get_node(graph, "c0").status == Status.DONE
         assert eng._planner.plan_calls == 0
 
@@ -185,8 +191,8 @@ class TestOnReportPass:
         self._setup_running_children(svc, graph, 2)
         runner = StubRunner()
         eng = _engine(svc, planner=StubPlanner(lambda g: [_child("c_proceed")]), runner=runner)
-        eng.on_report(_patch("t1", "c0", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS)))
-        eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS)))
+        _run(eng.on_report(_patch("t1", "c0", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))))
+        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))))
         assert svc._get_node(graph, "c_proceed").status == Status.RUNNING
         assert len(runner.run_calls) == 1
 
@@ -194,17 +200,17 @@ class TestOnReportPass:
         # V1:根验收不主动触发;gap 闭 + 根 → 根保持 PLANNING 等 owner bot 回投(engine 不调 verify)
         self._setup_running_children(svc, graph, 2)
         eng = _engine(svc, planner=StubPlanner(lambda g: []))
-        eng.on_report(_patch("t1", "c0", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS)))
-        eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS)))
+        _run(eng.on_report(_patch("t1", "c0", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))))
+        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))))
         assert svc._get_node(graph, "t1").status == Status.PLANNING  # 等回投,不自动验
 
     def test_root_terminal_pass_finish_graph(self, svc, graph):
         # 全图 DONE → plan[]→ 根 PLANNING 等回投 → 模拟 owner bot 回投 root PASS → graph DONE
         self._setup_running_children(svc, graph, 1)
         eng = _engine(svc, planner=StubPlanner(lambda g: []))
-        eng.on_report(_patch("t1", "c0", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS)))
+        _run(eng.on_report(_patch("t1", "c0", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))))
         # 模拟 owner bot 终验回投 root PASS(验收 100% 回投,engine 不主动验)
-        eng.on_report(_patch("t1", "t1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS)))
+        _run(eng.on_report(_patch("t1", "t1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))))
         assert graph.status == Status.DONE
 
 
@@ -215,7 +221,7 @@ class TestOnReportFail:
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         runner = StubRunner()
         eng = _engine(svc, planner=StubPlanner(lambda g: [_child("c1_remedy")]), runner=runner)
-        eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAIL, gaps=["缺x"])))
+        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAIL, gaps=["缺x"]))))
         assert svc._get_node(graph, "c1").status == Status.PLANNING
         assert svc._get_node(graph, "c1_remedy").status == Status.RUNNING
         assert len(runner.run_calls) == 1
@@ -225,7 +231,7 @@ class TestOnReportFail:
         svc.add_task_nodes([_child("c1", "t2")], parent_node_id="t2")
         svc.update_task_node_info(_patch("t2", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         eng = _engine(svc, planner=StubPlanner(lambda g: []))
-        eng.on_report(_patch("t2", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAIL, gaps=["缺x"])))
+        _run(eng.on_report(_patch("t2", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAIL, gaps=["缺x"]))))
         # 升 BBS:remove_subtree(c1) + loop_round++ + bbs_mode(无 bbs market publish)
         assert all(n.node_id != "c1" for n in g.tasks)
         assert g.loop_round == 1
@@ -237,7 +243,7 @@ class TestOnReportFail:
         svc.add_task_nodes([_child("c1", "t3")], parent_node_id="t3")
         svc.update_task_node_info(_patch("t3", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         eng = _engine(svc, planner=StubPlanner(lambda g: []))
-        eng.on_report(_patch("t3", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAIL, gaps=["缺x"])))
+        _run(eng.on_report(_patch("t3", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAIL, gaps=["缺x"]))))
         assert g.status == Status.HUNG
         assert g.extend_props.get("hung_reason") == "stuck"
 
@@ -248,7 +254,7 @@ class TestOnMiss:
         svc.add_task_nodes([_child("c1")], parent_node_id="t1")
         runner = StubRunner()
         eng = _engine(svc, dispatcher=StubDispatcher(), planner=StubPlanner(lambda g: [_child("c1_split")]), runner=runner)
-        eng.on_miss(_patch("t1", "c1", extend_props_patch={"miss_events": ["no_bot"]}))
+        _run(eng.on_miss(_patch("t1", "c1", extend_props_patch={"miss_events": ["no_bot"]})))
         assert svc._get_node(graph, "c1_split").status == Status.RUNNING
         assert len(runner.run_calls) == 1
 
@@ -256,7 +262,7 @@ class TestOnMiss:
         g = svc.initialize_graph(_task_info("t4", max_depth=1))
         svc.add_task_nodes([_child("c1", "t4")], parent_node_id="t4")
         eng = _engine(svc, planner=StubPlanner(lambda g: []))
-        eng.on_miss(_patch("t4", "c1", extend_props_patch={"miss_events": ["no_bot"]}))
+        _run(eng.on_miss(_patch("t4", "c1", extend_props_patch={"miss_events": ["no_bot"]})))
         assert g.loop_round == 1
         assert g.extend_props.get("bbs_mode") is True
 
@@ -268,7 +274,7 @@ class TestOnHarness:
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         runner = StubRunner()
         eng = _engine(svc, runner=runner)
-        eng.on_harness(_patch("t1", "c1", status=Status.PENDING, extend_props_patch={"crash": "timeout"}))
+        _run(eng.on_harness(_patch("t1", "c1", status=Status.PENDING, extend_props_patch={"crash": "timeout"})))
         assert svc._get_node(graph, "c1").status == Status.RUNNING
         assert len(runner.run_calls) == 1
 
@@ -280,7 +286,7 @@ class TestLoopRound:
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         before = graph.loop_round
         eng = _engine(svc, planner=StubPlanner(lambda g: [_child("c1_remedy")]))
-        eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAIL, gaps=["x"])))
+        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAIL, gaps=["x"]))))
         assert graph.loop_round == before
 
 

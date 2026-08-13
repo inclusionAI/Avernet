@@ -5,6 +5,7 @@ Avernet 阶段:form_coop_group stub(不真实 BCS)、start_run stub 投递(记�
 """
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Any, Protocol
 
@@ -19,7 +20,7 @@ from agentclaw.community.core.task.task_dispatch.strategies import GroupFormatio
 class DeliveryPort(Protocol):
     """执行投递后端 seam(单 bot workflow / bcn 协作群 / BBS 广场)。corp 注入真实实现。"""
 
-    def deliver(self, node: TaskNode) -> bool:
+    async def deliver(self, node: TaskNode) -> bool:
         """投递任务节点给执行主体,返回是否投递成功(完成结果经 TaskLoopCallback PUSH 回投)。"""
         ...
 
@@ -29,7 +30,12 @@ class TaskRunner:
 
     调用方:编排核(经 TaskService facade 驱动)。一个 start_run(批量)入口三模态自适应。
     三类投递后端经 ``set_delivery(mode, port)`` 注入(corp);缺省 stub 记投递日志返回 True。
+    投递并发:``start_run`` 内部 ``asyncio.gather`` + ``_DELIVER_CONCURRENCY`` Semaphore 限流
+    (对齐 backend lifecycle 模式,多节点网络投递并发防雪崩)。
     """
+
+    # 投递并发上限(多节点投递 gather 限流;对齐 backend lifecycle Semaphore 模式)。
+    _DELIVER_CONCURRENCY = 8
 
     def __init__(self, graph) -> None:
         """graph: TaskGraphService(派生查询 + 投递映射用)。"""
@@ -42,20 +48,24 @@ class TaskRunner:
         """(非公开)注入执行投递后端。mode∈{"single_bot","coop_group","bbs"};corp ocb 仓注入真实实现。"""
         self._deliveries[mode] = port
 
-    def start_run(self, toDoTaskList: list[TaskNode]) -> list[bool]:
+    async def start_run(self, toDoTaskList: list[TaskNode]) -> list[bool]:
         """图谱上有 TaskNode 完成派发后立即触发执行。入参批量(刚被 dispatcher/adaptor patch 完
         run_mode/assignee 的节点);返回每个任务派发是否成功 list[bool]。
-        内部按 run_mode(str)自适应分发:有注入 delivery → 调 delivery.deliver;否则 stub 记日志返 True。"""
-        results: list[bool] = []
-        for node in toDoTaskList:
+
+        内部按 run_mode(str)自适应分发:有注入 delivery → ``await`` delivery.deliver(投递耗时 IO),
+        多节点经 ``asyncio.gather`` + ``_DELIVER_CONCURRENCY`` Semaphore 并发限流(对齐 backend lifecycle
+        模式,防投递雪崩);否则 stub 记日志返 True。
+        协程化:真实投递(单 bot workflow/BCS 协作群/BBS 广场)是网络 IO,并发 await 不阻塞编排核。"""
+        sem = asyncio.Semaphore(self._DELIVER_CONCURRENCY)
+
+        async def _deliver_one(node: TaskNode) -> bool:
             mode = node.run_info.run_mode
             if mode not in ("single_bot", "coop_group", "bbs"):
-                results.append(False)
-                continue
-            port = self._deliveries.get(mode)
-            if port is not None:
-                results.append(bool(port.deliver(node)))
-            else:
+                return False
+            async with sem:
+                port = self._deliveries.get(mode)
+                if port is not None:
+                    return bool(await port.deliver(node))
                 self._run_log.append(
                     {
                         "task_id": node.task_id,
@@ -65,8 +75,9 @@ class TaskRunner:
                         "loop_task_id": f"{node.task_id}::{node.node_id}",
                     }
                 )
-                results.append(True)
-        return results
+                return True
+
+        return list(await asyncio.gather(*[_deliver_one(n) for n in toDoTaskList]))
 
     def query_status(self, task_id: str) -> Status:
         """产品/系统触发:查询某任务及所有子任务的状态(返回图级 status)。"""
@@ -88,8 +99,9 @@ class TaskRunner:
         """获取某个 Bot 下的所有任务实例列表。Avernet stub:返回空列表(后续补全局索引)。"""
         return []
 
-    def form_coop_group(self, gf: GroupFormation) -> str:
+    async def form_coop_group(self, gf: GroupFormation) -> str:
         """(内部)HIT_MULTI_BOTS 动态拉协作群,复用 BCS 建群 → group_id。
+        协程化:BCS 建群是网络 IO,``await`` 不阻塞编排核(由 engine 锁外 await 调用)。
         Avernet stub:生成 group_id 并记录 GroupFormation,不真实调 BCS。
         prod BCS wiring(group_strategy=collab_mode;state_machine 注入 workflow yaml)在 ocb 仓。"""
         gid = f"grp_{uuid.uuid4().hex[:8]}"

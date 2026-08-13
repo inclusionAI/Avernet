@@ -6,6 +6,7 @@ Avernet:in-memory 巡检(注入 clock);prod 接真实定时器/崩溃探针不�
 """
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 from typing import Callable
@@ -103,7 +104,11 @@ class TaskHarness:
             # 淘汰已非 RUNNING 的记时项
             self._dispatched_at = {k: v for k, v in self._dispatched_at.items() if k in seen}
         for p in resets:
-            self._on_harness_fn(p)
+            res = self._on_harness_fn(p)
+            # on_harness 协程化(async):harness 后台巡检线程无 event loop,起短命 loop 跑
+            # 复位重投(低频旁路;兼容同步 stub on_harness_fn 用于测试)。
+            if asyncio.iscoroutine(res):
+                asyncio.run(res)
         return resets
 
     def run_poll_loop(self, stop_event: threading.Event | None = None) -> None:

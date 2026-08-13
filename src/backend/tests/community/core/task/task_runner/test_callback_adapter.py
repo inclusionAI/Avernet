@@ -5,6 +5,8 @@ TaskLoopCallback.report_result→engine.on_report、start_run 进度信号不驱
 """
 from __future__ import annotations
 
+import asyncio
+
 from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
     TaskCallbackData,
@@ -32,13 +34,17 @@ def _data(loop_task_id: str = "t1::c1", *, success: bool = True, data=None, fail
     )
 
 
+def _run(coro):
+    return asyncio.new_event_loop().run_until_complete(coro)
+
+
 class RecordingEngine:
-    """记录 on_report 入参的编排核 stub。"""
+    """记录 on_report 入参的编排核 stub(on_report async,匹配协程化签名)。"""
 
     def __init__(self):
         self.reports: list[TaskNodePatch] = []
 
-    def on_report(self, patch: TaskNodePatch):
+    async def on_report(self, patch: TaskNodePatch):
         self.reports.append(patch)
         return patch
 
@@ -95,7 +101,7 @@ class TestTaskLoopCallback:
     def test_report_result_routes_to_engine(self):
         engine = RecordingEngine()
         cb = TaskLoopCallback(CallbackAdapter(), engine)
-        cb.report_result(_data(loop_task_id="t1::c1", success=True, data="done"))
+        _run(cb.report_result(_data(loop_task_id="t1::c1", success=True, data="done")))
         assert len(engine.reports) == 1
         p = engine.reports[0]
         assert (p.task_id, p.node_id) == ("t1", "c1")
@@ -105,13 +111,13 @@ class TestTaskLoopCallback:
     def test_report_result_fail_routes_with_gaps(self):
         engine = RecordingEngine()
         cb = TaskLoopCallback(CallbackAdapter(), engine)
-        cb.report_result(_data(loop_task_id="t1::c1", success=False, fail_detail="缺证据"))
+        _run(cb.report_result(_data(loop_task_id="t1::c1", success=False, fail_detail="缺证据")))
         assert engine.reports[0].acceptance_result.gaps == ["缺证据"]
 
     def test_start_run_is_noop(self):
         engine = RecordingEngine()
         cb = TaskLoopCallback(CallbackAdapter(), engine)
-        assert cb.start_run(_data(loop_task_id="t1::c1")) is None
+        assert _run(cb.start_run(_data(loop_task_id="t1::c1"))) is None
         assert engine.reports == []  # 进度信号不驱动 on_report
 
 

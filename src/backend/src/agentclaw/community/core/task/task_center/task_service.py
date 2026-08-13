@@ -52,12 +52,13 @@ class TaskService(TaskServiceProtocol):
 
     async def execute(self, task_info: TaskInfo) -> TaskOpResult:
         """提交执行任务:initialize_graph(根 PENDING)→ 编排核 on_execute(首帧推进:
-        条件 a 根 PENDING → plan → add_task_nodes → dispatch → start_run)。返回 TaskOpResult(含 run_id)。"""
+        条件 a 根 PENDING → plan → add_task_nodes → dispatch → start_run)。返回 TaskOpResult(含 run_id)。
+        协程化:await on_execute(async 链路),耗时投递(BCS/真实 workflow)不阻塞调用方。"""
         graph = self._graph.initialize_graph(task_info)
         task_id = task_info.task_spec.metadata.task_id
         if self._harness is not None:
             self._harness.register(task_id)
-        self._engine.on_execute(task_id)
+        await self._engine.on_execute(task_id)
         return TaskOpResult(task_id=task_id, success=True, run_id=graph.run_id)
 
     def get_task_dashboard(

@@ -6,6 +6,7 @@ query_status/detail/result 回填、query_bot_tasks stub、_build_context 验收
 """
 from __future__ import annotations
 
+import asyncio
 import pytest
 
 from agentclaw.community.core.task.domain.models import (
@@ -27,6 +28,9 @@ from agentclaw.community.core.task.task_dispatch.protocols import GroupFormation
 from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.task_runner.runner import TaskRunner
 
+
+def _run(coro):
+    return asyncio.new_event_loop().run_until_complete(coro)
 
 # ===== helpers =====
 def _task_info(task_id: str = "t1") -> TaskInfo:
@@ -88,7 +92,7 @@ class TestStartRun:
     def test_single_bot_dispatched(self, svc, graph):
         runner = TaskRunner(svc)
         _dispatch(svc, graph, ["c1"], run_mode="single_bot", assignee="bot_market")
-        results = runner.start_run([svc._get_node(graph, "c1")])
+        results = _run(runner.start_run([svc._get_node(graph, "c1")]))
         assert results == [True]
         log = runner._run_log[-1]
         assert log["run_mode"] == "single_bot"
@@ -99,7 +103,7 @@ class TestStartRun:
     def test_coop_group_dispatched(self, svc, graph):
         runner = TaskRunner(svc)
         _dispatch(svc, graph, ["c1"], run_mode="coop_group", assignee="grp_tech")
-        results = runner.start_run([svc._get_node(graph, "c1")])
+        results = _run(runner.start_run([svc._get_node(graph, "c1")]))
         assert results == [True]
         assert runner._run_log[-1]["run_mode"] == "coop_group"
         assert runner._run_log[-1]["assignee"] == "grp_tech"
@@ -107,7 +111,7 @@ class TestStartRun:
     def test_bbs_dispatched(self, svc, graph):
         runner = TaskRunner(svc)
         _dispatch(svc, graph, ["c1"], run_mode="bbs", assignee="bot_bbs_7")
-        results = runner.start_run([svc._get_node(graph, "c1")])
+        results = _run(runner.start_run([svc._get_node(graph, "c1")]))
         assert results == [True]
         assert runner._run_log[-1]["run_mode"] == "bbs"
         assert runner._run_log[-1]["assignee"] == "bot_bbs_7"
@@ -119,7 +123,7 @@ class TestStartRun:
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b1"))
         svc.update_task_node_info(_patch("t1", "c2", status=Status.RUNNING, run_mode="coop_group", assignee="g1"))
         svc.update_task_node_info(_patch("t1", "c3", status=Status.RUNNING, run_mode="bbs", assignee="bbs1"))
-        results = runner.start_run([svc._get_node(graph, "c1"), svc._get_node(graph, "c2"), svc._get_node(graph, "c3")])
+        results = _run(runner.start_run([svc._get_node(graph, "c1"), svc._get_node(graph, "c2"), svc._get_node(graph, "c3")]))
         assert results == [True, True, True]
         assert len(runner._run_log) == 3
         assert {e["run_mode"] for e in runner._run_log} == {"single_bot", "coop_group", "bbs"}
@@ -129,7 +133,7 @@ class TestStartRun:
         _dispatch(svc, graph, ["c1"])
         node = svc._get_node(graph, "c1")
         node.run_info.run_mode = None  # 强制非法
-        results = runner.start_run([node])
+        results = _run(runner.start_run([node]))
         assert results == [False]
         assert runner._run_log == []  # 非法不记日志
 
@@ -139,7 +143,7 @@ class TestFormCoopGroup:
     def test_generates_group_id_and_records(self, svc):
         runner = TaskRunner(svc)
         gf = GroupFormation(bot_ids=["bot_a", "bot_b"], collab_mode="manager_worker")
-        gid = runner.form_coop_group(gf)
+        gid = _run(runner.form_coop_group(gf))
         assert gid.startswith("grp_")
         assert len(gid) > len("grp_")
         assert runner._groups[gid] is gf
@@ -147,15 +151,15 @@ class TestFormCoopGroup:
     def test_distinct_group_ids(self, svc):
         runner = TaskRunner(svc)
         gf = GroupFormation(bot_ids=["bot_a"], collab_mode="chat")
-        g1 = runner.form_coop_group(gf)
-        g2 = runner.form_coop_group(gf)
+        g1 = _run(runner.form_coop_group(gf))
+        g2 = _run(runner.form_coop_group(gf))
         assert g1 != g2
         assert len(runner._groups) == 2
 
     def test_records_collab_modes(self, svc):
         runner = TaskRunner(svc)
         for cm in ("chat", "manager_worker", "state_machine"):
-            runner.form_coop_group(GroupFormation(bot_ids=["b"], collab_mode=cm))
+            _run(runner.form_coop_group(GroupFormation(bot_ids=["b"], collab_mode=cm)))
         modes = {g.collab_mode for g in runner._groups.values()}
         assert modes == {"chat", "manager_worker", "state_machine"}
 

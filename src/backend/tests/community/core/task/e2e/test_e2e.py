@@ -214,7 +214,7 @@ class _TestRunner:
         self._groups: list[GroupFormation] = []
         self._run_log: list[dict] = []
 
-    def start_run(self, toDoTaskList: list[TaskNode]) -> list[bool]:
+    async def start_run(self, toDoTaskList: list[TaskNode]) -> list[bool]:
         for node in toDoTaskList:
             self._run_log.append({
                 "task_id": node.task_id, "node_id": node.node_id,
@@ -223,7 +223,7 @@ class _TestRunner:
             })
         return [True] * len(toDoTaskList)
 
-    def form_coop_group(self, gf: GroupFormation) -> str:
+    async def form_coop_group(self, gf: GroupFormation) -> str:
         import uuid
         gid = f"grp_{uuid.uuid4().hex[:8]}"
         self._groups.append(gf)
@@ -295,7 +295,7 @@ class TestThreeModesHappyToDone:
         assert len(runner._run_log) == 1
 
         # 回投 N_overview PASS → 批2 four专题
-        facade.callback.report_result(_cb(True, f"{root_id}::N_overview", data="行业全貌"))
+        _run(facade.callback.report_result(_cb(True, f"{root_id}::N_overview", data="行业全貌")))
         g = svc.query_task_dashboard(root_id)
         assert svc._get_node(g, "N_overview").status == Status.DONE
         for nid, expect_mode in (("N_market", "coop_group"), ("N_tech", "coop_group"),
@@ -310,7 +310,7 @@ class TestThreeModesHappyToDone:
         assert all(str(gi).startswith("grp_") for gi in gids)
         assert len(runner._run_log) == 5
         for nid in ("N_market", "N_tech", "N_compete", "N_customer"):
-            facade.callback.report_result(_cb(True, f"{root_id}::{nid}", data=f"{nid}_out"))
+            _run(facade.callback.report_result(_cb(True, f"{root_id}::{nid}", data=f"{nid}_out")))
         g = svc.query_task_dashboard(root_id)
         pb = svc._get_node(g, "N_practice_bbs")
         assert pb.run_info.run_mode == "single_bot"
@@ -318,16 +318,16 @@ class TestThreeModesHappyToDone:
         for nid in ("N_market", "N_tech", "N_compete", "N_customer", "N_overview"):
             assert svc._get_node(g, nid).status == Status.DONE
 
-        facade.callback.report_result(_cb(True, f"{root_id}::N_practice_bbs", data="一手实践"))
+        _run(facade.callback.report_result(_cb(True, f"{root_id}::N_practice_bbs", data="一手实践")))
         g = svc.query_task_dashboard(root_id)
         assert svc._get_node(g, "N_report").run_info.run_mode == "single_bot"
         assert svc._get_node(g, "N_report").status == Status.RUNNING
 
         # 回投 N_report PASS → 根 plan[]→ 根 PLANNING 等回投 → owner bot 回投根 PASS → graph DONE(V1:无 verify)
-        facade.callback.report_result(_cb(True, f"{root_id}::N_report", data="尽调报告"))
+        _run(facade.callback.report_result(_cb(True, f"{root_id}::N_report", data="尽调报告")))
         g = svc.query_task_dashboard(root_id)
         assert svc._get_node(g, root_id).status == Status.PLANNING  # 等回投,不主动验
-        facade.callback.report_result(_cb(True, f"{root_id}::{root_id}", data="root PASS"))
+        _run(facade.callback.report_result(_cb(True, f"{root_id}::{root_id}", data="root PASS")))
         g = svc.query_task_dashboard(root_id)
         assert g.status == Status.DONE
         assert svc._get_node(g, root_id).status == Status.DONE
@@ -336,7 +336,7 @@ class TestThreeModesHappyToDone:
     def test_relations_decomposition_tree_single_in(self):
         facade, svc, *_ = _wire_facade()
         _run(facade.execute(_task_info("t_case")))
-        facade.callback.report_result(_cb(True, "t_case::N_overview", data="x"))
+        _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="x")))
         g = svc.query_task_dashboard("t_case")
         non_root = [n for n in g.tasks if n.node_id != "t_case"]
         for n in non_root:
@@ -350,11 +350,11 @@ class TestFailRemedyCure:
     def test_fail_then_remedy_pass_cures_and_propagates(self):
         facade, svc, runner = _wire_facade(max_depth=3)
         _run(facade.execute(_task_info("t_case", max_depth=3)))
-        facade.callback.report_result(_cb(True, "t_case::N_overview", data="overview"))
-        facade.callback.report_result(_cb(True, "t_case::N_compete", data="compete"))
-        facade.callback.report_result(
+        _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="overview")))
+        _run(facade.callback.report_result(_cb(True, "t_case::N_compete", data="compete")))
+        _run(facade.callback.report_result(
             _cb(False, "t_case::N_market", fail_detail="市场深度不足", data=None)
-        )
+        ))
         g = svc.query_task_dashboard("t_case")
         n_market = svc._get_node(g, "N_market")
         assert n_market.status == Status.PLANNING
@@ -365,11 +365,11 @@ class TestFailRemedyCure:
         assert remedy.status == Status.RUNNING
         assert svc.get_parent_task("t_case", "N_market_remedy").node_id == "N_market"
 
-        facade.callback.report_result(_cb(True, "t_case::N_market_remedy", data="市场深化"))
+        _run(facade.callback.report_result(_cb(True, "t_case::N_market_remedy", data="市场深化")))
         g = svc.query_task_dashboard("t_case")
         assert svc._get_node(g, "N_market").status == Status.DONE
-        facade.callback.report_result(_cb(True, "t_case::N_tech", data="tech"))
-        facade.callback.report_result(_cb(True, "t_case::N_customer", data="cust"))
+        _run(facade.callback.report_result(_cb(True, "t_case::N_tech", data="tech")))
+        _run(facade.callback.report_result(_cb(True, "t_case::N_customer", data="cust")))
         g = svc.query_task_dashboard("t_case")
         assert svc._get_node(g, "N_practice_bbs").status == Status.RUNNING
 
@@ -379,9 +379,9 @@ class TestMissEscalateBbs:
     def test_miss_at_max_escalates_bbs(self):
         facade, svc, runner = _wire_facade(max_depth=1, miss_nodes={"N_practice_bbs"})
         _run(facade.execute(_task_info("t_case", max_depth=1)))
-        facade.callback.report_result(_cb(True, "t_case::N_overview", data="overview"))
+        _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="overview")))
         for nid in ("N_market", "N_tech", "N_compete", "N_customer"):
-            facade.callback.report_result(_cb(True, f"t_case::{nid}", data=nid))
+            _run(facade.callback.report_result(_cb(True, f"t_case::{nid}", data=nid)))
         g = svc.query_task_dashboard("t_case")
         assert not any(n.node_id == "N_practice_bbs" for n in g.tasks)
         assert g.loop_round == 1
@@ -390,27 +390,29 @@ class TestMissEscalateBbs:
     def test_bbs_bot_claims_and_drives(self):
         facade, svc, runner = _wire_facade(max_depth=1, miss_nodes={"N_practice_bbs"})
         _run(facade.execute(_task_info("t_case", max_depth=1)))
-        facade.callback.report_result(_cb(True, "t_case::N_overview", data="overview"))
+        _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="overview")))
         for nid in ("N_market", "N_tech", "N_compete", "N_customer"):
-            facade.callback.report_result(_cb(True, f"t_case::{nid}", data=nid))
+            _run(facade.callback.report_result(_cb(True, f"t_case::{nid}", data=nid)))
         g = svc.query_task_dashboard("t_case")
         assert g.loop_round == 1
         # BBS bot 认领 → 自规划子任务(BBS 认领子,run_mode=bbs,挂 root 下)
         bbs_sub = _node("N_practice_bbs_bbs", "t_case", run_mode="bbs", assignee="bot_bbs_7")
         svc.add_task_nodes([bbs_sub], parent_node_id="t_case")
         # 框架驱动派发该 bbs 节点(corp 认领编排;此处经引擎内部 _dispatch_and_run 模拟)
-        facade._engine._dispatch_and_run("t_case")
+        side = []
+        facade._engine._prepare_into("t_case", side)
+        _run(facade._engine._drain("t_case", side))
         g = svc.query_task_dashboard("t_case")
         assert svc._get_node(g, "N_practice_bbs_bbs").status == Status.RUNNING
         assert svc._get_node(g, "N_practice_bbs_bbs").run_info.run_mode == "bbs"
-        facade.callback.report_result(_cb(True, "t_case::N_practice_bbs_bbs", data="bbs 一手实践"))
+        _run(facade.callback.report_result(_cb(True, "t_case::N_practice_bbs_bbs", data="bbs 一手实践")))
         g = svc.query_task_dashboard("t_case")
         assert svc._get_node(g, "N_practice_bbs_bbs").status == Status.DONE
         assert svc._get_node(g, "N_report").status == Status.RUNNING
-        facade.callback.report_result(_cb(True, "t_case::N_report", data="尽调报告聚合"))
+        _run(facade.callback.report_result(_cb(True, "t_case::N_report", data="尽调报告聚合")))
         g = svc.query_task_dashboard("t_case")
         assert svc._get_node(g, "t_case").status == Status.PLANNING  # V1:等回投,无 verify
-        facade.callback.report_result(_cb(True, "t_case::t_case", data="root PASS"))
+        _run(facade.callback.report_result(_cb(True, "t_case::t_case", data="root PASS")))
         g = svc.query_task_dashboard("t_case")
         assert g.status == Status.DONE
 
@@ -421,9 +423,9 @@ class TestBbsStuckHung:
         facade, svc, runner = _wire_facade(
             max_depth=1, bbs_max_depth=1, miss_nodes={"N_practice_bbs"})
         _run(facade.execute(_task_info("t_case", max_depth=1, bbs_max_depth=1)))
-        facade.callback.report_result(_cb(True, "t_case::N_overview", data="overview"))
+        _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="overview")))
         for nid in ("N_market", "N_tech", "N_compete", "N_customer"):
-            facade.callback.report_result(_cb(True, f"t_case::{nid}", data=nid))
+            _run(facade.callback.report_result(_cb(True, f"t_case::{nid}", data=nid)))
         g = svc.query_task_dashboard("t_case")
         assert g.status == Status.HUNG
         assert g.extend_props.get("hung_reason") == "stuck"
@@ -435,7 +437,7 @@ class TestDashboardTerminal:
     def test_query_result_and_detail(self):
         facade, svc, *_ = _wire_facade()
         _run(facade.execute(_task_info("t_case")))
-        facade.callback.report_result(_cb(True, "t_case::N_overview", data="行业全貌"))
+        _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="行业全貌")))
         from agentclaw.community.core.task.task_runner.runner import TaskRunner
         r = TaskRunner(svc)
         detail = r.query_detail(_node("N_overview", "t_case"))
