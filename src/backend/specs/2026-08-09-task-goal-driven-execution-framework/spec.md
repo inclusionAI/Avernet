@@ -81,7 +81,7 @@
 11. 作为 owner-bot skill,我想调 `TaskService.execute(TaskInfo)` 启动任务,这样入口契约统一。
 12. 作为前端/API,我想调 `TaskService.get_task_dashboard(task_id,node_id?)` 拿 `TaskExecutionGraph` 看板,这样 UI 不接触底层复杂关系边。
 13. 作为需求识别 skill,我想调 `TaskGraphService.initialize_graph(TaskInfo)` 建图(根节点 PENDING),这样建图有原子操作。
-14. 作为任务规划 skill,我想调 `TaskGraphService.add_task_nodes(list[TaskNode])` 把规划出的子图并网,触发条件 a/b/c 明确,这样规划产物落图谱有原子操作且时机清晰。
+14. 作为任务规划 skill,我想调 `TaskGraphService.add_task_nodes(list[TaskNode], parent_node_id)`(显式传父)把规划出的子图并网,触发条件 a/b/c 明确,这样规划产物落图谱有原子操作且时机清晰。
 15. 作为任务派发 skill,我想调 `TaskGraphService.update_task_node_info(TaskNodePatch)` 写派发结果(run_mode/assignee),这样派发落库有单一网关。
 16. 作为任务执行 skill,我想调 `TaskGraphService.update_task_node_info(TaskNodePatch)` 上报执行产出与验收结果,这样回投与派发走同一个节点级写口。
 17. 作为 TaskPlanner,我想 `plan(TaskExecutionGraph)→list[TaskNode]` 在"有失败/PLANNING 节点 ∧ 无 RUNNING 节点 ∧ 有 PLANNING 节点"时被调,产逻辑子节点(不含执行信息),这样规划纯逻辑可复跑。
@@ -92,7 +92,7 @@
 22. 作为 TaskRunner,我想 `query_status(task_id)`/`query_detail(TaskNode)`/`query_result(TaskNode)`/`query_bot_tasks(bot_id)` 查状态/详情/产出/bot 任务列表,这样产品与系统可探活。
 23. 作为执行实体(bot workflow/bcn 协作群),我想调 `TaskLoopCallback.start_run(TaskCallbackData)` 上报开始、`report_result(TaskCallbackData)` 上报完成/失败,这样 PUSH 回投有统一协议。
 24. 作为框架适配层,我想把 `TaskCallbackData`(loop_task_id/workflow_type/workflow_id/instance_id/result)映射成 `(task_id,node_id)`+`verdict`+`output` 走 `update_task_node_info`,这样回投驱动图谱状态。
-25. 作为 TaskHarness,我想旁路常驻周期检测 SLA 超时/崩溃并自愈(经 `update_task_node_info` 写 HUNG/FAILED),这样主链不卡死且旁路与主链同写口。
+25. 作为 TaskHarness,我想旁路常驻周期检测 SLA 超时/崩溃并自愈(经 `update_task_node_info` 复位 `RUNNING→PENDING` 重投,不直接写 HUNG),这样主链不卡死且旁路与主链同写口。
 26. 作为系统,我想任务 FAIL 时 Planner 读 graph 内 `acceptance_result.gaps` 自算 gap 重规划、补救拓扑经 `add_task_nodes` 并网(挂该节点下),子全 PASS → 传播该节点 DONE,这样 reroute 闭环(plan 不接收外部 gaps)。
 27. 作为系统,我想递归 MISS 到内层深度上限 `MAX_DEPTH` 自动升 BBS(删子树+挂广场),BBS 链路再迭代到 `BBS_MAX_DEPTH` 仍执行不下去变 `HUNG`(STUCK,人介入),这样图不无限膨胀。
 28. 作为系统,我想升 BBS 自动(无人工确认挡板,BBS bot 自主认领执行),BBS 仍执行不下去时 STUCK→HUNG 留人工入口,这样长尾能力可被利用且最终有人把关。
@@ -118,7 +118,8 @@
 - **主 seam(单一)**:singlebox 端到端(按新设计搭建 singlebox 编排)。一条 case 跑完 `execute→initialize_graph→plan(委托 decompose 按三阶段 AC 拆)→add_task_nodes(条件 a)→dispatch(决定谁来做:single_bot/coop_group 动态拉群;MISS+depth≥MAX→升 BBS)→start_run→TaskLoopCallback.report_result 回投→任一专题 FAIL+gaps→plan(条件 b)→add_task_nodes(补救子挂该节点下)→二次 PASS→传播治愈→图 status=DONE`。断言 `get_task_dashboard` 终态 + 事件日志可重放 + 经历三模态至少各一(含一次动态拉协作群)。**理想 seam 数=1**。
 - **补充 seam(仅 E2E 覆盖不到处)**:
   - 图谱原子变更 seam:`TaskGraphService` 内部契约(状态流转合法性、`add_task_nodes` 条件 a/b/c 触发校验、`relations` 分解树派生 `depth`/`get_child_tasks`/`get_parent_task`、就绪=被add即就绪、`PLANNING` 语义),做契约断言。
-  - Harness 自愈 seam:SLA 超时/崩溃→`update_task_node_info(HUNG/FAILED)` 旁路,独立常驻 seam。
+  - Harness 自愈 seam:SLA 超时/崩溃→`update_task_node_info(复位 PENDING)` 旁路重投(不写 HUNG/FAILED;STUCK 走编排核升 BBS 链路上限判),独立常驻 seam。
+  - 编排核 seam(`OwnerBotVerifyPort`/`BbsMarketPort`,缺省 no-op):根终验触发 + BBS 广场挂单,测试注入 double 断言调用契约。
   - Planner/Dispatcher 纯逻辑 seam:`plan` 给定图谱产固定 `list[TaskNode]`、`dispatch` 给定 toDo 产派发决策,纯函数式断言(无执行主体)。
 
 > seam 与断言面按新模型(`Relation`/6 态/`run_mode` str)定义;存储行业尽调全链路 case 作为 E2E 行为基线,断言对象按新模型字段。
@@ -139,7 +140,7 @@
 
 - **代码库声明**:代码库按本 spec 从零重新实现。技术设计见 `plan.md`,实现计划见 `tasks.md`。
 - **分解树统一承载结构归属**:`Relation{type=DEPENDENCY}` 在 `TaskExecutionGraph.relations` 表分解树(单入:`src_id`=结构父,`dst_id`=结构子)。`TaskNode` 不持 `decomposed_by`/`depends_on`。结构子(`get_child_tasks`)/结构父(`get_parent_task`)/验收/传播读 `relations`;`depth` 从 `relations` 分解树递归。5 文档 `depends_on` 字样语义统一收口到 `relations` 分解树(无单独结构归属字段)。
-- **`PLANNING` 语义**:节点被分解、委托子节点执行时进 `PLANNING`(显式状态);`add_task_nodes` 条件 c 直接判 `PLANNING`。子全 PASS → 传播该节点 DONE。
+- **`PLANNING` 语义**:节点被分解、委托子节点执行时进 `PLANNING`(显式状态);`add_task_nodes` 条件 c 直接判 `PLANNING`。子全 PASS → 传播该节点 DONE(直驱 `PLANNING→DONE`);根节点终验时 `PLANNING` 为委托态,owner bot skill 回投 PASS/FAIL → `PLANNING→DONE`(终态图 DONE)/ `PLANNING→FAILED`(acceptance 驱动,根不特殊化,按 gaps 补救子)。
 - **`collab_mode`**:`RuntimeInfo` 无 `collab_mode` 字段;协作群协作方式(chat/manager_worker/state_machine)作 `TaskRunner.form_coop_group(GroupFormation)` 内部参数(对齐 BCS `GroupStrategy`),不进模型持久字段。`run_mode` 为 str("single_bot"/"coop_group"/"bbs")。
 - **枚举精简**:`TaskSpec` 无 `SLA`(SLA 超时由 Harness 周期巡检 + `execution_config` 承载);`AcceptanceCriteria` 只 `id`/`description`(无 `tag`/`type`);`RuntimeInfo.run_mode` 为 str。
 - **`AcceptanceResult` 字段**:`{verdict, acceptances_metric, gaps}`(无 `verifier`);`acceptances_metric`=已满足验收指标明细(原 `acceptances_met` 语义)。
@@ -154,8 +155,11 @@
 - **输入/验收上下文**:store 不提供投影 API;执行/验收上下文由 `TaskRunner` 内部用 `get_child_tasks`/`get_parent_task` 组合自算(验收只按 `(task_id,node_id)` 上报节点:有结构子→验收模式聚合结构子(子树)output;无结构子→执行模式聚合结构父 P 的聚合上下文={P.task_spec/goal + P 已 DONE 结构子(本节点兄弟)output};无 NODE/SUBTREE/TASK scope 区分,见 `plan.md` §3.5)。
 - **回投坑点**:`output` MERGE 只浅合并一层(patch 覆盖);`extend_props_patch` 扁平传不可再包一层。
 - **Harness 与主链解耦**:Harness 是旁路常驻、只读图谱+反向 `update_task_node_info`,不参与正向规划/派发;主链故障由 Harness 复位后,下一轮事件自然续驱。
-- **`loop_round` 审计**(外层 BBS 上升轮次):仅升 BBS 时 `TaskExecutionGraph.loop_round++`(正常补救不再 ++);达 `BBS_MAX_DEPTH`(默认 3)→ STUCK → HUNG。
+- **`loop_round` 审计 + 图级写归属**(外层 BBS 上升轮次):仅升 BBS 时 `TaskExecutionGraph.loop_round++`(正常补救不再 ++);达 `BBS_MAX_DEPTH`(默认 3)→ STUCK → HUNG。
+  图级终态(图 `status`=DONE/HUNG、图 `output`、`loop_round`、图 `extend_props` 的 `bbs_mode`/`hung_reason`)由编排核在 `query_task_dashboard` 返回的 graph 引用上**直写**(in-memory,M1),不经 `TaskGraphService` 写口——图谱服务只持节点级写(`update_task_node_info`)与图结构写(`add_task_nodes`/`remove_subtree` 的 relations)。
+  Harness 旁路只**复位** `RUNNING→PENDING` 重投(不写 HUNG/FAILED;STUCK→HUNG 走编排核 on_miss/on_fail 升 BBS 链路上限判)。
 - **BBS 上升与执行**:正常链路 MISS 到 `MAX_DEPTH`→自动升 BBS(删 MISS 子树+挂任务广场);BBS bot 认领任务→加载完整上下文(已完成 output+验收 vs task_spec/goal)→自算 gap+自规划子任务(落图 `run_mode="bbs"`)→自执行→上报结果+验收→正常驱动根/子 plan;BBS 链路再迭代到 `BBS_MAX_DEPTH` 仍执行不下去→STUCK→HUNG(人介入)。广场 lease/认领机制属 corp 实现侧。
 - **开源执行边界(Avernet vs corp ocb)**:Avernet(开源仓)只发**契约 seam + Noop/singlebox double**(本地关键词 cover 的 bot catalog、BCS local/mock 拉群);真实搜推、真实 Bot/协作群/BBS 执行、LLM 规划/验收 SKILL 均**不在 Avernet**,由 corp `ocb` 仓的 adapter 落地。故 Tasks 中"实现 3 模式执行模块"在 Avernet 范畴 = 落 seam + singlebox double + BCS 复用接线;prod 接线属 corp,非 singlebox 阻塞。
+- **编排核 seam(`OwnerBotVerifyPort`/`BbsMarketPort`)**:终验 skill 触发口与 BBS 任务广场为编排核内 Protocol(定义于 `task_center/engine.py`,DI 注入)。Avernet 缺省 **no-op seam**(`request_verify`/`publish_task` 空实现,不驱动);singlebox/测试注入 double;corp `ocb` 仓注入真实 owner-bot 终验 SKILL 与任务广场 adapter。
 - **委托式规划(解耦 case 知识)**:planner(`TaskPlanner`)是**编排壳**:读图发现规划目标(PLANNING/FAIL)、按硬契约协调,把"产哪些节点"委托给 `DecomposerPort` 策略 / 规划 agent(plan_bot);默认生产实现走 LLM/SKILL(corp,Avernet 不含),singlebox/测试用**可注入 stub decomposer** 返回固定节点(case 推演里的 `N_overview`/`N_market` 等是 stub 产出,不是框架写死)。
 - **5 模块文档字段对齐**:5 文档部分字段表述(`depends_on`、`tn.goal` 简写、`asignee` 拼写、`is_plan`、`instance_id` vs `run_id`)以本 spec + `plan.md` 字段为准,文档语义(触发条件/职责/分层)保留。
