@@ -1,6 +1,10 @@
-"""TaskPlanner 规划编排壳(零 case 知识)+ DecomposerPort seam 委托。
+"""TaskPlanner 规划编排壳(零 case 知识)+ 内置策略库(first-match-wins)。
 
-对齐 plan §3.2 + 任务规划文档 uuq2tlue91q4lkal。
+对齐 plan §3.2 + §3.4 + 任务规划文档 uuq2tlue91q4lkal。零参构造,内置默认策略池
+[WorkflowPlanningStrategy, GapBasedPlanningStrategy];策略库(first-match-wins by priority,
+类 SQL optimizer,据 execution_config 动态匹配:config 有 workflow→workflow 策略;否则 gap 兜底)。
+引擎自带能力,不开放自定义;corp 经 ocb 仓覆写 ``_build_*`` 替换策略版本(待后续 PR 落 strategies.py)。
+触发条件:有可规划目标(根 PENDING / FAILED+gaps 叶 / PLANNING 父)即 first-match 选策略产子。
 """
 from __future__ import annotations
 
@@ -8,25 +12,24 @@ from agentclaw.community.core.task.domain.models import TaskExecutionGraph, Task
 
 
 class TaskPlanner:
-    """规划编排壳:判触发条件/读图发现目标/硬契约去重,委托 ``decomposer`` 产子节点内容。
+    """规划编排壳:判有无规划目标 → 对图级 execution_config first-match-wins 选策略 → apply 产子 → 去重。
 
-    分层:TaskPlanner(编排壳,框架固定,零 case 知识)↔ DecomposerPort(seam,产子内容,
-    stub/corp 各自实现)。DecomposerPort Protocol 定义延后(后续 task_plan/protocols.py,
-    待 stub/真实规划就位)。
+    分层:TaskPlanner(编排壳,框架固定,零 case 知识)↔ PlanningStrategy(引擎内置策略,
+    Avernet stub gap/workflow;corp 替换实现)。策略池内置默认;``set_strategies`` 仅供引擎
+    工厂方法/corp 子类注入,不对外暴露自定义。策略契约 + 默认 stub 类定义待后续 PR 落
+    task_plan/strategies.py。
     """
 
-    def __init__(self, decomposer):
-        """decomposer: DecomposerPort seam(产子节点内容);首批不强类型,
-        Protocol 定义延后到 task_plan/protocols.py(待 stub/真实规划就位)。"""
-        self._decomposer = decomposer
+    def __init__(self, graph) -> None:
+        """graph: TaskGraphService(派生查询用;策略 apply 自发现 target 经 graph 快照)。
+        零参构造,内置默认策略池 [WorkflowPlanningStrategy, GapBasedPlanningStrategy]
+        (首批壳,策略池接线待后续 PR 落 strategies.py)。"""
+        self._graph = graph
+        self._strategies = None  # list[PlanningStrategy](首批壳,待后续 PR)
 
     def plan(self, graph: TaskExecutionGraph) -> list[TaskNode]:
-        """触发条件(规划文档):图谱有更新(新增失败节点/PLANNING 节点)AND 无派发/执行中节点
-        AND 有 PLANNING 节点;不满足 → 返回 [] 空跑。
-        1) 读图自发现规划目标(不依赖具体节点名):
-           - FAIL: status=FAILED 且 gaps 非空 且 无分解子(叶子补救)
-           - 前向/委托: status=PLANNING 的父节点
-        2) 调 decomposer.decompose(graph)— seam 自洽发现 target + 产子;planner 不预选 target
-        3) 硬契约兜底:纯读图去重(图上已存则不产);步进式 deps 满足才产
-        4) 返回并集 list[TaskNode](不含物理执行信息)。plan 不接收外部 gaps。"""
+        """读图判有无可规划目标 → first-match-wins 选策略(graph 级 config 匹配)→ apply 产子 → 去重。
+
+        可规划目标:① 根 PENDING(无父,初始规划);② FAILED+gaps 叶(无结构子,补救);
+        ③ PLANNING 父(委托前向)。无目标 → 返回 []。plan 不接收外部 gaps,不判 RUNNING(时序由编排核管)。"""
         raise NotImplementedError

@@ -9,7 +9,7 @@
 
 | 层 | 路径 | 职责 |
 |---|---|---|
-| api/ | `community/api/task_service.py` + `community/api/task_loop_callback.py` | 对外 Service API Protocols(transport-agnostic,扁平 api 层一文件一 Protocol) |
+| api/ | `community/api/task/`(`task_service.py` + `task_loop_callback.py`) | 对外 Service API Protocols(transport-agnostic,一文件一 Protocol) |
 | core/ | `community/core/task/` | 业务实现(transport-agnostic,禁 transport import) |
 | adapters/http/ | `community/adapters/http/task/` | HTTP transport(thin:router+schema,不持 domain policy) |
 | di/modules/ | `community/di/modules/task_module.py` | composition root(DI 接线) |
@@ -27,10 +27,10 @@ core/task/
 │   └── engine.py                  #   ExecutionEngine:on_* 事件驱动 + 状态条件(a/b/c)推进
 ├── task_graph/                    # TaskGraphService 图谱 SSOT(7+2 API,独立模块)
 │   └── task_graph_service.py      #   原子变更唯一网关 + relations 分解树派生查询
-├── task_plan/                     # TaskPlanner 规划编排壳 + DecomposerPort seam(可插拔)
-│   └── planner.py                 #   plan(graph) → 委托 decompose(零 case 知识);protocols.py 延后
-├── task_dispatch/                 # TaskDispatcher 搜推分发 + BotDiscoverPort seam(可插拔)
-│   └── dispatcher.py              #   dispatch(toDoList) → 填 run_mode/assignee 返 list[TaskNode];protocols.py 延后
+├── task_plan/                     # TaskPlanner 规划编排壳(零参 + 内置策略池 PlanningStrategy)
+│   └── planner.py                 #   plan(graph) first-match-wins 选策略产子(零 case 知识);strategies.py 延后
+├── task_dispatch/                 # TaskDispatcher 派发编排壳(零参 + 内置策略池 DispatchStrategy,不持 runner)
+│   └── dispatcher.py              #   dispatch(toDoList) first-match-wins 选策略填 run_mode/assignee;strategies.py 延后
 ├── task_runner/                   # TaskRunner 三模态执行 + 回投适配
 │   ├── runner.py                  #   start_run(批量)三模态自适应 + query_status/detail/result/bot_tasks
 │   └── callback_adapter.py        #   TaskCallbackData → TaskNodePatch → engine.on_report
