@@ -1,4 +1,5 @@
 """Composition root for engine provisioning strategies."""
+
 from __future__ import annotations
 
 from typing import Any, Protocol, TYPE_CHECKING
@@ -68,8 +69,6 @@ class BaasEngineBucketResolverRegistry:
         return normalized_engine
 
 
-
-
 class DefaultCapabilitiesEngineBucketResolver(Protocol):
     """Resolver that may map an engine context to a default-capabilities bucket."""
 
@@ -127,11 +126,14 @@ class McpDefaultsResolverRegistry:
 
     def register(self, engine_bucket: str, resolver: McpDefaultsResolver) -> None:
         if engine_bucket in self._resolvers:
-            raise ValueError(f"MCP defaults resolver already registered: {engine_bucket}")
+            raise ValueError(
+                f"MCP defaults resolver already registered: {engine_bucket}"
+            )
         self._resolvers[engine_bucket] = resolver
 
     def resolve(self, engine_bucket: str) -> McpDefaultsResolver | None:
         return self._resolvers.get(engine_bucket)
+
 
 class EngineProvisioningRegistry:
     def __init__(self) -> None:
@@ -205,7 +207,9 @@ def get_engine_provisioning_registry() -> EngineProvisioningRegistry:
     return _REGISTRY
 
 
-def _build_default_baas_engine_bucket_resolver_registry() -> BaasEngineBucketResolverRegistry:
+def _build_default_baas_engine_bucket_resolver_registry() -> (
+    BaasEngineBucketResolverRegistry
+):
     """Assemble the process-wide BaaS bucket resolver registry."""
     registry = BaasEngineBucketResolverRegistry()
     registry.register(AicodingBaasEngineBucketResolver())
@@ -244,7 +248,9 @@ def resolve_baas_engine_bucket(
     )
 
 
-def _build_default_capabilities_engine_bucket_resolver_registry() -> DefaultCapabilitiesEngineBucketResolverRegistry:
+def _build_default_capabilities_engine_bucket_resolver_registry() -> (
+    DefaultCapabilitiesEngineBucketResolverRegistry
+):
     """Assemble the process-wide default MCP/CLI bucket resolver registry."""
     registry = DefaultCapabilitiesEngineBucketResolverRegistry()
     registry.register(AicodingBaasEngineBucketResolver())
@@ -256,7 +262,9 @@ _DEFAULT_CAPABILITIES_ENGINE_BUCKET_RESOLVER_REGISTRY = (
 )
 
 
-def get_default_capabilities_engine_bucket_resolver_registry() -> DefaultCapabilitiesEngineBucketResolverRegistry:
+def get_default_capabilities_engine_bucket_resolver_registry() -> (
+    DefaultCapabilitiesEngineBucketResolverRegistry
+):
     """Return the process-wide default-capabilities bucket resolver registry."""
     return _DEFAULT_CAPABILITIES_ENGINE_BUCKET_RESOLVER_REGISTRY
 
@@ -347,39 +355,111 @@ def resolve_outbound_rule_envelope(
     typed as ``Any`` so the neutral composition root does not reverse-import
     ``core/devices`` (see architecture review).
     """
+    logger.info(
+        "[engines.resolve_outbound_rule_envelope] start: "
+        "bot_id=%s, owner_id=%s, has_template_service=%s, "
+        "has_secret_resolver=%s, has_theta_master_key_secret=%s",
+        bot_id,
+        owner_id,
+        template_service is not None,
+        secret_resolver is not None,
+        bool(theta_master_key_secret),
+    )
     if template_service is None:
+        logger.warning(
+            "[engines.resolve_outbound_rule_envelope] fallback: "
+            "bot_id=%s, owner_id=%s, reason=template_service_missing",
+            bot_id,
+            owner_id,
+        )
         return None
+
     bot = bot_query.get_by_id_and_owner(bot_id, owner_id)
     if not bot:
+        logger.warning(
+            "[engines.resolve_outbound_rule_envelope] fallback: "
+            "bot_id=%s, owner_id=%s, reason=bot_not_found",
+            bot_id,
+            owner_id,
+        )
         return None
+
+    active_engine = bot.get("active_engine")
+    template_type = bot.get("template_type")
     try:
         template_config = template_service.get_template_config(bot_id)
     except Exception as e:
         logger.warning(
             "[engines.resolve_outbound_rule_envelope] get_template_config "
-            "failed: bot_id=%s, error=%s", bot_id, e)
+            "failed: bot_id=%s, owner_id=%s, error=%s",
+            bot_id,
+            owner_id,
+            e,
+        )
         return None
+
+    logger.info(
+        "[engines.resolve_outbound_rule_envelope] context: "
+        "bot_id=%s, owner_id=%s, active_engine=%s, template_type=%s, "
+        "has_template_config=%s",
+        bot_id,
+        owner_id,
+        active_engine,
+        template_type,
+        isinstance(template_config, dict),
+    )
+
     try:
         ctx, strategy = resolve_provisioning(
             bot_id=bot_id,
             owner_id=owner_id,
             bot_type=bot.get("bot_type", ""),
-            active_engine=bot.get("active_engine"),
-            template_type=bot.get("template_type"),
+            active_engine=active_engine,
+            template_type=template_type,
             template_config=template_config,
         )
-        return strategy.build_extra_properties(
+        extra_properties = strategy.build_extra_properties(
             ctx,
             secret_resolver=secret_resolver,
             theta_master_key_secret=theta_master_key_secret,
         )
+        custom_outbound_key_resolved = bool(
+            isinstance(extra_properties, dict)
+            and extra_properties.get("outbound_api_key")
+        )
+        logger.info(
+            "[engines.resolve_outbound_rule_envelope] result: "
+            "bot_id=%s, owner_id=%s, strategy=%s, "
+            "custom_outbound_key_resolved=%s",
+            bot_id,
+            owner_id,
+            type(strategy).__name__,
+            custom_outbound_key_resolved,
+        )
+        if not custom_outbound_key_resolved:
+            logger.warning(
+                "[engines.resolve_outbound_rule_envelope] fallback: "
+                "bot_id=%s, owner_id=%s, active_engine=%s, "
+                "template_type=%s, reason=strategy_returned_no_custom_key, "
+                "has_secret_resolver=%s, has_theta_master_key_secret=%s",
+                bot_id,
+                owner_id,
+                active_engine,
+                template_type,
+                secret_resolver is not None,
+                bool(theta_master_key_secret),
+            )
+        return extra_properties
     except Exception as e:  # pragma: no cover - defensive: resolve_provisioning
         # and each registered strategy's build_extra_properties never raise for
         # any real bot (they fail-open internally); this only fires on a future
         # broken engine/strategy or registry corruption. Fail-safe to None.
         logger.warning(
             "[engines.resolve_outbound_rule_envelope] resolve failed: "
-            "bot_id=%s, error=%s", bot_id, e)
+            "bot_id=%s, error=%s",
+            bot_id,
+            e,
+        )
         return None
 
 
