@@ -33,9 +33,15 @@ class Skill(BaseModel):
         description="Identifier of this skill. Use it in the path of the "
         "per-skill endpoints."
     )
+    # Not unique, and the upload service is the proof: `_same_name_matches`
+    # collects a list and raises LocalSkillDuplicateError on `len(matches) > 1`,
+    # which is a check that only makes sense because duplicates can exist.
+    # `ac_skill.name` carries no uniqueness constraint.
     name: str = Field(
-        description="Skill name, taken from the uploaded package and unique "
-        "within the bot."
+        description="Skill name, as recorded for the skill — from the package "
+        "for an upload through this API. Not a unique key: nothing enforces "
+        "uniqueness within the bot, so a listing can contain two skills with "
+        "the same name. Address a skill by `skill_id`."
     )
     description: str | None = Field(
         default=None, description="What the skill does; null when the package "
@@ -70,13 +76,18 @@ class Skill(BaseModel):
         "keeps its current state, so replacing an active skill leaves it "
         "active."
     )
+    # Both are the record's own timestamps, not package events:
+    # `SkillRepository.update` sets gmt_modified for any change it writes —
+    # name, description, category, tags, visibility — so a metadata edit moves
+    # `updated_at` without the package changing at all.
     created_at: datetime | str | None = Field(
-        default=None, description="When the skill was first uploaded (ISO 8601); "
-        "null when not recorded."
+        default=None, description="When the skill record was created (ISO "
+        "8601); null when not recorded."
     )
     updated_at: datetime | str | None = Field(
-        default=None, description="When the skill was last replaced (ISO 8601); "
-        "null when not recorded."
+        default=None, description="When the skill record was last changed (ISO "
+        "8601); null when not recorded. Any edit moves this, not just replacing "
+        "the package — do not read it as the last upload time."
     )
 
 

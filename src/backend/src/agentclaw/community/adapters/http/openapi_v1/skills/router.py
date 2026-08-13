@@ -233,6 +233,10 @@ async def upload_skill(
     is created inactive, so activate it separately, while a replacement keeps
     the skill's current activation — replacing an active skill leaves it active
     and running the new package.
+
+    Skill names are not unique, so the bot may already hold more than one skill
+    with the package's name. There is then no single skill to replace, and the
+    upload is refused with 409 rather than a guess.
     """
     # Grant-checked here for the same reason as the listing above: the owner
     # this writes under is `owner_entity_id or actor_id`, which only the handler

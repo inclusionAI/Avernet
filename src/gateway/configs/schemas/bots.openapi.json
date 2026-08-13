@@ -4605,7 +4605,7 @@
                 "type": "null"
               }
             ],
-            "description": "When the skill was first uploaded (ISO 8601); null when not recorded.",
+            "description": "When the skill record was created (ISO 8601); null when not recorded.",
             "title": "Created At"
           },
           "description": {
@@ -4621,7 +4621,7 @@
             "title": "Description"
           },
           "name": {
-            "description": "Skill name, taken from the uploaded package and unique within the bot.",
+            "description": "Skill name, as recorded for the skill — from the package for an upload through this API. Not a unique key: nothing enforces uniqueness within the bot, so a listing can contain two skills with the same name. Address a skill by `skill_id`.",
             "title": "Name",
             "type": "string"
           },
@@ -4651,7 +4651,7 @@
                 "type": "null"
               }
             ],
-            "description": "When the skill was last replaced (ISO 8601); null when not recorded.",
+            "description": "When the skill record was last changed (ISO 8601); null when not recorded. Any edit moves this, not just replacing the package — do not read it as the last upload time.",
             "title": "Updated At"
           }
         },
@@ -13078,7 +13078,7 @@
     },
     "/openapi/v1/bots/skills/upload": {
       "post": {
-        "description": "Upload a skill package.\n\nThe body is the ZIP itself, not a form: send the bytes with\n`Content-Type: application/zip`.\n\nA package whose name matches an existing skill **replaces** it and answers\n200 instead of 201. The two cases differ in what you get back: a new skill\nis created inactive, so activate it separately, while a replacement keeps\nthe skill's current activation — replacing an active skill leaves it active\nand running the new package.",
+        "description": "Upload a skill package.\n\nThe body is the ZIP itself, not a form: send the bytes with\n`Content-Type: application/zip`.\n\nA package whose name matches an existing skill **replaces** it and answers\n200 instead of 201. The two cases differ in what you get back: a new skill\nis created inactive, so activate it separately, while a replacement keeps\nthe skill's current activation — replacing an active skill leaves it active\nand running the new package.\n\nSkill names are not unique, so the bot may already hold more than one skill\nwith the package's name. There is then no single skill to replace, and the\nupload is refused with 409 rather than a guess.",
         "operationId": "upload_skill_openapi_v1_bots_skills_upload_post",
         "parameters": [
           {
