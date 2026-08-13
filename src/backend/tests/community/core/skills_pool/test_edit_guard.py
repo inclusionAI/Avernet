@@ -74,6 +74,21 @@ class _UnavailableCache(_Cache):
         raise CacheLockInfrastructureError("injected cache outage")
 
 
+class _RollbackAfterAcquireCache(_Cache):
+    def __init__(self, layouts: _Layouts) -> None:
+        super().__init__()
+        self._layouts = layouts
+
+    def acquire_lock_strict(self, key: str, ttl: int = 30) -> str | None:
+        token = super().acquire_lock_strict(key, ttl)
+        self._layouts.state = replace(
+            self._layouts.state,
+            target_layout=SkillLayout.LEGACY,
+            phase=SkillLayoutPhase.LEGACY_ROLLBACK_PREPARING,
+        )
+        return token
+
+
 def test_rollback_lease_excludes_new_local_edits() -> None:
     layouts = _Layouts()
     guard = SkillsPoolEditGuard(
@@ -143,6 +158,40 @@ def test_rollback_phase_rejects_edit_even_after_lock_becomes_available() -> None
         guard.acquire_for_edit(scope=SCOPE)
 
 
+def test_lock_contention_rechecks_for_a_rollback_before_reporting_busy() -> None:
+    layouts = _Layouts()
+    cache = _Cache()
+    guard = SkillsPoolEditGuard(
+        cache=cache,
+        layout_repository=layouts,
+        bot_repository=_Bots(),
+    )
+    assert cache.acquire_lock(guard._key(scope=SCOPE)) is not None
+    layouts.state = replace(
+        layouts.state,
+        target_layout=SkillLayout.LEGACY,
+        phase=SkillLayoutPhase.LEGACY_ROLLBACK_PREPARING,
+    )
+
+    with pytest.raises(SkillsPoolEditRollbackError, match="rollback"):
+        guard.acquire_for_edit(scope=SCOPE)
+
+
+def test_rollback_starting_after_lock_acquisition_releases_edit_lease() -> None:
+    layouts = _Layouts()
+    cache = _RollbackAfterAcquireCache(layouts)
+    guard = SkillsPoolEditGuard(
+        cache=cache,
+        layout_repository=layouts,
+        bot_repository=_Bots(),
+    )
+
+    with pytest.raises(SkillsPoolEditRollbackError, match="rollback"):
+        guard.acquire_for_edit(scope=SCOPE)
+
+    assert cache.held == {}
+
+
 def test_teclaw_bypasses_an_abandoned_pool_edit_lock() -> None:
     cache = _Cache()
     guard = SkillsPoolEditGuard(
@@ -172,3 +221,15 @@ def test_cache_outage_is_not_reported_as_lock_contention() -> None:
 
     with pytest.raises(SkillsPoolEditLockUnavailableError, match="lock service"):
         guard.acquire_for_edit(scope=SCOPE)
+
+
+@pytest.mark.asyncio
+async def test_wait_does_not_retry_a_cache_outage_as_ordinary_contention() -> None:
+    guard = SkillsPoolEditGuard(
+        cache=_UnavailableCache(),
+        layout_repository=_Layouts(),
+        bot_repository=_Bots(),
+    )
+
+    with pytest.raises(SkillsPoolEditLockUnavailableError, match="lock service"):
+        await guard.acquire_for_edit_wait(scope=SCOPE, timeout_seconds=0.1)
