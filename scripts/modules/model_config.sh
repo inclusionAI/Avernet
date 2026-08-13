@@ -135,7 +135,7 @@ singlebox_model_config_required_for_services() {
     local service
     for service in "$@"; do
         case "$service" in
-            all|baas|bots|bcs_bots|merchant_hybrid)
+            all|baas|bots|bcs_bots|hybrid|merchant_hybrid)
                 return 0
                 ;;
         esac

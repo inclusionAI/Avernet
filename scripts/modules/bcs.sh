@@ -200,13 +200,13 @@ prepare_bcs_runtime_config() {
             log_warn "Ignoring incomplete OPENCLAW_OPENAI_* config for the local BCS LLM judge; missing: ${bcs_llm_missing[*]}"
         fi
     fi
-    if [ "${MERCHANT_HYBRID_ACTIVE:-0}" = "1" ]; then
+    if [ "${HYBRID_CLAUDE_ACTIVE:-${MERCHANT_HYBRID_ACTIVE:-0}}" = "1" ]; then
         # The opt-in local Provider bridge listens on 127.0.0.1. Keep private
         # networks blocked while allowing this one local callback route.
         sed_args+=(
             "-e" "/^\[security.outbound_url\]/,/^\[/{s|^block_private_networks = .*|block_private_networks = true|;s|^allow_loopback = .*|allow_loopback = true|;}"
         )
-        log_info "Allowing loopback-only BCS Provider callbacks for merchant_hybrid"
+        log_info "Allowing loopback-only BCS Provider callbacks for hybrid Claude mode"
     fi
 
     local config_file tmp_file
@@ -219,7 +219,7 @@ prepare_bcs_runtime_config() {
         mv "$tmp_file" "$config_file" || return 1
     done
 
-    if [ "${MERCHANT_HYBRID_ACTIVE:-0}" = "1" ]; then
+    if [ "${HYBRID_CLAUDE_ACTIVE:-${MERCHANT_HYBRID_ACTIVE:-0}}" = "1" ]; then
         # This checkout's already-built BCS binary predates the optional
         # OpenAPI-v1 config schema. Keep the tracked template untouched and
         # remove only that unsupported section from the generated local copy.
@@ -233,7 +233,7 @@ prepare_bcs_runtime_config() {
             fi
             mv "$tmp_file" "$config_file" || return 1
         done
-        log_info "Removed unsupported OpenAPI-v1 block from merchant_hybrid BCS runtime config"
+        log_info "Removed unsupported OpenAPI-v1 block from hybrid BCS runtime config"
     fi
 
     prepare_bcs_runtime_config_resources "$config_dir" || return 1

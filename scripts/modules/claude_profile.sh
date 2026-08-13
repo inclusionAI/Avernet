@@ -84,7 +84,7 @@ for field in ("claude_config_dir", "workspace"):
     if not os.path.isabs(os.path.expanduser(runtime[field])):
         raise SystemExit(f"runtime.{field} must resolve to an absolute path")
 if runtime["model"] != "Kimi-K2.6":
-    raise SystemExit("runtime.model must be Kimi-K2.6 for merchant_hybrid")
+    raise SystemExit("runtime.model must be Kimi-K2.6 for hybrid Claude mode")
 
 prompt_rel = runtime["system_prompt_md"]
 if os.path.isabs(prompt_rel) or ".." in Path(prompt_rel).parts or Path(prompt_rel).suffix.lower() != ".md":
