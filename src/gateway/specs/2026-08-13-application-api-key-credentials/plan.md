@@ -350,9 +350,11 @@ its dispatch branch, and its tests.
 _SECBAAS_KEY = "5X1tk2yC6rxmKhUfWzN2GJ3CYiGGE22F"
 _SECBAAS_HASH = "YIrLEzbZybtDzATwCkQ9QERLnn0Q9z09iO+u02jvGGs=:UKS+A02LiRqVNsn0oOs9EiNO63ggsbZ3UHGnND6A08Q="
 def test_secbaas_produced_hash_verifies(): ...          # read side: the migration guarantee
-def test_secbaas_fixture_uses_documented_pbkdf2_parameters(): ...
+def test_secbaas_hash_rejects_a_different_key(): ...
+def test_pinned_fixture_is_internally_consistent(): ...  # authenticates the fixture
 def test_hash_key_output_uses_documented_pbkdf2_parameters(): ...  # write side
 def test_generate_is_32_char_base62(): ...
+def test_generate_is_not_deterministic(): ...
 def test_hash_roundtrip(): ...
 def test_hashing_one_key_twice_yields_different_stored_values(): ...  # salt uniqueness
 def test_verify_rejects_wrong_key(): ...
@@ -362,14 +364,39 @@ def test_round_trip_against_secbaas_implementation(): ...  # both directions
 def test_copy_is_byte_identical_to_secbaas_source(): ...
 ```
 
-Both parameter-pinning tests are needed: the read-side one asserts against the
-fixture constant, so it cannot catch a weakened salt or iteration count in *our*
-`hash_key` — the internal round-trips stay self-consistent under any change
-applied to `hash_key` and `verify_key` together. Two further tests characterize
-upstream quirks that byte-identity forbids fixing here (`validate_format`
-accepts a trailing newline; `b64decode` runs non-validating, so a stored hash
-corrupted only by punctuation still verifies). They document the behavior rather
-than hide it — see Notes on upstream follow-ups.
+The write-side pin is not redundant with the read-side one: the latter asserts
+against the fixture constant, so it cannot catch a weakened salt or iteration
+count in *our* `hash_key`, and the internal round-trips stay self-consistent
+under any change applied to `hash_key` and `verify_key` together. In a checkout
+without `src/baas` the parity tests skip and the write-side pin is the only
+guard left. Path resolution keys on the ancestor holding both `src/baas` and
+`src/gateway` — not `AGENTS.md`, which this repo already places at module level
+— so "split out on its own" (skip) stays distinguishable from "the file moved"
+(fail).
+
+## Notes on upstream follow-ups
+
+Two defects live in the copied scheme. Neither can be fixed here: byte-identity
+with secbaas is the migration guarantee, so a one-sided edit is worse than the
+defect. Both need a secbaas change plus a re-copy, and neither is triggered by
+anything the gateway does today.
+
+1. **`validate_format` accepts a trailing newline.** `re.match(r"^…{32}$", s)`
+   also matches immediately before a trailing `\n`, so a 33-character value
+   passes as a 32-char key (`re.fullmatch` or `\Z` would not). Harmless for the
+   credential dispatch — a newline-suffixed value authenticates on neither path,
+   which Task 4 tests directly — but wrong wherever this is used to validate
+   input, including in the migration tooling.
+2. **`verify_key` decodes non-validating.** `base64.b64decode` defaults to
+   discarding characters outside the alphabet, so a stored hash corrupted only
+   by inserted punctuation decodes to the original bytes and still verifies —
+   a fail-open on data corruption. `validate=True` fixes it.
+
+A third, structural: the gateway CI job is selected by changed paths under
+`src/gateway`, so a commit touching only secbaas's copy never runs
+`test_copy_is_byte_identical_to_secbaas_source`. The byte-identity guard is
+therefore one-directional until that path filter also watches the secbaas
+generator.
 
 ```python
 # src/gateway/tests/unit/plugins/test_app_registry_db.py (rework)
