@@ -249,10 +249,11 @@ class BotBuildService:
             # ============================================================
             # Step 1: 计算源目录和目标目录（统一走 NAS 存储）
             # ============================================================
+            source_nas_engine_type = bot.get("active_engine") or engine_type
             nas_storage_id = get_bot_nas_dir(
                 entity_id=entity_id,
                 bot_id=bot_id,
-                engine_type=engine_type,
+                engine_type=source_nas_engine_type,
                 entity_type=entity_type,
             )
             source_dir = nas_storage_id / build_plan.source_root_name
