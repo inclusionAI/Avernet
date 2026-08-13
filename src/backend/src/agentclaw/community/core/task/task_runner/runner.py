@@ -37,9 +37,11 @@ class TaskRunner:
     # 投递并发上限(多节点投递 gather 限流;对齐 backend lifecycle Semaphore 模式)。
     _DELIVER_CONCURRENCY = 8
 
-    def __init__(self, graph) -> None:
-        """graph: TaskGraphService(派生查询 + 投递映射用)。"""
+    def __init__(self, graph, execution_backend=None) -> None:
+        """graph: TaskGraphService(派生查询 + 投递映射用);execution_backend: TaskExecutor | None
+        (注入则真实派发 single_bot/coop_group/bbs;缺省 stub fallback 记日志)。"""
         self._graph = graph
+        self._execution_backend = execution_backend
         self._deliveries: dict[str, DeliveryPort] = {}
         self._groups: dict[str, GroupFormation] = {}   # group_id -> GroupFormation(form_coop_group stub 记录)
         self._run_log: list[dict[str, Any]] = []        # 投递日志(stub fallback,不真实发起)
@@ -62,6 +64,9 @@ class TaskRunner:
             mode = node.run_info.run_mode
             if mode not in ("single_bot", "coop_group", "bbs"):
                 return False
+            if self._execution_backend is not None:
+                # execution_backend.dispatch 自身按 run_mode 三模态分流(含 bbs no-op)
+                return await self._execution_backend.dispatch([node]) == [True]
             async with sem:
                 port = self._deliveries.get(mode)
                 if port is not None:
@@ -102,8 +107,10 @@ class TaskRunner:
     async def form_coop_group(self, gf: GroupFormation) -> str:
         """(内部)HIT_MULTI_BOTS 动态拉协作群,复用 BCS 建群 → group_id。
         协程化:BCS 建群是网络 IO,``await`` 不阻塞编排核(由 engine 锁外 await 调用)。
-        Avernet stub:生成 group_id 并记录 GroupFormation,不真实调 BCS。
+        注入 execution_backend 时委托其真实建群;否则 Avernet stub:生成 group_id 并记录 GroupFormation。
         prod BCS wiring(group_strategy=collab_mode;state_machine 注入 workflow yaml)在 ocb 仓。"""
+        if self._execution_backend is not None:
+            return await self._execution_backend.form_coop_group(gf)
         gid = f"grp_{uuid.uuid4().hex[:8]}"
         self._groups[gid] = gf
         return gid
