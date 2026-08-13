@@ -8,17 +8,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-import uuid
 from typing import Any
 
 from agentclaw.community.core.task.domain.models import TaskNode
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 
+from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import BcsCreateGroupRequest
 from agentclaw.community.core.task.task_runner.integration.open_api_bot_adapter import (
     OpenApiAuthError, OpenApiBadRequestError,
 )
 from agentclaw.community.core.task.task_runner.integration.task_executor_result_poller import (
-    SingleBotHandle,
+    BcsGroupHandle, SingleBotHandle,
 )
 
 logger = logging.getLogger(__name__)
@@ -76,13 +76,52 @@ class TaskExecutor:
             return True
 
     async def _dispatch_coop_group(self, node: TaskNode, sem: asyncio.Semaphore) -> bool:
-        return True  # T8/T9 替换:create_session/start_state_machine_run→poller.register
+        group_id = node.run_info.assignee
+        meta = self._group_meta.get(group_id)
+        collab_mode = (meta or {}).get("collab_mode", "chat")
+        loop_task_id = f"{node.task_id}::{node.node_id}"
+        async with sem:
+            if collab_mode == "state_machine":
+                return await self._dispatch_state_machine(node, group_id, meta, loop_task_id)
+            ctx = self._context.build(node.task_id, node.node_id)
+            prompt = self._formatter.format_execute(ctx, node)
+            session_id = await self._bcs.create_session(group_id, bootstrap_prompt=prompt)
+            self._poller.register(BcsGroupHandle(
+                loop_task_id=loop_task_id, group_id=group_id, collab_mode=collab_mode,
+                registered_at=time.monotonic(), session_id=session_id, run_id=None,
+            ))
+            return True
+
+    async def _dispatch_state_machine(self, node, group_id, meta, loop_task_id) -> bool:
+        return True  # T9 替换:start_state_machine_run→poller.register(run handle)
 
     async def form_coop_group(self, gf: GroupFormation) -> str:
-        gid = f"grp_{uuid.uuid4().hex[:8]}"  # T8 替换:真实 BcsHttpAdapter.create_group
-        self._group_meta[gid] = {"collab_mode": gf.collab_mode, "gf": gf,
-                                 "definition_ref": None, "session_id": None}
-        return gid
+        bot_ids = list(gf.bot_ids)
+        mode = gf.collab_mode
+        participants = [{"bot_uuid": b} for b in bot_ids]
+        req_kwargs: dict[str, Any] = {"driver_bot": bot_ids[0], "participants": participants}
+        if mode == "manager_worker":
+            mgr = gf.extend_props.get("manager_bot_id") or bot_ids[0]
+            req_kwargs["group_strategy"] = "manager_worker"
+            req_kwargs["driver_bot"] = mgr
+            req_kwargs["participants"] = [
+                {"bot_uuid": mgr, "role": "manager"}] + [
+                {"bot_uuid": b, "role": "worker"} for b in bot_ids if b != mgr]
+        elif mode == "state_machine":
+            req_kwargs["group_strategy"] = "state_machine"
+            req_kwargs["collaboration_definition_yaml"] = gf.extend_props["collaboration_definition_yaml"]
+            req_kwargs["participant_bindings"] = {b: {"source": "manual", "bot_ids": [b]} for b in bot_ids}
+            req_kwargs["start_initial_run"] = False
+        service_spec = gf.extend_props.get("service_spec")
+        if service_spec:
+            req_kwargs["service_spec"] = service_spec
+        req = BcsCreateGroupRequest(**req_kwargs)
+        res = await self._bcs.create_group(req)
+        self._group_meta[res.group_id] = {
+            "collab_mode": mode, "gf": gf,
+            "definition_ref": res.definition_ref, "session_id": res.session_id,
+        }
+        return res.group_id
 
     async def aclose(self) -> None:
         if self._poller is not None:
