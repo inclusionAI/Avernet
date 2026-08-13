@@ -150,14 +150,14 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/{bot_id}/startup-script"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("PUT", "/openapi/v1/bots/{bot_id}/startup-script"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("DELETE", "/openapi/v1/bots/{bot_id}/startup-script"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/activate"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/data-init"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/identity"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/identity/{file_type}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("PUT", "/openapi/v1/bots/{bot_id}/identity/{file_type}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    # resources — ``bot_id`` is a required query parameter on all seven, and
-    # every one of them is addressed by workspace path. There are no record-id
-    # routes left: a record id cannot address a file the bot created itself, and
-    # links are no longer part of this group. Each resolves its workspace from
-    # the caller-supplied ``bot_id``, so each carries the own-bot grant check.
+    # resources — every operation is bot-first and addressed by workspace path.
+    # There are no record-id routes left: a record id cannot address a file the
+    # bot created itself, and links are no longer part of this group.
     ("GET", "/openapi/v1/bots/{bot_id}/resources"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("DELETE", "/openapi/v1/bots/{bot_id}/resources"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/resources/stat"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
@@ -214,6 +214,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/{bot_id}/engine/available"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/engine/capabilities"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/engine/status"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/engine/restart"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/approvals/mode"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("PUT", "/openapi/v1/bots/{bot_id}/approvals/mode"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/approvals/modes"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
@@ -236,6 +237,22 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/mcp/servers/{server_code}"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/mcp/tenants"): AdmissionMode.OPEN,
     # ── REFUSED — each for its own reason ────────────────────────────────────
+    # The aggregated workshop list is not grant-filtered yet. Admitting an
+    # application before BotInventoryService can accept a granted bot-id set
+    # would expose every bot owned by the delegating user, so keep it human-only.
+    ("GET", "/openapi/v1/bots/all"): AdmissionMode.REFUSED,
+    # Local workflows expose host devices, directories, and desktop actions.
+    # They currently have no application-safe grant/filter contract, so the
+    # entire group remains human-only until that contract is designed.
+    ("GET", "/openapi/v1/bots/local/devices"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/bots/local/devices/{machine_id}/files"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/bots/local"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/bots/local"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/bots/local/{bot_id}"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/bots/local/{bot_id}/auth-status"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/bots/local/{bot_id}/restart"): AdmissionMode.REFUSED,
+    ("DELETE", "/openapi/v1/bots/local/{bot_id}"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/bots/local/{bot_id}/open-folder"): AdmissionMode.REFUSED,
     # No bot exists yet for a grant to cover, and creation spends the user's
     # quota. Auto-granting the new bot would invent consent nobody gave.
     ("POST", "/openapi/v1/bots"): AdmissionMode.REFUSED,

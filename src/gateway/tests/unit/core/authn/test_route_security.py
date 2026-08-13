@@ -40,6 +40,9 @@ def test_shipped_config_admits_a_machine_caller_on_the_public_api() -> None:
 #: enumeration rather than by a shared import.
 _HUMAN_ONLY = [
     ("POST", "/openapi/v1/bots"),
+    ("GET", "/openapi/v1/bots/all"),
+    ("GET", "/openapi/v1/bots/local"),
+    ("POST", "/openapi/v1/bots/local/bot-123/open-folder"),
     ("GET", "/openapi/v1/bots/bot-123/authorized-apps"),
     ("DELETE", "/openapi/v1/bots/bot-123/authorized-apps/42"),
     ("GET", "/openapi/v1/bots/logs/traces"),

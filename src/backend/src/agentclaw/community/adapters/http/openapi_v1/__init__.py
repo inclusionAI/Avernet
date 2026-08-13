@@ -257,6 +257,9 @@ _SUBGROUPS = [
     # because it would look the grant up against the delegating user rather than
     # the owner. See `skills/router.py` and `admission.SKILL_SCOPED_OPERATIONS`.
     skills_router,
+    # Local workflows are human-only rather than grant-checked. Their admission
+    # entries and gateway route security refuse application-only callers.
+    local_router,
 ]
 
 # The groups where **every** route is GRANT_CHECKED_OWN_BOT — it names a bot and resolves it
@@ -283,7 +286,6 @@ _GRANT_CHECKED_SUBGROUPS = [
     identity_router,
     resources_router,
     routines_router,
-    local_router,
 ]
 
 # Track C — the engine-runtime groups. Mounted separately because they document
