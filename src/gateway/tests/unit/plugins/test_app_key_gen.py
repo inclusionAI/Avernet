@@ -36,8 +36,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import importlib.util
-import inspect
 import re
+import secrets
 from pathlib import Path
 from types import ModuleType
 
@@ -57,9 +57,11 @@ _SECBAAS_RELPATH = "src/baas/src/secbaas/community/core/service/api_gateway/_key
 _OURS_RELPATH = "src/gateway/src/gateway/community/core/app/_key_gen.py"
 
 # The monorepo root is the ancestor holding both module trees. Derived from the
-# two paths above so that moving either module leaves one place to update —
-# a second hardcoded "src/baas" would make the guidance in _secbaas_source()
-# insufficient, since the probe would stop matching before the relpath is read.
+# two paths above so that moving a module leaves one place to update *in this
+# file* — a second hardcoded "src/baas" here would make the guidance in
+# _secbaas_source() insufficient, since the probe would stop matching before the
+# relpath is ever read. The path is also spelled out in the docstring of
+# gateway/community/core/app/__init__.py, which nothing enforces.
 _MODULE_DIRS = tuple(
     Path(*Path(rel).parts[:2]) for rel in (_SECBAAS_RELPATH, _OURS_RELPATH)
 )
@@ -93,8 +95,8 @@ def _require_monorepo_root() -> Path:
     return root
 
 
-def _secbaas_source() -> Path:
-    source = _require_monorepo_root() / _SECBAAS_RELPATH
+def _secbaas_source(root: Path | None = None) -> Path:
+    source = (root or _require_monorepo_root()) / _SECBAAS_RELPATH
     if not source.is_file():
         pytest.fail(
             f"secbaas key generator not found at {source}. This copy's migration "
@@ -122,14 +124,12 @@ def _load_secbaas_generator(source: Path) -> ModuleType:
 def _split_stored_hash(stored: str) -> tuple[bytes, bytes]:
     """Decode a stored hash, checking each half re-encodes to what was stored.
 
-    Decoding alone pins nothing about the alphabet: ``b64decode`` accepts a
-    ``urlsafe_b64encode`` string unchanged, and ``validate=True`` does not change
-    that (measured: identical ~26% acceptance either way). Re-encoding catches
-    the switch — but only for payloads that actually contain a ``-`` or ``_``.
-    For the other ~26%, the two alphabets emit *byte-identical* output, so the
-    difference is unobservable at any sample size of one. Callers that need the
-    alphabet pinned must sample; see
-    :func:`test_hash_key_output_uses_documented_pbkdf2_parameters`.
+    The re-encode catches an alphabet switch for any payload that contains a
+    distinguishing character, which is most but not all of them: standard and
+    urlsafe base64 emit byte-identical output when a payload happens to contain
+    none, so this cannot pin the alphabet on its own for a random salt. The
+    exact pin lives in :func:`test_hash_key_encodes_with_standard_base64`, which
+    injects a salt chosen to distinguish them.
     """
     salt_b64, dk_b64 = stored.split(":")
     salt, dk = base64.b64decode(salt_b64), base64.b64decode(dk_b64)
@@ -174,21 +174,45 @@ def test_hash_key_output_uses_documented_pbkdf2_parameters() -> None:
     internal round-trips stay self-consistent under any change applied to
     ``hash_key`` and ``verify_key`` together, and the parity tests skip.
 
-    Repeated because the base64 alphabet cannot be pinned by one sample — a
-    ``urlsafe_b64encode`` switch is byte-invisible for the ~26% of payloads
-    containing neither ``-`` nor ``_``. Ten samples take that blind spot from
-    roughly one run in four to one in a million; the digest and iteration count
-    are pinned deterministically by any single one.
+    Digest, iteration count, and salt width are deterministic in a single
+    sample; the base64 alphabet is not, and is pinned separately by
+    :func:`test_hash_key_encodes_with_standard_base64`.
     """
-    for _ in range(10):
-        key = APIKeyGenerator.generate()
-        salt, stored_dk = _split_stored_hash(APIKeyGenerator.hash_key(key))
+    key = APIKeyGenerator.generate()
+    salt, stored_dk = _split_stored_hash(APIKeyGenerator.hash_key(key))
 
-        assert len(salt) == 32
-        assert len(stored_dk) == 32
-        assert stored_dk == hashlib.pbkdf2_hmac(
-            hash_name="sha256", password=key.encode(), salt=salt, iterations=100_000
-        )
+    assert len(salt) == 32
+    assert len(stored_dk) == 32
+    assert stored_dk == hashlib.pbkdf2_hmac(
+        hash_name="sha256", password=key.encode(), salt=salt, iterations=100_000
+    )
+
+
+def test_hash_key_encodes_with_standard_base64(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pin the alphabet exactly, using a salt that distinguishes the two.
+
+    A random salt cannot do this: standard and urlsafe base64 differ only on
+    bytes that encode to ``+``/``/`` (resp. ``-``/``_``), and a payload
+    containing none of them encodes identically under both. Injecting a salt
+    whose encoding contains both characters turns a probabilistic check into an
+    exact one — and makes a failure name the expected string rather than show a
+    bytes diff.
+    """
+    # 0x3E/0x3F are the two byte values whose sixtets encode to the characters
+    # the alphabets disagree on, so this salt exercises both of them.
+    salt = bytes((0x3E, 0x3F)) * 16
+    expected_salt_b64 = base64.b64encode(salt).decode()
+    assert "+" in expected_salt_b64 and "/" in expected_salt_b64
+    monkeypatch.setattr(secrets, "token_bytes", lambda _n: salt)
+
+    salt_b64, _ = APIKeyGenerator.hash_key(APIKeyGenerator.generate()).split(":")
+
+    assert salt_b64 == expected_salt_b64, (
+        "stored salt is not standard base64 — a urlsafe_b64encode switch would "
+        f"render this as {base64.urlsafe_b64encode(salt).decode()!r}"
+    )
 
 
 def test_generate_is_32_char_base62() -> None:
@@ -268,24 +292,23 @@ def test_round_trip_against_secbaas_implementation() -> None:
 def test_copy_is_byte_identical_to_secbaas_source() -> None:
     """The copy must not drift; edit the scheme in both places or neither.
 
-    Checks both the file a contributor edits and the file this suite actually
-    imports. They are the same under the editable install used here, but diverge
-    under a non-editable one — and checking only the loaded module would also
-    pass vacuously if the gateway ever re-exported secbaas's class instead of
-    keeping a copy, which is the cross-module dependency the plan rejects.
+    Two things must hold. The class must be *defined in the gateway package* —
+    checked via ``__module__``, which is immune to install layout, where a path
+    comparison would miss a re-export from an installed secbaas elsewhere on
+    ``sys.path``. And the file a contributor edits must match secbaas's byte for
+    byte.
     """
-    source = _secbaas_source()
-    expected = source.read_bytes()
-
-    loaded_path = inspect.getsourcefile(APIKeyGenerator)
-    assert loaded_path is not None
-    loaded = Path(loaded_path).resolve()
-    tree_copy = (_require_monorepo_root() / _OURS_RELPATH).resolve()
-
-    assert loaded != source.resolve(), (
-        "APIKeyGenerator is being imported from secbaas rather than from the "
-        "gateway's own copy — the byte-identity check would compare a file to "
-        "itself, and the copy the plan calls for would be gone."
+    assert APIKeyGenerator.__module__ == "gateway.community.core.app._key_gen", (
+        f"APIKeyGenerator is defined in {APIKeyGenerator.__module__}, not the "
+        "gateway's own copy — the plan rejects importing secbaas's class, and "
+        "a byte-identity check against a re-export would pass vacuously."
     )
-    assert tree_copy.read_bytes() == expected
-    assert loaded.read_bytes() == expected
+
+    root = _require_monorepo_root()
+    tree_copy = root / _OURS_RELPATH
+    if not tree_copy.is_file():
+        pytest.fail(
+            f"gateway key generator not found at {tree_copy}; if it moved, "
+            "update _OURS_RELPATH rather than letting this check lapse."
+        )
+    assert tree_copy.read_bytes() == _secbaas_source(root).read_bytes()

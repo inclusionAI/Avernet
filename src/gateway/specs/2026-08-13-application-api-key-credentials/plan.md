@@ -370,9 +370,10 @@ count in *our* `hash_key`, and the internal round-trips stay self-consistent
 under any change applied to `hash_key` and `verify_key` together. In a checkout
 without `src/baas` the parity tests skip and the write-side pin is the only
 guard left. Path resolution keys on the ancestor holding both `src/baas` and
-`src/gateway` — not `AGENTS.md`, which this repo already places at module level
-— so "split out on its own" (skip) stays distinguishable from "the file moved"
-(fail).
+`src/gateway` — not `AGENTS.md`, which this repo already places at module level.
+That distinguishes "a generator file moved within its module" (fail, with
+guidance) from "no monorepo here" (skip), but *not* a renamed module directory,
+which also skips — see note 4 below.
 
 ```python
 # src/gateway/tests/unit/plugins/test_app_registry_db.py (rework)
@@ -451,7 +452,10 @@ Two further structural gaps, both outside this change's blast radius:
 4. **A skip reads as a pass at the coverage gate.** `scripts/ci/report_check.py`
    computes `passed = tests - failures - errors`, so if the parity tests ever
    skip (no ancestor holding both module trees — a split-out checkout, or a
-   renamed module directory), CI still reports 100%. Hard-failing instead would
-   break legitimately standalone checkouts, so the ambiguity is recorded rather
-   than resolved; item 3 removes most of its consequence.
+   renamed module directory), CI still reports 100%. Hard-failing in the test
+   is not the fix, since that breaks legitimately standalone checkouts; the
+   fixes are either a skip-aware gate (`report_check.py` already parses the
+   JUnit XML, which carries `skipped` on the same element) or failing only when
+   a CI environment variable is set. Both touch coverage reporting, which
+   `AGENTS.md` treats as a contract, so neither is bundled into this change.
 
