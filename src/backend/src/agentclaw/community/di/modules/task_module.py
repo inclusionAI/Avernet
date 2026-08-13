@@ -1,0 +1,76 @@
+"""TaskModule — production singletons for the task goal-driven execution framework。
+
+装配 TaskGraphService(local in-mem)+ TaskService(facade;内部 ExecutionEngine)。
+引擎构造期收传输端口(bot/bcs/discover),由 DI 从配置注入;端口缺省(community 未配 BaaS/BCS 密钥)
+→ 引擎退化为纯内核路径(默认空端口规划/派发 stub),prod 由 corp overlay 注真实端口实现。
+
+注册 TaskServiceProtocol / TaskLoopCallbackProtocol 供 http adapter 注入(Rule 14:DI composition root)。
+"""
+from __future__ import annotations
+
+import os
+
+from injector import Binder, Module, inject, provider, singleton
+
+from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
+from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
+from agentclaw.community.api.task.task_service import TaskServiceProtocol
+from agentclaw.community.core.task.task_center.task_service import TaskService
+from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+
+
+def _task_engine_active() -> bool:
+    """TASK_ENGINE=skill(或 truthy)激活真实端口接线;缺省 = 纯内核 stub 路径。"""
+    return bool(os.environ.get("TASK_ENGINE", "").strip().lower() in {"skill", "true", "1"})
+
+
+class TaskModule(Module):
+    """Production bindings for the task module(社区核心,所有 profile 装配)。"""
+
+    def configure(self, binder: Binder) -> None:
+        # TaskGraphService 是 in-mem 单例(无外部依赖),直接 self-bind。
+        binder.bind(TaskGraphService, to=TaskGraphService, scope=singleton)
+
+    @singleton
+    @provider
+    @inject
+    def task_service(
+        self,
+        graph: TaskGraphService,
+        discover: BotDiscoverServiceProtocol,
+    ) -> TaskService:
+        """构造 TaskService facade(引擎自当 ResultSink/TaskContextBuilder;构造期收端口)。
+
+        端口接线策略:
+        - TASK_ENGINE 激活且 corp 配置存在 → 构造 OpenApiBotAdapter/BcsHttpAdapter 注入(connector 层);
+          community 无 corp 密钥时不接端口(留 None),引擎仍可用内核纯规划/派发 stub 路径。
+        - discover(BotDiscoverServiceProtocol,来自 BotPublicModule)始终传入:
+          SearchBasedDispatchStrategy 在端口齐全时才调,否则 stub MISS。
+        """
+        bot, bcs = self._resolve_ports()
+        return TaskService(graph, bot=bot, bcs=bcs, discover=discover)
+
+    @singleton
+    @provider
+    @inject
+    def task_service_protocol(self, svc: TaskService) -> TaskServiceProtocol:
+        return svc
+
+    @singleton
+    @provider
+    @inject
+    def task_loop_callback_protocol(self, svc: TaskService) -> TaskLoopCallbackProtocol:
+        """回投 Protocol = TaskService.callback(已 internal 持 TaskLoopCallback)。"""
+        return svc.callback
+
+    @staticmethod
+    def _resolve_ports():
+        """构造传输端口(community:默认 None=纯内核;corp 经 overlay 覆写本方法注真实 conn)。
+
+        community 不内联 BaaS/BCS 密钥(Rule:环境访问在 DI),真实端口由 corp adapter 层覆写。
+        """
+        if not _task_engine_active():
+            return None, None
+        # corp 接真实 OpenApiBotAdapter/BcsHttpAdapter 时,在 corp overlay 覆写本 provider 或经 env_url。
+        # community 默认:即便 TASK_ENGINE 开,也无端口实现 → 退化 stub(可被测试用 double 覆盖)。
+        return None, None

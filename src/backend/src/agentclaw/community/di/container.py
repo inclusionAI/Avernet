@@ -24,6 +24,7 @@ from agentclaw.community.di.modules.bot_chat_open_module import BotChatOpenModul
 from agentclaw.community.di.modules.bot_dormant_module import BotDormantModule
 from agentclaw.community.di.modules.bot_management_module import BotManagementModule
 from agentclaw.community.di.modules.bot_public_module import BotPublicModule
+from agentclaw.community.di.modules.task_module import TaskModule
 from agentclaw.community.di.modules.caller_identity_module import CallerIdentityModule
 from agentclaw.community.di.modules.channel_module import ChannelModule
 from agentclaw.community.di.modules.common_config_module import CommonConfigModule
@@ -103,6 +104,7 @@ def build_injector(
         BotManagementModule(),
         SkillsPoolModule(),
         BotPublicModule(),
+        TaskModule(),
         DevicesModule(),
         McpModule(),
         AICodingModule(),
