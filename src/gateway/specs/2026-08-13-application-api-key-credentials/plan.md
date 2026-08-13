@@ -1,0 +1,305 @@
+# Plan: Application API-key credentials (secbaas-compatible)
+
+## Approach
+
+Copy secbaas's `APIKeyGenerator` verbatim into the gateway's app domain and swap
+the app credential path from "mint JWT, store plaintext, exact-match lookup" to
+"generate 32-char base62 key, store PBKDF2 hash + 8-char prefix, resolve by
+prefix + constant-time verify". The `AppRegistry` SPI keeps its
+opaque-credential shape (`credential in → RegisteredApp | None`): prefix lookup,
+status gating, and hash verification all live inside `AppRepository`, so the
+authn strategy and downstream principal contracts are untouched except for a
+method rename. `AppRegistrar` stops using `PrincipalSigner` entirely.
+
+Verbatim means byte-for-byte: same base62 alphabet, `pbkdf2_hmac("sha256", key,
+salt, 100_000)`, stored as `base64(salt):base64(dk)`, `hmac.compare_digest`
+verify, `key[:8]` prefix, 3-attempt prefix-collision retry at creation, and the
+`len < 8` cheap reject before any DB touch (mirroring
+`DefaultAPIKeyValidator.verify`, `src/baas/src/secbaas/community/core/service/api_gateway/_key_validator.py:32`).
+
+## Affected Components
+
+- `src/gateway/src/gateway/community/core/app/` — the app domain: new
+  `_key_gen.py` (copied), reworked `_orm.py` / `_repository.py` /
+  `_registrar.py` / `__init__.py`.
+- `src/gateway/src/gateway/community/spi/app/_ports.py` — `AppRegistry` port:
+  `find_app_by_token` → `find_app_by_api_key` (semantics: verify, not just look
+  up).
+- `src/gateway/src/gateway/community/plugins/authn/app_token/_strategy.py` —
+  strategy calls the renamed port; header extraction unchanged.
+- `src/gateway/src/gateway/community/adapters/web/admin.py` — `POST /admin/apps`
+  response returns `api_key` instead of `token` (breaking).
+- `src/gateway/src/gateway/community/bootstrap/_credential_issuance.py` and
+  `bootstrap/__init__.py:100` — `build_app_registrar` loses its `signer` param.
+- `src/gateway/migrations/mysql/001_init_schema.sql` — canonical DDL for
+  `avernet_application` swaps `token` for `api_key_hash` + `api_key_prefix`.
+- Tests under `src/gateway/tests/` (unit + integration) — see Test Strategy.
+
+Nothing outside `src/gateway` consumes `/admin/apps` or app tokens (checked:
+no hits in `src/backend`, `src/bcs`, `scripts/`). `src/backend`'s
+`bot_app_grant` references `avernet_application.id` only — unaffected.
+
+## Data Model Changes
+
+Column names deliberately mirror `baas_api_key`
+(`src/baas/src/secbaas/community/core/repository/api_gateway/_orm_model.py:16-17`)
+so the migration is a straight column map.
+
+```diff
+# src/gateway/src/gateway/community/core/app/_orm.py:31 — AppRow
+-    token: Mapped[str] = mapped_column(unique=True)
++    api_key_hash: Mapped[str] = mapped_column(String(256))
++    api_key_prefix: Mapped[str] = mapped_column(String(8), unique=True)
+```
+
+```diff
+# src/gateway/migrations/mysql/001_init_schema.sql:27 — avernet_application
+-  `token` varchar(1024) NOT NULL COMMENT '应用访问令牌(签名 JWT)，opaque 查找键',
++  `api_key_hash` varchar(256) NOT NULL COMMENT 'API Key 哈希(base64(salt):base64(dk)，PBKDF2-SHA256)',
++  `api_key_prefix` varchar(8) NOT NULL COMMENT 'API Key 前缀(8 位，查找键)',
+   ...
+-  UNIQUE KEY `uk_avernet_application_token` (`token`),
++  UNIQUE KEY `uk_avernet_application_api_key_prefix` (`api_key_prefix`),
+```
+
+Community edition creates tables via `DataSourcePlugin.create_all()` (no
+Alembic); the SQL file is the canonical schema for real MySQL/OceanBase. The
+ALTER + data move for a live DB belongs to the migration workstream.
+
+## API / Interface Changes
+
+```diff
+# BREAKING — src/gateway/src/gateway/community/spi/app/_ports.py:40 — AppRegistry
+-    async def find_app_by_token(self, token: str) -> RegisteredApp | None: ...
++    async def find_app_by_api_key(self, api_key: str) -> RegisteredApp | None: ...
+```
+
+Port contract: soft miss (`None`) for malformed key (`len < 8`), unknown prefix,
+non-`ACTIVE` row, or hash mismatch — never raises on a bad credential.
+`RegisteredApp` itself is unchanged (`id/app_name/owners/app_type/tenant`), so
+`AppPrincipal` and forwarded principal headers are untouched.
+
+```jsonc
+// BREAKING — POST /admin/apps → 201 (admin.py:90): "token" replaced by "api_key"
+{ "id": 1, "app_name": "…", "owners": "…", "app_type": "…", "tenant": "…",
+  "status": "ACTIVE", "env": "", "api_key": "5X1tk2yC6rxmKhUfWzN2GJ3CYiGGE22F" }
+// api_key: 32-char base62, shown exactly once; only its hash is persisted
+```
+
+Previously issued JWT app tokens stop authenticating (replacement, not
+coexistence — spec acceptance criterion). `Authorization: Bearer <api_key>` and
+`x-avernet-app-token: <api_key>` both keep working as presentation channels.
+
+## Key Files & Functions
+
+New module — byte-for-byte copy of
+`src/baas/src/secbaas/community/core/service/api_gateway/_key_gen.py` (the
+gateway does not depend on the baas package, so the class is copied, not
+imported; a parity fixture test keeps the copy honest):
+
+```python
+# src/gateway/src/gateway/community/core/app/_key_gen.py (new, copied verbatim)
+class APIKeyGenerator:
+    BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+    @classmethod
+    def generate(cls) -> str: ...            # 32-char base62
+    @classmethod
+    def hash_key(cls, api_key: str) -> str: ...   # base64(salt):base64(dk), 100k PBKDF2-SHA256
+    @classmethod
+    def verify_key(cls, api_key: str, stored_hash: str) -> bool: ...  # constant-time
+    @staticmethod
+    def validate_format(api_key: str) -> bool: ...  # ^[0-9A-Za-z]{32}$
+```
+
+```diff
+# src/gateway/src/gateway/community/core/app/_repository.py:38 — AppRepository
+-    async def find_app_by_token(self, token: str) -> RegisteredApp | None:
+-        with self._db.orm_session() as session:
+-            row = session.scalar(select(self.Model).where(self.Model.token == token))
+-            return None if row is None else row.to_record()
++    async def find_app_by_api_key(self, api_key: str) -> RegisteredApp | None:
++        if not api_key or len(api_key) < 8:
++            return None                     # cheap reject, no DB touch
++        with self._db.orm_session() as session:
++            row = session.scalar(
++                select(self.Model).where(
++                    self.Model.api_key_prefix == api_key[:8],
++                    self.Model.status == "ACTIVE",
++                )
++            )
++        if row is None or not APIKeyGenerator.verify_key(api_key, row.api_key_hash):
++            return None
++        return row.to_record()
++
++    async def exists_prefix(self, api_key_prefix: str) -> bool: ...
+```
+
+`store(...)` swaps `token: str` for `api_key_hash: str, api_key_prefix: str`;
+body maps them onto the new columns (verify runs outside the session block —
+PBKDF2 is ~100ms of CPU, no reason to hold the session open).
+
+```diff
+# src/gateway/src/gateway/community/core/app/_registrar.py — AppRegistrar
+-    def __init__(self, repository, signer, *, clock=time.time) -> None: ...
++    def __init__(self, repository: AppRepository) -> None: ...
+
+     async def register(self, app_name, owners, app_type, tenant, *, creator,
+                        status="ACTIVE", env="", config=None) -> IssuedApp:
+-        claims = {...}; token = await self._signer.sign_token(claims)
++        for _ in range(3):                     # prefix-collision retry, as secbaas
++            api_key = APIKeyGenerator.generate()
++            api_key_prefix = api_key[:8]
++            if not await self._repository.exists_prefix(api_key_prefix):
++                break
++        else:
++            raise RuntimeError("could not allocate a unique api key prefix")
++        app_id = await self._repository.store(
++            api_key_hash=APIKeyGenerator.hash_key(api_key),
++            api_key_prefix=api_key_prefix, ...)
+```
+
+```diff
+# src/gateway/src/gateway/community/core/app/_registrar.py:28 — IssuedApp
+ @dataclass(frozen=True)
+ class IssuedApp:
+-    token: str
++    api_key: str
+```
+
+```diff
+# src/gateway/src/gateway/community/plugins/authn/app_token/_strategy.py:63
+-        record = await self._registry.find_app_by_token(app_token)
++        record = await self._registry.find_app_by_api_key(app_token)
+```
+
+Strategy header extraction (`Bearer` / `x-avernet-app-token`) is unchanged; an
+unrecognized or invalid key stays a soft miss so other Bearer chains (bot_token)
+still adjudicate independently (US27).
+
+```diff
+# src/gateway/src/gateway/community/bootstrap/_credential_issuance.py:24
+-def build_app_registrar(db: DataSourcePlugin, signer: PrincipalSigner) -> AppRegistrar:
+-    return AppRegistrar(AppRepository(db), signer)
++def build_app_registrar(db: DataSourcePlugin) -> AppRegistrar:
++    return AppRegistrar(AppRepository(db))
+```
+
+Caller: `bootstrap/__init__.py:100` drops the `principal_signer` argument.
+`admin.py:100` response field `"token": issued.token` → `"api_key": issued.api_key`.
+`core/app/__init__.py` exports `APIKeyGenerator` (tests and the parity check
+import it via the public package face, per module import rules).
+
+## Dependencies
+
+None — `_key_gen.py` is stdlib-only (`base64`, `hashlib`, `hmac`, `re`,
+`secrets`). `pyjwt` stays (still used by access-key issuance and principal
+signing).
+
+## Risks & Mitigations
+
+- **Risk:** The copied generator drifts from secbaas's, silently breaking
+  migration compatibility.
+  **Mitigation:** A pinned cross-implementation fixture — a real
+  `(api_key, stored_hash)` pair produced by the *secbaas* implementation —
+  asserted against the gateway's `verify_key` (see Test Strategy). Any change to
+  iterations, salt handling, or encoding fails it.
+- **Risk:** `uk_avernet_application_api_key_prefix` rejects migrated rows if the
+  secbaas data ever produced duplicate prefixes (their uniqueness is enforced
+  at creation time, not by a DB constraint).
+  **Mitigation:** Creation-time invariant makes duplicates all but impossible;
+  the migration workstream should assert prefix uniqueness pre-copy. The unique
+  index also backstops the registrar's check-then-insert race (IntegrityError →
+  500, fail-closed, no partial write).
+- **Risk:** PBKDF2 at 100k iterations adds ~50–100ms CPU per app-token
+  authentication (per request, not per registration).
+  **Mitigation:** Accepted — identical cost profile to secbaas today, and
+  required byte-for-byte. Caching is out of scope (secbaas flags the same
+  future extension).
+- **Risk:** Seeded demo/test rows using plaintext `token=` stop working and
+  break unrelated suites.
+  **Mitigation:** Blast radius enumerated in Test Strategy; all seeds move to
+  `api_key_hash`/`api_key_prefix` in the same change.
+
+## Alternatives Considered
+
+- **Import secbaas's generator instead of copying** — rejected: the gateway
+  package (`src/gateway/pyproject.toml`) has no dependency on `baas`, and adding
+  a cross-module dependency for one stdlib-only class is worse than a copy
+  pinned by a parity test.
+- **Mirror secbaas's validator layering (repository returns hash, separate
+  validator verifies)** — rejected: the gateway's port pattern is
+  "opaque credential in → record | None" (`_ports.py:32-40`); keeping
+  verification inside `AppRepository` preserves that contract and keeps the
+  authn plugin storage-agnostic. "Exactly the same" binds the credential
+  scheme, not secbaas's internal layering.
+- **Keep `token` column and add key columns alongside (dual-scheme
+  coexistence)** — rejected: spec mandates replacement; precedent
+  (`specs/2026-07-30-application-tenant-accesskey-schema/spec.md` §已确认决策 1)
+  is replace-and-migrate, not coexist.
+- **Pin verification to `env` like secbaas
+  (`get_by_prefix_and_status(..., env=...)`)** — deferred: the gateway authn
+  path has no environment concept; spec's Open Question records the assumption
+  (no `env` filter). Trivial to add later (one more `where` clause).
+- **Unique index on `api_key_hash`** — rejected: the hash embeds a random salt
+  (unique by construction), and the lookup key is the prefix; a 256-char unique
+  index buys nothing.
+
+## Rollout
+
+No flag; single atomic change within the gateway (community edition rebuilds
+its schema via `create_all()` on boot). For a real MySQL/OceanBase deployment
+the ordering is owned by the migration workstream:
+
+```bash
+# 1. ALTER avernet_application (add api_key_hash/api_key_prefix, drop token)
+# 2. copy baas_api_key rows into avernet_application (column map, dedupe check)
+# 3. deploy gateway with this change
+```
+
+Old JWT app tokens die at step 3 by design; migrated key holders are unaffected.
+
+## Test Strategy
+
+```python
+# src/gateway/tests/unit/plugins/test_app_key_gen.py (new)
+# The load-bearing fixture pair below was produced by RUNNING the secbaas
+# implementation (src/baas/.../_key_gen.py) — it pins migration compatibility.
+_SECBAAS_KEY = "5X1tk2yC6rxmKhUfWzN2GJ3CYiGGE22F"
+_SECBAAS_HASH = "YIrLEzbZybtDzATwCkQ9QERLnn0Q9z09iO+u02jvGGs=:UKS+A02LiRqVNsn0oOs9EiNO63ggsbZ3UHGnND6A08Q="
+def test_secbaas_produced_hash_verifies(): ...          # the migration guarantee
+def test_generate_is_32_char_base62(): ...
+def test_hash_roundtrip_and_salt_uniqueness(): ...      # hash→verify; two hashes differ
+def test_verify_rejects_wrong_key_and_garbage_hash(): ...
+def test_validate_format(): ...
+```
+
+```python
+# src/gateway/tests/unit/plugins/test_app_registry_db.py (rework)
+def test_correct_key_resolves_active_seeded_app(): ...  # seed hash+prefix, present plaintext
+def test_wrong_key_with_known_prefix_returns_none(): ...
+def test_inactive_and_revoked_rows_return_none(): ...
+def test_short_or_empty_key_returns_none(): ...         # no DB lookup path
+def test_exists_prefix(): ...
+```
+
+```python
+# src/gateway/tests/unit/plugins/test_app_registrar.py (rework — JWT tests dropped)
+def test_register_returns_32_char_key_and_persists_only_hash(): ...
+def test_registered_key_authenticates_via_repository(): ...   # mint→verify closed loop
+def test_register_retries_on_prefix_collision(): ...          # fake repo, 3 attempts then raise
+def test_creator_recorded_as_creator_and_modifier(): ...      # kept from today
+```
+
+- `tests/unit/plugins/test_app_token_strategy.py` — `_FakeAppRegistry` renames
+  its method; behavior tests unchanged.
+- `tests/integration/test_identity_pipeline.py:54-57,111,178` and
+  `test_forward_route.py:419-427` — seed `AppRow(api_key_hash=hash_key(k),
+  api_key_prefix=k[:8], ...)` with a 32-char key; present the plaintext in
+  headers.
+- `tests/integration/test_admin_issuance.py:59-91` — `POST /admin/apps` → 201
+  body has `api_key` (32-char base62, format-validated), no `token`; the
+  returned key immediately authenticates through
+  `AppRepository.find_app_by_api_key`; the DB row holds a hash, not the key.
+
+Gates: `scripts/ci/python_sast_local.sh` (pre-push lint) and the gateway module
+test suite; run the full module gate via `OCB_PRE_PUSH_RUN_CI=1` before push.
