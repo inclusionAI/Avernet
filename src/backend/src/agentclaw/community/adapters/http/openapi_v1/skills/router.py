@@ -226,9 +226,13 @@ async def upload_skill(
     """Upload a skill package.
 
     The body is the ZIP itself, not a form: send the bytes with
-    `Content-Type: application/zip`. The skill is created **inactive** —
-    activate it separately. A package whose name matches an existing skill
-    replaces it and answers 200 instead of 201.
+    `Content-Type: application/zip`.
+
+    A package whose name matches an existing skill **replaces** it and answers
+    200 instead of 201. The two cases differ in what you get back: a new skill
+    is created inactive, so activate it separately, while a replacement keeps
+    the skill's current activation — replacing an active skill leaves it active
+    and running the new package.
     """
     # Grant-checked here for the same reason as the listing above: the owner
     # this writes under is `owner_entity_id or actor_id`, which only the handler

@@ -17,9 +17,9 @@ class Skill(BaseModel):
                 "skill_id": "sk-2f19",
                 "name": "quarterly-report",
                 "description": "Drafts the quarterly report from meeting notes.",
-                # Not invented values: 'general' and an empty list are what an
-                # upload through this API actually records, so the example shows
-                # them rather than a richer pair no response carries.
+                # What a first upload through this API records — not a richer
+                # pair invented for the example. Other values are possible on a
+                # skill that came from elsewhere; these are the common case.
                 "category": "general",
                 "tags": [],
                 "active": True,
@@ -41,25 +41,34 @@ class Skill(BaseModel):
         default=None, description="What the skill does; null when the package "
         "declares none."
     )
-    # Both come off the stored record, and upload writes fixed values into it:
-    # `LocalSkillUploadService` unpacks only the name and description from the
-    # package and hard-codes category "general" and empty tags. So neither is
-    # package-declared, whatever their names suggest.
+    # Both come off the stored record, and nothing on this surface derives them
+    # from the package: `LocalSkillUploadService` unpacks only the name and
+    # description, hard-codes category "general" and empty tags on a *create*,
+    # and on a replace passes neither — `replace_bot_local_skill` takes only the
+    # locator and description, so whatever the row held is kept. A skill created
+    # through the internal skill-create surface can hold arbitrary values, and
+    # this API reads those rows too.
     category: str | None = Field(
         default=None,
-        description="Category recorded for the skill. An upload through this "
-        "API always records 'general' — a category declared inside the package "
-        "is not read — so that is what you will see here.",
+        description="Category recorded for the skill. Not read from the "
+        "package: a first upload through this API records 'general', and a "
+        "re-upload keeps whatever the skill already had. Other values reach "
+        "here from skills created outside this API.",
     )
     tags: list[str] = Field(
         default_factory=list,
-        description="Tags recorded for the skill. An upload through this API "
-        "records none, so this is empty; tags declared inside the package are "
-        "not read.",
+        description="Tags recorded for the skill. Not read from the package: a "
+        "first upload through this API records none, and a re-upload keeps "
+        "whatever the skill already had. Other values reach here from skills "
+        "created outside this API.",
     )
+    # Replacement preserves the flag rather than resetting it — the upload
+    # service reconciles the runtime in the skill's existing state.
     active: bool = Field(
-        description="True when the skill is activated for the bot. An uploaded "
-        "skill starts inactive."
+        description="True when the skill is activated for the bot. A newly "
+        "uploaded skill starts inactive; re-uploading over an existing skill "
+        "keeps its current state, so replacing an active skill leaves it "
+        "active."
     )
     created_at: datetime | str | None = Field(
         default=None, description="When the skill was first uploaded (ISO 8601); "

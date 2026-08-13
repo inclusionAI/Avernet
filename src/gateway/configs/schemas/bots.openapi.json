@@ -4576,7 +4576,7 @@
         },
         "properties": {
           "active": {
-            "description": "True when the skill is activated for the bot. An uploaded skill starts inactive.",
+            "description": "True when the skill is activated for the bot. A newly uploaded skill starts inactive; re-uploading over an existing skill keeps its current state, so replacing an active skill leaves it active.",
             "title": "Active",
             "type": "boolean"
           },
@@ -4589,7 +4589,7 @@
                 "type": "null"
               }
             ],
-            "description": "Category recorded for the skill. An upload through this API always records 'general' — a category declared inside the package is not read — so that is what you will see here.",
+            "description": "Category recorded for the skill. Not read from the package: a first upload through this API records 'general', and a re-upload keeps whatever the skill already had. Other values reach here from skills created outside this API.",
             "title": "Category"
           },
           "created_at": {
@@ -4631,7 +4631,7 @@
             "type": "string"
           },
           "tags": {
-            "description": "Tags recorded for the skill. An upload through this API records none, so this is empty; tags declared inside the package are not read.",
+            "description": "Tags recorded for the skill. Not read from the package: a first upload through this API records none, and a re-upload keeps whatever the skill already had. Other values reach here from skills created outside this API.",
             "items": {
               "type": "string"
             },
@@ -13078,7 +13078,7 @@
     },
     "/openapi/v1/bots/skills/upload": {
       "post": {
-        "description": "Upload a skill package.\n\nThe body is the ZIP itself, not a form: send the bytes with\n`Content-Type: application/zip`. The skill is created **inactive** —\nactivate it separately. A package whose name matches an existing skill\nreplaces it and answers 200 instead of 201.",
+        "description": "Upload a skill package.\n\nThe body is the ZIP itself, not a form: send the bytes with\n`Content-Type: application/zip`.\n\nA package whose name matches an existing skill **replaces** it and answers\n200 instead of 201. The two cases differ in what you get back: a new skill\nis created inactive, so activate it separately, while a replacement keeps\nthe skill's current activation — replacing an active skill leaves it active\nand running the new package.",
         "operationId": "upload_skill_openapi_v1_bots_skills_upload_post",
         "parameters": [
           {
