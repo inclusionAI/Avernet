@@ -1311,6 +1311,9 @@ class _LockingCache:
         self.held[key] = "token"
         return "token"
 
+    def acquire_lock_strict(self, key, ttl=30):
+        return self.acquire_lock(key, ttl)
+
     def release_lock(self, key, token):
         if self.held.get(key) != token:
             return False
@@ -1340,7 +1343,15 @@ class _YieldingFilesystem(_Filesystem):
 async def test_concurrent_same_name_uploads_serialize_then_converge_on_one_skill():
     repo = _ConcurrentRepo()
     filesystem = _YieldingFilesystem()
-    guard = SkillsPoolEditGuard(cache=_LockingCache(), layout_repository=_PoolLayouts())
+    class _Bots:
+        def get_by_id_and_entity(self, _bot_id, _entity_id):
+            return {"env": "pre", "active_engine": "openclaw"}
+
+    guard = SkillsPoolEditGuard(
+        cache=_LockingCache(),
+        layout_repository=_PoolLayouts(),
+        bot_repository=_Bots(),
+    )
     package = _zip({"SKILL.md": b"name: upload-skill\ndescription: concurrent\n"})
     first, second = await asyncio.gather(
         _replacement_service(

@@ -53,5 +53,17 @@ class LocalSkillEditPausedError(Exception):
     """A Bot Skill layout operation currently owns the edit lock."""
 
 
+class LocalSkillEditBusyError(LocalSkillEditPausedError):
+    """Another Local Skill mutation is still in progress."""
+
+
+class LocalSkillLayoutRollbackError(LocalSkillEditPausedError):
+    """Pool-to-Legacy layout rollback currently owns the filesystem."""
+
+
+class LocalSkillEditLockUnavailableError(LocalSkillEditPausedError):
+    """The distributed lock backend is unavailable, so writes fail closed."""
+
+
 class ActiveSkillSetReferenceError(RuntimeError):
     """A Skill became referenced by an active custom SkillSet."""

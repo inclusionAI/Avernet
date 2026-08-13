@@ -6,9 +6,12 @@ from dataclasses import replace
 import pytest
 
 from agentclaw.community.core.skills_pool.edit_guard import (
+    SkillsPoolEditBusyError,
     SkillsPoolEditGuard,
-    SkillsPoolEditPausedError,
+    SkillsPoolEditLockUnavailableError,
+    SkillsPoolEditRollbackError,
 )
+from agentclaw.community.plugin_api.cache import CacheLockInfrastructureError
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     BotSkillLayoutState,
@@ -29,6 +32,9 @@ class _Cache:
             return None
         self.held[key] = "token"
         return "token"
+
+    def acquire_lock_strict(self, key: str, ttl: int = 30) -> str | None:
+        return self.acquire_lock(key, ttl)
 
     def release_lock(self, key: str, token: str) -> bool:
         if self.held.get(key) != token:
@@ -53,16 +59,32 @@ class _Layouts:
         return self.state
 
 
+class _Bots:
+    def __init__(self, *, engine: str = "openclaw") -> None:
+        self.engine = engine
+
+    def get_by_id_and_entity(self, bot_id: str, entity_id: str):
+        assert bot_id == SCOPE.bot_id
+        assert entity_id == SCOPE.entity_id
+        return {"env": SCOPE.env, "active_engine": self.engine}
+
+
+class _UnavailableCache(_Cache):
+    def acquire_lock_strict(self, key: str, ttl: int = 30) -> str | None:
+        raise CacheLockInfrastructureError("injected cache outage")
+
+
 def test_rollback_lease_excludes_new_local_edits() -> None:
     layouts = _Layouts()
     guard = SkillsPoolEditGuard(
         cache=_Cache(),
         layout_repository=layouts,
+        bot_repository=_Bots(),
     )
     rollback_lease = guard.acquire_for_rollback(scope=SCOPE)
     assert rollback_lease is not None
 
-    with pytest.raises(SkillsPoolEditPausedError, match="read-only"):
+    with pytest.raises(SkillsPoolEditBusyError, match="Another skill update"):
         guard.acquire_for_edit(scope=SCOPE)
 
     assert guard.release(rollback_lease)
@@ -72,6 +94,7 @@ def test_lock_identity_includes_entity_for_reused_bot_ids() -> None:
     guard = SkillsPoolEditGuard(
         cache=_Cache(),
         layout_repository=_Layouts(),
+        bot_repository=_Bots(),
     )
     other_scope = replace(SCOPE, entity_id="entity-2")
 
@@ -88,6 +111,7 @@ async def test_waiting_edit_acquires_lock_after_ordinary_edit_releases() -> None
     guard = SkillsPoolEditGuard(
         cache=_Cache(),
         layout_repository=_Layouts(),
+        bot_repository=_Bots(),
     )
     first = guard.acquire_for_edit(scope=SCOPE)
 
@@ -112,7 +136,39 @@ def test_rollback_phase_rejects_edit_even_after_lock_becomes_available() -> None
     guard = SkillsPoolEditGuard(
         cache=_Cache(),
         layout_repository=layouts,
+        bot_repository=_Bots(),
     )
 
-    with pytest.raises(SkillsPoolEditPausedError, match="rollback"):
+    with pytest.raises(SkillsPoolEditRollbackError, match="rollback"):
+        guard.acquire_for_edit(scope=SCOPE)
+
+
+def test_teclaw_bypasses_an_abandoned_pool_edit_lock() -> None:
+    cache = _Cache()
+    guard = SkillsPoolEditGuard(
+        cache=cache,
+        layout_repository=_Layouts(),
+        bot_repository=_Bots(engine="teclaw"),
+    )
+    # Simulates a previous worker acquiring the legacy generic lock and then
+    # exiting before its finally block.  Teclaw never owns Pool rollback, so a
+    # current Teclaw write must not wait for that lock's TTL.
+    abandoned = cache.acquire_lock(guard._key(scope=SCOPE))
+    assert abandoned is not None
+
+    lease = guard.acquire_for_edit(scope=SCOPE)
+
+    assert lease.token is None
+    assert guard.release(lease) is True
+    assert cache.held
+
+
+def test_cache_outage_is_not_reported_as_lock_contention() -> None:
+    guard = SkillsPoolEditGuard(
+        cache=_UnavailableCache(),
+        layout_repository=_Layouts(),
+        bot_repository=_Bots(),
+    )
+
+    with pytest.raises(SkillsPoolEditLockUnavailableError, match="lock service"):
         guard.acquire_for_edit(scope=SCOPE)
