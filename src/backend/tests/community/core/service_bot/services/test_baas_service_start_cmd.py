@@ -4,6 +4,8 @@ Covers the install_engine step that was added so the BaaS path mirrors the
 arca path (script split out of start_service.sh, marker file coordinates with
 setup_supervisor_sync_service.sh).
 """
+import logging
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -12,9 +14,19 @@ from agentclaw.community.core.service_bot.services.baas_service import BaasServi
 from agentclaw.community.plugins.local.http_client import LocalHttpClient
 
 
-def _make_service() -> BaasService:
-    """Build a ``BaasService`` with mocks — all deps are required now."""
+def _make_service(
+    *,
+    secret_resolver: object | None = None,
+    engine_repo_url_secret: str = "",
+) -> BaasService:
+    """Build a ``BaasService`` with mocks — all deps are required now.
+
+    ``engine_repo_url_secret`` defaults to empty, the state of every deployment
+    that has registered no repo-URL secret, so the existing cases keep asserting
+    the command they always asserted.
+    """
     return BaasService(
+        engine_repo_url_secret=engine_repo_url_secret,
         startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base="http://test",
         tenant="test",
@@ -28,7 +40,7 @@ def _make_service() -> BaasService:
         sandbox_registry=MagicMock(),
         http_client=LocalHttpClient(),
         general_http_client=LocalHttpClient(base_url=""),
-        secret_resolver=MagicMock(),
+        secret_resolver=secret_resolver if secret_resolver is not None else MagicMock(),
         common_whitelist_service=MagicMock(),
         outbound_rule_provider=MagicMock(),
     )
@@ -506,6 +518,118 @@ class TestStartupScriptPrivilege:
         assert "rm -rf" not in inner  # the body survives only as base64
 
 
+class TestGetInstallEngineRepoArg:
+    """The repo URL install_engine.sh clones from is a resolved secret."""
+
+    def _resolver(self, value):
+        return MagicMock(**{"get_secret.return_value": SimpleNamespace(secret_value=value)})
+
+    def test_no_secret_name_configured_passes_no_argument(self):
+        assert _make_service().get_install_engine_repo_arg() == ""
+
+    def test_resolved_url_is_a_single_quoted_argument(self):
+        svc = _make_service(
+            secret_resolver=self._resolver("https://tok@example.invalid/engine.git"),
+            engine_repo_url_secret="engine_repo_url",
+        )
+        assert svc.get_install_engine_repo_arg() == (
+            " 'https://tok@example.invalid/engine.git'"
+        )
+
+    def test_secret_is_looked_up_under_the_configured_name(self):
+        resolver = self._resolver("https://example.invalid/engine.git")
+        _make_service(
+            secret_resolver=resolver, engine_repo_url_secret="a_registry_key"
+        ).get_install_engine_repo_arg()
+        assert resolver.get_secret.call_args[0][0] == "a_registry_key"
+
+    def test_absent_secret_falls_back_to_the_script_default(self):
+        svc = _make_service(
+            secret_resolver=MagicMock(**{"get_secret.return_value": None}),
+            engine_repo_url_secret="engine_repo_url",
+        )
+        assert svc.get_install_engine_repo_arg() == ""
+
+    def test_empty_secret_value_falls_back_to_the_script_default(self):
+        svc = _make_service(
+            secret_resolver=self._resolver("   "),
+            engine_repo_url_secret="engine_repo_url",
+        )
+        assert svc.get_install_engine_repo_arg() == ""
+
+    def test_resolver_error_does_not_break_the_boot(self):
+        """A broken secret store must not stop bots from starting."""
+        svc = _make_service(
+            secret_resolver=MagicMock(**{"get_secret.side_effect": RuntimeError("mist down")}),
+            engine_repo_url_secret="engine_repo_url",
+        )
+        assert svc.get_install_engine_repo_arg() == ""
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "https://example.invalid/e.git'; rm -rf /; '",
+            "https://example.invalid/e.git && rm -rf /",
+            "https://example.invalid/e.git\nrm -rf /",
+        ],
+    )
+    def test_url_that_could_break_out_of_the_quoting_is_refused(self, value):
+        svc = _make_service(
+            secret_resolver=self._resolver(value),
+            engine_repo_url_secret="engine_repo_url",
+        )
+        assert svc.get_install_engine_repo_arg() == ""
+
+
+class TestInstallEngineCmdCarriesTheRepoArg:
+    def _svc(self, url: str = "https://tok@example.invalid/engine.git") -> BaasService:
+        return _make_service(
+            secret_resolver=MagicMock(
+                **{"get_secret.return_value": SimpleNamespace(secret_value=url)}
+            ),
+            engine_repo_url_secret="engine_repo_url",
+        )
+
+    def test_repo_url_is_the_first_positional_argument(self):
+        cmd = self._svc()._get_install_engine_cmd()
+        assert (
+            "bash /home/admin/bin/install_engine.sh "
+            "'https://tok@example.invalid/engine.git' "
+            ">> /home/admin/logs/install_engine.log" in cmd
+        )
+
+    def test_existence_guard_still_tests_the_bare_script_path(self):
+        cmd = self._svc()._get_install_engine_cmd()
+        assert "if [ -f /home/admin/bin/install_engine.sh ]" in cmd
+
+    def test_url_reaches_the_boot_chain(self):
+        cmd = self._svc()._get_start_cmd(
+            bot_id="bot-1", owner_id="owner-1", entity_id="entity-1",
+            entity_type="user", migration_pat="/tmp/src", bot_type="agent",
+            engine="openclaw", stage="online", version="1",
+        )
+        assert "'https://tok@example.invalid/engine.git'" in cmd
+
+    def test_url_is_kept_out_of_the_command_log(self, caplog):
+        with caplog.at_level(logging.INFO):
+            self._svc()._get_install_engine_cmd()
+        assert "tok@example.invalid" not in caplog.text
+
+    def test_url_is_kept_out_of_the_exec_command_log(self, caplog):
+        svc = self._svc()
+        svc._http = MagicMock(
+            **{"post.return_value": MagicMock(**{"json.return_value": {"code": 0, "data": {}}})}
+        )
+        with caplog.at_level(logging.INFO):
+            svc.exec_command_on_bot(
+                bot_uuid="bot-uuid",
+                cmd=f"nohup bash /home/admin/bin/install_engine.sh"
+                    f"{svc.get_install_engine_repo_arg()} >> /dev/null 2>&1 &",
+            )
+        assert "tok@example.invalid" not in caplog.text
+        assert "<repo url elided>" in caplog.text
+
+
 class TestPayloadLogRedaction:
     """Create payloads are logged at INFO and carry the user's script."""
 
@@ -563,6 +687,36 @@ class TestPayloadLogRedaction:
 
         payload = self._payload("bootstrap && start_service.sh")
         assert _redact_payload_for_log(payload) == payload
+
+    def test_the_engine_repo_url_is_elided(self):
+        """The platform put a resolved secret in the hook; it must not log."""
+        from agentclaw.community.core.service_bot.services.baas_service import (
+            _redact_payload_for_log,
+        )
+
+        svc = _make_service(
+            secret_resolver=MagicMock(
+                **{
+                    "get_secret.return_value": SimpleNamespace(
+                        secret_value="https://tok@example.invalid/engine.git"
+                    )
+                }
+            ),
+            engine_repo_url_secret="engine_repo_url",
+        )
+        hook = svc._get_start_cmd(
+            bot_id="bot-1", owner_id="owner-1", entity_id="entity-1",
+            entity_type="user", migration_pat="/tmp/src", bot_type="agent",
+            engine="openclaw", stage="online", version="1",
+        )
+        redacted = _redact_payload_for_log(self._payload(hook))
+        logged = redacted["config"]["deploy_config"]["after_create_cmd_hook"]
+
+        assert "tok@example.invalid" not in str(redacted)
+        assert "install_engine.sh <repo url elided>" in logged
+        # The rest of the boot chain still reads like a boot chain.
+        assert "bootstrap_minimal.sh" in logged
+        assert "start_service.sh" in logged
 
     def test_payload_without_a_deploy_config_passes_through(self):
         from agentclaw.community.core.service_bot.services.baas_service import (

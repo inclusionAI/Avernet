@@ -86,6 +86,14 @@ class BaasServiceProtocol(Protocol):
         """Open a bot's working folder on the device side."""
         ...
 
+    def get_install_engine_repo_arg(self) -> str:
+        """Repo-URL argument for ``install_engine.sh`` (``" '<url>'"`` or ``""``).
+
+        The URL is a resolved secret; the empty string means "pass no argument",
+        which leaves the script on its own default repo.
+        """
+        ...
+
     def exec_command_on_bot(
         self,
         *,

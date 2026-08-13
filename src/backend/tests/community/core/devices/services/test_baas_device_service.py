@@ -1266,14 +1266,50 @@ class TestStartService:
 class TestStartServiceInitSteps:
     """Tests for the 6-step container init that runs after publish SUCCESS."""
 
-    def _make_success_svc(self):
+    def _make_success_svc(self, install_engine_repo_arg: str = ""):
         baas = MagicMock()
         baas._baas_api_base = "http://baas.local"
         baas.get_publish_progress.return_value = {"status": "SUCCESS"}
         baas.exec_command_on_bot.return_value = {"exit_code": 0, "stdout": "", "stderr": ""}
+        # Default empty: the deployment has registered no engine repo-URL
+        # secret, so install_engine.sh is invoked bare as it always was.
+        baas.get_install_engine_repo_arg.return_value = install_engine_repo_arg
         svc = _make_service(baas_service=baas)
         svc.report_device_alive = MagicMock()
         return svc, baas
+
+    def _init_cmds(self, svc, baas, engine: str = "aicoding") -> list[str]:
+        with patch(
+            "agentclaw.community.core.devices.services.baas_device_service.time.sleep",
+            return_value=None,
+        ):
+            ok, _ = svc._start_service(device=_device_with_publish(), engine=engine)
+        assert ok is True
+        return [c.kwargs["cmd"] for c in baas.exec_command_on_bot.call_args_list]
+
+    def test_install_engine_takes_the_repo_url_as_its_first_argument(self):
+        """The URL is a secret BaasService resolves; the init step just passes it."""
+        svc, baas = self._make_success_svc(
+            install_engine_repo_arg=" 'https://tok@example.invalid/engine.git'"
+        )
+
+        cmds = self._init_cmds(svc, baas)
+
+        assert (
+            "bash /home/admin/bin/install_engine.sh "
+            "'https://tok@example.invalid/engine.git' "
+            ">> /home/admin/logs/install_engine.log" in cmds[1]
+        )
+
+    def test_install_engine_runs_bare_when_no_repo_url_is_configured(self):
+        svc, baas = self._make_success_svc()
+
+        cmds = self._init_cmds(svc, baas)
+
+        assert (
+            "bash /home/admin/bin/install_engine.sh "
+            ">> /home/admin/logs/install_engine.log" in cmds[1]
+        )
 
     def test_init_commands_called_in_order(self):
         svc, baas = self._make_success_svc()

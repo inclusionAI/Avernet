@@ -140,8 +140,9 @@ user_config:
     env_prefix: "AGENTCLAW_SECRET_"
 
   # Secret-registry key NAMES the app resolves via SecretResolver. Left unset:
-  # the dormant-token feature uses a local fallback and git-sync degrades to its
-  # on-disk source when no repo-URL secret name is configured.
+  # the dormant-token feature uses a local fallback, git-sync degrades to its
+  # on-disk source when no repo-URL secret name is configured, and the engine
+  # install falls back to the repo baked into install_engine.sh's properties.
   # TODO(community): if you provision these secrets, register their names here.
   # A registered name is the BARE key, with no env prefix: CommunitySecretResolver
   # uppercases it and prepends `secret.env_prefix` itself, so a name already
@@ -151,10 +152,17 @@ user_config:
   #   secret_names:
   #     dormant_internal_token: "dormant_internal_token"   # gates /api/internal/dormant/*
   #     aiworkbench_repo_url: "aiworkbench_repo_url"       # skills source repo URL
+  #     engine_repo_url: "engine_repo_url"                 # engine source repo URL
   #
   # ...each read from "{env_prefix}{NAME}_VALUE", so with the prefix above:
   #     AGENTCLAW_SECRET_DORMANT_INTERNAL_TOKEN_VALUE
   #     AGENTCLAW_SECRET_AIWORKBENCH_REPO_URL_VALUE
+  #     AGENTCLAW_SECRET_ENGINE_REPO_URL_VALUE
+  #
+  # engine_repo_url is the repository install_engine.sh clones inside a sandbox.
+  # It is a secret because the URL carries an access token. Unset (the default),
+  # backend passes no repo argument and the script installs from the repo baked
+  # into its own properties file.
   #
   # The gateway principal signing key needs NO entry here — its name already
   # defaults in SecretNamesConfig, so a community deployment only exports the

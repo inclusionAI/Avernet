@@ -154,19 +154,38 @@ def _elide_encoded_body(match: "re.Match[str]") -> str:
     return f"echo <startup script elided, {decoded_len} bytes> | base64 -d"
 
 
+#: The repo-URL argument handed to ``install_engine.sh``. It is a resolved
+#: secret (the URL carries an access token), and the command strings it sits in
+#: are logged at INFO on every create, release, restart and container init — so
+#: every log site that can carry it runs the string through
+#: :func:`_redact_install_engine_repo_arg` first. The pattern is exact because
+#: :meth:`BaasService.get_install_engine_repo_arg` always emits the argument as
+#: one single-quoted token and refuses a URL containing a quote or whitespace.
+_INSTALL_ENGINE_REPO_ARG_RE = re.compile(r"(install_engine\.sh) '[^']*'")
+
+
+def _redact_install_engine_repo_arg(cmd: str) -> str:
+    """Elide the repo-URL argument in a command string bound for the log."""
+    return _INSTALL_ENGINE_REPO_ARG_RE.sub(r"\1 <repo url elided>", cmd)
+
+
 def _redact_payload_for_log(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Shallow copy of a create payload with the *script body* elided.
+    """Shallow copy of a create payload with the *secrets* in the hook elided.
 
     ``after_create_cmd_hook`` is mostly the platform's own boot chain, which is
     exactly what someone reads these logs to debug — so everything the platform
     authored stays verbatim, including the ``if``/``fi``/``exit`` scaffolding
-    around the user stage. Only the caller's encoded body is replaced: the
-    published contract's "no secrets in a script body" is advice, not an
-    enforcement mechanism, and these payloads are logged at INFO on every
-    create, release and restart.
+    around the user stage. Two spans are replaced:
 
-    A hook with no encoded body is returned unchanged, so this is a no-op for
-    every bot without a script.
+    - the caller's encoded startup-script body: the published contract's "no
+      secrets in a script body" is advice, not an enforcement mechanism, and
+      these payloads are logged at INFO on every create, release and restart;
+    - the ``install_engine.sh`` repo-URL argument, which *is* a resolved secret
+      the platform itself put there (see
+      :meth:`BaasService.get_install_engine_repo_arg`).
+
+    A hook carrying neither is returned unchanged, so this is a no-op for every
+    bot without a script on a deployment with no repo-URL secret configured.
 
     **This covers this log only.** The same hook travels on to the device
     service, which logs ``rendered_hook[:1024]`` at INFO
@@ -187,8 +206,9 @@ def _redact_payload_for_log(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(hook, str):
         return payload
 
-    elided, count = _ENCODED_BODY_RE.subn(_elide_encoded_body, hook)
-    if not count:
+    elided, _ = _ENCODED_BODY_RE.subn(_elide_encoded_body, hook)
+    elided = _redact_install_engine_repo_arg(elided)
+    if elided == hook:
         return payload
 
     redacted = dict(payload)
@@ -466,6 +486,7 @@ class BaasService:  # pragma: no cover
         startup_script_reader: "StartupScriptReaderProtocol",
         personal_bot_template_uuid: Optional[str] = None,
         theta_master_key_secret: str = "",
+        engine_repo_url_secret: str = "",
     ):
         """初始化 BaasService。
 
@@ -496,6 +517,12 @@ class BaasService:  # pragma: no cover
         layotto/Mist); singlebox / pytest → LocalSecretResolver (返 None
         → token 退化为空字符串,BaaS LocalPaasService 无视 outbound rule)。
         None (仅旧测试构造时省略) → 走 layotto 老路径,仅 prod 可用。
+
+        ``engine_repo_url_secret``: the secret-registry *name* holding the
+        engine source repo URL passed to ``install_engine.sh`` (see
+        :meth:`get_install_engine_repo_arg`). Empty — the neutral default and
+        what every deployment that has not registered the secret gets — means
+        the argument is omitted and the script uses its own baked-in default.
         """
         self._baas_api_base = baas_api_base
         self._http = http_client
@@ -514,6 +541,7 @@ class BaasService:  # pragma: no cover
         self._common_whitelist_service = common_whitelist_service
         self._outbound_rule_provider = outbound_rule_provider
         self._theta_master_key_secret = theta_master_key_secret
+        self._engine_repo_url_secret = engine_repo_url_secret
         # Per-bot startup script (issue #926). Resolved here rather than passed
         # down by each caller: _build_create_bot_payload is reached from create,
         # from service-bot release, and from upgrade_bot (restart), and a script
@@ -1618,9 +1646,13 @@ class BaasService:  # pragma: no cover
         Raises:
             BaasServiceError: on HTTP or API-level error.
         """
+        # The install_engine command carries a resolved secret as its first
+        # argument, so the logged copy goes through the redactor. Truncation
+        # alone is no defense: the argument sits right after the script path,
+        # well inside the first 120 characters.
         logger.info(
             "[BaasService.exec_command_on_bot] bot_uuid=%s cmd=%.120s timeout=%s",
-            bot_uuid, cmd, timeout_seconds,
+            bot_uuid, _redact_install_engine_repo_arg(cmd), timeout_seconds,
         )
 
         payload: dict[str, Any] = {
@@ -2517,6 +2549,74 @@ class BaasService:  # pragma: no cover
         logger.info(f"[_get_setup_sync_service_cmd] Executing cmd: {setup_cmd}")
         return setup_cmd
 
+    def get_install_engine_repo_arg(self) -> str:
+        """The repo-URL argument for ``install_engine.sh``, ready to append.
+
+        Returns either ``" '<url>'"`` — a leading space plus one single-quoted
+        token, so a caller appends it straight after the script path — or ``""``
+        when there is no URL to pass. Omitting it is a supported state, not a
+        failure: the script then clones the repo named in its own properties
+        file, which is what every deployment did before the argument existed.
+
+        The URL is a secret (it carries an access token), so it is resolved
+        through ``SecretResolver`` rather than read from config, and never
+        logged. Every degradation — no secret name registered, no such secret,
+        a resolver error — yields ``""`` and keeps the boot going on the
+        script's own default; a broken secret store must not stop bots from
+        starting.
+
+        A URL containing whitespace or a single quote is refused rather than
+        quoted. No git remote URL contains either, so such a value is a
+        misconfiguration, and refusing it keeps the emitted token exactly one
+        unambiguous ``'…'`` span — which is what lets
+        :func:`_redact_install_engine_repo_arg` elide it from the logs whole.
+        """
+        url = self._resolve_engine_repo_url()
+        if not url:
+            return ""
+        return f" '{url}'"
+
+    def _resolve_engine_repo_url(self) -> str:
+        """Resolve the engine repo URL secret, or ``""`` when unavailable."""
+        if not self._engine_repo_url_secret:
+            return ""
+
+        try:
+            secret = self._secret_resolver.get_secret(self._engine_repo_url_secret)
+        except Exception as e:
+            logger.warning(
+                "[_resolve_engine_repo_url] secret lookup failed, falling back to "
+                "the install script default: secret_name=%s, error_type=%s",
+                self._engine_repo_url_secret,
+                type(e).__name__,
+            )
+            return ""
+
+        value = getattr(secret, "secret_value", "") if secret else ""
+        url = value.strip() if isinstance(value, str) else ""
+        if not url:
+            logger.warning(
+                "[_resolve_engine_repo_url] secret empty or absent, falling back to "
+                "the install script default: secret_name=%s",
+                self._engine_repo_url_secret,
+            )
+            return ""
+
+        if "'" in url or any(c.isspace() for c in url):
+            logger.error(
+                "[_resolve_engine_repo_url] secret value is not a usable repo URL "
+                "(contains whitespace or a quote); falling back to the install "
+                "script default: secret_name=%s",
+                self._engine_repo_url_secret,
+            )
+            return ""
+
+        logger.info(
+            "[_resolve_engine_repo_url] resolved: secret_name=%s",
+            self._engine_repo_url_secret,
+        )
+        return url
+
     def _get_install_engine_cmd(self):
         """执行 install_engine.sh 脚本。
 
@@ -2525,15 +2625,22 @@ class BaasService:  # pragma: no cover
         会等待该 marker 才继续。BaaS 路径通过 && 串联各步，install_engine
         同步执行即可，无需 nohup；存在性保护用于 backend 先发版而 daas-script
         旧镜像尚无该脚本的窗口。
+
+        脚本的第一个位置参数是引擎仓库地址（secret，见
+        :meth:`get_install_engine_repo_arg`）；未配置时不传，脚本回落到自带默认值。
         """
         script_path = "/home/admin/bin/install_engine.sh"
         log_path = "/home/admin/logs/install_engine.log"
+        repo_arg = self.get_install_engine_repo_arg()
         install_cmd = (
             f"if [ -f {script_path} ]; then "
-            f"bash {script_path} >> {log_path} 2>&1; "
+            f"bash {script_path}{repo_arg} >> {log_path} 2>&1; "
             f"else echo '[install_engine] {script_path} not found, skip'; fi"
         )
-        logger.info(f"[_get_install_engine_cmd] Executing cmd: {install_cmd}")
+        logger.info(
+            "[_get_install_engine_cmd] Executing cmd: %s",
+            _redact_install_engine_repo_arg(install_cmd),
+        )
         return install_cmd
 
     def _get_start_sandbox_service_cmd(

@@ -219,6 +219,7 @@ class ServiceBotModule(Module):
             common_whitelist_service=common_whitelist_service,
             outbound_rule_provider=outbound_rule_provider,
             theta_master_key_secret=secret_names.aicoding_theta_master_key,
+            engine_repo_url_secret=secret_names.engine_repo_url,
             startup_script_reader=startup_script_service,
         )
         logger.info(

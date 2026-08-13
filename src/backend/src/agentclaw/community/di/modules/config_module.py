@@ -195,6 +195,9 @@ class ConfigModule(Module):
                 "aicoding_theta_master_key",
                 defaults.aicoding_theta_master_key,
             ),
+            engine_repo_url=block.get(
+                "engine_repo_url", defaults.engine_repo_url
+            ),
         )
 
     @singleton

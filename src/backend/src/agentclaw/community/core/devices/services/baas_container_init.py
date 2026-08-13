@@ -72,9 +72,17 @@ class BaasContainerInitializer:
         logger.info("[_run_baas_bootstrap] done: bot_uuid=%s", bot_uuid)
 
     def _run_baas_install_engine(self, bot_uuid: str) -> None:
+        # The engine repo URL is the script's first positional argument and is
+        # a resolved secret; ``BaasService`` owns both the lookup and the
+        # quoting, and yields "" when no such secret is configured — the script
+        # then falls back to the repo URL baked into its own properties file.
+        repo_arg = self._baas_service.get_install_engine_repo_arg()
         self._baas_service.exec_command_on_bot(
             bot_uuid=bot_uuid,
-            cmd="nohup bash /home/admin/bin/install_engine.sh >> /home/admin/logs/install_engine.log 2>&1 &",
+            cmd=(
+                f"nohup bash /home/admin/bin/install_engine.sh{repo_arg} "
+                ">> /home/admin/logs/install_engine.log 2>&1 &"
+            ),
             timeout_seconds=30,
         )
         logger.info("[_run_baas_install_engine] dispatched: bot_uuid=%s", bot_uuid)

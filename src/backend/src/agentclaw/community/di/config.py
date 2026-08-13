@@ -174,12 +174,20 @@ class SecretNamesConfig:
     and the name were two config entries for one secret. Defaulting it means a
     deployment configures only the value, wherever its resolver reads that
     from; corp env overlays still override the name with the real Mist key.
+
+    ``engine_repo_url`` names the secret holding the engine source repository
+    URL that ``install_engine.sh`` clones from inside the sandbox. It is a
+    secret rather than plain config because the URL carries an access token.
+    Empty (the neutral default) means the argument is not passed at all and the
+    install script falls back to the repo URL baked into its own properties
+    file — the behavior every deployment had before the argument existed.
     """
 
     dormant_internal_token: str = ""
     aiworkbench_repo_url: str = ""
     gateway_principal_signing_key: str = "gateway_principal_signing_key"
     aicoding_theta_master_key: str = ""
+    engine_repo_url: str = ""
 
 
 def _default_cors_origins() -> list[str]:
