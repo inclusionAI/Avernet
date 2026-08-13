@@ -7,18 +7,25 @@ from agentclaw.community.core.task.task_runner.integration.task_executor_result_
 
 
 class _Bot:
-    def __init__(self, runs): self._runs = runs; self.calls = 0
+    def __init__(self, runs):
+        self._runs = runs
+        self.calls = 0
+
     async def get_run(self, run_id):
         self.calls += 1
         return self._runs[run_id]
 
 
 class _Sink:
-    def __init__(self): self.reports = []
-    async def report_result(self, data): self.reports.append(data)
+    def __init__(self):
+        self.reports = []
+
+    async def report_result(self, data):
+        self.reports.append(data)
 
 
-def _run(coro): return asyncio.new_event_loop().run_until_complete(coro)
+def _run(coro):
+    return asyncio.new_event_loop().run_until_complete(coro)
 
 
 def _poller(bot, sink, *, clock=None, sla=1000.0):
@@ -30,7 +37,8 @@ def _poller(bot, sink, *, clock=None, sla=1000.0):
 def test_single_bot_terminal_reports_and_unregisters():
     bot = _Bot({"r1": {"status": "COMPLETED", "result": {"content": "done"}}})
     sink = _Sink()
-    p = _poller(bot, sink); p.set_on_result(sink)
+    p = _poller(bot, sink)
+    p.set_on_result(sink)
     p.register(SingleBotHandle(loop_task_id="t1::c1", run_id="r1", bot_id="b1", registered_at=time.monotonic()))
     _run(p._poll_once())
     assert sink.reports[0].result["success"] is True
@@ -40,7 +48,8 @@ def test_single_bot_terminal_reports_and_unregisters():
 def test_single_bot_not_terminal_no_report():
     bot = _Bot({"r1": {"status": "RUNNING"}})
     sink = _Sink()
-    p = _poller(bot, sink); p.set_on_result(sink)
+    p = _poller(bot, sink)
+    p.set_on_result(sink)
     p.register(SingleBotHandle(loop_task_id="t1::c1", run_id="r1", bot_id="b1", registered_at=time.monotonic()))
     _run(p._poll_once())
     assert sink.reports == []
@@ -50,7 +59,8 @@ def test_sla_timeout_reports_fail_and_unregisters():
     bot = _Bot({"r1": {"status": "RUNNING"}})
     sink = _Sink()
     t = [0.0]
-    p = _poller(bot, sink, clock=lambda: t[0], sla=1.0); p.set_on_result(sink)
+    p = _poller(bot, sink, clock=lambda: t[0], sla=1.0)
+    p.set_on_result(sink)
     p.register(SingleBotHandle(loop_task_id="t1::c1", run_id="r1", bot_id="b1", registered_at=0.0))
     t[0] = 100.0  # 远超 sla
     _run(p._poll_once())
@@ -61,9 +71,12 @@ def test_sla_timeout_reports_fail_and_unregisters():
 
 def test_consecutive_failures_report_poll_exhausted():
     class _ErrBot:
-        async def get_run(self, run_id): raise RuntimeError("boom")
+        async def get_run(self, run_id):
+            raise RuntimeError("boom")
+
     sink = _Sink()
-    p = _poller(_ErrBot(), sink); p.set_on_result(sink)
+    p = _poller(_ErrBot(), sink)
+    p.set_on_result(sink)
     p.register(SingleBotHandle(loop_task_id="t1::c1", run_id="r1", bot_id="b1", registered_at=time.monotonic()))
     for _ in range(5):
         _run(p._poll_once())

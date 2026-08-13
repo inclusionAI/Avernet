@@ -18,25 +18,40 @@ def _node(group_id="g1", task_id="t1"):
 
 
 class _Bcs:
-    def __init__(self): self.created = []; self.sessions = []
+    def __init__(self):
+        self.created = []
+        self.sessions = []
+
     async def create_group(self, req):
-        self.created.append(req); return BcsCreateGroupResult(group_id="g1", definition_ref=None)
+        self.created.append(req)
+        return BcsCreateGroupResult(group_id="g1", definition_ref=None)
+
     async def create_session(self, group_id, *, bootstrap_prompt=None, idempotency_key=None):
-        self.sessions.append((group_id, bootstrap_prompt)); return "s1"
-    async def get_group(self, group_id): return {"session": {"status": "completed", "output": {"r": 1}}}
-    async def get_session_messages(self, sid, *, limit=50, since_msg_id=None): return []
+        self.sessions.append((group_id, bootstrap_prompt))
+        return "s1"
+
+    async def get_group(self, group_id):
+        return {"session": {"status": "completed", "output": {"r": 1}}}
+
+    async def get_session_messages(self, sid, *, limit=50, since_msg_id=None):
+        return []
 
 
 class _Poller:
-    def __init__(self): self.registered = []
-    def register(self, h): self.registered.append(h)
+    def __init__(self):
+        self.registered = []
+
+    def register(self, h):
+        self.registered.append(h)
 
 
 class _Ctx:
-    def build(self, task_id, node_id): return {"mode": "execute"}
+    def build(self, task_id, node_id):
+        return {"mode": "execute"}
 
 
-def _run(coro): return asyncio.new_event_loop().run_until_complete(coro)
+def _run(coro):
+    return asyncio.new_event_loop().run_until_complete(coro)
 
 
 def test_form_coop_group_chat_stores_meta_and_returns_gid():
@@ -57,7 +72,8 @@ def test_form_coop_group_manager_worker_sets_strategy():
 
 
 def test_dispatch_coop_group_session_mode_registers_session_handle():
-    bcs = _Bcs(); poller = _Poller()
+    bcs = _Bcs()
+    poller = _Poller()
     exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None, poller=poller)
     _run(exe.form_coop_group(GroupFormation(bot_ids=["drv"], collab_mode="chat")))
     ok = _run(exe.dispatch([_node(group_id="g1")]))

@@ -14,7 +14,9 @@ from agentclaw.community.core.task.task_runner.integration.task_executor import 
 
 
 class _Tok:
-    token = "drv"; secret = "s3c"; base_url = "http://bcs"
+    token = "drv"
+    secret = "s3c"
+    base_url = "http://bcs"
 
 
 def _adapter(handler):
@@ -22,7 +24,8 @@ def _adapter(handler):
                                                                 base_url="http://bcs"))
 
 
-def _run(coro): return asyncio.new_event_loop().run_until_complete(coro)
+def _run(coro):
+    return asyncio.new_event_loop().run_until_complete(coro)
 
 
 def test_start_state_machine_run_returns_run_id():
@@ -31,6 +34,7 @@ def test_start_state_machine_run_returns_run_id():
         body = req.read().decode()
         assert '"id":"d1"' in body and '"version":1' in body
         return httpx.Response(202, json={"run": {"run_id": "run_9"}})
+
     a = _adapter(h)
     rid = _run(a.start_state_machine_run("g1", definition_yaml=None,
                                          definition_ref={"id": "d1", "version": 1},
@@ -42,6 +46,7 @@ def test_get_state_machine_run():
     def h(req):
         assert req.url.path == "/state-machine-runs/run_9"
         return httpx.Response(200, json={"status": "completed", "output": {"x": 1}})
+
     d = _run(_adapter(h).get_state_machine_run("run_9"))
     assert d["status"] == "completed"
 
@@ -55,24 +60,36 @@ def _node(group_id="g1"):
 
 
 class _Bcs:
-    def __init__(self): self.run_input = None
-    async def create_group(self, req): return BcsCreateGroupResult(group_id="g1", definition_ref={"id": "d1", "version": 1})
+    def __init__(self):
+        self.run_input = None
+
+    async def create_group(self, req):
+        return BcsCreateGroupResult(group_id="g1", definition_ref={"id": "d1", "version": 1})
+
     async def start_state_machine_run(self, group_id, *, definition_yaml, definition_ref, session_id, input):
-        self.run_input = input; return "run_9"
-    async def get_state_machine_run(self, run_id): return {"status": "completed", "output": {}}
+        self.run_input = input
+        return "run_9"
+
+    async def get_state_machine_run(self, run_id):
+        return {"status": "completed", "output": {}}
 
 
 class _Poller:
-    def __init__(self): self.registered = []
-    def register(self, h): self.registered.append(h)
+    def __init__(self):
+        self.registered = []
+
+    def register(self, h):
+        self.registered.append(h)
 
 
 class _Ctx:
-    def build(self, task_id, node_id): return {"mode": "execute"}
+    def build(self, task_id, node_id):
+        return {"mode": "execute"}
 
 
 def test_dispatch_state_machine_registers_run_handle():
-    bcs = _Bcs(); poller = _Poller()
+    bcs = _Bcs()
+    poller = _Poller()
     exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None, poller=poller)
     _run(exe.form_coop_group(GroupFormation(bot_ids=["drv"], collab_mode="state_machine",
                                             extend_props={"collaboration_definition_yaml": "kind: collab"})))

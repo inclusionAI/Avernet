@@ -13,12 +13,28 @@ import httpx
 from agentclaw.community.core.task.task_runner.integration.ports import ApiKeyProvider, OpenApiBotPort
 
 
-class OpenApiError(Exception): ...
-class OpenApiAuthError(OpenApiError): ...        # 401/403 grant 失败不可重试
-class OpenApiBadRequestError(OpenApiError): ...  # 4xx 不重试
-class OpenApiRateLimitError(OpenApiError): ...   # 429 可重试
-class OpenApiServerError(OpenApiError): ...      # 5xx 可重试
-class OpenApiTimeoutError(OpenApiError): ...
+class OpenApiError(Exception):
+    ...
+
+
+class OpenApiAuthError(OpenApiError):
+    ...  # 401/403 grant 失败不可重试
+
+
+class OpenApiBadRequestError(OpenApiError):
+    ...  # 4xx 不重试
+
+
+class OpenApiRateLimitError(OpenApiError):
+    ...  # 429 可重试
+
+
+class OpenApiServerError(OpenApiError):
+    ...  # 5xx 可重试
+
+
+class OpenApiTimeoutError(OpenApiError):
+    ...
 
 
 def parse_bot_id(bot_id: str) -> tuple[str, str]:

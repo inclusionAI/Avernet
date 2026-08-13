@@ -17,11 +17,24 @@ import httpx
 from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import BcsTokenProvider
 
 
-class BcsClientError(Exception): ...
-class BcsServerError(BcsClientError): ...        # 5xx 可重试
-class BcsClientRequestError(BcsClientError): ... # 4xx 不重试
-class BcsRateLimitError(BcsClientError): ...     # 429
-class BcsTimeoutError(BcsClientError): ...
+class BcsClientError(Exception):
+    ...
+
+
+class BcsServerError(BcsClientError):
+    ...  # 5xx 可重试
+
+
+class BcsClientRequestError(BcsClientError):
+    ...  # 4xx 不重试
+
+
+class BcsRateLimitError(BcsClientError):
+    ...  # 429
+
+
+class BcsTimeoutError(BcsClientError):
+    ...
 
 
 @dataclass

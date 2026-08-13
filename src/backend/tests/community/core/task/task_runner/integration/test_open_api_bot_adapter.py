@@ -32,13 +32,17 @@ def test_parse_bot_id():
 
 def test_ensure_grant_already_allowed():
     allowed = {"data": {"allowed_bots": ["bot9:ent1"]}}
-    def h(req): return httpx.Response(200, json=allowed)
+
+    def h(req):
+        return httpx.Response(200, json=allowed)
+
     a = _adapter(h)
     _run(a.ensure_grant("bot9:ent1"))  # 不抛
 
 
 def test_ensure_grant_grants_when_missing():
     state = {"allowed": False}
+
     def h(req):
         if req.url.path.endswith("/allowed-bots") and req.method == "GET":
             return httpx.Response(200, json={"data": {"allowed_bots": [] if not state["allowed"] else ["bot9:ent1"]}})
@@ -48,14 +52,17 @@ def test_ensure_grant_grants_when_missing():
             state["allowed"] = True
             return httpx.Response(200, json={"data": {"bot_id": "bot9:ent1"}})
         return httpx.Response(404)
+
     _run(_adapter(h).ensure_grant("bot9:ent1"))
     assert state["allowed"] is True
 
 
 def test_ensure_grant_403_raises_auth():
     def h(req):
-        if req.method == "GET": return httpx.Response(200, json={"data": {"allowed_bots": []}})
+        if req.method == "GET":
+            return httpx.Response(200, json={"data": {"allowed_bots": []}})
         return httpx.Response(403)
+
     with pytest.raises(OpenApiAuthError):
         _run(_adapter(h).ensure_grant("bot9:ent1"))
 
@@ -67,6 +74,7 @@ def test_send_message_returns_run_id_and_uses_bearer():
         body = req.read()
         assert b'"bot_id":"bot9:ent1"' in body
         return httpx.Response(200, json={"data": {"message_id": "mid_77"}})
+
     rid = _run(_adapter(h).send_message(bot_id="bot9:ent1", message="hi", metadata={}))
     assert rid == "mid_77"
 
@@ -75,11 +83,14 @@ def test_get_run_status_case_insensitive():
     def h(req):
         assert req.url.path == "/openapi/v1/messages/mid_77"
         return httpx.Response(200, json={"data": {"status": "COMPLETED", "result": {"content": "x"}}})
+
     d = _run(_adapter(h).get_run("mid_77"))
     assert d["status"] == "COMPLETED"
 
 
 def test_server_error_raises():
-    def h(req): return httpx.Response(500)
+    def h(req):
+        return httpx.Response(500)
+
     with pytest.raises(OpenApiServerError):
         _run(_adapter(h).get_run("mid_77"))
