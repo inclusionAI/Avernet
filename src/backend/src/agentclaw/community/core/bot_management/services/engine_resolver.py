@@ -15,8 +15,8 @@ from __future__ import annotations
 from typing import Optional
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
-    AicodingProvisioningStrategy,
+from agentclaw.community.core.bot_management.engines.registry import (
+    resolve_bot_engine,
 )
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.log import get_logger
@@ -71,10 +71,6 @@ def resolve_engine_for_bot(
     if bot:
         active = bot.get("active_engine")
         if active:
-            routed_engine = AicodingProvisioningStrategy.resolve_baas_engine_bucket(
-                active_engine=active,
-                template_type=bot.get("template_type"),
-            )
-            return routed_engine or active
+            return resolve_bot_engine(bot) or active
 
     return DEFAULT_ENGINE_TYPE

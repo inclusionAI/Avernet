@@ -80,6 +80,16 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
     def engine_type(self) -> str:
         return self._engine_type
 
+    def resolve_bot_engine(self, bot: dict[str, Any]) -> str | None:
+        active_engine = bot.get("active_engine")
+        active_engine = active_engine if isinstance(active_engine, str) else None
+        if self.should_use_aicoding_runtime_engine(
+            active_engine=active_engine,
+            template_type=bot.get("template_type"),
+        ):
+            return AICODING_ENGINE_TYPE
+        return active_engine
+
     @staticmethod
     def normalize_engine_type(
         engine_type: str | None, *, default: str = "openclaw"
@@ -95,19 +105,13 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         return template_type in CODING_TEMPLATE_TYPES
 
     @classmethod
-    def should_use_aicoding_baas_bucket(
+    def should_use_aicoding_runtime_engine(
         cls,
         *,
         active_engine: str | None,
         template_type: str | None,
     ) -> bool:
-        """Whether this context should select the aicoding BaaS bucket.
-
-        BaaS bucket routing is an image/runtime selection policy: all explicit
-        claude_code template-factory types except normalCC reuse the aicoding
-        BaaS template bucket. It only depends on active_engine + template_type;
-        caller/create routing may only have template_type available.
-        """
+        """Whether this bot should use the aicoding runtime engine."""
         if (
             cls.normalize_engine_type(active_engine, default="")
             != CLAUDE_CODE_ENGINE_TYPE
@@ -117,6 +121,19 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         return bool(
             normalized_template_type
             and normalized_template_type != NORMAL_CC_TEMPLATE_TYPE
+        )
+
+    @classmethod
+    def should_use_aicoding_baas_bucket(
+        cls,
+        *,
+        active_engine: str | None,
+        template_type: str | None,
+    ) -> bool:
+        """Whether this context should select the aicoding BaaS bucket."""
+        return cls.should_use_aicoding_runtime_engine(
+            active_engine=active_engine,
+            template_type=template_type,
         )
 
     @classmethod

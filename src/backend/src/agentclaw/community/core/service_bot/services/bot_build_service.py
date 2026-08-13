@@ -25,8 +25,8 @@ from injector import inject
 
 from agentclaw.community.api.channel_service import ChannelServiceProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
-    AicodingProvisioningStrategy,
+from agentclaw.community.core.bot_management.engines.registry import (
+    resolve_bot_engine,
 )
 from agentclaw.community.core.bot_management.services.engine_resolver import (
     resolve_engine_for_bot,
@@ -156,11 +156,7 @@ class BotBuildService:
 
     def _resolve_sandbox_provider(self, bot: Dict[str, Any]) -> EngineSandboxProvider:
         engine_type = bot.get("active_engine") or DEFAULT_ENGINE_TYPE
-        routed_engine = AicodingProvisioningStrategy.resolve_baas_engine_bucket(
-            active_engine=engine_type,
-            template_type=bot.get("template_type"),
-        )
-        engine_type = routed_engine or engine_type
+        engine_type = resolve_bot_engine(bot) or engine_type
 
         try:
             return self._sandbox_registry.resolve(engine_type)
