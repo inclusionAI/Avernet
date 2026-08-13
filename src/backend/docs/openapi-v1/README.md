@@ -971,11 +971,13 @@ that one design choice, and none of it is visible in the OpenAPI document.
   one of them.
 - **Deleting the bot deletes its script, and a failed delete is not reported as
   success.** Bot deletion is a soft update, so nothing cascades to the script
-  row — it is removed explicitly. Two reasons it is not left behind: the body is
-  stored decoded, so an orphan row keeps plaintext executable content past the
-  life of its owner; and a `bot_id` may be supplied by the caller on create
-  while soft-deleted bots read as absent, so a reused id would otherwise inherit
-  the previous bot's script and run it on every start.
+  row — it is removed explicitly, because the body is stored decoded and an
+  orphan row keeps plaintext executable content past the life of its owner.
+
+  Inheritance by a later bot is *not* among the reasons, though an earlier
+  version of this document said it was: a caller may supply `bot_id` on create
+  and soft-deleted bots read as absent, but the uniqueness constraint described
+  below means such a create is refused rather than granted the tuple.
 
   Unlike the bot's skills and skill sets — inert metadata, swept after the
   deletion with failures logged and tolerated — this removal runs **before**
@@ -998,20 +1000,27 @@ that one design choice, and none of it is visible in the OpenAPI document.
   running, and a write landing after it has finished has nothing else coming
   for its row.
 
-  The re-check compares **which bot**, not whether the id resolves. `bot_id` is
-  reusable, so an in-flight write can find the id alive again while it belongs
-  to a different bot; each row is therefore pinned to the writing bot's
-  `ac_bots.id`, which does not repeat.
+  The re-check asks only whether the bot is gone, and that is sufficient
+  because the identifier cannot change hands underneath it. An earlier design
+  stamped each row with the writing bot's `ac_bots.id` and compared it on every
+  read, on the assumption that `bot_id` is reusable. It is not, so no stamp is
+  stored and no read compares one.
 
-  **A stale row cannot execute even if every one of those paths fails.** Each
-  read compares the row's stamp against the bot doing the read and ignores a
-  row that does not match, so a script only ever runs on the bot that stored
-  it. `GET` answers by the same rule, so what the API reports and what a
-  container would run cannot disagree: a bot that inherited an uncleaned row
-  reads as having no script, because it has none. The sweeps and the re-check
-  remain — an orphan is still plaintext executable content nobody should be
-  storing — but they are hygiene, not the only thing standing between a reused
-  identifier and someone else's code.
+  **A stale row cannot execute, and the reason is the key rather than a
+  read-time check.** `ac_bots` carries a uniqueness constraint over
+  `(bot_id, entity_id, env)` — `uk_bot_id_entity_id_env` in the production
+  schema, declared on the ORM as the tenant-scoped
+  `uk_bot_id_entity_id_env_tenant` so `create_all` deployments get it too.
+  `is_delete` is not part of that key and the repository has no hard delete, so
+  a soft-deleted bot goes on occupying its tuple forever and a create cannot
+  reissue it. A script row is filed under exactly that tuple, so there is no
+  later bot that could inherit one: the row a failed sweep leaves behind is
+  unreachable rather than dangerous.
+
+  The sweeps and the re-check remain — an orphan is still plaintext executable
+  content nobody should be storing, and the deletion path refuses to report
+  success over one — but they are hygiene. What stands between a stale row and
+  someone else's container is the constraint.
 
   The legacy `default`-bot delete is a restart rather than a deletion and keeps
   its script through both sweeps, matching how its skills and config are already

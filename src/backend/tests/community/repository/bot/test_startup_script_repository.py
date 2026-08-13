@@ -8,12 +8,10 @@ class TestTheKeyIsUnambiguous:
         """`(entity_id="a\x00b", bot_id="c")` and `(entity_id="a", bot_id="b\x00c")`
         are different bots and must not share a row.
 
-        Under a delimiter-joined key they hashed identically: one bot's write
-        landed on the other's row, and with the incarnation stamp in place the
-        victim's own next write was then refused as stale — locked out of its
-        own script rather than clobbered once. `create_bot` takes
-        caller-supplied ids and validates neither against control characters,
-        so this was reachable, not theoretical.
+        Under a delimiter-joined key they hashed identically, so one bot's
+        write landed on the other's row and the victim ran a script it never
+        stored. `create_bot` takes caller-supplied ids and validates neither
+        against control characters, so this was reachable, not theoretical.
         """
         from agentclaw.community.core.repository.implementations.bot.startup_script import (
             _script_key,

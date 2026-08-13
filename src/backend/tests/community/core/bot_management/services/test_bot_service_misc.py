@@ -40,8 +40,9 @@ def _make_bot(
     template_type: str | None = None,
 ) -> dict:
     result = {
-        # ac_bots' primary key: which incarnation of this bot_id this is. The
-        # post-delete sweep is conditional on it, so it has to be present.
+        # ac_bots' primary key, distinct from the logical bot_id. Neither
+        # purge reads it — both key on (entity_id, bot_id) — but a real row
+        # always carries it, so the fixture does too.
         "id": 4242,
         "bot_id": bot_id,
         "owner_id": owner_id,

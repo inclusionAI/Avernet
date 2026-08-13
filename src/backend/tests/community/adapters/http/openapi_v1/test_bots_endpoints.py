@@ -44,9 +44,9 @@ bots_router = importlib.import_module(
 )
 
 BOT = {
-    # ``id`` is ac_bots' primary key — which *incarnation* of "b1" this is.
-    # A bot_id can be deleted and reused, the primary key cannot, so the
-    # startup-script row is pinned to this rather than to bot_id.
+    # ``id`` is ac_bots' primary key, distinct from the logical "b1". The
+    # startup-script row keys on bot_id, not on this: uk_bot_id_entity_id_env
+    # means a deleted bot_id is never reissued, so it names one bot for good.
     "id": 77,
     "bot_id": "b1", "bot_name": "N", "bot_desc": "D", "active_engine": "teclaw",
     "bot_type": "personal", "status": "ACTIVE", "owner_id": "u1",
