@@ -123,6 +123,8 @@ from agentclaw.community.core.skill_center.services.skill_set_service import (
 )
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolLayoutRepositoryProtocol
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolSkillRepositoryProtocol
+from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
 from agentclaw.community.core.skills_pool.reconcile_task import (
     SkillsPoolReconcileWakeupListener,
 )
@@ -349,6 +351,9 @@ class SkillCenterModule(Module):
         collaborator_service: CollaboratorServiceProtocol,
         skill_set_service_factory: SkillSetServiceFactory,
         edit_guard: SkillsPoolEditGuard,
+        pool_runtime: SkillsPoolRuntimeProtocol,
+        pool_skills: SkillsPoolSkillRepositoryProtocol,
+        pool_layouts: SkillsPoolLayoutRepositoryProtocol,
     ) -> LocalSkillStateServiceProtocol:
         return LocalSkillStateService(
             skill_repo,
@@ -357,6 +362,9 @@ class SkillCenterModule(Module):
             collaborator_service,
             skill_set_service_factory,
             edit_guard,
+            pool_runtime,
+            pool_skills,
+            pool_layouts,
         )
 
     @singleton

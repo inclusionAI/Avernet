@@ -1,12 +1,16 @@
 from pathlib import Path
 
 import pytest
+
 from engine.community.core.skills.exceptions import (
     InvalidPoolMappingRequestError,
 )
 from engine.community.core.skills.layout_planner import (
     MAPPING_CONTRACT_VERSION,
     SkillLayoutResolutionError,
+)
+from engine.community.plugins.claude_code.layout_pool import (
+    claude_code_retirement_active_roots,
 )
 from engine.community.plugins.skills_pool.layout_activation import (
     MappingSourceLayout,
@@ -214,3 +218,29 @@ def test_legacy_no_version_physical_payload_remains_compatible(
     assert resolved.mappings[0].target == "/active/writer"
     assert resolved.resolved_locators == ()
     assert _snapshot(tmp_path) == []
+
+
+def test_claude_code_retired_legacy_mapping_resolves_both_managed_active_roots(
+    tmp_path: Path,
+) -> None:
+    mapping = {
+        "corpus": "local",
+        "relative_path": "financial-data-query",
+        "link_name": "financial-data-query",
+    }
+
+    resolved = resolve_mapping_payload(
+        engine="claude_code",
+        source_layout=MappingSourceLayout.LEGACY,
+        payload=[mapping],
+        mapping_contract_version=MAPPING_CONTRACT_VERSION,
+        additional_retirement_roots=claude_code_retirement_active_roots(
+            home=tmp_path
+        ),
+        home=tmp_path,
+    )
+
+    assert [item.target for item in resolved.mappings] == [
+        str(tmp_path / ".claude/skills/financial-data-query"),
+        str(tmp_path / ".claude_code/workspace/skills/financial-data-query"),
+    ]
