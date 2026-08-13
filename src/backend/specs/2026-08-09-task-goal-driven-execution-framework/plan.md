@@ -154,7 +154,7 @@ class RelationType(StrEnum):      DEPENDENCY    # 节点间依赖关系
 
 > 编排核为**事件驱动 + 状态条件触发**:在 facade `execute`/回投适配后,按图谱状态条件协调 `plan→add_task_nodes→dispatch→start_run`。是 `TaskService` 内部实现细节,对外只暴露 2 facade API(§3.7)。
 
-> **协程化(CR 反馈:任务执行是耗时任务)**:全链路 `async def`——`on_execute`/`on_report`/`on_miss`/`on_harness`/`start_run`/`form_coop_group`/`report_result`/`DeliveryPort.deliver` 均为协程。编排写图(graph 内存同步快操作)在 per-task `threading.RLock` 锁内同步执行(**锁内不 await**);真正的耗时 IO(投递 `start_run` / BCS 拉群 `form_coop_group` / `deliver`)全部 `await` 在锁外(不持锁,不阻塞事件循环)。**副作用收集模式**:`on_*` 锁内 `collect`(plan/add/dispatch/patch 同步,产出 side-effects list)→ 锁外 `_drain` 统一 `await` 执行 run/group/miss/finish,保证锁内永不 await。多节点投递并发限流(gather+Semaphore)下沉到 `TaskRunner.start_run` 内部(`_DELIVER_CONCURRENCY=8`;投递是 runner 职责,engine 批量调 `start_run`)。`on_report` 链路:`report_result(await) → on_report(await) → 锁内翻态+collect → 锁外 _drain await 投递`。
+> **协程化(CR 反馈:任务执行是耗时任务)**:全链路 `async def`——`on_execute`/`on_report`/`on_miss`/`on_harness`/`start_run`/`form_coop_group`/`report_result`/`DeliveryPort.deliver`/**`plan`/`dispatch`/策略 `matches`/`apply`** 均为协程。`plan`/`dispatch`(corp 为 LLM 规划 / bot catalog 搜推,耗时 IO)在 per-task `threading.RLock` **锁内 `await`**(同 task 串行推进的 IO,设计意图;不同 task 锁隔离互不阻塞)。锁内不 `await` 的是**高并发外部投递 IO**(`start_run`/BCS 拉群 `form_coop_group`/`deliver`)——这些 `await` 在锁外,gather+Semaphore 并发下沉 `TaskRunner.start_run` 内部(`_DELIVER_CONCURRENCY=8`)。**副作用收集模式**:`on_*` 锁内 `async collect`(`await plan/dispatch` + 同步 add/patch,产出 side-effects list)→ 锁外 `_drain` 统一 `await` 执行 run/group/miss/finish(投递 IO)。`on_report` 链路:`report_result(await) → on_report(await) → 锁内翻态+async collect → 锁外 _drain await 投递`。注:`threading.RLock` 在本仓一次性事件循环/跨线程回调模型下跨线程正确串行;若 corp 采用单持久 loop 并发处理同 task 多回投,需切 `asyncio.Lock`(ocb 仓接入时定)。
 
 > **编排核零参自建**(在 `task_center/engine.py` 内定义 Protocol,DI 注入;Avernet 缺省 no-op,singlebox/测试注入 double,corp 注入真实 adapter):
 ```python
@@ -285,7 +285,8 @@ class PlanningStrategy(Protocol):     # 规划优化策略契约(引擎内置,fi
 class TaskPlanner:     # 编排壳,零 case 知识
     def __init__(self, graph) -> None: ...   # 零参;内置策略池 [WorkflowPlanningStrategy(prio10), GapBasedPlanningStrategy(prio99)]
     def set_strategies(self, strategies: list[PlanningStrategy]) -> None: ...   # 非公开:engine 工厂/corp 子类注入
-    def plan(self, graph: TaskExecutionGraph) -> list[TaskNode]:
+    async def plan(self, graph: TaskExecutionGraph) -> list[TaskNode]:
+        # 协程化:策略 apply 在 corp 是 LLM 耗时 IO,锁内 await(同 task 串行,设计意图)。
         # 触发条件(规划文档):图谱有更新(新增失败节点/PLANNING 节点)
         #   AND 没有派发(RUNNING)或执行中节点 AND 状态图谱有处于 PLANNING 状态的节点
         #   不满足 → 返回 [] 空跑
@@ -318,7 +319,8 @@ class TaskDispatcher:
     def __init__(self, graph) -> None: ...   # 零参;持 graph 只读 config;内置策略池 [DirectDispatchStrategy(prio10), SearchBasedDispatchStrategy(prio99)]
     def set_strategies(self, strategies: list[DispatchStrategy]) -> None: ...   # 非公开:engine 工厂/corp 注入
     # 不持 runner(HIT_MULTI_BOTS 标 pending_group_formation;拉群归编排核+runner)
-    def dispatch(self, toDoTaskList: list[TaskNode]) -> list[TaskNode]:
+    async def dispatch(self, toDoTaskList: list[TaskNode]) -> list[TaskNode]:
+        # 协程化:catalog 搜推在 corp 是耗时 IO,锁内 await。
         # 入参=待派发节点;返回=填充执行者信息后的 list[TaskNode](对齐派发文档签名);
         #   不写图、不起 run;per node 仅按 node.task_spec 搜推,把结果填 node.run_info 上:
         #   HIT_SINGLE     → node.run_info.run_mode="single_bot",  assignee=bot_id
@@ -340,12 +342,12 @@ class TaskDispatcher:
 ```python
 class PlanningStrategy(Protocol):
     rule_id: str; priority: int
-    def matches(self, graph) -> bool: ...   # 纯读:据图级 execution_config 判适用(workflow 信号)
-    def apply(self, graph) -> list[TaskNode]: ...   # 自发现 target+产子
+    async def matches(self, graph) -> bool: ...   # 纯读:据图级 execution_config 判适用(workflow 信号)
+    async def apply(self, graph) -> list[TaskNode]: ...   # 自发现 target+产子(corp LLM 耗时 IO)
 class DispatchStrategy(Protocol):
     rule_id: str; priority: int
-    def matches(self, node, graph) -> bool: ...   # 纯读:据 execution_config(bot 信号)
-    def apply(self, node, graph) -> SearchResult: ...   # 4 态
+    async def matches(self, node, graph) -> bool: ...   # 纯读:据 execution_config(bot 信号)
+    async def apply(self, node, graph) -> SearchResult: ...   # 4 态(corp catalog 搜推耗时 IO)
 # 默认策略池: TaskPlanner 内置 [WorkflowPlanningStrategy(prio10,config.workflow), GapBasedPlanningStrategy(prio99,兜底 stub 返[])]
 #            TaskDispatcher 内置 [DirectDispatchStrategy(prio10,config.bot→HIT_SINGLE), SearchBasedDispatchStrategy(prio99,兜底 stub 恒MISS)]
 # first-match-wins:planner/dispatcher.plan/dispatch 遍历按 priority 升序,首个 matches=True 的 apply

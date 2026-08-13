@@ -39,17 +39,18 @@ class TaskPlanner:
         """(非公开)替换策略池。engine ``_build_planner`` 工厂方法/corp 子类注入用。"""
         self._strategies = list(strategies)
 
-    def plan(self, graph: TaskExecutionGraph) -> list[TaskNode]:
-        """读图判有无可规划目标 → first-match-wins 选策略(graph 级 config 匹配)→ apply 产子 → 去重。
+    async def plan(self, graph: TaskExecutionGraph) -> list[TaskNode]:
+        """读图判有无可规划目标 → first-match-wins 选策略(graph 级 config 匹配)→ await apply 产子 → 去重。
 
         可规划目标:① 根 PENDING(无父,初始规划);② FAILED+gaps 叶(无结构子,补救);
         ③ PLANNING 父(委托前向)。无目标 → 返回 []。plan 不接收外部 gaps,不判 RUNNING(时序由编排核管)。
+        协程化:策略 apply 在 corp 是 LLM 耗时 IO,await 不阻塞编排核(锁内 await,同 task 串行是设计意图)。
         """
         if not self._has_planning_target(graph):
             return []
         for strategy in sorted(self._strategies, key=lambda r: r.priority):
-            if strategy.matches(graph):
-                nodes = strategy.apply(graph)
+            if await strategy.matches(graph):
+                nodes = await strategy.apply(graph)
                 existing_ids = {n.node_id for n in graph.tasks}
                 return [n for n in nodes if n.node_id not in existing_ids]
         return []  # 无策略命中(不应发生:GapBased 兜底)

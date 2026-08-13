@@ -5,12 +5,14 @@
 验收 100% 走 on_report 回投(engine 不主动验,无 OwnerBotVerifyPort);BBS 投递归 runner BBS 模态
 (无 BbsMarketPort,升 BBS 只翻图态 bbs_mode)。零 case 知识:engine 不含任何节点名字面量。
 
-协程化(CR 反馈:任务执行是耗时任务):全链路 ``async def``。编排写图(graph 内存同步快操作)在
-per-task ``threading.RLock`` 锁内同步执行(锁内不 await);真正的耗时 IO(投递 start_run / BCS 拉群
-form_coop_group)全部 ``await`` 在锁外(不持锁,不阻塞 loop)。多节点投递并发限流(gather+Semaphore)
-下沉到 ``TaskRunner.start_run`` 内部(投递是 runner 职责,engine 批量调 start_run)。
-副作用收集模式:on_* 锁内 collect(plan/add/dispatch/patch 同步,产出 side effects list)→ 锁外
-``_drain`` 统一 await 执行 run/group/miss/finish(side effects),保证锁内永不 await。
+协程化(CR 反馈:任务执行是耗时任务):全链路 ``async def``。``plan``/``dispatch``(corp 为 LLM/catalog 耗时 IO)
+亦 ``async``,在 per-task ``threading.RLock`` 锁内 await(同 task 串行推进的 IO,设计意图;不同 task 锁隔离不互阻塞)。
+锁内不 await 的是高并发外部投递 IO(``start_run``/BCS 拉群 ``form_coop_group``/``deliver``)——这些 await 在锁外,
+gather+Semaphore 并发下沉 ``TaskRunner.start_run`` 内部。
+副作用收集模式:on_* 锁内 async collect(await plan/dispatch + 同步 add/patch,产出 side effects list)→
+锁外 ``_drain`` 统一 await 执行 run/group/miss/finish(投递 IO)。
+注:``threading.RLock`` 在本仓一次性事件循环/跨线程回调模型下跨线程正确串行;若 corp 采用单持久 loop 并发
+处理同 task 多回投,需切 ``asyncio.Lock``(ocb 仓接入时定)。
 """
 from __future__ import annotations
 
@@ -80,11 +82,11 @@ class ExecutionEngine:
             if root is None or root.status != Status.PENDING:
                 return  # 非条件 a
             graph = self._graph.query_task_dashboard(task_id)
-            nodes = self._planner.plan(graph)
+            nodes = await self._planner.plan(graph)   # 锁内 await plan(LLM IO,同 task 串行)
             if not nodes:
                 return  # 无可规划
             self._graph.add_task_nodes(nodes, root.node_id)
-            self._prepare_into(task_id, side)
+            await self._prepare_into(task_id, side)   # 锁内 await dispatch(catalog IO)
         await self._drain(task_id, side)
 
     # ===== on_report =====
@@ -98,16 +100,16 @@ class ExecutionEngine:
             side: list[tuple] = []
             verdict = patch.acceptance_result.verdict
             if verdict == AcceptanceVerdict.PASS:
-                self._on_pass_collect(patch.task_id, patch.node_id, side)
+                await self._on_pass_collect(patch.task_id, patch.node_id, side)
             else:  # FAIL
-                self._on_fail_collect(patch.task_id, patch.node_id, side)
+                await self._on_fail_collect(patch.task_id, patch.node_id, side)
         await self._drain(patch.task_id, side)
         return result
 
-    def _on_pass_collect(self, task_id: str, node_id: str, side: list[tuple]) -> None:
+    async def _on_pass_collect(self, task_id: str, node_id: str, side: list[tuple]) -> None:
         """PASS→DONE 后:查结构父 P;P=PLANNING 且本批兄弟全 DONE ∧ 无 RUNNING(决策C)
         → 委托 plan→prepare(产新子→add→dispatch side effects);gap 闭 → 非根传播 DONE 上行 / 根保持 PLANNING 等回投。
-        根 PASS(来自 owner bot 回投)→ finish side effect。纯同步收集(锁内)。"""
+        根 PASS(来自 owner bot 回投)→ finish side effect。async collect(锁内 await plan/dispatch)。"""
         parent = self._graph.get_parent_task(task_id, node_id)
         if parent is None:
             # 根 PASS(来自 owner bot 终验回投)→ 图完成
@@ -122,10 +124,10 @@ class ExecutionEngine:
             return  # 仍有 RUNNING,等待
         # 本批兄弟全 DONE → 委托 plan
         graph = self._graph.query_task_dashboard(task_id)
-        new_children = self._planner.plan(graph)
+        new_children = await self._planner.plan(graph)
         if new_children:
             self._graph.add_task_nodes(new_children, parent.node_id)
-            self._prepare_into(task_id, side)
+            await self._prepare_into(task_id, side)
         else:
             # decompose 返 [](gap 闭)→ 非根传播 DONE / 根保持 PLANNING 等回投
             root = self._root(task_id)
@@ -134,20 +136,20 @@ class ExecutionEngine:
             self._graph.update_task_node_info(
                 TaskNodePatch(task_id=task_id, node_id=parent.node_id, status=Status.DONE)
             )
-            self._on_pass_collect(task_id, parent.node_id, side)  # 上行传播
+            await self._on_pass_collect(task_id, parent.node_id, side)  # 上行传播
 
-    def _on_fail_collect(self, task_id: str, node_id: str, side: list[tuple]) -> None:
+    async def _on_fail_collect(self, task_id: str, node_id: str, side: list[tuple]) -> None:
         """FAIL+gaps→FAILED 后:深度闸门 <MAX → plan→add(补救子挂该节点下,该节点进 PLANNING)→ prepare;
-        ≥MAX → 自动升 BBS(remove_subtree+loop_round+++标 BBS)。纯同步收集(锁内)。"""
+        ≥MAX → 自动升 BBS(remove_subtree+loop_round+++标 BBS)。async collect(锁内 await plan/dispatch)。"""
         depth = self._graph._node_depth(task_id, node_id)
         cfg = self._graph._execution_config(task_id)
         max_depth = cfg["MAX_DEPTH"]
         if depth < max_depth:
             graph = self._graph.query_task_dashboard(task_id)
-            new_children = self._planner.plan(graph)
+            new_children = await self._planner.plan(graph)
             if new_children:
                 self._graph.add_task_nodes(new_children, node_id)
-                self._prepare_into(task_id, side)
+                await self._prepare_into(task_id, side)
         else:
             self._escalate_bbs(task_id, node_id)
 
@@ -162,10 +164,10 @@ class ExecutionEngine:
             max_depth = cfg["MAX_DEPTH"]
             if depth < max_depth:
                 graph = self._graph.query_task_dashboard(patch.task_id)
-                new_children = self._planner.plan(graph)
+                new_children = await self._planner.plan(graph)
                 if new_children:
                     self._graph.add_task_nodes(new_children, patch.node_id)
-                    self._prepare_into(patch.task_id, side)
+                    await self._prepare_into(patch.task_id, side)
             else:
                 self._escalate_bbs(patch.task_id, patch.node_id)
         await self._drain(patch.task_id, side)
@@ -177,7 +179,7 @@ class ExecutionEngine:
         side: list[tuple] = []
         with self._lock_for(patch.task_id):
             self._graph.update_task_node_info(patch)
-            self._prepare_into(patch.task_id, side)
+            await self._prepare_into(patch.task_id, side)
         await self._drain(patch.task_id, side)
 
     # ===== 升 BBS =====
@@ -207,16 +209,16 @@ class ExecutionEngine:
             )
 
     # ===== 派发+执行(通用)=====
-    def _prepare_into(self, task_id: str, side: list[tuple]) -> None:
-        """查 PENDING 可派发节点 → dispatcher.dispatch 返填执行者 → HIT_MULTI_BOTS 标 pending_group_formation
+    async def _prepare_into(self, task_id: str, side: list[tuple]) -> None:
+        """查 PENDING 可派发节点 → await dispatcher.dispatch 返填执行者 → HIT_MULTI_BOTS 标 pending_group_formation
         → 落库 RUNNING(side 'run');HIT_MULTI_BOTS 待拉群(side 'group');MISS(side 'miss')。
-        纯同步收集(锁内);拉群/投递 IO 由 ``_drain`` 锁外 await。"""
+        async collect(锁内 await dispatch catalog IO);拉群/投递 IO 由 ``_drain`` 锁外 await。"""
         pending = self._graph.query_task_nodes(
             task_id, TaskNodeQueryCriteria(status=Status.PENDING)
         )
         if not pending:
             return
-        dispatched = self._dispatcher.dispatch(pending)
+        dispatched = await self._dispatcher.dispatch(pending)
         to_run: list[TaskNode] = []
         for node in dispatched:
             miss = node.run_info.extend_props.get("miss_events")

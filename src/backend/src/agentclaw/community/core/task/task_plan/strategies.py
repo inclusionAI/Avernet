@@ -23,13 +23,13 @@ class PlanningStrategy(Protocol):
     rule_id: str
     priority: int
 
-    def matches(self, graph: TaskExecutionGraph) -> bool:
-        """纯读:据图级 execution_config 判本策略是否适用(workflow/yaml 信号)。"""
+    async def matches(self, graph: TaskExecutionGraph) -> bool:
+        """纯读:据图级 execution_config 判本策略是否适用(workflow/yaml 信号)。协程化:corp LLM 判定可耗 IO。"""
         ...
 
-    def apply(self, graph: TaskExecutionGraph) -> list[TaskNode]:
+    async def apply(self, graph: TaskExecutionGraph) -> list[TaskNode]:
         """自发现可规划目标(FAIL 叶 / PLANNING 父 / 根 PENDING)+ 产"下一步可执行子节点"挂其下。
-        返回 [] 表无可规划或 gap 已闭。"""
+        返回 [] 表无可规划或 gap 已闭。协程化:corp 真实 LLM 拆解是耗时 IO,await 不阻塞。"""
         ...
 
 
@@ -43,11 +43,11 @@ class WorkflowPlanningStrategy:
     rule_id = "workflow"
     priority = 10
 
-    def matches(self, graph: TaskExecutionGraph) -> bool:
+    async def matches(self, graph: TaskExecutionGraph) -> bool:
         cfg = graph.extend_props.get("execution_config", {}) or {}
         return cfg.get("workflow") is not None
 
-    def apply(self, graph: TaskExecutionGraph) -> list[TaskNode]:
+    async def apply(self, graph: TaskExecutionGraph) -> list[TaskNode]:
         cfg = graph.extend_props.get("execution_config", {}) or {}
         wf = cfg.get("workflow")
         if not wf:
@@ -71,10 +71,10 @@ class GapBasedPlanningStrategy:
     rule_id = "gap_based"
     priority = 99
 
-    def matches(self, graph: TaskExecutionGraph) -> bool:
+    async def matches(self, graph: TaskExecutionGraph) -> bool:
         return True  # 兜底
 
-    def apply(self, graph: TaskExecutionGraph) -> list[TaskNode]:
+    async def apply(self, graph: TaskExecutionGraph) -> list[TaskNode]:
         return []  # Avernet stub:不拆
 
 

@@ -49,12 +49,13 @@ class DispatchStrategy(Protocol):
     rule_id: str
     priority: int
 
-    def matches(self, node: TaskNode, graph: TaskExecutionGraph) -> bool:
-        """纯读:据图级 execution_config 判本策略是否适用(bot 信号)。"""
+    async def matches(self, node: TaskNode, graph: TaskExecutionGraph) -> bool:
+        """纯读:据图级 execution_config 判本策略是否适用(bot 信号)。协程化:corp catalog 查询可耗 IO。"""
         ...
 
-    def apply(self, node: TaskNode, graph: TaskExecutionGraph) -> SearchResult:
-        """对单节点决出 SearchResult(4 态)。HIT_MULTI_BOTS 携 GroupFormation;拉群由编排核+runner。"""
+    async def apply(self, node: TaskNode, graph: TaskExecutionGraph) -> SearchResult:
+        """对单节点决出 SearchResult(4 态)。HIT_MULTI_BOTS 携 GroupFormation;拉群由编排核+runner。
+        协程化:corp 真实 bot catalog 搜推是耗时 IO,await 不阻塞。"""
         ...
 
 
@@ -64,11 +65,11 @@ class DirectDispatchStrategy:
     rule_id = "direct"
     priority = 10
 
-    def matches(self, node: TaskNode, graph: TaskExecutionGraph) -> bool:
+    async def matches(self, node: TaskNode, graph: TaskExecutionGraph) -> bool:
         cfg = graph.extend_props.get("execution_config", {}) or {}
         return cfg.get("bot") is not None
 
-    def apply(self, node: TaskNode, graph: TaskExecutionGraph) -> SearchResult:
+    async def apply(self, node: TaskNode, graph: TaskExecutionGraph) -> SearchResult:
         cfg = graph.extend_props.get("execution_config", {}) or {}
         return SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id=cfg.get("bot"))
 
@@ -80,8 +81,8 @@ class SearchBasedDispatchStrategy:
     rule_id = "search"
     priority = 99
 
-    def matches(self, node: TaskNode, graph: TaskExecutionGraph) -> bool:
+    async def matches(self, node: TaskNode, graph: TaskExecutionGraph) -> bool:
         return True  # 兜底
 
-    def apply(self, node: TaskNode, graph: TaskExecutionGraph) -> SearchResult:
+    async def apply(self, node: TaskNode, graph: TaskExecutionGraph) -> SearchResult:
         return SearchResult(outcome=SearchOutcome.MISS, miss_reason="averent_stub_no_catalog")

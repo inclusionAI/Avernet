@@ -6,6 +6,7 @@ BBS 退化、不写图不起 run。零参 TaskDispatcher(graph);corp 注入策�
 """
 from __future__ import annotations
 
+import asyncio
 import pytest
 
 from agentclaw.community.core.task.domain.models import (
@@ -26,6 +27,10 @@ from agentclaw.community.core.task.task_dispatch.strategies import (
     SearchResult,
 )
 from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+
+
+def _run(coro):
+    return asyncio.new_event_loop().run_until_complete(coro)
 
 
 def _task_info(task_id: str = "t1") -> TaskInfo:
@@ -59,10 +64,10 @@ class _StubDispatchStrategy:
         self._result = result
         self.search_calls: list[TaskNode] = []
 
-    def matches(self, node: TaskNode, graph) -> bool:
+    async def matches(self, node: TaskNode, graph) -> bool:
         return True
 
-    def apply(self, node: TaskNode, graph) -> SearchResult:
+    async def apply(self, node: TaskNode, graph) -> SearchResult:
         self.search_calls.append(node)
         return self._result
 
@@ -84,20 +89,20 @@ def svc() -> TaskGraphService:
 class TestFourStates:
     def test_hit_single(self, svc):
         d, _ = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="bot_market"))
-        out = d.dispatch([_node("c1")])
+        out = _run(d.dispatch([_node("c1")]))
         assert out[0].run_info.run_mode == "single_bot"
         assert out[0].run_info.assignee == "bot_market"
 
     def test_hit_group(self, svc):
         d, _ = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_GROUP, group_id="grp_tech"))
-        out = d.dispatch([_node("c1")])
+        out = _run(d.dispatch([_node("c1")]))
         assert out[0].run_info.run_mode == "coop_group"
         assert out[0].run_info.assignee == "grp_tech"
 
     def test_hit_multi_bots_marks_pending_group(self, svc):
         gf = GroupFormation(bot_ids=["bot_a", "bot_b"], collab_mode="manager_worker")
         d, strat = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_MULTI_BOTS, group_formation=gf))
-        out = d.dispatch([_node("c1")])
+        out = _run(d.dispatch([_node("c1")]))
         assert out[0].run_info.run_mode == "coop_group"
         assert out[0].run_info.assignee is None  # 拉群归编排核,留空
         assert out[0].run_info.extend_props.get("pending_group_formation") is gf
@@ -105,7 +110,7 @@ class TestFourStates:
 
     def test_miss_no_assignee_marks_events(self, svc):
         d, _ = _dispatcher(svc, SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_bot_match"))
-        out = d.dispatch([_node("c1")])
+        out = _run(d.dispatch([_node("c1")]))
         assert out[0].run_info.run_mode is None
         assert out[0].run_info.assignee is None
         assert out[0].run_info.extend_props.get("miss_events") == ["no_bot_match"]
@@ -115,7 +120,7 @@ class TestBbsDegradation:
     def test_bbs_node_skips_search(self, svc):
         d, strat = _dispatcher(svc, SearchResult(outcome=SearchOutcome.MISS))
         node = _node("c1", run_mode="bbs", assignee="bot_bbs")
-        out = d.dispatch([node])
+        out = _run(d.dispatch([node]))
         assert out[0].run_info.run_mode == "bbs"
         assert out[0].run_info.assignee == "bot_bbs"
         assert len(strat.search_calls) == 0
@@ -125,11 +130,11 @@ class TestNoWriteGraph:
     def test_dispatch_returns_filled_nodes_only(self, svc):
         # dispatcher 持 graph 只读 config;不写图(不调 add/update/patch)。验证仅填充入参返回。
         d, _ = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="b1"))
-        out = d.dispatch([_node("c1"), _node("c2")])
+        out = _run(d.dispatch([_node("c1"), _node("c2")]))
         assert len(out) == 2
 
 
 class TestEmpty:
     def test_empty_list(self, svc):
         d, _ = _dispatcher(svc, SearchResult(outcome=SearchOutcome.MISS))
-        assert d.dispatch([]) == []
+        assert _run(d.dispatch([])) == []

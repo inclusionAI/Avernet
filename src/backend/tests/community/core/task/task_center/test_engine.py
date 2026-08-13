@@ -67,7 +67,7 @@ class StubPlanner:
         self._factory = factory or (lambda g: [])
         self.plan_calls = 0
 
-    def plan(self, graph) -> list[TaskNode]:
+    async def plan(self, graph) -> list[TaskNode]:
         self.plan_calls += 1
         return self._factory(graph)
 
@@ -78,7 +78,7 @@ class StubDispatcher:
         self.assignee = assignee
         self.miss = miss
 
-    def dispatch(self, toDoTaskList: list[TaskNode]) -> list[TaskNode]:
+    async def dispatch(self, toDoTaskList: list[TaskNode]) -> list[TaskNode]:
         out = []
         for n in toDoTaskList:
             if self.miss:

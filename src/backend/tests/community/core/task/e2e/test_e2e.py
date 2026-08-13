@@ -186,10 +186,10 @@ class _CasePlanningStrategy:
     def __init__(self, decomposer: CaseDecomposer):
         self._d = decomposer
 
-    def matches(self, graph) -> bool:
+    async def matches(self, graph) -> bool:
         return True
 
-    def apply(self, graph) -> list[TaskNode]:
+    async def apply(self, graph) -> list[TaskNode]:
         return self._d.decompose(graph)
 
 
@@ -200,10 +200,10 @@ class _CaseDispatchStrategy:
     def __init__(self, discover: CaseBotDiscover):
         self._d = discover
 
-    def matches(self, node, graph) -> bool:
+    async def matches(self, node, graph) -> bool:
         return True
 
-    def apply(self, node, graph) -> SearchResult:
+    async def apply(self, node, graph) -> SearchResult:
         return self._d.search(node)
 
 
@@ -400,7 +400,7 @@ class TestMissEscalateBbs:
         svc.add_task_nodes([bbs_sub], parent_node_id="t_case")
         # 框架驱动派发该 bbs 节点(corp 认领编排;此处经引擎内部 _dispatch_and_run 模拟)
         side = []
-        facade._engine._prepare_into("t_case", side)
+        _run(facade._engine._prepare_into("t_case", side))
         _run(facade._engine._drain("t_case", side))
         g = svc.query_task_dashboard("t_case")
         assert svc._get_node(g, "N_practice_bbs_bbs").status == Status.RUNNING
