@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from agentclaw.community.core.task.task_runner.integration.open_api_bot_adapter import (
-    OpenApiAuthError, OpenApiBotAdapter, OpenApiServerError, parse_bot_id,
+    OpenApiAuthError, OpenApiBotAdapter, OpenApiServerError, OpenApiTimeoutError, parse_bot_id,
 )
 
 
@@ -94,3 +94,56 @@ def test_server_error_raises():
 
     with pytest.raises(OpenApiServerError):
         _run(_adapter(h).get_run("mid_77"))
+
+
+def test_send_and_wait_returns_completed_run():
+    calls = {"n": 0}
+
+    def h(req):
+        if req.url.path == "/openapi/v1/messages" and req.method == "POST":
+            return httpx.Response(200, json={"data": {"message_id": "mid_1"}})
+        if req.url.path.endswith("/allowed-bots") and req.method == "GET":
+            return httpx.Response(200, json={"data": {"allowed_bots": ["bot9:ent1"]}})
+        if req.url.path.startswith("/openapi/v1/messages/mid") and req.method == "GET":
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return httpx.Response(200, json={"data": {"status": "RUNNING"}})
+            return httpx.Response(200, json={"data": {"status": "COMPLETED", "result": {"content": "ans"}}})
+        return httpx.Response(404)
+
+    a = _adapter(h)
+    run = a.send_and_wait(bot_id="bot9:ent1", message="hi", timeout=2.0, poll_interval=0.001)
+    assert run["status"] == "COMPLETED"
+    assert run["result"]["content"] == "ans"
+    assert calls["n"] >= 2  # 先 RUNNING 再 COMPLETED,至少轮询 2 次
+
+
+def test_send_and_wait_timeout_raises():
+    def h(req):
+        if req.url.path == "/openapi/v1/messages" and req.method == "POST":
+            return httpx.Response(200, json={"data": {"message_id": "mid_1"}})
+        if req.url.path.endswith("/allowed-bots") and req.method == "GET":
+            return httpx.Response(200, json={"data": {"allowed_bots": ["bot9:ent1"]}})
+        if req.url.path.startswith("/openapi/v1/messages/mid") and req.method == "GET":
+            return httpx.Response(200, json={"data": {"status": "RUNNING"}})
+        return httpx.Response(404)
+
+    a = _adapter(h)
+    with pytest.raises(OpenApiTimeoutError):
+        a.send_and_wait(bot_id="bot9:ent1", message="hi", timeout=0.05, poll_interval=0.001)
+
+
+def test_send_and_wait_failed_returns_run():
+    def h(req):
+        if req.url.path == "/openapi/v1/messages" and req.method == "POST":
+            return httpx.Response(200, json={"data": {"message_id": "mid_1"}})
+        if req.url.path.endswith("/allowed-bots") and req.method == "GET":
+            return httpx.Response(200, json={"data": {"allowed_bots": ["bot9:ent1"]}})
+        if req.url.path.startswith("/openapi/v1/messages/mid") and req.method == "GET":
+            return httpx.Response(200, json={"data": {"status": "FAILED", "error": "boom"}})
+        return httpx.Response(404)
+
+    a = _adapter(h)
+    run = a.send_and_wait(bot_id="bot9:ent1", message="hi", timeout=2.0, poll_interval=0.001)
+    assert run["status"] == "FAILED"
+    assert run["error"] == "boom"

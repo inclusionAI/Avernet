@@ -6,6 +6,8 @@ get_run:GET /openapi/v1/messages/{id}→ {status,result,error}(status 大小写�
 """
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import Any
 
 import httpx
@@ -88,3 +90,35 @@ class OpenApiBotAdapter(OpenApiBotPort):
                                    headers={"Authorization": f"Bearer {self._k.api_key}"})
         _map_status(r)
         return r.json().get("data") or {}
+
+    def send_and_wait(self, *, bot_id: str, message: str, metadata: dict[str, Any] | None = None,
+                      timeout: float = 180.0, poll_interval: float = 2.0) -> dict[str, Any]:
+        """同步便捷接口:ensure_grant → send_message → 轮询 get_run 到终态(COMPLETED/FAILED)。
+
+        在自有新事件循环上跑完整个 async 链路(对齐 run_execute 模式),供同步调用方一次拿回答。
+        终态返回 get_run 的 data dict;超时(默认 180s=3 分钟)抛 OpenApiTimeoutError;
+        grant 403 → OpenApiAuthError、5xx → OpenApiServerError 透传给同步调用方。
+        """
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(
+                self._send_and_wait_async(bot_id, message, metadata, timeout, poll_interval))
+        finally:
+            loop.close()
+
+    async def _send_and_wait_async(self, bot_id: str, message: str,
+                                   metadata: dict[str, Any] | None, timeout: float,
+                                   poll_interval: float) -> dict[str, Any]:
+        await self.ensure_grant(bot_id)
+        run_id = await self.send_message(bot_id=bot_id, message=message, metadata=metadata or {})
+        deadline = time.monotonic() + timeout
+        last_status = ""
+        while True:
+            run = await self.get_run(run_id)
+            last_status = str(run.get("status") or "")
+            if last_status.upper() in ("COMPLETED", "FAILED"):
+                return run
+            if time.monotonic() >= deadline:
+                raise OpenApiTimeoutError(
+                    f"run {run_id} not terminal within {timeout}s (last status={last_status})")
+            await asyncio.sleep(poll_interval)
