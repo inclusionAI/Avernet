@@ -494,8 +494,6 @@ dependencies = [
  "bcs-friend",
  "bcs-group",
  "bcs-group-store",
- "bcs-message",
- "bcs-message-store",
  "bcs-relation",
  "bcs-service-api",
  "bcs-session",

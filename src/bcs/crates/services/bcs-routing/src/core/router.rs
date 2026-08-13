@@ -81,6 +81,16 @@ fn overlay_forced_inject(overlay: &RouteParticipantOverlay) -> bool {
         || overlay.status == ActorStatus::Hidden
 }
 
+fn is_unified_ideograph(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{3400}'..='\u{4DBF}'
+            | '\u{4E00}'..='\u{9FFF}'
+            | '\u{F900}'..='\u{FAFF}'
+            | '\u{20000}'..='\u{2FA1F}'
+    )
+}
+
 fn is_display_name_mention_boundary(remainder: &str) -> bool {
     let Some(next) = remainder.chars().next() else {
         return true;
@@ -111,6 +121,7 @@ fn is_display_name_mention_boundary(remainder: &str) -> bool {
                 | '}'
                 | '》'
         )
+        || is_unified_ideograph(next)
 }
 
 // ---------------------------------------------------------------------------
@@ -1206,6 +1217,93 @@ mod tests {
         for target in &decision.targets {
             assert_eq!(target.delivery_type, DeliveryType::Send);
         }
+    }
+
+    #[tokio::test]
+    async fn test_chinese_display_name_allows_adjacent_chinese_message_text() {
+        let router = MessageRouter::new();
+        let mut session = create_test_session();
+        session.participants[1].bot_name = Some("圈人部署".to_string());
+
+        let decision = router.route(&session, "@圈人部署通知已输出", None).await;
+
+        assert_eq!(decision.mentions, vec!["consultant".to_string()]);
+        let consultant_target = decision
+            .targets
+            .iter()
+            .find(|target| target.bot_uuid == "consultant")
+            .unwrap();
+        assert_eq!(consultant_target.delivery_type, DeliveryType::Send);
+    }
+
+    #[tokio::test]
+    async fn test_overlay_route_allows_adjacent_chinese_message_text() {
+        let router = MessageRouter::new();
+        let mut session = create_overlay_test_session();
+        session.participants[1].bot_name = Some("圈人部署".to_string());
+        let overlay = vec![
+            ov_bot("driver", None, ActorStatus::Online),
+            ov_bot("bot_x", None, ActorStatus::Online),
+            ov_human("human_alice", ParticipantMode::Present, ActorStatus::Online),
+            ov_bot("sender", None, ActorStatus::Online),
+        ];
+
+        let decision = router
+            .route_with_overlay(
+                &session,
+                "@圈人部署通知已输出",
+                Some("sender"),
+                &overlay,
+            )
+            .await;
+
+        assert_eq!(decision.mentions, vec!["bot_x".to_string()]);
+        let target = decision
+            .targets
+            .iter()
+            .find(|target| target.bot_uuid == "bot_x")
+            .unwrap();
+        assert_eq!(target.delivery_type, DeliveryType::Send);
+    }
+
+    #[tokio::test]
+    async fn test_adjacent_chinese_mention_prefers_longest_display_name() {
+        let router = MessageRouter::new();
+        let mut session = create_test_session();
+        session.participants[0].bot_name = Some("圈人部署".to_string());
+        session.participants[1].bot_name = Some("圈人部署通知".to_string());
+
+        let decision = router.route(&session, "@圈人部署通知已输出", None).await;
+
+        assert_eq!(decision.mentions, vec!["consultant".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn test_ascii_display_name_allows_adjacent_chinese_message_text() {
+        let router = MessageRouter::new();
+        let mut session = create_test_session();
+        session.participants[1].bot_name = Some("xxx".to_string());
+
+        let decision = router.route(&session, "@xxx你好", None).await;
+
+        assert_eq!(decision.mentions, vec!["consultant".to_string()]);
+        let consultant_target = decision
+            .targets
+            .iter()
+            .find(|target| target.bot_uuid == "consultant")
+            .unwrap();
+        assert_eq!(consultant_target.delivery_type, DeliveryType::Send);
+    }
+
+    #[tokio::test]
+    async fn test_ascii_display_name_rejects_adjacent_ascii_text() {
+        let router = MessageRouter::new();
+        let mut session = create_test_session();
+        session.participants[1].bot_name = Some("dev".to_string());
+
+        let decision = router.route(&session, "@developer please respond", None).await;
+
+        assert!(decision.mentions.is_empty());
     }
 
     #[tokio::test]

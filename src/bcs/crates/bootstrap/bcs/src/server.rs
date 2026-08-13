@@ -1356,7 +1356,7 @@ fn build_openapi_v1_state(
     group_management: Arc<dyn GroupManagementService>,
     collaboration_runtime: Arc<dyn bcs_service_api::CollaborationRuntimeService>,
     session_repo: Arc<dyn SessionRepoPort>,
-    message_repo: Arc<dyn MessageRepoPort>,
+    group_message_history: Arc<dyn GroupMessageHistoryService>,
     session_files: Arc<dyn bcs_service_api::application::session_files::SessionFileService>,
     system_message: Arc<dyn SystemMessageService>,
     principal_verifier: Arc<dyn PrincipalVerifier>,
@@ -1387,7 +1387,7 @@ fn build_openapi_v1_state(
                 relation_env: relation_env.clone(),
             },
         )
-        .with_collaboration_runtime(collaboration_runtime),
+        .with_collaboration_runtime(collaboration_runtime.clone()),
     );
     let session_service = Arc::new(SessionServiceImpl::new(
         sessions.clone(),
@@ -1396,7 +1396,8 @@ fn build_openapi_v1_state(
         friends.clone(),
         relation,
         session_repo,
-        message_repo,
+        group_message_history,
+        collaboration_runtime,
         SessionServiceConfig { relation_env },
     ));
     let session_file_service = Arc::new(SessionFileApplicationServiceImpl::new(
@@ -1891,7 +1892,7 @@ impl Default for BcsServerState {
             group_management.clone(),
             collaboration_runtime.clone(),
             session_repo.clone(),
-            message_repo.clone(),
+            group_message_history.clone(),
             session_file_service.clone(),
             system_message.clone(),
             gateway_principal_verifier.clone(),
@@ -3240,7 +3241,7 @@ impl BcsServer {
             group_management.clone(),
             collaboration_runtime.clone(),
             session_repo.clone(),
-            message_repo.clone(),
+            group_message_history.clone(),
             session_file_service.clone(),
             use_cases.system_message.clone(),
             gateway_principal_verifier.clone(),
@@ -3840,7 +3841,7 @@ impl BcsServer {
             group_management.clone(),
             collaboration_runtime.clone(),
             session_repo.clone(),
-            message_repo.clone(),
+            group_message_history.clone(),
             session_file_service.clone(),
             use_cases.system_message.clone(),
             gateway_principal_verifier.clone(),

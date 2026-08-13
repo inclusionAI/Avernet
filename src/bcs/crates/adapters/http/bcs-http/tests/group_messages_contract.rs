@@ -5,6 +5,7 @@ use axum::{
 use bcs_auth_api::{AuthError, AuthPluginChain, AuthPrincipal, UserIdentityInfo};
 use bcs_auth_local::StaticAuthPlugin;
 use bcs_bot::BotCore;
+use bcs_domain::{AttachmentType, MessageAttachment};
 use bcs_group::{GroupManagement, GroupStore};
 use bcs_http::{
     router::build_router,
@@ -557,6 +558,31 @@ struct RecordingGroupMessageHistory {
     session_calls: Mutex<Vec<SessionHistoryCommand>>,
 }
 
+fn rich_session_messages() -> Vec<GroupMessage> {
+    vec![GroupMessage {
+        id: "hist-1".to_string(),
+        timestamp: 42,
+        sender: "owner-bot".to_string(),
+        content: "history answer".to_string(),
+        message_type: GroupMessageType::Bot,
+        bot_name: Some("Owner Bot".into()),
+        role: MessageRole::Assistant,
+        history_meta: Some(serde_json::json!({"assistantAggregation": true})),
+        metadata: Some(serde_json::json!({"tool": "search"})),
+        run_id: "run-1".into(),
+        attachments: Some(vec![MessageAttachment {
+            attachment_id: "att-1".into(),
+            attachment_type: AttachmentType::Image,
+            file_name: "result.png".into(),
+            mime_type: Some("image/png".into()),
+            size: Some(42),
+            sha256: Some("abcd".into()),
+            url: Some("https://download.example/result.png".into()),
+            expires_at: Some(123),
+        }]),
+    }]
+}
+
 #[async_trait::async_trait]
 impl GroupMessageHistoryService for RecordingGroupMessageHistory {
     async fn get_history(
@@ -608,19 +634,7 @@ impl GroupMessageHistoryService for RecordingGroupMessageHistory {
         self.session_calls.lock().await.push(cmd.clone());
         Ok(SessionHistoryResult {
             session_id: cmd.session_id,
-            messages: vec![GroupMessage {
-                id: "hist-1".to_string(),
-                timestamp: 42,
-                sender: "owner-bot".to_string(),
-                content: "history answer".to_string(),
-                message_type: GroupMessageType::Bot,
-                bot_name: None,
-                role: MessageRole::Assistant,
-                history_meta: None,
-                metadata: None,
-                run_id: String::new(),
-                attachments: None,
-            }],
+            messages: rich_session_messages(),
             limit: cmd.limit,
             before: cmd.before,
             next_before: None,
@@ -983,8 +997,15 @@ async fn session_messages_uses_history_service() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json[0]["id"], "hist-1");
-    assert_eq!(json[0]["content"], "history answer");
+    assert_eq!(
+        json,
+        serde_json::to_value(rich_session_messages()).expect("serialize expected history")
+    );
+    assert!(json.is_array());
+    assert_eq!(json[0]["historyMeta"]["assistantAggregation"], true);
+    assert_eq!(json[0]["attachments"][0]["type"], "image");
+    assert!(json.get("code").is_none());
+    assert!(json.get("data").is_none());
 
     // Verify the history service was called with the correct session ID
     let session_calls = group_message_history.session_calls.lock().await;
