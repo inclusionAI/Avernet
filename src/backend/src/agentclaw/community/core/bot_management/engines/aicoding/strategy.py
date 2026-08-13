@@ -4,6 +4,7 @@ All knowledge about coding template types, relay default envs and CodeFuse token
 provisioning lives here instead of being duplicated in bot/device/template
 services.
 """
+
 from __future__ import annotations
 
 import json
@@ -157,7 +158,10 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
             template_config.get("template_key") and template_config.get("template_uid")
         )
         normalized_engine = cls.normalize_engine_type(active_engine, default="")
-        return normalized_engine in TEMPLATE_CONFIG_CONSUMING_ENGINES and has_template_identity
+        return (
+            normalized_engine in TEMPLATE_CONFIG_CONSUMING_ENGINES
+            and has_template_identity
+        )
 
     def build_extra_envs(self, ctx: BotProvisioningContext) -> Dict[str, str] | None:
         template_type = ctx.template_type
@@ -174,9 +178,7 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         # template-factory templates expose their template_type verbatim so new
         # template types do not require backend enum/map changes.
         if template_type:
-            envs["BOT_TYPE"] = LEGACY_BOT_TYPE_ENV_MAP.get(
-                template_type, template_type
-            )
+            envs["BOT_TYPE"] = LEGACY_BOT_TYPE_ENV_MAP.get(template_type, template_type)
 
         devflow_workflow = template_config.get("devflow_workflow", "")
         if isinstance(devflow_workflow, dict):
@@ -199,7 +201,11 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
             if not isinstance(repos, list):
                 continue
             for repo in repos:
-                if isinstance(repo, str) and repo_key not in legacy_repo_keys and repo.strip():
+                if (
+                    isinstance(repo, str)
+                    and repo_key not in legacy_repo_keys
+                    and repo.strip()
+                ):
                     repo_list.append(repo.strip())
                 elif isinstance(repo, dict):
                     for url_key in ("repo_url", "url", "git_url", "ssh_url"):
@@ -252,30 +258,99 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
             ctx.active_engine not in TEMPLATE_CONFIG_CONSUMING_ENGINES
             and ctx.template_type not in CODING_TEMPLATE_TYPES
         ):
+            logger.info(
+                "[AicodingProvisioningStrategy.build_extra_properties] skipped: "
+                "bot_id=%s, active_engine=%s, template_type=%s, "
+                "reason=unsupported_engine_or_template",
+                ctx.bot_id,
+                ctx.active_engine,
+                ctx.template_type,
+            )
             return None
 
         stored = self._get_template_value(ctx.template_config, _THETA_KEY_PATH)
-        if (
-            secret_resolver is None
-            or not theta_master_key_secret
-            or not isinstance(stored, str)
-            or not stored.startswith(_ENCRYPTED_VALUE_PREFIX)
-        ):
+        has_theta_key = isinstance(stored, str) and bool(stored)
+        has_encrypted_theta_key = isinstance(stored, str) and stored.startswith(
+            _ENCRYPTED_VALUE_PREFIX
+        )
+        logger.info(
+            "[AicodingProvisioningStrategy.build_extra_properties] input: "
+            "bot_id=%s, active_engine=%s, template_type=%s, "
+            "has_template_config=%s, has_theta_key=%s, "
+            "has_encrypted_theta_key=%s, has_secret_resolver=%s, "
+            "has_theta_master_key_secret=%s",
+            ctx.bot_id,
+            ctx.active_engine,
+            ctx.template_type,
+            isinstance(ctx.template_config, dict),
+            has_theta_key,
+            has_encrypted_theta_key,
+            secret_resolver is not None,
+            bool(theta_master_key_secret),
+        )
+        if secret_resolver is None:
+            logger.warning(
+                "[AicodingProvisioningStrategy.build_extra_properties] fallback: "
+                "bot_id=%s, reason=secret_resolver_missing",
+                ctx.bot_id,
+            )
             return None
-        ciphertext = stored[len(_ENCRYPTED_VALUE_PREFIX):]
+        if not theta_master_key_secret:
+            logger.warning(
+                "[AicodingProvisioningStrategy.build_extra_properties] fallback: "
+                "bot_id=%s, reason=theta_master_key_secret_name_missing",
+                ctx.bot_id,
+            )
+            return None
+        if not has_encrypted_theta_key:
+            logger.warning(
+                "[AicodingProvisioningStrategy.build_extra_properties] fallback: "
+                "bot_id=%s, reason=encrypted_theta_key_missing_or_invalid",
+                ctx.bot_id,
+            )
+            return None
+
+        ciphertext = stored[len(_ENCRYPTED_VALUE_PREFIX) :]
         if not ciphertext:
+            logger.warning(
+                "[AicodingProvisioningStrategy.build_extra_properties] fallback: "
+                "bot_id=%s, reason=theta_ciphertext_empty",
+                ctx.bot_id,
+            )
             return None
 
         try:
             secret = secret_resolver.get_secret(theta_master_key_secret)
             master_key = getattr(secret, "secret_value", secret) if secret else None
             if not master_key:
+                logger.warning(
+                    "[AicodingProvisioningStrategy.build_extra_properties] fallback: "
+                    "bot_id=%s, reason=theta_master_secret_empty",
+                    ctx.bot_id,
+                )
                 return None
             api_key = secret_utils.symmetric_decrypt(ciphertext, str(master_key))
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "[AicodingProvisioningStrategy.build_extra_properties] fallback: "
+                "bot_id=%s, reason=theta_key_decrypt_failed, error_type=%s",
+                ctx.bot_id,
+                type(exc).__name__,
+            )
             return None
         if not isinstance(api_key, str) or not api_key:
+            logger.warning(
+                "[AicodingProvisioningStrategy.build_extra_properties] fallback: "
+                "bot_id=%s, reason=decrypted_theta_key_empty",
+                ctx.bot_id,
+            )
             return None
+
+        logger.info(
+            "[AicodingProvisioningStrategy.build_extra_properties] resolved: "
+            "bot_id=%s, custom_outbound_key_resolved=True",
+            ctx.bot_id,
+        )
         return {"outbound_api_key": api_key}
 
     def should_encrypt_template_token(self, ctx: BotProvisioningContext) -> bool:
@@ -361,7 +436,9 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         logger.info(
             "[aicoding.restart] persisted newer template snapshot: "
             "bot_id=%s old_version=%s new_version=%s",
-            ctx.bot_id, stored_version, incoming_version,
+            ctx.bot_id,
+            stored_version,
+            incoming_version,
         )
 
     def on_bot_created(self, ctx: BotProvisioningContext) -> None:
