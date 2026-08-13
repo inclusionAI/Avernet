@@ -98,6 +98,24 @@ def test_attachment_to_domain_optional_fields_none():
     assert domain.expires_at is None
 
 
+def test_file_attachment_to_domain():
+    """File attachments are accepted and preserve their temporary URL contract."""
+    att = PydanticAttachment.model_validate(
+        _make_attachment_dict(
+            type="file",
+            file_name="design.pdf",
+            mime_type="application/pdf",
+        )
+    )
+
+    domain = att.to_domain()
+
+    assert domain.type == "file"
+    assert domain.file_name == "design.pdf"
+    assert domain.mime_type == "application/pdf"
+    assert domain.url == "https://cdn.example.com/att_1"
+
+
 # ── ChatSendRequest attachments tests ──
 
 
@@ -126,6 +144,22 @@ def test_chat_send_request_without_attachments():
     req = ChatSendRequest.model_validate(body)
 
     assert req.attachments is None, "attachments must be None when key is absent"
+
+
+def test_chat_send_request_parses_file_attachment_with_empty_text():
+    """Pure file chat.send requests pass the BaaS boundary for Engine materialization."""
+    body = _make_send_request_body(
+        message={"role": "user", "content": [{"type": "text", "text": ""}]},
+        attachments=[
+            _make_attachment_dict(type="file", file_name="design.pdf"),
+        ],
+    )
+
+    req = ChatSendRequest.model_validate(body)
+
+    assert req.attachments is not None
+    assert req.attachments[0].type == "file"
+    assert req.attachments[0].file_name == "design.pdf"
 
 
 # ── ChatInjectRequest attachments test ──

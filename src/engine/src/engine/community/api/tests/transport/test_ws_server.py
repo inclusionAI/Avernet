@@ -35,6 +35,7 @@ from engine.community.kernel.frames import (
 from engine.community.manager import EngineManager
 from engine.community.api.transport.ws_server import (
     EngineWebSocketServer,
+    _ENGINE_LOCAL_CHAT_SCOPE_KEY_HASH,
     _is_openclaw_session_not_found,
 )
 from engine.community.api.transport.auth_gate import AuthGateResult
@@ -309,6 +310,41 @@ class TestHandleChatSend:
         assert response.ok is True
         stream.assert_called_once()
         assert stream.call_args.kwargs["attachments"] == attachments
+
+    @pytest.mark.asyncio
+    async def test_chat_send_accepts_remote_file_without_materialization_context(
+        self, server, fake_engine, auth_gate_service, monkeypatch
+    ):
+        websocket = MagicMock()
+        stream = AsyncMock()
+        server._stream_chat_events = stream
+        auth_gate_service.enabled = False
+        params = {
+            "sessionKey": "agent:main:user:165137",
+            "message": "",
+            "attachments": [
+                {
+                    "attachment_id": "att_1",
+                    "type": "file",
+                    "file_name": "brief.pdf",
+                    "url": "https://files.example/brief.pdf",
+                }
+            ],
+        }
+
+        response = await server._handle_chat_send(
+            websocket,
+            "conn-1",
+            _req("chat.send", params),
+            params,
+            auth_gate_service=auth_gate_service,
+        )
+
+        assert response.ok is True
+        stream.assert_called_once()
+        requests = stream.call_args.kwargs["chat_attachment_requests"]
+        assert len(requests) == 1
+        assert requests[0].scope_key_hash == _ENGINE_LOCAL_CHAT_SCOPE_KEY_HASH
 
     @pytest.mark.asyncio
     async def test_chat_send_rejects_invalid_attachments(self, server, fake_engine, auth_gate_service, monkeypatch):

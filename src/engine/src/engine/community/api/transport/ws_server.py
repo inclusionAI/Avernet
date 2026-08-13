@@ -86,6 +86,9 @@ _DEBUG = os.getenv("OPENCLAW_DEBUG_EVENTS", "").lower() in {"1", "true", "yes", 
 _REDACTED_MATERIALIZED_FILE = "[materialized-file]"
 _SESSION_FILES_PATH_MARKER = "/.teamclaw/session-files/"
 _CHAT_ATTACHMENT_LAYOUT_VERSION = "session_file_v1"
+_ENGINE_LOCAL_CHAT_SCOPE_KEY_HASH = hashlib.sha256(
+    b"engine_local_chat_scope_v1"
+).hexdigest()
 _MAX_CHAT_FILE_ATTACHMENTS = 5
 
 
@@ -193,13 +196,16 @@ def _parse_chat_file_materializations(
         return []
     if len(remote_files) > _MAX_CHAT_FILE_ATTACHMENTS:
         raise ValueError("too many remote file attachments")
-    if not isinstance(materialization_context, dict):
-        raise ValueError("materializationContext is required for remote files")
-    if materialization_context.get("layout_version") != _CHAT_ATTACHMENT_LAYOUT_VERSION:
-        raise ValueError("unsupported materializationContext layout_version")
-    scope_key_hash = materialization_context.get("scope_key_hash")
-    if not isinstance(scope_key_hash, str):
-        raise ValueError("materializationContext scope_key_hash is required")
+    if materialization_context is None:
+        scope_key_hash = _ENGINE_LOCAL_CHAT_SCOPE_KEY_HASH
+    else:
+        if not isinstance(materialization_context, dict):
+            raise ValueError("materializationContext must be an object")
+        if materialization_context.get("layout_version") != _CHAT_ATTACHMENT_LAYOUT_VERSION:
+            raise ValueError("unsupported materializationContext layout_version")
+        scope_key_hash = materialization_context.get("scope_key_hash")
+        if not isinstance(scope_key_hash, str):
+            raise ValueError("materializationContext scope_key_hash is required")
 
     requests: list[ChatAttachmentMaterializationRequest] = []
     for attachment in remote_files:
