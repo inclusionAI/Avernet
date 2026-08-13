@@ -13,6 +13,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 
 import aiofiles
 import httpx
+
 from engine.community.core.resource_materialization.models import (
     ChatAttachmentMaterializationRequest,
     MaterializationRequest,
@@ -161,20 +162,12 @@ class HttpTemporaryUrlPullClient:
     def __init__(
         self,
         *,
-        allowed_hosts: frozenset[str],
         max_bytes: int = 100 * 1024 * 1024,
         timeout_seconds: float = 60.0,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
-        if not allowed_hosts:
-            raise ValueError("temporary URL allowed_hosts is required")
         if max_bytes <= 0 or timeout_seconds <= 0:
             raise ValueError("temporary URL limits must be positive")
-        self._allowed_hosts = {
-            host.strip().lower() for host in allowed_hosts if host.strip()
-        }
-        if not self._allowed_hosts:
-            raise ValueError("temporary URL allowed_hosts is required")
         self._max_bytes = max_bytes
         self._timeout_seconds = timeout_seconds
         self._transport = transport
@@ -207,7 +200,7 @@ class HttpTemporaryUrlPullClient:
         )
         # COSEC: connect to the already-validated public IP so DNS cannot be
         # rebound between validation and the first request byte. Host and SNI
-        # retain the allowlisted hostname for HTTP routing and certificate checks.
+        # retain the original hostname for HTTP routing and certificate checks.
         async with (
             httpx.AsyncClient(
                 timeout=timeout,
@@ -244,7 +237,6 @@ class HttpTemporaryUrlPullClient:
         if (
             parsed.scheme != "https"
             or not host
-            or host not in self._allowed_hosts
             or parsed.username is not None
             or parsed.password is not None
         ):
