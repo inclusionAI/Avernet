@@ -78,6 +78,7 @@ def baas_service(fake_binding_repo, http):
         secret_resolver=MagicMock(),
         common_whitelist_service=MagicMock(),
         outbound_rule_provider=MagicMock(),
+        startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
     )
 
 
