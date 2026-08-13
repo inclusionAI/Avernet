@@ -19,6 +19,11 @@ The Human control-plane Bot batch contains exactly five operations:
 - `PATCH /openapi/v1/collaboration/bots/{bot_id}`
 - `GET /openapi/v1/collaboration/bots/mine`
 
+The candidates operation accepts either a physical Bot managed by the current
+Human or that Human's own `human_{subject.id}` record (including Human Actor).
+Both perspectives use the same discovery and collaboration filters, and the
+response still contains physical Bot candidates only.
+
 These operations deliberately do not add generic `GET /bots`, legacy
 `/actors/**` aliases, runtime discovery, or a separate descriptor patch route.
 All five require a Human Principal. The Bot domain object is discriminated by
