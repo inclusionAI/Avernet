@@ -9,6 +9,7 @@ from gateway.community.bootstrap._configs import DatabaseConfig
 from gateway.community.core.app import APIKeyGenerator, AppRegistrar, AppRepository
 from gateway.community.core.app._orm import AppRow
 from gateway.community.core.app._registrar import IssuedApp, PrefixAllocationError
+from gateway.community.core.app._repository import PrefixTakenError
 from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
 from gateway.community.spi.database import DataSourcePlugin
 
@@ -132,3 +133,45 @@ async def test_registration_succeeds_on_a_later_attempt() -> None:
     assert len(repository.checked) == 2
     assert repository.stored == 1
     assert issued.api_key[:8] == repository.checked[1]
+
+
+async def test_prefix_taken_at_insert_is_retried() -> None:
+    """The check-then-insert race: two concurrent registrations can both pass
+    ``exists_prefix``, so the loser must retry rather than 500."""
+
+    class _LosesFirstRace(_CollidingRepository):
+        async def exists_prefix(self, api_key_prefix: str) -> bool:
+            self.checked.append(api_key_prefix)
+            return False  # nothing seen yet — but someone else is inserting
+
+        async def store(self, **kwargs: object) -> int:
+            self.stored += 1
+            if self.stored == 1:
+                raise PrefixTakenError("raced")
+            return 7
+
+    repository = _LosesFirstRace()
+    issued = await AppRegistrar(repository).register(  # type: ignore[arg-type]
+        "X", "org", "assistant", "t", creator="a"
+    )
+
+    assert repository.stored == 2  # first insert lost the race, second won
+    assert issued.id == 7
+
+
+async def test_persistent_insert_races_fail_without_a_partial_write() -> None:
+    class _AlwaysRaced(_CollidingRepository):
+        async def exists_prefix(self, api_key_prefix: str) -> bool:
+            self.checked.append(api_key_prefix)
+            return False
+
+        async def store(self, **kwargs: object) -> int:
+            self.stored += 1
+            raise PrefixTakenError("raced")
+
+    repository = _AlwaysRaced()
+    with pytest.raises(PrefixAllocationError):
+        await AppRegistrar(repository).register(  # type: ignore[arg-type]
+            "X", "org", "assistant", "t", creator="a"
+        )
+    assert repository.stored == 3  # three attempts, all lost

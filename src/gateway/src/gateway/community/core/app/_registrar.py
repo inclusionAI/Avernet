@@ -15,6 +15,7 @@ returned by ``store``.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any
 
@@ -74,15 +75,20 @@ class AppRegistrar:
         unique index is the real guarantee, so a lost race is retried like any
         other collision.
         """
+        last_race: PrefixTakenError | None = None
         for _ in range(_MAX_PREFIX_ATTEMPTS):
             api_key = APIKeyGenerator.generate()
             api_key_prefix = api_key[:API_KEY_PREFIX_LEN]
             if await self._repository.exists_prefix(api_key_prefix):
                 continue  # cheap pre-check: skip the hash we would throw away
+            # Hashing is the same ~30ms PBKDF2 as verification, so it goes off
+            # the event loop for the same reason: registration must not stall
+            # unrelated traffic, and the retry can run it more than once.
+            api_key_hash = await asyncio.to_thread(APIKeyGenerator.hash_key, api_key)
             try:
                 # The registering caller is both creator and modifier.
                 app_id = await self._repository.store(
-                    api_key_hash=APIKeyGenerator.hash_key(api_key),
+                    api_key_hash=api_key_hash,
                     api_key_prefix=api_key_prefix,
                     app_name=app_name,
                     owners=owners,
@@ -94,8 +100,9 @@ class AppRegistrar:
                     creator=creator,
                     modifier=creator,
                 )
-            except PrefixTakenError:
-                continue  # lost the race to a concurrent registration
+            except PrefixTakenError as exc:
+                last_race = exc  # lost the race to a concurrent registration
+                continue
             return IssuedApp(
                 id=app_id,
                 app_name=app_name,
@@ -106,4 +113,4 @@ class AppRegistrar:
             )
         raise PrefixAllocationError(
             f"no unused API key prefix found in {_MAX_PREFIX_ATTEMPTS} attempts"
-        )
+        ) from last_race

@@ -12,6 +12,7 @@ Delete this module together with ``AppRepository._by_legacy_token`` and the
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 
 import pytest
 from sqlalchemy import event
@@ -19,6 +20,7 @@ from sqlalchemy import event
 from gateway.community.bootstrap import initialize_database
 from gateway.community.bootstrap._configs import DatabaseConfig
 from gateway.community.core.app import APIKeyGenerator, AppRepository, AppRow
+from gateway.community.core.app import _repository as app_repository
 from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
 from gateway.community.spi.app import RegisteredApp
 from gateway.community.spi.database import DataSourcePlugin
@@ -104,6 +106,16 @@ async def test_inactive_legacy_row_returns_none(registry: AppRepository) -> None
     assert await registry.find_app_by_credential(_INACTIVE_JWT) is None
 
 
+@pytest.fixture(autouse=True)
+def _reset_warned_apps() -> Iterator[None]:
+    """The warn-once ledger is module state keyed on surrogate ids, which restart
+    at 1 in every fresh in-memory DB. Clear on both sides so entries cannot leak
+    between tests or into another module."""
+    app_repository._warned_legacy_apps.clear()
+    yield
+    app_repository._warned_legacy_apps.clear()
+
+
 async def test_legacy_resolution_warns_with_the_app_identity(
     registry: AppRepository, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -116,6 +128,18 @@ async def test_legacy_resolution_warns_with_the_app_identity(
     message = warnings[0].getMessage()
     assert "deprecated" in message
     assert "Legacy App" in message  # identifies who still needs rotating
+
+
+async def test_legacy_warning_is_emitted_once_per_app_not_once_per_request(
+    registry: AppRepository, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A busy un-rotated app would otherwise emit millions of lines a day and
+    bury the quiet app that also needs rotating."""
+    with caplog.at_level(logging.WARNING):
+        for _ in range(5):
+            assert await registry.find_app_by_credential(_LEGACY_JWT) is not None
+
+    assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 1
 
 
 async def test_api_key_resolution_does_not_warn(

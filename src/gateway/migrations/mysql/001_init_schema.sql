@@ -5,6 +5,10 @@
 -- ON UPDATE CURRENT_TIMESTAMP), named `uk_`/`idx_` indexes, and per-column
 -- `COMMENT` (following the backend SQL style).
 --
+-- This file is CREATE TABLE IF NOT EXISTS, so it only provisions a NEW database.
+-- Changes to an already-deployed schema go in a numbered migration beside it
+-- (see `002_application_api_key.sql`); editing this file alone migrates nobody.
+--
 -- The gateway's bare/community edition creates these tables from ORM metadata
 -- via `DataSourcePlugin.create_all()` (in-memory SQLite; the bare plugin
 -- downgrades BIGINT PKs to INTEGER automatically). This DDL is the canonical
@@ -26,8 +30,8 @@ CREATE TABLE IF NOT EXISTS `avernet_application` (
   `app_name` varchar(256) NOT NULL COMMENT '应用名称',
   `app_type` varchar(64) NOT NULL DEFAULT 'UNKNOWN' COMMENT '应用类型',
   `api_key_hash` varchar(256) DEFAULT NULL COMMENT 'API Key 哈希(PBKDF2-SHA256，格式 base64(salt):base64(dk))',
-  `api_key_prefix` varchar(8) DEFAULT NULL COMMENT 'API Key 前 8 位，查找键(哈希加盐，无法按哈希查找)',
-  `token` varchar(1024) DEFAULT NULL COMMENT '[废弃] 旧版应用令牌(明文签名 JWT)，过渡期精确匹配查找键；待废弃日志静默后随查找路径一并删除',
+  `api_key_prefix` varchar(8) COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'API Key 前 8 位，查找键(哈希加盐，无法按哈希查找)',
+  `token` varchar(1024) COLLATE utf8mb4_bin DEFAULT NULL COMMENT '[废弃] 旧版应用令牌(明文签名 JWT)，过渡期精确匹配查找键；待废弃日志静默后随查找路径一并删除',
   `owners` varchar(1024) NOT NULL COMMENT '应用归属(开发者/组织)',
   `tenant` varchar(64) NOT NULL COMMENT '所属租户(逻辑引用 avernet_tenant.name)',
   `status` varchar(32) NOT NULL DEFAULT 'ACTIVE' COMMENT '状态(ACTIVE/INACTIVE)，仅 ACTIVE 可通过鉴权',

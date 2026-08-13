@@ -37,7 +37,7 @@ class AppRequest(BaseModel):
     # Constrained, not free text: authentication compares this to "ACTIVE"
     # exactly, so accepting "active" would mint a key that can never
     # authenticate while returning 201 as though registration had worked.
-    status: Literal["ACTIVE", "INACTIVE"] = "ACTIVE"
+    status: Literal["ACTIVE", "INACTIVE", "REVOKED"] = "ACTIVE"
     env: str = ""
     config: dict[str, Any] = Field(default_factory=dict)
 

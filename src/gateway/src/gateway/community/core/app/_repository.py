@@ -34,17 +34,38 @@ logger = get_logger("core-app")
 
 _ACTIVE = "ACTIVE"
 
-# App ids already reported as still presenting a legacy JWT. Warning once per
-# app rather than once per request keeps the deprecation signal readable: the
-# question is *which* apps still need rotating, and one busy app would otherwise
-# emit millions of lines a day and bury a quiet one. Module-level because the DI
-# container builds this repository per request (``providers.Factory``), so
-# instance state would never survive long enough to dedupe anything.
+# App ids already reported — once for still presenting a legacy JWT, once for a
+# corrupt credential row. Reporting once per app rather than once per request
+# keeps both signals readable: the question is *which* apps are affected, and one
+# busy app would otherwise emit millions of lines a day and bury a quiet one. A
+# corrupt row is the worse case, since it can never authenticate and its client
+# retries forever. Module-level because the DI container builds this repository
+# per request (``providers.Factory``), so instance state would never survive long
+# enough to dedupe anything.
 _warned_legacy_apps: set[int] = set()
+_reported_corrupt_apps: set[int] = set()
 
 
 class PrefixTakenError(RuntimeError):
     """The API-key prefix was claimed concurrently; generate another and retry."""
+
+
+def _report_corrupt_row(record: RegisteredApp, problem: str) -> None:
+    """Log a credential row that cannot ever authenticate, once per app.
+
+    Loud because the symptom otherwise is an app that mysteriously fails while
+    its row looks perfectly fine to whoever is reading the table.
+    """
+    if record.id in _reported_corrupt_apps:
+        return
+    _reported_corrupt_apps.add(record.id)
+    logger.error(
+        "app credential row is unusable (%s): id=%s app_name=%s "
+        "(logged once per app per process)",
+        problem,
+        record.id,
+        record.app_name,
+    )
 
 
 class AppRepository(AppRegistry):
@@ -94,15 +115,17 @@ class AppRepository(AppRegistry):
             stored_hash, record = row.api_key_hash, row.to_record()
 
         if stored_hash is None:
-            # Violates the table's one-credential-form invariant — a partial
-            # write or a botched migration. Logged loudly, because the symptom
-            # otherwise is an app that cannot authenticate while its row looks
-            # perfectly fine to whoever is reading the table.
-            logger.error(
-                "app row has an api_key_prefix but no api_key_hash: id=%s app_name=%s",
-                record.id,
-                record.app_name,
-            )
+            # Violates the table's one-credential-form invariant: a partial
+            # write or a botched migration.
+            _report_corrupt_row(record, "api_key_prefix set but api_key_hash is NULL")
+            return None
+        if stored_hash.count(":") != 1 or not all(stored_hash.split(":")):
+            # ``verify_key`` would return False here like any wrong key, so the
+            # shape is checked first to tell corruption apart from a bad
+            # credential. Deeper corruption (valid shape, unusable base64) still
+            # reads as a plain rejection — that branch is inside the copied
+            # generator, which cannot be edited without breaking parity.
+            _report_corrupt_row(record, "api_key_hash is not 'salt:digest'")
             return None
 
         # PBKDF2 is ~30ms of CPU and must not run on the event loop: measured
@@ -199,4 +222,9 @@ class AppRepository(AppRegistry):
                 session.flush()
                 return row.id
         except IntegrityError as exc:
+            # Only a prefix collision is retryable. Mapping every IntegrityError
+            # would turn a NOT NULL or FK violation into three silent retries and
+            # a "no unused prefix" error naming the wrong cause entirely.
+            if "api_key_prefix" not in str(exc.orig):
+                raise
             raise PrefixTakenError(api_key_prefix) from exc
