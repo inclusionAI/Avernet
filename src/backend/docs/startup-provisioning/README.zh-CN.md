@@ -56,6 +56,7 @@ skills、engine config、identity 文件，以及（在支持的引擎上）一�
 | --- | --- | --- |
 | `design.zh-CN.md` | 完整设计：动机、备选方案取舍、apply 语义、失败/安全/观测、版本化 | 平台 & 引擎团队 |
 | `manifest-schema.zh-CN.md` | Manifest v1 草案：六类配置的字段、校验、到各引擎的映射 | 平台 & 引擎团队 |
+| `examples.zh-CN.md` | 六类配置的完整案例：业务场景、manifest 写法、apply 动作、交付形态 | 平台 & 引擎团队 & 业务方 |
 | `engine-requirements.zh-CN.md` | 各引擎的工作量与需确认清单、能力矩阵、开放问题 | 平台 & 引擎团队 |
 
 ## 术语表
