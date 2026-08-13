@@ -24,9 +24,9 @@ in ``plan.md`` under "Notes on upstream follow-ups":
 
 * ``validate_format`` uses ``re.match`` with ``$``, which also matches before a
   trailing newline, so a 33-character value ending in ``\\n`` passes as a 32-char
-  key. The credential dispatch built on this predicate is tested directly for
-  the property that matters — such a value never authenticates — rather than
-  for the quirk itself.
+  key. Nothing consumes this predicate yet; when Task 4 builds the credential
+  dispatch on it, the property to test there is that such a value authenticates
+  on neither path — not the quirk itself, which is upstream's to fix.
 * ``verify_key`` decodes with a non-validating ``base64.b64decode``, so a stored
   hash corrupted only by characters outside the base64 alphabet still verifies.
 """
@@ -54,31 +54,47 @@ _SECBAAS_HASH = (
 )
 
 _SECBAAS_RELPATH = "src/baas/src/secbaas/community/core/service/api_gateway/_key_gen.py"
+_OURS_RELPATH = "src/gateway/src/gateway/community/core/app/_key_gen.py"
+
+# The monorepo root is the ancestor holding both module trees. Derived from the
+# two paths above so that moving either module leaves one place to update —
+# a second hardcoded "src/baas" would make the guidance in _secbaas_source()
+# insufficient, since the probe would stop matching before the relpath is read.
+_MODULE_DIRS = tuple(
+    Path(*Path(rel).parts[:2]) for rel in (_SECBAAS_RELPATH, _OURS_RELPATH)
+)
 
 
 def _monorepo_root() -> Path | None:
-    """The ancestor holding both module trees, or ``None`` outside the monorepo.
+    """The ancestor holding both module trees, or ``None`` if there is none.
 
-    Keyed on the two directories rather than on ``AGENTS.md``: this repo already
-    places that file at module level (``src/bcs``, ``src/frontend``), so a future
-    ``src/gateway/AGENTS.md`` would silently resolve the wrong root. ``None``
-    means the gateway was split out on its own, where there is no secbaas to
-    compare against — distinct from "the monorepo is here but the file moved",
-    which must fail loudly rather than quietly drop the parity guarantee.
+    Keyed on the module directories rather than on ``AGENTS.md``: this repo
+    already places that file at module level (``src/bcs``, ``src/frontend``), so
+    a future ``src/gateway/AGENTS.md`` would silently resolve the wrong root.
+
+    ``None`` is ambiguous between "the gateway was split out on its own" and
+    "a module directory was renamed", and is treated as the former — the tests
+    skip. That is a real gap: see the note in ``plan.md`` on the CI gate scoring
+    skips as passes.
     """
     for parent in Path(__file__).resolve().parents:
-        if (parent / "src/baas").is_dir() and (parent / "src/gateway").is_dir():
+        if all((parent / module).is_dir() for module in _MODULE_DIRS):
             return parent
     return None
 
 
-def _secbaas_source() -> Path:
+def _require_monorepo_root() -> Path:
     root = _monorepo_root()
     if root is None:
         pytest.skip(
-            "gateway checked out without src/baas; parity is not checkable here"
+            f"no ancestor holds all of {[str(m) for m in _MODULE_DIRS]}; "
+            "parity against secbaas is not checkable from this checkout"
         )
-    source = root / _SECBAAS_RELPATH
+    return root
+
+
+def _secbaas_source() -> Path:
+    source = _require_monorepo_root() / _SECBAAS_RELPATH
     if not source.is_file():
         pytest.fail(
             f"secbaas key generator not found at {source}. This copy's migration "
@@ -104,16 +120,22 @@ def _load_secbaas_generator(source: Path) -> ModuleType:
 
 
 def _split_stored_hash(stored: str) -> tuple[bytes, bytes]:
-    """Decode a stored hash strictly, so the encoding itself is pinned.
+    """Decode a stored hash, checking each half re-encodes to what was stored.
 
-    ``validate=True`` matters here: the default silently discards characters
-    outside the base64 alphabet, which would let a switch to ``urlsafe_b64encode``
-    pass these tests most of the time instead of failing deterministically.
+    Decoding alone pins nothing about the alphabet: ``b64decode`` accepts a
+    ``urlsafe_b64encode`` string unchanged, and ``validate=True`` does not change
+    that (measured: identical ~26% acceptance either way). Re-encoding catches
+    the switch — but only for payloads that actually contain a ``-`` or ``_``.
+    For the other ~26%, the two alphabets emit *byte-identical* output, so the
+    difference is unobservable at any sample size of one. Callers that need the
+    alphabet pinned must sample; see
+    :func:`test_hash_key_output_uses_documented_pbkdf2_parameters`.
     """
     salt_b64, dk_b64 = stored.split(":")
-    return base64.b64decode(salt_b64, validate=True), base64.b64decode(
-        dk_b64, validate=True
-    )
+    salt, dk = base64.b64decode(salt_b64), base64.b64decode(dk_b64)
+    assert base64.b64encode(salt).decode() == salt_b64, "salt is not standard base64"
+    assert base64.b64encode(dk).decode() == dk_b64, "digest is not standard base64"
+    return salt, dk
 
 
 def test_secbaas_produced_hash_verifies() -> None:
@@ -151,15 +173,22 @@ def test_hash_key_output_uses_documented_pbkdf2_parameters() -> None:
     passes every other test in a checkout with no ``src/baas`` on disk: the
     internal round-trips stay self-consistent under any change applied to
     ``hash_key`` and ``verify_key`` together, and the parity tests skip.
-    """
-    key = APIKeyGenerator.generate()
-    salt, stored_dk = _split_stored_hash(APIKeyGenerator.hash_key(key))
 
-    assert len(salt) == 32
-    assert len(stored_dk) == 32
-    assert stored_dk == hashlib.pbkdf2_hmac(
-        hash_name="sha256", password=key.encode(), salt=salt, iterations=100_000
-    )
+    Repeated because the base64 alphabet cannot be pinned by one sample — a
+    ``urlsafe_b64encode`` switch is byte-invisible for the ~26% of payloads
+    containing neither ``-`` nor ``_``. Ten samples take that blind spot from
+    roughly one run in four to one in a million; the digest and iteration count
+    are pinned deterministically by any single one.
+    """
+    for _ in range(10):
+        key = APIKeyGenerator.generate()
+        salt, stored_dk = _split_stored_hash(APIKeyGenerator.hash_key(key))
+
+        assert len(salt) == 32
+        assert len(stored_dk) == 32
+        assert stored_dk == hashlib.pbkdf2_hmac(
+            hash_name="sha256", password=key.encode(), salt=salt, iterations=100_000
+        )
 
 
 def test_generate_is_32_char_base62() -> None:
@@ -198,7 +227,7 @@ def test_verify_rejects_wrong_key() -> None:
         "",  # empty column
         "no-colon-separator",  # unpack fails: one field
         "a:b:c",  # unpack fails: three fields, e.g. a migration concatenation
-        "!!!:???",  # decodes to empty, fails on length
+        "!!!:???",  # decodes to empty; compare_digest then mismatches
         "onlysalt:",
         ":onlydk",
     ],
@@ -239,10 +268,24 @@ def test_round_trip_against_secbaas_implementation() -> None:
 def test_copy_is_byte_identical_to_secbaas_source() -> None:
     """The copy must not drift; edit the scheme in both places or neither.
 
-    Anchored to the module actually imported by this suite, not to a path in the
-    source tree: under a non-editable install those are different files, and
-    comparing the tree would pass while the loaded code was stale.
+    Checks both the file a contributor edits and the file this suite actually
+    imports. They are the same under the editable install used here, but diverge
+    under a non-editable one — and checking only the loaded module would also
+    pass vacuously if the gateway ever re-exported secbaas's class instead of
+    keeping a copy, which is the cross-module dependency the plan rejects.
     """
-    loaded = inspect.getsourcefile(APIKeyGenerator)
-    assert loaded is not None
-    assert Path(loaded).read_bytes() == _secbaas_source().read_bytes()
+    source = _secbaas_source()
+    expected = source.read_bytes()
+
+    loaded_path = inspect.getsourcefile(APIKeyGenerator)
+    assert loaded_path is not None
+    loaded = Path(loaded_path).resolve()
+    tree_copy = (_require_monorepo_root() / _OURS_RELPATH).resolve()
+
+    assert loaded != source.resolve(), (
+        "APIKeyGenerator is being imported from secbaas rather than from the "
+        "gateway's own copy — the byte-identity check would compare a file to "
+        "itself, and the copy the plan calls for would be gone."
+    )
+    assert tree_copy.read_bytes() == expected
+    assert loaded.read_bytes() == expected

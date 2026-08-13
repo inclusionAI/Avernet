@@ -374,30 +374,6 @@ guard left. Path resolution keys on the ancestor holding both `src/baas` and
 — so "split out on its own" (skip) stays distinguishable from "the file moved"
 (fail).
 
-## Notes on upstream follow-ups
-
-Two defects live in the copied scheme. Neither can be fixed here: byte-identity
-with secbaas is the migration guarantee, so a one-sided edit is worse than the
-defect. Both need a secbaas change plus a re-copy, and neither is triggered by
-anything the gateway does today.
-
-1. **`validate_format` accepts a trailing newline.** `re.match(r"^…{32}$", s)`
-   also matches immediately before a trailing `\n`, so a 33-character value
-   passes as a 32-char key (`re.fullmatch` or `\Z` would not). Harmless for the
-   credential dispatch — a newline-suffixed value authenticates on neither path,
-   which Task 4 tests directly — but wrong wherever this is used to validate
-   input, including in the migration tooling.
-2. **`verify_key` decodes non-validating.** `base64.b64decode` defaults to
-   discarding characters outside the alphabet, so a stored hash corrupted only
-   by inserted punctuation decodes to the original bytes and still verifies —
-   a fail-open on data corruption. `validate=True` fixes it.
-
-A third, structural: the gateway CI job is selected by changed paths under
-`src/gateway`, so a commit touching only secbaas's copy never runs
-`test_copy_is_byte_identical_to_secbaas_source`. The byte-identity guard is
-therefore one-directional until that path filter also watches the secbaas
-generator.
-
 ```python
 # src/gateway/tests/unit/plugins/test_app_registry_db.py (rework)
 def test_correct_key_resolves_active_seeded_app(): ...  # seed hash+prefix, present plaintext
@@ -444,3 +420,38 @@ def test_creator_recorded_as_creator_and_modifier(): ...      # kept from today
 
 Gates: `scripts/ci/python_sast_local.sh` (pre-push lint) and the gateway module
 test suite; run the full module gate via `OCB_PRE_PUSH_RUN_CI=1` before push.
+
+## Notes on upstream follow-ups
+
+Two defects live in the copied scheme. Neither can be fixed here: byte-identity
+with secbaas is the migration guarantee, so a one-sided edit is worse than the
+defect. Both need a secbaas change plus a re-copy, and neither is triggered by
+anything the gateway does today.
+
+1. **`validate_format` accepts a trailing newline.** `re.match(r"^…{32}$", s)`
+   also matches immediately before a trailing `\n`, so a 33-character value
+   passes as a 32-char key (`re.fullmatch` or `\Z` would not). Harmless for the
+   credential dispatch — a newline-suffixed value authenticates on neither path,
+   which Task 4 must test — but wrong wherever this is used to validate input,
+   including in the migration tooling.
+2. **`verify_key` decodes non-validating.** `base64.b64decode` defaults to
+   discarding characters outside the alphabet, so a stored hash corrupted only
+   by inserted punctuation decodes to the original bytes and still verifies —
+   a fail-open on data corruption. `validate=True` fixes it.
+
+Two further structural gaps, both outside this change's blast radius:
+
+3. **The byte-identity guard is one-directional.** The gateway CI job is
+   selected by changed paths under `src/gateway`, so a commit touching only
+   secbaas's copy never runs `test_copy_is_byte_identical_to_secbaas_source`.
+   The clean fix is a mirror assertion in
+   `src/baas/tests/unit/core/service/api_gateway/test_key_gen.py`, which runs on
+   exactly the commits the gateway job skips — a baas-module change, hence not
+   made here.
+4. **A skip reads as a pass at the coverage gate.** `scripts/ci/report_check.py`
+   computes `passed = tests - failures - errors`, so if the parity tests ever
+   skip (no ancestor holding both module trees — a split-out checkout, or a
+   renamed module directory), CI still reports 100%. Hard-failing instead would
+   break legitimately standalone checkouts, so the ambiguity is recorded rather
+   than resolved; item 3 removes most of its consequence.
+
