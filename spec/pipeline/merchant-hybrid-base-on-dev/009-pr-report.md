@@ -36,9 +36,13 @@
 | merchant_hybrid Shell 回归 | PASS | `bash scripts/test_merchant_hybrid.sh` | - | - | profile、模型、顺序与回滚通过 |
 | Provider bridge 回归 | PASS | `node scripts/test_bcs_baas_provider_bridge.mjs` | - | - | h2c/HTTP1、鉴权与日志脱敏通过 |
 | singlebox service guards | PASS | `bash scripts/test_singlebox_service_guards.sh` | - | - | guard 与失败回滚通过 |
+| BaaS 覆盖率缺口定向测试 | PASS | `pytest` 目标 2 个测试文件 + coverage JSON | - | 本次覆盖率测试提交 | 66 passed；CI 指出的 10 条未覆盖新增行全部 executed |
+| BaaS 本地完整 CI | BLOCKED | `DEPLOY_ENV=dev bash scripts/ci_test.sh --base origin/dev` | E2E 启动阶段本地 8888 端口冲突，完整流水线未得到有效结论 | 停止本地全量运行，交由隔离的 GitHub runner 复验 | 定向测试与 ruff 均通过 |
 | Claude relay ESLint | BLOCKED | `npm run lint` | 当前 package 与父目录缺少 ESLint 配置，ESLint 在规则加载前退出 | 未修改业务代码规避 | 单测、TypeScript 构建正常 |
-| Gateway unit tests | PASS | https://github.com/inclusionAI/Avernet/actions/runs/31681025528/job/94386258462 | - | - | GitHub check SUCCESS |
-| BCS e2e / Singlebox coverage / BCS、Backend、Engine、BaaS unit tests | PENDING | PR #1009 checks | 正在运行 | - | 等待最终状态 |
+| BCS e2e coverage | PASS | https://github.com/inclusionAI/Avernet/actions/runs/31681089545/job/94386515164 | - | - | GitHub check SUCCESS |
+| BCS / Backend / Engine / Gateway unit tests | PASS | https://github.com/inclusionAI/Avernet/actions/runs/31681089519 | - | - | 4 个 GitHub checks 均 SUCCESS |
+| BaaS unit tests（修复前 head） | FAIL | https://github.com/inclusionAI/Avernet/actions/runs/31681089519/job/94386518361 | 用例通过率 100%、总行覆盖率 92.94%，但 changed-line coverage 为 32/42（76.19%），低于 90% | 新增 SecretStore/本地 token 回退与 loopback 直连行为测试 | 本地确认原 10 条缺口全部 executed；等待新 head GitHub check |
+| Singlebox coverage | PENDING | https://github.com/inclusionAI/Avernet/actions/runs/31681089517/job/94386516417 | 修复前 head 仍在运行 | - | 等待最终状态 |
 
 ## 人工意见
 
@@ -52,4 +56,4 @@
 - 自动意见: CLEAR
 - ACI/CI: PENDING
 - 人工意见: CLEAR
-- 下一步: 推送本报告更新，随后检查最终 head 的自动意见、人工意见与全部远端 checks。
+- 下一步: 推送 BaaS changed-line coverage 测试，随后检查最终 head 的自动意见、人工意见与全部远端 checks。

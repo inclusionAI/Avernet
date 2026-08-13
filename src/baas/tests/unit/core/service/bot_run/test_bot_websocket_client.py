@@ -21,6 +21,7 @@ import pytest
 from secbaas.community.core.service.bot_run._bot_websocket_client import (
     BotWebSocketClient,
     ChatRequestError,
+    _is_loopback_websocket_uri,
 )
 
 # ==================== Fixtures ====================
@@ -135,6 +136,17 @@ class TestInit:
         assert client.uri == "wss://test.example.com/ws"
 
 
+@pytest.mark.parametrize(
+    ("uri", "expected"),
+    [
+        ("/relative/path", False),
+        ("ws://localhost:18900/ws", True),
+    ],
+)
+def test_is_loopback_websocket_uri_handles_hostname_edges(uri, expected):
+    assert _is_loopback_websocket_uri(uri) is expected
+
+
 # ==================== Tests: _next_request_id ====================
 
 
@@ -178,7 +190,9 @@ class TestConnect:
     # [单测用例]测试场景：连接成功并完成握手
     async def test_connect_handshake_success(self, client):
         """Successfully completes handshake with response."""
+        client.uri = "ws://127.0.0.1:18900/ws"
         mock_ws = AsyncMock()
+        connect_kwargs = {}
 
         async def mock_send(data):
             sent = json.loads(data)
@@ -203,6 +217,7 @@ class TestConnect:
         mock_ws.__aiter__ = AsyncMock(return_value=iter([]))
 
         async def mock_connect(*args, **kwargs):
+            connect_kwargs.update(kwargs)
             return mock_ws
 
         with (
@@ -223,6 +238,7 @@ class TestConnect:
         assert client.connected is True
         assert client.server_info == {"version": "2.5"}
         assert client.features == {"chat": True}
+        assert connect_kwargs["proxy"] is None
 
         await client.close()
 
