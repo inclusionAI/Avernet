@@ -198,10 +198,27 @@ def test_known_field_names_are_still_named():
         redact_error_location,
     )
 
+    # Query/path/header names are declared by the handler, never sent by the
+    # caller, so they stay readable — this is the case that started the change.
     assert redact_error_location(("query", "user_id"), "missing") == "query.user_id"
+    # Under `body` a caller-chosen key can sit at any depth, so only the root
+    # and list indices survive.
     assert redact_error_location(("body", "items", 3, "title"), "missing") == (
-        "body.items.3.title"
+        "body.<field>.3.<field>"
     )
+
+
+def test_a_free_form_map_key_is_not_echoed():
+    """The leak a name-shaped filter misses: a caller-chosen key that looks
+    exactly like a field name, e.g. an MCP header called SECRETKEY1234567890."""
+    from agentclaw.community.adapters.http.openapi_v1.responses import (
+        redact_error_location,
+    )
+
+    rendered = redact_error_location(
+        ("body", "headers", "SECRETKEY1234567890"), "string_type"
+    )
+    assert "SECRETKEY1234567890" not in rendered
 
 
 def test_internal_validation_error_keeps_fastapi_shape():

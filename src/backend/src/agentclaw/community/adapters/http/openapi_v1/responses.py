@@ -17,7 +17,6 @@ a builder on success and let the decorator handle the mapped failures.
 from __future__ import annotations
 
 import inspect
-import re
 from functools import wraps
 from http import HTTPStatus
 from json import JSONDecodeError
@@ -476,50 +475,59 @@ def _is_json_content_type(request: Request) -> bool:
     return subtype == "application/json" or subtype.endswith("+json")
 
 
-#: A location segment safe to echo: what a schema-defined field name looks like.
-#: Anything else in a ``loc`` came from the request — an unknown key under
-#: ``extra="forbid"``, or a map key in a free-form object — and is not echoed.
-_SAFE_LOCATION_SEGMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}\Z")
+#: Where a validation failure sits. These come from the framework, never from
+#: the request, so they are always safe to name.
+_LOCATION_ROOTS: frozenset[str] = frozenset(
+    {"body", "query", "path", "header", "cookie"}
+)
 
-#: Stands in for a segment the caller chose. Named rather than blanked so the
-#: shape of the path survives: ``body.<field>`` still says where to look.
+#: Roots whose remaining segments are parameter names declared by a handler
+#: signature. A caller supplies parameter *values*, never their names, so these
+#: paths render in full — which is what makes ``query.user_id`` readable.
+_DECLARED_NAME_ROOTS: frozenset[str] = frozenset({"query", "path", "header", "cookie"})
+
+#: Stands in for a segment that could have come from the request. Named rather
+#: than blanked so the shape survives: ``body.<field>`` still says where to look.
 _REDACTED_SEGMENT = "<field>"
-
-#: The one error type whose final ``loc`` segment is caller-supplied by
-#: definition — pydantic reports the rejected key itself.
-_CALLER_NAMED_TYPES: frozenset[str] = frozenset({"extra_forbidden"})
-
-
-def _safe_segment(part: object) -> str:
-    """One ``loc`` segment, echoed only when it cannot be caller-chosen text."""
-    text = str(part)
-    if text.isdigit():  # a list index, not a name
-        return text
-    return text if _SAFE_LOCATION_SEGMENT.fullmatch(text) else _REDACTED_SEGMENT
 
 
 def _error_location(loc: object, kind: str = "") -> str:
     """A validation error's ``loc`` tuple as a caller-readable path.
 
     Segments are filtered, not just joined. Dropping ``input`` keeps the
-    caller's *values* out of the response; it does nothing about their *keys*,
-    and a rejected unknown field puts one straight into ``loc`` — so a caller
-    who sends ``{"sk-live-…": 1}`` to a strict model would otherwise read their
-    own credential back in the 422, and see it copied into the server log.
+    caller's *values* out of the response and the log; it does nothing about
+    their *keys*, and the body puts those into ``loc`` two different ways — a
+    rejected unknown field under ``extra="forbid"``, and a map key inside a
+    free-form object such as the MCP config's ``headers``. Either would
+    otherwise copy a credential the caller mistakenly used as a name into the
+    422 and into the log line.
 
-    Two rules, because there are two ways a segment can carry request text. Any
-    segment that does not look like a schema-defined name is replaced, which
-    covers a map key inside a free-form object. And for ``extra_forbidden`` the
-    final segment *is* the rejected key whatever it looks like, so it is
-    replaced regardless — an unknown field name is by definition not one this
-    surface published.
+    So the rule is positional rather than a guess at what a name looks like.
+    Query, path, header and cookie segments are handler-declared and render in
+    full. Under ``body`` only the root is kept: a caller-chosen key can appear
+    at any depth there — the engine-config PUT takes a free-form object as the
+    *whole* body — and a key that happens to look like an identifier is exactly
+    the case a pattern-based filter lets through. List indices stay, since a
+    number carries nothing.
+
+    The cost is real: ``body.title`` reads as ``body.<field>``. The message
+    still carries pydantic's own ``msg``, and the schema names the fields, so
+    what is lost is precision on which body field — not the ability to fix the
+    request. Leaking a caller's key is the worse trade.
     """
     if not isinstance(loc, (list, tuple)) or not loc:
         return "request"
-    parts = [_safe_segment(part) for part in loc]
-    if kind in _CALLER_NAMED_TYPES:
-        parts[-1] = _REDACTED_SEGMENT
-    return ".".join(parts)
+    parts = [str(part) for part in loc]
+    root = parts[0]
+    if root in _DECLARED_NAME_ROOTS:
+        return ".".join(parts)
+    if root not in _LOCATION_ROOTS:
+        # Not a shape we recognise; assume the worst rather than echo it.
+        return _REDACTED_SEGMENT
+    rendered = [root] + [
+        part if part.isdigit() else _REDACTED_SEGMENT for part in parts[1:]
+    ]
+    return ".".join(rendered)
 
 
 def redact_error_location(loc: object, kind: str = "") -> str:
@@ -545,10 +553,17 @@ def validation_message(errors: list[dict[str, object]], request: Request) -> str
     unreadable_body = False
     for error in errors:
         kind = str(error.get("type") or "")
-        loc = _error_location(error.get("loc"), kind)
-        if (loc, kind) in seen:
+        raw = error.get("loc")
+        loc = _error_location(raw, kind)
+        # Deduplicate on the *unredacted* location. Redaction maps many distinct
+        # body fields onto one rendered path, so keying on the rendered form
+        # would collapse a body with several different problems into a single
+        # line — hiding failures rather than repeating them. The caller still
+        # gets one line per real failure, each carrying pydantic's own message.
+        key = (str(raw), kind)
+        if key in seen:
             continue
-        seen.add((loc, kind))
+        seen.add(key)
         if loc == "body" and kind in _UNREADABLE_BODY_TYPES:
             unreadable_body = True
         if len(parts) < _MAX_REPORTED_ERRORS:

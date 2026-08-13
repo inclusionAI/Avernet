@@ -6777,7 +6777,7 @@
     },
     "/openapi/v1/bots/identity/{bot_id}": {
       "get": {
-        "description": "List a bot's identity files and whether each exists.\n\nEvery possible file is listed, including the ones the bot does not have yet\n— read `exists` to tell them apart.",
+        "description": "List a bot's identity files and whether each has content.\n\nEvery possible file is listed. `exists` reports whether one has content —\nit does not separate a file the bot never had from one blanked by an empty\nwrite, since both read as empty here.",
         "operationId": "list_bot_identity_files_openapi_v1_bots_identity__bot_id__get",
         "parameters": [
           {

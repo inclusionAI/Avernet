@@ -50,10 +50,11 @@ async def list_bot_identity_files(
     request: Request,
     identity_service: IdentityService = Injected(IdentityService),
 ) -> Envelope[IdentityFileList]:
-    """List a bot's identity files and whether each exists.
+    """List a bot's identity files and whether each has content.
 
-    Every possible file is listed, including the ones the bot does not have yet
-    — read `exists` to tell them apart.
+    Every possible file is listed. `exists` reports whether one has content —
+    it does not separate a file the bot never had from one blanked by an empty
+    write, since both read as empty here.
     """
     entity_type = "staff"  # personal bot owner is a staff entity
     entity_id = owner_id
