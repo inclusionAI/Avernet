@@ -23,6 +23,7 @@ use bcs_route_security::OutboundUrlGuard;
 use bcs_service_api::port::repo::MessageRepoPort;
 use bcs_service_api::{
     AuthenticatedHumanCaller, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
+    BotRunContext, BotRunContextPort,
     BotDeliveryTarget, BotRegistryCoreService, CancelStateMachineRunCommand, ChatEventState,
     CollaborationDefinitionRecord, CollaborationDefinitionValidationOutcome,
     CollaborationEventRepoPort, CollaborationRuntimeError, CollaborationRuntimeService,
@@ -80,6 +81,7 @@ pub struct CollaborationRuntime {
     sessions: Arc<dyn SessionManagementService>,
     bot_delivery: Arc<dyn BotDeliveryPort>,
     bot_registry: Option<Arc<dyn BotRegistryCoreService>>,
+    bot_run_context: Option<Arc<dyn BotRunContextPort>>,
     frontend_delivery: Option<Arc<dyn FrontendDeliveryPort>>,
     message_repo: Option<Arc<dyn MessageRepoPort>>,
     session_channel_outbound: Option<Arc<dyn SessionChannelOutboundPort>>,
@@ -119,6 +121,7 @@ impl CollaborationRuntime {
             sessions,
             bot_delivery,
             bot_registry: None,
+            bot_run_context: None,
             judge,
             frontend_delivery: None,
             message_repo: None,
@@ -130,6 +133,11 @@ impl CollaborationRuntime {
 
     pub fn with_bot_registry(mut self, bot_registry: Arc<dyn BotRegistryCoreService>) -> Self {
         self.bot_registry = Some(bot_registry);
+        self
+    }
+
+    pub fn with_bot_run_context(mut self, bot_run_context: Arc<dyn BotRunContextPort>) -> Self {
+        self.bot_run_context = Some(bot_run_context);
         self
     }
 
@@ -575,6 +583,30 @@ impl CollaborationRuntime {
             })
             .await?;
 
+        if let Some(bot_run_context) = self.bot_run_context.as_ref() {
+            let deadline_ms = self
+                .runs
+                .get_node_run(&run.run_id, node_id)
+                .await?
+                .and_then(|node| node.timeout_deadline_ms)
+                .unwrap_or_else(|| {
+                    bcs_protocol::now_ms()
+                        .saturating_add(bcs_service_api::DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS)
+                });
+            bot_run_context
+                .put_context(BotRunContext {
+                    run_id: delivery_request_id.clone(),
+                    bot_id: assignee_bot_id.clone(),
+                    // State-machine responses are consumed by the runtime and
+                    // must not enter ordinary group relay.
+                    group_id: String::new(),
+                    bcs_session_id: None,
+                    deadline_ms,
+                    terminal: false,
+                })
+                .await;
+        }
+
         let prompt = self.build_node_prompt(compiled, run, node_id).await?;
         let group_context = group_context_input(group, &run.session_id);
         log_state_machine_node_dispatch(
@@ -627,7 +659,6 @@ impl CollaborationRuntime {
                 run_id: delivery_request_id.clone(),
                 frame,
                 delivery_kind: BotDeliveryKind::TaskDispatch,
-                provider_transport: Default::default(),
                 provider_bypass_headers: Vec::new(),
             })
             .await

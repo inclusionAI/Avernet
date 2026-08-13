@@ -89,7 +89,9 @@ pub struct RegisterProviderRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub admin_callback_url: Option<String>,
     pub auth: ProviderAuthDto,
-    /// Downlink protocol version: "1.0" (callback, default) or "2.0" (streaming/SSE).
+    /// Downlink protocol version: "1.0" (callback, default) or "2.0".
+    /// Version 2.0 negotiates every `chat.send` SSE-first on the response
+    /// Content-Type, with a JSON acknowledgement selecting callback fallback.
     /// Omitted = "1.0" for backward compatibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protocol_version: Option<String>,
@@ -130,7 +132,7 @@ pub struct PatchProviderRequest {
     #[serde(default)]
     pub admin_callback_url: Option<String>,
     /// Downlink protocol version ("1.0" | "2.0"). When present, updates the
-    /// stored downlink config; controls whether SSE streaming is eligible.
+    /// stored downlink config. Version 2.0 makes every `chat.send` SSE-first.
     #[serde(default)]
     pub protocol_version: Option<String>,
     #[serde(default)]

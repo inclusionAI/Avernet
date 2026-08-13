@@ -629,7 +629,6 @@ impl A2aChatService for A2aChat {
                 run_id: run_id.clone(),
                 frame,
                 delivery_kind: BotDeliveryKind::Send,
-                provider_transport: Default::default(),
                 provider_bypass_headers: cmd.provider_bypass_headers.clone(),
             })
             .await
@@ -752,7 +751,7 @@ impl A2aChatService for A2aChat {
 
         let client_kind = direct_chat_client_kind(record.client.as_deref());
         if record.completion_policy == ChatRunCompletionPolicy::DetachDeliveryAck {
-            return match classify_detach_delivery_callback(event_json) {
+            match classify_detach_delivery_callback(event_json) {
                 DetachDeliveryCallback::Success => {
                     if self
                         .run_store
@@ -767,7 +766,6 @@ impl A2aChatService for A2aChat {
                         )
                         .await;
                     }
-                    Ok(true)
                 }
                 DetachDeliveryCallback::Error(msg) => {
                     let reason = direct_chat_failure_reason(&msg);
@@ -780,10 +778,10 @@ impl A2aChatService for A2aChat {
                         )
                         .await;
                     }
-                    Ok(true)
+                    return Ok(true);
                 }
-                DetachDeliveryCallback::Ignored => Ok(false),
-            };
+                DetachDeliveryCallback::Ignored => {}
+            }
         }
 
         let mut accumulated = record.accumulated_content.clone();

@@ -31,9 +31,9 @@ context by `session_id`.
 | 1. Prepare the Provider webhook | Expose an HTTP endpoint reachable by BCS for downstream requests. |
 | 2. Register the Provider | Record the Provider ID, and store the returned Provider management token and BCS-to-Provider downstream token securely. |
 | 3. Register Bots | Register display name, summary, owner, and `provider_bot_ref` for each bot under the Provider, and store the Bot runtime token when one is returned. |
-| 4. Implement `chat.send` | When a message requires a bot reply, return `200 OK` quickly and let the bot runtime process the task asynchronously. |
+| 4. Implement `chat.send` | For protocol 1.0, acknowledge then call back. For protocol 2.0, negotiate SSE or JSON callback fallback on the same response. |
 | 5. Implement `chat.inject` | Write context into the session state for `(provider_bot_ref, session_id)`, without triggering reasoning. |
-| 6. Call back `/bot/events` | After the bot completes, use the downstream request `id` as `run_id` and send one final event with `state = "final"`. |
+| 6. Return events | Stream protocol 2.0 events on the accepted SSE response, or call `/bot/events` only after returning a JSON ack. Use downstream `id` as `run_id`. |
 
 After `chat.send -> final` works, add `chat.abort`, `chat.history`, `bot.ping`,
 rate limiting, retries, and monitoring.
@@ -108,10 +108,42 @@ Core downstream body fields:
 | `message` | `chat.send` / `chat.inject` | Current downstream message. |
 | `timeout_ms` | `chat.send` / `chat.inject` / `chat.history` | Downstream operation timeout. For direct A2A `chat.send` submitted by `bcs-cli chat`, BCS sends a fixed 2-hour execution budget (`7200000` ms), independent of the CLI polling timeout. |
 
+## Protocol 2.0 `chat.send` transport negotiation
+
+For every Provider registered with `protocol_version = "2.0"`, BCS sends every
+response-producing `chat.send` (group chat, task coordination, state-machine
+delivery, and direct A2A / `bcs-cli chat`) with:
+
+```http
+Accept: text/event-stream, application/json
+X-BCN-Protocol-Version: 2.0
+```
+
+The response to that single POST selects the event source for the whole run:
+
+- `Content-Type: text/event-stream` binds the run to SSE. Keep the response
+  open and stream provider events on it. `/bot/events` callbacks for that run
+  are rejected with HTTP `409 transport_conflict`.
+- A successful JSON acknowledgement such as `{ "ok": true }` binds the run to
+  `/bot/events` callback delivery. The Provider must not send a callback until
+  after it has returned the JSON ack; callbacks received while negotiation is
+  still in progress are rejected with HTTP 409.
+- A network error, timeout, non-2xx response, or invalid acknowledgement fails
+  the delivery. BCS does not issue a second POST using another transport.
+
+A run cannot mix SSE and callback events. SSE ping frames are liveness-only:
+they do not mark execution as started and do not acknowledge a detached CLI
+submission. The first non-ping event does. A final event may have no text; it is
+still a valid terminal marker, and BCS keeps text accumulated from earlier
+delta events. Delta text should be placed in `delta_text`; BCS also accepts
+`message.content[].text` for compatibility. A textual final is a full snapshot,
+not an additional delta.
+
 ## Calling BCS back
 
-`chat.send` is asynchronous. The Provider should not wait for the bot to finish
-inside the webhook request. Return quickly:
+Protocol 1.0 and protocol 2.0 JSON fallback use `/bot/events`. The Provider
+should not wait for the bot to finish inside a JSON-acknowledged webhook
+request. Return quickly:
 
 ```json
 { "ok": true }

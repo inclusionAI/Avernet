@@ -1852,6 +1852,26 @@ impl BotRunContextPort for NoopBotRunContextPort {
     }
 
     async fn release_terminal(&self, _run_id: &str) {}
+
+    async fn begin_provider_transport(&self, _run_id: &str, _deadline_ms: u64) -> bool {
+        false
+    }
+
+    async fn bind_provider_transport(
+        &self,
+        _run_id: &str,
+        _transport: ProviderRunTransport,
+    ) -> bool {
+        false
+    }
+
+    async fn get_provider_transport(&self, _run_id: &str) -> Option<ProviderRunTransport> {
+        None
+    }
+
+    async fn mark_provider_transport_terminal(&self, _run_id: &str) {}
+
+    async fn clear_provider_transport(&self, _run_id: &str) {}
 }
 
 #[derive(Debug, Default)]
