@@ -5060,6 +5060,22 @@ fn elapsed_ms(started_at: Instant) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bcs_collaboration_store::MemoryCollaborationStore;
+    use bcs_group_store::MemoryGroupRepo;
+    use bcs_service_api::JudgeDecision;
+    use bcs_session::SessionManagementServiceImpl;
+    use bcs_session_store::MemorySessionRepo;
+    use bcs_test_support::{NoopBotDeliveryPort, NoopGroupCoreService};
+
+    #[derive(Debug)]
+    struct UnusedJudge;
+
+    #[async_trait]
+    impl JudgeEvaluatorPort for UnusedJudge {
+        async fn judge(&self, _request: JudgeRequest) -> Result<JudgeDecision, ServiceError> {
+            unreachable!("missing-node retry check must not invoke the Judge")
+        }
+    }
 
     #[test]
     fn default_judge_timeout_is_ninety_seconds() {
@@ -5149,5 +5165,90 @@ runtime:
     #[test]
     fn runtime_cleanup_session_limit_is_sqlite_representable() {
         assert!(RUNTIME_CLEANUP_SESSION_LIMIT <= i64::MAX as u64);
+    }
+
+    #[tokio::test]
+    async fn retry_check_rejects_a_missing_persisted_node() {
+        let store = Arc::new(MemoryCollaborationStore::new());
+        let sessions = Arc::new(SessionManagementServiceImpl::new(
+            Arc::new(MemorySessionRepo::new()),
+            Arc::new(MemoryGroupRepo::new()),
+        ));
+        let runtime = CollaborationRuntime::new(
+            store.clone(),
+            store.clone(),
+            store.clone(),
+            store,
+            Arc::new(NoopGroupCoreService),
+            sessions,
+            Arc::new(NoopBotDeliveryPort),
+            Arc::new(UnusedJudge),
+        );
+        let definition: CollaborationDefinition = serde_yaml::from_str(
+            r#"
+api_version: bcs.collaboration/v1
+id: missing-node
+version: 1
+name: Missing Node
+participants:
+  worker:
+    bot_id: bot-a
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    nodes:
+      step:
+        kind: bot_task
+        display_name: Step
+        assignee:
+          type: bot_binding
+          binding: worker
+        instruction: Do the work.
+        final_output: true
+"#,
+        )
+        .unwrap();
+        let compiled = validate_definition(definition).unwrap();
+        let run = StateMachineRun {
+            run_id: "run-missing-node".to_string(),
+            definition_id: compiled.definition.id.clone(),
+            definition_version: compiled.definition.version,
+            group_id: "group".to_string(),
+            group_version: 1,
+            session_id: "session".to_string(),
+            created_by: None,
+            status: StateMachineRunStatus::Running,
+            input: Value::Null,
+            output: None,
+            error: None,
+            created_at: 1,
+            updated_at: 1,
+            completed_at: None,
+        };
+        runtime
+            .runs
+            .create_run(run.clone(), Vec::new())
+            .await
+            .unwrap();
+        let group = Group::new("group", "owner", Vec::new());
+
+        let error = runtime
+            .fail_node_or_schedule_retry(
+                &compiled,
+                &group,
+                &run,
+                "missing",
+                0,
+                "delivery failed".to_string(),
+            )
+            .await
+            .expect_err("missing persisted node must prevent retry scheduling");
+
+        assert!(matches!(
+            error,
+            CollaborationRuntimeError::NodeNotFound { run_id, node_id }
+                if run_id == "run-missing-node" && node_id == "missing"
+        ));
     }
 }
