@@ -11,7 +11,10 @@ import asyncio
 
 from fastapi import APIRouter, Request
 
-from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
+from agentclaw.community.adapters.http.openapi_v1.contracts import (
+    BotIdPath,
+    Envelope,
+)
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.connection.schemas import (
     Connection,
     Socket,
@@ -39,7 +42,7 @@ router = APIRouter(prefix="/openapi/v1/bots/connection", tags=["connection"])
 @router.get("/{bot_id}", response_model=Envelope[Connection])
 @envelope_errors
 async def get_connection(
-    bot_id: str,
+    bot_id: BotIdPath,
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,

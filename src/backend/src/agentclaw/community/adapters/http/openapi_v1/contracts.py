@@ -7,10 +7,10 @@ generation; handlers are stubs (a later pass wires them to services).
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import Depends, Query
-from pydantic import BaseModel, Field
+from fastapi import Depends, Path, Query
+from pydantic import BaseModel, ConfigDict, Field
 
 # The published startup-script size limit, imported rather than retyped so the
 # example in STARTUP_SCRIPT_WRITE_RESPONSES cannot drift from the enforced value.
@@ -24,8 +24,32 @@ CODE_ACCEPTED = 202000
 CODE_NO_CONTENT = 204000
 
 
+# Injected into every parametrisation's schema (Envelope[Bot], Page[Skill], …):
+# a parametrised generic does not inherit the generic's docstring, so without
+# this the concrete wrapper components in the published document carry no
+# description at all. `setdefault` so a named subclass that states its own
+# docstring keeps it.
+def _describe_envelope(schema: dict[str, Any]) -> None:
+    schema.setdefault(
+        "description",
+        "Uniform response wrapper for every endpoint: `code`/`message` say how "
+        "the call went, `data` carries the payload named in the wrapper's "
+        "title, and `request_id` identifies the request for support.",
+    )
+
+
+def _describe_page(schema: dict[str, Any]) -> None:
+    schema.setdefault(
+        "description",
+        "One page of a list result: `total` counts every match, `items` holds "
+        "the current page.",
+    )
+
+
 class Envelope[T](BaseModel):
     """Uniform response wrapper for every public endpoint."""
+
+    model_config = ConfigDict(json_schema_extra=_describe_envelope)
 
     code: int = Field(
         description="6-digit code: HTTP status (3) + business subcode (3)."
@@ -42,12 +66,12 @@ class Envelope[T](BaseModel):
 
 
 class ErrorEnvelope(BaseModel):
-    """The envelope returned on every documented failure.
+    """The envelope returned on every documented failure — the same shape as
+    the success envelope, with `data` pinned to null."""
 
-    Shape-identical to :class:`Envelope` with ``data`` pinned to null, which is
-    what the error paths actually emit. Declared as its own model so generated
-    clients get a named error type instead of a synthesized ``Envelope[None]``.
-    """
+    # Shape-identical to Envelope with data pinned to null, which is what the
+    # error paths actually emit. Declared as its own model so generated clients
+    # get a named error type instead of a synthesized Envelope[None].
 
     code: int = Field(
         description="6-digit code: HTTP status (3) + business subcode (3), "
@@ -157,6 +181,8 @@ ENGINE_RUNTIME_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
 class Page[T](BaseModel):
     """A page of items returned by list endpoints."""
 
+    model_config = ConfigDict(json_schema_extra=_describe_page)
+
     total: int = Field(description="Total number of items matching the query.")
     items: list[T] = Field(
         description="Items on the current page (present, possibly empty)."
@@ -166,14 +192,45 @@ class Page[T](BaseModel):
 class Deleted(BaseModel):
     """Payload returned by delete operations."""
 
-    deleted: bool = True
+    model_config = ConfigDict(json_schema_extra={"example": {"deleted": True}})
+
+    deleted: bool = Field(
+        default=True,
+        description="Always true: the resource is gone. A failed delete "
+        "answers an error envelope instead, never `deleted: false`.",
+    )
 
 
 class NameCheck(BaseModel):
     """Payload returned by name-availability checks."""
 
-    name: str
-    exists: bool
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"name": "quarterly-report", "exists": False}}
+    )
+
+    name: str = Field(
+        description="The name in the form the server actually checked — "
+        "normalized (e.g. trimmed) from what was sent, so this is the exact "
+        "string the availability answer applies to."
+    )
+    exists: bool = Field(
+        description="True when the name is already taken; false when it is "
+        "available to use."
+    )
+
+
+#: The path parameter naming the bot an operation addresses, documented once so
+#: every group publishes the same wording. The example is the issued format
+#: (date + 8 random characters); legacy deployments may hold other shapes, so
+#: the format is illustrative, not a contract.
+BotIdPath = Annotated[
+    str,
+    Path(
+        description="The bot this operation addresses — its `bot_id` as "
+        "issued at creation and returned by the bots listing, "
+        "e.g. `20260813_a7k2m9p1`."
+    ),
+]
 
 
 class PageParams:
