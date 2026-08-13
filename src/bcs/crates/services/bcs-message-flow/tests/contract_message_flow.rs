@@ -7,7 +7,7 @@ use bcs_service_api::{
     FrontendDeliveryTarget, Group, GroupHistoryCommand, GroupKind, GroupMessage, GroupMessageHistoryService, GroupMessageType,
     GroupCoreService, GroupStatus, GroupStrategy, HumanActor, MessageFlowService, MessageRole, Participant,
     ParticipantMode, ParticipantRole, PersistentGroupSendCommand, ProviderStreamGrayList,
-    ProviderTransportPreference, RedactedToken, ServiceError, WebSendCommand,
+    RedactedToken, ServiceError, WebSendCommand,
     DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
     ServiceResult, Session, SessionHistoryCommand, SessionKind, SessionManagementService,
     SessionStatus, SessionUseCaseError,
@@ -1447,7 +1447,7 @@ async fn web_send_delivers_to_registered_provider_target_without_ws_connection()
 }
 
 #[tokio::test]
-async fn provider_stream_gray_created_by_enables_sse_for_provider_chat_send() {
+async fn deprecated_provider_stream_gray_match_keeps_provider_delivery_target() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     install_provider_driver_group(&support, "gray-user").await;
     let flow = BcsMessageFlow::new(
@@ -1482,14 +1482,11 @@ async fn provider_stream_gray_created_by_enables_sse_for_provider_chat_send() {
     .await
     .unwrap();
 
-    assert_eq!(
-        support.bot_delivery.provider_transports().await,
-        vec![ProviderTransportPreference::CallbackSse]
-    );
+    assert!(support.bot_delivery.targets().await[0].is_http_provider());
 }
 
 #[tokio::test]
-async fn provider_stream_gray_created_by_miss_keeps_provider_callback() {
+async fn deprecated_provider_stream_gray_miss_keeps_provider_delivery_target() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     install_provider_driver_group(&support, "other-user").await;
     let flow = BcsMessageFlow::new(
@@ -1524,14 +1521,11 @@ async fn provider_stream_gray_created_by_miss_keeps_provider_callback() {
     .await
     .unwrap();
 
-    assert_eq!(
-        support.bot_delivery.provider_transports().await,
-        vec![ProviderTransportPreference::Callback]
-    );
+    assert!(support.bot_delivery.targets().await[0].is_http_provider());
 }
 
 #[tokio::test]
-async fn provider_stream_gray_mode_disabled_sends_provider_chat_send_over_sse() {
+async fn deprecated_provider_stream_gray_disabled_keeps_provider_delivery_target() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     install_provider_driver_group(&support, "gray-user").await;
     let flow = BcsMessageFlow::new(
@@ -1566,14 +1560,11 @@ async fn provider_stream_gray_mode_disabled_sends_provider_chat_send_over_sse() 
     .await
     .unwrap();
 
-    assert_eq!(
-        support.bot_delivery.provider_transports().await,
-        vec![ProviderTransportPreference::CallbackSse]
-    );
+    assert!(support.bot_delivery.targets().await[0].is_http_provider());
 }
 
 #[tokio::test]
-async fn provider_stream_gray_created_by_still_keeps_inject_on_callback() {
+async fn deprecated_provider_stream_gray_does_not_change_inject_delivery_target() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     support
         .registry
@@ -1628,10 +1619,8 @@ async fn provider_stream_gray_created_by_still_keeps_inject_on_callback() {
 
     let kinds = support.bot_delivery.kinds().await;
     let targets = support.bot_delivery.targets().await;
-    let transports = support.bot_delivery.provider_transports().await;
     assert_eq!(kinds, vec![BotDeliveryKind::Send, BotDeliveryKind::Inject]);
     assert!(targets[1].is_http_provider());
-    assert_eq!(transports[1], ProviderTransportPreference::Callback);
 }
 
 async fn install_provider_driver_group(

@@ -11,10 +11,10 @@ use bcs_domain::{
     SystemMessageEvent, SystemMessageEventKind,
 };
 use bcs_service_api::{
-    ActorStatus, AgentCredentials, BotCapabilities, BotDeliveryCommand, BotDeliveryPort,
+    ActorStatus, AgentCredentials, BotCapabilities, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
     BotDeliveryResult, BotDeliveryTarget, BotDynamicStatus, BotRegistryCoreService,
     BotRunContext, BotRunContextPort, DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
-    EnsureHumanResult, ProviderStreamGrayList, ProviderTransportPreference, RegisteredBot,
+    EnsureHumanResult, ProviderRunTransport, ProviderStreamGrayList, RegisteredBot,
     ServiceError, ServiceResult, SystemMessageDispatcherService, SystemMessageProducerService,
 };
 use bcs_test_support::NoopFrontendDeliveryPort;
@@ -100,6 +100,26 @@ impl BotRunContextPort for RecordingRunContext {
     }
 
     async fn release_terminal(&self, _run_id: &str) {}
+
+    async fn begin_provider_transport(&self, _run_id: &str, _deadline_ms: u64) -> bool {
+        false
+    }
+
+    async fn bind_provider_transport(
+        &self,
+        _run_id: &str,
+        _transport: ProviderRunTransport,
+    ) -> bool {
+        false
+    }
+
+    async fn get_provider_transport(&self, _run_id: &str) -> Option<ProviderRunTransport> {
+        None
+    }
+
+    async fn mark_provider_transport_terminal(&self, _run_id: &str) {}
+
+    async fn clear_provider_transport(&self, _run_id: &str) {}
 }
 
 #[derive(Default, Clone)]
@@ -281,7 +301,7 @@ async fn dispatch_bot_joined_delivers_to_all_participants() {
     assert!(target_ids.contains(&existing_bot_id));
 
     for cmd in calls.iter() {
-        assert_eq!(cmd.delivery_kind, bcs_protocol::BotDeliveryKind::Inject);
+        assert_eq!(cmd.delivery_kind, BotDeliveryKind::Inject);
     }
 }
 
@@ -473,7 +493,7 @@ async fn dispatch_session_context_preserves_manager_worker_group_type() {
         other => panic!("expected request frame, got {other:?}"),
     };
 
-    assert_eq!(manager.delivery_kind, bcs_protocol::BotDeliveryKind::Send);
+    assert_eq!(manager.delivery_kind, BotDeliveryKind::Send);
     assert_eq!(params["session_context"]["group_type"], "manager_worker");
     assert_eq!(params["session_context"]["recipient_role"], "manager");
 }
@@ -521,8 +541,8 @@ async fn dispatch_manager_worker_session_context_persists_worker_private_context
 
     let manager_context = appended
         .iter()
-        .find(|msg| msg.owner_bot_id.as_deref() == Some("bot-manager"))
-        .expect("manager-owned context record");
+        .find(|msg| msg.owner_bot_id.is_none())
+        .expect("public manager context record");
     assert_eq!(manager_context.group_id, group.id);
     assert_eq!(manager_context.session_id, session_id);
     assert_eq!(manager_context.sender_id, "system");
@@ -584,13 +604,9 @@ async fn dispatch_manager_worker_session_context_persists_each_worker_private_co
 
     let appended = message_repo.appended().await;
     assert_eq!(appended.len(), 3);
-    assert!(
-        appended.iter().all(|msg| msg.owner_bot_id.is_some()),
-        "no global (owner=None) record; each bot owns its context copy"
-    );
     let manager_ctx = appended.iter()
-        .find(|msg| msg.owner_bot_id.as_deref() == Some("bot-manager"))
-        .expect("manager copy");
+        .find(|msg| msg.owner_bot_id.is_none())
+        .expect("public manager copy");
     assert!(content_text(manager_ctx).contains("你的角色: manager"));
     for worker_id in ["bot-worker-a", "bot-worker-b"] {
         let worker_context = appended.iter()
@@ -867,7 +883,7 @@ async fn dispatch_send_system_message_records_run_context_for_provider_callback(
 }
 
 #[tokio::test]
-async fn dispatch_send_system_message_uses_sse_when_stream_gray_mode_disabled() {
+async fn deprecated_stream_gray_setting_keeps_system_message_send_delivery() {
     let group = Group {
         id: "group-provider".into(),
         label: None,
@@ -927,7 +943,7 @@ async fn dispatch_send_system_message_uses_sse_when_stream_gray_mode_disabled() 
     let calls = delivery.calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
     assert!(calls[0].target.is_http_provider());
-    assert_eq!(calls[0].provider_transport, ProviderTransportPreference::CallbackSse);
+    assert_eq!(calls[0].delivery_kind, BotDeliveryKind::Send);
 }
 
 #[tokio::test]

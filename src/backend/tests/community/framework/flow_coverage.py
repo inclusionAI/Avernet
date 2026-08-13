@@ -84,6 +84,10 @@ _TASK_EXEMPT_REASON = (
     "blocked on cross-module deps R6/B5 (TODO)."
 )
 
+_TASK_FRAMEWORK_EXEMPT_REASON = (
+    "Task goal-driven execution framework skeleton (core/task). No HTTP/router or DI surface is wired yet (no adapters/http/task/, no di/modules/task_module.py), so there is no endpoint for an e2e flow to drive. Covered by domain/unit tests on the graph, planner, dispatcher, runner, and harness as each lands. Drain this when a router + DI provider expose the TaskService facade over a real singlebox stack."
+)
+
 _ENGINE_RUNTIME_EXEMPT_REASON = (
     "TEMPORARY, and blocked twice over. FIRST, on the auth workstream — not on "
     "this module: every /openapi/v1 route answers 401 in singlebox, so a flow "
@@ -165,6 +169,7 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "config": _EXEMPT_REASON,
     "config_compose": _EXEMPT_REASON,
     "desktop_bot": _EXEMPT_REASON,
+    "task": _TASK_FRAMEWORK_EXEMPT_REASON,
     "economy": _EXEMPT_REASON,
     "events": _EXEMPT_REASON,
     "gateway_principal": _GATEWAY_PRINCIPAL_EXEMPT_REASON,
