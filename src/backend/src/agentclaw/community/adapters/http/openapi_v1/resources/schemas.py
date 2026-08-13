@@ -133,8 +133,16 @@ class ResourceUpdate(BaseModel):
         json_schema_extra={"example": {"name": "Q3 notes (final)"}}
     )
 
-    name: str | None = Field(default=None, description="New name; omit to keep.")
-    url: str | None = Field(default=None, description="New target URL; omit to keep.")
+    name: str | None = Field(
+        default=None,
+        description="New name; omit to keep. Not checked for uniqueness — "
+        "unlike on create, a name another link already uses is accepted.",
+    )
+    url: str | None = Field(
+        default=None,
+        description="New target URL; omit to keep. A URL another link already "
+        "uses is refused (409).",
+    )
 
 
 class Preview(BaseModel):

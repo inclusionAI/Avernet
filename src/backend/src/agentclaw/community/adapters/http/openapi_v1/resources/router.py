@@ -920,9 +920,20 @@ async def update_resource(
     """Rename a link resource or change its target URL.
 
     Links only, addressed by `resource_id`. A file's identifier answers 404 —
-    files live in the workspace and are not renamed through this endpoint. A
-    name or URL already used within the bot is refused (409).
+    files live in the workspace and are not renamed through this endpoint.
+
+    A URL already used by another link is refused (409). A **name** is not
+    checked here, unlike on create: renaming a link to a name another link
+    already uses succeeds, so two links can end up sharing a name. Check the
+    name yourself first if you need it to stay unique.
     """
+    # The asymmetry is the service's, not this contract's: `update_link_resource`
+    # assigns `name` unconditionally and only runs `check_link_url_exists` for a
+    # changed URL. Adding the name check there would refuse renames that
+    # currently succeed, which is a resources-contract decision rather than one
+    # a documentation change makes silently — the same ruling the link
+    # name-check preflight got.
+    #
     # link_type is intentionally not exposed on the openapi contract.
     # ValueError from the service (not found / url clash) → 409 Conflict, per
     # legacy + create parity.

@@ -2902,7 +2902,7 @@
             "type": "string"
           },
           "content": {
-            "description": "The file's full markdown content; empty when the file does not exist yet.",
+            "description": "The file's full markdown content. Empty both when the bot has no such file and when the file is there but was blanked — the two are not distinguished.",
             "title": "Content",
             "type": "string"
           },
@@ -2929,7 +2929,7 @@
         "description": "One identity file, and whether the bot has it.",
         "properties": {
           "exists": {
-            "description": "False when the bot has no such file yet. Writing one creates it.",
+            "description": "True when the file has content. False covers two cases this surface does not distinguish: the bot has no such file, and the file is there but empty. Blanking a file with an empty write therefore reads back as false here.",
             "title": "Exists",
             "type": "boolean"
           },
@@ -4004,7 +4004,7 @@
                 "type": "null"
               }
             ],
-            "description": "New name; omit to keep.",
+            "description": "New name; omit to keep. Not checked for uniqueness — unlike on create, a name another link already uses is accepted.",
             "title": "Name"
           },
           "url": {
@@ -4016,7 +4016,7 @@
                 "type": "null"
               }
             ],
-            "description": "New target URL; omit to keep.",
+            "description": "New target URL; omit to keep. A URL another link already uses is refused (409).",
             "title": "Url"
           }
         },
@@ -10356,7 +10356,7 @@
         ]
       },
       "put": {
-        "description": "Rename a link resource or change its target URL.\n\nLinks only, addressed by `resource_id`. A file's identifier answers 404 —\nfiles live in the workspace and are not renamed through this endpoint. A\nname or URL already used within the bot is refused (409).",
+        "description": "Rename a link resource or change its target URL.\n\nLinks only, addressed by `resource_id`. A file's identifier answers 404 —\nfiles live in the workspace and are not renamed through this endpoint.\n\nA URL already used by another link is refused (409). A **name** is not\nchecked here, unlike on create: renaming a link to a name another link\nalready uses succeeds, so two links can end up sharing a name. Check the\nname yourself first if you need it to stay unique.",
         "operationId": "update_resource_openapi_v1_bots_resources__resource_id__put",
         "parameters": [
           {

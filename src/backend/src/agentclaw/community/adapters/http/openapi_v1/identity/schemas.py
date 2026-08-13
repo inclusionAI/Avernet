@@ -44,9 +44,16 @@ class IdentityFileInfo(BaseModel):
     """One identity file, and whether the bot has it."""
 
     type: IdentityFileType = Field(description=_TYPE_DESC)
+    # `bool(content)`, not a filesystem probe — see IdentityService.list_bot_files,
+    # which reads each file and tests the string. Cheaper than a per-file
+    # existence call, and it makes an empty file indistinguishable from an
+    # absent one. That is the read model this surface has, so it is what the
+    # description states rather than a promise about the filesystem.
     exists: bool = Field(
-        description="False when the bot has no such file yet. Writing one "
-        "creates it."
+        description="True when the file has content. False covers two cases "
+        "this surface does not distinguish: the bot has no such file, and the "
+        "file is there but empty. Blanking a file with an empty write "
+        "therefore reads back as false here."
     )
     file_path: str = Field(description=_PATH_DESC)
 
@@ -83,8 +90,9 @@ class IdentityFile(BaseModel):
     type: IdentityFileType = Field(description=_TYPE_DESC)
     bot_id: str = Field(description="Bot this file belongs to.")
     content: str = Field(
-        description="The file's full markdown content; empty when the file does "
-        "not exist yet."
+        description="The file's full markdown content. Empty both when the bot "
+        "has no such file and when the file is there but was blanked — the two "
+        "are not distinguished."
     )
     file_path: str = Field(description=_PATH_DESC)
 
