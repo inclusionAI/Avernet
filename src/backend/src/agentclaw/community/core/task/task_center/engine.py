@@ -57,6 +57,7 @@ class ExecutionEngine:
         self._cb_adapter = CallbackAdapter()
         # TaskExecutor 接线(三模态投递+poller);poller sink = engine 自当(实现 report_result),
         # 执行上下文 = engine 自当(实现 build),消除"先建 stub 再接线"的后填。端口 None 时退化为默认 TaskRunner。
+        self._poller_thread = None
         self._executor = self._build_executor()
         self._planner = self._build_planner()
         self._dispatcher = self._build_dispatcher()
@@ -77,10 +78,17 @@ class ExecutionEngine:
         )
         poller = TaskExecutorResultPoller(bot=self._bot, bcs=self._bcs)
         poller.set_on_result(self)  # engine 实现 report_result(poller 终态回投直接调 on_report)
-        return TaskExecutor(
+        exe = TaskExecutor(
             bot=self._bot, bcs=self._bcs, formatter=PromptFormatterImpl(),
             context=self, sink=self, poller=poller,
         )
+        # poller daemon 线程:异步回收 single_bot run / coop_group session / state_machine run,
+        # 终态 → 翻译 → report_result → on_report(与外部 HTTP push 回投收敛同一入口)。
+        # 同 build_integration(poller_thread=True) 语义;engine 自当 sink 时线程随 engine 生命周期(daemon)。
+        import threading as _t
+        self._poller_thread = _t.Thread(target=poller.run_poll_loop, daemon=True, name="task-exec-poller")
+        self._poller_thread.start()
+        return exe
 
     def _build_planner(self):
         from agentclaw.community.core.task.task_plan.planner import TaskPlanner
