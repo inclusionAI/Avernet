@@ -108,7 +108,10 @@ from agentclaw.community.core.resources.service import (
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillDuplicateError,
     LocalSkillActiveError,
+    LocalSkillEditBusyError,
+    LocalSkillEditLockUnavailableError,
     LocalSkillEditPausedError,
+    LocalSkillLayoutRollbackError,
     LocalSkillInvalidPackageError,
     LocalSkillNotFoundError,
     LocalSkillNotReadyError,
@@ -268,6 +271,9 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LocalSkillTooLargeError: (413, "Skill package is too large"),
     LocalSkillStorageError: (502, "Skill storage operation failed"),
     LocalSkillRuntimeSyncError: (502, "Skill runtime synchronization failed"),
+    LocalSkillEditBusyError: (409, "Another Skill update is in progress"),
+    LocalSkillLayoutRollbackError: (409, "Skill layout rollback is in progress"),
+    LocalSkillEditLockUnavailableError: (503, "Skill update service is temporarily unavailable"),
     LocalSkillEditPausedError: (409, "Skill layout is being updated"),
     FileTooLargeError: (413, "File too large for preview"),
     # Startup script (issue #926): the body is refused at write time so a
