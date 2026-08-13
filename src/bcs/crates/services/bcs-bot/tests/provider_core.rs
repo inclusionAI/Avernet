@@ -204,6 +204,85 @@ async fn register_provider_rejects_non_native_mcp_tool_name_mapping() {
 }
 
 #[tokio::test]
+async fn register_provider_rejects_too_many_tool_name_mappings() {
+    let ctx = test_context();
+    let tool_name_mapping = (0..33)
+        .map(|index| (format!("provider-tool-{index}"), "bcs_assign_task".to_string()))
+        .collect();
+    let err = ctx
+        .core
+        .register_provider(
+            "Provider".to_string(),
+            "https://provider.example.com/bcs/webhook".to_string(),
+            ProviderAuthMode::StaticBearer,
+            "197262".to_string(),
+            None,
+            Some(ProviderCoordinationConfig {
+                mode: CoordinationMode::NativeMcp,
+                mcp_server: Some("bcs".to_string()),
+                mcporter_command: None,
+                tool_name_mapping,
+            }),
+        )
+        .await
+        .expect_err("more than 32 mappings should fail");
+
+    assert!(matches!(err, ServiceError::InvalidOperation { message, .. } if message.contains("must not exceed 32")));
+}
+
+#[tokio::test]
+async fn register_provider_rejects_invalid_provider_tool_name() {
+    let ctx = test_context();
+    let err = ctx
+        .core
+        .register_provider(
+            "Provider".to_string(),
+            "https://provider.example.com/bcs/webhook".to_string(),
+            ProviderAuthMode::StaticBearer,
+            "197262".to_string(),
+            None,
+            Some(ProviderCoordinationConfig {
+                mode: CoordinationMode::NativeMcp,
+                mcp_server: Some("bcs".to_string()),
+                mcporter_command: None,
+                tool_name_mapping: [(" provider-tool".to_string(), "bcs_assign_task".to_string())]
+                    .into_iter()
+                    .collect(),
+            }),
+        )
+        .await
+        .expect_err("tool names with surrounding whitespace should fail");
+
+    assert!(matches!(err, ServiceError::InvalidOperation { message, .. } if message.contains("invalid provider tool name")));
+}
+
+#[tokio::test]
+async fn register_provider_rejects_unsupported_canonical_tool_name() {
+    let ctx = test_context();
+    let err = ctx
+        .core
+        .register_provider(
+            "Provider".to_string(),
+            "https://provider.example.com/bcs/webhook".to_string(),
+            ProviderAuthMode::StaticBearer,
+            "197262".to_string(),
+            None,
+            Some(ProviderCoordinationConfig {
+                mode: CoordinationMode::NativeMcp,
+                mcp_server: Some("bcs".to_string()),
+                mcporter_command: None,
+                tool_name_mapping: [("provider-tool".to_string(), "unknown-tool".to_string())]
+                    .into_iter()
+                    .collect(),
+            }),
+        )
+        .await
+        .expect_err("unknown canonical tool names should fail");
+
+    assert!(matches!(err, ServiceError::InvalidOperation { message, .. } if message.contains("unsupported canonical tool 'unknown-tool'")));
+}
+
+#[tokio::test]
 async fn register_provider_rejects_native_tool_with_mcp_fields() {
     let ctx = test_context();
     let err = ctx
