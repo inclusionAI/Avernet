@@ -92,6 +92,19 @@ prepare_bcs_runtime_config() {
     local bcs_bind="${BCS_BIND:-}"
     local bcs_mock_user_id="${BCS_MOCK_USER_ID:-}"
     local bcs_mock_user_name="${BCS_MOCK_USER_NICK_NAME:-}"
+    # BCS_BOT_PROFILE_DIR is the explicit override. If the caller used the
+    # dynamic --profile-dir form (BOTS_PROFILE_DIR), wire the same source
+    # directory into BCS so bot context files can be found by bcs-fusion.
+    local bcs_bot_profile_dir="${BCS_BOT_PROFILE_DIR:-${BOTS_PROFILE_DIR:-}}"
+    if [ -n "$bcs_bot_profile_dir" ]; then
+        case "$bcs_bot_profile_dir" in
+            /*) ;;
+            *) bcs_bot_profile_dir="${PROJECT_ROOT}/${bcs_bot_profile_dir}" ;;
+        esac
+        if [ ! -d "$bcs_bot_profile_dir" ]; then
+            log_warn "Configured bot profile directory does not exist: ${bcs_bot_profile_dir}"
+        fi
+    fi
 
     if [ "${BCS_SERVER_ENV:-}" = "dev" ]; then
         if [ -f "${BCS_DIR}/configs/bcs-config-dev.toml" ]; then
@@ -134,6 +147,14 @@ prepare_bcs_runtime_config() {
         local escaped_mock_user_name
         escaped_mock_user_name="$(toml_sed_replacement "$bcs_mock_user_name")"
         sed_args+=("-e" "s|^mock_user_name = \".*\"$|mock_user_name = \"${escaped_mock_user_name}\"|")
+    fi
+    if [ -n "$bcs_bot_profile_dir" ]; then
+        local escaped_bcs_bot_profile_dir
+        escaped_bcs_bot_profile_dir="$(toml_sed_replacement "$bcs_bot_profile_dir")"
+        # Use # as the sed delimiter because the path contains /. Escape the
+        # trailing $ because # would otherwise make it "$#" (positional param
+        # count) inside the double-quoted script.
+        sed_args+=("-e" "s#^bots_base_dir = \".*\"\$#bots_base_dir = \"${escaped_bcs_bot_profile_dir}\"#")
     fi
     if [ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]; then
         local escaped_e2e_judge_url

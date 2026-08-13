@@ -26,6 +26,12 @@ from agentclaw.community.core.repository.protocols.bot import CollaboratorReposi
 from agentclaw.community.core.repository.protocols.bot import BotCollabLogRepositoryProtocol
 from agentclaw.community.core.repository.protocols.bot import BotCollabLockRepositoryProtocol
 from agentclaw.community.core.bot_collaborator.services.collaborator_service import CollaboratorService
+from agentclaw.community.core.bot_collaborator.services.credentials_admins_writer import (
+    DeviceCredentialsAdminsWriter,
+)
+from agentclaw.community.core.repository.protocols.publishing import (
+    BotPublishRepositoryProtocol,
+)
 from agentclaw.community.core.bot_collaborator.services.aicoding.member_management_capability import (
     AICodingMemberManagementCapability,
 )
@@ -95,26 +101,48 @@ class BotCollaboratorModule(Module):
     @singleton
     @provider
     @inject
+    def credentials_admins_writer(
+        self,
+        collaborator_repo: CollaboratorRepositoryProtocol,
+        bot_publish_repo: BotPublishRepositoryProtocol,
+        injector: Injector,
+    ) -> DeviceCredentialsAdminsWriter:
+        """Construct ``DeviceCredentialsAdminsWriter``.
+
+        ``resolver`` / ``device_fs_dispatcher`` 走 lazy ``Callable`` thunk 注入,打断
+        构造期 DI 循环(device 图反向依赖 ``BotService``);collaborator_repo /
+        bot_publish_repo 直接注入(均为 singleton repository)。被 ``CollaboratorService``
+        (运行时协作者变更同步) 和 ``TeclawPublishTaskHandler`` (发布后 seed) 共用。
+        """
+        return DeviceCredentialsAdminsWriter(
+            collaborator_repo=collaborator_repo,
+            bot_publish_repo=bot_publish_repo,
+            resolver_provider=lambda: injector.get(DeviceContextResolver),
+            device_fs_dispatcher_provider=lambda: injector.get(DeviceFilesystemDispatcher),
+        )
+
+    @singleton
+    @provider
+    @inject
     def collaborator_service(
         self,
         collaborator_repo: CollaboratorRepositoryProtocol,
         bot_repo: BotRepository,
         passport_plugin: PassportPlugin,
+        credentials_admins_writer: DeviceCredentialsAdminsWriter,
         member_management_capability_service: MemberManagementCapabilityService,
-        injector: Injector,
     ) -> CollaboratorService:
         """Construct ``CollaboratorService``.
 
-        ``resolver`` / ``device_fs_dispatcher`` 走 lazy ``Callable`` thunk 注入，
-        打断构造期 DI 循环(device 图反向依赖 ``BotService``)。同手法见
-        ``di/modules/mcp_module.py`` 的 ``mcp_sync_service``。
+        ``.credentials`` 的 ADMINS= 同步委托给 ``DeviceCredentialsAdminsWriter`` (对
+        service bot 解析在线 binding、对其它 bot 回退 resolve_for_bot)。设备解析/读写
+        的 DI 循环由 writer 内部的 lazy thunk 打断。
         """
         return CollaboratorService(
             collaborator_repo=collaborator_repo,
             bot_repo=bot_repo,
             passport_plugin=passport_plugin,
-            resolver_provider=lambda: injector.get(DeviceContextResolver),
-            device_fs_dispatcher_provider=lambda: injector.get(DeviceFilesystemDispatcher),
+            credentials_admins_writer=credentials_admins_writer,
             member_management_capability_service=member_management_capability_service,
         )
 

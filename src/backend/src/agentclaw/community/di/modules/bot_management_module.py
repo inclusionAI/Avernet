@@ -44,10 +44,26 @@ from agentclaw.community.core.bot_collaborator.protocols import (
 )
 from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
 from agentclaw.community.core.repository.protocols.bot import RenderScreenRepository
+from agentclaw.community.core.bot_collaborator.services.credentials_admins_writer import (
+    DeviceCredentialsAdminsWriter,
+)
 from agentclaw.community.core.bot_management.render_screen.services.render_screen_service import (
     RenderScreenService,
 )
-from agentclaw.community.core.repository.protocols.bot import BotRestartLockRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import (
+    BotRestartLockRepositoryProtocol,
+    BotStartupScriptRepositoryProtocol,
+)
+from agentclaw.community.api.bot_startup_script_service import (
+    BotStartupScriptServiceProtocol,
+)
+from agentclaw.community.core.bot_startup_script.protocols import (
+    StartupScriptPurgeProtocol,
+    TeclawEngineTestProtocol,
+)
+from agentclaw.community.core.bot_startup_script.services.startup_script_service import (
+    BotStartupScriptService,
+)
 from agentclaw.community.core.bot_app_grant.services import (
     BotAppGrantService,
 )
@@ -109,6 +125,7 @@ from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
 from agentclaw.community.core.repository.implementations.bot.bot import BotRepository as UnifiedBotRepository
 from agentclaw.community.core.repository.implementations.bot.restart_lock import BotRestartLockRepository
+from agentclaw.community.core.repository.implementations.bot.startup_script import BotStartupScriptRepository
 from agentclaw.community.core.repository.implementations.bot.render_screen import RenderScreenRepository as UnifiedRenderScreenRepository
 from agentclaw.community.core.repository.implementations.bot.template import TemplateRepository as UnifiedTemplateRepository
 
@@ -173,6 +190,32 @@ class BotManagementModule(Module):
         binder.bind(
             BotRestartLockRepositoryProtocol,
             to=BotRestartLockRepository,
+            scope=singleton,
+        )
+        # BotStartupScriptRepository: single unified ORM impl, same shape as the
+        # restart lock above — UNIQUE(env, entity_id, bot_id) on
+        # ac_bot_startup_script, one script per bot at most.
+        binder.bind(
+            BotStartupScriptRepositoryProtocol,
+            to=BotStartupScriptRepository,
+            scope=singleton,
+        )
+        # The Service API Protocol resolves to the same singleton as the concrete
+        # class, so routers can Inject the Protocol per the http-adapter rule.
+        binder.bind(
+            BotStartupScriptService, to=BotStartupScriptService, scope=singleton
+        )
+        binder.bind(
+            BotStartupScriptServiceProtocol,
+            to=BotStartupScriptService,
+            scope=singleton,
+        )
+        # The delete side, handed to ``BotCleanupService`` so a deleted bot takes
+        # its stored script with it. Narrow on purpose: the deletion path removes
+        # scripts, it never reads or writes one.
+        binder.bind(
+            StartupScriptPurgeProtocol,
+            to=BotStartupScriptService,
             scope=singleton,
         )
         # TemplateService: constructed with injected TemplateRepository.
@@ -389,12 +432,14 @@ class BotManagementModule(Module):
         baas_service: BaasService,
         device_binding_repo: DeviceBindingRepository,
         passport_plugin: PassportPlugin,
+        credentials_admins_writer: DeviceCredentialsAdminsWriter,
     ) -> TeclawPublishTaskLifecycle:
         return TeclawPublishTaskLifecycle(
             registry=registry,
             baas_service=baas_service,
             device_binding_repo=device_binding_repo,
             passport_plugin=passport_plugin,
+            credentials_admins_writer=credentials_admins_writer,
         )
 
     @singleton
@@ -421,6 +466,21 @@ class BotManagementModule(Module):
             bot_repository=bot_repository,
             teclaw_template_uuid=baas_config.teclaw_template_uuid,
         )
+
+    @singleton
+    @provider
+    @inject
+    def teclaw_engine_test_factory(
+        self, injector: Injector
+    ) -> Callable[[], TeclawEngineTestProtocol]:
+        """The narrow engine test BotStartupScriptService depends on.
+
+        Same lazy shape as the factory below, and deliberately a *separate*
+        binding: that service cannot name ``TeclawProvisionService`` in its
+        annotations without closing an import cycle, so the composition root is
+        where the concrete class and the narrow contract meet.
+        """
+        return lambda: injector.get(TeclawProvisionService)
 
     @singleton
     @provider

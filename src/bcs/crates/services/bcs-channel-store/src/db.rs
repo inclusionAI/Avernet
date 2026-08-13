@@ -501,6 +501,27 @@ impl ConversationSessionRepoPort for DbConversationSessionStore {
         rows.iter().map(row_to_conversation).collect()
     }
 
+    async fn list_by_binding(
+        &self,
+        binding_id: &str,
+    ) -> ServiceResult<Vec<ConversationSessionMap>> {
+        let rows = self
+            .query(
+                "list_conversations_by_binding",
+                DbStatement::with_params(
+                    "SELECT binding_id, im_conversation_id, im_conversation_type, \
+                     session_scope, im_user_id, bcs_session_id, last_active_at \
+                     FROM bcs_channel_conversations \
+                     WHERE binding_id = ? \
+                     ORDER BY im_conversation_id, session_scope, im_user_id",
+                    vec![DbValue::from(binding_id)],
+                ),
+            )
+            .await?;
+
+        rows.iter().map(row_to_conversation).collect()
+    }
+
     async fn upsert(&self, map: ConversationSessionMap) -> ServiceResult<()> {
         self.execute(
             "upsert_conversation",
@@ -519,6 +540,17 @@ impl ConversationSessionRepoPort for DbConversationSessionStore {
         )
         .await?;
         Ok(())
+    }
+
+    async fn delete_by_binding(&self, binding_id: &str) -> ServiceResult<u64> {
+        self.execute(
+            "delete_conversations_by_binding",
+            DbStatement::with_params(
+                "DELETE FROM bcs_channel_conversations WHERE binding_id = ?",
+                vec![DbValue::from(binding_id)],
+            ),
+        )
+        .await
     }
 
     async fn delete_if_session(
@@ -1923,6 +1955,20 @@ mod tests {
         assert_eq!(by_bcs_session.len(), 1);
         assert_eq!(by_bcs_session[0].binding_id, "binding_1");
         assert_eq!(by_bcs_session[0].session_scope, SessionScope::PerSender);
+
+        let mut other_binding = conversation(
+            SessionScope::Conversation,
+            None,
+            "session_other_binding",
+            400,
+        );
+        other_binding.binding_id = "binding_2".to_string();
+        conversation_repo.upsert(other_binding).await?;
+
+        assert_eq!(conversation_repo.list_by_binding("binding_1").await?.len(), 2);
+        assert_eq!(conversation_repo.delete_by_binding("binding_1").await?, 2);
+        assert!(conversation_repo.list_by_binding("binding_1").await?.is_empty());
+        assert_eq!(conversation_repo.list_by_binding("binding_2").await?.len(), 1);
 
         Ok(())
     }

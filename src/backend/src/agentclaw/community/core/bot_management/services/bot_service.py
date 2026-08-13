@@ -3418,6 +3418,29 @@ class BotService:
                     bot_id,
                 )
 
+            # Drop the stored startup script, here and not in the post-delete
+            # cleanup, for the same reason the grant sweep is here: a failure
+            # aborts while the bot is still intact.
+            #
+            # It is not filed with the skills and skill sets below because it is
+            # not the same kind of leftover. Those are inert metadata; this is
+            # the user's script in plaintext, which should not outlive the bot
+            # it was written for.
+            #
+            # Failures propagate, matching how this feature already treats a
+            # failed script read (`_resolve_startup_script`): swallowing a
+            # failure against the script store buys a silently wrong state, not
+            # resilience. The wedged-bot risk is smaller than it looks — this
+            # write and the soft delete hit the same database, so a purge that
+            # cannot write almost certainly precedes a deletion that would have
+            # failed anyway.
+            #
+            # The `default` bot is exempt on the same grounds its skills and
+            # config are: that delete is a restart, and the script is meant to
+            # survive it.
+            if bot_id != "default":
+                self._purge_startup_script(bot_id, bot)
+
             # Release device if binding exists (包括 ACTIVE 和 PENDING 状态)
             binding_id = bot.get("binding_id")
             if binding_id:
@@ -3462,6 +3485,9 @@ class BotService:
                 raise BotNotFoundError(f"Bot not found: {bot_id}")
 
             self._sweep_grants_that_raced_the_deletion(bot_id, user_id)
+
+            if bot_id != "default":
+                self._sweep_startup_script_that_raced_the_deletion(bot_id, bot)
 
             self._sync_provider_bot_delete_to_bcn(bot_id, user_id)
 
@@ -3565,11 +3591,85 @@ class BotService:
                 exc_info=True,
             )
 
+    def _sweep_startup_script_that_raced_the_deletion(
+        self, bot_id: str, bot: Dict[str, Any]
+    ) -> None:
+        """Second purge, after the soft delete. Paired with the first, and the
+        pairing is what makes the set of orderings complete.
+
+        The first purge runs early, while the bot is still intact, so a failure
+        aborts the deletion rather than stranding the row. But it is a long way
+        from the soft delete: ``release_device`` and ``destroy_passport`` — the
+        latter unconditional and a blocking call to an external plugin — both
+        sit in between. A ``PUT`` whose existence check, write **and** post-write
+        re-check all fall inside that gap sees a live bot at every point and
+        leaves its row behind. Neither the first purge nor the re-check catches
+        that ordering; only a purge on the far side of ``soft_delete_by_owner``
+        does.
+
+        With this in place the orderings are, for a write W, its re-check R, the
+        first purge P1, the soft delete S and this sweep P2:
+
+        * W before P1 — P1 removes it;
+        * W between P1 and S, R also before S — R sees a live bot and answers
+          200, and P2 removes the row;
+        * W between P1 and S, R after S — R sees the bot gone and withdraws;
+        * W after S — R is later still, so R withdraws, and P2 covers it too.
+
+        That assumes R reads committed state; a re-check served stale would fall
+        back on P2 for the third case.
+
+        Unconditional, and it needs no owner stamp. ``uk_bot_id_entity_id_env``
+        means the identifier cannot be handed to another bot, so whatever sits
+        at this key belongs to the bot being deleted.
+
+        Failures propagate, like the first purge and like the grant sweep. The
+        deletion has really happened by then, so a caller who retries is told
+        "no such bot" — confusing, but honest, where reporting success over a
+        row that survived is a wrong answer nobody can later discover.
+        """
+        if self._purge_startup_script(bot_id, bot):
+            logger.warning(
+                "[bot_service.delete_bot] removed a startup script written on "
+                "bot %s while it was being deleted",
+                bot_id,
+            )
+
+    def _purge_startup_script(self, bot_id: str, bot: Dict[str, Any]) -> bool:
+        """Delete the bot's stored startup script. Failures propagate.
+
+        Keyed by ``entity_id``, not the owner id. The two are usually equal —
+        this file says so in several places — but under a team entity they are
+        not, and using the owner would look correct in every single-owner case
+        while missing the row for every team-owned bot.
+
+        A bot with no ``entity_id`` never had a script: the write path requires
+        both halves of the key. There is nothing to delete and no id to invent.
+
+        Two call sites, and their failure semantics differ because the bot is in
+        a different state at each. The first runs before the soft delete, while
+        the bot is still intact, so a failure aborts the deletion and leaves it
+        retryable. The second is
+        :meth:`_sweep_startup_script_that_raced_the_deletion`, after the soft
+        delete, catching a write that landed in the gap between the two; a
+        failure there surfaces as well, but the bot is already gone by then, so
+        it cannot abort anything.
+        """
+        entity_id = str(bot.get("entity_id") or "")
+        if not entity_id:
+            return False
+        return self._cleanup_service.purge_startup_script(
+            entity_id=entity_id, bot_id=bot_id
+        )
+
     def _cleanup_bot_associated_data(self, bot_id: str, user_id: str) -> Dict[str, Any]:
         """
         清理 Bot 关联的脏数据（技能、技能集、资源等）
 
         注意：此方法仅应在确认 Bot 真正被删除时调用（非 default bot 的重启场景）
+
+        启动脚本不在此列：它在软删*之前*由 ``_purge_startup_script`` 单独删除，
+        失败要阻断删除而不是记录后继续。见那里的说明。
 
         Args:
             bot_id: Bot ID
@@ -3962,6 +4062,7 @@ class BotService:
         bot_id: str,
         user_id: str,
         nick_name: Optional[str] = None,
+        extra_configs: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Restart a bot by releasing current device and allocating a new one.
@@ -3970,6 +4071,7 @@ class BotService:
             bot_id: Bot ID
             user_id: User ID for permission check (must be the owner)
             nick_name: Nick name for device allocation (optional, defaults to user_id)
+            extra_configs: Optional engine-agnostic restart extension envelope
 
         Returns:
             Updated bot record with PENDING status (device allocation in progress)
@@ -4027,6 +4129,36 @@ class BotService:
             raise BotInvalidLifecycleStateError(
                 bot_id=bot_id,
                 current_status=bot_status or "UNKNOWN",
+            )
+
+        # Delegate optional engine-owned restart inputs after lifecycle guards
+        # pass and before device allocation consumes persisted configuration.
+        try:
+            from agentclaw.community.core.bot_management.engines import (
+                resolve_provisioning,
+            )
+
+            ctx, strategy = resolve_provisioning(
+                bot_id=bot_id,
+                owner_id=str(bot.get("owner_id") or ""),
+                bot_type=str(bot.get("bot_type") or ""),
+                active_engine=bot.get("active_engine"),
+                template_type=bot.get("template_type"),
+                template_config=None,
+            )
+            strategy.apply_restart_extra_configs(
+                ctx,
+                extra_configs,
+                template_service=self._template_service,
+            )
+        except Exception as exc:
+            # Optional engine extensions must never block the existing restart path.
+            logger.warning(
+                "[bot_service.restart_bot] applying restart extra configs failed; "
+                "continue with stored config: bot_id=%s error=%s",
+                bot_id,
+                exc,
+                exc_info=True,
             )
 
         env = get_current_env()

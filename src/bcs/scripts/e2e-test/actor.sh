@@ -8,7 +8,7 @@
 #   GET  /bots/my                  routes::bots::list_my_bots
 #   GET  /bots/paged               routes::bots::list_bots_paged
 #   POST /bots/query               routes::bots::query_bots
-#   POST /bots/{id}/chat           routes::bot_chat::bot_chat   (sync 1:1)
+#   POST /bots/{id}/chat-async     routes::bot_chat::bot_chat_async
 # (GET /bots/{id}/groups is exercised in group.sh's test_bot_groups_of_bot.)
 
 # Test registration (consumed by e2e.sh)
@@ -19,13 +19,14 @@ E2E_TESTS_ACTOR=(
     "test_bots_my"
     "test_bots_paged"
     "test_bots_query"
-    "test_bot_chat_sync"
+    "test_bot_chat_async"
 )
 
-# A bot-token-authenticated request. The /actors/{aid}/status PUT and the sync
-# /bots/{id}/chat resolve the caller bot from its session token (X-BCS-Bot-Token
-# or Authorization: Bearer) — api_put/api_post only send the mock-human headers,
-# so use the shared bot_request (see common.sh) which sends the bot token.
+# A bot-token-authenticated request. The /actors/{aid}/status PUT and async
+# /bots/{id}/chat-async resolve the caller bot from its session token
+# (X-BCS-Bot-Token or Authorization: Bearer) — api_put/api_post only send
+# the mock-human headers, so use the shared bot_request (see common.sh) which
+# sends the bot token.
 # Usage: _bot_request <METHOD> <PATH> <BODY> <BOT_NAME>
 _bot_request() {
     bot_request "$1" "$2" "$4" "${3:-}"
@@ -186,44 +187,22 @@ test_bots_query() {
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
 }
 
-# POST /bots/{id}/chat — synchronous 1:1 bot chat (CEO -> PM). Blocks up to
-# timeout_ms; accept 200 (delivered) or a timeout-family code (the demo bot may
-# not reply within the small window, in which case BCS returns 500
-# "Timeout waiting for bot response" — the endpoint is still exercised). Fail
-# on auth/not-found/connection errors only.
-test_bot_chat_sync() {
-    info "Bots: POST /bots/{PM}/chat sync (from CEO, 6s timeout)"
+# POST /bots/{id}/chat-async — asynchronous 1:1 bot chat (CEO -> PM).
+# Accept 202 when the async run is submitted; auth/not-found and connection
+# errors fail the case.
+test_bot_chat_async() {
+    info "Bots: POST /bots/{PM}/chat-async (from CEO)"
     if ! ensure_cli_token CEO; then
-        skip_case "no CEO token; skipping sync chat" || { TESTS_TOTAL=$((TESTS_TOTAL + 1)); return; }
+        skip_case "no CEO token; skipping async chat" || { TESTS_TOTAL=$((TESTS_TOTAL + 1)); return; }
     fi
-    _bot_request POST "/bots/${BOT_PM_UUID}/chat" \
-        '{"message":"ping","timeout_ms":6000}' CEO
+    _bot_request POST "/bots/${BOT_PM_UUID}/chat-async" \
+        '{"message":"ping"}' CEO
     case "$HTTP_STATUS" in
-        200)
-            pass "sync bot chat returned 200 (delivered)"
+        202)
+            pass "async bot chat returned 202 (run submitted)"
             TESTS_PASSED=$((TESTS_PASSED + 1)) ;;
-        # The chat route maps the blocking-chat timeout to HTTP 500 with body
-        # "Timeout waiting for bot response" — accept that (and 408/502/504) as
-        # the endpoint being exercised. But do NOT blanket-accept any 500: the
-        # route also maps generic ServiceError::InternalError to 500, and treating
-        # those as pass would mask a real regression. Only accept 500 when the
-        # body carries the known timeout message.
-        408|502|504)
-            warn "sync bot chat returned $HTTP_STATUS (timeout family — endpoint exercised)"
-            pass "sync bot chat endpoint reachable (status $HTTP_STATUS)"
-            TESTS_PASSED=$((TESTS_PASSED + 1)) ;;
-        500)
-            if [[ "$RESPONSE" == *"Timeout waiting for bot response"* ]]; then
-                warn "sync bot chat returned 500 (timeout waiting for bot response — endpoint exercised)"
-                pass "sync bot chat endpoint reachable (timeout)"
-                TESTS_PASSED=$((TESTS_PASSED + 1))
-            else
-                fail "sync bot chat returned 500 (non-timeout server error): $(printf '%s' "$RESPONSE" | head -c 200)"
-                TESTS_FAILED=$((TESTS_FAILED + 1))
-            fi
-            ;;
         *)
-            fail "sync bot chat returned $HTTP_STATUS: $(printf '%s' "$RESPONSE" | head -c 160)"
+            fail "async bot chat returned $HTTP_STATUS: $(printf '%s' "$RESPONSE" | head -c 160)"
             TESTS_FAILED=$((TESTS_FAILED + 1)) ;;
     esac
     TESTS_TOTAL=$((TESTS_TOTAL + 1))

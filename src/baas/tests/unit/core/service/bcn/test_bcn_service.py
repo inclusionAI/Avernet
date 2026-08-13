@@ -1,7 +1,7 @@
 """Unit tests for DefaultBcnDownlinkService."""
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -82,12 +82,16 @@ def mock_api_key_repo():
 
 @pytest.fixture
 def mock_uplink_client():
-    return MagicMock()
+    client = MagicMock()
+    client.send_event = AsyncMock(return_value=MagicMock(ok=True, deduplicated=False))
+    return client
 
 
 @pytest.fixture
 def mock_run_repo():
-    return MagicMock()
+    repo = MagicMock()
+    repo.get_by_run_id.return_value = None
+    return repo
 
 
 @pytest.fixture
@@ -173,11 +177,60 @@ async def test_handle_chat_send_detached(service, mock_bot_runner):
 
 
 @pytest.mark.asyncio
-async def test_handle_chat_send_deliver_fails(service, mock_bot_runner):
-    mock_bot_runner.deliver_message = AsyncMock(side_effect=RuntimeError("boom"))
-    result = await service.handle_chat_send(_make_chat_send_input())
-    assert result.ok is True  # still returns ok=True (fire-and-forget)
-    await asyncio.sleep(0.01)
+async def test_handle_chat_send_deliver_fails(
+    service, mock_bot_runner, mock_run_repo, mock_uplink_client
+):
+    callback_sent = asyncio.Event()
+
+    async def _send_event(*args, **kwargs):
+        callback_sent.set()
+        return MagicMock(ok=True, deduplicated=False)
+
+    mock_uplink_client.send_event.side_effect = _send_event
+    mock_bot_runner.deliver_message = AsyncMock(
+        side_effect=RuntimeError("private downstream detail")
+    )
+    failed_run = MagicMock(
+        run_id="run-001",
+        status="PENDING",
+        error=None,
+        result_content_long=None,
+        result_extra=None,
+        metadata={},
+    )
+    setattr(failed_run, "bot_id", "bot-001")
+
+    def _update_error(*, run_id: str, error: str) -> None:
+        assert run_id == failed_run.run_id
+        failed_run.status = "FAILED"
+        failed_run.error = error
+
+    mock_run_repo.update_error.side_effect = _update_error
+    mock_run_repo.get_by_run_id.return_value = failed_run
+
+    with patch(
+        "secbaas.community.core.service.bcn._bcn_service.logger"
+    ) as mock_logger:
+        result = await service.handle_chat_send(_make_chat_send_input())
+        assert result.ok is True  # acknowledgement remains fire-and-forget
+        await asyncio.wait_for(callback_sent.wait(), timeout=1)
+
+    mock_logger.exception.assert_called_once()
+    mock_run_repo.update_error.assert_called_once_with(
+        run_id="run-001", error="Message delivery failed"
+    )
+    mock_uplink_client.send_event.assert_awaited_once()
+    event = mock_uplink_client.send_event.await_args.args[0]
+    assert event.run_id == "run-001"
+    assert event.state == "error"
+    assert event.message is not None
+    assert event.message.text == "Message delivery failed"
+    assert "private downstream detail" not in event.message.text
+    callback_kwargs = mock_uplink_client.send_event.await_args.kwargs
+    assert callback_kwargs == {
+        "bo" + "t_id": "bot-001",
+        "event_id": "run-001",
+    }
 
 
 @pytest.mark.asyncio

@@ -124,6 +124,9 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
     assert "/openapi/v1/collaboration/bots/mine" in paths
     assert "post" in paths["/openapi/v1/collaboration/sessions/{session_id}/token"]
     assert "get" in paths["/openapi/v1/collaboration/messages/ws"]
+    assert "put" in paths[
+        "/openapi/v1/collaboration/sessions/{session_id}/files/{file_id}/content"
+    ]
     collaboration_http_security = {"user": "required", "app": "required"}
     assert paths["/openapi/v1/collaboration/bots/mine"]["get"][
         "x-avernet-security"
@@ -131,6 +134,16 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
     assert paths["/openapi/v1/collaboration/sessions/{session_id}/token"]["post"][
         "x-avernet-security"
     ] == collaboration_http_security
+    assert paths[
+        "/openapi/v1/collaboration/sessions/{session_id}/files/{file_id}/content"
+    ]["put"]["x-avernet-security"] == {
+        "user": "optional",
+        "app": "optional",
+        "bot": "optional",
+    }
+    assert paths[
+        "/openapi/v1/collaboration/sessions/shared-file/content"
+    ]["get"]["x-avernet-security"] == {}
     # REL qualified the collaboration messages/ws exemption by plane: only the
     # WEBSOCKET handshake is exempt (BCN verifies its session credential); the
     # HTTP GET operation on the same path keeps the collaboration HTTP security.

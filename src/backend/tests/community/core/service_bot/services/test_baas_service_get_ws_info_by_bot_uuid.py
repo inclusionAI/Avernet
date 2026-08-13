@@ -27,6 +27,7 @@ def _make_service_with_response(response_data: dict, status_code: int = 200) -> 
     http_client.get.return_value = http_resp
 
     return BaasService(
+        startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base="http://baas.test",
         tenant="tnt",
         template_uuid="tpl",
@@ -56,6 +57,7 @@ def _make_service_raising(status_code: int, body: str) -> BaasService:
     http_client.get.return_value = http_resp
 
     return BaasService(
+        startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base="http://baas.test",
         tenant="tnt",
         template_uuid="tpl",
@@ -131,6 +133,7 @@ class TestGetWsInfoByBotUuid:
         http_client.get.return_value = http_resp
 
         service = BaasService(
+            startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
             baas_api_base="http://baas.test",
             tenant="tnt",
             template_uuid="tpl",
@@ -178,6 +181,7 @@ class TestGetWsInfoByBotUuid:
         http_client.get.return_value = http_resp
 
         service = BaasService(
+            startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
             baas_api_base="http://baas.test",
             tenant="tnt",
             template_uuid="tpl",
@@ -224,6 +228,7 @@ class TestGetWsInfoByBotUuid:
         http_client.get.return_value = http_resp
 
         service = BaasService(
+            startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
             baas_api_base="http://baas.test",
             tenant="default-tenant",
             template_uuid="tpl",
@@ -264,6 +269,7 @@ class TestGetWsInfoByBotUuid:
         http_client.get.return_value = http_resp
 
         service = BaasService(
+            startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
             baas_api_base="http://baas.test",
             tenant="tnt",
             template_uuid="tpl",
@@ -328,6 +334,7 @@ class TestGetWsInfoByBotUuid:
         http_client.get.side_effect = Exception("Network error")
 
         service = BaasService(
+            startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
             baas_api_base="http://baas.test",
             tenant="tnt",
             template_uuid="tpl",
@@ -380,6 +387,7 @@ class TestGetWsInfoDelegation:
         binding_repo.get_by_id.return_value = binding
 
         service = BaasService(
+            startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
             baas_api_base="http://baas.test",
             tenant="tnt",
             template_uuid="tpl",
@@ -416,6 +424,7 @@ class TestGetWsInfoDelegation:
         binding_repo.get_by_id.return_value = None
 
         service = BaasService(
+            startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
             baas_api_base="http://baas.test",
             tenant="tnt",
             template_uuid="tpl",
@@ -460,6 +469,7 @@ class TestGetWsInfoDelegation:
         binding_repo.get_by_id.return_value = binding
 
         service = BaasService(
+            startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
             baas_api_base="http://baas.test",
             tenant="default-tenant",
             template_uuid="tpl",

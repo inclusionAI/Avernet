@@ -2363,20 +2363,22 @@ def _resolve_configs_dir() -> Path | None:
 
 并在构造 `ForwardRequest` 时通过 seam 注入(目前 no-op):
 
+> Forwarder Plugin API 后续已升级为 contract version 2。下面的示例按当前
+> one-shot `body` 契约展示：先完成身份接缝，再开始消费请求流；不再调用
+> `await request.body()` 或构造 `content=bytes`。
+
 把:
 ```python
-    body = await request.body()
     forward = ForwardRequest(
         method=request.method,
         url=_target_url(server.base_url, request),
         # Drop Host so httpx sets it from the upstream URL, not the gateway's.
         headers={k: v for k, v in request.headers.items() if k.lower() != "host"},
-        content=body,
     )
+    forward = replace(forward, body=await _request_body(request))
 ```
 改为:
 ```python
-    body = await request.body()
     forward = _attach_identities(
         ForwardRequest(
             method=request.method,
@@ -2385,10 +2387,10 @@ def _resolve_configs_dir() -> Path | None:
             headers={
                 k: v for k, v in request.headers.items() if k.lower() != "host"
             },
-            content=body,
         ),
         identities,
     )
+    forward = replace(forward, body=await _request_body(request))
 ```
 
 并在 `_bundle` 函数之后、`forward_request` 之前添加 seam 函数:
@@ -2616,7 +2618,6 @@ def test_seam_does_not_inject_identity_headers() -> None:
         method="GET",
         url="http://up/x",
         headers={"x-existing": "keep"},
-        content=b"",
     )
     # Non-empty identity set must still not leak any header.
     out = _attach_identities(forward, {"user": object()})
@@ -2626,7 +2627,7 @@ def test_seam_does_not_inject_identity_headers() -> None:
 
 
 def test_seam_returns_forward_unchanged_with_empty_identities() -> None:
-    forward = ForwardRequest(method="GET", url="http://up/x", headers={}, content=b"")
+    forward = ForwardRequest(method="GET", url="http://up/x", headers={})
     out = _attach_identities(forward, {})
     assert out is forward or (out.headers == {} and out.url == "http://up/x")
 ```

@@ -30,6 +30,7 @@ internal_dependencies:
   - agentclaw.community.core.system_config.orm  # SQLite ORM side-effect import for ac_config_* table creation
   - agentclaw.community.core.skill_center.orm   # SQLite ORM side-effect import for ac_default_skillset_* table creation
   - agentclaw.community.core.devices.repository.models  # SQLite ORM side-effect import for ac_entity_device_binding
+  - agentclaw.community.core.bot_startup_script.repository.models  # SQLite ORM side-effect import for ac_bot_startup_script
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.bot_public
   - agentclaw.community.core.bot_chat

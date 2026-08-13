@@ -88,6 +88,38 @@ class BotModel(Base):
     # to_dict() so no current API response body changes.
     avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
 
+    # The ``create_all`` mirror of prod's UNIQUE uk_bot_id_entity_id_env
+    # (bot_id, entity_id, env), which the out-of-band prod DDL carries and this
+    # model previously did not — so local and singlebox, which build their
+    # schema from here, enforced nothing.
+    #
+    # Load-bearing, not tidiness. ``is_delete`` is not in the key and nothing
+    # hard-deletes an ac_bots row, so a soft-deleted bot goes on occupying its
+    # tuple and the identifier can never be handed to a later bot.
+    # ``ac_bot_startup_script`` reads its row by exactly that tuple with no
+    # owner stamp on top *because of this*; without the constraint a re-created
+    # bot_id inherits the previous bot's script and executes it on every
+    # container start. See that table's DDL for the full argument.
+    #
+    # **Tenant-scoped, where prod's key may or may not be.** The prod index list
+    # does not show whether it is GLOBAL or per-tenant, and
+    # ``test_every_skills_operation_is_guarded_from_another_tenant`` creates one
+    # (bot_id, entity_id, env) under two tenants — so a global key here would
+    # reject something a supported deployment does today. Adding the tenant can
+    # only ever accept *more* than prod does, never less, so it cannot break a
+    # flow prod allows; and it is still exactly the guarantee the script table
+    # needs, whose own key is (avernet_tenant, sha256(env|entity_id|bot_id)).
+    # If prod's index turns out to be global, tighten this to match.
+    __table_args__ = (
+        UniqueConstraint(
+            "bot_id",
+            "entity_id",
+            "env",
+            "avernet_tenant",
+            name="uk_bot_id_entity_id_env_tenant",
+        ),
+    )
+
     def to_dict(self) -> dict:
         """Convert to dictionary."""
         return {

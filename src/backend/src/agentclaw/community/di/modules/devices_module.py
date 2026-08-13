@@ -48,6 +48,8 @@ from agentclaw.community.core.bot_management.services.default_image_policy_liste
     DefaultImagePolicyActivationListener,
 )
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
+from agentclaw.community.di import config as cfg
+from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.core.devices.protocols import (
     BotQueryProtocol,
     BotSyncProtocol,
@@ -231,6 +233,8 @@ class DevicesModule(Module):
         token_vault: TokenVault,
         task_queue_service: TaskQueueService,
         template_service: TemplateService,
+        secret_resolver: SecretResolver,
+        secret_names: cfg.SecretNamesConfig,
     ) -> BaasDeviceService:
         # Explicit provider: BaasDeviceService takes ``bot_query`` /
         # ``bot_sync`` / ``mcp_sync`` typed as Protocols, which
@@ -249,6 +253,8 @@ class DevicesModule(Module):
             vault=token_vault,
             task_queue_service=task_queue_service,
             template_service=template_service,
+            secret_resolver=secret_resolver,
+            theta_master_key_secret=secret_names.aicoding_theta_master_key,
         )
 
     @singleton

@@ -55,14 +55,14 @@ class ExpertChatRepository(
     def __init__(self, db: DatabasePlugin) -> None:
         from agentclaw.community.core.expert_chat.sqlite_models import (
             AcExpertChatBotSession,
+            AcExpertChatOwnedSession,
         )
 
         self._db = db
         self.Model = AcExpertChatBotSession
+        self.OwnedSessionModel = AcExpertChatOwnedSession
 
-    def add_chat_bot(
-        self, user_id: str, bot_id: str, owner_id: str
-    ) -> Dict[str, Any]:
+    def add_chat_bot(self, user_id: str, bot_id: str, owner_id: str) -> Dict[str, Any]:
         """Atomic upsert on uk_user_bot_owner_env (prod parity)."""
         env = get_current_env()
         with self._db.orm_session() as db:
@@ -254,3 +254,142 @@ class ExpertChatRepository(
                 )
             )
             return rowcount > 0
+
+    def add_owned_session(
+        self, user_id: str, bot_id: str, owner_id: str, session_key: str
+    ) -> Dict[str, Any]:
+        """Atomically add or reactivate one multi-session index row."""
+        env = get_current_env()
+        with self._db.orm_session() as db:
+            dialect = db.get_bind().dialect.name
+            table = self.OwnedSessionModel.__table__
+            values = {
+                "user_id": user_id,
+                "bot_id": bot_id,
+                "owner_id": owner_id,
+                "session_key": session_key,
+                "status": "ACTIVE",
+                "env": env,
+            }
+            if dialect == "sqlite":
+                from sqlalchemy.dialects.sqlite import insert as _insert
+
+                stmt = _insert(table).values(**values)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=[
+                        "user_id",
+                        "bot_id",
+                        "owner_id",
+                        "env",
+                        "session_key",
+                    ],
+                    set_={"status": "ACTIVE", "gmt_modified": func.now()},
+                )
+                db.execute(stmt)
+                db.flush()
+                row = (
+                    db.query(self.OwnedSessionModel)
+                    .filter(
+                        self.OwnedSessionModel.user_id == user_id,
+                        self.OwnedSessionModel.bot_id == bot_id,
+                        self.OwnedSessionModel.owner_id == owner_id,
+                        self.OwnedSessionModel.env == env,
+                        self.OwnedSessionModel.session_key == session_key,
+                    )
+                    .one()
+                )
+            else:
+                from sqlalchemy.dialects.mysql import insert as _insert
+
+                stmt = _insert(table).values(**values)
+                stmt = stmt.on_duplicate_key_update(
+                    id=func.LAST_INSERT_ID(self.OwnedSessionModel.id),
+                    status="ACTIVE",
+                    gmt_modified=func.now(),
+                )
+                row_id = db.execute(stmt).lastrowid
+                row = db.get(self.OwnedSessionModel, row_id)
+            return row.to_dict()
+
+    def list_owned_sessions(
+        self,
+        user_id: str,
+        bot_id: str,
+        owner_id: str,
+        session_key: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        env = get_current_env()
+        with self._db.orm_session() as db:
+            query = db.query(self.OwnedSessionModel).filter(
+                self.OwnedSessionModel.user_id == user_id,
+                self.OwnedSessionModel.bot_id == bot_id,
+                self.OwnedSessionModel.owner_id == owner_id,
+                self.OwnedSessionModel.status == "ACTIVE",
+                self.OwnedSessionModel.env == env,
+            )
+            if session_key is not None:
+                query = query.filter(self.OwnedSessionModel.session_key == session_key)
+            rows = query.order_by(
+                self.OwnedSessionModel.gmt_modified.desc(),
+                self.OwnedSessionModel.id.desc(),
+            ).all()
+            return [row.to_dict() for row in rows]
+
+    def get_owned_session(
+        self, user_id: str, bot_id: str, owner_id: str, session_key: str
+    ) -> Optional[Dict[str, Any]]:
+        rows = self.list_owned_sessions(
+            user_id=user_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            session_key=session_key,
+        )
+        return rows[0] if rows else None
+
+    def delete_owned_session(
+        self, user_id: str, bot_id: str, owner_id: str, session_key: str
+    ) -> bool:
+        env = get_current_env()
+        with self._db.orm_session() as db:
+            rowcount = (
+                db.query(self.OwnedSessionModel)
+                .filter(
+                    self.OwnedSessionModel.user_id == user_id,
+                    self.OwnedSessionModel.bot_id == bot_id,
+                    self.OwnedSessionModel.owner_id == owner_id,
+                    self.OwnedSessionModel.session_key == session_key,
+                    self.OwnedSessionModel.status == "ACTIVE",
+                    self.OwnedSessionModel.env == env,
+                )
+                .update(
+                    {
+                        self.OwnedSessionModel.status: "DELETED",
+                        self.OwnedSessionModel.gmt_modified: func.now(),
+                    },
+                    synchronize_session=False,
+                )
+            )
+            return rowcount > 0
+
+    def delete_all_owned_sessions(
+        self, user_id: str, bot_id: str, owner_id: str
+    ) -> int:
+        env = get_current_env()
+        with self._db.orm_session() as db:
+            return (
+                db.query(self.OwnedSessionModel)
+                .filter(
+                    self.OwnedSessionModel.user_id == user_id,
+                    self.OwnedSessionModel.bot_id == bot_id,
+                    self.OwnedSessionModel.owner_id == owner_id,
+                    self.OwnedSessionModel.status == "ACTIVE",
+                    self.OwnedSessionModel.env == env,
+                )
+                .update(
+                    {
+                        self.OwnedSessionModel.status: "DELETED",
+                        self.OwnedSessionModel.gmt_modified: func.now(),
+                    },
+                    synchronize_session=False,
+                )
+            )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from injector import Binder, Module, inject, provider, singleton
 
+from engine.community.config import load_temporary_url_settings
 from engine.community.core.resource_materialization.service import (
     ResourceMaterializationService,
 )
@@ -12,9 +13,11 @@ from engine.community.core.session_files.service import SessionFileService
 from engine.community.plugin_api.resource_materialization import (
     BaasMaterializationClient,
     BackendMaterializationCallbackClient,
+    TemporaryUrlPullClient,
 )
 from engine.community.plugin_api.session_file_export import BaasSessionFileClient
 from engine.community.plugins.resource_materialization import (
+    HttpTemporaryUrlPullClient,
     NotConfiguredBaasMaterializationClient,
     NotConfiguredBackendMaterializationCallbackClient,
 )
@@ -30,6 +33,16 @@ class ResourceMaterializationModule(Module):
         binder.bind(
             BaasMaterializationClient,
             to=NotConfiguredBaasMaterializationClient,
+            scope=singleton,
+        )
+        settings = load_temporary_url_settings()
+        temporary_client: TemporaryUrlPullClient = HttpTemporaryUrlPullClient(
+            max_bytes=settings.max_bytes,
+            timeout_seconds=settings.timeout_seconds,
+        )
+        binder.bind(
+            TemporaryUrlPullClient,
+            to=temporary_client,
             scope=singleton,
         )
         binder.bind(
@@ -50,10 +63,12 @@ class ResourceMaterializationModule(Module):
         self,
         pull_client: BaasMaterializationClient,
         callback_client: BackendMaterializationCallbackClient,
+        temporary_url_pull_client: TemporaryUrlPullClient,
     ) -> ResourceMaterializationService:
         return ResourceMaterializationService(
             pull_client=pull_client,
             callback_client=callback_client,
+            temporary_url_pull_client=temporary_url_pull_client,
         )
 
     @singleton

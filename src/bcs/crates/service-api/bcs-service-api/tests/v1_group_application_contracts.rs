@@ -113,6 +113,7 @@ fn list_command_carries_caller_view_actor_and_all_approved_filters() {
         offset: 10,
         limit: 25,
         q: Some("planning".into()),
+        visibility: Some(GroupVisibility::Public),
         membership: MembershipFilter::SessionOnly,
         kind: GroupKindFilter::All,
         strategy: Some(bcs_service_api::application::v1::GroupStrategy::StateMachine),
@@ -120,6 +121,7 @@ fn list_command_carries_caller_view_actor_and_all_approved_filters() {
 
     assert_eq!(command.caller.user.expect("User").id, "staff-1");
     assert_eq!(command.view_bot_id.as_deref(), Some("bot-1"));
+    assert_eq!(command.visibility, Some(GroupVisibility::Public));
     assert_eq!(command.membership, MembershipFilter::SessionOnly);
     assert_eq!(command.kind, GroupKindFilter::All);
 }

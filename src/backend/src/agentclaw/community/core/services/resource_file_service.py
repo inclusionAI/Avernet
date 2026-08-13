@@ -341,6 +341,32 @@ class ResourceFileService:
             self._logical(path), enforce_download_limit=enforce_download_limit
         )
 
+    async def exists(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+        path: str,
+        publish_id: str | None = None,
+        device_uuid: str | None = None,
+    ) -> bool:
+        """Whether ``path`` is present in the bot's workspace, provider-blind.
+
+        Same addressing as every other method here — the caller passes a
+        workspace-relative path and never learns the container's layout.
+        """
+        ctx = self._resolve_ctx(
+            bot_id=bot_id, entity_id=entity_id, publish_id=publish_id,
+            device_uuid=device_uuid,
+        )
+        device_fs = self._device_fs(
+            ctx, entity_type=entity_type, entity_id=entity_id,
+            bot_id=bot_id, engine_type=engine_type,
+        )
+        return await device_fs.exists(self._logical(path))
+
     async def create_directory(
         self,
         *,
@@ -369,13 +395,50 @@ class ResourceFileService:
         engine_type: str,
         path: str,
     ) -> bool:
-        """Delete a file or directory; returns False when nothing was deleted."""
+        """Delete a file or directory; returns False when nothing was deleted.
+
+        A directory needs ``delete_tree``: the engines route the two through
+        separate operations (``/api/file/remove`` vs ``/api/file/rmtree``), and
+        the single-file one does not recurse — so sending every path to
+        ``delete_file`` made the documented "or directory" half of this method
+        silently unable to delete one.
+        """
         ctx = self._resolve_ctx(bot_id=bot_id, entity_id=entity_id)
         device_fs = self._device_fs(
             ctx, entity_type=entity_type, entity_id=entity_id,
             bot_id=bot_id, engine_type=engine_type,
         )
-        return await device_fs.delete_file(self._logical(path))
+        logical = self._logical(path)
+        if await self._is_dir(device_fs, path):
+            return await device_fs.delete_tree(logical)
+        return await device_fs.delete_file(logical)
+
+    async def _is_dir(self, device_fs: Any, path: str) -> bool:
+        """Whether *path* names a directory, asked of the parent's listing.
+
+        The parent rather than the path itself: listing a *file* is not a
+        defined operation on the engines — ``list_dir`` raises rather than
+        answering "not a directory" — so probing directly would turn every file
+        delete into an error.
+
+        Uses the raw device listing, not this class's filtered ``list_dir``, so
+        the hidden system names stay deletable exactly as before. A listing
+        failure answers "not a directory": the delete then takes the file
+        branch, which is what it did unconditionally until now.
+        """
+        parent, _, leaf = path.rpartition("/")
+        try:
+            entries = await device_fs.list_dir(self._logical(parent))
+        except Exception as exc:
+            logger.warning(
+                "[%s._is_dir] listing %r failed, assuming file: %s",
+                type(self).__name__, parent, exc,
+            )
+            return False
+        for entry in entries or ():
+            if entry.get("name") == leaf:
+                return bool(entry.get("is_dir", False))
+        return False
 
     async def upload_file(
         self,

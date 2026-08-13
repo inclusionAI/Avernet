@@ -49,6 +49,7 @@ def _make_service_raising(
     http_client.get.return_value = http_resp
 
     return BaasService(
+        startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base="http://baas.test",
         tenant="tnt",
         template_uuid="tpl",

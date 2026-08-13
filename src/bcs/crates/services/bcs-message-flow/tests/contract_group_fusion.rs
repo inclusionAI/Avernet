@@ -38,6 +38,8 @@ impl FusionCoreService for RecordingFusion {
             soul: None,
             rules: None,
             memory: None,
+            tools: None,
+            agents: None,
         })
     }
 

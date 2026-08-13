@@ -250,6 +250,7 @@ pub struct ListGroups {
     pub offset: u64,
     pub limit: u64,
     pub q: Option<String>,
+    pub visibility: Option<GroupVisibility>,
     pub membership: MembershipFilter,
     pub kind: GroupKindFilter,
     pub strategy: Option<GroupStrategy>,

@@ -517,7 +517,7 @@ _story_connect_with_group_session_jwt() {
     assert_not_empty "public collaboration group has an id" "$group_id"
     [[ -n "$group_id" ]] || return
 
-    api_request_headers GET "${public_prefix}/groups?view_bot_id=${BOT_PM_UUID}&kind=all&membership=all&limit=20" "" \
+    api_request_headers GET "${public_prefix}/groups?view_bot_id=${BOT_PM_UUID}&kind=all&membership=direct&limit=20" "" \
         "X-Avernet-Principal: ${principal}"
     require_status "human lists collaboration groups through the public API" "200" || true
 
@@ -700,17 +700,16 @@ _story_complete_and_invoke_sessions() {
 # User story: One agent starts, observes, and cancels a direct conversation with another.
 #
 # Flow:
-#   Attempt synchronous chat -> start an asynchronous chat -> inspect its run
+#   Start an asynchronous chat -> inspect its run
 #   -> cancel the run -> inspect the terminal state.
 #
 # Critical assertions:
-#   - Synchronous chat accepts only delivery or the documented timeout contract.
 #   - Async start returns stable run/session identifiers for the requested target agent.
 #   - Run lookup preserves identity and exposes lifecycle state.
 #   - Cancellation is acknowledged and remains terminal on a later read.
 story_user_has_direct_agent_conversation() {
     info "Story: an agent starts a direct async conversation, inspects it, and cancels it"
-    test_bot_chat_sync
+    test_bot_chat_async
 
     bot_post "/bots/${BOT_PM_UUID}/chat-async" CEO \
         '{"message":"Prepare a release checklist","timeout_ms":60000,"tags":["e2e","release"]}'

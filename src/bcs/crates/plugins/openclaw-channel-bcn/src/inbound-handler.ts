@@ -8,7 +8,7 @@
  * 4. Stream response back to BCS as event frames
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import { rm } from 'node:fs/promises';
 import * as path from 'node:path';
@@ -45,6 +45,10 @@ const MAX_IMAGE_ATTACHMENTS = 5;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const IMAGE_DOWNLOAD_TIMEOUT_MS = 30_000;
 const IMAGE_READ_IDLE_TIMEOUT_MS = 10_000;
+const MAX_FILE_ATTACHMENTS = 5;
+const MAX_FILE_BYTES = 100 * 1024 * 1024;
+const FILE_DOWNLOAD_TIMEOUT_MS = 60_000;
+const FILE_READ_IDLE_TIMEOUT_MS = 15_000;
 const RUN_TERMINAL_TIMEOUT_MS = 15 * 60 * 1000;
 const INJECT_ASSISTANT_ONLY_FIELDS = [ 'api', 'provider', 'model', 'stopReason', 'usage' ];
 
@@ -196,7 +200,7 @@ type RunContext = {
   agentRunId?: string;
   finalSent?: boolean;
   sawToolEvent: boolean;
-  preparedImages?: PreparedImage[];
+  preparedAttachments?: PreparedAttachment[];
   terminalTimer?: ReturnType<typeof setTimeout>;
 };
 
@@ -374,6 +378,10 @@ function extractImageAttachments(attachments: Attachment[] | undefined): Attachm
   return (attachments ?? []).filter(attachment => attachment.type === 'image');
 }
 
+function extractFileAttachments(attachments: Attachment[] | undefined): Attachment[] {
+  return (attachments ?? []).filter(attachment => attachment.type === 'file');
+}
+
 function sanitizeAttachmentDisplay(value: string): string {
   // COSEC: prevent untrusted filenames from breaking structured prompt notes.
   return value
@@ -439,9 +447,10 @@ function sniffSupportedImageMime(buffer: Buffer): string | undefined {
   return undefined;
 }
 
-type PreparedImage = {
+type PreparedAttachment = {
   path: string;
   contentType: string;
+  attachmentId: string;
 };
 
 type InboundImageErrorCode =
@@ -466,9 +475,9 @@ class InboundImageError extends Error {
   }
 }
 
-async function cleanupPreparedImages(images: PreparedImage[]): Promise<void> {
-  await Promise.all(images.map(async image => {
-    await rm(image.path, { force: true }).catch(() => undefined);
+async function cleanupPreparedAttachments(attachments: PreparedAttachment[]): Promise<void> {
+  await Promise.all(attachments.map(async attachment => {
+    await rm(attachment.path, { force: true }).catch(() => undefined);
   }));
 }
 
@@ -527,13 +536,13 @@ function cleanupRunContext(
     pendingRouteBySessionKey.delete(context.sessionKey);
   }
 
-  const preparedImages = context.preparedImages ?? [];
-  context.preparedImages = [];
-  if (preparedImages.length === 0) return Promise.resolve();
+  const preparedAttachments = context.preparedAttachments ?? [];
+  context.preparedAttachments = [];
+  if (preparedAttachments.length === 0) return Promise.resolve();
 
-  const cleanupPromise = cleanupPreparedImages(preparedImages)
+  const cleanupPromise = cleanupPreparedAttachments(preparedAttachments)
     .then(() => {
-      log?.info?.(`[BCS] Cleaned ${preparedImages.length} prepared image(s) for run_id=${runId}`);
+      log?.info?.(`[BCS] Cleaned ${preparedAttachments.length} prepared attachment(s) for run_id=${runId}`);
     })
     .finally(() => {
       if (cleanupPromiseByRunId.get(runId) === cleanupPromise) {
@@ -589,7 +598,7 @@ async function prepareImageAttachments(params: {
   attachments: Attachment[];
   abortSignal: AbortSignal;
   runtime: ReturnType<typeof getBcsRuntime>;
-}): Promise<PreparedImage[]> {
+}): Promise<PreparedAttachment[]> {
   if (params.attachments.length === 0) return [];
 
   if (params.attachments.length > MAX_IMAGE_ATTACHMENTS) {
@@ -607,7 +616,7 @@ async function prepareImageAttachments(params: {
     );
   }
 
-  const prepared: PreparedImage[] = [];
+  const prepared: PreparedAttachment[] = [];
   try {
     for (const attachment of params.attachments) {
       if (typeof attachment.expires_at === 'number' && attachment.expires_at <= Date.now()) {
@@ -708,13 +717,194 @@ async function prepareImageAttachments(params: {
       prepared.push({
         path: saved.path,
         contentType: savedContentType,
+        attachmentId: attachment.attachment_id,
       });
     }
     return prepared;
   } catch (err) {
-    await cleanupPreparedImages(prepared);
+    await cleanupPreparedAttachments(prepared);
     throw err;
   }
+}
+
+type InboundFileErrorCode =
+  | 'FILE_TOO_MANY'
+  | 'FILE_EXPIRED'
+  | 'FILE_INVALID_URL'
+  | 'FILE_TOO_LARGE'
+  | 'FILE_DOWNLOAD_TIMEOUT'
+  | 'FILE_DOWNLOAD_FAILED'
+  | 'FILE_SIZE_MISMATCH'
+  | 'FILE_HASH_MISMATCH'
+  | 'FILE_STORE_FAILED'
+  | 'FILE_ABORTED';
+
+class InboundFileError extends Error {
+  constructor(
+    readonly code: InboundFileErrorCode,
+    readonly userMessage: string,
+    readonly attachmentId?: string,
+  ) {
+    super(code);
+    this.name = 'InboundFileError';
+  }
+}
+
+function validateFileUrl(attachment: Attachment): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(attachment.url);
+  } catch {
+    throw new InboundFileError('FILE_INVALID_URL', 'The attached file has an invalid download URL.', attachment.attachment_id);
+  }
+  if (
+    parsed.protocol !== 'https:'
+    || parsed.username !== ''
+    || parsed.password !== ''
+  ) {
+    throw new InboundFileError('FILE_INVALID_URL', 'The attached file has an invalid download URL.', attachment.attachment_id);
+  }
+}
+
+async function prepareFileAttachments(params: {
+  attachments: Attachment[];
+  abortSignal: AbortSignal;
+  runtime: ReturnType<typeof getBcsRuntime>;
+}): Promise<PreparedAttachment[]> {
+  if (params.attachments.length === 0) return [];
+  if (params.attachments.length > MAX_FILE_ATTACHMENTS) {
+    throw new InboundFileError('FILE_TOO_MANY', `A message can contain at most ${MAX_FILE_ATTACHMENTS} files.`);
+  }
+  const media = params.runtime.channel?.media;
+  if (!media?.fetchRemoteMedia || !media?.saveMediaBuffer) {
+    throw new InboundFileError('FILE_STORE_FAILED', 'File processing is unavailable in the current OpenClaw runtime.');
+  }
+
+  const prepared: PreparedAttachment[] = [];
+  try {
+    for (const attachment of params.attachments) {
+      if (typeof attachment.expires_at === 'number' && attachment.expires_at <= Date.now()) {
+        throw new InboundFileError('FILE_EXPIRED', 'The attached file download link has expired.', attachment.attachment_id);
+      }
+      if (typeof attachment.size === 'number' && attachment.size > MAX_FILE_BYTES) {
+        throw new InboundFileError('FILE_TOO_LARGE', 'The attached file exceeds the 100 MB limit.', attachment.attachment_id);
+      }
+      validateFileUrl(attachment);
+
+      const timeoutSignal = AbortSignal.timeout(FILE_DOWNLOAD_TIMEOUT_MS);
+      const downloadSignal = AbortSignal.any([ params.abortSignal, timeoutSignal ]);
+      let fetched: { buffer: Buffer; contentType?: string; fileName?: string };
+      try {
+        // OpenClaw owns SSRF validation for the initial URL and every redirect.
+        fetched = await media.fetchRemoteMedia({
+          url: attachment.url,
+          filePathHint: attachment.file_name,
+          maxBytes: MAX_FILE_BYTES,
+          maxRedirects: 3,
+          readIdleTimeoutMs: FILE_READ_IDLE_TIMEOUT_MS,
+          requestInit: { signal: downloadSignal },
+        });
+      } catch (err) {
+        if (params.abortSignal.aborted) {
+          throw new InboundFileError('FILE_ABORTED', 'File processing was aborted.', attachment.attachment_id);
+        }
+        if (timeoutSignal.aborted) {
+          throw new InboundFileError('FILE_DOWNLOAD_TIMEOUT', 'The attached file download timed out.', attachment.attachment_id);
+        }
+        if ((err as { code?: string })?.code === 'max_bytes') {
+          throw new InboundFileError('FILE_TOO_LARGE', 'The attached file exceeds the 100 MB limit.', attachment.attachment_id);
+        }
+        throw new InboundFileError('FILE_DOWNLOAD_FAILED', 'The attached file could not be downloaded. The link may have expired.', attachment.attachment_id);
+      }
+      if (!Buffer.isBuffer(fetched.buffer)) {
+        throw new InboundFileError('FILE_DOWNLOAD_FAILED', 'The attached file could not be downloaded.', attachment.attachment_id);
+      }
+      if (typeof attachment.size === 'number' && fetched.buffer.length !== attachment.size) {
+        throw new InboundFileError('FILE_SIZE_MISMATCH', 'The attached file failed its size check.', attachment.attachment_id);
+      }
+      if (attachment.sha256) {
+        const expectedHash = attachment.sha256.trim().toLowerCase();
+        const actualHash = createHash('sha256').update(fetched.buffer).digest('hex');
+        if (!/^[a-f0-9]{64}$/.test(expectedHash) || actualHash !== expectedHash) {
+          throw new InboundFileError('FILE_HASH_MISMATCH', 'The attached file failed its integrity check.', attachment.attachment_id);
+        }
+      }
+
+      const contentType = normalizeMimeType(fetched.contentType)
+        ?? normalizeMimeType(attachment.mime_type)
+        ?? 'application/octet-stream';
+      let saved: { path: string; size: number; contentType?: string };
+      try {
+        saved = await media.saveMediaBuffer(
+          fetched.buffer,
+          contentType,
+          'inbound',
+          MAX_FILE_BYTES,
+          fetched.fileName ?? attachment.file_name,
+        );
+      } catch {
+        throw new InboundFileError('FILE_STORE_FAILED', 'The attached file could not be prepared for analysis.', attachment.attachment_id);
+      }
+      prepared.push({
+        path: saved.path,
+        contentType: normalizeMimeType(saved.contentType) ?? contentType,
+        attachmentId: attachment.attachment_id,
+      });
+    }
+    return prepared;
+  } catch (err) {
+    await cleanupPreparedAttachments(prepared);
+    throw err;
+  }
+}
+
+type InboundMediaFactBuilder = (items: Array<{
+  path: string;
+  contentType: string;
+  messageId: string;
+}>) => unknown;
+
+let inboundMediaFactBuilderPromise: Promise<InboundMediaFactBuilder | undefined> | undefined;
+
+export function setInboundMediaFactBuilderForTest(
+  builder: InboundMediaFactBuilder | undefined,
+): void {
+  inboundMediaFactBuilderPromise = Promise.resolve(builder);
+}
+
+async function loadInboundMediaFactBuilder(): Promise<InboundMediaFactBuilder | undefined> {
+  if (!inboundMediaFactBuilderPromise) {
+    inboundMediaFactBuilderPromise = (async () => {
+      try {
+        const moduleName = 'openclaw/plugin-sdk/channel-inbound';
+        const sdk = await import(moduleName) as { toInboundMediaFacts?: InboundMediaFactBuilder };
+        return typeof sdk.toInboundMediaFacts === 'function' ? sdk.toInboundMediaFacts : undefined;
+      } catch {
+        return undefined;
+      }
+    })();
+  }
+  return inboundMediaFactBuilderPromise;
+}
+
+async function buildInboundMediaFields(prepared: PreparedAttachment[]): Promise<Record<string, unknown>> {
+  if (prepared.length === 0) return {};
+  const factBuilder = await loadInboundMediaFactBuilder();
+  if (factBuilder) {
+    return {
+      media: factBuilder(prepared.map(attachment => ({
+        path: attachment.path,
+        contentType: attachment.contentType,
+        messageId: attachment.attachmentId,
+      }))),
+    };
+  }
+  return {
+    MediaPath: prepared[0]?.path,
+    MediaType: prepared[0]?.contentType,
+    MediaPaths: prepared.map(attachment => attachment.path),
+    MediaTypes: prepared.map(attachment => attachment.contentType),
+  };
 }
 
 function buildChatEventPayload(
@@ -723,6 +913,7 @@ function buildChatEventPayload(
   state: ChatEventPayload['state'],
   text?: string,
   routeIntent?: PendingRouteIntent,
+  errorCode?: string,
 ): ChatEventPayload {
   return {
     run_id: runId,
@@ -744,6 +935,7 @@ function buildChatEventPayload(
         dedupe_key: routeIntent.dedupeKey,
       } satisfies ChatEventRouting,
     } : {}),
+    ...(errorCode ? { errorCode } : {}),
   };
 }
 
@@ -943,11 +1135,12 @@ function sendRunErrorOnce(
   userMessage: string,
   log?: { warn: (...args: unknown[]) => void },
   detail?: string,
+  errorCode?: string,
 ): boolean {
   const context = runContexts.get(runId);
   if (!context || context.finalSent) return false;
 
-  const errorPayload = buildChatEventPayload(runId, context.groupId, 'error', userMessage);
+  const errorPayload = buildChatEventPayload(runId, context.groupId, 'error', userMessage, undefined, errorCode);
   context.client.sendEvent(
     'chat.event',
     errorPayload as unknown as Record<string, unknown>,
@@ -993,9 +1186,10 @@ export async function handleChatSend(
 
   // Extract text from message content
   const imageAttachments = extractImageAttachments(params.attachments);
+  const fileAttachments = extractFileAttachments(params.attachments);
   const messageText = extractText(params.message?.content ?? []);
   const text = messageText || (imageAttachments.length > 0 ? attachmentFallbackText(imageAttachments) : '');
-  if (!text) {
+  if (!text && fileAttachments.length === 0) {
     client.sendResponse(request.id, false, undefined, {
       code: 'INVALID_REQUEST',
       message: 'Empty message',
@@ -1022,7 +1216,7 @@ export async function handleChatSend(
   // Track active stream for abort support
   const abortController = new AbortController();
   activeStreams.set(runId, abortController);
-  let preparedImages: PreparedImage[] = [];
+  let preparedAttachments: PreparedAttachment[] = [];
 
   // Track run context for agent event routing
   runContexts.set(runId, { groupId: bcsGroupId, client, sawToolEvent: false });
@@ -1032,15 +1226,23 @@ export async function handleChatSend(
   try {
     const rt = getBcsRuntime();
     const currentCfg = await rt.config.loadConfig();
-    preparedImages = await prepareImageAttachments({
+    const preparedImages = await prepareImageAttachments({
       attachments: imageAttachments,
       abortSignal: abortController.signal,
       runtime: rt,
     });
-    const preparedImageContext = runContexts.get(runId);
-    if (preparedImageContext) {
-      preparedImageContext.preparedImages = preparedImages;
+    preparedAttachments = preparedImages;
+    const preparedContext = runContexts.get(runId);
+    if (preparedContext) {
+      preparedContext.preparedAttachments = preparedAttachments;
     }
+    const preparedFiles = await prepareFileAttachments({
+      attachments: fileAttachments,
+      abortSignal: abortController.signal,
+      runtime: rt,
+    });
+    preparedAttachments = [ ...preparedImages, ...preparedFiles ];
+    if (preparedContext) preparedContext.preparedAttachments = preparedAttachments;
 
     // Resolve agent route to find the correct agent for this session
     const route = rt.channel.routing.resolveAgentRoute({
@@ -1076,6 +1278,7 @@ export async function handleChatSend(
     // Build inbound context using SDK's finalizeInboundContext
     // Use bcsGroupId for To/OriginatingTo so agent's outbound messages route correctly
     // BCS v2+ prepends GroupContext header to message content, so pass text as-is
+    const inboundMediaFields = await buildInboundMediaFields(preparedAttachments);
     const msgCtx = rt.channel.reply.finalizeInboundContext({
       Body: text,
       RawBody: text,
@@ -1094,14 +1297,7 @@ export async function handleChatSend(
       ConversationLabel: bcsGroupId ? `BCS Group ${bcsGroupId}` : 'BCS Onboarding',
       Timestamp: Date.now(),
       CommandAuthorized: true,
-      MediaPath: preparedImages[0]?.path,
-      MediaType: preparedImages[0]?.contentType,
-      MediaPaths: preparedImages.length > 0
-        ? preparedImages.map(image => image.path)
-        : undefined,
-      MediaTypes: preparedImages.length > 0
-        ? preparedImages.map(image => image.contentType)
-        : undefined,
+      ...inboundMediaFields,
     });
 
     // Resolve store path for session storage using the resolved agentId
@@ -1211,9 +1407,11 @@ export async function handleChatSend(
     );
   } catch (err: any) {
     const imageError = err instanceof InboundImageError ? err : undefined;
-    if (imageError) {
+    const fileError = err instanceof InboundFileError ? err : undefined;
+    const attachmentError = imageError ?? fileError;
+    if (attachmentError) {
       log?.error?.(
-        `[BCS] Image preparation failed for run_id=${runId}, attachment_id=${sanitizeAttachmentLogValue(imageError.attachmentId ?? 'unknown')}, code=${imageError.code}`,
+        `[BCS] Attachment preparation failed for run_id=${runId}, attachment_id=${sanitizeAttachmentLogValue(attachmentError.attachmentId ?? 'unknown')}, code=${attachmentError.code}`,
       );
     } else {
       log?.error?.(`Error processing chat.send for run_id=${runId}: ${err?.message ?? err}`);
@@ -1230,9 +1428,10 @@ export async function handleChatSend(
     } else {
       sendRunErrorOnce(
         runId,
-        imageError?.userMessage ?? 'An error occurred while processing your message.',
+        attachmentError?.userMessage ?? 'An error occurred while processing your message.',
         log,
         'dispatcher failure',
+        attachmentError?.code,
       );
     }
     await cleanupRunContext(runId, log);

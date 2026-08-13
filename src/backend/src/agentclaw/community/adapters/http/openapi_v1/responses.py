@@ -39,9 +39,15 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     ErrorEnvelope,
     Page,
 )
+from agentclaw.community.api.bot_startup_script_service import (
+    MAX_SCRIPT_BYTES,
+    StartupScriptNotEncodableError,
+    StartupScriptTooLargeError,
+)
 from agentclaw.community.adapters.http.openapi_v1.errors import (
     GrantNotResolvableError,
     ClusterMismatchError,
+    StartupScriptUnsupportedError,
     MissingPrincipalError,
     UnsupportedEngineError,
     UserIdMismatchError,
@@ -96,6 +102,7 @@ from agentclaw.community.core.mcp.errors import (
 from agentclaw.community.core.resources.service import (
     DuplicateResourceError,
     FileTooLargeError,
+    InvalidResourcePathError,
     ResourceNotFoundError,
 )
 from agentclaw.community.core.skill_center.errors import (
@@ -248,6 +255,10 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # str(exc), which would leak internal ids/paths to external callers.
     DuplicateResourceError: (409, "Resource already exists"),
     ResourceNotFoundError: (404, "Not found"),
+    # The message says the path was rejected but not what the server made of it:
+    # echoing the caller's path back, or naming the segment that failed, turns a
+    # rejection into a probe for how addresses are resolved.
+    InvalidResourcePathError: (400, "Invalid resource path"),
     LocalSkillNotFoundError: (404, "Not found"),
     LocalSkillOwnerAmbiguousError: (409, "Ambiguous Local Skill owner"),
     LocalSkillInvalidPackageError: (400, "Invalid Skill package"),
@@ -259,6 +270,22 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LocalSkillRuntimeSyncError: (502, "Skill runtime synchronization failed"),
     LocalSkillEditPausedError: (409, "Skill layout is being updated"),
     FileTooLargeError: (413, "File too large for preview"),
+    # Startup script (issue #926): the body is refused at write time so a
+    # caller learns the limit instead of hitting it inside a container. The
+    # limit is interpolated from the constant rather than typed as a literal so
+    # the message cannot drift from what the service actually enforces — and
+    # unlike ``str(exc)`` it carries no caller data or internal path, which is
+    # what the fixed-message rule above is protecting against.
+    # A body JSON accepted but UTF-8 cannot encode — a lone surrogate. The
+    # caller's input, so a 400, not the 500 an unmapped encode error would give.
+    StartupScriptNotEncodableError: (400, "Startup script is not valid UTF-8"),
+    StartupScriptTooLargeError: (
+        413,
+        f"Startup script exceeds the {MAX_SCRIPT_BYTES}-byte limit",
+    ),
+    # ... and refused outright for a bot whose container cannot run one,
+    # rather than stored where it would silently never execute.
+    StartupScriptUnsupportedError: (409, "Startup script is not supported for this bot"),
     # Identity domain errors — ValueError subclasses raised by IdentityService
     # validate_entity_type / validate_file_type.
     InvalidIdentityEntityTypeError: (400, "Invalid entity type"),

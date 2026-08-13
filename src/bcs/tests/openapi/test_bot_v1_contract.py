@@ -42,7 +42,10 @@ def test_bot_management_operations_are_human_control_plane_only() -> None:
 
     for method, path in BOT_OPERATIONS:
         operation = contract["paths"][path][method]
-        assert operation["x-avernet-security"] == {"user": "required"}
+        assert operation["x-avernet-security"] == {
+            "user": "required",
+            "app": "required",
+        }
 
 
 def test_bot_management_operations_share_the_collaboration_prefix() -> None:

@@ -161,7 +161,6 @@ fn build_api_routes() -> Router<HttpAppState> {
             "/bots/{id}/visibility",
             get(routes::bots::get_visibility).put(routes::bots::set_visibility),
         )
-        .route("/bots/{id}/chat", post(routes::bot_chat::bot_chat))
         .route(
             "/bots/{id}/chat-async",
             post(routes::bot_chat::bot_chat_async),

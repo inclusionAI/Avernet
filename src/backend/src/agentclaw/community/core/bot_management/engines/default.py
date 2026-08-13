@@ -44,6 +44,15 @@ class DefaultProvisioningStrategy(EngineProvisioningStrategy):
             f"engine {ctx.active_engine or self.engine_type} uses adapter chat session lifecycle"
         )
 
+    def apply_restart_extra_configs(
+        self,
+        ctx: BotProvisioningContext,
+        extra_configs: dict[str, object] | None,
+        *,
+        template_service: object,
+    ) -> None:
+        return None
+
     def on_bot_created(self, ctx: BotProvisioningContext) -> None:
         return None
 

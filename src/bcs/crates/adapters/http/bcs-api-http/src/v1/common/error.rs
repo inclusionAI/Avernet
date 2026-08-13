@@ -72,6 +72,9 @@ pub fn application_error_response(
             "forbidden".to_string(),
             message,
         ),
+        ApplicationError::ForbiddenCode { code, message } => {
+            (StatusCode::FORBIDDEN, 40_300, code, message)
+        }
         ApplicationError::NotFound { code, message } => {
             (StatusCode::NOT_FOUND, 40_400, code, message)
         }
@@ -81,6 +84,15 @@ pub fn application_error_response(
         ApplicationError::Gone { code, message } => (StatusCode::GONE, 41_000, code, message),
         ApplicationError::QuotaExceeded { code, message } => {
             (StatusCode::TOO_MANY_REQUESTS, 42_900, code, message)
+        }
+        ApplicationError::PayloadTooLarge { code, message } => {
+            (StatusCode::PAYLOAD_TOO_LARGE, 41_300, code, message)
+        }
+        ApplicationError::Unprocessable { code, message } => {
+            (StatusCode::UNPROCESSABLE_ENTITY, 42_200, code, message)
+        }
+        ApplicationError::BadGateway { code, message } => {
+            (StatusCode::BAD_GATEWAY, 50_200, code, message)
         }
         ApplicationError::Internal(detail) => {
             tracing::error!(
@@ -196,6 +208,36 @@ mod tests {
                 42_900,
                 "group_quota_exceeded",
                 "group quota exceeded",
+            ),
+            (
+                ApplicationError::PayloadTooLarge {
+                    code: "file_too_large".to_string(),
+                    message: "file exceeds the configured limit".to_string(),
+                },
+                StatusCode::PAYLOAD_TOO_LARGE,
+                41_300,
+                "file_too_large",
+                "file exceeds the configured limit",
+            ),
+            (
+                ApplicationError::Unprocessable {
+                    code: "file_upload_incomplete".to_string(),
+                    message: "file upload is incomplete".to_string(),
+                },
+                StatusCode::UNPROCESSABLE_ENTITY,
+                42_200,
+                "file_upload_incomplete",
+                "file upload is incomplete",
+            ),
+            (
+                ApplicationError::BadGateway {
+                    code: "storage_backend_unavailable".to_string(),
+                    message: "storage backend is unavailable".to_string(),
+                },
+                StatusCode::BAD_GATEWAY,
+                50_200,
+                "storage_backend_unavailable",
+                "storage backend is unavailable",
             ),
             (
                 ApplicationError::internal("database credentials leaked"),

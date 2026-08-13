@@ -1,10 +1,12 @@
 """openapi_v1 resources handler unit tests: mapping + handler behavior."""
 
 import json
+import logging
 from datetime import datetime
 from types import SimpleNamespace
 from typing import List
 
+import httpx
 import pytest
 from fastapi import HTTPException, Request, Response
 
@@ -23,12 +25,14 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
 from agentclaw.community.adapters.http.openapi_v1.resources.router import (
     _to_openapi_resource,
     check_resource_name,
+    create_directory,
     create_resource,
+    delete_file,
     delete_resource,
-    download_resource,
+    download_file,
     get_resource,
     list_resources,
-    preview_resource,
+    preview_file,
     update_resource,
     upload_resource,
 )
@@ -43,6 +47,9 @@ from agentclaw.community.core.resources.models import (
     Resource,
     ResourceType as LegacyType,
     create_link_resource,
+)
+from agentclaw.community.core.devices.services.device_filesystem import (
+    FileTooLargeError as DeviceFileTooLargeError,
 )
 from agentclaw.community.core.resources.service import (
     DuplicateResourceError,
@@ -138,6 +145,9 @@ class _StubService:
     def __init__(self, items: List[Resource]) -> None:
         self._items = items
         self.last_call_kwargs: dict = {}
+        self.recorded: List[dict] = []
+        self.record_deletes: List[str] = []
+        self.deleted: List[str] = []
 
     def list_resources(self, *args, **kwargs):
         self.last_call_kwargs = dict(kwargs)
@@ -159,6 +169,24 @@ class _StubService:
             if str(r.id) == str(resource_id):
                 return r
         return None
+
+    async def record_uploaded_file(
+        self, *, path, size, user_id=None, created_by=None, source="upload"
+    ):
+        self.recorded.append(
+            {"path": path, "size": size, "user_id": user_id, "created_by": created_by}
+        )
+        return _legacy(
+            id="rec-1",
+            name=path.rsplit("/", 1)[-1],
+            resource_type=LegacyType.FILE,
+            attributes={"path": path, "size": size},
+            source=source,
+        )
+
+    async def delete_file_record(self, *, path) -> bool:
+        self.record_deletes.append(path)
+        return True
 
     async def check_name_exists(
         self,
@@ -262,6 +290,7 @@ class _StubService:
         """
         self.last_call_kwargs = dict(resource_id=resource_id)
         self.last_call_device_fs = device_fs
+        self.deleted.append(str(resource_id))
         return str(resource_id) != "0"
 
     async def upload_file(
@@ -359,125 +388,229 @@ class _StubFactory:
         self.created_bot_ids.append(bot_id)
         return self._service
 
-
 @pytest.mark.asyncio
-async def test_list_resources_returns_envelope_with_page():
-    service = _StubService([_legacy(id=1, name="r1"), _legacy(id=2, name="r2")])
-    factory = _StubFactory(service)
+async def test_list_returns_workspace_entries_not_records():
+    """Files and folders come from the workspace. A record-backed listing could
+    not see a file the bot produced itself — it has no record and never will."""
+    file_svc = _StubListFileService([
+        _listed("notes.md", rel="notes.md", size=12),
+        _listed("docs", rel="docs", is_dir=True),
+    ])
 
     env = await list_resources(
-        page=PageParams(page=1, page_size=20),
-        user_id="u1",
-        bot_id="bot-a",
+        page=PageParams(),
+        owner_id="u1",
+        bot_id="bot-x",
+        path="",
         type=None,
-        factory=factory,
+        factory=_StubFactory(_StubService([])),
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
         request=_request_without_trace(),
     )
 
-    assert isinstance(env, Envelope)
-    assert env.code == CODE_OK
-    assert env.message == "OK"
-    assert env.data is not None
-    assert isinstance(env.data, Page)
     assert env.data.total == 2
-    assert len(env.data.items) == 2
-    assert env.data.items[0].resource_id == "1"
-    assert env.data.items[1].resource_id == "2"
-    # mapping: legacy LINK → openapi LINK, source/url flattened
+    by_name = {i.name: i for i in env.data.items}
+    assert by_name["notes.md"].type == OpenapiType.FILE
+    assert by_name["notes.md"].path == "notes.md"
+    assert by_name["notes.md"].size == 12
+    assert by_name["docs"].type == OpenapiType.FOLDER
+    # No record backs a workspace entry.
+    assert all(i.resource_id == "" for i in env.data.items)
+    assert all(i.gmt_create is None for i in env.data.items)
+
+
+@pytest.mark.asyncio
+async def test_list_joins_the_listed_directory_onto_entry_paths():
+    """The device reports ``relative_path`` relative to the listed directory, so
+    listing ``a/b`` must yield ``a/b/c.txt`` — the address a client hands back."""
+    file_svc = _StubListFileService([
+        _listed("c.txt", rel="a/b/c.txt"),
+    ])
+
+    env = await list_resources(
+        page=PageParams(),
+        owner_id="u1",
+        bot_id="bot-x",
+        path="a/b",
+        type=None,
+        factory=_StubFactory(_StubService([])),
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
+
+    assert env.data.items[0].path == "a/b/c.txt"
+    assert file_svc.listed == ["a/b"]
+
+
+@pytest.mark.asyncio
+async def test_list_never_exposes_the_container_path():
+    """The entry's own ``path`` is the engine-view absolute container path and
+    must not cross a public API."""
+    file_svc = _StubListFileService([
+        _listed("c.txt", rel="c.txt"),
+    ])
+
+    env = await list_resources(
+        page=PageParams(), owner_id="u1", bot_id="bot-x", path="", type=None,
+        factory=_StubFactory(_StubService([])), bot_repo=_StubBotRepo(),
+        file_svc=file_svc, request=_request_without_trace(),
+    )
+
+    assert "/home/admin" not in (env.data.items[0].path or "")
+
+
+@pytest.mark.asyncio
+async def test_list_appends_links_which_have_no_file():
+    """A link has no file and no device presence, so the record is the resource."""
+    link = _legacy(id="l1", name="wiki")
+    file_svc = _StubListFileService([
+        _listed("a.txt", rel="a.txt"),
+    ])
+
+    env = await list_resources(
+        page=PageParams(), owner_id="u1", bot_id="bot-x", path="", type=None,
+        factory=_StubFactory(_StubService([link])), bot_repo=_StubBotRepo(),
+        file_svc=file_svc, request=_request_without_trace(),
+    )
+
+    kinds = {i.type for i in env.data.items}
+    assert kinds == {OpenapiType.FILE, OpenapiType.LINK}
+    assert env.data.total == 2
+
+
+@pytest.mark.asyncio
+async def test_list_includes_legacy_url_rows_as_links():
+    """Two legacy types collapse into openapi LINK — ``LINK`` and the older
+    ``URL`` — so narrowing the repo query to either one silently drops the
+    other. Rows are fetched unfiltered and narrowed by the *mapped* type."""
+    url_row = _legacy(id="u9", name="yuque-doc", resource_type=LegacyType.URL)
+
+    env = await list_resources(
+        page=PageParams(), owner_id="u1", bot_id="bot-x", path="", type=None,
+        factory=_StubFactory(_StubService([url_row])), bot_repo=_StubBotRepo(),
+        file_svc=_StubListFileService([]), request=_request_without_trace(),
+    )
+
+    assert [i.name for i in env.data.items] == ["yuque-doc"]
     assert env.data.items[0].type == OpenapiType.LINK
-    assert env.data.items[0].url == "https://example.com"
 
 
 @pytest.mark.asyncio
-async def test_list_resources_paginates_items():
-    service = _StubService(
-        [
-            _legacy(id=1, name="r1"),
-            _legacy(id=2, name="r2"),
-            _legacy(id=3, name="r3"),
-        ]
-    )
-    factory = _StubFactory(service)
+async def test_list_never_reports_file_rows():
+    """A record is not evidence a file exists — that is the divergence this
+    change removes. File rows are excluded; the workspace half is authoritative."""
+    file_row = _legacy(id="f1", name="ghost.txt", resource_type=LegacyType.FILE,
+                       attributes={"path": "ghost.txt"})
 
     env = await list_resources(
-        page=PageParams(page=2, page_size=1),
-        user_id="u1",
-        bot_id="bot-a",
-        type=None,
-        factory=factory,
+        page=PageParams(), owner_id="u1", bot_id="bot-x", path="", type=None,
+        factory=_StubFactory(_StubService([file_row])), bot_repo=_StubBotRepo(),
+        file_svc=_StubListFileService([]), request=_request_without_trace(),
+    )
+
+    assert env.data.items == []
+
+
+@pytest.mark.asyncio
+async def test_list_folder_filter_returns_directories():
+    """FOLDER used to short-circuit to an empty page — there were no folder rows
+    to return. Directories are real on the filesystem, so it now returns them."""
+    file_svc = _StubListFileService([
+        _listed("docs", rel="docs", is_dir=True),
+        _listed("a.txt", rel="a.txt"),
+    ])
+
+    env = await list_resources(
+        page=PageParams(), owner_id="u1", bot_id="bot-x", path="",
+        type=OpenapiType.FOLDER,
+        factory=_StubFactory(_StubService([_legacy(id="l1", name="wiki")])),
+        bot_repo=_StubBotRepo(), file_svc=file_svc,
         request=_request_without_trace(),
     )
 
-    # total reflects the full list; current page slice holds the 2nd item only
-    assert env.data.total == 3
-    assert [item.resource_id for item in env.data.items] == ["2"]
+    assert [i.name for i in env.data.items] == ["docs"]
 
 
 @pytest.mark.asyncio
-async def test_list_resources_passes_type_filter_value_to_service():
-    service = _StubService([])
-    factory = _StubFactory(service)
+async def test_list_link_filter_does_not_touch_the_device():
+    file_svc = _StubListFileService([
+        _listed("a.txt", rel="a.txt"),
+    ])
 
-    await list_resources(
-        page=PageParams(),
-        user_id="u1",
-        bot_id="bot-a",
+    env = await list_resources(
+        page=PageParams(), owner_id="u1", bot_id="bot-x", path="",
         type=OpenapiType.LINK,
-        factory=factory,
+        factory=_StubFactory(_StubService([_legacy(id="l1", name="wiki")])),
+        bot_repo=_StubBotRepo(), file_svc=file_svc,
         request=_request_without_trace(),
     )
 
-    # Fix #1: the openapi enum is mapped to the legacy ResourceType enum at
-    # the handler seam (the slim service does ``.value`` internally — passing
-    # the openapi enum's ``.value`` string broke at filter time). ``LegacyType``
-    # subclasses ``str``, so this assertion still passes via str equality, but
-    # the stricter ``is`` check lives in ``test_list_resources_passes_legacy_enum_to_service``.
-    assert service.last_call_kwargs.get("resource_type") == "link"
+    assert [i.type for i in env.data.items] == [OpenapiType.LINK]
+    assert file_svc.listed == []  # no device round trip for a link-only listing
 
 
 @pytest.mark.asyncio
-async def test_list_resources_reads_x_trace_id_from_request():
-    factory = _StubFactory(_StubService([]))
-    request = _request_with_trace("trace-abc")
+async def test_list_paginates_across_both_sources():
+    file_svc = _StubListFileService([
+        _listed(f"f{n}.txt", rel=f"f{n}.txt") for n in range(3)
+    ])
 
     env = await list_resources(
-        page=PageParams(),
-        user_id="u1",
-        bot_id="bot-a",
-        type=None,
-        factory=factory,
-        request=request,
-    )
-
-    assert env.request_id == "trace-abc"
-
-
-@pytest.mark.asyncio
-async def test_list_resources_request_id_empty_when_no_request_context():
-    factory = _StubFactory(_StubService([]))
-
-    env = await list_resources(
-        page=PageParams(),
-        user_id="u1",
-        bot_id="bot-a",
-        type=None,
-        factory=factory,
+        page=PageParams(page=2, page_size=2),
+        owner_id="u1", bot_id="bot-x", path="", type=None,
+        factory=_StubFactory(_StubService([_legacy(id="l1", name="wiki")])),
+        bot_repo=_StubBotRepo(), file_svc=file_svc,
         request=_request_without_trace(),
     )
 
-    assert env.request_id == ""
+    # total spans the merged view; the page is the slice.
+    assert env.data.total == 4
+    assert len(env.data.items) == 2
 
 
 @pytest.mark.asyncio
-async def test_list_resources_empty_result_returns_empty_page():
-    factory = _StubFactory(_StubService([]))
+async def test_list_reads_x_trace_id_from_request():
+    env = await list_resources(
+        page=PageParams(), owner_id="u1", bot_id="bot-x", path="", type=None,
+        factory=_StubFactory(_StubService([])), bot_repo=_StubBotRepo(),
+        file_svc=_StubListFileService([]),
+        request=_request_with_trace("trace-list-1"),
+    )
+    assert env.request_id == "trace-list-1"
+
+
+@pytest.mark.asyncio
+async def test_list_empty_workspace_returns_empty_page():
+    env = await list_resources(
+        page=PageParams(), owner_id="u1", bot_id="bot-x", path="", type=None,
+        factory=_StubFactory(_StubService([])), bot_repo=_StubBotRepo(),
+        file_svc=_StubListFileService([]), request=_request_without_trace(),
+    )
+    assert env.data.total == 0
+    assert env.data.items == []
+
+
+@pytest.mark.asyncio
+async def test_list_of_an_absent_directory_is_an_empty_page_not_a_500():
+    """The baas providers re-raise the upstream 404 instead of answering
+    "nothing there", while providers returning ``None`` already produce an empty
+    page — so without normalizing, the same request is a 500 on one and an empty
+    page on the others."""
+
+    class _MissingDirService:
+        async def list_dir(self, **_kw):
+            raise _http_status(404)
 
     env = await list_resources(
-        page=PageParams(),
-        user_id="u1",
-        bot_id="bot-a",
-        type=None,
-        factory=factory,
+        page=PageParams(page=1, page_size=10),
+        owner_id="u1",
+        bot_id="bot-x",
+        path="nope",
+        factory=_StubFactory(_StubService([])),
+        bot_repo=_StubBotRepo(),
+        file_svc=_MissingDirService(),
         request=_request_without_trace(),
     )
 
@@ -485,92 +618,155 @@ async def test_list_resources_empty_result_returns_empty_page():
     assert env.data.items == []
 
 
-# ── check_resource_name handler wiring (Phase 1 Task 3) ──────────────────
-#
-# Same direct-handler-invocation pattern as Task 2: bypass FastAPI DI,
-# supply a stub factory. `_StubService.check_name_exists` returns True iff
-# `name == "taken"`, exercising both exists-branches with one stub.
+@pytest.mark.asyncio
+async def test_list_does_not_swallow_other_upstream_statuses():
+    """Only 404 is an ordinary answer; an upstream fault must still surface."""
+
+    class _FailingDirService:
+        async def list_dir(self, **_kw):
+            raise _http_status(503)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await list_resources(
+            page=PageParams(page=1, page_size=10),
+            owner_id="u1",
+            bot_id="bot-x",
+            path="docs",
+            factory=_StubFactory(_StubService([])),
+            bot_repo=_StubBotRepo(),
+            file_svc=_FailingDirService(),
+            request=_request_without_trace(),
+        )
 
 
 @pytest.mark.asyncio
-async def test_check_name_returns_envelope_with_exists_false_for_available():
-    service = _StubService([])
-    factory = _StubFactory(service)
+async def test_list_rejects_a_directory_escaping_the_workspace():
+    file_svc = _StubListFileService([])
 
-    env = await check_resource_name(
-        name="available",
-        owner_id="u1",
-        type=None,
-        bot_id="bot-x",
-        factory=factory,
-        request=_request_without_trace(),
+    resp = await list_resources(
+        page=PageParams(), owner_id="u1", bot_id="bot-x", path="../../etc",
+        type=None, factory=_StubFactory(_StubService([])), bot_repo=_StubBotRepo(),
+        file_svc=file_svc, request=_request_without_trace(),
     )
 
-    assert isinstance(env, Envelope)
-    assert env.code == CODE_OK
-    assert env.message == "OK"
-    assert env.data is not None
-    assert isinstance(env.data, NameCheck)
-    assert env.data.name == "available"
-    assert env.data.exists is False
+    assert resp.status_code == 400
+    assert file_svc.listed == []
+
+# ── check_resource_name: files ask the workspace, links ask the records ──
 
 
 @pytest.mark.asyncio
-async def test_check_name_returns_exists_true_for_taken():
-    service = _StubService([])
-    factory = _StubFactory(service)
+async def test_check_name_asks_the_workspace_for_a_file_path():
+    """Same question the upload asks before writing, answered by the same
+    authority — so the two can never disagree."""
+    file_svc = _StubFileService(existing={"docs/a.txt"})
 
     env = await check_resource_name(
-        name="taken",
+        path="docs/a.txt",
         owner_id="u1",
-        type=None,
-        bot_id=None,
-        factory=factory,
+        bot_id="bot-x",
+        factory=_StubFactory(_StubService([])),
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
         request=_request_without_trace(),
     )
 
     assert env.data.exists is True
-    assert env.data.name == "taken"
+    assert file_svc.exists_calls == ["docs/a.txt"]
+
+
+@pytest.mark.asyncio
+async def test_check_name_reports_a_free_path_as_available():
+    env = await check_resource_name(
+        path="docs/new.txt",
+        owner_id="u1",
+        bot_id="bot-x",
+        factory=_StubFactory(_StubService([])),
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubFileService(existing=set()),
+        request=_request_without_trace(),
+    )
+    assert env.data.exists is False
+
+
+@pytest.mark.asyncio
+async def test_check_name_rejects_a_path_escaping_the_workspace():
+    file_svc = _StubFileService()
+
+    resp = await check_resource_name(
+        path="../../etc/passwd",
+        owner_id="u1",
+        bot_id="bot-x",
+        factory=_StubFactory(_StubService([])),
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
+
+    assert resp.status_code == 400
+    assert file_svc.exists_calls == []
+
+
+@pytest.mark.asyncio
+async def test_check_name_asks_the_records_for_a_link():
+    """A link has no file, so the record is the only place to look."""
+    service = _StubService([])
+    file_svc = _StubFileService()
+
+    env = await check_resource_name(
+        name="wiki",
+        type=OpenapiType.LINK,
+        owner_id="u1",
+        bot_id="bot-x",
+        factory=_StubFactory(service),
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
+
+    assert env.data.name == "wiki"
+    assert service.last_call_kwargs.get("resource_type") == LegacyType.LINK
+    assert service.last_call_kwargs.get("user_id") == "u1"
+    # No device round trip for a link check.
+    assert file_svc.exists_calls == []
+
+
+@pytest.mark.asyncio
+async def test_check_name_requires_one_of_the_two_addressing_modes():
+    """Both parameters carry plain defaults so either may be omitted, which
+    costs FastAPI's required-parameter check. Without the handler's own rule the
+    link branch asks the repository about the empty name and answers a cheerful
+    ``exists=false`` to a request that named no resource."""
+    service = _StubService([])
+    file_svc = _StubFileService()
+
+    resp = await check_resource_name(
+        owner_id="u1",
+        bot_id="bot-x",
+        factory=_StubFactory(service),
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
+
+    # ``@envelope_errors`` maps InvalidResourcePathError to a 400 envelope.
+    assert resp.status_code == 400
+    assert service.last_call_kwargs == {}
+    assert file_svc.exists_calls == []
 
 
 @pytest.mark.asyncio
 async def test_check_name_reads_x_trace_id_from_request():
-    factory = _StubFactory(_StubService([]))
-    request = _request_with_trace("trace-xyz")
-
     env = await check_resource_name(
-        name="available",
+        path="a.txt",
         owner_id="u1",
-        type=None,
-        bot_id="bot-a",
-        factory=factory,
-        request=request,
+        bot_id="bot-x",
+        factory=_StubFactory(_StubService([])),
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubFileService(),
+        request=_request_with_trace("trace-cn-1"),
     )
-
-    assert env.request_id == "trace-xyz"
-
-
-@pytest.mark.asyncio
-async def test_check_name_passes_type_value_to_service_when_provided():
-    service = _StubService([])
-    factory = _StubFactory(service)
-
-    await check_resource_name(
-        name="available",
-        owner_id="u1",
-        type=OpenapiType.FILE,
-        bot_id="bot-a",
-        factory=factory,
-        request=_request_without_trace(),
-    )
-
-    # Fix #1: passed value is the legacy ResourceType enum (str-subclass —
-    # equality with "file" still holds). parent_path stays None; user_id is
-    # sourced from the verified principal (caller_owner_id → "u1").
-    assert service.last_call_kwargs.get("resource_type") == "file"
-    assert service.last_call_kwargs.get("parent_path") is None
-    assert service.last_call_kwargs.get("user_id") == "u1"
-
+    assert env.request_id == "trace-cn-1"
 
 # ── get_resource handler wiring (Phase 1 Task 4) ─────────────────────────
 #
@@ -619,6 +815,27 @@ async def test_get_resource_raises_404_when_missing():
 
     assert exc.value.status_code == 404
     assert exc.value.detail == "Resource not found"
+
+
+@pytest.mark.asyncio
+async def test_get_resource_404s_a_file_id():
+    """A file's fields come from the workspace, never from a row. Serving one
+    from its record would report a name and size nothing keeps in step with the
+    device — the divergence this change removes. Its address is its path."""
+    service = _StubService(
+        [_legacy(id=7, name="a.txt", resource_type=LegacyType.FILE)]
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_resource(
+            resource_id="7",
+            user_id="u1",
+            bot_id="bot-x",
+            factory=_StubFactory(service),
+            request=_request_without_trace(),
+        )
+
+    assert exc.value.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -772,6 +989,29 @@ async def test_update_link_returns_200_envelope():
 
 
 @pytest.mark.asyncio
+async def test_update_resource_404s_a_file_id():
+    """Completes what GET and DELETE /{resource_id} already do.
+    ``update_link_resource`` checks no type, so a stale file id would rename a
+    FILE row that nothing reads — the response would even show the new name,
+    while the workspace every file response is built from is untouched."""
+    service = _StubService(
+        [_legacy(id=7, name="a.txt", resource_type=LegacyType.FILE)]
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await update_resource(
+            resource_id="7",
+            body=ResourceUpdate(name="renamed", url=None),
+            user_id="u1",
+            bot_id="bot-x",
+            factory=_StubFactory(service),
+            request=_request_without_trace(),
+        )
+
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_update_link_raises_409_when_not_found():
     service = _StubService([])  # resource_id="0" → not-found ValueError
     factory = _StubFactory(service)
@@ -914,6 +1154,105 @@ class _StubDeviceFs:
         return b"device-fs bytes"
 
 
+class _StubFileService:
+    """Stands in for ``ResourceFileService`` — the engine seam the file handlers
+    now delegate to.
+
+    Records the workspace-relative paths it is handed, so a test can assert what
+    address reached the device without reaching a device at all. ``existing``
+    seeds the workspace for the duplicate check; ``raises`` makes ``upload_file``
+    fail, standing in for the allow-list / size rejections (``ValueError``) and
+    for a device write failure (anything else).
+    """
+
+    def __init__(
+        self,
+        *,
+        existing: set[str] | None = None,
+        raises: Exception | None = None,
+        delete_raises: Exception | None = None,
+    ):
+        self.existing: set[str] = set(existing or ())
+        self.raises = raises
+        self.delete_raises = delete_raises
+        self.upload_calls: List[dict] = []
+        self.exists_calls: List[str] = []
+        self.deleted_paths: List[str] = []
+
+    async def exists(self, *, path, **_kw) -> bool:
+        self.exists_calls.append(path)
+        return path in self.existing
+
+    async def upload_file(self, **kwargs) -> dict:
+        self.upload_calls.append(kwargs)
+        if self.raises is not None:
+            raise self.raises
+        rel = kwargs["filename"]
+        return {
+            "name": rel.rsplit("/", 1)[-1],
+            "path": rel,
+            "size": len(kwargs["data"]),
+        }
+
+    async def delete(self, *, path, **_kw) -> bool:
+        """The rollback leg of a failed upload."""
+        self.deleted_paths.append(path)
+        if self.delete_raises is not None:
+            raise self.delete_raises
+        return True
+
+
+class _StubListFileService:
+    """Stands in for ``ResourceFileService`` on the listing path.
+
+    Returns entries in the shape ``ResourceFileService.list_dir`` actually
+    produces (``core/services/resource_file_service.py:239-261``): ``path`` is
+    already workspace-relative, having had ``_rel_path`` applied, and the
+    engine-view container path is under a separate ``absolute_path``. There is
+    no ``relative_path`` key on this shape — that one exists only on the raw
+    device entries ``_rel_path`` consumes internally.
+
+    Building the stub from the real shape matters: an earlier version returned
+    the raw device shape, so the handler's path handling was asserted against a
+    listing production never emits.
+    """
+
+    def __init__(self, entries: List[dict]):
+        self._entries = entries
+        self.listed: List[str] = []
+
+    async def list_dir(self, *, path, **_kw) -> List[dict]:
+        self.listed.append(path)
+        return self._entries
+
+
+def _listed(name: str, *, rel: str, is_dir: bool = False, size: int | None = 1) -> dict:
+    """One entry as ``ResourceFileService.list_dir`` returns it."""
+    return {
+        "name": name,
+        "path": rel,
+        "absolute_path": f"/home/admin/.aicoding/workspace/{rel}",
+        "is_dir": is_dir,
+        "readonly": False,
+        "size": None if is_dir else size,
+        "size_human": None,
+        "modified_at": None,
+    }
+
+
+class _StubBotRepo:
+    """Minimal ``BotRepository`` for ``_file_coords`` → ``resolve_engine_for_bot``."""
+
+    def __init__(self, active_engine: str = "aicoding"):
+        self._bot = {"active_engine": active_engine}
+
+    def get_by_id_and_owner(self, bot_id, owner_id):
+        return self._bot
+
+    def get_by_id(self, bot_id):
+        return self._bot
+
+
 _DEFAULT_BOT = {"owner_id": "own-a", "bot_id": "b"}
 _DEFAULT_DEVICE_INFO = {"device_provider": "arca", "sandbox_id": "sb-1"}
 
@@ -946,8 +1285,6 @@ async def test_delete_returns_200_envelope_with_deleted_true():
         owner_id="u1",
         bot_id="bot-x",
         factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
         request=_request_without_trace(),
     )
 
@@ -957,8 +1294,9 @@ async def test_delete_returns_200_envelope_with_deleted_true():
     assert env.data is not None
     assert isinstance(env.data, Deleted)
     assert env.data.deleted is True
-    # device_fs resolved by the dispatcher was forwarded to the service
-    assert service.last_call_device_fs is device_fs
+    # No device is threaded any more: this endpoint is link-only, and a link has
+    # no file to remove. Files are deleted through DELETE ""?path=.
+    assert service.last_call_device_fs is None
     # service received the resource_id (no device_provider/sandbox_id on
     # the slim contract — device_fs is the sole device boundary)
     assert service.last_call_kwargs.get("resource_id") == "1"
@@ -988,7 +1326,11 @@ async def test_no_handler_can_fall_back_to_a_bot_derived_owner():
         for route in _api_routes(build_public_router())
         if route.path.startswith("/openapi/v1/bots/resources")
     ]
-    assert len(mounted) == 9, [r.path for r in mounted]
+    # 11 routes: the id-addressed download and preview were replaced by the
+    # path-addressed download / preview / delete / mkdir. The count is a
+    # tripwire — a resources route added without the shared user_id dependency
+    # is exactly the silent owner fallback this guard exists to prevent.
+    assert len(mounted) == 11, [r.path for r in mounted]
 
     def guarded(dependant) -> bool:
         return dependant.call is require_user_id or any(
@@ -1028,13 +1370,33 @@ async def test_delete_raises_404_when_resource_missing():
             owner_id="u1",
             bot_id="bot-a",
             factory=factory,
-            resolver=resolver,
-            device_fs_dispatcher=dispatcher,
             request=_request_without_trace(),
         )
 
     assert exc.value.status_code == 404
     assert exc.value.detail == "Resource not found"
+
+
+@pytest.mark.asyncio
+async def test_delete_resource_404s_a_file_id_without_dropping_the_row():
+    """Without the refusal the row would soft-delete and the handler would
+    report success while the workspace file stayed put — a stale file id that
+    "works" and quietly widens the divergence. The file's address is its path."""
+    service = _StubService(
+        [_legacy(id=7, name="a.txt", resource_type=LegacyType.FILE)]
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await delete_resource(
+            resource_id="7",
+            owner_id="u1",
+            bot_id="bot-x",
+            factory=_StubFactory(service),
+            request=_request_without_trace(),
+        )
+
+    assert exc.value.status_code == 404
+    assert service.deleted == []  # the row is untouched
 
 
 @pytest.mark.asyncio
@@ -1047,8 +1409,6 @@ async def test_delete_reads_x_trace_id_from_request():
         owner_id="u1",
         bot_id="bot-a",
         factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
         request=request,
     )
 
@@ -1071,18 +1431,17 @@ async def test_delete_reads_x_trace_id_from_request():
 
 
 @pytest.mark.asyncio
-async def test_upload_returns_201_envelope_and_threads_device_fs():
-    service = _StubService([])
-    factory, resolver, dispatcher, device_fs = _delete_deps(service=service)
+async def test_upload_hands_the_workspace_relative_path_to_the_engine_seam():
+    file_svc = _StubFileService()
 
     env = await upload_resource(
-        name="hello.txt",
+        path="hello.txt",
         content=b"file bytes",
         owner_id="u1",
         bot_id="bot-x",
-        factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
+        factory=_StubFactory(_StubService([])),
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
         request=_request_without_trace(),
     )
 
@@ -1090,210 +1449,655 @@ async def test_upload_returns_201_envelope_and_threads_device_fs():
     assert env.code == CODE_CREATED
     assert env.message == "Created"
     assert env.data is not None
-    assert env.data.resource_id == "1"
     assert env.data.name == "hello.txt"
+    assert env.data.path == "hello.txt"
     assert env.data.type == OpenapiType.FILE
     assert env.data.size == len(b"file bytes")
-    # device_fs resolved by the dispatcher was forwarded to the service
-    assert service.last_call_device_fs is device_fs
-    # upload_file received the file bytes + filename
-    assert service.last_call_kwargs.get("data") == b"file bytes"
-    assert service.last_call_kwargs.get("filename") == "hello.txt"
-    # owner_id from the verified principal ({"user_id": "u1"}) → user_id
-    # (slim upload_file has no created_by param — created_by is omitted
-    # from the slim contract)
-    assert service.last_call_kwargs.get("user_id") == "u1"
-    # bot_id flowed through to factory.create
-    assert factory.created_bot_ids == ["bot-x"]
+    # The address that reached the engine seam is workspace-relative — never a
+    # bare name (which resolved against the engine's CWD) and never a composed
+    # container path.
+    call = file_svc.upload_calls[0]
+    assert call["filename"] == "hello.txt"
+    assert call["target_dir"] == ""
+    assert call["data"] == b"file bytes"
+    assert call["bot_id"] == "bot-x"
+    # engine_type defaulted from the bot's active_engine
+    assert call["engine_type"] == "aicoding"
 
 
 @pytest.mark.asyncio
-async def test_upload_raises_409_on_duplicate_name():
-    # upload_file raises ValueError for filename == "taken"
-    service = _StubService([])
-    factory, resolver, dispatcher, _ = _delete_deps(service=service)
+async def test_upload_keeps_the_directories_carried_by_the_path():
+    file_svc = _StubFileService()
+
+    env = await upload_resource(
+        path="docs/spec/a.txt",
+        content=b"x",
+        owner_id="u1",
+        bot_id="bot-x",
+        factory=_StubFactory(_StubService([])),
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
+
+    assert env.data.path == "docs/spec/a.txt"
+    assert env.data.name == "a.txt"  # the leaf, not the whole path
+    assert file_svc.upload_calls[0]["filename"] == "docs/spec/a.txt"
+    # The structure-preserving branch must run, or the service flattens the
+    # path to its basename and the caller's directories vanish.
+    assert file_svc.upload_calls[0]["preserve_structure"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".private.md",
+        "docs/.private.md",
+        "AGENTS.md",
+        # Protected *ancestors*: the leaf is an ordinary name, but creating
+        # the path brings a hidden directory into existence along the way.
+        ".private/file.md",
+        "docs/.private/sub.md",
+        "AGENTS.md/sub.txt",
+    ],
+)
+async def test_upload_403s_a_read_only_path(path):
+    """The surface must not be talked into making something it then refuses to
+    manage: listings hide dotfiles and the root identity files, and delete
+    refuses them, so accepting the upload would leave an entry this API can
+    neither show nor remove."""
+    file_svc = _StubFileService()
+
+    with pytest.raises(HTTPException) as exc:
+        await upload_resource(
+            path=path,
+            content=b"x",
+            owner_id="u1",
+            bot_id="bot-x",
+            factory=_StubFactory(_StubService([])),
+            bot_repo=_StubBotRepo(),
+            file_svc=file_svc,
+            request=_request_without_trace(),
+        )
+
+    assert exc.value.status_code == 403
+    assert file_svc.upload_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", [".hidden", "docs/.hidden", ".hidden/deep"])
+async def test_mkdir_403s_a_dot_prefixed_directory_at_any_depth(path):
+    """Same reason as the upload guard — a hidden directory would be invisible
+    to listing and refused by delete."""
+    file_svc = _StubReadFileService({})
+
+    with pytest.raises(HTTPException) as exc:
+        await create_directory(
+            path=path,
+            owner_id="u1",
+            bot_id="bot-x",
+            bot_repo=_StubBotRepo(),
+            file_svc=file_svc,
+            request=_request_without_trace(),
+        )
+
+    assert exc.value.status_code == 403
+    assert file_svc.made_dirs == []
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_a_path_escaping_the_workspace():
+    file_svc = _StubFileService()
 
     resp = await upload_resource(
-        name="taken",
+        path="../../etc/passwd",
         content=b"x",
         owner_id="u1",
         bot_id="bot-a",
-        factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
         request=_request_without_trace(),
     )
+
+    assert resp.status_code == 400
+    assert json.loads(resp.body)["message"] == "Invalid resource path"
+    # Rejected before anything reached the device.
+    assert file_svc.upload_calls == []
+
+
+@pytest.mark.asyncio
+async def test_upload_409_when_the_path_is_already_taken():
+    file_svc = _StubFileService(existing={"taken.txt"})
+
+    resp = await upload_resource(
+        path="taken.txt",
+        content=b"x",
+        owner_id="u1",
+        bot_id="bot-a",
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
+
     assert resp.status_code == 409
     assert json.loads(resp.body)["message"] == "Resource already exists"
+    # Occupancy is decided by the workspace, and nothing was overwritten.
+    assert file_svc.exists_calls == ["taken.txt"]
+    assert file_svc.upload_calls == []
+
+
+@pytest.mark.asyncio
+async def test_upload_same_leaf_name_in_two_directories_does_not_collide():
+    """The old row-level ``(name, parent_path)`` check reported these as a
+    duplicate; two distinct paths are two distinct files."""
+    file_svc = _StubFileService(existing={"a/x.txt"})
+
+    env = await upload_resource(
+        path="b/x.txt",
+        content=b"x",
+        owner_id="u1",
+        bot_id="bot-a",
+        factory=_StubFactory(_StubService([])),
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
+
+    assert env.code == CODE_CREATED
+    assert env.data.path == "b/x.txt"
+
+
+@pytest.mark.asyncio
+async def test_upload_400_when_the_service_rejects_the_file():
+    """Extension allow-list / size cap surface as a bare ValueError from the
+    service; unmapped, they would have surfaced as a 500."""
+    file_svc = _StubFileService(raises=ValueError("File type not allowed"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await upload_resource(
+            path="a.exe",
+            content=b"x",
+            owner_id="u1",
+            bot_id="bot-a",
+            bot_repo=_StubBotRepo(),
+            file_svc=file_svc,
+            request=_request_without_trace(),
+        )
+
+    assert excinfo.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_upload_502_when_the_device_write_fails():
+    file_svc = _StubFileService(raises=RuntimeError("device unreachable"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await upload_resource(
+            path="a.txt",
+            content=b"x",
+            owner_id="u1",
+            bot_id="bot-a",
+            bot_repo=_StubBotRepo(),
+            file_svc=file_svc,
+            request=_request_without_trace(),
+        )
+
+    assert excinfo.value.status_code == 502
 
 
 @pytest.mark.asyncio
 async def test_upload_reads_x_trace_id_from_request():
-    factory, resolver, dispatcher, _ = _delete_deps()
-    request = _request_with_trace("trace-up-1")
-
     env = await upload_resource(
-        name="hello.txt",
+        path="hello.txt",
         content=b"x",
         owner_id="u1",
         bot_id="bot-a",
-        factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
-        request=request,
+        factory=_StubFactory(_StubService([])),
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubFileService(),
+        request=_request_with_trace("trace-up-1"),
     )
 
     assert env.request_id == "trace-up-1"
 
-
-# ── download_resource (Phase 3 Task 4 — third real device_fs handler) ─
+# ── file read: download / preview, addressed by workspace path ───────
 #
-# Same device_fs resolution chain as Task 2 delete / Task 3 upload
-# (principal → owner_id → resolver.resolve_for_bot →
-# dispatcher.dispatch → device_fs). Like upload, download does NOT call
-# get_device_info (that's a delete-only concern for picking arca/local).
-# download_resource on the concrete service is ASYNC — the handler must
-# ``await`` it. Service returns (bytes, mime) or None → 404 (not-found /
-# not-a-file / is-directory / read-failure all collapse to 404 — service
-# already filters non-file / directory, so the handler's None branch is
-# exercised by the resource-missing case). Download returns a raw
-# ``Response`` with no envelope, so there is no x-trace-id assertion.
+# These replaced the id-addressed ``/{resource_id}/download`` and
+# ``/preview``. A record id cannot address a file the bot created itself, and
+# the record no longer decides existence, so the workspace path is the address.
+# The handlers reach the device through ``ResourceFileService``, so the tests
+# assert on the workspace-relative path handed to that seam.
 
 
-@pytest.mark.asyncio
-async def test_download_returns_raw_bytes_with_mime_type():
-    service = _StubService([])
-    factory, resolver, dispatcher, device_fs = _delete_deps(service=service)
+class _StubReadFileService(_StubFileService):
+    """Adds a readable workspace to the upload stub."""
 
-    response = await download_resource(
-        resource_id="1",
-        owner_id="u1",
-        bot_id="bot-x",
-        factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
-    )
-
-    # Raw Response (no envelope): body is the bytes, media_type is the mime.
-    assert isinstance(response, Response)
-    assert response.body == b"file content"
-    assert response.media_type == "application/pdf"
-    # device_fs resolved by the dispatcher was forwarded to the service.
-    assert service.last_call_device_fs is device_fs
-    # bot_id flowed through to factory.create.
-    assert factory.created_bot_ids == ["bot-x"]
-
-
-@pytest.mark.asyncio
-async def test_download_raises_404_when_service_returns_none():
-    # service.download_resource returns None for resource_id == "0"
-    # (simulates not-found / not-a-file / is-directory / read-failure —
-    # the service collapses all to None and the handler maps to 404).
-    service = _StubService([])
-    factory, resolver, dispatcher, _ = _delete_deps(service=service)
-
-    with pytest.raises(HTTPException) as exc:
-        await download_resource(
-            resource_id="0",
-            owner_id="u1",
-            bot_id="bot-a",
-            factory=factory,
-            resolver=resolver,
-            device_fs_dispatcher=dispatcher,
+    def __init__(
+        self,
+        files: dict[str, bytes] | None = None,
+        *,
+        read_raises: Exception | None = None,
+        delete_raises: Exception | None = None,
+    ):
+        super().__init__(
+            existing=set((files or {}).keys()), delete_raises=delete_raises
         )
+        self._files = dict(files or {})
+        self.read_raises = read_raises
+        self.read_paths: List[str] = []
+        self.deleted_paths: List[str] = []
+        self.made_dirs: List[str] = []
 
-    assert exc.value.status_code == 404
-    assert "not downloadable" in exc.value.detail
+    async def exists(self, *, path, **_kw) -> bool:
+        """Occupancy follows the stored bytes, so an upload then a delete leave
+        the workspace in the state the handlers expect."""
+        self.exists_calls.append(path)
+        return path in self._files
 
+    async def upload_file(self, **kwargs) -> dict:
+        info = await super().upload_file(**kwargs)
+        self._files[info["path"]] = kwargs["data"]
+        return info
 
-# ── preview_resource (Phase 3 Task 5 — fourth real device_fs handler) ─
-#
-# Same device_fs resolution chain as delete / upload / download
-# (principal → owner_id → resolver.resolve_for_bot →
-# dispatcher.dispatch → device_fs). Like download / upload, preview does
-# NOT call get_device_info (that's a delete-only concern for picking
-# arca/local). preview_resource
-# on the concrete service is ASYNC — the handler must ``await`` it. Service
-# returns a dict {content, content_type, size} or None → 404 (not-found /
-# not-a-file / is-directory / read-failure / empty all collapse to 404 —
-# service filters non-file / directory / empty). ValueError (content > 1
-# MB cap) → 413 (legacy parity). Unlike download (raw Response), preview
-# returns an enveloped Preview schema so the caller gets a structured
-# content_type + content pair.
+    async def read_file(self, *, path, enforce_download_limit=False, **_kw):
+        self.read_paths.append(path)
+        if self.read_raises is not None:
+            raise self.read_raises
+        return self._files.get(path)
+
+    async def delete(self, *, path, **_kw) -> bool:
+        self.deleted_paths.append(path)
+        if self.delete_raises is not None:
+            raise self.delete_raises
+        # The real service answers False when the device refused, so the stub
+        # reports the removal rather than returning None.
+        return self._files.pop(path, None) is not None
+
+    async def create_directory(self, *, path, **_kw):
+        self.made_dirs.append(path)
 
 
 @pytest.mark.asyncio
-async def test_preview_returns_envelope_with_content_and_type():
-    service = _StubService([])
-    factory, resolver, dispatcher, device_fs = _delete_deps(service=service)
+async def test_download_returns_raw_bytes_for_a_workspace_path():
+    file_svc = _StubReadFileService({"docs/a.txt": b"file bytes"})
 
-    env = await preview_resource(
-        resource_id="1",
+    response = await download_file(
+        path="docs/a.txt",
         owner_id="u1",
         bot_id="bot-x",
-        factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
         request=_request_without_trace(),
     )
 
-    assert isinstance(env, Envelope)
-    assert env.code == CODE_OK
-    assert env.message == "OK"
-    assert env.data is not None
-    assert isinstance(env.data, Preview)
-    assert env.data.resource_id == "1"
-    assert env.data.content_type == "text/plain"
-    assert env.data.content == "preview body"
-    # preview_url is intentionally left unset (no signed-URL path in Phase 3).
-    assert env.data.preview_url is None
-    # device_fs resolved by the dispatcher was forwarded to the service.
-    assert service.last_call_device_fs is device_fs
-    # bot_id flowed through to factory.create.
-    assert factory.created_bot_ids == ["bot-x"]
+    assert isinstance(response, Response)
+    assert response.body == b"file bytes"
+    assert response.media_type == "application/octet-stream"
+    # The address reaching the engine seam is workspace-relative.
+    assert file_svc.read_paths == ["docs/a.txt"]
 
 
 @pytest.mark.asyncio
-async def test_preview_raises_404_when_service_returns_none():
-    # service.preview_resource returns None for resource_id == "0" (simulates
-    # not-found / not-a-file / is-directory / read-failure / empty — the
-    # service collapses all to None and the handler maps to 404).
-    service = _StubService([])
-    factory, resolver, dispatcher, _ = _delete_deps(service=service)
-
+async def test_download_404_when_the_file_is_absent():
     with pytest.raises(HTTPException) as exc:
-        await preview_resource(
-            resource_id="0",
+        await download_file(
+            path="nope.txt",
             owner_id="u1",
-            bot_id="bot-a",
-            factory=factory,
-            resolver=resolver,
-            device_fs_dispatcher=dispatcher,
+            bot_id="bot-x",
+            bot_repo=_StubBotRepo(),
+            file_svc=_StubReadFileService({}),
+            request=_request_without_trace(),
+        )
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_download_rejects_a_path_escaping_the_workspace():
+    file_svc = _StubReadFileService({})
+
+    resp = await download_file(
+        path="../../etc/passwd",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
+
+    assert resp.status_code == 400
+    assert file_svc.read_paths == []  # nothing was read
+
+
+@pytest.mark.asyncio
+async def test_preview_returns_decoded_content():
+    env = await preview_file(
+        path="a.txt",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubReadFileService({"a.txt": b"hello"}),
+        request=_request_without_trace(),
+    )
+
+    assert env.code == CODE_OK
+    assert env.data.content == "hello"
+    assert env.data.content_type == "application/octet-stream"
+
+
+@pytest.mark.asyncio
+async def test_preview_413_when_over_the_cap():
+    big = b"x" * (1_048_576 + 1)
+
+    resp = await preview_file(
+        path="big.bin",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubReadFileService({"big.bin": big}),
+        request=_request_without_trace(),
+    )
+
+    # A 413, not a truncated preview: a caller must never receive a prefix it
+    # could mistake for the whole file.
+    assert resp.status_code == 413
+    assert json.loads(resp.body)["message"] == "File too large for preview"
+
+
+def _http_status(code: int) -> httpx.HTTPStatusError:
+    """The error a baas provider re-raises from the upstream file API."""
+    request = httpx.Request("POST", "http://baas/api/file/read")
+    return httpx.HTTPStatusError(
+        f"HTTP {code}", request=request, response=httpx.Response(code, request=request)
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("handler", [download_file, preview_file])
+async def test_read_404s_when_the_provider_reports_the_file_missing(handler):
+    """The baas providers re-raise the upstream status rather than returning
+    ``None`` for a missing file, and that loudness is load-bearing at the device
+    — a swallowed 401 once read as "file gone" and silently dropped promoted
+    files. It stops being a failure only here, where 404 is a documented
+    answer."""
+    with pytest.raises(HTTPException) as exc:
+        await handler(
+            path="gone.txt",
+            owner_id="u1",
+            bot_id="bot-x",
+            bot_repo=_StubBotRepo(),
+            file_svc=_StubReadFileService({}, read_raises=_http_status(404)),
             request=_request_without_trace(),
         )
 
     assert exc.value.status_code == 404
-    assert "not previewable" in exc.value.detail
 
 
 @pytest.mark.asyncio
-async def test_preview_raises_413_when_too_large():
-    # service.preview_resource raises ValueError for resource_id == "too-large"
-    # (simulates content > 1 MB cap); the handler maps ValueError → 413.
-    service = _StubService([])
-    factory, resolver, dispatcher, _ = _delete_deps(service=service)
+@pytest.mark.parametrize("code", [401, 500, 503])
+async def test_read_does_not_swallow_other_upstream_statuses(code):
+    """Only 404 is an ordinary answer. Anything else is an upstream fault and
+    must stay unmapped, which is what a 500 reports."""
+    with pytest.raises(httpx.HTTPStatusError):
+        await download_file(
+            path="a.txt",
+            owner_id="u1",
+            bot_id="bot-x",
+            bot_repo=_StubBotRepo(),
+            file_svc=_StubReadFileService({}, read_raises=_http_status(code)),
+            request=_request_without_trace(),
+        )
 
-    resp = await preview_resource(
-        resource_id="too-large",
+
+@pytest.mark.asyncio
+async def test_download_serves_an_empty_file_rather_than_404ing_it():
+    """An empty file exists and appears in a listing, so 404ing it would be the
+    workspace and the API disagreeing about what exists — the divergence this
+    change removes. Only ``None`` means absent."""
+    resp = await download_file(
+        path="empty.txt",
         owner_id="u1",
-        bot_id="bot-a",
-        factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubReadFileService({"empty.txt": b""}),
         request=_request_without_trace(),
     )
+
+    assert isinstance(resp, Response)
+    assert resp.body == b""
+
+
+@pytest.mark.asyncio
+async def test_preview_of_an_empty_file_is_empty_not_missing():
+    env = await preview_file(
+        path="empty.txt",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubReadFileService({"empty.txt": b""}),
+        request=_request_without_trace(),
+    )
+
+    assert env.data.content == ""
+
+
+@pytest.mark.asyncio
+async def test_download_413_when_the_device_refuses_an_oversized_file():
+    """Two distinct classes share the name ``FileTooLargeError`` — the device
+    filesystem's and the resources one — and ENVELOPE_ERRORS maps concrete
+    types, so the device's would escape unmapped as a 500. The handler
+    re-raises it as the mapped type, giving one answer for "too large"
+    regardless of which layer noticed."""
+    resp = await download_file(
+        path="big.bin",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubReadFileService(
+            {}, read_raises=DeviceFileTooLargeError("file exceeds 100 MB")
+        ),
+        request=_request_without_trace(),
+    )
+
     assert resp.status_code == 413
-    assert json.loads(resp.body)["message"] == "File too large for preview"
+
+
+@pytest.mark.asyncio
+async def test_preview_decodes_invalid_utf8_rather_than_failing():
+    env = await preview_file(
+        path="mixed.bin",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubReadFileService({"mixed.bin": b"ok\xff"}),
+        request=_request_without_trace(),
+    )
+    assert env.data.content.startswith("ok")
+
+
+# ── file delete + mkdir, addressed by workspace path ─────────────────
+
+
+@pytest.mark.asyncio
+async def test_delete_file_removes_it_from_the_workspace():
+    file_svc = _StubReadFileService({"docs/a.txt": b"x"})
+
+    class _NoopFactory:
+        def create(self, *, bot_id):
+            return SimpleNamespace(
+                delete_file_record=lambda **kw: _async_true()
+            )
+
+    env = await delete_file(
+        path="docs/a.txt",
+        owner_id="u1",
+        bot_id="bot-x",
+        factory=_NoopFactory(),
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
+
+    assert env.data.deleted is True
+    assert file_svc.deleted_paths == ["docs/a.txt"]
+
+
+@pytest.mark.asyncio
+async def test_delete_file_drops_the_record_before_the_file():
+    """The reverse order cannot recover: file gone, record dropped-and-failed
+    leaves the manifest pointing at a path with no bytes, and the retry is
+    refused 404 because the file is already gone — so nothing can ever clear it.
+    Record-first means a record failure changes nothing and the retry works."""
+    order: List[str] = []
+
+    class _RecordingFactory:
+        def create(self, *, bot_id):
+            async def _drop(**_kw):
+                order.append("record")
+                return True
+
+            return SimpleNamespace(delete_file_record=_drop)
+
+    class _RecordingFileService(_StubReadFileService):
+        async def delete(self, *, path, **kw):
+            order.append("file")
+            return await super().delete(path=path, **kw)
+
+    await delete_file(
+        path="docs/a.txt",
+        owner_id="u1",
+        bot_id="bot-x",
+        factory=_RecordingFactory(),
+        bot_repo=_StubBotRepo(),
+        file_svc=_RecordingFileService({"docs/a.txt": b"x"}),
+        request=_request_without_trace(),
+    )
+
+    assert order == ["record", "file"]
+
+
+@pytest.mark.asyncio
+async def test_delete_file_leaves_the_file_when_the_record_drop_fails():
+    """Both legs propagate rather than being swallowed. A half-done delete that
+    reports success is the divergence this change exists to remove, and the
+    caller cannot retry what it was told had already worked."""
+    file_svc = _StubReadFileService({"docs/a.txt": b"x"})
+
+    class _ExplodingFactory:
+        def create(self, *, bot_id):
+            async def _drop(**_kw):
+                raise RuntimeError("repo down")
+
+            return SimpleNamespace(delete_file_record=_drop)
+
+    with pytest.raises(RuntimeError):
+        await delete_file(
+            path="docs/a.txt",
+            owner_id="u1",
+            bot_id="bot-x",
+            factory=_ExplodingFactory(),
+            bot_repo=_StubBotRepo(),
+            file_svc=file_svc,
+            request=_request_without_trace(),
+        )
+
+    assert file_svc.deleted_paths == []  # the bytes are still there to retry
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", [".env", "AGENTS.md", "docs/.hidden"])
+async def test_delete_file_403s_a_read_only_path(path):
+    """Same policy the console's delete enforces. Addressing by path is what
+    makes these reachable at all — they never had a resource record, so the old
+    id-addressed delete could not name them."""
+    file_svc = _StubReadFileService({".env": b"x", "AGENTS.md": b"x"})
+
+    with pytest.raises(HTTPException) as exc:
+        await delete_file(
+            path=path,
+            owner_id="u1",
+            bot_id="bot-x",
+            factory=SimpleNamespace(create=lambda **kw: None),
+            bot_repo=_StubBotRepo(),
+            file_svc=file_svc,
+            request=_request_without_trace(),
+        )
+
+    assert exc.value.status_code == 403
+    assert file_svc.deleted_paths == []
+
+
+@pytest.mark.asyncio
+async def test_delete_file_502_when_the_device_refuses():
+    """The providers report a refused delete by returning False rather than
+    raising, so discarding it would answer ``deleted=true`` over a file still
+    sitting in the workspace."""
+
+    class _RefusingFileService(_StubReadFileService):
+        async def delete(self, *, path, **_kw) -> bool:
+            self.deleted_paths.append(path)
+            return False
+
+    file_svc = _RefusingFileService({"docs/a.txt": b"x"})
+
+    class _NoopFactory:
+        def create(self, *, bot_id):
+            return SimpleNamespace(delete_file_record=lambda **kw: _async_true())
+
+    with pytest.raises(HTTPException) as exc:
+        await delete_file(
+            path="docs/a.txt",
+            owner_id="u1",
+            bot_id="bot-x",
+            factory=_NoopFactory(),
+            bot_repo=_StubBotRepo(),
+            file_svc=file_svc,
+            request=_request_without_trace(),
+        )
+
+    # 502, not the console's 404: the existence check already ran, so False here
+    # means the device refused rather than the path being absent.
+    assert exc.value.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_delete_file_404_when_absent():
+    with pytest.raises(HTTPException) as exc:
+        await delete_file(
+            path="gone.txt",
+            owner_id="u1",
+            bot_id="bot-x",
+            factory=SimpleNamespace(create=lambda **kw: None),
+            bot_repo=_StubBotRepo(),
+            file_svc=_StubReadFileService({}),
+            request=_request_without_trace(),
+        )
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_mkdir_creates_a_directory_without_a_record():
+    file_svc = _StubReadFileService({})
+
+    env = await create_directory(
+        path="docs/spec",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
+
+    assert env.code == CODE_CREATED
+    assert env.data.type == OpenapiType.FOLDER
+    assert env.data.path == "docs/spec"
+    # Physical only — no record, so no record id.
+    assert env.data.resource_id == ""
+    assert file_svc.made_dirs == ["docs/spec"]
+
+
+async def _async_true() -> bool:
+    return True
 
 
 # ── End-to-end integration (review #8) ──────────────────────────────
@@ -1466,256 +2270,94 @@ async def test_real_factory_service_supports_all_handler_methods_e2e():
     assert env.data.type == OpenapiType.LINK
     assert env.data.url == "https://x.com"
 
-    # 3. list (exercises factory.create → service.list_resources — confirms
-    #    the persisted row is visible to the real repo).
+    # 3. list — the link comes from the real repo (a link has no file), and the
+    #    workspace half comes from the device.
     env = await list_resources(
         page=PageParams(),
-        user_id="u1",
+        owner_id="u1",
         bot_id="bot-x",
+        path="",
         type=None,
         factory=factory,
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubListFileService([]),
         request=_request_without_trace(),
     )
     assert env.data.total >= 1
     assert any(item.resource_id == link_id for item in env.data.items)
-
-    # 4. upload a FILE (exercises factory.create → service.upload_file —
-    #    the new slim method; device_fs.write_file is called by real service
-    #    logic, and the real repo stores the FILE record).
+    # 4. upload a FILE by workspace path (real factory writes the enrichment
+    #    record; the engine seam is stubbed, since a device is not under test).
+    file_svc = _StubReadFileService({})
     env = await upload_resource(
-        name="hello.txt",
+        path="docs/hello.txt",
         content=b"file bytes",
         owner_id="u1",
         bot_id="bot-x",
         factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
         request=_request_without_trace(),
     )
     assert env.code == CODE_CREATED
-    file_id = env.data.resource_id
     assert env.data.type == OpenapiType.FILE
+    assert env.data.path == "docs/hello.txt"
     assert env.data.size == len(b"file bytes")
-    # real service really invoked device_fs.write_file
-    assert device_fs.written == [("hello.txt", b"file bytes")]
+    # The real repo stored the record, with the uploader the console reads.
+    file_row = list(repo._rows.values())[-1]
+    assert file_row["attributes"]["path"] == "docs/hello.txt"
+    assert file_row["user_id"] == "u1"
 
-    # 5. download the FILE (exercises factory.create →
-    #    service.download_resource — new slim method; device_fs.read_file
-    #    round-trips the bytes written in step 4).
-    response = await download_resource(
-        resource_id=file_id,
+    # 5. download it back by the same path the upload reported — the address a
+    #    client actually round-trips.
+    response = await download_file(
+        path=env.data.path,
         owner_id="u1",
         bot_id="bot-x",
-        factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
     )
     assert response.body == b"file bytes"
-    assert response.media_type == "application/octet-stream"
 
-    # 6. preview the FILE (exercises factory.create →
-    #    service.preview_resource — new slim method; real service decodes
-    #    the bytes and returns the {content, content_type, size} dict).
-    env = await preview_resource(
-        resource_id=file_id,
+    # 6. preview it.
+    env_p = await preview_file(
+        path="docs/hello.txt",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
+    assert env_p.data.content == "file bytes"
+
+    # 7. delete it — the file goes, and the real record goes with it.
+    rows_before = len([r for r in repo._rows.values() if r.get("status") != "deleted"])
+    env_d = await delete_file(
+        path="docs/hello.txt",
         owner_id="u1",
         bot_id="bot-x",
         factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
         request=_request_without_trace(),
     )
-    assert env.code == CODE_OK
-    assert env.data.content == "file bytes"
-    assert env.data.content_type == "application/octet-stream"
+    assert env_d.data.deleted is True
+    assert file_svc.deleted_paths == ["docs/hello.txt"]
+    rows_after = len([r for r in repo._rows.values() if r.get("status") != "deleted"])
+    assert rows_after == rows_before - 1
 
-    # 7. delete the FILE (exercises factory.create → service.delete_resource
-    #    — new slim method; real service awaits device_fs.delete_file for the
-    #    FILE resource, then soft-deletes the repo row).
-    env = await delete_resource(
-        resource_id=file_id,
+    # 8. the path is free again, so the same upload succeeds rather than 409ing.
+    env2 = await upload_resource(
+        path="docs/hello.txt",
+        content=b"again",
         owner_id="u1",
         bot_id="bot-x",
         factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
         request=_request_without_trace(),
     )
-    assert env.code == CODE_OK
-    assert env.data.deleted is True
-    # real service really invoked device_fs.delete_file with the stored path
-    assert device_fs.deleted_paths == ["hello.txt"]
-    # second delete → service reports False (already soft-deleted row still
-    # resolves, but a missing-id delete returns False). Drive a bogus id
-    # directly to exercise the not-found → 404 path.
-    with pytest.raises(HTTPException) as exc:
-        await delete_resource(
-            resource_id="999999",
-            owner_id="u1",
-            bot_id="bot-x",
-            factory=factory,
-            resolver=resolver,
-            device_fs_dispatcher=dispatcher,
-            request=_request_without_trace(),
-        )
-    assert exc.value.status_code == 404
-
-    # 8. duplicate-name upload surfaces ValueError → 409 through the REAL
-    #    slim service's check_name_exists path (repo.list_resources really
-    #    sees the prior FILE row).
-    resp = await upload_resource(
-        name="hello.txt",
-        content=b"dup",
-        owner_id="u1",
-        bot_id="bot-x",
-        factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
-        request=_request_without_trace(),
-    )
-    assert resp.status_code == 409
-    assert json.loads(resp.body)["message"] == "Resource already exists"
-
-
-# ── Fix #1 (review round-2): enum mapping contract ──────────────────
-#
-# Round-1 wired the openapi ResourceType→legacy ResourceType seam as
-# ``type.value if type else None`` — passing a STRING where the slim
-# service expects the legacy ResourceType ENUM (the service internally
-# does ``resource_type.value``). Strings have no ``.value`` →
-# AttributeError. These tests pin the new ``_legacy_type_for`` contract:
-# the value handed to the service IS the legacy enum (identity check,
-# not just str equality which would pass either way).
-
-
-@pytest.mark.asyncio
-async def test_list_resources_passes_legacy_enum_to_service():
-    service = _StubService([])
-    factory = _StubFactory(service)
-
-    await list_resources(
-        page=PageParams(),
-        user_id="u1",
-        bot_id="bot-a",
-        type=OpenapiType.LINK,
-        factory=factory,
-        request=_request_without_trace(),
-    )
-
-    passed = service.last_call_kwargs.get("resource_type")
-    assert passed is LegacyType.LINK
-    assert passed is not OpenapiType.LINK
-
-
-@pytest.mark.asyncio
-async def test_list_resources_passes_none_when_type_filter_absent():
-    service = _StubService([])
-    factory = _StubFactory(service)
-
-    await list_resources(
-        page=PageParams(),
-        user_id="u1",
-        bot_id="bot-a",
-        type=None,
-        factory=factory,
-        request=_request_without_trace(),
-    )
-
-    # _legacy_type_for(None) returns None — no filter.
-    assert service.last_call_kwargs.get("resource_type") is None
-
-
-@pytest.mark.asyncio
-async def test_list_resources_openapi_folder_has_no_legacy_counterpart():
-    """openapi FOLDER has no legacy enum equivalent. List with type=FOLDER
-    MUST return an empty page — NOT fall through to resource_type=None which
-    the slim service treats as "no filter" and would surface every row
-    (FILE/LINK) under a FOLDER query. This pins that guard (the bug:
-    unfiltered list leaked all rows when asked for FOLDER)."""
-    # Real factory + repo seeded with FILE and LINK rows (NOT empty) — an
-    # unfiltered list would return them; a correct FOLDER filter returns none.
-    factory, repo = _real_factory_with_inmemory_repo()
-    repo.create(
-        Resource(
-            id=1,
-            name="f1",
-            resource_type=LegacyType.FILE,
-            attributes={"path": "/f", "size": 5},
-            bolt_id="bot-a",
-        ).to_dict()
-    )
-    repo.create(
-        create_link_resource(
-            name="l1",
-            url="https://x.com",
-            link_type="external",
-            id=2,
-            bolt_id="bot-a",
-        ).to_dict()
-    )
-
-    # Sanity: an unfiltered list DOES see both rows (proves the repo is
-    # non-empty and the leak would surface them without the FOLDER guard).
-    unfiltered = await list_resources(
-        page=PageParams(),
-        user_id="u1",
-        bot_id="bot-a",
-        type=None,
-        factory=factory,
-        request=_request_without_trace(),
-    )
-    assert unfiltered.data.total >= 2
-
-    # type=FOLDER must NOT leak those rows — empty page, not "all".
-    env = await list_resources(
-        page=PageParams(),
-        user_id="u1",
-        bot_id="bot-a",
-        type=OpenapiType.FOLDER,
-        factory=factory,
-        request=_request_without_trace(),
-    )
-    assert env.code == CODE_OK
-    assert env.data.total == 0
-    assert env.data.items == []
-
-
-@pytest.mark.asyncio
-async def test_check_name_passes_legacy_enum_to_service_when_provided():
-    service = _StubService([])
-    factory = _StubFactory(service)
-
-    await check_resource_name(
-        name="available",
-        owner_id="u1",
-        type=OpenapiType.FILE,
-        bot_id="bot-a",
-        factory=factory,
-        request=_request_without_trace(),
-    )
-
-    passed = service.last_call_kwargs.get("resource_type")
-    assert passed is LegacyType.FILE
-    assert passed is not OpenapiType.FILE
-
-
-@pytest.mark.asyncio
-async def test_check_name_defaults_to_legacy_file_enum_when_type_absent():
-    service = _StubService([])
-    factory = _StubFactory(service)
-
-    await check_resource_name(
-        name="available",
-        owner_id="u1",
-        type=None,
-        bot_id="bot-a",
-        factory=factory,
-        request=_request_without_trace(),
-    )
-
-    # ``or _LegacyType.FILE`` is the documented default for the no-type case.
-    assert service.last_call_kwargs.get("resource_type") is LegacyType.FILE
-
+    assert env2.code == CODE_CREATED
 
 # ── Fix #2 (review round-2): cross-bot ownership isolation ──────────
 #
@@ -1784,8 +2426,6 @@ async def test_delete_resource_returns_404_for_cross_bot_resource_id():
             owner_id="u1",
             bot_id="bot-x",
             factory=factory,
-            resolver=resolver,
-            device_fs_dispatcher=dispatcher,
             request=_request_without_trace(),
         )
     assert exc.value.status_code == 404
@@ -1794,48 +2434,29 @@ async def test_delete_resource_returns_404_for_cross_bot_resource_id():
     row = repo.get_by_id(foreign_id)
     assert row.get("status") == "active"
 
-
 @pytest.mark.asyncio
-async def test_download_resource_returns_404_for_cross_bot_resource_id():
-    factory, repo = _real_factory_with_inmemory_repo()
-    foreign_id = _seed_foreign_resource(repo)
+async def test_file_reads_are_scoped_to_the_requested_bot():
+    """Replaces the cross-bot ``resource_id`` isolation tests for download and
+    preview.
 
-    resolver = _StubResolver()
-    dispatcher = _StubDispatcher(_StubDeviceFs())
+    Those guarded against reading another bot's file by passing its record id.
+    Path addressing removes the vector rather than guarding it: there is no
+    foreign id to pass, and the workspace is resolved from the requested
+    ``bot_id``, so a caller can only ever read inside the bot it named. This
+    pins that scoping — the bot from the request is what reaches the seam.
+    """
+    file_svc = _StubReadFileService({"a.txt": b"x"})
 
-    with pytest.raises(HTTPException) as exc:
-        await download_resource(
-            resource_id=foreign_id,
-            owner_id="u1",
-            bot_id="bot-x",
-            factory=factory,
-            resolver=resolver,
-            device_fs_dispatcher=dispatcher,
-        )
-    assert exc.value.status_code == 404
-    assert "not downloadable" in exc.value.detail
+    await download_file(
+        path="a.txt",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
 
-
-@pytest.mark.asyncio
-async def test_preview_resource_returns_404_for_cross_bot_resource_id():
-    factory, repo = _real_factory_with_inmemory_repo()
-    foreign_id = _seed_foreign_resource(repo)
-
-    resolver = _StubResolver()
-    dispatcher = _StubDispatcher(_StubDeviceFs())
-
-    with pytest.raises(HTTPException) as exc:
-        await preview_resource(
-            resource_id=foreign_id,
-            owner_id="u1",
-            bot_id="bot-x",
-            factory=factory,
-            resolver=resolver,
-            device_fs_dispatcher=dispatcher,
-            request=_request_without_trace(),
-        )
-    assert exc.value.status_code == 404
-    assert "not previewable" in exc.value.detail
+    assert file_svc.read_paths == ["a.txt"]
 
 
 @pytest.mark.asyncio
@@ -1881,68 +2502,209 @@ class _FailingDeviceFs:
 
 
 @pytest.mark.asyncio
-async def test_upload_returns_502_when_device_fs_write_fails():
+async def test_upload_returns_502_when_the_device_write_fails():
     factory, repo = _real_factory_with_inmemory_repo()
-
-    resolver = _StubResolver()
-    dispatcher = _StubDispatcher(_FailingDeviceFs())
     rows_before = len(repo._rows)
 
     with pytest.raises(HTTPException) as exc:
         await upload_resource(
-            name="hello.txt",
+            path="hello.txt",
             content=b"file bytes",
             owner_id="u1",
             bot_id="bot-x",
             factory=factory,
-            resolver=resolver,
-            device_fs_dispatcher=dispatcher,
+            bot_repo=_StubBotRepo(),
+            file_svc=_StubFileService(raises=RuntimeError("device unreachable")),
             request=_request_without_trace(),
         )
     assert exc.value.status_code == 502
     assert "Upload storage failed" in exc.value.detail
-    # No DB row created — write failure short-circuited before repo.create.
+    # No row written: the record is created only after the bytes land, so a
+    # failed upload leaves neither a file nor a row pointing at one.
     assert len(repo._rows) == rows_before
 
 
 @pytest.mark.asyncio
-async def test_upload_409_takes_precedence_over_502_path():
-    """When both conditions hold (duplicate name AND a failing device_fs),
-    the slim service runs check_name_exists FIRST (before write_file), so
-    the 409 surfaces — not the 502. Pins the service's ordering invariance."""
-    from datetime import datetime
-
+async def test_upload_records_the_uploader_for_the_console():
+    """The console's resource list shows an owner off this shared table, so an
+    upload that wrote no ``user_id`` would appear there with a blank one."""
     factory, repo = _real_factory_with_inmemory_repo()
 
-    resolver = _StubResolver()
-    dispatcher = _StubDispatcher(_FailingDeviceFs())
-    # Seed a bot-x FILE row whose name collides with the upload below.
-    # user_id MUST match the principal's user_id ("u1") — the slim service's
-    # check_name_exists filters by user_id, so a mismatch would miss the
-    # collision and let the upload fall through to the 502 write path.
-    ts = datetime(2026, 7, 28, 10, 0).isoformat()
-    repo.create(
-        {
-            "name": "hello.txt",
-            "resource_type": "file",
-            "status": "active",
-            "gmt_created": ts,
-            "gmt_modified": ts,
-            "attributes": {"path": "hello.txt", "size": 1},
-            "user_id": "u1",
-            "bolt_id": "bot-x",
-        }
+    env = await upload_resource(
+        path="docs/a.txt",
+        content=b"file bytes",
+        owner_id="u1",
+        bot_id="bot-x",
+        factory=factory,
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubFileService(),
+        request=_request_without_trace(),
     )
 
+    assert env.code == CODE_CREATED
+    assert env.data.path == "docs/a.txt"
+    # The row is written but never read back: the response is built from the
+    # workspace, so it reports the same empty id and null source/timestamps a
+    # listing of this file would. See
+    # ``test_upload_reports_the_file_the_way_a_listing_would``.
+    assert env.data.resource_id == ""
+    row = list(repo._rows.values())[-1]
+    assert row["user_id"] == "u1"
+    assert row["created_by"] == "u1"
+    assert row["name"] == "a.txt"  # leaf
+    assert row["attributes"]["path"] == "docs/a.txt"  # full workspace-relative
+    assert row["attributes"]["parent_path"] == "docs"  # dirname, for the console
+    assert row["source"] == "upload"
+
+
+@pytest.mark.asyncio
+async def test_upload_reports_the_file_the_way_a_listing_would():
+    """The row is the publish pipeline's input, not something this API reads
+    back. Sourcing the response from it would make the upload the one file
+    response shaped differently from every other — and the id it echoed could
+    not address anything anyway, since files are path-addressed and
+    ``GET /{resource_id}`` 404s a file row."""
+    factory, _ = _real_factory_with_inmemory_repo()
+
+    env = await upload_resource(
+        path="docs/a.txt",
+        content=b"file bytes",
+        owner_id="u1",
+        bot_id="bot-x",
+        factory=factory,
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubFileService(),
+        request=_request_without_trace(),
+    )
+
+    assert env.data.resource_id == ""
+    assert env.data.source is None
+    assert env.data.gmt_create is None
+    assert env.data.gmt_modified is None
+    # What the caller can actually use: the path, which every file endpoint takes.
+    assert env.data.path == "docs/a.txt"
+    assert env.data.name == "a.txt"
+    assert env.data.size == len(b"file bytes")
+
+
+@pytest.mark.asyncio
+async def test_upload_rolls_the_file_back_when_the_record_write_fails():
+    """The record is the publish pipeline's only input, so bytes without a row
+    publish as a bot silently missing that file. Reporting 201 would leave
+    exactly that, and the obvious repair — upload it again — cannot work, because
+    the file is on disk and the duplicate check answers 409. So the write is
+    undone and the request fails; a retry then finds a clean slate."""
+
+    class _ExplodingFactory:
+        def create(self, *, bot_id):
+            raise RuntimeError("repo down")
+
+    file_svc = _StubFileService()
+
+    with pytest.raises(HTTPException) as excinfo:
+        await upload_resource(
+            path="a.txt",
+            content=b"xy",
+            owner_id="u1",
+            bot_id="bot-x",
+            factory=_ExplodingFactory(),
+            bot_repo=_StubBotRepo(),
+            file_svc=file_svc,
+            request=_request_without_trace(),
+        )
+
+    assert excinfo.value.status_code == 502
+    assert file_svc.deleted_paths == ["a.txt"]
+
+
+@pytest.mark.asyncio
+async def test_upload_treats_a_refused_rollback_as_a_failed_one(caplog):
+    """A provider refuses by returning ``False``, not by raising, so catching
+    only exceptions would miss half of it. Both arms land in the same state —
+    file on disk, no record — and both must say so, because the next upload of
+    this path 409s against a file the operator has no record of."""
+
+    class _ExplodingFactory:
+        def create(self, *, bot_id):
+            raise RuntimeError("repo down")
+
+    class _RefusingFileService(_StubFileService):
+        async def delete(self, *, path, **_kw) -> bool:
+            self.deleted_paths.append(path)
+            return False
+
+    file_svc = _RefusingFileService()
+
+    with caplog.at_level(logging.ERROR):
+        with pytest.raises(HTTPException) as excinfo:
+            await upload_resource(
+                path="a.txt",
+                content=b"xy",
+                owner_id="u1",
+                bot_id="bot-x",
+                factory=_ExplodingFactory(),
+                bot_repo=_StubBotRepo(),
+                file_svc=file_svc,
+                request=_request_without_trace(),
+            )
+
+    assert excinfo.value.status_code == 502
+    assert file_svc.deleted_paths == ["a.txt"]
+    assert "on disk with no record" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_upload_still_fails_when_the_rollback_itself_fails():
+    """Both halves down leaves the file on disk with no record — the state the
+    rollback exists to avoid. The caller still gets a failure rather than a 201
+    over an unrecorded file; the operator gets it from the log."""
+
+    class _ExplodingFactory:
+        def create(self, *, bot_id):
+            raise RuntimeError("repo down")
+
+    file_svc = _StubFileService(delete_raises=RuntimeError("device down"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await upload_resource(
+            path="a.txt",
+            content=b"xy",
+            owner_id="u1",
+            bot_id="bot-x",
+            factory=_ExplodingFactory(),
+            bot_repo=_StubBotRepo(),
+            file_svc=file_svc,
+            request=_request_without_trace(),
+        )
+
+    assert excinfo.value.status_code == 502
+    assert file_svc.deleted_paths == ["a.txt"]
+
+
+@pytest.mark.asyncio
+async def test_upload_409_takes_precedence_over_502_path():
+    """With both conditions live (occupied path AND a failing device), the
+    occupancy check runs first, so the 409 surfaces — not the 502. Pins the
+    ordering: an upload must never attempt a write it would refuse anyway.
+
+    Occupancy is now decided by the workspace rather than by a row, so the seed
+    is a file present on the device, not a record.
+    """
+    factory, repo = _real_factory_with_inmemory_repo()
+    rows_before = len(repo._rows)
+
     resp = await upload_resource(
-        name="hello.txt",
+        path="hello.txt",
         content=b"x",
         owner_id="u1",
         bot_id="bot-x",
         factory=factory,
-        resolver=resolver,
-        device_fs_dispatcher=dispatcher,
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubFileService(
+            existing={"hello.txt"}, raises=RuntimeError("device unreachable")
+        ),
         request=_request_without_trace(),
     )
     assert resp.status_code == 409
     assert json.loads(resp.body)["message"] == "Resource already exists"
+    assert len(repo._rows) == rows_before

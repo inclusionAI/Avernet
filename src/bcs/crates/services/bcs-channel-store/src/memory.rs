@@ -313,6 +313,18 @@ impl ConversationSessionRepoPort for MemoryConversationSessionRepo {
             .collect())
     }
 
+    async fn list_by_binding(
+        &self,
+        binding_id: &str,
+    ) -> ServiceResult<Vec<ConversationSessionMap>> {
+        let maps = self.maps.read().await;
+        Ok(maps
+            .iter()
+            .filter(|map| map.binding_id == binding_id)
+            .cloned()
+            .collect())
+    }
+
     async fn upsert(&self, map: ConversationSessionMap) -> ServiceResult<()> {
         {
             let mut maps = self.maps.write().await;
@@ -328,6 +340,19 @@ impl ConversationSessionRepoPort for MemoryConversationSessionRepo {
             maps.push(map);
         }
         self.save_to_disk().await
+    }
+
+    async fn delete_by_binding(&self, binding_id: &str) -> ServiceResult<u64> {
+        let deleted = {
+            let mut maps = self.maps.write().await;
+            let before = maps.len();
+            maps.retain(|map| map.binding_id != binding_id);
+            (before - maps.len()) as u64
+        };
+        if deleted > 0 {
+            self.save_to_disk().await?;
+        }
+        Ok(deleted)
     }
 
     async fn delete_if_session(

@@ -62,6 +62,23 @@ bots_dynamic_manifest_version() {
     jq -r '.version // empty' "$(bots_dynamic_manifest)"
 }
 
+bots_dynamic_fusion_enabled() {
+    local manifest
+    manifest="$(bots_dynamic_manifest)"
+    if [ ! -f "$manifest" ]; then
+        return 1
+    fi
+    # Profile-level opt-in: bcsfuse.fusion_enable must be exactly true.
+    if jq -e '.bcsfuse.fusion_enable == true' "$manifest" >/dev/null 2>&1; then
+        return 0
+    fi
+    # Env override to preserve legacy auto-enable behavior for CI/demos.
+    if [ "${BCSFUSE_FORCE_ENABLE_FUSION:-0}" = "1" ]; then
+        return 0
+    fi
+    return 1
+}
+
 bots_dynamic_has_runtime() {
     local runtime="$1"
     jq -e --arg runtime "$runtime" \
@@ -371,7 +388,7 @@ bots_dynamic_validate_manifest() {
             or
             (
                 .version == 2
-                and keys_allowed(["version", "name", "port_start", "port_step", "scopes", "bots"])
+                and keys_allowed(["version", "name", "port_start", "port_step", "scopes", "bots", "bcsfuse"])
                 and (.name | type == "string" and length > 0)
                 and all(.bots[];
                     common_bot
@@ -986,6 +1003,67 @@ bots_dynamic_onboard() {
     done < <(bots_dynamic_specs)
 }
 
+bots_dynamic_enable_fusion() {
+    local bcsfuse_url bcsfuse_token bcsfuse_env_file
+    bcsfuse_url="http://127.0.0.1:${BCSFUSE_PORT:-8765}"
+
+    # Prefer the caller's env var, then the value bcsfuse actually loaded from
+    # its runtime .env.local, then the open-core default. This avoids silently
+    # 401-ing when the user changed BCSFUSE_AUTH_TOKEN in bcsfuse's env file.
+    bcsfuse_token="${BCSFUSE_AUTH_TOKEN:-}"
+    if [ -z "$bcsfuse_token" ] && [ -n "${BCSFUSE_DIR:-}" ]; then
+        bcsfuse_env_file="${BCSFUSE_DIR}/.runtime/env/.env.local"
+        if [ -f "$bcsfuse_env_file" ]; then
+            bcsfuse_token="$(bash -c 'set -a; source "$1" >/dev/null 2>&1; echo "${BCSFUSE_AUTH_TOKEN:-}"' _ "$bcsfuse_env_file")"
+        fi
+    fi
+    if [ -z "$bcsfuse_token" ]; then
+        bcsfuse_token="dev-opencore-token"
+    fi
+
+    if ! curl -sf --max-time 2 "${bcsfuse_url}/health" >/dev/null 2>&1; then
+        log_warn "bcsfuse not reachable at ${bcsfuse_url}; skipping fusion_enable for ${BOTS_PROFILE_DIR}"
+        return 0
+    fi
+
+    local name profile port source summary domains skills scopes runtime session_file bot_uuid response status body failed=false
+    log_info "Enabling bcsfuse profile fusion for dynamic bots..."
+    while IFS=$'\t' read -r name profile port source summary domains skills scopes runtime; do
+        [ "$runtime" = "openclaw" ] || continue
+        session_file="$(bcs_bot_profile_dir "$profile")/.bcs/session.json"
+        bot_uuid="$(bots_session_bot_uuid "$session_file")"
+        if [ -z "$bot_uuid" ]; then
+            log_warn "No bot_uuid for ${name}; skipping fusion_enable"
+            continue
+        fi
+
+        response="$(curl -s -w "\n%{http_code}" -X PUT "${bcsfuse_url}/v1/workers/${bot_uuid}/config" \
+            -H "Authorization: Bearer ${bcsfuse_token}" \
+            -H "Content-Type: application/json" \
+            -d '{"fusion_enable":true}' 2>/dev/null)"
+        status="${response##*$'\n'}"
+        body="${response%$'\n'*}"
+
+        case "$status" in
+            200|204)
+                log_info "Profile fusion enabled for ${name} (${bot_uuid})"
+                ;;
+            401)
+                log_error "Failed to enable profile fusion for ${name} (${bot_uuid}): HTTP 401 (token mismatch). Check BCSFUSE_AUTH_TOKEN or ${bcsfuse_env_file:-bcsfuse env file}."
+                failed=true
+                ;;
+            *)
+                log_warn "Failed to enable profile fusion for ${name} (${bot_uuid}): HTTP ${status}: ${body}"
+                ;;
+        esac
+    done < <(bots_dynamic_specs)
+
+    if [ "$failed" = true ]; then
+        return 1
+    fi
+    return 0
+}
+
 bots_dynamic_capture_session_uuids() {
     local snapshot="$1"
     local sessions_dir
@@ -1174,10 +1252,18 @@ bots_dynamic_start() {
     fi
     bots_remove_session_snapshot "$snapshot"
 
-    if bots_dynamic_onboard; then
-        log_info "Dynamic bots onboarded"
-    else
+    if ! bots_dynamic_onboard; then
         return 1
+    fi
+    log_info "Dynamic bots onboarded"
+
+    if bots_dynamic_fusion_enabled; then
+        if ! bots_dynamic_enable_fusion; then
+            log_error "Dynamic bots onboarded but failed to enable bcsfuse fusion. Fix BCSFUSE_AUTH_TOKEN or set bcsfuse.fusion_enable=false in bots.json."
+            return 1
+        fi
+    else
+        log_info "bcsfuse fusion not enabled for profile ${BOTS_PROFILE_DIR}; skipping fusion_enable (set bcsfuse.fusion_enable=true in bots.json or BCSFUSE_FORCE_ENABLE_FUSION=1 to opt in)"
     fi
 }
 

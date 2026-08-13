@@ -109,7 +109,7 @@ pub struct InboundMessage {
     pub im_user_id: String,
     pub im_user_nick: Option<String>,
     pub text: String,
-    /// Channel-normalized temporary attachments. The first rollout accepts images only.
+    /// Channel-normalized temporary attachments. Capability URLs must not be persisted.
     pub attachments: Option<Vec<Attachment>>,
     /// 该消息是否 @ 了本机器人(isInAtList / atUsers 命中)。
     pub is_at_bot: bool,

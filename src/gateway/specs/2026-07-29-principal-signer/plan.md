@@ -573,7 +573,7 @@ def _app() -> AppPrincipal:
 
 def _req() -> ForwardRequest:
     return ForwardRequest(
-        method="GET", url="http://up/x", headers={"x-existing": "keep"}, content=b""
+        method="GET", url="http://up/x", headers={"x-existing": "keep"}
     )
 
 
@@ -656,10 +656,9 @@ async def _attach_identities(
     return replace(forward, headers=headers)
 ```
 
-3c. 在 `forward_request` 中，把构建并调用接缝的那段（当前是 `body = await request.body()` 起到 `forward = _attach_identities(...)` 止）替换为带入站剔除、audience、签名失败兜底的版本：
+3c. 在 `forward_request` 中，把构建并调用接缝的那段替换为带入站剔除、audience、签名失败兜底的版本。下面示例已按后续 Forwarder Plugin API contract version 2 更新：先完成身份签名，再挂载 one-shot request body，避免在认证或签名前消费请求流：
 
 ```python
-    body = await request.body()
     try:
         forward = await _attach_identities(
             ForwardRequest(
@@ -672,7 +671,6 @@ async def _attach_identities(
                     for k, v in request.headers.items()
                     if k.lower() not in _INBOUND_STRIP
                 },
-                content=body,
             ),
             identities,
             signer=request.app.state.principal_signer,
@@ -681,6 +679,8 @@ async def _attach_identities(
     except Exception:
         logger.exception("principal signing failed")
         return _error(500, 1, "principal signing failed")
+
+    forward = replace(forward, body=await _request_body(request))
 ```
 
 - [ ] **Step 4: 跑测试确认通过**

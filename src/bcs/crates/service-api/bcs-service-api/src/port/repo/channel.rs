@@ -61,7 +61,14 @@ pub trait ConversationSessionRepoPort: Send + Sync {
         &self,
         bcs_session_id: &str,
     ) -> ServiceResult<Vec<ConversationSessionMap>>;
+    /// Binding 删除清理：列出该 binding 仍引用的全部 session 映射。
+    async fn list_by_binding(
+        &self,
+        binding_id: &str,
+    ) -> ServiceResult<Vec<ConversationSessionMap>>;
     async fn upsert(&self, map: ConversationSessionMap) -> ServiceResult<()>;
+    /// Binding 删除清理：删除该 binding 的全部 session 映射。
+    async fn delete_by_binding(&self, binding_id: &str) -> ServiceResult<u64>;
     /// Delete the mapping only when it still points at `expected_bcs_session_id`.
     /// This CAS cleanup prevents a failed start from deleting a newer mapping.
     async fn delete_if_session(

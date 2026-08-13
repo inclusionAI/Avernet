@@ -27,6 +27,9 @@ from agentclaw.community.core.repository.protocols.bot.collaborator import (
 from agentclaw.community.core.repository.protocols.bot.mcp import (
     UserMCPConfigRepository,
 )
+from agentclaw.community.core.repository.protocols.bot.startup_script import (
+    BotStartupScriptRepositoryProtocol,
+)
 
 __all__ = [
     "BotAppGrantRepositoryProtocol",
@@ -35,6 +38,7 @@ __all__ = [
     "BotFriendRepositoryProtocol",
     "BotRepository",
     "BotRestartLockRepositoryProtocol",
+    "BotStartupScriptRepositoryProtocol",
     "CollaboratorRepositoryProtocol",
     "RenderScreenRepository",
     "TemplateRepository",

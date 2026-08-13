@@ -98,6 +98,29 @@ class _SessionFileClient:
         self.complete_calls.append(request)
 
 
+def test_temporary_url_manifest_requires_baas_upload_before_export(tmp_path: Path):
+    service, session_key, _ = _write_file(tmp_path)
+    store = ManifestStore(tmp_path)
+    entry = store.get("sr_001")
+    assert entry is not None
+    store.upsert(
+        entry.model_copy(
+            update={
+                "source_kind": "temporary_url",
+                "source_attachment_id": "att-1",
+                "source_url_hash": "a" * 64,
+            }
+        )
+    )
+
+    source = service.prepare_export_source(
+        session_key=session_key,
+        resource_id="sr_001",
+    )
+
+    assert source.requires_upload is True
+
+
 async def _ready_result(
     exports: SessionFileExportService,
     service: SessionFileService,

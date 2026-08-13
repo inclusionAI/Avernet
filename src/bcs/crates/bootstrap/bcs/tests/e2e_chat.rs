@@ -18,7 +18,7 @@
 //! │             │  POST   │             │  push   │             │
 //! └─────────────┘         └─────────────┘         └─────────────┘
 //!       │                       │                       │
-//!       │  POST /bots/{id}/chat │                       │
+//!       │  POST /bots/{id}/chat-async │                       │
 //!       │ ──────────────────────▶│                       │
 //!       │                       │  WebSocket chat.send  │
 //!       │                       │ ──────────────────────▶│
@@ -61,7 +61,7 @@ use e2e_helpers::{create_temp_dir, next_port, ProcessManager};
 // │                                                                           │
 // │  User (张三)             BCS Server              张三's Bot               │
 // │       │                       │                       │                  │
-// │       │  POST /bots/{张三}/chat                     │                  │
+// │       │  POST /bots/{张三}/chat-async                     │                  │
 // │       │  Authorization: Bearer <张三's token>        │                  │
 // │       │  { "message": "我今天要做什么？" }            │                  │
 // │       │ ─────────────────▶│                       │                  │
@@ -96,7 +96,7 @@ use e2e_helpers::{create_temp_dir, next_port, ProcessManager};
 ///
 /// Flow:
 /// 1. Bot connects to BCS via WebSocket (internal network, no public IP)
-/// 2. User sends message via BCS HTTP API: POST /bots/{own_bot}/chat
+/// 2. User sends message via BCS HTTP API: POST /bots/{own_bot}/chat-async
 /// 3. BCS routes message to bot's WebSocket
 /// 4. Bot responds, BCS returns response to user
 #[tokio::test]
@@ -128,11 +128,11 @@ async fn e2e_personal_assistant() {
     // Act: User sends message to own bot VIA BCS (not directly to bot's gateway)
     // This is the key point: bots are in internal network, user accesses via BCS
     let user_message = "我今天要做什么？请根据你的上下文回答。";
-    println!("[S1] User → BCS: POST /bots/{}/chat", zhangsan_uuid);
+    println!("[S1] User → BCS: POST /bots/{}/chat-async", zhangsan_uuid);
 
     let client = reqwest::Client::new();
     let response = client
-        .post(format!("{}/bots/{}/chat", bcs_url, zhangsan_uuid))
+        .post(format!("{}/bots/{}/chat-async", bcs_url, zhangsan_uuid))
         .bearer_auth(&zhangsan_token)
         .json(&serde_json::json!({
             "message": user_message,
@@ -173,7 +173,7 @@ async fn e2e_personal_assistant() {
 // │                                                                           │
 // │  User (张三)             BCS Server              DBA Bot                  │
 // │       │                       │                       │                  │
-// │       │  POST /bots/{DBA}/chat                        │                  │
+// │       │  POST /bots/{DBA}/chat-async                        │                  │
 // │       │  Authorization: Bearer <张三's token>          │                  │
 // │       │  { "message": "帮我排查死锁" }                 │                  │
 // │       │ ─────────────────▶│                       │                  │
@@ -206,7 +206,7 @@ async fn e2e_personal_assistant() {
 ///
 /// Flow:
 /// 1. Expert bot (DBA) connects to BCS via WebSocket
-/// 2. User sends message via BCS: POST /bots/{dba_uuid}/chat
+/// 2. User sends message via BCS: POST /bots/{dba_uuid}/chat-async
 /// 3. BCS routes to DBA's WebSocket
 /// 4. DBA responds with expertise
 #[tokio::test]
@@ -242,11 +242,11 @@ async fn e2e_expert_consultation() {
 
     // Act: User sends message to DBA bot VIA BCS (using 张三's token for auth)
     let user_message = "我遇到了数据库死锁问题，请帮我分析可能的原因。";
-    println!("[S2] User → BCS: POST /bots/{}/chat", dba_uuid);
+    println!("[S2] User → BCS: POST /bots/{}/chat-async", dba_uuid);
 
     let client = reqwest::Client::new();
     let response = client
-        .post(format!("{}/bots/{}/chat", bcs_url, dba_uuid))
+        .post(format!("{}/bots/{}/chat-async", bcs_url, dba_uuid))
         .bearer_auth(&zhangsan_token)  // User's own bot's token
         .json(&serde_json::json!({
             "message": user_message,
@@ -286,7 +286,7 @@ async fn e2e_expert_consultation() {
 // │                                                                           │
 // │  User (张三)             BCS Server              张三's Bot               │
 // │       │                       │                       │                  │
-// │       │  POST /bots/{张三}/chat                     │                  │
+// │       │  POST /bots/{张三}/chat-async                     │                  │
 // │       │  "我们可以找李四帮我"                        │                  │
 // │       │ ─────────────────▶│                       │                  │
 // │       │                       │                       │                  │
@@ -393,11 +393,11 @@ async fn e2e_group_chat() {
 
     // Phase 1: User tells their bot to find collaboration help
     let user_message = "我们可以找李四帮我出一个建议方案。你知道他的联系方式吗？";
-    println!("[S3] User -> BCS: POST /bots/{{张三}}/chat");
+    println!("[S3] User -> BCS: POST /bots/{{张三}}/chat-async");
 
     let client = reqwest::Client::new();
     let response = client
-        .post(format!("{}/bots/张三/chat", bcs_url))
+        .post(format!("{}/bots/张三/chat-async", bcs_url))
         .bearer_auth(&zhangsan_token)
         .json(&serde_json::json!({
             "message": user_message,

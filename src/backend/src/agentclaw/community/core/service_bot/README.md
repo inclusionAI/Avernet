@@ -23,6 +23,7 @@ internal_dependencies:
   - agentclaw.community.core.repository.protocols.skills_pool    # repository contracts consumed by this module
   - agentclaw.community.core.common_config
   - agentclaw.community.core.bot_management
+  - agentclaw.community.core.bot_startup_script.protocols  # StartupScriptReaderProtocol — the read side of the per-bot startup script, consumed while composing the container start command
   - agentclaw.community.core.channel    # per-stage engine_overrides (DingTalk channels) reader at verify/online promotion
   - agentclaw.community.core.config_compose
   - agentclaw.community.core.caller_identity.credential  # CallerToken used by BaaS outbound-rule update
