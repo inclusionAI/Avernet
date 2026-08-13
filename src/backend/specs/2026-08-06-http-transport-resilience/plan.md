@@ -80,8 +80,21 @@ event loop on one HTTP call; retry would have made it two plus a blocking sleep,
 and the health probe fans its coroutines out through `asyncio.gather`, so each
 would block before yielding and the bindings would probe serially.
 
-Those three now `await asyncio.to_thread(...)`, as do the four skill routes
-reached via `sync_symlinks`.
+Those three now `await asyncio.to_thread(...)`, and they stay that way: each is a
+per-file or read-only operation, so none carries the ordering hazard described
+below.
+
+The four skill routes reached via `sync_symlinks` were offloaded too, and that
+was **reverted** — do not reintroduce it in a backport. `sync_symlinks` is a
+*full-sync*: it applies a complete snapshot and removes whatever the snapshot
+omits. The routes capture that snapshot on the loop and the offload applied it on
+a worker thread, so two overlapping changes for the same bot could finish out of
+order — a slow activation's stale snapshot recreating a skill a later
+deactivation had removed. The inline call's loop-blocking had been *incidentally
+serializing* those requests, and offloading removed that without replacing it.
+Reverting was the right repair rather than adding per-bot locking, because the
+loop-aware retry below already makes the amplification the offload existed to
+prevent exactly zero on those paths.
 
 **But patching call sites did not converge.** Three review rounds each found more
 of them, and a bounded reverse-reachability scan from `get_http_info` found
