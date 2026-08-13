@@ -26,10 +26,10 @@ class _LiveKey:
     """真实 ApiKeyProvider(读取上方配置常量;填入后生效)。"""
 
     api_key = API_KEY
-    api_key_prefix = API_KEY_PREFIX
+    api_key_prefix = ''
     base_url = BASE_URL
     cookie = COOKIE
-    referer = REFERER
+    referer = ''
 
 
 @unittest.skipUnless(
