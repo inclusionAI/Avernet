@@ -66,6 +66,24 @@ class TestSandboxDeviceApi:
         assert resp.status_code in (401, 403, 422)
 
     @pytest.mark.asyncio
+    async def test_renew_ttl_trigger_without_api_key_403(self, api):
+        """Test that renew-ttl-trigger without API key returns 401/403."""
+        resp = await api.client.post(
+            "/api/v1/sandbox-device/renew-ttl-trigger",
+            json={"run_uuid": "test-run"},
+        )
+        assert resp.status_code in (401, 403)
+
+    @pytest.mark.asyncio
+    async def test_renew_ttl_trigger_empty_body_403(self, api):
+        """Test that renew-ttl-trigger with empty body returns 401, 403, or 422."""
+        resp = await api.client.post(
+            "/api/v1/sandbox-device/renew-ttl-trigger",
+            json={},
+        )
+        assert resp.status_code in (401, 403, 422)
+
+    @pytest.mark.asyncio
     async def test_active_sandboxes_invalid_table_type_403(self, api):
         """Test that invalid table_type still requires API key first (401/403)."""
         resp = await api.client.get(

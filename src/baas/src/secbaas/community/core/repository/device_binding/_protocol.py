@@ -260,26 +260,30 @@ class DeviceBindingRepository(Protocol):
         ttl_expiration_time: str,
     ) -> None: ...
 
-    def list_bindings_by_ttl_asc(
+    def list_bindings_by_id_asc(
         self,
         *,
+        last_id: int = 0,
         limit: int = 100,
     ) -> list[DeviceBindingRecord]:
         """查询 ac_entity_device_binding 中 ACTIVE 且有 sandbox_id 的记录，
-        按 TTL 过期时间 ASC 排序，取前 limit 条。
+        按 id ASC 排序，取前 limit 条。
 
-        用于 DeviceTtlTimer 定时任务：优先处理即将过期的个人 bot 设备。
+        用于 DeviceTtlTimer 定时任务：仅处理 TTL 在 24 小时内（已到期或即将
+        到期）的个人 bot 设备。
         """
         ...
 
-    def list_baas_devices_by_ttl_asc(
+    def list_baas_devices_by_id_asc(
         self,
         *,
+        last_id: int = 0,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         """查询 baas_device 中 ACTIVE 且有 sandbox_id 的记录，
-        按 TTL 过期时间 ASC 排序，取前 limit 条。
+        按 id ASC 排序，取前 limit 条。
 
-        用于 DeviceTtlTimer 定时任务：优先处理即将过期的服务 bot 设备。
+        用于 DeviceTtlTimer 定时任务：仅处理 TTL 在 24 小时内（已到期或即将
+        到期）的服务 bot 设备。
         """
         ...

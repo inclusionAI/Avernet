@@ -107,6 +107,33 @@ class RenewTtlResponse(BaseModel):
     error: str | None
 
 
+class RenewTtlTriggerRequest(BaseModel):
+    """手动触发整表 TTL 续期定时任务的请求体。"""
+
+    run_uuid: str | None = Field(
+        default=None,
+        description="可选：本次 run 的 UUID；省略则由任务自动生成。",
+    )
+    batch_size: int | None = Field(
+        default=None,
+        ge=1,
+        description="可选：本次手动触发每页拉取条数；省略则用任务配置默认值。",
+    )
+    max_pages: int | None = Field(
+        default=None,
+        ge=0,
+        description="可选：每个分组 while 循环最多推进的页数（0=不跑该分组数据，"
+        "省略=跑完整队列）；仅本次手动触发生效。",
+    )
+
+
+class RenewTtlTriggerResponse(BaseModel):
+    """手动触发 TTL 定时任务的结果。"""
+
+    triggered: bool
+    run_uuid: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -227,4 +254,39 @@ async def renew_ttl(
             refresh_fail_count=result.refresh_fail_count,
             error=result.error,
         ),
+    )
+
+
+@router.post(
+    "/renew-ttl-trigger",
+    response_model=ApiResponse[RenewTtlTriggerResponse],
+)
+@inject
+async def renew_ttl_trigger(
+    request: RenewTtlTriggerRequest | None = None,
+    api_key_record: APIKeyRecord = Depends(validate_sandbox_device_api_key),
+    device_ttl_task=Depends(Provide[ApplicationContainer.tasks.device_ttl_timer_task]),
+):
+    """手动触发整表 TTL 续期定时任务（含探活）。
+
+    与 ``renew-ttl``（单设备续期）不同，此端点会跑一遍完整的
+    ``DeviceTtlTimerTask._run_once()``（经 ``run_direct()``）：
+    个人 bot 设备 + 服务 bot 设备各按 (id) keyset 分页续期 + 探活。
+
+    触发为异步（fire-and-forget）：后台任务立即调度执行，接口不阻塞等待
+    整表扫描完成，直接返回 triggered=True 与 run_uuid。
+    注意：手动触发不经分布式锁（不抢锁）。
+    """
+    run_uuid = request.run_uuid if request and request.run_uuid else None
+    batch_size = request.batch_size if request else None
+    max_pages = request.max_pages if request else None
+
+    run_uuid = device_ttl_task.trigger_async(
+        run_uuid=run_uuid, batch_size=batch_size, max_pages=max_pages
+    )
+
+    return ApiResponse(
+        code=0,
+        message="success",
+        data=RenewTtlTriggerResponse(triggered=True, run_uuid=run_uuid),
     )
