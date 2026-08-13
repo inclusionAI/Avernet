@@ -7,11 +7,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from typing import Any
 
 from agentclaw.community.core.task.domain.models import TaskNode
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
+
+from agentclaw.community.core.task.task_runner.integration.open_api_bot_adapter import (
+    OpenApiAuthError, OpenApiBadRequestError,
+)
+from agentclaw.community.core.task.task_runner.integration.task_executor_result_poller import (
+    SingleBotHandle,
+)
 
 logger = logging.getLogger(__name__)
 _DISPATCH_CONCURRENCY = 8
@@ -48,7 +56,24 @@ class TaskExecutor:
         return list(await asyncio.gather(*[_one(n) for n in toDoTaskList]))
 
     async def _dispatch_single_bot(self, node: TaskNode, sem: asyncio.Semaphore) -> bool:
-        return True  # T6 替换:ensure_grant→send_message→poller.register
+        bot_id = node.run_info.assignee
+        loop_task_id = f"{node.task_id}::{node.node_id}"
+        async with sem:
+            try:
+                await self._bot.ensure_grant(bot_id)
+                ctx = self._context.build(node.task_id, node.node_id)
+                message = self._formatter.format_execute(ctx, node)
+                run_id = await self._bot.send_message(
+                    bot_id=bot_id, message=message,
+                    metadata={"biz_task_id": node.task_id},
+                )
+            except (OpenApiAuthError, OpenApiBadRequestError):
+                return False
+            self._poller.register(SingleBotHandle(
+                loop_task_id=loop_task_id, run_id=run_id, bot_id=bot_id,
+                registered_at=time.monotonic(),
+            ))
+            return True
 
     async def _dispatch_coop_group(self, node: TaskNode, sem: asyncio.Semaphore) -> bool:
         return True  # T8/T9 替换:create_session/start_state_machine_run→poller.register
