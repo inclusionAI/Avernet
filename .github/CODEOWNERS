@@ -22,6 +22,7 @@
 # Task goal-driven execution framework — dedicated owners.
 # These rules override the /src/backend/ fallback above for the
 # task goal-driven execution framework code paths.
-/src/backend/src/agentclaw/community/core/task/ @totalfrank @regrecall @msjbear @jiangj0627
+/src/backend/src/agentclaw/community/adapters/http/task/ @totalfrank @regrecall @msjbear @jiangj0627
 /src/backend/src/agentclaw/community/api/task/ @totalfrank @regrecall @msjbear @jiangj0627
-# /src/backend/tests/community/core/task/ — 测试目录待建,建后补此规则
+/src/backend/src/agentclaw/community/core/task/ @totalfrank @regrecall @msjbear @jiangj0627
+/src/backend/tests/community/core/task/ @totalfrank @regrecall @msjbear @jiangj0627
