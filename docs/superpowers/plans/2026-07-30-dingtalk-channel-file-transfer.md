@@ -27,8 +27,8 @@ BaaS 由独立团队负责无损透传顶层 `attachments` 与可信 `materializ
 ## Engine 物化与 Runtime 交付
 
 - 保留唯一 `ResourceMaterializationService`，增加内部 `materialize_chat_attachment()`；不新增 HTTP API，不调用 Engine 自己的 HTTP API，也不触发 Backend callback。
-- 新增 `TemporaryUrlPullClient` plugin port 与受控 HTTP adapter。下载只允许配置中的精确 HTTPS host，禁止 userinfo 和 redirect，拒绝非公网 DNS 地址，并执行大小、超时、摘要与原子落盘校验。
-- 部署通过 `ENGINE_TEMPORARY_URL_ALLOWED_HOSTS` 配置逗号分隔的精确 host allowlist；可用 `ENGINE_TEMPORARY_URL_MAX_BYTES` 与 `ENGINE_TEMPORARY_URL_TIMEOUT_SECONDS` 收紧限制。allowlist 为空时 fail closed。
+- 新增 `TemporaryUrlPullClient` plugin port 与受控 HTTP adapter。下载只允许 HTTPS，禁止 userinfo 和 redirect，拒绝非公网 DNS 地址，并执行大小、超时、摘要与原子落盘校验。
+- Engine 不要求配置临时 URL host allowlist；下载器接受任意公网 HTTPS host，并继续执行 DNS 解析与公网 IP 校验、IP pinning、禁止重定向、大小和超时限制。可用 `ENGINE_TEMPORARY_URL_MAX_BYTES` 与 `ENGINE_TEMPORARY_URL_TIMEOUT_SECONDS` 收紧限制。
 - WebSocket 在 ACK 前校验 attachment schema、HTTPS URL 与 `materializationContext`；ACK 后执行网络下载。失败通过稳定 `ATTACHMENT_MATERIALIZATION_*` 终态事件返回，且不调用 `chat_plugin.stream()`。
 - 多文件 all-or-nothing；失败或取消时清理本批已发布文件和临时文件。Manifest 记录 `source_kind=temporary_url`、attachment ID 与 URL 哈希，不记录原 URL。
 - 成功后删除下游远程 file attachment，生成受控 placeholder，并复用 `ResourceReferenceService` 校验 session 所属、文件大小和摘要，得到 `<file-ref name path>` 与 `extraParams.materializedFiles` 后再启动 Runtime。
