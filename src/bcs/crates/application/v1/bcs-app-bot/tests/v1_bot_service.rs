@@ -301,12 +301,7 @@ async fn human_actor_collaboration_candidates_include_only_private_friends() {
         .await
         .expect("ensure human");
     fixture
-        .add_bot(
-            "private-friend",
-            "staff-2",
-            "private",
-            ActorStatus::Hidden,
-        )
+        .add_bot("private-friend", "staff-2", "private", ActorStatus::Hidden)
         .await;
     fixture
         .add_bot(
