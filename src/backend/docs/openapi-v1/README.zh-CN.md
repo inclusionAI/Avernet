@@ -605,7 +605,7 @@ skills 组的 `owner_entity_id` 定位参数早于 `owner_id`，应在 skills �
 
 `bots` 组件是唯一的例外，而且仅仅因为它**就是** base 所命名的那个组件：它拥有
 `/openapi/v1/bots` 与 `/openapi/v1/bots/{bot_id}`，它自己的子资源（`/status`、
-`/passport`、`/restart`、`/auth-status`、`/engine-config`）挂在这个 Agent 记录之下。
+`/passport`、`/restart`、`/auth-status`、`/engine-config`、`/startup-script`）挂在这个 Agent 记录之下。
 这些是 Agent 本身的属性，而不是别的组件来借用 Agent 的地址。
 
 **为什么。** 曾有三处违反此规则 —— `identity` 多带了一段冗余的 `/bot/`；

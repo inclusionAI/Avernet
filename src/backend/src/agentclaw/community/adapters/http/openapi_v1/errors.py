@@ -82,3 +82,14 @@ class UnsupportedEngineError(Exception):
     allocated or a Passport is applied for — otherwise the request would create
     side effects and only fail later at device provisioning.
     """
+
+
+class StartupScriptUnsupportedError(Exception):
+    """A bot whose container cannot run a startup script was sent one.
+
+    Refusing the write is deliberate: storing it would be the silent no-op this
+    design exists to prevent, and the caller would reasonably read a 200 as
+    "my provisioning is in place". The *reason* is served by GET rather than in
+    this refusal, because the surface's messages are fixed by contract.
+    """
+

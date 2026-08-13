@@ -870,8 +870,8 @@ adding the route without moving the name fails there rather than in review.
 All responses use the `Envelope[T]` / `Page[T]` shapes from
 `openapi_v1/contracts.py` unless noted (binary streams bypass the envelope).
 
-### ✅ totalfrank · P1 — bots (13 endpoints) · `openapi_v1/bots/router.py` — **IMPLEMENTED (PR #494)**
-All 13 wired to the internal bot services. Kept here as the reference shape for
+### ✅ totalfrank · P1 — bots (17 endpoints) · `openapi_v1/bots/router.py` — **IMPLEMENTED (PR #494; startup script #926)**
+All 17 wired to the internal bot services. Kept here as the reference shape for
 the other six: this is what "done" looks like per category.
 
 | Method | Path | Purpose | Success |
@@ -889,6 +889,147 @@ the other six: this is what "done" looks like per category.
 | GET | `/openapi/v1/bots/{bot_id}/passport` | Get the bot's Agent Passport | `Envelope[Passport]` |
 | GET | `/openapi/v1/bots/{bot_id}/engine-config` | Read engine config (free-form JSON) | `Envelope[dict]` |
 | PUT | `/openapi/v1/bots/{bot_id}/engine-config` | Write engine config (free-form JSON) | `Envelope[dict]` |
+| GET | `/openapi/v1/bots/{bot_id}/startup-script` | Read the bot's startup script | `Envelope[StartupScript]` |
+| PUT | `/openapi/v1/bots/{bot_id}/startup-script` | Set/replace it; takes effect next start | `Envelope[StartupScript]` |
+| DELETE | `/openapi/v1/bots/{bot_id}/startup-script` | Clear it | `Envelope[Deleted]` |
+
+#### Startup script — the promises a caller cannot infer from the schema
+
+The script is **appended to the container's start sequence**, after the
+platform's own boot steps (bootstrap, engine install, service start,
+watchdog) and before the start is reported. Everything below follows from
+that one design choice, and none of it is visible in the OpenAPI document.
+
+- **It runs on every start the platform composes, and the platform does not
+  dedupe — so it must be idempotent.** Create, restart and republish each
+  compose a fresh start command and run the script again.
+- **Editing takes effect on the next start, never on a running container.**
+  A script written after a bot was created reaches a container only once that
+  bot restarts. The first write therefore always needs a restart.
+- **A failure degrades rather than blocks — the script's *execution*, that is.**
+  A non-zero exit, a crash, or a timeout leaves the agent running: the script is
+  guarded so it cannot change the boot's outcome, and it is skipped entirely if
+  the boot itself failed. That is not a promise to start anyway if the platform
+  *cannot read* your stored script: a start that could not resolve it fails
+  rather than bringing up a bot that looks ready and is not provisioned.
+- **Limits:** body ≤ **24 KiB** (413 above that, naming the limit); each run
+  capped at **300s** by `timeout`, sized against the 600s publish budget the
+  start reports into. The cap is enforced as TERM at 300s followed by an
+  uncatchable KILL **10s** later, so a script that traps or ignores TERM cannot
+  hold the start open past **310s**. The cap bounds **the start**, not your
+  descendants: a process the script deliberately backgrounds (`something &`)
+  outlives it, because the script itself has exited and the start has already
+  completed — nothing reaps it, so it runs until it ends or the container does.
+  Interpreter is `bash`; the body runs as `admin`, the same user every platform
+  step runs as.
+- **Do not put secrets in the body.** This is a hard requirement, not advice.
+  The body is stored as written, and it is **logged in recoverable form**: the
+  backend elides it from its own payload log, but the start command travels to
+  the device service, which logs the first 1024 characters of the rendered hook
+  at INFO — and the base64 body typically begins inside that window, so the
+  opening bytes of your script decode straight out of those logs. The
+  backend-side elision does not and cannot cover a downstream log. There is no
+  by-reference secret mechanism yet, so anything secret must reach the container
+  some other way.
+- **There is no API to read the run's result yet.** The script's output goes to
+  `/home/admin/logs/startup_script.log` inside the container, and that is the
+  only place to see it. A read endpoint was deliberately left out of this
+  change: the script shares one exit status with the platform's boot, so any
+  such endpoint reports the whole start sequence rather than the script alone,
+  and resolving *which* start to report is not solved for a published service
+  bot. Tracked as follow-up work.
+- **Two kinds of bot cannot run one, and `supported` says which.** A write to
+  either is refused with **409** rather than stored where it would silently
+  never run; `GET` still answers for them, carrying the reason, so a caller can
+  find out before attempting the write.
+
+  - a **teclaw** bot (any engine the platform provisions as teclaw) — its
+    container is provisioned without a start sequence at all, so there is
+    nothing for a script to ride on;
+  - a **desktop** bot (`bot_type == "desktop"`) — its start command is built on
+    a separate path that does not carry the stored script.
+
+  Support is answered from the bot's **engine and type** and never from its live
+  container, so the answer is the same before the first start, during a restart,
+  and while an unrelated lookup is failing. That choice has a cost, and there
+  are two known cases where `supported: true` is optimistic — in both, the
+  script is stored and the write accepted, but nothing runs it:
+
+  - a legacy **ARCA-direct** bot, created before the BaaS rollout, whose
+    container is not built through the shared start sequence. Every bot created
+    today is BaaS-backed unless it is teclaw or desktop;
+  - a deployment whose containers come from a **`LOCAL`-type BaaS template**
+    (single-machine / singlebox installs). The backend composes and sends the
+    hook exactly as it does for any other bot, but BaaS skips hook dispatch for
+    `LOCAL` and hands off to a `container_ready` callback that does not run it.
+    Whether a given install is affected depends on its BaaS template's
+    configured type, which is deployment data rather than a property of the bot,
+    so this check — answered from the bot record alone — cannot see it.
+
+  Both are the same shape: the refusal covers the cases visible in the bot
+  record, and a provisioning path that bypasses the shared start sequence is not
+  one of them.
+- **Deleting the bot deletes its script, and a failed delete is not reported as
+  success.** Bot deletion is a soft update, so nothing cascades to the script
+  row — it is removed explicitly, because the body is stored decoded and an
+  orphan row keeps plaintext executable content past the life of its owner.
+
+  Inheritance by a later bot is *not* among the reasons, though an earlier
+  version of this document said it was: a caller may supply `bot_id` on create
+  and soft-deleted bots read as absent, but the uniqueness constraint described
+  below means such a create is refused rather than granted the tuple.
+
+  Unlike the bot's skills and skill sets — inert metadata, swept after the
+  deletion with failures logged and tolerated — this removal runs **before**
+  anything destructive and its failures **propagate**. A deletion that could not
+  clear the script fails with the bot still intact and retryable, rather than
+  returning success over a row that can still execute.
+
+  It runs a **second** time after the soft delete, mirroring the app-grant
+  revocation's two-sweep handling of the same race, which stops a *later* `PUT`
+  from passing its existence check.
+
+  The sweeps alone are not enough, because they cannot cancel a request that
+  already passed its check and is still in flight — that one can commit after
+  both of them. So the write **re-checks the bot after storing** and withdraws
+  its row if the bot is gone. A `PUT` that loses this race answers **404**: the
+  bot it addressed no longer exists, so reporting a stored script for it would
+  be a wrong answer rather than a successful write. If the withdrawal itself
+  cannot complete, that failure surfaces instead of being reported as a clean
+  404 — the second sweep is a backstop only while that deletion is still
+  running, and a write landing after it has finished has nothing else coming
+  for its row.
+
+  The re-check asks only whether the bot is gone, and that is sufficient
+  because the identifier cannot change hands underneath it. An earlier design
+  stamped each row with the writing bot's `ac_bots.id` and compared it on every
+  read, on the assumption that `bot_id` is reusable. It is not, so no stamp is
+  stored and no read compares one.
+
+  **A stale row cannot execute, and the reason is the key rather than a
+  read-time check.** `ac_bots` carries a uniqueness constraint over
+  `(bot_id, entity_id, env)` — `uk_bot_id_entity_id_env` in the production
+  schema, declared on the ORM as the tenant-scoped
+  `uk_bot_id_entity_id_env_tenant` so `create_all` deployments get it too.
+  `is_delete` is not part of that key and the repository has no hard delete, so
+  a soft-deleted bot goes on occupying its tuple forever and a create cannot
+  reissue it. A script row is filed under exactly that tuple, so there is no
+  later bot that could inherit one: the row a failed sweep leaves behind is
+  unreachable rather than dangerous.
+
+  The sweeps and the re-check remain — an orphan is still plaintext executable
+  content nobody should be storing, and the deletion path refuses to report
+  success over one — but they are hygiene. What stands between a stale row and
+  someone else's container is the constraint.
+
+  The legacy `default`-bot delete is a restart rather than a deletion and keeps
+  its script through both sweeps, matching how its skills and config are already
+  preserved.
+- **Re-running on restart is inherited, not guaranteed by this feature.** The
+  script re-runs wherever the platform's own start sequence re-runs. On a
+  provider whose restart is destroy-and-create that is every restart; on one
+  that restarts a container in place, the sequence does not re-run and
+  neither does the script.
 
 _Deliberately **not** exposed on bots: `engine_options` on create (nothing
 downstream reads `BotCreateSpec.extra_properties` yet, so advertising it would
