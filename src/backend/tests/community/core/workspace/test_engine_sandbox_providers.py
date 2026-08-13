@@ -197,6 +197,16 @@ class TestAICodingProvider:
         assert plan.extra_sync_source_relpath == ".claude"
         assert plan.extra_sync_target_relpath == "claude"
 
+    def test_build_plan_sets_aicoding_rsync_chown(self):
+        provider = AICodingSandboxProvider(workspace=_workspace())
+        plan = provider.get_build_plan()
+
+        assert plan.rsync_chown == "admin:admin"
+
+    def test_other_engine_build_plans_keep_default_rsync_owner(self):
+        assert OpenClawSandboxProvider(workspace=_workspace()).get_build_plan().rsync_chown == ""
+        assert ClaudeCodeSandboxProvider(workspace=_workspace()).get_build_plan().rsync_chown == ""
+
     def test_default_read_only_rules_include_workspace_files(self):
         provider = AICodingSandboxProvider(workspace=_workspace())
         rule_paths = {r.path for r in provider.get_default_read_only_rules()}

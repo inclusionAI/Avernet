@@ -776,6 +776,9 @@ class BotBuildService:
             excludes = []
             for pattern in (build_plan.rsync_excludes if build_plan else []):
                 excludes.append(f"--exclude={pattern}")
+            chown_args = []
+            if build_plan and build_plan.rsync_chown:
+                chown_args.append(f"--chown={build_plan.rsync_chown}")
 
             # 构建 rsync 命令
             cmd = [
@@ -788,6 +791,7 @@ class BotBuildService:
                 # earlier partial artifact, otherwise Pool active roots can
                 # expose the full repository through a stale bridge.
                 "--delete-excluded",
+                *chown_args,
                 *excludes,
                 f"{source_dir}/",
                 f"{target_dir}/",
@@ -814,6 +818,7 @@ class BotBuildService:
                         "-av",
                         "--delete",
                         "--delete-excluded",
+                        *chown_args,
                         *excludes,
                         f"{extra_source}/",
                         f"{extra_target}/",

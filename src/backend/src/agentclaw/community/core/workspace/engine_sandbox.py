@@ -39,6 +39,9 @@ class EngineBuildPlan:
     # 两者同时为空时跳过额外同步。
     extra_sync_source_relpath: str = ""
     extra_sync_target_relpath: str = ""
+    # Optional rsync --chown value applied to both main and extra sync.
+    # Empty string preserves rsync archive-mode owner/group behavior.
+    rsync_chown: str = ""
 
 
 @runtime_checkable

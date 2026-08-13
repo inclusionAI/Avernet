@@ -78,6 +78,7 @@ def _make_aicoding_build_plan(rsync_excludes: list[str]) -> EngineBuildPlan:
         extra_sync_source_relpath=".claude",
         extra_sync_target_relpath="claude",
         rsync_excludes=rsync_excludes,
+        rsync_chown="admin:admin",
     )
 
 

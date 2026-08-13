@@ -28,6 +28,7 @@ def _make_plan(
     extra_src: str = "",
     extra_tgt: str = "",
     excludes: list[str] | None = None,
+    rsync_chown: str = "",
 ) -> EngineBuildPlan:
     return EngineBuildPlan(
         engine_type="claude_code",
@@ -40,6 +41,7 @@ def _make_plan(
         rsync_excludes=excludes or ["projects", "sessions"],
         extra_sync_source_relpath=extra_src,
         extra_sync_target_relpath=extra_tgt,
+        rsync_chown=rsync_chown,
     )
 
 
@@ -154,6 +156,44 @@ class TestMigrateBotInstanceExtraSync:
         assert extra_cmd[-1] == expected_tgt
         # target 子目录应被自动创建
         assert (target_dir / "claude").is_dir()
+
+
+    def test_applies_plan_rsync_chown_to_main_and_extra_sync(self, tmp_path: Path):
+        service = _make_service()
+        service._run_local_command = MagicMock(return_value=None)
+
+        source_dir, target_dir = _seed_dirs(tmp_path, with_extra_source=True)
+        plan = _make_plan(
+            extra_src=".claude",
+            extra_tgt="claude",
+            excludes=["projects"],
+            rsync_chown="admin:admin",
+        )
+
+        ok = service._migrate_bot_instance(
+            device_id="dev1",
+            source_dir=source_dir,
+            target_dir=target_dir,
+            version_str="v1",
+            is_nas=True,
+            nas_storage_id=str(source_dir),
+            build_plan=plan,
+            provider=MagicMock(),
+        )
+
+        assert ok is True
+        main_cmd = next(
+            call.kwargs["cmd"]
+            for call in service._run_local_command.call_args_list
+            if call.kwargs.get("command_name") == "rsync"
+        )
+        extra_cmd = next(
+            call.kwargs["cmd"]
+            for call in service._run_local_command.call_args_list
+            if call.kwargs.get("command_name") == "rsync (extra)"
+        )
+        assert "--chown=admin:admin" in main_cmd
+        assert "--chown=admin:admin" in extra_cmd
 
     def test_skips_when_extra_source_missing(self, tmp_path: Path):
         # 配置了 extra sync 但源不存在 → 跳过该项，不影响主 rsync。
