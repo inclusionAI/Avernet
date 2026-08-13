@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from engine.community.api.transport.ws_server import (
+    _ENGINE_LOCAL_CHAT_SCOPE_KEY_HASH,
     EngineWebSocketServer,
     _materialized_path_redaction_targets,
     _parse_chat_file_materializations,
@@ -58,7 +59,7 @@ def test_materialized_path_redaction_targets_include_workspace_root():
     assert _materialized_path_redaction_targets((path,)) == (path, "/bot/work")
 
 
-def test_parse_remote_file_requires_trusted_materialization_context():
+def test_parse_remote_file_uses_engine_scope_without_materialization_context():
     attachment = {
         "attachment_id": "att-1",
         "type": "file",
@@ -66,12 +67,23 @@ def test_parse_remote_file_requires_trusted_materialization_context():
         "url": "https://files.example/object",
     }
 
-    with pytest.raises(ValueError, match="materializationContext"):
-        _parse_chat_file_materializations(
-            session_key="session-1",
-            attachments=[attachment],
-            materialization_context=None,
-        )
+    requests = _parse_chat_file_materializations(
+        session_key="session-1",
+        attachments=[attachment],
+        materialization_context=None,
+    )
+
+    assert requests[0].attachment_id == "att-1"
+    assert requests[0].scope_key_hash == _ENGINE_LOCAL_CHAT_SCOPE_KEY_HASH
+
+
+def test_parse_remote_file_uses_valid_materialization_context_scope():
+    attachment = {
+        "attachment_id": "att-1",
+        "type": "file",
+        "file_name": "design.pdf",
+        "url": "https://files.example/object",
+    }
 
     requests = _parse_chat_file_materializations(
         session_key="session-1",
@@ -82,6 +94,42 @@ def test_parse_remote_file_requires_trusted_materialization_context():
         },
     )
     assert requests[0].attachment_id == "att-1"
+    assert requests[0].scope_key_hash == "a" * 64
+
+
+@pytest.mark.parametrize(
+    ("materialization_context", "error"),
+    [
+        ("invalid", "must be an object"),
+        ({}, "layout_version"),
+        (
+            {"layout_version": "session_file_v2", "scope_key_hash": "a" * 64},
+            "layout_version",
+        ),
+        ({"layout_version": "session_file_v1"}, "scope_key_hash"),
+        (
+            {"layout_version": "session_file_v1", "scope_key_hash": "not-a-hash"},
+            "invalid remote file attachment",
+        ),
+    ],
+)
+def test_parse_remote_file_rejects_invalid_materialization_context(
+    materialization_context,
+    error,
+):
+    attachment = {
+        "attachment_id": "att-1",
+        "type": "file",
+        "file_name": "design.pdf",
+        "url": "https://files.example/object",
+    }
+
+    with pytest.raises(ValueError, match=error):
+        _parse_chat_file_materializations(
+            session_key="session-1",
+            attachments=[attachment],
+            materialization_context=materialization_context,
+        )
 
 
 def test_get_server_attaches_late_materialization_dependency():
