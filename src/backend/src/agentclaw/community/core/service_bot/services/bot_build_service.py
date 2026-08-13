@@ -25,7 +25,6 @@ from injector import inject
 
 from agentclaw.community.api.channel_service import ChannelServiceProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.device_service import DeviceService
 from agentclaw.community.core.service_bot.services.baas_service import (
@@ -150,24 +149,19 @@ class BotBuildService:
         return self._device_binding_repo
 
     def _resolve_sandbox_provider(self, bot: Dict[str, Any]) -> EngineSandboxProvider:
-        engine_type = bot.get("active_engine") or DEFAULT_ENGINE_TYPE
+        active_engine = bot.get("active_engine") or DEFAULT_ENGINE_TYPE
+        template_type = bot.get("template_type")
+        if (
+            active_engine == "claude_code"
+            and template_type
+            and str(template_type).strip().lower() != "normalcc"
+        ):
+            active_engine = "aicoding"
+
         try:
-            return self._sandbox_registry.resolve(engine_type)
+            return self._sandbox_registry.resolve(active_engine)
         except Exception:
-            bot_id = bot.get("bot_id")
-            entity_id = bot.get("entity_id", "")
-            entity_type = bot.get("entity_type", "staff")
-            try:
-                resolved_engine = resolve_engine_for_bot(
-                    bot_id,
-                    entity_id,
-                    bot=bot,
-                    default_engine=engine_type,
-                    entity_type=entity_type,
-                )
-                return self._sandbox_registry.resolve(resolved_engine)
-            except Exception:
-                return self._sandbox_registry.resolve(DEFAULT_ENGINE_TYPE)
+            return self._sandbox_registry.resolve(DEFAULT_ENGINE_TYPE)
 
     def generate_request_id(
         self,
@@ -792,45 +786,30 @@ class BotBuildService:
                 error_message="rsync migration failed",
             )
 
-            # 额外同步目录：支持单条旧配置与多条新配置。
-            extra_sync_items: list[tuple[str, str]] = []
-            if build_plan and getattr(build_plan, "extra_sync_items", None):
-                extra_sync_items = list(build_plan.extra_sync_items)
-            elif build_plan:
-                extra_src_rel = build_plan.extra_sync_source_relpath
-                extra_tgt_rel = build_plan.extra_sync_target_relpath
-                if extra_src_rel and extra_tgt_rel:
-                    extra_sync_items = [(extra_src_rel, extra_tgt_rel)]
+            # 额外同步目录：例如 claude_code 需要把 source_dir 同级的 .claude
+            # 同步到目标 claude_code/claude 下。
+            if build_plan and build_plan.extra_sync_source_relpath and build_plan.extra_sync_target_relpath:
+                extra_source = source_dir.parent / build_plan.extra_sync_source_relpath
+                extra_target = target_dir / build_plan.extra_sync_target_relpath
 
-            for extra_src_rel, extra_tgt_rel in extra_sync_items:
-                extra_source = source_dir.parent / extra_src_rel
-                extra_target = target_dir / extra_tgt_rel
+                if extra_source.exists():
+                    extra_target.mkdir(parents=True, exist_ok=True)
 
-                if not extra_source.exists():
-                    logger.info(
-                        "[BotBuildService._migrate_bot_instance] "
-                        "skip missing extra sync source: %s",
-                        extra_source,
+                    extra_cmd = [
+                        "sudo",
+                        "rsync",
+                        "-av",
+                        "--delete",
+                        "--delete-excluded",
+                        *excludes,
+                        f"{extra_source}/",
+                        f"{extra_target}/",
+                    ]
+                    self._run_local_command(
+                        cmd=extra_cmd,
+                        command_name="rsync (extra)",
+                        error_message="rsync extra sync failed",
                     )
-                    continue
-
-                extra_target.mkdir(parents=True, exist_ok=True)
-
-                extra_cmd = [
-                    "sudo",
-                    "rsync",
-                    "-av",
-                    "--delete",
-                    "--delete-excluded",
-                    *excludes,
-                    f"{extra_source}/",
-                    f"{extra_target}/",
-                ]
-                self._run_local_command(
-                    cmd=extra_cmd,
-                    command_name="rsync (extra)",
-                    error_message="rsync extra sync failed",
-                )
 
             logger.info(
                 f"[BotBuildService._migrate_bot_instance] "

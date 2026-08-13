@@ -206,3 +206,44 @@ class TestBotBuildServiceRsyncExcludesConfig:
         mock_provider.get_build_plan.assert_called_once()
         call_kwargs = mock_provider.get_build_plan.call_args[1]
         assert call_kwargs["build_rsync_excludes_append"] is None
+
+    def test_build_resolve_sandbox_provider_uses_resolver_for_template_routing(self):
+        bot = {
+            "bot_id": "test-bot-id",
+            "entity_id": "test-entity-id",
+            "entity_type": "staff",
+            "device_id": "test-device-id",
+            "active_engine": "claude_code",
+            "template_type": "generalCC",
+        }
+
+        mock_provider = MagicMock()
+        mock_build_plan = EngineBuildPlan(
+            engine_type="aicoding",
+            source_root_name=".aicoding",
+            migration_subpath="aicoding",
+            workspace_subdir="workspace",
+            mcp_config_relpath="workspace/config/mcporter.json",
+            skill_source_relpath="workspace/skills",
+            skill_target_relpath="workspace/skills",
+            rsync_excludes=["workspace/memory/", "logs/"],
+        )
+        mock_provider.get_build_plan.return_value = mock_build_plan
+
+        service = _make_service()
+        service._sandbox_registry = MagicMock()
+        service._sandbox_registry.resolve.return_value = mock_provider
+        service._bot_repository = MagicMock()
+        service._bot_repository.get_by_id_and_owner.return_value = bot
+        service._bot_repository.get_by_id.return_value = bot
+        service._migrate_bot_instance = MagicMock(return_value=True)
+        service._generate_mcp_config = MagicMock(return_value=True)
+        service._generate_openclaw_stage_configs = MagicMock(return_value=True)
+        service._get_migration_path_base = MagicMock(return_value="/fake/path")
+
+        try:
+            service.build(bot, version=1)
+        except Exception:
+            pass
+
+        service._sandbox_registry.resolve.assert_any_call("aicoding")

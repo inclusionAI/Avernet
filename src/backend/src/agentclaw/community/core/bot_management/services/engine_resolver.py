@@ -68,6 +68,13 @@ def resolve_engine_for_bot(
     if bot:
         active = bot.get("active_engine")
         if active:
+            template_type = bot.get("template_type")
+            if (
+                active == "claude_code"
+                and template_type
+                and str(template_type).strip().lower() != "normalcc"
+            ):
+                return "aicoding"
             return active
 
     return DEFAULT_ENGINE_TYPE
