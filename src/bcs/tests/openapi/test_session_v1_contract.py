@@ -170,6 +170,98 @@ def test_session_completion_endpoint_is_not_in_public_contract() -> None:
     )
 
 
+def test_session_collection_exposes_human_control_plane_operations() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    path = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/collect"
+    ]
+
+    assert set(path) == {"post", "delete"}
+    for operation in path.values():
+        assert operation["x-avernet-security"] == {
+            "user": "required",
+            "app": "required",
+        }
+        assert {
+            status: response["x-error-codes"]
+            for status, response in operation["responses"].items()
+            if status != "200" and "x-error-codes" in response
+        } == {
+            "400": ["invalid_request"],
+            "401": ["unauthenticated"],
+            "403": ["forbidden"],
+            "404": ["session_not_found"],
+            "500": ["internal_error"],
+        }
+
+
+def test_collect_session_requires_only_the_participant_json_field() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/collect"
+    ]["post"]
+
+    assert operation["operationId"] == "collect_session"
+    assert operation["requestBody"]["required"] is True
+    assert operation["requestBody"]["content"]["application/json"]["schema"] == {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["participant"],
+        "properties": {
+            "participant": {"type": "string", "minLength": 1},
+        },
+    }
+
+
+def test_uncollect_session_requires_only_the_participant_query() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/collect"
+    ]["delete"]
+
+    assert operation["operationId"] == "uncollect_session"
+    assert operation["parameters"][1:] == [
+        {
+            "name": "participant",
+            "in": "query",
+            "required": True,
+            "schema": {"type": "string", "minLength": 1},
+        }
+    ]
+
+
+def test_session_collection_returns_a_strict_result_envelope() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    path = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/collect"
+    ]
+
+    for operation in path.values():
+        envelope = operation["responses"]["200"]["content"]["application/json"][
+            "schema"
+        ]
+        assert envelope["additionalProperties"] is False
+        assert set(envelope["required"]) == {
+            "code",
+            "message",
+            "data",
+            "request_id",
+        }
+        data = envelope["properties"]["data"]
+        assert data["additionalProperties"] is False
+        assert set(data["required"]) == {
+            "session_id",
+            "participant",
+            "collected",
+        }
+        assert set(data["properties"]) == {
+            "session_id",
+            "participant",
+            "collected",
+        }
+        assert data["properties"]["collected"] == {"type": "boolean"}
+
+
 def test_add_session_participant_accepts_only_bot_uuid() -> None:
     contract = load_contract(CONTRACT_ROOT)
     operation = contract["paths"][
