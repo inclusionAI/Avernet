@@ -17,8 +17,11 @@ class Skill(BaseModel):
                 "skill_id": "sk-2f19",
                 "name": "quarterly-report",
                 "description": "Drafts the quarterly report from meeting notes.",
-                "category": "reporting",
-                "tags": ["report", "internal"],
+                # Not invented values: 'general' and an empty list are what an
+                # upload through this API actually records, so the example shows
+                # them rather than a richer pair no response carries.
+                "category": "general",
+                "tags": [],
                 "active": True,
                 "created_at": "2026-07-30T09:00:00+00:00",
                 "updated_at": "2026-07-30T09:12:04+00:00",
@@ -38,13 +41,21 @@ class Skill(BaseModel):
         default=None, description="What the skill does; null when the package "
         "declares none."
     )
+    # Both come off the stored record, and upload writes fixed values into it:
+    # `LocalSkillUploadService` unpacks only the name and description from the
+    # package and hard-codes category "general" and empty tags. So neither is
+    # package-declared, whatever their names suggest.
     category: str | None = Field(
-        default=None, description="Category the package declares; null when it "
-        "declares none."
+        default=None,
+        description="Category recorded for the skill. An upload through this "
+        "API always records 'general' — a category declared inside the package "
+        "is not read — so that is what you will see here.",
     )
     tags: list[str] = Field(
-        default_factory=list, description="Tags the package declares; empty when "
-        "it declares none."
+        default_factory=list,
+        description="Tags recorded for the skill. An upload through this API "
+        "records none, so this is empty; tags declared inside the package are "
+        "not read.",
     )
     active: bool = Field(
         description="True when the skill is activated for the bot. An uploaded "

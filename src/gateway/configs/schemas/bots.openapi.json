@@ -3533,7 +3533,7 @@
             "type": "boolean"
           },
           "name": {
-            "description": "The name that was checked, in the trimmed form actually compared.",
+            "description": "The value the check was actually performed against. What each endpoint does to your input before comparing it differs — some trim or normalise it, some do not — so read this field rather than assuming the value you sent was used verbatim.",
             "title": "Name",
             "type": "string"
           }
@@ -4566,15 +4566,12 @@
         "description": "One skill owned by a bot.",
         "example": {
           "active": true,
-          "category": "reporting",
+          "category": "general",
           "created_at": "2026-07-30T09:00:00+00:00",
           "description": "Drafts the quarterly report from meeting notes.",
           "name": "quarterly-report",
           "skill_id": "sk-2f19",
-          "tags": [
-            "report",
-            "internal"
-          ],
+          "tags": [],
           "updated_at": "2026-07-30T09:12:04+00:00"
         },
         "properties": {
@@ -4592,7 +4589,7 @@
                 "type": "null"
               }
             ],
-            "description": "Category the package declares; null when it declares none.",
+            "description": "Category recorded for the skill. An upload through this API always records 'general' — a category declared inside the package is not read — so that is what you will see here.",
             "title": "Category"
           },
           "created_at": {
@@ -4634,7 +4631,7 @@
             "type": "string"
           },
           "tags": {
-            "description": "Tags the package declares; empty when it declares none.",
+            "description": "Tags recorded for the skill. An upload through this API records none, so this is empty; tags declared inside the package are not read.",
             "items": {
               "type": "string"
             },

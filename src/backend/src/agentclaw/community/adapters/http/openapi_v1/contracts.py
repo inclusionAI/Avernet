@@ -150,9 +150,17 @@ class NameCheck(BaseModel):
         json_schema_extra={"example": {"name": "Quarterly reporter", "exists": False}}
     )
 
+    # Endpoint-neutral on purpose: this model is shared, and its three producers
+    # normalise differently. `check_bot_name` trims and validates through
+    # `validate_bot_name`; the resources file branch runs `_safe_path`, which
+    # normalises slash segments but does not trim; the resources link branch
+    # compares the name exactly as sent. A description promising any one of
+    # those would be wrong on the other two.
     name: str = Field(
-        description="The name that was checked, in the trimmed form actually "
-        "compared."
+        description="The value the check was actually performed against. What "
+        "each endpoint does to your input before comparing it differs — some "
+        "trim or normalise it, some do not — so read this field rather than "
+        "assuming the value you sent was used verbatim."
     )
     exists: bool = Field(
         description="True when the name is already taken, so creating with it "
