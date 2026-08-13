@@ -25,6 +25,12 @@ from injector import inject
 
 from agentclaw.community.api.channel_service import ChannelServiceProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
+    AicodingProvisioningStrategy,
+)
+from agentclaw.community.core.bot_management.services.engine_resolver import (
+    resolve_engine_for_bot,
+)
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.device_service import DeviceService
 from agentclaw.community.core.service_bot.services.baas_service import (
@@ -149,18 +155,28 @@ class BotBuildService:
         return self._device_binding_repo
 
     def _resolve_sandbox_provider(self, bot: Dict[str, Any]) -> EngineSandboxProvider:
-        active_engine = bot.get("active_engine") or DEFAULT_ENGINE_TYPE
-        template_type = bot.get("template_type")
-        if (
-            active_engine == "claude_code"
-            and template_type
-            and str(template_type).strip().lower() != "normalcc"
-        ):
-            active_engine = "aicoding"
+        engine_type = bot.get("active_engine") or DEFAULT_ENGINE_TYPE
+        routed_engine = AicodingProvisioningStrategy.resolve_baas_engine_bucket(
+            active_engine=engine_type,
+            template_type=bot.get("template_type"),
+        )
+        engine_type = routed_engine or engine_type
 
         try:
-            return self._sandbox_registry.resolve(active_engine)
+            return self._sandbox_registry.resolve(engine_type)
         except Exception:
+            bot_id = bot.get("bot_id")
+            owner_id = bot.get("owner_id") or bot.get("entity_id")
+            if self._bot_repository is not None:
+                try:
+                    resolved_engine = resolve_engine_for_bot(
+                        bot_id,
+                        owner_id,
+                        bot_repo=self._bot_repository,
+                    )
+                    return self._sandbox_registry.resolve(resolved_engine)
+                except Exception:
+                    pass
             return self._sandbox_registry.resolve(DEFAULT_ENGINE_TYPE)
 
     def generate_request_id(

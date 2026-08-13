@@ -9,27 +9,6 @@ from agentclaw.community.log import get_logger
 logger = get_logger()
 
 
-# ============================================================================
-# TODO(claude-code-sandbox-recheck): 以下字段当前沿用自 OpenClawSandboxProvider,
-# 尚未按 aicoding 引擎的真实 VM 目录约定逐项核对。待拿到 start_service.sh /
-# finalize.sh 已就位的 aicoding 引擎目录权威清单后,单独开 change 复评估并调整。
-#
-# 待复评估字段（不在本 change 内修改值,仅记录）:
-#   - _AICODING_RSYNC_EXCLUDES: 与 openclaw 几乎相同,仅去掉了
-#       "workspace/.openclaw/" 和 "workspace/skills/.skills-repo*"。
-#       aicoding 是否有引擎专属临时目录需要新增排除?
-#   - _DEFAULT_RULES: 路径名已替换,但缺少 openclaw 的
-#       "agents/*/agent/models.json" 规则。aicoding 是否需要等价规则?
-#   - _BUILD_PLAN.workspace_subdir = "workspace": 是否符合 aicoding 实际布局?
-#   - _BUILD_PLAN.mcp_config_relpath = "workspace/config/mcporter.json":
-#       finalize.sh 双目录软链接的落点是否就是这里?
-#   - _BUILD_PLAN.skill_source_relpath / skill_target_relpath = "workspace/skills":
-#       是否与 aicoding 引擎 skills 目录布局一致?
-#
-# _SANDBOX_ROOT / _LOCAL_ROOT 已与 start_service.sh / finalize.sh 对齐,不需复评估。
-# ============================================================================
-
-
 _AICODING_RSYNC_EXCLUDES = [
     "workspace/.claude",
     "projects",
