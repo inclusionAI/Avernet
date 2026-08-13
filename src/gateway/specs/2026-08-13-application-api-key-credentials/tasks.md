@@ -112,7 +112,7 @@
         the rename, so the port change is reflected in the contract tests too.
 - **Depends on:** Task 3
 
-## Task 6: Rework `AppRegistrar` to mint API keys
+## Task 6 `[x]`: Rework `AppRegistrar` to mint API keys
 - **Goal:** Registration generates a key via `APIKeyGenerator`, retries up to 3
   times on prefix collision, persists only hash + prefix, and returns the
   plaintext once via `IssuedApp.api_key`; `PrincipalSigner` and `clock` are
@@ -122,16 +122,21 @@
   `src/gateway/tests/unit/plugins/test_app_registrar.py` (rework — JWT claim
   tests dropped)
 - **Done when:**
-  - [ ] `register(...)` returns `IssuedApp` with a 32-char base62 `api_key`; the
+  - [x] `register(...)` returns `IssuedApp` with a 32-char base62 `api_key`; the
         stored row holds only `api_key_hash`/`api_key_prefix`, with `token` NULL.
-  - [ ] The freshly issued key authenticates through
+  - [x] The freshly issued key authenticates through
         `AppRepository.find_app_by_credential` (mint → verify closed loop).
-  - [ ] Collision retry: a fake repository forcing `exists_prefix=True` sees 3
-        generate attempts, then a clean raise with no partial write.
-  - [ ] `creator` is recorded as both creator and modifier (behavior kept).
+  - [x] Collision retry: a fake repository forcing `exists_prefix=True` sees 3
+        generate attempts (each a fresh key), then a clean `PrefixAllocationError`
+        with nothing written.
+  - [x] `creator` is recorded as both creator and modifier (behavior kept).
+  - [x] *(added)* A collision on the first attempt still succeeds on the second —
+        retrying is not merely a path to failure.
+  - [x] *(added)* Hashing happens only after a prefix is settled, so a collision
+        does not throw away ~60ms of PBKDF2.
 - **Depends on:** Task 3
 
-## Task 7: Rewire bootstrap and the admin endpoint
+## Task 7 `[x]`: Rewire bootstrap and the admin endpoint
 - **Goal:** `build_app_registrar` loses its signer; `POST /admin/apps` returns
   `api_key` instead of `token`.
 - **Files:** `src/gateway/src/gateway/community/bootstrap/_credential_issuance.py`,
@@ -139,14 +144,16 @@
   `src/gateway/src/gateway/community/adapters/web/admin.py`,
   `src/gateway/tests/integration/test_admin_issuance.py` (rework)
 - **Done when:**
-  - [ ] `build_app_registrar(db)` builds without a `PrincipalSigner`; access-key
+  - [x] `build_app_registrar(db)` builds without a `PrincipalSigner`; access-key
         issuance keeps its signer untouched.
-  - [ ] `POST /admin/apps` → 201 body carries `api_key` (32-char base62) and no
+  - [x] `POST /admin/apps` → 201 body carries `api_key` (32-char base62) and no
         `token`; nothing JWT-decodable is returned for apps.
-  - [ ] The returned key immediately authenticates via
+  - [x] The returned key immediately authenticates via
         `find_app_by_credential` (register → use closed loop over HTTP).
-  - [ ] Access-key admin flow (`POST /admin/access-keys`) regression-passes
+  - [x] Access-key admin flow (`POST /admin/access-keys`) regression-passes
         unchanged.
+  - [x] *(added)* The persisted row is asserted to hold no plaintext: `token`
+        is NULL and the key does not appear in `api_key_hash`.
 - **Depends on:** Task 6
 
 ## Task 8: Cover both credential paths in the integration suites

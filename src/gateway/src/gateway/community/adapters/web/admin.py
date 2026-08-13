@@ -87,6 +87,8 @@ async def register_app(payload: AppRequest, request: Request) -> JSONResponse:
     except Exception:
         logger.exception("app registration failed")
         return _error(500, 1, "app registration failed")
+    # ``api_key`` is returned here and nowhere else, ever: the registry keeps
+    # only its hash, so a caller who loses it must be issued a new one.
     return JSONResponse(
         status_code=201,
         content={
@@ -97,6 +99,6 @@ async def register_app(payload: AppRequest, request: Request) -> JSONResponse:
             "tenant": issued.tenant,
             "status": payload.status,
             "env": payload.env,
-            "token": issued.token,
+            "api_key": issued.api_key,
         },
     )
