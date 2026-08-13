@@ -3486,6 +3486,9 @@ class BotService:
 
             self._sweep_grants_that_raced_the_deletion(bot_id, user_id)
 
+            if bot_id != "default":
+                self._sweep_startup_script_that_raced_the_deletion(bot_id, bot)
+
             self._sync_provider_bot_delete_to_bcn(bot_id, user_id)
 
             # 清理关联的脏数据（仅限非 default bot）
@@ -3586,6 +3589,50 @@ class BotService:
                 f"Failed to sync provider bot delete, ignored: "
                 f"bot_id={bot_id}, owner_workno={user_id}, error={e}",
                 exc_info=True,
+            )
+
+    def _sweep_startup_script_that_raced_the_deletion(
+        self, bot_id: str, bot: Dict[str, Any]
+    ) -> None:
+        """Second purge, after the soft delete. Paired with the first, and the
+        pairing is what makes the set of orderings complete.
+
+        The first purge runs early, while the bot is still intact, so a failure
+        aborts the deletion rather than stranding the row. But it is a long way
+        from the soft delete: ``release_device`` and ``destroy_passport`` — the
+        latter unconditional and a blocking call to an external plugin — both
+        sit in between. A ``PUT`` whose existence check, write **and** post-write
+        re-check all fall inside that gap sees a live bot at every point and
+        leaves its row behind. Neither the first purge nor the re-check catches
+        that ordering; only a purge on the far side of ``soft_delete_by_owner``
+        does.
+
+        With this in place the orderings are, for a write W, its re-check R, the
+        first purge P1, the soft delete S and this sweep P2:
+
+        * W before P1 — P1 removes it;
+        * W between P1 and S, R also before S — R sees a live bot and answers
+          200, and P2 removes the row;
+        * W between P1 and S, R after S — R sees the bot gone and withdraws;
+        * W after S — R is later still, so R withdraws, and P2 covers it too.
+
+        That assumes R reads committed state; a re-check served stale would fall
+        back on P2 for the third case.
+
+        Unconditional, and it needs no owner stamp. ``uk_bot_id_entity_id_env``
+        means the identifier cannot be handed to another bot, so whatever sits
+        at this key belongs to the bot being deleted.
+
+        Failures propagate, like the first purge and like the grant sweep. The
+        deletion has really happened by then, so a caller who retries is told
+        "no such bot" — confusing, but honest, where reporting success over a
+        row that survived is a wrong answer nobody can later discover.
+        """
+        if self._purge_startup_script(bot_id, bot):
+            logger.warning(
+                "[bot_service.delete_bot] removed a startup script written on "
+                "bot %s while it was being deleted",
+                bot_id,
             )
 
     def _purge_startup_script(self, bot_id: str, bot: Dict[str, Any]) -> bool:
