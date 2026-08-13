@@ -924,8 +924,9 @@ async def update_resource(
 ) -> Envelope[Resource]:
     """Rename a link resource or change its target URL.
 
-    Links only, addressed by `resource_id`. A file's identifier answers 404 —
-    files live in the workspace and are not renamed through this endpoint.
+    Addressed by `resource_id`. A file's identifier answers 404. A record of
+    some other kind is **not** refused: as on the read, it is accepted and
+    reported as a link — check what you are addressing before writing.
 
     **Do not rely on uniqueness here.** A name is never compared at all. A URL
     is compared, but not against the links this API creates — so pointing one
