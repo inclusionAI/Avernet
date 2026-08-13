@@ -1,9 +1,9 @@
 """TaskService facade(2 API):系统唯一对外入口,内部持 ExecutionEngine 编排核。对齐 plan §3.7。
 
-零参 facade:用户只传 TaskInfo。内部 ``_build_engine`` 工厂方法自建 ExecutionEngine(零参,自建
-planner/dispatcher/runner 内置策略池 + stub 投递);corp 子类覆写工厂方法注入真实策略/投递后端(ocb 仓)。
+facade 内部 ``_build_engine`` 构造 ExecutionEngine(收传输端口 bot/bcs/discover,由 DI 从配置注入);
+引擎 ``_build_*`` 内部 new 引擎自带策略 + 接线 TaskExecutor,无子类化、无外部 reach-in setter。
 回投经 ``callback``(TaskLoopCallback)适配层 → 编排核 on_report(非 facade 直暴露)。
-Avernet 发 stub/singlebox;corp adapter 红线在 ocb 仓。engine 对调用方不可见(无 engine property)。
+engine 对调用方不可见(无 engine property)。测试可经 facade/engine 子类覆写 ``_build_*`` 注入 stub 策略/投递(测试 seam)。
 """
 from __future__ import annotations
 
@@ -28,22 +28,22 @@ class TaskService(TaskServiceProtocol):
     验收 100% 走回调回投;engine 不主动验,无 verify/bbs port。engine 对调用方不可见(无 property)。
     """
 
-    def __init__(self, graph, harness=None) -> None:
-        """graph: TaskGraphService;harness: TaskHarness | None(旁路复位,可选)。
-        corp 接真实策略/投递:子类覆写 ``_build_engine`` 返回注入真实策略池/投递后端的 CorpEngine。"""
+    def __init__(self, graph, harness=None, *, bot=None, bcs=None, discover=None) -> None:
+        """graph: TaskGraphService;harness: TaskHarness | None(旁路复位,可选);
+        bot/bcs/discover: 传输端口(DI 从配置注入 local/prod/double 实现传给引擎;省略=stub 路径/纯内核单测)。"""
         self._graph = graph
         self._harness = harness
-        self._engine = self._build_engine()
+        self._engine = self._build_engine(bot=bot, bcs=bcs, discover=discover)
         # 回投适配层:执行实体 PUSH → 适配 → 编排核 on_report
         self._callback = TaskLoopCallback(CallbackAdapter(), self._engine)
         # harness 复位重投入口回填(编排核已建,harness 才能拿到 on_harness)
         if self._harness is not None:
             self._harness.set_on_harness(self._engine.on_harness)
 
-    def _build_engine(self) -> ExecutionEngine:
-        """(corp 覆写 seam)构造编排核。默认 ExecutionEngine(graph)自建 stub 策略池/投递;
-        corp 子类返回 CorpEngine(覆写 _build_planner/_build_dispatcher/_build_runner 注入真实实现)。"""
-        return ExecutionEngine(self._graph)
+    def _build_engine(self, *, bot=None, bcs=None, discover=None) -> ExecutionEngine:
+        """构造编排核:ExecutionEngine(graph, bot=, bcs=, discover=)。引擎内部 ``_build_*`` new 自带策略 +
+        接线 TaskExecutor。测试可经 facade/engine 子类覆写本方法注入 stub 策略/投递的引擎(测试 seam)。"""
+        return ExecutionEngine(self._graph, bot=bot, bcs=bcs, discover=discover)
 
     @property
     def callback(self) -> TaskLoopCallback:
