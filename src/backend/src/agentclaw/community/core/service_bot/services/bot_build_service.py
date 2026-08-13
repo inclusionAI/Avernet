@@ -792,17 +792,27 @@ class BotBuildService:
                 error_message="rsync migration failed",
             )
 
-            # 额外同步目录：例如 claude_code 引擎需要把 .claude 同步到 target/claude
-            extra_src_rel = build_plan.extra_sync_source_relpath if build_plan else ""
-            extra_tgt_rel = build_plan.extra_sync_target_relpath if build_plan else ""
-            if extra_src_rel and extra_tgt_rel:
+            # 额外同步目录：支持单条旧配置与多条新配置。
+            extra_sync_items: list[tuple[str, str]] = []
+            if build_plan and getattr(build_plan, "extra_sync_items", None):
+                extra_sync_items = list(build_plan.extra_sync_items)
+            elif build_plan:
+                extra_src_rel = build_plan.extra_sync_source_relpath
+                extra_tgt_rel = build_plan.extra_sync_target_relpath
+                if extra_src_rel and extra_tgt_rel:
+                    extra_sync_items = [(extra_src_rel, extra_tgt_rel)]
+
+            for extra_src_rel, extra_tgt_rel in extra_sync_items:
                 extra_source = source_dir.parent / extra_src_rel
                 extra_target = target_dir / extra_tgt_rel
 
                 if not extra_source.exists():
-                    raise BotBuildMigrationError(
-                        f"Extra sync source does not exist: {extra_source}"
+                    logger.info(
+                        "[BotBuildService._migrate_bot_instance] "
+                        "skip missing extra sync source: %s",
+                        extra_source,
                     )
+                    continue
 
                 extra_target.mkdir(parents=True, exist_ok=True)
 
