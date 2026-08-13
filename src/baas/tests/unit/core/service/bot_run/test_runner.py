@@ -22,6 +22,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from secbaas.community.api.bcn import Attachment
 from secbaas.community.api.bot_runtime import (
     BotBindingInfo,
     BotChatContext,
@@ -2116,3 +2117,168 @@ class _DummyConverter:
         result = self._results[self._idx]
         self._idx += 1
         return result
+
+
+# ==================== Tests: Attachment Passthrough ====================
+
+
+class TestAttachmentPassthrough:
+    """BotRunner 全部 3 个方法的 attachments 透传验证。"""
+
+    @pytest.mark.asyncio
+    async def test_deliver_message_passes_attachments(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+        context,
+    ):
+        """deliver_message 调用 dispatcher.dispatch_send 时传入 attachments 参数。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+
+        att1 = Attachment(
+            attachment_id="att_1",
+            type="image",
+            file_name="f1.png",
+            url="https://cdn.example.com/f1",
+        )
+        att2 = Attachment(
+            attachment_id="att_2",
+            type="image",
+            file_name="f2.png",
+            url="https://cdn.example.com/f2",
+        )
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        await runner.deliver_message(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hello",
+            context=context,
+            metadata={},
+            message_id=None,
+            attachments=[att1, att2],
+        )
+
+        runner._dispatchers[0].dispatch_send.assert_called_once()
+        kw = runner._dispatchers[0].dispatch_send.call_args.kwargs
+        assert "attachments" in kw
+        passed = kw["attachments"]
+        assert len(passed) == 2
+        assert passed[0].attachment_id == "att_1"
+        assert passed[0].type == "image"
+        assert passed[0].file_name == "f1.png"
+        assert isinstance(passed[0], Attachment)
+        assert passed[1].attachment_id == "att_2"
+
+    @pytest.mark.asyncio
+    async def test_inject_message_passes_attachments(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+        context,
+    ):
+        """inject_message 调用 dispatcher.dispatch_inject 时传入 attachments 参数。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+
+        att1 = Attachment(
+            attachment_id="att_1",
+            type="image",
+            file_name="f1.png",
+            url="https://cdn.example.com/f1",
+        )
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        await runner.inject_message(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hello",
+            context=context,
+            metadata={},
+            message_id="test-inject-001",
+            attachments=[att1],
+        )
+
+        runner._dispatchers[0].dispatch_inject.assert_called_once()
+        kw = runner._dispatchers[0].dispatch_inject.call_args.kwargs
+        assert "attachments" in kw
+        passed = kw["attachments"]
+        assert len(passed) == 1
+        assert passed[0].attachment_id == "att_1"
+        assert isinstance(passed[0], Attachment)
+
+    @pytest.mark.asyncio
+    async def test_deliver_message_stream_passes_attachments(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+        context,
+    ):
+        """deliver_message_stream 调用 dispatcher.dispatch_send_stream 时传入 attachments 参数 (D-01)。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+
+        async def _fake_stream():
+            return
+            yield  # make it an async generator
+
+        att1 = Attachment(
+            attachment_id="att_1",
+            type="image",
+            file_name="f1.png",
+            url="https://cdn.example.com/f1",
+        )
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        runner._dispatchers[0].dispatch_send_stream = MagicMock(
+            return_value=_fake_stream()
+        )
+
+        msg_id, sess_id, stream = await runner.deliver_message_stream(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hello",
+            context=context,
+            metadata={},
+            message_id=None,
+            attachments=[att1],
+        )
+
+        runner._dispatchers[0].dispatch_send_stream.assert_called_once()
+        kw = runner._dispatchers[0].dispatch_send_stream.call_args.kwargs
+        assert "attachments" in kw
+        passed = kw["attachments"]
+        assert len(passed) == 1
+        assert passed[0].attachment_id == "att_1"
+        assert isinstance(passed[0], Attachment)
+
+    @pytest.mark.asyncio
+    async def test_deliver_message_attachments_none_is_passed(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+        context,
+    ):
+        """attachments 为 None 时 dispatcher 收到 None（不报错）。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        await runner.deliver_message(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hello",
+            context=context,
+            metadata={},
+            message_id=None,
+            attachments=None,
+        )
+
+        runner._dispatchers[0].dispatch_send.assert_called_once()
+        kw = runner._dispatchers[0].dispatch_send.call_args.kwargs
+        assert kw.get("attachments") is None

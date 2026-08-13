@@ -191,6 +191,9 @@ base_url = "http://127.0.0.1:21000"
 group_link_url = "http://localhost:8000/groups/{group_id}"
 session_link_url = "http://localhost:8000/sessions/{session_id}"
 
+[openapi_v1]
+public_collaboration_base_url = "http://127.0.0.1:21000/openapi/v1/collaboration"
+
 [session_files]
 storage_backend = "local"
 multipart_threshold = 104857600

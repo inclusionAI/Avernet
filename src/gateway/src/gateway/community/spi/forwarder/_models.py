@@ -1,8 +1,15 @@
 """Framework-neutral request/response models for the Forwarder SPI.
 
-The delivery adapter snapshots an incoming request into a :class:`ForwardRequest`
-and streams a :class:`ForwardResponse` back; neither type depends on a web
-framework, so flavors (bare httpx, enterprise) are interchangeable.
+Forwarder Plugin API contract version: **2**. Version 1 represented an inbound
+body as fully-buffered ``ForwardRequest.content: bytes``. Version 2 replaces that
+field with the closeable, one-shot ``ForwardRequest.body`` stream so large
+uploads can propagate backpressure instead of consuming memory proportional to
+the complete payload. The Python class names remain stable; the contract version
+describes their semantics rather than creating parallel ``V1``/``V2`` types.
+
+The delivery adapter translates request metadata and a one-shot body stream into
+a :class:`ForwardRequest`, then streams a :class:`ForwardResponse` back. Neither
+type depends on a web framework, so transport implementations remain replaceable.
 
 Response headers are kept as an ordered list of ``(name, value)`` pairs rather
 than a dict so **repeatable** headers (``Set-Cookie``, ``Vary``, ``Link``, …)
@@ -13,6 +20,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterable, Mapping
 from dataclasses import dataclass, field
+from typing import Protocol
 
 # Hop-by-hop headers must not be forwarded end to end (RFC 7230 §6.1).
 HOP_BY_HOP_HEADERS = frozenset(
@@ -56,14 +64,32 @@ def strip_hop_by_hop_items(
     return [(k, v) for k, v in pairs if k.lower() not in banned]
 
 
+class ForwardRequestBody(Protocol):
+    """Closeable one-shot request bytes accepted by a :class:`Forwarder`.
+
+    ``aclose`` must be safe to call after full consumption and more than once.
+    """
+
+    def __aiter__(self) -> AsyncIterator[bytes]: ...
+
+    async def aclose(self) -> None: ...
+
+
 @dataclass(frozen=True)
 class ForwardRequest:
-    """A request to forward to an upstream, addressed by absolute URL."""
+    """A request to forward to an upstream, addressed by absolute URL.
+
+    ``body`` is either absent or a closeable, one-shot asynchronous byte stream.
+    It intentionally cannot be supplied as buffered ``content``: buffering would
+    defeat backpressure and make Gateway memory usage grow with upload size.
+    Once a forwarder's context manager is entered, that forwarder owns the body
+    and must close it after sending finishes, fails, or is cancelled.
+    """
 
     method: str
     url: str
     headers: dict[str, str] = field(default_factory=dict)
-    content: bytes = b""
+    body: ForwardRequestBody | None = None
 
 
 @dataclass

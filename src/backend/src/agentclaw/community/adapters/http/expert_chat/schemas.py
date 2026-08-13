@@ -27,6 +27,12 @@ class GrtChatRequest(BaseModel):
     session_id: str = Field(..., description="session:uuid 格式")
 
 
+class SessionKeyRequest(BaseModel):
+    """Select an existing expert-chat session."""
+
+    session_key: str = Field(..., min_length=1, max_length=255)
+
+
 # ============ Response Models ============
 
 class AddChatBotResponse(BaseModel):

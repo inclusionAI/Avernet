@@ -151,6 +151,54 @@ third-party developers without paying the double-write cost on every change.
   changes to the published description; an explicit new major version is the way to
   make one.
 
+## Forwarder Plugin API Contract
+
+The current Forwarder Plugin API contract is **version 2**. The version describes
+the semantics of the stable Python symbols `Forwarder`, `ForwardRequest`, and
+`ForwardResponse`; the classes and their files are not renamed with a `V2`
+suffix.
+
+Version 1 represented the request body as fully buffered
+`ForwardRequest.content: bytes`. That made the catch-all adapter call
+`await request.body()` before opening the upstream request, so Gateway memory
+usage grew with the complete upload and upstream backpressure could not reach the
+caller. Version 2 replaces `content` with
+`ForwardRequest.body: ForwardRequestBody | None`, where `ForwardRequestBody` is a
+closeable, one-shot asynchronous byte stream. This breaking evolution is required
+to forward large uploads with bounded memory.
+
+Version 2 has the following lifecycle and wire contract:
+
+- Authentication and principal signing finish before the adapter consumes the
+  first body chunk.
+- `None` means that the inbound request is truly empty. Otherwise the adapter may
+  prefetch at most one non-empty transport chunk and supplies the remaining bytes
+  on demand.
+- Once `Forwarder.forward(request)` begins entering its context manager, the
+  implementation owns `request.body`. It must close the body after successful
+  transmission, request construction or transport failure, cancellation, or an
+  early upstream response. `aclose()` is idempotent.
+- A one-shot body must never be replayed for redirects, challenge authentication,
+  retries, or failover.
+- A declared `Content-Length` is preserved. If the body length is unknown, the
+  HTTP transport may use chunked transfer encoding. Empty requests remain
+  unchunked.
+- Response streaming, duplicate response headers, hop-by-hop filtering, path and
+  query forwarding, and principal signing retain their version 1 behavior.
+
+Migration from version 1 is explicit: callers construct
+`ForwardRequest(..., body=stream_or_none)` instead of passing `content=bytes`;
+implementations consume the asynchronous stream and close it in every terminal
+path instead of reading `request.content`. A compatibility adapter is not
+provided because converting the version 2 stream back into version 1 bytes would
+reintroduce the complete-body buffering this contract removes.
+
+Propagation analysis found one in-repository implementation,
+`HttpxForwarder`, and it migrates in the same change as the adapter and contract
+tests. The enterprise Gateway package selects that community implementation and
+does not register a separate HTTP Forwarder. Any out-of-tree provider must migrate
+to version 2 before upgrading `gateway-community`.
+
 ## Open Questions
 
 - **Scope inheritance (future).** Once the scope vocabulary lands, a new endpoint

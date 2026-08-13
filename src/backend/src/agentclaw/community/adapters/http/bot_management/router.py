@@ -2626,6 +2626,15 @@ async def restart_bot(
     Restart a bot by releasing current device and allocating a new one.
 
     POST /api/bots/{bot_id}/restart
+    Body (optional): {
+        "extra_configs": {
+            "<engine-owned-key>": {...}
+        }
+    }
+
+    ``extra_configs`` is an engine-agnostic extension envelope. Unknown or
+    malformed engine-owned values are ignored and do not block the historical
+    restart flow.
 
     This will:
     1. Release the current device bound to the bot
@@ -2652,10 +2661,27 @@ async def restart_bot(
 
         resolved_owner_id = owner_id or operator_id
 
+        # Keep the HTTP/core restart path engine-agnostic. Concrete engine
+        # strategies interpret their own keys inside this optional envelope.
+        extra_configs = None
+        try:
+            request_body = await request.json()
+            candidate = (
+                request_body.get("extra_configs")
+                if isinstance(request_body, dict)
+                else None
+            )
+            if isinstance(candidate, dict):
+                extra_configs = candidate
+        except Exception:
+            # Empty/non-JSON request bodies remain valid for legacy callers.
+            extra_configs = None
+
         result = bot_service.restart_bot(
             bot_id=bot_id,
             user_id=resolved_owner_id,
             nick_name=nick_name,
+            extra_configs=extra_configs,
         )
 
         if result.get("restart_in_progress"):

@@ -294,9 +294,15 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: no ``bot_id`` at all, so it grows by one for each such operation added — the
 #: load-test endpoint is the twentieth.
 #:
-#: ``path`` gained three with the startup-script operations (GET/PUT/DELETE
-#: on ``/bots/{bot_id}/startup-script``) — all address a bot, none moved.
-_BOT_ID_PLACEMENT = {"path": 34, "query": 18, "none": 21}
+#: ``query`` moved 18 → 20 when the resources file endpoints were re-addressed by
+#: workspace path (#1000): ``{resource_id}/download`` and ``{resource_id}/preview``
+#: went away and ``DELETE ""``, ``/download``, ``/preview`` and ``/mkdir`` replaced
+#: them, all four taking ``bot_id`` as a query parameter — which is what it is
+#: there, since the address is the file's path and not the bot's.
+#:
+#: ``path`` moved 31 → 34 with the startup-script operations (GET/PUT/DELETE on
+#: ``/bots/{bot_id}/startup-script``) — all three address a bot, none moved.
+_BOT_ID_PLACEMENT = {"path": 34, "query": 20, "none": 21}
 
 
 def _schema() -> dict:
@@ -338,13 +344,21 @@ def test_every_user_scoped_operation_requires_user_id_in_the_query():
 
 
 def test_the_pinned_number_of_operations_take_it():
-    """The count is pinned so a silent drop shows up as a number, not a shrug."""
+    """The count is pinned so a silent drop shows up as a number, not a shrug.
+
+    60 → 62 with the resources file endpoints re-addressed by workspace path
+    (#1000): four new operations (``DELETE ""``, ``/download``, ``/preview``,
+    ``/mkdir``) replaced two id-addressed ones, and every one of them takes the
+    caller's ``user_id`` like the rest of the user-scoped surface.
+    """
     taking = [
         1
         for path, method, operation in _operations(_schema())
         if _user_scoped(path, method) and _param(operation, USER_ID_QUERY)
     ]
-    assert len(taking) == 63
+    # 60 on the merge base, +3 for the startup-script operations and +2 for the
+    # resources file endpoints re-addressed by workspace path (#1000).
+    assert len(taking) == 65
 
 
 def test_the_exempt_operations_take_none():

@@ -853,6 +853,8 @@ impl FusionCoreService for NoopFusionCoreService {
             soul: None,
             rules: None,
             memory: None,
+            tools: None,
+            agents: None,
         })
     }
 

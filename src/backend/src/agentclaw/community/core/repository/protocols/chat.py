@@ -111,6 +111,45 @@ class ExpertChatRepository(Protocol):
         """
         ...
 
+    @abstractmethod
+    def add_owned_session(
+        self, user_id: str, bot_id: str, owner_id: str, session_key: str
+    ) -> Dict[str, Any]:
+        """Idempotently add one user-owned session to the multi-session index."""
+        ...
+
+    @abstractmethod
+    def list_owned_sessions(
+        self,
+        user_id: str,
+        bot_id: str,
+        owner_id: str,
+        session_key: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """List active sessions owned by one user for one expert Bot."""
+        ...
+
+    @abstractmethod
+    def get_owned_session(
+        self, user_id: str, bot_id: str, owner_id: str, session_key: str
+    ) -> Optional[Dict[str, Any]]:
+        """Return one active owned-session row, or ``None`` when unauthorized."""
+        ...
+
+    @abstractmethod
+    def delete_owned_session(
+        self, user_id: str, bot_id: str, owner_id: str, session_key: str
+    ) -> bool:
+        """Soft-delete one user-owned session mapping."""
+        ...
+
+    @abstractmethod
+    def delete_all_owned_sessions(
+        self, user_id: str, bot_id: str, owner_id: str
+    ) -> int:
+        """Soft-delete every active session mapping for one user and Bot."""
+        ...
+
 
 @runtime_checkable
 class ExpertChatInstanceRepository(Protocol):

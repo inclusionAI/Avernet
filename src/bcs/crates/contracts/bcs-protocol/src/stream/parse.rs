@@ -152,6 +152,7 @@ fn parse_chat(data: Value) -> StreamEvent {
         stop_reason: str_field(&data, "stopReason"),
         error_message: str_field(&data, "errorMessage"),
         error_kind: str_field(&data, "errorKind"),
+        error_code: str_field(&data, "errorCode"),
         message: data.get("message").cloned(),
         raw: data,
     })

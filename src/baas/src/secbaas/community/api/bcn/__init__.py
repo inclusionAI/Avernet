@@ -15,6 +15,7 @@ from ._exceptions import (
     BcnUnsupportedMethodError,
 )
 from ._models import (
+    Attachment,
     BotRef,
     ChatEvent,
     ChatHistoryInput,
@@ -42,6 +43,7 @@ __all__ = [
     # Protocol
     "BcnDownlinkService",
     # Models - 下行
+    "Attachment",
     "BotRef",
     "ChatHistoryInput",
     "ChatHistoryResult",

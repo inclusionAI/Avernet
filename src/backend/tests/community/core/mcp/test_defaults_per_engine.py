@@ -285,19 +285,21 @@ def test_default_cli_items_returns_copy():
 
 def test_template_config_mcps_append_and_override_defaults():
     template_config = {
-        "preset_capabilities": {
-            "mcp": [
-                {
-                    "server_code": "mcp.ant.arkai.dimamcpserver",
-                    "name": "Template Dima",
-                    "description": "template override",
-                },
-                {
-                    "server_code": "mcp.ant.custom.template.server",
-                    "name": "Template Custom",
-                    "description": "template appended",
-                },
-            ]
+        "bot_template_config": {
+            "preset_capabilities": {
+                "mcp": [
+                    {
+                        "server_code": "mcp.ant.arkai.dimamcpserver",
+                        "name": "Template Dima",
+                        "description": "template override",
+                    },
+                    {
+                        "server_code": "mcp.ant.custom.template.server",
+                        "name": "Template Custom",
+                        "description": "template appended",
+                    },
+                ]
+            }
         }
     }
 
@@ -314,16 +316,84 @@ def test_template_config_mcps_append_and_override_defaults():
     assert appended["name"] == "Template Custom"
 
 
-def test_template_config_mcp_presets_are_aicoding_specific():
+def test_resolved_template_config_mcps_append_defaults():
+    template_config = {
+        "template_key": "mcptest",
+        "bot_template_config": {
+            "preset_capabilities": {
+                "mcp": [
+                    {
+                        "server_code": "mcp.ant.agentix.112858.baishitong",
+                        "name": "Aix 安全百事通",
+                        "description": "Aix 安全百事通",
+                    },
+                    {
+                        "server_code": "mcp.ant.productai.product-query-tool",
+                        "name": "找产品、找人、找服务、找文档",
+                        "description": "产品星球提供的：找产品、找人、找服务、找文档(语雀)、语雀文档URL解析等。",
+                    },
+                ]
+            }
+        },
+    }
+
+    codes = get_default_mcp_server_codes(
+        "aicoding",
+        ext_info={"aicoding": {"template_config": template_config}},
+    )
+
+    assert "mcp.ant.agentix.112858.baishitong" in codes
+    assert "mcp.ant.productai.product-query-tool" in codes
+
+
+def test_template_config_top_level_mcp_presets_are_ignored():
     template_config = {
         "preset_capabilities": {
             "mcp": [
                 {
                     "server_code": "mcp.ant.custom.template.server",
                     "name": "Template Custom",
-                    "description": "template appended",
                 }
             ]
+        }
+    }
+
+    assert "mcp.ant.custom.template.server" not in get_default_mcp_server_codes(
+        "aicoding", ext_info={"aicoding": {"template_config": template_config}}
+    )
+
+
+def test_legacy_wrapped_template_config_mcp_presets_are_ignored():
+    template_config = {
+        "template_config": {
+            "preset_capabilities": {
+                "mcp": [
+                    {
+                        "server_code": "mcp.ant.custom.template.server",
+                        "name": "Template Custom",
+                    }
+                ]
+            }
+        }
+    }
+
+    assert "mcp.ant.custom.template.server" not in get_default_mcp_server_codes(
+        "aicoding", ext_info={"aicoding": {"template_config": template_config}}
+    )
+
+
+def test_template_config_mcp_presets_are_aicoding_specific():
+    template_config = {
+        "bot_template_config": {
+            "preset_capabilities": {
+                "mcp": [
+                    {
+                        "server_code": "mcp.ant.custom.template.server",
+                        "name": "Template Custom",
+                        "description": "template appended",
+                    }
+                ]
+            }
         }
     }
 
@@ -340,13 +410,15 @@ def test_template_config_mcp_presets_are_aicoding_specific():
 
 def test_claude_code_coding_template_uses_aicoding_mcp_bucket():
     template_config = {
-        "preset_capabilities": {
-            "mcp": [
-                {
-                    "server_code": "mcp.ant.custom.template.server",
-                    "name": "Template Custom",
-                }
-            ]
+        "bot_template_config": {
+            "preset_capabilities": {
+                "mcp": [
+                    {
+                        "server_code": "mcp.ant.custom.template.server",
+                        "name": "Template Custom",
+                    }
+                ]
+            }
         }
     }
     ext_info = {"aicoding": {"template_config": template_config}}
@@ -364,13 +436,15 @@ def test_claude_code_coding_template_uses_aicoding_mcp_bucket():
 
 def test_claude_code_template_factory_non_normal_uses_aicoding_mcp_bucket():
     template_config = {
-        "preset_capabilities": {
-            "mcp": [
-                {
-                    "server_code": "mcp.ant.custom.template.server",
-                    "name": "Template Custom",
-                }
-            ]
+        "bot_template_config": {
+            "preset_capabilities": {
+                "mcp": [
+                    {
+                        "server_code": "mcp.ant.custom.template.server",
+                        "name": "Template Custom",
+                    }
+                ]
+            }
         }
     }
     ext_info = {"aicoding": {"template_config": template_config}}

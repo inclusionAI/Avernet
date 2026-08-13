@@ -3584,6 +3584,19 @@ fn image_attachment() -> bcs_domain::Attachment {
     }
 }
 
+fn file_attachment() -> bcs_domain::Attachment {
+    bcs_domain::Attachment {
+        attachment_id: "file_2".to_string(),
+        attachment_type: bcs_domain::AttachmentType::File,
+        file_name: "design.pdf".to_string(),
+        mime_type: Some("application/pdf".to_string()),
+        size: None,
+        sha256: None,
+        url: "https://download.example.com/temporary".to_string(),
+        expires_at: None,
+    }
+}
+
 fn human_web_send(message: &str, attachments: Option<Vec<bcs_domain::Attachment>>) -> WebSendCommand {
     WebSendCommand {
         caller: CallerContext::Human(HumanActor {
@@ -3642,6 +3655,50 @@ async fn web_send_event_echoes_attachments_verbatim() {
 }
 
 #[tokio::test]
+async fn temporary_file_attachment_is_sent_only_to_active_chat_send() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    );
+
+    flow.handle_web_send(human_web_send("", Some(vec![file_attachment()])))
+        .await
+        .unwrap();
+
+    let frames = support.bot_delivery.frames().await;
+    let send = frames
+        .iter()
+        .find_map(|frame| match frame {
+            BcsFrame::Request(request) if request.method == "chat.send" => request.params.as_ref(),
+            _ => None,
+        })
+        .expect("chat.send params");
+    let inject = frames
+        .iter()
+        .find_map(|frame| match frame {
+            BcsFrame::Request(request) if request.method == "chat.inject" => request.params.as_ref(),
+            _ => None,
+        })
+        .expect("chat.inject params");
+    assert_eq!(send["attachments"][0]["type"], "file");
+    assert!(inject.get("attachments").is_none());
+
+    let events = support.frontend_delivery.events().await;
+    assert_eq!(events.len(), 1);
+    let event: serde_json::Value = serde_json::from_str(&events[0]).unwrap();
+    let attachment = &event["payload"]["message"]["attachments"][0];
+    assert_eq!(attachment["attachment_id"], "file_2");
+    assert_eq!(attachment["type"], "file");
+    assert!(attachment.get("url").is_none(), "event: {event}");
+    assert!(attachment.get("expires_at").is_none(), "event: {event}");
+    assert!(!events[0].contains("download.example.com"));
+}
+
+#[tokio::test]
 async fn web_send_event_without_attachments_has_no_attachments_key() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let flow = BcsMessageFlow::new(
@@ -3687,4 +3744,72 @@ async fn web_send_event_omits_attachments_key_for_empty_attachment_list() {
         event["payload"]["message"].get("attachments").is_none(),
         "event: {event}"
     );
+}
+
+#[tokio::test]
+async fn web_send_persists_raw_mention_text_while_bots_receive_cleaned_text() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let repo = Arc::new(RecordingMessageRepo::default());
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_message_repo(repo.clone());
+
+    flow.handle_web_send(WebSendCommand {
+        caller: CallerContext::Human(HumanActor {
+            actor_id: "human_1".to_string(),
+            staff_no: "1".to_string(),
+        }),
+        group_id: "group-1".to_string(),
+        session_id: None,
+        from_actor_id: "human_1".to_string(),
+        from_name: Some("Human One".to_string()),
+        message: "@Driver please review".to_string(),
+        mentions: vec!["bot-driver".to_string()],
+        attachments: None,
+        thinking: None,
+        idempotency_key: None,
+        source_im_message_id: None,
+        sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
+    })
+    .await
+    .unwrap();
+
+    // Human-facing history keeps the sender's text verbatim and stores the
+    // structured mention targets for rendering.
+    let appended = repo.appended().await;
+    assert_eq!(appended.len(), 1);
+    assert_eq!(appended[0].content["text"], "@Driver please review");
+    assert_eq!(appended[0].content["mentions"][0], "bot-driver");
+    assert!(appended[0].content.get("attachments").is_none());
+
+    // Bot-bound deliveries still get the @-stripped routing text.
+    let frames = support.bot_delivery.frames().await;
+    assert_eq!(frames.len(), 2);
+    for frame in frames {
+        let BcsFrame::Request(req) = frame else {
+            panic!("expected request frame");
+        };
+        let params = req.params.as_ref().expect("params");
+        let text = params["message"]["content"][0]["text"]
+            .as_str()
+            .expect("text");
+        assert!(text.contains("Driver please review"), "text: {text}");
+        assert!(!text.contains("@Driver"), "text: {text}");
+    }
+
+    // The realtime workbench event already echoes the raw text and mentions.
+    let events = support.frontend_delivery.events().await;
+    assert_eq!(events.len(), 1);
+    let event: serde_json::Value = serde_json::from_str(&events[0]).unwrap();
+    assert_eq!(
+        event["payload"]["message"]["content"][0]["text"],
+        "@Driver please review"
+    );
+    assert_eq!(event["payload"]["message"]["mentions"][0], "bot-driver");
 }

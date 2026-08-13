@@ -102,6 +102,7 @@ from agentclaw.community.core.mcp.errors import (
 from agentclaw.community.core.resources.service import (
     DuplicateResourceError,
     FileTooLargeError,
+    InvalidResourcePathError,
     ResourceNotFoundError,
 )
 from agentclaw.community.core.skill_center.errors import (
@@ -254,6 +255,10 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # str(exc), which would leak internal ids/paths to external callers.
     DuplicateResourceError: (409, "Resource already exists"),
     ResourceNotFoundError: (404, "Not found"),
+    # The message says the path was rejected but not what the server made of it:
+    # echoing the caller's path back, or naming the segment that failed, turns a
+    # rejection into a probe for how addresses are resolved.
+    InvalidResourcePathError: (400, "Invalid resource path"),
     LocalSkillNotFoundError: (404, "Not found"),
     LocalSkillOwnerAmbiguousError: (409, "Ambiguous Local Skill owner"),
     LocalSkillInvalidPackageError: (400, "Invalid Skill package"),

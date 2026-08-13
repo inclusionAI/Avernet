@@ -308,6 +308,10 @@ class AcBindingSandboxHandler:
                     refresh_fail_count=0,
                 )
             else:
+                logger.warning(
+                    f"[AcBindingSandboxHandler] Renew TTL extension returned failure "
+                    f"for {sandbox_id}: {ttl_info.error or 'TTL extension failed'}"
+                )
                 return RenewTtlResult(
                     table_id=table_id,
                     table_type=TableType.AC_BINDING,
@@ -442,6 +446,21 @@ class BaasSandboxHandler:
         if row is None:
             raise ValueError(f"Device record not found: id={table_id}")
 
+        # STOPPED 状态不续期
+        if row.get("status") == "STOPPED":
+            dp = _parse_device_props(row.get("provider_device_props"))
+            logger.info(
+                f"[BaasSandboxHandler] Skip renew TTL for stopped device id={table_id}"
+            )
+            return RenewTtlResult(
+                table_id=table_id,
+                table_type=TableType.BAAS,
+                device_id=row.get("provider_device_id"),
+                success=False,
+                refresh_fail_count=dp.get("refresh_fail_count", 0),
+                error="Device is stopped",
+            )
+
         # baas_device 表的 provider_device_id 就是 sandbox_id
         sandbox_id = row.get("provider_device_id")
         if not sandbox_id:
@@ -475,6 +494,10 @@ class BaasSandboxHandler:
                     refresh_fail_count=0,
                 )
             else:
+                logger.warning(
+                    f"[BaasSandboxHandler] Renew TTL extension returned failure "
+                    f"for {sandbox_id}: {ttl_info.error or 'TTL extension failed'}"
+                )
                 return RenewTtlResult(
                     table_id=table_id,
                     table_type=TableType.BAAS,

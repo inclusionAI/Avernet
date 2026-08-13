@@ -29,6 +29,35 @@ EXPERT_CHAT_FLOWS: list[FlowCase] = [
                 extract={"expert_session_reused": "data.session_key"},
             ),
             FlowStep(
+                method="POST",
+                path="/api/v1/expert-chats/{bot_id}/{owner_id}/sessions",
+                expect={"success": True, "data": {"is_new": True}},
+                extract={"expert_session_second": "data.session_key"},
+            ),
+            FlowStep(
+                method="GET",
+                path="/api/v1/expert-chats/{bot_id}/{owner_id}/sessions",
+                expect={"success": True, "data": {"total": 2}},
+            ),
+            FlowStep(
+                method="POST",
+                path="/api/v1/expert-chats/{bot_id}/{owner_id}/sessions/connect",
+                body={"session_key": "{expert_session_second}"},
+                expect={"success": True, "data": {"is_new": False}},
+                extract={"expert_session_connected": "data.session_key"},
+            ),
+            FlowStep(
+                method="DELETE",
+                path="/api/v1/expert-chats/{bot_id}/{owner_id}/sessions",
+                query={"session_key": "{expert_session_second}"},
+                expect={"success": True},
+            ),
+            FlowStep(
+                method="GET",
+                path="/api/v1/expert-chats/{bot_id}/{owner_id}/sessions",
+                expect={"success": True, "data": {"total": 1}},
+            ),
+            FlowStep(
                 method="DELETE",
                 path="/api/v1/expert-chats/{bot_id}/{owner_id}/session",
                 expect={"success": True},

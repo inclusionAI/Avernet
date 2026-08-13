@@ -66,6 +66,7 @@ class TaskMessageDispatcher:
         bot_id: str = "",
         callback: Any = None,
         chat_metadata: dict[str, str] | None = None,
+        attachments: list[Any] | None = None,
     ) -> None:
         task = asyncio.create_task(
             self._execute_send_message(
@@ -79,6 +80,7 @@ class TaskMessageDispatcher:
                 timeout=timeout,
                 bot_id=bot_id,
                 chat_metadata=chat_metadata,
+                attachments=attachments,
             )
         )
         task.add_done_callback(
@@ -98,6 +100,7 @@ class TaskMessageDispatcher:
         context: BotChatContext | None = None,
         timeout: float,
         bot_id: str = "",
+        attachments: list[Any] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """流式直传：直接 yield bot_service.send_message_stream 的 chunk。
 
@@ -121,6 +124,7 @@ class TaskMessageDispatcher:
                     binding_info=binding_info,
                     context=context,
                     timeout=timeout,
+                    attachments=attachments,
                 ):
                     if chunk.type == "final":
                         final_content = chunk.content
@@ -160,6 +164,7 @@ class TaskMessageDispatcher:
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         bot_id: str = "",
+        attachments: list[Any] | None = None,
     ) -> None:
         task = asyncio.create_task(
             self._execute_inject_message(
@@ -170,6 +175,7 @@ class TaskMessageDispatcher:
                 binding_info=binding_info,
                 context=context,
                 bot_id=bot_id,
+                attachments=attachments,
             )
         )
         task.add_done_callback(self._handle_task_exception)
@@ -198,6 +204,7 @@ class TaskMessageDispatcher:
         timeout: float,
         bot_id: str = "",
         chat_metadata: dict[str, str] | None = None,
+        attachments: list[Any] | None = None,
     ) -> None:
         """执行消息发送
 
@@ -219,6 +226,7 @@ class TaskMessageDispatcher:
                     context=context,
                     timeout=max(timeout - 0.2, 0.1),
                     chat_metadata=chat_metadata,
+                    attachments=attachments,
                 )
 
                 # 3. 更新成功结果
@@ -265,6 +273,7 @@ class TaskMessageDispatcher:
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         bot_id: str = "",
+        attachments: list[Any] | None = None,
     ) -> None:
         """执行消息注入
 
@@ -283,6 +292,7 @@ class TaskMessageDispatcher:
                     message=message,
                     binding_info=binding_info,
                     context=context,
+                    attachments=attachments,
                 )
 
                 # 3. 更新成功结果（inject 无响应内容）

@@ -8,6 +8,9 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from secbaas.community.api.bcn import (
+    Attachment as DomainAttachment,
+)
+from secbaas.community.api.bcn import (
     BotRef as DomainBotRef,
 )
 from secbaas.community.api.bcn import (
@@ -108,6 +111,31 @@ class DownlinkMessage(BaseModel):
         )
 
 
+class Attachment(BaseModel):
+    """BCN 下行附件 — 与 BCS domain 对齐"""
+
+    attachment_id: str = Field(..., description="附件唯一 ID")
+    type: Literal["image"] = Field(..., description="附件类型")
+    file_name: str = Field(..., description="文件名")
+    mime_type: str | None = Field(default=None)
+    size: int | None = Field(default=None)
+    sha256: str | None = Field(default=None)
+    url: str = Field(..., description="下载 URL（临时凭证，不可持久化）")
+    expires_at: int | None = Field(default=None)
+
+    def to_domain(self) -> DomainAttachment:
+        return DomainAttachment(
+            attachment_id=self.attachment_id,
+            type=self.type,
+            file_name=self.file_name,
+            mime_type=self.mime_type,
+            size=self.size,
+            sha256=self.sha256,
+            url=self.url,
+            expires_at=self.expires_at,
+        )
+
+
 # ─────────────────────────── Request ───────────────────────────
 
 
@@ -133,6 +161,7 @@ class ChatSendRequest(BaseModel):
         default=60000, description="BCN 等待 final 回调的最长时间 (毫秒)"
     )
     extensions: dict[str, Any] | None = Field(default=None, description="扩展信息")
+    attachments: list[Attachment] | None = Field(default=None, description="附件列表")
 
     model_config = {"populate_by_name": True}
 
@@ -155,6 +184,7 @@ class ChatInjectRequest(BaseModel):
     from_: FromRef = Field(..., alias="from", description="消息发送方")
     message: DownlinkMessage = Field(..., description="注入消息")
     timeout_ms: int = Field(default=60000, description="超时时间 (毫秒)")
+    attachments: list[Attachment] | None = Field(default=None, description="附件列表")
 
     model_config = {"populate_by_name": True}
 

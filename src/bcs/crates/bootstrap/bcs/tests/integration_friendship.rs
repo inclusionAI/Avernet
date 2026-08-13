@@ -579,12 +579,12 @@ async fn test_visibility_change_to_private_preserves_friendships() {
 }
 
 // ============================================================================
-// Bot Chat Private Tests (AC-41)
+// Bot Chat-Async Private Tests (AC-41)
 // ============================================================================
 
-/// Test that a private bot cannot send chat messages (AC-41).
+/// Test that a private bot cannot submit async chat to a protected non-friend (AC-41).
 #[tokio::test]
-async fn test_private_bot_cannot_send_chat() {
+async fn test_private_bot_cannot_send_chat_async() {
     let _ = tracing_subscriber::fmt::try_init();
     let temp_dir = create_temp_bots_dir();
     let bots_dir = temp_dir.path().to_path_buf();
@@ -600,10 +600,10 @@ async fn test_private_bot_cannot_send_chat() {
     target_client.set_visibility(&target_uuid, "protected").await
         .expect("Should set target visibility to protected");
 
-    // Private sender tries to chat with target → should fail with 403
+    // Private sender tries to submit async chat with target → should fail with 403
     let client = reqwest::Client::new();
     let response = client
-        .post(format!("http://{}/bots/{}/chat", addr, target_uuid))
+        .post(format!("http://{}/bots/{}/chat-async", addr, target_uuid))
         .header("Authorization", format!("Bearer {}", sender_token))
         .json(&json!({
             "message": "Hello from private bot",
@@ -611,18 +611,18 @@ async fn test_private_bot_cannot_send_chat() {
         }))
         .send()
         .await
-        .expect("Failed to send chat request");
+        .expect("Failed to send chat-async request");
 
     assert_eq!(response.status(), reqwest::StatusCode::FORBIDDEN,
-               "Private bot sending chat to non-friend protected target should be rejected with 403");
+               "Private bot submitting chat-async to non-friend protected target should be rejected with 403");
     let body: serde_json::Value = response.json().await.expect("Failed to parse response");
     let error_msg = body.get("error").and_then(|e| e.as_str()).unwrap_or("");
     assert!(!error_msg.is_empty(), "Error message should not be empty");
 }
 
-/// Test that sending chat to a private bot returns 404 (AC-41).
+/// Test that submitting async chat to a private bot returns 404 (AC-41).
 #[tokio::test]
-async fn test_chat_to_private_bot_returns_404() {
+async fn test_chat_async_to_private_bot_returns_404() {
     let _ = tracing_subscriber::fmt::try_init();
     let temp_dir = create_temp_bots_dir();
     let bots_dir = temp_dir.path().to_path_buf();
@@ -638,10 +638,10 @@ async fn test_chat_to_private_bot_returns_404() {
     sender_client.set_visibility(&sender_uuid, "protected").await
         .expect("Should set sender visibility to protected");
 
-    // Sender tries to chat with private target → should fail with 404
+    // Sender tries to submit async chat with private target → should fail with 404
     let client = reqwest::Client::new();
     let response = client
-        .post(format!("http://{}/bots/{}/chat", addr, target_uuid))
+        .post(format!("http://{}/bots/{}/chat-async", addr, target_uuid))
         .header("Authorization", format!("Bearer {}", sender_token))
         .json(&json!({
             "message": "Hello to private bot",
@@ -649,15 +649,15 @@ async fn test_chat_to_private_bot_returns_404() {
         }))
         .send()
         .await
-        .expect("Failed to send chat request");
+        .expect("Failed to send chat-async request");
 
     assert_eq!(response.status(), reqwest::StatusCode::NOT_FOUND,
-               "Chat to private bot should return 404");
+               "Chat-async to private bot should return 404");
 
     // Also try with a non-existent bot UUID to verify 404 consistency
     let fake_uuid = "00000000-0000-0000-0000-000000000000";
     let response_fake = client
-        .post(format!("http://{}/bots/{}/chat", addr, fake_uuid))
+        .post(format!("http://{}/bots/{}/chat-async", addr, fake_uuid))
         .header("Authorization", format!("Bearer {}", sender_token))
         .json(&json!({
             "message": "Hello to non-existent bot",
@@ -665,10 +665,10 @@ async fn test_chat_to_private_bot_returns_404() {
         }))
         .send()
         .await
-        .expect("Failed to send chat request to fake bot");
+        .expect("Failed to send chat-async request to fake bot");
 
     assert_eq!(response_fake.status(), reqwest::StatusCode::NOT_FOUND,
-               "Chat to non-existent bot should also return 404");
+               "Chat-async to non-existent bot should also return 404");
 }
 
 // ============================================================================

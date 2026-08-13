@@ -14,6 +14,10 @@ pub enum SystemMessageEvent {
         /// serialized events deserializable.
         #[serde(default)]
         session_id: String,
+        /// Session input (the task/goal) used to populate the `目标` line of the
+        /// join context message when non-empty. `#[serde(default)]` for old data.
+        #[serde(default)]
+        session_input: Option<serde_json::Value>,
     },
     BotLeft {
         group_id: String,

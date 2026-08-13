@@ -1557,6 +1557,7 @@ mod tests {
             group_id: group_id.to_string(),
             actor: Participant::bot(&new_bot_id, ParticipantRole::Consultant),
             session_id: session_id.clone(),
+            session_input: None,
         };
         dispatcher
             .dispatch(event, &group_fixture(group_id, &existing_id), &session_id, &participants)

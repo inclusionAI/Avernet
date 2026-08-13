@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum AttachmentType {
     Image,
+    File,
 }
 
 /// A temporary attachment reference carried through the message flow.
@@ -66,5 +67,21 @@ mod tests {
         assert!(stable.get("url").is_none());
         assert!(stable.get("expires_at").is_none());
         assert!(!stable.to_string().contains("token=temporary"));
+    }
+
+    #[test]
+    fn file_attachment_uses_file_wire_type() {
+        let attachment = Attachment {
+            attachment_id: "att_file".to_string(),
+            attachment_type: AttachmentType::File,
+            file_name: "design.pdf".to_string(),
+            mime_type: Some("application/pdf".to_string()),
+            size: None,
+            sha256: None,
+            url: "https://download.example.com/temporary".to_string(),
+            expires_at: None,
+        };
+
+        assert_eq!(attachment.stable_metadata()["type"], "file");
     }
 }

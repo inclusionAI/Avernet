@@ -57,6 +57,9 @@ pub struct PrepareUploadResult {
     pub file: SessionFile,
     pub client_target_json: serde_json::Value, // wire: §1.2.a / §1.2.b 响应体（去掉 file_id 重复由 handler 拼）
     pub expires_at: u64,
+    /// True when upload URLs target the BCN proxy and may be projected by a
+    /// delivery adapter. Direct storage presigned URLs must remain untouched.
+    pub proxy_upload: bool,
 }
 
 /// Mutate authz is done ENTIRELY in the service, fed by values the HTTP layer

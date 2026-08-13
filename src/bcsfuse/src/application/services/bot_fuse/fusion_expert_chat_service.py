@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Optional
 
 from src.domain.models.profile_fusion import ConversationTurn
 from src.domain.enums.fuse_enums import FusionStatus
+from src.domain.models.llm_response import LLMResponse
 from src.utils.env_utils import get_server_ip
 
 if TYPE_CHECKING:
@@ -48,6 +49,15 @@ CONTEXT_SUMMARY_TEMPLATE = """【会话背景】
 以下是群组近期的对话摘要，帮助你理解问题的上下文：
 
 {context_summary}
+
+---
+"""
+
+# 关键群消息模板
+KEY_MESSAGES_TEMPLATE = """【关键群消息】
+以下是与问题相关的关键群消息原文，按发送者整理：
+
+{key_messages_text}
 
 ---
 """
@@ -233,6 +243,7 @@ class FusionExpertChatService:
         original_question: str,
         rewritten_question: Optional[str] = None,
         context_summary: Optional[str] = None,
+        key_messages: Optional[list[dict[str, str]]] = None,
     ) -> tuple[str, str]:
         """
         构建 Bot 融合对话的 System Prompt 和 User Prompt
@@ -242,6 +253,7 @@ class FusionExpertChatService:
             original_question: 原始问题
             rewritten_question: 改写后的问题（可选，补充了上下文）
             context_summary: 会话上下文摘要（可选）
+            key_messages: 关键群消息列表（可选），每条包含 sender 和 content
 
         Returns:
             tuple[str, str]: (system_prompt, user_prompt)
@@ -255,7 +267,7 @@ class FusionExpertChatService:
         logger.info("[FusionChat] System Prompt 长度: %d chars (%.1f KB)",
                    len(system_prompt), len(system_prompt) / 1024)
 
-        # 构建 User Prompt：会话背景 + 问题 + 分析框架
+        # 构建 User Prompt：会话摘要 + 关键群消息 + 问题 + 分析框架
         user_prompt_parts = []
 
         # 1. 如果有会话摘要，先添加会话背景
@@ -264,7 +276,19 @@ class FusionExpertChatService:
                 CONTEXT_SUMMARY_TEMPLATE.format(context_summary=context_summary)
             )
 
-        # 2. 问题部分（优先使用改写后的问题）
+        # 2. 添加关键群消息原文，保留"谁说了什么"
+        if key_messages:
+            key_messages_text = "\n\n".join(
+                f"【{km.get('sender', 'unknown')}】\n{km.get('content', '')}"
+                for km in key_messages
+                if km.get("content") or km.get("sender")
+            )
+            if key_messages_text:
+                user_prompt_parts.append(
+                    KEY_MESSAGES_TEMPLATE.format(key_messages_text=key_messages_text)
+                )
+
+        # 3. 问题部分（优先使用改写后的问题）
         if rewritten_question and rewritten_question != original_question:
             user_prompt_parts.append(
                 QUESTION_WITH_REWRITE_TEMPLATE.format(
@@ -277,7 +301,7 @@ class FusionExpertChatService:
                 QUESTION_ONLY_TEMPLATE.format(original_question=original_question)
             )
 
-        # 3. 分析框架（总-分-总结构）
+        # 4. 分析框架（总-分-总结构）
         user_prompt_parts.append(PROFILE_FUSION_USER_PROMPT_TEMPLATE)
 
         user_prompt = "\n".join(user_prompt_parts)
@@ -288,6 +312,8 @@ class FusionExpertChatService:
                    len(user_prompt), len(user_prompt) / 1024)
         if context_summary:
             logger.info("[FusionChat] 会话摘要长度: %d chars", len(context_summary))
+        if key_messages:
+            logger.info("[FusionChat] 关键群消息条数: %d", len(key_messages))
         if rewritten_question and rewritten_question != original_question:
             logger.info("[FusionChat] 问题已改写: '%s...' -> '%s...'",
                        original_question[:30], rewritten_question[:30])
@@ -512,16 +538,30 @@ class FusionExpertChatService:
             latency_budget_ms=timeout_ms // 2 if timeout_ms > 1000 else 30000,
         )
 
+        # Allow environment override for demo / long-scenario use cases.
+        # Defaults to 4096 to stay safe in token-constrained deployments.
+        env_max_tokens = os.environ.get("FUSION_CHAT_MAX_TOKENS", "4096")
+        try:
+            fusion_max_tokens = int(env_max_tokens)
+            if not 1 <= fusion_max_tokens <= 128000:
+                raise ValueError
+        except ValueError:
+            logger.warning(
+                "[FusionChat] Invalid FUSION_CHAT_MAX_TOKENS=%r, using default 4096",
+                env_max_tokens,
+            )
+            fusion_max_tokens = 4096
+
         llm_request = LLMRequest(
             task_spec=task_spec,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=0.7,
-            max_tokens=4096,
+            max_tokens=fusion_max_tokens,
         )
 
-        logger.debug("[FusionChat] 调用 LLM Gateway, model=%s, max_tokens=4096",
-                    physical_model)
+        logger.debug("[FusionChat] 调用 LLM Gateway, model=%s, max_tokens=%d",
+                    physical_model, fusion_max_tokens)
 
         # 直接调用 provider，绕过 router 以使用指定模型
         llm_response = self._llm_gateway.provider.generate(llm_request, model=physical_model)
@@ -598,10 +638,11 @@ class FusionExpertChatService:
                    fusion_result.cache_hit,
                    fusion_result.fused_profile.has_content() and len(errors) == 0,
                    len(errors))
-        logger.info("[FusionChat] 会话总结: success=%s, rewritten=%s, context_count=%d",
+        logger.info("[FusionChat] 会话总结: success=%s, rewritten=%s, context_count=%d, key_messages=%d",
                    conv_summary.success,
                    conv_summary.rewritten_question != conv_summary.original_question,
-                   conv_summary.context_messages_count)
+                   conv_summary.context_messages_count,
+                   len(conv_summary.key_messages) if conv_summary.key_messages else 0)
         if conv_summary.success:
             if conv_summary.rewritten_question:
                 rewritten_preview = conv_summary.rewritten_question[:100] + "..." if len(conv_summary.rewritten_question) > 100 else conv_summary.rewritten_question
@@ -609,6 +650,8 @@ class FusionExpertChatService:
             if conv_summary.context_summary:
                 summary_preview = conv_summary.context_summary[:100] + "..." if len(conv_summary.context_summary) > 100 else conv_summary.context_summary
                 logger.info("[FusionChat] 会话摘要: %s", summary_preview)
+            if conv_summary.key_messages:
+                logger.info("[FusionChat] 关键群消息条数: %d", len(conv_summary.key_messages))
 
         timing = FusionTiming(
             started_at=started_at,
@@ -662,6 +705,7 @@ class FusionExpertChatService:
                     "original_question": conv_summary.original_question if conv_summary.success else None,
                     "rewritten_question": conv_summary.rewritten_question if conv_summary.success else None,
                     "context_summary": conv_summary.context_summary if conv_summary.success else None,
+                    "key_messages": conv_summary.key_messages if conv_summary.success else None,
                     "rewrite_success": conv_summary.success,
                     "context_messages_count": conv_summary.context_messages_count,
                 } if conv_summary.success or conv_summary.context_messages_count > 0 else None,

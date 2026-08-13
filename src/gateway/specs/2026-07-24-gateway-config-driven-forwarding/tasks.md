@@ -20,10 +20,10 @@
 - **Goal:** A streaming HTTP forwarder behind an SPI so flavors can swap.
 - **Files:** `src/gateway/src/gateway/community/spi/forwarder/{_protocols,_models,__init__}.py` (new), `src/gateway/src/gateway/community/plugins/forwarder/httpx/_plugin.py` (new), `pyproject.toml`
 - **Done when:**
-  - [x] `Forwarder.forward(request) -> AsyncContextManager[ForwardResponse]` protocol defined (neutral `ForwardRequest`/`ForwardResponse` models).
-  - [x] Bare plugin issues the upstream call with `httpx`, streaming the response body (raw bytes) and dropping hop-by-hop headers both directions. (Downstream principal conveyance/signing is added by the auth workstream at this seam; not built here.)
+  - [x] `Forwarder.forward(request) -> AsyncContextManager[ForwardResponse]` protocol defined (neutral `ForwardRequest`/`ForwardResponse` models). The current contract is version 2 without renaming the Python symbols; it replaces version 1's buffered `content: bytes` with a closeable, one-shot `body` stream so large uploads retain bounded memory and backpressure.
+  - [x] Bare plugin issues the upstream call with `httpx`, streaming request and response bodies (raw bytes), closing the request body on every terminal path, never replaying it, and dropping hop-by-hop headers both directions. (Downstream principal conveyance/signing is added by the auth workstream at this seam; not built here.)
   - [x] `httpx` promoted to a runtime dependency; new code is mypy-consistent with the codebase (only the ubiquitous bare-plugin subclass-Any artifact).
-  - [x] Conformance test against a real ASGI app (status, headers, multi-chunk streamed body, hop-by-hop stripping).
+  - [x] Conformance test against a real ASGI app (status, headers, request framing, multi-chunk streaming, cleanup/cancellation, replay prevention, hop-by-hop stripping).
 - **Depends on:** —
 
 ## Task 3: SchemaCatalog SPI + file loader + background refresh `[x]`

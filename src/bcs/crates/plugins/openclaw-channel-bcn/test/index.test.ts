@@ -18,6 +18,7 @@ import {
   resolveChatRunId,
   resolveInboundSender,
   resolveGroupIdFromSessionKey,
+  setInboundMediaFactBuilderForTest,
 } from '../src/inbound-handler.js';
 import type { RequestFrame, ResolvedBcsAccount } from '../src/types.js';
 
@@ -39,6 +40,106 @@ function listSourceFiles(dir: string): string[] {
 }
 
 describe('openclaw-channel-bcn', () => {
+  it('stages a pure file message and uses facts-first media when available', async () => {
+    const mediaDir = await mkdtemp(join(tmpdir(), 'bcn-inbound-file-'));
+    const savedPath = join(mediaDir, 'design.pdf');
+    let inboundContext: Record<string, unknown> | undefined;
+    let dispatched = false;
+    const responses: Array<{ ok: boolean }> = [];
+    const client = {
+      sendResponse(_id: string, ok: boolean) {
+        responses.push({ ok });
+      },
+      sendEvent() {},
+    };
+    setInboundMediaFactBuilderForTest(items => ({ facts: items }));
+    setBcsRuntime({
+      config: { async loadConfig() { return {}; } },
+      channel: {
+        media: {
+          async fetchRemoteMedia() {
+            return {
+              buffer: Buffer.from('pdf-content'),
+              contentType: 'application/pdf',
+              fileName: 'design.pdf',
+            };
+          },
+          async saveMediaBuffer(buffer: Buffer) {
+            writeFileSync(savedPath, buffer);
+            return { path: savedPath, size: buffer.length, contentType: 'application/pdf' };
+          },
+        },
+        routing: {
+          resolveAgentRoute() {
+            return { agentId: 'agent-1', sessionKey: 'bcs:group-1' };
+          },
+        },
+        reply: {
+          finalizeInboundContext(ctx: Record<string, unknown>) {
+            inboundContext = ctx;
+            return ctx;
+          },
+          async dispatchReplyWithBufferedBlockDispatcher({ dispatcherOptions }: any) {
+            dispatched = true;
+            await dispatcherOptions.deliver({ text: 'done' }, { kind: 'final' });
+          },
+        },
+        session: {
+          resolveStorePath() { return join(mediaDir, 'sessions.json'); },
+          async recordInboundSession() { return undefined; },
+        },
+      },
+    } as any);
+
+    try {
+      await handleChatSend({
+        type: 'req',
+        id: 'chat-file-facts',
+        method: 'chat.send',
+        params: {
+          bcs_group_id: 'group-1',
+          channel: { source: 'dingtalk', user_id: 'user-1' },
+          session_context: {},
+          message: { role: 'user', content: [], timestamp: Date.now() },
+          attachments: [{
+            attachment_id: 'att-file',
+            type: 'file',
+            file_name: 'design.pdf',
+            mime_type: 'application/pdf',
+            size: 11,
+            url: 'https://download.example/temporary-token',
+          }],
+        },
+      }, client as any, {
+        accountId: 'default',
+        enabled: true,
+        bcsUrl: 'ws://bcs.test/ws/bot',
+        botId: 'bot-1',
+        botName: 'Bot 1',
+        capabilities: { summary: '', domains: [], skills: [], scopes: [] },
+        heartbeatIntervalMs: 60000,
+        reconnectIntervalMs: 5000,
+        connectionTimeoutMs: 10000,
+      });
+
+      assert.equal(responses[0]?.ok, true);
+      assert.equal(dispatched, true);
+      assert.equal(inboundContext?.Body, '');
+      assert.deepEqual(inboundContext?.media, {
+        facts: [{
+          path: savedPath,
+          contentType: 'application/pdf',
+          messageId: 'att-file',
+        }],
+      });
+      assert.equal('MediaPath' in (inboundContext ?? {}), false);
+      assert.equal(JSON.stringify(inboundContext).includes('temporary-token'), false);
+    } finally {
+      setInboundMediaFactBuilderForTest(undefined);
+      await rm(mediaDir, { recursive: true, force: true });
+    }
+  });
+
   it('preserves the upstream BCS run id with backward-compatible fallbacks', () => {
     assert.equal(resolveChatRunId('request-run', ' upstream-run '), 'upstream-run');
     assert.equal(resolveChatRunId(' request-run ', undefined), 'request-run');

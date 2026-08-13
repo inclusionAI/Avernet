@@ -37,12 +37,17 @@
 forward_request(request):
   server     = domain_map.resolve(path)                       # 已有；server.name 用作 aud
   identities = await authenticator.authenticate(method, path, bundle)   # 已有
-  forward    = ForwardRequest(method, url, headers=caller_headers_minus_host_and_principal, body)
+  forward    = ForwardRequest(method, url, headers=caller_headers_minus_host_and_principal)
   forward    = await _attach_identities(forward, identities,
                                         signer=request.app.state.principal_signer,
                                         audience=server.name)   # ← 真正注入
+  forward    = replace(forward, body=await _request_body(request))
   stream forwarder.forward(forward) … 略
 ```
+
+这里遵循 Forwarder Plugin API contract version 2：请求体是 closeable、one-shot
+异步流，而不是 version 1 的 buffered `content: bytes`。身份认证和签名必须在读取
+首个 body chunk 之前完成；Forwarder 接管后负责在成功、失败或取消时关闭 body。
 
 ### 接缝 `_attach_identities`（由 no-op → 真注入）
 

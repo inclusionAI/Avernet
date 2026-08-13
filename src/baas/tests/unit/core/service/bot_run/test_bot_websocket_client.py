@@ -903,6 +903,120 @@ class TestOnEvent:
         assert client._event_handlers["my.event"] is h2
 
 
+# ==================== Tests: chat_send / chat_inject with attachments ====================
+
+
+class TestAttachmentsInChatSendAndInject:
+    """Tests for attachments passthrough in chat_send and chat_inject."""
+
+    async def _setup_mock_ws(self, client):
+        """Helper: set up a mock ws that auto-responds to requests."""
+        mock_ws = AsyncMock()
+        client._ws = mock_ws
+        client._connected = True
+        sent_frames = []
+
+        async def mock_send(data):
+            sent = json.loads(data)
+            sent_frames.append(sent)
+            req_id = sent["id"]
+            entry = client._pending_requests.get(req_id)
+            if entry:
+                if not entry.done():
+                    entry.set_result(
+                        {
+                            "type": "res",
+                            "id": req_id,
+                            "ok": True,
+                            "payload": {},
+                        }
+                    )
+
+        mock_ws.send = mock_send
+        return sent_frames
+
+    # [单测用例]测试场景：chat_send 带 attachments 时 params 包含 attachments 键
+    @pytest.mark.asyncio
+    async def test_chat_send_with_attachments(self, client):
+        """chat_send with attachments includes 'attachments' key in params dict."""
+        sent_frames = await self._setup_mock_ws(client)
+        attachments = [
+            {
+                "attachment_id": "att_1",
+                "type": "image",
+                "file_name": "f1.png",
+                "url": "https://cdn.example.com/f1",
+            }
+        ]
+
+        await client.chat_send(
+            session_key="agent:main:xxx",
+            message="hello",
+            attachments=attachments,
+        )
+
+        params = sent_frames[0]["params"]
+        assert "attachments" in params
+        assert params["attachments"] == attachments
+        assert params["attachments"][0]["attachment_id"] == "att_1"
+        # Verify required fields still present
+        assert params["sessionKey"] == "agent:main:xxx"
+        assert params["message"] == "hello"
+        assert "permissionMode" in params
+
+    # [单测用例]测试场景：chat_send 不带 attachments 时 params 不含 attachments 键
+    @pytest.mark.asyncio
+    async def test_chat_send_without_attachments(self, client):
+        """chat_send without attachments does not include 'attachments' key."""
+        sent_frames = await self._setup_mock_ws(client)
+
+        await client.chat_send(session_key="agent:main:xxx", message="hello")
+
+        params = sent_frames[0]["params"]
+        assert "attachments" not in params
+        # Verify backward compatibility
+        assert params["sessionKey"] == "agent:main:xxx"
+        assert params["message"] == "hello"
+
+    # [单测用例]测试场景：chat_inject 带 attachments 时 params 包含 attachments 键
+    @pytest.mark.asyncio
+    async def test_chat_inject_with_attachments(self, client):
+        """chat_inject with attachments includes 'attachments' key in params dict."""
+        sent_frames = await self._setup_mock_ws(client)
+        attachments = [
+            {
+                "attachment_id": "att_2",
+                "type": "document",
+                "file_name": "report.pdf",
+                "url": "https://cdn.example.com/report",
+            }
+        ]
+
+        await client.chat_inject(
+            session_key="agent:main:yyy",
+            message="inject with attachment",
+            attachments=attachments,
+        )
+
+        params = sent_frames[0]["params"]
+        assert "attachments" in params
+        assert params["attachments"] == attachments
+        assert params["attachments"][0]["attachment_id"] == "att_2"
+        assert params["sessionKey"] == "agent:main:yyy"
+
+    # [单测用例]测试场景：chat_inject 不带 attachments 时 params 不含 attachments 键
+    @pytest.mark.asyncio
+    async def test_chat_inject_without_attachments(self, client):
+        """chat_inject without attachments does not include 'attachments' key."""
+        sent_frames = await self._setup_mock_ws(client)
+
+        await client.chat_inject(session_key="agent:main:yyy", message="hello inject")
+
+        params = sent_frames[0]["params"]
+        assert "attachments" not in params
+        assert params["sessionKey"] == "agent:main:yyy"
+
+
 # ==================== Tests: _get_default_headers ====================
 
 

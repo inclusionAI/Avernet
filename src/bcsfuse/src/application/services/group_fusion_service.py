@@ -43,6 +43,7 @@ Stage 1 Phase 5:
 from __future__ import annotations
 
 import logging
+import os
 import time
 import uuid
 import threading
@@ -60,7 +61,7 @@ from src.domain.models.fusion_result import (
     FusionTiming,
 )
 from src.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
-from src.domain.models.profile_fusion import FusionContext
+from src.domain.models.profile_fusion import FusionContext, GroupConversationSummary
 from src.infra.context import submit_with_context
 
 if TYPE_CHECKING:
@@ -74,6 +75,26 @@ if TYPE_CHECKING:
     from src.domain.services.adapters.worker_registry_store_adapter import WorkerRegistryStoreAdapter
 
 logger = logging.getLogger(__name__)
+
+# G9 Profile 融合默认超时（毫秒）。Profile 融合包含一次 LLM 调用，
+# 4 个 Bot 的完整 profile 较大，首次冷缓存通常需要 2-4 分钟，因此默认放宽到 240s。
+_DEFAULT_PROFILE_FUSION_TIMEOUT_MS = 240000
+
+
+def _get_profile_fusion_timeout_seconds() -> float:
+    """读取 FUSION_PROFILE_TIMEOUT_MS 环境变量，返回秒数。"""
+    raw = os.environ.get("FUSION_PROFILE_TIMEOUT_MS", str(_DEFAULT_PROFILE_FUSION_TIMEOUT_MS))
+    try:
+        ms = int(raw)
+        if ms < 1000:
+            raise ValueError
+        return ms / 1000.0
+    except ValueError:
+        logger.warning(
+            "[GroupFusionService] Invalid FUSION_PROFILE_TIMEOUT_MS=%r, using default %d ms",
+            raw, _DEFAULT_PROFILE_FUSION_TIMEOUT_MS
+        )
+        return _DEFAULT_PROFILE_FUSION_TIMEOUT_MS / 1000.0
 
 
 class GroupFusionService:
@@ -638,7 +659,6 @@ class GroupFusionService:
         Returns:
             FusionResult: 融合结果（G9 模式）
         """
-        from src.domain.models.profile_fusion import GroupConversationSummary
         from src.utils.fuse_util import generate_fusion_id, worker_profile_to_dict
 
         start_time = time.time()
@@ -720,10 +740,11 @@ class GroupFusionService:
             group_id,
         )
 
-        # 并发等待两个任务（超时取最大值 120s）
+        # 并发等待两个任务（Profile 融合超时通过 FUSION_PROFILE_TIMEOUT_MS 配置）
+        profile_fusion_timeout = _get_profile_fusion_timeout_seconds()
         done, not_done = wait(
             [profile_future, summary_future],
-            timeout=120,  # Profile 融合最长 120s，Summary 最长 30s
+            timeout=profile_fusion_timeout,
             return_when=ALL_COMPLETED
         )
 
@@ -750,7 +771,7 @@ class GroupFusionService:
             profile_future.cancel()
             step1_profile_elapsed = time.time() - step1_start
             logger.error("[G9-FUSE] Step1a(Profile融合)超时: 耗时=%.3fs", step1_profile_elapsed)
-            errors.append("Profile fusion timed out after 120s")
+            errors.append(f"Profile fusion timed out after {profile_fusion_timeout:.1f}s")
 
         if not profile_success or fusion_result is None:
             return self._fusion_expert_chat_service.build_error_result(
@@ -804,6 +825,7 @@ class GroupFusionService:
                 rewritten_question=request.question,
                 original_question=request.question,
                 context_summary="",
+                key_messages=[],
                 context_messages_count=0,
                 success=False,
                 error_message="Conversation summary failed or timed out",
@@ -813,13 +835,14 @@ class GroupFusionService:
         step1_elapsed = time.time() - step1_start
         logger.info("[G9-FUSE] Step1(并发)总耗时: %.3fs (实际并行执行)", step1_elapsed)
 
-        # ========== Step 2: 构建 Prompt（包含改写问题和会话摘要）==========
+        # ========== Step 2: 构建 Prompt（包含改写问题、会话摘要和关键群消息）==========
         step2_start = time.time()
         system_prompt, user_prompt = self._fusion_expert_chat_service.build_prompts(
             fused_profile=fused_profile,
             original_question=request.question,
             rewritten_question=conv_summary.rewritten_question,
             context_summary=conv_summary.context_summary,
+            key_messages=conv_summary.key_messages,
         )
         step2_elapsed = time.time() - step2_start
         logger.info("[G9-FUSE] Step2(Prompt构建)完成: 耗时=%.3fs", step2_elapsed)
@@ -919,14 +942,13 @@ class GroupFusionService:
         """
         import asyncio
 
-        from src.domain.models.profile_fusion import GroupConversationSummary
-
         if self._group_context_service is None:
             logger.info("[G9-FUSE] GroupContextService 未注入，跳过会话总结")
             return GroupConversationSummary(
                 rewritten_question=question,
                 original_question=question,
                 context_summary="",
+                key_messages=[],
                 context_messages_count=0,
                 success=False,
                 error_message="GroupContextService not injected",
@@ -948,6 +970,7 @@ class GroupFusionService:
                 rewritten_question=question,
                 original_question=question,
                 context_summary="",
+                key_messages=[],
                 context_messages_count=0,
                 success=False,
                 error_message=str(e),
