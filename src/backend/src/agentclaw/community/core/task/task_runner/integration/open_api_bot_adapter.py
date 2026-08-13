@@ -102,11 +102,12 @@ class OpenApiBotAdapter(OpenApiBotPort):
         loop = asyncio.new_event_loop()
         try:
             return loop.run_until_complete(
-                self._send_and_wait_async(bot_id, message, metadata, timeout, poll_interval))
+                self.send_and_wait_async(bot_id=bot_id, message=message, metadata=metadata,
+                                     timeout=timeout, poll_interval=poll_interval))
         finally:
             loop.close()
 
-    async def _send_and_wait_async(self, bot_id: str, message: str,
+    async def send_and_wait_async(self, *, bot_id: str, message: str,
                                    metadata: dict[str, Any] | None, timeout: float,
                                    poll_interval: float) -> dict[str, Any]:
         await self.ensure_grant(bot_id)
