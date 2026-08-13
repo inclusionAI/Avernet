@@ -128,10 +128,21 @@ class BcsHttpAdapter:
 
     async def start_state_machine_run(self, group_id, *, definition_yaml, definition_ref,
                                       session_id, input) -> str:
-        raise NotImplementedError  # T9
+        body: dict[str, Any] = {"input": input}
+        if definition_ref is not None:
+            body["definition_ref"] = definition_ref
+        if definition_yaml is not None:
+            body["definition_yaml"] = definition_yaml
+        if session_id is not None:
+            body["session_id"] = session_id
+        r = await self._req("POST", f"/groups/{group_id}/state-machine-runs", json=body,
+                            idempotency_key=uuid.uuid4().hex)
+        data = r.json()
+        return (data.get("run") or data).get("run_id")
 
     async def get_state_machine_run(self, run_id: str) -> dict[str, Any]:
-        raise NotImplementedError  # T9
+        r = await self._req("GET", f"/state-machine-runs/{run_id}")
+        return r.json()
 
     async def validate_definition(self, definition_yaml: str) -> None:
         await self._req("POST", "/collaboration/definitions/validate", json={"yaml": definition_yaml})

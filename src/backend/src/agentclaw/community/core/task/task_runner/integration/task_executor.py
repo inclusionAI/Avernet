@@ -93,7 +93,18 @@ class TaskExecutor:
             return True
 
     async def _dispatch_state_machine(self, node, group_id, meta, loop_task_id) -> bool:
-        return True  # T9 替换:start_state_machine_run→poller.register(run handle)
+        ctx = self._context.build(node.task_id, node.node_id)
+        prompt = self._formatter.format_execute(ctx, node)
+        definition_ref = (meta or {}).get("definition_ref")
+        run_id = await self._bcs.start_state_machine_run(
+            group_id, definition_yaml=None, definition_ref=definition_ref,
+            session_id=None, input={"query": prompt},
+        )
+        self._poller.register(BcsGroupHandle(
+            loop_task_id=loop_task_id, group_id=group_id, collab_mode="state_machine",
+            registered_at=time.monotonic(), session_id=None, run_id=run_id,
+        ))
+        return True
 
     async def form_coop_group(self, gf: GroupFormation) -> str:
         bot_ids = list(gf.bot_ids)
