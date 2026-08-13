@@ -430,8 +430,8 @@ class DataInitResult(BaseModel):
 
 
 # ── Bot inventory card surface ─────────────────────────────────────────────
-# Card view at ``/openapi/v1/bots/all`` (list) and ``/all/{bot_id}`` (one
-# card); actions hang off the bot record at ``/{bot_id}/actions``.
+# Card list returned by ``/openapi/v1/bots/all``. Action affordances are
+# embedded in each item; there is no rich-card detail or standalone actions route.
 # These Literals are trimmed siblings of the core enums in
 # ``core.bot_inventory.types`` (kept as strings so a pydantic schema carries
 # them as JSON enums without a circular import on the core module).

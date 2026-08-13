@@ -546,13 +546,14 @@ async def get_bots_ceiling(
 
 
 # ── Bot inventory card surface ─────────────────────────────────────────────
-# Aggregated card view at ``/openapi/v1/bots/all``, declared before the
-# ``/{bot_id}`` wildcard so ``all`` matches as a literal, not as a bot id.
-# The endpoint aggregates the owner's personal cloud + local Bots behind
-# ``BotInventoryServiceProtocol`` (a distinct Service API from the
-# ``BotServiceProtocol`` CRUD this file serves below); the value translation is
-# the ``_to_inventory_item`` helper at the top of this file (same place as
-# ``_to_bot``).
+# Card list at ``/openapi/v1/bots/all``, declared before the ``/{bot_id}``
+# wildcard so ``all`` matches as a literal rather than a bot_id. Each card already
+# carries its action affordances; the former rich-card detail and standalone
+# actions endpoints were removed. The list aggregates the owner's personal cloud
+# + local Bots behind ``BotInventoryServiceProtocol`` (a distinct Service API
+# from the ``BotServiceProtocol`` CRUD below); ``_to_inventory_item`` translates
+# the read model to the public schema.
+
 
 
 @router.get(
