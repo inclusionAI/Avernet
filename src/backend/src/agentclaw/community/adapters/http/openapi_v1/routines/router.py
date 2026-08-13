@@ -19,6 +19,7 @@ from agentclaw.community.adapters.http.openapi_v1.principal import (
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Deleted,
     Envelope,
+    ErrorEnvelope,
     Page,
     PageParamsDep,
 )
@@ -249,7 +250,23 @@ async def update_routine(
     return envelope(_map_routine(data), request)
 
 
-@router.delete("/{routine_id}", response_model=Envelope[Deleted])
+# Only this route forwards the relay's own error code, so 504 is declared here
+# rather than in the surface-wide ERROR_RESPONSES — which already carries 502 —
+# for the same reason the resources group declares its 413 locally: a status one
+# route produces should not make every other route advertise it.
+_RELAY_TIMEOUT_RESPONSE: dict[int | str, dict[str, object]] = {
+    504: {
+        "model": ErrorEnvelope,
+        "description": "The bot did not answer within the relay's deadline.",
+    },
+}
+
+
+@router.delete(
+    "/{routine_id}",
+    response_model=Envelope[Deleted],
+    responses=_RELAY_TIMEOUT_RESPONSE,
+)
 @envelope_errors
 async def delete_routine(
     routine_id: str,
@@ -261,12 +278,17 @@ async def delete_routine(
     """Delete a routine.
 
     `bot_id` is a required query parameter, as on the read. A failed delete is
-    never reported as a success: an unknown routine answers 404 and an
-    unreachable bot 502.
+    never reported as a success: an unknown routine answers 404, and a bot that
+    does not answer in time answers 504 when the call itself timed out or 502
+    when the bot reported the timeout back. Both mean the same thing to a
+    caller — the delete may or may not have happened, so re-read before
+    retrying.
     """
-    # A published-stage delete is refused by the relay, which carries the
-    # status to answer with per-raise — hence the dynamic mapping below rather
-    # than a static entry in ENVELOPE_ERRORS.
+    # The relay carries the status to answer with per-raise, so the mapping
+    # below is dynamic rather than a static ENVELOPE_ERRORS entry. Two cases
+    # reach it: a published-stage delete the relay refuses, and
+    # CronApiTimeoutError, whose error_code is 504 — which is why the timeout is
+    # documented as 504 and not only as the 502 the result-dict branch raises.
     user_id = owner_id
     nick_name = owner_id
     try:

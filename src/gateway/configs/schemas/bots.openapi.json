@@ -10789,7 +10789,7 @@
     },
     "/openapi/v1/bots/routines/{routine_id}": {
       "delete": {
-        "description": "Delete a routine.\n\n`bot_id` is a required query parameter, as on the read. A failed delete is\nnever reported as a success: an unknown routine answers 404 and an\nunreachable bot 502.",
+        "description": "Delete a routine.\n\n`bot_id` is a required query parameter, as on the read. A failed delete is\nnever reported as a success: an unknown routine answers 404, and a bot that\ndoes not answer in time answers 504 when the call itself timed out or 502\nwhen the bot reported the timeout back. Both mean the same thing to a\ncaller — the delete may or may not have happened, so re-read before\nretrying.",
         "operationId": "delete_routine_openapi_v1_bots_routines__routine_id__delete",
         "parameters": [
           {
@@ -10913,6 +10913,16 @@
               }
             },
             "description": "Upstream service error"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The bot did not answer within the relay's deadline."
           }
         },
         "summary": "Delete Routine",
