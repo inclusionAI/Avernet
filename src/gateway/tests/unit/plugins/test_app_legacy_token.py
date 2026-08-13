@@ -108,12 +108,12 @@ async def test_inactive_legacy_row_returns_none(registry: AppRepository) -> None
 
 @pytest.fixture(autouse=True)
 def _reset_warned_apps() -> Iterator[None]:
-    """The warn-once ledger is module state keyed on surrogate ids, which restart
-    at 1 in every fresh in-memory DB. Clear on both sides so entries cannot leak
+    """The report ledger is module state keyed on surrogate ids, which restart at
+    1 in every fresh in-memory DB. Clear on both sides so entries cannot leak
     between tests or into another module."""
-    app_repository._warned_legacy_apps.clear()
+    app_repository._last_reported.clear()
     yield
-    app_repository._warned_legacy_apps.clear()
+    app_repository._last_reported.clear()
 
 
 async def test_legacy_resolution_warns_with_the_app_identity(

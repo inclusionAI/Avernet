@@ -18,6 +18,8 @@ are stored stays a storage concern.
 from __future__ import annotations
 
 import asyncio
+import time
+from collections.abc import Callable
 from typing import Any
 
 from sqlalchemy import select
@@ -34,38 +36,43 @@ logger = get_logger("core-app")
 
 _ACTIVE = "ACTIVE"
 
-# App ids already reported — once for still presenting a legacy JWT, once for a
-# corrupt credential row. Reporting once per app rather than once per request
-# keeps both signals readable: the question is *which* apps are affected, and one
-# busy app would otherwise emit millions of lines a day and bury a quiet one. A
-# corrupt row is the worse case, since it can never authenticate and its client
-# retries forever. Module-level because the DI container builds this repository
-# per request (``providers.Factory``), so instance state would never survive long
-# enough to dedupe anything.
-_warned_legacy_apps: set[int] = set()
-_reported_corrupt_apps: set[int] = set()
+# When each (datasource, app) was last reported, for the two per-request
+# conditions worth reporting: an app still presenting a legacy JWT, and a
+# credential row that cannot ever authenticate. Reporting every request would
+# bury both signals — one busy app emits millions of lines a day — but reporting
+# only once per process is worse for the corrupt-row case, which is a live
+# outage: a single line at deploy time leaves every rate-based alert reading zero
+# for the hours it persists. Hence a re-report window rather than a one-shot set.
+#
+# Keyed on the datasource too, because ``AppRow.id`` is a per-database surrogate:
+# two plugins in one process both number their apps from 1, and a bare id would
+# let one silence the other. Module-level because the DI container builds this
+# repository per request (``providers.Factory``), so instance state would never
+# survive long enough to dedupe anything.
+_REPORT_WINDOW_SECONDS = 300.0
+_last_reported: dict[tuple[str, int, int], float] = {}
 
 
 class PrefixTakenError(RuntimeError):
     """The API-key prefix was claimed concurrently; generate another and retry."""
 
 
-def _report_corrupt_row(record: RegisteredApp, problem: str) -> None:
-    """Log a credential row that cannot ever authenticate, once per app.
-
-    Loud because the symptom otherwise is an app that mysteriously fails while
-    its row looks perfectly fine to whoever is reading the table.
-    """
-    if record.id in _reported_corrupt_apps:
+def _report_once_per_window(
+    kind: str,
+    datasource: object,
+    record: RegisteredApp,
+    log: Callable[..., None],
+    message: str,
+    *args: object,
+) -> None:
+    """Emit ``message`` for this app at most once per report window."""
+    key = (kind, id(datasource), record.id)
+    now = time.monotonic()
+    last = _last_reported.get(key)
+    if last is not None and now - last < _REPORT_WINDOW_SECONDS:
         return
-    _reported_corrupt_apps.add(record.id)
-    logger.error(
-        "app credential row is unusable (%s): id=%s app_name=%s "
-        "(logged once per app per process)",
-        problem,
-        record.id,
-        record.app_name,
-    )
+    _last_reported[key] = now
+    log(message, *args)
 
 
 class AppRepository(AppRegistry):
@@ -79,6 +86,25 @@ class AppRepository(AppRegistry):
 
     def __init__(self, db: DataSourcePlugin) -> None:
         self._db = db
+
+    def _report_corrupt(self, record: RegisteredApp, problem: str) -> None:
+        """A row that can never authenticate — a partial write or bad migration.
+
+        Loud, because the symptom otherwise is an app failing every request
+        while its row looks perfectly fine to whoever is reading the table.
+        """
+        _report_once_per_window(
+            "corrupt-row",
+            self._db,
+            record,
+            logger.error,
+            "app credential row is unusable (%s): id=%s app_name=%s "
+            "(repeated at most every %ss)",
+            problem,
+            record.id,
+            record.app_name,
+            int(_REPORT_WINDOW_SECONDS),
+        )
 
     async def find_app_by_credential(self, credential: str) -> RegisteredApp | None:
         """Resolve a presented credential to its app, or ``None`` (soft miss).
@@ -117,7 +143,7 @@ class AppRepository(AppRegistry):
         if stored_hash is None:
             # Violates the table's one-credential-form invariant: a partial
             # write or a botched migration.
-            _report_corrupt_row(record, "api_key_prefix set but api_key_hash is NULL")
+            self._report_corrupt(record, "api_key_prefix set but api_key_hash is NULL")
             return None
         if stored_hash.count(":") != 1 or not all(stored_hash.split(":")):
             # ``verify_key`` would return False here like any wrong key, so the
@@ -125,7 +151,7 @@ class AppRepository(AppRegistry):
             # credential. Deeper corruption (valid shape, unusable base64) still
             # reads as a plain rejection — that branch is inside the copied
             # generator, which cannot be edited without breaking parity.
-            _report_corrupt_row(record, "api_key_hash is not 'salt:digest'")
+            self._report_corrupt(record, "api_key_hash is not 'salt:digest'")
             return None
 
         # PBKDF2 is ~30ms of CPU and must not run on the event loop: measured
@@ -158,16 +184,19 @@ class AppRepository(AppRegistry):
                 return None
             record = row.to_record()
 
-        if record.id not in _warned_legacy_apps:
-            _warned_legacy_apps.add(record.id)
-            logger.warning(
-                "app is still authenticating with a deprecated JWT token: "
-                "id=%s app_name=%s tenant=%s — rotate it onto an API key "
-                "(logged once per app per process)",
-                record.id,
-                record.app_name,
-                record.tenant,
-            )
+        _report_once_per_window(
+            "legacy-jwt",
+            self._db,
+            record,
+            logger.warning,
+            "app is still authenticating with a deprecated JWT token: "
+            "id=%s app_name=%s tenant=%s — rotate it onto an API key "
+            "(repeated at most every %ss)",
+            record.id,
+            record.app_name,
+            record.tenant,
+            int(_REPORT_WINDOW_SECONDS),
+        )
         return record
 
     async def exists_prefix(self, api_key_prefix: str) -> bool:
@@ -222,9 +251,11 @@ class AppRepository(AppRegistry):
                 session.flush()
                 return row.id
         except IntegrityError as exc:
-            # Only a prefix collision is retryable. Mapping every IntegrityError
+            # Only a prefix collision is retryable: mapping every IntegrityError
             # would turn a NOT NULL or FK violation into three silent retries and
             # a "no unused prefix" error naming the wrong cause entirely.
-            if "api_key_prefix" not in str(exc.orig):
+            # Decided by re-reading the table rather than by matching the driver's
+            # message, which differs per backend and moves with index names.
+            if not await self.exists_prefix(api_key_prefix):
                 raise
             raise PrefixTakenError(api_key_prefix) from exc

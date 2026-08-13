@@ -20,6 +20,15 @@
 -- below: the third-party-app registry (`avernet_application`), the tenant master
 -- (`avernet_tenant`), and the access-key registry (`avernet_access_key_token`).
 
+-- KNOWN ISSUE (pre-dates the API-key work): the unique indexes on the two
+-- `token` columns are over varchar(1024) utf8mb4 = 4096 bytes, past InnoDB's
+-- 3072-byte key limit, so this file cannot be executed as-is against MySQL 8
+-- InnoDB. Those columns also keep the server-default (case-insensitive)
+-- collation, so their exact-match lookups are case-insensitive there. Both are
+-- left alone deliberately: changing either rebuilds an index on a deployed
+-- table, which `002` cannot do safely. `api_key_prefix` pins utf8mb4_bin
+-- because it is a new column with no such constraint.
+
 -- Table: avernet_application
 -- 第三方应用注册表：按 `api_key_prefix`(API Key 前 8 位)定位、再比对 `api_key_hash`；
 -- `id` 为应用稳定身份。每行只填一种凭证：新行填 api_key_*，迁移前的旧行填 `token`。
@@ -30,8 +39,8 @@ CREATE TABLE IF NOT EXISTS `avernet_application` (
   `app_name` varchar(256) NOT NULL COMMENT '应用名称',
   `app_type` varchar(64) NOT NULL DEFAULT 'UNKNOWN' COMMENT '应用类型',
   `api_key_hash` varchar(256) DEFAULT NULL COMMENT 'API Key 哈希(PBKDF2-SHA256，格式 base64(salt):base64(dk))',
-  `api_key_prefix` varchar(8) COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'API Key 前 8 位，查找键(哈希加盐，无法按哈希查找)',
-  `token` varchar(1024) COLLATE utf8mb4_bin DEFAULT NULL COMMENT '[废弃] 旧版应用令牌(明文签名 JWT)，过渡期精确匹配查找键；待废弃日志静默后随查找路径一并删除',
+  `api_key_prefix` varchar(8) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'API Key 前 8 位，查找键(哈希加盐，无法按哈希查找)',
+  `token` varchar(1024) DEFAULT NULL COMMENT '[废弃] 旧版应用令牌(明文签名 JWT)，过渡期精确匹配查找键；待废弃日志静默后随查找路径一并删除',
   `owners` varchar(1024) NOT NULL COMMENT '应用归属(开发者/组织)',
   `tenant` varchar(64) NOT NULL COMMENT '所属租户(逻辑引用 avernet_tenant.name)',
   `status` varchar(32) NOT NULL DEFAULT 'ACTIVE' COMMENT '状态(ACTIVE/INACTIVE)，仅 ACTIVE 可通过鉴权',

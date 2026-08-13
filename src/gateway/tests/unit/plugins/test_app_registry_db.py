@@ -7,13 +7,23 @@ and presents the plaintext key the way a caller would.
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import os
+import time
 from collections.abc import Iterator
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from gateway.community.bootstrap import initialize_database
 from gateway.community.bootstrap._configs import DatabaseConfig
-from gateway.community.core.app import APIKeyGenerator, AppRepository, AppRow
+from gateway.community.core.app import (
+    APIKeyGenerator,
+    AppRepository,
+    AppRow,
+    PrefixTakenError,
+)
 from gateway.community.core.app import _repository as app_repository
 from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
 from gateway.community.spi.app import RegisteredApp
@@ -59,13 +69,16 @@ def registry(db: DataSourcePlugin) -> AppRepository:
 
 
 @pytest.fixture(autouse=True)
-def _reset_report_ledgers() -> Iterator[None]:
-    """The report-once ledgers are module state keyed on surrogate ids, which
-    restart at 1 in every fresh in-memory DB. Clear on both sides so entries
-    cannot leak between tests or into another module."""
-    app_repository._reported_corrupt_apps.clear()
+def _reset_report_ledger() -> Iterator[None]:
+    """The report ledger is module state; clear it on both sides.
+
+    Keyed on (kind, datasource, surrogate id), and surrogate ids restart at 1 in
+    every fresh in-memory DB, so a leaked entry would silently suppress another
+    test's expected log — passing or failing on collection order.
+    """
+    app_repository._last_reported.clear()
     yield
-    app_repository._reported_corrupt_apps.clear()
+    app_repository._last_reported.clear()
 
 
 async def test_correct_key_resolves_active_seeded_app(registry: AppRepository) -> None:
@@ -169,8 +182,6 @@ async def test_duplicate_prefix_raises_prefix_taken_error(
     Guards the constraint-name discrimination in ``store``: without it the
     registrar retries any write failure and reports prefix exhaustion.
     """
-    from gateway.community.core.app import PrefixTakenError
-
     repository = AppRepository(db)
     key = APIKeyGenerator.generate()
     common = dict(
@@ -190,11 +201,10 @@ async def test_non_collision_integrity_errors_are_not_disguised(
     db: DataSourcePlugin,
 ) -> None:
     """A NOT NULL violation must surface as itself, not as a prefix collision."""
-    from sqlalchemy.exc import IntegrityError
-
-    from gateway.community.core.app import PrefixTakenError
-
     key = APIKeyGenerator.generate()
+    # PrefixTakenError is a RuntimeError, so binding IntegrityError here is
+    # itself the assertion: a regression that relabelled every IntegrityError
+    # would escape this ``raises`` rather than satisfy it.
     with pytest.raises(IntegrityError) as caught:
         await AppRepository(db).store(
             api_key_hash=APIKeyGenerator.hash_key(key),
@@ -204,15 +214,13 @@ async def test_non_collision_integrity_errors_are_not_disguised(
             app_type="assistant",
             tenant="t",
         )
-    assert not isinstance(caught.value, PrefixTakenError)
+    assert "app_name" in str(caught.value.orig)
 
 
 async def test_malformed_hash_is_reported_not_silently_rejected(
     db: DataSourcePlugin, registry: AppRepository, caplog: pytest.LogCaptureFixture
 ) -> None:
     """A hash missing its separator reads as a wrong key without this check."""
-    import logging
-
     key = APIKeyGenerator.generate()
     with db.orm_session() as session:
         session.add(
@@ -238,8 +246,6 @@ async def test_corrupt_row_error_is_logged_once_per_app(
     db: DataSourcePlugin, registry: AppRepository, caplog: pytest.LogCaptureFixture
 ) -> None:
     """A corrupt row can never authenticate, so its client retries forever."""
-    import logging
-
     key = APIKeyGenerator.generate()
     with db.orm_session() as session:
         session.add(
@@ -268,8 +274,6 @@ async def test_corrupt_row_is_logged_as_an_error(
     It fails closed either way, but silently would leave an operator staring at
     a healthy-looking row and an app that cannot authenticate.
     """
-    import logging
-
     key = APIKeyGenerator.generate()
     with db.orm_session() as session:
         session.add(
@@ -320,10 +324,6 @@ async def test_verification_does_not_stall_the_event_loop(
         ``cpu_count`` reports the machine's cores and would let the guard pass on a
         pinned runner, then fail the assertion against correct code.
     """
-    import asyncio
-    import os
-    import time
-
     available = (
         len(os.sched_getaffinity(0))
         if hasattr(os, "sched_getaffinity")
@@ -334,10 +334,17 @@ async def test_verification_does_not_stall_the_event_loop(
             f"needs >1 usable core to tell stalling from starvation (have {available})"
         )
 
+    heartbeat_period = 0.005
     start = time.perf_counter()
     APIKeyGenerator.verify_key(_ACTIVE_KEY, _ACTIVE_HASH)
     derivation = time.perf_counter() - start
     budget = derivation * 0.5
+    if budget <= heartbeat_period * 2:
+        pytest.skip(
+            f"a {derivation * 1000:.0f}ms derivation leaves a {budget * 1000:.0f}ms "
+            f"budget, under the {heartbeat_period * 1000:.0f}ms heartbeat floor — "
+            "correct code would fail this bound"
+        )
 
     longest_gap = 0.0
 
@@ -345,7 +352,7 @@ async def test_verification_does_not_stall_the_event_loop(
         nonlocal longest_gap
         previous = time.perf_counter()
         while True:
-            await asyncio.sleep(0.005)
+            await asyncio.sleep(heartbeat_period)
             now = time.perf_counter()
             longest_gap = max(longest_gap, now - previous)
             previous = now

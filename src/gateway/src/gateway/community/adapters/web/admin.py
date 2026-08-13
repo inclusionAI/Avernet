@@ -37,7 +37,11 @@ class AppRequest(BaseModel):
     # Constrained, not free text: authentication compares this to "ACTIVE"
     # exactly, so accepting "active" would mint a key that can never
     # authenticate while returning 201 as though registration had worked.
-    status: Literal["ACTIVE", "INACTIVE", "REVOKED"] = "ACTIVE"
+    # REVOKED is excluded deliberately — it is a transition applied to an
+    # existing app, and registering straight into it would mint a dead
+    # credential. The repository still honors REVOKED rows, which is what
+    # migrated secbaas records need.
+    status: Literal["ACTIVE", "INACTIVE"] = "ACTIVE"
     env: str = ""
     config: dict[str, Any] = Field(default_factory=dict)
 
