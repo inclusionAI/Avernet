@@ -107,18 +107,8 @@ def test_literal_groups_are_registered_before_the_bot_id_wildcard():
         assert order.index(f"{_BOTS_PREFIX}{literal}") < wildcard, literal
 
 
-# The one route outside engine-runtime that can answer 504, and therefore the
-# one allowed to document it. ``delete_routine`` catches ``CronRelayError`` and
-# forwards the relay's own ``error_code``; ``CronApiTimeoutError`` carries 504
-# and reaches it uncaught, because ``_forward_runtime_target_request`` wraps
-# ``_invoke_transport`` without a handler. Every other routines route lets the
-# same error escape to ``@envelope_errors``, which has no mapping for it and
-# answers 500 — so they must not advertise 504 either.
-_NON_RUNTIME_504 = {(f"{_BOTS_PREFIX}routines/{{routine_id}}", "delete")}
-
-
 def test_engine_runtime_routes_document_501_and_504():
-    """And the rest of the surface does not — with one demonstrated exception."""
+    """And the rest of the surface does not — they cannot return them."""
     schema = _document()
 
     runtime_paths = {_schema_path(r.path) for r in _engine_runtime_routes()}
@@ -128,8 +118,6 @@ def test_engine_runtime_routes_document_501_and_504():
             extras = {"501", "504"} & documented
             if path in runtime_paths:
                 assert extras == {"501", "504"}, f"{method.upper()} {path} missing {extras}"
-            elif (path, method) in _NON_RUNTIME_504:
-                assert extras == {"504"}, f"{method.upper()} {path} should document 504 only"
             else:
                 assert not extras, f"{method.upper()} {path} advertises {extras}"
 
