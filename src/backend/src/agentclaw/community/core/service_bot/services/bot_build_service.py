@@ -807,9 +807,12 @@ class BotBuildService:
                 extra_target = target_dir / extra_tgt_rel
 
                 if not extra_source.exists():
-                    raise BotBuildMigrationError(
-                        f"Extra sync source does not exist: {extra_source}"
+                    logger.info(
+                        "[BotBuildService._migrate_bot_instance] "
+                        "skip missing extra sync source: %s",
+                        extra_source,
                     )
+                    continue
 
                 extra_target.mkdir(parents=True, exist_ok=True)
 
