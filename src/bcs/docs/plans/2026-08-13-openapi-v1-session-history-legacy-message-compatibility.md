@@ -18,7 +18,7 @@
 - Do not add `next_cursor`, `has_more`, or another message page object.
 - Do not run workspace-wide `cargo fmt`; format only touched Rust files with `rustfmt` or `cargo fmt -p <package>` after checking that it is scoped.
 - Preserve unrelated untracked files and user changes.
-- Use the approved design as the behavioral source of truth: `docs/plans/2026-08-13-openapi-v1-session-history-legacy-message-compatibility-design.md`.
+- Use the approved design as the behavioral source of truth: `src/bcs/docs/plans/2026-08-13-openapi-v1-session-history-legacy-message-compatibility-design.md`.
 
 ## Target Contract
 
@@ -888,7 +888,7 @@ If `test_served_openapi.py` did not need a change, omit it from `git add`.
 **Files:**
 
 - Verify only: all files changed above
-- Update only if implementation details diverged: `docs/plans/2026-08-13-openapi-v1-session-history-legacy-message-compatibility-design.md`
+- Update only if implementation details diverged: `src/bcs/docs/plans/2026-08-13-openapi-v1-session-history-legacy-message-compatibility-design.md`
 
 **Step 1: Format only touched Rust packages/files**
 
