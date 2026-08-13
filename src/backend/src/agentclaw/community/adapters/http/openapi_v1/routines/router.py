@@ -8,9 +8,9 @@ requires an authenticated user principal.
 from __future__ import annotations
 
 from datetime import datetime, timezone as _tz
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Path, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     ActingCallerDep,
@@ -38,6 +38,26 @@ from agentclaw.community.di import Injected
 from .schemas import Routine, RoutineCreate, RoutineRun, RoutineUpdate, ScheduleTrigger
 
 router = APIRouter(prefix="/openapi/v1/bots/routines", tags=["routines"])
+
+#: The path parameter naming the routine an operation addresses.
+RoutineIdPath = Annotated[
+    str,
+    Path(
+        description="The routine's id, exactly as returned on create or in "
+        "the listing — an opaque string; treat it as a token."
+    ),
+]
+
+#: Routines are addressed (routine_id, bot_id) together: the id alone does not
+#: say which bot's engine holds it, so every per-routine operation requires the
+#: bot in the query string.
+RoutineBotIdQuery = Annotated[
+    str,
+    Query(
+        description="The bot the routine belongs to — required, because a "
+        "routine id alone does not identify the bot that holds it."
+    ),
+]
 
 
 def _ms_to_iso(ms: Any) -> str:
@@ -102,19 +122,25 @@ def _map_run(data: dict, routine_id: str) -> RoutineRun:
 async def list_routines(
     page: PageParamsDep,
     owner_id: UserIdDep,
-    bot_id: str,
+    bot_id: Annotated[
+        str, Query(description="The bot whose routines to list.")
+    ],
     request: Request,
-    status: str | None = None,
+    status: Annotated[
+        str | None,
+        Query(
+            description="Reserved; currently ignored — the full set is "
+            "returned. Filter client-side on `enabled`."
+        ),
+    ] = None,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
 ) -> Envelope[Page[Routine]]:
-    """List routines (filter + paginate).
-
-    ``status`` is an openapi query hint with no direct field on ``Routine``
-    (which only carries ``enabled``). It is currently a no-op: the adapter
-    does not expose a status filter at the list seam, so we return the full
-    set and let the client filter on ``enabled``. Wire a server-side filter
-    here only if/when the engine surfaces a status dimension.
-    """
+    """List a bot's routines (paginated)."""
+    # `status` is an openapi query hint with no direct field on `Routine`
+    # (which only carries `enabled`). It is currently a no-op: the adapter
+    # does not expose a status filter at the list seam, so we return the full
+    # set and let the client filter on `enabled`. Wire a server-side filter
+    # here only if/when the engine surfaces a status dimension.
     user_id = owner_id
     nick_name = owner_id
     # Draft only, like every other route in this group: the public surface
@@ -147,21 +173,23 @@ async def create_routine(
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
 ) -> Envelope[Routine]:
-    """Create a routine.
+    """Create a routine on a bot.
 
-    The only operation in this group whose bot is in the **body**, so the grant
-    check cannot run as a dependency — the body is not parsed yet when those
-    resolve. It runs here instead, immediately after parsing and **before any
-    service call**, which is the same guarantee in a different place. The
-    shared dependency defers for exactly this operation (it is named in
-    ``admission.py``), so nothing checks it twice and nothing skips it.
-
-    Translates the openapi ``RoutineCreate`` body into the engine adapter
-    cron body shape: ``schedule`` is the raw cron expression STRING (not
-    the nested ``{kind,expr,tz}`` dict — the adapter wraps it on read in
-    ``device_adapter_transport._build_item``), and ``timezone`` defaults
-    to ``Asia/Shanghai`` to match legacy ``cron/router.py``'s create path.
+    The schedule fires in the routine's timezone, which defaults to
+    Asia/Shanghai when omitted. Each firing starts a fresh session and hands
+    the bot the command as its user message.
     """
+    # The only operation in this group whose bot is in the body, so the grant
+    # check cannot run as a dependency — the body is not parsed yet when those
+    # resolve. It runs here instead, immediately after parsing and before any
+    # service call, which is the same guarantee in a different place. The
+    # shared dependency defers for exactly this operation (it is named in
+    # admission.py), so nothing checks it twice and nothing skips it.
+    #
+    # Translation to the engine adapter cron body shape: schedule is the raw
+    # cron expression STRING (not the nested {kind,expr,tz} dict — the adapter
+    # wraps it on read in device_adapter_transport._build_item), and timezone
+    # defaults to Asia/Shanghai to match legacy cron/router.py's create path.
     bot_id = body.bot_id
     # Before anything else touches the bot.
     caller.require_bot(bot_id, owner_id=owner_id)
@@ -190,19 +218,22 @@ async def create_routine(
 @router.get("/{routine_id}", response_model=Envelope[Routine])
 @envelope_errors
 async def get_routine(
-    routine_id: str,
+    routine_id: RoutineIdPath,
     owner_id: UserIdDep,
-    bot_id: str,
+    bot_id: RoutineBotIdQuery,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
 ) -> Envelope[Routine]:
     """Get a routine.
 
-    C3: the path carries only ``routine_id`` (no routine table to
-    reverse-map to a bot), so ``bot_id`` is a required query. Owner
-    identity comes from the authenticated principal via
-    ``UserIdDep``. Missing/non-dict ``data`` collapses to 404.
+    The bot_id query parameter is required — a routine id alone does not
+    identify the bot that holds it. Note the returned bot_id may be empty on
+    this read; keep the one you queried with.
     """
+    # C3: the path carries only routine_id (no routine table to reverse-map
+    # to a bot), so bot_id is a required query. Owner identity comes from the
+    # authenticated principal via UserIdDep. Missing/non-dict data collapses
+    # to 404.
     user_id = owner_id
     nick_name = owner_id
     result = await factory.get_cron_detail(
@@ -217,21 +248,22 @@ async def get_routine(
 @router.patch("/{routine_id}", response_model=Envelope[Routine])
 @envelope_errors
 async def update_routine(
-    routine_id: str,
+    routine_id: RoutineIdPath,
     body: RoutineUpdate,
     owner_id: UserIdDep,
-    bot_id: str,
+    bot_id: RoutineBotIdQuery,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
 ) -> Envelope[Routine]:
-    """Update a routine (partial).
+    """Update a routine. Omitted fields are left unchanged.
 
-    C3: ``bot_id`` is a required query (see ``get_routine``). Partial
-    update: only set fields flow to the adapter. ``trigger.cron`` becomes
-    a raw ``schedule`` STRING (not a ``{kind,expr,tz}`` dict — the adapter
-    wraps it on read; Task 3 contract). Missing/non-dict ``data`` on the
-    response collapses to 404.
+    When sending a new trigger, send the timezone with it — a trigger update
+    without one resets the schedule's zone to the default.
     """
+    # C3: bot_id is a required query (see get_routine). Partial update: only
+    # set fields flow to the adapter. trigger.cron becomes a raw schedule
+    # STRING (not a {kind,expr,tz} dict — the adapter wraps it on read; Task 3
+    # contract). Missing/non-dict data on the response collapses to 404.
     user_id = owner_id
     nick_name = owner_id
     update_body: dict = {}
@@ -261,23 +293,23 @@ async def update_routine(
 @router.delete("/{routine_id}", response_model=Envelope[Deleted])
 @envelope_errors
 async def delete_routine(
-    routine_id: str,
+    routine_id: RoutineIdPath,
     owner_id: UserIdDep,
-    bot_id: str,
+    bot_id: RoutineBotIdQuery,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
 ) -> Envelope[Deleted]:
     """Delete a routine.
 
-    C3: ``bot_id`` is a required query (path carries only ``routine_id``).
-    ``delete_cron`` only operates on the draft stage; a published-stage delete
-    raises ``CronRelayError`` (error_code 403), mapped here (the code is dynamic
-    per-raise, so not in the static ``ENVELOPE_ERRORS`` map). A failed draft
-    delete is NOT surfaced as ``200 {deleted: false}`` — a missing routine_id
-    maps to 404 and a relay timeout to 502. The engine result distinguishes the
-    two only via its ``error`` text today; a structured engine ``error_code``
-    would make timeout-vs-missing precise (follow-up).
+    A failure is never reported as a successful delete: an unknown routine
+    answers 404 and a timeout answers 502.
     """
+    # C3: bot_id is a required query (path carries only routine_id).
+    # delete_cron only operates on the draft stage; a published-stage delete
+    # raises CronRelayError (error_code 403), mapped here (the code is dynamic
+    # per-raise, so not in the static ENVELOPE_ERRORS map). The engine result
+    # distinguishes timeout-vs-missing only via its error text today; a
+    # structured engine error_code would make that precise (follow-up).
     user_id = owner_id
     nick_name = owner_id
     try:
@@ -304,23 +336,24 @@ async def delete_routine(
 @router.post("/{routine_id}/run", response_model=Envelope[RoutineRun])
 @envelope_errors
 async def run_routine(
-    routine_id: str,
+    routine_id: RoutineIdPath,
     owner_id: UserIdDep,
-    bot_id: str,
+    bot_id: RoutineBotIdQuery,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
 ) -> Envelope[RoutineRun]:
-    """Run a routine now.
+    """Trigger a routine now.
 
-    C3: ``bot_id`` is a required query. ``run_cron`` returns
-    ``{"success":..,"data":{"ok":..,"ran":..,"reason":..}}`` — no run_id, no
-    timestamps. We synthesize ``run_id`` from ``routine_id`` + the handler's
-    UTC trigger timestamp (uniqueness is good enough for an immediate-trigger
-    echo; the engine has no run_id to return). ``status`` is derived from
-    ``ran``/``reason``: completed | failed | unknown. ``started_at`` /
-    ``finished_at`` are None because the adapter doesn't surface them on the
-    run-trigger seam (use ``GET /{routine_id}/runs`` for actual timestamps).
+    The response describes the trigger attempt, not a finished run: status is
+    'completed' (the engine acknowledged the trigger), 'failed' (it declined,
+    with a reason) or 'unknown', and both timestamps are null. Read the runs
+    listing for actual execution results and timings.
     """
+    # bot_id is a required query (C3). run_cron returns
+    # {"success":..,"data":{"ok":..,"ran":..,"reason":..}} — no run_id, no
+    # timestamps. run_id is synthesized from routine_id + the handler's UTC
+    # trigger timestamp (uniqueness good enough for an immediate-trigger echo;
+    # the engine has no run_id to return).
     user_id = owner_id
     nick_name = owner_id
     result = await factory.run_cron(
@@ -354,22 +387,24 @@ async def run_routine(
 )
 @envelope_errors
 async def list_routine_runs(
-    routine_id: str,
+    routine_id: RoutineIdPath,
     page: PageParamsDep,
     owner_id: UserIdDep,
-    bot_id: str,
+    bot_id: RoutineBotIdQuery,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
 ) -> Envelope[Page[RoutineRun]]:
-    """List a routine's execution history.
+    """List a routine's execution history, most recent first.
 
-    C3: ``bot_id`` is a required query. ``get_cron_runs`` returns
-    ``{"success":..,"data":{"runs":[{job_id, started_at_ms, finished_at_ms,
-    status, ...}]}}`` in draft mode (``_forward_single_stage_request``
-    passthrough; ``_decorate_single_result`` only adds bot_metadata fields to
-    ``data``, leaving ``runs`` intact). We map each entry via ``_map_run``
-    and paginate client-side.
+    The engine keeps a bounded history per routine, so deep pages come back
+    empty by construction.
     """
+    # bot_id is a required query (C3). get_cron_runs returns
+    # {"success":..,"data":{"runs":[{job_id, started_at_ms, finished_at_ms,
+    # status, ...}]}} in draft mode (_forward_single_stage_request
+    # passthrough; _decorate_single_result only adds bot_metadata fields to
+    # data, leaving runs intact). Each entry maps via _map_run; pagination is
+    # client-side over the fetched set.
     user_id = owner_id
     nick_name = owner_id
     result = await factory.get_cron_runs(

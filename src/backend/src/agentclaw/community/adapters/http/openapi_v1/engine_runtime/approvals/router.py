@@ -12,7 +12,10 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Query, Request
 
-from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
+from agentclaw.community.adapters.http.openapi_v1.contracts import (
+    BotIdPath,
+    Envelope,
+)
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.approvals.schemas import (
     ApprovalModeInfo,
     ApprovalModeSet,
@@ -88,7 +91,7 @@ def _reject_refused_set(raw: Any) -> None:
 @router.get("/{bot_id}/mode", response_model=Envelope[ApprovalState])
 @envelope_errors
 async def get_approval_mode(
-    bot_id: str,
+    bot_id: BotIdPath,
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,
@@ -121,7 +124,7 @@ async def get_approval_mode(
 @router.put("/{bot_id}/mode", response_model=Envelope[ApprovalState])
 @envelope_errors
 async def set_approval_mode(
-    bot_id: str,
+    bot_id: BotIdPath,
     body: ApprovalModeSet,
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
@@ -157,7 +160,7 @@ async def set_approval_mode(
 @router.get("/{bot_id}/modes", response_model=Envelope[list[ApprovalModeInfo]])
 @envelope_errors
 async def list_approval_modes(
-    bot_id: str,
+    bot_id: BotIdPath,
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,
