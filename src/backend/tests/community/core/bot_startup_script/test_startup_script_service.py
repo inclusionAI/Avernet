@@ -428,23 +428,31 @@ def test_the_uniqueness_key_fits_innodbs_index_limit():
         )
 
 
-def test_the_size_cap_leaves_the_base64_body_inside_a_mysql_text_column():
-    """The hook carrying the body is persisted into a ``Text`` column downstream
-    (``baas_bot.extra_config`` / ``baas_publish.extra_config``), which is 65,535
-    bytes on MySQL. base64 costs 4/3, so a cap chosen without that arithmetic
-    lets a caller store a script that is accepted and then fails to persist on
-    the next restart — after the write already reported success.
+def test_the_size_cap_is_not_what_overflows_the_config_column():
+    """The cap stays inside even the smaller of the two widths declared for the
+    column the hook lands in, so the script is never the term that overflows it.
+
+    Production declares ``baas_bot.extra_config`` / ``baas_publish.extra_config``
+    ``mediumtext`` (16,777,215 bytes); the BaaS ORM declares ``Text`` (65,535),
+    which is what ``create_all`` schemas get. The cap is checked against the
+    smaller of the two, so it holds under either.
+
+    This pins one direction only. It does **not** assert the whole serialised
+    row fits — the other terms (template envs, mounts, outbound config) are
+    unbounded here and editable after a script is accepted, so no check made at
+    write time could promise that.
     """
     import math
 
     from agentclaw.community.api.bot_startup_script_service import MAX_SCRIPT_BYTES
 
     encoded = math.ceil(MAX_SCRIPT_BYTES / 3) * 4
-    mysql_text_limit = 65_535
+    narrower_of_the_two_declarations = 65_535
     # Room for the platform's own hook plus the other extra_config fields.
-    assert encoded + 8192 < mysql_text_limit, (
+    assert encoded + 8192 < narrower_of_the_two_declarations, (
         f"{MAX_SCRIPT_BYTES} raw expands to {encoded} base64 bytes, which does "
-        f"not leave usable room inside a {mysql_text_limit}-byte TEXT column"
+        f"not leave usable room inside a "
+        f"{narrower_of_the_two_declarations}-byte column"
     )
 
 

@@ -55,21 +55,32 @@ UNSUPPORTED = "unsupported"
 #: in the service and re-exporting it here closed an ``api`` ↔ ``core`` import
 #: cycle. Defining it once, on the contract, is what avoids both.
 #:
-#: Derived from where the body actually has to fit, not chosen for roundness.
+#: A safety bound, deliberately far below where the body has to fit. It is not
+#: derived from the column width, and an earlier version of this comment that
+#: claimed it was had the width wrong.
 #:
-#: The script rides inside ``after_create_cmd_hook``, and the device service
-#: serialises that hook into ``baas_bot.extra_config`` and
-#: ``baas_publish.extra_config`` — both ``Text`` columns, which is 65,535 bytes
-#: on MySQL/OceanBase. base64 costs 4/3, so the raw cap has to leave room for
-#: the expansion *and* for the rest of that JSON (template config, mounts, env).
+#: The script does ride inside ``after_create_cmd_hook``, and that hook is
+#: serialised into ``baas_bot.extra_config`` and ``baas_publish.extra_config``
+#: (``_bot_management_service.py``, ``extra_config=stored_config.model_dump()``).
+#: But production declares both columns ``mediumtext`` — 16,777,215 bytes, not
+#: the 65,535 of ``Text``. base64 costs 4/3, so 24 KiB raw reaches ~34.8 KB of
+#: hook, which is 0.2% of the column. The rest of that JSON (template config,
+#: mounts, env) has room to spare in any realistic shape.
 #:
-#:     24 KiB raw -> 32,768 base64 -> ~34.8 KB of hook, ~30 KB left for the rest.
+#: So the limit is not doing the job of keeping the row under the column, and
+#: should not be read as a promise that it does. Two reasons it stays anyway:
+#: a provisioning script is a boot-time shell body and nothing legitimate comes
+#: near 24 KiB, and an unbounded field that lands in a device boot chain wants
+#: some ceiling regardless of what the storage happens to allow today.
 #:
-#: 64 KiB was the first value here and does not survive that arithmetic: it
-#: expands to 87,384 bytes and overflows the column on its own, so a script
-#: written near the advertised limit would be accepted and then fail to persist
-#: on the next restart or republish — after the write had already succeeded.
-#: 24 KiB is still far above any real provisioning script.
+#: A point-in-time check could not make that promise even if it tried. The
+#: script is one term in a sum whose other terms — template envs, mounts,
+#: outbound config — are editable after the script is accepted. Validating the
+#: fully serialised payload at PUT time would pass, and the next env added
+#: would overflow it just the same, with no write to refuse. Keeping the row
+#: inside the column is the column's job, which is why the ``Text``-vs-
+#: ``mediumtext`` divergence in the BaaS ORM is filed separately rather than
+#: papered over here.
 MAX_SCRIPT_BYTES = 24 * 1024
 
 
