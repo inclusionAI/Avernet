@@ -240,10 +240,14 @@ class BotAuthStatus(BaseModel):
         "(e.g. 'REJECTED', 'EXPIRED') is terminal and is answered as a 400 "
         "with the state kept in data.status."
     )
+    # Reserved, not wired: the completion flow's result carries only the
+    # status and the bot, so nothing populates this yet. Documented as always
+    # null rather than promising a note the server never sends; wiring the
+    # provider's message through is a behavior change for a separate PR.
     message: str | None = Field(
         default=None,
-        description="Optional human-readable note from the authorization "
-        "service; null when there is nothing to add.",
+        description="Reserved for a human-readable note from the "
+        "authorization service; currently always null.",
     )
     bot: Bot | None = Field(
         default=None,

@@ -309,7 +309,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional human-readable note from the authorization service; null when there is nothing to add.",
+            "description": "Reserved for a human-readable note from the authorization service; currently always null.",
             "title": "Message"
           },
           "status": {
