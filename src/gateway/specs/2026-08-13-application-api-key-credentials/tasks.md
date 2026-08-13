@@ -44,7 +44,7 @@
         empty-string sentinel would have broken.
 - **Depends on:** —
 
-## Task 3: Rework `AppRepository` + the `AppRegistry` port for API-key verification
+## Task 3 `[x]`: Rework `AppRepository` + the `AppRegistry` port for API-key verification
 - **Goal:** Resolution becomes prefix lookup + status gate + constant-time hash
   verify inside the repository, behind a renamed port method with soft-miss
   semantics.
@@ -52,18 +52,22 @@
   `src/gateway/src/gateway/community/spi/app/_ports.py`,
   `src/gateway/tests/unit/plugins/test_app_registry_db.py` (rework)
 - **Done when:**
-  - [ ] Port and impl expose
+  - [x] Port and impl expose
         `find_app_by_credential(credential) -> RegisteredApp | None`;
         `find_app_by_token` is gone.
-  - [ ] Correct plaintext key against a seeded hashed row resolves the
+  - [x] Correct plaintext key against a seeded hashed row resolves the
         `RegisteredApp`; wrong key with a valid prefix returns `None`.
-  - [ ] Rows in `INACTIVE`/`REVOKED` status return `None` even with the correct key.
-  - [ ] Empty/short (`len < 8`) credentials return `None` without touching the DB.
-  - [ ] The stored hash and record are read inside the ORM session and verified
+  - [x] Rows in `INACTIVE`/`REVOKED` status return `None` even with the correct key.
+  - [x] Empty/short (`len < 8`) credentials return `None` without touching the DB.
+  - [x] The stored hash and record are read inside the ORM session and verified
         after it closes (no `DetachedInstanceError`, no session held across
         ~62ms of PBKDF2).
-  - [ ] `exists_prefix` and the reworked `store(api_key_hash=…, api_key_prefix=…)`
+  - [x] `exists_prefix` and the reworked `store(api_key_hash=…, api_key_prefix=…)`
         are covered by DB-backed tests.
+  - [x] *(added)* `exists_prefix` ignores `status`, so a new key cannot be
+        issued with a prefix already held by a deactivated row.
+  - [x] *(added)* A row with a prefix but a `NULL` hash fails closed rather
+        than raising.
 - **Depends on:** Task 1, Task 2
 
 ## Task 4: Add the deprecated legacy-JWT path (the continuity guarantee)
