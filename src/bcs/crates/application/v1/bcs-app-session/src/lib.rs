@@ -1016,8 +1016,14 @@ fn map_runtime_error(error: CollaborationRuntimeError) -> ApplicationError {
 /// Session-history application service into the stable V1 error surface.
 fn map_group_use_case_error(error: GroupUseCaseError) -> ApplicationError {
     match error {
+        GroupUseCaseError::Unauthorized(_) => ApplicationError::Unauthenticated,
+        GroupUseCaseError::Forbidden(message) => ApplicationError::forbidden(message),
+        GroupUseCaseError::InvalidHistoryLimit(limit) => ApplicationError::invalid(
+            "invalid_request",
+            format!("limit must be greater than zero, got {limit}"),
+        ),
         GroupUseCaseError::Service(service_error) => map_service_error(service_error),
-        other => ApplicationError::invalid("invalid_request", other.to_string()),
+        other => ApplicationError::internal(other.to_string()),
     }
 }
 
@@ -1072,6 +1078,22 @@ mod tests {
         );
         assert_eq!(
             map_service_error(ServiceError::SessionInvalidParams("x".into())).code(),
+            "invalid_request"
+        );
+    }
+
+    #[test]
+    fn session_history_errors_preserve_authentication_and_authorization_categories() {
+        assert!(matches!(
+            map_group_use_case_error(GroupUseCaseError::Unauthorized("missing".into())),
+            ApplicationError::Unauthenticated
+        ));
+        assert!(matches!(
+            map_group_use_case_error(GroupUseCaseError::Forbidden("denied".into())),
+            ApplicationError::Forbidden(_)
+        ));
+        assert_eq!(
+            map_group_use_case_error(GroupUseCaseError::InvalidHistoryLimit(0)).code(),
             "invalid_request"
         );
     }
