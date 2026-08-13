@@ -349,12 +349,27 @@ its dispatch branch, and its tests.
 # implementation (src/baas/.../_key_gen.py) — it pins migration compatibility.
 _SECBAAS_KEY = "5X1tk2yC6rxmKhUfWzN2GJ3CYiGGE22F"
 _SECBAAS_HASH = "YIrLEzbZybtDzATwCkQ9QERLnn0Q9z09iO+u02jvGGs=:UKS+A02LiRqVNsn0oOs9EiNO63ggsbZ3UHGnND6A08Q="
-def test_secbaas_produced_hash_verifies(): ...          # the migration guarantee
+def test_secbaas_produced_hash_verifies(): ...          # read side: the migration guarantee
+def test_secbaas_fixture_uses_documented_pbkdf2_parameters(): ...
+def test_hash_key_output_uses_documented_pbkdf2_parameters(): ...  # write side
 def test_generate_is_32_char_base62(): ...
-def test_hash_roundtrip_and_salt_uniqueness(): ...      # hash→verify; two hashes differ
-def test_verify_rejects_wrong_key_and_garbage_hash(): ...
+def test_hash_roundtrip(): ...
+def test_hashing_one_key_twice_yields_different_stored_values(): ...  # salt uniqueness
+def test_verify_rejects_wrong_key(): ...
+def test_verify_rejects_unusable_stored_hash(): ...
 def test_validate_format(): ...
+def test_round_trip_against_secbaas_implementation(): ...  # both directions
+def test_copy_is_byte_identical_to_secbaas_source(): ...
 ```
+
+Both parameter-pinning tests are needed: the read-side one asserts against the
+fixture constant, so it cannot catch a weakened salt or iteration count in *our*
+`hash_key` — the internal round-trips stay self-consistent under any change
+applied to `hash_key` and `verify_key` together. Two further tests characterize
+upstream quirks that byte-identity forbids fixing here (`validate_format`
+accepts a trailing newline; `b64decode` runs non-validating, so a stored hash
+corrupted only by punctuation still verifies). They document the behavior rather
+than hide it — see Notes on upstream follow-ups.
 
 ```python
 # src/gateway/tests/unit/plugins/test_app_registry_db.py (rework)

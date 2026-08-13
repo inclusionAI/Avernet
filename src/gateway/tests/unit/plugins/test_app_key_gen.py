@@ -3,15 +3,24 @@
 This module is a verbatim copy of the secbaas API-gateway key generator, because
 secbaas's existing ``baas_api_key`` records are migrated into
 ``avernet_application`` and must keep verifying with their original plaintext
-keys. The tests here exist to pin that compatibility:
+keys. The tests here exist to pin that compatibility from both ends:
 
-* :func:`test_secbaas_produced_hash_verifies` asserts against a ``(key, hash)``
-  pair produced by *running the real secbaas implementation*. It fails the
-  moment anyone changes the digest, the iteration count, the salt handling, or
-  the encoding — none of which are recoverable from the stored string, since it
-  carries only the salt.
-* :func:`test_round_trip_against_secbaas_implementation` loads that
-  implementation from disk and checks both directions.
+* :func:`test_secbaas_produced_hash_verifies` proves we can *read* what secbaas
+  wrote — it asserts against a ``(key, hash)`` pair produced by running the real
+  secbaas implementation.
+* :func:`test_hash_key_output_uses_documented_pbkdf2_parameters` proves we
+  *write* what secbaas would — the read-side test alone cannot catch a weakened
+  salt or iteration count in this copy.
+
+Neither is recoverable from the stored string, which carries only the salt: the
+digest, the iteration count, and the encoding are implicit constants, so drift
+in any of them silently invalidates every migrated record.
+
+Two tests here characterize known upstream quirks rather than desired behavior
+(see :func:`test_validate_format_accepts_a_trailing_newline` and
+:func:`test_verify_tolerates_non_base64_noise_in_stored_hash`). Correcting them
+means editing secbaas's file first and re-copying, since
+:func:`test_copy_is_byte_identical_to_secbaas_source` forbids one-sided edits.
 """
 
 from __future__ import annotations
@@ -35,30 +44,46 @@ _SECBAAS_HASH = (
     ":UKS+A02LiRqVNsn0oOs9EiNO63ggsbZ3UHGnND6A08Q="
 )
 
-_SECBAAS_SOURCE = (
-    Path(__file__).parents[5]
-    / "src/baas/src/secbaas/community/core/service/api_gateway/_key_gen.py"
-)
+_SECBAAS_RELPATH = "src/baas/src/secbaas/community/core/service/api_gateway/_key_gen.py"
+_OURS_RELPATH = "src/gateway/src/gateway/community/core/app/_key_gen.py"
 
 
-def _load_secbaas_generator() -> ModuleType:
+def _repo_root() -> Path:
+    """Walk up to the directory holding ``AGENTS.md``.
+
+    Deliberately not a hardcoded ``parents[N]``: moving this file would silently
+    change which path it resolves to, and the tests below would then skip rather
+    than fail — quietly dropping the drift protection they exist to provide.
+    """
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "AGENTS.md").is_file():
+            return parent
+    raise RuntimeError("cannot locate repository root: no AGENTS.md above this file")
+
+
+def _load_secbaas_generator(source: Path) -> ModuleType:
     """Load the secbaas generator straight from disk.
 
-    By file path rather than by package import: ``secbaas.community.api`` uses
-    syntax this interpreter rejects, and the generator itself is stdlib-only, so
-    the file loads cleanly on its own.
+    By file path rather than by package import because secbaas is deliberately
+    *not* a dependency of ``src/gateway/pyproject.toml`` — the plan rejects the
+    cross-module dependency and copies the class instead. The generator is
+    stdlib-only, so the file loads cleanly on its own.
     """
-    spec = importlib.util.spec_from_file_location("_secbaas_key_gen", _SECBAAS_SOURCE)
+    spec = importlib.util.spec_from_file_location("_secbaas_key_gen", source)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-_requires_secbaas = pytest.mark.skipif(
-    not _SECBAAS_SOURCE.exists(),
-    reason="secbaas source not present (module tested in isolation)",
-)
+def _secbaas_source() -> Path:
+    source = _repo_root() / _SECBAAS_RELPATH
+    assert source.is_file(), (
+        f"secbaas key generator not found at {source}. This copy's migration "
+        "compatibility is pinned against that file; if it moved, update "
+        "_SECBAAS_RELPATH rather than letting these checks lapse."
+    )
+    return source
 
 
 def test_secbaas_produced_hash_verifies() -> None:
@@ -70,24 +95,38 @@ def test_secbaas_hash_rejects_a_different_key() -> None:
     assert APIKeyGenerator.verify_key("0" * 32, _SECBAAS_HASH) is False
 
 
-def test_stored_hash_uses_documented_pbkdf2_parameters() -> None:
-    """Pin digest, iteration count, and encoding — none are in the stored string.
-
-    Recomputes the derived key from the salt the hash carries. Any drift in
-    ``sha256`` / ``100_000`` / UTF-8 password encoding / base64 breaks this,
-    which is exactly the drift that would silently invalidate migrated records.
-    """
+def test_secbaas_fixture_uses_documented_pbkdf2_parameters() -> None:
+    """Read side: recompute secbaas's derived key from the salt it carries."""
     salt_b64, dk_b64 = _SECBAAS_HASH.split(":")
     salt, stored_dk = base64.b64decode(salt_b64), base64.b64decode(dk_b64)
-    assert len(salt) == 32 and len(stored_dk) == 32
 
-    recomputed = hashlib.pbkdf2_hmac(
+    assert len(salt) == 32
+    assert len(stored_dk) == 32
+    assert stored_dk == hashlib.pbkdf2_hmac(
         hash_name="sha256",
         password=_SECBAAS_KEY.encode(),
         salt=salt,
         iterations=100_000,
     )
-    assert recomputed == stored_dk
+
+
+def test_hash_key_output_uses_documented_pbkdf2_parameters() -> None:
+    """Write side: the same pinning against *our* ``hash_key`` output.
+
+    Without this, weakening the salt width or the iteration count in this copy
+    passes every other test in any checkout that has no ``src/baas`` on disk —
+    the internal round-trips stay self-consistent under any parameter change
+    applied to ``hash_key`` and ``verify_key`` together.
+    """
+    key = APIKeyGenerator.generate()
+    salt_b64, dk_b64 = APIKeyGenerator.hash_key(key).split(":")
+    salt, stored_dk = base64.b64decode(salt_b64), base64.b64decode(dk_b64)
+
+    assert len(salt) == 32
+    assert len(stored_dk) == 32
+    assert stored_dk == hashlib.pbkdf2_hmac(
+        hash_name="sha256", password=key.encode(), salt=salt, iterations=100_000
+    )
 
 
 def test_generate_is_32_char_base62() -> None:
@@ -124,9 +163,24 @@ def test_verify_rejects_wrong_key() -> None:
     "stored_hash",
     ["", "not-a-hash", "no-colon-separator", "!!!:???", "onlysalt:", ":onlydk"],
 )
-def test_verify_rejects_malformed_stored_hash(stored_hash: str) -> None:
-    """A corrupt stored value is a rejection, never an exception."""
+def test_verify_rejects_unusable_stored_hash(stored_hash: str) -> None:
+    """A stored value that cannot yield a matching digest returns False.
+
+    Not "every corrupt value is rejected" — see
+    :func:`test_verify_tolerates_non_base64_noise_in_stored_hash`.
+    """
     assert APIKeyGenerator.verify_key(_SECBAAS_KEY, stored_hash) is False
+
+
+def test_verify_tolerates_non_base64_noise_in_stored_hash() -> None:
+    """Characterization of an upstream quirk, not an endorsement.
+
+    ``base64.b64decode`` defaults to non-validating, so characters outside the
+    alphabet are discarded rather than rejected: a stored hash corrupted *only*
+    by inserted punctuation decodes to the original bytes and still verifies.
+    Failing closed here means passing ``validate=True`` in secbaas's copy first.
+    """
+    assert APIKeyGenerator.verify_key(_SECBAAS_KEY, _SECBAAS_HASH + "!!!") is True
 
 
 @pytest.mark.parametrize(
@@ -146,10 +200,21 @@ def test_validate_format(candidate: str, expected: bool) -> None:
     assert APIKeyGenerator.validate_format(candidate) is expected
 
 
-@_requires_secbaas
+def test_validate_format_accepts_a_trailing_newline() -> None:
+    """Characterization of an upstream quirk, not an endorsement.
+
+    ``re.match`` with a ``$`` anchor also matches immediately before a trailing
+    newline, so a 33-character value ending in ``\\n`` passes as a 32-char key
+    (``\\Z`` or ``re.fullmatch`` would not). Harmless where this predicate is
+    used for credential dispatch — both branches reject such a value — but wrong
+    if it is ever used to validate input. Fixing it means editing secbaas's copy.
+    """
+    assert APIKeyGenerator.validate_format("a" * 32 + "\n") is True
+
+
 def test_round_trip_against_secbaas_implementation() -> None:
     """Both directions: each implementation verifies the other's output."""
-    secbaas = _load_secbaas_generator().APIKeyGenerator
+    secbaas = _load_secbaas_generator(_secbaas_source()).APIKeyGenerator
 
     ours = APIKeyGenerator.generate()
     assert secbaas.verify_key(ours, APIKeyGenerator.hash_key(ours)) is True
@@ -158,8 +223,7 @@ def test_round_trip_against_secbaas_implementation() -> None:
     assert APIKeyGenerator.verify_key(theirs, secbaas.hash_key(theirs)) is True
 
 
-@_requires_secbaas
 def test_copy_is_byte_identical_to_secbaas_source() -> None:
     """The copy must not drift; edit the scheme in both places or neither."""
-    ours = Path(__file__).parents[3] / "src/gateway/community/core/app/_key_gen.py"
-    assert ours.read_bytes() == _SECBAAS_SOURCE.read_bytes()
+    ours = _repo_root() / _OURS_RELPATH
+    assert ours.read_bytes() == _secbaas_source().read_bytes()
