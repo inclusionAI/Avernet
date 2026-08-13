@@ -71,6 +71,6 @@ def resolve_engine_for_bot(
     if bot:
         active = bot.get("active_engine")
         if active:
-            return resolve_bot_engine(bot) or active
+            return resolve_bot_engine(bot)
 
     return DEFAULT_ENGINE_TYPE
