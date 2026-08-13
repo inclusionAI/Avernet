@@ -121,7 +121,9 @@ backend_start() {
 backend_wait_until_ready() {
     local pid="${1:-}"
     local attempt=0
-    local max_attempts="${BACKEND_READY_ATTEMPTS:-20}"
+    # A clean singlebox boot seeds the local Skill catalog before the health
+    # endpoint becomes available, which can exceed ten seconds on macOS.
+    local max_attempts="${BACKEND_READY_ATTEMPTS:-120}"
     while [ "$attempt" -lt "$max_attempts" ]; do
         if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
             log_error "Backend process exited before becoming ready. Last backend log lines:"

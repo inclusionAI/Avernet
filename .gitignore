@@ -19,6 +19,8 @@ htmlcov/
 # Node.js
 node_modules/
 .npm/
+.tshy/
+.tshy-build/
 .umi/
 .umi-production/
 dist-webview/

@@ -1685,7 +1685,7 @@ async fn human_input_remains_persisted_when_judge_fails() {
 }
 
 #[tokio::test]
-async fn human_input_timeout_fails_run_without_bot_retry_and_rejects_late_response() {
+async fn human_input_timeout_ignores_global_retries_and_rejects_late_response() {
     let group = Arc::new(GroupStore::new());
     group.upsert(test_group()).await.expect("seed group");
     let sessions = test_sessions();
@@ -1701,11 +1701,17 @@ async fn human_input_timeout_fails_run_without_bot_retry_and_rejects_late_respon
         delivery.clone(),
         noop_judge(),
     );
+    let definition_yaml = human_input_yaml()
+        .replace(
+            "    nodes:\n",
+            "    defaults:\n      max_attempts: 3\n    nodes:\n",
+        )
+        .replace("60000", "1");
     let started = runtime
         .start_state_machine_run(StartStateMachineRunCommand {
             group_id: "group-1".to_string(),
             session_id: None,
-            definition_yaml: Some(human_input_yaml().replace("60000", "1")),
+            definition_yaml: Some(definition_yaml),
             definition: None,
             definition_ref: None,
             participant_bindings: None,
@@ -1733,6 +1739,7 @@ async fn human_input_timeout_fails_run_without_bot_retry_and_rejects_late_respon
     assert_eq!(view.run.status, StateMachineRunStatus::Failed);
     assert_eq!(view.nodes[0].status, StateMachineNodeStatus::Failed);
     assert_eq!(view.nodes[0].attempt, 0);
+    assert_eq!(view.nodes[0].max_attempts, 1);
     assert!(delivery.commands.lock().await.is_empty());
 
     let late = runtime

@@ -135,7 +135,7 @@ singlebox_model_config_required_for_services() {
     local service
     for service in "$@"; do
         case "$service" in
-            all|baas|bots|bcs_bots|merchant_hybrid)
+            all|baas|bots|bcs_bots|hybrid|merchant_hybrid)
                 return 0
                 ;;
         esac
@@ -225,6 +225,138 @@ singlebox_model_config_require_manual_env() {
         log_error "Set them in ${PROJECT_ROOT}/.env.local or choose SINGLEBOX_MODEL_CONFIG_MODE=mock."
         return 1
     fi
+}
+
+singlebox_model_config_thinking_enabled() {
+    case "${OPENCLAW_ENABLE_THINKING:-false}" in
+        1|true|TRUE|yes|YES|on|ON)
+            printf 'true\n'
+            ;;
+        0|false|FALSE|no|NO|off|OFF|'')
+            printf 'false\n'
+            ;;
+        *)
+            log_error "Invalid OPENCLAW_ENABLE_THINKING: ${OPENCLAW_ENABLE_THINKING}"
+            log_error "Valid values: true, false"
+            return 1
+            ;;
+    esac
+}
+
+singlebox_model_config_apply_thinking_policy() {
+    local output_file="$1"
+    local thinking_enabled thinking_default temporary_file
+    thinking_enabled="$(singlebox_model_config_thinking_enabled)" || return 1
+    if [ "$thinking_enabled" = "true" ]; then
+        thinking_default="medium"
+    else
+        thinking_default="off"
+    fi
+    temporary_file="${output_file}.thinking.$$"
+
+    (
+        umask 077
+        jq \
+            --argjson thinking_enabled "$thinking_enabled" \
+            --arg thinking_default "$thinking_default" '
+          def model_provider_id($model_ref):
+            $model_ref | split("/")[0];
+          def model_id($model_ref):
+            $model_ref | split("/")[1:] | join("/");
+          def needs_bailian_glm_thinking_override($config; $model_ref):
+            ($config.models.providers[model_provider_id($model_ref)] // {}) as $provider
+            | (($provider.api // "") == "openai-completions"
+               or ($provider.api // "") == "openai")
+              and (($provider.baseUrl // "" | ascii_downcase)
+                   | contains("aliyuncs.com/compatible-mode/"))
+              and ((model_id($model_ref) | ascii_downcase)
+                   | test("(^|/)glm-(4\\.(5|6|7)|5([.-]|$))"));
+          def set_bailian_glm_thinking_override:
+            if type != "object" then {} else . end
+            | .params = (if (.params? | type) == "object" then .params else {} end)
+            | .params.extra_body = (
+                if (.params.extra_body? | type) == "object" then .params.extra_body else {} end
+              )
+            | .params.extra_body.enable_thinking = $thinking_enabled;
+          def toggle_thinking_object:
+            if type != "object" then .
+            else
+              (if has("enable_thinking") then
+                 .enable_thinking = $thinking_enabled
+               else . end)
+              | (if (.thinking? | type) == "object" then
+                   if $thinking_enabled then
+                     .thinking |= del(.type)
+                     | if .thinking == {} then del(.thinking) else . end
+                   else
+                     .thinking.type = "disabled"
+                   end
+                 else . end)
+            end;
+          def toggle_model_params:
+            if type != "object" then .
+            else
+              toggle_thinking_object
+              | (if (.extra_body? | type) == "object" then
+                   .extra_body |= toggle_thinking_object
+                 else . end)
+              | (if (.extraBody? | type) == "object" then
+                   .extraBody |= toggle_thinking_object
+                 else . end)
+              | (if (.chat_template_kwargs? | type) == "object"
+                       and (.chat_template_kwargs | has("enable_thinking")) then
+                   .chat_template_kwargs.enable_thinking = $thinking_enabled
+                 else . end)
+              | (if (.chatTemplateKwargs? | type) == "object"
+                       and (.chatTemplateKwargs | has("enable_thinking")) then
+                   .chatTemplateKwargs.enable_thinking = $thinking_enabled
+                 else . end)
+            end;
+          . as $source_config
+          | (.agents.defaults.model.primary? // null) as $primary_model
+          | .agents = (if (.agents? | type) == "object" then .agents else {} end)
+          | .agents.defaults = (
+              if (.agents.defaults? | type) == "object" then .agents.defaults else {} end
+            )
+          | .agents.defaults.thinkingDefault = $thinking_default
+          | if (.agents.defaults.models? | type) == "object" then
+              .agents.defaults.models |= with_entries(
+                .value |= (
+                  if type == "object" and (.params? | type) == "object" then
+                    .params |= toggle_model_params
+                  else . end
+                )
+              )
+            else . end
+          | if ($primary_model | type) == "string"
+               and needs_bailian_glm_thinking_override($source_config; $primary_model) then
+              .agents.defaults.models = (
+                if (.agents.defaults.models? | type) == "object" then
+                  .agents.defaults.models
+                else
+                  {}
+                end
+              )
+              | .agents.defaults.models[$primary_model] = (
+                  (.agents.defaults.models[$primary_model] // {})
+                  | set_bailian_glm_thinking_override
+                )
+            else . end
+          | if (.agents.defaults.models? | type) == "object" then
+              .agents.defaults.models |= with_entries(
+                .key as $model_ref
+                | if needs_bailian_glm_thinking_override($source_config; $model_ref) then
+                    .value |= set_bailian_glm_thinking_override
+                  else . end
+              )
+            else . end
+        ' "$output_file" > "$temporary_file"
+    ) || {
+        rm -f "$temporary_file"
+        return 1
+    }
+    mv "$temporary_file" "$output_file"
+    chmod 600 "$output_file"
 }
 
 singlebox_model_config_write_manual() {
@@ -536,6 +668,7 @@ singlebox_model_config_prepare() {
             log_warn "Singlebox model config mode is mock; bots use fixed-format local model replies."
             ;;
     esac
+    singlebox_model_config_apply_thinking_policy "$output_file" || return 1
 
     SINGLEBOX_MODEL_CONFIG_MODE="$mode"
     SINGLEBOX_MODEL_CONFIG_FILE="$output_file"
@@ -545,4 +678,5 @@ singlebox_model_config_prepare() {
 
     log_info "Singlebox model config mode: ${mode}"
     log_info "Singlebox model config: ${output_file}"
+    log_info "Singlebox model thinking default: $(jq -r '.agents.defaults.thinkingDefault' "$output_file")"
 }
