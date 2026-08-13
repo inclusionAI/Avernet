@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import httpx
 import pytest
+
 from engine.community.core.resource_materialization.models import (
     ChatAttachmentMaterializationRequest,
     MaterializationRequest,
@@ -109,7 +110,6 @@ async def test_temporary_url_pull_checks_host_dns_and_size(tmp_path: Path):
         return httpx.Response(200, content=b"file-bytes")
 
     client = HttpTemporaryUrlPullClient(
-        allowed_hosts=frozenset({"files.example"}),
         max_bytes=32,
         transport=httpx.MockTransport(handler),
     )
@@ -140,7 +140,6 @@ async def test_temporary_url_pull_pins_validated_ip_before_request(tmp_path: Pat
         return httpx.Response(200, content=b"safe")
 
     client = HttpTemporaryUrlPullClient(
-        allowed_hosts=frozenset({"files.example"}),
         transport=httpx.MockTransport(handler),
     )
     with patch(
@@ -157,39 +156,45 @@ async def test_temporary_url_pull_pins_validated_ip_before_request(tmp_path: Pat
 
 
 @pytest.mark.asyncio
-async def test_temporary_url_pull_rejects_non_allowlisted_host(tmp_path: Path):
+async def test_temporary_url_pull_accepts_any_public_https_host(tmp_path: Path):
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, content=b"file")
+
     client = HttpTemporaryUrlPullClient(
-        allowed_hosts=frozenset({"files.example"}),
-        transport=httpx.MockTransport(lambda request: httpx.Response(200)),
+        transport=httpx.MockTransport(handler),
     )
     request = ChatAttachmentMaterializationRequest(
         attachment_id="att-1",
         session_key="session-1",
         filename="file.txt",
-        temporary_url="https://blocked.example/object",
+        temporary_url="https://another-public.example/object",
         scope_key_hash="a" * 64,
     )
 
-    with pytest.raises(ValueError, match="untrusted temporary URL"):
+    with patch(
+        "engine.community.plugins.resource_materialization.socket.getaddrinfo",
+        return_value=[(2, 1, 6, "", ("93.184.216.34", 443))],
+    ):
         await client.pull(request, tmp_path / "file.part")
+
+    assert len(requests) == 1
+    assert requests[0].headers["host"] == "another-public.example"
+    assert (tmp_path / "file.part").read_bytes() == b"file"
 
 
 @pytest.mark.parametrize(
     "kwargs, message",
     [
-        ({"allowed_hosts": frozenset()}, "allowed_hosts is required"),
-        (
-            {"allowed_hosts": frozenset({"files.example"}), "max_bytes": 0},
-            "limits must be positive",
-        ),
+        ({"max_bytes": 0}, "limits must be positive"),
         (
             {
-                "allowed_hosts": frozenset({"files.example"}),
                 "timeout_seconds": 0,
             },
             "limits must be positive",
         ),
-        ({"allowed_hosts": frozenset({"  "})}, "allowed_hosts is required"),
     ],
 )
 def test_temporary_url_pull_rejects_invalid_configuration(kwargs, message):
@@ -224,7 +229,6 @@ async def test_temporary_url_pull_enforces_declared_and_observed_size(
 ):
     headers = {"content-length": content_length} if content_length is not None else {}
     client = HttpTemporaryUrlPullClient(
-        allowed_hosts=frozenset({"files.example"}),
         max_bytes=4,
         transport=httpx.MockTransport(
             lambda request: httpx.Response(200, headers=headers, content=content)
@@ -256,7 +260,6 @@ async def test_temporary_url_pull_rejects_unverifiable_or_private_dns(
     message,
 ):
     client = HttpTemporaryUrlPullClient(
-        allowed_hosts=frozenset({"files.example"}),
         transport=httpx.MockTransport(lambda request: httpx.Response(200)),
     )
 
