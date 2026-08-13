@@ -1,0 +1,42 @@
+"""task_runner integration 子模块:单 bot(Open API)/协作群(BCS)/bbs 真实执行接入。
+
+组合根 ``build_integration`` 装配 double(singlebox)/real(corp 覆写);真实 wiring 属 corp adapter。
+"""
+from __future__ import annotations
+
+import threading
+
+from agentclaw.community.core.task.task_runner.integration.double.double_bcs_client import _DoubleBcsClient
+from agentclaw.community.core.task.task_runner.integration.double.double_context_provider import (
+    _DoubleApiKeyProvider, _DoubleContextProvider,
+)
+from agentclaw.community.core.task.task_runner.integration.double.double_open_api_bot import _DoubleOpenApiBot
+from agentclaw.community.core.task.task_runner.integration.prompt_formatter import PromptFormatterImpl
+from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
+from agentclaw.community.core.task.task_runner.integration.task_executor_result_poller import (
+    TaskExecutorResultPoller,
+)
+
+
+def build_integration(*, double: bool, sink, runner=None, poller_thread: bool = True) -> TaskExecutor:
+    """组合根:double(singlebox)/real(corp 覆写)。返装配好的 TaskExecutor(poller 可选起线程)。"""
+    if double:
+        bot = _DoubleOpenApiBot()
+        bcs = _DoubleBcsClient()
+        ctx = _DoubleContextProvider()
+    else:
+        from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import BcsHttpAdapter
+        from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import _RealToken  # corp 覆写
+        from agentclaw.community.core.task.task_runner.integration.open_api_bot_adapter import OpenApiBotAdapter
+        from agentclaw.community.core.task.task_runner.integration.prompt_formatter import _RunnerContextBuilder
+        keys = _DoubleApiKeyProvider()
+        bot = OpenApiBotAdapter(keys)
+        bcs = BcsHttpAdapter(_RealToken())
+        ctx = _RunnerContextBuilder(runner) if runner is not None else _DoubleContextProvider()
+    poller = TaskExecutorResultPoller(bot=bot, bcs=bcs)
+    poller.set_on_result(sink)
+    exe = TaskExecutor(bot=bot, bcs=bcs, formatter=PromptFormatterImpl(), context=ctx, sink=sink, poller=poller)
+    if poller_thread:
+        t = threading.Thread(target=poller.run_poll_loop, daemon=True)
+        t.start()
+    return exe
