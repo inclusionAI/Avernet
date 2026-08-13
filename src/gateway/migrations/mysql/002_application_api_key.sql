@@ -33,12 +33,21 @@ ALTER TABLE `avernet_application`
 -- kept (not dropped) so pre-existing JWT holders keep authenticating; drop it,
 -- with its unique index, once the deprecation warning has gone quiet.
 --
--- Only the nullability changes. Restating the column's charset/collation would
--- rebuild `uk_avernet_application_token`, and that index is over a
--- varchar(1024) utf8mb4 column — 4096 bytes, past InnoDB's 3072-byte key limit —
--- so the rebuild would fail and leave this migration half-applied. The legacy
--- lookup therefore keeps whatever collation the deployed table already uses; see
--- the note in `001_init_schema.sql`.
+-- BEFORE APPLYING, CHECK THIS STATEMENT AGAINST THE DEPLOYED SCHEMA.
+-- MySQL's MODIFY restates a column's whole definition: attributes left out are
+-- reset to the table default rather than preserved, so the charset/collation
+-- must be spelled out to make this a pure nullability change. Spelling them out
+-- rebuilds `uk_avernet_application_token`, and that index is over a
+-- varchar(1024) utf8mb4 column — 4096 bytes, past InnoDB's 3072-byte key limit.
+-- Whether the rebuild succeeds depends on how the deployed column was actually
+-- created (see the KNOWN ISSUE note in `001_init_schema.sql`). DDL auto-commits
+-- per statement, so if it fails the ALTER above has already landed and this file
+-- is not re-runnable — verify, or split the two statements across two windows.
+--
+-- utf8mb4_bin matches `001` and makes the legacy exact-match lookup genuinely
+-- exact. If the deployed column is currently case-insensitive this tightens it;
+-- that only affects a holder presenting a case-variant of their own token.
 ALTER TABLE `avernet_application`
-  MODIFY COLUMN `token` varchar(1024) DEFAULT NULL
+  MODIFY COLUMN `token` varchar(1024) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin
+    DEFAULT NULL
     COMMENT '[废弃] 旧版应用令牌(明文签名 JWT)，过渡期精确匹配查找键；待废弃日志静默后随查找路径一并删除';

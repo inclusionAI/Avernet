@@ -144,3 +144,48 @@ async def test_issuance_failure_returns_500() -> None:
             },
         )
     assert resp.status_code == 500
+
+
+@pytest.mark.parametrize("status", ["ACTIVE", "INACTIVE"])
+async def test_register_app_accepts_initial_statuses(status: str) -> None:
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/admin/apps",
+            json={
+                "app_name": "Status App",
+                "owners": "org-1",
+                "app_type": "assistant",
+                "tenant": "t",
+                "creator": "admin",
+                "status": status,
+            },
+        )
+    assert resp.status_code == 201
+    assert resp.json()["status"] == status
+
+
+@pytest.mark.parametrize("status", ["REVOKED", "active", "Active", "ENABLED", ""])
+async def test_register_app_rejects_unusable_statuses(status: str) -> None:
+    """A status the lookup will not match must not mint a dead credential.
+
+    Authentication compares against "ACTIVE" exactly, so a casing typo would
+    otherwise return 201 with a key that can never authenticate. REVOKED is
+    refused for the same reason — it is a transition, not an initial state.
+    """
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/admin/apps",
+            json={
+                "app_name": "Bad Status App",
+                "owners": "org-1",
+                "app_type": "assistant",
+                "tenant": "t",
+                "creator": "admin",
+                "status": status,
+            },
+        )
+    assert resp.status_code == 422

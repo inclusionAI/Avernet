@@ -38,9 +38,9 @@ class AppRequest(BaseModel):
     # exactly, so accepting "active" would mint a key that can never
     # authenticate while returning 201 as though registration had worked.
     # REVOKED is excluded deliberately — it is a transition applied to an
-    # existing app, and registering straight into it would mint a dead
-    # credential. The repository still honors REVOKED rows, which is what
-    # migrated secbaas records need.
+    # existing app, and registering straight into it would mint a credential
+    # that is dead on arrival. Migrated rows may still carry it; those are
+    # refused at lookup, which is the intended handling.
     status: Literal["ACTIVE", "INACTIVE"] = "ACTIVE"
     env: str = ""
     config: dict[str, Any] = Field(default_factory=dict)

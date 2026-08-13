@@ -21,6 +21,7 @@ import asyncio
 import time
 from collections.abc import Callable
 from typing import Any
+from weakref import WeakKeyDictionary
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -50,7 +51,12 @@ _ACTIVE = "ACTIVE"
 # repository per request (``providers.Factory``), so instance state would never
 # survive long enough to dedupe anything.
 _REPORT_WINDOW_SECONDS = 300.0
-_last_reported: dict[tuple[str, int, int], float] = {}
+# Keyed on the plugin object itself, not ``id()``: an address is recycled after
+# collection, so a replacement datasource would inherit a dead one's window. The
+# weak map also drops a plugin's entries when it goes away.
+_last_reported: WeakKeyDictionary[object, dict[tuple[str, int], float]] = (
+    WeakKeyDictionary()
+)
 
 
 class PrefixTakenError(RuntimeError):
@@ -66,13 +72,28 @@ def _report_once_per_window(
     *args: object,
 ) -> None:
     """Emit ``message`` for this app at most once per report window."""
-    key = (kind, id(datasource), record.id)
+    try:
+        seen = _last_reported.setdefault(datasource, {})
+    except TypeError:  # a datasource that cannot be weak-referenced
+        log(message, *args, stacklevel=3)
+        return
+
+    key = (kind, record.id)
     now = time.monotonic()
-    last = _last_reported.get(key)
+    last = seen.get(key)
     if last is not None and now - last < _REPORT_WINDOW_SECONDS:
         return
-    _last_reported[key] = now
-    log(message, *args)
+    # Expired entries are due to re-report anyway, so dropping them here keeps
+    # the map from growing for the process lifetime.
+    for stale, when in list(seen.items()):
+        if now - when >= _REPORT_WINDOW_SECONDS:
+            del seen[stale]
+    # ``stacklevel=3`` so the record names the branch that found the problem
+    # rather than this helper, keeping the two conditions distinguishable to any
+    # pipeline that routes on source location. Stamped only after a successful
+    # emit, so a failing handler cannot consume the window silently.
+    log(message, *args, stacklevel=3)
+    seen[key] = now
 
 
 class AppRepository(AppRegistry):
@@ -168,10 +189,11 @@ class AppRepository(AppRegistry):
         """DEPRECATED — resolve a pre-API-key app by its plaintext JWT.
 
         Kept only so credentials issued before the API-key scheme keep working
-        while their holders rotate. The first hit from each app logs at WARNING;
-        once that log stops appearing across a full deploy cycle, delete this
-        method, its branch in :meth:`find_app_by_credential`, ``AppRow.token``,
-        and the column's unique index.
+        while their holders rotate. Each still-unrotated app re-warns at most
+        once per report window, so the log is a live census rather than a
+        one-shot notice; once it stops naming any app across a full deploy
+        cycle, delete this method, its branch in
+        :meth:`find_app_by_credential`, ``AppRow.token``, and its unique index.
         """
         with self._db.orm_session() as session:
             row = session.scalar(
@@ -255,7 +277,10 @@ class AppRepository(AppRegistry):
             # would turn a NOT NULL or FK violation into three silent retries and
             # a "no unused prefix" error naming the wrong cause entirely.
             # Decided by re-reading the table rather than by matching the driver's
-            # message, which differs per backend and moves with index names.
+            # message, which differs per backend and moves with index names. The
+            # re-read runs in a fresh transaction, so a collision whose winning
+            # row disappeared in between would escape as a raw IntegrityError —
+            # no delete path exists for app rows, so that cannot happen here.
             if not await self.exists_prefix(api_key_prefix):
                 raise
             raise PrefixTakenError(api_key_prefix) from exc

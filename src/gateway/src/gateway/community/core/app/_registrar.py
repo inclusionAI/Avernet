@@ -111,12 +111,8 @@ class AppRegistrar:
                 tenant=tenant,
                 api_key=api_key,
             )
-        # Chained only when a race actually happened: ``from None`` would set
-        # __suppress_context__ and strip the traceback for the commoner case
-        # where every attempt stopped at the pre-check.
-        error = PrefixAllocationError(
+        # ``from last_race`` is a no-op when no race occurred: this raise is
+        # outside any handler, so there is no exception context to suppress.
+        raise PrefixAllocationError(
             f"no unused API key prefix found in {_MAX_PREFIX_ATTEMPTS} attempts"
-        )
-        if last_race is not None:
-            raise error from last_race
-        raise error
+        ) from last_race

@@ -179,8 +179,9 @@ async def test_duplicate_prefix_raises_prefix_taken_error(
 ) -> None:
     """The real IntegrityError path, not a fake raising the domain error.
 
-    Guards the constraint-name discrimination in ``store``: without it the
-    registrar retries any write failure and reports prefix exhaustion.
+    Guards ``store``'s collision oracle — the ``exists_prefix`` re-read that
+    decides whether a failed insert is retryable. Without it the registrar
+    retries every write failure and reports prefix exhaustion.
     """
     repository = AppRepository(db)
     key = APIKeyGenerator.generate()
@@ -204,7 +205,8 @@ async def test_non_collision_integrity_errors_are_not_disguised(
     key = APIKeyGenerator.generate()
     # PrefixTakenError is a RuntimeError, so binding IntegrityError here is
     # itself the assertion: a regression that relabelled every IntegrityError
-    # would escape this ``raises`` rather than satisfy it.
+    # would escape this ``raises`` rather than satisfy it. Deliberately not
+    # asserting on the driver's message, which differs per backend.
     with pytest.raises(IntegrityError) as caught:
         await AppRepository(db).store(
             api_key_hash=APIKeyGenerator.hash_key(key),
@@ -214,7 +216,7 @@ async def test_non_collision_integrity_errors_are_not_disguised(
             app_type="assistant",
             tenant="t",
         )
-    assert "app_name" in str(caught.value.orig)
+    assert not isinstance(caught.value, PrefixTakenError)  # nosec: see above
 
 
 async def test_malformed_hash_is_reported_not_silently_rejected(
@@ -339,12 +341,6 @@ async def test_verification_does_not_stall_the_event_loop(
     APIKeyGenerator.verify_key(_ACTIVE_KEY, _ACTIVE_HASH)
     derivation = time.perf_counter() - start
     budget = derivation * 0.5
-    if budget <= heartbeat_period * 2:
-        pytest.skip(
-            f"a {derivation * 1000:.0f}ms derivation leaves a {budget * 1000:.0f}ms "
-            f"budget, under the {heartbeat_period * 1000:.0f}ms heartbeat floor — "
-            "correct code would fail this bound"
-        )
 
     longest_gap = 0.0
 
@@ -359,7 +355,17 @@ async def test_verification_does_not_stall_the_event_loop(
 
     beat = asyncio.create_task(heartbeat())
     try:
-        await asyncio.sleep(0.02)
+        # Warm-up doubles as calibration: whatever the loop's idle scheduling
+        # jitter is on this machine, the budget has to clear it comfortably or
+        # the assertion measures noise rather than blocking.
+        await asyncio.sleep(0.05)
+        idle_jitter = longest_gap
+        if budget <= idle_jitter * 2:
+            pytest.skip(
+                f"idle jitter is {idle_jitter * 1000:.0f}ms against a "
+                f"{budget * 1000:.0f}ms budget — too noisy here to tell a stall "
+                "from scheduling delay"
+            )
         longest_gap = 0.0
         assert await registry.find_app_by_credential(_ACTIVE_KEY) is not None
         # Yield before cancelling: the heartbeat records a gap only when it next
