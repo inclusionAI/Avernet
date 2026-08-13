@@ -47,6 +47,7 @@ impl PrincipalVerifier for HeaderVerifier {
 #[derive(Default)]
 struct FakeBotService {
     candidates: Mutex<Option<ListBotCandidates>>,
+    candidate_search: Mutex<Option<SearchBotCandidates>>,
     query: Mutex<Option<QueryBots>>,
     get: Mutex<Option<GetBot>>,
     update: Mutex<Option<UpdateBot>>,
@@ -68,6 +69,31 @@ impl BotService for FakeBotService {
             total: 1,
             offset: 5,
             limit: 10,
+        })
+    }
+
+    async fn search_candidates(
+        &self,
+        command: SearchBotCandidates,
+    ) -> Result<BotCandidateSearchResult, ApplicationError> {
+        *self
+            .candidate_search
+            .lock()
+            .expect("candidate search lock") = Some(command);
+        Ok(BotCandidateSearchResult {
+            items: vec![BotCandidateSearchItem {
+                bot: physical_bot(),
+                is_friend: true,
+                tags: std::collections::BTreeMap::from([(
+                    "specialty".to_string(),
+                    json!("planning"),
+                )]),
+                score: Some(0.92),
+                short_profile: Some("Planning specialist".to_string()),
+            }],
+            context: BotCandidateSearchContext {
+                recommend_response: Some(json!({"trace": "semantic"})),
+            },
         })
     }
 
@@ -274,7 +300,7 @@ fn test_router(service: Arc<FakeBotService>) -> axum::Router {
 }
 
 #[tokio::test]
-async fn all_five_bot_routes_forward_verified_human_and_contract_inputs() {
+async fn all_six_bot_routes_forward_verified_human_and_contract_inputs() {
     let service = Arc::new(FakeBotService::default());
     let app = test_router(service.clone());
 
@@ -291,6 +317,27 @@ async fn all_five_bot_routes_forward_verified_human_and_contract_inputs() {
     assert_eq!(
         response_json(candidates).await["data"]["items"][0]["bot"]["kind"],
         "bot"
+    );
+
+    let searched = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/openapi/v1/collaboration/bots/human_staff-1/candidates/search?q=planning%20help&purpose=collaboration",
+            Value::Null,
+        ))
+        .await
+        .expect("candidate search response");
+    assert_eq!(searched.status(), StatusCode::OK);
+    let searched_body = response_json(searched).await;
+    assert_eq!(searched_body["data"]["items"][0]["score"], 0.92);
+    assert_eq!(
+        searched_body["data"]["items"][0]["tags"]["specialty"],
+        "planning"
+    );
+    assert_eq!(
+        searched_body["data"]["context"]["recommend_response"]["trace"],
+        "semantic"
     );
 
     let queried = app
@@ -355,6 +402,18 @@ async fn all_five_bot_routes_forward_verified_human_and_contract_inputs() {
     assert_eq!(candidates.purpose, BotCandidatePurpose::Collaboration);
     assert_eq!(candidates.name.as_deref(), Some("planner"));
     assert_eq!((candidates.offset, candidates.limit), (5, 10));
+    let search = service
+        .candidate_search
+        .lock()
+        .expect("candidate search lock");
+    let search = search.as_ref().expect("candidate search command");
+    assert_eq!(
+        search.caller.user.as_ref().map(|user| user.id.as_str()),
+        Some("staff-1")
+    );
+    assert_eq!(search.bot_id, "human_staff-1");
+    assert_eq!(search.purpose, BotCandidatePurpose::Collaboration);
+    assert_eq!(search.query, "planning help");
 
     assert_eq!(
         service
@@ -386,7 +445,8 @@ async fn all_five_bot_routes_forward_verified_human_and_contract_inputs() {
 
 #[tokio::test]
 async fn bot_routes_reject_unknown_request_fields_and_missing_principal() {
-    let app = test_router(Arc::new(FakeBotService::default()));
+    let service = Arc::new(FakeBotService::default());
+    let app = test_router(service.clone());
     let unknown = app
         .clone()
         .oneshot(request(
@@ -400,6 +460,28 @@ async fn bot_routes_reject_unknown_request_fields_and_missing_principal() {
     assert_eq!(
         response_json(unknown).await["data"]["error_code"],
         "invalid_request"
+    );
+
+    let unknown_search_query = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/openapi/v1/collaboration/bots/bot-1/candidates/search?q=planning&limit=10",
+            Value::Null,
+        ))
+        .await
+        .expect("unknown search query response");
+    assert_eq!(unknown_search_query.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response_json(unknown_search_query).await["data"]["error_code"],
+        "invalid_request"
+    );
+    assert!(
+        service
+            .candidate_search
+            .lock()
+            .expect("candidate search lock")
+            .is_none()
     );
 
     let missing = app

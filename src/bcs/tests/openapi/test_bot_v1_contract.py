@@ -12,6 +12,7 @@ from scripts.validate_openapi_contract import load_contract  # noqa: E402
 
 BOT_OPERATIONS = {
     ("get", "/openapi/v1/collaboration/bots/{bot_id}/candidates"),
+    ("get", "/openapi/v1/collaboration/bots/{bot_id}/candidates/search"),
     ("post", "/openapi/v1/collaboration/bots/query"),
     ("get", "/openapi/v1/collaboration/bots/{bot_id}"),
     ("patch", "/openapi/v1/collaboration/bots/{bot_id}"),
@@ -158,6 +159,67 @@ def test_candidates_contract_matches_legacy_list_semantics() -> None:
     candidate = _success_data(operation)["properties"]["items"]["items"]
     assert set(candidate["required"]) == {"bot", "is_friend"}
     assert candidate["properties"]["bot"]["properties"]["kind"]["const"] == "bot"
+
+
+def test_candidate_search_contract_matches_legacy_search_semantics() -> None:
+    operation = _operation(
+        "get", "/openapi/v1/collaboration/bots/{bot_id}/candidates/search"
+    )
+    parameters = _parameters(operation)
+
+    assert operation["operationId"] == "search_bot_candidates"
+    assert set(parameters) == {"bot_id", "q", "purpose"}
+    assert parameters["q"]["required"] is True
+    assert parameters["q"]["schema"] == {"type": "string", "minLength": 1}
+    assert parameters["purpose"]["schema"] == {
+        "type": "string",
+        "enum": ["discovery", "collaboration"],
+        "default": "discovery",
+    }
+    assert {
+        "ctoken",
+        "current_bot_uuid",
+        "cooperatable_only",
+        "name",
+        "offset",
+        "limit",
+    }.isdisjoint(parameters)
+
+    assert operation["x-avernet-behavior"] == {
+        "legacy_equivalent": "/actors/search",
+        "acting_bot": ["managed_physical_bot", "current_human_actor"],
+        "result_kind": "bot",
+        "purpose_mapping": {
+            "discovery": {"cooperatable_only": False},
+            "collaboration": {"cooperatable_only": True},
+        },
+        "top_k": 20,
+        "primary_ordering": "recommendation_score_desc",
+        "fallback": "trimmed_case_insensitive_name_substring",
+    }
+
+    data = _success_data(operation)
+    assert data["additionalProperties"] is False
+    assert set(data["required"]) == {"items", "context"}
+    item = data["properties"]["items"]["items"]
+    assert item["additionalProperties"] is False
+    assert set(item["required"]) == {"bot", "is_friend", "tags"}
+    assert set(item["properties"]) == {
+        "bot",
+        "is_friend",
+        "tags",
+        "score",
+        "short_profile",
+    }
+    assert item["properties"]["bot"]["properties"]["kind"]["const"] == "bot"
+    assert item["properties"]["tags"]["additionalProperties"] is True
+    context = data["properties"]["context"]
+    assert context["additionalProperties"] is False
+    assert context["required"] == ["recommend_response"]
+    assert context["properties"]["recommend_response"]["oneOf"] == [
+        {"type": "object", "additionalProperties": True},
+        {"type": "null"},
+    ]
 
 
 def test_batch_query_is_sparse_ordered_and_not_visibility_filtered() -> None:

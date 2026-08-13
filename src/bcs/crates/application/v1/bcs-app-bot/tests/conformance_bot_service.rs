@@ -9,7 +9,9 @@ use bcs_app_bot::{BotServiceConfig, BotServiceImpl};
 use bcs_bot::BotControlPlaneCore;
 use bcs_bot_store::{MemoryBotRepo, MemoryProviderStore};
 use bcs_service_api::BotControlPlaneCoreService;
-use bcs_test_support::{NoopBotRegistryCoreService, NoopFriendCoreService};
+use bcs_test_support::{
+    NoopActorDirectoryService, NoopBotRegistryCoreService, NoopFriendCoreService,
+};
 
 #[tokio::test]
 async fn bot_service_impl_passes_the_v1_bot_service_contract() {
@@ -25,6 +27,7 @@ async fn bot_service_impl_passes_the_v1_bot_service_contract() {
         control_plane,
         Arc::new(NoopBotRegistryCoreService),
         Arc::new(NoopFriendCoreService),
+        Arc::new(NoopActorDirectoryService),
         BotServiceConfig {
             env: bcs_config::resolve_env_str(),
         },

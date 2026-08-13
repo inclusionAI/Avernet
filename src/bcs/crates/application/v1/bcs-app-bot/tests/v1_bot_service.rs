@@ -3,7 +3,8 @@
     reason = "test assertions intentionally fail fast"
 )]
 
-use std::sync::Arc;
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use bcs_app_bot::{BotServiceConfig, BotServiceImpl};
@@ -13,15 +14,19 @@ use bcs_friend::FriendCore;
 use bcs_service_api::application::v1::{
     ApplicationError, Bot, BotCandidatePurpose, BotDescriptorPatch, BotKind, BotPatch,
     BotReachability, BotService, BotStatus, BotVisibility, GetBot, ListBotCandidates, ListMyBots,
-    QueryBots, UpdateBot,
+    QueryBots, SearchBotCandidates, UpdateBot,
 };
 use bcs_service_api::{
-    ActorKind, ActorStatus, BotCapabilities, BotControlPlaneCoreService,
+    ActorCapabilitiesView, ActorDirectoryEntry, ActorDirectoryService, ActorKind, ActorListCommand,
+    ActorListResult, ActorSearchCommand, ActorSearchContext, ActorSearchResult, ActorStatus,
+    ActorStatusUpdateCommand, ActorStatusUpdateResult, BotCapabilities, BotControlPlaneCoreService,
     BotControlPlaneDescriptor, BotControlPlaneRecord, BotRegistryCoreService, BotRepoPort,
-    FriendCoreService, ProviderBotBinding, ProviderBotBindingRepoPort, ProviderRecord,
-    ProviderRepoPort, ServiceError, ServiceResult, Skill,
+    DynamicStatusResponse, FriendCoreService, ProviderBotBinding, ProviderBotBindingRepoPort,
+    ProviderRecord, ProviderRepoPort, ServiceError, ServiceResult, Skill,
 };
-use bcs_test_support::{NoopBotRegistryCoreService, NoopFriendCoreService};
+use bcs_test_support::{
+    NoopActorDirectoryService, NoopBotRegistryCoreService, NoopFriendCoreService,
+};
 
 #[test]
 fn v1_bot_commands_expose_the_approved_control_plane_surface() {
@@ -34,6 +39,12 @@ fn v1_bot_commands_expose_the_approved_control_plane_surface() {
         name: None,
         offset: 0,
         limit: 20,
+    };
+    let _ = SearchBotCandidates {
+        caller: caller.clone(),
+        bot_id: "bot-1".to_string(),
+        purpose: Default::default(),
+        query: "planning".to_string(),
     };
     let _ = QueryBots {
         caller: caller.clone(),
@@ -94,6 +105,7 @@ impl Fixture {
             control_plane,
             registry,
             friends.clone(),
+            Arc::new(NoopActorDirectoryService),
             BotServiceConfig { env: env.clone() },
         );
         Self {
@@ -128,6 +140,69 @@ impl Fixture {
             .update_actor_status(bot_id, status)
             .await
             .expect("update actor status");
+    }
+}
+
+struct RecordingActorDirectory {
+    command: Mutex<Option<ActorSearchCommand>>,
+    result: ActorSearchResult,
+}
+
+impl RecordingActorDirectory {
+    fn new(result: ActorSearchResult) -> Self {
+        Self {
+            command: Mutex::new(None),
+            result,
+        }
+    }
+}
+
+#[async_trait]
+impl ActorDirectoryService for RecordingActorDirectory {
+    async fn list_actors(&self, _command: ActorListCommand) -> ActorListResult {
+        unreachable!("candidate search does not list actors")
+    }
+
+    async fn search_actors(&self, command: ActorSearchCommand) -> ActorSearchResult {
+        *self.command.lock().expect("search command lock") = Some(command);
+        self.result.clone()
+    }
+
+    async fn update_actor_status_for_caller(
+        &self,
+        _command: ActorStatusUpdateCommand,
+    ) -> ServiceResult<ActorStatusUpdateResult> {
+        unreachable!("candidate search does not update actor status")
+    }
+}
+
+fn search_entry(
+    bot_id: &str,
+    is_friend: bool,
+    score: f64,
+    short_profile: &str,
+) -> ActorDirectoryEntry {
+    ActorDirectoryEntry {
+        bot_uuid: bot_id.to_string(),
+        capabilities: ActorCapabilitiesView {
+            name: Some(bot_id.to_string()),
+            summary: Some(format!("summary-{bot_id}")),
+            skills: vec![Skill::new("plan")],
+            domains: vec!["planning".to_string()],
+            scopes: vec!["workspace".to_string()],
+        },
+        visibility: "public".to_string(),
+        dynamic_status: DynamicStatusResponse {
+            status: "offline".to_string(),
+        },
+        is_friend,
+        is_downlink: false,
+        tags: BTreeMap::from([(
+            "specialty".to_string(),
+            serde_json::json!("planning"),
+        )]),
+        score: Some(score),
+        short_profile: Some(short_profile.to_string()),
     }
 }
 
@@ -214,6 +289,7 @@ async fn ownership_denial_precedes_provider_hydration() {
         control_plane,
         Arc::new(NoopBotRegistryCoreService),
         Arc::new(NoopFriendCoreService),
+        Arc::new(NoopActorDirectoryService),
         BotServiceConfig { env },
     );
 
@@ -230,6 +306,152 @@ async fn ownership_denial_precedes_provider_hydration() {
         .expect_err("ownership denial must not hydrate Provider metadata");
 
     assert_eq!(error.code(), "forbidden");
+}
+
+#[tokio::test]
+async fn search_candidates_maps_legacy_command_and_preserves_ranked_enrichment() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let repo = Arc::new(MemoryBotRepo::with_base_dir(temp.path().to_path_buf()));
+    let registry: Arc<dyn BotRegistryCoreService> = Arc::new(BotCore::with_repo(repo.clone()));
+    let providers = Arc::new(MemoryProviderStore::new());
+    let control_plane: Arc<dyn BotControlPlaneCoreService> = Arc::new(
+        BotControlPlaneCore::new(repo.clone(), providers.clone(), providers),
+    );
+    let friends = Arc::new(FriendCore::memory());
+    let directory = Arc::new(RecordingActorDirectory::new(ActorSearchResult {
+        bots: vec![
+            search_entry("recommended-b", true, 0.9, "best match"),
+            search_entry("recommended-a", false, 0.7, "second match"),
+        ],
+        context: ActorSearchContext {
+            recommend_response: Some(serde_json::json!({"trace": "recommendation"})),
+        },
+    }));
+    let env = bcs_config::resolve_env_str();
+    let service = BotServiceImpl::new(
+        control_plane,
+        registry,
+        friends,
+        directory.clone(),
+        BotServiceConfig { env },
+    );
+
+    for bot_id in ["acting", "recommended-a", "recommended-b"] {
+        repo.register_with_owner_and_token(
+            bot_id.to_string(),
+            BotCapabilities {
+                name: Some(bot_id.to_string()),
+                summary: Some(format!("summary-{bot_id}")),
+                visibility: if bot_id == "acting" {
+                    "private".to_string()
+                } else {
+                    "public".to_string()
+                },
+                ..Default::default()
+            },
+            if bot_id == "acting" { "staff-1" } else { "staff-2" },
+            &format!("token-{bot_id}"),
+        )
+        .await
+        .expect("register search bot");
+    }
+
+    let result = service
+        .search_candidates(SearchBotCandidates {
+            caller: human_caller("staff-1"),
+            bot_id: "acting".to_string(),
+            purpose: BotCandidatePurpose::Collaboration,
+            query: "  planning help  ".to_string(),
+        })
+        .await
+        .expect("search candidates");
+
+    let command = directory
+        .command
+        .lock()
+        .expect("search command lock")
+        .clone()
+        .expect("search command recorded");
+    assert_eq!(command.query, "  planning help  ");
+    assert_eq!(command.current_bot_uuid, "acting");
+    assert!(command.cooperatable_only);
+    assert_eq!(command.limit, 20);
+    assert_eq!(
+        result
+            .items
+            .iter()
+            .map(|item| item.bot.bot_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["recommended-b", "recommended-a"]
+    );
+    assert!(result.items[0].is_friend);
+    assert_eq!(result.items[0].score, Some(0.9));
+    assert_eq!(result.items[0].short_profile.as_deref(), Some("best match"));
+    assert_eq!(
+        result.items[0].tags.get("specialty"),
+        Some(&serde_json::json!("planning"))
+    );
+    assert_eq!(
+        result.context.recommend_response,
+        Some(serde_json::json!({"trace": "recommendation"}))
+    );
+}
+
+#[tokio::test]
+async fn search_candidates_denies_unauthorized_perspective_before_legacy_search() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let repo = Arc::new(MemoryBotRepo::with_base_dir(temp.path().to_path_buf()));
+    let registry: Arc<dyn BotRegistryCoreService> = Arc::new(BotCore::with_repo(repo.clone()));
+    let providers = Arc::new(MemoryProviderStore::new());
+    let control_plane: Arc<dyn BotControlPlaneCoreService> = Arc::new(
+        BotControlPlaneCore::new(repo.clone(), providers.clone(), providers),
+    );
+    let directory = Arc::new(RecordingActorDirectory::new(ActorSearchResult {
+        bots: Vec::new(),
+        context: ActorSearchContext {
+            recommend_response: None,
+        },
+    }));
+    let service = BotServiceImpl::new(
+        control_plane,
+        registry,
+        Arc::new(FriendCore::memory()),
+        directory.clone(),
+        BotServiceConfig {
+            env: bcs_config::resolve_env_str(),
+        },
+    );
+    repo.register_with_owner_and_token(
+        "acting".to_string(),
+        BotCapabilities {
+            name: Some("acting".to_string()),
+            visibility: "private".to_string(),
+            ..Default::default()
+        },
+        "staff-1",
+        "token-acting",
+    )
+    .await
+    .expect("register acting bot");
+
+    let error = service
+        .search_candidates(SearchBotCandidates {
+            caller: human_caller("staff-2"),
+            bot_id: "acting".to_string(),
+            purpose: BotCandidatePurpose::Discovery,
+            query: "planning".to_string(),
+        })
+        .await
+        .expect_err("non-owner search must fail");
+
+    assert_eq!(error.code(), "forbidden");
+    assert!(
+        directory
+            .command
+            .lock()
+            .expect("search command lock")
+            .is_none()
+    );
 }
 
 #[tokio::test]

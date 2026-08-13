@@ -1350,6 +1350,7 @@ fn build_openapi_v1_state(
     registry: Arc<dyn BotRegistryCoreService>,
     groups: Arc<dyn GroupCoreService>,
     friends: Arc<dyn FriendCoreService>,
+    actor_directory: Arc<dyn bcs_service_api::ActorDirectoryService>,
     friend_requests: Arc<dyn FriendRequestCoreService>,
     relation: Arc<dyn RelationCoreService>,
     sessions: Arc<dyn SessionManagementService>,
@@ -1371,6 +1372,7 @@ fn build_openapi_v1_state(
         control_plane,
         registry.clone(),
         friends.clone(),
+        actor_directory,
         BotServiceConfig {
             env: relation_env.clone(),
         },
@@ -1877,6 +1879,14 @@ impl Default for BcsServerState {
                 collaboration_runtime.clone(),
             )),
         );
+        let actor_directory: Arc<dyn bcs_service_api::ActorDirectoryService> = Arc::new(
+            bcs_bot::ActorDirectory::new(
+                bot_registry.clone(),
+                friend_store.clone(),
+                relation_store.clone(),
+            )
+            .with_recommend_min_score(config.bcsfuse.recommend_min_score),
+        );
         let openapi_v1 = build_openapi_v1_state(
             &config,
             invite_token_secret.clone(),
@@ -1885,6 +1895,7 @@ impl Default for BcsServerState {
             bot_registry.clone(),
             sessions.clone(),
             friend_store.clone(),
+            actor_directory.clone(),
             friend_request_store,
             relation_store.clone(),
             session_management.clone(),
@@ -1940,6 +1951,7 @@ impl Default for BcsServerState {
             .a2a_chat_runs(a2a_chat_runs)
             .collaboration_runtime(collaboration_runtime)
             .collaboration_templates(build_standalone_collaboration_template_service(&config))
+            .actor_directory(actor_directory)
             .bot_query(bot_use_cases.clone())
             .bot_management(bot_use_cases.clone())
             .bot_runtime(bot_use_cases.clone())
@@ -3234,6 +3246,7 @@ impl BcsServer {
             bot_registry.clone(),
             sessions.clone(),
             friend_store.clone(),
+            use_cases.actor_directory.clone(),
             friend_request_store,
             relation_store.clone(),
             session_management.clone(),
@@ -3834,6 +3847,7 @@ impl BcsServer {
             bot_registry.clone(),
             sessions.clone(),
             friend_svc.clone(),
+            use_cases.actor_directory.clone(),
             friend_request_svc,
             relation_svc.clone(),
             session_management.clone(),

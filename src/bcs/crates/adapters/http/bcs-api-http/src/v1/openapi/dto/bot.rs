@@ -40,6 +40,14 @@ pub struct ListBotCandidatesQuery {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct SearchBotCandidatesQuery {
+    pub q: String,
+    #[serde(default)]
+    pub purpose: CandidatePurposeQuery,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct QueryBotsRequest {
     pub bot_ids: Vec<String>,
 }

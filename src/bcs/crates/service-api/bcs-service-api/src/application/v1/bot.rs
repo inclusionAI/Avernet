@@ -1,5 +1,7 @@
 //! Versioned Bot control-plane application contract for BCN OpenAPI v1.
 
+use std::collections::BTreeMap;
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -125,6 +127,28 @@ pub struct BotCandidate {
     pub is_friend: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BotCandidateSearchItem {
+    pub bot: PhysicalBot,
+    pub is_friend: bool,
+    pub tags: BTreeMap<String, serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub short_profile: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BotCandidateSearchContext {
+    pub recommend_response: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BotCandidateSearchResult {
+    pub items: Vec<BotCandidateSearchItem>,
+    pub context: BotCandidateSearchContext,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BotList {
     pub items: Vec<Bot>,
@@ -138,6 +162,14 @@ pub struct ListBotCandidates {
     pub name: Option<String>,
     pub offset: u64,
     pub limit: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct SearchBotCandidates {
+    pub caller: AuthenticatedCaller,
+    pub bot_id: String,
+    pub purpose: BotCandidatePurpose,
+    pub query: String,
 }
 
 #[derive(Debug, Clone)]
@@ -210,6 +242,11 @@ pub trait BotService: Send + Sync {
         &self,
         command: ListBotCandidates,
     ) -> Result<Page<BotCandidate>, ApplicationError>;
+
+    async fn search_candidates(
+        &self,
+        command: SearchBotCandidates,
+    ) -> Result<BotCandidateSearchResult, ApplicationError>;
 
     async fn query(&self, command: QueryBots) -> Result<Vec<Bot>, ApplicationError>;
 

@@ -247,6 +247,58 @@ BotCandidate:
       type: boolean
       description: Whether the acting physical Bot has an accepted Friendship.
 
+BotCandidateSearchItem:
+  type: object
+  additionalProperties: false
+  required:
+    - bot
+    - is_friend
+    - tags
+  properties:
+    bot:
+      $ref: "#/PhysicalBot"
+    is_friend:
+      type: boolean
+      description: Whether the acting Actor has an accepted Friendship with this Bot.
+    tags:
+      type: object
+      additionalProperties: true
+      description: Worker-profile tags attached by the legacy search capability.
+    score:
+      type: number
+      format: double
+      description: Semantic relevance score, or zero for a name-fallback result.
+    short_profile:
+      type: string
+      description: Short recommendation profile or fallback skill summary.
+
+BotCandidateSearchContext:
+  type: object
+  additionalProperties: false
+  required:
+    - recommend_response
+  properties:
+    recommend_response:
+      oneOf:
+        - type: object
+          additionalProperties: true
+        - type: "null"
+      description: Raw BCSFuse response when recommendation returned one.
+
+BotCandidateSearchResult:
+  type: object
+  additionalProperties: false
+  required:
+    - items
+    - context
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/BotCandidateSearchItem"
+    context:
+      $ref: "#/BotCandidateSearchContext"
+
 BotPage:
   type: object
   additionalProperties: false
@@ -355,6 +407,24 @@ BotCandidatePageEnvelope:
       type: string
     data:
       $ref: "#/BotCandidatePage"
+    request_id:
+      type: string
+
+BotCandidateSearchEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/BotCandidateSearchResult"
     request_id:
       type: string
 
