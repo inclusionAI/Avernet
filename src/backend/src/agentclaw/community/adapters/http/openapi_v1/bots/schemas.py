@@ -103,22 +103,6 @@ class Bot(BaseModel):
         description="The user who owns the bot — echoes the user_id the "
         "request named."
     )
-    # Workshop card enrichment. ``deploy_mode`` is derived from ``bot_type``
-    # (desktop → local; else cloud), while ``space`` comes from the structured
-    # bot space with the personal-space fallback.
-    deploy_mode: Literal["cloud", "local"] = "cloud"
-    space: "BotSpaceRef | None" = None
-
-
-class BotSpaceRef(BaseModel):
-    """Minimal business-space reference surfaced on ``Bot.space``."""
-
-    space_id: str
-    name: str
-    kind: str = "personal"
-
-
-Bot.model_rebuild()
 
 
 class BotCreate(BaseModel):
@@ -446,7 +430,7 @@ class DataInitResult(BaseModel):
 
 
 # ── Bot inventory card surface ─────────────────────────────────────────────
-# Card view at ``/openapi/v1/bots/cards`` (list) and ``/cards/{bot_id}`` (one
+# Card view at ``/openapi/v1/bots/all`` (list) and ``/all/{bot_id}`` (one
 # card); actions hang off the bot record at ``/{bot_id}/actions``.
 # These Literals are trimmed siblings of the core enums in
 # ``core.bot_inventory.types`` (kept as strings so a pydantic schema carries
@@ -492,15 +476,6 @@ class BotInventoryItem(BaseModel):
     mount_path: str | None = None
     passport_id: str | None = None
     actions: list[BotAction] = Field(default_factory=list)
-    disabled_actions: dict[str, str] | None = None
-
-
-class BotActions(BaseModel):
-    """Action affordances for a Bot inventory item."""
-
-    bot_id: str
-    display_state: DisplayState
-    actions: list[BotAction]
     disabled_actions: dict[str, str] | None = None
 
 

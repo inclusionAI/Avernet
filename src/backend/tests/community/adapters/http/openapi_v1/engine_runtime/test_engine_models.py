@@ -122,7 +122,10 @@ def test_available_engines(engine_client, relay):
 
 
 def test_switch_is_not_exposed(engine_client):
-    """Switch stays unexposed because a bot's engine is fixed at creation."""
+    """``switch`` stays unexposed because engine choice is fixed at creation.
+
+    ``restart`` is exposed separately by the engine runtime adapter.
+    """
     resp = engine_client.post(f"/openapi/v1/bots/{BOT}/engine/switch")
     assert resp.status_code in (404, 405), resp.status_code
 

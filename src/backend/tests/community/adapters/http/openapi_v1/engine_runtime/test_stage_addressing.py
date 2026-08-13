@@ -290,6 +290,7 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
     )
 
 
+
 def test_the_stage_enum_publishes_exactly_the_three_runtimes():
     schema = _schema()
     enum = schema["components"]["schemas"]["RuntimeStage"]["enum"]

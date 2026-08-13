@@ -118,8 +118,6 @@ from .schemas import (
     BotAuthStatus,
     BotCreate,
     BotInventoryItem,
-    BotActions,
-    BotSpaceRef,
     BotStatus,
     BotType,
     BotUpdate,
@@ -153,66 +151,19 @@ _REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
 
 router = APIRouter(prefix="/openapi/v1/bots", tags=["bots"])
 
-# Post-filter fetch bounds for the new workshop filters (deploy_mode/service/space)
-# on ``GET /openapi/v1/bots``. The legacy filters go straight to the service, which
-# pages natively; the new ones are not understood downstream, so the handler fetches
-# a window and post-filters. These bounds keep one list call from scanning an
-# unbounded set, the same rationale as ``BotInventoryService.MAX_CLOUD_ROWS``.
-_LIST_POSTFILTER_PAGES = 5
-_LIST_POSTFILTER_MAX = 500
-
-
 def _to_bot(d: dict[str, Any]) -> Bot:
     """Adapt an internal bot ``to_dict()`` record to the public ``Bot`` schema."""
     engine = d.get("active_engine") or ""
-    bot_type = d.get("bot_type") or ""
     return Bot(
         bot_id=d["bot_id"],
         bot_name=d.get("bot_name") or "",
         bot_desc=d.get("bot_desc") or "",
         engine=engine,
         cluster_name=cluster_for_engine(engine),
-        bot_type=bot_type,
+        bot_type=d.get("bot_type") or "",
         status=d.get("status") or "",
         owner_entity_id=d.get("owner_id") or "",
-        # desktop → local; everything else (personal/service) is cloud-provisioned
-        # — local Bots have their own /openapi/v1/bots/local surface and never
-        # appear here, so the only thing this distinguishes today is bot_type.
-        deploy_mode="local" if bot_type == "desktop" else "cloud",
-        space=_bot_space_ref(d, d.get("owner_id") or ""),
     )
-
-
-def _resolve_bot_space(bot: dict[str, Any], owner_id: str) -> dict[str, str]:
-    """Resolve ``(space_id, name, kind)`` from ``ac_bots.space_id`` (struct).
-
-    Reads the structured ``space_id`` column on ``ac_bots`` — NOT ``bot.ext``
-    (the contract owner rejected the transient ext path). A NULL space falls
-    back to the personal space ``personal:{owner_id}`` so the personal view
-    always contains the bot; ``name``/``kind`` mirror the same fallback the
-    inventory ``NoopBusinessSpaceContext`` uses.
-    """
-    space_id = bot.get("space_id")
-    if not space_id:
-        return {"space_id": f"personal:{owner_id}", "name": "Personal", "kind": "personal"}
-    return {"space_id": str(space_id), "name": str(space_id), "kind": "personal"}
-
-
-def _bot_space_ref(bot: dict[str, Any], owner_id: str) -> BotSpaceRef | None:
-    """Build the public ``Bot.space`` ref, or None when no owner to resolve against."""
-    if not owner_id:
-        return None
-    s = _resolve_bot_space(bot, owner_id)
-    return BotSpaceRef(space_id=s["space_id"], name=s["name"], kind=s["kind"])
-
-
-def _row_matches_space(bot: dict[str, Any], owner_id: str, space_id: str) -> bool:
-    """Whether ``bot`` belongs to space ``space_id`` for list filtering.
-
-    Same source as the per-bot ``space`` derivation (``ac_bots.space_id`` +
-    personal fallback), so list-filter and detail-derive read one value.
-    """
-    return _resolve_bot_space(bot, owner_id)["space_id"] == space_id
 
 
 def _to_inventory_item(item: CoreItem) -> BotInventoryItem:
@@ -248,16 +199,6 @@ def _to_inventory_item(item: CoreItem) -> BotInventoryItem:
         actions=[a.value for a in item.actions],
         disabled_actions=dict(item.disabled_actions) if item.disabled_actions else None,
     )
-
-
-def _to_inventory_actions(item: CoreItem) -> dict[str, Any]:
-    """Build the ``BotActions`` fields for an inventory card (used as kwargs)."""
-    return {
-        "bot_id": item.bot_id,
-        "display_state": item.display_state.value,
-        "actions": [a.value for a in item.actions],
-        "disabled_actions": dict(item.disabled_actions) if item.disabled_actions else None,
-    }
 
 
 def _auth_status_error(status: str, request: Request) -> JSONResponse:
@@ -481,70 +422,37 @@ async def list_bots(
             "exactly (e.g. 'ACTIVE'; see the Bot schema for the vocabulary)."
         ),
     ] = None,
-    deploy_mode: str | None = None,
-    service: str | None = None,
-    space: str | None = None,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[Page[Bot]]:
     """List the caller's bots, narrowed to the caller's authorized scope.
 
     Human callers see their own bots. Application callers see only owned bots
     explicitly granted by the delegating user. The grant restriction is passed
-    to the service before pagination and is also preserved when workshop-only
-    filters require a bounded post-filter window.
+    to the service before pagination.
 
     An application granted nothing gets an empty page, not an error: naming no
     bot, this operation has nothing to mask. The complete view of delegated
     bots, including bots the user does not own, is the authorized-bots listing.
 
-    ``keyword``/``engine``/``status`` are native service filters.
-    ``deploy_mode``/``service``/``space`` are workshop filters applied here
-    because the underlying service does not own those presentation concerns.
-
+    ``keyword``/``engine``/``status`` are forwarded to
+    ``BotService.list_bots_by_conditions``. For the workshop card view (with
+    deploy mode, space, and richer inventory fields), use
+    ``GET /openapi/v1/bots/all``.
     """
     granted = caller.granted_bot_ids(owned_by_delegator=True)
     if granted is not None and not granted:
         return page(0, [], request)
-
-    if deploy_mode == "local":
-        return page(0, [], request)
-
-    effective_deploy_mode: str | None = None if deploy_mode == "cloud" else deploy_mode
-    if effective_deploy_mode is None and service is None and space is None:
-        result = bot_service.list_bots_by_conditions(
-            owner_id=owner_id,
-            bot_name=keyword,
-            engine=engine,
-            status=status,
-            page=page_params.page,
-            page_size=page_params.page_size,
-            bot_ids=sorted(granted) if granted is not None else None,
-        )
-        items = [_to_bot(b) for b in result["items"]]
-        return page(result["total"], items, request)
-
-    fetch_size = min(page_params.page_size * _LIST_POSTFILTER_PAGES, _LIST_POSTFILTER_MAX)
     result = bot_service.list_bots_by_conditions(
         owner_id=owner_id,
         bot_name=keyword,
         engine=engine,
         status=status,
-        page=1,
-        page_size=fetch_size,
+        page=page_params.page,
+        page_size=page_params.page_size,
         bot_ids=sorted(granted) if granted is not None else None,
     )
-    rows = list(result.get("items", []))
-    if service == "yes":
-        rows = [b for b in rows if (b.get("bot_type") or "") == "service"]
-    elif service == "no":
-        rows = [b for b in rows if (b.get("bot_type") or "") != "service"]
-    if space is not None:
-        rows = [b for b in rows if _row_matches_space(b, owner_id, space)]
-    items = [_to_bot(b) for b in rows]
-    total = len(items)
-    start = (page_params.page - 1) * page_params.page_size
-    page_items = items[start : start + page_params.page_size]
-    return page(total, page_items, request)
+    items = [_to_bot(b) for b in result["items"]]
+    return page(result["total"], items, request)
 
 
 @router.get(
@@ -638,12 +546,9 @@ async def get_bots_ceiling(
 
 
 # ── Bot inventory card surface ─────────────────────────────────────────────
-# Card view at ``/openapi/v1/bots/cards`` (list) and ``/cards/{bot_id}`` (one
-# card), declared before the ``/{bot_id}`` wildcard so ``cards`` matches as a
-# literal, not as a bot_id. The actions affordance hangs off the bot record
-# itself at ``/{bot_id}/actions`` (a two-segment sub-resource like
-# ``/{bot_id}/restart``), so it follows ``/{bot_id}`` below and needs no literal
-# guard. The card aggregates the owner's personal cloud + local Bots behind
+# Aggregated card view at ``/openapi/v1/bots/all``, declared before the
+# ``/{bot_id}`` wildcard so ``all`` matches as a literal, not as a bot id.
+# The endpoint aggregates the owner's personal cloud + local Bots behind
 # ``BotInventoryServiceProtocol`` (a distinct Service API from the
 # ``BotServiceProtocol`` CRUD this file serves below); the value translation is
 # the ``_to_inventory_item`` helper at the top of this file (same place as
@@ -651,7 +556,7 @@ async def get_bots_ceiling(
 
 
 @router.get(
-    "/cards",
+    "/all",
     response_model=Envelope[Page[BotInventoryItem]],
     responses=USER_SCOPED_403,
 )
@@ -685,61 +590,6 @@ async def list_inventory(
     )
     return page(total, [_to_inventory_item(item) for item in items], request)
 
-
-@router.get(
-    "/cards/{bot_id}",
-    response_model=Envelope[BotInventoryItem],
-    responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
-)
-@envelope_errors
-async def get_inventory_item(
-    bot_id: str,
-    owner_id: UserIdDep,
-    request: Request,
-    x_space_id: str | None = Header(default=None, alias="X-Space-Id"),
-    service: BotInventoryServiceProtocol = Injected(BotInventoryServiceProtocol),
-    space_context: BusinessSpaceContextProtocol = Injected(
-        BusinessSpaceContextProtocol
-    ),
-) -> Envelope[BotInventoryItem]:
-    """Get one Bot inventory card by Bot id."""
-    current_space = space_context.resolve_current(
-        owner_id=owner_id,
-        header_space_id=x_space_id,
-    )
-    return envelope(
-        _to_inventory_item(
-            service.get_item(owner_id=owner_id, bot_id=bot_id, space=current_space)
-        ),
-        request,
-    )
-
-
-@router.get(
-    "/{bot_id}/actions",
-    response_model=Envelope[BotActions],
-    responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
-)
-@envelope_errors
-async def get_inventory_actions(
-    bot_id: str,
-    owner_id: UserIdDep,
-    request: Request,
-    x_space_id: str | None = Header(default=None, alias="X-Space-Id"),
-    service: BotInventoryServiceProtocol = Injected(BotInventoryServiceProtocol),
-    space_context: BusinessSpaceContextProtocol = Injected(
-        BusinessSpaceContextProtocol
-    ),
-) -> Envelope[BotActions]:
-    """Get action affordances for one Bot in the current business space."""
-    current_space = space_context.resolve_current(
-        owner_id=owner_id,
-        header_space_id=x_space_id,
-    )
-    item = service.actions(owner_id=owner_id, bot_id=bot_id, space=current_space)
-    return envelope(BotActions(**_to_inventory_actions(item)), request)
 
 
 # ── Dormant Bot activation ─────────────────────────────────────────────────

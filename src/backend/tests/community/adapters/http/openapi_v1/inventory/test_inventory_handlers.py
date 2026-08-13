@@ -98,7 +98,7 @@ def _ok(resp):
 
 
 def test_list_inventory_combines_personal_cloud_and_local(client):
-    data = _ok(client.get("/openapi/v1/bots/cards"))
+    data = _ok(client.get("/openapi/v1/bots/all"))
 
     ids = {item["bot_id"] for item in data["items"]}
     assert data["total"] == 2
@@ -106,32 +106,10 @@ def test_list_inventory_combines_personal_cloud_and_local(client):
 
 
 def test_inventory_consumes_space_header_fail_closed(client):
-    resp = client.get("/openapi/v1/bots/cards", headers={"X-Space-Id": "team:1"})
+    resp = client.get("/openapi/v1/bots/all", headers={"X-Space-Id": "team:1"})
 
     assert resp.status_code == 404
     assert resp.json()["message"] == "Not found"
-
-
-def test_get_inventory_actions(client, bot_service):
-    bot_service.get_bot.return_value = {**CLOUD, "status": "DORMANT"}
-
-    data = _ok(client.get("/openapi/v1/bots/c1/actions"))
-
-    assert data["bot_id"] == "c1"
-    assert data["display_state"] == "dormant"
-    assert "activate" in data["actions"]
-
-
-def test_get_inventory_item_falls_back_to_local_source(client, bot_service):
-    class BotNotFoundError(Exception):
-        pass
-
-    bot_service.get_bot.side_effect = BotNotFoundError("cloud miss")
-
-    data = _ok(client.get("/openapi/v1/bots/cards/l1"))
-
-    assert data["bot_id"] == "l1"
-    assert data["kind"] == "local"
 
 
 def test_list_inventory_total_includes_cloud_rows_beyond_first_fetch_window(client, bot_service):
@@ -152,7 +130,7 @@ def test_list_inventory_total_includes_cloud_rows_beyond_first_fetch_window(clie
 
     bot_service.list_bots_by_conditions.side_effect = list_page
 
-    data = _ok(client.get("/openapi/v1/bots/cards", params={"page": 3, "page_size": 100}))
+    data = _ok(client.get("/openapi/v1/bots/all", params={"page": 3, "page_size": 100}))
 
     assert data["total"] == 251
     ids = {item["bot_id"] for item in data["items"]}

@@ -373,8 +373,8 @@ class BotInventoryService:
 
 | Method | Path | 说明 |
 | --- | --- | --- |
-| GET | `/openapi/v1/bots/cards` | 列个人云端 + 本地 Bot 清单项 |
-| GET | `/openapi/v1/bots/cards/{bot_id}` | 查单个清单项 |
+| GET | `/openapi/v1/bots/all` | 列个人云端 + 本地 Bot 清单项 |
+| GET | `/openapi/v1/bots/all/{bot_id}` | 查单个清单项 |
 | GET | `/openapi/v1/bots/{bot_id}/actions` | 查当前可用动作 |
 
 handler 形态：
@@ -610,8 +610,8 @@ P0 在业务空间 prod API 未接入时只允许个人业务空间 fallback：
 
 | OpenAPI 组件 | Endpoint | 是否消费 `X-Space-Id` | 用途 | P0 行为 |
 | --- | --- | --- | --- | --- |
-| `inventory` | `GET /openapi/v1/bots/cards` | 是 | 当前空间下的个人云端 + 本地 Bot 清单过滤 | `None` 默认个人空间；非个人空间需空间 owner 校验，否则 fail closed / 不支持 |
-| `inventory` | `GET /openapi/v1/bots/cards/{bot_id}` | 是 | 单 Bot 详情可见性校验 | 先 owner guard，再校验 Bot 是否属于当前空间 |
+| `inventory` | `GET /openapi/v1/bots/all` | 是 | 当前空间下的个人云端 + 本地 Bot 清单过滤 | `None` 默认个人空间；非个人空间需空间 owner 校验，否则 fail closed / 不支持 |
+| `inventory` | `GET /openapi/v1/bots/all/{bot_id}` | 是 | 单 Bot 详情可见性校验 | 先 owner guard，再校验 Bot 是否属于当前空间 |
 | `inventory` | `GET /openapi/v1/bots/{bot_id}/actions` | 是 | 当前空间下动作可用性；例如团队空间协作能力后续只在可见空间生效 | 先 owner guard，再空间可见性校验 |
 | `bots` 既有组 | `POST /openapi/v1/bots`，且 `bot_type=personal` | 是 | 创建个人云端 Bot 时绑定到当前业务空间 | 未接空间 owner API 时只能创建到个人空间；若传非个人空间且无法校验则拒绝 |
 | `bots` 既有组 | `GET /openapi/v1/bots` | 不建议改旧契约 | 旧列表保持 owner 维度；空间化列表走 `inventory` | 不作为空间视图入口，避免影响历史调用方 |

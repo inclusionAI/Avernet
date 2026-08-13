@@ -88,13 +88,11 @@ class EngineInfo(BaseModel):
 class EngineRestartResult(BaseModel):
     """Outcome of restarting the bot's engine process.
 
-    The bot's engine lives in its own daemon (``/api/engine/restart`` on the
-    device adapter), separate from BaaS ``restart_bot`` which re-provisions the
-    whole container and drops sessions. The result echoes a coarse dispatch
-    status only — the engine's restart is in-flight by the time the request
-    returns, and the caller confirms completion via ``GET .../engine/status``.
-    The engine's own response body is otherwise engine-specific and is not
-    re-published here.
+    The engine restart is distinct from the bot-level restart endpoint, which
+    re-provisions the whole container and drops sessions; this one restarts
+    only the engine process. The result echoes a coarse dispatch state only —
+    the restart is in-flight by the time the request returns, and the caller
+    confirms completion via the engine status endpoint.
     """
 
     model_config = ConfigDict(
@@ -103,8 +101,8 @@ class EngineRestartResult(BaseModel):
 
     bot_id: str = Field(description="The bot whose engine was asked to restart.")
     status: str = Field(
-        description="Coarse dispatch state the engine returned (e.g. "
-        "``restarting``); field set only when the engine reports one."
+        description="Coarse dispatch state the engine returned (e.g. restarting); "
+        "set only when the engine reports one."
     )
 
 

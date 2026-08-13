@@ -93,15 +93,6 @@ class BotInventoryService:
             )
         return item
 
-    def actions(
-        self,
-        *,
-        owner_id: str,
-        bot_id: str,
-        space: BusinessSpaceRef | None,
-    ) -> BotInventoryItem:
-        return self.get_item(owner_id=owner_id, bot_id=bot_id, space=space)
-
     def _get_row(self, *, bot_id: str, owner_id: str) -> Mapping[str, Any]:
         try:
             return self._bot.get_bot(bot_id, owner_id)

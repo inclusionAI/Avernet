@@ -33,11 +33,3 @@ class BotInventoryServiceProtocol(Protocol):
         bot_id: str,
         space: BusinessSpaceRef | None,
     ) -> BotInventoryItem: ...
-
-    def actions(
-        self,
-        *,
-        owner_id: str,
-        bot_id: str,
-        space: BusinessSpaceRef | None,
-    ) -> BotInventoryItem: ...
