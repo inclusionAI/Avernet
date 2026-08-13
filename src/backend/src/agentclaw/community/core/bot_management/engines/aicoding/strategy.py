@@ -59,6 +59,10 @@ SINGLEBOX_CLAUDE_RELAY_PORTS = {
     "planner": 18910,
     "developer": 18911,
     "reviewer": 18912,
+    # The merchant-hybrid profile deliberately has one isolated Claude relay
+    # after the legacy three-role topology. Keep this allowlist role-bound so
+    # template_config cannot redirect a normalCC adapter to an arbitrary host.
+    "platform-data": 18913,
 }
 
 

@@ -137,7 +137,8 @@ frontend_start() {
     # receive SIGHUP after singlebox exits, close npm's stdin, and make the
     # Tailwind watcher terminate after the readiness probe has already passed.
     BCS_PORT="${BCS_PORT}" BCSFUSE_PORT="${BCSFUSE_PORT}" PORT="${FRONTEND_PORT}" \
-        nohup bash -c 'tail -f /dev/null | npm run "$1"' bash "$frontend_script" \
+        nohup perl -MPOSIX=setsid -e 'setsid() or die "setsid failed: $!\\n"; exec @ARGV' \
+        bash -c 'tail -f /dev/null | npm run "$1"' bash "$frontend_script" \
         >> "${FRONTEND_LOG}" 2>&1 < /dev/null &
     local frontend_pid=$!
     echo "$frontend_pid" > "${FRONTEND_PID_FILE}"

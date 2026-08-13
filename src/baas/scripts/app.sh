@@ -259,9 +259,11 @@ do_start() {
     fi
     if [[ -n "$debug_port" ]]; then
         log_info "Debug 端口: $debug_port (不等待debugger，web服务立即启动)"
-        SERVER_ENV="$env_name" APP_CONFIG_PATH="$config_file" nohup "$VENV_DIR/bin/python" -m debugpy --listen "0.0.0.0:$debug_port" "$WORK_DIR/src/secbaas/community/main.py" -c "$CONFIG_DIR" --mode "$APP_MODE" >> "$LOG_FILE" 2>&1 &
+        SERVER_ENV="$env_name" APP_CONFIG_PATH="$config_file" nohup perl -MPOSIX=setsid -e 'setsid() or die "setsid failed: $!\\n"; exec @ARGV' \
+            "$VENV_DIR/bin/python" -m debugpy --listen "0.0.0.0:$debug_port" "$WORK_DIR/src/secbaas/community/main.py" -c "$CONFIG_DIR" --mode "$APP_MODE" >> "$LOG_FILE" 2>&1 &
     else
-        SERVER_ENV="$env_name" APP_CONFIG_PATH="$config_file" nohup "${start_cmd[@]}" >> "$LOG_FILE" 2>&1 &
+        SERVER_ENV="$env_name" APP_CONFIG_PATH="$config_file" nohup perl -MPOSIX=setsid -e 'setsid() or die "setsid failed: $!\\n"; exec @ARGV' \
+            "${start_cmd[@]}" >> "$LOG_FILE" 2>&1 &
     fi
 
     APP_PID=$!

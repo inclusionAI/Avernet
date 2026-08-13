@@ -468,6 +468,34 @@ JSON
   rm -rf "$tmp"
 }
 
+test_dynamic_bot_profile_refreshes_when_runtime_model_changes() {
+  local tmp; tmp="$(mktemp -d)"
+  local profile_dir source_file
+  profile_dir="$tmp/profile"
+  source_file="$tmp/model-config.json"
+  mkdir -p "$profile_dir"
+  cat > "$source_file" <<'JSON'
+{"models":{"providers":{"antchat":{"models":[{"id":"Kimi-K2.6"}]}}},"agents":{"defaults":{"model":{"primary":"antchat/Kimi-K2.6"},"models":{"antchat/Kimi-K2.6":{}}}}}
+JSON
+  cat > "$profile_dir/openclaw.json" <<'JSON'
+{"models":{"providers":{"antchat":{"models":[{"id":"Kimi-K2.5"}]}}},"agents":{"defaults":{"model":{"primary":"antchat/Kimi-K2.5"},"models":{"antchat/Kimi-K2.5":{}}}}}
+JSON
+
+  (
+    PROJECT_ROOT="$PROJECT_ROOT"
+    . "${SCRIPT_DIR}/utils.sh"
+    . "${SCRIPT_DIR}/modules/bots.sh"
+    bots_dynamic_model_config_source() { printf '%s\n' "$source_file"; }
+    ! bots_dynamic_config_models_match_source "$profile_dir/openclaw.json"
+    jq '.models.providers.antchat.models[0].id = "Kimi-K2.6" | .agents.defaults.model.primary = "antchat/Kimi-K2.6" | .agents.defaults.models = {"antchat/Kimi-K2.6": {}}' \
+      "$profile_dir/openclaw.json" > "$tmp/refreshed.json"
+    mv "$tmp/refreshed.json" "$profile_dir/openclaw.json"
+    bots_dynamic_config_models_match_source "$profile_dir/openclaw.json"
+  ) || fail "dynamic Bot profile should refresh after the runtime model changes"
+
+  rm -rf "$tmp"
+}
+
 test_load_dir_source_mode
 test_load_dir_npm_mode
 test_stack_script_forwards_mode
@@ -476,5 +504,6 @@ test_stack_start_reuses_dist_without_npm_install
 test_session_bot_uuid_requires_usable_session
 test_stack_config_allows_plugin_path_refresh
 test_dynamic_config_refreshes_plugin_path
+test_dynamic_bot_profile_refreshes_when_runtime_model_changes
 
 if [ "$FAILS" -eq 0 ]; then echo "ALL PASS"; else echo "${FAILS} FAILURE(S)"; exit 1; fi

@@ -7,16 +7,22 @@ import {
   handleBcsRouteToolBySession,
   getSessionRoutingMode,
   getSessionTaskGroupInfo,
+  handleDiscoverBots,
+  handleCreateManagerWorkerGroup,
   handleAssignTask,
   handleTaskMessage,
   handleTaskComplete,
   BCS_ROUTE_TOOL_SCHEMA,
+  BCS_DISCOVER_BOTS_TOOL_SCHEMA,
+  BCS_CREATE_MANAGER_WORKER_GROUP_TOOL_SCHEMA,
   BCS_ASSIGN_TASK_TOOL_SCHEMA,
   BCS_TASK_MESSAGE_TOOL_SCHEMA,
   BCS_TASK_COMPLETE_TOOL_SCHEMA,
 } from './inbound-handler.js';
 
 export const BCS_CORE_TOOL_NAMES = [
+  'bcs_discover_bots',
+  'bcs_create_manager_worker_group',
   'bcs_route',
   'bcs_assign_task',
   'bcs_send_task_message',
@@ -87,6 +93,53 @@ export function registerBcsCore(
 
     return { sessionKey, channel };
   }
+
+  function isGroupSetupToolAvailable(sessionKey: string, channel: string): boolean {
+    if (channel !== 'bcs' || !sessionKey || sessionKey.includes('onboarding')) return false;
+    return getSessionTaskGroupInfo(sessionKey)?.groupType !== 'manager_worker';
+  }
+
+  api.registerTool(
+    (ctx: OpenClawPluginToolContext) => {
+      const { sessionKey, channel } = rememberSessionSandbox(ctx);
+      if (!isGroupSetupToolAvailable(sessionKey, channel)) return null;
+      return {
+        name: BCS_DISCOVER_BOTS_TOOL_SCHEMA.name,
+        label: 'BCS Discover Bots',
+        description: BCS_DISCOVER_BOTS_TOOL_SCHEMA.description,
+        parameters: BCS_DISCOVER_BOTS_TOOL_SCHEMA.parameters,
+        async execute(_toolCallId: string, params: Record<string, unknown>) {
+          const result = await handleDiscoverBots(sessionKey, params);
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+            details: result,
+          };
+        },
+      };
+    },
+    { name: 'bcs_discover_bots' },
+  );
+
+  api.registerTool(
+    (ctx: OpenClawPluginToolContext) => {
+      const { sessionKey, channel } = rememberSessionSandbox(ctx);
+      if (!isGroupSetupToolAvailable(sessionKey, channel)) return null;
+      return {
+        name: BCS_CREATE_MANAGER_WORKER_GROUP_TOOL_SCHEMA.name,
+        label: 'BCS Create Manager-Worker Group',
+        description: BCS_CREATE_MANAGER_WORKER_GROUP_TOOL_SCHEMA.description,
+        parameters: BCS_CREATE_MANAGER_WORKER_GROUP_TOOL_SCHEMA.parameters,
+        async execute(_toolCallId: string, params: Record<string, unknown>) {
+          const result = await handleCreateManagerWorkerGroup(sessionKey, params, console);
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+            details: result,
+          };
+        },
+      };
+    },
+    { name: 'bcs_create_manager_worker_group' },
+  );
 
   // 9.4: Register bcs_route tool only for BCS group sessions (not 1:1 or onboarding)
   api.registerTool(

@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import plugin, { bcsPlugin, registerBcsCore, setBcsRuntime } from '../src/index.js';
 import { getDefaultBcsUrl, listAccountIds, resolveAccount } from '../src/accounts.js';
+import { BcsWsClient } from '../src/bcs-ws-client.js';
 import {
   abortAllStreams,
   cleanupAgentEventsSubscription,
@@ -18,6 +19,7 @@ import {
   resolveChatRunId,
   resolveInboundSender,
   resolveGroupIdFromSessionKey,
+  resolveSessionKeyFromGroupId,
 } from '../src/inbound-handler.js';
 import type { RequestFrame, ResolvedBcsAccount } from '../src/types.js';
 
@@ -39,6 +41,77 @@ function listSourceFiles(dir: string): string[] {
 }
 
 describe('openclaw-channel-bcn', () => {
+  it('uses the connected BCS identity for discovery and manager-worker creation', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ url: string; method: string; authorization: string | null; body?: unknown }> = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      const url = String(input);
+      requests.push({
+        url,
+        method: init?.method ?? 'GET',
+        authorization: headers.get('authorization'),
+        ...(typeof init?.body === 'string' ? { body: JSON.parse(init.body) } : {}),
+      });
+      if (url.includes('/bots/discover')) {
+        return new Response(JSON.stringify({ bots: [{ bot_uuid: 'worker-1' }], count: 1 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ id: 'group-1', session_id: 'session-1' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    try {
+      const client = new BcsWsClient({
+        account: {
+          bcsUrl: 'ws://127.0.0.1:21000/ws/bot',
+          botId: 'manager-1',
+        } as ResolvedBcsAccount,
+      });
+      Object.assign(client as any, {
+        _connected: true,
+        _ws: { readyState: 1 },
+        _sessionToken: 'runtime-secret',
+        _botUuid: 'manager-1',
+      });
+
+      assert.deepEqual(await client.discoverBots('平台营销方案'), {
+        bots: [{ bot_uuid: 'worker-1' }],
+        count: 1,
+      });
+      assert.deepEqual(await client.createManagerWorkerGroup({
+        workerBotUuids: [ 'worker-1', 'worker-1', 'manager-1' ],
+        topic: 'anniversary',
+        context: 'public brief',
+      }), { id: 'group-1', session_id: 'session-1' });
+
+      assert.equal(requests.length, 2);
+      assert.equal(requests[0].url, 'http://127.0.0.1:21000/bots/discover?q=%E5%B9%B3%E5%8F%B0%E8%90%A5%E9%94%80%E6%96%B9%E6%A1%88');
+      assert.equal(requests[0].authorization, 'Bearer runtime-secret');
+      assert.deepEqual(requests[1], {
+        url: 'http://127.0.0.1:21000/groups',
+        method: 'POST',
+        authorization: 'Bearer runtime-secret',
+        body: {
+          driver_bot: 'manager-1',
+          participants: [
+            { bot_uuid: 'manager-1', role: 'manager' },
+            { bot_uuid: 'worker-1', role: 'worker' },
+          ],
+          context: 'public brief',
+          topic: 'anniversary',
+          group_strategy: 'manager_worker',
+        },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('preserves the upstream BCS run id with backward-compatible fallbacks', () => {
     assert.equal(resolveChatRunId('request-run', ' upstream-run '), 'upstream-run');
     assert.equal(resolveChatRunId(' request-run ', undefined), 'request-run');
@@ -46,6 +119,80 @@ describe('openclaw-channel-bcn', () => {
       resolveChatRunId(undefined, '  '),
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
     );
+  });
+
+  it('isolates state-machine deliveries without replacing the normal group session', async () => {
+    const sessionKeys: string[] = [];
+    const client = {
+      sendResponse() {},
+      sendEvent() {},
+    };
+    setBcsRuntime({
+      config: { async loadConfig() { return {}; } },
+      channel: {
+        routing: {
+          resolveAgentRoute() {
+            return { agentId: 'main', sessionKey: 'agent:main:bcs:group:group-1' };
+          },
+        },
+        reply: {
+          finalizeInboundContext(ctx: Record<string, unknown>) {
+            sessionKeys.push(String(ctx.SessionKey));
+            return ctx;
+          },
+          async dispatchReplyWithBufferedBlockDispatcher({ dispatcherOptions }: any) {
+            await dispatcherOptions.deliver({ text: 'done' }, { kind: 'final' });
+          },
+        },
+        session: {
+          resolveStorePath() {
+            return '/tmp/openclaw-bcn-state-machine-session-test';
+          },
+          async recordInboundSession() {
+            return undefined;
+          },
+        },
+      },
+    } as any);
+
+    const send = async (id: string, groupType: string) => handleChatSend({
+      type: 'req',
+      id,
+      method: 'chat.send',
+      params: {
+        idempotency_key: id,
+        bcs_group_id: 'group-1',
+        channel: { source: 'api', user_id: 'bcs_state_machine' },
+        session_context: { group_type: groupType },
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: '[State Machine Task]\nreturn the artifact' }],
+          timestamp: Date.now(),
+        },
+      },
+    }, client as any, {
+      accountId: 'default',
+      botId: 'manager-1',
+    } as any);
+
+    try {
+      await send('normal-run', 'manager_worker');
+      await send('smnode-run-1-node-a-0', 'state_machine');
+      await send('smnode-run-1-node-b-0', 'state_machine');
+
+      assert.equal(sessionKeys[0], 'agent:main:bcs:group:group-1');
+      assert.notEqual(sessionKeys[1], sessionKeys[0]);
+      assert.notEqual(sessionKeys[2], sessionKeys[0]);
+      assert.notEqual(sessionKeys[1], sessionKeys[2]);
+      assert.equal(
+        resolveSessionKeyFromGroupId('group-1'),
+        'agent:main:bcs:group:group-1',
+      );
+      assert.equal(resolveGroupIdFromSessionKey(sessionKeys[1]), 'group-1');
+      assert.equal(resolveGroupIdFromSessionKey(sessionKeys[2]), 'group-1');
+    } finally {
+      abortAllStreams();
+    }
   });
 
   it('keeps the legacy From value while using actor identity for sender metadata', async () => {
@@ -549,7 +696,14 @@ describe('openclaw-channel-bcn', () => {
 
     assert.deepEqual(
       [ ...new Set(registeredToolNames) ].sort(),
-      [ 'bcs_assign_task', 'bcs_route', 'bcs_send_task_message', 'bcs_task_complete' ].sort(),
+      [
+        'bcs_assign_task',
+        'bcs_create_manager_worker_group',
+        'bcs_discover_bots',
+        'bcs_route',
+        'bcs_send_task_message',
+        'bcs_task_complete',
+      ].sort(),
     );
     assert.equal(registeredEvents.includes('before_tool_call'), false);
   });

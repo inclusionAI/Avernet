@@ -6,12 +6,20 @@ _CLAUDE_BOTS_SH_LOADED=1
 CLAUDE_BOTS_LOG="${LOG_DIR}/claude_bots.log"
 
 claude_bots_entity_id() {
+    if type -t claude_profile_enabled &>/dev/null && claude_profile_enabled; then
+        claude_profile_entity_id
+        return
+    fi
     local config_path
     config_path="$(claude_bots_config_path)"
     jq -r '.entity_id // "mock-user"' "$config_path"
 }
 
 claude_bots_entity_type() {
+    if type -t claude_profile_enabled &>/dev/null && claude_profile_enabled; then
+        claude_profile_entity_type
+        return
+    fi
     local config_path
     config_path="$(claude_bots_config_path)"
     jq -r '.entity_type // "staff"' "$config_path"
@@ -39,7 +47,7 @@ claude_bots_find_existing() {
 }
 
 claude_bots_create_payload() {
-    local role="$1" name="$2" description="$3" port="$4" workspace="$5" model="$6" entity_id="$7"
+    local role="$1" name="$2" description="$3" port="$4" workspace="$5" model="$6" permission_mode="$7" entity_id="$8"
     local relay_url="ws://127.0.0.1:${port}"
     jq -n \
         --arg bot_name "$name" \
@@ -50,6 +58,7 @@ claude_bots_create_payload() {
         --arg role "$role" \
         --arg workspace "$workspace" \
         --arg model "$model" \
+        --arg permission_mode "$permission_mode" \
         '{
             bot_name: $bot_name,
             bot_desc: $bot_desc,
@@ -63,16 +72,17 @@ claude_bots_create_payload() {
                     relay_url: $relay_url,
                     role: $role,
                     workspace: $workspace,
-                    model: $model
+                    model: $model,
+                    permission_mode: $permission_mode
                 }
             }
         }'
 }
 
 claude_bots_create() {
-    local role="$1" name="$2" description="$3" port="$4" workspace="$5" model="$6" entity_id="$7"
+    local role="$1" name="$2" description="$3" port="$4" workspace="$5" model="$6" permission_mode="$7" entity_id="$8"
     local payload response
-    payload="$(claude_bots_create_payload "$role" "$name" "$description" "$port" "$workspace" "$model" "$entity_id")"
+    payload="$(claude_bots_create_payload "$role" "$name" "$description" "$port" "$workspace" "$model" "$permission_mode" "$entity_id")"
     response="$(
         curl --noproxy '*' --connect-timeout 2 --max-time 90 -fsS \
             -X POST "$(claude_bots_backend_base_url)/api/bots?user_id=${entity_id}" \
@@ -137,15 +147,15 @@ claude_bots_start() {
     mkdir -p "$LOG_DIR"
     : > "$CLAUDE_BOTS_LOG"
 
-    local entity_id role name description port config_dir workspace model bot_id items='[]'
+    local entity_id role name description port config_dir workspace model prompt_file permission_mode bot_id items='[]'
     entity_id="$(claude_bots_entity_id)"
-    while IFS=$'\t' read -r role name description port config_dir workspace model; do
+    while IFS=$'\x1f' read -r role name description port config_dir workspace model prompt_file permission_mode; do
         bot_id="$(claude_bots_find_existing "$name" "$entity_id")"
         if [ -n "$bot_id" ]; then
             log_info "Reusing Claude ${role} bot: ${bot_id}"
         else
             log_info "Creating Claude ${role} normalCC bot through Backend"
-            bot_id="$(claude_bots_create "$role" "$name" "$description" "$port" "$workspace" "$model" "$entity_id")"
+            bot_id="$(claude_bots_create "$role" "$name" "$description" "$port" "$workspace" "$model" "$permission_mode" "$entity_id")"
         fi
         if [ -z "$bot_id" ]; then
             log_error "Failed to create or locate Claude ${role} bot; check ${CLAUDE_BOTS_LOG}"
@@ -156,7 +166,7 @@ claude_bots_start() {
             '. + [{role: $role, bot_id: $bot_id, name: $name, relay_port: ($port | tonumber)}]' <<< "$items")"
     done < <(claude_bots_entries)
     claude_bots_write_state "$(jq -n --arg entity_id "$entity_id" --arg entity_type "$(claude_bots_entity_type)" --argjson bots "$items" '{entity_id: $entity_id, entity_type: $entity_type, bots: $bots}')"
-    log_info "Started three Claude Code normalCC bots with isolated relay endpoints"
+    log_info "Started $(jq -r '.bots | length' "$CLAUDE_BOTS_STATE_FILE") Claude Code normalCC bot(s) with isolated relay endpoints"
 }
 
 claude_bots_stop() {
@@ -170,7 +180,7 @@ claude_bots_stop() {
 claude_bots_ready() {
     claude_bots_enabled || return 0
     [ -f "$CLAUDE_BOTS_STATE_FILE" ] || return 1
-    jq -e '.bots | length == 3' "$CLAUDE_BOTS_STATE_FILE" >/dev/null 2>&1
+    jq -e '.bots | length > 0' "$CLAUDE_BOTS_STATE_FILE" >/dev/null 2>&1
 }
 
 claude_bots_status() {
@@ -179,15 +189,15 @@ claude_bots_status() {
         echo "  Claude bots: Not ready"
         return 0
     fi
-    echo "  Claude bots (3):"
+    echo "  Claude bots ($(jq -r '.bots | length' "$CLAUDE_BOTS_STATE_FILE" 2>/dev/null || echo '?')):"
     jq -r '.bots[] | "    \(.role): Started (\(.bot_id); relay \(.relay_port))"' "$CLAUDE_BOTS_STATE_FILE" 2>/dev/null || {
         echo "  Claude bots: state unreadable"
         return 0
     }
-    echo "  Claude adapters (3):"
+    echo "  Claude adapters ($(jq -r '.bots | length' "$CLAUDE_BOTS_STATE_FILE" 2>/dev/null || echo '?')):"
     jq -r '.bots[] | "    \(.role): BAAS-managed (relay \(.relay_port))"' "$CLAUDE_BOTS_STATE_FILE"
 }
 
 claude_bots_help() {
-    echo "claude_bots - three Backend-created Claude Code normalCC bots (mixed mode only)"
+    echo "claude_bots - Backend-created Claude Code normalCC bots (mixed mode only)"
 }

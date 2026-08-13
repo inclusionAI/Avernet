@@ -103,6 +103,19 @@ async function h1Request(port, body, token = 'bcs-to-provider-test') {
   return { status: response.status, body: await response.text() };
 }
 
+async function h1BotEvent(port, body, token = 'baas-test', providerBotRef = 'bot-1:mock-user') {
+  const response = await fetch(`http://127.0.0.1:${port}/bot/events`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+      'x-bcn-provider-bot-ref': providerBotRef,
+    },
+    body: JSON.stringify(body),
+  });
+  return { status: response.status, body: await response.text() };
+}
+
 function providerBody(method, runId = 'run-1') {
   return {
     type: 'req',
@@ -135,24 +148,48 @@ const fakeBaas = createHttpServer(async (request, response) => {
   response.end(body.method === 'chat.history' ? '{"ok":true,"messages":[]}' : '{"ok":true}');
 });
 
+const seenBcsEvents = [];
+const fakeBcs = createHttpServer(async (request, response) => {
+  const chunks = [];
+  for await (const chunk of request) chunks.push(chunk);
+  seenBcsEvents.push({
+    path: request.url,
+    authorization: request.headers.authorization,
+    providerId: request.headers['x-bcn-provider-id'],
+    providerBotRef: request.headers['x-bcn-provider-bot-ref'],
+    body: JSON.parse(Buffer.concat(chunks).toString('utf8')),
+  });
+  response.writeHead(200, { 'content-type': 'application/json' });
+  response.end('{"ok":true,"delivered_count":1,"failed_count":0}');
+});
+
 const tmp = mkdtempSync(join(tmpdir(), 'bcs-baas-bridge-'));
 const tokenFile = join(tmp, 'tokens.json');
 writeFileSync(tokenFile, JSON.stringify({
   baas_token: 'baas-test',
+  provider_id: 'provider-1',
+  provider_admin_token: 'provider-admin-test',
   bcs_to_provider_token: 'bcs-to-provider-test',
-  provider_bots: { planner: { provider_bot_ref: 'bot-1:mock-user' } },
+  provider_bots: {
+    planner: {
+      provider_bot_ref: 'bot-1:mock-user',
+      bot_runtime_token: 'bot-runtime-test',
+    },
+  },
 }), { mode: 0o600 });
 
 let bridge;
 let bridgeOutput = '';
 let baasPort;
+let bcsPort;
 let bridgePort;
 try {
   baasPort = await listen(fakeBaas);
+  bcsPort = await listen(fakeBcs);
   const reservation = createHttpServer();
   bridgePort = await listen(reservation);
   await close(reservation);
-  bridge = spawn(process.execPath, [BRIDGE, '--port', String(bridgePort), '--baas-url', `http://127.0.0.1:${baasPort}`, '--token-file', tokenFile], {
+  bridge = spawn(process.execPath, [BRIDGE, '--port', String(bridgePort), '--baas-url', `http://127.0.0.1:${baasPort}`, '--bcs-url', `http://127.0.0.1:${bcsPort}`, '--token-file', tokenFile], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   bridge.stdout.on('data', (chunk) => { bridgeOutput += chunk; });
@@ -191,9 +228,36 @@ try {
   assert.equal(response.status, 400);
   assert.deepEqual(JSON.parse(response.body), { error: 'unsupported method' });
 
+  response = await h1BotEvent(bridgePort, {
+    run_id: 'callback-run-1',
+    seq: 0,
+    state: 'final',
+    message: { text: 'not logged callback' },
+  });
+  assert.equal(response.status, 200);
+  assert.equal(seenBcsEvents.length, 1);
+  assert.deepEqual(seenBcsEvents[0], {
+    path: '/bot/events',
+    authorization: 'Bearer bot-runtime-test',
+    providerId: 'provider-1',
+    providerBotRef: 'bot-1:mock-user',
+    body: {
+      run_id: 'callback-run-1',
+      seq: 0,
+      state: 'final',
+      message: { text: 'not logged callback' },
+    },
+  });
+
+  response = await h1BotEvent(bridgePort, { run_id: 'callback-run-2', state: 'final' }, 'wrong-token');
+  assert.equal(response.status, 401);
+  response = await h1BotEvent(bridgePort, { run_id: 'callback-run-3', state: 'final' }, 'baas-test', 'other-bot:mock-user');
+  assert.equal(response.status, 403);
+
   assert.match(bridgeOutput, /bridge\.reject reason=provider_bot_mismatch method=chat\.inject run_id=run-1 provider_bot_ref=other-bot:mock-user/);
   assert.match(bridgeOutput, /bridge\.reject reason=unauthorized method=chat\.inject run_id=run-1 provider_bot_ref=bot-1:mock-user/);
   assert.match(bridgeOutput, /bridge\.reject reason=abort_unsupported provider_bot_ref=bot-1:mock-user/);
+  assert.match(bridgeOutput, /bridge\.uplink run_id=callback-run-1 provider_bot_ref=bot-1:mock-user status=200/);
   assert.doesNotMatch(bridgeOutput, /not logged/);
   process.stdout.write('BCS h2c Provider bridge contract tests passed\n');
 } finally {
@@ -202,5 +266,6 @@ try {
     await once(bridge, 'exit');
   }
   await close(fakeBaas);
+  await close(fakeBcs);
   rmSync(tmp, { recursive: true, force: true });
 }

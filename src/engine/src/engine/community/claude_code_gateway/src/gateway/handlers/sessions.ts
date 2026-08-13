@@ -99,6 +99,7 @@ export function resolveDefaultSessionModel(): string {
  * Override with the `RELAY_DEFAULT_CWD` env var.
  */
 export const DEFAULT_CWD: string = process.env.RELAY_DEFAULT_CWD?.trim() || homedir();
+export const DEFAULT_PERMISSION_MODE: string | undefined = process.env.RELAY_DEFAULT_PERMISSION_MODE?.trim() || undefined;
 
 /**
  * Materialize the binding for a session. On existing bindings this is a pure
@@ -139,6 +140,7 @@ export function ensureBinding(
         acpSessionId: `cli:${randomUUID()}`,
         cwd: cwd || DEFAULT_CWD,
         model: resolveDefaultSessionModel(),
+        permissionMode: DEFAULT_PERMISSION_MODE,
         createdAt: nowIso(),
         updatedAt: nowIso(),
         title: sessionKey,

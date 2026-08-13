@@ -33,6 +33,8 @@ setup_env() {
   unset SINGLEBOX_MODEL_CONFIG_FILE
   unset SINGLEBOX_MODEL_CONFIG_PREPARED
   unset SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED
+  unset SINGLEBOX_MODEL_ID_OVERRIDE
+  unset SINGLEBOX_MODEL_PROVIDER_ID_OVERRIDE
 
   export PROJECT_ROOT="$ROOT"
   export SCRIPT_DIR="${ROOT}/scripts"
@@ -154,6 +156,42 @@ JSON
     .models.providers["home-provider"].apiKey == "home-key"
     and .agents.defaults == {}
   ' "$SINGLEBOX_MODEL_CONFIG_FILE" >/dev/null || fail "home mode should ignore non-object agents"
+}
+
+test_home_applies_runtime_model_override_without_changing_home_source() {
+  setup_env
+  export SINGLEBOX_MODEL_CONFIG_MODE="home"
+  export SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED=1
+  export SINGLEBOX_MODEL_ID_OVERRIDE="Kimi-K2.6"
+  export SINGLEBOX_MODEL_PROVIDER_ID_OVERRIDE="home-provider"
+  mkdir -p "$(dirname "$OPENCLAW_CONFIG_FILE")"
+  cat > "$OPENCLAW_CONFIG_FILE" <<'JSON'
+{
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "home-provider": {
+        "baseUrl": "https://home.example.test/v1",
+        "apiKey": "home-key",
+        "models": [{"id": "old-model", "name": "Old Model"}]
+      }
+    }
+  },
+  "agents": {"defaults": {"model": {"primary": "home-provider/old-model"}}}
+}
+JSON
+
+  # shellcheck source=/dev/null
+  source "$MODULE"
+  singlebox_model_config_prepare
+
+  jq -e '
+    .agents.defaults.model.primary == "home-provider/Kimi-K2.6"
+    and (.models.providers["home-provider"].models | any(.id == "Kimi-K2.6"))
+    and (.models.providers["home-provider"].models | any(.id == "Kimi-K2.6" and .maxTokens == 16384))
+  ' "$SINGLEBOX_MODEL_CONFIG_FILE" >/dev/null || fail "runtime model override mismatch"
+  jq -e '.agents.defaults.model.primary == "home-provider/old-model"' "$OPENCLAW_CONFIG_FILE" >/dev/null \
+    || fail "runtime model override must not modify the home source"
 }
 
 test_home_requires_confirmation() {
@@ -504,6 +542,7 @@ test_manual_generates_runtime_config_from_env
 test_manual_requires_complete_env
 test_home_copies_only_model_fields
 test_home_ignores_non_object_agents_when_models_exist
+test_home_applies_runtime_model_override_without_changing_home_source
 test_home_requires_confirmation
 test_mock_generates_local_provider
 test_mock_port_override_updates_local_provider

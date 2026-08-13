@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "name": "商家经营协作队 Claude Code Profile",
+  "entity_id": "mock-user",
+  "entity_type": "staff",
+  "bots": [
+    {
+      "source": "platform-data",
+      "profile": "platform-data-analyst",
+      "name": "平台数据分析",
+      "summary": "平台侧数据 Worker，基于 manager 定向数据或平台美发行业聚合基准比较方案、识别异常信号，并返回可复算、可追溯的证据和限制。",
+      "domains": "local-commerce,data-analysis,campaign-measurement,conversion-funnel,forecasting,anomaly-detection,decision-support,data-governance",
+      "skills": "metric-definition,cohort-comparison,campaign-forecast,capacity-check,trend-analysis,anomaly-signal,decision-table,data-lineage",
+      "runtime": {
+        "type": "claude_code",
+        "relay_port": 18913,
+        "claude_config_dir": "~/.claude-platform-data",
+        "workspace": "~/.teamclaw/claude-workspaces/platform-data",
+        "model": "Kimi-K2.6",
+        "permission_mode": "bypassPermissions",
+        "system_prompt_md": "platform-data/CLAUDE.md"
+      }
+    }
+  ]
+}

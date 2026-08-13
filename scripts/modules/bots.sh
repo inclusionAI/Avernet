@@ -291,9 +291,10 @@ bots_bcn_plugin_load_dir() {
 }
 
 bots_dynamic_specs() {
-    local manifest
+    local manifest excluded_source
     manifest="$(bots_dynamic_manifest)"
-    jq -r '
+    excluded_source="${BOTS_EXCLUDED_PROFILE_SOURCE:-}"
+    jq -r --arg excluded_source "$excluded_source" '
       . as $root
       | ($root.port_start // 0 | tonumber) as $start
       | ($root.port_step // 1 | tonumber) as $step
@@ -302,6 +303,7 @@ bots_dynamic_specs() {
       | to_entries[]
       | .key as $idx
       | .value as $bot
+      | select($excluded_source == "" or ($bot.source // "") != $excluded_source)
       | ($bot.runtime.type // "openclaw") as $runtime
       | [
           $bot.name,
@@ -319,7 +321,7 @@ bots_dynamic_specs() {
 }
 
 bots_dynamic_count() {
-    jq -r '.bots | length' "$(bots_dynamic_manifest)"
+    bots_dynamic_specs | awk 'END { print NR }'
 }
 
 bots_dynamic_validate_manifest() {
@@ -563,12 +565,32 @@ bots_dynamic_config_has_model_fields() {
     jq -e '(.models? != null) or (.agents.defaults.model? != null) or (.agents.defaults.models? != null) or (.agents.defaults.imageModel? != null)' "$config_file" >/dev/null
 }
 
+bots_dynamic_config_models_match_source() {
+    local config_file="$1"
+    local source
+    source="$(bots_dynamic_model_config_source)"
+
+    [ -f "$config_file" ] && [ -f "$source" ] || return 1
+    jq -e --slurpfile source "$source" '
+      .models == ($source[0].models // null)
+      and {
+        model: (.agents.defaults.model // null),
+        models: (.agents.defaults.models // null),
+        imageModel: (.agents.defaults.imageModel // null)
+      } == {
+        model: ($source[0].agents.defaults.model // null),
+        models: ($source[0].agents.defaults.models // null),
+        imageModel: ($source[0].agents.defaults.imageModel // null)
+      }
+    ' "$config_file" >/dev/null 2>&1
+}
+
 bots_dynamic_config_has_bcs_core_tools() {
     local config_file="$1"
     [ -f "$config_file" ] || return 1
     jq -e '
       (.tools.alsoAllow // []) as $tools
-      | ["bcs_route", "bcs_assign_task", "bcs_send_task_message", "bcs_task_complete"]
+      | ["bcs_discover_bots", "bcs_create_manager_worker_group", "bcs_route", "bcs_assign_task", "bcs_send_task_message", "bcs_task_complete"]
       | all(. as $tool | ($tools | index($tool)) != null)
     ' "$config_file" >/dev/null
 }
@@ -721,6 +743,8 @@ bots_dynamic_write_openclaw_config() {
           tools: {
             profile: "coding",
             alsoAllow: [
+              "bcs_discover_bots",
+              "bcs_create_manager_worker_group",
               "bcs_route",
               "bcs_assign_task",
               "bcs_send_task_message",
@@ -834,6 +858,8 @@ bots_dynamic_setup_profile() {
     if [ "${BCS_BOTS_PRESERVE_FILES:-1}" = "1" ] && [ -f "$config_file" ]; then
         if bots_dynamic_model_source_has_fields && ! bots_dynamic_config_has_model_fields "$config_file"; then
             log_info "Refreshing dynamic bot profile with model config: ${profile} (${name})"
+        elif bots_dynamic_model_source_has_fields && ! bots_dynamic_config_models_match_source "$config_file"; then
+            log_info "Refreshing dynamic bot profile with the current runtime model selection: ${profile} (${name})"
         elif ! bots_dynamic_config_has_bcs_core_tools "$config_file"; then
             log_info "Refreshing dynamic bot profile with BCS core tool allowlist: ${profile} (${name})"
         elif ! bots_dynamic_config_matches "$name" "$profile" "$port" "$source"; then
@@ -887,7 +913,8 @@ bots_dynamic_start_openclaw() {
     OPENCLAW_STATE_DIR="$profile_dir" \
     OPENCLAW_CONFIG_PATH="$profile_dir/openclaw.json" \
     OPENCLAW_WORKSPACE_DIR="$workspace_dir" \
-    nohup openclaw --profile "$profile" gateway run --port "$port" > "$log_file" 2>&1 < /dev/null &
+    nohup perl -MPOSIX=setsid -e 'setsid() or die "setsid failed: $!\\n"; exec @ARGV' \
+        openclaw --profile "$profile" gateway run --port "$port" > "$log_file" 2>&1 < /dev/null &
     pid="$!"
     cd "$old_pwd" || return 1
 
@@ -1330,8 +1357,13 @@ bots_dynamic_prereqs() {
             [ "$runtime" = "openclaw" ] || continue
             if port_is_listening "$port"; then
                 listener="$(port_listener_summary "$port")"
-                prereq_error "${name} port ${port} is in use. Current listener: ${listener}"
-                has_error=true
+                if [ "${BOTS_ALLOW_OWNED_PORTS_FOR_RESTART:-0}" = "1" ] \
+                    && path_is_under_dir "$(process_cwd "$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | head -n 1)")" "$PROJECT_ROOT"; then
+                    prereq_ok "${name} port ${port} is owned by this checkout and will be restarted"
+                else
+                    prereq_error "${name} port ${port} is in use. Current listener: ${listener}"
+                    has_error=true
+                fi
             else
                 prereq_ok "${name} port ${port} available"
             fi

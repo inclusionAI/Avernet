@@ -171,6 +171,7 @@ export type ChatHandlerDeps = {
   useSdkBridge: boolean;
   defaultContextTurns: number;
   maxContextChars: number;
+  systemPromptPrefix?: string;
   registry: PendingInteractionRegistry;
   runtimeRegistry: SessionRuntimeRegistry;
 };
@@ -487,10 +488,9 @@ export const handleChatSend: ChatHandler = async (ctx, frame, deps) => {
   const historyForSystemPrompt = replayInjectHistory.length > 0
     ? priorHistory.filter(entry => !replayInjectHistory.includes(entry))
     : priorHistory;
-  // Singlebox role prompts are process-scoped, never written into a user's
-  // workspace or CLAUDE.md.  The normal conversation summary remains appended
-  // after this stable role instruction.
-  const systemPromptPrefix = process.env.RELAY_SYSTEM_PROMPT_PREFIX?.trim();
+  // The process-scoped role prompt is loaded at relay startup and never written
+  // into a user's workspace. The normal conversation summary follows it.
+  const systemPromptPrefix = deps.systemPromptPrefix;
   const conversationContext = buildConversationContext({
     history: toOrchestratorHistory(historyForSystemPrompt),
     contextTurns,

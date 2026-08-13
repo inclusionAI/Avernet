@@ -32,6 +32,30 @@ bcs_port_has_healthy_server() {
     printf '%s\n' "$payload" | grep -Eq '"service"[[:space:]]*:[[:space:]]*"bcs"'
 }
 
+bcs_merchant_hybrid_provider_state_file() {
+    # The merchant profile deliberately uses a separate state file from the
+    # legacy three-Claude-bot topology.  Keep this path explicit so a partial
+    # BCS start cannot silently replace its loopback callback policy.
+    printf '%s/bcs_baas_provider.merchant_hybrid.state.json\n' "${DEP_DIR}"
+}
+
+bcs_reject_partial_merchant_hybrid_start() {
+    # A complete merchant_hybrid command enables the Claude profile before
+    # reaching bcs_start.  In that mode prepare_bcs_runtime_config installs
+    # the narrow loopback exception required by its local Provider bridge.
+    if type -t claude_bots_enabled &>/dev/null && claude_bots_enabled; then
+        return 0
+    fi
+
+    local provider_state
+    provider_state="$(bcs_merchant_hybrid_provider_state_file)"
+    [ -s "$provider_state" ] || return 0
+
+    log_error "Refusing to start standalone BCS while merchant_hybrid Provider state is present"
+    log_error "Use 'singlebox.sh restart merchant_hybrid ...' or stop merchant_hybrid before starting bcs/bcs_frontend alone"
+    return 1
+}
+
 resolve_bcs_config_file() {
     local config_dir="$1"
 
@@ -144,7 +168,7 @@ prepare_bcs_runtime_config() {
         )
         log_info "Enabling local Provider/Judge mock for BCS E2E"
     fi
-    if [ -n "${CLAUDE_BOTS_CONFIG:-}" ]; then
+    if type -t claude_bots_enabled &>/dev/null && claude_bots_enabled; then
         # The mixed topology registers one Provider webhook on this machine.
         # Keep general private-network blocking enabled; only loopback is
         # needed for the worktree-owned bridge listener.
@@ -795,7 +819,8 @@ start_bcs_binary() {
 
     # Start BCS service
     local bcs_bin="${BCS_BIN:-./target/debug/bcs}"
-    SERVER_ENV="${BCS_SERVER_ENV}" nohup "$bcs_bin" >> "${BCS_LOG}" 2>&1 &
+    SERVER_ENV="${BCS_SERVER_ENV}" nohup perl -MPOSIX=setsid -e 'setsid() or die "setsid failed: $!\\n"; exec @ARGV' \
+        "$bcs_bin" >> "${BCS_LOG}" 2>&1 &
     local bcs_pid=$!
 
     # Verify process started successfully
@@ -840,7 +865,13 @@ bcs_setup() {
 }
 
 bcs_start() {
+    bcs_reject_partial_merchant_hybrid_start || return 1
     resolve_bcs_server_env
+
+    if bcs_binaries_stale; then
+        log_info "BCS build needed before start: ${BCS_BUILD_REASON}"
+        build_bcs || return 1
+    fi
 
     # Auth mock defaults (only for local mode without remote auth cookies)
     if [ "$BCS_SERVER_ENV" = "local" ]; then

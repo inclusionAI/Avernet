@@ -75,7 +75,7 @@ test_provider_registration_separates_backend_and_bcs_owners() {
     unset -f curl
 
     jq -e '.bcs_owner_id == "001" and (.bots | length == 3)' "$BCS_BAAS_PROVIDER_STATE_FILE" >/dev/null
-    jq -e '.bcs_to_provider_token == "bcs-to-provider-test" and .provider_admin_token == "admin-test" and (.provider_bots.planner | keys == ["provider_bot_ref"])' "$BCS_BAAS_PROVIDER_TOKEN_FILE" >/dev/null
+    jq -e '.provider_id == "provider-test" and .bcs_to_provider_token == "bcs-to-provider-test" and .provider_admin_token == "admin-test" and .provider_bots.planner.provider_bot_ref == "planner-backend:mock-user" and .provider_bots.planner.bot_runtime_token == "planner-token"' "$BCS_BAAS_PROVIDER_TOKEN_FILE" >/dev/null
     grep -F 'X-Mock-User-Id: 001' "$calls" >/dev/null
     grep -F 'planner-backend:mock-user' "$calls" >/dev/null
     grep -F 'Claude Developer（当前）' "$calls" >/dev/null
@@ -95,7 +95,7 @@ test_provider_cleanup_removes_only_current_bots() {
     BCS_BAAS_PROVIDER_TOKEN_FILE="$provider_tmp/provider.tokens.json"
     BCS_PORT=21000
     printf '%s\n' '{"provider_id":"provider-test","bots":[{"role":"planner","provider_bot_ref":"planner-backend:mock-user"},{"role":"developer","provider_bot_ref":"developer-backend:mock-user"},{"role":"reviewer","provider_bot_ref":"reviewer-backend:mock-user"}]}' > "$BCS_BAAS_PROVIDER_STATE_FILE"
-    printf '%s\n' '{"baas_token":"test","provider_admin_token":"admin-test","bcs_to_provider_token":"bcs-to-provider-test","provider_bots":{"planner":{"provider_bot_ref":"planner-backend:mock-user"},"developer":{"provider_bot_ref":"developer-backend:mock-user"},"reviewer":{"provider_bot_ref":"reviewer-backend:mock-user"}}}' > "$BCS_BAAS_PROVIDER_TOKEN_FILE"
+    printf '%s\n' '{"baas_token":"test","provider_id":"provider-test","provider_admin_token":"admin-test","bcs_to_provider_token":"bcs-to-provider-test","provider_bots":{"planner":{"provider_bot_ref":"planner-backend:mock-user","bot_runtime_token":"planner-token"},"developer":{"provider_bot_ref":"developer-backend:mock-user","bot_runtime_token":"developer-token"},"reviewer":{"provider_bot_ref":"reviewer-backend:mock-user","bot_runtime_token":"reviewer-token"}}}' > "$BCS_BAAS_PROVIDER_TOKEN_FILE"
 
     curl() {
         local arg method='' url=''
@@ -115,7 +115,7 @@ test_provider_cleanup_removes_only_current_bots() {
     unset -f curl
 
     [ ! -f "$BCS_BAAS_PROVIDER_STATE_FILE" ]
-    jq -e '.provider_admin_token == "" and .bcs_to_provider_token == "" and .provider_bots == {} and .baas_token == "test"' "$BCS_BAAS_PROVIDER_TOKEN_FILE" >/dev/null
+    jq -e '.provider_id == "" and .provider_admin_token == "" and .bcs_to_provider_token == "" and .provider_bots == {} and .baas_token == "test"' "$BCS_BAAS_PROVIDER_TOKEN_FILE" >/dev/null
     [[ "$(grep -c '^DELETE|' "$calls")" -eq 3 ]]
     grep -F 'planner-backend%3Amock-user' "$calls" >/dev/null
 }
@@ -126,6 +126,11 @@ BCS_CONFIG_DIR="$TMP/bcs-runtime-config"
 prepare_bcs_runtime_config
 grep -F 'block_private_networks = true' "$BCS_CONFIG_DIR/bcs-config.toml" >/dev/null
 grep -F 'allow_loopback = true' "$BCS_CONFIG_DIR/bcs-config.toml" >/dev/null
+runtime_llm_section="$(awk '/^\[llm\]/{inside=1; next} inside && /^\[/{exit} inside {print}' "$BCS_CONFIG_DIR/bcs-config.toml")"
+grep -F 'type = "openai_compatible"' <<<"$runtime_llm_section" >/dev/null
+grep -F 'base_url = "https://antchat.alipay.com/v1"' <<<"$runtime_llm_section" >/dev/null
+grep -F 'api_key_env = "ANTCHAT_API_KEY"' <<<"$runtime_llm_section" >/dev/null
+grep -F 'model = "Kimi-K2.6"' <<<"$runtime_llm_section" >/dev/null
 
 events="$TMP/mixed-rollbacks"
 check_prereqs_for_services() { return 0; }

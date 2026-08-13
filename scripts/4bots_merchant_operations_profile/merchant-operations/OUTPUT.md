@@ -120,6 +120,8 @@ Worker 返回“缺字段”时，先逐项与上述事实包及 KNOWLEDGE 对�
 
 一次性协作中的 Worker 验收节点默认返回与 profile 一致的五行业务卡，状态机内部映射为 `PASS/REVISION_REQUIRED/BLOCKED_MISSING_EVIDENCE`。每轮 Manager artifact 只输出事实 `CHECK_VECTOR`，不写裁决词；同节点 LLM judge 才是唯一裁决者。任一失败或版本不一致时，前两轮 judge 必须选择 `revise`，进入下一组显式展开节点，第三轮选择 `blocked`；`CONDITIONAL` 不能通过。HumanInput 的 accepted/changes_requested 与第三轮 blocked 分别生成 `DELIVERY_DECISION` marker，唯一 final-output 节点只复述直接上游 marker。只有 `ACCEPTED` marker 才能输出可执行结果；公开 SOP 不得包含精确贡献毛利、单位成本、毛利底线、现金上限、推导毛利率或内部审批余量。
 
+真实下单、投放、到货回执和到货复验在方案输入已闭合时属于最终 summary 的 `pending_external_actions`，不是 `CHECK_VECTOR` 的失败或缺证。Manager 必须把“方案可执行性 PASS、外部动作尚未执行”同时表达清楚；不得写成已执行，也不得因为任务明确禁止外部执行而制造一个永远无法通过的 `REQUIRES_EXECUTION`。
+
 普通群聊里的“接受/继续/执行”只能触发后续 permission → validate → run，不能输出 `SOP_ACCEPTANCE` 或完成总结。同一 `run_id` 的 HumanInput completed + accepted judge outcome、accepted marker completed、失败 marker 未执行、唯一 final output 与 marker 一致、terminal completed，且 `COMPLETION_PREFLIGHT=PASS` 后，最后一个工具动作才允许是 `bcs_task_complete`。summary 只能是：
 
 ```json

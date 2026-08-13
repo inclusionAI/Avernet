@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/modules/bcs_baas_provider.sh — one BCS Provider for three Claude bots
+# scripts/modules/bcs_baas_provider.sh — one BCS Provider for active Claude bots
 [[ -n "${_BCS_BAAS_PROVIDER_SH_LOADED:-}" ]] && return 0
 _BCS_BAAS_PROVIDER_SH_LOADED=1
 
@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 
 path = Path(sys.argv[1])
-path.write_text(json.dumps({"baas_token": secrets.token_urlsafe(32), "provider_admin_token": "", "bcs_to_provider_token": "", "provider_bots": {}}), encoding="utf-8")
+path.write_text(json.dumps({"baas_token": secrets.token_urlsafe(32), "provider_id": "", "provider_admin_token": "", "bcs_to_provider_token": "", "provider_bots": {}}), encoding="utf-8")
 path.chmod(0o600)
 PY
 }
@@ -74,8 +74,8 @@ bcs_baas_provider_bcs_owner_id() {
 }
 
 bcs_baas_provider_set_registration_tokens() {
-    local provider_admin_token="$1" bcs_to_provider_token="$2"
-    BCS_BAAS_PROVIDER_ADMIN_TOKEN="$provider_admin_token" BCS_BAAS_PROVIDER_DOWNLINK_TOKEN="$bcs_to_provider_token" python3 - "$BCS_BAAS_PROVIDER_TOKEN_FILE" <<'PY'
+    local provider_id="$1" provider_admin_token="$2" bcs_to_provider_token="$3"
+    BCS_BAAS_PROVIDER_ID="$provider_id" BCS_BAAS_PROVIDER_ADMIN_TOKEN="$provider_admin_token" BCS_BAAS_PROVIDER_DOWNLINK_TOKEN="$bcs_to_provider_token" python3 - "$BCS_BAAS_PROVIDER_TOKEN_FILE" <<'PY'
 import json
 import os
 import sys
@@ -83,6 +83,7 @@ from pathlib import Path
 
 path = Path(sys.argv[1])
 data = json.loads(path.read_text(encoding="utf-8"))
+data["provider_id"] = os.environ["BCS_BAAS_PROVIDER_ID"]
 data["provider_admin_token"] = os.environ["BCS_BAAS_PROVIDER_ADMIN_TOKEN"]
 data["bcs_to_provider_token"] = os.environ["BCS_BAAS_PROVIDER_DOWNLINK_TOKEN"]
 path.write_text(json.dumps(data), encoding="utf-8")
@@ -98,6 +99,7 @@ from pathlib import Path
 
 path = Path(sys.argv[1])
 data = json.loads(path.read_text(encoding="utf-8"))
+data["provider_id"] = ""
 data["provider_admin_token"] = ""
 data["bcs_to_provider_token"] = ""
 data["provider_bots"] = {}
@@ -110,7 +112,7 @@ bcs_baas_provider_active_display_name() {
     printf '%s（当前）\n' "$1"
 }
 
-# Delete only the three Provider bots recorded by this checkout.  BCS has no
+# Delete only the Provider bots recorded by this checkout.  BCS has no
 # Provider DELETE endpoint, and retaining those public bots after their
 # downlink token is discarded leaves visually identical cards that always
 # return 401.  Return 2 for a pre-fix runtime file that has no admin token:
@@ -142,12 +144,12 @@ bcs_baas_provider_cleanup_registration() {
 
     bcs_baas_provider_clear_registration_tokens
     rm -f "$BCS_BAAS_PROVIDER_STATE_FILE"
-    log_info "Removed the three current Claude Provider bots before clearing their downlink registration"
+    log_info "Removed current Claude Provider bots before clearing their downlink registration"
 }
 
 bcs_baas_provider_add_provider_bot_ref() {
-    local role="$1" provider_bot_ref="$2"
-    BCS_BAAS_PROVIDER_ROLE="$role" BCS_BAAS_PROVIDER_REF="$provider_bot_ref" python3 - "$BCS_BAAS_PROVIDER_TOKEN_FILE" <<'PY'
+    local role="$1" provider_bot_ref="$2" bot_runtime_token="$3"
+    BCS_BAAS_PROVIDER_ROLE="$role" BCS_BAAS_PROVIDER_REF="$provider_bot_ref" BCS_BAAS_PROVIDER_BOT_RUNTIME_TOKEN="$bot_runtime_token" python3 - "$BCS_BAAS_PROVIDER_TOKEN_FILE" <<'PY'
 import json
 import os
 import sys
@@ -157,6 +159,7 @@ path = Path(sys.argv[1])
 data = json.loads(path.read_text(encoding="utf-8"))
 data.setdefault("provider_bots", {})[os.environ["BCS_BAAS_PROVIDER_ROLE"]] = {
     "provider_bot_ref": os.environ["BCS_BAAS_PROVIDER_REF"],
+    "bot_runtime_token": os.environ["BCS_BAAS_PROVIDER_BOT_RUNTIME_TOKEN"],
 }
 path.write_text(json.dumps(data), encoding="utf-8")
 path.chmod(0o600)
@@ -222,9 +225,9 @@ bcs_baas_provider_register() {
         log_error "BCS Provider registration returned an incomplete response"
         return 1
     fi
-    bcs_baas_provider_set_registration_tokens "$provider_admin_token" "$bcs_to_provider_token"
+    bcs_baas_provider_set_registration_tokens "$provider_id" "$provider_admin_token" "$bcs_to_provider_token"
 
-    local role bot_id name display_name provider_ref bot_payload bot_response runtime_token bot_uuid visibility_response state_bots='[]'
+    local role bot_id name display_name provider_ref bot_payload bot_response runtime_token bot_uuid visibility_response state_bots='[]' provider_bot_count=0
     while IFS=$'\t' read -r role bot_id name; do
         provider_ref="${bot_id}:${backend_entity_id}"
         display_name="$(bcs_baas_provider_active_display_name "$name")"
@@ -246,14 +249,15 @@ bcs_baas_provider_register() {
             log_error "BCS Provider bot was not made discoverable for Claude ${role}"
             return 1
         fi
-        bcs_baas_provider_add_provider_bot_ref "$role" "$provider_ref"
+        bcs_baas_provider_add_provider_bot_ref "$role" "$provider_ref" "$runtime_token"
         state_bots="$(jq -c --arg role "$role" --arg ref "$provider_ref" --arg uuid "$bot_uuid" '. + [{role: $role, provider_bot_ref: $ref, bot_uuid: $uuid}]' <<< "$state_bots")"
+        provider_bot_count=$((provider_bot_count + 1))
     done < <(jq -r '.bots[] | [.role, .bot_id, .name] | @tsv' "$CLAUDE_BOTS_STATE_FILE")
     unset provider_admin_token bcs_to_provider_token runtime_token visibility_response
     umask 077
     jq -n --arg provider_id "$provider_id" --arg bcs_owner_id "$bcs_owner_id" --argjson bots "$state_bots" '{provider_id: $provider_id, bcs_owner_id: $bcs_owner_id, bots: $bots}' > "$BCS_BAAS_PROVIDER_STATE_FILE"
     chmod 600 "$BCS_BAAS_PROVIDER_STATE_FILE"
-    log_info "Registered one local BCS Provider and three discoverable Claude Provider bots for the active BCS user"
+    log_info "Registered one local BCS Provider and ${provider_bot_count} discoverable Claude Provider bot(s) for the active BCS user"
 }
 
 bcs_baas_provider_start() {
@@ -284,7 +288,8 @@ bcs_baas_provider_start() {
     log_info "Starting BCS to BAAS Provider bridge on port ${BCS_BAAS_PROVIDER_PORT}"
     (
         cd "$PROJECT_ROOT"
-        nohup node "$BCS_BAAS_PROVIDER_BRIDGE" --port "$BCS_BAAS_PROVIDER_PORT" --token-file "$BCS_BAAS_PROVIDER_TOKEN_FILE" >> "$BCS_BAAS_PROVIDER_LOG" 2>&1 &
+        nohup perl -MPOSIX=setsid -e 'setsid() or die "setsid failed: $!\\n"; exec @ARGV' \
+            node "$BCS_BAAS_PROVIDER_BRIDGE" --port "$BCS_BAAS_PROVIDER_PORT" --bcs-url "http://127.0.0.1:${BCS_PORT}" --token-file "$BCS_BAAS_PROVIDER_TOKEN_FILE" >> "$BCS_BAAS_PROVIDER_LOG" 2>&1 &
         echo $! > "$BCS_BAAS_PROVIDER_PID_FILE"
     )
     bcs_baas_provider_wait_ready || { log_error "Provider bridge did not become ready"; return 1; }
@@ -329,12 +334,12 @@ bcs_baas_provider_ready() {
 bcs_baas_provider_status() {
     claude_bots_enabled || return 0
     if bcs_baas_provider_healthy && [ -f "$BCS_BAAS_PROVIDER_STATE_FILE" ]; then
-        echo "  Claude Provider: Running (bridge ${BCS_BAAS_PROVIDER_PORT}; 3 Provider bots)"
+        echo "  Claude Provider: Running (bridge ${BCS_BAAS_PROVIDER_PORT}; $(jq -r '.bots | length' "$BCS_BAAS_PROVIDER_STATE_FILE" 2>/dev/null || echo '?') Provider bots)"
     else
         echo "  Claude Provider: Stopped"
     fi
 }
 
 bcs_baas_provider_help() {
-    echo "bcs_baas_provider - local BCS Provider bridge for three Claude bots (mixed mode only)"
+    echo "bcs_baas_provider - local BCS Provider bridge for active Claude bots (mixed mode only)"
 }

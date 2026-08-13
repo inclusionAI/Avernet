@@ -60,6 +60,9 @@ for role in planner developer reviewer; do
   esac
   curl --noproxy '*' --connect-timeout 1 --max-time 2 -fsS "http://127.0.0.1:${port}/health" | jq -e '.ok == true' >/dev/null
   [ -f "${CLAUDE_RELAY_STATE_DIR}/${role}.pid" ]
+  relay_pid="$(cat "${CLAUDE_RELAY_STATE_DIR}/${role}.pid")"
+  relay_pgid="$(ps -o pgid= -p "$relay_pid" | tr -d ' ')"
+  [[ "$relay_pgid" == "$relay_pid" ]]
   [ -d "${CLAUDE_RELAY_STATE_DIR}/${role}/data" ]
   [ ! -e "$TMP/${role}/workspace/CLAUDE.md" ]
 done

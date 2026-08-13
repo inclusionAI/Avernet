@@ -18,19 +18,24 @@ import { once } from 'node:events';
 const MAX_BODY_BYTES = 1024 * 1024;
 
 function parseArgs(argv) {
-  const options = { baasUrl: 'http://127.0.0.1:8890' };
+  const options = {
+    baasUrl: 'http://127.0.0.1:8890',
+    bcsUrl: 'http://127.0.0.1:21000',
+  };
   for (let index = 2; index < argv.length; index += 1) {
     const key = argv[index];
     const value = argv[index + 1];
     if (key === '--port') options.port = Number(value);
     if (key === '--baas-url') options.baasUrl = value;
+    if (key === '--bcs-url') options.bcsUrl = value;
     if (key === '--token-file') options.tokenFile = value;
-    if (key === '--port' || key === '--baas-url' || key === '--token-file') index += 1;
+    if (key === '--port' || key === '--baas-url' || key === '--bcs-url' || key === '--token-file') index += 1;
   }
   if (!Number.isInteger(options.port) || options.port < 1 || options.port > 65535 || !options.tokenFile) {
-    throw new Error('usage: bcs_baas_provider_bridge.mjs --port PORT --token-file PATH [--baas-url URL]');
+    throw new Error('usage: bcs_baas_provider_bridge.mjs --port PORT --token-file PATH [--baas-url URL] [--bcs-url URL]');
   }
   options.downlinkUrl = `${options.baasUrl.replace(/\/$/, '')}/bcn/downlink`;
+  options.uplinkUrl = `${options.bcsUrl.replace(/\/$/, '')}/bot/events`;
   return options;
 }
 
@@ -50,19 +55,26 @@ function runtimeCredentials(tokenFile) {
   if (typeof raw.bcs_to_provider_token !== 'string' || raw.bcs_to_provider_token.length === 0) {
     throw new Error('BCS Provider credential is missing');
   }
-  const providerBotRefs = new Set();
+  if (typeof raw.provider_id !== 'string' || raw.provider_id.length === 0
+      || typeof raw.provider_admin_token !== 'string' || raw.provider_admin_token.length === 0) {
+    throw new Error('BCS Provider uplink credential is missing');
+  }
+  const providerBotTokens = new Map();
   for (const record of Object.values(raw.provider_bots ?? {})) {
     if (!record || typeof record !== 'object') continue;
-    const { provider_bot_ref: providerBotRef } = record;
-    if (typeof providerBotRef !== 'string' || providerBotRef.length === 0) {
+    const { provider_bot_ref: providerBotRef, bot_runtime_token: botRuntimeToken } = record;
+    if (typeof providerBotRef !== 'string' || providerBotRef.length === 0
+        || typeof botRuntimeToken !== 'string' || botRuntimeToken.length === 0) {
       throw new Error('provider credentials are invalid');
     }
-    providerBotRefs.add(providerBotRef);
+    providerBotTokens.set(providerBotRef, botRuntimeToken);
   }
   return {
     baasToken: raw.baas_token,
+    providerId: raw.provider_id,
+    providerAdminToken: raw.provider_admin_token,
     bcsToProviderToken: raw.bcs_to_provider_token,
-    providerBotRefs,
+    providerBotTokens,
   };
 }
 
@@ -82,7 +94,7 @@ function responseJson(response, status, payload) {
   response.end(body);
 }
 
-async function requestJson(request) {
+async function requestObject(request) {
   const declared = Number(request.headers['content-length'] ?? 0);
   if (!Number.isInteger(declared) || declared <= 0 || declared > MAX_BODY_BYTES) {
     throw new Error('invalid request size');
@@ -95,9 +107,13 @@ async function requestJson(request) {
     chunks.push(chunk);
   }
   const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || parsed.type !== 'req') {
-    throw new Error('invalid provider request');
-  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('invalid request');
+  return parsed;
+}
+
+async function requestJson(request) {
+  const parsed = await requestObject(request);
+  if (parsed.type !== 'req') throw new Error('invalid provider request');
   return parsed;
 }
 
@@ -133,6 +149,60 @@ function bridgeHandler(options, activeRuns) {
       responseJson(response, 200, { ok: true });
       return;
     }
+    if (method === 'POST' && path === '/bot/events') {
+      let event;
+      let credentials;
+      try {
+        event = await requestObject(request);
+        credentials = runtimeCredentials(options.tokenFile);
+      } catch {
+        responseJson(response, 400, { error: 'invalid request' });
+        return;
+      }
+      const runId = typeof event.run_id === 'string' ? event.run_id : '';
+      const state = typeof event.state === 'string' ? event.state : '';
+      const providerBotRef = typeof request.headers['x-bcn-provider-bot-ref'] === 'string'
+        ? request.headers['x-bcn-provider-bot-ref']
+        : '';
+      if (!runId || !['final', 'error', 'aborted'].includes(state)) {
+        responseJson(response, 400, { error: 'invalid event' });
+        return;
+      }
+      if (bearerToken(request.headers) !== credentials.baasToken) {
+        safeLog(`bridge.uplink_reject reason=unauthorized run_id=${runId} provider_bot_ref=${providerBotRef}`);
+        responseJson(response, 401, { error: 'unauthorized' });
+        return;
+      }
+      const botRuntimeToken = credentials.providerBotTokens.get(providerBotRef);
+      if (!botRuntimeToken) {
+        safeLog(`bridge.uplink_reject reason=provider_bot_mismatch run_id=${runId} provider_bot_ref=${providerBotRef}`);
+        responseJson(response, 403, { error: 'provider bot mismatch' });
+        return;
+      }
+      try {
+        const upstream = await fetch(options.uplinkUrl, {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${botRuntimeToken}`,
+            'content-type': 'application/json',
+            'x-bcn-provider-id': credentials.providerId,
+            'x-bcn-provider-bot-ref': providerBotRef,
+          },
+          body: JSON.stringify(event),
+        });
+        const payload = Buffer.from(await upstream.arrayBuffer());
+        response.writeHead(upstream.status, {
+          'content-type': upstream.headers.get('content-type') ?? 'application/json',
+          'content-length': payload.length,
+        });
+        response.end(payload);
+        safeLog(`bridge.uplink run_id=${runId} provider_bot_ref=${providerBotRef} status=${upstream.status}`);
+      } catch {
+        responseJson(response, 502, { error: 'local BCS uplink unavailable' });
+        safeLog(`bridge.uplink_failed run_id=${runId} provider_bot_ref=${providerBotRef}`);
+      }
+      return;
+    }
     if (method !== 'POST' || path !== '/webhook') {
       responseJson(response, 404, { error: 'not found' });
       return;
@@ -158,7 +228,7 @@ function bridgeHandler(options, activeRuns) {
       responseJson(response, 401, { error: 'unauthorized' });
       return;
     }
-    if (!credentials.providerBotRefs.has(meta.providerBotRef)) {
+    if (!credentials.providerBotTokens.has(meta.providerBotRef)) {
       safeLog(`bridge.reject reason=provider_bot_mismatch method=${meta.method} run_id=${meta.runId} provider_bot_ref=${meta.providerBotRef}`);
       responseJson(response, 403, { error: 'provider bot mismatch' });
       return;

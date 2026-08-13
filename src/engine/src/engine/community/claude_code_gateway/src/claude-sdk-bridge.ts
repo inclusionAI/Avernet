@@ -185,6 +185,19 @@ export function shouldGateTool(toolName: string): boolean {
 }
 
 /**
+ * The SDK permission mode is authoritative.  A bypass request must not also
+ * install the relay's HITL callback: BCS Provider has no approval endpoint,
+ * and the callback would otherwise leave a tool request pending until its
+ * timeout.  Other modes retain the existing suspend/resume behaviour.
+ */
+export function shouldInstallInteractiveToolGate(
+  permissionMode: string | undefined,
+  hasInteractionCallback: boolean,
+): boolean {
+  return hasInteractionCallback && permissionMode !== 'bypassPermissions';
+}
+
+/**
  * Resolve the path to the Claude Code CLI executable.
  * Priority:
  *  1. CLAUDE_CODE_PATH env var (explicit override)
@@ -569,8 +582,10 @@ export function startClaudePromptSdk(
       hasOnInteractionRequested: Boolean(params.onInteractionRequested),
     });
 
-    // Inject canUseTool hook for HITL suspend/resume
-    if (params.onInteractionRequested) {
+    // Inject canUseTool hook for HITL suspend/resume.  bypassPermissions is
+    // intentionally delegated to the SDK; BCS Provider has no HITL approval
+    // endpoint and must not create a five-minute pending interaction.
+    if (shouldInstallInteractiveToolGate(params.permissionMode, Boolean(params.onInteractionRequested))) {
       // EXEC_APPROVAL_TIMEOUT_MS 统一从 interaction/builders 导出（可通过
       // RELAY_INTERACTION_TIMEOUT_MS 配置，默认 5min），避免多处硬编码。
       // 排查日志：确认 canUseTool 生效的审批超时值
@@ -681,6 +696,8 @@ export function startClaudePromptSdk(
           throw err;
         }
       };
+    } else if (params.onInteractionRequested && params.permissionMode === 'bypassPermissions') {
+      log.debug('canUseTool: skipped HITL gate for bypassPermissions', { runId, sessionKey });
     }
 
     // Use explicit CLI path if provided (useful when SDK's bundled binary is unavailable)

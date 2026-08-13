@@ -78,6 +78,8 @@
   },
   "contracts": {
     "tools": [
+      "bcs_discover_bots",
+      "bcs_create_manager_worker_group",
       "bcs_route",
       "bcs_assign_task",
       "bcs_send_task_message",

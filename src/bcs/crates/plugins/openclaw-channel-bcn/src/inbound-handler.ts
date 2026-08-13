@@ -8,7 +8,7 @@
  * 4. Stream response back to BCS as event frames
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import { rm } from 'node:fs/promises';
 import * as path from 'node:path';
@@ -62,6 +62,23 @@ function extractFromPrefix(raw: string): { senderName: string; text: string } {
 function nonEmptyString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   return value.trim() || undefined;
+}
+
+function resolveChatSessionKey(
+  baseSessionKey: string,
+  sessionContext: GroupContext | undefined,
+  runId: string,
+): { sessionKey: string; isolated: boolean; hash?: string } {
+  const isolated = sessionContext?.group_type === 'state_machine' && runId.startsWith('smnode-');
+  if (!isolated) return { sessionKey: baseSessionKey, isolated: false };
+
+  const hash = createHash('sha256').update(runId).digest('hex')
+    .slice(0, 24);
+  return {
+    sessionKey: `${baseSessionKey}:state-machine:${hash}`,
+    isolated: true,
+    hash,
+  };
 }
 
 function isPathInside(baseDir: string, candidate: string): boolean {
@@ -254,6 +271,37 @@ const sessionKeyToClient = new Map<string, BcsWsClient>();
 
 /** Session key -> task group info (for tool activation checks). */
 const sessionTaskGroupInfo = new Map<string, TaskGroupInfo>();
+
+type AssignTaskResult = { ok: boolean; task_id?: string; status?: string; error?: string };
+type AssignTaskReceipt = { expiresAt: number; result: Promise<AssignTaskResult> };
+type CreateGroupResult = Record<string, unknown>;
+type CreateGroupReceipt = { expiresAt: number; result: Promise<CreateGroupResult> };
+const EXACT_WRITE_TOOL_DEDUPE_WINDOW_MS = 60_000;
+
+/** Exact short-lived task receipts prevent concurrent model activations from duplicating dispatch. */
+const assignTaskReceiptsBySession = new Map<string, Map<string, AssignTaskReceipt>>();
+const createGroupReceiptsBySession = new Map<string, Map<string, CreateGroupReceipt>>();
+
+function assignTaskFingerprint(
+  groupId: string,
+  targetBot: string,
+  message: string,
+  responseMode?: TaskDispatchParams['response_mode'],
+): string {
+  return createHash('sha256')
+    .update(JSON.stringify([ groupId, targetBot, message, responseMode ?? null ]))
+    .digest('hex');
+}
+
+function createGroupFingerprint(
+  workerBotUuids: string[],
+  topic: string,
+  context: string,
+): string {
+  return createHash('sha256')
+    .update(JSON.stringify([ workerBotUuids, topic, context ]))
+    .digest('hex');
+}
 
 /** Get the cached routing_mode for a session (used by tool factory to hide bcs_route). */
 export function getSessionRoutingMode(sessionKey: string): string | undefined {
@@ -1053,24 +1101,41 @@ export async function handleChatSend(
       },
     });
 
-    log?.info?.(`[DEBUG] Resolved agent route: agentId=${route.agentId}, sessionKey=${route.sessionKey}`);
+    const chatSession = resolveChatSessionKey(route.sessionKey, sessionContext, runId);
+    const sessionKey = chatSession.sessionKey;
+
+    if (chatSession.isolated) {
+      log?.info?.(
+        `[BCS] state-machine session isolated: state_machine_session_isolated=true run_id=${runId} session_key_hash=${chatSession.hash}`,
+      );
+    } else {
+      log?.info?.(`[DEBUG] Resolved agent route: agentId=${route.agentId}, sessionKey=${sessionKey}`);
+    }
     const runContext = runContexts.get(runId);
     if (runContext) {
-      runContext.sessionKey = route.sessionKey;
+      runContext.sessionKey = sessionKey;
     }
 
     // Record bidirectional mapping: sessionKey <-> bcsGroupId
     if (bcsGroupId) {
-      sessionKeyToGroupId.set(route.sessionKey, bcsGroupId);
-      groupIdToSessionKey.set(bcsGroupId, route.sessionKey);
+      sessionKeyToGroupId.set(sessionKey, bcsGroupId);
+      if (chatSession.isolated) {
+        if (!groupIdToSessionKey.has(bcsGroupId)) {
+          groupIdToSessionKey.set(bcsGroupId, route.sessionKey);
+        }
+      } else {
+        groupIdToSessionKey.set(bcsGroupId, sessionKey);
+      }
     }
 
     // Track client reference and manager-worker context for task group tools
-    rememberTaskToolSession(route.sessionKey, client, bcsGroupId, sessionContext, params.bcs_session_id);
+    if (!chatSession.isolated) {
+      rememberTaskToolSession(sessionKey, client, bcsGroupId, sessionContext, params.bcs_session_id);
+    }
 
     // Cache routing_mode so tool factory can hide bcs_route when mode=mention
     if (sessionContext?.routing_mode) {
-      sessionRoutingMode.set(route.sessionKey, sessionContext.routing_mode);
+      sessionRoutingMode.set(sessionKey, sessionContext.routing_mode);
     }
 
     // Build inbound context using SDK's finalizeInboundContext
@@ -1082,7 +1147,7 @@ export async function handleChatSend(
       CommandBody: text,
       From: `bcs:${fromDisplayName}`,
       To: bcsGroupId || `bcs:${account.botId}`,
-      SessionKey: route.sessionKey,
+      SessionKey: sessionKey,
       AccountId: account.accountId,
       OriginatingChannel: CHANNEL_ID,
       OriginatingTo: bcsGroupId || `bcs:${account.botId}`,
@@ -1109,18 +1174,22 @@ export async function handleChatSend(
       agentId: route.agentId,
     });
 
-    log?.info?.(`[DEBUG] Recording inbound session: storePath=${storePath}, sessionKey=${route.sessionKey}, agentId=${route.agentId}`);
+    log?.info?.(
+      chatSession.isolated
+        ? `[DEBUG] Recording isolated state-machine inbound session: storePath=${storePath}, sessionKeyHash=${chatSession.hash}, agentId=${route.agentId}`
+        : `[DEBUG] Recording inbound session: storePath=${storePath}, sessionKey=${sessionKey}, agentId=${route.agentId}`,
+    );
 
     // Record inbound session to save user message (makes it visible in UI)
     // Use the actual BCS group ID as the route "to" so replies go back to the correct group
     try {
       await rt.channel.session.recordInboundSession({
         storePath,
-        sessionKey: route.sessionKey,
+        sessionKey,
         ctx: msgCtx,
         createIfMissing: true,
         updateLastRoute: {
-          sessionKey: route.sessionKey,
+          sessionKey,
           channel: CHANNEL_ID,
           to: bcsGroupId || `bcs:${account.botId}`,
           accountId: account.accountId,
@@ -1278,6 +1347,8 @@ export async function handleSessionDelete(
     sessionRoutingMode.delete(sessionKey);
     sessionKeyToClient.delete(sessionKey);
     sessionTaskGroupInfo.delete(sessionKey);
+    assignTaskReceiptsBySession.delete(sessionKey);
+    createGroupReceiptsBySession.delete(sessionKey);
 
     log?.info?.(`[session.delete] Session deleted: ${sessionKey}`);
     client.sendResponse(request.id, true, {});
@@ -1892,6 +1963,168 @@ export function abortAllStreams(): void {
   sessionRoutingMode.clear();
   sessionKeyToClient.clear();
   sessionTaskGroupInfo.clear();
+  assignTaskReceiptsBySession.clear();
+  createGroupReceiptsBySession.clear();
+}
+
+// ---------------------------------------------------------------------------
+// BCS directory and manager-worker group tools
+// ---------------------------------------------------------------------------
+
+export const BCS_DISCOVER_BOTS_TOOL_SCHEMA = {
+  name: 'bcs_discover_bots',
+  description:
+    'Discover BCS bots by an exact display-name query using the current authenticated BCS session. ' +
+    'Use this before creating a manager-worker group. The tool never returns credentials.',
+  parameters: {
+    type: 'object' as const,
+    properties: {
+      query: {
+        type: 'string' as const,
+        description: 'The exact Bot display name to discover.',
+      },
+    },
+    required: [ 'query' ],
+  },
+};
+
+export const BCS_CREATE_MANAGER_WORKER_GROUP_TOOL_SCHEMA = {
+  name: 'bcs_create_manager_worker_group',
+  description:
+    'Create one BCS manager-worker group led by the current bot. ' +
+    'Pass only discovered worker Bot UUIDs and a privacy-reviewed shared context.',
+  parameters: {
+    type: 'object' as const,
+    properties: {
+      worker_bot_uuids: {
+        type: 'array' as const,
+        items: { type: 'string' as const },
+        description: 'Unique BCS Bot UUIDs for every required worker.',
+      },
+      topic: {
+        type: 'string' as const,
+        description: 'Short public collaboration topic.',
+      },
+      context: {
+        type: 'string' as const,
+        description: 'Privacy-reviewed shared brief. Do not include private financial values or chat transcripts.',
+      },
+    },
+    required: [ 'worker_bot_uuids', 'topic', 'context' ],
+  },
+};
+
+function toolString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+export async function handleDiscoverBots(
+  sessionKey: string,
+  params: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const client = sessionKeyToClient.get(sessionKey);
+  if (!client?.connected) return { ok: false, error: 'BCS WebSocket not connected' };
+
+  const query = toolString(params.query);
+  if (!query || query.length > 200) {
+    return { ok: false, error: "'query' is required and must not exceed 200 characters" };
+  }
+
+  try {
+    const response = await client.discoverBots(query);
+    const rawBots = Array.isArray(response.bots) ? response.bots : [];
+    const bots = rawBots.flatMap(value => {
+      if (!value || typeof value !== 'object') return [];
+      const bot = value as Record<string, unknown>;
+      const capabilities = bot.capabilities && typeof bot.capabilities === 'object'
+        ? bot.capabilities as Record<string, unknown>
+        : {};
+      const botUuid = toolString(bot.bot_uuid);
+      if (!botUuid) return [];
+      const name = toolString(capabilities.name) ?? toolString(bot.bot_name) ?? botUuid;
+      return [{
+        bot_uuid: botUuid,
+        name,
+        status: toolString(bot.status),
+        visibility: toolString(bot.visibility) ?? toolString(capabilities.visibility),
+        exact_name_match: name === query,
+      }];
+    });
+    return { ok: true, bots, count: bots.length };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function handleCreateManagerWorkerGroup(
+  sessionKey: string,
+  params: Record<string, unknown>,
+  log?: { info: (...args: unknown[]) => void },
+): Promise<Record<string, unknown>> {
+  const client = sessionKeyToClient.get(sessionKey);
+  if (!client?.connected) return { ok: false, error: 'BCS WebSocket not connected' };
+
+  const rawWorkerBotUuids = params.worker_bot_uuids;
+  const topic = toolString(params.topic);
+  const context = toolString(params.context);
+  if (!Array.isArray(rawWorkerBotUuids) || rawWorkerBotUuids.length === 0 || rawWorkerBotUuids.length > 16) {
+    return { ok: false, error: "'worker_bot_uuids' must contain between 1 and 16 Bot UUIDs" };
+  }
+  const workerBotUuids = rawWorkerBotUuids.map(toolString);
+  if (workerBotUuids.some(value => !value)) {
+    return { ok: false, error: "'worker_bot_uuids' must contain only non-empty strings" };
+  }
+  if (!topic || topic.length > 500) {
+    return { ok: false, error: "'topic' is required and must not exceed 500 characters" };
+  }
+  if (!context || context.length > 20_000) {
+    return { ok: false, error: "'context' is required and must not exceed 20000 characters" };
+  }
+
+  const now = Date.now();
+  const fingerprint = createGroupFingerprint(workerBotUuids as string[], topic, context);
+  let sessionReceipts = createGroupReceiptsBySession.get(sessionKey);
+  if (!sessionReceipts) {
+    sessionReceipts = new Map();
+    createGroupReceiptsBySession.set(sessionKey, sessionReceipts);
+  }
+  for (const [ key, receipt ] of sessionReceipts) {
+    if (receipt.expiresAt <= now) sessionReceipts.delete(key);
+  }
+  const cached = sessionReceipts.get(fingerprint);
+  if (cached) {
+    log?.info?.('[bcs_create_manager_worker_group] Reusing exact group creation receipt');
+    return cached.result;
+  }
+
+  const create = (async (): Promise<CreateGroupResult> => {
+    try {
+      const response = await client.createManagerWorkerGroup({
+        workerBotUuids: workerBotUuids as string[],
+        topic,
+        context,
+      });
+      return {
+        ok: true,
+        id: toolString(response.id),
+        session_id: toolString(response.session_id),
+        chat_url: toolString(response.chat_url),
+        driver_bot: toolString(response.driver_bot),
+        participants: Array.isArray(response.participants) ? response.participants : [],
+      };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  })();
+  const receipt = { expiresAt: now + EXACT_WRITE_TOOL_DEDUPE_WINDOW_MS, result: create };
+  sessionReceipts.set(fingerprint, receipt);
+  const result = await create;
+  if (result.ok === true) {
+    receipt.expiresAt = Date.now() + EXACT_WRITE_TOOL_DEDUPE_WINDOW_MS;
+  } else if (sessionReceipts.get(fingerprint) === receipt) {
+    sessionReceipts.delete(fingerprint);
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -2389,7 +2622,7 @@ export async function handleAssignTask(
   sessionKey: string,
   params: Record<string, unknown>,
   log?: { info: (...args: unknown[]) => void; warn: (...args: unknown[]) => void; error: (...args: unknown[]) => void },
-): Promise<{ ok: boolean; task_id?: string; status?: string; error?: string }> {
+): Promise<AssignTaskResult> {
   const client = sessionKeyToClient.get(sessionKey);
   if (!client?.connected) {
     return { ok: false, error: 'BCS WebSocket not connected' };
@@ -2409,39 +2642,65 @@ export async function handleAssignTask(
     return { ok: false, error: "'target_bot' and 'message' are required" };
   }
 
+  const now = Date.now();
+  const fingerprint = assignTaskFingerprint(groupId, targetBot, message, responseMode);
+  let sessionReceipts = assignTaskReceiptsBySession.get(sessionKey);
+  if (!sessionReceipts) {
+    sessionReceipts = new Map();
+    assignTaskReceiptsBySession.set(sessionKey, sessionReceipts);
+  }
+  for (const [ key, receipt ] of sessionReceipts) {
+    if (receipt.expiresAt <= now) sessionReceipts.delete(key);
+  }
+  const cached = sessionReceipts.get(fingerprint);
+  if (cached) {
+    log?.info?.(`[bcs_assign_task] Reusing exact dispatch receipt for ${targetBot} in group ${groupId}`);
+    return cached.result;
+  }
+
   log?.info?.(`[bcs_assign_task] Dispatching to ${targetBot} in group ${groupId}`);
+  const dispatch = (async (): Promise<AssignTaskResult> => {
+    try {
+      const response = await client.sendRequest(
+        'task.dispatch',
+        {
+          group_id: groupId,
+          target_bot: targetBot,
+          message,
+          ...(responseMode ? { response_mode: responseMode } : {}),
+        },
+        30_000,
+      );
 
-  try {
-    const response = await client.sendRequest(
-      'task.dispatch',
-      {
-        group_id: groupId,
-        target_bot: targetBot,
-        message,
-        ...(responseMode ? { response_mode: responseMode } : {}),
-      },
-      30_000,
-    );
+      if (!response.ok) {
+        const errMsg = response.error?.message ?? 'task.dispatch failed';
+        log?.warn?.(`[bcs_assign_task] Failed: ${errMsg}`);
+        return { ok: false, error: errMsg };
+      }
 
-    if (!response.ok) {
-      const errMsg = response.error?.message ?? 'task.dispatch failed';
-      log?.warn?.(`[bcs_assign_task] Failed: ${errMsg}`);
+      const payload = response.payload as unknown as TaskDispatchResponse;
+      log?.info?.(`[bcs_assign_task] Dispatched: task_id=${payload.task_id}`);
+
+      return {
+        ok: true,
+        task_id: payload.task_id,
+        status: payload.status ?? 'dispatched',
+      };
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      log?.error?.(`[bcs_assign_task] Error: ${errMsg}`);
       return { ok: false, error: errMsg };
     }
-
-    const payload = response.payload as unknown as TaskDispatchResponse;
-    log?.info?.(`[bcs_assign_task] Dispatched: task_id=${payload.task_id}`);
-
-    return {
-      ok: true,
-      task_id: payload.task_id,
-      status: payload.status ?? 'dispatched',
-    };
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    log?.error?.(`[bcs_assign_task] Error: ${errMsg}`);
-    return { ok: false, error: errMsg };
+  })();
+  const receipt = { expiresAt: now + EXACT_WRITE_TOOL_DEDUPE_WINDOW_MS, result: dispatch };
+  sessionReceipts.set(fingerprint, receipt);
+  const result = await dispatch;
+  if (result.ok) {
+    receipt.expiresAt = Date.now() + EXACT_WRITE_TOOL_DEDUPE_WINDOW_MS;
+  } else if (sessionReceipts.get(fingerprint) === receipt) {
+    sessionReceipts.delete(fingerprint);
   }
+  return result;
 }
 
 // ---------------------------------------------------------------------------

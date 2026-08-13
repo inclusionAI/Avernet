@@ -7,6 +7,17 @@ _BAAS_SH_LOADED=1
 BAAS_LOG="${LOG_DIR}/baas.log"
 BAAS_APP_DIR="${BAAS_APP_DIR:-${BAAS_DIR}}"
 
+baas_mixed_claude_enabled() {
+    # Both supported mixed topologies require the BaaS real engine adapter and
+    # its loopback Backend binding resolver.  Keep the legacy JSON config and
+    # the merchant-specific Claude profile equivalent here; otherwise the
+    # latter starts with bot_service=local and streaming chat.send cannot map
+    # the Backend bot id to its BaaS bot UUID.
+    [ -n "${CLAUDE_BOTS_CONFIG:-}" ] || {
+        type -t claude_profile_enabled &>/dev/null && claude_profile_enabled
+    }
+}
+
 baas_normalize_dir_path() {
     local path="$1"
 
@@ -207,7 +218,7 @@ baas_start() {
         BCN_PLUGIN_PATH="${bcn_plugin_path}"
         BCS_PORT="${BCS_PORT}"
     )
-    if [ -n "${CLAUDE_BOTS_CONFIG:-}" ]; then
+    if baas_mixed_claude_enabled; then
         if ! type -t bcs_baas_provider_prepare_runtime_tokens &>/dev/null || ! bcs_baas_provider_prepare_runtime_tokens; then
             log_error "Failed to prepare the local BaaS downlink credential"
             return 1
@@ -220,6 +231,8 @@ baas_start() {
         baas_env_args+=(
             SOFAPY_CONFIG_OVERLAY="mixed-claude-code"
             BCS_BAAS_DOWNLINK_TOKEN="${baas_downlink_token}"
+            BCS_BAAS_UPLINK_TOKEN="${baas_downlink_token}"
+            BCS_BAAS_UPLINK_URL="http://127.0.0.1:${BCS_BAAS_PROVIDER_PORT}"
         )
         unset baas_downlink_token
         log_info "BAAS mixed Claude mode: real adapter and local Backend binding lookup enabled"

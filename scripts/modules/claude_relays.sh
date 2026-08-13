@@ -8,8 +8,23 @@ CLAUDE_RELAY_GATEWAY_DIR="${ENGINE_DIR}/src/engine/community/claude_code_gateway
 CLAUDE_RELAY_STATE_DIR="${DEP_DIR}/claude_relays"
 CLAUDE_BOTS_STATE_FILE="${DEP_DIR}/claude_bots.state.json"
 
+claude_bots_select_runtime_files() {
+    # Keep the 3-role legacy mixed topology's state untouched. The merchant
+    # profile has one deliberately overlapping human-facing name, so it needs
+    # its own Bot and Provider state/credential files rather than reusing a
+    # stale planner/developer/reviewer registration.
+    if ! type -t claude_profile_enabled &>/dev/null || ! claude_profile_enabled; then
+        return 0
+    fi
+    CLAUDE_BOTS_STATE_FILE="${DEP_DIR}/claude_bots.merchant_hybrid.state.json"
+    BCS_BAAS_PROVIDER_LOG="${LOG_DIR}/bcs_baas_provider.merchant_hybrid.log"
+    BCS_BAAS_PROVIDER_PID_FILE="${DEP_DIR}/bcs_baas_provider.merchant_hybrid.pid"
+    BCS_BAAS_PROVIDER_STATE_FILE="${DEP_DIR}/bcs_baas_provider.merchant_hybrid.state.json"
+    BCS_BAAS_PROVIDER_TOKEN_FILE="${DEP_DIR}/bcs_baas_provider.merchant_hybrid.tokens.json"
+}
+
 claude_bots_enabled() {
-    [ -n "${CLAUDE_BOTS_CONFIG:-}" ]
+    [ -n "${CLAUDE_BOTS_CONFIG:-}" ] || (type -t claude_profile_enabled &>/dev/null && claude_profile_enabled)
 }
 
 claude_expand_path() {
@@ -25,8 +40,37 @@ claude_bots_config_path() {
     claude_expand_path "${CLAUDE_BOTS_CONFIG:-}"
 }
 
+claude_relay_can_initialize_profile_config() {
+    type -t claude_profile_enabled &>/dev/null && claude_profile_enabled \
+        && [ "${SINGLEBOX_MODEL_CONFIG_MODE:-}" = "home" ] \
+        && [ -f "$HOME/.claude/settings.json" ]
+}
+
+claude_relay_ensure_config_dir() {
+    local role="$1" config_dir="$2"
+    [ -d "$config_dir" ] && return 0
+    if ! claude_relay_can_initialize_profile_config; then
+        log_error "Claude ${role} config directory does not exist: ${config_dir}"
+        return 1
+    fi
+    if ! mkdir -p "$config_dir"; then
+        log_error "Failed to initialize isolated Claude ${role} config directory: ${config_dir}"
+        return 1
+    fi
+    log_info "Initialized isolated Claude ${role} config directory from home model settings mode"
+}
+
 claude_bots_validate_config() {
     claude_bots_enabled || return 0
+    if [ -n "${CLAUDE_BOTS_CONFIG:-}" ] && type -t claude_profile_enabled &>/dev/null && claude_profile_enabled; then
+        log_error "--claude-bots-config and --claude-profile-dir cannot be used together"
+        return 1
+    fi
+    if type -t claude_profile_enabled &>/dev/null && claude_profile_enabled; then
+        claude_bots_select_runtime_files
+        claude_profile_validate_config
+        return
+    fi
     local config_path
     config_path="$(claude_bots_config_path)"
     if [ ! -f "$config_path" ]; then
@@ -108,9 +152,13 @@ PY
     fi
 }
 
-# Emits tab-separated role/name/description/port/config-dir/workspace/model.
+# Emits unit-separator-delimited role/name/description/port/config-dir/workspace/model/prompt-file/permission-mode.
 # All calls validate first, so the shell does not need to parse untrusted JSON.
 claude_bots_entries() {
+    if type -t claude_profile_enabled &>/dev/null && claude_profile_enabled; then
+        claude_profile_entries
+        return
+    fi
     local config_path
     config_path="$(claude_bots_config_path)"
     python3 - "$config_path" <<'PY'
@@ -129,10 +177,12 @@ for bot in sorted(bots, key=lambda item: item["relay_port"]):
         os.path.expanduser(bot["claude_config_dir"]),
         os.path.expanduser(bot["workspace"]),
         bot.get("model") or "",
+        "",
+        "",
     ]
-    if any("\t" in value or "\n" in value for value in values):
-        raise SystemExit("tab/newline is not allowed in Claude bot config values")
-    print("\t".join(values))
+    if any("\x1f" in value or "\t" in value or "\n" in value or "\r" in value for value in values):
+        raise SystemExit("unit-separator/tab/newline is not allowed in Claude bot config values")
+    print("\x1f".join(values))
 PY
 }
 
@@ -222,7 +272,8 @@ claude_relays_setup() {
         log_error "Vendored Claude Code gateway is missing: ${CLAUDE_RELAY_GATEWAY_DIR}"
         return 1
     fi
-    if [ ! -f "${CLAUDE_RELAY_GATEWAY_DIR}/dist/esm/server.js" ]; then
+    if [ ! -f "${CLAUDE_RELAY_GATEWAY_DIR}/dist/esm/server.js" ] \
+        || find "${CLAUDE_RELAY_GATEWAY_DIR}/src" -type f -newer "${CLAUDE_RELAY_GATEWAY_DIR}/dist/esm/server.js" -print -quit | grep -q .; then
         log_info "Building vendored Claude Code gateway..."
         if ! (
             cd "$CLAUDE_RELAY_GATEWAY_DIR" &&
@@ -251,16 +302,24 @@ claude_relays_prereqs() {
         prereq_error "jq not found; required for Claude Code relay health checks"
         has_error=true
     fi
+    if check_command perl; then
+        prereq_ok "perl: $(command -v perl)"
+    else
+        prereq_error "perl not found; required to isolate Claude relay process sessions"
+        has_error=true
+    fi
     if claude_relay_resolve_cli >/dev/null; then
         prereq_ok "Claude CLI version preflight passed"
     else
         prereq_error "No usable Claude CLI found; see the relay diagnostic above"
         has_error=true
     fi
-    local role name description port config_dir workspace model
-    while IFS=$'\t' read -r role name description port config_dir workspace model; do
+    local role name description port config_dir workspace model prompt_file permission_mode
+    while IFS=$'\x1f' read -r role name description port config_dir workspace model prompt_file permission_mode; do
         if [ -d "$config_dir" ]; then
             prereq_ok "Claude ${role} config: ${config_dir}"
+        elif claude_relay_can_initialize_profile_config; then
+            prereq_ok "Claude ${role} config will be initialized from home model settings"
         else
             prereq_error "Claude ${role} config directory not found: ${config_dir}"
             has_error=true
@@ -289,20 +348,48 @@ claude_relay_healthy() {
         | jq -e '.ok == true' >/dev/null 2>&1
 }
 
+claude_relay_start_detached() {
+    local port="$1" config_dir="$2" model_settings_source="$3" model="$4" permission_mode="$5" workspace="$6" data_dir="$7" log_dir="$8" prompt="$9" prompt_file="${10}" claude_cli="${11}" prompt_root=""
+    if [ -n "$prompt_file" ]; then
+        prompt_root="$(dirname "$prompt_file")"
+    fi
+
+    # A relay must not share the invoking singlebox shell's process group.
+    # Interactive shells and task runners may terminate that group after the
+    # command returns; without a new session a healthy streaming chat is cut
+    # off with an EOF even though BCS/BaaS are still running.  The PID remains
+    # the node process, so normal singlebox stop ownership checks still apply.
+    (
+        cd "$CLAUDE_RELAY_GATEWAY_DIR"
+        exec env \
+            PORT="$port" \
+            RELAY_CLAUDE_CONFIG_DIR="$config_dir" \
+            RELAY_MODEL_SETTINGS_SOURCE="$model_settings_source" \
+            RELAY_DEFAULT_MODEL="$model" \
+            RELAY_DEFAULT_PERMISSION_MODE="$permission_mode" \
+            RELAY_DEFAULT_CWD="$workspace" \
+            RELAY_DATA_DIR="$data_dir" \
+            RELAY_LOG_DIR="$log_dir" \
+            RELAY_SYSTEM_PROMPT_PREFIX="$prompt" \
+            RELAY_SYSTEM_PROMPT_FILE="$prompt_file" \
+            RELAY_SYSTEM_PROMPT_ROOT="$prompt_root" \
+            CLAUDE_CODE_PATH="$claude_cli" \
+            nohup perl -MPOSIX=setsid -e 'setsid() or die "setsid failed: $!\\n"; exec @ARGV' \
+            node dist/esm/server.js
+    ) </dev/null >> "$CLAUDE_RELAY_LOG" 2>&1 &
+}
+
 claude_relays_start() {
     claude_bots_enabled || return 0
     claude_bots_validate_config || return 1
     claude_relays_setup || return 1
     mkdir -p "$CLAUDE_RELAY_STATE_DIR" "$LOG_DIR"
 
-    local role name description port config_dir workspace model pid_file prompt model_settings_source claude_cli
+    local role name description port config_dir workspace model prompt_file permission_mode pid_file prompt model_settings_source claude_cli
     claude_cli="$(claude_relay_resolve_cli)" || return 1
     log_info "Claude relay CLI preflight passed; starting isolated relays"
-    while IFS=$'\t' read -r role name description port config_dir workspace model; do
-        [ -d "$config_dir" ] || {
-            log_error "Claude ${role} config directory does not exist: ${config_dir}"
-            return 1
-        }
+    while IFS=$'\x1f' read -r role name description port config_dir workspace model prompt_file permission_mode; do
+        claude_relay_ensure_config_dir "$role" "$config_dir" || return 1
         mkdir -p "$workspace" "$(claude_relay_data_dir "$role")" "$(claude_relay_log_dir "$role")"
         pid_file="$(claude_relay_pid_file "$role")"
         if [ -f "$pid_file" ]; then
@@ -311,26 +398,27 @@ claude_relays_start() {
         fi
         stop_port_processes_if_owned "$port" "$PROJECT_ROOT" "Claude ${role} relay" || true
         require_port_available_after_owned_stop "$port" "Claude ${role} relay" || return 1
-        prompt="$(claude_relay_role_prompt "$role")" || return 1
+        if [ -n "$prompt_file" ]; then
+            if [ ! -f "$prompt_file" ]; then
+                log_error "Claude ${role} system prompt file does not exist"
+                return 1
+            fi
+            prompt=""
+        else
+            prompt="$(claude_relay_role_prompt "$role")" || return 1
+        fi
         model_settings_source=""
         if [ ! -f "${config_dir}/settings.json" ] && [ -f "$HOME/.claude/settings.json" ]; then
             model_settings_source="$HOME/.claude/settings.json"
             log_info "Claude ${role} relay will use the local model-provider settings source"
         fi
         log_info "Starting vendored Claude Code relay: role=${role} port=${port}"
-        (
-            cd "$CLAUDE_RELAY_GATEWAY_DIR"
-            PORT="$port" \
-            RELAY_CLAUDE_CONFIG_DIR="$config_dir" \
-            RELAY_MODEL_SETTINGS_SOURCE="$model_settings_source" \
-            RELAY_DEFAULT_CWD="$workspace" \
-            RELAY_DATA_DIR="$(claude_relay_data_dir "$role")" \
-            RELAY_LOG_DIR="$(claude_relay_log_dir "$role")" \
-            RELAY_SYSTEM_PROMPT_PREFIX="$prompt" \
-            CLAUDE_CODE_PATH="$claude_cli" \
-            nohup node dist/esm/server.js >> "$CLAUDE_RELAY_LOG" 2>&1 &
-            echo $! > "$pid_file"
-        )
+        claude_relay_start_detached \
+            "$port" "$config_dir" "$model_settings_source" "$model" "$permission_mode" "$workspace" \
+            "$(claude_relay_data_dir "$role")" "$(claude_relay_log_dir "$role")" \
+            "$prompt" "$prompt_file" "$claude_cli"
+        echo $! > "$pid_file"
+        log_info "Claude ${role} relay launched in an isolated process session"
         if ! claude_relay_wait_ready "$port"; then
             log_error "Claude ${role} relay did not become ready; check ${CLAUDE_RELAY_LOG}"
             return 1
@@ -340,8 +428,8 @@ claude_relays_start() {
 
 claude_relays_stop() {
     claude_bots_enabled || return 0
-    local role name description port config_dir workspace model pid_file
-    while IFS=$'\t' read -r role name description port config_dir workspace model; do
+    local role name description port config_dir workspace model prompt_file permission_mode pid_file
+    while IFS=$'\x1f' read -r role name description port config_dir workspace model prompt_file permission_mode; do
         pid_file="$(claude_relay_pid_file "$role")"
         if [ -f "$pid_file" ]; then
             stop_process_if_owned "$(cat "$pid_file" 2>/dev/null || true)" "$PROJECT_ROOT" "Claude ${role} relay" || true
@@ -352,16 +440,16 @@ claude_relays_stop() {
 
 claude_relays_ready() {
     claude_bots_enabled || return 0
-    local role name description port config_dir workspace model
-    while IFS=$'\t' read -r role name description port config_dir workspace model; do
+    local role name description port config_dir workspace model prompt_file permission_mode
+    while IFS=$'\x1f' read -r role name description port config_dir workspace model prompt_file permission_mode; do
         claude_relay_wait_ready "$port" || return 1
     done < <(claude_bots_entries)
 }
 
 claude_relays_status() {
     claude_bots_enabled || return 0
-    local role name description port config_dir workspace model
-    while IFS=$'\t' read -r role name description port config_dir workspace model; do
+    local role name description port config_dir workspace model prompt_file permission_mode
+    while IFS=$'\x1f' read -r role name description port config_dir workspace model prompt_file permission_mode; do
         if claude_relay_healthy "$port"; then
             echo "  Claude relay (${role}): Running (port ${port})"
         else
@@ -371,5 +459,5 @@ claude_relays_status() {
 }
 
 claude_relays_help() {
-    echo "claude_relays - three isolated vendored Claude Code gateway relays (mixed mode only)"
+    echo "claude_relays - isolated vendored Claude Code gateway relays (mixed mode only)"
 }

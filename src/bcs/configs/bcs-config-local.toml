@@ -20,7 +20,7 @@ provider_stream_gray_enabled = false
 # transport when gray-list mode is enabled.
 provider_stream_gray_created_by = []
 
-max_groups_as_driver = 20
+max_groups_as_driver = 200
 max_group_members = 20
 max_groups_as_member = 20
 max_group_messages = 1000
@@ -59,15 +59,13 @@ mode = "pull"
 endpoint_path = "/metrics"
 
 [llm]
-type = "none"
-base_url = "https://api.openai.com/v1"
-api_key_env = "OPENAI_API_KEY"
-# api_key = "replace-with-llm-api-key"
-model = "gpt-4.1-mini"
-timeout_ms = 120000
-temperature = 0
-max_tokens = 4096
-structured_output = "json_schema"
+type = "openai_compatible"
+base_url = "https://antchat.alipay.com/v1"
+api_key_env = "ANTCHAT_API_KEY"
+model = "Kimi-K2.6"
+timeout_ms = 540000
+max_tokens = 8192
+structured_output = "tool_call"
 
 [leader_election]
 enabled = false

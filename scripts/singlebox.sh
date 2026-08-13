@@ -75,6 +75,8 @@ BCSFUSE_PORT="${BCSFUSE_PORT:-${DEFAULT_BCSFUSE_PORT}}"
 FRONTEND_PORT="${FRONTEND_PORT:-${DEFAULT_FRONTEND_PORT}}"
 CHAT_ENGINE="${CHAT_ENGINE:-openclaw}"
 BOTS_PROFILE_DIR="${BOTS_PROFILE_DIR:-}"
+BOTS_EXCLUDED_PROFILE_SOURCE="${BOTS_EXCLUDED_PROFILE_SOURCE:-}"
+CLAUDE_PROFILE_DIR="${CLAUDE_PROFILE_DIR:-}"
 BCN_PLUGIN_SOURCE="${BCN_PLUGIN_SOURCE:-source}"
 BCN_PLUGIN_VERSION="${BCN_PLUGIN_VERSION:-latest}"
 
@@ -150,6 +152,7 @@ source "${SCRIPT_DIR}/modules/bcs.sh"
 source "${SCRIPT_DIR}/modules/bcsfuse.sh"
 source "${SCRIPT_DIR}/modules/bots.sh"
 source "${SCRIPT_DIR}/modules/demo_bot.sh"
+source "${SCRIPT_DIR}/modules/claude_profile.sh"
 source "${SCRIPT_DIR}/modules/claude_relays.sh"
 source "${SCRIPT_DIR}/modules/claude_bots.sh"
 source "${SCRIPT_DIR}/modules/bcs_baas_provider.sh"
@@ -158,6 +161,7 @@ source "${SCRIPT_DIR}/modules/bcs_bots.sh"
 # Group modules (must be after service modules they compose)
 source "${SCRIPT_DIR}/modules/all.sh"
 source "${SCRIPT_DIR}/modules/bcs_frontend.sh"
+source "${SCRIPT_DIR}/modules/merchant_hybrid.sh"
 
 # ============ Git hooks ============
 ensure_git_hooks_installed() {
@@ -186,6 +190,9 @@ resolve_services() {
             ;;
         bcs_frontend)
             echo "bcs frontend"
+            ;;
+        merchant_hybrid)
+            echo "${MERCHANT_HYBRID_START_ORDER[*]}"
             ;;
         bcs_bots)
             echo "bcs bots"
@@ -220,28 +227,32 @@ setup_service() {
 
 # 执行服务的 start 动作
 start_service() {
-    local svc="$1"
-    if [ -z "$svc" ]; then
+    # Keep the dispatch target separate from common loop variables used by
+    # composite *_prereqs functions. Bash uses dynamic scoping, so a nested
+    # `for svc in ...` must not turn `merchant_hybrid` into its final child
+    # service (frontend) before the start dispatch below.
+    local service_target="$1"
+    if [ -z "$service_target" ]; then
         log_error "Service name required for start command"
         echo "Run '$0 --help' for available services"
         exit 1
     fi
     # 自动检查该服务的前置依赖
-    if type -t "${svc}_prereqs" &>/dev/null; then
-        if ! "${svc}_prereqs"; then
+    if type -t "${service_target}_prereqs" &>/dev/null; then
+        if ! "${service_target}_prereqs"; then
             local check_cmd
-            check_cmd="$(singlebox_cmd check "$svc")"
-            if [ "$svc" = "bots" ] && [ -n "${BOTS_PROFILE_DIR:-}" ]; then
+            check_cmd="$(singlebox_cmd check "$service_target")"
+            if [ "$service_target" = "bots" ] && [ -n "${BOTS_PROFILE_DIR:-}" ]; then
                 check_cmd="${check_cmd} --profile-dir ${BOTS_PROFILE_DIR}"
             fi
-            log_error "Prerequisites not met for ${svc}. Fix errors above or run: ${check_cmd}"
+            log_error "Prerequisites not met for ${service_target}. Fix errors above or run: ${check_cmd}"
             return 1
         fi
     fi
-    if type -t "${svc}_start" &>/dev/null; then
-        "${svc}_start"
+    if type -t "${service_target}_start" &>/dev/null; then
+        "${service_target}_start"
     else
-        log_error "Unknown service or no start: $svc"
+        log_error "Unknown service or no start: $service_target"
         exit 1
     fi
 }
@@ -401,7 +412,9 @@ show_help() {
     echo "  --bcn-plugin-source source|npm  BCN plugin source: build from repo (source, default) or install"
     echo "                                  @avernet-plugin/openclaw-channel-bcn (npm). Env: BCN_PLUGIN_SOURCE,"
     echo "                                  BCN_PLUGIN_VERSION (npm mode, default latest)"
-    echo "  --profile-dir DIR            Bot persona source dir for 'bots' target; requires DIR/bots.json"
+    echo "  --profile-dir DIR            OpenClaw persona source dir for 'bots' or 'merchant_hybrid'; requires DIR/bots.json"
+    echo "  --exclusive-profile-dir NAME Exclude one bots.json source for 'merchant_hybrid' (platform-data)"
+    echo "  --claude-profile-dir DIR     Claude profile source dir for 'merchant_hybrid'; requires DIR/bots.json"
     echo "  --claude-bots-config PATH    Enable strict 5 OpenClaw + 3 Claude Code bot topology"
     echo "  --bcs-auto-onboard            Legacy compatibility flag; use bcs_bots for BCS + bots"
     echo "  --no-bcs-auto-onboard         Legacy compatibility flag; use bcs for BCS-only"
@@ -417,7 +430,7 @@ show_help() {
     done
     echo ""
     echo "Groups:"
-    for grp in all bcs_bots bcs_frontend; do
+    for grp in all bcs_bots bcs_frontend merchant_hybrid; do
         if type -t "${grp}_help" &>/dev/null; then
             echo "  $( "${grp}_help" )"
         fi
@@ -431,6 +444,7 @@ show_help() {
     echo "  $0 restart bcs                 Restart only the BCS server"
     echo "  $0 restart bots                Restart only the 5 local bot gateways"
     echo "  $0 start bots --profile-dir scripts/8bots_micro_merchant_profile"
+    echo "  $0 start merchant_hybrid --profile-dir scripts/4bots_merchant_operations_profile --exclusive-profile-dir platform-data --claude-profile-dir scripts/4bots_merchant_operations_profile_for_claude"
     echo "  $0 restart bcs_bots            Restart BCS + 5 local bot gateways"
     echo "  $0 clean bcs                   Clean only local BCS runtime data"
     echo "  $0 clean bots                  Clean only local bot profiles/workspaces"
@@ -672,6 +686,24 @@ main() {
                 BOTS_PROFILE_DIR="$2"
                 shift 2
                 ;;
+            --exclusive-profile-dir)
+                if [ -z "$2" ] || [ "$2" = -* ]; then
+                    log_error "Excluded profile source required for $1"
+                    show_help
+                    exit 1
+                fi
+                BOTS_EXCLUDED_PROFILE_SOURCE="$2"
+                shift 2
+                ;;
+            --claude-profile-dir)
+                if [ -z "$2" ] || [ "$2" = -* ]; then
+                    log_error "Claude profile directory required for $1"
+                    show_help
+                    exit 1
+                fi
+                CLAUDE_PROFILE_DIR="$2"
+                shift 2
+                ;;
             --claude-bots-config)
                 if [ -z "$2" ] || [ "$2" = -* ]; then
                     log_error "Claude bot config path required for $1"
@@ -725,7 +757,7 @@ main() {
                 LOCAL_MODE=true
                 shift
                 ;;
-            baas|backend|bcs|bcsfuse|frontend|engine|bots|bcs_bots|bcs_frontend|all)
+            baas|backend|bcs|bcsfuse|frontend|engine|bots|bcs_bots|bcs_frontend|merchant_hybrid|all)
                 # Legacy: service name without command defaults to start
                 services+=("$1")
                 if [ -z "$command" ]; then
@@ -773,11 +805,17 @@ main() {
     fi
     if [ -n "${BOTS_PROFILE_DIR:-}" ]; then
         for svc in "${services[@]}"; do
-            if [ "$svc" != "bots" ]; then
-                log_error "--profile-dir only supports the bots target, for example: ./scripts/singlebox.sh $(singlebox_mode_option) start bots --profile-dir <dir>"
+            if [ "$svc" != "bots" ] && [ "$svc" != "merchant_hybrid" ]; then
+                log_error "--profile-dir only supports bots or merchant_hybrid targets"
                 exit 1
             fi
         done
+    fi
+    if [ -n "${CLAUDE_PROFILE_DIR:-}" ] || [ -n "${BOTS_EXCLUDED_PROFILE_SOURCE:-}" ]; then
+        if [ "${#services[@]}" -ne 1 ] || [ "${services[0]}" != "merchant_hybrid" ]; then
+            log_error "--claude-profile-dir and --exclusive-profile-dir only support the merchant_hybrid target"
+            exit 1
+        fi
     fi
     if [ -n "${CLAUDE_BOTS_CONFIG:-}" ]; then
         claude_bots_validate_config || exit 1

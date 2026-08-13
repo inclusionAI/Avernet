@@ -222,7 +222,89 @@ export class BcsWsClient {
     return this._waitResponse(requestId, timeoutMs);
   }
 
+  /** Discover BCS bots with the authenticated channel session. */
+  async discoverBots(query: string): Promise<Record<string, unknown>> {
+    const normalizedQuery = query.trim();
+    if (!normalizedQuery) {
+      throw new Error('Bot discovery query is required');
+    }
+
+    return await this._sendHttpJson(
+      `/bots/discover?q=${encodeURIComponent(normalizedQuery)}`,
+      { method: 'GET' },
+    );
+  }
+
+  /** Create a manager-worker group led by the currently connected bot. */
+  async createManagerWorkerGroup(params: {
+    workerBotUuids: string[];
+    topic: string;
+    context: string;
+  }): Promise<Record<string, unknown>> {
+    const managerBotUuid = this._botUuid;
+    if (!managerBotUuid) {
+      throw new Error('BCS bot identity is not available');
+    }
+
+    const workerBotUuids = [ ...new Set(params.workerBotUuids.map(value => value.trim())) ]
+      .filter(value => value && value !== managerBotUuid);
+    if (workerBotUuids.length === 0) {
+      throw new Error('At least one worker bot is required');
+    }
+
+    return await this._sendHttpJson('/groups', {
+      method: 'POST',
+      body: JSON.stringify({
+        driver_bot: managerBotUuid,
+        participants: [
+          { bot_uuid: managerBotUuid, role: 'manager' },
+          ...workerBotUuids.map(botUuid => ({ bot_uuid: botUuid, role: 'worker' })),
+        ],
+        context: params.context,
+        topic: params.topic,
+        group_strategy: 'manager_worker',
+      }),
+    });
+  }
+
   // ── Internal ──────────────────────────────────────────────────────────
+
+  private async _sendHttpJson(
+    pathname: string,
+    init: { method: 'GET' | 'POST'; body?: string },
+  ): Promise<Record<string, unknown>> {
+    const token = this._sessionToken;
+    if (!this.connected || !token) {
+      throw new Error('BCS authenticated session is not connected');
+    }
+
+    const baseUrl = new URL(this._account.bcsUrl);
+    baseUrl.protocol = baseUrl.protocol === 'wss:' ? 'https:' : 'http:';
+    baseUrl.pathname = '/';
+    baseUrl.search = '';
+    baseUrl.hash = '';
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const response = await fetch(new URL(pathname, baseUrl), {
+        method: init.method,
+        headers: {
+          accept: 'application/json',
+          authorization: `Bearer ${token}`,
+          ...(init.body ? { 'content-type': 'application/json' } : {}),
+        },
+        ...(init.body ? { body: init.body } : {}),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        throw new Error(`BCS HTTP ${init.method} ${pathname.split('?')[0]} failed with status ${response.status}`);
+      }
+      return await response.json() as Record<string, unknown>;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
 
   private _nextRequestId(): string {
     return (++this._requestIdCounter).toString(36).padStart(6, '0');

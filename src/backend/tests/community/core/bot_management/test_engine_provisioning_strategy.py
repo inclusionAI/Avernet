@@ -133,6 +133,30 @@ def test_claude_code_singlebox_config_allows_missing_or_blank_template_type():
         }
 
 
+def test_claude_code_merchant_hybrid_platform_data_profile_forwards_its_relay():
+    strategy = AicodingProvisioningStrategy("claude_code")
+    ctx = BotProvisioningContext(
+        active_engine="claude_code",
+        template_type="normalCC",
+        bot_id="b1",
+        owner_id="u1",
+        bot_type="personal",
+        template_config={
+            "singlebox_claude": {
+                "relay_url": "ws://127.0.0.1:18913",
+                "role": "platform-data",
+                "workspace": "/tmp/platform-data",
+            }
+        },
+    )
+
+    assert strategy.build_extra_envs(ctx) == {
+        "CLAUDE_CODE_RELAY_URL": "ws://127.0.0.1:18913",
+        "CLAUDE_CODE_ROLE": "platform-data",
+        "CLAUDE_CODE_WORKSPACE": "/tmp/platform-data",
+    }
+
+
 def test_claude_code_singlebox_config_does_not_apply_to_other_template_types():
     strategy = AicodingProvisioningStrategy("claude_code")
     for template_type in ("personalCoding", "generalCC", "architect"):

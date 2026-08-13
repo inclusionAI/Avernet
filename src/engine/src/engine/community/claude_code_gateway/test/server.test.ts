@@ -8,7 +8,10 @@ import { setDefaultChatRunner, resetDefaultChatRunner } from '../src/chat-orches
 import { createFakeRunner } from './fixtures/fake-claude-cli.js';
 import { TestGatewayClient, sleep } from './helpers/ws-client.js';
 
-async function bootServer(script: Parameters<typeof createFakeRunner>[0]): Promise<{
+async function bootServer(
+  script: Parameters<typeof createFakeRunner>[0],
+  options: { systemPromptPrefix?: string } = {},
+): Promise<{
   server: GatewayServer;
   store: SessionStore;
   controller: ReturnType<typeof createFakeRunner>;
@@ -19,7 +22,12 @@ async function bootServer(script: Parameters<typeof createFakeRunner>[0]): Promi
   const storePath = path.join(os.tmpdir(), `gateway-test-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`);
   const store = new SessionStore(storePath, { writeDebounceMs: 5 });
   // Use CLI/continuation mode for tests with fake runners (they don't support SDK canUseTool)
-  const server = startGatewayServer({ port: 0, store, useSdkBridge: false });
+  const server = startGatewayServer({
+    port: 0,
+    store,
+    useSdkBridge: false,
+    systemPromptPrefix: options.systemPromptPrefix,
+  });
   return { server, store, controller, storePath };
 }
 
@@ -202,6 +210,28 @@ describe('Gateway server (E2E)', () => {
     } finally {
       if (previous === undefined) delete process.env.RELAY_SYSTEM_PROMPT_PREFIX;
       else process.env.RELAY_SYSTEM_PROMPT_PREFIX = previous;
+    }
+  });
+
+  it('passes a profile-loaded static role prompt to the first model turn', async () => {
+    const rolePrompt = '# 平台数据分析\n\nPROFILE-ROLE-MARKER';
+    const { server, store, storePath, controller } = await bootServer([
+      { kind: 'lifecycle', phase: 'start' },
+      { kind: 'done', stopReason: 'end_turn' },
+    ], { systemPromptPrefix: rolePrompt });
+
+    try {
+      const client = await connectedClient(server.port);
+      await client.request('chat.send', {
+        sessionKey: 'profile-role-prompt',
+        message: '请分析指标',
+        cwd: process.cwd(),
+      });
+      await client.waitForEvent(event => event.event === 'chat' && (event.payload as { state?: string }).state === 'final');
+      assert.match(controller.runs[0]?.params.systemPrompt ?? '', /PROFILE-ROLE-MARKER/);
+      await client.close();
+    } finally {
+      await teardown(server, store, storePath);
     }
   });
 

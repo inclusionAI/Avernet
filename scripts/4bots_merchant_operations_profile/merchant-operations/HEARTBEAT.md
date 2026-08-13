@@ -28,8 +28,8 @@
 - one-shot candidate 是否只用当前 schema 的顶层键、mapping participants、嵌套 nodes、节点内 transitions、`bot_task/human_input` 和唯一 final output；是否混入顶层 nodes、participant 数组、depends_on、condition、prompt、额外 finalizer、占位符或不存在的引用。
 - 每次 validate 前及 run 前是否扫描了最终完整 YAML/input；任何修改后是否重新扫描。节点 instruction、judge criteria、metadata 或推导值中是否泄露精确毛利率、成本、底线、现金上限、余额或差额。
 - one-shot validation graph 是否为当前运行时支持的 `acyclic`，并用最多三组节点显式展开修订；是否误用了不支持的 `initial_node`、`max_iterations` 或回边。validate 是否保留真实错误与退出码，是否错误用 fallback 追加 `cli_not_available`；judge 不可用时是否正确阻断。
-- state machine 默认及每个 bot_task 的有效超时是否至少 180000ms，HumanInput 是否至少 600000ms；是否复制了 Schema 的 60000ms 示例。marker 是否只输出单行且未调用工具。
-- Manager 汇总 artifact 是否只含 CHECK_VECTOR，还是与 judge 各自产生了一个互相矛盾的裁决。是否存在 accepted/changes/blocked 三个 marker，且唯一 final output 按 marker 输出而非写死成功。
+- state machine 默认及每个 bot_task、HumanInput 的有效超时是否都至少 600000ms，是否存在显式更小覆盖；Claude Code 数据 Worker 是否逐节点显式设置至少 600000ms。是否复制了 Schema 的 60000ms 示例。marker 是否只输出单行且未调用工具。
+- Manager 汇总 artifact 是否只含 CHECK_VECTOR，还是与 judge 各自产生了一个互相矛盾的裁决。三轮 Manager judge outcomes 是否依次精确为 `approved/revise`、`approved/revise`、`approved/blocked`，Worker 是否错误配置 judge，是否把只属于 HumanInput 的 `accepted/changes_requested` 用在 Manager。是否存在 accepted/changes/blocked 三个 marker，且唯一 final output 按 marker 输出而非写死成功。
 - 调用 run 前是否有 Present Human；缺席时是否错误试跑、调用 session/bot/help 探测或预填 HumanInput。
 - 店主节点是否精确为无 assignee 的前端 `human_input`，节点自身是否有正数超时；participants/run bindings 是否只含 Bot。出现 owner Bot slot、`--binding owner=human_001` 或 HumanInput `assignee_bot_id` 非空时必须以 `HUMAN_INPUT_MODELED_AS_BOT` 阻断。
 - `delivery_mode=one_shot_collaboration` 时 `session_completion_lock` 是否始终保持 `LOCKED`，直到同一 run 的 HumanInput completed + accepted judge outcome、accepted marker completed、失败 marker 未执行、唯一 final output 与 terminal 均 completed；是否错误把 skipped HumanInput、普通群聊“接受/继续/执行”、final 文案或自写阶段当作完成证据。

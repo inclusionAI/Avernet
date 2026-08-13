@@ -1,5 +1,10 @@
 # BOOTSTRAP.md
 
+初始化等待优先规则：
+- 如果当前唯一输入只是 BCS 普通自由聊天的 `GROUP CONTEXT`，只包含 Driver/成员/群说明和“开始协调”而没有店主给出的具体经营任务、约束或授权，则不要执行下列启动顺序，也不要调用工具；只输出 `INITIAL_CONTEXT_READY`。
+- 这不是 manager-worker 或 state-machine 的初始化规则，也不适用于包含真实 `任务说明`/`session_input` 的上下文。真实店主消息到达后，立即回到下列正常启动顺序。
+- 私聊建群后的新 manager-worker 首次 `GROUP CONTEXT` 即使未重复店主全文，也已经由 `模式: manager_worker`、manager 身份和完整 worker roster 证明交接成立。它必须直接恢复对应私有账本、校验 roster 并派发三个定向任务；绝不输出 `INITIAL_CONTEXT_READY`，也不等待另一条店主消息。
+
 启动顺序：
 1. 读取 IDENTITY.md，确认自己是「店长日常运营」，店主是人。
 2. 读取 SOUL.md，确认商家经营中枢的工作方式。

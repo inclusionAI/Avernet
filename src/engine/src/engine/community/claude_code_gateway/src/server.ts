@@ -18,7 +18,7 @@ import { CronScheduler } from './cron/scheduler.js';
 import { McpStore, defaultConfigPath as defaultMcpConfigPath } from './mcp/store.js';
 import { SkillsStore, defaultSkillsDir } from './skills/store.js';
 import { CommandsStore } from './commands/store.js';
-import { setDefaultChatRunner } from './chat-orchestrator.js';
+import { setDefaultChatRunner, startChatRun } from './chat-orchestrator.js';
 import { initRouter } from './claude-code-router.js';
 import { ConnectionContext } from './gateway/connection-context.js';
 import { createOrchestratorBridge } from './gateway/orchestrator-bridge.js';
@@ -26,6 +26,7 @@ import { handleFrame } from './gateway/frame-dispatcher.js';
 import { PendingInteractionRegistry } from './interaction/registry.js';
 import { SessionRuntimeRegistry } from './runtime/session-runtime-registry.js';
 import { setupFileLogger } from './log-to-file.js';
+import { resolveConfiguredSystemPrompt } from './system-prompt.js';
 
 const log = createLogger('server');
 
@@ -91,14 +92,18 @@ export type StartGatewayServerOptions = {
   skillsStore?: SkillsStore;
   commandsStore?: CommandsStore;
   useSdkBridge?: boolean;
+  systemPromptPrefix?: string;
 };
 
 export function startGatewayServer(options: StartGatewayServerOptions | number = {}): GatewayServer {
   const opts: StartGatewayServerOptions = typeof options === 'number' ? { port: options } : options;
+  const systemPromptPrefix = opts.systemPromptPrefix ?? resolveConfiguredSystemPrompt();
 
   const sessionStore = opts.store ?? new SessionStore(DEFAULT_STORE_PATH);
   const cronStore = opts.cronStore ?? new CronStore(DEFAULT_CRON_JOBS_PATH);
-  const cronScheduler = opts.cronScheduler ?? new CronScheduler(cronStore);
+  const cronScheduler = opts.cronScheduler ?? new CronScheduler(cronStore, {
+    chatRunner: params => startChatRun({ ...params, systemPrompt: systemPromptPrefix }),
+  });
   const mcpStore = opts.mcpStore ?? new McpStore(defaultMcpConfigPath());
   const skillsStore = opts.skillsStore ?? new SkillsStore({ rootDir: defaultSkillsDir() });
   const commandsStore = opts.commandsStore ?? new CommandsStore();
@@ -139,6 +144,7 @@ export function startGatewayServer(options: StartGatewayServerOptions | number =
       useSdkBridge,
       defaultContextTurns: DEFAULT_CONTEXT_TURNS,
       maxContextChars: MAX_CONTEXT_CHARS,
+      systemPromptPrefix,
       registry: interactionRegistry,
       runtimeRegistry,
     },
@@ -149,6 +155,7 @@ export function startGatewayServer(options: StartGatewayServerOptions | number =
       runtimeRegistry,
       contextTurns: DEFAULT_CONTEXT_TURNS,
       maxContextChars: MAX_CONTEXT_CHARS,
+      systemPromptPrefix,
     },
     sessions: {
       store: sessionStore,
@@ -223,12 +230,16 @@ if (IS_ENTRY_POINT) {
   const server = startGatewayServer(PORT);
   console.log(`claude-code-gateway gateway ws: ws://127.0.0.1:${server.port} (bridge=${USE_SDK_BRIDGE ? 'sdk' : 'cli'}, debug=${process.env.CLAUDE_CODE_GATEWAY_DEBUG ?? process.env.TEAMCLAW_AICODING_RELAY_DEBUG ?? process.env.AIX_DEBUG ?? 'off'}${logFile ? `, log=${logFile.path}` : ''})`);
 
-  const shutdown = async () => {
+  let shutdownStarted = false;
+  const shutdown = async (signal: 'SIGINT' | 'SIGTERM') => {
+    if (shutdownStarted) return;
+    shutdownStarted = true;
+    log.warn('process:shutdown-signal', { signal });
     console.log('\nShutting down gateway...');
     await server.store.flush();
     await server.close();
     process.exit(0);
   };
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', () => { void shutdown('SIGINT'); });
+  process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
 }

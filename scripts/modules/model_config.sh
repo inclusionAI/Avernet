@@ -135,7 +135,7 @@ singlebox_model_config_required_for_services() {
     local service
     for service in "$@"; do
         case "$service" in
-            all|baas|bots|bcs_bots)
+            all|baas|bots|bcs_bots|merchant_hybrid)
                 return 0
                 ;;
         esac
@@ -383,6 +383,64 @@ singlebox_model_config_write_home() {
     chmod 600 "$output_file"
 }
 
+singlebox_model_config_apply_model_override() {
+    local output_file="$1"
+    local model_id="${SINGLEBOX_MODEL_ID_OVERRIDE:-}"
+    local provider_id="${SINGLEBOX_MODEL_PROVIDER_ID_OVERRIDE:-}"
+    local max_tokens=8192
+
+    [ -n "$model_id" ] || return 0
+    if [[ "$model_id" == *$'\t'* || "$model_id" == *$'\r'* || "$model_id" == *$'\n'* ]]; then
+        log_error "SINGLEBOX_MODEL_ID_OVERRIDE must be a single-line model ID."
+        return 1
+    fi
+    if [[ "$provider_id" == *$'\t'* || "$provider_id" == *$'\r'* || "$provider_id" == *$'\n'* ]]; then
+        log_error "SINGLEBOX_MODEL_PROVIDER_ID_OVERRIDE must be a single-line provider ID."
+        return 1
+    fi
+    if [ "$model_id" = "Kimi-K2.6" ]; then
+        # The merchant manager's first BCS dispatch may require more than the
+        # generic 8192-token budget after loading its isolated task ledger.
+        max_tokens=16384
+    fi
+
+    local tmp_file
+    tmp_file="${output_file}.tmp.$$"
+    if ! jq --arg requested_model "$model_id" --arg requested_provider "$provider_id" --argjson max_tokens "$max_tokens" '
+      def default_provider:
+        (.agents.defaults.model.primary? // "")
+        | if type == "string" and contains("/") then split("/")[0] else "" end;
+      ($requested_provider // "") as $requested_provider
+      | (if $requested_provider != "" then $requested_provider else default_provider end) as $provider
+      | if $provider == "" or (.models.providers[$provider] | type) != "object" then
+          error("model override provider is missing from the imported runtime model config")
+        else . end
+      | .models.providers[$provider].models = (.models.providers[$provider].models // [])
+      | if (.models.providers[$provider].models | any(.id == $requested_model)) then .
+        else .models.providers[$provider].models += [{
+          id: $requested_model,
+          name: $requested_model,
+          reasoning: false,
+          input: ["text"],
+          cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0},
+          contextWindow: 200000,
+          maxTokens: $max_tokens
+        }] end
+      | .models.providers[$provider].models |= map(
+          if .id == $requested_model then .maxTokens = $max_tokens else . end
+        )
+      | .agents.defaults.model.primary = ($provider + "/" + $requested_model)
+      | .agents.defaults.models = ((.agents.defaults.models // {}) + {($provider + "/" + $requested_model): {}})
+    ' "$output_file" > "$tmp_file"; then
+        rm -f "$tmp_file"
+        log_error "Failed to apply singlebox model override."
+        return 1
+    fi
+    mv "$tmp_file" "$output_file"
+    chmod 600 "$output_file"
+    log_info "Singlebox runtime Bot model override: ${provider_id:-imported-default-provider}/${model_id}"
+}
+
 singlebox_model_config_write_mock() {
     local output_file="$1"
     local base_url
@@ -457,6 +515,8 @@ singlebox_model_config_prepare() {
             log_warn "Singlebox model config mode is mock; bots use fixed-format local model replies."
             ;;
     esac
+
+    singlebox_model_config_apply_model_override "$output_file" || return 1
 
     SINGLEBOX_MODEL_CONFIG_MODE="$mode"
     SINGLEBOX_MODEL_CONFIG_FILE="$output_file"

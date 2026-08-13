@@ -22,6 +22,7 @@ setup_env() {
   export LOG_DIR="${DEP_DIR}/logs"
   export BACKEND_DIR="${ROOT}/src/backend"
   export BAAS_APP_DIR="${ROOT}/src/baas"
+  export BCS_DIR="${ROOT}/src/bcs"
   export ENGINE_DIR="${ROOT}/src/engine"
   mkdir -p "$LOG_DIR"
 
@@ -76,6 +77,64 @@ test_mixed_all_preflight_rejects_external_port_before_restart() (
   if all_mixed_port_ownership_preflight; then
     fail "mixed preflight must reject a listener owned by another checkout"
   fi
+)
+
+test_bcs_start_rejects_partial_merchant_hybrid_runtime() (
+  setup_env
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/bcs.sh"
+
+  local launch_marker
+  launch_marker="$(mktemp)"
+  printf '%s\n' '{"provider_id":"runtime-only"}' \
+    > "${DEP_DIR}/bcs_baas_provider.merchant_hybrid.state.json"
+  claude_bots_enabled() { return 1; }
+  resolve_bcs_server_env() { BCS_SERVER_ENV=local; }
+  bcs_binaries_stale() { return 1; }
+  start_bcs_binary() { printf '%s\n' started > "$launch_marker"; }
+
+  if bcs_start; then
+    fail "standalone BCS must reject a tracked merchant Provider runtime"
+  fi
+  [ ! -s "$launch_marker" ] || \
+    fail "partial BCS start must fail before launching the BCS binary"
+)
+
+test_bcs_start_allows_merchant_hybrid_runtime() (
+  setup_env
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/bcs.sh"
+
+  local launch_marker
+  launch_marker="$(mktemp)"
+  printf '%s\n' '{"provider_id":"runtime-only"}' \
+    > "${DEP_DIR}/bcs_baas_provider.merchant_hybrid.state.json"
+  claude_bots_enabled() { return 0; }
+  resolve_bcs_server_env() { BCS_SERVER_ENV=local; }
+  bcs_binaries_stale() { return 1; }
+  start_bcs_binary() { printf '%s\n' started > "$launch_marker"; }
+
+  bcs_start || fail "merchant_hybrid BCS start should remain allowed"
+  assert_eq "started" "$(cat "$launch_marker")" \
+    "merchant_hybrid BCS launch"
+)
+
+test_bcs_start_rebuilds_stale_binary() (
+  setup_env
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/bcs.sh"
+
+  local events_file
+  events_file="$(mktemp)"
+  claude_bots_enabled() { return 0; }
+  resolve_bcs_server_env() { BCS_SERVER_ENV=local; }
+  bcs_binaries_stale() { BCS_BUILD_REASON='source newer than binary: crates/example.rs'; return 0; }
+  build_bcs() { printf '%s\n' build >> "$events_file"; }
+  start_bcs_binary() { printf '%s\n' start >> "$events_file"; }
+
+  bcs_start
+  assert_eq $'build\nstart' "$(cat "$events_file")" \
+    "stale BCS source must rebuild before launch"
 )
 
 test_backend_health_failure_stops_backend() {
@@ -203,8 +262,10 @@ test_frontend_stdin_keeper_survives_singlebox_exit() {
   local source
   source="${ROOT}/scripts/modules/frontend.sh"
 
-  grep -F "nohup bash -c 'tail -f /dev/null | npm run \"\$1\"' bash \"\$frontend_script\"" "$source" >/dev/null || \
-    fail "frontend stdin keeper and npm must share the nohup process group"
+  grep -F "bash -c 'tail -f /dev/null | npm run \"\$1\"' bash \"\$frontend_script\"" "$source" >/dev/null || \
+    fail "frontend stdin keeper and npm must share the isolated launcher session"
+  grep -F 'nohup perl -MPOSIX=setsid' "$source" >/dev/null || \
+    fail "frontend launcher must establish an isolated process session"
   if grep -F 'tail -f /dev/null | BCS_PORT=' "$source" >/dev/null; then
     fail "frontend must not leave the stdin keeper outside nohup"
   fi
@@ -523,6 +584,43 @@ test_baas_start_passes_bcn_runtime_configuration() (
     "baas_start must prepare the BCN plugin before launching BAAS"
 )
 
+test_baas_start_enables_mixed_overlay_for_claude_profile() (
+  setup_env
+  export RUNTIME_DATA_DIR="$(mktemp -d)"
+  export LOCAL_AIDESKTOP_DIR="$(mktemp -d)"
+  export LOCAL_MODE=false
+  export CHAT_ENGINE="openclaw"
+  export BCS_PORT=21099
+  export BCS_BAAS_PROVIDER_PORT=28083
+  export CLAUDE_PROFILE_DIR="scripts/4bots_merchant_operations_profile_for_claude"
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/baas.sh"
+
+  local plugin_dir captured_env
+  plugin_dir="$(mktemp -d)"
+  captured_env="$(mktemp)"
+  mkdir -p "${plugin_dir}/dist/esm"
+  : > "${plugin_dir}/dist/esm/index.js"
+
+  stop_port_processes_if_owned() { return 0; }
+  stop_matching_processes_if_owned() { return 0; }
+  require_port_available_after_owned_stop() { return 0; }
+  check_directory_exists() { return 0; }
+  setup_bcn_plugin() { return 0; }
+  bots_bcn_plugin_load_dir() { printf '%s\n' "$plugin_dir"; }
+  claude_profile_enabled() { return 0; }
+  bcs_baas_provider_prepare_runtime_tokens() { return 0; }
+  bcs_baas_provider_baas_token() { printf '%s\n' 'test-downlink-token'; }
+  env() { printf '%s\n' "$*" > "$captured_env"; return 0; }
+
+  baas_start
+
+  grep -F 'SOFAPY_CONFIG_OVERLAY=mixed-claude-code' "$captured_env" >/dev/null || \
+    fail "Claude profile must start BAAS with the mixed Claude overlay"
+  grep -F 'BCS_BAAS_DOWNLINK_TOKEN=test-downlink-token' "$captured_env" >/dev/null || \
+    fail "Claude profile must provide BaaS's local downlink credential"
+)
+
 test_baas_start_aborts_when_bcn_plugin_setup_fails() (
   setup_env
   export RUNTIME_DATA_DIR="$(mktemp -d)"
@@ -680,6 +778,9 @@ test_local_frontend_hides_stale_claude_roles() {
 
 test_all_start_rolls_back_started_services_on_failure
 test_mixed_all_preflight_rejects_external_port_before_restart
+test_bcs_start_rejects_partial_merchant_hybrid_runtime
+test_bcs_start_allows_merchant_hybrid_runtime
+test_bcs_start_rebuilds_stale_binary
 test_backend_health_failure_stops_backend
 test_backend_wait_fails_when_started_process_exits
 test_frontend_start_prepares_dependencies_before_launch
@@ -701,6 +802,7 @@ test_baas_session_scan_failure_keeps_source_and_backup
 test_baas_start_refuses_root_bots_dir
 test_baas_start_passes_bcn_runtime_configuration
 test_baas_start_aborts_when_bcn_plugin_setup_fails
+test_baas_start_enables_mixed_overlay_for_claude_profile
 test_5bot_openclaw_config_is_written_private
 test_local_bcs_launchers_supply_required_signing_keys
 test_ready_banner_describes_full_stack

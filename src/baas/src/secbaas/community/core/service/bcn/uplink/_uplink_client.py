@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 import uuid
 from dataclasses import dataclass
@@ -86,7 +87,11 @@ class BcnUplinkClient:
           - X-BCN-Event-Id: <uuid-v4>
           - X-BCN-Provider-Bot-Ref: <bot_id>
         """
-        token = self._secret_plugin.get_secret("other_manual_secbaas_bcn_admin_token")
+        token = os.getenv("BCS_BAAS_UPLINK_TOKEN")
+        if not token:
+            token = self._secret_plugin.get_secret(
+                "other_manual_secbaas_bcn_admin_token"
+            )
         return {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
@@ -233,7 +238,8 @@ class BcnUplinkClient:
         if event_id is None:
             event_id = str(uuid.uuid4())
 
-        url = f"{self._config.base_url.rstrip('/')}/bot/events"
+        base_url = os.getenv("BCS_BAAS_UPLINK_URL") or self._config.base_url
+        url = f"{base_url.rstrip('/')}/bot/events"
         headers = self._build_headers(event_id=event_id, bot_id=bot_id)
         payload = event.to_dict()
 
