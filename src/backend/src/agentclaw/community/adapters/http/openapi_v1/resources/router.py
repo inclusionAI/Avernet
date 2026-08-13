@@ -30,7 +30,7 @@ from __future__ import annotations
 from typing import Annotated
 
 import httpx
-from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Body, HTTPException, Path, Query, Request, Response
 
 from agentclaw.community.api.resource_service import ResourceServiceFactoryProtocol
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
@@ -40,6 +40,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     NameCheck,
     Page,
     PageParamsDep,
+    error_example,
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
@@ -146,6 +147,7 @@ _TOO_LARGE_RESPONSE: dict[int | str, dict[str, object]] = {
         "model": ErrorEnvelope,
         "description": "File exceeds the size the provider will serve, or the "
         "1 MB preview cap.",
+        **error_example(413, "File too large for preview"),
     },
 }
 # The group is already user-scoped, so it carries ``USER_SCOPED_403`` from
@@ -159,6 +161,7 @@ _READ_ONLY_RESPONSE: dict[int | str, dict[str, object]] = {
         "description": "The path is read-only — a dotfile, or a workspace-root "
         "identity file — or the user_id names a user the authenticated caller "
         "may not act for.",
+        **error_example(403, "Forbidden"),
     },
 }
 
@@ -235,6 +238,28 @@ def _file_coords(
 
 router = APIRouter(prefix="/openapi/v1/bots/resources", tags=["resources"])
 
+#: The query parameter addressing a file or folder, documented once. Kept as an
+#: Annotated default so handlers stay directly callable in tests.
+FilePathQuery = Annotated[
+    str,
+    Query(
+        description="Workspace-relative path of the file or folder, e.g. "
+        "'docs/spec/a.txt' — exactly as returned in a listing entry's "
+        "`path`. A leading slash is tolerated; '..' segments are refused "
+        "(400)."
+    ),
+]
+
+#: The path parameter naming a link resource, documented once.
+ResourceIdPath = Annotated[
+    str,
+    Path(
+        description="The link resource's id, as returned by the listing or "
+        "create response (decimal digits, e.g. '42'). Files and folders "
+        "have no id — address them by `path` on the path-based endpoints."
+    ),
+]
+
 
 @router.get("", response_model=Envelope[Page[Resource]])
 @envelope_errors
@@ -246,7 +271,14 @@ async def list_resources(
     path: str = Query(
         "", description="Directory to list, relative to the workspace root."
     ),
-    type: ResourceType | None = None,
+    type: Annotated[
+        ResourceType | None,
+        Query(
+            description="Filter: 'file' or 'folder' lists only workspace "
+            "entries of that kind; 'link' returns only the bot's links "
+            "(path is then ignored). Omit for everything."
+        ),
+    ] = None,
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
     file_svc: ResourceFileService = Injected(ResourceFileService),
@@ -263,8 +295,9 @@ async def list_resources(
     presence on any device, so the record *is* the resource. They are read from
     the repo and appended.
 
-    ``path`` selects the directory (empty = workspace root). Listing is
-    non-recursive, which bounds the device round trip this endpoint now makes.
+    The path parameter selects the directory (empty = workspace root).
+    Listing is non-recursive, which bounds the device round trip this
+    endpoint makes.
     """
     safe = _safe_path(path)
     entries: list[Resource] = []
@@ -339,12 +372,32 @@ async def list_resources(
 async def check_resource_name(
     owner_id: UserIdDep,
     request: Request,
-    # Plain defaults rather than ``Query(...)``: FastAPI still treats them as
-    # query parameters, and the handler stays directly callable in tests without
-    # a ``Query`` sentinel standing in for a string.
-    name: str = "",
-    path: str = "",
-    type: ResourceType | None = None,
+    # Annotated defaults rather than ``Query(...)`` defaults: FastAPI treats
+    # them as query parameters either way, and the plain default keeps the
+    # handler directly callable in tests without a ``Query`` sentinel standing
+    # in for a string.
+    name: Annotated[
+        str,
+        Query(
+            description="Link name to check against the bot's link records "
+            "(exact, case-sensitive match). Supply this or path."
+        ),
+    ] = "",
+    path: Annotated[
+        str,
+        Query(
+            description="Workspace-relative path to check for a file or "
+            "folder, e.g. 'docs/spec.md'. When given, the file check runs "
+            "and name is ignored."
+        ),
+    ] = "",
+    type: Annotated[
+        ResourceType | None,
+        Query(
+            description="Addressing hint: 'file' or 'folder' forces the "
+            "workspace check; otherwise a supplied path decides."
+        ),
+    ] = None,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
@@ -353,15 +406,15 @@ async def check_resource_name(
     """Whether a resource already exists.
 
     Two parameters because there are two kinds of resource, addressed
-    differently. A **file** is checked against the workspace by ``path`` — the
-    same question the upload asks before writing, answered by the same authority,
-    so the two can never disagree. A **link** is checked by ``name`` against the
-    records, because a link has no file.
-
-    A caller supplying ``path`` gets the file check; otherwise it is the link
-    check. Splitting the two surfaces entirely would be cleaner than one endpoint
-    with two addressing modes, but that is a larger contract change than this one.
+    differently. A file or folder is checked against the workspace by path —
+    the same question the upload asks before writing, answered by the same
+    authority, so the two can never disagree. A link is checked by name
+    against the records, because a link has no file. Supplying path gets the
+    file check; otherwise it is the link check.
     """
+    # Splitting the two surfaces entirely would be cleaner than one endpoint
+    # with two addressing modes, but that is a larger contract change than
+    # this one.
     # Neither addressing mode supplied. Both parameters carry plain defaults so
     # that one may be omitted, which costs FastAPI's required-parameter check —
     # so the "at least one" rule is enforced here instead. Without it the link
@@ -451,7 +504,7 @@ async def create_resource(
 @envelope_errors
 async def upload_resource(
     owner_id: UserIdDep,
-    path: str,
+    path: FilePathQuery,
     content: Annotated[bytes, Body(media_type="application/octet-stream")],
     request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
@@ -461,16 +514,17 @@ async def upload_resource(
 ) -> Envelope[Resource]:
     """Upload a file's raw bytes into the bot's workspace.
 
-    ``path`` is workspace-relative and carries its own directories
-    (``docs/spec/a.txt``); intermediate ones are created by the engine. There is
-    no separate name or parent-directory parameter — the directory is part of the
-    path, and ``path`` is the same spelling every other file endpoint uses.
-
-    The write goes through ``ResourceFileService``, the same service the console
-    uses, so both surfaces compose the workspace address identically and cannot
-    drift. ``owner_id`` comes from the request's ``user_id`` (``UserIdDep``),
-    fail-closed — mirroring the bots router.
+    The body is the file's raw bytes (content type application/octet-stream),
+    not a multipart form. The path is workspace-relative and carries its own
+    directories ('docs/spec/a.txt'); intermediate ones are created as needed
+    — there is no separate name or parent-directory parameter. An occupied
+    path answers 409; the size limit is 500 MB, and only common document,
+    code, image and archive extensions are accepted (400 otherwise).
     """
+    # The write goes through ResourceFileService, the same service the console
+    # uses, so both surfaces compose the workspace address identically and
+    # cannot drift. owner_id comes from the request's user_id (UserIdDep),
+    # fail-closed — mirroring the bots router.
     safe = _safe_path(path)
     if not safe:
         raise InvalidResourcePathError("path is required")
@@ -662,7 +716,7 @@ async def _read_file_or_404(
 @envelope_errors
 async def download_file(
     owner_id: UserIdDep,
-    path: str,
+    path: FilePathQuery,
     # Required by ``@envelope_errors`` to locate the request: without it the
     # decorator cannot build an error envelope and re-raises instead, so a
     # rejected path would surface as a 500 rather than a 400. The success path
@@ -674,10 +728,11 @@ async def download_file(
 ) -> Response:
     """Stream a file's bytes from the bot's workspace, addressed by path.
 
-    Raw bytes, not an envelope — the body is the file. Replaces the former
-    ``/{resource_id}/download``: a record id cannot address a file the bot
-    created itself, and the record is no longer what decides existence.
+    Raw bytes, not an envelope — the body is the file.
     """
+    # Replaces the former /{resource_id}/download: a record id cannot address
+    # a file the bot created itself, and the record is no longer what decides
+    # existence.
     content = await _read_file_or_404(
         file_svc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo, path=path
     )
@@ -692,7 +747,7 @@ async def download_file(
 @envelope_errors
 async def preview_file(
     owner_id: UserIdDep,
-    path: str,
+    path: FilePathQuery,
     request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     bot_repo: BotRepository = Injected(BotRepository),
@@ -730,7 +785,7 @@ async def preview_file(
 @envelope_errors
 async def delete_file(
     owner_id: UserIdDep,
-    path: str,
+    path: FilePathQuery,
     request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
@@ -796,19 +851,21 @@ async def delete_file(
 @envelope_errors
 async def create_directory(
     owner_id: UserIdDep,
-    path: str,
+    path: FilePathQuery,
     request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     bot_repo: BotRepository = Injected(BotRepository),
     file_svc: ResourceFileService = Injected(ResourceFileService),
 ) -> Envelope[Resource]:
-    """Create a directory in the bot's workspace.
+    """Create a directory in the bot's workspace, addressed by path.
 
-    Physical only — no FOLDER record is written, and ``POST ""`` with
-    ``type=FOLDER`` still returns 501. Directories exist on the filesystem and
-    are reported by listing it; giving them records would reintroduce exactly
-    the record-vs-filesystem divergence this change removes.
+    Intermediate directories are created as needed. Directories exist on the
+    workspace filesystem only and are reported by listing it — they have no
+    record and no resource id.
     """
+    # No FOLDER record is written, and the create endpoint's type=folder still
+    # returns 501: giving directories records would reintroduce exactly the
+    # record-vs-filesystem divergence this change removed.
     safe = _safe_path(path)
     if not safe:
         raise InvalidResourcePathError("path is required")
@@ -835,20 +892,20 @@ async def create_directory(
 @router.get("/{resource_id}", response_model=Envelope[Resource])
 @envelope_errors
 async def get_resource(
-    resource_id: str,
+    resource_id: ResourceIdPath,
     user_id: UserIdDep,
     request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
 ) -> Envelope[Resource]:
-    """Get a **link** resource by record id.
+    """Get a link resource by id.
 
-    A file id 404s here, mirroring ``DELETE /{resource_id}``: serving a file
-    from its record would report size and name from a row that nothing keeps in
-    step with the workspace, which is the divergence this change removes. A
-    file's address is its path — ``GET ""?path=`` lists it, ``GET /download``
-    and ``GET /preview`` serve it.
+    Only links are served by id — a file's id answers 404 here. A file's
+    address is its path: the listing shows it, and download/preview serve it.
     """
+    # Serving a file from its record would report size and name from a row
+    # nothing keeps in step with the workspace, which is the divergence this
+    # change removed.
     del user_id  # not-yet-enforced ownership — see list_resources
     effective_bot_id = bot_id
     service = factory.create(bot_id=effective_bot_id)
@@ -863,25 +920,23 @@ async def get_resource(
 @router.put("/{resource_id}", response_model=Envelope[Resource])
 @envelope_errors
 async def update_resource(
-    resource_id: str,
+    resource_id: ResourceIdPath,
     body: ResourceUpdate,
     user_id: UserIdDep,
     request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
 ) -> Envelope[Resource]:
-    """Update a **link** resource by record id (rename / url change).
+    """Rename a link resource and/or change its URL, by id.
 
-    ``link_type`` is intentionally not exposed on the openapi contract.
-    ValueError from the service (not found / url clash) → 409 Conflict, per
-    legacy + create parity.
-
-    A file id 404s, completing what ``GET`` and ``DELETE /{resource_id}``
-    already do. ``update_link_resource`` checks no type, so a stale file id
-    would otherwise rename a FILE row that nothing reads — the response would
-    even show the new name, while the workspace, which is what every file
-    response is actually built from, is untouched.
+    Only links are updatable by id — a file's id answers 404. A name or URL
+    clash with an existing link answers 409.
     """
+    # link_type is intentionally not exposed on the openapi contract.
+    # ValueError from the service (not found / url clash) → 409 Conflict, per
+    # legacy + create parity. A file id 404s, completing what GET and DELETE
+    # /{resource_id} already do: update_link_resource checks no type, so a
+    # stale file id would otherwise rename a FILE row that nothing reads.
     del user_id  # not-yet-enforced ownership — see list_resources
     effective_bot_id = bot_id
     service = factory.create(bot_id=effective_bot_id)
@@ -901,25 +956,24 @@ async def update_resource(
 @router.delete("/{resource_id}", response_model=Envelope[Deleted])
 @envelope_errors
 async def delete_resource(
-    resource_id: str,
+    resource_id: ResourceIdPath,
     owner_id: UserIdDep,
     request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
 ) -> Envelope[Deleted]:
-    """Delete a **link** resource by record id.
+    """Delete a link resource by id.
 
-    Files are no longer addressed this way — they live in the workspace and are
-    deleted through ``DELETE ""?path=``. A link has no file, so the record is
-    the resource and the record id is the only address it can have. A file id
-    sent here resolves to nothing and 404s, which is also the right answer for
-    a stale id from before the change.
-
-    No device is touched, so this must not require a bound one: the former
-    unconditional ``resolve_for_bot`` raised DeviceNotBoundError (409) on an
-    unbound bot even for a link, which is the follow-up that removing the file
-    branch resolves.
+    Only links are deleted by id — files and folders are deleted through the
+    path-addressed delete. A file's id answers 404. Works whether or not the
+    bot currently has a live device.
     """
+    # A link has no file, so the record is the resource and the record id is
+    # the only address it can have; a stale file id from before the change
+    # resolves to nothing and 404s, which is the right answer for it too. No
+    # device is touched, so this must not require a bound one: the former
+    # unconditional resolve_for_bot raised DeviceNotBoundError (409) on an
+    # unbound bot even for a link.
     service = factory.create(bot_id=bot_id)
     # Refuse a FILE row explicitly. ``delete_resource`` would otherwise accept
     # one, skip the device because ``device_fs`` is None, soft-delete the row and
