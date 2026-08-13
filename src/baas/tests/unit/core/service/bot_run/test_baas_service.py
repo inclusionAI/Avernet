@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from secbaas.community.api.bcn import Attachment
 from secbaas.community.api.bot_runtime import (
     BotBindingInfo,
     BotNotAvailableError,
@@ -187,6 +188,111 @@ class TestCreateSessionTenantValidation:
                 tenant=TENANT,
                 device_affinity=consistency_key,
             )
+
+
+class TestSessionRoutingAffinityPrefix:
+    """device_affinity 必须对 ``agent:main:`` 前缀不敏感。
+
+    同一会话经 DingTalk(裸 id)与 Open API(带前缀 id)两次投递必须哈希到同一实例,
+    因此 ``_create_session_consistency_key`` 对非 None session_id 剥离前导 ``agent:main:``。
+    """
+
+    def test_prefixed_and_raw_collapse_to_same_affinity(self, service):
+        raw = "bcs-sess-123"
+        prefixed = f"agent:main:{raw}"
+        kwargs = dict(
+            engine_type="openclaw",
+            tc_bot_id=BOT_UUID,
+            user_id="u-1",
+            run_id="run-1",
+        )
+        assert (
+            service._create_session_consistency_key(session_id=raw, **kwargs)
+            == service._create_session_consistency_key(session_id=prefixed, **kwargs)
+            == raw
+        )
+
+    def test_non_prefix_id_unchanged(self, service):
+        assert (
+            service._create_session_consistency_key(
+                engine_type="openclaw",
+                tc_bot_id=BOT_UUID,
+                user_id="u-1",
+                run_id="run-1",
+                session_id="plain-sess",
+            )
+            == "plain-sess"
+        )
+
+    def test_none_branch_synthetic_key_unchanged(self, service):
+        """session_id=None 的合成键保持不变,不动既有 first-call 路由 stickiness。"""
+        assert (
+            service._create_session_consistency_key(
+                engine_type="openclaw",
+                tc_bot_id=BOT_UUID,
+                user_id="u-1",
+                run_id="run-1",
+                session_id=None,
+            )
+            == "agent:main:session:run-1:user:u-1"
+        )
+
+    def test_double_prefix_stripped_to_idempotent_form(self, service):
+        """重复 agent:main: 前缀应被完全剥离,亲和键对前缀次数幂等。"""
+        assert (
+            service._create_session_consistency_key(
+                engine_type="openclaw",
+                tc_bot_id=BOT_UUID,
+                user_id="u-1",
+                run_id="run-1",
+                session_id="agent:main:agent:main:X",
+            )
+            == "X"
+        )
+
+    def test_empty_after_strip(self, service):
+        """仅含前缀的退化 id 剥离后为空串(不致崩溃,固定哈希到某设备)。"""
+        assert (
+            service._create_session_consistency_key(
+                engine_type="openclaw",
+                tc_bot_id=BOT_UUID,
+                user_id="u-1",
+                run_id="run-1",
+                session_id="agent:main:",
+            )
+            == ""
+        )
+
+    @pytest.mark.asyncio
+    async def test_send_path_routes_raw_and_prefixed_to_same_device(
+        self, service, wss_resolver
+    ):
+        """send/inject 路径(_resolve_ws_connection_for_binding): 裸 id 与带前缀 id
+        应使下游 resolver 收到相同 device_affinity —— 本缺陷的实际承重路径。"""
+        wss_resolver.dispatch_bot_ws_conn_info.return_value = _make_conn_info()
+        binding = _make_binding_info()
+
+        affinities = []
+        for sid in ("bcs-sess-123", "agent:main:bcs-sess-123"):
+            await service._resolve_ws_connection_for_binding(binding, session_id=sid)
+            affinities.append(
+                wss_resolver.dispatch_bot_ws_conn_info.call_args.kwargs["device_affinity"]
+            )
+        assert affinities == ["bcs-sess-123", "bcs-sess-123"]
+
+    @pytest.mark.asyncio
+    async def test_send_path_none_session_id_routes_with_none_affinity(
+        self, service, wss_resolver
+    ):
+        """session_id=None 时 send 路由亲和键为 None(回退随机/无粘性),不报错。"""
+        wss_resolver.dispatch_bot_ws_conn_info.return_value = _make_conn_info()
+        await service._resolve_ws_connection_for_binding(
+            _make_binding_info(), session_id=None
+        )
+        assert (
+            wss_resolver.dispatch_bot_ws_conn_info.call_args.kwargs["device_affinity"]
+            is None
+        )
 
 
 class TestCreateSessionBotResolution:
@@ -1321,6 +1427,7 @@ class TestSendMessageExtended:
                 auth_token=None,
                 app_id=None,
                 chat_metadata=None,
+                attachments=None,
             )
 
     @pytest.mark.asyncio
@@ -1354,6 +1461,7 @@ class TestSendMessageExtended:
                 auth_token=None,
                 app_id=None,
                 chat_metadata=None,
+                attachments=None,
             )
 
     @pytest.mark.asyncio
@@ -1395,6 +1503,7 @@ class TestSendMessageExtended:
                 auth_token="OPEN_API:app:my-key",
                 app_id="test-app",
                 chat_metadata=None,
+                attachments=None,
             )
 
     @pytest.mark.asyncio
@@ -1530,6 +1639,7 @@ class TestInjectMessageExtended:
                 message="instruction",
                 session_key=SESSION_ID,
                 auth_token="OPEN_API:app:inj-key",
+                attachments=None,
             )
 
     @pytest.mark.asyncio
@@ -1560,6 +1670,7 @@ class TestInjectMessageExtended:
                 message="instruction",
                 session_key=SESSION_ID,
                 auth_token=None,
+                attachments=None,
             )
 
     @pytest.mark.asyncio
@@ -2438,3 +2549,169 @@ class _ANY:
 
 
 ANY: _ANY = _ANY()
+
+
+# ==================== Tests: Attachment Passthrough ====================
+
+
+class TestBaasBotServiceAttachmentPassthrough:
+    """BaasBotService 全部 3 个方法的 attachments 透传验证。"""
+
+    @pytest.mark.asyncio
+    async def test_send_message_passes_attachments_to_client(
+        self, service, wss_resolver, mock_pool
+    ):
+        """send_message 将 attachments 透传到 client.send_message。"""
+        binding = _make_binding_info(baas_session_id="SESSION-xyz")
+
+        att1 = Attachment(
+            attachment_id="att_1",
+            type="image",
+            file_name="f1.png",
+            url="https://cdn.example.com/f1",
+        )
+
+        mock_client = AsyncMock()
+        mock_client.send_message = AsyncMock(return_value=("response content", "done"))
+        mock_pool.get.return_value = mock_client
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                return_value=_make_conn_info(),
+            ),
+            patch.object(service, "_mark_session_completed"),
+        ):
+            await service.send_message(
+                session_id=SESSION_ID,
+                message="hello",
+                binding_info=binding,
+                timeout=30.0,
+                attachments=[att1],
+            )
+
+        mock_client.send_message.assert_awaited_once()
+        call_kw = mock_client.send_message.call_args.kwargs
+        passed = call_kw["attachments"]
+        assert len(passed) == 1
+        assert passed[0].attachment_id == "att_1"
+        assert isinstance(passed[0], Attachment)
+
+    @pytest.mark.asyncio
+    async def test_inject_message_passes_attachments_to_client(
+        self, service, wss_resolver, mock_pool
+    ):
+        """inject_message 将 attachments 透传到 client.inject_message。"""
+        binding = _make_binding_info(baas_session_id="SESSION-xyz")
+
+        att1 = Attachment(
+            attachment_id="att_1",
+            type="image",
+            file_name="f1.png",
+            url="https://cdn.example.com/f1",
+        )
+
+        mock_client = AsyncMock()
+        mock_pool.get.return_value = mock_client
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                return_value=_make_conn_info(),
+            ),
+            patch.object(service, "_mark_session_completed"),
+        ):
+            await service.inject_message(
+                session_id=SESSION_ID,
+                message="instruction",
+                binding_info=binding,
+                attachments=[att1],
+            )
+
+        mock_client.inject_message.assert_awaited_once()
+        call_kw = mock_client.inject_message.call_args.kwargs
+        passed = call_kw["attachments"]
+        assert len(passed) == 1
+        assert passed[0].attachment_id == "att_1"
+        assert isinstance(passed[0], Attachment)
+
+    @pytest.mark.asyncio
+    async def test_send_message_stream_passes_attachments_to_client(
+        self, service, wss_resolver, mock_pool
+    ):
+        """send_message_stream 将 attachments 透传到 client.send_message_stream (D-01)。"""
+        from secbaas.community.api.sse import StreamChunk
+
+        binding = _make_binding_info(
+            baas_session_id="SESSION-xyz", engine_type="openclaw"
+        )
+
+        att1 = Attachment(
+            attachment_id="att_1",
+            type="image",
+            file_name="f1.png",
+            url="https://cdn.example.com/f1",
+        )
+
+        async def _stream_ok(**kwargs):
+            yield StreamChunk(type="delta", content="hi")
+            yield StreamChunk(type="final", content="done")
+
+        mock_client = AsyncMock()
+        mock_client.send_message_stream = _stream_ok
+        mock_pool.get.return_value = mock_client
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                return_value=_make_conn_info(),
+            ),
+            patch.object(service, "_mark_session_completed"),
+            patch.object(service, "_mark_session_failed"),
+        ):
+            chunks = []
+            async for chunk in service.send_message_stream(
+                session_id=SESSION_ID,
+                message="hello",
+                binding_info=binding,
+                timeout=30.0,
+                attachments=[att1],
+            ):
+                chunks.append(chunk)
+
+        assert len(chunks) == 2
+        # Stream completed without error; attachments were passed through
+
+    @pytest.mark.asyncio
+    async def test_send_message_attachments_none_is_passed(
+        self, service, wss_resolver, mock_pool
+    ):
+        """attachments 为 None 时 client.send_message 收到 None（不报错）。"""
+        binding = _make_binding_info(baas_session_id="SESSION-xyz")
+
+        mock_client = AsyncMock()
+        mock_client.send_message = AsyncMock(return_value=("ok", "done"))
+        mock_pool.get.return_value = mock_client
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                return_value=_make_conn_info(),
+            ),
+            patch.object(service, "_mark_session_completed"),
+        ):
+            await service.send_message(
+                session_id=SESSION_ID,
+                message="hello",
+                binding_info=binding,
+                timeout=30.0,
+                attachments=None,
+            )
+
+        mock_client.send_message.assert_awaited_once()
+        call_kw = mock_client.send_message.call_args.kwargs
+        assert call_kw.get("attachments") is None

@@ -41,9 +41,11 @@ use bcs_app_bot::{BotServiceConfig, BotServiceImpl};
 use bcs_app_group::{GroupServiceConfig, GroupServiceImpl};
 use bcs_app_invitation::{InvitationFriendshipServiceConfig, InvitationFriendshipServiceImpl};
 use bcs_app_session::{
-    GroupSessionConnectionServiceImpl, SessionServiceConfig, SessionServiceImpl,
+    GroupSessionConnectionServiceImpl, SessionFileApplicationServiceImpl, SessionServiceConfig,
+    SessionServiceImpl,
 };
 use bcs_api_http::{ApiState, PrincipalVerifier};
+use bcs_api_http::v1::openapi::SessionFileUrlProjector;
 use bcs_bot::{Bot, BotControlPlaneCore, BotCore, ProviderBotEvents, ProviderCore, ProviderManagement};
 use bcs_api_http::v1::gateway_principal::{
     GatewayPrincipalTokenVerifier, GatewayPrincipalTrust,
@@ -1353,6 +1355,7 @@ fn build_openapi_v1_state(
     collaboration_runtime: Arc<dyn bcs_service_api::CollaborationRuntimeService>,
     session_repo: Arc<dyn SessionRepoPort>,
     message_repo: Arc<dyn MessageRepoPort>,
+    session_files: Arc<dyn bcs_service_api::application::session_files::SessionFileService>,
     system_message: Arc<dyn SystemMessageService>,
     principal_verifier: Arc<dyn PrincipalVerifier>,
 ) -> ApiState {
@@ -1394,6 +1397,20 @@ fn build_openapi_v1_state(
         message_repo,
         SessionServiceConfig { relation_env },
     ));
+    let session_file_service = Arc::new(SessionFileApplicationServiceImpl::new(
+        session_files,
+        sessions.clone(),
+        groups.clone(),
+        registry.clone(),
+        system_message.clone(),
+    ));
+    let session_file_url_projector = SessionFileUrlProjector::new(
+        config
+            .openapi_v1
+            .validated_public_collaboration_base_url()
+            .expect("OpenAPI V1 public collaboration URL was validated at config load"),
+    )
+    .expect("validated OpenAPI V1 public collaboration URL");
     let invitation_groups = groups.clone();
     let invitation_sessions = sessions.clone();
     let invite: Arc<dyn InviteService> = Arc::new(bcs_group::application::invite::InviteServiceImpl {
@@ -1429,6 +1446,7 @@ fn build_openapi_v1_state(
         principal_verifier,
     )
     .with_bot_service(bot_service)
+    .with_session_file_service(session_file_service, session_file_url_projector)
 }
 
 pub(crate) fn gateway_principal_verifier_for_tests() -> Arc<dyn PrincipalVerifier> {
@@ -1866,6 +1884,7 @@ impl Default for BcsServerState {
             collaboration_runtime.clone(),
             session_repo.clone(),
             message_repo.clone(),
+            session_file_service.clone(),
             system_message.clone(),
             gateway_principal_verifier.clone(),
         );
@@ -3139,6 +3158,7 @@ impl BcsServer {
             collaboration_runtime.clone(),
             session_repo.clone(),
             message_repo.clone(),
+            session_file_service.clone(),
             use_cases.system_message.clone(),
             gateway_principal_verifier.clone(),
         );
@@ -3728,6 +3748,7 @@ impl BcsServer {
             collaboration_runtime.clone(),
             session_repo.clone(),
             message_repo.clone(),
+            session_file_service.clone(),
             use_cases.system_message.clone(),
             gateway_principal_verifier.clone(),
         );

@@ -65,6 +65,23 @@ DEFAULT_ADAPTER_PORT = 20003
 DEFAULT_REQUEST_TIMEOUT = 30
 DEFAULT_CONNECT_TIMEOUT = 10
 
+# openclaw 给持久化 session id 加的固定前缀; 路由亲和键必须对有无该前缀不敏感,
+# 否则同一会话经 DingTalk(裸 id)与 Open API(带前缀 id)两次投递会哈希到不同实例。
+_AGENT_MAIN_PREFIX = "agent:main:"
+
+
+def _strip_agent_main_prefix(session_id: str) -> str:
+    """剥离前导 ``agent:main:`` 前缀,使设备路由亲和键对前缀有无不敏感。
+
+    openclaw 会在持久化/返回 session id 时加上 ``agent:main:`` 前缀,而 DingTalk 入站
+    携带的是裸 id;若直接把调用方原样传入的 session_id 作为 ``device_affinity`` 哈希,
+    同一会话两次调用(裸 id vs 带前缀 id)会命中不同实例。在构造亲和键处统一剥离前缀,
+    使两种形式哈希到同一设备。循环剥离以对重复前缀幂等。
+    """
+    while session_id.startswith(_AGENT_MAIN_PREFIX):
+        session_id = session_id[len(_AGENT_MAIN_PREFIX) :]
+    return session_id
+
 
 def _safe_client_msg(exc: Exception) -> str:
     """返回可安全外抛给客户端的异常消息(剥离 aiohttp 请求 url 等内部信息)。
@@ -355,6 +372,7 @@ class BaasBotService(BotService):
         context: BotChatContext | None = None,
         timeout: float,
         chat_metadata: dict[str, str] | None = None,
+        attachments: list[Any] | None = None,
     ) -> BotResponse:
         """Send a message and get response via ChatClient.
 
@@ -405,6 +423,7 @@ class BaasBotService(BotService):
                 auth_token=auth_token,
                 app_id=app_id,
                 chat_metadata=chat_metadata,
+                attachments=attachments,
             )
             self._mark_session_completed(baas_session_id, result={"content": content})
             return BotResponse(content=content)
@@ -432,6 +451,7 @@ class BaasBotService(BotService):
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         timeout: float,
+        attachments: list[Any] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """流式发送消息，逐 chunk 产出 StreamChunk。
 
@@ -469,6 +489,7 @@ class BaasBotService(BotService):
                 timeout=timeout,
                 auth_token=auth_token,
                 app_id=app_id,
+                attachments=attachments,
             ):
                 if chunk.type == "error":
                     stream_error = True
@@ -500,6 +521,7 @@ class BaasBotService(BotService):
         message: str,
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
+        attachments: list[Any] | None = None,
     ) -> None:
         """注入消息到已有会话
 
@@ -535,6 +557,7 @@ class BaasBotService(BotService):
                 message=message,
                 session_key=session_id,
                 auth_token=auth_token,
+                attachments=attachments,
             )
             self._mark_session_completed(
                 baas_session_id, result={"content": "inject success"}
@@ -812,11 +835,16 @@ class BaasBotService(BotService):
         if not tenant and binding_info.device_props:
             tenant = binding_info.device_props.get("tenant", "")
 
+        # 与 create_session 路径一致:剥离前导 agent:main: 前缀,使 send/inject 等
+        # API 路径的 device 路由对前缀有无不敏感(同一会话跨通道落到同一实例)。
+        affinity = (
+            _strip_agent_main_prefix(session_id) if session_id is not None else None
+        )
         return await self._resolve_ws_connection(
             bot_uuid,
             tenant,
             engine_type=binding_info.engine_type,
-            session_consistency_key=session_id,
+            session_consistency_key=affinity,
         )
 
     @staticmethod
@@ -1089,9 +1117,17 @@ class BaasBotService(BotService):
         run_id: str,
         session_id: str | None = None,
     ) -> str | None:
-        """Create consistency key for session routing."""
+        """Create consistency key for session routing.
+
+        The affinity key drives consistent-hash device routing, so it must be
+        stable for a conversation regardless of whether the caller supplied the
+        ``agent:main:`` prefix. A caller-supplied ``session_id`` is therefore
+        canonicalized by stripping a leading ``agent:main:`` so the DingTalk
+        path (raw id) and the Open API path (prefixed id) hash to the same
+        device. The persisted/returned session id contract is unchanged.
+        """
         if session_id is not None:
-            return session_id
+            return _strip_agent_main_prefix(session_id)
 
         if engine_type == "openclaw":
             # Fixed prefix 'agent:main:'

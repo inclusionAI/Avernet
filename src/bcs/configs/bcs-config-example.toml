@@ -255,6 +255,9 @@ base_url = "https://bcs.example.com"
 group_link_url = "https://botchat.example.com/groups/{group_id}"
 session_link_url = "https://botchat.example.com/sessions/{session_id}"
 
+[openapi_v1]
+public_collaboration_base_url = "https://gateway.example.com/openapi/v1/collaboration"
+
 [session_files]
 storage_backend = "local"      # or "baas"
 multipart_threshold = 104857600

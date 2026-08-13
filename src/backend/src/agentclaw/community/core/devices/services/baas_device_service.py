@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from agentclaw.community.core.devices.protocols import BotQueryProtocol, BotSyncProtocol, McpSyncProtocol
     from agentclaw.community.core.service_bot.services.baas_service import BaasService
     from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
+    from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 
 logger = get_logger()
 
@@ -102,6 +103,8 @@ class BaasDeviceService(DeviceService):
         vault: "TokenVault | None" = None,
         task_queue_service: "TaskQueueService | None" = None,
         template_service: TemplateConfigReader | None = None,
+        secret_resolver: SecretResolver | None = None,
+        theta_master_key_secret: str = "",
     ):
         super().__init__(
             repository=repository,
@@ -114,13 +117,21 @@ class BaasDeviceService(DeviceService):
             task_queue_service=task_queue_service,
         )
         self._baas_service = baas_service
-        self._header_updater = BaasDeviceHeaderUpdater(baas_service)
+        self._header_updater = BaasDeviceHeaderUpdater(
+            baas_service,
+            bot_query=bot_query,
+            template_service=template_service,
+            secret_resolver=secret_resolver,
+            theta_master_key_secret=theta_master_key_secret,
+        )
         self._lifecycle_executor = lifecycle_executor or BaasDeviceLifecycleExecutor(
             baas_service
         )
         self._container_initializer = BaasContainerInitializer(baas_service)
         self._template_resolver = template_resolver
         self._template_service = template_service
+        self._secret_resolver = secret_resolver
+        self._theta_master_key_secret = theta_master_key_secret
         logger.info("[BaasDeviceService] Initialized")
 
     # ------------------------------------------------------------------

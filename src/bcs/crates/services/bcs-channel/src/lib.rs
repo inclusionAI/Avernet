@@ -11,8 +11,9 @@ use tracing::{info, warn};
 
 use bcs_channel_api::{ChannelInboundSink, ChannelProvider, ChannelProviderRegistry};
 use bcs_domain::{
-    ActorKind, BindingStatus, BindingTarget, ChannelBinding, ChannelType, ConversationSessionMap,
-    Group, GroupChatScope, GroupKind, GroupStrategy, HumanInputNotificationMode,
+    ActorKind, Attachment, AttachmentType, BindingStatus, BindingTarget, ChannelBinding,
+    ChannelType, ConversationSessionMap, Group, GroupChatScope, GroupKind, GroupStrategy,
+    HumanInputNotificationMode,
     HumanInputRequest, HumanInputRequestStatus, ImParticipantMap, Participant, ParticipantMode,
     ParticipantRole, Session, SessionKind, SessionScope, SessionStatus, SystemMessageEvent,
     Visibility, channel_group_id,
@@ -344,10 +345,12 @@ impl BcsChannelService {
             )
             .await?;
         if ctx.context_projection == "group" {
-            let reason = group
-                .label
-                .clone()
-                .unwrap_or_else(|| "协作任务".to_string());
+            // bcs-channel's session reason is the group's label (purpose); its
+            // `session.input` is the inbound chat message and `group.context`
+            // is not used as the reason here, so input/context are passed as
+            // None. Empty label → no `目标` line.
+            let reason = bcs_service_api::resolve_session_topic(None, None, group.label.as_deref())
+                .unwrap_or_default();
             match self
                 .system_message
                 .notify(
@@ -946,6 +949,7 @@ impl ChannelService for BcsChannelService {
         msg.im_user_id = normalize_required(&msg.im_user_id, "im_user_id")
             .map_err(|error| invalid_inbound(error))?
             .to_string();
+        validate_inbound_content(&msg)?;
         let account_ref = msg.account_ref.clone();
         info!(
             channel_type = %msg.channel_type,
@@ -983,6 +987,17 @@ impl ChannelService for BcsChannelService {
             target_kind = binding_target_kind(&binding.target),
             "channel inbound: binding resolved"
         );
+        if has_temporary_file_attachment(msg.attachments.as_deref())
+            && msg.channel_type == "dingtalk"
+            && msg.conversation_type == "2"
+            && binding.group_chat_scope != Some(GroupChatScope::PerSender)
+        {
+            return Err(ChannelInboundError::new(
+                ChannelInboundFailureKind::UnsupportedAttachment,
+                false,
+                "DingTalk file attachments require a direct or per-sender session",
+            ));
+        }
         let dedup_key = inbound_dedup_key(&msg.channel_type, &account_ref, &msg.msg_id);
         if let Some(key) = dedup_key.as_deref() {
             if !self.inbound_dedup.claim(key).await {
@@ -1472,12 +1487,46 @@ impl ChannelService for BcsChannelService {
     }
 
     async fn delete_binding(&self, id: &str) -> Result<(), ChannelUseCaseError> {
-        if self.bindings.get(id).await?.is_none() {
+        let _guard = self.binding_admin_lock.lock().await;
+        let Some(binding) = self.bindings.get(id).await? else {
             return Err(ChannelUseCaseError::NotFound(id.to_string()));
-        }
-        self.bindings.delete(id).await?;
+        };
+        self.delete_binding_locked(&binding).await?;
         Ok(())
     }
+}
+
+fn validate_inbound_content(msg: &InboundMessage) -> Result<(), ChannelInboundError> {
+    let attachments = msg.attachments.as_deref().unwrap_or_default();
+    if attachments.iter().any(|attachment| !valid_attachment(attachment)) {
+        return Err(ChannelInboundError::new(
+            ChannelInboundFailureKind::InvalidInbound,
+            false,
+            "attachment metadata is incomplete",
+        ));
+    }
+    if msg.text.trim().is_empty() && attachments.is_empty() {
+        return Err(ChannelInboundError::new(
+            ChannelInboundFailureKind::InvalidInbound,
+            false,
+            "message text and attachments are both empty",
+        ));
+    }
+    Ok(())
+}
+
+fn valid_attachment(attachment: &Attachment) -> bool {
+    !attachment.attachment_id.trim().is_empty()
+        && !attachment.file_name.trim().is_empty()
+        && !attachment.url.trim().is_empty()
+}
+
+fn has_temporary_file_attachment(attachments: Option<&[Attachment]>) -> bool {
+    attachments.is_some_and(|items| {
+        items
+            .iter()
+            .any(|attachment| attachment.attachment_type == AttachmentType::File)
+    })
 }
 
 #[async_trait]
@@ -1487,15 +1536,69 @@ impl ChannelBindingCleanupPort for BcsChannelService {
         group_id: &str,
     ) -> ServiceResult<u64> {
         let _guard = self.binding_admin_lock.lock().await;
-        self.bindings
-            .delete_by_target(&BindingTarget::Group {
+        let bindings = self
+            .bindings
+            .list_by_target(
+                &BindingTarget::Group {
                 group_id: group_id.to_string(),
-            })
-            .await
+                },
+                None,
+            )
+            .await?;
+        let mut deleted = 0;
+        for binding in bindings {
+            self.delete_binding_locked(&binding).await?;
+            deleted += 1;
+        }
+        Ok(deleted)
     }
 }
 
 impl BcsChannelService {
+    async fn delete_binding_locked(&self, binding: &ChannelBinding) -> ServiceResult<()> {
+        self.bindings.set_status(&binding.id, false).await?;
+        let mappings = self.conversations.list_by_binding(&binding.id).await?;
+        let session_ids = mappings
+            .iter()
+            .map(|mapping| mapping.bcs_session_id.clone())
+            .collect::<HashSet<_>>();
+
+        for session_id in &session_ids {
+            let has_other_binding = self
+                .conversations
+                .list_by_bcs_session(session_id)
+                .await?
+                .iter()
+                .any(|mapping| mapping.binding_id != binding.id);
+            if has_other_binding {
+                continue;
+            }
+            self.collaboration_runtime
+                .cancel_session_runs(session_id, "channel_binding_deleted")
+                .await
+                .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+            if self.sessions.get(session_id).await.is_some() {
+                self.sessions
+                    .complete_if_running(
+                        session_id,
+                        None,
+                        Some("channel_binding_deleted".to_string()),
+                    )
+                    .await?;
+            }
+        }
+
+        let deleted_mappings = self.conversations.delete_by_binding(&binding.id).await?;
+        self.bindings.delete(&binding.id).await?;
+        info!(
+            binding_id = %binding.id,
+            session_count = session_ids.len(),
+            deleted_mappings,
+            "channel binding: deleted with session cleanup"
+        );
+        Ok(())
+    }
+
     fn redact_bindings(
         &self,
         bindings: Vec<ChannelBinding>,
@@ -2781,6 +2884,191 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn delete_binding_completes_sessions_and_removes_conversation_mappings() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        harness
+            .binding_repo
+            .create(active_binding(
+                "binding_1",
+                "robot_1",
+                BindingTarget::Bot {
+                    bot_id: "bot_1".to_string(),
+                },
+                Visibility::FullTranscript,
+            ))
+            .await?;
+        let session = harness
+            .session_repo
+            .create("group_1", NewSessionParams::default())
+            .await?;
+        harness
+            .conversation_repo
+            .upsert(bcs_domain::ConversationSessionMap {
+                binding_id: "binding_1".to_string(),
+                im_conversation_id: "conversation_1".to_string(),
+                im_conversation_type: "2".to_string(),
+                session_scope: SessionScope::PerSender,
+                im_user_id: Some("human_1".to_string()),
+                bcs_session_id: session.id.clone(),
+                last_active_at: 1,
+            })
+            .await?;
+
+        harness.service.delete_binding("binding_1").await?;
+
+        assert!(harness.binding_repo.get("binding_1").await?.is_none());
+        assert!(
+            harness
+                .conversation_repo
+                .list_by_binding("binding_1")
+                .await?
+                .is_empty()
+        );
+        let completed = harness.session_repo.get(&session.id).await.unwrap();
+        assert_eq!(completed.status, SessionStatus::Completed);
+        assert_eq!(
+            completed.error_message.as_deref(),
+            Some("channel_binding_deleted")
+        );
+        assert_eq!(
+            harness.collaboration_runtime.cancelled_sessions.lock().await.as_slice(),
+            &[(session.id, "channel_binding_deleted".to_string())]
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn delete_binding_keeps_cleanup_state_retryable_when_run_cancellation_fails() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        harness
+            .binding_repo
+            .create(active_binding(
+                "binding_1",
+                "robot_1",
+                BindingTarget::Bot {
+                    bot_id: "bot_1".to_string(),
+                },
+                Visibility::FullTranscript,
+            ))
+            .await?;
+        let session = harness
+            .session_repo
+            .create("group_1", NewSessionParams::default())
+            .await?;
+        harness
+            .conversation_repo
+            .upsert(bcs_domain::ConversationSessionMap {
+                binding_id: "binding_1".to_string(),
+                im_conversation_id: "conversation_1".to_string(),
+                im_conversation_type: "2".to_string(),
+                session_scope: SessionScope::PerSender,
+                im_user_id: Some("human_1".to_string()),
+                bcs_session_id: session.id.clone(),
+                last_active_at: 1,
+            })
+            .await?;
+        *harness.collaboration_runtime.cancel_error.lock().await =
+            Some("cancel failed".to_string());
+
+        let error = harness.service.delete_binding("binding_1").await.unwrap_err();
+
+        assert!(error.to_string().contains("cancel failed"));
+        assert_eq!(
+            harness.binding_repo.get("binding_1").await?.unwrap().status,
+            BindingStatus::Disabled
+        );
+        assert_eq!(
+            harness
+                .conversation_repo
+                .list_by_binding("binding_1")
+                .await?
+                .len(),
+            1
+        );
+        assert_eq!(
+            harness.session_repo.get(&session.id).await.unwrap().status,
+            SessionStatus::Running
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn delete_binding_preserves_session_used_by_another_binding() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        for (binding_id, account_ref) in [
+            ("binding_1", "robot_1"),
+            ("binding_2", "robot_2"),
+        ] {
+            harness
+                .binding_repo
+                .create(active_binding(
+                    binding_id,
+                    account_ref,
+                    BindingTarget::Group {
+                        group_id: "group_1".to_string(),
+                    },
+                    Visibility::FullTranscript,
+                ))
+                .await?;
+        }
+        let session = harness
+            .session_repo
+            .create("group_1", NewSessionParams::default())
+            .await?;
+        for (binding_id, conversation_id) in [
+            ("binding_1", "conversation_1"),
+            ("binding_2", "conversation_2"),
+        ] {
+            harness
+                .conversation_repo
+                .upsert(bcs_domain::ConversationSessionMap {
+                    binding_id: binding_id.to_string(),
+                    im_conversation_id: conversation_id.to_string(),
+                    im_conversation_type: "2".to_string(),
+                    session_scope: SessionScope::Conversation,
+                    im_user_id: None,
+                    bcs_session_id: session.id.clone(),
+                    last_active_at: 1,
+                })
+                .await?;
+        }
+
+        harness.service.delete_binding("binding_1").await?;
+
+        assert!(
+            harness
+                .conversation_repo
+                .list_by_binding("binding_1")
+                .await?
+                .is_empty()
+        );
+        assert_eq!(
+            harness
+                .conversation_repo
+                .list_by_binding("binding_2")
+                .await?
+                .len(),
+            1
+        );
+        assert_eq!(
+            harness.session_repo.get(&session.id).await.unwrap().status,
+            SessionStatus::Running
+        );
+        assert!(
+            harness
+                .collaboration_runtime
+                .cancelled_sessions
+                .lock()
+                .await
+                .is_empty()
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn create_direct_bot_binding_defaults_group_scope_to_per_sender() -> TestResult {
         let harness = TestHarness::new(manager_group("group_1")).await?;
 
@@ -3854,6 +4142,74 @@ mod tests {
         assert_eq!(
             attachments[0]["url"],
             "https://download.example.com/image?token=temporary"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn dingtalk_file_attachment_requires_dm_or_per_sender_scope() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        harness
+            .service
+            .create_binding(CreateBindingCommand {
+                channel_type: channel_type(),
+                account_ref: "robot_1".to_string(),
+                target: BindingTarget::Group {
+                    group_id: "group_1".to_string(),
+                },
+                group_chat_scope: Some(GroupChatScope::ConversationShared),
+                outbound_visibility: Visibility::FullTranscript,
+                env: "dev".to_string(),
+                created_by: Some("creator".to_string()),
+                config: dingtalk_config("robot_1"),
+            })
+            .await?;
+        let mut inbound = group_inbound("conv_group", "u1", Some("张三"), "msg-file", true);
+        inbound.text.clear();
+        inbound.attachments = Some(vec![serde_json::from_value(serde_json::json!({
+            "attachment_id": "att-file",
+            "type": "file",
+            "file_name": "design.pdf",
+            "url": "https://download.example.com/temporary"
+        }))?]);
+
+        let error = harness.service.handle_inbound(inbound).await.unwrap_err();
+
+        assert_eq!(error.kind, ChannelInboundFailureKind::UnsupportedAttachment);
+        assert!(harness.message_flow.web_sends.lock().await.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn per_sender_accepts_pure_file_message_without_fabricated_text() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        let mut binding = active_binding(
+            "binding_per_sender_file",
+            "robot_1",
+            BindingTarget::Group {
+                group_id: "group_1".to_string(),
+            },
+            Visibility::FullTranscript,
+        );
+        binding.group_chat_scope = Some(GroupChatScope::PerSender);
+        harness.binding_repo.create(binding).await?;
+        let mut inbound = group_inbound("conv_group", "u1", Some("张三"), "msg-file", true);
+        inbound.text.clear();
+        inbound.attachments = Some(vec![serde_json::from_value(serde_json::json!({
+            "attachment_id": "att-file",
+            "type": "file",
+            "file_name": "design.pdf",
+            "url": "https://download.example.com/temporary"
+        }))?]);
+
+        harness.service.handle_inbound(inbound).await?;
+
+        let sends = harness.message_flow.web_sends.lock().await;
+        assert_eq!(sends.len(), 1);
+        assert_eq!(sends[0].message, "");
+        assert_eq!(
+            sends[0].attachments.as_ref().unwrap()[0].attachment_type,
+            bcs_domain::AttachmentType::File
         );
         Ok(())
     }
@@ -5886,6 +6242,8 @@ mod tests {
         starts: Mutex<Vec<StartStateMachineRunCommand>>,
         start_error: Mutex<Option<String>>,
         runs_by_session: Mutex<HashMap<String, StateMachineRunView>>,
+        cancelled_sessions: Mutex<Vec<(String, String)>>,
+        cancel_error: Mutex<Option<String>>,
         pending_human_nodes: Mutex<Vec<PendingHumanNodeView>>,
         human_responses: Mutex<Vec<RespondHumanNodeCommand>>,
     }
@@ -5936,6 +6294,21 @@ mod tests {
             session_id: &str,
         ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
             Ok(self.runs_by_session.lock().await.get(session_id).cloned())
+        }
+
+        async fn cancel_session_runs(
+            &self,
+            session_id: &str,
+            reason: &str,
+        ) -> Result<(), CollaborationRuntimeError> {
+            if let Some(error) = self.cancel_error.lock().await.clone() {
+                return Err(CollaborationRuntimeError::InvalidRequest(error));
+            }
+            self.cancelled_sessions
+                .lock()
+                .await
+                .push((session_id.to_string(), reason.to_string()));
+            Ok(())
         }
 
         async fn list_pending_human_nodes(

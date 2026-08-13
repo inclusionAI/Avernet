@@ -161,6 +161,7 @@ bcs-llm-openai-compatible = { workspace = true }
 
 # URL encoding
 urlencoding = { workspace = true }
+url = { workspace = true }
 
 # Secrets handling
 secrecy = { version = "0.8", features = ["serde"] }

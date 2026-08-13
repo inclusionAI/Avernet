@@ -5,9 +5,11 @@ use async_trait::async_trait;
 use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Request, StatusCode};
 use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
+use bcs_api_http::v1::openapi::SessionFileUrlProjector;
 use bcs_service_api::application::v1::{
-    AddGroupParticipant, AddSessionParticipant, ApplicationError, AuthenticatedCaller,
-    AuthenticatedUserIdentity, BotParticipantMode, CompleteSession, CreateGroup, CreateSession,
+    AddGroupParticipant, AddSessionParticipant, ApplicationError, AuthenticatedAppIdentity,
+    AuthenticatedBotIdentity, AuthenticatedCaller, AuthenticatedUserIdentity, BotParticipantMode,
+    CompleteSession, CreateGroup, CreateSession,
     CreateSessionOutcome,
     DeleteGroup, DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant,
     GetGroup, GetSession, GroupDetail, GroupService, GroupSummary, ListGroups,
@@ -25,6 +27,150 @@ use bcs_service_api::application::v1::{
 use bcs_service_api::{ActorKind, ParticipantMode, ParticipantRole};
 use serde_json::{Value, json};
 use tower::ServiceExt;
+use futures::StreamExt;
+use bcs_storage_api::byte_stream_from_bytes;
+use bytes::Bytes;
+
+struct FakeSessionFileService;
+
+fn session_file_view() -> bcs_service_api::application::v1::SessionFileView {
+    use bcs_service_api::application::v1::{
+        SessionFileActor, SessionFileActorKind, SessionFileStatus, SessionFileView,
+    };
+    SessionFileView {
+        file_id: "file-1".into(),
+        session_id: "session-1".into(),
+        file_name: "report.txt".into(),
+        mime_type: "text/plain".into(),
+        size: 42,
+        sha256: None,
+        owner: SessionFileActor {
+            actor_kind: SessionFileActorKind::Human,
+            actor_id: "human_staff-1".into(),
+        },
+        storage_backend: "local".into(),
+        status: SessionFileStatus::Ready,
+        created_at: 1,
+        updated_at: 2,
+    }
+}
+
+#[async_trait]
+impl bcs_service_api::application::v1::SessionFileApplicationService
+    for FakeSessionFileService
+{
+    async fn prepare(
+        &self,
+        _command: bcs_service_api::application::v1::PrepareSessionFile,
+    ) -> Result<bcs_service_api::application::v1::PrepareSessionFileResult, ApplicationError> {
+        Ok(bcs_service_api::application::v1::PrepareSessionFileResult {
+            file: session_file_view(),
+            upload_target: json!({
+                "mode": "single",
+                "method": "PUT",
+                "upload_url": "http://legacy.test/sessions/session-1/files/file-1/content",
+                "expires_at": 3600
+            }),
+            expires_at: 3600,
+            proxy_upload: true,
+        })
+    }
+
+    async fn upload_content(
+        &self,
+        mut command: bcs_service_api::application::v1::UploadSessionFileContent,
+    ) -> Result<bcs_service_api::application::v1::UploadSessionFileResult, ApplicationError> {
+        let mut body = Vec::new();
+        while let Some(chunk) = command.body.next().await {
+            body.extend_from_slice(&chunk.expect("request body chunk"));
+        }
+        assert_eq!(body, b"abc");
+        Ok(bcs_service_api::application::v1::UploadSessionFileResult {
+            file_id: command.file_id,
+            status: bcs_service_api::application::v1::SessionFileStatus::Pending,
+        })
+    }
+
+    async fn complete(
+        &self,
+        _command: bcs_service_api::application::v1::CompleteSessionFile,
+    ) -> Result<bcs_service_api::application::v1::SessionFileView, ApplicationError> {
+        Ok(session_file_view())
+    }
+
+    async fn delete(
+        &self,
+        _command: bcs_service_api::application::v1::DeleteSessionFile,
+    ) -> Result<DeleteResult, ApplicationError> {
+        Ok(DeleteResult { deleted: true })
+    }
+
+    async fn get(
+        &self,
+        _command: bcs_service_api::application::v1::GetSessionFile,
+    ) -> Result<bcs_service_api::application::v1::SessionFileView, ApplicationError> {
+        Ok(session_file_view())
+    }
+
+    async fn list(
+        &self,
+        _command: bcs_service_api::application::v1::ListSessionFiles,
+    ) -> Result<bcs_service_api::application::v1::SessionFilePage, ApplicationError> {
+        Ok(bcs_service_api::application::v1::SessionFilePage {
+            items: vec![session_file_view()],
+            total: 1,
+        })
+    }
+
+    async fn download(
+        &self,
+        _command: bcs_service_api::application::v1::DownloadSessionFile,
+    ) -> Result<bcs_service_api::application::v1::SessionFileContent, ApplicationError> {
+        Ok(bcs_service_api::application::v1::SessionFileContent::Redirect {
+            download_url: "https://storage.example.com/file-1".into(),
+            expires_at: 3600,
+        })
+    }
+
+    async fn share(
+        &self,
+        _command: bcs_service_api::application::v1::ShareSessionFile,
+    ) -> Result<bcs_service_api::application::v1::ShareSessionFileResult, ApplicationError> {
+        Ok(bcs_service_api::application::v1::ShareSessionFileResult {
+            share_token: "share-token".into(),
+            expires_at: 3600,
+        })
+    }
+
+    async fn download_shared(
+        &self,
+        command: bcs_service_api::application::v1::DownloadSharedSessionFile,
+    ) -> Result<bcs_service_api::application::v1::SessionFileContent, ApplicationError> {
+        match command.token.as_str() {
+            "good-token" => {
+                return Ok(bcs_service_api::application::v1::SessionFileContent::Stream {
+                    file: session_file_view(),
+                    body: byte_stream_from_bytes(Bytes::from_static(b"abc")),
+                    inline: command.show,
+                });
+            }
+            "backend-error" => {
+                return Err(ApplicationError::bad_gateway(
+                    "storage_backend_unavailable",
+                    "Storage backend is unavailable",
+                ));
+            }
+            "internal-error" => {
+                return Err(ApplicationError::internal("database unavailable"));
+            }
+            _ => {}
+        }
+        Err(ApplicationError::not_found(
+            "shared_file_not_found",
+            "Shared file was not found",
+        ))
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Shared test helpers (duplicated from group_routes.rs to keep each test
@@ -426,6 +572,14 @@ fn test_session_router(
     session: Arc<FakeSessionService>,
     message: Arc<FakeSessionMessageService>,
 ) -> axum::Router {
+    test_session_router_for_caller(session, message, caller())
+}
+
+fn test_session_router_for_caller(
+    session: Arc<FakeSessionService>,
+    message: Arc<FakeSessionMessageService>,
+    authenticated_caller: AuthenticatedCaller,
+) -> axum::Router {
     router(ApiState::new(
         Arc::new(NoopGroupService),
         session,
@@ -433,14 +587,313 @@ fn test_session_router(
         Arc::new(NoopInvitationService),
         Arc::new(NoopFriendshipService),
         Arc::new(HeaderVerifier {
-            caller: caller(),
+            caller: authenticated_caller,
         }),
+    )
+    .with_session_file_service(
+        Arc::new(FakeSessionFileService),
+        SessionFileUrlProjector::new(
+            "https://gateway.example.com/openapi/v1/collaboration".into(),
+        )
+        .expect("valid base"),
     ))
 }
 
 // ---------------------------------------------------------------------------
 // Tests.
 // ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn get_session_file_uses_the_v1_envelope() {
+    let app = test_session_router(
+        Arc::new(FakeSessionService::default()),
+        Arc::new(FakeSessionMessageService::default()),
+    );
+
+    let response = app
+        .oneshot(authenticated_request(
+            "GET",
+            "/openapi/v1/collaboration/sessions/session-1/files/file-1",
+            json!(null),
+        ))
+        .await
+        .expect("file response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["code"], 20_000);
+    assert_eq!(body["data"]["file_id"], "file-1");
+    assert_eq!(body["data"]["status"], "ready");
+}
+
+#[tokio::test]
+async fn prepare_session_file_projects_the_proxy_upload_url() {
+    let app = test_session_router(
+        Arc::new(FakeSessionService::default()),
+        Arc::new(FakeSessionMessageService::default()),
+    );
+
+    let response = app
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/collaboration/sessions/session-1/files",
+            json!({
+                "file_name": "report.txt",
+                "size": 42,
+                "mime_type": "text/plain"
+            }),
+        ))
+        .await
+        .expect("prepare response");
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body = response_json(response).await;
+    assert_eq!(body["code"], 20_100);
+    assert_eq!(body["data"]["file_id"], "file-1");
+    assert_eq!(
+        body["data"]["upload_url"],
+        "https://gateway.example.com/openapi/v1/collaboration/sessions/session-1/files/file-1/content"
+    );
+}
+
+#[tokio::test]
+async fn protected_session_file_mutations_and_download_follow_v1_statuses() {
+    let app = test_session_router(
+        Arc::new(FakeSessionService::default()),
+        Arc::new(FakeSessionMessageService::default()),
+    );
+
+    let upload = Request::builder()
+        .method("PUT")
+        .uri("/openapi/v1/collaboration/sessions/session-1/files/file-1/content?part=1")
+        .header("x-test-auth", "yes")
+        .header("x-request-id", "request-upload")
+        .body(Body::from("abc"))
+        .expect("upload request");
+    let response = app.clone().oneshot(upload).await.expect("upload response");
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+    for (method, path, expected) in [
+        (
+            "POST",
+            "/openapi/v1/collaboration/sessions/session-1/files/file-1/complete",
+            StatusCode::OK,
+        ),
+        (
+            "DELETE",
+            "/openapi/v1/collaboration/sessions/session-1/files/file-1",
+            StatusCode::OK,
+        ),
+        (
+            "GET",
+            "/openapi/v1/collaboration/sessions/session-1/files",
+            StatusCode::OK,
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(authenticated_request(method, path, json!(null)))
+            .await
+            .expect("file operation response");
+        assert_eq!(response.status(), expected, "{method} {path}");
+    }
+
+    let share = app
+        .clone()
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/collaboration/sessions/session-1/files/file-1/share",
+            json!({}),
+        ))
+        .await
+        .expect("share response");
+    assert_eq!(share.status(), StatusCode::CREATED);
+    let share_body = response_json(share).await;
+    assert_eq!(
+        share_body["data"]["share_url"],
+        "https://gateway.example.com/openapi/v1/collaboration/sessions/shared-file/content?token=share-token"
+    );
+
+    let download = app
+        .oneshot(authenticated_request(
+            "GET",
+            "/openapi/v1/collaboration/sessions/session-1/files/file-1/content",
+            json!(null),
+        ))
+        .await
+        .expect("download response");
+    assert_eq!(download.status(), StatusCode::FOUND);
+    assert_eq!(
+        download.headers()["location"],
+        "https://storage.example.com/file-1"
+    );
+}
+
+#[tokio::test]
+async fn shared_file_content_is_public_and_token_failures_are_uniform_not_found() {
+    let app = test_session_router(
+        Arc::new(FakeSessionService::default()),
+        Arc::new(FakeSessionMessageService::default()),
+    );
+
+    for uri in [
+        "/openapi/v1/collaboration/sessions/shared-file/content",
+        "/openapi/v1/collaboration/sessions/shared-file/content?token=bad-token",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header("x-request-id", "public-request")
+                    .body(Body::empty())
+                    .expect("public request"),
+            )
+            .await
+            .expect("public response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{uri}");
+        let body = response_json(response).await;
+        assert_eq!(body["data"]["error_code"], "shared_file_not_found");
+    }
+
+    let success = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/openapi/v1/collaboration/sessions/shared-file/content?token=good-token&show=true")
+                .body(Body::empty())
+                .expect("public success request"),
+        )
+        .await
+        .expect("public success response");
+    assert_eq!(success.status(), StatusCode::OK);
+    assert_eq!(success.headers()["content-disposition"], "inline; filename=\"report.txt\"");
+    assert_eq!(
+        to_bytes(success.into_body(), usize::MAX).await.unwrap(),
+        Bytes::from_static(b"abc")
+    );
+
+    let protected = app
+        .oneshot(
+            Request::builder()
+                .uri("/openapi/v1/collaboration/sessions/session-1/files")
+                .body(Body::empty())
+                .expect("protected request"),
+        )
+        .await
+        .expect("protected response");
+    assert_eq!(protected.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn shared_file_content_preserves_infrastructure_failures() {
+    let app = test_session_router(
+        Arc::new(FakeSessionService::default()),
+        Arc::new(FakeSessionMessageService::default()),
+    );
+
+    for (token, expected) in [
+        ("backend-error", StatusCode::BAD_GATEWAY),
+        ("internal-error", StatusCode::INTERNAL_SERVER_ERROR),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/openapi/v1/collaboration/sessions/shared-file/content?token={token}"
+                    ))
+                    .body(Body::empty())
+                    .expect("public request"),
+            )
+            .await
+            .expect("public response");
+        assert_eq!(response.status(), expected, "{token}");
+    }
+}
+
+#[tokio::test]
+async fn session_file_routes_admit_bot_and_reject_mismatched_or_app_only_callers() {
+    let session = Arc::new(FakeSessionService::default());
+    let message = Arc::new(FakeSessionMessageService::default());
+    let bot = AuthenticatedBotIdentity {
+        bot_uuid: "bot-1".into(),
+        owner_id: "staff-1".into(),
+        app_id: 1,
+        agent_code: "agent".into(),
+    };
+
+    let bot_only = test_session_router_for_caller(
+        session.clone(),
+        message.clone(),
+        AuthenticatedCaller {
+            tenant: Some("tenant-a".into()),
+            user: None,
+            bot: Some(bot.clone()),
+            app: None,
+            access_key: None,
+        },
+    );
+    let response = bot_only
+        .oneshot(authenticated_request(
+            "GET",
+            "/openapi/v1/collaboration/sessions/session-1/files",
+            Value::Null,
+        ))
+        .await
+        .expect("Bot-only response");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let mismatched = test_session_router_for_caller(
+        session.clone(),
+        message.clone(),
+        AuthenticatedCaller {
+            tenant: Some("tenant-a".into()),
+            user: caller().user,
+            bot: Some(AuthenticatedBotIdentity {
+                owner_id: "someone-else".into(),
+                ..bot
+            }),
+            app: None,
+            access_key: None,
+        },
+    );
+    let response = mismatched
+        .oneshot(authenticated_request(
+            "GET",
+            "/openapi/v1/collaboration/sessions/session-1/files",
+            Value::Null,
+        ))
+        .await
+        .expect("mismatched User/Bot response");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let app_only = test_session_router_for_caller(
+        session,
+        message,
+        AuthenticatedCaller {
+            tenant: Some("tenant-a".into()),
+            user: None,
+            bot: None,
+            app: Some(AuthenticatedAppIdentity {
+                app_id: 1,
+                app_name: "test-app".into(),
+                owners: "staff-1".into(),
+                app_type: "service".into(),
+            }),
+            access_key: None,
+        },
+    );
+    let response = app_only
+        .oneshot(authenticated_request(
+            "GET",
+            "/openapi/v1/collaboration/sessions/session-1/files",
+            Value::Null,
+        ))
+        .await
+        .expect("App-only response");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
 
 #[tokio::test]
 async fn create_session_returns_created_and_forwards_principal() {

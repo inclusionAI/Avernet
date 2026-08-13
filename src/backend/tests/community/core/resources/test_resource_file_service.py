@@ -308,14 +308,82 @@ async def test_create_directory_writes_keep_placeholder():
     device_fs.write_file.assert_awaited_once_with("workspace/newdir/.keep", b"")
 
 
+def _fs_listing(*entries: dict) -> MagicMock:
+    """A device whose parent listing answers the file-or-directory question."""
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(return_value=list(entries))
+    device_fs.delete_file = AsyncMock(return_value=True)
+    device_fs.delete_tree = AsyncMock(return_value=True)
+    return device_fs
+
+
 @pytest.mark.asyncio
 async def test_delete_addresses_workspace():
-    device_fs = MagicMock()
-    device_fs.delete_file = AsyncMock(return_value=True)
+    device_fs = _fs_listing({"name": "a.txt", "is_dir": False})
     svc, _ = _svc(provider="arca", device_fs=device_fs)
     ok = await svc.delete(**_COORDS, path="sub/a.txt")
     assert ok is True
     device_fs.delete_file.assert_awaited_once_with("workspace/sub/a.txt")
+    device_fs.delete_tree.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_routes_a_directory_through_delete_tree():
+    """The engines split these across two operations (``remove`` vs ``rmtree``)
+    and the single-file one does not recurse, so a directory sent to
+    ``delete_file`` is simply not deleted."""
+    device_fs = _fs_listing({"name": "docs", "is_dir": True})
+    svc, _ = _svc(provider="teclaw", device_fs=device_fs)
+
+    assert await svc.delete(**_COORDS, path="sub/docs") is True
+    device_fs.delete_tree.assert_awaited_once_with("workspace/sub/docs")
+    device_fs.delete_file.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_asks_the_parent_not_the_path_itself():
+    """Listing a *file* is not a defined operation on the engines, so probing
+    the path directly would turn every file delete into an error."""
+    device_fs = _fs_listing({"name": "a.txt", "is_dir": False})
+    svc, _ = _svc(provider="arca", device_fs=device_fs)
+
+    await svc.delete(**_COORDS, path="sub/a.txt")
+
+    device_fs.list_dir.assert_awaited_once_with("workspace/sub")
+
+
+@pytest.mark.asyncio
+async def test_delete_at_the_workspace_root_lists_the_root():
+    device_fs = _fs_listing({"name": "a.txt", "is_dir": False})
+    svc, _ = _svc(provider="arca", device_fs=device_fs)
+
+    await svc.delete(**_COORDS, path="a.txt")
+
+    device_fs.list_dir.assert_awaited_once_with("workspace")
+
+
+@pytest.mark.asyncio
+async def test_delete_falls_back_to_the_file_branch_when_the_listing_fails():
+    """A failed probe must not fail the delete — the file branch is what this
+    did unconditionally before the directory support existed."""
+    device_fs = _fs_listing()
+    device_fs.list_dir = AsyncMock(side_effect=RuntimeError("engine down"))
+    svc, _ = _svc(provider="arca", device_fs=device_fs)
+
+    assert await svc.delete(**_COORDS, path="sub/a.txt") is True
+    device_fs.delete_file.assert_awaited_once_with("workspace/sub/a.txt")
+
+
+@pytest.mark.asyncio
+async def test_delete_still_reaches_hidden_system_names():
+    """The probe uses the raw device listing rather than this class's filtered
+    ``list_dir``, which drops dotfiles and the hidden system directories — those
+    stay as deletable as they were before."""
+    device_fs = _fs_listing({"name": "state", "is_dir": True})
+    svc, _ = _svc(provider="arca", device_fs=device_fs)
+
+    assert await svc.delete(**_COORDS, path="state") is True
+    device_fs.delete_tree.assert_awaited_once_with("workspace/state")
 
 
 @pytest.mark.asyncio

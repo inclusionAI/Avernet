@@ -4,6 +4,9 @@
   "port_start": 30601,
   "port_step": 10,
   "scopes": "local,merchant-operations,local-commerce,merchant-platform-coordination",
+  "bcsfuse": {
+    "fusion_enable": true
+  },
   "bots": [
     {
       "source": "merchant-operations",

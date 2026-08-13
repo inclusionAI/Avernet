@@ -10,6 +10,7 @@ import mimetypes
 import os
 import re
 import threading
+import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
@@ -17,6 +18,7 @@ from typing import Any, ClassVar
 from urllib.parse import quote
 
 from engine.community.core.resource_materialization.models import (
+    ChatAttachmentMaterializationRequest,
     ManifestEntry,
     MaterializationRequest,
     MaterializationResult,
@@ -25,6 +27,7 @@ from engine.community.core.resource_materialization.models import (
 from engine.community.plugin_api.resource_materialization import (
     BaasMaterializationClient,
     BackendMaterializationCallbackClient,
+    TemporaryUrlPullClient,
 )
 from engine.community.plugin_api.workspace_root import workspace_root_strict
 
@@ -32,6 +35,46 @@ log = logging.getLogger("engine.resource_materialization")
 _SAFE_IDENTIFIER_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
 _WINDOWS_FORBIDDEN_FILENAME_CHARACTERS = frozenset('<>:"/\\|?*')
 _MAX_FILENAME_UTF8_BYTES = 255
+
+
+def build_session_file_relative_path(
+    *,
+    scope_key_hash: str,
+    session_key_hash: str,
+    resource_id: str,
+    filename: str,
+) -> Path:
+    """Build the version-1 controlled Session File workspace layout."""
+    identifier_segments = (scope_key_hash, session_key_hash, resource_id)
+    if any(
+        not _SAFE_IDENTIFIER_SEGMENT.fullmatch(segment)
+        for segment in identifier_segments
+    ):
+        raise MaterializationSecurityError("invalid controlled path segment")
+    try:
+        filename_bytes = filename.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise MaterializationSecurityError("invalid controlled path segment") from exc
+    if (
+        not filename
+        or Path(filename).name != filename
+        or filename in {".", ".."}
+        or len(filename_bytes) > _MAX_FILENAME_UTF8_BYTES
+        or any(
+            not character.isprintable()
+            or character in _WINDOWS_FORBIDDEN_FILENAME_CHARACTERS
+            for character in filename
+        )
+    ):
+        raise MaterializationSecurityError("invalid controlled path segment")
+    return Path(
+        ".teamclaw",
+        "session-files",
+        scope_key_hash,
+        session_key_hash,
+        resource_id,
+        filename,
+    )
 
 
 class MaterializationSecurityError(ValueError):
@@ -135,6 +178,9 @@ class ManifestStore:
                     "observed_mtime_ns": observed_mtime_ns,
                     "observed_inode": observed_inode,
                     "baas_tenant": baas_tenant,
+                    "source_kind": "baas_session_file",
+                    "source_attachment_id": None,
+                    "source_url_hash": None,
                 }
             )
             payload["resources"][resource_id] = updated.model_dump(mode="json")
@@ -163,10 +209,12 @@ class ResourceMaterializationService:
         *,
         pull_client: BaasMaterializationClient,
         callback_client: BackendMaterializationCallbackClient,
+        temporary_url_pull_client: TemporaryUrlPullClient | None = None,
         workspace_root_provider: Callable[[], Path | None] = workspace_root_strict,
     ) -> None:
         self._pull_client = pull_client
         self._callback_client = callback_client
+        self._temporary_url_pull_client = temporary_url_pull_client
         self._workspace_root_provider = workspace_root_provider
         self._lock = asyncio.Lock()
 
@@ -255,9 +303,75 @@ class ResourceMaterializationService:
         await self._report(result)
         return result
 
+    async def materialize_chat_attachment(
+        self,
+        request: ChatAttachmentMaterializationRequest,
+    ) -> MaterializationResult:
+        """Materialize a chat capability without Backend callback or HTTP recursion."""
+        session_key_hash = hashlib.sha256(
+            request.session_key.encode("utf-8")
+        ).hexdigest()
+        resource_id = self._chat_resource_id(
+            request.scope_key_hash,
+            session_key_hash,
+            request.attachment_id,
+        )
+        relative = build_session_file_relative_path(
+            scope_key_hash=request.scope_key_hash,
+            session_key_hash=session_key_hash,
+            resource_id=resource_id,
+            filename=request.filename,
+        )
+        internal = MaterializationRequest(
+            resource_id=resource_id,
+            transfer_id=f"tmp_{self._url_hash(request.temporary_url)[:32]}",
+            task_id=f"chat_{resource_id}",
+            task_version=1,
+            scope_key_hash=request.scope_key_hash,
+            session_key_hash=session_key_hash,
+            transfer_api_version="bot_device_v1",
+            device_path=relative.as_posix(),
+            filename=request.filename,
+            size_bytes=request.size_bytes,
+            content_hash=request.content_hash.lower() if request.content_hash else None,
+        )
+        async with self._lock:
+            if request.expires_at_ms is not None and request.expires_at_ms <= int(
+                time.time() * 1000
+            ):
+                return self._failure_result(internal, "temporary_url_expired")
+            if self._temporary_url_pull_client is None:
+                return self._failure_result(
+                    internal, "temporary_url_pull_not_configured"
+                )
+            try:
+                return await self._materialize_locked(internal, chat_request=request)
+            except MaterializationSecurityError:
+                return self._failure_result(internal, "invalid_device_path")
+            except Exception as exc:
+                log.warning(
+                    "engine.resource_materialize.chat.fail resource_id=%s error_type=%s",
+                    resource_id,
+                    type(exc).__name__,
+                )
+                return self._failure_result(internal, "pull_failed")
+
+    async def remove_chat_materialization(self, resource_id: str) -> None:
+        """Rollback one just-created chat materialization after batch failure."""
+        async with self._lock:
+            root = self._workspace_root()
+            entry = ManifestStore(root).remove(resource_id)
+            if entry is None or entry.source_kind != "temporary_url":
+                return
+            target = root / Path(entry.relative_path)
+            self._assert_contained(root, target)
+            target.unlink(missing_ok=True)
+
     async def _materialize_locked(
         self,
         request: MaterializationRequest,
+        *,
+        chat_request: ChatAttachmentMaterializationRequest | None = None,
     ) -> MaterializationResult:
         root = self._workspace_root()
         relative, target = self._target(root, request)
@@ -293,7 +407,11 @@ class ResourceMaterializationService:
             self._path_hash(target),
         )
         try:
-            await self._pull_client.pull(request, temporary)
+            if chat_request is None:
+                await self._pull_client.pull(request, temporary)
+            else:
+                assert self._temporary_url_pull_client is not None
+                await self._temporary_url_pull_client.pull(chat_request, temporary)
             if not temporary.is_file():
                 return self._failure_result(request, "pull_missing_file")
             actual_size = temporary.stat().st_size
@@ -326,6 +444,17 @@ class ResourceMaterializationService:
                 observed_inode=getattr(observed, "st_ino", None),
                 uploaded_at=request.uploaded_at,
                 baas_tenant=request.tenant,
+                source_kind="temporary_url"
+                if chat_request is not None
+                else "baas_session_file",
+                source_attachment_id=(
+                    chat_request.attachment_id if chat_request is not None else None
+                ),
+                source_url_hash=(
+                    self._url_hash(chat_request.temporary_url)
+                    if chat_request is not None
+                    else None
+                ),
             )
             store.upsert(entry)
             log.info(
@@ -354,48 +483,19 @@ class ResourceMaterializationService:
         root: Path,
         request: MaterializationRequest,
     ) -> tuple[Path, Path]:
-        identifier_segments = (
-            request.scope_key_hash,
-            request.session_key_hash,
-            request.resource_id,
+        relative = build_session_file_relative_path(
+            scope_key_hash=request.scope_key_hash,
+            session_key_hash=request.session_key_hash,
+            resource_id=request.resource_id,
+            filename=request.filename,
         )
-        if any(
-            not _SAFE_IDENTIFIER_SEGMENT.fullmatch(segment)
-            for segment in identifier_segments
-        ):
-            raise MaterializationSecurityError("invalid controlled path segment")
-        try:
-            filename_bytes = request.filename.encode("utf-8")
-        except UnicodeEncodeError as exc:
-            raise MaterializationSecurityError(
-                "invalid controlled path segment"
-            ) from exc
-        if (
-            not request.filename
-            or Path(request.filename).name != request.filename
-            or request.filename in {".", ".."}
-            or len(filename_bytes) > _MAX_FILENAME_UTF8_BYTES
-            or any(
-                not character.isprintable()
-                or character in _WINDOWS_FORBIDDEN_FILENAME_CHARACTERS
-                for character in request.filename
-            )
-        ):
-            raise MaterializationSecurityError("invalid controlled path segment")
         supplied_path = request.workspace_relative_path or request.device_path
         if supplied_path is None:
             raise MaterializationSecurityError("controlled path is missing")
         supplied = PurePosixPath(supplied_path.replace("\\", "/"))
         if ".." in supplied.parts:
             raise MaterializationSecurityError("device_path traversal is forbidden")
-        expected_suffix = (
-            ".teamclaw",
-            "session-files",
-            request.scope_key_hash,
-            request.session_key_hash,
-            request.resource_id,
-            request.filename,
-        )
+        expected_suffix = relative.parts
         if request.transfer_api_version == "session_v2":
             if tuple(supplied.parts) != expected_suffix:
                 raise MaterializationSecurityError(
@@ -405,7 +505,6 @@ class ResourceMaterializationService:
             raise MaterializationSecurityError(
                 "device_path does not match resource scope"
             )
-        relative = Path(*expected_suffix)
         target = root / relative
         self._assert_contained(root, target)
         return relative, target
@@ -505,3 +604,18 @@ class ResourceMaterializationService:
     @staticmethod
     def _path_hash(path: Path) -> str:
         return hashlib.sha256(str(path).encode("utf-8")).hexdigest()[:16]
+
+    @staticmethod
+    def _url_hash(url: str) -> str:
+        return hashlib.sha256(url.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _chat_resource_id(
+        scope_key_hash: str,
+        session_key_hash: str,
+        attachment_id: str,
+    ) -> str:
+        digest = hashlib.sha256(
+            f"{scope_key_hash}\0{session_key_hash}\0{attachment_id}".encode("utf-8")
+        ).hexdigest()
+        return f"sr_{digest[:40]}"

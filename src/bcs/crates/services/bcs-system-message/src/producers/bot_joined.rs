@@ -55,6 +55,7 @@ impl SystemMessageProducerService for BotJoinedMessageProducer {
         let SystemMessageEvent::BotJoined {
             actor,
             session_id,
+            session_input,
             ..
         } = event
         else {
@@ -62,6 +63,13 @@ impl SystemMessageProducerService for BotJoinedMessageProducer {
         };
 
         let new_bot_uuid = actor.bot_uuid.clone();
+        // `目标` (topic) sourcing: session input → group.context → group.label,
+        // empty when all are absent (the `目标` line is then omitted).
+        let topic = bcs_service_api::resolve_session_topic(
+            session_input.as_ref(),
+            group.context.as_deref(),
+            group.label.as_deref(),
+        );
         let mut messages = Vec::new();
 
         // 1. Full context injection to the newly joined bot (personalized,
@@ -71,6 +79,7 @@ impl SystemMessageProducerService for BotJoinedMessageProducer {
             participants,
             &new_bot_uuid,
             session_id,
+            topic.as_deref(),
             registry,
             &*self.history,
         )
@@ -155,13 +164,16 @@ fn truncate_utf8(s: &str, max_chars: usize) -> String {
 ///
 /// Mirrors the unified `<GroupContext>` block used by the session-context
 /// producer, with a `你已加入` opening and a trailing `## 群历史消息` section.
-/// The `BotJoined` event carries no session/reason/task, so `## 群聊信息`
-/// omits `会话ID`/`目标` and there is no `## 任务说明` section.
+/// `会话ID` comes from the `BotJoined` event; `目标` is sourced from the
+/// session input → group.context → group.label, omitted when all are empty.
+/// There is no `## 任务说明` section (the joining bot is not re-injected with
+/// the original task).
 async fn build_context_injection_message(
     group: &Group,
     participants: &[Participant],
     new_bot_uuid: &str,
     session_id: &str,
+    topic: Option<&str>,
     registry: &dyn BotRegistryCoreService,
     history: &dyn GroupMessageHistoryService,
 ) -> String {
@@ -202,7 +214,7 @@ async fn build_context_injection_message(
     let history_messages = fetch_history(group, session_id, participants, history).await;
 
     let sections = vec![
-        group_info_section(&render_group, None, None, &recipient, mode),
+        group_info_section(&render_group, Some(session_id), topic, &recipient, mode),
         format!("## 参与者:\n{}", participant_table(&render_group)),
         format!(
             "## 工具说明 ({})\n{}",

@@ -41,6 +41,16 @@ class FileTooLargeError(ValueError):
     """Raised when a preview's content exceeds the configured max preview size."""
 
 
+class InvalidResourcePathError(ValueError):
+    """Raised when a caller-supplied path is not addressable inside the workspace.
+
+    A named subclass rather than a bare ``ValueError`` because
+    ``responses.ENVELOPE_ERRORS`` maps types, not base classes: an unmapped
+    exception is re-raised and surfaces as a 500, so a caller sending ``..`` in a
+    path would be told the server broke rather than that their input was wrong.
+    """
+
+
 class ResourceService:
     """Manage resources backed by `ResourceRepositoryProtocol`."""
 
@@ -350,6 +360,87 @@ class ResourceService:
             except Exception as e:
                 logger.warning("[delete_resource] device_fs delete failed: %s", e)
         return self._repo.delete(resource_id)
+
+    async def delete_file_record(self, *, path: str) -> bool:
+        """Drop the record for a workspace path, and for anything beneath it.
+
+        The subtree half is what a directory delete needs: removing a directory
+        removes its files too, so rows for ``docs/a.txt`` must go when ``docs``
+        does. Left behind, they stay in the publish pipeline's manifest pointing
+        at bytes that no longer exist, and nothing can clear them — the retry is
+        refused 404 because the directory is already gone.
+
+        The caller does not have to say which it is. A file path has no
+        descendants (nothing can live under ``a.txt/``), so the prefix arm is
+        inert for it and one method covers both.
+
+        Returns whether anything was removed — the repository's own answer, not
+        a restatement of "a row matched". The two differ when a row disappears
+        between the scan and the update, and reporting the scan result would
+        claim a drop that never happened.
+
+        A ``False`` is not an error, which is why the caller does not check it:
+        absence is the desired end state either way. A file the bot created
+        itself never had a record, and the workspace — not this table — decides
+        what exists.
+        """
+        prefix = f"{path}/"
+        removed = False
+        for item in self._repo.list_resources(
+            resource_type=ResourceType.FILE.value,
+            parent_path=None,
+            user_id=None,
+            bolt_id=self._bot_id,
+        ):
+            row_path = (item.get("attributes") or {}).get("path")
+            if row_path == path or (row_path or "").startswith(prefix):
+                # Every match is dropped, not just the first: a directory has as
+                # many rows as it has files.
+                removed = self._repo.delete(str(item.get("id"))) or removed
+        return removed
+
+    async def record_uploaded_file(
+        self,
+        *,
+        path: str,
+        size: int,
+        user_id: Optional[str] = None,
+        created_by: Optional[str] = None,
+        source: str = "upload",
+    ) -> Resource:
+        """Record a file that is already present in the workspace.
+
+        The bytes are written through the device seam before this runs, so the
+        row is not the fact of existence — the workspace is. What it is, is the
+        publish pipeline's input: that pipeline builds a released bot's manifest
+        from these rows, so a file with no row publishes as a bot silently
+        missing it. That makes the write load-bearing rather than decorative,
+        and a failure here fails the upload (the caller rolls the file back).
+
+        It also carries what the filesystem cannot know — who uploaded the file,
+        when, and that it arrived by upload rather than being produced by the
+        bot — which the console surfaces. This API does not.
+
+        ``name`` and ``parent_path`` are derived from ``path`` rather than asked
+        for: ``name`` is non-optional on the model, and the console's listing
+        filters rows by ``parent_path``. Both are a ``basename``/``dirname`` off
+        the single path the caller gave.
+        """
+        leaf = path.rsplit("/", 1)[-1]
+        parent = path.rsplit("/", 1)[0] if "/" in path else ""
+        record = create_file_resource(
+            name=leaf,
+            path=path,
+            parent_path=parent,
+            size=size,
+            user_id=user_id,
+            created_by=created_by,
+            source=source,
+            bolt_id=self._bot_id,
+        )
+        stored = self._repo.create(record.to_dict())
+        record.id = stored.get("id")
+        return record
 
     async def upload_file(
         self,

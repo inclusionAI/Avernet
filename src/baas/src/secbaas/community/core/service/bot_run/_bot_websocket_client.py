@@ -10,6 +10,7 @@ OpenClaw WebSocket 客户端（纯异步版本）
 """
 
 import asyncio
+import dataclasses
 import json
 import os
 import ssl
@@ -218,6 +219,7 @@ class BotWebSocketClient:
         auth_token: str | None = None,
         app_id: str | None = None,
         chat_metadata: dict[str, str] | None = None,
+        attachments: list[Any] | None = None,
     ) -> dict[str, Any]:
         """发送聊天消息"""
         params: dict[str, Any] = {
@@ -231,6 +233,11 @@ class BotWebSocketClient:
             params["appId"] = app_id
         if chat_metadata:
             params.update(chat_metadata)
+        if attachments:
+            params["attachments"] = [
+                dataclasses.asdict(a) if dataclasses.is_dataclass(a) else a
+                for a in attachments
+            ]
         params["x-iam-token"] = auth_token or "OPEN_API:NOT_PROVIDED"
 
         result = await self._send_request(
@@ -257,6 +264,7 @@ class BotWebSocketClient:
         timeout_ms: int | None = None,
         auth_token: str | None = None,
         chat_metadata: dict[str, str] | None = None,
+        attachments: list[Any] | None = None,
     ) -> dict[str, Any]:
         """注入聊天消息"""
         params: dict[str, Any] = {
@@ -267,6 +275,11 @@ class BotWebSocketClient:
             params["timeoutMs"] = str(timeout_ms)
         if chat_metadata:
             params.update(chat_metadata)
+        if attachments:
+            params["attachments"] = [
+                dataclasses.asdict(a) if dataclasses.is_dataclass(a) else a
+                for a in attachments
+            ]
         params["x-iam-token"] = auth_token or "OPEN_API:NOT_PROVIDED"
 
         result = await self._send_request(

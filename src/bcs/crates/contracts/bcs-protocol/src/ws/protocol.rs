@@ -817,6 +817,8 @@ pub struct ChatEventPayload {
     pub error_message: Option<String>,
     #[serde(rename = "errorKind", skip_serializing_if = "Option::is_none")]
     pub error_kind: Option<String>,
+    #[serde(rename = "errorCode", skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
     /// Tool call ID (for tool_call_start/tool_call_end states).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
@@ -1579,6 +1581,19 @@ mod tests {
         assert_eq!(serde_json::to_string(&ChatEventState::Error).unwrap(), r#""error""#);
         assert_eq!(serde_json::to_string(&ChatEventState::ToolCallStart).unwrap(), r#""tool_call_start""#);
         assert_eq!(serde_json::to_string(&ChatEventState::ToolCallEnd).unwrap(), r#""tool_call_end""#);
+    }
+
+    #[test]
+    fn chat_event_preserves_stable_error_code() {
+        let payload: ChatEventPayload = serde_json::from_value(serde_json::json!({
+            "run_id": "run-1",
+            "bcs_group_id": "group-1",
+            "state": "error",
+            "errorCode": "FILE_HASH_MISMATCH"
+        }))
+        .expect("deserialize chat error");
+
+        assert_eq!(payload.error_code.as_deref(), Some("FILE_HASH_MISMATCH"));
     }
 
     mod tool_event {

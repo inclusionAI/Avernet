@@ -147,7 +147,11 @@ class _StubForwarder:
             if False:  # pragma: no cover
                 yield
 
-        yield ForwardResponse(status_code=200, headers=[], body=_empty_body())
+        try:
+            yield ForwardResponse(status_code=200, headers=[], body=_empty_body())
+        finally:
+            if request.body is not None:
+                await request.body.aclose()
 
 
 @pytest.fixture

@@ -1657,7 +1657,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by(le, route) (rate(bcs_http_request_duration_seconds_bucket{env=\"$env\",route!~\"/chat/runs/[{]run_id[}]|/bots/[{]id[}]/chat|/sessions/[{]sid[}]/chat|/bot/events|/bots/[{]id[}]/chat-async\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by(le, route) (rate(bcs_http_request_duration_seconds_bucket{env=\"$env\",route!~\"/chat/runs/[{]run_id[}]|/sessions/[{]sid[}]/chat|/bot/events|/bots/[{]id[}]/chat-async\"}[5m])))",
           "instant": false,
           "legendFormat": "p95 {{route}}",
           "range": true,
@@ -1755,7 +1755,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum by(le, route) (rate(bcs_http_request_duration_seconds_bucket{env=\"$env\",route!~\"/chat/runs/[{]run_id[}]|/bots/[{]id[}]/chat|/sessions/[{]sid[}]/chat|/bot/events|/bots/[{]id[}]/chat-async\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by(le, route) (rate(bcs_http_request_duration_seconds_bucket{env=\"$env\",route!~\"/chat/runs/[{]run_id[}]|/sessions/[{]sid[}]/chat|/bot/events|/bots/[{]id[}]/chat-async\"}[5m])))",
           "instant": false,
           "legendFormat": "p99 {{route}}",
           "range": true,
@@ -1853,7 +1853,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by(le, route) (rate(bcs_http_request_duration_seconds_bucket{env=\"$env\",route=~\"/chat/runs/[{]run_id[}]|/bots/[{]id[}]/chat|/sessions/[{]sid[}]/chat\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by(le, route) (rate(bcs_http_request_duration_seconds_bucket{env=\"$env\",route=~\"/chat/runs/[{]run_id[}]|/sessions/[{]sid[}]/chat\"}[5m])))",
           "instant": false,
           "legendFormat": "p95 {{route}}",
           "range": true,
@@ -1865,7 +1865,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum by(le, route) (rate(bcs_http_request_duration_seconds_bucket{env=\"$env\",route=~\"/chat/runs/[{]run_id[}]|/bots/[{]id[}]/chat|/sessions/[{]sid[}]/chat\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by(le, route) (rate(bcs_http_request_duration_seconds_bucket{env=\"$env\",route=~\"/chat/runs/[{]run_id[}]|/sessions/[{]sid[}]/chat\"}[5m])))",
           "instant": false,
           "legendFormat": "p99 {{route}}",
           "range": true,

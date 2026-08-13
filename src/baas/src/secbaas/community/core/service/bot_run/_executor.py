@@ -25,6 +25,7 @@ import json
 import time
 from typing import TYPE_CHECKING, Any
 
+from secbaas.community.api.bcn import Attachment
 from secbaas.community.api.bot_runtime import (
     BotBindingInfo,
     BotChatContext,
@@ -266,6 +267,12 @@ class BotRunRequestExecutor:
             return
 
         metadata: dict[str, Any] = run.metadata or {}
+        # Reconstruct Attachment objects from Queue meta (D-04 Step B)
+        queue_meta: dict[str, Any] = record.meta or {}
+        attachments_raw = queue_meta.get("attachments")
+        attachments = (
+            [Attachment(**a) for a in attachments_raw] if attachments_raw else None
+        )
         request_type = metadata.get("request_type", "chat")
         stream = metadata.get("stream", "false") == "true"
         timeout_sec = metadata.get("timeout")
@@ -309,11 +316,22 @@ class BotRunRequestExecutor:
         try:
             if request_type == "inject":
                 await self._do_inject(
-                    run, bot_service, session_id, binding_info, context
+                    run,
+                    bot_service,
+                    session_id,
+                    binding_info,
+                    context,
+                    attachments=attachments,
                 )
             elif stream:
                 await self._do_send_stream(
-                    run, bot_service, session_id, timeout_sec, binding_info, context
+                    run,
+                    bot_service,
+                    session_id,
+                    timeout_sec,
+                    binding_info,
+                    context,
+                    attachments=attachments,
                 )
             else:
                 await self._do_send(
@@ -325,6 +343,7 @@ class BotRunRequestExecutor:
                     binding_info,
                     context,
                     chat_metadata,
+                    attachments=attachments,
                 )
 
         except TimeoutError:
@@ -343,6 +362,7 @@ class BotRunRequestExecutor:
         binding_info: BotBindingInfo,
         context: BotChatContext,
         chat_metadata: dict[str, str] | None = None,
+        attachments: list[Any] | None = None,
     ) -> None:
         wait_result = True
         if "ignore_result" in metadata:
@@ -367,6 +387,7 @@ class BotRunRequestExecutor:
             context=context,
             timeout=timeout_sec,
             chat_metadata=chat_metadata,
+            attachments=attachments,
         )
 
         extra: dict[str, Any] = {"session_id": session_id}
@@ -392,6 +413,7 @@ class BotRunRequestExecutor:
         timeout_sec: float | None,
         binding_info: BotBindingInfo,
         context: BotChatContext,
+        attachments: list[Any] | None = None,
     ) -> None:
         """流式发送：消费 bot_service.send_message_stream，逐 chunk 写 chunk 表 + ZCache watermark。
 
@@ -484,6 +506,7 @@ class BotRunRequestExecutor:
                 binding_info=binding_info,
                 context=context,
                 timeout=timeout_sec,
+                attachments=attachments,
             ):
                 if chunk.type == "delta":
                     delta_buffer.append(chunk.content)
@@ -546,12 +569,14 @@ class BotRunRequestExecutor:
         session_id: str,
         binding_info: BotBindingInfo,
         context: BotChatContext,
+        attachments: list[Any] | None = None,
     ) -> None:
         await bot_service.inject_message(
             session_id=session_id,
             message=run.message_long or "",
             binding_info=binding_info,
             context=context,
+            attachments=attachments,
         )
         self._repo.update_result(
             run_id=run.run_id,

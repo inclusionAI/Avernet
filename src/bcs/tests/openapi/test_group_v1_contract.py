@@ -46,9 +46,24 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
         "offset",
         "limit",
         "q",
+        "visibility",
         "membership",
         "kind",
         "strategy",
+    }
+    query_parameters = {
+        parameter["name"]: parameter
+        for parameter in list_operation["parameters"]
+        if parameter["in"] == "query"
+    }
+    assert query_parameters["membership"]["schema"] == {
+        "type": "string",
+        "enum": ["direct", "session_only"],
+        "default": "direct",
+    }
+    assert query_parameters["visibility"]["schema"] == {
+        "type": "string",
+        "enum": ["private", "public"],
     }
     path_names = {
         parameter["name"]
@@ -229,6 +244,7 @@ def test_list_groups_uses_the_shared_view_actor_query() -> None:
         "offset",
         "limit",
         "q",
+        "visibility",
         "membership",
         "kind",
         "strategy",

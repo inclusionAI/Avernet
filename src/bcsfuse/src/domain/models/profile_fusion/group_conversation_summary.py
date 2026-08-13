@@ -27,6 +27,14 @@ class GroupConversationSummary:
     context_summary: str
     """会话上下文摘要，用于 prompt 增强"""
 
+    key_messages: list[dict[str, str]]
+    """
+    与原始问题相关的关键群消息。
+
+    每条消息包含 `sender`（发送者/bot 名）和 `content`（核心原话），
+    用于在最终 Prompt 中保留"谁说了什么"的原始信息。
+    """
+
     context_messages_count: int
     """会话历史消息数量"""
 
