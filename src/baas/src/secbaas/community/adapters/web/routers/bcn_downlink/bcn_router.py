@@ -20,6 +20,7 @@
 """
 
 import json
+import os
 import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Any
@@ -119,9 +120,16 @@ def validate_bcn_token(
     if len(parts) != 2 or parts[0].lower() != "bearer":
         raise BcnUnauthorizedError("Invalid Authorization header format")
 
-    expected_token = secret_plugin.get_secret(
-        "other_manual_secbaas_bcn_to_provider_token"
-    )
+    expected_token = os.getenv("BCS_BAAS_DOWNLINK_TOKEN", "")
+    if not expected_token:
+        try:
+            expected_token = secret_plugin.get_secret(
+                "other_manual_secbaas_bcn_to_provider_token"
+            )
+        except RuntimeError:
+            # The default local stub has no secret. The opt-in bridge supplies
+            # a process-local token; old local behaviour otherwise remains.
+            expected_token = ""
     if not expected_token:
         return parts[1]
 

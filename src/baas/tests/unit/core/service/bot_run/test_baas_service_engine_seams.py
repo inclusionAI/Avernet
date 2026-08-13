@@ -67,6 +67,13 @@ def test_strip_ws_url_to_base_aicoding_path() -> None:
     assert base == "https://host/proxypass/tgt"
 
 
+def test_strip_ws_url_to_base_claude_code_loopback_uses_http() -> None:
+    base = BaasBotService._strip_ws_url_to_base(
+        "ws://localhost:20010/api/claude_code/ws", "/api/claude_code/ws"
+    )
+    assert base == "http://localhost:20010"
+
+
 def test_build_base_url_openclaw_regression() -> None:
     # openclaw 静态 _build_base_url 行为保持不变
     conn = MagicMock()

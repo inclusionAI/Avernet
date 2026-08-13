@@ -218,6 +218,18 @@ test_baas_stop_does_not_delegate_to_app_stop() {
     fail "baas_stop should clean the BAAS port with ownership verification"
 }
 
+test_baas_start_exports_environment_before_invoking_shell_wrapper() {
+  local start_body
+  start_body="$(
+    sed -n '/^baas_start()/,/^baas_stop()/p' "${ROOT}/scripts/modules/baas.sh"
+  )"
+  grep -F 'export "${baas_env_args[@]}"' <<<"$start_body" >/dev/null || \
+    fail "baas_start must export BAAS environment in its shell before invoking start_in_detached_session"
+  if grep -F 'env "${baas_env_args[@]}"' <<<"$start_body" >/dev/null; then
+    fail "baas_start must not use env to invoke the start_in_detached_session shell function"
+  fi
+}
+
 test_baas_bot_cleanup_preserves_bcs_sessions() {
   setup_env
   export RUNTIME_DATA_DIR="$(mktemp -d)"
@@ -442,7 +454,13 @@ test_baas_start_passes_bcn_runtime_configuration() (
   check_directory_exists() { return 0; }
   setup_bcn_plugin() { printf '%s\n' "setup" >> "$sequence_file"; }
   bots_bcn_plugin_load_dir() { printf '%s\n' "resolve" >> "$sequence_file"; printf '%s\n' "$plugin_dir"; }
-  env() { printf '%s\n' "start" >> "$sequence_file"; printf '%s\n' "$*" > "$captured_env"; return 0; }
+  start_in_detached_session() {
+    printf '%s\n' "start" >> "$sequence_file"
+    {
+      printf '%s\n' "BCN_PLUGIN_PATH=${BCN_PLUGIN_PATH:-}"
+      printf '%s\n' "BCS_PORT=${BCS_PORT:-}"
+    } > "$captured_env"
+  }
 
   baas_start
 
@@ -548,6 +566,7 @@ test_frontend_install_includes_dev_dependencies
 test_service_modules_use_ownership_aware_stop_helpers
 test_service_starts_fail_when_ports_remain_occupied
 test_baas_stop_does_not_delegate_to_app_stop
+test_baas_start_exports_environment_before_invoking_shell_wrapper
 test_baas_bot_cleanup_preserves_bcs_sessions
 test_baas_session_backup_normalizes_trailing_slashes
 test_baas_session_restore_normalizes_trailing_slashes

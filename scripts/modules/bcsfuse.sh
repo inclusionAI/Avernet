@@ -31,6 +31,19 @@ bcsfuse_load_env() {
     # Without this, BCSFUSE_AUTH_TOKEN is never set → 401 on all protected routes.
     load_repo_env_file "${BCSFUSE_ENV_FILE}"
 
+    # merchant_hybrid has one model policy for OpenClaw, Claude Code, and SOP.
+    # Its generated BCSFuse env file may predate that policy, so restore the
+    # five SOP model selectors only after that file has been loaded.
+    if [ "${MERCHANT_HYBRID_ACTIVE:-0}" = "1" ]; then
+        local merchant_hybrid_model="${MERCHANT_HYBRID_MODEL_ID:-Kimi-K2.6}"
+        export LLM_FAST_MODEL="$merchant_hybrid_model"
+        export LLM_BALANCED_MODEL="$merchant_hybrid_model"
+        export LLM_REASONING_MODEL="$merchant_hybrid_model"
+        export LLM_LONG_CONTEXT_MODEL="$merchant_hybrid_model"
+        export LLM_EXTRACTION_MODEL="$merchant_hybrid_model"
+        log_info "merchant_hybrid model policy: reapplied ${merchant_hybrid_model} for BCSFuse SOP"
+    fi
+
     # Ensure provider mode defaults to dev
     export BCSFUSE_PROVIDER_MODE="${BCSFUSE_PROVIDER_MODE:-dev}"
     export BCSFUSE_SERVER_PORT="${BCSFUSE_PORT:-8765}"
@@ -268,7 +281,7 @@ bcsfuse_start() {
     # Start runtime
     cd "${BCSFUSE_DIR}"
     log_info "Starting bcsfuse (${mode}) on port ${BCSFUSE_PORT}..."
-    nohup uv run python main.py >> "${BCSFUSE_LOG}" 2>&1 &
+    start_in_detached_session uv run python main.py >> "${BCSFUSE_LOG}" 2>&1 &
     local pid=$!
     echo "$pid" > "${BCSFUSE_PID_FILE}"
 
@@ -298,7 +311,15 @@ bcsfuse_start() {
     done
 
     if [ "$passed" = true ]; then
-        log_info "bcsfuse started successfully on port ${BCSFUSE_PORT} (${mode} mode)"
+        # The detached-session wrapper execs through uv before Python owns the
+        # listening socket. Record the actual listener so status/stop do not
+        # retain the short-lived wrapper PID.
+        local listener_pid
+        listener_pid="$(lsof -tiTCP:"${BCSFUSE_PORT}" -sTCP:LISTEN 2>/dev/null | head -1)"
+        if [ -n "$listener_pid" ]; then
+            printf '%s\n' "$listener_pid" > "${BCSFUSE_PID_FILE}"
+        fi
+        log_info "bcsfuse started successfully on port ${BCSFUSE_PORT} (${mode} mode; listener PID: ${listener_pid:-unknown})"
     else
         log_error "bcsfuse: Health check failed after startup"
         log_error "Check log: ${BCSFUSE_LOG}"
@@ -414,6 +435,8 @@ bcsfuse_clean() {
 # ============ Status ============
 
 bcsfuse_status() {
+    bcsfuse_load_env
+
     local pid=""
     if [ -f "${BCSFUSE_PID_FILE}" ]; then
         pid=$(cat "${BCSFUSE_PID_FILE}" 2>/dev/null || echo "")
