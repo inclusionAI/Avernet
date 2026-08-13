@@ -123,6 +123,10 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
     assert "/openapi/v1/chat/sessions/{session_id}" in paths
     assert "/openapi/v1/collaboration/bots/mine" in paths
     assert "post" in paths["/openapi/v1/collaboration/sessions/{session_id}/token"]
+    collection = paths[
+        "/openapi/v1/collaboration/sessions/{session_id}/collect"
+    ]
+    assert set(collection) == {"delete", "post"}
     assert "get" in paths["/openapi/v1/collaboration/messages/ws"]
     assert "put" in paths[
         "/openapi/v1/collaboration/sessions/{session_id}/files/{file_id}/content"
@@ -143,6 +147,8 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
     }.issubset(message_data["items"]["properties"])
     assert {"messages", "next_cursor", "has_more"}.isdisjoint(message_data)
     collaboration_http_security = {"user": "required", "app": "required"}
+    assert collection["post"]["x-avernet-security"] == collaboration_http_security
+    assert collection["delete"]["x-avernet-security"] == collaboration_http_security
     assert paths["/openapi/v1/collaboration/bots/mine"]["get"][
         "x-avernet-security"
     ] == collaboration_http_security

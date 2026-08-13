@@ -73,12 +73,12 @@ def test_main_publishes_on_pass(tmp_path: Path) -> None:
     )
 
 
-def test_checked_in_bcn_artifact_is_a_41_operation_openapi_document() -> None:
+def test_checked_in_bcn_artifact_is_a_43_operation_openapi_document() -> None:
     document = json.loads(_BCN_ARTIFACT.read_text(encoding="utf-8"))
     operations = sum(len(item) for item in document["paths"].values())
 
     assert document["openapi"] == "3.1.0"
-    assert operations == 41
+    assert operations == 43
     assert all(
         path.startswith("/openapi/v1/collaboration/") for path in document["paths"]
     )
@@ -86,6 +86,15 @@ def test_checked_in_bcn_artifact_is_a_41_operation_openapi_document() -> None:
         "post"
         in document["paths"]["/openapi/v1/collaboration/sessions/{session_id}/token"]
     )
+    collection = document["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/collect"
+    ]
+    assert set(collection) == {"delete", "post"}
+    for operation in collection.values():
+        assert operation["x-avernet-security"] == {
+            "user": "required",
+            "app": "required",
+        }
     websocket = document["paths"]["/openapi/v1/collaboration/messages/ws"]["get"]
     assert websocket["x-avernet-protocol"] == "websocket"
     assert websocket["x-avernet-security"] == {}
