@@ -17,23 +17,34 @@ are stored stays a storage concern.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from gateway.community.logger import get_logger
 from gateway.community.spi.app import AppRegistry, RegisteredApp
 from gateway.community.spi.database import DataSourcePlugin
 
 from ._key_gen import APIKeyGenerator
-from ._orm import AppRow
+from ._orm import API_KEY_PREFIX_LEN, AppRow
 
 logger = get_logger("core-app")
 
 _ACTIVE = "ACTIVE"
 
-# The API-key prefix length, and the shortest credential worth a lookup.
-_PREFIX_LEN = 8
+# App ids already reported as still presenting a legacy JWT. Warning once per
+# app rather than once per request keeps the deprecation signal readable: the
+# question is *which* apps still need rotating, and one busy app would otherwise
+# emit millions of lines a day and bury a quiet one. Module-level because the DI
+# container builds this repository per request (``providers.Factory``), so
+# instance state would never survive long enough to dedupe anything.
+_warned_legacy_apps: set[int] = set()
+
+
+class PrefixTakenError(RuntimeError):
+    """The API-key prefix was claimed concurrently; generate another and retry."""
 
 
 class AppRepository(AppRegistry):
@@ -57,13 +68,13 @@ class AppRepository(AppRegistry):
         sets cannot overlap. Each call therefore makes exactly one query, and
         neither form can be silently served by the other's path.
         """
-        if not credential or len(credential) < _PREFIX_LEN:
+        if not credential or len(credential) < API_KEY_PREFIX_LEN:
             return None  # too short to carry a prefix — reject without a query
         if APIKeyGenerator.validate_format(credential):
-            return self._by_api_key(credential)
+            return await self._by_api_key(credential)
         return self._by_legacy_token(credential)
 
-    def _by_api_key(self, api_key: str) -> RegisteredApp | None:
+    async def _by_api_key(self, api_key: str) -> RegisteredApp | None:
         """Locate by prefix, then verify the hash in constant time.
 
         The prefix is the lookup key because the stored hash is salted: deriving
@@ -72,7 +83,7 @@ class AppRepository(AppRegistry):
         with self._db.orm_session() as session:
             row = session.scalar(
                 select(self.Model).where(
-                    self.Model.api_key_prefix == api_key[:_PREFIX_LEN],
+                    self.Model.api_key_prefix == api_key[:API_KEY_PREFIX_LEN],
                     self.Model.status == _ACTIVE,
                 )
             )
@@ -83,21 +94,35 @@ class AppRepository(AppRegistry):
             stored_hash, record = row.api_key_hash, row.to_record()
 
         if stored_hash is None:
-            return None  # an api-key prefix with no hash is a malformed row
-        # Verify outside the session — PBKDF2 is ~60ms of CPU, and there is no
-        # reason to hold a pooled connection across it.
-        if not APIKeyGenerator.verify_key(api_key, stored_hash):
+            # Violates the table's one-credential-form invariant — a partial
+            # write or a botched migration. Logged loudly, because the symptom
+            # otherwise is an app that cannot authenticate while its row looks
+            # perfectly fine to whoever is reading the table.
+            logger.error(
+                "app row has an api_key_prefix but no api_key_hash: id=%s app_name=%s",
+                record.id,
+                record.app_name,
+            )
             return None
-        return record
+
+        # PBKDF2 is ~30ms of CPU and must not run on the event loop: measured
+        # inline, ten concurrent verifications stall every other coroutine for
+        # the full ~300ms — unrelated user traffic, WebSocket relays, health
+        # checks alike. ``pbkdf2_hmac`` releases the GIL, so a worker thread also
+        # lets concurrent verifications genuinely overlap.
+        verified = await asyncio.to_thread(
+            APIKeyGenerator.verify_key, api_key, stored_hash
+        )
+        return record if verified else None
 
     def _by_legacy_token(self, token: str) -> RegisteredApp | None:
         """DEPRECATED — resolve a pre-API-key app by its plaintext JWT.
 
         Kept only so credentials issued before the API-key scheme keep working
-        while their holders rotate. Every hit logs at WARNING; once that log
-        goes quiet in production, delete this method, its branch in
-        :meth:`find_app_by_credential`, ``AppRow.token``, and the column's
-        unique index.
+        while their holders rotate. The first hit from each app logs at WARNING;
+        once that log stops appearing across a full deploy cycle, delete this
+        method, its branch in :meth:`find_app_by_credential`, ``AppRow.token``,
+        and the column's unique index.
         """
         with self._db.orm_session() as session:
             row = session.scalar(
@@ -110,13 +135,16 @@ class AppRepository(AppRegistry):
                 return None
             record = row.to_record()
 
-        logger.warning(
-            "app authenticated with a deprecated JWT token: "
-            "id=%s app_name=%s tenant=%s — rotate this app onto an API key",
-            record.id,
-            record.app_name,
-            record.tenant,
-        )
+        if record.id not in _warned_legacy_apps:
+            _warned_legacy_apps.add(record.id)
+            logger.warning(
+                "app is still authenticating with a deprecated JWT token: "
+                "id=%s app_name=%s tenant=%s — rotate it onto an API key "
+                "(logged once per app per process)",
+                record.id,
+                record.app_name,
+                record.tenant,
+            )
         return record
 
     async def exists_prefix(self, api_key_prefix: str) -> bool:
@@ -145,24 +173,30 @@ class AppRepository(AppRegistry):
         """Persist a freshly registered app; return its inserted surrogate ``id``.
 
         Takes the hashed credential and its prefix — the plaintext key is never
-        passed here and never stored. Optional ``status`` / ``env`` / ``config``
-        default to ``ACTIVE`` / ``""`` / ``{}``; ``creator`` / ``modifier``
-        default to ``""`` (the unauthenticated admin has no caller).
+        passed here and never stored. Raises :class:`PrefixTakenError` when the
+        prefix was claimed between the caller's check and this insert, so the
+        caller can retry with a fresh key: the unique index, not the check, is
+        what actually guarantees uniqueness. Optional ``status`` / ``env`` /
+        ``config`` default to ``ACTIVE`` / ``""`` / ``{}``; ``creator`` /
+        ``modifier`` default to ``""`` (the unauthenticated admin has no caller).
         """
-        with self._db.orm_session() as session:
-            row = AppRow(
-                api_key_hash=api_key_hash,
-                api_key_prefix=api_key_prefix,
-                app_name=app_name,
-                app_type=app_type,
-                owners=owners,
-                tenant=tenant,
-                status=status,
-                env=env,
-                config={} if config is None else config,
-                creator=creator,
-                modifier=modifier,
-            )
-            session.add(row)
-            session.flush()
-            return row.id
+        try:
+            with self._db.orm_session() as session:
+                row = AppRow(
+                    api_key_hash=api_key_hash,
+                    api_key_prefix=api_key_prefix,
+                    app_name=app_name,
+                    app_type=app_type,
+                    owners=owners,
+                    tenant=tenant,
+                    status=status,
+                    env=env,
+                    config={} if config is None else config,
+                    creator=creator,
+                    modifier=modifier,
+                )
+                session.add(row)
+                session.flush()
+                return row.id
+        except IntegrityError as exc:
+            raise PrefixTakenError(api_key_prefix) from exc

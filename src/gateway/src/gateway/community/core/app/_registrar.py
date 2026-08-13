@@ -19,11 +19,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from ._key_gen import APIKeyGenerator
-from ._repository import _PREFIX_LEN, AppRepository
+from ._orm import API_KEY_PREFIX_LEN
+from ._repository import AppRepository, PrefixTakenError
 
 # Prefix collisions are vanishingly unlikely (8 base62 characters), but the
-# column is unique, so a collision would surface as an IntegrityError on insert.
-# Retrying costs nothing and mirrors the secbaas key service.
+# column is unique, so one would otherwise surface as a 500. Retrying costs
+# nothing and mirrors the secbaas key service.
 _MAX_PREFIX_ATTEMPTS = 3
 
 
@@ -65,40 +66,44 @@ class AppRegistrar:
         env: str = "",
         config: dict[str, Any] | None = None,
     ) -> IssuedApp:
-        api_key = await self._allocate_key()
-        # The registering caller is both creator and modifier on register.
-        app_id = await self._repository.store(
-            api_key_hash=APIKeyGenerator.hash_key(api_key),
-            api_key_prefix=api_key[:_PREFIX_LEN],
-            app_name=app_name,
-            owners=owners,
-            app_type=app_type,
-            tenant=tenant,
-            status=status,
-            env=env,
-            config=config,
-            creator=creator,
-            modifier=creator,
-        )
-        return IssuedApp(
-            id=app_id,
-            app_name=app_name,
-            owners=owners,
-            app_type=app_type,
-            tenant=tenant,
-            api_key=api_key,
-        )
+        """Register an app, returning its record and its one-time plaintext key.
 
-    async def _allocate_key(self) -> str:
-        """Generate a key whose prefix no app holds yet.
-
-        Hashing is deliberately left until after a prefix is settled: it costs
-        ~60ms of CPU, and a collision would throw that work away.
+        The insert is inside the retry, not after it: ``exists_prefix`` alone is
+        a check-then-act, and two concurrent registrations that generate the
+        same prefix would both pass it and leave the second insert to fail. The
+        unique index is the real guarantee, so a lost race is retried like any
+        other collision.
         """
         for _ in range(_MAX_PREFIX_ATTEMPTS):
             api_key = APIKeyGenerator.generate()
-            if not await self._repository.exists_prefix(api_key[:_PREFIX_LEN]):
-                return api_key
+            api_key_prefix = api_key[:API_KEY_PREFIX_LEN]
+            if await self._repository.exists_prefix(api_key_prefix):
+                continue  # cheap pre-check: skip the hash we would throw away
+            try:
+                # The registering caller is both creator and modifier.
+                app_id = await self._repository.store(
+                    api_key_hash=APIKeyGenerator.hash_key(api_key),
+                    api_key_prefix=api_key_prefix,
+                    app_name=app_name,
+                    owners=owners,
+                    app_type=app_type,
+                    tenant=tenant,
+                    status=status,
+                    env=env,
+                    config=config,
+                    creator=creator,
+                    modifier=creator,
+                )
+            except PrefixTakenError:
+                continue  # lost the race to a concurrent registration
+            return IssuedApp(
+                id=app_id,
+                app_name=app_name,
+                owners=owners,
+                app_type=app_type,
+                tenant=tenant,
+                api_key=api_key,
+            )
         raise PrefixAllocationError(
             f"no unused API key prefix found in {_MAX_PREFIX_ATTEMPTS} attempts"
         )

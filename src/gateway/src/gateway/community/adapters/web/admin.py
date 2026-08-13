@@ -8,7 +8,7 @@ convenience). A production deployment must gate them behind an admin credential
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -34,7 +34,10 @@ class AppRequest(BaseModel):
     app_type: str = "UNKNOWN"
     tenant: str
     creator: str = Field(min_length=1)
-    status: str = "ACTIVE"
+    # Constrained, not free text: authentication compares this to "ACTIVE"
+    # exactly, so accepting "active" would mint a key that can never
+    # authenticate while returning 201 as though registration had worked.
+    status: Literal["ACTIVE", "INACTIVE"] = "ACTIVE"
     env: str = ""
     config: dict[str, Any] = Field(default_factory=dict)
 

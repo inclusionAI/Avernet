@@ -34,6 +34,15 @@ from sqlalchemy.orm import Mapped, mapped_column
 from gateway.community.spi.app import RegisteredApp
 from gateway.community.spi.database import Base
 
+# How many leading characters of an API key form its lookup prefix. A property
+# of the credential scheme, not of storage — but it cannot live in ``_key_gen``,
+# which must stay byte-identical to secbaas's copy, so it is defined here (the
+# module with no intra-package imports) and used by the column width, the
+# repository's lookups, and the registrar's slicing alike. Changing it in only
+# some of those places truncates prefixes in MySQL while passing every SQLite
+# test, since SQLite ignores VARCHAR widths.
+API_KEY_PREFIX_LEN = 8
+
 
 class AppRow(Base):  # type: ignore[misc]
     """A third-party app resolvable by credential (the ``avernet_application`` table)."""
@@ -45,7 +54,7 @@ class AppRow(Base):  # type: ignore[misc]
     app_type: Mapped[str] = mapped_column()
     api_key_hash: Mapped[str | None] = mapped_column(String(256), nullable=True)
     api_key_prefix: Mapped[str | None] = mapped_column(
-        String(8), unique=True, nullable=True
+        String(API_KEY_PREFIX_LEN), unique=True, nullable=True
     )
     # DEPRECATED — legacy plaintext JWT credential; see the module docstring.
     token: Mapped[str | None] = mapped_column(unique=True, nullable=True)
