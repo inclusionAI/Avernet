@@ -209,6 +209,24 @@ fn session_message_service_uses_legacy_group_message_wire_shape() {
     assert!(json.get("session_seq").is_none());
     assert!(json.get("sender_id").is_none());
     assert!(json.get("created_at").is_none());
+
+    let minimal = GroupMessage {
+        id: "m2".into(),
+        timestamp: 100,
+        sender: "human_staff-1".into(),
+        content: "follow up".into(),
+        message_type: GroupMessageType::Bot,
+        bot_name: None,
+        role: MessageRole::User,
+        run_id: String::new(),
+        history_meta: None,
+        metadata: None,
+        attachments: None,
+    };
+    let minimal_json = serde_json::to_value(minimal).expect("serialize minimal GroupMessage");
+    for omitted in ["bot_name", "run_id", "historyMeta", "metadata", "attachments"] {
+        assert!(minimal_json.get(omitted).is_none(), "{omitted} must be omitted");
+    }
 }
 
 #[test]
