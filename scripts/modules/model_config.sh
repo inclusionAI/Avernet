@@ -227,6 +227,95 @@ singlebox_model_config_require_manual_env() {
     fi
 }
 
+singlebox_model_config_thinking_enabled() {
+    case "${OPENCLAW_ENABLE_THINKING:-false}" in
+        1|true|TRUE|yes|YES|on|ON)
+            printf 'true\n'
+            ;;
+        0|false|FALSE|no|NO|off|OFF|'')
+            printf 'false\n'
+            ;;
+        *)
+            log_error "Invalid OPENCLAW_ENABLE_THINKING: ${OPENCLAW_ENABLE_THINKING}"
+            log_error "Valid values: true, false"
+            return 1
+            ;;
+    esac
+}
+
+singlebox_model_config_apply_thinking_policy() {
+    local output_file="$1"
+    local thinking_enabled thinking_default temporary_file
+    thinking_enabled="$(singlebox_model_config_thinking_enabled)" || return 1
+    if [ "$thinking_enabled" = "true" ]; then
+        thinking_default="medium"
+    else
+        thinking_default="off"
+    fi
+    temporary_file="${output_file}.thinking.$$"
+
+    (
+        umask 077
+        jq \
+            --argjson thinking_enabled "$thinking_enabled" \
+            --arg thinking_default "$thinking_default" '
+          def toggle_thinking_object:
+            if type != "object" then .
+            else
+              (if has("enable_thinking") then
+                 .enable_thinking = $thinking_enabled
+               else . end)
+              | (if (.thinking? | type) == "object" then
+                   if $thinking_enabled then
+                     .thinking |= del(.type)
+                     | if .thinking == {} then del(.thinking) else . end
+                   else
+                     .thinking.type = "disabled"
+                   end
+                 else . end)
+            end;
+          def toggle_model_params:
+            if type != "object" then .
+            else
+              toggle_thinking_object
+              | (if (.extra_body? | type) == "object" then
+                   .extra_body |= toggle_thinking_object
+                 else . end)
+              | (if (.extraBody? | type) == "object" then
+                   .extraBody |= toggle_thinking_object
+                 else . end)
+              | (if (.chat_template_kwargs? | type) == "object"
+                       and (.chat_template_kwargs | has("enable_thinking")) then
+                   .chat_template_kwargs.enable_thinking = $thinking_enabled
+                 else . end)
+              | (if (.chatTemplateKwargs? | type) == "object"
+                       and (.chatTemplateKwargs | has("enable_thinking")) then
+                   .chatTemplateKwargs.enable_thinking = $thinking_enabled
+                 else . end)
+            end;
+          .agents = (if (.agents? | type) == "object" then .agents else {} end)
+          | .agents.defaults = (
+              if (.agents.defaults? | type) == "object" then .agents.defaults else {} end
+            )
+          | .agents.defaults.thinkingDefault = $thinking_default
+          | if (.agents.defaults.models? | type) == "object" then
+              .agents.defaults.models |= with_entries(
+                .value |= (
+                  if type == "object" and (.params? | type) == "object" then
+                    .params |= toggle_model_params
+                  else . end
+                )
+              )
+            else . end
+        ' "$output_file" > "$temporary_file"
+    ) || {
+        rm -f "$temporary_file"
+        return 1
+    }
+    mv "$temporary_file" "$output_file"
+    chmod 600 "$output_file"
+}
+
 singlebox_model_config_write_manual() {
     local output_file="$1"
     local provider_id="${OPENCLAW_OPENAI_PROVIDER_ID:-openai-compatible}"
@@ -536,6 +625,7 @@ singlebox_model_config_prepare() {
             log_warn "Singlebox model config mode is mock; bots use fixed-format local model replies."
             ;;
     esac
+    singlebox_model_config_apply_thinking_policy "$output_file" || return 1
 
     SINGLEBOX_MODEL_CONFIG_MODE="$mode"
     SINGLEBOX_MODEL_CONFIG_FILE="$output_file"
@@ -545,4 +635,5 @@ singlebox_model_config_prepare() {
 
     log_info "Singlebox model config mode: ${mode}"
     log_info "Singlebox model config: ${output_file}"
+    log_info "Singlebox model thinking default: $(jq -r '.agents.defaults.thinkingDefault' "$output_file")"
 }

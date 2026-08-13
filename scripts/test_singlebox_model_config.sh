@@ -29,6 +29,7 @@ setup_env() {
   unset OPENCLAW_OPENAI_MODEL_ID
   unset OPENCLAW_OPENAI_MODEL_NAME
   unset OPENCLAW_OPENAI_MODEL_API
+  unset OPENCLAW_ENABLE_THINKING
   unset OPENCLAW_MODEL_CONFIG_SOURCE
   unset SINGLEBOX_MODEL_CONFIG_FILE
   unset SINGLEBOX_MODEL_CONFIG_PREPARED
@@ -66,6 +67,8 @@ test_manual_generates_runtime_config_from_env() {
     and .models.providers["test-provider"].apiKey == "sk-test"
     and .models.providers["test-provider"].models[0].id == "model-a"
     and .agents.defaults.model.primary == "test-provider/model-a"
+    and .agents.defaults.thinkingDefault == "off"
+    and (.agents.defaults.models["test-provider/model-a"] | has("params") | not)
   ' "$SINGLEBOX_MODEL_CONFIG_FILE" >/dev/null || fail "manual runtime config mismatch"
   assert_eq "$SINGLEBOX_MODEL_CONFIG_FILE" "$OPENCLAW_MODEL_CONFIG_SOURCE" "5bot source"
 }
@@ -104,7 +107,18 @@ test_home_copies_only_model_fields() {
   "agents": {
     "defaults": {
       "model": {"primary": "home-provider/home-model"},
-      "models": {"home-provider/home-model": {"alias": "Home Model"}},
+      "models": {
+        "home-provider/home-model": {
+          "alias": "Home Model",
+          "params": {"extra_body": {"enable_thinking": true}}
+        },
+        "home-provider/glm-model": {
+          "params": {"extraBody": {"thinking": {"type": "enabled"}}}
+        },
+        "home-provider/qwen-model": {
+          "params": {"chat_template_kwargs": {"enable_thinking": true}}
+        }
+      },
       "workspace": "/should/not/copy"
     }
   },
@@ -120,9 +134,72 @@ JSON
   jq -e '
     .models.providers["home-provider"].apiKey == "home-key"
     and .agents.defaults.model.primary == "home-provider/home-model"
+    and .agents.defaults.thinkingDefault == "off"
+    and .agents.defaults.models["home-provider/home-model"].params.extra_body.enable_thinking == false
+    and .agents.defaults.models["home-provider/glm-model"].params.extraBody.thinking.type == "disabled"
+    and .agents.defaults.models["home-provider/qwen-model"].params.chat_template_kwargs.enable_thinking == false
     and (.agents.defaults | has("workspace") | not)
     and (. | has("gateway") | not)
   ' "$SINGLEBOX_MODEL_CONFIG_FILE" >/dev/null || fail "home runtime config mismatch"
+}
+
+test_thinking_can_be_enabled_from_env() {
+  setup_env
+  export SINGLEBOX_MODEL_CONFIG_MODE="home"
+  export SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED=1
+  export OPENCLAW_ENABLE_THINKING=true
+  mkdir -p "$(dirname "$OPENCLAW_CONFIG_FILE")"
+  cat > "$OPENCLAW_CONFIG_FILE" <<'JSON'
+{
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "home-provider": {
+        "baseUrl": "https://home.example.test/v1",
+        "apiKey": "home-key",
+        "models": [{"id": "home-model", "name": "Home Model"}]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {"primary": "home-provider/home-model"},
+      "models": {
+        "home-provider/home-model": {
+          "params": {
+            "extra_body": {
+              "enable_thinking": false,
+              "thinking": {"type": "disabled"}
+            }
+          }
+        }
+      }
+    }
+  }
+}
+JSON
+
+  # shellcheck source=/dev/null
+  source "$MODULE"
+  singlebox_model_config_prepare
+
+  jq -e '
+    .agents.defaults.thinkingDefault == "medium"
+    and .agents.defaults.models["home-provider/home-model"].params.extra_body.enable_thinking == true
+    and (.agents.defaults.models["home-provider/home-model"].params.extra_body | has("thinking") | not)
+  ' "$SINGLEBOX_MODEL_CONFIG_FILE" >/dev/null || fail "thinking env override mismatch"
+}
+
+test_invalid_thinking_env_is_rejected() {
+  setup_env
+  export SINGLEBOX_MODEL_CONFIG_MODE="mock"
+  export OPENCLAW_ENABLE_THINKING="sometimes"
+
+  # shellcheck source=/dev/null
+  source "$MODULE"
+  if singlebox_model_config_prepare; then
+    fail "invalid OPENCLAW_ENABLE_THINKING should fail"
+  fi
 }
 
 test_home_ignores_non_object_agents_when_models_exist() {
@@ -152,7 +229,7 @@ JSON
 
   jq -e '
     .models.providers["home-provider"].apiKey == "home-key"
-    and .agents.defaults == {}
+    and .agents.defaults == {"thinkingDefault": "off"}
   ' "$SINGLEBOX_MODEL_CONFIG_FILE" >/dev/null || fail "home mode should ignore non-object agents"
 }
 
@@ -503,6 +580,8 @@ test_mock_health_requires_exact_response() (
 test_manual_generates_runtime_config_from_env
 test_manual_requires_complete_env
 test_home_copies_only_model_fields
+test_thinking_can_be_enabled_from_env
+test_invalid_thinking_env_is_rejected
 test_home_ignores_non_object_agents_when_models_exist
 test_home_requires_confirmation
 test_mock_generates_local_provider

@@ -1589,7 +1589,16 @@ impl CollaborationRuntime {
         attempt: i32,
         error: String,
     ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
-        let max_attempts = compiled_node_max_attempts(compiled, node_id);
+        let max_attempts = self
+            .runs
+            .get_node_run(&run.run_id, node_id)
+            .await?
+            .ok_or_else(|| CollaborationRuntimeError::NodeNotFound {
+                run_id: run.run_id.clone(),
+                node_id: node_id.to_string(),
+            })?
+            .max_attempts
+            .max(1);
         if attempt + 1 < max_attempts {
             let next_attempt = attempt + 1;
             let scheduled = self
@@ -5031,18 +5040,6 @@ fn final_output_text(
         .iter()
         .find(|node| &node.node_id == final_node_id)
         .and_then(|node| node.artifact_text.clone())
-}
-
-fn compiled_node_max_attempts(compiled: &CompiledStateMachine, node_id: &str) -> i32 {
-    match &compiled.definition.runtime {
-        CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine
-            .nodes
-            .get(node_id)
-            .and_then(|node| node.max_attempts)
-            .unwrap_or(state_machine.defaults.max_attempts)
-            .max(1),
-        _ => 1,
-    }
 }
 
 fn judge_service_error_message(error: &ServiceError) -> String {

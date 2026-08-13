@@ -574,13 +574,26 @@ bots_dynamic_model_source_has_fields() {
     local source
     source="$(bots_dynamic_model_config_source)"
     [ -f "$source" ] || return 1
-    jq -e '(.models? != null) or (.agents.defaults.model? != null) or (.agents.defaults.models? != null) or (.agents.defaults.imageModel? != null)' "$source" >/dev/null
+    jq -e '(.models? != null) or (.agents.defaults.model? != null) or (.agents.defaults.models? != null) or (.agents.defaults.imageModel? != null) or (.agents.defaults.thinkingDefault? != null)' "$source" >/dev/null
 }
 
-bots_dynamic_config_has_model_fields() {
+bots_dynamic_config_matches_model_source() {
     local config_file="$1"
-    [ -f "$config_file" ] || return 1
-    jq -e '(.models? != null) or (.agents.defaults.model? != null) or (.agents.defaults.models? != null) or (.agents.defaults.imageModel? != null)' "$config_file" >/dev/null
+    local source source_models config_models source_agent_fields config_agent_fields
+    source="$(bots_dynamic_model_config_source)"
+    [ -f "$source" ] && [ -f "$config_file" ] || return 1
+    source_models="$(jq -S -c '.models // null' "$source")" || return 1
+    config_models="$(jq -S -c '.models // null' "$config_file")" || return 1
+    source_agent_fields="$(bots_dynamic_agent_model_fields_json)" || return 1
+    config_agent_fields="$(jq -S -c '
+      (.agents.defaults // {}) as $defaults
+      | {}
+        + (if $defaults.model? != null then {model: $defaults.model} else {} end)
+        + (if $defaults.models? != null then {models: $defaults.models} else {} end)
+        + (if $defaults.imageModel? != null then {imageModel: $defaults.imageModel} else {} end)
+        + (if $defaults.thinkingDefault? != null then {thinkingDefault: $defaults.thinkingDefault} else {} end)
+    ' "$config_file")" || return 1
+    [ "$source_models" = "$config_models" ] && [ "$source_agent_fields" = "$config_agent_fields" ]
 }
 
 bots_dynamic_config_has_required_model() {
@@ -617,12 +630,13 @@ bots_dynamic_agent_model_fields_json() {
         printf '{}\n'
         return 0
     fi
-    jq -c '
+    jq -S -c '
       (.agents.defaults // {}) as $defaults
       | {}
         + (if $defaults.model? != null then {model: $defaults.model} else {} end)
         + (if $defaults.models? != null then {models: $defaults.models} else {} end)
         + (if $defaults.imageModel? != null then {imageModel: $defaults.imageModel} else {} end)
+        + (if $defaults.thinkingDefault? != null then {thinkingDefault: $defaults.thinkingDefault} else {} end)
     ' "$source"
 }
 
@@ -862,8 +876,8 @@ bots_dynamic_setup_profile() {
 
     local config_file="${profile_dir}/openclaw.json"
     if [ "${BCS_BOTS_PRESERVE_FILES:-1}" = "1" ] && [ -f "$config_file" ]; then
-        if bots_dynamic_model_source_has_fields && ! bots_dynamic_config_has_model_fields "$config_file"; then
-            log_info "Refreshing dynamic bot profile with model config: ${profile} (${name})"
+        if bots_dynamic_model_source_has_fields && ! bots_dynamic_config_matches_model_source "$config_file"; then
+            log_info "Refreshing dynamic bot profile with current model config: ${profile} (${name})"
         elif ! bots_dynamic_config_has_required_model "$config_file"; then
             log_info "Refreshing dynamic bot profile with required model: ${profile} (${name})"
         elif ! bots_dynamic_config_has_bcs_core_tools "$config_file"; then
