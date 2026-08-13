@@ -20,16 +20,17 @@
 -- below: the third-party-app registry (`avernet_application`), the tenant master
 -- (`avernet_tenant`), and the access-key registry (`avernet_access_key_token`).
 
--- KNOWN ISSUE (pre-dates the API-key work, NOT fixed here): the unique indexes
--- on the two `token` columns are over varchar(1024) utf8mb4 = 4096 bytes, past
--- InnoDB's 3072-byte key limit, so this file may not execute as-is against
--- MySQL 8 InnoDB. Fixing it means either shortening the columns or indexing a
--- prefix, both of which change an index on already-deployed tables — out of
--- scope for this workstream and flagged for the schema owner.
+-- The unique indexes on the two `token` columns span a 700-character prefix,
+-- not the whole varchar(1024): at utf8mb4 the full width is a 4096-byte key,
+-- past InnoDB's 3072-byte limit, which made this file non-executable as
+-- previously written. Both token kinds are signed JWTs of ~261 characters, so a
+-- 700-character prefix (2800 bytes) covers the entire value and uniqueness is
+-- unaffected. `002_application_api_key.sql` makes the same change on deployed
+-- databases.
 --
--- `avernet_access_key_token.token` also keeps the server-default
--- (case-insensitive) collation, so its exact-match lookup is case-insensitive
--- on MySQL. Left alone because access-key credentials are outside this change.
+-- `avernet_access_key_token.token` keeps the server-default (case-insensitive)
+-- collation, so its exact-match lookup is case-insensitive on MySQL. Left alone
+-- because access-key credentials are outside this change.
 
 -- Table: avernet_application
 -- 第三方应用注册表：按 `api_key_prefix`(API Key 前 8 位)定位、再比对 `api_key_hash`；
@@ -52,7 +53,7 @@ CREATE TABLE IF NOT EXISTS `avernet_application` (
   `modifier` varchar(128) NOT NULL DEFAULT '' COMMENT '修改人',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_avernet_application_api_key_prefix` (`api_key_prefix`),
-  UNIQUE KEY `uk_avernet_application_token` (`token`),
+  UNIQUE KEY `uk_avernet_application_token_prefix` (`token`(700)),
   KEY `idx_avernet_application_app_name` (`app_name`)
 ) DEFAULT CHARSET = utf8mb4 COMMENT = '第三方应用注册表';
 
@@ -86,6 +87,6 @@ CREATE TABLE IF NOT EXISTS `avernet_access_key_token` (
   `creator` varchar(128) NOT NULL DEFAULT '' COMMENT '创建人',
   `modifier` varchar(128) NOT NULL DEFAULT '' COMMENT '修改人',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_avernet_access_key_token_token` (`token`),
+  UNIQUE KEY `uk_avernet_access_key_token_token` (`token`(700)),
   KEY `idx_avernet_access_key_token_access_key` (`access_key`)
 ) DEFAULT CHARSET = utf8mb4 COMMENT = '访问密钥注册表';
