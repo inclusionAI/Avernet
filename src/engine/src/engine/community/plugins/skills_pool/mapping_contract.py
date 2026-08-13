@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -58,6 +59,7 @@ def resolve_mapping_payload(
     source_layout: MappingSourceLayout,
     payload: object,
     mapping_contract_version: str | None = None,
+    additional_retirement_roots: Sequence[Path] = (),
     home: Path = Path("/home/admin"),
 ) -> ResolvedMappingPayload:
     """Resolve logical v2 or legacy unversioned physical mappings.
@@ -140,13 +142,18 @@ def resolve_mapping_payload(
         if source_layout is MappingSourceLayout.POOL
         else plan.legacy_repo
     )
+    active_roots = [plan.active_root, *additional_retirement_roots]
     try:
-        resolved = resolve_skill_mappings(
-            active_root=plan.active_root,
-            local_root=local_root,
-            repo_root=repo_root,
-            mappings=logical,
-        )
+        resolved = [
+            mapping
+            for active_root in active_roots
+            for mapping in resolve_skill_mappings(
+                active_root=active_root,
+                local_root=local_root,
+                repo_root=repo_root,
+                mappings=logical,
+            )
+        ]
     except SkillLayoutResolutionError as error:
         raise InvalidPoolMappingRequestError(str(error)) from error
     return ResolvedMappingPayload(

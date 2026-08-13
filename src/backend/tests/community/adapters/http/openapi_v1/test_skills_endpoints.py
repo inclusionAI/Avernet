@@ -644,7 +644,9 @@ async def test_state_command_cannot_cross_the_real_tenant_guard(tmp_path):
             return True
 
     factory = _Factory()
-    service = LocalSkillStateService(skills, sets, bots, object(), factory, _Guard())
+    service = LocalSkillStateService(
+        skills, sets, bots, object(), factory, _Guard(), object(), object(), object()
+    )
     with avernet_tenant_scope("tenant-b"):
         with pytest.raises(LocalSkillNotFoundError):
             await service.set_local_skill_active(
