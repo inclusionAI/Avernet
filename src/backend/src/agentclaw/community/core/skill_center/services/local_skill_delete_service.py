@@ -16,7 +16,10 @@ from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillActiveError,
+    LocalSkillEditBusyError,
+    LocalSkillEditLockUnavailableError,
     LocalSkillEditPausedError,
+    LocalSkillLayoutRollbackError,
     LocalSkillNotFoundError,
     LocalSkillNotReadyError,
     LocalSkillStorageError,
@@ -29,8 +32,11 @@ from agentclaw.community.core.repository.protocols.skill_center import SkillSetR
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.skill_center.errors import ActiveSkillSetReferenceError
 from agentclaw.community.core.skills_pool.edit_guard import (
+    SkillsPoolEditBusyError,
     SkillsPoolEditGuard,
+    SkillsPoolEditLockUnavailableError,
     SkillsPoolEditPausedError,
+    SkillsPoolEditRollbackError,
 )
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 from agentclaw.community.core.repository.protocols.skill_center import LocalSkillCleanupRepository
@@ -69,6 +75,12 @@ class LocalSkillDeleteService:
         scope = self._discover_scope(skill_id)
         try:
             lease = await self._edit_guard.acquire_for_edit_wait(scope=scope)
+        except SkillsPoolEditBusyError as exc:
+            raise LocalSkillEditBusyError() from exc
+        except SkillsPoolEditRollbackError as exc:
+            raise LocalSkillLayoutRollbackError() from exc
+        except SkillsPoolEditLockUnavailableError as exc:
+            raise LocalSkillEditLockUnavailableError() from exc
         except SkillsPoolEditPausedError as exc:
             raise LocalSkillEditPausedError() from exc
         try:

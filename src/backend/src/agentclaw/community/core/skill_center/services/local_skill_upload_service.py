@@ -24,12 +24,15 @@ from agentclaw.community.core.repository.protocols.bot import BotCollabLogReposi
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillDuplicateError,
+    LocalSkillEditBusyError,
+    LocalSkillEditLockUnavailableError,
     LocalSkillEditPausedError,
     LocalSkillInvalidPackageError,
     LocalSkillNotReadyError,
     LocalSkillRuntimeSyncError,
     LocalSkillStorageError,
     LocalSkillTooLargeError,
+    LocalSkillLayoutRollbackError,
 )
 from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
@@ -41,8 +44,11 @@ from agentclaw.community.core.skill_center.factories import (
 )
 from agentclaw.community.core.repository.protocols.skill_center import LocalSkillCleanupRepository
 from agentclaw.community.core.skills_pool.edit_guard import (
+    SkillsPoolEditBusyError,
     SkillsPoolEditGuard,
+    SkillsPoolEditLockUnavailableError,
     SkillsPoolEditPausedError,
+    SkillsPoolEditRollbackError,
 )
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 
@@ -95,6 +101,12 @@ class LocalSkillUploadService:
         scope = self._scope_for(initial_bot, bot_id)
         try:
             lease = await self._edit_guard.acquire_for_edit_wait(scope=scope)
+        except SkillsPoolEditBusyError as exc:
+            raise LocalSkillEditBusyError() from exc
+        except SkillsPoolEditRollbackError as exc:
+            raise LocalSkillLayoutRollbackError() from exc
+        except SkillsPoolEditLockUnavailableError as exc:
+            raise LocalSkillEditLockUnavailableError() from exc
         except SkillsPoolEditPausedError as exc:
             raise LocalSkillEditPausedError() from exc
         try:
