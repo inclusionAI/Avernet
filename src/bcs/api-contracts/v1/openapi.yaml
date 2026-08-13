@@ -95,8 +95,10 @@ components:
       $ref: ./domain-models.yaml#/SessionDetail
     SessionPage:
       $ref: ./domain-models.yaml#/SessionPage
-    SessionMessage:
-      $ref: ./domain-models.yaml#/SessionMessage
+    GroupMessage:
+      $ref: ./domain-models.yaml#/GroupMessage
+    MessageAttachment:
+      $ref: ./domain-models.yaml#/MessageAttachment
     SessionParticipant:
       $ref: ./domain-models.yaml#/SessionParticipant
     SessionFile:
