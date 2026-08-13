@@ -14,6 +14,12 @@ class PublishFlowServiceError(Exception):
     pass
 
 
+class OnlineDeployDeferredError(PublishFlowServiceError):
+    """The online deploy must wait without failing the publish record."""
+
+    pass
+
+
 class DraftRestoreRetryableError(PublishFlowServiceError):
     """Draft restore failed in an in-doubt/transient external-workflow window.
 

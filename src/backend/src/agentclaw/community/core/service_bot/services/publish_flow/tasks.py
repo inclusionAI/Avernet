@@ -36,7 +36,9 @@ publish record) returns ``Fail`` so the task row lands terminally FAILED with th
 error in ``last_error`` — mirroring the domain failure the phase already recorded
 on the publish record — instead of a semantically dishonest SUCCEEDED. Domain
 retry stays user-driven (``retry()`` enqueues a fresh task); the worker never
-re-runs a failed stage on its own.
+re-runs a failed stage on its own. A deferred online-deploy preflight is different:
+no mutation was submitted and the domain state remains valid, so online-release
+and restart return ``Reschedule`` and recheck it at the BaaS polling cadence.
 """
 from __future__ import annotations
 
@@ -50,6 +52,7 @@ from agentclaw.community.core.task_queue.services.task_queue_service import (
 )
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     DraftRestoreRetryableError,
+    OnlineDeployDeferredError,
 )
 from agentclaw.community.core.task_queue.types import (
     Complete,
@@ -81,8 +84,10 @@ DESTROY_TASK = "service_bot.publish.destroy"
 EVAL_TEARDOWN_TASK = "service_bot.publish.eval_teardown"
 APPROVAL_TRIGGER_TASK = "service_bot.publish.approval_trigger"
 
-# Give-up horizons (DB-enforced). Build+release can be slow; the poll waits on the
-# BaaS workflow, matching the devices poll deadline.
+# Give-up horizons (DB-enforced). Build+verify release can be slow but does not
+# poll before submission. Online release and restart can now defer their liveness
+# preflight, so their enqueue functions use the same 24h horizon as the workflow
+# polls instead of timing out in ONLINE_PUB / before restart submission at 1h.
 _STAGE_TASK_DEADLINE_SECONDS = 3600
 _POLL_TASK_DEADLINE_SECONDS = 86400
 _POLL_DELAY_SECONDS = 8.0
@@ -149,7 +154,7 @@ def enqueue_online_release(
     task_queue_service.enqueue(
         ONLINE_RELEASE_TASK,
         build_stage_payload(publish_id=publish_id, operator=operator),
-        deadline_seconds=_STAGE_TASK_DEADLINE_SECONDS,
+        deadline_seconds=_POLL_TASK_DEADLINE_SECONDS,
     )
 
 
@@ -201,7 +206,7 @@ def enqueue_restart(
     task_queue_service.enqueue(
         RESTART_TASK,
         build_restart_payload(publish_id=publish_id, stage=stage, operator=operator),
-        deadline_seconds=_STAGE_TASK_DEADLINE_SECONDS,
+        deadline_seconds=_RESTART_POLL_TASK_DEADLINE_SECONDS,
     )
 
 
@@ -356,7 +361,15 @@ class PublishOnlineReleaseHandler(_PublishTaskBase):
         if status == PublishStatus.ONLINE_PUB and not self._flow.is_current_online_deployment(
             publish_id
         ):
-            release_result = await self._flow.execute_release_phase(record, operator)
+            try:
+                release_result = await self._flow.execute_release_phase(record, operator)
+            except OnlineDeployDeferredError as exc:
+                logger.info(
+                    "[PublishOnlineReleaseHandler] deferring publish_id=%s: %s",
+                    publish_id,
+                    exc,
+                )
+                return Reschedule(_POLL_DELAY_SECONDS)
             if release_result.status != PublishStatus.ONLINE_PUB:
                 return Fail(
                     f"online release failed: publish_id={publish_id}, {release_result.message}"
@@ -401,9 +414,18 @@ class PublishRestartHandler(_PublishTaskBase):
             enqueue_restart_poll(self._task_queue_service, publish_id=publish_id)
             return Complete()
 
-        result = await self._flow.execute_restart(
-            publish_id=publish_id, stage=stage, operator=operator
-        )
+        try:
+            result = await self._flow.execute_restart(
+                publish_id=publish_id, stage=stage, operator=operator
+            )
+        except OnlineDeployDeferredError as exc:
+            logger.info(
+                "[PublishRestartHandler] deferring publish_id=%s stage=%s: %s",
+                publish_id,
+                stage,
+                exc,
+            )
+            return Reschedule(_POLL_DELAY_SECONDS)
         if not result or not result.get("success"):
             message = (result or {}).get("message", "unknown error")
             # Deliberately does NOT touch ext.restart.restarting. Every

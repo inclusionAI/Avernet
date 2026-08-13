@@ -6,6 +6,9 @@ import pytest
 
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.task_queue.types import Complete, Fail, Reschedule
+from agentclaw.community.core.service_bot.services.publish_flow.errors import (
+    OnlineDeployDeferredError,
+)
 from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
     PROGRESS_POLL_TASK,
     RESTART_POLL_TASK,
@@ -14,6 +17,10 @@ from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
     PublishRestartHandler,
     PublishRestartPollHandler,
     PublishVerifyFlowHandler,
+    _POLL_TASK_DEADLINE_SECONDS,
+    _RESTART_POLL_TASK_DEADLINE_SECONDS,
+    enqueue_online_release,
+    enqueue_restart,
 )
 
 
@@ -29,6 +36,7 @@ class _FakeFlow:
         build_fails=False,
         verify_release_fails=False,
         online_release_fails=False,
+        online_defer_attempts=0,
         sync_to=None,
         online_recorded=False,
     ):
@@ -38,6 +46,7 @@ class _FakeFlow:
         self._build_fails = build_fails
         self._verify_release_fails = verify_release_fails
         self._online_release_fails = online_release_fails
+        self._online_defer_attempts = online_defer_attempts
         self._sync_to = sync_to  # status to move to when advance_publish_progress runs
         # Whether ext.publish.online is already recorded (the online-release
         # idempotency marker the online_release task guards on).
@@ -72,6 +81,9 @@ class _FakeFlow:
 
     async def execute_release_phase(self, record, operator):
         self.calls.append("online_release")
+        if self._online_defer_attempts:
+            self._online_defer_attempts -= 1
+            raise OnlineDeployDeferredError("candidate is STOPPING")
         if self._online_release_fails:
             self.status = PublishStatus.FAILED.value
             return SimpleNamespace(status=PublishStatus.FAILED, message="online boom")
@@ -93,6 +105,20 @@ def _handlers(flow):
         PublishOnlineReleaseHandler(flow=flow, task_queue_service=tq),
         PublishProgressPollHandler(flow=flow, task_queue_service=tq, poll_delay_seconds=1.0),
         tq,
+    )
+
+
+def test_deferred_deploy_tasks_use_poll_horizon_deadlines():
+    tq = Mock()
+
+    enqueue_online_release(tq, publish_id=1, operator="op")
+    assert tq.enqueue.call_args.kwargs["deadline_seconds"] == _POLL_TASK_DEADLINE_SECONDS
+
+    tq.reset_mock()
+    enqueue_restart(tq, publish_id=1, stage="online", operator="op")
+    assert (
+        tq.enqueue.call_args.kwargs["deadline_seconds"]
+        == _RESTART_POLL_TASK_DEADLINE_SECONDS
     )
 
 
@@ -231,6 +257,27 @@ def test_online_release_failure_fails_task_without_poll():
     tq.enqueue.assert_not_called()
 
 
+def test_online_release_reschedules_without_state_change_then_completes():
+    flow = _FakeFlow(PublishStatus.ONLINE_PUB, online_defer_attempts=1)
+    _verify, online, _poll, tq = _handlers(flow)
+
+    waiting = online.handle({"publish_id": 1, "operator": "op"})
+
+    assert isinstance(waiting, Reschedule)
+    assert flow.status == PublishStatus.ONLINE_PUB.value
+    assert flow._online_recorded is False
+    tq.enqueue.assert_not_called()
+
+    completed = online.handle({"publish_id": 1, "operator": "op"})
+
+    assert isinstance(completed, Complete)
+    assert flow.status == PublishStatus.ONLINE_PUB.value
+    assert flow._online_recorded is True
+    assert flow.calls == ["online_release", "online_release"]
+    tq.enqueue.assert_called_once()
+    assert tq.enqueue.call_args.args[0] == PROGRESS_POLL_TASK
+
+
 def test_online_release_missing_record_fails_task():
     flow = _FakeFlow(PublishStatus.ONLINE_PUB, missing=True)
     _verify, online, _poll, tq = _handlers(flow)
@@ -310,6 +357,7 @@ class _FakeRestartFlow:
         sync_statuses=None,
         missing=False,
         unreconciled=False,
+        restart_defer_attempts=0,
     ):
         self.calls: list[str] = []
         self.restarting = restarting
@@ -318,6 +366,8 @@ class _FakeRestartFlow:
         # Whether the record already carries a submitted-but-unreconciled
         # restart for the stage — the redelivery guard's signal.
         self._unreconciled = unreconciled
+        self._restart_defer_attempts = restart_defer_attempts
+        self.status = PublishStatus.SUCCESS.value
         # Successive BaaS statuses returned by sync_restart_progress; the last one
         # repeats. ``None`` models the no-data early returns (unresolved workflow
         # id / progress-fetch error).
@@ -326,13 +376,16 @@ class _FakeRestartFlow:
     def get_publish_record(self, publish_id):
         if self._missing:
             return None
-        return SimpleNamespace(id=publish_id, status=PublishStatus.SUCCESS.value)
+        return SimpleNamespace(id=publish_id, status=self.status)
 
     def has_unreconciled_restart(self, publish_id, stage):
         return self._unreconciled
 
     async def execute_restart(self, *, publish_id, stage, operator):
         self.calls.append("execute_restart")
+        if self._restart_defer_attempts:
+            self._restart_defer_attempts -= 1
+            raise OnlineDeployDeferredError("candidate is STOPPING")
         if not self._restart_succeeds:
             return {"success": False, "message": "restart boom"}
         return {"success": True, "message": "Restart submitted", "stage": stage}
@@ -370,6 +423,29 @@ def test_restart_success_enqueues_restart_poll():
     tq.enqueue.assert_called_once()
     assert tq.enqueue.call_args.args[0] == RESTART_POLL_TASK
     assert tq.enqueue.call_args.args[1] == {"publish_id": 1}
+
+
+def test_restart_reschedules_without_publish_state_change_then_completes():
+    flow = _FakeRestartFlow(restart_defer_attempts=1)
+    restart, _poll, tq = _restart_handlers(flow)
+
+    waiting = restart.handle(
+        {"publish_id": 1, "stage": "online", "operator": "op"}
+    )
+
+    assert isinstance(waiting, Reschedule)
+    assert flow.status == PublishStatus.SUCCESS.value
+    tq.enqueue.assert_not_called()
+
+    completed = restart.handle(
+        {"publish_id": 1, "stage": "online", "operator": "op"}
+    )
+
+    assert isinstance(completed, Complete)
+    assert flow.status == PublishStatus.SUCCESS.value
+    assert flow.calls == ["execute_restart", "execute_restart"]
+    tq.enqueue.assert_called_once()
+    assert tq.enqueue.call_args.args[0] == RESTART_POLL_TASK
 
 
 def test_restart_poll_enqueue_failure_propagates():

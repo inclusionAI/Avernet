@@ -21,8 +21,11 @@ from agentclaw.community.core.service_bot.repository.models import (
 from agentclaw.community.core.service_bot.services.arca_image_pin import (
     RUNTIME_KIND_TECLAW,
 )
+from agentclaw.community.core.service_bot.services.baas_service import (
+    BaasServiceError,
+)
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
-    PublishFlowServiceError,
+    OnlineDeployDeferredError,
 )
 from agentclaw.community.core.service_bot.types import (
     OnlineDeployDecision,
@@ -179,9 +182,9 @@ class UpgradeResolutionMixin:
         - no candidate / ``RELEASED`` / ``DESTROYING`` → ``FIRST_RELEASE``
           (nothing live to reuse or orphan).
         - ``ACTIVE`` → ``UPGRADE`` (re-deliver in place; works for both providers).
-        - ``STOPPING`` → raise (wait): a STOP publish is still in flight, and BaaS
+        - ``STOPPING`` → defer: a STOP publish is still in flight, and BaaS
           rejects any new publish of a different type while it runs, so neither an
-          UPGRADE nor a retire could land — the durable task retries until it
+          UPGRADE nor a retire could land — the durable task reschedules until it
           settles to ``STOPPED``.
         - ``FAILED`` / ``STOPPED`` → ``UPGRADE`` for ``baas``/ARCA (the UPDATE
           destroys+recreates the device in place and recovers it), but
@@ -191,9 +194,9 @@ class UpgradeResolutionMixin:
           atom / progress poll settles a still-provisioning bot).
 
         ``get_bot`` already normalizes a genuine 404 to ``{"status":"RELEASED"}``,
-        so a raised error here means a transient/non-404 BaaS failure — NOT that
-        the candidate is gone. We let it propagate so the durable task retries the
-        status read rather than creating a replacement for a possibly-live bot.
+        so a BaaS error here means a transient/non-404 failure — NOT that the
+        candidate is gone. We classify it as deferred so the durable task
+        reschedules the status read rather than replacing a possibly-live bot.
         An empty/absent status on a *successful* envelope is likewise ambiguous
         (``get_bot`` returns the response ``data`` which defaults to ``{}``), so
         we refuse to treat it as gone and raise so the task retries — only an
@@ -203,17 +206,23 @@ class UpgradeResolutionMixin:
         if not bot_uuid:
             return OnlineDeployDecision.FIRST_RELEASE
 
-        # No try/except: a raised error is a transient/non-404 failure (a real 404
-        # is already normalized to RELEASED); propagate so the deploy retries.
-        baas_bot = self._baas_service.get_bot(bot_uuid=bot_uuid)
+        try:
+            baas_bot = self._baas_service.get_bot(bot_uuid=bot_uuid)
+        except BaasServiceError as exc:
+            # A real 404 is normalized to RELEASED by BaasService. Other BaaS
+            # read failures leave the candidate's liveness unknown, so defer
+            # instead of either replacing it or failing the publish record.
+            raise OnlineDeployDeferredError(
+                f"BaaS get_bot failed for candidate bot_uuid={bot_uuid}: {exc}"
+            ) from exc
         status = (baas_bot or {}).get("status")
 
         if not status:
             # A genuine 404 is already normalized to RELEASED; an empty/absent
             # status from a 200 envelope is ambiguous — NOT proof the candidate is
-            # gone. Refuse to recreate on it; raise so the durable task retries the
-            # status read rather than replacing a possibly-live bot.
-            raise PublishFlowServiceError(
+            # gone. Refuse to recreate on it; defer so the durable task reschedules
+            # the status read rather than replacing a possibly-live bot.
+            raise OnlineDeployDeferredError(
                 f"BaaS get_bot returned no status for candidate "
                 f"bot_uuid={bot_uuid}; refusing to treat as gone"
             )
@@ -225,8 +234,8 @@ class UpgradeResolutionMixin:
             # A STOP publish is still in flight; BaaS create_publish rejects any
             # new publish of a different type (UPGRADE's UPDATE or a retire's
             # DESTROY) while it runs. Wait for it to settle to STOPPED — raise so
-            # the durable task retries rather than issuing a doomed publish.
-            raise PublishFlowServiceError(
+            # the durable task reschedules rather than issuing a doomed publish.
+            raise OnlineDeployDeferredError(
                 f"candidate bot_uuid={bot_uuid} is STOPPING (teardown publish in "
                 f"flight); retry once it settles"
             )

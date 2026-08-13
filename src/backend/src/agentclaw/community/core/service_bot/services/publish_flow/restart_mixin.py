@@ -288,15 +288,22 @@ class RestartMixin:
         if not migration_path and not config_artifact:
             return {"success": False, "message": f"Missing build artifact: publish_id={publish_id}"}
 
-        # Mark restart in progress, and note that every failure return above this
-        # point leaves it untouched — the restart task's failure branch relies on
-        # that to avoid clearing a concurrent restart's marker. Cleared on an
-        # observed terminal workflow by sync_restart_progress, which the restart
-        # poll now drives.
-        def _set_restarting_flag(latest_ext: dict) -> None:
-            latest_ext.setdefault("restart", {})["restarting"] = True
-
-        self._mutate_and_update_ext(publish_id=publish_id, mutator=_set_restarting_flag)
+        # Resolve the online target before marking the restart in progress. A
+        # deferred liveness read (STOPPING / missing status / transient BaaS
+        # failure) means no restart workflow was submitted; setting the marker
+        # earlier could combine it with a stale restart.<stage> handle and make
+        # redelivery incorrectly skip this restart as already submitted.
+        decision = None
+        if stage_enum == PublishStage.ONLINE:
+            decision = self._decide_online_deploy(publish_record, bot)
+            if decision not in (
+                OnlineDeployDecision.UPGRADE,
+                OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE,
+                OnlineDeployDecision.FIRST_RELEASE,
+            ):
+                raise PublishFlowServiceError(
+                    f"Unhandled online deploy decision: {decision}"
+                )
 
         version = f"{publish_record.version}"
         # STORED overrides slot: reproduce what was promoted (not a live re-fetch),
@@ -304,6 +311,16 @@ class RestartMixin:
         delivery = self._ext_state.compose_stored(publish_record.ext or {}, stage_enum)
         skills_env = service_skills_env_from_ext(publish_record.ext, bot)
         image_pin = self.resolve_publish_image_pin(publish_record)
+
+        # All local preflight checks, including the online liveness decision and
+        # delivery resolution, passed. Mark the restart in progress immediately
+        # before entering the crash-recovery / external-mutation section. Cleared
+        # on an observed terminal workflow by sync_restart_progress, which the
+        # restart poll drives.
+        def _set_restarting_flag(latest_ext: dict) -> None:
+            latest_ext.setdefault("restart", {})["restarting"] = True
+
+        self._mutate_and_update_ext(publish_id=publish_id, mutator=_set_restarting_flag)
 
         # A prior recreate that crashed between its ext write and its
         # complete_operation left a dangling op. That crashed leg IS this restart
@@ -334,15 +351,6 @@ class RestartMixin:
         # op's workflow id) does not read a stale earlier restart, and instead
         # falls back to the ``ext.restart`` handle the recreate writes.
         if stage_enum == PublishStage.ONLINE:
-            decision = self._decide_online_deploy(publish_record, bot)
-            if decision not in (
-                OnlineDeployDecision.UPGRADE,
-                OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE,
-                OnlineDeployDecision.FIRST_RELEASE,
-            ):
-                raise PublishFlowServiceError(
-                    f"Unhandled online deploy decision: {decision}"
-                )
             if decision != OnlineDeployDecision.UPGRADE:
                 # Release the record's now-stale online binding before recreating
                 # (the recreate below mints a fresh one and rewrites

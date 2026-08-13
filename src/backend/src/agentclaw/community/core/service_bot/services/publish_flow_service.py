@@ -38,6 +38,7 @@ from agentclaw.community.core.service_bot.types import (
 )
 from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
+    OnlineDeployDeferredError,
     PublishFlowServiceError,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.ext_state import (
@@ -765,6 +766,11 @@ class PublishFlowService(
                 f"Unhandled online deploy decision: {decision}"
             )
 
+        except OnlineDeployDeferredError:
+            # A live reuse candidate is temporarily unavailable for another
+            # deploy. Keep ONLINE_PUB intact so the durable task can reschedule
+            # this same release instead of turning a healthy wait into FAILED.
+            raise
         except Exception as e:
             logger.error(f"[PublishFlowService] Release failed: {e}")
 
