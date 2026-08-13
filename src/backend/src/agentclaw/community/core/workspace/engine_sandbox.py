@@ -1,5 +1,5 @@
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 
@@ -39,8 +39,6 @@ class EngineBuildPlan:
     # 两者同时为空时跳过额外同步。
     extra_sync_source_relpath: str = ""
     extra_sync_target_relpath: str = ""
-    # 新增：支持多条额外同步目录。优先由 BotBuildService 读取此字段。
-    extra_sync_items: tuple[tuple[str, str], ...] = field(default_factory=tuple)
 
 
 @runtime_checkable

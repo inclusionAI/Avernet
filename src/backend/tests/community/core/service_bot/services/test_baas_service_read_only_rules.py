@@ -2,6 +2,7 @@ from unittest.mock import MagicMock
 
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxRegistry
+from agentclaw.community.core.workspace.engines.aicoding import AICodingSandboxProvider
 from agentclaw.community.core.workspace.engines.claude_code import ClaudeCodeSandboxProvider
 from agentclaw.community.core.workspace.engines.openclaw import OpenClawSandboxProvider
 from agentclaw.community.di import config as cfg
@@ -15,12 +16,14 @@ def _make_registry() -> EngineSandboxRegistry:
     registry = EngineSandboxRegistry()
     registry.register(OpenClawSandboxProvider(workspace=workspace))
     registry.register(ClaudeCodeSandboxProvider(workspace=workspace))
+    registry.register(AICodingSandboxProvider(workspace=workspace))
     return registry
 
 
 def _make_service(bot_repo=None) -> BaasService:
+    startup_script_reader = MagicMock()
+    startup_script_reader.get_body.return_value = ""
     return BaasService(
-        startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base="http://test",
         tenant="test",
         template_uuid="test",
@@ -36,6 +39,7 @@ def _make_service(bot_repo=None) -> BaasService:
         secret_resolver=MagicMock(),
         common_whitelist_service=MagicMock(),
         outbound_rule_provider=MagicMock(),
+        startup_script_reader=startup_script_reader,
     )
 
 
@@ -43,7 +47,6 @@ class TestGetSetReadOnlyRule:
     def test_openclaw_default_rules(self):
         bot_repo = MagicMock()
         bot_repo.get_by_id_and_owner.return_value = {
-            "id": 501,
             "bot_id": "bot-1",
             "active_engine": "openclaw",
             "ext": {},
@@ -63,7 +66,6 @@ class TestGetSetReadOnlyRule:
         # workspace/config/mcporter.json。
         bot_repo = MagicMock()
         bot_repo.get_by_id_and_owner.return_value = {
-            "id": 501,
             "bot_id": "bot-1",
             "active_engine": "claude_code",
             "ext": {},
@@ -85,7 +87,6 @@ class TestGetSetReadOnlyRule:
     def test_custom_rules_support_absolute_and_relative_paths(self):
         bot_repo = MagicMock()
         bot_repo.get_by_id_and_owner.return_value = {
-            "id": 501,
             "bot_id": "bot-1",
             "active_engine": "claude_code",
             "ext": {
