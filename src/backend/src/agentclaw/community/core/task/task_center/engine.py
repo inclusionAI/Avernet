@@ -18,6 +18,7 @@ import threading
 
 from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
+    NodeOpResult,
     Status,
     TaskGraphPatch,
     TaskNode,
@@ -87,7 +88,7 @@ class ExecutionEngine:
         await self._drain(task_id, side)
 
     # ===== on_report =====
-    async def on_report(self, patch: TaskNodePatch):
+    async def on_report(self, patch: TaskNodePatch) -> NodeOpResult:
         """回投事件:patch 内含 (task_id,node_id)+acceptance_result+output_patch。
         update_task_node_info 翻态(+fold)→ PASS 传播 / FAIL+gaps 补救。验收 100% 来自回投,engine 不主动验。"""
         with self._lock_for(patch.task_id):
