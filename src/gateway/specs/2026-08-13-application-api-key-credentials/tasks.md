@@ -156,19 +156,22 @@
         is NULL and the key does not appear in `api_key_hash`.
 - **Depends on:** Task 6
 
-## Task 8: Cover both credential paths in the integration suites
+## Task 8 `[x]`: Cover both credential paths in the integration suites
 - **Goal:** Identity-pipeline and forward-route suites exercise the real verify
   path for API keys, plus one end-to-end legacy-JWT case through the strategy.
 - **Files:** `src/gateway/tests/integration/test_identity_pipeline.py`,
   `src/gateway/tests/integration/test_forward_route.py`
 - **Done when:**
-  - [ ] Seeds use `AppRow(api_key_hash=hash_key(k), api_key_prefix=k[:8], …)`
+  - [x] Seeds use `AppRow(api_key_hash=hash_key(k), api_key_prefix=k[:8], …)`
         with a 32-char key; headers present the plaintext key.
-  - [ ] One case seeds a legacy `token=` row and authenticates with the JWT
+  - [x] One case seeds a legacy `token=` row and authenticates with the JWT
         through the real strategy, end to end.
-  - [ ] App-identity, mixed-identity (app + user), and US27 adjudication cases
+  - [x] App-identity, mixed-identity (app + user), and US27 adjudication cases
         pass; resolved principal fields (id/name/owners/type/tenant) unchanged
         on both paths.
+  - [x] `test_forward_route.py` needed no seed change — it builds the strategy
+        from `AppRepository` but exercises bot/user identities, so the app rows
+        it never seeds stay irrelevant.
 - **Depends on:** Task 4, Task 5, Task 7
 
 ## Task 9: Full-suite verification against spec acceptance criteria
