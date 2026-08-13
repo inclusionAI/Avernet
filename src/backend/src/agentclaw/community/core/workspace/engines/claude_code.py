@@ -99,6 +99,10 @@ def _make_claude_code_build_plan(rsync_excludes: list[str]) -> EngineBuildPlan:
         extra_sync_source_relpath=".claude",
         extra_sync_target_relpath="claude",
         rsync_excludes=rsync_excludes,
+        extra_sync_items=(
+            (".claude", "claude"),
+            (".aicoding/workspace/skills/skills-local", "workspace/skills/skills-local"),
+        ),
     )
 
 

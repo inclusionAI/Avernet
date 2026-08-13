@@ -106,6 +106,10 @@ class TestClaudeCodeProvider:
 
         assert plan.extra_sync_source_relpath == ".claude"
         assert plan.extra_sync_target_relpath == "claude"
+        assert plan.extra_sync_items == (
+            (".claude", "claude"),
+            (".aicoding/workspace/skills/skills-local", "workspace/skills/skills-local"),
+        )
 
     def test_build_snapshot_excludes_pool_shared_repo(self):
         provider = ClaudeCodeSandboxProvider(workspace=_workspace())
