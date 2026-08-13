@@ -271,10 +271,10 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
             # parameter existed.
             assert not params["owner_id"].get("required", False), path
 
-    # 16 current operations, and the same 16 answering at their former
-    # addresses while callers migrate. The number halves again when the
-    # deprecated package is deleted.
-    assert len(engine_runtime) == 32
+    # 17 current operations, and the same 17 answering at their former
+    # addresses while callers migrate. The relocation layer picks up restart
+    # along with the three existing engine operations.
+    assert len(engine_runtime) == 34
     assert sorted(carrying_stage) == sorted(
         set(engine_runtime) | _STAGE_ADDRESSED_ELSEWHERE
     ), (

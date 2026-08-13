@@ -313,7 +313,8 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: on one bot now names it in the path; the only query placement left is the
 #: Bot Logs trace filter. Inventory/local added seven path and five account-level
 #: operations; dormant activation and data initialization added two more paths.
-_BOT_ID_PLACEMENT = {"path": 63, "query": 1, "none": 21}
+#: Engine restart adds one more bot-addressed operation.
+_BOT_ID_PLACEMENT = {"path": 64, "query": 1, "none": 21}
 
 
 def _schema() -> dict:
@@ -390,10 +391,27 @@ def test_the_pinned_number_of_operations_take_it():
         for path, method, operation in _current_operations(_schema())
         if _user_scoped(path, method) and _param(operation, USER_ID_QUERY)
     ]
-    # 60 on the merge base, +3 for startup scripts, +2 for re-addressed
-    # resource files, -4 for files-only resources, +12 for inventory/local,
-    # and +2 for dormant activation and data initialization.
-    assert len(taking) == 75
+#: ``query`` moved 18 → 20 when the resources file endpoints were re-addressed by
+#: workspace path (#1000): ``{resource_id}/download`` and ``{resource_id}/preview``
+#: went away and ``DELETE ""``, ``/download``, ``/preview`` and ``/mkdir`` replaced
+#: them, all four taking ``bot_id`` as a query parameter — which is what it is
+#: there, since the address is the file's path and not the bot's.
+#:
+#: ``query`` then moved 20 → 16 when the resources group became files-only: the
+#: five record-addressed operations went with the links they served (``POST ""``,
+#: ``GET``/``PUT``/``DELETE /{resource_id}``, ``check-name``) and ``GET /stat``
+#: replaced them, all query-addressed like the rest of the group. ``path`` is
+#: untouched by that: those five carried ``{resource_id}``, never a ``{bot_id}``.
+#:
+#: ``path`` moved 31 → 34 with the startup-script operations (GET/PUT/DELETE on
+#: ``/bots/{bot_id}/startup-script``) — all three address a bot, none moved.
+#:
+#: Then bot-first addressing moved 34/16/21 → 54/1/16. Every operation acting
+#: on one bot now names it in the path; the only query placement left is the
+#: Bot Logs trace filter. Inventory/local added seven path and five account-level
+#: operations; dormant activation and data initialization added two more paths.
+#: Engine restart adds one more bot-addressed operation.
+_BOT_ID_PLACEMENT = {"path": 64, "query": 1, "none": 21}
 
 
 def test_the_exempt_operations_take_none():

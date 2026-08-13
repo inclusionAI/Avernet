@@ -149,6 +149,7 @@ class BotCreateSpec:
     share_policy: dict[str, Any] | None = None
     template_type: str | None = None
     template_config: dict[str, Any] | None = None
+    space_id: str | None = None
     # Engine/vendor-specific inputs belong here, NOT as new named fields. The
     # spec is the contract shared by every surface, so it stays engine-agnostic
     # rather than growing an attribute per engine; anything meaningful to only
@@ -408,6 +409,7 @@ def create_bot_with_authorization(
         template_type=spec.template_type,
         template_config=spec.template_config,
         cookie=cookie,
+        space_id=spec.space_id,
     )
 
     if agent_code:
@@ -476,6 +478,7 @@ def complete_bot_authorization(
         template_type=spec.template_type,
         template_config=spec.template_config,
         cookie=cookie,
+        space_id=spec.space_id,
     )
 
     if agent_code:

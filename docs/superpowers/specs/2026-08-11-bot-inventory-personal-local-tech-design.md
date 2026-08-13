@@ -277,7 +277,7 @@ def assert_local_create(engine: str, space_kind: str) -> ComboDecision:
 
 > `SUPPORTED_ENGINES` 后续应尽量引用 `core/workspace/constants.py` 或统一 engine registry，避免长期双源。若要新增 `teclaw` 到工程常量，应作为独立加法改动并补测试。
 >
-> **teclaw 引擎归属（2026-08-12 融志确认，产品权威口径）**：teclaw **仅支持云端 Bot**，**本地 Bot 不支持 teclaw**。故 `LOCAL_CAPABLE_ENGINES` 不含 teclaw（`openclaw` / `claude_code` 两种）；`PERSONAL_CLOUD_CAPABLE_ENGINES = SUPPORTED_ENGINE_TYPES` 仍含 teclaw。本地路径 `assert_local_create("teclaw", "personal")` 在前门即拒，避免请求进入 desktop/BaaS provisioning 深处才失败。`SERVICE_CAPABLE_ENGINES` 同步保留 teclaw（服务 Bot 走云端编排）。
+> **teclaw 引擎归属（2026-08-12 lucas确认，产品权威口径）**：teclaw **仅支持云端 Bot**，**本地 Bot 不支持 teclaw**。故 `LOCAL_CAPABLE_ENGINES` 不含 teclaw（`openclaw` / `claude_code` 两种）；`PERSONAL_CLOUD_CAPABLE_ENGINES = SUPPORTED_ENGINE_TYPES` 仍含 teclaw。本地路径 `assert_local_create("teclaw", "personal")` 在前门即拒，避免请求进入 desktop/BaaS provisioning 深处才失败。`SERVICE_CAPABLE_ENGINES` 同步保留 teclaw（服务 Bot 走云端编排）。
 
 ### 5.2 动作矩阵 `action_policy.py`
 
@@ -368,14 +368,14 @@ class BotInventoryService:
 
 ### 7.1 `inventory`：Bot Inventory 列表 / 详情 / 动作
 
-**路径前缀**: `/openapi/v1/bots/inventory`  
-**包**: `openapi_v1/inventory/`
+**地址见下表**(已并入 `bots/router.py`,无独立子包;原 `openapi_v1/inventory/` 子包已删 — A 方案见 §5)
+**包**: 无独立子包 — 并入 `openapi_v1/bots/`。
 
 | Method | Path | 说明 |
 | --- | --- | --- |
-| GET | `/openapi/v1/bots/inventory` | 列个人云端 + 本地 Bot 清单项 |
-| GET | `/openapi/v1/bots/inventory/{bot_id}` | 查单个清单项 |
-| GET | `/openapi/v1/bots/inventory/{bot_id}/actions` | 查当前可用动作 |
+| GET | `/openapi/v1/bots/cards` | 列个人云端 + 本地 Bot 清单项 |
+| GET | `/openapi/v1/bots/cards/{bot_id}` | 查单个清单项 |
+| GET | `/openapi/v1/bots/{bot_id}/actions` | 查当前可用动作 |
 
 handler 形态：
 
@@ -462,7 +462,7 @@ def require_personal_cloud_bot(bot: Mapping[str, Any]) -> None:
 | GET | `/openapi/v1/bots/{bot_id}/passport` | Passport | 保留 |
 | GET/PUT | `/openapi/v1/bots/{bot_id}/engine-config` | 引擎配置 | 保留 |
 
-**data-init 不并入创建入参（2026-08-12 融志决定，跟老 `/api` 逻辑）**：**不**给 `BotCreate` 加 `init_config` 字段，**不**在 create handler / `create_bot_with_authorization` / `complete_bot_authorization` 里塞 data-init 副作用。data-init 走独立端点 `POST /openapi/v1/bots/{bot_id}/data-init`（见 §7.x / OpenAPI 清单 #84），是老 `POST /api/bots/{bot_id}/data-init` 的纯委托暴露：
+**data-init 不并入创建入参（2026-08-12 lucas决定，跟老 `/api` 逻辑）**：**不**给 `BotCreate` 加 `init_config` 字段，**不**在 create handler / `create_bot_with_authorization` / `complete_bot_authorization` 里塞 data-init 副作用。data-init 走独立端点 `POST /openapi/v1/bots/{bot_id}/data-init`（见 §7.x / OpenAPI 清单 #84），是老 `POST /api/bots/{bot_id}/data-init` 的纯委托暴露：
 
 - 老端点语义：fire-and-forget 异步（ACTIVE）/标记 `ext.data_init_status="pending"`（PENDING），前端轮询 `ext.data_init_status` 取进度，body 仅 `{force: bool}`。
 - 触发时机由前端控制：创建成功（201 同步）或 `auth-status` ISSUED 后（202 异步落库后）再单独发一次 #84。后端不因此在 create 链路做任何分支。
@@ -512,12 +512,12 @@ class LocalBotCreate(BaseModel):
 
 ### 7.5 `dormant`：个人云端 Bot 激活
 
-**路径前缀**: `/openapi/v1/bots/dormant`  
-**包**: `openapi_v1/dormant/`
+**地址**: `POST /openapi/v1/bots/{bot_id}/activate`(并入 `bots/router.py`,`/{bot_id}` 子动作)
+**包**: 无独立子包 — 已并入 `openapi_v1/bots/`(A 方案,见 §5/OpenAPI 清单 §5)。原 `openapi_v1/dormant/` 子包已删。
 
 | Method | Path | 说明 |
 | --- | --- | --- |
-| POST | `/openapi/v1/bots/dormant/{bot_id}/activate` | 激活沉寂的个人云端 Bot |
+| POST | `/openapi/v1/bots/{bot_id}/activate` | 激活沉寂的个人云端 Bot |
 
 规则：
 
@@ -610,14 +610,14 @@ P0 在业务空间 prod API 未接入时只允许个人业务空间 fallback：
 
 | OpenAPI 组件 | Endpoint | 是否消费 `X-Space-Id` | 用途 | P0 行为 |
 | --- | --- | --- | --- | --- |
-| `inventory` | `GET /openapi/v1/bots/inventory` | 是 | 当前空间下的个人云端 + 本地 Bot 清单过滤 | `None` 默认个人空间；非个人空间需空间 owner 校验，否则 fail closed / 不支持 |
-| `inventory` | `GET /openapi/v1/bots/inventory/{bot_id}` | 是 | 单 Bot 详情可见性校验 | 先 owner guard，再校验 Bot 是否属于当前空间 |
-| `inventory` | `GET /openapi/v1/bots/inventory/{bot_id}/actions` | 是 | 当前空间下动作可用性；例如团队空间协作能力后续只在可见空间生效 | 先 owner guard，再空间可见性校验 |
+| `inventory` | `GET /openapi/v1/bots/cards` | 是 | 当前空间下的个人云端 + 本地 Bot 清单过滤 | `None` 默认个人空间；非个人空间需空间 owner 校验，否则 fail closed / 不支持 |
+| `inventory` | `GET /openapi/v1/bots/cards/{bot_id}` | 是 | 单 Bot 详情可见性校验 | 先 owner guard，再校验 Bot 是否属于当前空间 |
+| `inventory` | `GET /openapi/v1/bots/{bot_id}/actions` | 是 | 当前空间下动作可用性；例如团队空间协作能力后续只在可见空间生效 | 先 owner guard，再空间可见性校验 |
 | `bots` 既有组 | `POST /openapi/v1/bots`，且 `bot_type=personal` | 是 | 创建个人云端 Bot 时绑定到当前业务空间 | 未接空间 owner API 时只能创建到个人空间；若传非个人空间且无法校验则拒绝 |
 | `bots` 既有组 | `GET /openapi/v1/bots` | 不建议改旧契约 | 旧列表保持 owner 维度；空间化列表走 `inventory` | 不作为空间视图入口，避免影响历史调用方 |
 | `bots` 既有组 | `GET/PUT/DELETE /openapi/v1/bots/{bot_id}`，`POST /restart`，`GET /status`，`GET /passport`，`GET/PUT /engine-config` | 建议消费 | 个人云端 Bot 的详情 / 更新 / 删除 / 重启 / 状态 / Passport / 引擎配置操作前做当前空间可见性校验 | header 缺省为个人空间；空间不匹配返回不可见 / 不允许 |
 | `diagnostics` | `GET /runtime-logs`，`POST /engine-restart`，`GET /health`，`POST /health-check` | 是 | 个人云端诊断操作前确认 Bot 在当前空间可见 | 仅 personal cloud；空间不可见则拒绝 |
-| `dormant` | `POST /openapi/v1/bots/dormant/{bot_id}/activate` | 是 | 激活沉寂个人云端 Bot 前确认当前空间可见 | 仅 personal cloud；空间不可见则拒绝 |
+| `dormant` | `POST /openapi/v1/bots/{bot_id}/activate` | 是 | 激活沉寂个人云端 Bot 前确认当前空间可见 | 仅 personal cloud；空间不可见则拒绝 |
 | `local` | `POST /openapi/v1/bots/local` | 是，但只允许个人空间 | 本地 Bot 创建只能发生在个人业务空间 | `resolve_current` 后要求 `space.kind == "personal"` |
 | `local` | `GET /openapi/v1/bots/local` | 是，但只允许个人空间 | 本地 Bot 列表是个人空间资源视图 | 非个人空间返回不支持或空列表；建议 fail closed |
 | `local` | `GET /openapi/v1/bots/local/{bot_id}`，`GET /openapi/v1/bots/local/{bot_id}/auth-status`，`POST /openapi/v1/bots/local/{bot_id}/restart`，`DELETE /openapi/v1/bots/local/{bot_id}`，`POST /openapi/v1/bots/local/{bot_id}/open-folder` | 是，但只允许个人空间 | 本地 Bot 单资源操作前确认当前空间是个人空间，并做 desktop ownership guard | 非个人空间拒绝；本地 Bot 不挂团队空间 |

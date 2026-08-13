@@ -146,6 +146,10 @@ class BotCreate(BaseModel):
     engine: str = Field(description=_ENGINE_DESC)
     cluster_name: ClusterName = Field(description=_CLUSTER_DESC)
     bot_type: BotType = Field(description=_BOT_TYPE_DESC)
+    space_id: str | None = Field(
+        default=None,
+        description="Business space to associate with the bot, when applicable.",
+    )
     # ``engine_options`` is deliberately absent. Nothing downstream consumes
     # ``BotCreateSpec.extra_properties`` yet, so declaring the field would
     # publish a contract slot the server rejects on every non-empty value —
@@ -434,6 +438,78 @@ class DataInitResult(BaseModel):
     LLM-driven init runs fire-and-forget in the background, and the frontend
     polls ``GET /openapi/v1/bots`` (``Bot.ext.data_init_status``) for progress,
     matching the legacy ``/api`` contract.
+    """
+
+    bot_id: str
+    status: str
+    message: str | None = None
+
+
+# ── Bot inventory card surface ─────────────────────────────────────────────
+# Card view at ``/openapi/v1/bots/cards`` (list) and ``/cards/{bot_id}`` (one
+# card); actions hang off the bot record at ``/{bot_id}/actions``.
+# These Literals are trimmed siblings of the core enums in
+# ``core.bot_inventory.types`` (kept as strings so a pydantic schema carries
+# them as JSON enums without a circular import on the core module).
+
+DeployMode = Literal["cloud", "local"]
+BotInventoryKind = Literal["personal_cloud", "local", "service"]
+DisplayState = Literal[
+    "running", "pending", "failed", "dormant",
+    "local_running", "local_offline", "local_pending", "local_failed",
+    "service_draft", "service_staging", "service_online", "service_offline",
+]
+BotAction = Literal[
+    "view", "chat", "edit", "delete", "restart", "data_init", "activate",
+    "open_folder", "passport", "engine_config", "runtime_logs", "engine_restart",
+]
+
+
+class BusinessSpace(BaseModel):
+    """Business-space reference surfaced on an inventory card."""
+
+    space_id: str
+    name: str
+    kind: str = Field(description="Space kind from the business-space owner.")
+
+
+class BotInventoryItem(BaseModel):
+    """Unified card for a personal cloud, local, or service Bot."""
+
+    bot_id: str
+    bot_name: str
+    bot_desc: str
+    engine: str
+    bot_type: str
+    kind: BotInventoryKind
+    deploy_mode: DeployMode
+    display_state: DisplayState
+    status: str
+    owner_entity_id: str
+    space: BusinessSpace | None = None
+    avatar_url: str | None = None
+    machine_id: str | None = None
+    mount_path: str | None = None
+    passport_id: str | None = None
+    actions: list[BotAction] = Field(default_factory=list)
+    disabled_actions: dict[str, str] | None = None
+
+
+class BotActions(BaseModel):
+    """Action affordances for a Bot inventory item."""
+
+    bot_id: str
+    display_state: DisplayState
+    actions: list[BotAction]
+    disabled_actions: dict[str, str] | None = None
+
+
+class BotActivateResult(BaseModel):
+    """Result of activating a recycled personal cloud Bot.
+
+    Mirrors the ``{status, message}`` dict ``ActivateBotService.activate``
+    returns: a synchronous ``REACTIVATING`` loading state while the Passport
+    unfreeze + ``start_bot`` flow runs in the background.
     """
 
     bot_id: str

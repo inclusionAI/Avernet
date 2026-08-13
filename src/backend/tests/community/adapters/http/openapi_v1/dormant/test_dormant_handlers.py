@@ -13,7 +13,7 @@ from tests.community.adapters.http.openapi_v1.conftest import (
     user_scoped_client,
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
-from agentclaw.community.adapters.http.openapi_v1.dormant.router import router
+from agentclaw.community.adapters.http.openapi_v1.bots.router import router
 from agentclaw.community.api.bot_dormant_service import (
     BotDormantActivateServiceProtocol,
 )
@@ -66,7 +66,7 @@ def _ok(resp):
 
 
 def test_activate_personal_cloud_bot(client, activate_service):
-    data = _ok(client.post("/openapi/v1/bots/dormant/b1/activate"))
+    data = _ok(client.post("/openapi/v1/bots/b1/activate"))
 
     assert data["bot_id"] == "b1"
     assert data["status"] == "REACTIVATING"
@@ -81,7 +81,7 @@ def test_activate_personal_cloud_bot(client, activate_service):
 def test_activate_refuses_desktop_bot(client, bot_service, activate_service):
     bot_service.get_bot.return_value = {**PERSONAL_RECYCLED, "bot_type": "desktop"}
 
-    resp = client.post("/openapi/v1/bots/dormant/b1/activate")
+    resp = client.post("/openapi/v1/bots/b1/activate")
 
     assert resp.status_code == 409
     activate_service.activate.assert_not_called()
@@ -90,7 +90,7 @@ def test_activate_refuses_desktop_bot(client, bot_service, activate_service):
 def test_activate_refuses_service_bot(client, bot_service, activate_service):
     bot_service.get_bot.return_value = {**PERSONAL_RECYCLED, "bot_type": "service"}
 
-    resp = client.post("/openapi/v1/bots/dormant/b1/activate")
+    resp = client.post("/openapi/v1/bots/b1/activate")
 
     assert resp.status_code == 409
     activate_service.activate.assert_not_called()
@@ -105,7 +105,7 @@ def test_activate_missing_for_owner_is_not_found(client, bot_service):
 
     bot_service.get_bot.side_effect = BotNotFoundError("bot not found: bX")
 
-    resp = client.post("/openapi/v1/bots/dormant/bX/activate")
+    resp = client.post("/openapi/v1/bots/bX/activate")
 
     assert resp.status_code == 404
     assert resp.json()["message"] == "Not found"

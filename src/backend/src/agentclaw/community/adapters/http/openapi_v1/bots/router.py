@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import JSONResponse
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
@@ -91,6 +91,20 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
+from agentclaw.community.api.bot_inventory_service import (
+    BotInventoryServiceProtocol,
+)
+from agentclaw.community.api.bot_dormant_service import (
+    BotDormantActivateServiceProtocol,
+)
+from agentclaw.community.core.bot_inventory.protocols import (
+    BusinessSpaceContextProtocol,
+)
+from agentclaw.community.core.bot_inventory.types import (
+    BotInventoryItem as CoreItem,
+    DeployMode,
+)
+
 from .engine_config import _engine_config_target
 from .startup_script_support import (
     _startup_script_payload,
@@ -99,9 +113,12 @@ from .startup_script_support import (
 )
 from .schemas import (
     Bot,
+    BotActivateResult,
     BotAuthPending,
     BotAuthStatus,
     BotCreate,
+    BotInventoryItem,
+    BotActions,
     BotSpaceRef,
     BotStatus,
     BotType,
@@ -196,6 +213,51 @@ def _row_matches_space(bot: dict[str, Any], owner_id: str, space_id: str) -> boo
     personal fallback), so list-filter and detail-derive read one value.
     """
     return _resolve_bot_space(bot, owner_id)["space_id"] == space_id
+
+
+def _to_inventory_item(item: CoreItem) -> BotInventoryItem:
+    """Adapt a core ``BotInventoryItem`` value object to the public schema.
+
+    ``space`` is forwarded as a plain dict — pydantic coerces it into a
+    ``BusinessSpace``. ``actions`` is a tuple of enums on the core side and a
+    list of strings on the public side; ``disabled_actions`` mirrors that.
+    """
+    space = None
+    if item.space is not None:
+        space = {
+            "space_id": item.space.space_id,
+            "name": item.space.name,
+            "kind": item.space.kind,
+        }
+    return BotInventoryItem(
+        bot_id=item.bot_id,
+        bot_name=item.bot_name,
+        bot_desc=item.bot_desc,
+        engine=item.engine,
+        bot_type=item.bot_type,
+        kind=item.kind.value,
+        deploy_mode=item.deploy_mode.value,
+        display_state=item.display_state.value,
+        status=item.status,
+        owner_entity_id=item.owner_entity_id,
+        space=space,
+        avatar_url=item.avatar_url,
+        machine_id=item.machine_id,
+        mount_path=item.mount_path,
+        passport_id=item.passport_id,
+        actions=[a.value for a in item.actions],
+        disabled_actions=dict(item.disabled_actions) if item.disabled_actions else None,
+    )
+
+
+def _to_inventory_actions(item: CoreItem) -> dict[str, Any]:
+    """Build the ``BotActions`` fields for an inventory card (used as kwargs)."""
+    return {
+        "bot_id": item.bot_id,
+        "display_state": item.display_state.value,
+        "actions": [a.value for a in item.actions],
+        "disabled_actions": dict(item.disabled_actions) if item.disabled_actions else None,
+    }
 
 
 def _auth_status_error(status: str, request: Request) -> JSONResponse:
@@ -373,6 +435,7 @@ async def create_bot(
             bot_type=body.bot_type,
             bot_name=body.bot_name,
             bot_desc=body.bot_desc,
+            space_id=body.space_id,
         ),
         bot_service=bot_service,
         passport_plugin=passport_plugin,
@@ -437,6 +500,7 @@ async def list_bots(
     ``keyword``/``engine``/``status`` are native service filters.
     ``deploy_mode``/``service``/``space`` are workshop filters applied here
     because the underlying service does not own those presentation concerns.
+
     """
     granted = caller.granted_bot_ids(owned_by_delegator=True)
     if granted is not None and not granted:
@@ -573,12 +637,186 @@ async def get_bots_ceiling(
     return envelope(Ceiling(ceiling=ceiling), request)
 
 
+# ── Bot inventory card surface ─────────────────────────────────────────────
+# Card view at ``/openapi/v1/bots/cards`` (list) and ``/cards/{bot_id}`` (one
+# card), declared before the ``/{bot_id}`` wildcard so ``cards`` matches as a
+# literal, not as a bot_id. The actions affordance hangs off the bot record
+# itself at ``/{bot_id}/actions`` (a two-segment sub-resource like
+# ``/{bot_id}/restart``), so it follows ``/{bot_id}`` below and needs no literal
+# guard. The card aggregates the owner's personal cloud + local Bots behind
+# ``BotInventoryServiceProtocol`` (a distinct Service API from the
+# ``BotServiceProtocol`` CRUD this file serves below); the value translation is
+# the ``_to_inventory_item`` helper at the top of this file (same place as
+# ``_to_bot``).
+
+
+@router.get(
+    "/cards",
+    response_model=Envelope[Page[BotInventoryItem]],
+    responses=USER_SCOPED_403,
+)
+@envelope_errors
+async def list_inventory(
+    page_params: PageParamsDep,
+    owner_id: UserIdDep,
+    request: Request,
+    x_space_id: str | None = Header(default=None, alias="X-Space-Id"),
+    keyword: str | None = Query(default=None),
+    engine: str | None = Query(default=None),
+    deploy_mode: DeployMode | None = Query(default=None),
+    service: BotInventoryServiceProtocol = Injected(BotInventoryServiceProtocol),
+    space_context: BusinessSpaceContextProtocol = Injected(
+        BusinessSpaceContextProtocol
+    ),
+) -> Envelope[Page[BotInventoryItem]]:
+    """List personal cloud and local Bots visible in the current business space."""
+    current_space = space_context.resolve_current(
+        owner_id=owner_id,
+        header_space_id=x_space_id,
+    )
+    items, total = service.list_items(
+        owner_id=owner_id,
+        space=current_space,
+        keyword=keyword,
+        engine=engine,
+        deploy_mode=deploy_mode,
+        page=page_params.page,
+        page_size=page_params.page_size,
+    )
+    return page(total, [_to_inventory_item(item) for item in items], request)
+
+
+@router.get(
+    "/cards/{bot_id}",
+    response_model=Envelope[BotInventoryItem],
+    responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED,
+)
+@envelope_errors
+async def get_inventory_item(
+    bot_id: str,
+    owner_id: UserIdDep,
+    request: Request,
+    x_space_id: str | None = Header(default=None, alias="X-Space-Id"),
+    service: BotInventoryServiceProtocol = Injected(BotInventoryServiceProtocol),
+    space_context: BusinessSpaceContextProtocol = Injected(
+        BusinessSpaceContextProtocol
+    ),
+) -> Envelope[BotInventoryItem]:
+    """Get one Bot inventory card by Bot id."""
+    current_space = space_context.resolve_current(
+        owner_id=owner_id,
+        header_space_id=x_space_id,
+    )
+    return envelope(
+        _to_inventory_item(
+            service.get_item(owner_id=owner_id, bot_id=bot_id, space=current_space)
+        ),
+        request,
+    )
+
+
+@router.get(
+    "/{bot_id}/actions",
+    response_model=Envelope[BotActions],
+    responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED,
+)
+@envelope_errors
+async def get_inventory_actions(
+    bot_id: str,
+    owner_id: UserIdDep,
+    request: Request,
+    x_space_id: str | None = Header(default=None, alias="X-Space-Id"),
+    service: BotInventoryServiceProtocol = Injected(BotInventoryServiceProtocol),
+    space_context: BusinessSpaceContextProtocol = Injected(
+        BusinessSpaceContextProtocol
+    ),
+) -> Envelope[BotActions]:
+    """Get action affordances for one Bot in the current business space."""
+    current_space = space_context.resolve_current(
+        owner_id=owner_id,
+        header_space_id=x_space_id,
+    )
+    item = service.actions(owner_id=owner_id, bot_id=bot_id, space=current_space)
+    return envelope(BotActions(**_to_inventory_actions(item)), request)
+
+
+# ── Dormant Bot activation ─────────────────────────────────────────────────
+# ``POST /openapi/v1/bots/{bot_id}/activate`` — a two-segment sub-resource of
+# the bot record (like ``/{bot_id}/restart``), so it follows ``/{bot_id}`` and
+# needs no literal guard. The handler does the owner lookup + bot_type guard
+# itself and delegates only the reactivation orchestration to
+# ``BotDormantActivateServiceProtocol`` (``ActivateBotService.activate``);
+# local bots are never reclaimed by dormant so they are refused here (409),
+# service bots go through their own publish flow.
+
+
+def _require_personal_cloud_bot(bot: dict[str, Any]) -> None:
+    """Refuse dormant activation for non-personal-cloud bots (→ 409).
+
+    ``bot_type`` is the only field that distinguishes a personal cloud bot from
+    a desktop or service bot at this layer; ``status`` is checked downstream
+    by ``ActivateBotService.activate`` (RECYCLED only).
+    """
+    bot_type = bot.get("bot_type") or ""
+    if bot_type == "desktop":
+        raise BotOperationNotAllowedError(
+            "local bots are not reclaimed by dormant activation"
+        )
+    if bot_type == "service":
+        raise BotOperationNotAllowedError(
+            "service bot lifecycle is owned by the publish flow"
+        )
+    if bot_type != "personal":
+        raise BotOperationNotAllowedError(
+            f"dormant activation is not supported for bot_type: {bot_type or 'unknown'}"
+        )
+
+
+@router.post(
+    "/{bot_id}/activate",
+    response_model=Envelope[BotActivateResult],
+    responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED,
+)
+@envelope_errors
+async def activate_dormant_bot(
+    bot_id: str,
+    request: Request,
+    owner_id: UserIdDep,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    activate_service: BotDormantActivateServiceProtocol = Injected(
+        BotDormantActivateServiceProtocol
+    ),
+) -> Envelope[BotActivateResult]:
+    """Activate a recycled personal cloud Bot.
+
+    Owner/tenant guard runs first via ``bot_service.get_bot`` (raises
+    ``BotNotFoundError`` → 404 for a bot that is not the caller's). The
+    ``bot_type`` guard then refuses desktop/service (→ 409) before the
+    reactivation orchestration is delegated.
+    """
+    bot = bot_service.get_bot(bot_id, owner_id)
+    _require_personal_cloud_bot(bot)
+    result = activate_service.activate(bot_id=bot_id, user_id=owner_id)
+    return envelope(
+        BotActivateResult(
+            bot_id=bot_id,
+            status=str(result.get("status") or ""),
+            message=result.get("message"),
+        ),
+        request,
+    )
+
+
 @router.get(
     "/{bot_id}",
     response_model=Envelope[Bot],
     responses=USER_SCOPED_403,
     dependencies=_GRANT_CHECKED_OWN_BOT,
 )
+
 @envelope_errors
 async def get_bot(
     bot_id: BotIdPath,
@@ -766,6 +1004,10 @@ async def get_bot_auth_status(
             "defaults to 'personal' when omitted."
         ),
     ] = None,
+    space_id: Annotated[
+        str | None,
+        Query(description="Business space to associate with the created bot."),
+    ] = None,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     passport_plugin: PassportPlugin = Injected(PassportPlugin),
     auth_rel_plugin: AuthRelationshipPlugin = Injected(AuthRelationshipPlugin),
@@ -809,6 +1051,7 @@ async def get_bot_auth_status(
             bot_type=bot_type or "personal",
             bot_name=bot_name,
             bot_desc=bot_desc,
+            space_id=space_id,
         ),
         bot_service=bot_service,
         passport_plugin=passport_plugin,

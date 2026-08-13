@@ -195,9 +195,7 @@ from .engine_runtime.engine import router as engine_engine_router
 from .engine_runtime.models import router as engine_models_router
 from .engine_runtime.sessions import router as engine_sessions_router
 from .identity import router as identity_router
-from .inventory import router as inventory_router
 from .local import router as local_router
-from .dormant import router as dormant_router
 from .loadtest import router as loadtest_router
 from .mcp import router as mcp_router
 from .bot_logs import router as logs_router
@@ -285,9 +283,7 @@ _GRANT_CHECKED_SUBGROUPS = [
     identity_router,
     resources_router,
     routines_router,
-    inventory_router,
     local_router,
-    dormant_router,
 ]
 
 # Track C — the engine-runtime groups. Mounted separately because they document

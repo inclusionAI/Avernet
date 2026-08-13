@@ -1,4 +1,4 @@
-"""Request/response models for the engine (read-only) group."""
+"""Request/response models for the engine group."""
 
 from __future__ import annotations
 
@@ -85,4 +85,32 @@ class EngineInfo(BaseModel):
     active: bool = Field(description="Whether this is the bot's active engine.")
 
 
-__all__ = ["EngineCapabilities", "EngineInfo", "EngineStatus"]
+class EngineRestartResult(BaseModel):
+    """Outcome of restarting the bot's engine process.
+
+    The bot's engine lives in its own daemon (``/api/engine/restart`` on the
+    device adapter), separate from BaaS ``restart_bot`` which re-provisions the
+    whole container and drops sessions. The result echoes a coarse dispatch
+    status only — the engine's restart is in-flight by the time the request
+    returns, and the caller confirms completion via ``GET .../engine/status``.
+    The engine's own response body is otherwise engine-specific and is not
+    re-published here.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"bot_id": "b1", "status": "restarting"}}
+    )
+
+    bot_id: str = Field(description="The bot whose engine was asked to restart.")
+    status: str = Field(
+        description="Coarse dispatch state the engine returned (e.g. "
+        "``restarting``); field set only when the engine reports one."
+    )
+
+
+__all__ = [
+    "EngineCapabilities",
+    "EngineInfo",
+    "EngineRestartResult",
+    "EngineStatus",
+]

@@ -934,9 +934,9 @@ literals the routes actually publish:
 
 <!-- reserved-component-names -->
 ```text
-approvals  authorized  ceiling  check-name  connection  engine  identity
-inventory  loadtest  local  logs  mcp  models  resources  routines  sessions
-skills  dormant
+approvals  authorized  cards  ceiling  check-name  connection  engine  identity
+loadtest  local  logs  mcp  models  resources  routines  sessions
+skills
 ```
 
 Nine of those fifteen — `approvals`, `connection`, `engine`, `identity`,

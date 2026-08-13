@@ -28,7 +28,7 @@ internal_dependencies:
 
 ### Change impact
 
-Changes affect the public `/openapi/v1/bots/inventory` and
+Changes affect the public `/openapi/v1/bots/cards` and
 `/openapi/v1/bots/local` views that compose existing Bot management and desktop
 Bot services.  The module does not own business-space membership, storage, or
 CRUD; replacing the fallback space context with the business-space owner's
