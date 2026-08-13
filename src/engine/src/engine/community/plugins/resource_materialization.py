@@ -235,13 +235,13 @@ class HttpTemporaryUrlPullClient:
         parsed = urlsplit(value)
         host = parsed.hostname.lower() if parsed.hostname else ""
         if (
-            parsed.scheme != "https"
+            parsed.scheme not in {"http", "https"}
             or not host
             or parsed.username is not None
             or parsed.password is not None
         ):
             raise ValueError("untrusted temporary URL")
-        return host, parsed.port or 443
+        return host, parsed.port or (443 if parsed.scheme == "https" else 80)
 
     @staticmethod
     async def _resolve_public_ips(host: str, port: int) -> frozenset[str]:
