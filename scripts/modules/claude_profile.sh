@@ -140,3 +140,13 @@ claude_profile_entity_id() {
 claude_profile_entity_type() {
     jq -r '.entity_type // "staff"' "$(claude_profile_manifest)"
 }
+
+# Return the first Claude bot's comma-separated domains (from bots.json).
+claude_profile_first_bot_domains() {
+    jq -r '.bots[0].domains // empty' "$(claude_profile_manifest)" 2>/dev/null
+}
+
+# Return the first Claude bot's comma-separated skills (from bots.json).
+claude_profile_first_bot_skills() {
+    jq -r '.bots[0].skills // empty' "$(claude_profile_manifest)" 2>/dev/null
+}

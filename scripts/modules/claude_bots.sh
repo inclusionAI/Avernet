@@ -94,6 +94,102 @@ claude_bots_start() {
         '{entity_id: $entity_id, entity_type: $entity_type, bots: [{role: $role, bot_id: $bot_id, name: $name, relay_port: $relay_port}]}' > "$CLAUDE_BOTS_STATE_FILE"
     chmod 600 "$CLAUDE_BOTS_STATE_FILE"
     log_info "Started one Claude Code normalCC bot on relay ${port}"
+
+    # Register the Claude bot in bcsfuse so it can participate in fusion.
+    _claude_bots_register_bcsfuse_fusion "$bot_id" "$name" "$summary"
+}
+
+# Resolve BCSFUSE_AUTH_TOKEN from the bcsfuse env file or current environment.
+_claude_bots_bcsfuse_auth_token() {
+    local token="${BCSFUSE_AUTH_TOKEN:-}"
+    if [ -z "$token" ] && [ -n "${BCSFUSE_ENV_FILE:-}" ] && [ -f "$BCSFUSE_ENV_FILE" ]; then
+        token="$(grep '^export BCSFUSE_AUTH_TOKEN=' "$BCSFUSE_ENV_FILE" 2>/dev/null | head -1 | sed -E 's/^export BCSFUSE_AUTH_TOKEN="?([^"]*)"?$/\1/')"
+    fi
+    printf '%s\n' "$token"
+}
+
+# Register the Claude Code bot as a bcsfuse worker and enable fusion.
+# Uses the backend bot_id as the bcsfuse worker_id.
+_claude_bots_register_bcsfuse_fusion() {
+    local bot_id="$1"
+    local name="$2"
+    local summary="$3"
+
+    if [ -z "$bot_id" ]; then
+        return 0
+    fi
+
+    local bcsfuse_url="http://127.0.0.1:${BCSFUSE_PORT:-8765}"
+    local auth_token
+    auth_token="$(_claude_bots_bcsfuse_auth_token)"
+    if [ -z "$auth_token" ]; then
+        log_warn "BCSFUSE_AUTH_TOKEN not available; skipping Claude bot bcsfuse fusion registration"
+        return 0
+    fi
+
+    # Wait until bcsfuse health endpoint is reachable.
+    local attempt=0
+    while [ "$attempt" -lt 10 ]; do
+        if curl -sf --max-time 2 "${bcsfuse_url}/health" >/dev/null 2>&1; then
+            break
+        fi
+        sleep 1
+        attempt=$((attempt + 1))
+    done
+    if [ "$attempt" -ge 10 ]; then
+        log_warn "bcsfuse health check not passing; skipping Claude bot fusion registration"
+        return 0
+    fi
+
+    local domains_csv skills_csv
+    domains_csv="$(claude_profile_first_bot_domains 2>/dev/null || true)"
+    skills_csv="$(claude_profile_first_bot_skills 2>/dev/null || true)"
+
+    # Convert comma-separated values to JSON arrays.
+    local domains_json skills_json
+    if [ -n "$domains_csv" ]; then
+        domains_json="$(printf '%s\n' "$domains_csv" | tr ',' '\n' | jq -R . | jq -s .)" || domains_json="[]"
+    else
+        domains_json="[]"
+    fi
+    if [ -n "$skills_csv" ]; then
+        skills_json="$(printf '%s\n' "$skills_csv" | tr ',' '\n' | jq -R . | jq -s .)" || skills_json="[]"
+    else
+        skills_json="[]"
+    fi
+
+    local payload response status body
+    payload="$(jq -n \
+        --arg worker_id "$bot_id" \
+        --arg name "$name" \
+        --arg description "$summary" \
+        --argjson skills "$skills_json" \
+        --argjson domains "$domains_json" \
+        '{worker_id: $worker_id, name: $name, description: $description, skills: $skills, domains: $domains, is_public: true}')"
+
+    response="$(curl -s -w '\n%{http_code}' -X POST "${bcsfuse_url}/api/v1/workers" \
+        -H 'Content-Type: application/json' \
+        -H "Authorization: Bearer ${auth_token}" \
+        -d "$payload" 2>/dev/null || true)"
+    status="$(printf '%s\n' "$response" | tail -1)"
+    body="$(printf '%s\n' "$response" | sed '$d')"
+
+    if [ "$status" != "200" ] && [ "$status" != "201" ]; then
+        log_warn "Failed to register Claude bot in bcsfuse: HTTP ${status}: ${body}"
+        return 0
+    fi
+    log_info "Registered Claude bot as bcsfuse worker: ${bot_id} (${name})"
+
+    response="$(curl -s -w '\n%{http_code}' -X PUT "${bcsfuse_url}/api/v1/workers/${bot_id}/config" \
+        -H 'Content-Type: application/json' \
+        -H "Authorization: Bearer ${auth_token}" \
+        -d '{"fusion_enable": true}' 2>/dev/null || true)"
+    status="$(printf '%s\n' "$response" | tail -1)"
+    if [ "$status" = "200" ]; then
+        log_info "Enabled bcsfuse fusion for Claude bot: ${name}"
+    else
+        log_warn "Failed to enable bcsfuse fusion for Claude bot: HTTP ${status}"
+    fi
 }
 
 claude_bots_stop() {
