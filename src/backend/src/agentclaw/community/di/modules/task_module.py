@@ -51,7 +51,7 @@ class TaskModule(Module):
 
         端口接线策略(组合根按 ``DEPLOY_PROFILE`` 选实现,不在 adapter 内 if):
         - ``DEPLOY_PROFILE=singlebox`` → singlebox 真实链路(``SingleboxEngineAdapter`` 直连 per-bot 引擎 +
-          ``_DoubleBcsClient`` 本地 BCS 占位);本地集成即真实执行。
+          ``BcsHttpAdapter`` 复用 BCS REST 直连本地 BCS :21000);本地集成即真实执行。
         - 其它(corp/prod 由 overlay 覆写)→ community 不内联 BaaS/BCS 密钥,留 None,真实端口由 corp adapter 覆写。
         - discover(``BotDiscoverServiceProtocol``,来自 BotPublicModule)始终传入:
           singlebox profile 换 ``SingleboxKeywordBotDiscover``(本地关键字搜索),其余用注入的 BCSFuse。
@@ -96,21 +96,29 @@ class TaskModule(Module):
         """构造传输端口(组合根按 ``DEPLOY_PROFILE`` 选实现,不在 adapter 内 if)。
 
         - ``DEPLOY_PROFILE=singlebox`` → ``SingleboxEngineAdapter``(直连 per-bot 引擎 WebSocket,绕开 BaaS)
-          + ``_DoubleBcsClient``(本地 BCS 占位;singlebox 这一轮走 single_bot 真实执行,coop_group 走模拟)。
+          + ``SingleboxBcsAdapter``(继承 ``BcsHttpAdapter`` 复用 BCS REST 直连本地 BCS :21000;本地
+          ``require_authentication=false``,HMAC 头被忽略;仅覆写本地响应形状与生产不一致处 → coop_group 真驱动本地 BCS)。
         - 其它(corp/prod 由 overlay 覆写)→ 不内联 BaaS/BCS(社区不发 corp 密钥),真实端口由 corp adapter
           覆写本 provider。
         """
         if os.environ.get("DEPLOY_PROFILE", "").strip().lower() != "singlebox":
             return None, None
-        from agentclaw.community.core.task.task_runner.integration.double.double_bcs_client import (
-            _DoubleBcsClient,
+        from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import (
+            LocalBcsTokenProvider,
+        )
+        from agentclaw.community.core.task.task_runner.integration.singlebox_bcs_adapter import (
+            SingleboxBcsAdapter,
         )
         from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adapter import (
             SingleboxEngineAdapter,
         )
         backend = os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
         user_id = os.environ.get("SINGLEBOX_USER_ID", "146836")
-        return SingleboxEngineAdapter(backend_base_url=backend, user_id=user_id), _DoubleBcsClient()
+        bot = SingleboxEngineAdapter(backend_base_url=backend, user_id=user_id)
+        # 本地 BCS 与生产同 REST、require_authentication=false → SingleboxBcsAdapter(继承 BcsHttpAdapter,
+        # HMAC 头被本地忽略;仅覆写本地响应形状差异)。_DoubleBcsClient 仅留单测用。
+        bcs = SingleboxBcsAdapter(LocalBcsTokenProvider.from_env())
+        return bot, bcs
 
     @staticmethod
     def _resolve_discover(

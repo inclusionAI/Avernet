@@ -21,6 +21,7 @@ import asyncio
 import os
 import time
 import unittest
+import uuid
 from pathlib import Path
 
 import httpx
@@ -31,11 +32,12 @@ from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adap
 
 _LIVE = os.environ.get("SINGLEBOX_TASK_E2E", "").strip() in {"1", "true"}
 _BACKEND = os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
-_USER_ID = os.environ.get("SINGLEBOX_USER_ID", "146836")
+_USER_ID = os.environ.get("SINGLEBOX_USER_ID", "35983")
 _TIMEOUT = float(os.environ.get("SINGLEBOX_TASK_E2E_TIMEOUT", "1500"))
 
 SKILLS_DIR = Path(__file__).parent / "skills"
-TASK_ID = "t_case"
+# 每次进程随机:避免后端 in-mem TaskGraphService 跨次重跑时 task_id 重复 → GraphAlreadyInitializedError。
+TASK_ID = f"t_case_{uuid.uuid4().hex[:6]}"
 
 # search skill 剧本角色名(HIT_SINGLE 真实叶节点)→ bot_name;协作群 bot 走 BCS double 不建。
 ROLE_BOTS = {
