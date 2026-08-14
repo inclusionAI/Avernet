@@ -99,7 +99,7 @@ class TestTaskIntegrationE2E(unittest.TestCase):
         await prov._aclose()
         print(f"[provision] owner={owner_id} roles={role_ids}")
 
-        async with httpx.AsyncClient(timeout=60.0, headers=_HDRS) as cli:
+        async with httpx.AsyncClient(timeout=300.0, headers=_HDRS) as cli:
             # 2) POST /api/task/execute → backend 进程内真实 engine 推进首帧
             r = await cli.post(f"{_BACKEND}/api/task/execute", json=_execute_body(owner_id))
             r.raise_for_status()

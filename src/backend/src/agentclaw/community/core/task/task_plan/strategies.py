@@ -7,6 +7,7 @@ GapBased 真实实现:组 planning prompt → 投 owner bot(``send_and_wait_asyn
 """
 from __future__ import annotations
 
+import logging
 from typing import Protocol
 
 from agentclaw.community.core.task.domain.json_extract import extract_json
@@ -22,6 +23,8 @@ from agentclaw.community.core.task.domain.models import (
     TaskNode,
     TaskSpec,
 )
+
+logger = logging.getLogger("task.planner")
 
 
 class PlanningStrategy(Protocol):
@@ -102,7 +105,10 @@ class GapBasedPlanningStrategy:
         run = await self._bot.send_and_wait_async(
             bot_id=owner, message=prompt, metadata={"phase": "planning"},
         )
-        return _parse_children(run, target, graph)
+        children = _parse_children(run, target, graph)
+        logger.info("[plan] owner=%s target=%s → %d children: %s",
+                    owner, target.node_id, len(children), [c.node_id for c in children])
+        return children
 
 
 def _find_planning_target(graph: TaskExecutionGraph) -> TaskNode | None:

@@ -8,6 +8,7 @@ engine 对调用方不可见(无 engine property)。测试可经 facade/engine �
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.domain.models import (
@@ -20,6 +21,8 @@ from agentclaw.community.core.task.task_runner.callback_adapter import (
     CallbackAdapter,
     TaskLoopCallback,
 )
+
+logger = logging.getLogger("task.service")
 
 
 class TaskService(TaskServiceProtocol):
@@ -56,9 +59,13 @@ class TaskService(TaskServiceProtocol):
         协程化:await on_execute(async 链路),耗时投递(BCS/真实 workflow)不阻塞调用方。"""
         graph = self._graph.initialize_graph(task_info)
         task_id = task_info.task_spec.metadata.task_id
+        logger.info("[execute] task=%s source=%s title=%s → initialize(run_id=%s)+on_execute",
+                    task_id, task_info.source_channel_id,
+                    task_info.task_spec.metadata.title, graph.run_id)
         if self._harness is not None:
             self._harness.register(task_id)
         await self._engine.on_execute(task_id)
+        logger.info("[execute] task=%s 首帧推进完成", task_id)
         return TaskOpResult(task_id=task_id, success=True, run_id=graph.run_id)
 
     def get_task_dashboard(

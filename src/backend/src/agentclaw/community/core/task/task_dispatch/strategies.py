@@ -7,12 +7,15 @@
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol
 
 from agentclaw.community.core.task.domain.json_extract import extract_json
 from agentclaw.community.core.task.domain.models import TaskExecutionGraph, TaskNode
+
+logger = logging.getLogger("task.dispatcher")
 
 
 class SearchOutcome(StrEnum):
@@ -109,10 +112,15 @@ class SearchBasedDispatchStrategy:
             return SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_owner")
         candidates = await _prefetch_candidates(self._discover, node, graph)
         prompt = _compose_search_prompt(node, candidates)
+        logger.info("[search] owner=%s node=%s 候选=%s", owner, node.node_id,
+                    [c.get("bot_id") for c in candidates])
         run = await self._bot.send_and_wait_async(
             bot_id=owner, message=prompt, metadata={"phase": "search"},
         )
-        return _parse_search_result(run)
+        sr = _parse_search_result(run)
+        logger.info("[search] node=%s → outcome=%s bot_id=%s group=%s miss=%s",
+                    node.node_id, sr.outcome, sr.bot_id, sr.group_id, sr.miss_reason)
+        return sr
 
 
 def _query_text(node: TaskNode) -> dict:
@@ -133,8 +141,8 @@ async def _prefetch_candidates(discover, node: TaskNode, graph: TaskExecutionGra
     texts = _query_text(node)
     user_id = str(graph.extend_props.get("source_channel_id") or "")
     seen: dict[str, dict] = {}
-    for field in ("title", "objective", "background"):
-        kw = texts.get(field)
+    for fld in ("title", "objective", "background"):
+        kw = texts.get(fld)
         if not kw:
             continue
         try:

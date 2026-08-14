@@ -18,6 +18,7 @@ gather+Semaphore 并发下沉 ``TaskRunner.start_run`` 内部。
 """
 from __future__ import annotations
 
+import logging
 import threading
 
 from agentclaw.community.core.task.domain.errors import NodeNotFoundError, TaskStateError
@@ -31,6 +32,9 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodePatch,
     TaskNodeQueryCriteria,
 )
+
+
+logger = logging.getLogger("task.engine")
 
 
 class ExecutionEngine:
@@ -167,10 +171,15 @@ class ExecutionEngine:
         side: list[tuple] = []
         with self._lock_for(task_id):
             root = self._root(task_id)
+            logger.info("[on_execute] task=%s root=%s status=%s", task_id,
+                        root.node_id if root else None, root.status if root else None)
             if root is None or root.status != Status.PENDING:
+                logger.info("[on_execute] task=%s 非条件 a(根非 PENDING),跳过", task_id)
                 return  # 非条件 a
             graph = self._graph.query_task_dashboard(task_id)
             nodes = await self._planner.plan(graph)   # 锁内 await plan(LLM IO,同 task 串行)
+            logger.info("[on_execute] task=%s plan 产 %d 子节点: %s",
+                        task_id, len(nodes), [n.node_id for n in nodes])
             if not nodes:
                 return  # 无可规划
             self._graph.add_task_nodes(nodes, root.node_id)
@@ -205,6 +214,9 @@ class ExecutionEngine:
     async def on_report(self, patch: TaskNodePatch) -> NodeOpResult:
         """回投事件:patch 内含 (task_id,node_id)+acceptance_result+output_patch。
         update_task_node_info 翻态(+fold)→ PASS 传播 / FAIL+gaps 补救。验收 100% 来自回投,engine 不主动验。"""
+        logger.info("[on_report] task=%s node=%s verdict=%s",
+                    patch.task_id, patch.node_id,
+                    patch.acceptance_result.verdict if patch.acceptance_result else "fold-only")
         with self._lock_for(patch.task_id):
             result = self._graph.update_task_node_info(patch)
             if patch.acceptance_result is None:
@@ -230,13 +242,20 @@ class ExecutionEngine:
         if parent.status != Status.PLANNING:
             return  # 父非委托态,不推进
         siblings = self._graph.get_child_tasks(task_id, parent.node_id)
-        if not all(s.status == Status.DONE for s in siblings):
+        logger.info("[on_pass] task=%s node=%s 父=%s 父态=%s 兄弟=%s",
+                    task_id, node_id, parent.node_id, parent.status,
+                    [(s.node_id, s.status.value) for s in siblings])
+        if not all(st.status == Status.DONE for st in siblings):
+            logger.info("[on_pass] task=%s 兄弟未齐,等待", task_id)
             return  # 兄弟未齐,等待
-        if any(s.status == Status.RUNNING for s in siblings):
+        if any(st.status == Status.RUNNING for st in siblings):
+            logger.info("[on_pass] task=%s 仍有 RUNNING,等待", task_id)
             return  # 仍有 RUNNING,等待
         # 本批兄弟全 DONE → 委托 plan(gap 计算;返 children=gap 未闭继续拆,返 []=gap 闭=验收通过)
         graph = self._graph.query_task_dashboard(task_id)
         new_children = await self._planner.plan(graph)
+        logger.info("[on_pass] task=%s 父=%s 委托 plan 产 %d 子",
+                    task_id, parent.node_id, len(new_children))
         if new_children:
             self._graph.add_task_nodes(new_children, parent.node_id)
             await self._prepare_into(task_id, side)
@@ -257,9 +276,15 @@ class ExecutionEngine:
         depth = self._graph._node_depth(task_id, node_id)
         cfg = self._graph._execution_config(task_id)
         max_depth = cfg["MAX_DEPTH"]
+        _n = next((x for x in self._graph.query_task_dashboard(task_id).tasks if x.node_id == node_id), None)
+        logger.info("[on_fail] task=%s node=%s depth=%d/%d gaps=%s",
+                    task_id, node_id, depth, max_depth,
+                    (_n.run_info.acceptance_result.gaps if _n and _n.run_info.acceptance_result else None))
         if depth < max_depth:
             graph = self._graph.query_task_dashboard(task_id)
             new_children = await self._planner.plan(graph)
+            logger.info("[on_fail] task=%s node=%s 补救 plan 产 %d 子",
+                        task_id, node_id, len(new_children))
             if new_children:
                 self._graph.add_task_nodes(new_children, node_id)
                 await self._prepare_into(task_id, side)
@@ -331,17 +356,23 @@ class ExecutionEngine:
         )
         if not pending:
             return
+        logger.info("[prepare] task=%s 待派发节点=%s", task_id, [n.node_id for n in pending])
         dispatched = await self._dispatcher.dispatch(pending)
+        logger.info("[prepare] task=%s dispatch 完成 %d 节点", task_id, len(dispatched))
         to_run: list[TaskNode] = []
         for node in dispatched:
             miss = node.run_info.extend_props.get("miss_events")
             gf = node.run_info.extend_props.pop("pending_group_formation", None)
             if gf is not None:
                 # HIT_MULTI_BOTS:待锁外拉群填充 assignee 后投递
+                logger.info("[prepare] task=%s node=%s → group(HIT_MULTI_BOTS collab=%s bot_ids=%s)",
+                            task_id, node.node_id, gf.collab_mode, gf.bot_ids)
                 side.append(("group", node, gf))
                 continue
             if node.run_info.run_mode and node.run_info.assignee:
                 # 有执行者 → 落库 RUNNING
+                logger.info("[prepare] task=%s node=%s → run(mode=%s assignee=%s)",
+                            task_id, node.node_id, node.run_info.run_mode, node.run_info.assignee)
                 self._graph.update_task_node_info(
                     TaskNodePatch(
                         task_id=task_id,
@@ -353,6 +384,7 @@ class ExecutionEngine:
                 )
                 to_run.append(node)
             elif miss:
+                logger.info("[prepare] task=%s node=%s → miss(%s)", task_id, node.node_id, miss)
                 # MISS → on_miss(锁外 await)
                 side.append((
                     "miss",
@@ -374,6 +406,7 @@ class ExecutionEngine:
                 run_nodes.extend(payload[0])
             elif kind == "group":
                 node, gf = payload
+                logger.info("[drain] task=%s node=%s 拉群(collab=%s)", task_id, node.node_id, gf.collab_mode)
                 gid = await self._runner.form_coop_group(gf)
                 node.run_info.assignee = gid
                 with self._lock_for(task_id):
@@ -390,8 +423,11 @@ class ExecutionEngine:
             elif kind == "miss":
                 await self.on_miss(payload[0])  # 递归 collect+drain(锁外)
             elif kind == "finish":
+                logger.info("[drain] task=%s finish(根 gap 闭→图 DONE)", task_id)
                 self._maybe_finish_graph(payload[0])
         if run_nodes:
+            logger.info("[drain] task=%s start_run %d 节点:%s",
+                        task_id, len(run_nodes), [n.node_id for n in run_nodes])
             await self._runner.start_run(run_nodes)
 
     def _maybe_finish_graph(self, task_id: str) -> None:

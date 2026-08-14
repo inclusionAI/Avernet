@@ -375,6 +375,9 @@ class SingleboxBotProvisioner:
         """
         import os as _os
 
+        # 0) readiness guard:装 skill 前确保 bot 已创建完成(status=ACTIVE);PENDING→ACTIVE 约 15s
+        await self.wait_active(bot_id)
+
         # 1) upload each skill dir (幂等:跳过已装同名 skill)
         installed = await self._installed_skill_names(bot_id)
         skill_ids: list[str] = []

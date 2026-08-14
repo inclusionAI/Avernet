@@ -6,6 +6,7 @@ SLA 超时→FAIL sla_timeout;连续 5 次端口失败→FAIL poll_exhausted;终
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 import time
 from dataclasses import dataclass
@@ -16,8 +17,10 @@ from agentclaw.community.core.task.task_runner.integration.translators import (
     BcsSessionTranslator, BcsStateMachineRunTranslator, SingleBotRunTranslator,
 )
 
+logger = logging.getLogger("task.poller")
+
 _DEFAULT_INTERVAL = 1.0
-_DEFAULT_SLA = 30.0
+_DEFAULT_SLA = 300.0  # 真实 LLM execute round-trip(单 bot 产出)可达数分钟;double 立即终态不受影响
 _MAX_CONSEC_FAIL = 5
 
 _TERMINAL_SINGLE = {"COMPLETED", "FAILED"}
@@ -89,6 +92,8 @@ class TaskExecutorResultPoller:
     async def _poll_one(self, handle) -> None:
         now = self._clock()
         if now - handle.registered_at > self._sla_for(handle):
+            logger.warning("[poller] %s SLA 超时(%.0fs>%.0fs)→FAIL sla_timeout",
+                           handle.loop_task_id, now - handle.registered_at, self._sla_for(handle))
             await self._report(self._fail(handle, "sla_timeout"), handle)
             return
         try:
@@ -100,6 +105,9 @@ class TaskExecutorResultPoller:
             return
         if data is not None:
             handle.fails = 0
+            logger.info("[poller] %s 收终态 success=%s data=%s",
+                        handle.loop_task_id, data.result.get("success"),
+                        str(data.result.get("data"))[:80])
             await self._report(data, handle)
 
     async def _poll_terminal(self, handle) -> TaskCallbackData | None:
