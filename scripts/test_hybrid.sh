@@ -90,6 +90,16 @@ IFS=$'\x1f' read -r role _ _ port config_dir workspace model prompt permission <
 [[ "$workspace" == "$TMP/claude-workspace" ]]
 [[ "$prompt" == "$CLAUDE_PROFILE/platform-data/CLAUDE.md" ]]
 
+export SINGLEBOX_MODEL_CONFIG_MODE="manual"
+claude_relays_manual_model_env "$model"
+[[ "${CLAUDE_RELAY_MANUAL_MODEL_ENV[*]}" == *"ANTHROPIC_BASE_URL=https://model.example.test/v1"* ]]
+[[ "${CLAUDE_RELAY_MANUAL_MODEL_ENV[*]}" == *"ANTHROPIC_AUTH_TOKEN=test-token"* ]]
+[[ "${CLAUDE_RELAY_MANUAL_MODEL_ENV[*]}" == *"ANTHROPIC_MODEL=glm-local"* ]]
+[[ "${CLAUDE_RELAY_MANUAL_MODEL_ENV[*]}" == *"ANTHROPIC_SMALL_FAST_MODEL=glm-local"* ]]
+export SINGLEBOX_MODEL_CONFIG_MODE="home"
+claude_relays_manual_model_env "$model"
+[[ "${#CLAUDE_RELAY_MANUAL_MODEL_ENV[@]}" == "0" ]]
+
 export BCSFUSE_RUNTIME_DIR="$TMP/bcsfuse-runtime"
 mkdir -p "$BCSFUSE_RUNTIME_DIR/env"
 cat > "$BCSFUSE_RUNTIME_DIR/env/.env.local" <<'ENV'
