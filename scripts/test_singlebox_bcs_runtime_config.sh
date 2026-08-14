@@ -34,6 +34,7 @@ write_local_template() {
 bind = "127.0.0.1"
 port = 21000
 bcs_endpoint = "http://127.0.0.1:21000"
+botchat_url = "http://localhost:8000"
 
 [llm]
 type = "openai_compatible"
@@ -57,7 +58,7 @@ reset_case() {
     write_local_template
     export BCS_CONFIG_DIR="${TEST_ROOT}/${name}"
     export BCS_SERVER_ENV="local"
-    unset BCS_E2E_MOCK_BASE_URL BCS_E2E_JUDGE_API_KEY
+    unset BCS_BOTCHAT_URL BCS_E2E_MOCK_BASE_URL BCS_E2E_JUDGE_API_KEY
     unset OPENCLAW_OPENAI_BASE_URL OPENCLAW_OPENAI_API_KEY OPENCLAW_OPENAI_MODEL_ID OPENAI_API_KEY
 }
 
@@ -84,6 +85,16 @@ test_local_llm_stays_disabled_without_env_config() {
     assert_contains "${BCS_CONFIG_DIR}/bcs-config-local.toml" 'type = "none"'
     assert_not_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'legacy-template-secret'
     assert_not_contains "${BCS_CONFIG_DIR}/bcs-config-local.toml" 'legacy-template-secret'
+}
+
+test_botchat_url_can_be_overridden() {
+    reset_case "botchat-url"
+    export BCS_BOTCHAT_URL='https://workbench.example.test'
+
+    prepare_bcs_runtime_config
+
+    assert_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'botchat_url = "https://workbench.example.test"'
+    assert_contains "${BCS_CONFIG_DIR}/bcs-config-local.toml" 'botchat_url = "https://workbench.example.test"'
 }
 
 test_complete_env_config_enables_local_llm() {
@@ -165,6 +176,7 @@ test_e2e_mock_takes_precedence_over_env_config() {
 }
 
 test_local_llm_stays_disabled_without_env_config
+test_botchat_url_can_be_overridden
 test_complete_env_config_enables_local_llm
 test_local_llm_resolves_openai_api_key_reference
 test_local_llm_rejects_unresolved_openai_api_key_reference

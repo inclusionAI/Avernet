@@ -128,6 +128,25 @@ test_claude_code_install_fails_without_resolved_cli() (
     fi
 )
 
+test_load_rust_environment() (
+  local temp_cargo_home original_path
+  temp_cargo_home="$(mktemp -d)"
+  original_path="$PATH"
+  mkdir -p "${temp_cargo_home}/bin"
+  printf '%s\n' 'export TEST_RUST_ENV_LOADED=1' > "${temp_cargo_home}/env"
+
+  export CARGO_HOME="$temp_cargo_home"
+  unset TEST_RUST_ENV_LOADED
+  PATH="$original_path"
+  load_rust_environment
+
+  assert_eq "1" "${TEST_RUST_ENV_LOADED:-}" "Rust env file loaded"
+  case ":${PATH}:" in
+    *":${temp_cargo_home}/bin:"*) ;;
+    *) fail "Cargo bin missing from PATH after loading Rust environment" ;;
+  esac
+)
+
 test_command_package_mapping
 test_library_package_mapping
 test_manual_install_hints
@@ -136,5 +155,6 @@ test_failed_install_prints_manual_command
 test_claude_code_existing_cli_skips_install
 test_claude_code_installs_missing_cli
 test_claude_code_install_fails_without_resolved_cli
+test_load_rust_environment
 
 printf 'PASS: singlebox toolchain tests\n'

@@ -1768,6 +1768,9 @@ bots_restart() {
 }
 
 bots_clean() {
+    if type -t hybrid_clean_attached_claude_runtime >/dev/null; then
+        hybrid_clean_attached_claude_runtime || return 1
+    fi
     if bots_dynamic_enabled; then
         bots_dynamic_clean
         return
