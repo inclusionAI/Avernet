@@ -24,6 +24,7 @@ Per-event side effects (Langfuse emission, etc.) live inside the plugin.
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import logging
@@ -44,6 +45,7 @@ from engine.community.core.resource_materialization.models import (
     ChatAttachmentMaterializationRequest,
 )
 from engine.community.core.resource_materialization.service import (
+    ChatAttachmentPreparationError,
     ResourceMaterializationService,
 )
 from engine.community.manager import EngineManager
@@ -90,6 +92,7 @@ _ENGINE_LOCAL_CHAT_SCOPE_KEY_HASH = hashlib.sha256(
     b"engine_local_chat_scope_v1"
 ).hexdigest()
 _MAX_CHAT_FILE_ATTACHMENTS = 5
+_MAX_CHAT_IMAGE_ATTACHMENTS = 5
 
 
 class ChatAttachmentMaterializationFailure(RuntimeError):
@@ -224,6 +227,47 @@ def _parse_chat_file_materializations(
             )
         except ValidationError as exc:
             raise ValueError("invalid remote file attachment") from exc
+    return requests
+
+
+def _parse_chat_image_preparations(
+    *,
+    session_key: str,
+    attachments: list[dict[str, Any]],
+) -> list[ChatAttachmentMaterializationRequest]:
+    remote_images = [
+        attachment
+        for attachment in attachments
+        if attachment.get("type") == "image"
+        and isinstance(attachment.get("url"), str)
+    ]
+    if not remote_images:
+        return []
+    if len(remote_images) > _MAX_CHAT_IMAGE_ATTACHMENTS:
+        raise ValueError("too many remote image attachments")
+    attachment_ids = [attachment.get("attachment_id") for attachment in remote_images]
+    if len(set(attachment_ids)) != len(attachment_ids):
+        raise ValueError("duplicate remote image attachment_id")
+
+    requests: list[ChatAttachmentMaterializationRequest] = []
+    for attachment in remote_images:
+        try:
+            requests.append(
+                ChatAttachmentMaterializationRequest(
+                    attachment_id=attachment.get("attachment_id"),
+                    session_key=session_key,
+                    filename=attachment.get("file_name"),
+                    temporary_url=attachment.get("url"),
+                    scope_key_hash=_ENGINE_LOCAL_CHAT_SCOPE_KEY_HASH,
+                    expires_at_ms=attachment.get("expires_at"),
+                    size_bytes=attachment.get("size"),
+                    content_hash=attachment.get("sha256"),
+                    media_type=attachment.get("mime_type")
+                    or attachment.get("mimeType"),
+                )
+            )
+        except ValidationError as exc:
+            raise ValueError("invalid remote image attachment") from exc
     return requests
 
 
@@ -1006,12 +1050,18 @@ class EngineWebSocketServer:
                 attachments=normalized_attachments,
                 materialization_context=materialization_context,
             )
+            chat_image_requests = _parse_chat_image_preparations(
+                session_key=session_key,
+                attachments=normalized_attachments,
+            )
         except ValueError as exc:
             return ResponseFrame.err_response(
                 request.id,
                 ErrorShape(ErrorCodes.INVALID_REQUEST, str(exc)),
             )
-        if not isinstance(message, str) or (not message and not chat_attachment_requests):
+        if not isinstance(message, str) or (
+            not message and not chat_attachment_requests and not chat_image_requests
+        ):
             return ResponseFrame.err_response(
                 request.id,
                 ErrorShape(ErrorCodes.INVALID_REQUEST, "Missing message or file attachment"),
@@ -1086,6 +1136,7 @@ class EngineWebSocketServer:
                 params.get("idempotencyKey"),
                 attachments=attachments,
                 chat_attachment_requests=chat_attachment_requests,
+                chat_image_requests=chat_image_requests,
                 resource_references=resource_references,
                 prompt_file_refs=prompt_file_refs,
             )
@@ -1105,6 +1156,9 @@ class EngineWebSocketServer:
         chat_attachment_requests: Optional[
             list[ChatAttachmentMaterializationRequest]
         ] = None,
+        chat_image_requests: Optional[
+            list[ChatAttachmentMaterializationRequest]
+        ] = None,
         resource_references: Optional[list[dict[str, Any]]] = None,
         prompt_file_refs: Optional[list[dict[str, Any]]] = None,
     ) -> None:
@@ -1121,6 +1175,61 @@ class EngineWebSocketServer:
             conn_id,
             session_key_hash,
         )
+
+        if chat_image_requests:
+            try:
+                if self._resource_materialization_service is None:
+                    raise ChatAttachmentPreparationError(
+                        "temporary_url_pull_not_configured"
+                    )
+                prepared_images = [
+                    await self._resource_materialization_service.prepare_chat_image_attachment(
+                        request
+                    )
+                    for request in chat_image_requests
+                ]
+                prepared_by_id = {
+                    prepared.attachment_id: {
+                        "type": "file",
+                        "mimeType": prepared.media_type,
+                        "fileName": prepared.filename,
+                        "content": base64.b64encode(prepared.content).decode("ascii"),
+                    }
+                    for prepared in prepared_images
+                }
+                attachments = [
+                    prepared_by_id.get(attachment.get("attachment_id"), attachment)
+                    if (
+                        attachment.get("type") == "image"
+                        and isinstance(attachment.get("url"), str)
+                    )
+                    else attachment
+                    for attachment in attachments or []
+                ]
+            except asyncio.CancelledError:
+                raise
+            except ChatAttachmentPreparationError as exc:
+                code = {
+                    "temporary_url_expired": "ATTACHMENT_IMAGE_EXPIRED",
+                    "temporary_url_pull_not_configured": "ATTACHMENT_IMAGE_NOT_CONFIGURED",
+                    "size_limit_exceeded": "ATTACHMENT_IMAGE_TOO_LARGE",
+                    "size_mismatch": "ATTACHMENT_IMAGE_SIZE_MISMATCH",
+                    "hash_mismatch": "ATTACHMENT_IMAGE_HASH_MISMATCH",
+                    "invalid_filename": "ATTACHMENT_IMAGE_INVALID_FILENAME",
+                    "invalid_image_content": "ATTACHMENT_IMAGE_INVALID_CONTENT",
+                    "media_type_mismatch": "ATTACHMENT_IMAGE_MIME_MISMATCH",
+                }.get(exc.reason, "ATTACHMENT_IMAGE_DOWNLOAD_FAILED")
+                await self._send_event(
+                    websocket,
+                    "chat",
+                    {
+                        "sessionKey": session_key,
+                        "state": "error",
+                        "errorCode": code,
+                        "errorMessage": "The attached image could not be prepared.",
+                    },
+                )
+                return
 
         materialized_resource_ids: list[str] = []
         if chat_attachment_requests:

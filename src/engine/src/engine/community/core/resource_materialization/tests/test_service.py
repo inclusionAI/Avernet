@@ -11,6 +11,7 @@ from engine.community.core.resource_materialization.models import (
     MaterializationRequest,
 )
 from engine.community.core.resource_materialization.service import (
+    ChatAttachmentPreparationError,
     ResourceMaterializationService,
     ResourceNotMaterializedError,
     build_session_file_relative_path,
@@ -22,10 +23,12 @@ class _PullClient:
         self.content = content
         self.calls = 0
         self.requests = []
+        self.destinations = []
 
     async def pull(self, request, destination: Path) -> None:
         self.calls += 1
         self.requests.append(request)
+        self.destinations.append(destination)
         destination.write_bytes(self.content)
 
 
@@ -103,6 +106,218 @@ def _chat_request(**overrides) -> ChatAttachmentMaterializationRequest:
     }
     values.update(overrides)
     return ChatAttachmentMaterializationRequest(**values)
+
+
+_PNG_CONTENT = b"\x89PNG\r\n\x1a\n" + b"validated-image"
+
+
+def test_resource_materialization_rejects_non_positive_image_limit(tmp_path: Path):
+    with pytest.raises(ValueError, match="image size limit"):
+        ResourceMaterializationService(
+            pull_client=_PullClient(b"unused"),
+            callback_client=_CallbackClient(),
+            workspace_root_provider=lambda: tmp_path,
+            max_chat_image_bytes=0,
+        )
+
+
+@pytest.mark.asyncio
+async def test_prepare_chat_image_returns_validated_in_memory_content(tmp_path: Path):
+    pull = _PullClient(_PNG_CONTENT)
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(b"unused"),
+        callback_client=_CallbackClient(),
+        temporary_url_pull_client=pull,
+        workspace_root_provider=lambda: tmp_path,
+    )
+    request = _chat_request(
+        filename="image.png",
+        media_type="image/x-png",
+        size_bytes=len(_PNG_CONTENT),
+        content_hash=hashlib.sha256(_PNG_CONTENT).hexdigest(),
+    )
+
+    prepared = await service.prepare_chat_image_attachment(request)
+
+    assert prepared.attachment_id == "att-1"
+    assert prepared.filename == "image.png"
+    assert prepared.media_type == "image/png"
+    assert prepared.content == _PNG_CONTENT
+    assert pull.calls == 1
+    assert pull.requests[0].download_max_bytes == 20 * 1024 * 1024
+    assert not pull.destinations[0].exists()
+
+
+@pytest.mark.asyncio
+async def test_prepare_chat_image_rejects_non_image_and_cleans_temporary_file(
+    tmp_path: Path,
+):
+    pull = _PullClient(b"not-an-image")
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(b"unused"),
+        callback_client=_CallbackClient(),
+        temporary_url_pull_client=pull,
+        workspace_root_provider=lambda: tmp_path,
+    )
+
+    with pytest.raises(ChatAttachmentPreparationError) as error:
+        await service.prepare_chat_image_attachment(
+            _chat_request(filename="image.png", media_type="image/png")
+        )
+
+    assert error.value.reason == "invalid_image_content"
+    assert not pull.destinations[0].exists()
+
+
+@pytest.mark.asyncio
+async def test_prepare_chat_image_rejects_mime_mismatch(tmp_path: Path):
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(b"unused"),
+        callback_client=_CallbackClient(),
+        temporary_url_pull_client=_PullClient(_PNG_CONTENT),
+        workspace_root_provider=lambda: tmp_path,
+    )
+
+    with pytest.raises(ChatAttachmentPreparationError) as error:
+        await service.prepare_chat_image_attachment(
+            _chat_request(filename="image.jpg", media_type="image/jpeg")
+        )
+
+    assert error.value.reason == "media_type_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_prepare_chat_image_rejects_expired_url_before_download(
+    tmp_path: Path,
+):
+    pull = _PullClient(_PNG_CONTENT)
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(b"unused"),
+        callback_client=_CallbackClient(),
+        temporary_url_pull_client=pull,
+        workspace_root_provider=lambda: tmp_path,
+    )
+
+    with pytest.raises(ChatAttachmentPreparationError) as error:
+        await service.prepare_chat_image_attachment(
+            _chat_request(filename="image.png", expires_at_ms=1)
+        )
+
+    assert error.value.reason == "temporary_url_expired"
+    assert pull.calls == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("content", "expected_media_type"),
+    [
+        (b"\xff\xd8\xffimage", "image/jpeg"),
+        (b"GIF89aimage", "image/gif"),
+        (b"RIFF\x04\x00\x00\x00WEBPimage", "image/webp"),
+    ],
+)
+async def test_prepare_chat_image_detects_supported_magic_bytes(
+    tmp_path: Path,
+    content: bytes,
+    expected_media_type: str,
+):
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(b"unused"),
+        callback_client=_CallbackClient(),
+        temporary_url_pull_client=_PullClient(content),
+        workspace_root_provider=lambda: tmp_path,
+    )
+
+    prepared = await service.prepare_chat_image_attachment(
+        _chat_request(filename="image.bin")
+    )
+
+    assert prepared.media_type == expected_media_type
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("request_overrides", "expected_reason"),
+    [
+        ({"filename": "../image.png"}, "invalid_filename"),
+        ({"filename": "image.png", "size_bytes": 9}, "size_mismatch"),
+        ({"filename": "image.png", "content_hash": "0" * 64}, "hash_mismatch"),
+    ],
+)
+async def test_prepare_chat_image_rejects_invalid_provider_metadata(
+    tmp_path: Path,
+    request_overrides: dict,
+    expected_reason: str,
+):
+    pull = _PullClient(_PNG_CONTENT)
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(b"unused"),
+        callback_client=_CallbackClient(),
+        temporary_url_pull_client=pull,
+        workspace_root_provider=lambda: tmp_path,
+    )
+
+    with pytest.raises(ChatAttachmentPreparationError) as error:
+        await service.prepare_chat_image_attachment(_chat_request(**request_overrides))
+
+    assert error.value.reason == expected_reason
+
+
+@pytest.mark.asyncio
+async def test_prepare_chat_image_rejects_declared_size_before_download(tmp_path: Path):
+    pull = _PullClient(_PNG_CONTENT)
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(b"unused"),
+        callback_client=_CallbackClient(),
+        temporary_url_pull_client=pull,
+        workspace_root_provider=lambda: tmp_path,
+        max_chat_image_bytes=8,
+    )
+
+    with pytest.raises(ChatAttachmentPreparationError) as error:
+        await service.prepare_chat_image_attachment(
+            _chat_request(filename="image.png", size_bytes=9)
+        )
+
+    assert error.value.reason == "size_limit_exceeded"
+    assert pull.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_prepare_chat_image_fails_closed_without_downloader(tmp_path: Path):
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(b"unused"),
+        callback_client=_CallbackClient(),
+        workspace_root_provider=lambda: tmp_path,
+    )
+
+    with pytest.raises(ChatAttachmentPreparationError) as error:
+        await service.prepare_chat_image_attachment(
+            _chat_request(filename="image.png")
+        )
+
+    assert error.value.reason == "temporary_url_pull_not_configured"
+
+
+@pytest.mark.asyncio
+async def test_prepare_chat_image_maps_downloader_error_to_safe_reason(
+    tmp_path: Path,
+    caplog,
+):
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(b"unused"),
+        callback_client=_CallbackClient(),
+        temporary_url_pull_client=_FailingPullClient(),
+        workspace_root_provider=lambda: tmp_path,
+    )
+
+    with pytest.raises(ChatAttachmentPreparationError) as error:
+        await service.prepare_chat_image_attachment(
+            _chat_request(filename="image.png")
+        )
+
+    assert error.value.reason == "pull_failed"
+    assert "secret URL" not in caplog.text
 
 
 @pytest.mark.asyncio
