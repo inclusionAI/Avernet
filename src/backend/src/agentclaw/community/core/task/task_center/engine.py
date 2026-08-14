@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import threading
 
+from agentclaw.community.core.task.domain.errors import NodeNotFoundError, TaskStateError
 from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
     NodeOpResult,
@@ -175,6 +176,30 @@ class ExecutionEngine:
             self._graph.add_task_nodes(nodes, root.node_id)
             await self._prepare_into(task_id, side)   # 锁内 await dispatch(catalog IO)
         await self._drain(task_id, side)
+
+    # ===== on_start =====
+    async def on_start(self, patch: TaskNodePatch) -> NodeOpResult:
+        """入站 start 回调:status-direct PENDING→RUNNING(幂等)。不触发传播/side-effect(纯节点态翻转)。
+        协程化:锁内同步写图(update_task_node_info 内存同步),锁内不 await。"""
+        with self._lock_for(patch.task_id):
+            graph = self._graph.query_task_dashboard(patch.task_id)
+            node = next((n for n in graph.tasks if n.node_id == patch.node_id), None)
+            if node is None:
+                raise NodeNotFoundError(
+                    f"on_start: node not found {patch.task_id}::{patch.node_id}"
+                )
+            if node.status == Status.RUNNING:
+                return NodeOpResult(
+                    task_id=patch.task_id, node_id=patch.node_id, success=True,
+                    prev_status=Status.RUNNING, new_status=Status.RUNNING,
+                )
+            if node.status in {Status.DONE, Status.FAILED, Status.HUNG, Status.PLANNING}:
+                raise TaskStateError(
+                    f"on_start: stale/illegal start on {node.status} node "
+                    f"{patch.task_id}::{patch.node_id}"
+                )
+            # PENDING → RUNNING,经 SSOT 校验 _DIRECT_TRANSITIONS
+            return self._graph.update_task_node_info(patch)
 
     # ===== on_report =====
     async def on_report(self, patch: TaskNodePatch) -> NodeOpResult:
