@@ -158,7 +158,7 @@ class TestOnExecute:
         runner = StubRunner()
         eng = _engine(svc, planner=planner, runner=runner)
         _run(eng.on_execute("t1"))
-        assert svc._get_node(graph, "t1").status == Status.RUNNING  # Step2:委托执行态
+        assert svc._get_node(graph, "t1").status == Status.PLANNING  # v4:父委托态
         assert svc._get_node(graph, "c1").status == Status.RUNNING
         assert svc._get_node(graph, "c2").status == Status.RUNNING
         assert len(runner.run_calls) == 1
@@ -222,36 +222,52 @@ class TestOnReportPass:
 
 # ===== on_report FAIL =====
 class TestOnReportFail:
-    def test_fail_remedy_below_max(self, svc, graph):
+    def test_fail_to_failed_no_immediate_remedy(self, svc, graph):
+        """v4:验收 FAIL→FAILED,不立即补救拆子(补救改由 harness 重新派发执行重试)。"""
+        svc.add_task_nodes([_child("c1")], parent_node_id="t1")
+        svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
+        planner = StubPlanner(lambda g: [_child("c1_remedy")])
+        eng = _engine(svc, planner=planner)
+        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAIL, gaps=["缺x"]))))
+        assert svc._get_node(graph, "c1").status == Status.FAILED  # 落 FAILED,不补救
+        assert planner.plan_calls == 0  # 不调用 plan 补救
+
+    def test_fail_harness_retry_redispatch(self, svc, graph):
+        """v4:FAILED 经 harness on_harness 重新派发执行(不拆):复位 FAILED→PENDING→dispatch→RUNNING。"""
         svc.add_task_nodes([_child("c1")], parent_node_id="t1")
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         runner = StubRunner()
-        eng = _engine(svc, planner=StubPlanner(lambda g: [_child("c1_remedy")]), runner=runner)
+        eng = _engine(svc, dispatcher=StubDispatcher(), runner=runner)
         _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAIL, gaps=["缺x"]))))
-        assert svc._get_node(graph, "c1").status == Status.RUNNING  # Step2:补救 add 翻 FAILED→RUNNING
-        assert svc._get_node(graph, "c1_remedy").status == Status.RUNNING
+        assert svc._get_node(graph, "c1").status == Status.FAILED
+        _run(eng.on_harness(_patch("t1", "c1", exec_error="acceptance_fail_retry")))  # harness 重新派发
+        assert svc._get_node(graph, "c1").status == Status.RUNNING  # 重新派发执行
         assert len(runner.run_calls) == 1
 
-    def test_fail_escalate_bbs_at_max(self, svc):
+    def test_fail_harness_max_hung_escalate(self, svc):
+        """v4:harness 重试达 MAX_HARNESS→节点 HUNG + 升 BBS(loop_round++,bbs_mode;节点保留不 remove)。"""
         g = svc.initialize_graph(_task_info("t2", max_depth=1))
         svc.add_task_nodes([_child("c1", "t2")], parent_node_id="t2")
         svc.update_task_node_info(_patch("t2", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
+        svc.update_task_node_info(_patch("t2", "c1", extend_props_patch={"harness_retries": 2}))
         eng = _engine(svc, planner=StubPlanner(lambda g: []))
-        _run(eng.on_report(_patch("t2", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAIL, gaps=["缺x"]))))
-        # 升 BBS:remove_subtree(c1) + loop_round++ + bbs_mode(无 bbs market publish)
-        assert all(n.node_id != "c1" for n in g.tasks)
+        _run(eng.on_harness(_patch("t2", "c1", exec_error="acceptance_fail_retry")))
+        assert svc._get_node(g, "c1").status == Status.HUNG
+        assert any(n.node_id == "c1" for n in g.tasks)  # v4 保留(不 remove)
         assert g.loop_round == 1
         assert g.extend_props.get("bbs_mode") is True
 
-    def test_fail_escalate_bbs_stuck(self, svc):
+    def test_loop_exhausted_graph_hung(self, svc):
+        """v4:loop_round 达 MAX_LOOP→图 HUNG(hung_reason=loop_exhausted)。"""
         g = svc.initialize_graph(_task_info("t3", max_depth=1))
-        g.extend_props["execution_config"]["BBS_MAX_DEPTH"] = 1
+        g.extend_props["execution_config"]["MAX_LOOP"] = 1
         svc.add_task_nodes([_child("c1", "t3")], parent_node_id="t3")
         svc.update_task_node_info(_patch("t3", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
+        svc.update_task_node_info(_patch("t3", "c1", extend_props_patch={"harness_retries": 2}))
         eng = _engine(svc, planner=StubPlanner(lambda g: []))
-        _run(eng.on_report(_patch("t3", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAIL, gaps=["缺x"]))))
+        _run(eng.on_harness(_patch("t3", "c1", exec_error="x")))
         assert g.status == Status.HUNG
-        assert g.extend_props.get("hung_reason") == "stuck"
+        assert g.extend_props.get("hung_reason") == "loop_exhausted"
 
 
 # ===== on_miss =====

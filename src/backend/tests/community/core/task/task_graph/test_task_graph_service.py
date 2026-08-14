@@ -2,7 +2,7 @@
 
 覆盖:initialize_graph 幂等、add_task_nodes a/b/c 触发+单层同构护栏、
 update_task_node_info 双模式状态机+fold、relations 派生(child/parent/depth)、
-PLANNING 语义、传播 status 直驱、remove_subtree、query 派生查询、.execution_config。
+PLANNING 语义、传播 status 直驱、v4 删 remove_subtree、query 派生查询、.execution_config。
 """
 from __future__ import annotations
 
@@ -103,8 +103,8 @@ class TestAddTaskNodes:
         assert len(children.relations) == 2
         assert all(r.src_id == "t1" for r in children.relations)
         assert {r.dst_id for r in children.relations} == {"c1", "c2"}
-        # 父进 RUNNING(委托执行态;Step2 PLANNING/RUNNING 解耦)
-        assert svc._get_node(graph, "t1").status == Status.RUNNING
+        # v4:父进 PLANNING(委托/编排态)
+        assert svc._get_node(graph, "t1").status == Status.PLANNING
         # 子回填 node_run_graph
         assert svc._get_node(graph, "c1").node_run_graph is graph
 
@@ -116,20 +116,18 @@ class TestAddTaskNodes:
             _patch("t1", "leaf", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAIL, gaps=["缺深度"]))
         )
         assert svc._get_node(graph, "leaf").status == Status.FAILED
-        # 条件 b 成立:补救子挂 FAILED 叶子下
+        # 条件 b 成立:补救子挂 FAILED 叶子下(v4 父→PLANNING)
         svc.add_task_nodes([_node("remedy")], parent_node_id="leaf")
-        assert svc._get_node(graph, "leaf").status == Status.RUNNING
+        assert svc._get_node(graph, "leaf").status == Status.PLANNING
         assert svc.get_parent_task("t1", "remedy").node_id == "leaf"
 
     def test_trigger_c_next_layer(self, svc: TaskGraphService, graph):
-        # Step2:前向重规划 = 父 RUNNING(委托)→ 翻 PLANNING(显式委托态)→ add(cond_c)
-        svc.add_task_nodes([_node("c1")], parent_node_id="t1")  # t1 PENDING→RUNNING
-        assert svc._get_node(graph, "t1").status == Status.RUNNING
-        # 模拟 on_pass:本批兄弟全 DONE → 翻父 RUNNING→PLANNING(直驱)→ 再 add(cond_c:存在 PLANNING 节点)
-        svc.update_task_node_info(_patch("t1", "t1", status=Status.PLANNING))
-        svc.add_task_nodes([_node("c2")], parent_node_id="t1")  # PLANNING→RUNNING(cond_c 命中)
+        # v4:前向重规划,父恒 PLANNING,再 add(cond_c:存在 PLANNING 节点)
+        svc.add_task_nodes([_node("c1")], parent_node_id="t1")  # t1 PENDING→PLANNING
+        assert svc._get_node(graph, "t1").status == Status.PLANNING
+        svc.add_task_nodes([_node("c2")], parent_node_id="t1")  # cond_c 命中(存在 PLANNING)
         assert svc.get_parent_task("t1", "c2").node_id == "t1"
-        assert svc._get_node(graph, "t1").status == Status.RUNNING
+        assert svc._get_node(graph, "t1").status == Status.PLANNING
 
     def test_no_trigger_raises(self, svc: TaskGraphService, graph):
         # 根 RUNNING(委托执行)后,a/b/c/d 均不满足(无 PENDING 根/无 FAILED 叶/无 PLANNING/无 miss 叶)→ raise
@@ -211,10 +209,9 @@ class TestUpdateTaskNodeInfo:
         assert svc._get_node(graph, "c1").status == Status.PENDING
 
     def test_status_direct_propagate_done(self, svc: TaskGraphService, graph):
-        # Step2:add 后父 RUNNING;前向 gap 闭时翻 RUNNING→PLANNING→DONE(传播)
+        # v4:add 后父 PLANNING;前向 gap 闭时翻 PLANNING→DONE(传播)
         svc.add_task_nodes([_node("c1")], parent_node_id="t1")
-        assert svc._get_node(graph, "t1").status == Status.RUNNING
-        svc.update_task_node_info(_patch("t1", "t1", status=Status.PLANNING))  # 委托→规划态
+        assert svc._get_node(graph, "t1").status == Status.PLANNING
         r = svc.update_task_node_info(_patch("t1", "t1", status=Status.DONE))  # gap 闭传播
         assert r.new_status == Status.DONE
         assert svc._get_node(graph, "t1").status == Status.DONE
@@ -290,22 +287,7 @@ class TestDerivedQueries:
         assert g is graph  # 整图返回引用(D3-A)
 
 
-# ===== remove_subtree =====
-class TestRemoveSubtree:
-    def test_remove_subtree(self, svc: TaskGraphService, graph):
-        svc.add_task_nodes([_node("c1"), _node("c2")], parent_node_id="t1")
-        svc.add_task_nodes([_node("c1a")], parent_node_id="c1")
-        svc.remove_subtree("t1", "c1")
-        ids = {n.node_id for n in graph.tasks}
-        assert ids == {"t1", "c2"}  # c1 及子 c1a 删
-        assert not any(r.dst_id == "c1" or r.src_id == "c1" for r in graph.relations)
-
-    def test_remove_subtree_root(self, svc: TaskGraphService, graph):
-        svc.add_task_nodes([_node("c1")], parent_node_id="t1")
-        svc.remove_subtree("t1", "t1")
-        assert graph.tasks == []
-        assert graph.relations == []
-
+# v4:remove_subtree 已删除,TestRemoveSubtree 已移除
 
 # ===== execution_config / not found =====
 class TestUpdateTaskGraphInfo:
@@ -341,8 +323,7 @@ class TestUpdateTaskGraphInfo:
 
     def test_combined_atomic_write(self, svc: TaskGraphService, graph):
         """一次 patch 多字段原子写(升 BBS 后 STUCK 场景)。"""
-        svc.remove_subtree("t1", "t1")  # 清空,模拟升 BBS remove
-        # 重建空图场景不可能(remove_root 后无根),改直接 patch
+        # v4 升 BBS 不再 remove;直接新建图测多字段原子写
         svc2 = TaskGraphService()
         svc2.initialize_graph(_task_info("tX"))
         svc2.update_task_graph_info(
@@ -383,15 +364,17 @@ class TestUpdateTaskGraphInfo:
 class TestMisc:
     def test_execution_config_default(self, svc: TaskGraphService, graph):
         cfg = svc._execution_config("t1")
-        assert cfg["MAX_DEPTH"] == 3
-        assert cfg["BBS_MAX_DEPTH"] == 3
+        assert cfg["MAX_DEPTH"] == 2  # v4 默认
+        assert cfg["MAX_LOOP"] == 10
+        assert cfg["MAX_HARNESS"] == 3
 
     def test_execution_config_custom(self, svc: TaskGraphService):
         ti = _task_info("tC")
         ti.execution_config["MAX_DEPTH"] = 5
         svc.initialize_graph(ti)
         assert svc._execution_config("tC")["MAX_DEPTH"] == 5
-        assert svc._execution_config("tC")["BBS_MAX_DEPTH"] == 3  # 默认
+        assert svc._execution_config("tC")["MAX_LOOP"] == 10  # v4 默认
+        assert svc._execution_config("tC")["MAX_HARNESS"] == 3  # v4 默认
 
     def test_task_not_found(self, svc: TaskGraphService):
         with pytest.raises(TaskNotFoundError):

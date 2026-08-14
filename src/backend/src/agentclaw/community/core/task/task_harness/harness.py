@@ -1,6 +1,6 @@
 """TaskHarness 旁路常驻:周期巡检 SLA 超时/崩溃 → 复位 PENDING 重投。对齐 plan §3.6。
 
-不抢正向驱动:只做"读 RUNNING → 比对超时 → 复位 PENDING 重投(经编排核 on_harness)";
+v4:两路巡检——① RUNNING 真执行叶子超时 → 复位重投;② FAILED(验收不过)真执行叶子 → re-dispatch 重试。经编排核 on_harness 计 harness_retries:<MAX 重派 / >=MAX HUNG→升 BBS。不抢正向驱动。
 不直接写 HUNG(STUCK 走 on_miss/on_fail 升 BBS 链路上限判)。复位阈值从 execution_config/extend_props 读(SLA 不在 TaskSpec)。
 Avernet:in-memory 巡检(注入 clock);prod 接真实定时器/崩溃探针不变编排口。
 """
@@ -82,6 +82,10 @@ class TaskHarness:
                 )
             except Exception:  # noqa: BLE001 - task 已删 → 跳过
                 continue
+            # 只监控真正派发执行的叶子(run_mode ∈ 三模态);委托态父节点(RUNNING 但 run_mode=planning/None)
+            # 不执行 bot run,不纳入 SLA 超时巡检(避免误复位委托中的分解/聚合节点)。
+            _EXEC_MODES = ("single_bot", "coop_group", "bbs")
+            nodes = [n for n in nodes if n.run_info.run_mode in _EXEC_MODES]
             sla = self._sla_timeout(task_id)
             now = self._clock()
             for n in nodes:
@@ -103,10 +107,28 @@ class TaskHarness:
         with self._lock:
             # 淘汰已非 RUNNING 的记时项
             self._dispatched_at = {k: v for k, v in self._dispatched_at.items() if k in seen}
+        # v4:扫描 FAILED(验收不过)真执行叶子 → harness 重新派发执行重试。FAILED 不走 SLA 计时,
+        # 立即交 on_harness(计数 harness_retries:<MAX 复位重派 / >=MAX HUNG 升 BBS)。
+        failed_resets: list[TaskNodePatch] = []
+        _EXEC_MODES = ("single_bot", "coop_group", "bbs")
+        for task_id in task_ids:
+            try:
+                failed = self._graph.query_task_nodes(
+                    task_id, TaskNodeQueryCriteria(status=Status.FAILED)
+                )
+            except Exception:  # noqa: BLE001
+                continue
+            for n in failed:
+                if n.run_info.run_mode not in _EXEC_MODES:
+                    continue
+                failed_resets.append(TaskNodePatch(
+                    task_id=task_id, node_id=n.node_id, exec_error="acceptance_fail_retry"))
         for p in resets:
             res = self._on_harness_fn(p)
-            # on_harness 协程化(async):harness 后台巡检线程无 event loop,起短命 loop 跑
-            # 复位重投(低频旁路;兼容同步 stub on_harness_fn 用于测试)。
+            if asyncio.iscoroutine(res):
+                asyncio.run(res)
+        for p in failed_resets:
+            res = self._on_harness_fn(p)
             if asyncio.iscoroutine(res):
                 asyncio.run(res)
         return resets

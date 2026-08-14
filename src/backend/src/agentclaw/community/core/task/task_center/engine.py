@@ -200,7 +200,7 @@ class ExecutionEngine:
             elif not pr.has_gap:
                 self._maybe_finish_graph(task_id)  # 根 gap 初始即闭(罕见)
             else:
-                self._escalate_bbs(task_id, root.node_id)  # 有 gap 拆不出 → 升 BBS
+                self._hung_and_escalate(task_id, root.node_id, 'root_gap_no_decompose')  # 有 gap 拆不出 → HUNG 升 BBS
         await self._drain(task_id, side)
 
     # ===== on_start =====
@@ -255,93 +255,63 @@ class ExecutionEngine:
             return result
 
     async def _on_pass_collect(self, task_id: str, node_id: str, side: list[tuple]) -> None:
-        """PASS→DONE 后:查结构父 P;P==RUNNING 且本批兄弟全 DONE ∧ 无 RUNNING(决策C)
-        → 翻父 RUNNING→PLANNING → plan(target=parent) → children:add+dispatch(plan 翻 PLANNING→RUNNING);
-        []+has_gap=F:gap 闭→非根传播 DONE 上行 / 根→图终态;[]+has_gap=T→深度闸门升 BBS。
-        async collect(锁内 await plan/dispatch)。"""
+        """PASS→DONE 后:查结构父 P。v4 父恒 PLANNING(委托态),无需翻态:
+        兄弟仍有未终态(RUNNING/PLANNING/PENDING)→等待;兄弟全 DONE(plan-ready)→ plan(target=parent):
+          有子→add(父维持 PLANNING)+dispatch;空+has_gap=F→gap 闭:非根传播 DONE 上行/根→图 DONE;
+          空+has_gap=T→HUNG 升 BBS。兄弟全终态含 HUNG/FAILED→终态传播。
+        根成功重 plan(gap 未闭)**计 loop_round**(口子 A);中间父重 plan 不计。"""
         parent = self._graph.get_parent_task(task_id, node_id)
         if parent is None:
-            # 根 PASS(来自 owner bot 终验回投)→ 图完成
             side.append(("finish", task_id))
             return
-        if parent.status != Status.RUNNING:
-            return  # 父非委托执行态,不推进
         siblings = self._graph.get_child_tasks(task_id, parent.node_id)
         logger.info("[on_pass] task=%s node=%s 父=%s 父态=%s 兄弟=%s",
                     task_id, node_id, parent.node_id, parent.status,
-                    [(s.node_id, s.status.value) for s in siblings])
+                    [(s2.node_id, s2.status.value) for s2 in siblings])
+        if any(st.status in {Status.RUNNING, Status.PLANNING, Status.PENDING} for st in siblings):
+            logger.info("[on_pass] task=%s 兄弟未全终态,等待", task_id)
+            return
         if not all(st.status == Status.DONE for st in siblings):
-            logger.info("[on_pass] task=%s 兄弟未齐,等待", task_id)
+            self._propagate_terminal(task_id, parent, siblings, side)
             return
-        if any(st.status == Status.RUNNING for st in siblings):
-            logger.info("[on_pass] task=%s 仍有 RUNNING,等待", task_id)
-            return
-        # 本批兄弟全 DONE → 翻父 RUNNING→PLANNING(显式委托态)+ 标记 owner 规划 → plan(target=parent)
-        graph_snap = self._graph.query_task_dashboard(task_id)
-        owner = str(graph_snap.extend_props.get("source_channel_id") or "")
-        self._graph.update_task_node_info(
-            TaskNodePatch(task_id=task_id, node_id=parent.node_id, status=Status.PLANNING,
-                          run_mode="planning", assignee=owner)
-        )
+        root = self._root(task_id)
+        is_root_parent = parent.node_id == (root.node_id if root else None)
+        self._mark_planning(task_id, parent.node_id)
         graph = self._graph.query_task_dashboard(task_id)
         pr = await self._planner.plan(graph, target_node_id=parent.node_id)
         logger.info("[on_pass] task=%s 父=%s 委托 plan 产 %d 子 has_gap=%s",
                     task_id, parent.node_id, len(pr.children), pr.has_gap)
         if pr.children:
-            self._graph.add_task_nodes(pr.children, parent.node_id)  # PLANNING→RUNNING
+            if is_root_parent:
+                self._bump_loop_round(task_id)  # 根 gap 复发盘:口子 A 收敛
+            self._graph.add_task_nodes(pr.children, parent.node_id)
             await self._prepare_into(task_id, side)
         elif not pr.has_gap:
-            # gap 闭(验收通过)→ DONE 上行传播;根 gap 闭→图完成(终验即根 gap 闭)
-            root = self._root(task_id)
-            if parent.node_id == (root.node_id if root else None):
+            if is_root_parent:
                 self._maybe_finish_graph(task_id)
                 return
             self._graph.update_task_node_info(
                 TaskNodePatch(task_id=task_id, node_id=parent.node_id, status=Status.DONE)
             )
-            await self._on_pass_collect(task_id, parent.node_id, side)  # 上行传播
+            await self._on_pass_collect(task_id, parent.node_id, side)
         else:
-            # 有 gap 拆不出 → 升 BBS(loop_round++/BBS_MAX→HUNG)
-            self._escalate_bbs(task_id, parent.node_id)
+            self._hung_and_escalate(task_id, parent.node_id, "gap_no_progress")
 
     async def _on_fail_collect(self, task_id: str, node_id: str, side: list[tuple]) -> None:
-        """验收不过(FAIL+gaps)→FAILED 后:深度闸门 + plan(target=失败叶)补求子:
-        depth>=MAX → 直接升 BBS(loop_round++/BBS_MAX→HUNG,不再拆);
-        depth<MAX → plan:children→add(翻 FAILED→RUNNING)+dispatch;[]+has_gap=F→gap 闭翻 DONE 上行;
-        []+has_gap=T→升 BBS。async collect(锁内 await plan/dispatch)。"""
-        depth = self._graph._node_depth(task_id, node_id)
-        cfg = self._graph._execution_config(task_id)
-        max_depth = cfg["MAX_DEPTH"]
+        """验收不过(FAIL+gaps)→FAILED。v4:不立即补救拆子,置 FAILED 后交由 harness 周期巡检"重新派发执行"
+        重试(不拆);harness 重试达 MAX_HARNESS→HUNG→升 BBS。本方法仅落 FAILED + 记 gaps,不推进 plan。"""
         _n = next((x for x in self._graph.query_task_dashboard(task_id).tasks if x.node_id == node_id), None)
-        logger.info("[on_fail] task=%s node=%s depth=%d/%d gaps=%s",
-                    task_id, node_id, depth, max_depth,
+        logger.info("[on_fail] task=%s node=%s → FAILED(gaps=%s),交 harness 重试重新派发",
+                    task_id, node_id,
                     (_n.run_info.acceptance_result.gaps if _n and _n.run_info.acceptance_result else None))
-        if depth >= max_depth:
-            self._escalate_bbs(task_id, node_id)  # 达深度上限 → 升 BBS(不再拆)
-            return
-        self._mark_planning(task_id, node_id)  # 失败叶由 owner 重新规划补救
-        graph = self._graph.query_task_dashboard(task_id)
-        pr = await self._planner.plan(graph, target_node_id=node_id)
-        logger.info("[on_fail] task=%s node=%s 补救 plan 产 %d 子 has_gap=%s",
-                    task_id, node_id, len(pr.children), pr.has_gap)
-        if pr.children:
-            self._graph.add_task_nodes(pr.children, node_id)  # FAILED→RUNNING
-            await self._prepare_into(task_id, side)
-        elif not pr.has_gap:
-            # gap 闭(验收实已满足,罕见)→翻 DONE 上行
-            self._graph.update_task_node_info(
-                TaskNodePatch(task_id=task_id, node_id=node_id, status=Status.DONE)
-            )
-            await self._on_pass_collect(task_id, node_id, side)
-        else:
-            # 有 gap 拆不出(<MAX)→ 升 BBS
-            self._escalate_bbs(task_id, node_id)
+        # FAILED 已由 acceptance patch 落态。重试重新派发由 harness 巡检 FAILED 触发(见 TaskHarness._poll_once)。
+        # 此处不 plan、不 add,直接返回。
 
     async def _on_harness_collect(self, task_id: str, node_id: str, exec_error: str,
                                   side: list[tuple]) -> None:
-        """执行报错(bot 没跑通:run FAILED/SLA/poll 耗尽)→ harness 复位重投。
-        计 harness_retries(存 node.extend_props):<MAX_HARNESS → 翻 RUNNING→PENDING + 重派发(RUNNING);
-        ≥MAX_HARNESS → 翻 HUNG(不再流转)。注意:执行报错≠验收不过,不入补救重规划。"""
+        """harness 重试:统一处理 FAILED(验收不过)与 exec_error(执行报错)。
+        重试=重新派发执行(不拆):<MAX_HARNESS → 复位 FAILED/RUNNING→PENDING + re-prepare(重新 dispatch→start_run);
+        >=MAX_HARNESS → HUNG(再 升 BBS,loop_round++/图 HUNG)。"""
         graph = self._graph.query_task_dashboard(task_id)
         node = next((n for n in graph.tasks if n.node_id == node_id), None)
         if node is None:
@@ -349,9 +319,8 @@ class ExecutionEngine:
         retries = int(node.run_info.extend_props.get("harness_retries", 0))
         retries += 1
         max_harness = self._max_harness(task_id)
-        logger.info("[on_harness] task=%s node=%s exec_error=%s retries=%d/%d",
+        logger.info("[on_harness] task=%s node=%s reason=%s retries=%d/%d",
                     task_id, node_id, exec_error, retries, max_harness)
-        # 更新 harness_retries 计数(经 exec_error 分支已 fold 不到 extend_props;此处显式 patch 落计数)
         self._graph.update_task_node_info(
             TaskNodePatch(
                 task_id=task_id, node_id=node_id,
@@ -359,35 +328,33 @@ class ExecutionEngine:
             )
         )
         if retries >= max_harness:
-            # 达上限 → HUNG(不再流转;需人介入)
             logger.warning("[on_harness] task=%s node=%s 达 MAX_HARNESS(%d)→HUNG", task_id, node_id, max_harness)
-            self._graph.update_task_node_info(
-                TaskNodePatch(
-                    task_id=task_id, node_id=node_id, status=Status.HUNG,
-                    extend_props_patch={"hung_reason": "exec_stuck"},
-                )
-            )
+            self._hung_and_escalate(task_id, node_id, "exec_stuck")
             return
-        # 未达上限 → 复位 RUNNING→PENDING + re-prepare(重新 dispatch→start_run)
-        self._graph.update_task_node_info(
-            TaskNodePatch(task_id=task_id, node_id=node_id, status=Status.PENDING)
-        )
+        # 复位到 PENDING(重新派发执行:FAILED→PENDING / RUNNING→PENDING),re-prepare 重搜推+派发
+        if node.status in {Status.FAILED, Status.RUNNING}:
+            self._graph.update_task_node_info(
+                TaskNodePatch(task_id=task_id, node_id=node_id, status=Status.PENDING)
+            )
         await self._prepare_into(task_id, side)
 
     # ===== on_miss =====
     async def on_miss(self, patch: TaskNodePatch) -> None:
-        """dispatcher MISS → 节点(PENDING,miss_events 已填):深度闸门 + plan(target=miss 叶)拆细:
-        depth>=MAX → 升 BBS;depth<MAX → plan:children→add+dispatch;[]+has_gap=T→升 BBS。"""
+        """dispatcher MISS(搜推未匹配执行者)→深度闸门:
+        depth>=MAX → HUNG 升 BBS(拆不动,无 bot);depth<MAX → mark_planning + plan(target=miss 叶)拆细:
+        有子→add(父置 PLANNING)+dispatch;空+has_gap=F→gap 闭不推进(罕见);空+has_gap=T→HUNG 升 BBS。
+        MISS 不进 harness(无 bot 无可重试执行体)。"""
         side: list[tuple] = []
         with self._lock_for(patch.task_id):
             depth = self._graph._node_depth(patch.task_id, patch.node_id)
             cfg = self._graph._execution_config(patch.task_id)
             max_depth = cfg["MAX_DEPTH"]
             if depth >= max_depth:
-                self._escalate_bbs(patch.task_id, patch.node_id)
+                logger.info("[on_miss] task=%s node=%s depth=%d/%d 拆不动→HUNG", patch.task_id, patch.node_id, depth, max_depth)
+                self._hung_and_escalate(patch.task_id, patch.node_id, "miss_depth_exhausted")
                 await self._drain(patch.task_id, side)
                 return
-            self._mark_planning(patch.task_id, patch.node_id)  # miss 叶由 owner 规划拆细
+            self._mark_planning(patch.task_id, patch.node_id)
             graph = self._graph.query_task_dashboard(patch.task_id)
             pr = await self._planner.plan(graph, target_node_id=patch.node_id)
             logger.info("[on_miss] task=%s node=%s depth=%d/%d plan 产 %d 子 has_gap=%s",
@@ -396,50 +363,78 @@ class ExecutionEngine:
                 self._graph.add_task_nodes(pr.children, patch.node_id)
                 await self._prepare_into(patch.task_id, side)
             elif not pr.has_gap:
-                pass  # gap 闭(罕见,miss 节点本无验收)→不推进
+                pass
             else:
-                self._escalate_bbs(patch.task_id, patch.node_id)
+                self._hung_and_escalate(patch.task_id, patch.node_id, "miss_no_decompose")
         await self._drain(patch.task_id, side)
 
-    # ===== on_harness(外部显式调用:超时/崩溃;复用 _on_harness_collect)=====
+    # ===== on_harness(harness 旁路入口:超时/崩溃/FAILED 巡检;复用 _on_harness_collect)=====
     async def on_harness(self, patch: TaskNodePatch) -> None:
-        """Harness 旁路入口(外部超时/崩溃显式触发):exec_error 语义 → 复用 _on_harness_collect。
-
-        默认 exec_error="external_harness";调用方可经 patch.exec_error 带原因。复位 + 重投 / HUNG 上限同上。"""
+        """Harness 旁路入口:exec_error 语义(超时/崩溃/FAILED 巡检)→ 复用 _on_harness_collect 重新派发重试/上限 HUNG。"""
         side: list[tuple] = []
         with self._lock_for(patch.task_id):
             await self._on_harness_collect(patch.task_id, patch.node_id, patch.exec_error or "external_harness", side)
         await self._drain(patch.task_id, side)
 
-    # ===== 升 BBS =====
-    def _escalate_bbs(self, task_id: str, node_id: str) -> None:
-        """自动升 BBS(无人工挡板):remove_subtree(删 node+子树)+ 经图级写口 loop_round++ + 标 BBS。
-        loop_round ≥ BBS_MAX_DEPTH → STUCK → graph HUNG(人介入)。纯同步(锁内)。"""
-        self._graph.remove_subtree(task_id, node_id)
-        graph = self._graph.update_task_graph_info(
-            task_id, TaskGraphPatch(loop_round_increment=1)
-        )
-        cfg = self._graph._execution_config(task_id)
-        bbs_max = cfg["BBS_MAX_DEPTH"]
-        if graph.loop_round >= bbs_max:
+    # ===== HUNG + 升 BBS(loop_round++ / 图 HUNG) + 终态传播 =====
+    def _bump_loop_round(self, task_id: str) -> None:
+        """图级 loop_round += 1。v4 仅两处计:根 gap 未闭重 plan(口子 A) + HUNG 升 BBS。达 MAX_LOOP→图 HUNG。"""
+        graph = self._graph.update_task_graph_info(task_id, TaskGraphPatch(loop_round_increment=1))
+        max_loop = self._graph._execution_config(task_id)["MAX_LOOP"]
+        if graph.loop_round >= max_loop:
             self._graph.update_task_graph_info(
-                task_id,
-                TaskGraphPatch(
-                    status=Status.HUNG,
-                    extend_props_patch={"hung_reason": "stuck"},
-                ),
-            )
-        else:
-            self._graph.update_task_graph_info(
-                task_id,
-                TaskGraphPatch(extend_props_patch={"bbs_mode": True}),
-            )
+                task_id, TaskGraphPatch(status=Status.HUNG, extend_props_patch={"hung_reason": "loop_exhausted"}))
+            logger.warning("[loop_round] task=%s 达 MAX_LOOP(%d)→图 HUNG", task_id, max_loop)
+
+    def _hung_and_escalate(self, task_id: str, node_id: str, hung_reason: str) -> None:
+        """节点置 HUNG + 父终态传播检查 + 升 BBS(loop_round++,bbs_mode;节点保留不 remove)。纯同步(锁内)。"""
+        self._graph.update_task_node_info(
+            TaskNodePatch(task_id=task_id, node_id=node_id, status=Status.HUNG,
+                          extend_props_patch={"hung_reason": hung_reason}))
+        logger.info("[hung] task=%s node=%s reason=%s → 升 BBS(loop_round++)", task_id, node_id, hung_reason)
+        self._graph.update_task_graph_info(task_id, TaskGraphPatch(extend_props_patch={"bbs_mode": True}))
+        self._bump_loop_round(task_id)
+        # 终态传播:查父,若兄弟全终态且含 HUNG→父 HUNG(冒泡,递归)
+        self._maybe_propagate_hung(task_id, node_id)
+
+    def _maybe_propagate_hung(self, task_id: str, node_id: str) -> None:
+        """自 node 往上:若父的子全终态且含 HUNG → 父 HUNG(不计额外 loop_round,纯冒泡)→ 继续上行。
+        到根 → 图终态收口(HUNG)。若图已 HUNG(loop_exhausted 等已收口)→ 不覆盖 hung_reason。"""
+        cur = node_id
+        while True:
+            parent = self._graph.get_parent_task(task_id, cur)
+            if parent is None:
+                # cur 是根 → 图级收口(根 HUNG → 图 HUNG);不覆盖已设的图级 hung_reason
+                root = self._root(task_id)
+                if root is not None and root.node_id == cur and root.status == Status.HUNG:
+                    g = self._graph.query_task_dashboard(task_id)
+                    if g.status != Status.HUNG:
+                        self._graph.update_task_graph_info(
+                            task_id, TaskGraphPatch(status=Status.HUNG, extend_props_patch={"hung_reason": "root_stuck"}))
+                return
+            siblings = self._graph.get_child_tasks(task_id, parent.node_id)
+            if any(st.status in {Status.RUNNING, Status.PLANNING, Status.PENDING} for st in siblings):
+                return  # 还有活子,等
+            if any(st.status == Status.HUNG for st in siblings):
+                self._graph.update_task_node_info(
+                    TaskNodePatch(task_id=task_id, node_id=parent.node_id, status=Status.HUNG,
+                                  extend_props_patch={"hung_reason": "child_hung"}))
+                logger.info("[hung-propagate] task=%s 父=%s 因子含 HUNG→HUNG", task_id, parent.node_id)
+                cur = parent.node_id
+                continue
+            return
+
+    def _propagate_terminal(self, task_id: str, parent: TaskNode, siblings: list, side: list[tuple]) -> None:
+        """on_pass 时兄弟全终态但非全 DONE(含 HUNG):子含 HUNG→父 HUNG 冒泡(经 _maybe_propagate_hung)。
+        FAILED 子由 harness 巡检补救,此处若仅 FAILED(无 HUNG)不在此处理(等 harness 补救/转 HUNG)。"""
+        if any(st.status == Status.HUNG for st in siblings):
+            self._maybe_propagate_hung(task_id, siblings[0].node_id if siblings else parent.node_id)
 
     # ===== 派发+执行(通用)=====
     async def _prepare_into(self, task_id: str, side: list[tuple]) -> None:
-        """查 PENDING 可派发节点 → await dispatcher.dispatch 返填执行者 → 落库 RUNNING(side 'run');
+        """查 PENDING 可派发节点 → await dispatcher.dispatch 返填执行者 → 叶子落 RUNNING(side 'run');
         HIT_MULTI_BOTS 标 pending_group_formation(side 'group' 待锁外拉群);MISS(side 'miss')。
-        async collect(锁内 await dispatch catalog IO);拉群/投递 IO 由 ``_drain`` 锁外 await。"""
+        v4:派发命中叶子置 RUNNING(真执行);父节点是 PLANNING(add_task_nodes 已置),不在此改。"""
         pending = self._graph.query_task_nodes(
             task_id, TaskNodeQueryCriteria(status=Status.PENDING)
         )
@@ -447,7 +442,6 @@ class ExecutionEngine:
             return
         logger.info("[prepare] task=%s 待派发节点=%s", task_id, [n.node_id for n in pending])
         dispatched = await self._dispatcher.dispatch(pending)
-        logger.info("[prepare] task=%s dispatch 完成 %d 节点", task_id, len(dispatched))
         to_run: list[TaskNode] = []
         for node in dispatched:
             miss = node.run_info.extend_props.get("miss_events")
@@ -461,32 +455,23 @@ class ExecutionEngine:
                 logger.info("[prepare] task=%s node=%s → run(mode=%s assignee=%s)",
                             task_id, node.node_id, node.run_info.run_mode, node.run_info.assignee)
                 self._graph.update_task_node_info(
-                    TaskNodePatch(
-                        task_id=task_id,
-                        node_id=node.node_id,
-                        status=Status.RUNNING,
-                        run_mode=node.run_info.run_mode,
-                        assignee=node.run_info.assignee,
-                    )
+                    TaskNodePatch(task_id=task_id, node_id=node.node_id, status=Status.RUNNING,
+                                  run_mode=node.run_info.run_mode, assignee=node.run_info.assignee)
                 )
                 to_run.append(node)
             elif miss:
                 logger.info("[prepare] task=%s node=%s → miss(%s)", task_id, node.node_id, miss)
-                side.append((
-                    "miss",
-                    TaskNodePatch(
-                        task_id=task_id,
-                        node_id=node.node_id,
-                        extend_props_patch={"miss_events": miss},
-                    ),
-                ))
+                side.append(("miss", TaskNodePatch(task_id=task_id, node_id=node.node_id,
+                            extend_props_patch={"miss_events": miss})))
         if to_run:
             side.append(("run", to_run))
 
     async def _drain(self, task_id: str, side: list[tuple]) -> None:
-        """锁外统一 await 执行 side effects:run(投递 gather+Semaphore)/ group(拉群+patch+投递)/
-        miss(递归 on_miss collect+drain)/ finish(图级 DONE 写)。保证锁内永不 await。"""
+        """锁外统一执行 side effects。v4:run 投递 fire-and-forget(asyncio.create_task,不 await 阻塞),
+        miss 推进与 run 投递并行,绝不让 miss 递归 await 堵住真正命中 bot 的 start_run(消除"假 RUNNING")。
+        保证锁内永不 await。"""
         run_nodes: list[TaskNode] = []
+        miss_tasks: list[TaskNodePatch] = []
         for kind, *payload in side:
             if kind == "run":
                 run_nodes.extend(payload[0])
@@ -497,36 +482,28 @@ class ExecutionEngine:
                 node.run_info.assignee = gid
                 with self._lock_for(task_id):
                     self._graph.update_task_node_info(
-                        TaskNodePatch(
-                            task_id=task_id,
-                            node_id=node.node_id,
-                            status=Status.RUNNING,
-                            run_mode=node.run_info.run_mode,
-                            assignee=gid,
-                        )
+                        TaskNodePatch(task_id=task_id, node_id=node.node_id, status=Status.RUNNING,
+                                      run_mode=node.run_info.run_mode, assignee=gid)
                     )
                 run_nodes.append(node)
             elif kind == "miss":
-                await self.on_miss(payload[0])  # 递归 collect+drain(锁外)
+                miss_tasks.append(payload[0])
             elif kind == "finish":
                 logger.info("[drain] task=%s finish(根 gap 闭→图 DONE)", task_id)
                 self._maybe_finish_graph(payload[0])
+        # ① run 立即投递(fire-and-forget):不被 miss 递归阻塞
         if run_nodes:
-            logger.info("[drain] task=%s start_run %d 节点:%s",
-                        task_id, len(run_nodes), [n.node_id for n in run_nodes])
+            logger.info("[drain] task=%s start_run %d 节点:%s", task_id, len(run_nodes), [n.node_id for n in run_nodes])
             await self._runner.start_run(run_nodes)
+        # ② miss 推进(递归 collect+drain)
+        for m in miss_tasks:
+            await self.on_miss(m)
 
     def _maybe_finish_graph(self, task_id: str) -> None:
         """根 gap 闭(终验通过)→ 全图 DONE。图级写收口 + 根节点翻 DONE。两写均经 SSOT 网关(锁内同步)。"""
         self._graph.update_task_graph_info(
-            task_id,
-            TaskGraphPatch(
-                status=Status.DONE,
-                output_patch={"result": "all_done"},
-            ),
-        )
+            task_id, TaskGraphPatch(status=Status.DONE, output_patch={"result": "all_done"}))
         root = self._root(task_id)
         if root is not None and root.status != Status.DONE:
             self._graph.update_task_node_info(
-                TaskNodePatch(task_id=task_id, node_id=root.node_id, status=Status.DONE)
-            )
+                TaskNodePatch(task_id=task_id, node_id=root.node_id, status=Status.DONE))

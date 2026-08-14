@@ -35,21 +35,22 @@ from agentclaw.community.core.task.domain.models import (
 _ACCEPTANCE_TRANSITIONS: dict[Status, set[Status]] = {
     Status.RUNNING: {Status.DONE, Status.FAILED},
 }
-# status 直驱(框架内部:派发/委托/复位/传播/补救)
-#   PENDING->RUNNING(派发/初始 add 委托) / PLANNING->RUNNING(add 产子委托)/PLANNING->DONE(gap 闭传播)
-#   RUNNING->PLANNING(本批兄弟全 DONE 重规划)/RUNNING->DONE(gap 闭终态)/RUNNING->PENDING(harness 复位重投)
-#   FAILED->RUNNING(补救 add 产子重新委托)
+# status 直驱(框架内部:派发/复位/传播/HUNG)。v4:父节点规划出子由 add_task_nodes 直置 PLANNING(不走此表),
+#   故 PLANNING->RUNNING 已废弃;RUNNING 已不再表示委托态(委托态=PLANNING),RUNNING->PLANNING 已废弃。
+#   PENDING->RUNNING(叶子派发执行) / RUNNING->PENDING(harness 复位重投) / RUNNING->DONE(gap 闭) / RUNNING->HUNG
+#   PLANNING->DONE(gap 闭传播) / PLANNING->HUNG(depth>=MAX 拆不动)
+#   FAILED->PENDING(harness 重新派发执行重试) / FAILED->HUNG(重试达上限)
 _DIRECT_TRANSITIONS: dict[Status, set[Status]] = {
     Status.PENDING: {Status.RUNNING, Status.HUNG, Status.DONE},
-    Status.PLANNING: {Status.RUNNING, Status.DONE, Status.HUNG},
-    Status.RUNNING: {Status.PENDING, Status.PLANNING, Status.DONE, Status.HUNG},
-    Status.FAILED: {Status.RUNNING, Status.HUNG},
+    Status.PLANNING: {Status.DONE, Status.HUNG},
+    Status.RUNNING: {Status.PENDING, Status.DONE, Status.HUNG},
+    Status.FAILED: {Status.PENDING, Status.HUNG},
 }
 # 可委托(add_task_nodes 时 parent 允许的态):PENDING(初始/根)/FAILED(补救)/PLANNING(前向重规划)
 _DELEGATABLE_PARENT: set[Status] = {Status.PENDING, Status.FAILED, Status.PLANNING}
 
-_DEFAULT_MAX_DEPTH = 3
-_DEFAULT_BBS_MAX_DEPTH = 3
+_DEFAULT_MAX_DEPTH = 2
+_DEFAULT_MAX_LOOP = 10  # 图级总轮次(根 gap 不闭 + 反复升 BBS)
 
 
 class TaskGraphService:
@@ -178,9 +179,10 @@ class TaskGraphService:
                 graph.relations.append(
                     Relation(src_id=parent_node_id, dst_id=t.node_id, type=RelationType.DEPENDENCY)
                 )
-            # 父进 RUNNING(委托态:子执行/自身执行;PLANNING/RUNNING 维持);PLANNING=规划中已解耦
-            if parent.status != Status.RUNNING:
-                parent.status = Status.RUNNING
+            # 父进 PLANNING(委托/编排态:等子完成 / 待重算 gap)。v4:规划出子的父永不为 RUNNING,
+            # RUNNING 只给真正派发执行的叶子。
+            if parent.status != Status.PLANNING:
+                parent.status = Status.PLANNING
             return graph
 
     def _assert_add_trigger(self, graph: TaskExecutionGraph) -> None:
@@ -355,20 +357,8 @@ class TaskGraphService:
                 return None
             return self._require_node(graph, parent_ids[0])
 
-    def remove_subtree(self, task_id: str, node_id: str) -> TaskExecutionGraph:
-        """删节点 + 其下整个子树(递归 get_child_tasks 删;含 relations 边)。
-        触发:升 BBS 时——某 xx_node 搜推 MISS 且其下所有子都 MISS、没走 RUNNING(整子树无效)。"""
-        with self._lock_for(task_id):
-            graph = self._require_graph(task_id)
-            self._require_node(graph, node_id)
-            subtree = self._collect_subtree(graph, node_id)
-            graph.tasks = [n for n in graph.tasks if n.node_id not in subtree]
-            graph.relations = [
-                r
-                for r in graph.relations
-                if r.src_id not in subtree and r.dst_id not in subtree
-            ]
-            return graph
+    # v4:remove_subtree 已删——升 BBS 不再删子树,HUNG 节点保留在图里,靠终态传播(子含 HUNG→父 HUNG)
+    # 冒泡驱动收敛。dashboard 子树投影仍用 _collect_subtree。
 
     def _node_depth(self, task_id: str, node_id: str) -> int:
         """从 relations 分解树递归自算深度(派生不持久)。根=0。"""
@@ -390,10 +380,11 @@ class TaskGraphService:
             return depth
 
     def _execution_config(self, task_id: str) -> dict[str, Any]:
-        """读 MAX_DEPTH(内层升 BBS 阈值)/ BBS_MAX_DEPTH(外层 STUCK 阈值,默认 3)等,填默认。"""
+        """读 MAX_DEPTH(结构深度闸门,默认 2)/ MAX_LOOP(图级总轮次,默认 10)/ MAX_HARNESS(默认 3),填默认。"""
         with self._lock_for(task_id):
             graph = self._require_graph(task_id)
             cfg: dict[str, Any] = dict(graph.extend_props.get("execution_config", {}))
             cfg.setdefault("MAX_DEPTH", _DEFAULT_MAX_DEPTH)
-            cfg.setdefault("BBS_MAX_DEPTH", _DEFAULT_BBS_MAX_DEPTH)
+            cfg.setdefault("MAX_LOOP", _DEFAULT_MAX_LOOP)
+            cfg.setdefault("MAX_HARNESS", 3)
             return cfg

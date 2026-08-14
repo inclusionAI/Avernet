@@ -15,6 +15,7 @@ from agentclaw.community.core.task.domain.models import (
     Context,
     Goal,
     Metadata,
+    PlanResult,
     RelationType,
     RuntimeInfo,
     Status,
@@ -189,8 +190,9 @@ class _CasePlanningStrategy:
     async def matches(self, graph) -> bool:
         return True
 
-    async def apply(self, graph) -> list[TaskNode]:
-        return self._d.decompose(graph)
+    async def apply(self, graph, target) -> PlanResult:
+        kids = self._d.decompose(graph)
+        return PlanResult(children=kids, has_gap=bool(kids))
 
 
 class _CaseDispatchStrategy:
@@ -292,7 +294,7 @@ class TestThreeModesHappyToDone:
         assert ov.run_info.run_mode == "single_bot"
         assert ov.run_info.assignee == "行业信息抓取Bot"
         assert ov.status == Status.RUNNING
-        assert svc._get_node(g, root_id).status == Status.PLANNING
+        assert svc._get_node(g, root_id).status == Status.RUNNING  # Step2:委托执行态(非 PLANNING)
         assert len(runner._run_log) == 1
 
         # 回投 N_overview PASS → 批2 four专题
@@ -355,7 +357,7 @@ class TestFailRemedyCure:
         ))
         g = svc.query_task_dashboard("t_case")
         n_market = svc._get_node(g, "N_market")
-        assert n_market.status == Status.PLANNING
+        assert n_market.status == Status.RUNNING  # Step2:补救 add 翻 FAILED→RUNNING(委托补救子)
         assert n_market.run_info.acceptance_result is not None
         assert n_market.run_info.acceptance_result.verdict == AcceptanceVerdict.FAIL
         remedy = svc._get_node(g, "N_market_remedy")
@@ -395,6 +397,9 @@ class TestMissEscalateBbs:
         assert g.loop_round == 1
         # BBS bot 认领 → 自规划子任务(BBS 认领子,run_mode=bbs,挂 root 下)
         bbs_sub = _node("N_practice_bbs_bbs", "t_case", run_mode="bbs", assignee="bot_bbs_7")
+        # Step2:升 BBS 后 root 仍 RUNNING(委托态);BBS bot 认领规划前先翻 root RUNNING→PLANNING(可委托 add)
+        from agentclaw.community.core.task.domain.models import TaskNodePatch as _TNP
+        svc.update_task_node_info(_TNP(task_id="t_case", node_id="t_case", status=Status.PLANNING))
         svc.add_task_nodes([bbs_sub], parent_node_id="t_case")
         # 框架驱动派发该 bbs 节点(corp 认领编排;此处经引擎内部 _dispatch_and_run 模拟)
         side = []

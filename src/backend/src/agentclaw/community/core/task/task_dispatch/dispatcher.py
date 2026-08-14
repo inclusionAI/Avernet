@@ -45,11 +45,11 @@ class TaskDispatcher:
         graph = self._graph.query_task_dashboard(
             toDoTaskList[0].task_id if toDoTaskList else ""
         ) if toDoTaskList else None
-        out: list[TaskNode] = []
-        for node in toDoTaskList:
+        import asyncio as _aio
+        # v4:并发搜推(gather,无并发限流;catalog IO 耗时,串行是瓶颈)。BBS 节点跳过策略直接维持。
+        async def _one(node: "TaskNode"):
             if node.run_info.run_mode == "bbs":
-                out.append(node)  # BBS 节点退化维持
-                continue
+                return node  # BBS 节点退化维持
             result = await self._select_and_apply(node, graph)
             if result.outcome == SearchOutcome.HIT_SINGLE:
                 node.run_info.run_mode = "single_bot"
@@ -60,10 +60,10 @@ class TaskDispatcher:
             elif result.outcome == SearchOutcome.HIT_MULTI_BOTS:
                 node.run_info.run_mode = "coop_group"
                 node.run_info.extend_props["pending_group_formation"] = result.group_formation
-                # assignee 留空,编排核拉群后填
             else:  # MISS
                 node.run_info.extend_props["miss_events"] = [result.miss_reason or "no_bot"]
-            out.append(node)
+            return node
+        out = list(await _aio.gather(*[_one(n) for n in toDoTaskList]))
         return out
 
     async def _select_and_apply(self, node: TaskNode, graph: TaskExecutionGraph | None):

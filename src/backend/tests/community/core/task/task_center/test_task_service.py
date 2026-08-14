@@ -190,7 +190,7 @@ class TestExecute:
         assert result.success is True
         assert result.run_id is not None
         graph = svc.query_task_dashboard("t1")
-        assert svc._get_node(graph, "t1").status == Status.RUNNING  # Step2:委托执行态
+        assert svc._get_node(graph, "t1").status == Status.PLANNING  # v4:父委托态
         assert svc._get_node(graph, "c1").status == Status.RUNNING
         assert svc._get_node(graph, "c2").status == Status.RUNNING
         assert len(runner.run_calls) == 1
@@ -285,8 +285,8 @@ class TestBbsEscalationNoMarket:
             result={"success": False, "fail_detail": "缺x"},
         )))
         graph = svc.query_task_dashboard("t3")
-        assert graph.extend_props.get("bbs_mode") is True
-        assert graph.loop_round == 1
+        # v4:验收 FAIL→FAILED(补救治移 harness 重新派发;无 harness → 停 FAILED,不立即升 BBS)
+        assert svc._get_node(graph, "c1").status == Status.FAILED
 
 
 class TestZeroCase:
