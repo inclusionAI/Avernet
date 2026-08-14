@@ -15,7 +15,7 @@
 
 | 结果 | 证据 | 说明 |
 |---|---|---|
-| OPEN | https://github.com/inclusionAI/Avernet/pull/1064 | Head `02ba9c284`，base 为 `dev`；标题与 Problem / Solution / Validation / Compatibility and risk / Spec 段落均已核验。 |
+| OPEN | https://github.com/inclusionAI/Avernet/pull/1064 | Head 为该 PR 的当前远端提交，base 为 `dev`；标题与 Problem / Solution / Validation / Compatibility and risk / Spec 段落均已核验。 |
 
 ## 自动意见
 
