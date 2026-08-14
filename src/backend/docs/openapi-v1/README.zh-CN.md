@@ -130,7 +130,7 @@ _按优先级分层排序。_
 |---|---|---|---|---|---|
 | bots | totalfrank | P1 | `openapi_v1/bots/router.py` | ✅ **DONE —— PR #494 已于 2026-07-29 合并**（13/13 端点） | ~~Track A 阶段 1~~ ✅ |
 | mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` | ✅ **DONE —— PR #610**（6/6 端点） | ~~Track A 阶段 5~~ ✅（PR #564） |
-| resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | 🔧 IN PROGRESS（PARTIAL）— 9 handler 全接通但 DEFINITION-ONLY / NOT PUBLIC-READY | Track A resources ✅(Phase 0)，Track B 全 9 端点接通 stub→service；待 auth workstream(gateway principal seam) 落地 + DDL 部署后才可对外 |
+| resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | 🔧 IN PROGRESS（PARTIAL）— 7 handler 全接通但 DEFINITION-ONLY / NOT PUBLIC-READY | Track A resources ✅(Phase 0)，Track B 全 7 端点接通 stub→service，仅文件、按路径寻址；待 auth workstream(gateway principal seam) 落地 + DDL 部署后才可对外 |
 | routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` | 🔧 IN PROGRESS（PARTIAL）— 7 handler 全接通但 NOT PUBLIC-READY | Track A routines 无表靠 ac_bots 间接隔离；Track B 7 端点接通；待 gateway principal seam + tenant resolver 落地后才可对外 |
 | channels | —— | ❌ **已删除（2026-08-03）** | *(已删除)* | 路由、schema 与两条已发布路径均删除 —— 见下方 channels 小节 | 不适用 |
 | identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` | 🔧 IN PROGRESS（PARTIAL）— 3 handler 全接通但 NOT PUBLIC-READY | bots 隔离（Stage 1 ✅）；Track B 3 端点接通；待 gateway principal seam + tenant resolver 落地后才可对外 |
@@ -721,21 +721,31 @@ _已定案的决策（PR #610）：路径保持嵌套（`/openapi/v1/bots/mcp/..
 调用者"有权限"（该端点仅供参考，真正的强制点是 MCP 服务器本身）—— 已用测试钉住，使其读起来
 是一个决策而非 bug。_
 
-### 🟩 lucas-xzp · P1 —— resources（9 个端点）· `openapi_v1/resources/router.py`
-文件/链接/文件夹的统一抽象；存储位置从不暴露。
+### 🟩 lucas-xzp · P1 —— resources（7 个端点）· `openapi_v1/resources/router.py`
+Bot 工作区的文件与目录；存储位置从不暴露。所有操作都以工作区相对路径 `path`
+查询参数寻址，七个端点均要求 `bot_id` 与 `user_id`。
 | 方法 | 路径 | 用途 | 成功响应 |
 |---|---|---|---|
-| GET | `/openapi/v1/bots/resources` | 列表（`bot_id`、`type`、分页） | `Envelope[Page[Resource]]` |
-| GET | `/openapi/v1/bots/resources/check-name` | 重名检查（`name`） | `Envelope[NameCheck]` |
-| POST | `/openapi/v1/bots/resources` | 创建（文件占位 / 链接 / 文件夹） | `201 Envelope[Resource]` |
-| POST | `/openapi/v1/bots/resources/upload` | 上传原始字节为资源（`application/octet-stream`） | `201 Envelope[Resource]` |
-| GET | `/openapi/v1/bots/resources/{resource_id}` | 获取 | `Envelope[Resource]` |
-| PUT | `/openapi/v1/bots/resources/{resource_id}` | 更新 | `Envelope[Resource]` |
-| DELETE | `/openapi/v1/bots/resources/{resource_id}` | 删除 | `Envelope[Deleted]` |
-| GET | `/openapi/v1/bots/resources/{resource_id}/download` | 下载字节（**原始，不走信封**） | `application/octet-stream` |
-| GET | `/openapi/v1/bots/resources/{resource_id}/preview` | 预览 | `Envelope[Preview]` |
+| GET | `/openapi/v1/bots/resources` | 列目录（`path`、`type`、分页） | `Envelope[Page[FileEntry]]` |
+| GET | `/openapi/v1/bots/resources/stat` | 单个条目的元数据（`path`） | `Envelope[FileEntry]` |
+| POST | `/openapi/v1/bots/resources/upload` | 上传原始字节（`application/octet-stream`、`overwrite`） | `201 Envelope[FileEntry]` |
+| GET | `/openapi/v1/bots/resources/download` | 下载字节（**原始，不走信封**） | `application/octet-stream` |
+| GET | `/openapi/v1/bots/resources/preview` | 文本预览（1 MB 上限 → 413） | `Envelope[Preview]` |
+| POST | `/openapi/v1/bots/resources/mkdir` | 创建目录 | `201 Envelope[FileEntry]` |
+| DELETE | `/openapi/v1/bots/resources` | 删除文件或目录 | `Envelope[Deleted]` |
 
 _注：upload 已定稿为原始 `application/octet-stream` body（非 multipart）。与 PR #363 总览的 multipart 描述不一致——实现以路由为准，若后续需改 multipart 是契约 PR。_
+
+_注：本组**不再有记录 id**。#1001 让 engine 成为文件的唯一真源，于是 `resource_id`
+在每个文件响应里恒为空，而三个 id 寻址路由实际只解析 link 记录。link 已移出本面，
+因此 id 直接退出契约，而不是继续以 `""` 上报——用空串代表"没有 id"是一个哨兵值，
+调用方在失败之前无法把它与真实地址区分开。`GET /stat` 同时取代了 id 寻址的单条查询
+与 `check-name`：它向工作区回答存在性，与列表读取同一个真源，两者不可能互相矛盾。_
+
+_注：这里的 `Page` 是后端在整个目录列表上做的切片——engine 的 `ListDirRequest`
+没有 page/limit/cursor。`page_size` 约束的是响应体，而不是设备往返；翻到后面的页
+与第一页开销相同。这只有在列表非递归时才成比例；若将来加 `recursive=true`，必须
+一并重新审视分页。_
 
 ### 🟪 totalfrank + lucas-xzp · P3 —— skills，共担（六个已定案操作）· `openapi_v1/skills/router.py`
 

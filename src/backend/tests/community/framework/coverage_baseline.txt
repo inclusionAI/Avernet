@@ -27,6 +27,14 @@
 # unit tests in tests/community/adapters/http/openapi_v1/resources/. Hand edited
 # rather than regenerated, to keep these notes.
 #
+# 2026-08-14: the resources group became files-only, so the record-addressed
+# routes went with the links they served: `POST ""`, `GET/PUT/DELETE
+# /{resource_id}` and `check-name` are removed (five lines), and `GET /stat`
+# takes over the single-entry lookup (one line, landing here for the same single
+# reason as every other /openapi/v1 entry above -- no principal minter in the
+# harness). Net debt shrinks by four; nothing tracked here was left uncovered at
+# a new address. Hand edited rather than regenerated, to keep these notes.
+#
 # Comments survive hand edits; `python -m tests.community.framework.coverage_gate
 # --regen` rewrites the file and drops them.
 #
@@ -49,7 +57,6 @@ DELETE /api/skillsets/{skill_set_id}/skills/{skill_id}: missing [happy, error]
 DELETE /api/skillsets/{skill_set_id}: missing [happy, error]
 DELETE /api/v1/expert-chats/{bot_id}/{owner_id}/session: missing [happy, error]
 DELETE /api/v1/expert-chats/{bot_id}/{owner_id}: missing [happy, error]
-DELETE /openapi/v1/bots/resources/{resource_id}: missing [happy, error]
 DELETE /openapi/v1/bots/resources: missing [happy, error]
 DELETE /openapi/v1/bots/routines/{routine_id}: missing [happy, error]
 DELETE /openapi/v1/bots/sessions/{bot_id}/{session_id}/messages: missing [happy, error]
@@ -187,10 +194,9 @@ GET /openapi/v1/bots/mcp/servers/{server_code}/permissions: missing [happy, erro
 GET /openapi/v1/bots/mcp/servers/{server_code}: missing [happy, error]
 GET /openapi/v1/bots/mcp/servers: missing [happy, error]
 GET /openapi/v1/bots/mcp/tenants: missing [happy, error]
-GET /openapi/v1/bots/resources/check-name: missing [happy, error]
 GET /openapi/v1/bots/resources/download: missing [happy, error]
 GET /openapi/v1/bots/resources/preview: missing [happy, error]
-GET /openapi/v1/bots/resources/{resource_id}: missing [happy, error]
+GET /openapi/v1/bots/resources/stat: missing [happy, error]
 GET /openapi/v1/bots/resources: missing [happy, error]
 GET /openapi/v1/bots/routines/{routine_id}/runs: missing [happy, error]
 GET /openapi/v1/bots/routines/{routine_id}: missing [happy, error]
@@ -357,7 +363,6 @@ POST /api/v1/skill-center/sync: missing [happy, error]
 POST /api/v1/token/exchange: missing [happy, error]
 POST /openapi/v1/bots/resources/mkdir: missing [happy, error]
 POST /openapi/v1/bots/resources/upload: missing [happy, error]
-POST /openapi/v1/bots/resources: missing [happy, error]
 POST /openapi/v1/bots/routines/{routine_id}/run: missing [happy, error]
 POST /openapi/v1/bots/routines: missing [happy, error]
 POST /openapi/v1/bots/{bot_id}/authorized-apps: missing [happy, error]
@@ -376,7 +381,6 @@ PUT /api/skills/{skill_uuid}/members/{user_id}/role: missing [happy, error]
 PUT /api/skillsets/{skill_set_id}: missing [happy, error]
 PUT /openapi/v1/bots/identity/{bot_id}/{file_type}: missing [happy, error]
 PUT /openapi/v1/bots/mcp/servers/{server_code}/config: missing [happy, error]
-PUT /openapi/v1/bots/resources/{resource_id}: missing [happy, error]
 PUT /openapi/v1/bots/approvals/{bot_id}/mode: missing [happy, error]
 PUT /openapi/v1/bots/{bot_id}/engine-config: missing [happy, error]
 PUT /openapi/v1/bots/{bot_id}: missing [happy, error]

@@ -1,8 +1,12 @@
-"""Request/response models for the resources group (unified files + links).
+"""Request/response models for the resources group (workspace files).
 
 Docstrings and field descriptions here are published verbatim into the OpenAPI
 document external tenants read — keep them caller-facing prose. Rationale and
 internal names belong in ``#`` comments.
+
+Every model here describes something read from the bot's workspace, so none of
+them carries a record id: the engine is the source of truth, and `path` is the
+address. Link resources are not part of this surface.
 """
 
 from __future__ import annotations
@@ -13,24 +17,19 @@ from agentclaw.community.adapters.http.openapi_v1.enums import _DocumentedEnum
 
 
 class ResourceType(_DocumentedEnum):
-    """A resource is a file, an external link, or a folder."""
+    """A resource is a file or a folder in the bot's workspace."""
 
     FILE = "file"
-    LINK = "link"
     FOLDER = "folder"
 
     __descriptions__ = {
-        "file": "A file in the bot's workspace, addressed by its "
-        "workspace-relative path.",
-        "link": "An external URL saved for the bot, addressed by its "
-        "resource id.",
-        "folder": "A directory in the bot's workspace, addressed by its "
-        "workspace-relative path.",
+        "file": "A file in the bot's workspace.",
+        "folder": "A directory in the bot's workspace.",
     }
 
 
-class Resource(BaseModel):
-    """A resource: a file or folder in the bot's workspace, or an external link.
+class FileEntry(BaseModel):
+    """A file or folder in the bot's workspace.
 
     The container's own storage layout is never exposed — `path` is relative to
     the workspace root, not to any real filesystem the bot runs on.
@@ -39,149 +38,62 @@ class Resource(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "resource_id": "",
+                "path": "docs/spec.md",
                 "name": "spec.md",
                 "type": "file",
-                "source": None,
-                "url": None,
                 "size": 2048,
-                "path": "docs/spec.md",
-                "gmt_create": None,
-                "gmt_modified": None,
             }
         }
     )
 
-    resource_id: str = Field(
-        description="Identifier of the resource's stored record — decimal "
-        "digits for a link, e.g. '42'. Empty for files and folders, which "
-        "have no record: address those by `path` instead."
+    # Required, unlike every other field: it is the address every endpoint in
+    # this group accepts, so an entry without one describes something the
+    # caller cannot then act on.
+    path: str = Field(
+        description="Workspace-relative path, e.g. 'docs/spec/a.txt' — the "
+        "whole path, not the directory. This is the addressing key: pass it "
+        "as `path` on stat, download, preview, upload, mkdir and delete, "
+        "exactly as listed."
     )
     name: str = Field(
-        description="Display name. For a file or folder this is the last "
-        "segment of `path`; a link has only a name."
+        description="Display name — the last segment of `path`."
     )
-    type: ResourceType = Field(description="What kind of resource this is.")
-    # Pass-through of the record's provenance column; only links surface a
-    # record on this API, so files/folders read null here.
-    source: str | None = Field(
-        default=None,
-        description="How the resource record came to exist — e.g. 'manual' "
-        "for a link created through this API, 'upload' for an uploaded "
-        "file's record. Null for files and folders read straight from the "
-        "workspace, which have no record.",
-    )
-    url: str | None = Field(
-        default=None,
-        description="The link's URL; null for files and folders.",
-    )
+    type: ResourceType = Field(description="What kind of entry this is.")
     size: int | None = Field(
         default=None,
-        description="Size in bytes; null when not reported (links, and "
-        "entries whose listing carries no size).",
+        description="Size in bytes. Null for folders, and for files whose "
+        "listing carries no size — not every engine reports one.",
     )
-    path: str | None = Field(
-        default=None,
-        description="Workspace-relative path of a file or folder, e.g. "
-        "'docs/spec/a.txt' — the whole path, not the directory; `name` is "
-        "its last segment. This is the addressing key: pass it as `path` on "
-        "download, preview, upload and delete exactly as listed. Null for "
-        "links.",
-    )
-    gmt_create: str | None = Field(
-        default=None,
-        description="When the record was created (ISO 8601, no timezone "
-        "designator). Null for files and folders read straight from the "
-        "workspace — their listing carries no timestamps.",
-    )
-    gmt_modified: str | None = Field(
-        default=None,
-        description="When the record last changed (ISO 8601, no timezone "
-        "designator); null for files and folders read straight from the "
-        "workspace.",
-    )
-    # Timestamp field names kept DB-flavoured on purpose: they are the
-    # prevailing openapi_v1 convention (sessions, routines), and renaming only
-    # this group would deepen the split with `skills`, which uses
-    # created_at/updated_at.
-
-
-class ResourceCreate(BaseModel):
-    """Create a link resource.
-
-    Only links are created here: files are created through the upload
-    endpoint (a file request answers 400 pointing there), and folders through
-    the mkdir endpoint (a folder request answers 501).
-    """
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "name": "Team wiki",
-                "type": "link",
-                "url": "https://wiki.example.com/team",
-            }
-        }
-    )
-
-    name: str = Field(
-        description="Display name for the link; a duplicate of an existing "
-        "link answers 409."
-    )
-    type: ResourceType = Field(
-        description="What to create. Only 'link' is accepted here — see the "
-        "model description for where files and folders are created."
-    )
-    url: str | None = Field(
-        default=None,
-        description="The URL the link points to. Required when type is "
-        "'link' (400 when missing).",
-    )
-    parent_id: str | None = Field(
-        default=None,
-        description="Accepted for compatibility and currently ignored — "
-        "links are not placed in folders.",
-    )
-
-
-class ResourceUpdate(BaseModel):
-    """Partial update of a link resource. Omitted fields are left unchanged."""
-
-    model_config = ConfigDict(
-        json_schema_extra={"example": {"name": "Team wiki (new)"}}
-    )
-
-    name: str | None = Field(
-        default=None, description="New display name; omit to keep."
-    )
-    url: str | None = Field(default=None, description="New URL; omit to keep.")
+    # Deliberately absent: ``modified_at`` and ``readonly``.
+    #
+    # ``ResourceFileService.list_dir`` computes both, and both are dropped here
+    # on purpose. ``modified_at`` is provider-dependent — the local device's
+    # listing returns name/path/is_dir only — and a field populated on some
+    # engines and null on others is the shape the engine-backed spec (G6)
+    # rejected. ``readonly`` is always false in a listing: ``is_readonly``
+    # matches dotfiles and workspace-root identity files, and ``list_dir``
+    # filters both out before it is ever consulted.
 
 
 class Preview(BaseModel):
-    """A file's preview content."""
+    """A file's content, decoded as text."""
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "resource_id": "",
+                "path": "docs/spec.md",
                 "content_type": "application/octet-stream",
-                "preview_url": None,
                 "content": "# Spec\nThe gateway forwards…",
             }
         }
     )
 
-    resource_id: str = Field(
-        description="Always empty — previews address files by their `path`."
+    path: str = Field(
+        description="Workspace-relative path of the previewed file, as given."
     )
     content_type: str = Field(
         description="MIME label of the returned content; currently always "
         "'application/octet-stream' — the server does not classify further."
-    )
-    preview_url: str | None = Field(
-        default=None,
-        description="Reserved for a URL-based preview; currently always null "
-        "— the content is returned inline instead.",
     )
     content: str | None = Field(
         default=None,
