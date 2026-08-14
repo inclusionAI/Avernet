@@ -152,7 +152,7 @@ _Ordered by priority tier._
 |---|---|---|---|---|---|
 | bots | totalfrank | P1 | `openapi_v1/bots/router.py` | ✅ **DONE — PR #494 merged 2026-07-29** (13/13 endpoints) | ~~Track A stage 1~~ ✅ |
 | mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` | ✅ **DONE — PR #610** (6/6 endpoints) | ~~Track A stage 5~~ ✅ (PR #564) |
-| resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | 🔧 IN PROGRESS (PARTIAL) — 9 handlers all wired but DEFINITION-ONLY / NOT PUBLIC-READY | Track A resources ✅(Phase 0); Track B all 9 endpoints wired stub→service; gated on auth workstream (gateway principal seam) + DDL deploy before public exposure |
+| resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | 🔧 IN PROGRESS (PARTIAL) — 7 handlers all wired but DEFINITION-ONLY / NOT PUBLIC-READY | Track A resources ✅(Phase 0); Track B all 7 endpoints wired stub→service, files-only and path-addressed; gated on auth workstream (gateway principal seam) + DDL deploy before public exposure |
 | routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` *(stub)* | ⬜ TODO | Track A routines (lucas-xzp) |
 | channels | — | ❌ **REMOVED (2026-08-03)** | *(deleted)* | Router, schemas and both published paths deleted — see the channels section below | n/a |
 | identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` *(stub)* | ⬜ TODO | bots isolation (Stage 1 ✅) |
@@ -697,13 +697,17 @@ scope by. They still require an authenticated caller — that is
 | `GET /openapi/v1/bots/mcp/servers/{server_code}` | Same |
 | `GET /openapi/v1/bots/mcp/tenants` | Same |
 
-Note what is *not* on that list: `list_resources`, `create_resource`,
-`get_resource` and `update_resource` also do not use the value, but they take it
-anyway. They are user-scoped in principle and merely fail to enforce it today —
-they scope on a caller-supplied `bot_id` without checking the caller owns that
-bot, the gap `specs/2026-08-02-public-api-user-only-principal/` records. Closing
-it later should be a change to those handlers, not a required parameter added to
-four public operations.
+Note what is *not* on that list: four resources handlers (`list_resources`,
+`create_resource`, `get_resource`, `update_resource`) used to take the value
+without using it — user-scoped in principle, scoping on a caller-supplied
+`bot_id` without checking the caller owns that bot, the gap
+`specs/2026-08-02-public-api-user-only-principal/` records. Three of them went
+with the link resources they served, and the surviving `list_resources` now
+consumes the value: every files-only handler resolves the workspace through
+`_file_coords(bot_id, owner_id, …)`, so the parameter reaches the seam rather
+than being accepted and dropped. The ownership gap itself is unchanged — the
+`bot_id` is still caller-supplied — and closing it remains a change to those
+handlers, not a new parameter.
 
 **Bot Logs is a different exclusion, and the sharpest thing to know here.**
 `GET /openapi/v1/bots/logs/traces` has taken a required `user_id` since #692 —
@@ -1076,23 +1080,38 @@ strict enums (`PROD`/`PRE`, `SSE`/`STREAMABLE_HTTP`). **Preserved fail-open:** a
 marketplace outage still reports the caller as permitted (advisory endpoint; the
 MCP server enforces) — pinned by a test so it reads as a decision, not a bug._
 
-### 🟩 lucas-xzp · P1 — resources (9 endpoints) · `openapi_v1/resources/router.py`
-Unified file/link/folder abstraction; storage location never exposed.
+### 🟩 lucas-xzp · P1 — resources (7 endpoints) · `openapi_v1/resources/router.py`
+The bot's workspace files and folders; storage location never exposed. Every
+operation is addressed by a workspace-relative `path` query parameter, and
+`bot_id` + `user_id` are required on all seven.
 | Method | Path | Purpose | Success |
 |---|---|---|---|
-| GET | `/openapi/v1/bots/resources` | List (`bot_id`, `type`, paged) | `Envelope[Page[Resource]]` |
-| GET | `/openapi/v1/bots/resources/check-name` | Name availability (`name`) | `Envelope[NameCheck]` |
-| POST | `/openapi/v1/bots/resources` | Create (file placeholder / link / folder) | `201 Envelope[Resource]` |
-| POST | `/openapi/v1/bots/resources/upload` | Upload raw bytes as a resource (`application/octet-stream`) | `201 Envelope[Resource]` |
-| GET | `/openapi/v1/bots/resources/{resource_id}` | Get | `Envelope[Resource]` |
-| PUT | `/openapi/v1/bots/resources/{resource_id}` | Update | `Envelope[Resource]` |
-| DELETE | `/openapi/v1/bots/resources/{resource_id}` | Delete | `Envelope[Deleted]` |
-| GET | `/openapi/v1/bots/resources/{resource_id}/download` | Download bytes (**raw, not enveloped**) | `application/octet-stream` |
-| GET | `/openapi/v1/bots/resources/{resource_id}/preview` | Preview | `Envelope[Preview]` |
+| GET | `/openapi/v1/bots/resources` | List a directory (`path`, `type`, paged) | `Envelope[Page[FileEntry]]` |
+| GET | `/openapi/v1/bots/resources/stat` | One entry's metadata (`path`) | `Envelope[FileEntry]` |
+| POST | `/openapi/v1/bots/resources/upload` | Upload raw bytes (`application/octet-stream`, `overwrite`) | `201 Envelope[FileEntry]` |
+| GET | `/openapi/v1/bots/resources/download` | Download bytes (**raw, not enveloped**) | `application/octet-stream` |
+| GET | `/openapi/v1/bots/resources/preview` | Preview as text (1 MB cap → 413) | `Envelope[Preview]` |
+| POST | `/openapi/v1/bots/resources/mkdir` | Create a directory | `201 Envelope[FileEntry]` |
+| DELETE | `/openapi/v1/bots/resources` | Delete a file or directory | `Envelope[Deleted]` |
 
 _Note: upload is finalized as a raw `application/octet-stream` body (not
 multipart). This diverges from PR #363's multipart summary — implementation
 follows the route; switching to multipart would be a contract change._
+
+_Note: the group carries **no record ids**. #1001 made the engine the source of
+truth for files, which left `resource_id` permanently empty on every file
+response and three id-addressed routes that only ever resolved link records.
+Links left this surface, so the id left the contract rather than being reported
+as `""` — an empty string standing in for "no id" is a sentinel a caller cannot
+tell from a real address until it fails. `GET /stat` replaces both the
+id-addressed single lookup and `check-name`: it answers existence against the
+workspace, the same authority the listing reads, so the two cannot disagree._
+
+_Note: `Page` here is applied by the backend over a whole directory listing —
+the engine's `ListDirRequest` carries no page, limit or cursor. `page_size`
+bounds the response, not the device round trip, and a later page costs what the
+first one costs. That is proportionate only because listing is non-recursive; a
+`recursive=true` option would have to revisit it._
 
 ### 🟪 totalfrank + lucas-xzp · P3 — skills, co-owned (six ratified operations) · `openapi_v1/skills/router.py`
 
