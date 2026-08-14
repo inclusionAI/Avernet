@@ -300,6 +300,28 @@ async def test_temporary_url_pull_enforces_declared_and_observed_size(
 
 
 @pytest.mark.asyncio
+async def test_temporary_url_pull_enforces_request_specific_lower_limit(
+    tmp_path: Path,
+):
+    client = HttpTemporaryUrlPullClient(
+        max_bytes=32,
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, content=b"five!")
+        ),
+    )
+    request = _chat_request().model_copy(update={"download_max_bytes": 4})
+
+    with (
+        patch(
+            "engine.community.plugins.resource_materialization.socket.getaddrinfo",
+            return_value=[(2, 1, 6, "", ("93.184.216.34", 443))],
+        ),
+        pytest.raises(ValueError, match="exceeds size limit"),
+    ):
+        await client.pull(request, tmp_path / "image.part")
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "addresses, side_effect, message",
     [

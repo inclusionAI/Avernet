@@ -347,6 +347,43 @@ class TestHandleChatSend:
         assert requests[0].scope_key_hash == _ENGINE_LOCAL_CHAT_SCOPE_KEY_HASH
 
     @pytest.mark.asyncio
+    async def test_chat_send_accepts_remote_image_without_message(
+        self, server, fake_engine, auth_gate_service,
+    ):
+        websocket = MagicMock()
+        stream = AsyncMock()
+        server._stream_chat_events = stream
+        auth_gate_service.enabled = False
+        attachments = [
+            {
+                "attachment_id": "image-1",
+                "type": "image",
+                "file_name": "photo.png",
+                "mime_type": "image/png",
+                "url": "https://files.example/photo.png",
+            }
+        ]
+        params = {
+            "sessionKey": "agent:main:user:165137",
+            "message": "",
+            "attachments": attachments,
+        }
+
+        response = await server._handle_chat_send(
+            websocket,
+            "conn-1",
+            _req("chat.send", params),
+            params,
+            auth_gate_service=auth_gate_service,
+        )
+
+        assert response.ok is True
+        requests = stream.call_args.kwargs["chat_image_requests"]
+        assert len(requests) == 1
+        assert requests[0].media_type == "image/png"
+        assert stream.call_args.kwargs["attachments"] == attachments
+
+    @pytest.mark.asyncio
     async def test_chat_send_rejects_invalid_attachments(self, server, fake_engine, auth_gate_service, monkeypatch):
         websocket = MagicMock()
         stream = AsyncMock()

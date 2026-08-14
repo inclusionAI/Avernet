@@ -10,6 +10,7 @@ import mimetypes
 import os
 import re
 import threading
+import tempfile
 import time
 import uuid
 from collections.abc import Callable
@@ -23,6 +24,7 @@ from engine.community.core.resource_materialization.models import (
     MaterializationRequest,
     MaterializationResult,
     MaterializedContent,
+    PreparedChatAttachment,
 )
 from engine.community.plugin_api.resource_materialization import (
     BaasMaterializationClient,
@@ -35,6 +37,7 @@ log = logging.getLogger("engine.resource_materialization")
 _SAFE_IDENTIFIER_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
 _WINDOWS_FORBIDDEN_FILENAME_CHARACTERS = frozenset('<>:"/\\|?*')
 _MAX_FILENAME_UTF8_BYTES = 255
+_DEFAULT_MAX_CHAT_IMAGE_BYTES = 20 * 1024 * 1024
 
 
 def build_session_file_relative_path(
@@ -83,6 +86,14 @@ class MaterializationSecurityError(ValueError):
 
 class ResourceNotMaterializedError(ValueError):
     """The requested resource has no readable ready workspace file."""
+
+
+class ChatAttachmentPreparationError(RuntimeError):
+    """Safe reason for rejecting a temporary chat attachment."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 
 class ManifestStore:
@@ -211,11 +222,15 @@ class ResourceMaterializationService:
         callback_client: BackendMaterializationCallbackClient,
         temporary_url_pull_client: TemporaryUrlPullClient | None = None,
         workspace_root_provider: Callable[[], Path | None] = workspace_root_strict,
+        max_chat_image_bytes: int = _DEFAULT_MAX_CHAT_IMAGE_BYTES,
     ) -> None:
+        if max_chat_image_bytes <= 0:
+            raise ValueError("chat image size limit must be positive")
         self._pull_client = pull_client
         self._callback_client = callback_client
         self._temporary_url_pull_client = temporary_url_pull_client
         self._workspace_root_provider = workspace_root_provider
+        self._max_chat_image_bytes = max_chat_image_bytes
         self._lock = asyncio.Lock()
 
     @property
@@ -355,6 +370,119 @@ class ResourceMaterializationService:
                     type(exc).__name__,
                 )
                 return self._failure_result(internal, "pull_failed")
+
+    async def prepare_chat_image_attachment(
+        self,
+        request: ChatAttachmentMaterializationRequest,
+    ) -> PreparedChatAttachment:
+        """Download and validate a temporary image without publishing it."""
+        if request.expires_at_ms is not None and request.expires_at_ms <= int(
+            time.time() * 1000
+        ):
+            raise ChatAttachmentPreparationError("temporary_url_expired")
+        if self._temporary_url_pull_client is None:
+            raise ChatAttachmentPreparationError(
+                "temporary_url_pull_not_configured"
+            )
+
+        # COSEC: validate the provider filename before OpenClaw may stage it.
+        try:
+            build_session_file_relative_path(
+                scope_key_hash=request.scope_key_hash,
+                session_key_hash=hashlib.sha256(
+                    request.session_key.encode("utf-8")
+                ).hexdigest(),
+                resource_id="chat-image",
+                filename=request.filename,
+            )
+        except MaterializationSecurityError as exc:
+            raise ChatAttachmentPreparationError("invalid_filename") from exc
+        if (
+            request.size_bytes is not None
+            and request.size_bytes > self._max_chat_image_bytes
+        ):
+            raise ChatAttachmentPreparationError("size_limit_exceeded")
+
+        descriptor, temporary_name = tempfile.mkstemp(prefix=".engine-chat-image-")
+        os.close(descriptor)
+        temporary = Path(temporary_name)
+        try:
+            pull_request = request.model_copy(
+                update={"download_max_bytes": self._max_chat_image_bytes}
+            )
+            await self._temporary_url_pull_client.pull(pull_request, temporary)
+            if not temporary.is_file():
+                raise ChatAttachmentPreparationError("pull_missing_file")
+            actual_size = temporary.stat().st_size
+            if actual_size > self._max_chat_image_bytes:
+                raise ChatAttachmentPreparationError("size_limit_exceeded")
+            if request.size_bytes is not None and actual_size != request.size_bytes:
+                raise ChatAttachmentPreparationError("size_mismatch")
+            actual_hash = await asyncio.to_thread(self._sha256, temporary)
+            if (
+                request.content_hash is not None
+                and actual_hash != request.content_hash.lower()
+            ):
+                raise ChatAttachmentPreparationError("hash_mismatch")
+            content = await asyncio.to_thread(temporary.read_bytes)
+            detected_media_type = self._detect_image_media_type(content)
+            if detected_media_type is None:
+                raise ChatAttachmentPreparationError("invalid_image_content")
+            declared_media_type = (
+                request.media_type.lower().split(";", 1)[0].strip()
+                if request.media_type
+                else None
+            )
+            aliases = {
+                "image/jpg": "image/jpeg",
+                "image/x-png": "image/png",
+            }
+            declared_media_type = aliases.get(
+                declared_media_type, declared_media_type
+            )
+            if (
+                declared_media_type is not None
+                and declared_media_type != detected_media_type
+            ):
+                raise ChatAttachmentPreparationError("media_type_mismatch")
+            return PreparedChatAttachment(
+                attachment_id=request.attachment_id,
+                filename=request.filename,
+                media_type=detected_media_type,
+                content=content,
+            )
+        except asyncio.CancelledError:
+            raise
+        except ChatAttachmentPreparationError:
+            raise
+        except Exception as exc:
+            attachment_hash = hashlib.sha256(
+                request.attachment_id.encode("utf-8")
+            ).hexdigest()[:16]
+            log.warning(
+                "engine.resource_materialize.image.fail attachment_hash=%s error_type=%s",
+                attachment_hash,
+                type(exc).__name__,
+            )
+            raise ChatAttachmentPreparationError("pull_failed") from exc
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    @staticmethod
+    def _detect_image_media_type(content: bytes) -> str | None:
+        if content.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "image/png"
+        if content.startswith(b"\xff\xd8\xff"):
+            return "image/jpeg"
+        if content.startswith((b"GIF87a", b"GIF89a")):
+            return "image/gif"
+        if (
+            len(content) >= 12
+            and content.startswith(b"RIFF")
+            and content[8:12] == b"WEBP"
+        ):
+            return "image/webp"
+        return None
 
     async def remove_chat_materialization(self, resource_id: str) -> None:
         """Rollback one just-created chat materialization after batch failure."""
