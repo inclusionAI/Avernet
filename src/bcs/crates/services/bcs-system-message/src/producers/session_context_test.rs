@@ -346,6 +346,7 @@ async fn manager_worker_context_uses_recipient_coordination_surface() {
             mode: CoordinationMode::McporterMcp,
             mcp_server: Some("bcs".to_string()),
             mcporter_command: Some("mcporter".to_string()),
+            tool_name_mapping: Default::default(),
         },
     )
     .with_surface(
@@ -354,6 +355,7 @@ async fn manager_worker_context_uses_recipient_coordination_surface() {
             mode: CoordinationMode::NativeMcp,
             mcp_server: Some("bcs".to_string()),
             mcporter_command: None,
+            tool_name_mapping: Default::default(),
         },
     )
     .with_surface(native_tool_worker_id, CoordinationSurface::native_tool());
