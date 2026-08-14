@@ -190,7 +190,12 @@ def test_served_internal_openapi_combines_only_internal_schema_paths() -> None:
             }
         },
         "components": {"schemas": {"InternalFile": {"type": "object"}}},
-        "tags": [{"name": "Internal / Session Files"}],
+        "tags": [
+            "not-a-tag",
+            {"name": "Internal / Session Files"},
+            {"name": "Internal / Session Files", "description": "duplicate"},
+            {"name": 123},
+        ],
     }
     public = {
         "openapi": "3.1.0",
