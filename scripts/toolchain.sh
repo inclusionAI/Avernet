@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/toolchain.sh — Development toolchain management
 # Handles installation and verification of dev tools:
-# node, npm, uv, python, protoc, openclaw, rust/cargo
+# node, npm, uv, python, protoc, openclaw, claude code, rust/cargo
 #
 # toolchain_setup()  → Check and install all tools (idempotent, skip-if-present)
 # toolchain_check()  → Check only, return 1 if missing (dry-run, no install)
@@ -20,6 +20,8 @@ REQUIRED_UV_VERSION="0.4.0"
 
 # 服务子项目共同满足的 Python 版本（bcsfuse >=3.10,<3.13；backend/baas >=3.12,<3.13）
 REQUIRED_PYTHON_VERSION="3.12"
+CLAUDE_CODE_NPM_PACKAGE="@anthropic-ai/claude-code"
+CLAUDE_CODE_NPM_REGISTRY="https://registry.npmmirror.com"
 
 confirm_tool_install() {
     local prompt="$1"
@@ -583,6 +585,76 @@ ensure_npm_available() {
     return 1
 }
 
+# ============ Claude Code 安装 ============
+
+claude_code_cli_path() {
+    local npm_prefix=""
+    local candidate
+
+    if command -v npm >/dev/null 2>&1; then
+        npm_prefix="$(npm prefix -g 2>/dev/null || true)"
+    fi
+
+    for candidate in "${CLAUDE_CODE_PATH:-}" "$(command -v claude 2>/dev/null || true)" "${npm_prefix:+${npm_prefix}/bin/claude}"; do
+        [ -n "$candidate" ] && [ -x "$candidate" ] && { printf '%s\n' "$candidate"; return 0; }
+    done
+    return 1
+}
+
+log_claude_code_path_setup() {
+    local quoted_path
+    printf -v quoted_path '%q' "$CLAUDE_CODE_PATH"
+    log_info "Claude Code CLI ready: ${CLAUDE_CODE_PATH}"
+    log_info "To configure future terminals, run:"
+    log_info "  export CLAUDE_CODE_PATH=${quoted_path}"
+}
+
+install_claude_code() {
+    if ! command -v npm >/dev/null 2>&1; then
+        log_error "npm not found. Install Node.js with npm, then rerun install-tools."
+        return 1
+    fi
+
+    log_info "Installing Claude Code from npm mirror..."
+    # 以下为安全注释COSEC：包名和镜像为固定的脚本常量，避免执行用户控制的安装参数。
+    if ! npm install -g "$CLAUDE_CODE_NPM_PACKAGE" --registry="$CLAUDE_CODE_NPM_REGISTRY"; then
+        log_error "Claude Code installation failed. Run this command manually, then rerun install-tools:"
+        log_error "  npm install -g @anthropic-ai/claude-code --registry=https://registry.npmmirror.com"
+        return 1
+    fi
+}
+
+setup_claude_code() {
+    local cli_path
+
+    log_info "Checking Claude Code installation..."
+    if cli_path="$(claude_code_cli_path)"; then
+        CLAUDE_CODE_PATH="$cli_path"
+        export CLAUDE_CODE_PATH
+        log_claude_code_path_setup
+        return 0
+    fi
+
+    log_warn "Claude Code CLI not found."
+    if ! confirm_tool_install "Install Claude Code now?"; then
+        log_error "Claude Code is required for hybrid Claude relay. Install it manually:"
+        log_error "  npm install -g @anthropic-ai/claude-code --registry=https://registry.npmmirror.com"
+        return 1
+    fi
+
+    install_claude_code || return 1
+    if ! cli_path="$(claude_code_cli_path)"; then
+        log_error "Claude Code was installed but no executable CLI could be resolved."
+        log_error "Set CLAUDE_CODE_PATH to the executable claude path, then rerun install-tools."
+        log_error "  export CLAUDE_CODE_PATH=/actual/path/to/claude"
+        return 1
+    fi
+
+    CLAUDE_CODE_PATH="$cli_path"
+    export CLAUDE_CODE_PATH
+    log_claude_code_path_setup
+}
+
 # ============ OpenClaw 安装 ============
 
 # 安装 openclaw
@@ -858,43 +930,48 @@ toolchain_setup() {
     _apply_cargo_mirror_config
 
     # Step 1: System dependencies
-    log_info "[1/8] Checking system dependencies..."
+    log_info "[1/9] Checking system dependencies..."
     setup_system_dependencies || return 1
     echo ""
 
     # Step 2: Node.js
-    log_info "[2/8] Setting up Node.js..."
+    log_info "[2/9] Setting up Node.js..."
     setup_node || return 1
     echo ""
 
     # Step 3: npm
-    log_info "[3/8] Checking npm..."
+    log_info "[3/9] Checking npm..."
     ensure_npm_available || return 1
     echo ""
 
     # Step 4: uv
-    log_info "[4/8] Setting up uv..."
+    log_info "[4/9] Setting up uv..."
     ensure_uv || return 1
     echo ""
 
     # Step 5: Python (must satisfy all service subprojects)
-    log_info "[5/8] Checking Python compatibility..."
+    log_info "[5/9] Checking Python compatibility..."
     ensure_uv_managed_python || return 1
     check_python_version_file
     echo ""
 
     # Step 6: openclaw
-    log_info "[6/8] Setting up openclaw..."
+    log_info "[6/9] Setting up openclaw..."
     setup_openclaw || return 1
     echo ""
 
-    # Step 7: Rust/Cargo
-    log_info "[7/8] Setting up Rust/Cargo..."
+    # Step 7: Claude Code
+    log_info "[7/9] Setting up Claude Code..."
+    setup_claude_code || return 1
+    echo ""
+
+    # Step 8: Rust/Cargo
+    log_info "[8/9] Setting up Rust/Cargo..."
     setup_rust || return 1
     echo ""
 
-    # Step 8: Protobuf
-    log_info "[8/8] Setting up protobuf..."
+    # Step 9: Protobuf
+    log_info "[9/9] Setting up protobuf..."
     setup_protobuf_interactive || return 1
     echo ""
 
@@ -904,5 +981,5 @@ toolchain_setup() {
 
 # 工具链帮助
 toolchain_help() {
-    echo "toolchain - Development tools (node, npm, uv, python, protoc, openclaw, rust)"
+    echo "toolchain - Development tools (node, npm, uv, python, protoc, openclaw, claude code, rust)"
 }

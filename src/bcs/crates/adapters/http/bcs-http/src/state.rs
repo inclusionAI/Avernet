@@ -38,6 +38,18 @@ pub struct HttpUserIdentity {
     pub nick_name: Option<String>,
 }
 
+/// A narrowly scoped, configuration-owned Provider Bot ID assignment.
+///
+/// The override is applied only after the Provider admin token authenticates the
+/// Provider and its immutable identity attributes match this complete record.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TrustedProviderBotIdOverride {
+    pub provider_name: String,
+    pub created_by: String,
+    pub provider_bot_ref: String,
+    pub bot_uuid: String,
+}
+
 #[async_trait::async_trait]
 pub trait UserIdentityPort: Send + Sync {
     async fn extract(
@@ -465,6 +477,7 @@ pub struct HttpAppState {
     pub manifest_env: String,
     pub manifest: ManifestConfig,
     pub allowed_switch_provider_ids: Arc<Vec<String>>,
+    pub trusted_provider_bot_id_overrides: Arc<Vec<TrustedProviderBotIdOverride>>,
     pub provider_stream_gray_list: Arc<ProviderStreamGrayList>,
     pub provider_bypass_header_names: Arc<Vec<HeaderName>>,
     pub judge_enabled: bool,
@@ -515,6 +528,7 @@ impl HttpAppState {
             manifest_env: "local".to_string(),
             manifest: ManifestConfig::default(),
             allowed_switch_provider_ids: Arc::new(Vec::new()),
+            trusted_provider_bot_id_overrides: Arc::new(Vec::new()),
             provider_stream_gray_list: Arc::new(ProviderStreamGrayList::default()),
             provider_bypass_header_names: Arc::new(Vec::new()),
             judge_enabled: false,
@@ -675,6 +689,14 @@ impl HttpAppState {
         self
     }
 
+    pub fn with_trusted_provider_bot_id_overrides(
+        mut self,
+        overrides: Vec<TrustedProviderBotIdOverride>,
+    ) -> Self {
+        self.trusted_provider_bot_id_overrides = Arc::new(overrides);
+        self
+    }
+
     pub fn with_judge_enabled(mut self, value: bool) -> Self {
         self.judge_enabled = value;
         self
@@ -828,6 +850,10 @@ impl std::fmt::Debug for HttpAppState {
             .field(
                 "allowed_switch_provider_ids",
                 &self.allowed_switch_provider_ids,
+            )
+            .field(
+                "trusted_provider_bot_id_overrides",
+                &self.trusted_provider_bot_id_overrides,
             )
             .field(
                 "auth_chain",

@@ -176,7 +176,7 @@ impl ProviderCore {
         };
         let bot_uuid = match bot_uuid {
             Some(bot_uuid) => {
-                validate_external_id("bot_uuid", &bot_uuid)?;
+                validate_bot_uuid(&bot_uuid)?;
                 bot_uuid
             }
             None => new_bot_uuid(),
@@ -328,6 +328,22 @@ fn validate_external_id(kind: &str, value: &str) -> ServiceResult<()> {
     } else {
         Err(ServiceError::InvalidOperation {
             message: format!("invalid {kind}: '{value}'"),
+            request_id: None,
+        })
+    }
+}
+
+fn validate_bot_uuid(value: &str) -> ServiceResult<()> {
+    let valid = !value.is_empty()
+        && value.len() <= 256
+        && value
+            .chars()
+            .all(|ch| ch.is_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':'));
+    if valid {
+        Ok(())
+    } else {
+        Err(ServiceError::InvalidOperation {
+            message: format!("invalid bot_uuid: '{value}'"),
             request_id: None,
         })
     }

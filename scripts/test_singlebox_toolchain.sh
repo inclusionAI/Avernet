@@ -62,12 +62,79 @@ test_failed_install_prints_manual_command() {
     *"brew install jq"*) ;;
     *) fail "failed install did not print the manual command" ;;
   esac
+  log_error() { :; }
 }
+
+test_claude_code_existing_cli_skips_install() (
+    local temp_dir cli_path
+    temp_dir="$(mktemp -d)"
+    cli_path="${temp_dir}/claude"
+    printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$cli_path"
+    chmod +x "$cli_path"
+
+    export CLAUDE_CODE_PATH="$cli_path"
+    npm() { fail "npm should not run when CLAUDE_CODE_PATH is executable"; }
+
+    setup_claude_code || fail "existing Claude Code CLI should be accepted"
+    assert_eq "$cli_path" "$CLAUDE_CODE_PATH" "existing Claude Code path"
+)
+
+test_claude_code_installs_missing_cli() (
+    local temp_dir bin_dir args_path
+    temp_dir="$(mktemp -d)"
+    bin_dir="${temp_dir}/bin"
+    TEST_CLAUDE_CLI_PATH="${bin_dir}/claude"
+    args_path="${temp_dir}/npm-args"
+    mkdir -p "$bin_dir"
+
+    export PATH="${bin_dir}:/usr/bin:/bin"
+    export TEST_CLAUDE_CLI_PATH
+    unset CLAUDE_CODE_PATH
+    confirm_tool_install() { return 0; }
+    npm() {
+        if [ "$1" = "prefix" ] && [ "$2" = "-g" ]; then
+            printf '%s\n' "$temp_dir"
+            return 0
+        fi
+        assert_eq "install -g @anthropic-ai/claude-code --registry=https://registry.npmmirror.com" "$*" "Claude Code npm install arguments"
+        printf '%s\n' "$*" > "$args_path"
+        printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$TEST_CLAUDE_CLI_PATH"
+        chmod +x "$TEST_CLAUDE_CLI_PATH"
+    }
+
+    setup_claude_code || fail "missing Claude Code CLI should install successfully"
+    assert_eq "install -g @anthropic-ai/claude-code --registry=https://registry.npmmirror.com" "$(<"$args_path")" "recorded Claude Code npm install arguments"
+    assert_eq "$TEST_CLAUDE_CLI_PATH" "$CLAUDE_CODE_PATH" "installed Claude Code path"
+    EXPECTED_CLAUDE_CODE_PATH="$TEST_CLAUDE_CLI_PATH" bash -c '[ "$CLAUDE_CODE_PATH" = "$EXPECTED_CLAUDE_CODE_PATH" ]' || fail "installed Claude Code path should be exported"
+)
+
+test_claude_code_install_fails_without_resolved_cli() (
+    local temp_dir
+    temp_dir="$(mktemp -d)"
+
+    export PATH="/usr/bin:/bin"
+    unset CLAUDE_CODE_PATH
+    confirm_tool_install() { return 0; }
+    npm() {
+        if [ "$1" = "prefix" ] && [ "$2" = "-g" ]; then
+            printf '%s\n' "$temp_dir"
+            return 0
+        fi
+        return 0
+    }
+
+    if setup_claude_code; then
+        fail "setup should fail when Claude Code is still unavailable after npm install"
+    fi
+)
 
 test_command_package_mapping
 test_library_package_mapping
 test_manual_install_hints
 test_basic_build_environment_on_current_host
 test_failed_install_prints_manual_command
+test_claude_code_existing_cli_skips_install
+test_claude_code_installs_missing_cli
+test_claude_code_install_fails_without_resolved_cli
 
 printf 'PASS: singlebox toolchain tests\n'

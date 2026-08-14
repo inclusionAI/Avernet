@@ -231,9 +231,9 @@ test_provider_bot_registration_keeps_profile_display_name() (
                 ;;
             */providers/provider-test/bots)
                 printf '%s' "$data" > "$captured_provider_bot_payload"
-                printf '%s\n' '{"bot_runtime_token":"bot-runtime-test","bot_uuid":"bot-provider-test"}'
+                printf '%s\n' '{"bot_runtime_token":"bot-runtime-test","bot_uuid":"平台数据分析"}'
                 ;;
-            */bots/bot-provider-test/visibility)
+            */bots/平台数据分析/visibility)
                 printf '%s\n' '{"success":true,"data":{"visibility":"public"}}'
                 ;;
             *)
@@ -245,9 +245,41 @@ test_provider_bot_registration_keeps_profile_display_name() (
     bcs_baas_provider_register
     [ "$(jq -r '.name' "$captured_provider_bot_payload")" = '平台数据分析' ]
     ! jq -e '.name | contains("（当前）")' "$captured_provider_bot_payload" >/dev/null
+    [ "$(jq -r '.provider_bot_ref' "$captured_provider_bot_payload")" = 'merchant-platform-data:mock-user' ]
 )
 
 test_provider_bot_registration_keeps_profile_display_name
+
+test_provider_lifecycle_reuses_healthy_registration() (
+    export BCS_BAAS_PROVIDER_STATE_FILE="$TMP/provider-state-reuse.json"
+    export BCS_BAAS_PROVIDER_TOKEN_FILE="$TMP/provider-tokens-reuse.json"
+    export BCS_BAAS_PROVIDER_PID_FILE="$TMP/provider-reuse.pid"
+    printf '%s\n' '{"provider_id":"provider-test","bots":[{"role":"platform-data","provider_bot_ref":"merchant-platform-data:mock-user","bot_uuid":"平台数据分析"}]}' \
+        > "$BCS_BAAS_PROVIDER_STATE_FILE"
+
+    local cleanup_calls=0 register_calls=0
+    bcs_baas_provider_enabled() { return 0; }
+    bcs_baas_provider_prereqs() { return 0; }
+    bcs_ready() { return 0; }
+    baas_ready() { return 0; }
+    bcs_baas_provider_prepare_runtime_tokens() { return 0; }
+    bcs_baas_provider_registration_is_reusable() { return 0; }
+    bcs_baas_provider_wait_ready() { return 0; }
+    stop_port_processes_if_owned() { return 0; }
+    require_port_available_after_owned_stop() { return 0; }
+    bcs_baas_provider_cleanup_registration() { cleanup_calls=$((cleanup_calls + 1)); return 0; }
+    bcs_baas_provider_register() { register_calls=$((register_calls + 1)); return 0; }
+    log_info() { :; }
+    nohup() { return 0; }
+
+    bcs_baas_provider_start
+    [ "$cleanup_calls" -eq 0 ]
+    [ "$register_calls" -eq 0 ]
+    bcs_baas_provider_stop
+    [ "$cleanup_calls" -eq 0 ]
+)
+
+test_provider_lifecycle_reuses_healthy_registration
 
 test_hybrid_profile_defaults() (
     log_info() { :; }

@@ -80,6 +80,22 @@ bcs_baas_provider_clear_registration() {
     chmod 600 "$BCS_BAAS_PROVIDER_TOKEN_FILE"
 }
 
+bcs_baas_provider_bot_ref() {
+    local role="$1" bot_id="$2" entity_id="$3"
+    case "$role" in
+        platform-data) printf 'merchant-platform-data:%s\n' "$entity_id" ;;
+        *) printf '%s:%s\n' "$bot_id" "$entity_id" ;;
+    esac
+}
+
+bcs_baas_provider_expected_bot_uuid() {
+    local role="$1" name="$2"
+    case "$role" in
+        platform-data) printf '%s\n' "$name" ;;
+        *) return 1 ;;
+    esac
+}
+
 bcs_baas_provider_healthy() {
     node - "$BCS_BAAS_PROVIDER_PORT" <<'NODE' >/dev/null 2>&1
 const http2 = require('node:http2');
@@ -109,26 +125,98 @@ bcs_baas_provider_wait_ready() {
     return 1
 }
 
-bcs_baas_provider_cleanup_registration() {
-    [ -f "$BCS_BAAS_PROVIDER_STATE_FILE" ] || return 0
+bcs_baas_provider_state_matches_expected_identity() {
+    [ -f "$BCS_BAAS_PROVIDER_STATE_FILE" ] || return 1
+    [ -f "$CLAUDE_BOTS_STATE_FILE" ] || return 1
+    local entity_id owner role bot_id name provider_bot_ref bot_uuid expected_bots='[]'
+    entity_id="$(jq -r '.entity_id // empty' "$CLAUDE_BOTS_STATE_FILE")"
+    owner="$(bcs_baas_provider_bcs_owner_id)"
+    [ -n "$entity_id" ] && [ -n "$owner" ] || return 1
+    while IFS=$'\t' read -r role bot_id name; do
+        provider_bot_ref="$(bcs_baas_provider_bot_ref "$role" "$bot_id" "$entity_id")"
+        bot_uuid="$(bcs_baas_provider_expected_bot_uuid "$role" "$name")" || return 1
+        expected_bots="$(jq -c --arg role "$role" --arg ref "$provider_bot_ref" --arg uuid "$bot_uuid" \
+            '. + [{role: $role, provider_bot_ref: $ref, bot_uuid: $uuid}]' <<< "$expected_bots")" || return 1
+    done < <(jq -r '.bots[] | [.role, .bot_id, .name] | @tsv' "$CLAUDE_BOTS_STATE_FILE")
+    jq -e --arg owner "$owner" --argjson expected_bots "$expected_bots" '
+        (.provider_id | type == "string" and length > 0)
+        and .bcs_owner_id == $owner
+        and .bots == $expected_bots
+    ' "$BCS_BAAS_PROVIDER_STATE_FILE" >/dev/null
+}
+
+bcs_baas_provider_registration_is_reusable() {
+    bcs_baas_provider_state_matches_expected_identity || return 1
     [ -f "$BCS_BAAS_PROVIDER_TOKEN_FILE" ] || return 1
-    local provider_id provider_admin_token provider_bot_ref encoded_id encoded_ref
+    local provider_id provider_admin_token provider_response bindings_response role provider_bot_ref bot_uuid runtime_token
     provider_id="$(jq -r '.provider_id // empty' "$BCS_BAAS_PROVIDER_STATE_FILE")"
     provider_admin_token="$(jq -r '.provider_admin_token // empty' "$BCS_BAAS_PROVIDER_TOKEN_FILE")"
-    if [ -z "$provider_id" ] || [ -z "$provider_admin_token" ]; then
-        log_warn "Cannot remove stale merchant Claude Provider registration without its runtime credential"
-        return 1
+    [ -n "$provider_id" ] && [ -n "$provider_admin_token" ] || return 1
+    provider_response="$(curl --noproxy '*' --connect-timeout 2 --max-time 20 -fsS \
+        "http://127.0.0.1:${BCS_PORT}/providers/${provider_id}" \
+        -H "Authorization: Bearer ${provider_admin_token}")" || return 1
+    jq -e --arg provider_id "$provider_id" '
+        .provider_id == $provider_id and .name == "singlebox-merchant-claude" and .disabled == false
+    ' <<< "$provider_response" >/dev/null || return 1
+    bindings_response="$(curl --noproxy '*' --connect-timeout 2 --max-time 20 -fsS \
+        "http://127.0.0.1:${BCS_PORT}/providers/${provider_id}/bots" \
+        -H "Authorization: Bearer ${provider_admin_token}")" || return 1
+    while IFS=$'\t' read -r role provider_bot_ref bot_uuid; do
+        runtime_token="$(jq -r --arg role "$role" '.provider_bots[$role].bot_runtime_token // empty' "$BCS_BAAS_PROVIDER_TOKEN_FILE")"
+        [ -n "$runtime_token" ] || return 1
+        jq -e --arg ref "$provider_bot_ref" --arg uuid "$bot_uuid" '
+            .items | any(.provider_bot_ref == $ref and .bot_uuid == $uuid and .disabled == false)
+        ' <<< "$bindings_response" >/dev/null || return 1
+    done < <(jq -r '.bots[] | [.role, .provider_bot_ref, .bot_uuid] | @tsv' "$BCS_BAAS_PROVIDER_STATE_FILE")
+}
+
+bcs_baas_provider_retire_legacy_registration() {
+    [ -f "$BCS_BAAS_PROVIDER_STATE_FILE" ] || return 0
+    [ -f "$BCS_BAAS_PROVIDER_TOKEN_FILE" ] || { bcs_baas_provider_clear_registration; rm -f "$BCS_BAAS_PROVIDER_STATE_FILE"; return 0; }
+    local provider_id provider_admin_token provider_bot_ref encoded_id encoded_ref delete_failed=0
+    provider_id="$(jq -r '.provider_id // empty' "$BCS_BAAS_PROVIDER_STATE_FILE")"
+    provider_admin_token="$(jq -r '.provider_admin_token // empty' "$BCS_BAAS_PROVIDER_TOKEN_FILE")"
+    if [ -n "$provider_id" ] && [ -n "$provider_admin_token" ]; then
+        encoded_id="$(jq -nr --arg value "$provider_id" '$value | @uri')"
+        while IFS= read -r provider_bot_ref; do
+            encoded_ref="$(jq -nr --arg value "$provider_bot_ref" '$value | @uri')"
+            curl --noproxy '*' --connect-timeout 2 --max-time 20 -fsS -X DELETE \
+                "http://127.0.0.1:${BCS_PORT}/providers/${encoded_id}/bots/${encoded_ref}" \
+                -H "Authorization: Bearer ${provider_admin_token}" >/dev/null || delete_failed=1
+        done < <(jq -r '.bots[]?.provider_bot_ref // empty' "$BCS_BAAS_PROVIDER_STATE_FILE")
+    else
+        delete_failed=1
     fi
-    encoded_id="$(jq -nr --arg value "$provider_id" '$value | @uri')"
-    while IFS= read -r provider_bot_ref; do
-        encoded_ref="$(jq -nr --arg value "$provider_bot_ref" '$value | @uri')"
-        curl --noproxy '*' --connect-timeout 2 --max-time 20 -fsS -X DELETE \
-            "http://127.0.0.1:${BCS_PORT}/providers/${encoded_id}/bots/${encoded_ref}" \
-            -H "Authorization: Bearer ${provider_admin_token}" >/dev/null || return 1
-    done < <(jq -r '.bots[]?.provider_bot_ref // empty' "$BCS_BAAS_PROVIDER_STATE_FILE")
     bcs_baas_provider_clear_registration || return 1
     rm -f "$BCS_BAAS_PROVIDER_STATE_FILE"
-    log_info "Removed the current merchant Claude Provider registration"
+    if [ "$delete_failed" -eq 0 ]; then
+        log_info "Retired legacy merchant Claude Provider registration; re-add 平台数据分析 to existing groups once"
+    else
+        log_warn "Could not verify legacy merchant Claude Provider removal; cleared local registration state before recovery"
+    fi
+}
+
+bcs_baas_provider_ensure_registration() {
+    if [ ! -f "$BCS_BAAS_PROVIDER_STATE_FILE" ]; then
+        bcs_baas_provider_register
+        return
+    fi
+    if bcs_baas_provider_registration_is_reusable; then
+        local provider_id bot_uuid
+        provider_id="$(jq -r '.provider_id' "$BCS_BAAS_PROVIDER_STATE_FILE")"
+        bot_uuid="$(jq -r '.bots[0].bot_uuid' "$BCS_BAAS_PROVIDER_STATE_FILE")"
+        log_info "Reusing merchant Claude Provider registration provider_id=${provider_id} bot_uuid=${bot_uuid}"
+        return
+    fi
+    if bcs_baas_provider_state_matches_expected_identity; then
+        bcs_baas_provider_clear_registration || return 1
+        rm -f "$BCS_BAAS_PROVIDER_STATE_FILE"
+        log_warn "Merchant Claude Provider registration is missing from BCS; creating a replacement"
+    else
+        log_info "Migrating legacy merchant Claude Provider registration to stable Bot ID 平台数据分析"
+        bcs_baas_provider_retire_legacy_registration || return 1
+    fi
+    bcs_baas_provider_register
 }
 
 bcs_baas_provider_register() {
@@ -143,14 +231,16 @@ bcs_baas_provider_register() {
     [ -n "$provider_id" ] && [ -n "$provider_admin_token" ] && [ -n "$bcs_token" ] || { log_error "BCS Provider registration returned incomplete metadata"; return 1; }
     bcs_baas_provider_update_tokens "$provider_id" "$provider_admin_token" "$bcs_token" || return 1
 
-    local role bot_id name provider_ref payload bot_response runtime_token bot_uuid visibility state_bots='[]'
+    local role bot_id name provider_ref expected_bot_uuid payload bot_response runtime_token bot_uuid visibility state_bots='[]'
     while IFS=$'\t' read -r role bot_id name; do
-        provider_ref="${bot_id}:${entity_id}"
+        provider_ref="$(bcs_baas_provider_bot_ref "$role" "$bot_id" "$entity_id")"
+        expected_bot_uuid="$(bcs_baas_provider_expected_bot_uuid "$role" "$name")" || { log_error "No stable BCS Bot ID is configured for Claude role=${role}"; return 1; }
         payload="$(jq -n --arg name "$name" --arg ref "$provider_ref" --arg owner "$owner" '{name: $name, provider_bot_ref: $ref, owners: [$owner], summary: "Local Claude Code platform data bot", domains: ["claude_code", "local-commerce"], skills: ["chat", "data-analysis"], scopes: ["local"]}')"
         bot_response="$(curl --noproxy '*' --connect-timeout 2 --max-time 20 -fsS -X POST "http://127.0.0.1:${BCS_PORT}/providers/${provider_id}/bots" -H "Authorization: Bearer ${provider_admin_token}" -H 'Content-Type: application/json' -d "$payload")" || return 1
         runtime_token="$(jq -r '.bot_runtime_token // empty' <<< "$bot_response")"
         bot_uuid="$(jq -r '.bot_uuid // empty' <<< "$bot_response")"
         [ -n "$runtime_token" ] && [ -n "$bot_uuid" ] || { log_error "BCS Provider bot registration failed for ${role}"; return 1; }
+        [ "$bot_uuid" = "$expected_bot_uuid" ] || { log_error "BCS Provider bot ID mismatch for ${role}; expected=${expected_bot_uuid} got=${bot_uuid}"; return 1; }
         visibility="$(curl --noproxy '*' --connect-timeout 2 --max-time 20 -fsS -X PUT "http://127.0.0.1:${BCS_PORT}/bots/${bot_uuid}/visibility" -H "Authorization: Bearer ${runtime_token}" -H 'Content-Type: application/json' -d '{"visibility":"public"}')" || return 1
         jq -e '.success == true and .data.visibility == "public"' <<< "$visibility" >/dev/null || { log_error "BCS Provider bot is not discoverable"; return 1; }
         bcs_baas_provider_add_bot_token "$role" "$provider_ref" "$runtime_token" || return 1
@@ -170,9 +260,6 @@ bcs_baas_provider_start() {
     baas_ready || { log_error "BAAS is not ready; cannot start Provider bridge"; return 1; }
     [ -f "$CLAUDE_BOTS_STATE_FILE" ] || { log_error "Claude bot state is missing"; return 1; }
     bcs_baas_provider_prepare_runtime_tokens || return 1
-    if [ -f "$BCS_BAAS_PROVIDER_STATE_FILE" ]; then
-        bcs_baas_provider_cleanup_registration || { log_error "Refusing duplicate Provider registration while cleanup is incomplete"; return 1; }
-    fi
     mkdir -p "$LOG_DIR"
     stop_port_processes_if_owned "$BCS_BAAS_PROVIDER_PORT" "$PROJECT_ROOT" "BCS BaaS Provider bridge" || true
     require_port_available_after_owned_stop "$BCS_BAAS_PROVIDER_PORT" "BCS BaaS Provider bridge" || return 1
@@ -184,7 +271,7 @@ bcs_baas_provider_start() {
         echo $! > "$BCS_BAAS_PROVIDER_PID_FILE"
     )
     bcs_baas_provider_wait_ready || { log_error "Provider bridge did not become ready"; return 1; }
-    bcs_baas_provider_register || { bcs_baas_provider_stop || true; return 1; }
+    bcs_baas_provider_ensure_registration || { bcs_baas_provider_stop || true; return 1; }
 }
 
 bcs_baas_provider_stop() {
@@ -196,7 +283,7 @@ bcs_baas_provider_stop() {
     fi
     stop_port_processes_if_owned "$BCS_BAAS_PROVIDER_PORT" "$PROJECT_ROOT" "BCS BaaS Provider bridge" || true
     rm -f "$BCS_BAAS_PROVIDER_PID_FILE"
-    if bcs_ready; then bcs_baas_provider_cleanup_registration || return 1; fi
+    log_info "Stopped BCS to BAAS Provider bridge; preserving merchant Claude Provider registration"
 }
 
 bcs_baas_provider_ready() {

@@ -80,7 +80,7 @@ claude_relays_manual_model_env() {
     fi
 
     CLAUDE_RELAY_MANUAL_MODEL_ENV=(
-        "ANTHROPIC_BASE_URL=${base_url}"
+        "ANTHROPIC_BASE_URL=https://taotoken.net/api"
         "ANTHROPIC_AUTH_TOKEN=${api_key}"
         "ANTHROPIC_MODEL=${model}"
         "ANTHROPIC_SMALL_FAST_MODEL=${model}"

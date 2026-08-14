@@ -12,7 +12,7 @@ use bcs_bot_store::{MemoryBotRepo, MemoryProviderStore};
 use bcs_http::{
     router::build_router,
     service_key::{ApiKeyEntry, ApiKeyRegistry, sha256_hex},
-    state::{ChainUserIdentityPort, HttpAppState, HttpUserIdentity, UserIdentityPort},
+    state::{ChainUserIdentityPort, HttpAppState, HttpUserIdentity, TrustedProviderBotIdOverride, UserIdentityPort},
 };
 use bcs_user_directory_api::{UserDirectoryPlugin, UserDirectoryProfile};
 use bcs_service_api::{
@@ -49,7 +49,13 @@ fn test_app_with_user_identity_and_user_directory(
     user_identity: Arc<dyn UserIdentityPort>,
     user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
 ) -> TestApp {
-    test_app_with_options(user_identity, user_directory, Vec::new(), Vec::new())
+    test_app_with_options(
+        user_identity,
+        user_directory,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    )
 }
 
 fn test_app_with_allowed_switch_provider_ids(allowed_provider_ids: Vec<String>) -> TestApp {
@@ -58,6 +64,7 @@ fn test_app_with_allowed_switch_provider_ids(allowed_provider_ids: Vec<String>) 
         Arc::new(ChainUserIdentityPort::new(chain)),
         None,
         allowed_provider_ids,
+        Vec::new(),
         Vec::new(),
     )
 }
@@ -69,6 +76,20 @@ fn test_app_with_service_keys(service_keys: Vec<ApiKeyEntry>) -> TestApp {
         None,
         Vec::new(),
         service_keys,
+        Vec::new(),
+    )
+}
+
+fn test_app_with_trusted_provider_bot_id_overrides(
+    overrides: Vec<TrustedProviderBotIdOverride>,
+) -> TestApp {
+    let chain = static_auth_chain("11111111", "Admin");
+    test_app_with_options(
+        Arc::new(ChainUserIdentityPort::new(chain)),
+        None,
+        Vec::new(),
+        Vec::new(),
+        overrides,
     )
 }
 
@@ -77,6 +98,7 @@ fn test_app_with_options(
     user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
     allowed_provider_ids: Vec<String>,
     service_keys: Vec<ApiKeyEntry>,
+    trusted_provider_bot_id_overrides: Vec<TrustedProviderBotIdOverride>,
 ) -> TestApp {
     let temp_dir = tempfile::tempdir().expect("temp dir");
     let provider_store = Arc::new(MemoryProviderStore::new());
@@ -124,6 +146,7 @@ fn test_app_with_options(
             HttpAppState::new(services)
                 .with_user_identity(user_identity)
                 .with_allowed_switch_provider_ids(allowed_provider_ids)
+                .with_trusted_provider_bot_id_overrides(trusted_provider_bot_id_overrides)
                 .with_service_api_keys(Arc::new(ApiKeyRegistry::new(service_keys)))
                 .with_provider_stream_gray_list(provider_stream_gray_list.clone()),
         ),
@@ -1797,6 +1820,121 @@ async fn register_provider_bot_reuses_provider_ref_as_bot_uuid_for_allowed_switc
         .await
         .expect("bot should use provider ref as uuid");
     assert_eq!(bot.created_by.as_deref(), Some("alice"));
+}
+
+#[tokio::test]
+async fn register_provider_bot_uses_configured_stable_uuid_for_exact_trusted_provider() {
+    let provider_id = "prv_merchant_claude".to_string();
+    let admin_token = "merchant-provider-admin-token";
+    let trusted_ref = "merchant-platform-data:mock-user";
+    let TestApp {
+        app,
+        provider_repo,
+        provider_credentials,
+        registry,
+        _temp_dir,
+        ..
+    } = test_app_with_trusted_provider_bot_id_overrides(vec![
+        TrustedProviderBotIdOverride {
+            provider_name: "other-provider".to_string(),
+            created_by: "001".to_string(),
+            provider_bot_ref: trusted_ref.to_string(),
+            bot_uuid: "must-not-match".to_string(),
+        },
+        TrustedProviderBotIdOverride {
+            provider_name: "singlebox-merchant-claude".to_string(),
+            created_by: "001".to_string(),
+            provider_bot_ref: trusted_ref.to_string(),
+            bot_uuid: "平台数据分析".to_string(),
+        },
+    ]);
+    provider_repo
+        .insert_provider(ProviderRecord {
+            provider_id: provider_id.clone(),
+            name: "singlebox-merchant-claude".to_string(),
+            config: json!({
+                "downlink": {
+                    "enabled": true,
+                    "webhook_url": "https://provider.example.com/bcs/webhook",
+                    "auth_mode": "static_bearer",
+                    "protocol_version": "2.0"
+                }
+            })
+            .to_string(),
+            created_by: "001".to_string(),
+            owners: r#"["001"]"#.to_string(),
+            disabled: false,
+            created_at: 1,
+            updated_at: 1,
+        })
+        .await
+        .expect("seed merchant Claude provider");
+    provider_credentials
+        .insert_credential(ProviderCredential {
+            provider_id: provider_id.clone(),
+            credential_kind: "provider_admin".to_string(),
+            secret_value: admin_token.to_string(),
+            disabled: false,
+            created_at: 1,
+            updated_at: 1,
+        })
+        .await
+        .expect("seed provider admin credential");
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/providers/{provider_id}/bots"))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(
+                    json!({
+                        "name": "平台数据分析",
+                        "summary": "Local Claude Code platform data bot",
+                        "owners": ["001"],
+                        "provider_bot_ref": trusted_ref
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["bot_uuid"], "平台数据分析");
+    assert_eq!(body["provider_bot_ref"], trusted_ref);
+    registry
+        .get("平台数据分析")
+        .await
+        .expect("trusted provider bot should use the configured stable UUID");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/providers/{provider_id}/bots"))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(
+                    json!({
+                        "name": "Different Bot",
+                        "summary": "Must not receive the configured UUID",
+                        "owners": ["001"],
+                        "provider_bot_ref": "merchant-platform-data:other-user"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_ne!(response_json(response).await["bot_uuid"], "平台数据分析");
 }
 
 #[tokio::test]

@@ -187,7 +187,16 @@ pub async fn register_provider_bot(
 ) -> Result<Json<RegisterProviderBotResponse>, ProviderRouteError> {
     let provider_admin_token = bearer_token(&headers)?;
     let allowed_switch_provider = state.allowed_switch_provider_ids.contains(&provider_id);
-    let bot_uuid = allowed_switch_provider.then(|| req.provider_bot_ref.clone());
+    let trusted_bot_uuid = trusted_provider_bot_uuid(
+        &state,
+        &provider_id,
+        &provider_admin_token,
+        &req.provider_bot_ref,
+    )
+    .await?;
+    let uses_trusted_bot_uuid = trusted_bot_uuid.is_some();
+    let bot_uuid =
+        trusted_bot_uuid.or_else(|| allowed_switch_provider.then(|| req.provider_bot_ref.clone()));
     let outcome = state
         .services
         .provider_management
@@ -202,7 +211,7 @@ pub async fn register_provider_bot(
             skills: req.skills.into_iter().map(to_core_skill).collect(),
             scopes: req.scopes,
             bot_uuid,
-            reject_existing_bot_uuid: allowed_switch_provider,
+            reject_existing_bot_uuid: allowed_switch_provider || uses_trusted_bot_uuid,
         })
         .await
         .map_err(provider_error)?;
@@ -214,6 +223,42 @@ pub async fn register_provider_bot(
         bot_runtime_token: outcome.bot_runtime_token,
         message: outcome.message,
     }))
+}
+
+async fn trusted_provider_bot_uuid(
+    state: &HttpAppState,
+    provider_id: &str,
+    provider_admin_token: &str,
+    provider_bot_ref: &str,
+) -> Result<Option<String>, ProviderRouteError> {
+    if !state
+        .trusted_provider_bot_id_overrides
+        .iter()
+        .any(|rule| rule.provider_bot_ref == provider_bot_ref)
+    {
+        return Ok(None);
+    }
+    let provider = state
+        .services
+        .provider_management
+        .get_provider(provider_id, provider_admin_token)
+        .await
+        .map_err(provider_error)?;
+    // 以下为安全注释COSEC：仅允许通过 Provider 管理凭据认证，且名称、创建者、内部引用均与受信任配置完全匹配的 Provider 指定固定 Bot ID。
+    let Some(override_rule) = state.trusted_provider_bot_id_overrides.iter().find(|rule| {
+        rule.provider_bot_ref == provider_bot_ref
+            && rule.provider_name == provider.name
+            && rule.created_by == provider.created_by
+    }) else {
+        return Ok(None);
+    };
+    info!(
+        provider_id,
+        provider_bot_ref,
+        bot_uuid = %override_rule.bot_uuid,
+        "applying trusted Provider Bot ID override"
+    );
+    Ok(Some(override_rule.bot_uuid.clone()))
 }
 
 pub async fn list_provider_bots(
