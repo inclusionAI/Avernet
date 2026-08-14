@@ -1,7 +1,7 @@
 """TaskHarness 旁路常驻:周期巡检 SLA 超时/崩溃 → 复位 PENDING 重投。对齐 plan §3.6。
 
 v4:两路巡检——① RUNNING 真执行叶子超时 → 复位重投;② FAILED(验收不过)真执行叶子 → re-dispatch 重试。经编排核 on_harness 计 harness_retries:<MAX 重派 / >=MAX HUNG→升 BBS。不抢正向驱动。
-不直接写 HUNG(STUCK 走 on_miss/on_fail 升 BBS 链路上限判)。复位阈值从 execution_config/extend_props 读(SLA 不在 TaskSpec)。
+不直接写 HUNG(HUNG 由编排核 _hung_and_escalate 落:on_miss 深度闸门 / on_harness 重试达 MAX_HARNESS → 节点 HUNG + 升 BBS)。复位阈值从 execution_config/extend_props 读(SLA 不在 TaskSpec)。
 Avernet:in-memory 巡检(注入 clock);prod 接真实定时器/崩溃探针不变编排口。
 """
 from __future__ import annotations

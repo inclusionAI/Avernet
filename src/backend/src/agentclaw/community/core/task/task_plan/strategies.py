@@ -214,14 +214,14 @@ def _parse_plan_result(run: dict, target: TaskNode, graph: TaskExecutionGraph) -
     """
     status = str(run.get("status") or "").upper()
     if status != "COMPLETED":
-        return PlanResult(children=[], has_gap=False, gap_detail="plan_not_completed")
+        return PlanResult(children=[], has_gap=True, gap_detail="plan_not_completed")
     content = (run.get("result") or {}).get("content") if isinstance(run.get("result"), dict) else run.get("result")
     if not content:
-        return PlanResult(children=[], has_gap=False, gap_detail="plan_empty_content")
+        return PlanResult(children=[], has_gap=True, gap_detail="plan_empty_content")
     try:
         data = extract_json(content)  # 鲁棒解析:裸 JSON / ```json 代码块 / 散文包裹
     except (ValueError, TypeError):
-        return PlanResult(children=[], has_gap=False, gap_detail="plan_parse_fail")
+        return PlanResult(children=[], has_gap=True, gap_detail="plan_parse_fail")
     # 归一:对象 {tasks,has_gap,gap_detail} 或裸 list
     tasks_data: list = []
     has_gap = False
@@ -236,7 +236,7 @@ def _parse_plan_result(run: dict, target: TaskNode, graph: TaskExecutionGraph) -
         if not isinstance(tasks_data, list):
             tasks_data = []
     else:
-        return PlanResult(children=[], has_gap=False, gap_detail="plan_shape_unexpected")
+        return PlanResult(children=[], has_gap=True, gap_detail="plan_shape_unexpected")
     existing = {n.node_id for n in graph.tasks}
     children: list[TaskNode] = []
     for ch in tasks_data:

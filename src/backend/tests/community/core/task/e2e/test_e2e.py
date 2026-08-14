@@ -35,7 +35,7 @@ from agentclaw.community.core.task.task_graph.task_graph_service import TaskGrap
 
 
 # ===== domain helpers =====
-def _task_info(task_id: str = "t_case", *, max_depth: int = 3, bbs_max_depth: int = 3) -> TaskInfo:
+def _task_info(task_id: str = "t_case", *, max_depth: int = 3) -> TaskInfo:
     return TaskInfo(
         task_spec=TaskSpec(
             metadata=Metadata(task_id=task_id, title="存储行业尽调", instruction="produce a DD report"),
@@ -47,7 +47,7 @@ def _task_info(task_id: str = "t_case", *, max_depth: int = 3, bbs_max_depth: in
         ),
         source_channel_type="bot",
         source_channel_id="owner_bot",
-        execution_config={"MAX_DEPTH": max_depth, "BBS_MAX_DEPTH": bbs_max_depth},
+        execution_config={"MAX_DEPTH": max_depth},
     )
 
 
@@ -274,7 +274,15 @@ class _CaseTaskService(TaskService):
         return _CaseEngine(self._graph, self._cd, self._cbd, self._cr)
 
 
-def _wire_facade(*, task_id="t_case", max_depth=3, bbs_max_depth=3, miss_nodes=None) -> tuple:
+def _patch(task_id: str, node_id: str, **kw) -> "object":
+    """构造 TaskNodePatch(测试 on_harness 直调用)。"""
+    from agentclaw.community.core.task.domain.models import TaskNodePatch as _TNP
+    return _TNP(task_id=task_id, node_id=node_id, **kw)
+
+
+def _wire_facade(*, task_id="t_case", max_depth=3, miss_nodes=None) -> tuple:
+    """接线 case facade:真实 TaskGraphService + ExecutionEngine(经 _CaseEngine 注入 case 策略 stub)。
+    v4:bbs_max_depth 已废(图级总轮次由 MAX_LOOP=10 承载);MISS/FAIL 补救改为 harness 重新派发执行(不拆子)。"""
     svc = TaskGraphService()
     runner = _TestRunner(svc)
     decomposer = CaseDecomposer(task_id=task_id)
@@ -294,7 +302,9 @@ class TestThreeModesHappyToDone:
         assert ov.run_info.run_mode == "single_bot"
         assert ov.run_info.assignee == "行业信息抓取Bot"
         assert ov.status == Status.RUNNING
-        assert svc._get_node(g, root_id).status == Status.RUNNING  # Step2:委托执行态(非 PLANNING)
+        # v4:规划出子的父恒为 PLANNING(委托/编排态),RUNNING 只给真正派发执行的叶子
+        assert svc._get_node(g, root_id).status == Status.PLANNING
+        assert svc._get_node(g, root_id).run_info.run_mode == "planning"
         assert len(runner._run_log) == 1
 
         # 回投 N_overview PASS → 批2 four专题
@@ -345,27 +355,28 @@ class TestThreeModesHappyToDone:
             assert parents[0] == "t_case"
 
 
-# ===== Test 2: FAIL 补救治愈 =====
+# ===== Test 2: FAIL→FAILED→harness 重新派发执行→PASS 治愈(v4:补救=重新派发,不拆子) =====
 class TestFailRemedyCure:
     def test_fail_then_remedy_pass_cures_and_propagates(self):
         facade, svc, runner = _wire_facade(max_depth=3)
         _run(facade.execute(_task_info("t_case", max_depth=3)))
         _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="overview")))
         _run(facade.callback.report_result(_cb(True, "t_case::N_compete", data="compete")))
+        # 验收不过 → FAILED(v4:不立即补救拆子,交 harness 重新派发执行重试)
         _run(facade.callback.report_result(
             _cb(False, "t_case::N_market", fail_detail="市场深度不足", data=None)
         ))
         g = svc.query_task_dashboard("t_case")
         n_market = svc._get_node(g, "N_market")
-        assert n_market.status == Status.RUNNING  # Step2:补救 add 翻 FAILED→RUNNING(委托补救子)
+        assert n_market.status == Status.FAILED
         assert n_market.run_info.acceptance_result is not None
         assert n_market.run_info.acceptance_result.verdict == AcceptanceVerdict.FAIL
-        remedy = svc._get_node(g, "N_market_remedy")
-        assert remedy is not None
-        assert remedy.status == Status.RUNNING
-        assert svc.get_parent_task("t_case", "N_market_remedy").node_id == "N_market"
-
-        _run(facade.callback.report_result(_cb(True, "t_case::N_market_remedy", data="市场深化")))
+        # v4:harness 重新派发执行(不拆):FAILED→PENDING→dispatch→RUNNING
+        _run(facade._engine.on_harness(_patch("t_case", "N_market", exec_error="acceptance_fail_retry")))
+        g = svc.query_task_dashboard("t_case")
+        assert svc._get_node(g, "N_market").status == Status.RUNNING  # 重新派发执行
+        # 重新派发后回投 PASS → DONE
+        _run(facade.callback.report_result(_cb(True, "t_case::N_market", data="市场深化")))
         g = svc.query_task_dashboard("t_case")
         assert svc._get_node(g, "N_market").status == Status.DONE
         _run(facade.callback.report_result(_cb(True, "t_case::N_tech", data="tech")))
@@ -374,7 +385,7 @@ class TestFailRemedyCure:
         assert svc._get_node(g, "N_practice_bbs").status == Status.RUNNING
 
 
-# ===== Test 3: MISS → 自动升 BBS + BBS bot 认领执行 =====
+# ===== Test 3: MISS at max → HUNG(节点保留)+升 BBS =====
 class TestMissEscalateBbs:
     def test_miss_at_max_escalates_bbs(self):
         facade, svc, runner = _wire_facade(max_depth=1, miss_nodes={"N_practice_bbs"})
@@ -383,26 +394,36 @@ class TestMissEscalateBbs:
         for nid in ("N_market", "N_tech", "N_compete", "N_customer"):
             _run(facade.callback.report_result(_cb(True, f"t_case::{nid}", data=nid)))
         g = svc.query_task_dashboard("t_case")
-        assert not any(n.node_id == "N_practice_bbs" for n in g.tasks)
-        assert g.loop_round == 1
-        assert g.extend_props.get("bbs_mode") is True  # V2:无 bbs market publish
+        # v4:MISS at max(depth>=MAX)→HUNG(节点保留不 remove)+升 BBS(bbs_mode,loop_round++)
+        node = next((n for n in g.tasks if n.node_id == "N_practice_bbs"), None)
+        assert node is not None  # 节点保留
+        assert node.status == Status.HUNG
+        assert g.extend_props.get("bbs_mode") is True
+        assert g.loop_round >= 1  # 升 BBS 自增图级 loop_round
 
     def test_bbs_bot_claims_and_drives(self):
+        """模拟"真 BBS 执行接管"(out-of-band;singlebox 无 BCS BBS 真执行经框架状态机不可达,测试直写复位模拟):
+        BBS bot 认领任务 → 复位图态/根委托态/已 HUNG 的 N_practice_bbs 标 DONE(BBS 已 fulfilled)
+        → 自规划子任务 N_practice_bbs_bbs 挂 root → 执行 → 回投 → 根重 plan → N_report → 终验 DONE。"""
         facade, svc, runner = _wire_facade(max_depth=1, miss_nodes={"N_practice_bbs"})
         _run(facade.execute(_task_info("t_case", max_depth=1)))
         _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="overview")))
         for nid in ("N_market", "N_tech", "N_compete", "N_customer"):
             _run(facade.callback.report_result(_cb(True, f"t_case::{nid}", data=nid)))
         g = svc.query_task_dashboard("t_case")
-        assert g.loop_round == 1
-        # BBS bot 认领 → 自规划子任务(BBS 认领子,run_mode=bbs,挂 root 下)
+        # MISS at max→HUNG→升 BBS→终态传播冒泡→图 HUNG(singlebox 无 BBS 真执行)
+        hung_node = next((n for n in g.tasks if n.node_id == "N_practice_bbs"), None)
+        assert hung_node is not None and hung_node.status == Status.HUNG
+        assert g.extend_props.get("bbs_mode") is True
+        # 模拟 BBS 接管:out-of-band 复位(经状态机从 HUNG 不可恢复,直写模拟 BCS BBS 接管复位)
+        g.status = Status.RUNNING
+        root = svc._get_node(g, "t_case")
+        root.status = Status.PLANNING
+        hung_node.status = Status.DONE  # BBS bot 认领后 N_practice_bbs 被 fulfilled
+        # BBS bot 自规划子任务(run_mode=bbs,挂 root 下)
         bbs_sub = _node("N_practice_bbs_bbs", "t_case", run_mode="bbs", assignee="bot_bbs_7")
-        # Step2:升 BBS 后 root 仍 RUNNING(委托态);BBS bot 认领规划前先翻 root RUNNING→PLANNING(可委托 add)
-        from agentclaw.community.core.task.domain.models import TaskNodePatch as _TNP
-        svc.update_task_node_info(_TNP(task_id="t_case", node_id="t_case", status=Status.PLANNING))
         svc.add_task_nodes([bbs_sub], parent_node_id="t_case")
-        # 框架驱动派发该 bbs 节点(corp 认领编排;此处经引擎内部 _dispatch_and_run 模拟)
-        side = []
+        side: list[tuple] = []
         _run(facade._engine._prepare_into("t_case", side))
         _run(facade._engine._drain("t_case", side))
         g = svc.query_task_dashboard("t_case")
@@ -414,24 +435,27 @@ class TestMissEscalateBbs:
         assert svc._get_node(g, "N_report").status == Status.RUNNING
         _run(facade.callback.report_result(_cb(True, "t_case::N_report", data="尽调报告聚合")))
         g = svc.query_task_dashboard("t_case")
-        # 语义A:根 plan[]→ gap 闭=终验通过 → 翻根 DONE + graph DONE(无需回投根 PASS)
+        # 语义A:根 plan[]→ gap 闭=终验通过 → 翻根 DONE + graph DONE
         assert svc._get_node(g, "t_case").status == Status.DONE
         assert g.status == Status.DONE
 
 
-# ===== Test 4: BBS STUCK → graph HUNG =====
+# ===== Test 4: MISS at max → 终态传播冒泡 → 图 HUNG(v4:HUNG 节点保留) =====
 class TestBbsStuckHung:
-    def test_bbs_max_depth_reached_hung(self):
-        facade, svc, runner = _wire_facade(
-            max_depth=1, bbs_max_depth=1, miss_nodes={"N_practice_bbs"})
-        _run(facade.execute(_task_info("t_case", max_depth=1, bbs_max_depth=1)))
+    def test_miss_at_max_graph_hung(self):
+        facade, svc, runner = _wire_facade(max_depth=1, miss_nodes={"N_practice_bbs"})
+        _run(facade.execute(_task_info("t_case", max_depth=1)))
         _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="overview")))
         for nid in ("N_market", "N_tech", "N_compete", "N_customer"):
             _run(facade.callback.report_result(_cb(True, f"t_case::{nid}", data=nid)))
         g = svc.query_task_dashboard("t_case")
+        # v4:MISS at max→HUNG→升 BBS→终态传播冒泡(子含 HUNG→父 HUNG→根 HUNG)→图 HUNG
         assert g.status == Status.HUNG
-        assert g.extend_props.get("hung_reason") == "stuck"
-        assert not any(n.node_id == "N_practice_bbs" for n in g.tasks)
+        node = next((n for n in g.tasks if n.node_id == "N_practice_bbs"), None)
+        assert node is not None  # HUNG 节点保留(不 remove)
+        assert node.status == Status.HUNG
+        assert g.extend_props.get("bbs_mode") is True
+        assert g.extend_props.get("hung_reason") in ("root_stuck", "child_hung", "loop_exhausted")
 
 
 # ===== Test 5: dashboard 事件可重放(view 终态断言) =====

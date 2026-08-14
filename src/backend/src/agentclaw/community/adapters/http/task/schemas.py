@@ -55,7 +55,7 @@ class TaskInfoDTO(BaseModel):
     task_spec: TaskSpecDTO
     source_channel_type: str = Field("bot", description="任务来源渠道: bot / coop_group")
     source_channel_id: str = Field(..., description="来源ID: bot_id / 协作群id")
-    execution_config: dict[str, Any] = Field(default_factory=dict, description="执行配置(MAX_DEPTH/BBS_MAX_DEPTH/bot/workflow 等)")
+    execution_config: dict[str, Any] = Field(default_factory=dict, description="执行配置(MAX_DEPTH/MAX_LOOP/MAX_HARNESS/bot/workflow 等)")
 
 
 class TaskCallbackDataDTO(BaseModel):

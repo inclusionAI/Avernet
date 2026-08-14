@@ -166,6 +166,21 @@ class ExecutionEngine:
         cfg = self._graph._execution_config(task_id)
         return int(cfg.get("MAX_HARNESS", _DEFAULT_MAX_HARNESS))
 
+    async def _plan_with_retry(self, task_id: str, graph, target_node_id: str | None = None):
+        """plan 容错重试:planning 调用失败(parse/not_completed/empty 等,gap_detail 以 ``plan_`` 前缀)
+        → 重试最多 MAX_HARNESS 次;耗尽后返回最后结果(has_gap=True → 编排核走深度闸门/HUNG)。
+        非 ``plan_`` 前缀的空结果(gap 闭 has_gap=F / 真拆不出 has_gap=T)不经重试直接返回。
+        planning 是 owner bot 的耗时工作,失败同 exec_error 应重试而非静默 DONE/立即 HUNG。"""
+        max_h = self._max_harness(task_id)
+        pr = None
+        for attempt in range(max_h):
+            pr = await self._planner.plan(graph, target_node_id=target_node_id)
+            if pr.children or not (pr.gap_detail or "").startswith("plan_"):
+                return pr  # 有子 / 真 gap 闭 / 真拆不出 → 不重试
+            logger.warning("[plan-retry] task=%s attempt=%d/%d gap_detail=%s",
+                           task_id, attempt + 1, max_h, pr.gap_detail)
+        return pr  # 重试耗尽 → has_gap=True(plan_ 失败)→ 编排核 HUNG 升 BBS
+
     def _mark_planning(self, task_id: str, node_id: str) -> None:
         """节点被 owner bot 规划时,落 run_mode="planning" + assignee=owner(source_channel_id)。
         规划本身就是 owner bot 的 bot 工作(组 prompt→owner bot 算 gap 产子),故节点应归属 owner,
@@ -191,7 +206,7 @@ class ExecutionEngine:
                 return
             graph = self._graph.query_task_dashboard(task_id)
             self._mark_planning(task_id, root.node_id)  # root 由 owner bot 规划
-            pr = await self._planner.plan(graph)   # None → 自发现根
+            pr = await self._plan_with_retry(task_id, graph)   # None → 自发现根(含 plan 容错重试)
             logger.info("[on_execute] task=%s plan 产 %d 子节点: %s",
                         task_id, len(pr.children), [n.node_id for n in pr.children])
             if pr.children:
@@ -278,7 +293,7 @@ class ExecutionEngine:
         is_root_parent = parent.node_id == (root.node_id if root else None)
         self._mark_planning(task_id, parent.node_id)
         graph = self._graph.query_task_dashboard(task_id)
-        pr = await self._planner.plan(graph, target_node_id=parent.node_id)
+        pr = await self._plan_with_retry(task_id, graph, target_node_id=parent.node_id)
         logger.info("[on_pass] task=%s 父=%s 委托 plan 产 %d 子 has_gap=%s",
                     task_id, parent.node_id, len(pr.children), pr.has_gap)
         if pr.children:
@@ -356,7 +371,7 @@ class ExecutionEngine:
                 return
             self._mark_planning(patch.task_id, patch.node_id)
             graph = self._graph.query_task_dashboard(patch.task_id)
-            pr = await self._planner.plan(graph, target_node_id=patch.node_id)
+            pr = await self._plan_with_retry(patch.task_id, graph, target_node_id=patch.node_id)
             logger.info("[on_miss] task=%s node=%s depth=%d/%d plan 产 %d 子 has_gap=%s",
                         patch.task_id, patch.node_id, depth, max_depth, len(pr.children), pr.has_gap)
             if pr.children:

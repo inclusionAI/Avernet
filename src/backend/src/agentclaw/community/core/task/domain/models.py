@@ -132,7 +132,7 @@ class TaskExecutionGraph:
     """任务运行时执行图。"""
 
     run_id: int                   # 运行实例唯一 ID
-    loop_round: int               # 外层 BBS 上升轮次(仅升 BBS 时 ++;达 BBS_MAX_DEPTH→STUCK→HUNG)
+    loop_round: int               # 图级总轮次(根 gap 不闭重 plan + 升 BBS 时 ++;达 MAX_LOOP→图 HUNG)
     status: Status
     output: dict[str, Any] = field(default_factory=dict)
     tasks: list[TaskNode] = field(default_factory=list)
