@@ -12,11 +12,17 @@ import os
 
 from injector import Binder, Module, inject, provider, singleton
 
+from agentclaw.community.adapters.http.task.auth import (
+    CallbackAuthenticator, NoopCallbackAuthenticator,
+)
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.task_center.task_service import TaskService
 from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_runner.callback_correlation import (
+    CallbackCorrelationRegistry, InMemoryCallbackCorrelationRegistry,
+)
 
 
 def _task_engine_active() -> bool:
@@ -30,6 +36,11 @@ class TaskModule(Module):
     def configure(self, binder: Binder) -> None:
         # TaskGraphService 是 in-mem 单例(无外部依赖),直接 self-bind。
         binder.bind(TaskGraphService, to=TaskGraphService, scope=singleton)
+        # task_loop inbound callback 服务的进程内可信默认绑定(社区分布)。
+        # CORP/prod 的 HmacCallbackAuthenticator + 真实密钥由 corp adapter 覆写(经模块替换/子类)。
+        binder.bind(InMemoryCallbackCorrelationRegistry,
+                    to=InMemoryCallbackCorrelationRegistry, scope=singleton)
+        binder.bind(NoopCallbackAuthenticator, to=NoopCallbackAuthenticator, scope=singleton)
 
     @singleton
     @provider
@@ -62,6 +73,24 @@ class TaskModule(Module):
     def task_loop_callback_protocol(self, svc: TaskService) -> TaskLoopCallbackProtocol:
         """回投 Protocol = TaskService.callback(已 internal 持 TaskLoopCallback)。"""
         return svc.callback
+
+    @singleton
+    @provider
+    @inject
+    def callback_correlation_registry(
+        self, reg: InMemoryCallbackCorrelationRegistry
+    ) -> CallbackCorrelationRegistry:
+        """task 级回调→节点寻址 registry(社区 in-mem;进程内可信)。"""
+        return reg
+
+    @singleton
+    @provider
+    @inject
+    def callback_authenticator(
+        self, auth: NoopCallbackAuthenticator
+    ) -> CallbackAuthenticator:
+        """回调鉴权(社区 Noop 直通;corp adapter 覆写绑 HmacCallbackAuthenticator + 密钥)。"""
+        return auth
 
     @staticmethod
     def _resolve_ports():

@@ -118,6 +118,7 @@ from agentclaw.community.adapters.http.beta_quota.router import router as beta_q
 from agentclaw.community.adapters.http.channel.router import router as channel_router  # noqa: E402
 from agentclaw.community.adapters.http.quality.router import router as quality_router  # noqa: E402
 from agentclaw.community.adapters.http.task.router import router as task_router  # noqa: E402
+from agentclaw.community.adapters.http.task.router import task_callback_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_render_screen.router import router as render_screen_router  # noqa: E402
 from agentclaw.community.adapters.http.antprocess import router as antprocess_router  # noqa: E402
 from agentclaw.community.adapters.http.antcode.router import router as antcode_router  # noqa: E402
@@ -768,6 +769,7 @@ app.include_router(beta_quota_router)
 app.include_router(channel_router)
 app.include_router(quality_router)
 app.include_router(task_router)
+app.include_router(task_callback_router)
 try:
     app.include_router(render_screen_router)
     logger.info("[RenderScreen] Router registered successfully: prefix=%s", render_screen_router.prefix)
