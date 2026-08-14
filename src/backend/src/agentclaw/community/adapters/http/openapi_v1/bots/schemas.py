@@ -300,16 +300,7 @@ class Ceiling(BaseModel):
 
 
 class Passport(BaseModel):
-    """Agent Passport (identity credential) summary.
-
-    Mirrors the legacy ``GET /api/bots/{bot_id}/passport`` which forwarded the
-    PassportPlugin dict verbatim — ``useBot.ts`` reads ``agent_id``/``agent_code``
-    via ``passport_id`` and ``expire_at``/``certificate_url`` for the license
-    card (PRD §10.6). The license fields stay optional/nullable because both
-    Passport implementations currently return ``None`` for them; the contract is
-    exposed now so the frontend wiring and the data-source backfill can land
-    independently.
-    """
+    """A bot's platform-issued identity credential summary."""
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -333,7 +324,6 @@ class Passport(BaseModel):
     certificate_url: str | None = Field(
         default=None, description="License certificate URL when reported."
     )
-
 
 class StartupScriptWrite(BaseModel):
     """PUT body for a bot's startup script — the script is the only field.
@@ -404,30 +394,22 @@ class StartupScript(BaseModel):
 
 
 class DataInitRequest(BaseModel):
-    """Body for ``POST /openapi/v1/bots/{bot_id}/data-init``.
-
-    Mirrors the legacy ``POST /api/bots/{bot_id}/data-init`` body. ``force``
-    re-runs initialization even if it already completed.
-    """
+    """Options for starting a bot's cold-start data initialization."""
 
     model_config = ConfigDict(extra="forbid")
 
-    force: bool = False
+    force: bool = Field(
+        default=False,
+        description="Run initialization again even if it previously completed.",
+    )
 
 
 class DataInitResult(BaseModel):
-    """Result of triggering Bot cold-start data initialization.
+    """Acknowledgement that cold-start data initialization was dispatched."""
 
-    The handler returns the synchronous ``in_progress`` dispatch state — the
-    LLM-driven init runs fire-and-forget in the background, and the frontend
-    polls ``GET /openapi/v1/bots`` (``Bot.ext.data_init_status``) for progress,
-    matching the legacy ``/api`` contract.
-    """
-
-    bot_id: str
-    status: str
-    message: str | None = None
-
+    bot_id: str = Field(description="Bot whose data initialization was started.")
+    status: str = Field(description="Dispatch status; currently `in_progress` when accepted.")
+    message: str | None = Field(default=None, description="Additional dispatch detail, when available.")
 
 # ── Bot inventory card surface ─────────────────────────────────────────────
 # Card list returned by ``/openapi/v1/bots/all``. Action affordances are
@@ -452,42 +434,36 @@ BotAction = Literal[
 class BusinessSpace(BaseModel):
     """Business-space reference surfaced on an inventory card."""
 
-    space_id: str
-    name: str
+    space_id: str = Field(description="Unique identifier of the business space.")
+    name: str = Field(description="Display name of the business space.")
     kind: str = Field(description="Space kind from the business-space owner.")
 
 
 class BotInventoryItem(BaseModel):
-    """Unified card for a personal cloud, local, or service Bot."""
+    """Unified card for a personal cloud, local, or service bot."""
 
-    bot_id: str
-    bot_name: str
-    bot_desc: str
-    engine: str
-    bot_type: str
-    kind: BotInventoryKind
-    deploy_mode: DeployMode
-    display_state: DisplayState
-    status: str
-    owner_entity_id: str
-    space: BusinessSpace | None = None
-    avatar_url: str | None = None
-    machine_id: str | None = None
-    mount_path: str | None = None
-    passport_id: str | None = None
-    actions: list[BotAction] = Field(default_factory=list)
-    disabled_actions: dict[str, str] | None = None
+    bot_id: str = Field(description="Unique identifier of the bot.")
+    bot_name: str = Field(description="Display name of the bot.")
+    bot_desc: str = Field(description="Description of what the bot is for; may be empty.")
+    engine: str = Field(description="Engine currently assigned to the bot.")
+    bot_type: str = Field(description="Underlying bot type reported by the bot service.")
+    kind: BotInventoryKind = Field(description="Inventory category used to render the bot card.")
+    deploy_mode: DeployMode = Field(description="Whether the bot runs in the cloud or on a local device.")
+    display_state: DisplayState = Field(description="Normalized lifecycle state used by the inventory view.")
+    status: str = Field(description="Raw lifecycle status reported by the owning service.")
+    owner_entity_id: str = Field(description="User who owns the bot.")
+    space: BusinessSpace | None = Field(default=None, description="Business space containing the bot, when resolved.")
+    avatar_url: str | None = Field(default=None, description="Avatar URL for the bot, when configured.")
+    machine_id: str | None = Field(default=None, description="Host device identifier for a local bot; otherwise null.")
+    mount_path: str | None = Field(default=None, description="Mounted workspace path for a local bot; otherwise null.")
+    passport_id: str | None = Field(default=None, description="Platform identity credential identifier, when issued.")
+    actions: list[BotAction] = Field(default_factory=list, description="Actions currently available for this bot.")
+    disabled_actions: dict[str, str] | None = Field(default=None, description="Unavailable actions mapped to caller-facing reasons, when any.")
 
 
 class BotActivateResult(BaseModel):
-    """Result of activating a recycled personal cloud Bot.
+    """Acknowledgement that a recycled personal cloud bot is reactivating."""
 
-    Mirrors the ``{status, message}`` dict ``ActivateBotService.activate``
-    returns: a synchronous ``REACTIVATING`` loading state while the Passport
-    unfreeze + ``start_bot`` flow runs in the background.
-    """
-
-    bot_id: str
-    status: str
-    message: str | None = None
-
+    bot_id: str = Field(description="Bot whose reactivation was started.")
+    status: str = Field(description="Current reactivation status.")
+    message: str | None = Field(default=None, description="Additional reactivation detail, when available.")

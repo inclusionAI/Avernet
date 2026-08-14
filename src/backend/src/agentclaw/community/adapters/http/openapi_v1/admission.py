@@ -248,11 +248,11 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/local/devices/{machine_id}/files"): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/bots/local"): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/bots/local"): AdmissionMode.REFUSED,
-    ("GET", "/openapi/v1/bots/local/{bot_id}"): AdmissionMode.REFUSED,
-    ("GET", "/openapi/v1/bots/local/{bot_id}/auth-status"): AdmissionMode.REFUSED,
-    ("POST", "/openapi/v1/bots/local/{bot_id}/restart"): AdmissionMode.REFUSED,
-    ("DELETE", "/openapi/v1/bots/local/{bot_id}"): AdmissionMode.REFUSED,
-    ("POST", "/openapi/v1/bots/local/{bot_id}/open-folder"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/bots/{bot_id}/local"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/bots/{bot_id}/local/auth-status"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/bots/{bot_id}/local/restart"): AdmissionMode.REFUSED,
+    ("DELETE", "/openapi/v1/bots/{bot_id}/local"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/bots/{bot_id}/local/open-folder"): AdmissionMode.REFUSED,
     # No bot exists yet for a grant to cover, and creation spends the user's
     # quota. Auto-granting the new bot would invent consent nobody gave.
     ("POST", "/openapi/v1/bots"): AdmissionMode.REFUSED,

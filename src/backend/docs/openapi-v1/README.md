@@ -990,7 +990,7 @@ adding the route without moving the name fails there rather than in review.
 **Nothing was removed.** Every address this surface answered before bot-first
 addressing still answers — same shape, same parameters, in the same places,
 including the `bot_id` in a query string and the one in a request body that the
-rule above exists to remove. Forty-one operations, served by
+rule above exists to remove. Forty-two operations, served by
 `openapi_v1/deprecated/`.
 
 They are not aliases. A retiring address publishes the *old* parameter names in

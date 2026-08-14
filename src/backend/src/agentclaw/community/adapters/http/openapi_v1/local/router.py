@@ -1,9 +1,9 @@
 """Public local Bot routes."""
 from __future__ import annotations
 
-from typing import Any, Mapping
+from typing import Annotated, Any, Mapping
 
-from fastapi import APIRouter, Header, Query, Request
+from fastapi import APIRouter, Header, Path as ApiPath, Query, Request
 from fastapi.responses import JSONResponse
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
@@ -11,6 +11,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Envelope,
     Page,
     PageParamsDep,
+    BotIdPath,
 )
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     accepted,
@@ -38,7 +39,19 @@ from .schemas import (
 
 logger = get_logger()
 
-router = APIRouter(prefix="/openapi/v1/bots/local", tags=["local-bots"])
+router = APIRouter(prefix="/openapi/v1/bots", tags=["local-bots"])
+
+SpaceIdHeader = Annotated[
+    str | None,
+    Header(
+        alias="X-Space-Id",
+        description="Business-space context for the operation; omit to use the personal space.",
+    ),
+]
+MachineIdPath = Annotated[
+    str,
+    ApiPath(description="Device whose filesystem is being listed."),
+]
 
 
 def _to_local_bot(row: Mapping[str, Any]) -> LocalBot:
@@ -68,14 +81,14 @@ def _lifecycle_result(result: Mapping[str, Any], *, bot_id: str) -> LocalLifecyc
     )
 
 
-@router.get("/devices", response_model=Envelope[Page[LocalDevice]])
+@router.get("/local/devices", response_model=Envelope[Page[LocalDevice]])
 @envelope_errors
 async def list_local_devices(
     page: PageParamsDep,
     owner_id: UserIdDep,
     request: Request,
-    x_space_id: str | None = Header(default=None, alias="X-Space-Id"),
-    status: str | None = Query(default=None),
+    x_space_id: SpaceIdHeader = None,
+    status: Annotated[str | None, Query(description="Filter devices by their reported status.")] = None,
     service: LocalBotWorkflowServiceProtocol = Injected(LocalBotWorkflowServiceProtocol),
 ) -> Envelope[Page[LocalDevice]]:
     """List local devices usable for personal local Bots."""
@@ -104,14 +117,14 @@ async def list_local_devices(
     )
 
 
-@router.get("/devices/{machine_id}/files", response_model=Envelope[dict[str, Any]])
+@router.get("/local/devices/{machine_id}/files", response_model=Envelope[dict[str, Any]])
 @envelope_errors
 async def list_local_device_files(
-    machine_id: str,
+    machine_id: MachineIdPath,
     owner_id: UserIdDep,
     request: Request,
-    x_space_id: str | None = Header(default=None, alias="X-Space-Id"),
-    dir: str = Query(default="~/Desktop"),
+    x_space_id: SpaceIdHeader = None,
+    dir: Annotated[str, Query(description="Directory to list on the device.")] = "~/Desktop",
     service: LocalBotWorkflowServiceProtocol = Injected(LocalBotWorkflowServiceProtocol),
 ) -> Envelope[dict[str, Any]]:
     """List a local device directory tree for mount-path selection."""
@@ -127,7 +140,7 @@ async def list_local_device_files(
 
 
 @router.post(
-    "",
+    "/local",
     status_code=201,
     response_model=Envelope[LocalBot],
     responses={202: {"model": Envelope[LocalBotAuthPending], "description": "Needs user authorization"}},
@@ -137,7 +150,7 @@ async def create_local_bot(
     body: LocalBotCreate,
     owner_id: UserIdDep,
     request: Request,
-    x_space_id: str | None = Header(default=None, alias="X-Space-Id"),
+    x_space_id: SpaceIdHeader = None,
     service: LocalBotWorkflowServiceProtocol = Injected(LocalBotWorkflowServiceProtocol),
 ) -> Envelope[LocalBot] | JSONResponse:
     """Start creating a personal local Bot."""
@@ -166,15 +179,15 @@ async def create_local_bot(
     return created(_to_local_bot(result), request)
 
 
-@router.get("", response_model=Envelope[Page[LocalBot]])
+@router.get("/local", response_model=Envelope[Page[LocalBot]])
 @envelope_errors
 async def list_local_bots(
     page: PageParamsDep,
     owner_id: UserIdDep,
     request: Request,
-    x_space_id: str | None = Header(default=None, alias="X-Space-Id"),
-    keyword: str | None = Query(default=None),
-    engine: str | None = Query(default=None),
+    x_space_id: SpaceIdHeader = None,
+    keyword: Annotated[str | None, Query(description="Filter local bots whose name contains this text.")] = None,
+    engine: Annotated[str | None, Query(description="Filter local bots by engine, matched exactly.")] = None,
     service: LocalBotWorkflowServiceProtocol = Injected(LocalBotWorkflowServiceProtocol),
 ) -> Envelope[Page[LocalBot]]:
     """List personal local Bots."""
@@ -193,13 +206,13 @@ async def list_local_bots(
     )
 
 
-@router.get("/{bot_id}", response_model=Envelope[LocalBot])
+@router.get("/{bot_id}/local", response_model=Envelope[LocalBot])
 @envelope_errors
 async def get_local_bot(
-    bot_id: str,
+    bot_id: BotIdPath,
     owner_id: UserIdDep,
     request: Request,
-    x_space_id: str | None = Header(default=None, alias="X-Space-Id"),
+    x_space_id: SpaceIdHeader = None,
     service: LocalBotWorkflowServiceProtocol = Injected(LocalBotWorkflowServiceProtocol),
 ) -> Envelope[LocalBot]:
     """Get one personal local Bot."""
@@ -211,19 +224,19 @@ async def get_local_bot(
     )
 
 
-@router.get("/{bot_id}/auth-status", response_model=Envelope[LocalBotAuthStatus])
+@router.get("/{bot_id}/local/auth-status", response_model=Envelope[LocalBotAuthStatus])
 @envelope_errors
 async def local_bot_auth_status(
-    bot_id: str,
+    bot_id: BotIdPath,
     owner_id: UserIdDep,
     request: Request,
-    bot_name: str = Query(...),
-    machine_id: str = Query(...),
-    bot_desc: str | None = Query(default=None),
-    mount_path: str | None = Query(default=None),
-    avatar_url: str | None = Query(default=None),
-    engine: str = Query(default="openclaw"),
-    x_space_id: str | None = Header(default=None, alias="X-Space-Id"),
+    bot_name: Annotated[str, Query(description="Display name to apply when authorization completes.")],
+    machine_id: Annotated[str, Query(description="Device on which the authorized bot will run.")],
+    bot_desc: Annotated[str | None, Query(description="Optional description to apply to the bot.")] = None,
+    mount_path: Annotated[str | None, Query(description="Optional workspace path to mount for the bot.")] = None,
+    avatar_url: Annotated[str | None, Query(description="Optional avatar URL to apply to the bot.")] = None,
+    engine: Annotated[str, Query(description="Engine to run after authorization completes.")] = "openclaw",
+    x_space_id: SpaceIdHeader = None,
     service: LocalBotWorkflowServiceProtocol = Injected(LocalBotWorkflowServiceProtocol),
 ) -> Envelope[LocalBotAuthStatus] | JSONResponse:
     """Poll Passport authorization and complete local Bot creation once issued."""
@@ -258,13 +271,13 @@ async def local_bot_auth_status(
     )
 
 
-@router.post("/{bot_id}/restart", response_model=Envelope[LocalLifecycleResult])
+@router.post("/{bot_id}/local/restart", response_model=Envelope[LocalLifecycleResult])
 @envelope_errors
 async def restart_local_bot(
-    bot_id: str,
+    bot_id: BotIdPath,
     owner_id: UserIdDep,
     request: Request,
-    x_space_id: str | None = Header(default=None, alias="X-Space-Id"),
+    x_space_id: SpaceIdHeader = None,
     service: LocalBotWorkflowServiceProtocol = Injected(LocalBotWorkflowServiceProtocol),
 ) -> Envelope[LocalLifecycleResult]:
     """Restart a personal local Bot."""
@@ -272,13 +285,13 @@ async def restart_local_bot(
     return envelope(_lifecycle_result(result, bot_id=bot_id), request)
 
 
-@router.delete("/{bot_id}", response_model=Envelope[Deleted])
+@router.delete("/{bot_id}/local", response_model=Envelope[Deleted])
 @envelope_errors
 async def delete_local_bot(
-    bot_id: str,
+    bot_id: BotIdPath,
     owner_id: UserIdDep,
     request: Request,
-    x_space_id: str | None = Header(default=None, alias="X-Space-Id"),
+    x_space_id: SpaceIdHeader = None,
     service: LocalBotWorkflowServiceProtocol = Injected(LocalBotWorkflowServiceProtocol),
 ) -> Envelope[Deleted]:
     """Delete a personal local Bot."""
@@ -286,14 +299,14 @@ async def delete_local_bot(
     return deleted_envelope(request)
 
 
-@router.post("/{bot_id}/open-folder", response_model=Envelope[LocalOpenFolderResult])
+@router.post("/{bot_id}/local/open-folder", response_model=Envelope[LocalOpenFolderResult])
 @envelope_errors
 async def open_local_bot_folder(
-    bot_id: str,
+    bot_id: BotIdPath,
     body: LocalOpenFolder | None,
     owner_id: UserIdDep,
     request: Request,
-    x_space_id: str | None = Header(default=None, alias="X-Space-Id"),
+    x_space_id: SpaceIdHeader = None,
     service: LocalBotWorkflowServiceProtocol = Injected(LocalBotWorkflowServiceProtocol),
 ) -> Envelope[LocalOpenFolderResult]:
     """Open a personal local Bot folder on the host device."""

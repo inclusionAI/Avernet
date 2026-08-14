@@ -155,6 +155,8 @@ user_config:
       user: required
     "/openapi/v1/bots/local/**":
       user: required
+    "/openapi/v1/bots/{bot_id}/local/**":
+      user: required
 
     # Creating a bot. No bot exists yet for a grant to cover, and creation
     # spends the user's quota.

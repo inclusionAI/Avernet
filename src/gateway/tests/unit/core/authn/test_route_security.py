@@ -42,7 +42,7 @@ _HUMAN_ONLY = [
     ("POST", "/openapi/v1/bots"),
     ("GET", "/openapi/v1/bots/all"),
     ("GET", "/openapi/v1/bots/local"),
-    ("POST", "/openapi/v1/bots/local/bot-123/open-folder"),
+    ("POST", "/openapi/v1/bots/bot-123/local/open-folder"),
     ("GET", "/openapi/v1/bots/bot-123/authorized-apps"),
     ("DELETE", "/openapi/v1/bots/bot-123/authorized-apps/42"),
     ("GET", "/openapi/v1/bots/logs/traces"),

@@ -102,7 +102,7 @@ from agentclaw.community.core.bot_inventory.protocols import (
 )
 from agentclaw.community.core.bot_inventory.types import (
     BotInventoryItem as CoreItem,
-    DeployMode,
+    DeployMode as CoreDeployMode,
 )
 
 from .engine_config import _engine_config_target
@@ -124,6 +124,7 @@ from .schemas import (
     Ceiling,
     DataInitRequest,
     DataInitResult,
+    DeployMode,
     Passport,
     StartupScript,
     StartupScriptWrite,
@@ -434,10 +435,9 @@ async def list_bots(
     bot, this operation has nothing to mask. The complete view of delegated
     bots, including bots the user does not own, is the authorized-bots listing.
 
-    ``keyword``/``engine``/``status`` are forwarded to
-    ``BotService.list_bots_by_conditions``. For the workshop card view (with
-    deploy mode, space, and richer inventory fields), use
-    ``GET /openapi/v1/bots/all``.
+    The keyword, engine, and status filters are applied before pagination.
+    For richer inventory fields such as deployment mode and business space,
+    use GET /openapi/v1/bots/all.
     """
     granted = caller.granted_bot_ids(owned_by_delegator=True)
     if granted is not None and not granted:
@@ -566,10 +566,25 @@ async def list_inventory(
     page_params: PageParamsDep,
     owner_id: UserIdDep,
     request: Request,
-    x_space_id: str | None = Header(default=None, alias="X-Space-Id"),
-    keyword: str | None = Query(default=None),
-    engine: str | None = Query(default=None),
-    deploy_mode: DeployMode | None = Query(default=None),
+    x_space_id: Annotated[
+        str | None,
+        Header(
+            alias="X-Space-Id",
+            description="Business-space context for the inventory; omit to use the personal space.",
+        ),
+    ] = None,
+    keyword: Annotated[
+        str | None,
+        Query(description="Filter inventory items whose bot name contains this text."),
+    ] = None,
+    engine: Annotated[
+        str | None,
+        Query(description="Filter inventory items by engine, matched exactly."),
+    ] = None,
+    deploy_mode: Annotated[
+        DeployMode | None,
+        Query(description="Filter inventory items by cloud or local deployment."),
+    ] = None,
     service: BotInventoryServiceProtocol = Injected(BotInventoryServiceProtocol),
     space_context: BusinessSpaceContextProtocol = Injected(
         BusinessSpaceContextProtocol
@@ -585,7 +600,7 @@ async def list_inventory(
         space=current_space,
         keyword=keyword,
         engine=engine,
-        deploy_mode=deploy_mode,
+        deploy_mode=CoreDeployMode(deploy_mode) if deploy_mode is not None else None,
         page=page_params.page,
         page_size=page_params.page_size,
     )
@@ -633,7 +648,7 @@ def _require_personal_cloud_bot(bot: dict[str, Any]) -> None:
 )
 @envelope_errors
 async def activate_dormant_bot(
-    bot_id: str,
+    bot_id: BotIdPath,
     request: Request,
     owner_id: UserIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
@@ -641,12 +656,10 @@ async def activate_dormant_bot(
         BotDormantActivateServiceProtocol
     ),
 ) -> Envelope[BotActivateResult]:
-    """Activate a recycled personal cloud Bot.
+    """Activate a recycled personal cloud bot.
 
-    Owner/tenant guard runs first via ``bot_service.get_bot`` (raises
-    ``BotNotFoundError`` → 404 for a bot that is not the caller's). The
-    ``bot_type`` guard then refuses desktop/service (→ 409) before the
-    reactivation orchestration is delegated.
+    Returns 404 when the bot is not visible to the caller and 409 when the bot
+    is not a recycled personal cloud bot.
     """
     bot = bot_service.get_bot(bot_id, owner_id)
     _require_personal_cloud_bot(bot)
@@ -1124,24 +1137,17 @@ async def delete_bot_startup_script(
 )
 @envelope_errors
 async def trigger_bot_data_init(
-    bot_id: str,
+    bot_id: BotIdPath,
     body: DataInitRequest,
     request: Request,
     owner_id: UserIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     data_init_service: DataInitServiceProtocol = Injected(DataInitServiceProtocol),
 ) -> Envelope[DataInitResult]:
-    """Trigger a personal-cloud bot's cold-start data initialization.
+    """Trigger cold-start data initialization for a personal cloud bot.
 
-    Mirrors the legacy ``POST /api/bots/{bot_id}/data-init``: fire-and-forget
-    — the LLM-driven init runs in the background and the caller returns with an
-    ``in_progress`` state, while the frontend polls ``Bot.ext.data_init_status``
-    for progress (the same field the legacy ``GET /api/bots/by-owner`` exposed).
-
-    Personal cloud bots only: a desktop bot has its own desktop/BaaS provisioning
-    and is never in the device-ACTIVE / SKILL.md-pulling path this orchestrates,
-    and a service bot's data lifecycle is owned by the service line. Both are
-    refused with 409 rather than routed through ``DataInitService``.
+    The operation returns immediately with an `in_progress` state while work
+    continues in the background. Local and service bots are refused with 409.
     """
     bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard (→ 404)
     bot_type = bot.get("bot_type") or ""

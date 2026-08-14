@@ -89,7 +89,7 @@ def _segments(path: str) -> list[str]:
 #: operations have no bot dimension at all. Forcing it under ``{bot_id}`` would
 #: remove the ability to query across bots.
 _BOT_FREE = frozenset(
-    {"authorized", "ceiling", "check-name", "loadtest", "logs", "mcp"}
+    {"all", "authorized", "ceiling", "check-name", "loadtest", "local", "logs", "mcp"}
 )
 
 

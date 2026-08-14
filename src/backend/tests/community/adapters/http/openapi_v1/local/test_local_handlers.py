@@ -166,7 +166,7 @@ def test_create_local_bot_rejects_non_personal_space(client):
 def test_local_auth_status_completes_creation(client, auth_rel):
     data = _ok(
         client.get(
-            "/openapi/v1/bots/local/l1/auth-status",
+            "/openapi/v1/bots/l1/local/auth-status",
             params={"bot_name": "Local", "machine_id": "m1", "engine": "openclaw"},
         )
     )
@@ -177,6 +177,6 @@ def test_local_auth_status_completes_creation(client, auth_rel):
 
 
 def test_restart_and_open_folder_verify_ownership(client, desktop_service):
-    assert _ok(client.post("/openapi/v1/bots/local/l1/restart"))["bot_id"] == "l1"
-    assert _ok(client.post("/openapi/v1/bots/local/l1/open-folder", json={"folder_path": "src"}))["bot_id"] == "l1"
+    assert _ok(client.post("/openapi/v1/bots/l1/local/restart"))["bot_id"] == "l1"
+    assert _ok(client.post("/openapi/v1/bots/l1/local/open-folder", json={"folder_path": "src"}))["bot_id"] == "l1"
     assert desktop_service.verify_ownership.call_count == 2
