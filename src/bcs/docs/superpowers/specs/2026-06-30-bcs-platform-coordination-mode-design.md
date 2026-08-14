@@ -263,6 +263,12 @@ guard。解析成功后再映射到现有 `task.dispatch` / `task.message` / `ta
 `tool_result` 的 `tool_name` 必须精确命中当前 Provider 的 `tool_name_mapping`，且结果中的 canonical
 `tool` 必须与映射值一致。Provider 认证、run/bot 绑定、角色校验和 `run_id + tool_call_id` 去重继续适用。
 
+Provider 2.0 downlink 也可能把同一结果作为运行流中的 `agent` / `tool_call_end` SSE 事件回传，而不调用独立的
+`/bot/events/coordination`。BCS 对该入口执行相同的精确映射和 canonical tool 一致性校验，校验通过后复用现有
+`CoordinationCall -> task.*` 派发逻辑。协调 surface 在一个 run 首次出现协调包络时解析并缓存；普通 tool result
+不触发配置查询，同一 run 的后续协调结果只读取内存快照。run 结束时清理快照。`exec`、`bash`、`shell` 和
+`mcporter` 的非 `native_mcp` echo 兼容路径保持不变。
+
 ### 7.3 `native_tool`
 
 接受 `kind = "coordination_intent"`，但不要求 `mcp_server`：
@@ -296,8 +302,8 @@ BCS 必须拒绝 mode 与回传形态不匹配的事件：
 | `native_tool` | `coordination_intent` without MCP requirement | `tool_result`、带 MCP-only 语义的回传 |
 | `disabled` | 无 | 任意协同回传 |
 
-拒绝时返回 `400 invalid_coordination_mode`，日志记录 `provider_id`、`bot_id`、`mode`、`kind`、`run_id`，但不记录
-工具参数全文或 credential。
+Provider coordination callback 拒绝时返回 `400 invalid_coordination_mode`；运行流中的不匹配 echo 被忽略。
+日志记录可用的 `provider_id`、`bot_id`、`mode`、`kind`、`run_id`，但不记录工具参数全文或 credential。
 
 ## 8. 代码落点
 

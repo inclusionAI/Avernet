@@ -316,7 +316,12 @@ async fn provider_bot_resolves_coordination_surface_from_provider_config() {
             mode: CoordinationMode::NativeMcp,
             mcp_server: Some("bcs".to_string()),
             mcporter_command: None,
-            tool_name_mapping: Default::default(),
+            tool_name_mapping: [(
+                "provider_assign_task".to_string(),
+                "bcs_assign_task".to_string(),
+            )]
+            .into_iter()
+            .collect(),
         },
     )
     .await;
@@ -345,6 +350,10 @@ async fn provider_bot_resolves_coordination_surface_from_provider_config() {
     assert_eq!(surface.mode, CoordinationMode::NativeMcp);
     assert_eq!(surface.mcp_server.as_deref(), Some("bcs"));
     assert_eq!(surface.mcporter_command, None);
+    assert_eq!(
+        surface.tool_name_mapping.get("provider_assign_task").map(String::as_str),
+        Some("bcs_assign_task")
+    );
 }
 
 #[tokio::test]
@@ -373,6 +382,7 @@ async fn websocket_plugin_bot_resolves_native_tool_surface() {
     assert_eq!(surface.mode, CoordinationMode::NativeTool);
     assert_eq!(surface.mcp_server, None);
     assert_eq!(surface.mcporter_command, None);
+    assert!(surface.tool_name_mapping.is_empty());
 }
 
 #[tokio::test]
