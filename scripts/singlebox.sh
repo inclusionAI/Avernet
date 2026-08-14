@@ -81,6 +81,10 @@ HYBRID_USE_CLAUDE_CODE="${HYBRID_USE_CLAUDE_CODE:-}"
 HYBRID_INSTALL_CLAUDE_CODE="${HYBRID_INSTALL_CLAUDE_CODE:-}"
 HYBRID_CLAUDE_CONFIG_MODE="${HYBRID_CLAUDE_CONFIG_MODE:-}"
 HYBRID_RUNTIME_SELECTION_EXPLICIT="${HYBRID_RUNTIME_SELECTION_EXPLICIT:-0}"
+HYBRID_PROFILE_OPTIONS_EXPLICIT="${HYBRID_PROFILE_OPTIONS_EXPLICIT:-0}"
+if [ -n "${BOTS_PROFILE_DIR:-}" ] || [ -n "${BOTS_EXCLUDED_PROFILE_SOURCE:-}" ] || [ -n "${CLAUDE_PROFILE_DIR:-}" ]; then
+    HYBRID_PROFILE_OPTIONS_EXPLICIT=1
+fi
 BCN_PLUGIN_SOURCE="${BCN_PLUGIN_SOURCE:-source}"
 BCN_PLUGIN_VERSION="${BCN_PLUGIN_VERSION:-latest}"
 HYBRID_DEFAULT_PROFILE_DIR="scripts/4bots_merchant_operations_profile"
@@ -544,6 +548,29 @@ apply_hybrid_profile_defaults() {
         return 0
     fi
 
+    if [ "$target_command" = "restart" ] && \
+       { [ "$1" = hybrid ] || [ "$1" = merchant_hybrid ]; } && \
+       [ "${HYBRID_PROFILE_OPTIONS_EXPLICIT:-0}" != "1" ]; then
+        if [ ! -f "$HYBRID_STATE_FILE" ]; then
+            log_error "No active hybrid runtime state to restart. Run start hybrid first."
+            return 1
+        fi
+        HYBRID_RESTART_FROM_STATE=1
+        export HYBRID_RESTART_FROM_STATE
+        hybrid_restore_runtime_state || return 1
+        if [ -z "${SINGLEBOX_MODEL_CONFIG_MODE:-}" ]; then
+            log_error "The previous hybrid runtime does not record its model configuration mode."
+            log_error "Run start hybrid once to create restartable runtime state."
+            return 1
+        fi
+        if [ "$SINGLEBOX_MODEL_CONFIG_MODE" = "home" ]; then
+            SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED=1
+            export SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED
+        fi
+        log_info "hybrid restart restored the previous runtime selection without prompting"
+        return 0
+    fi
+
     case "$1" in
         hybrid|merchant_hybrid)
             if [ -z "${BOTS_PROFILE_DIR:-}" ] && \
@@ -605,6 +632,11 @@ prepare_hybrid_claude_runtime_choice() {
     local claude_cli=""
     claude_cli="$(claude_relay_find_cli 2>/dev/null || true)"
     if [ -z "$claude_cli" ]; then
+        if [ "${HYBRID_RESTART_FROM_STATE:-0}" = "1" ]; then
+            log_error "Claude Code from the previous hybrid runtime is no longer available; restart will not install it interactively."
+            log_error "Run start hybrid to repair or change the runtime selection."
+            return 1
+        fi
         local install_rc=0
         hybrid_confirm_choice "${HYBRID_INSTALL_CLAUDE_CODE:-}" "Claude Code was not found. Install it now?" || install_rc=$?
         case "$install_rc" in
@@ -635,16 +667,7 @@ prepare_hybrid_claude_runtime_choice() {
         user)
             ;;
         '')
-            local replace_rc=0
-            hybrid_confirm_choice "" "Replace Claude Code model configuration with values from .env.local?" || replace_rc=$?
-            case "$replace_rc" in
-                0) HYBRID_CLAUDE_CONFIG_MODE="env-local" ;;
-                1) HYBRID_CLAUDE_CONFIG_MODE="user" ;;
-                *)
-                    log_error "Set HYBRID_CLAUDE_CONFIG_MODE=env-local or user for non-interactive startup."
-                    return 1
-                    ;;
-            esac
+            HYBRID_CLAUDE_CONFIG_MODE="env-local"
             ;;
         *)
             log_error "Invalid HYBRID_CLAUDE_CONFIG_MODE: ${HYBRID_CLAUDE_CONFIG_MODE}"
@@ -656,7 +679,8 @@ prepare_hybrid_claude_runtime_choice() {
     if [ "$HYBRID_CLAUDE_CONFIG_MODE" = "env-local" ]; then
         SINGLEBOX_MODEL_CONFIG_MODE="manual"
         export SINGLEBOX_MODEL_CONFIG_MODE
-        log_info "Claude Code model configuration will use .env.local."
+        claude_relay_prepare_env_local_model || return 1
+        log_info "Claude Code model configuration uses .env.local by default."
     else
         log_info "Claude Code will keep the user's model configuration."
     fi
@@ -893,6 +917,7 @@ main() {
                     exit 1
                 fi
                 BOTS_PROFILE_DIR="$2"
+                HYBRID_PROFILE_OPTIONS_EXPLICIT=1
                 shift 2
                 ;;
             --exclusive-profile-dir)
@@ -902,6 +927,7 @@ main() {
                     exit 1
                 fi
                 BOTS_EXCLUDED_PROFILE_SOURCE="$2"
+                HYBRID_PROFILE_OPTIONS_EXPLICIT=1
                 shift 2
                 ;;
             --claude-profile-dir)
@@ -911,6 +937,7 @@ main() {
                     exit 1
                 fi
                 CLAUDE_PROFILE_DIR="$2"
+                HYBRID_PROFILE_OPTIONS_EXPLICIT=1
                 shift 2
                 ;;
             --bcs-auto-onboard)

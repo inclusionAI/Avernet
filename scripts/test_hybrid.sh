@@ -62,6 +62,9 @@ export OPENCLAW_OPENAI_BASE_URL="https://model.example.test/v1"
 export OPENCLAW_OPENAI_API_KEY="test-token"
 export OPENCLAW_OPENAI_MODEL_ID="glm-local"
 export OPENCLAW_OPENAI_MODEL_NAME="GLM Local"
+export ANTHROPIC_BASE_URL="https://anthropic-gateway.example.test"
+export ANTHROPIC_AUTH_TOKEN="anthropic-test-token"
+export ANTHROPIC_MODEL="glm-claude"
 singlebox_model_config_write_manual "$MODEL_CONFIG"
 export SINGLEBOX_MODEL_CONFIG_FILE="$MODEL_CONFIG"
 model_config_before="$(shasum -a 256 "$MODEL_CONFIG" | awk '{print $1}')"
@@ -92,7 +95,7 @@ hybrid_apply_model_policy
 IFS=$'\x1f' read -r role _ _ port config_dir workspace model prompt permission < <(claude_profile_entries)
 [[ "$role" == "platform-data" ]]
 [[ "$port" == "18900" ]]
-[[ "$model" == "glm-local" ]]
+[[ "$model" == "glm-claude" ]]
 [[ "$permission" == "bypassPermissions" ]]
 [[ "$config_dir" == "$TMP/claude-config" ]]
 [[ "$workspace" == "$TMP/claude-workspace" ]]
@@ -101,10 +104,10 @@ IFS=$'\x1f' read -r role _ _ port config_dir workspace model prompt permission <
 export SINGLEBOX_MODEL_CONFIG_MODE="manual"
 unset HYBRID_CLAUDE_CONFIG_MODE
 claude_relays_manual_model_env "$model"
-[[ "${CLAUDE_RELAY_MANUAL_MODEL_ENV[*]}" == *"ANTHROPIC_BASE_URL=https://model.example.test/v1"* ]]
-[[ "${CLAUDE_RELAY_MANUAL_MODEL_ENV[*]}" == *"ANTHROPIC_AUTH_TOKEN=test-token"* ]]
-[[ "${CLAUDE_RELAY_MANUAL_MODEL_ENV[*]}" == *"ANTHROPIC_MODEL=glm-local"* ]]
-[[ "${CLAUDE_RELAY_MANUAL_MODEL_ENV[*]}" == *"ANTHROPIC_SMALL_FAST_MODEL=glm-local"* ]]
+[[ "${CLAUDE_RELAY_MANUAL_MODEL_ENV[*]}" == *"ANTHROPIC_BASE_URL=https://anthropic-gateway.example.test"* ]]
+[[ "${CLAUDE_RELAY_MANUAL_MODEL_ENV[*]}" == *"ANTHROPIC_AUTH_TOKEN=anthropic-test-token"* ]]
+[[ "${CLAUDE_RELAY_MANUAL_MODEL_ENV[*]}" == *"ANTHROPIC_MODEL=glm-claude"* ]]
+[[ "${CLAUDE_RELAY_MANUAL_MODEL_ENV[*]}" == *"ANTHROPIC_SMALL_FAST_MODEL=glm-claude"* ]]
 export HYBRID_CLAUDE_CONFIG_MODE="user"
 claude_relays_manual_model_env "$model"
 [[ "${#CLAUDE_RELAY_MANUAL_MODEL_ENV[@]}" == "0" ]]
@@ -499,12 +502,108 @@ test_hybrid_profile_defaults() (
 
 test_hybrid_profile_defaults
 
+test_hybrid_restart_restores_previous_selection_without_prompts() (
+    log_info() { :; }
+    local restart_state="$TMP/hybrid-restart-state.json"
+    HYBRID_STATE_FILE="$restart_state"
+    jq -n \
+        --arg bots_profile "$ROOT/scripts/4bots_merchant_operations_profile" \
+        --arg claude_profile "$CLAUDE_PROFILE" \
+        '{
+          mode: "claude",
+          bots_profile_dir: $bots_profile,
+          excluded_profile_source: "platform-data",
+          claude_profile_dir: $claude_profile,
+          claude_config_mode: "env-local",
+          anthropic_base_url: "https://saved-anthropic-gateway.example.test",
+          singlebox_model_config_mode: "manual"
+        }' > "$restart_state"
+    HYBRID_PROFILE_OPTIONS_EXPLICIT=0
+    HYBRID_RUNTIME_SELECTION_EXPLICIT=0
+    unset BOTS_PROFILE_DIR BOTS_EXCLUDED_PROFILE_SOURCE CLAUDE_PROFILE_DIR
+    unset HYBRID_CLAUDE_CONFIG_MODE HYBRID_RESTART_FROM_STATE SINGLEBOX_MODEL_CONFIG_MODE
+    unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_MODEL
+    hybrid_confirm_choice() {
+        echo 'unexpected restart confirmation prompt' >&2
+        return 2
+    }
+    claude_relay_prompt_anthropic_base_url() {
+        echo 'unexpected restart base URL prompt' >&2
+        return 2
+    }
+    claude_relay_find_cli() { printf '%s\n' "$TMP/fake-claude"; }
+
+    apply_hybrid_profile_defaults restart hybrid
+    [ "$HYBRID_RESTART_FROM_STATE" = "1" ]
+    [ "$BOTS_PROFILE_DIR" = "$ROOT/scripts/4bots_merchant_operations_profile" ]
+    [ "$BOTS_EXCLUDED_PROFILE_SOURCE" = "platform-data" ]
+    [ "$CLAUDE_PROFILE_DIR" = "$CLAUDE_PROFILE" ]
+    [ "$HYBRID_CLAUDE_CONFIG_MODE" = "env-local" ]
+    [ "$ANTHROPIC_BASE_URL" = "https://saved-anthropic-gateway.example.test" ]
+    [ "$SINGLEBOX_MODEL_CONFIG_MODE" = "manual" ]
+
+    prepare_hybrid_claude_runtime_choice restart hybrid
+    [ "$ANTHROPIC_AUTH_TOKEN" = "$OPENCLAW_OPENAI_API_KEY" ]
+    [ "$ANTHROPIC_MODEL" = "$OPENCLAW_OPENAI_MODEL_ID" ]
+)
+
+test_hybrid_restart_restores_previous_selection_without_prompts
+
+test_hybrid_restart_restores_home_model_confirmation() (
+    log_info() { :; }
+    HYBRID_STATE_FILE="$TMP/hybrid-restart-home-state.json"
+    jq -n \
+        --arg bots_profile "$ROOT/scripts/4bots_merchant_operations_profile" \
+        '{
+          mode: "openclaw",
+          bots_profile_dir: $bots_profile,
+          excluded_profile_source: "",
+          claude_profile_dir: "",
+          claude_config_mode: "",
+          anthropic_base_url: "",
+          singlebox_model_config_mode: "home"
+        }' > "$HYBRID_STATE_FILE"
+    HYBRID_PROFILE_OPTIONS_EXPLICIT=0
+    unset BOTS_PROFILE_DIR BOTS_EXCLUDED_PROFILE_SOURCE CLAUDE_PROFILE_DIR
+    unset HYBRID_RESTART_FROM_STATE SINGLEBOX_MODEL_CONFIG_MODE SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED
+
+    apply_hybrid_profile_defaults restart hybrid
+    [ "$SINGLEBOX_MODEL_CONFIG_MODE" = "home" ]
+    [ "$SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED" = "1" ]
+)
+
+test_hybrid_restart_restores_home_model_confirmation
+
+test_hybrid_restart_without_state_is_rejected() (
+    log_error() { :; }
+    HYBRID_STATE_FILE="$TMP/missing-hybrid-restart-state.json"
+    HYBRID_PROFILE_OPTIONS_EXPLICIT=0
+    unset BOTS_PROFILE_DIR BOTS_EXCLUDED_PROFILE_SOURCE CLAUDE_PROFILE_DIR
+    if apply_hybrid_profile_defaults restart hybrid; then
+        echo 'hybrid restart without previous state unexpectedly accepted' >&2
+        exit 1
+    fi
+)
+
+test_hybrid_restart_without_state_is_rejected
+
 test_hybrid_claude_runtime_choice() (
     log_info() { :; }
     export BOTS_PROFILE_DIR="$ROOT/scripts/4bots_merchant_operations_profile"
     export BOTS_EXCLUDED_PROFILE_SOURCE="platform-data"
     export CLAUDE_PROFILE_DIR="$CLAUDE_PROFILE"
     claude_relay_find_cli() { printf '%s\n' "$TMP/fake-claude"; }
+
+    hybrid_confirm_choice() {
+        echo 'unexpected model configuration prompt' >&2
+        return 2
+    }
+
+    export SINGLEBOX_MODEL_CONFIG_MODE="home"
+    unset HYBRID_CLAUDE_CONFIG_MODE
+    prepare_hybrid_claude_runtime_choice start hybrid
+    [ "$SINGLEBOX_MODEL_CONFIG_MODE" = "manual" ]
+    [ "$HYBRID_CLAUDE_CONFIG_MODE" = "env-local" ]
 
     export SINGLEBOX_MODEL_CONFIG_MODE="home"
     export HYBRID_CLAUDE_CONFIG_MODE="user"
@@ -520,6 +619,45 @@ test_hybrid_claude_runtime_choice() (
 )
 
 test_hybrid_claude_runtime_choice
+
+test_hybrid_anthropic_defaults_and_base_url_edit() (
+    log_warn() { :; }
+    export OPENCLAW_OPENAI_BASE_URL="https://openai-upstream.example.test/v1"
+    export OPENCLAW_OPENAI_API_KEY="openai-fallback-token"
+    export OPENCLAW_OPENAI_MODEL_ID="openai-fallback-model"
+    unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_MODEL
+    local prompt_count=0
+    claude_relay_prompt_anthropic_base_url() {
+        prompt_count=$((prompt_count + 1))
+        ANTHROPIC_BASE_URL="https://edited-anthropic-gateway.example.test"
+        export ANTHROPIC_BASE_URL
+    }
+
+    claude_relay_prepare_env_local_model
+    [ "$prompt_count" = "1" ]
+    [ "$ANTHROPIC_BASE_URL" = "https://edited-anthropic-gateway.example.test" ]
+    [ "$ANTHROPIC_AUTH_TOKEN" = "openai-fallback-token" ]
+    [ "$ANTHROPIC_MODEL" = "openai-fallback-model" ]
+)
+
+test_hybrid_anthropic_defaults_and_base_url_edit
+
+test_hybrid_missing_anthropic_env_is_rejected() (
+    log_info() { :; }
+    log_error() { :; }
+    export BOTS_PROFILE_DIR="$ROOT/scripts/4bots_merchant_operations_profile"
+    export BOTS_EXCLUDED_PROFILE_SOURCE="platform-data"
+    export CLAUDE_PROFILE_DIR="$CLAUDE_PROFILE"
+    unset HYBRID_CLAUDE_CONFIG_MODE ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_MODEL OPENCLAW_OPENAI_BASE_URL
+    claude_relay_find_cli() { printf '%s\n' "$TMP/fake-claude"; }
+
+    if prepare_hybrid_claude_runtime_choice start hybrid; then
+        echo 'incomplete Anthropic configuration unexpectedly accepted' >&2
+        exit 1
+    fi
+)
+
+test_hybrid_missing_anthropic_env_is_rejected
 
 test_hybrid_missing_claude_cancels_when_install_declined() (
     log_info() { :; }
@@ -575,6 +713,33 @@ for service in claude_relays baas backend bcs bcsfuse bots claude_bots bcs_baas_
     eval "${service}_status() { printf '%s\\n' 'status:${service}' >> \"\$events\"; }"
 done
 
+test_hybrid_explicit_selection_switches_active_runtime() (
+    HYBRID_STATE_FILE="$TMP/hybrid-transition-state.json"
+    HYBRID_RUNTIME_SELECTION_EXPLICIT=0
+    export BOTS_PROFILE_DIR="$ROOT/scripts/4bots_merchant_operations_profile"
+    unset BOTS_EXCLUDED_PROFILE_SOURCE CLAUDE_PROFILE_DIR HYBRID_CLAUDE_ACTIVE MERCHANT_HYBRID_ACTIVE
+    : > "$events"
+    hybrid_start
+    [[ "$(jq -r '.mode' "$HYBRID_STATE_FILE")" == "openclaw" ]]
+
+    : > "$events"
+    HYBRID_RUNTIME_SELECTION_EXPLICIT=1
+    export BOTS_EXCLUDED_PROFILE_SOURCE="platform-data"
+    export CLAUDE_PROFILE_DIR="$CLAUDE_PROFILE"
+    export HYBRID_CLAUDE_CONFIG_MODE="env-local"
+    hybrid_prereqs
+    expected_transition_stop=$'stop:frontend\nstop:bots\nstop:bcsfuse\nstop:bcs'
+    [[ "$(cat "$events")" == "$expected_transition_stop" ]]
+    [[ ! -f "$HYBRID_STATE_FILE" ]]
+    [[ "$BOTS_EXCLUDED_PROFILE_SOURCE" == "platform-data" ]]
+    [[ "$CLAUDE_PROFILE_DIR" == "$CLAUDE_PROFILE" ]]
+    [[ "$HYBRID_CLAUDE_CONFIG_MODE" == "env-local" ]]
+    [[ "${HYBRID_START_ORDER[*]}" == "${HYBRID_CLAUDE_START_ORDER[*]}" ]]
+)
+
+test_hybrid_explicit_selection_switches_active_runtime
+: > "$events"
+
 unset BOTS_EXCLUDED_PROFILE_SOURCE CLAUDE_PROFILE_DIR HYBRID_CLAUDE_ACTIVE MERCHANT_HYBRID_ACTIVE
 hybrid_start
 expected_openclaw_start=$'setup:bcs\nsetup:bcsfuse\nsetup:bots\nsetup:frontend\nstart:bcs\nstart:bcsfuse\nstart:bots\nstart:frontend\nready'
@@ -594,6 +759,9 @@ hybrid_start
 expected_start=$'setup:claude_relays\nsetup:baas\nsetup:backend\nsetup:bcs\nsetup:bcsfuse\nsetup:bots\nsetup:claude_bots\nsetup:bcs_baas_provider\nsetup:frontend\nstart:claude_relays\nstart:baas\nstart:backend\nstart:bcs\nstart:bcsfuse\nstart:bots\nstart:claude_bots\nstart:bcs_baas_provider\nstart:frontend\nready'
 [[ "$(cat "$events")" == "$expected_start" ]]
 [[ "$(jq -r '.mode' "$HYBRID_STATE_FILE")" == "claude" ]]
+[[ "$(jq -r '.claude_config_mode' "$HYBRID_STATE_FILE")" == "env-local" ]]
+[[ "$(jq -r '.anthropic_base_url' "$HYBRID_STATE_FILE")" == "$ANTHROPIC_BASE_URL" ]]
+[[ "$(jq -r '.singlebox_model_config_mode' "$HYBRID_STATE_FILE")" == "$SINGLEBOX_MODEL_CONFIG_MODE" ]]
 expected_stop=$'stop:frontend\nstop:bcs_baas_provider\nstop:claude_bots\nstop:bots\nstop:bcsfuse\nstop:bcs\nstop:backend\nstop:baas\nstop:claude_relays'
 
 : > "$events"

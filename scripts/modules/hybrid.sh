@@ -50,8 +50,14 @@ hybrid_profile_paths_match() {
 }
 
 hybrid_save_runtime_state() {
-    local mode="openclaw" tmp_file
-    hybrid_claude_enabled && mode="claude"
+    local mode="openclaw" tmp_file claude_config_mode="" anthropic_base_url=""
+    if hybrid_claude_enabled; then
+        mode="claude"
+        claude_config_mode="${HYBRID_CLAUDE_CONFIG_MODE:-env-local}"
+        if [ "$claude_config_mode" = "env-local" ]; then
+            anthropic_base_url="${ANTHROPIC_BASE_URL:-}"
+        fi
+    fi
     tmp_file="${HYBRID_STATE_FILE}.$$.tmp"
     mkdir -p "$(dirname "$HYBRID_STATE_FILE")"
     umask 077
@@ -60,7 +66,18 @@ hybrid_save_runtime_state() {
         --arg bots_profile_dir "${BOTS_PROFILE_DIR}" \
         --arg excluded_profile_source "${BOTS_EXCLUDED_PROFILE_SOURCE:-}" \
         --arg claude_profile_dir "${CLAUDE_PROFILE_DIR:-}" \
-        '{mode: $mode, bots_profile_dir: $bots_profile_dir, excluded_profile_source: $excluded_profile_source, claude_profile_dir: $claude_profile_dir}' \
+        --arg claude_config_mode "$claude_config_mode" \
+        --arg anthropic_base_url "$anthropic_base_url" \
+        --arg singlebox_model_config_mode "${SINGLEBOX_MODEL_CONFIG_MODE:-}" \
+        '{
+          mode: $mode,
+          bots_profile_dir: $bots_profile_dir,
+          excluded_profile_source: $excluded_profile_source,
+          claude_profile_dir: $claude_profile_dir,
+          claude_config_mode: $claude_config_mode,
+          anthropic_base_url: $anthropic_base_url,
+          singlebox_model_config_mode: $singlebox_model_config_mode
+        }' \
         > "$tmp_file"; then
         rm -f "$tmp_file"
         log_error "Failed to save hybrid runtime state"
@@ -86,6 +103,11 @@ hybrid_restore_runtime_state() {
         and ((.bots_profile_dir | length) > 0)
         and ((.excluded_profile_source | type) == "string")
         and ((.claude_profile_dir | type) == "string")
+        and (((.claude_config_mode // "") | type) == "string")
+        and (((.anthropic_base_url // "") | type) == "string")
+        and (((.singlebox_model_config_mode // "") | type) == "string")
+        and ((.claude_config_mode // "") as $value | ($value == "" or $value == "env-local" or $value == "user"))
+        and ((.singlebox_model_config_mode // "") as $value | ($value == "" or $value == "mock" or $value == "manual" or $value == "home"))
         and (if .mode == "claude"
              then ((.excluded_profile_source | length) > 0) and ((.claude_profile_dir | length) > 0)
              else .excluded_profile_source == "" and .claude_profile_dir == ""
@@ -96,10 +118,18 @@ hybrid_restore_runtime_state() {
     fi
 
     local mode state_bots_profile state_excluded_profile state_claude_profile
+    local state_claude_config_mode state_anthropic_base_url state_model_config_mode
     mode="$(jq -r '.mode' "$HYBRID_STATE_FILE")"
     state_bots_profile="$(jq -r '.bots_profile_dir' "$HYBRID_STATE_FILE")"
     state_excluded_profile="$(jq -r '.excluded_profile_source' "$HYBRID_STATE_FILE")"
     state_claude_profile="$(jq -r '.claude_profile_dir' "$HYBRID_STATE_FILE")"
+    state_claude_config_mode="$(jq -r '.claude_config_mode // empty' "$HYBRID_STATE_FILE")"
+    state_anthropic_base_url="$(jq -r '.anthropic_base_url // empty' "$HYBRID_STATE_FILE")"
+    state_model_config_mode="$(jq -r '.singlebox_model_config_mode // empty' "$HYBRID_STATE_FILE")"
+    if [ "$mode" = "claude" ]; then
+        state_claude_config_mode="${state_claude_config_mode:-env-local}"
+        state_model_config_mode="${state_model_config_mode:-manual}"
+    fi
 
     if [ -n "${BOTS_PROFILE_DIR:-}" ] && ! hybrid_profile_paths_match "$BOTS_PROFILE_DIR" "$state_bots_profile"; then
         log_error "--profile-dir does not match the active hybrid runtime"
@@ -123,6 +153,14 @@ hybrid_restore_runtime_state() {
         fi
         export BOTS_EXCLUDED_PROFILE_SOURCE="$state_excluded_profile"
         export CLAUDE_PROFILE_DIR="$state_claude_profile"
+        if [ -n "$state_claude_config_mode" ] && \
+           { [ "${HYBRID_RESTART_FROM_STATE:-0}" = "1" ] || [ -z "${HYBRID_CLAUDE_CONFIG_MODE:-}" ]; }; then
+            export HYBRID_CLAUDE_CONFIG_MODE="$state_claude_config_mode"
+        fi
+        if [ -n "$state_anthropic_base_url" ] && \
+           { [ "${HYBRID_RESTART_FROM_STATE:-0}" = "1" ] || [ -z "${ANTHROPIC_BASE_URL:-}" ]; }; then
+            export ANTHROPIC_BASE_URL="$state_anthropic_base_url"
+        fi
     else
         if [ -n "${BOTS_EXCLUDED_PROFILE_SOURCE:-}" ] || [ -n "${CLAUDE_PROFILE_DIR:-}" ]; then
             log_error "Claude profile options do not match the active OpenClaw-only hybrid runtime"
@@ -130,11 +168,86 @@ hybrid_restore_runtime_state() {
         fi
         unset BOTS_EXCLUDED_PROFILE_SOURCE CLAUDE_PROFILE_DIR
     fi
+    if [ -n "$state_model_config_mode" ] && \
+       { [ "${HYBRID_RESTART_FROM_STATE:-0}" = "1" ] || [ -z "${SINGLEBOX_MODEL_CONFIG_MODE:-}" ]; }; then
+        export SINGLEBOX_MODEL_CONFIG_MODE="$state_model_config_mode"
+    fi
+}
+
+hybrid_runtime_state_differs_from_requested() {
+    [ -f "$HYBRID_STATE_FILE" ] || return 1
+
+    local requested_mode="openclaw" state_mode state_bots_profile state_excluded_profile state_claude_profile
+    hybrid_claude_enabled && requested_mode="claude"
+    state_mode="$(jq -r '.mode // empty' "$HYBRID_STATE_FILE" 2>/dev/null || true)"
+    state_bots_profile="$(jq -r '.bots_profile_dir // empty' "$HYBRID_STATE_FILE" 2>/dev/null || true)"
+    state_excluded_profile="$(jq -r '.excluded_profile_source // empty' "$HYBRID_STATE_FILE" 2>/dev/null || true)"
+    state_claude_profile="$(jq -r '.claude_profile_dir // empty' "$HYBRID_STATE_FILE" 2>/dev/null || true)"
+
+    [ "$requested_mode" != "$state_mode" ] && return 0
+    hybrid_profile_paths_match "${BOTS_PROFILE_DIR:-}" "$state_bots_profile" || return 0
+    if [ "$requested_mode" = "claude" ]; then
+        [ "${BOTS_EXCLUDED_PROFILE_SOURCE:-}" = "$state_excluded_profile" ] || return 0
+        hybrid_profile_paths_match "${CLAUDE_PROFILE_DIR:-}" "$state_claude_profile" || return 0
+    fi
+    return 1
+}
+
+hybrid_stop_active_runtime_preserving_requested() {
+    local requested_bots_profile="${BOTS_PROFILE_DIR:-}"
+    local requested_excluded_profile="${BOTS_EXCLUDED_PROFILE_SOURCE:-}"
+    local requested_claude_profile="${CLAUDE_PROFILE_DIR:-}"
+    local requested_claude_config_mode="${HYBRID_CLAUDE_CONFIG_MODE:-}"
+    local requested_anthropic_base_url="${ANTHROPIC_BASE_URL:-}"
+    local requested_model_config_mode="${SINGLEBOX_MODEL_CONFIG_MODE:-}"
+    local rc=0
+
+    unset BOTS_PROFILE_DIR BOTS_EXCLUDED_PROFILE_SOURCE CLAUDE_PROFILE_DIR
+    hybrid_stop || rc=$?
+
+    export BOTS_PROFILE_DIR="$requested_bots_profile"
+    if [ -n "$requested_excluded_profile" ]; then
+        export BOTS_EXCLUDED_PROFILE_SOURCE="$requested_excluded_profile"
+    else
+        unset BOTS_EXCLUDED_PROFILE_SOURCE
+    fi
+    if [ -n "$requested_claude_profile" ]; then
+        export CLAUDE_PROFILE_DIR="$requested_claude_profile"
+    else
+        unset CLAUDE_PROFILE_DIR
+    fi
+    if [ -n "$requested_claude_config_mode" ]; then
+        export HYBRID_CLAUDE_CONFIG_MODE="$requested_claude_config_mode"
+    else
+        unset HYBRID_CLAUDE_CONFIG_MODE
+    fi
+    if [ -n "$requested_anthropic_base_url" ]; then
+        export ANTHROPIC_BASE_URL="$requested_anthropic_base_url"
+    else
+        unset ANTHROPIC_BASE_URL
+    fi
+    if [ -n "$requested_model_config_mode" ]; then
+        export SINGLEBOX_MODEL_CONFIG_MODE="$requested_model_config_mode"
+    else
+        unset SINGLEBOX_MODEL_CONFIG_MODE
+    fi
+    return "$rc"
+}
+
+hybrid_prepare_requested_runtime() {
+    [ "${HYBRID_RUNTIME_SELECTION_EXPLICIT:-0}" = "1" ] || return 0
+    hybrid_runtime_state_differs_from_requested || return 0
+
+    # Validate the requested replacement before stopping the active runtime.
+    hybrid_configure_mode
+    hybrid_validate_profiles || return 1
+    log_info "Hybrid runtime selection changed; stopping the active runtime before switching modes."
+    hybrid_stop_active_runtime_preserving_requested
 }
 
 hybrid_apply_model_policy() {
     hybrid_claude_enabled || return 0
-    local config_file primary provider primary_model
+    local config_file primary provider primary_model claude_model
     config_file="${SINGLEBOX_MODEL_CONFIG_FILE:-}"
     [ -n "$config_file" ] && [ -f "$config_file" ] || {
         log_error "hybrid Claude model policy requires the prepared runtime model config"
@@ -171,9 +284,14 @@ hybrid_apply_model_policy() {
         unset HYBRID_MODEL_ID
         log_info "Hybrid model policy: OpenClaw and SOP use configured primary ${primary}; Claude Code keeps the user's configuration"
     else
+        claude_model="${ANTHROPIC_MODEL:-}"
+        [ -n "$claude_model" ] || {
+            log_error "Hybrid Claude mode requires ANTHROPIC_MODEL in .env.local"
+            return 1
+        }
         HYBRID_MODEL_ID="$primary_model"
         export HYBRID_MODEL_ID
-        log_info "Hybrid model policy: OpenClaw, Claude Code, and SOP use configured primary ${primary}"
+        log_info "Hybrid model policy: OpenClaw and SOP use ${primary}; Claude Code uses Anthropic-compatible model ${claude_model}"
     fi
 }
 
@@ -231,6 +349,7 @@ hybrid_port_preflight() {
 }
 
 hybrid_prereqs() {
+    hybrid_prepare_requested_runtime || return 1
     hybrid_restore_runtime_state || return 1
     hybrid_configure_mode
     hybrid_validate_profiles || return 1
@@ -248,6 +367,7 @@ hybrid_runtime_prereqs() {
 hybrid_start() {
     # `start hybrid` is intentionally self-contained after install-tools: setup
     # creates missing venvs, builds artifacts, and prepares runtime config.
+    hybrid_prepare_requested_runtime || return 1
     hybrid_restore_runtime_state || return 1
     hybrid_setup || return 1
     hybrid_runtime_prereqs || return 1
@@ -305,31 +425,12 @@ hybrid_restart() {
         return
     fi
 
-    local requested_bots_profile="${BOTS_PROFILE_DIR:-}"
-    local requested_excluded_profile="${BOTS_EXCLUDED_PROFILE_SOURCE:-}"
-    local requested_claude_profile="${CLAUDE_PROFILE_DIR:-}"
-    local requested_claude_config_mode="${HYBRID_CLAUDE_CONFIG_MODE:-}"
-
-    hybrid_stop || return 1
+    if [ -f "$HYBRID_STATE_FILE" ]; then
+        hybrid_stop_active_runtime_preserving_requested || return 1
+    else
+        hybrid_stop || return 1
+    fi
     sleep 2
-
-    BOTS_PROFILE_DIR="$requested_bots_profile"
-    if [ -n "$requested_excluded_profile" ]; then
-        BOTS_EXCLUDED_PROFILE_SOURCE="$requested_excluded_profile"
-    else
-        unset BOTS_EXCLUDED_PROFILE_SOURCE
-    fi
-    if [ -n "$requested_claude_profile" ]; then
-        CLAUDE_PROFILE_DIR="$requested_claude_profile"
-    else
-        unset CLAUDE_PROFILE_DIR
-    fi
-    if [ -n "$requested_claude_config_mode" ]; then
-        HYBRID_CLAUDE_CONFIG_MODE="$requested_claude_config_mode"
-    else
-        unset HYBRID_CLAUDE_CONFIG_MODE
-    fi
-
     hybrid_start
 }
 

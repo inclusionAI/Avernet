@@ -1,8 +1,8 @@
 # 平台数据分析 Claude Code Profile
 
-此 profile 用于 `hybrid` 的 Claude Code 数据分析 Bot。模型沿用 Singlebox
-本次选择的配置：`manual` 模式读取仓库根目录 `.env.local`，`home` 模式读取
-本机 OpenClaw 配置。Claude Code 的本机认证配置不会写入该目录。
+此 profile 用于 `hybrid` 的 Claude Code 数据分析 Bot。默认从仓库根目录
+`.env.local` 读取独立的 Anthropic-compatible 模型配置，不复用 OpenClaw 的
+OpenAI-compatible endpoint。Claude Code 的本机认证配置不会写入该目录。
 `CLAUDE.md` 是受控角色 prompt 的入口。
 
 ## 本地启动
@@ -31,8 +31,8 @@
 
 三个 profile 参数全部传入时，OpenClaw profile 中被排除的一个 source
 由 Claude profile 中同 source 的唯一一个 Bot 替代。此时不再询问是否使用
-Claude Code，但仍会检测本机安装，并询问是否用 `.env.local` 替换 Claude Code
-的模型配置：
+Claude Code，但仍会检测本机安装。Claude Code 的模型配置默认直接读取
+`.env.local`：
 
 ```bash
 ./scripts/singlebox.sh start hybrid \
@@ -42,15 +42,25 @@ Claude Code，但仍会检测本机安装，并询问是否用 `.env.local` 替�
 ```
 
 如果本机没有 `claude` 命令，启动流程会询问是否通过 npm 安装；拒绝安装会取消
-本次启动。选择不使用 `.env.local` 时，只读取用户自己的 Claude Code 模型配置，
-不会改写 `~/.claude/settings.json`。
+本次启动。OpenClaw 使用 `OPENCLAW_OPENAI_*`。Claude Code 的
+`ANTHROPIC_MODEL` 和 `ANTHROPIC_AUTH_TOKEN` 未配置时，分别沿用 OpenClaw 的模型
+和 API key；已有 `ANTHROPIC_API_KEY` 时不会被覆盖。`ANTHROPIC_BASE_URL` 未配置时，
+交互式启动会展示当前 OpenAI URL，并允许输入一次 Anthropic-compatible URL；直接
+回车则沿用展示值。该 URL 必须支持 Anthropic Messages API，输入仅对本次启动有效，
+不会写回 `.env.local`。非交互启动必须显式配置 `ANTHROPIC_BASE_URL`。
+
+如需显式使用用户自己的 Claude Code 配置，可设置
+`HYBRID_CLAUDE_CONFIG_MODE=user`；脚本不会改写 `~/.claude/settings.json`。
+
+不带 profile 参数执行 `restart hybrid` 时，脚本直接恢复上次成功 `start hybrid`
+保存的运行模式、profiles、模型配置模式和 Anthropic base URL，不再询问以上选项。
+如果没有可恢复状态，会要求先执行一次 `start hybrid`，而不是重新猜测配置。
 
 非交互环境可以显式设置：
 
 ```bash
 HYBRID_USE_CLAUDE_CODE=yes \
 HYBRID_INSTALL_CLAUDE_CODE=yes \
-HYBRID_CLAUDE_CONFIG_MODE=env-local \
 ./scripts/singlebox.sh start hybrid
 ```
 

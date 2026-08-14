@@ -92,26 +92,83 @@ claude_relays_prereqs() {
     claude_relay_cli >/dev/null || return 1
 }
 
+claude_relay_prompt_anthropic_base_url() {
+    local openai_base_url="${OPENCLAW_OPENAI_BASE_URL:-}"
+    local answer=""
+    [ -n "$openai_base_url" ] || {
+        log_error "ANTHROPIC_BASE_URL is not set and no OPENCLAW_OPENAI_BASE_URL is available as an editing hint."
+        return 1
+    }
+
+    log_warn "ANTHROPIC_BASE_URL is not set."
+    log_warn "Current OpenAI-compatible URL: ${openai_base_url}"
+    log_warn "Claude Code requires this URL to support the Anthropic Messages API."
+    if [ ! -t 0 ] || [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+        log_error "Set ANTHROPIC_BASE_URL explicitly for non-interactive startup."
+        return 1
+    fi
+
+    printf 'Anthropic-compatible base URL [%s]: ' "$openai_base_url" >&2
+    read -r answer </dev/tty || return 1
+    ANTHROPIC_BASE_URL="${answer:-$openai_base_url}"
+    export ANTHROPIC_BASE_URL
+}
+
+claude_relay_prepare_env_local_model() {
+    if [ -z "${ANTHROPIC_AUTH_TOKEN:-}" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+        ANTHROPIC_AUTH_TOKEN="${OPENCLAW_OPENAI_API_KEY:-}"
+        export ANTHROPIC_AUTH_TOKEN
+        [ -n "$ANTHROPIC_AUTH_TOKEN" ] && log_info "Claude Code auth token defaults to OPENCLAW_OPENAI_API_KEY."
+    fi
+    if [ -z "${ANTHROPIC_MODEL:-}" ]; then
+        ANTHROPIC_MODEL="${OPENCLAW_OPENAI_MODEL_ID:-}"
+        export ANTHROPIC_MODEL
+        [ -n "$ANTHROPIC_MODEL" ] && log_info "Claude Code model defaults to OPENCLAW_OPENAI_MODEL_ID (${ANTHROPIC_MODEL})."
+    fi
+    if [ -z "${ANTHROPIC_BASE_URL:-}" ]; then
+        if [ "${HYBRID_RESTART_FROM_STATE:-0}" = "1" ]; then
+            log_error "The previous hybrid runtime has no reusable ANTHROPIC_BASE_URL; restart will not prompt for a replacement."
+            log_error "Run start hybrid once to choose and save an Anthropic-compatible URL."
+            return 1
+        fi
+        claude_relay_prompt_anthropic_base_url || return 1
+    fi
+    claude_relay_validate_env_local_model
+}
+
+claude_relay_validate_env_local_model() {
+    local missing=()
+    [ -n "${ANTHROPIC_MODEL:-}" ] || missing+=(ANTHROPIC_MODEL)
+    if [ -z "${ANTHROPIC_AUTH_TOKEN:-}" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+        missing+=("ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY")
+    fi
+    [ -n "${ANTHROPIC_BASE_URL:-}" ] || missing+=(ANTHROPIC_BASE_URL)
+    if [ "${#missing[@]}" -gt 0 ]; then
+        log_error "Claude Code .env.local configuration is incomplete: ${missing[*]}"
+        log_error "Claude Code requires an Anthropic-compatible Messages API endpoint."
+        log_error "If the upstream only supports OpenAI APIs, configure an Anthropic-compatible gateway and set ANTHROPIC_BASE_URL to it."
+        return 1
+    fi
+}
+
 claude_relays_manual_model_env() {
     CLAUDE_RELAY_MANUAL_MODEL_ENV=()
     [ "${HYBRID_CLAUDE_CONFIG_MODE:-}" != "user" ] || return 0
     [ "${SINGLEBOX_MODEL_CONFIG_MODE:-}" = "manual" ] || return 0
 
-    local base_url="${OPENCLAW_OPENAI_BASE_URL:-}"
-    local api_key="${OPENCLAW_OPENAI_API_KEY:-}"
-    local model="$1"
-    if [ -z "$base_url" ] || [ -z "$api_key" ] || [ -z "$model" ]; then
-        log_error "Claude relay manual model configuration is incomplete"
-        return 1
+    claude_relay_validate_env_local_model || return 1
+    local model="${ANTHROPIC_MODEL}"
+    [ -n "${ANTHROPIC_BASE_URL:-}" ] && CLAUDE_RELAY_MANUAL_MODEL_ENV+=("ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL}")
+    if [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ] && [ -n "${ANTHROPIC_BASE_URL:-}" ]; then
+        CLAUDE_RELAY_MANUAL_MODEL_ENV+=("ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN}")
+    else
+        CLAUDE_RELAY_MANUAL_MODEL_ENV+=("ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}")
     fi
-
-    CLAUDE_RELAY_MANUAL_MODEL_ENV=(
-        "ANTHROPIC_BASE_URL=${base_url}"
-        "ANTHROPIC_AUTH_TOKEN=${api_key}"
+    CLAUDE_RELAY_MANUAL_MODEL_ENV+=(
         "ANTHROPIC_MODEL=${model}"
         "ANTHROPIC_SMALL_FAST_MODEL=${model}"
     )
-    log_info "Claude relay model provider resolved from manual configuration (model=${model})"
+    log_info "Claude relay model provider resolved from .env.local Anthropic configuration (model=${model})"
 }
 
 claude_relays_start() {
