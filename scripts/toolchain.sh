@@ -684,11 +684,27 @@ rustup_target_triple() {
     esac
 }
 
+load_rust_environment() {
+    local cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+    local cargo_bin="${cargo_home}/bin"
+
+    if [ -f "${cargo_home}/env" ]; then
+        # shellcheck source=/dev/null
+        . "${cargo_home}/env"
+    fi
+    if [ -d "$cargo_bin" ]; then
+        case ":${PATH}:" in
+            *":${cargo_bin}:"*) ;;
+            *) export PATH="${cargo_bin}:${PATH}" ;;
+        esac
+    fi
+}
+
 load_existing_rust_from_home() {
     local cargo_home="${CARGO_HOME:-$HOME/.cargo}"
     if [ -x "${cargo_home}/bin/cargo" ] && [ -x "${cargo_home}/bin/rustc" ]; then
         log_warn "Rust/Cargo found under ${cargo_home}/bin but not in current PATH."
-        export PATH="${cargo_home}/bin:${PATH}"
+        load_rust_environment
         if check_rust_installed; then
             log_info "Loaded Rust/Cargo from ${cargo_home}/bin for this shell."
             return 0
@@ -745,11 +761,7 @@ install_rust_via_rustup() {
         rm -rf "${work}"
     fi
 
-    if [ -f "${cargo_home}/env" ]; then
-        # shellcheck source=/dev/null
-        . "${cargo_home}/env"
-    fi
-    export PATH="${cargo_home}/bin:${PATH}"
+    load_rust_environment
 
     if check_rust_installed; then
         log_info "Rust/Cargo installed: $(rustc --version 2>&1 | head -1)"
@@ -899,6 +911,9 @@ toolchain_setup() {
     echo ""
 
     log_info "Toolchain setup complete!"
+    if [ -f "${CARGO_HOME:-$HOME/.cargo}/env" ]; then
+        log_info "To use Cargo directly in the invoking shell, run: source \"${CARGO_HOME:-$HOME/.cargo}/env\""
+    fi
     echo ""
 }
 
