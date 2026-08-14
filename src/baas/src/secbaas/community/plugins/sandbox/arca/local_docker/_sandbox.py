@@ -11,7 +11,7 @@ from secbaas.community.api.device_manage import (
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.sandbox.arca import ArcaSandbox
 
-logger = get_logger("plugin-sandbox-arca-local-docker")
+logger = get_logger("plugin-sandbox")
 
 
 class LocalDockerArcaSandbox(ArcaSandbox):

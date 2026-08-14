@@ -22,7 +22,7 @@ from sqlalchemy.pool import NullPool, QueuePool, StaticPool
 from secbaas.community.logger import get_logger
 
 logger = get_logger("database")
-_error_logger = get_logger("orm-error")
+_error_logger = get_logger("orm")
 
 
 class DatabaseManager:

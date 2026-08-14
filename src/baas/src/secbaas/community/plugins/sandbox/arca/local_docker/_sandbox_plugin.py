@@ -21,7 +21,7 @@ from ._sandbox import LocalDockerArcaSandbox
 if TYPE_CHECKING:
     from secbaas.community.api.device_manage import ArcaCredentials
 
-logger = get_logger("plugin-sandbox-arca-local-docker")
+logger = get_logger("plugin-sandbox")
 
 
 class LocalDockerArcaSandboxPlugin(ArcaSandboxPlugin):

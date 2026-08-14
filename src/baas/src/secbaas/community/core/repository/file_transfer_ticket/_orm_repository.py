@@ -12,7 +12,7 @@ from ._protocol import (
 )
 from ._record import TicketRecord
 
-log = get_logger("orm-repository")
+log = get_logger("orm")
 
 # Upload path: CREATED->UPLOADING->UPLOAD_COMPLETED->PULLING->DONE
 # Retention path: CREATED->UPLOADING->UPLOAD_COMPLETED->DONE (device_path IS NULL)  [Phase 69]

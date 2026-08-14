@@ -23,7 +23,7 @@ from ._models import CallbackPayload, CallbackResult
 if TYPE_CHECKING:
     from secbaas.community.core.repository.bot_run import BotRunRepository
 
-logger = get_logger("http-callback")
+logger = get_logger("router")
 
 _DEFAULT_TIMEOUT: float = 10.0
 

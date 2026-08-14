@@ -16,7 +16,7 @@ from ._orm_model import DeviceBindingModel
 from ._protocol import DeviceBindingRepository
 from ._record import DeviceBindingRecord, DeviceBindingStatus
 
-log = get_logger("orm-repository")
+log = get_logger("orm")
 
 
 class OrmDeviceBindingRepository(OrmConnectionMixin, DeviceBindingRepository):

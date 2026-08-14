@@ -48,7 +48,7 @@ from secbaas.community.logger import get_logger
 
 from ._errors import DeviceAllocateError
 
-logger = get_logger("plugin-sandbox-arca-local-proc")
+logger = get_logger("plugin-sandbox")
 
 # Port ranges for dynamically allocated processes.
 ADAPTER_PORT_START = 20010

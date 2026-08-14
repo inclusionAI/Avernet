@@ -25,7 +25,7 @@ from secbaas.community.spi.sandbox.arca import ArcaSandbox, ArcaSandboxPlugin
 if TYPE_CHECKING:
     from secbaas.community.api.device_manage import ArcaCredentials
 
-logger = get_logger("plugin-sandbox-arca")
+logger = get_logger("plugin-sandbox")
 
 
 class StubSandboxInfo:

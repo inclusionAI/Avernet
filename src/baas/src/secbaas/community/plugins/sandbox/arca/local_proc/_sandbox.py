@@ -15,7 +15,7 @@ from secbaas.community.spi.sandbox.arca import ArcaSandbox
 if TYPE_CHECKING:
     from ._process_manager import ProcessEntry
 
-logger = get_logger("plugin-sandbox-arca-local-proc")
+logger = get_logger("plugin-sandbox")
 
 
 class LocalProcessSandboxInfo:
