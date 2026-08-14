@@ -1,0 +1,187 @@
+"""Task HTTP API schemas —— FastAPI 边界 DTO <-> core task domain models。
+
+纯 pydantic.BaseModel 序列化,不含业务逻辑(Rule 22:HTTP adapter 只转协议)。
+对齐 domain/models.py 的 TaskInfo/TaskCallbackData/TaskExecutionGraph/TaskOpResult/TaskNode 字段。
+"""
+from __future__ import annotations
+
+from typing import Any, Generic, TypeVar
+
+from pydantic import BaseModel, Field
+
+T = TypeVar("T")
+
+
+class ApiResponse(BaseModel, Generic[T]):
+    """统一 API 响应格式(与其它 http adapter 一致 envelope)。"""
+    success: bool
+    message: str = "OK"
+    error_code: int = 200
+    data: T | None = None
+
+
+# ===== Request DTOs =====
+
+
+class MetadataDTO(BaseModel):
+    task_id: str = Field(..., description="任务ID")
+    title: str = Field("", description="任务标题")
+    instruction: str = Field("", description="核心执行指令(Prompt)")
+
+
+class ContextDTO(BaseModel):
+    background: str = Field("", description="任务背景信息")
+    extend_props: dict[str, Any] = Field(default_factory=dict, description="上下文扩展属性")
+
+
+class AcceptanceCriteriaDTO(BaseModel):
+    id: str = Field(..., description="验收标准唯一标识")
+    description: str = Field("", description="验收标准具体描述")
+
+
+class GoalDTO(BaseModel):
+    objective: str = Field("", description="任务目标描述")
+    acceptances: list[AcceptanceCriteriaDTO] = Field(default_factory=list, description="验收标准列表")
+
+
+class TaskSpecDTO(BaseModel):
+    metadata: MetadataDTO
+    context: ContextDTO = Field(default_factory=ContextDTO)
+    goal: GoalDTO = Field(default_factory=GoalDTO)
+
+
+class TaskInfoDTO(BaseModel):
+    """POST /api/task/execute 请求体。"""
+    task_spec: TaskSpecDTO
+    source_channel_type: str = Field("bot", description="任务来源渠道: bot / coop_group")
+    source_channel_id: str = Field(..., description="来源ID: bot_id / 协作群id")
+    execution_config: dict[str, Any] = Field(default_factory=dict, description="执行配置(MAX_DEPTH/BBS_MAX_DEPTH/bot/workflow 等)")
+
+
+class TaskCallbackDataDTO(BaseModel):
+    """POST /api/task/callback/report 请求体(执行实体回投)。"""
+    loop_task_id: str = Field(..., description="回投标识 f'{task_id}::{node_id}'")
+    workflow_type: str = Field("single_bot", description="执行模态 single_bot / bcn_coop_group")
+    workflow_id: int = Field(0, description="workflow id(占位)")
+    instance_id: int = Field(0, description="instance id(占位)")
+    result: dict[str, Any] = Field(
+        default_factory=dict,
+        description="回投结果 {success: bool, data?: any, fail_detail?: str}",
+    )
+
+
+# ===== Response DTOs =====
+
+
+class TaskOpResultDTO(BaseModel):
+    task_id: str
+    success: bool
+    run_id: int = Field(0, description="图运行实例ID")
+    message: str | None = None
+
+
+class AcceptanceResultDTO(BaseModel):
+    verdict: str = Field(..., description="PASS / FAIL")
+    acceptances_metric: list[str] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+
+
+class RuntimeInfoDTO(BaseModel):
+    run_mode: str | None = None
+    assignee: str | None = None
+    start_time: float | None = None
+    end_time: float | None = None
+    output: dict[str, Any] = Field(default_factory=dict)
+    acceptance_result: AcceptanceResultDTO | None = None
+    extend_props: dict[str, Any] = Field(default_factory=dict)
+
+
+class TaskNodeDTO(BaseModel):
+    node_id: str
+    task_id: str
+    status: str
+    task_spec: TaskSpecDTO
+    run_info: RuntimeInfoDTO = Field(default_factory=RuntimeInfoDTO)
+
+
+class TaskExecutionGraphDTO(BaseModel):
+    run_id: int
+    loop_round: int
+    status: str
+    output: dict[str, Any] = Field(default_factory=dict)
+    tasks: list[TaskNodeDTO] = Field(default_factory=list)
+    extend_props: dict[str, Any] = Field(default_factory=dict)
+
+
+# ===== DTO <-> domain conversion(Rule 22:adapter 唯一写/读翻译位) =====
+
+
+def task_info_from_dto(dto: TaskInfoDTO):
+    from agentclaw.community.core.task.domain.models import (
+        AcceptanceCriteria, Context, Goal, Metadata, TaskInfo, TaskSpec,
+    )
+    return TaskInfo(
+        task_spec=TaskSpec(
+            metadata=Metadata(task_id=dto.task_spec.metadata.task_id,
+                              title=dto.task_spec.metadata.title,
+                              instruction=dto.task_spec.metadata.instruction),
+            context=Context(background=dto.task_spec.context.background,
+                            extend_props=dict(dto.task_spec.context.extend_props)),
+            goal=Goal(objective=dto.task_spec.goal.objective,
+                      acceptances=[AcceptanceCriteria(id=a.id, description=a.description)
+                                   for a in dto.task_spec.goal.acceptances]),
+        ),
+        source_channel_type=dto.source_channel_type,
+        source_channel_id=dto.source_channel_id,
+        execution_config=dict(dto.execution_config),
+    )
+
+
+def callback_from_dto(dto: TaskCallbackDataDTO):
+    from agentclaw.community.core.task.domain.models import TaskCallbackData
+    return TaskCallbackData(
+        loop_task_id=dto.loop_task_id,
+        workflow_type=dto.workflow_type,
+        workflow_id=dto.workflow_id,
+        instance_id=dto.instance_id,
+        result=dict(dto.result),
+    )
+
+
+def graph_to_dto(graph) -> TaskExecutionGraphDTO:
+    nodes: list[TaskNodeDTO] = []
+    for n in graph.tasks:
+        ar = n.run_info.acceptance_result
+        ar_dto = (AcceptanceResultDTO(verdict=ar.verdict.value,
+                                      acceptances_metric=list(ar.acceptances_metric),
+                                      gaps=list(ar.gaps))
+                  if ar is not None else None)
+        nodes.append(TaskNodeDTO(
+            node_id=n.node_id, task_id=n.task_id, status=n.status.value,
+            task_spec=TaskSpecDTO(
+                metadata=MetadataDTO(task_id=n.task_spec.metadata.task_id,
+                                     title=n.task_spec.metadata.title,
+                                     instruction=n.task_spec.metadata.instruction),
+                context=ContextDTO(background=n.task_spec.context.background,
+                                   extend_props=dict(n.task_spec.context.extend_props)),
+                goal=GoalDTO(objective=n.task_spec.goal.objective,
+                             acceptances=[AcceptanceCriteriaDTO(id=a.id, description=a.description)
+                                          for a in n.task_spec.goal.acceptances]),
+            ),
+            run_info=RuntimeInfoDTO(run_mode=n.run_info.run_mode,
+                                    assignee=n.run_info.assignee,
+                                    start_time=n.run_info.start_time,
+                                    end_time=n.run_info.end_time,
+                                    output=dict(n.run_info.output),
+                                    acceptance_result=ar_dto,
+                                    extend_props=dict(n.run_info.extend_props)),
+        ))
+    return TaskExecutionGraphDTO(
+        run_id=graph.run_id, loop_round=graph.loop_round, status=graph.status.value,
+        output=dict(graph.output), tasks=nodes, extend_props=dict(graph.extend_props),
+    )
+
+
+def op_result_to_dto(result) -> TaskOpResultDTO:
+    return TaskOpResultDTO(task_id=result.task_id, success=result.success, run_id=result.run_id,
+                           message=getattr(result, "message", None))

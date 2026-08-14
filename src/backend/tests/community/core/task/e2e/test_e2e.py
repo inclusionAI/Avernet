@@ -267,7 +267,8 @@ class _CaseTaskService(TaskService):
         self._cr = runner
         super().__init__(graph, harness=harness)
 
-    def _build_engine(self) -> ExecutionEngine:
+    def _build_engine(self, *, bot=None, bcs=None, discover=None) -> ExecutionEngine:
+        # case 测试覆写:注入 stub 策略/投递的 _CaseEngine(忽略传入端口)
         return _CaseEngine(self._graph, self._cd, self._cbd, self._cr)
 
 

@@ -78,11 +78,6 @@ _SESSION_RESOURCES_EXEMPT_REASON = (
     "the unpublished BaaS pull contract remains fail-closed and this change "
     "covers the module with core and HTTP API tests."
 )
-_TASK_EXEMPT_REASON = (
-    "Goal-driven task execution (SDD 2026-07-28): backend loop + 副屏 canvas "
-    "covered by unit/integration tests; real engine/BCS dispatch + e2e flow "
-    "blocked on cross-module deps R6/B5 (TODO)."
-)
 
 _TASK_FRAMEWORK_EXEMPT_REASON = (
     "Task goal-driven execution framework skeleton (core/task). No HTTP/router or DI surface is wired yet (no adapters/http/task/, no di/modules/task_module.py), so there is no endpoint for an e2e flow to drive. Covered by domain/unit tests on the graph, planner, dispatcher, runner, and harness as each lands. Drain this when a router + DI provider expose the TaskService facade over a real singlebox stack."
@@ -189,7 +184,6 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     ),
     "storage": _EXEMPT_REASON,
     "system_config": _EXEMPT_REASON,
-    "task": _TASK_EXEMPT_REASON,
     "task_queue": _TASK_QUEUE_EXEMPT_REASON,
     "utils": _EXEMPT_REASON,
     "workspace": _EXEMPT_REASON,

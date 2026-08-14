@@ -1,7 +1,7 @@
 """TaskDispatcher 派发编排壳(零 case 知识)+ 内置策略库(first-match-wins)。
 
-对齐 plan.md §3.3 + §3.4。零参构造(持 graph 只读 config),内置默认策略池
-[DirectDispatchStrategy, SearchBasedDispatchStrategy];``set_strategies`` 非公开。
+对齐 plan.md §3.3 + §3.4。构造期注入策略池(``pool=``),内置默认
+[DirectDispatchStrategy, SearchBasedDispatchStrategy];``set_strategies`` 仅供测试覆写。
 不持 runner(HIT_MULTI_BOTS 拉群归编排核+runner);不写图、不起 run。
 """
 from __future__ import annotations
@@ -23,16 +23,17 @@ class TaskDispatcher:
     (拉群归编排核调 runner.form_coop_group 后填 assignee)。
     """
 
-    def __init__(self, graph) -> None:
-        """graph: TaskGraphService(读图级 execution_config 匹配策略用,不写)。"""
+    def __init__(self, graph, *, pool: list[DispatchStrategy] | None = None) -> None:
+        """graph: TaskGraphService(读图级 execution_config 匹配策略用,不写);
+        pool: 策略池(构造期注入;省略=内置默认 [DirectDispatch, SearchBased])。"""
         self._graph = graph
-        self._strategies: list[DispatchStrategy] = [
+        self._strategies: list[DispatchStrategy] = list(pool) if pool is not None else [
             DirectDispatchStrategy(),
             SearchBasedDispatchStrategy(),
         ]
 
     def set_strategies(self, strategies: list[DispatchStrategy]) -> None:
-        """(非公开)替换策略池。engine ``_build_dispatcher`` 工厂方法/corp 子类注入用。"""
+        """(测试覆写用)替换策略池。prod 经构造器 ``pool=`` 注入。"""
         self._strategies = list(strategies)
 
     async def dispatch(self, toDoTaskList: list[TaskNode]) -> list[TaskNode]:

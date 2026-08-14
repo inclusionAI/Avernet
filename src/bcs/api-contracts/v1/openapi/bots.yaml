@@ -2,19 +2,23 @@ BotCandidatesPath:
   get:
     operationId: list_bot_candidates
     tags: ["Collaboration / Bots"]
-    summary: List candidate physical Bots from a managed Bot's perspective.
+    summary: >-
+      List candidate physical Bots from a managed Bot's perspective (including Human Actor).
     description: >-
-      Human control-plane operation. The path bot_id must identify a physical
-      Bot managed by the current Human. Results stay in that Bot's environment,
-      exclude the acting Bot, Humans, deleted rows, and unonboarded rows. An
-      empty or whitespace-only name is treated as absent; otherwise matching is
-      a trimmed case-insensitive substring. Status and reachability do not
-      remove candidates.
+      Human control-plane operation. The path bot_id must identify either a
+      physical Bot managed by the current Human or that Human's own Human Actor,
+      identified as human_{subject.id}. Results remain physical Bots, stay in
+      the selected Bot record's environment, and exclude the selected Bot,
+      Humans, deleted rows, and unonboarded rows. An empty or whitespace-only
+      name is treated as absent; otherwise matching is a trimmed case-insensitive
+      substring. Status and reachability do not remove candidates.
     x-avernet-security:
       user: required
       app: required
     x-avernet-behavior:
-      acting_bot: managed_physical_bot
+      acting_bot:
+        - managed_physical_bot
+        - current_human_actor
       result_kind: bot
       environment: same_as_acting_bot
       exclude_self: true
@@ -71,10 +75,9 @@ BotCandidatesPath:
             schema:
               $ref: ../domain-models.yaml#/BotCandidatePageEnvelope
       "400":
-        description: Invalid filter or the acting identity is not a physical Bot.
+        description: Invalid candidate filter.
         x-error-codes:
           - invalid_request
-          - invalid_bot_kind
         content:
           application/json:
             schema:
@@ -88,7 +91,9 @@ BotCandidatesPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: Current Human does not manage the acting physical Bot.
+        description: >-
+          Current Human does not manage the selected physical Bot, or the
+          selected Human Actor does not represent the current Human.
         x-error-codes:
           - forbidden
         content:

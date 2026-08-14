@@ -1,9 +1,11 @@
 """ExecutionEngine 内部编排核(事件驱动 + 状态条件触发)。对齐 plan.md §3.0。
 
-非独立模块,TaskService 内部实现细节,对外不暴露。零参构造,自建 planner/dispatcher/runner
-(内置策略池 + stub 投递);corp 子类覆写 ``_build_*`` 工厂方法注入真实策略/投递后端(ocb 仓)。
-验收 100% 走 on_report 回投(engine 不主动验,无 OwnerBotVerifyPort);BBS 投递归 runner BBS 模态
-(无 BbsMarketPort,升 BBS 只翻图态 bbs_mode)。零 case 知识:engine 不含任何节点名字面量。
+非独立模块,TaskService 内部实现细节,对外不暴露。构造期收传输端口(bot/bcs/discover,由 DI 从配置注入),
+``_build_*`` 内部 new 引擎自带策略(TaskPlanner/TaskDispatcher/TaskRunner)+ 接线 TaskExecutor(三模态投递+poller)。
+引擎自身实现 ResultSink(poller 终态回投直接调 on_report)与 TaskContextBuilder(执行上下文派生),
+消除"先建 stub 再外部注入真实 body/接线点"的后填,无引擎子类化、无 reach-in setter。验收 100% 走 on_report
+回投(gap 计算即验收,无主动 verify dispatch);BBS 投递归 runner BBS 模态(无 BbsMarketPort,升 BBS 只翻图态 bbs_mode)。
+零 case 知识:engine 不含任何节点名字面量。测试可经 facade/engine 子类覆写 ``_build_*`` 注入 stub 策略/投递(测试 seam)。
 
 协程化(CR 反馈:任务执行是耗时任务):全链路 ``async def``。``plan``/``dispatch``(corp 为 LLM/catalog 耗时 IO)
 亦 ``async``,在 per-task ``threading.RLock`` 锁内 await(同 task 串行推进的 IO,设计意图;不同 task 锁隔离不互阻塞)。
@@ -22,6 +24,7 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
     NodeOpResult,
     Status,
+    TaskCallbackData,
     TaskGraphPatch,
     TaskNode,
     TaskNodePatch,
@@ -32,31 +35,115 @@ from agentclaw.community.core.task.domain.models import (
 class ExecutionEngine:
     """事件驱动 + 状态条件触发协调 plan/graph/dispatch/execution(协程化,全链路 async)。
 
-    零参构造:``_build_planner/dispatcher/runner`` 工厂方法自建。on_* 入参统一收口 TaskNodePatch。
-    按事件 + 状态条件(a/b/c + plan 三条件)分段协调。同 task_id 串行(per-task RLock,仅保护锁内同步
-    编排写);跨 task 并行。投递/拉群 IO 锁外 await,gather+Semaphore 并发。loop_round 仅升 BBS 时 ++。
+    构造期收传输端口(bot/bcs/discover,DI 从配置注入),``_build_*`` 内部 new 引擎自带策略 + 接线 TaskExecutor。
+    引擎自当 ResultSink(poller 终态回投→on_report)与 TaskContextBuilder(执行上下文派生),消除后填/back-reach-in。
+    on_* 入参统一收口 TaskNodePatch。按事件 + 状态条件(a/b/c + plan 三条件)分段协调。同 task_id 串行
+    (per-task RLock,仅保护锁内同步编排写);跨 task 并行。投递/拉群 IO 锁外 await,gather+Semaphore 并发。
+    loop_round 仅升 BBS 时 ++。测试可经 facade/engine 子类覆写 ``_build_*`` 注入 stub 策略/投递(测试 seam)。
     """
 
-    def __init__(self, graph) -> None:
+    def __init__(self, graph, *, bot=None, bcs=None, discover=None) -> None:
+        """graph: TaskGraphService;bot: OpenApiBotPort;bcs: BcsClientPort;discover: BotDiscoverServiceProtocol。
+        端口由 DI 从配置注入(local/prod/double 只换端口实现,引擎代码不变)。prod 必传;测试子类覆写
+        ``_build_*`` 注入 stub 策略/投递时可省略(走 super 路径默认 berth)。"""
         self._graph = graph
+        self._bot = bot
+        self._bcs = bcs
+        self._discover = discover
+        self._locks: dict[str, threading.RLock] = {}
+        self._locks_guard = threading.RLock()
+        # 回投适配:执行主体(经 poller 翻译终态/经 HTTP push)→ TaskCallbackData → TaskNodePatch → on_report
+        from agentclaw.community.core.task.task_runner.callback_adapter import CallbackAdapter
+        self._cb_adapter = CallbackAdapter()
+        # TaskExecutor 接线(三模态投递+poller);poller sink = engine 自当(实现 report_result),
+        # 执行上下文 = engine 自当(实现 build),消除"先建 stub 再接线"的后填。端口 None 时退化为默认 TaskRunner。
+        self._poller_thread = None
+        self._executor = self._build_executor()
         self._planner = self._build_planner()
         self._dispatcher = self._build_dispatcher()
         self._runner = self._build_runner()
-        self._locks: dict[str, threading.RLock] = {}
-        self._locks_guard = threading.RLock()
 
-    # ===== protected 工厂方法(corp 覆写 seam;Avernet 默认内置 stub)=====
+    # ===== protected 工厂方法(测试子类可覆写注入 stub 策略/投递;引擎自带默认接真实端口)=====
+    def _build_executor(self):
+        """构造 TaskExecutor(三模态投递+poller);poller sink=engine 自当,context builder=engine 自当。
+        端口 None(纯内核单测/stub 路径)→ 返回 None,runner 退化为默认 TaskRunner(stub 投递)。"""
+        if self._bot is None or self._bcs is None:
+            return None
+        from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
+        from agentclaw.community.core.task.task_runner.integration.task_executor_result_poller import (
+            TaskExecutorResultPoller,
+        )
+        from agentclaw.community.core.task.task_runner.integration.prompt_formatter import (
+            PromptFormatterImpl,
+        )
+        poller = TaskExecutorResultPoller(bot=self._bot, bcs=self._bcs)
+        poller.set_on_result(self)  # engine 实现 report_result(poller 终态回投直接调 on_report)
+        exe = TaskExecutor(
+            bot=self._bot, bcs=self._bcs, formatter=PromptFormatterImpl(),
+            context=self, sink=self, poller=poller,
+        )
+        # poller daemon 线程:异步回收 single_bot run / coop_group session / state_machine run,
+        # 终态 → 翻译 → report_result → on_report(与外部 HTTP push 回投收敛同一入口)。
+        # 同 build_integration(poller_thread=True) 语义;engine 自当 sink 时线程随 engine 生命周期(daemon)。
+        import threading as _t
+        self._poller_thread = _t.Thread(target=poller.run_poll_loop, daemon=True, name="task-exec-poller")
+        self._poller_thread.start()
+        return exe
+
     def _build_planner(self):
         from agentclaw.community.core.task.task_plan.planner import TaskPlanner
-        return TaskPlanner(self._graph)
+        from agentclaw.community.core.task.task_plan.strategies import (
+            GapBasedPlanningStrategy, WorkflowPlanningStrategy,
+        )
+        pool = [WorkflowPlanningStrategy()]
+        if self._bot is not None:
+            pool.append(GapBasedPlanningStrategy(self._bot))
+        else:
+            pool.append(GapBasedPlanningStrategy())  # stub 路径(无端口;测试可覆写)
+        return TaskPlanner(self._graph, pool=pool)
 
     def _build_dispatcher(self):
         from agentclaw.community.core.task.task_dispatch.dispatcher import TaskDispatcher
-        return TaskDispatcher(self._graph)
+        from agentclaw.community.core.task.task_dispatch.strategies import (
+            DirectDispatchStrategy, SearchBasedDispatchStrategy,
+        )
+        pool = [DirectDispatchStrategy()]
+        if self._bot is not None and self._discover is not None:
+            pool.append(SearchBasedDispatchStrategy(self._bot, self._discover))
+        else:
+            pool.append(SearchBasedDispatchStrategy())  # stub 路径(无端口;测试可覆写)
+        return TaskDispatcher(self._graph, pool=pool)
 
     def _build_runner(self):
         from agentclaw.community.core.task.task_runner.runner import TaskRunner
-        return TaskRunner(self._graph)
+        return TaskRunner(self._graph, execution_backend=self._executor)
+
+    # ===== ResultSink impl:poller 终态回投直接调 on_report(内部回投路径,绕过 HTTP)=====
+    async def report_result(self, data: "TaskCallbackData") -> None:
+        """引擎自当 ResultSink:TaskExecutorResultPoller 终态→TaskCallbackData→TaskNodePatch→on_report。
+        与外部 HTTP push 回投(TaskLoopCallback.report_result→on_report)收敛同一入口。"""
+        patch = self._cb_adapter.adapt(data)
+        await self.on_report(patch)
+
+    # ===== TaskContextBuilder impl:engine 自当执行上下文派生(消除 _RunnerContextBuilder 自循环)=====
+    def build(self, task_id: str, node_id: str) -> dict:
+        """引擎自当 TaskContextBuilder:派生 execute 模式上下文(叶子/聚合均 execute;gap 计算即验收,
+        无 verify 模式 dispatch)。siblings_outputs 取本节点的兄弟(DONE 的 run_info.output);
+        无结构父→根,无兄弟产出。"""
+        graph = self._graph.query_task_dashboard(task_id)
+        node = next((n for n in graph.tasks if n.node_id == node_id), None)
+        parent = self._graph.get_parent_task(task_id, node_id)
+        if parent is None:
+            return {"mode": "execute", "parent_node_id": None, "parent_spec": None,
+                    "sibling_outputs": {}, "node_spec": node.task_spec if node else None}
+        siblings = self._graph.get_child_tasks(task_id, parent.node_id)
+        sibling_outputs = {
+            s.node_id: s.run_info.output
+            for s in siblings if s.status == Status.DONE and s.node_id != node_id
+        }
+        return {"mode": "execute", "parent_node_id": parent.node_id,
+                "parent_spec": parent.task_spec, "sibling_outputs": sibling_outputs,
+                "node_spec": node.task_spec if node else None}
 
     def _lock_for(self, task_id: str) -> threading.RLock:
         with self._locks_guard:
@@ -122,17 +209,18 @@ class ExecutionEngine:
             return  # 兄弟未齐,等待
         if any(s.status == Status.RUNNING for s in siblings):
             return  # 仍有 RUNNING,等待
-        # 本批兄弟全 DONE → 委托 plan
+        # 本批兄弟全 DONE → 委托 plan(gap 计算;返 children=gap 未闭继续拆,返 []=gap 闭=验收通过)
         graph = self._graph.query_task_dashboard(task_id)
         new_children = await self._planner.plan(graph)
         if new_children:
             self._graph.add_task_nodes(new_children, parent.node_id)
             await self._prepare_into(task_id, side)
         else:
-            # decompose 返 [](gap 闭)→ 非根传播 DONE / 根保持 PLANNING 等回投
+            # decompose 返 [](gap 闭=验收通过)→ DONE 上行传播;根 gap 闭→图完成(终验即根 gap 闭)
             root = self._root(task_id)
             if parent.node_id == (root.node_id if root else None):
-                return  # 根:保持 PLANNING 等 owner bot 终验回投(engine 不主动验)
+                side.append(("finish", task_id))  # 根 gap 闭=终验通过→图 DONE
+                return
             self._graph.update_task_node_info(
                 TaskNodePatch(task_id=task_id, node_id=parent.node_id, status=Status.DONE)
             )

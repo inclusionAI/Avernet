@@ -64,11 +64,13 @@ for local and test behavior.
 
 ### Candidates
 
-The acting path Bot must exist, be physical, and have
-`created_by == current subject.id`. The query uses the acting Bot's persisted
-environment, excludes self/Humans/deleted rows, and applies the approved
-purpose visibility rules. Friendship is read from the existing Friend core.
-Ordering and pagination happen after all filters.
+The acting path Bot must exist and identify either a physical Bot with
+`created_by == current subject.id` or that Human's own
+`human_{subject.id}` record (including Human Actor). The query uses the selected
+Bot record's persisted environment, excludes self/Humans/deleted rows, and
+applies the same approved purpose visibility rules for both perspectives.
+Friendship is read from the existing Friend core. Results remain physical Bots,
+and ordering and pagination happen after all filters.
 
 ### Query and Exact Read
 

@@ -120,7 +120,10 @@ class TaskExecutor:
                 {"bot_uuid": b, "role": "worker"} for b in bot_ids if b != mgr]
         elif mode == "state_machine":
             req_kwargs["group_strategy"] = "state_machine"
-            req_kwargs["collaboration_definition_yaml"] = gf.extend_props["collaboration_definition_yaml"]
+            # GroupFormation.extend_props["definition_yaml"] → BCS collaboration_definition_yaml
+            def_yaml = gf.extend_props.get("definition_yaml") or gf.extend_props.get("collaboration_definition_yaml")
+            if def_yaml is not None:
+                req_kwargs["collaboration_definition_yaml"] = def_yaml
             req_kwargs["participant_bindings"] = {b: {"source": "manual", "bot_ids": [b]} for b in bot_ids}
             req_kwargs["start_initial_run"] = False
         service_spec = gf.extend_props.get("service_spec")

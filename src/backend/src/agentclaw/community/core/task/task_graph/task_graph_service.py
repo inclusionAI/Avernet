@@ -135,6 +135,8 @@ class TaskGraphService:
             )
             root.node_run_graph = graph  # 回填循环引用(in-memory)
             graph.extend_props["execution_config"] = dict(task_info.execution_config)
+            graph.extend_props["source_channel_type"] = task_info.source_channel_type
+            graph.extend_props["source_channel_id"] = task_info.source_channel_id
             self._graphs[task_id] = graph
             return graph
 

@@ -117,6 +117,7 @@ from agentclaw.community.adapters.http.skills_pool import router as skills_pool_
 from agentclaw.community.adapters.http.beta_quota.router import router as beta_quota_router  # noqa: E402
 from agentclaw.community.adapters.http.channel.router import router as channel_router  # noqa: E402
 from agentclaw.community.adapters.http.quality.router import router as quality_router  # noqa: E402
+from agentclaw.community.adapters.http.task.router import router as task_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_render_screen.router import router as render_screen_router  # noqa: E402
 from agentclaw.community.adapters.http.antprocess import router as antprocess_router  # noqa: E402
 from agentclaw.community.adapters.http.antcode.router import router as antcode_router  # noqa: E402
@@ -452,10 +453,6 @@ async def _domain_error_handler(request: Request, exc: DomainError) -> JSONRespo
     )
 
 
-
-
-
-
 @app.exception_handler(StarletteHTTPException)
 async def _http_exception_handler(
     request: Request, exc: StarletteHTTPException,
@@ -766,6 +763,7 @@ app.include_router(skills_pool_ops_router)
 app.include_router(beta_quota_router)
 app.include_router(channel_router)
 app.include_router(quality_router)
+app.include_router(task_router)
 try:
     app.include_router(render_screen_router)
     logger.info("[RenderScreen] Router registered successfully: prefix=%s", render_screen_router.prefix)
@@ -835,22 +833,3 @@ for _r in injector.get(OptionalRouters).routers:
 # adapters/http/openapi_v1). Handlers are stubs until the implementation lands.
 from agentclaw.community.adapters.http.openapi_v1 import build_public_router  # noqa: E402
 app.include_router(build_public_router())
-
-# 4. Static assets — serve open-source side-panel UMD bundles (and other
-# backend-owned assets) so the frontend can load them via the generic UmdPanel
-# without any frontend-code change. The task-recognition skill emits an
-# ``<AixUI type="panel" component="taskPanel.TaskWorkflowView" cdn=".../assets/..."
-# entry="TaskWorkflowView" .../>`` tag; the SDK routes the cdn URL here.
-# Guarded so a checkout without the built dist (or without the assets dir) does
-# not crash boot — the panel simply 404s until ``npm run build`` lands dist/.
-from pathlib import Path as _AssetsPath  # noqa: E402
-
-_assets_root = _AssetsPath(__file__).resolve().parents[5] / "assets"
-if _assets_root.is_dir():
-    from fastapi.staticfiles import StaticFiles  # noqa: E402
-
-    app.mount(
-        "/assets",
-        StaticFiles(directory=str(_assets_root), check_dir=False),
-        name="backend-assets",
-    )
