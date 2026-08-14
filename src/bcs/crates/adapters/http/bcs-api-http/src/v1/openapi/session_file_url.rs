@@ -18,11 +18,14 @@ impl SessionFileUrlProjector {
 
     fn route_url(&self, segments: &[&str]) -> Url {
         let mut url = self.public_base.clone();
+        url.set_path("");
         {
             let mut path = url
                 .path_segments_mut()
                 .expect("validated HTTP(S) URL supports path segments");
-            path.pop_if_empty();
+            path.push("api");
+            path.push("v1");
+            path.push("collaboration");
             for segment in segments {
                 path.push(segment);
             }

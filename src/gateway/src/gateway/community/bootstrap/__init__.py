@@ -61,6 +61,20 @@ class BootstrapResult:
             description=description,
         )
 
+    def served_internal_openapi(
+        self,
+        *,
+        title: str,
+        version: str,
+        description: str = "",
+    ) -> dict[str, object]:
+        """Return the served OpenAPI document for configured internal APIs."""
+        return self.forwarding.served_internal_openapi(
+            title=title,
+            version=version,
+            description=description,
+        )
+
     def shutdown(self) -> None:
         import asyncio
 

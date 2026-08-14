@@ -14,11 +14,11 @@ fn constructs_encoded_protected_and_shared_content_urls() {
 
     assert_eq!(
         projector.content_url("group/a session", "file-1"),
-        "https://gateway.example.com/openapi/v1/collaboration/sessions/group%2Fa%20session/files/file-1/content"
+        "https://gateway.example.com/api/v1/collaboration/sessions/group%2Fa%20session/files/file-1/content"
     );
     assert_eq!(
         projector.shared_content_url("token/with+symbols="),
-        "https://gateway.example.com/openapi/v1/collaboration/sessions/shared-file/content?token=token%2Fwith%2Bsymbols%3D"
+        "https://gateway.example.com/api/v1/collaboration/sessions/shared-file/content?token=token%2Fwith%2Bsymbols%3D"
     );
 }
 
@@ -35,7 +35,7 @@ fn projects_only_proxy_single_upload_targets() {
     let projected = projector.project_upload_target(target.clone(), true, "s", "f");
     assert_eq!(
         projected["upload_url"],
-        "https://gateway.example.com/openapi/v1/collaboration/sessions/s/files/f/content"
+        "https://gateway.example.com/api/v1/collaboration/sessions/s/files/f/content"
     );
     assert_eq!(
         projector.project_upload_target(target.clone(), false, "s", "f"),
@@ -61,10 +61,10 @@ fn projects_each_proxy_multipart_part_from_its_server_part_number() {
 
     assert_eq!(
         projected["parts"][0]["upload_url"],
-        "https://gateway.example.com/openapi/v1/collaboration/sessions/s/files/f/content?part=1"
+        "https://gateway.example.com/api/v1/collaboration/sessions/s/files/f/content?part=1"
     );
     assert_eq!(
         projected["parts"][1]["upload_url"],
-        "https://gateway.example.com/openapi/v1/collaboration/sessions/s/files/f/content?part=2"
+        "https://gateway.example.com/api/v1/collaboration/sessions/s/files/f/content?part=2"
     );
 }

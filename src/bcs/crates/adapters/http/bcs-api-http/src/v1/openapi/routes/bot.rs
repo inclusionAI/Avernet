@@ -7,59 +7,20 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use bcs_service_api::application::v1::{
-    ApplicationError, AuthenticatedCaller, BotList, BotService, GetBot, ListBotCandidates,
-    ListMyBots, QueryBots, SearchBotCandidates, UpdateBot,
+    ApplicationError, AuthenticatedCaller, BotList, BotService, GetBot, ListMyBots, QueryBots,
+    UpdateBot,
 };
 
 use crate::v1::common::{
     ApiState, Envelope, ErrorResponse, RequestId, application_error_response, invalid_request,
 };
-use crate::v1::openapi::dto::bot::{
-    ListBotCandidatesQuery, ListMyBotsQuery, QueryBotsRequest, SearchBotCandidatesQuery,
-    UpdateBotRequest,
-};
+use crate::v1::openapi::dto::bot::{ListMyBotsQuery, QueryBotsRequest, UpdateBotRequest};
 
 pub fn router() -> Router<ApiState> {
     Router::new()
-        .route(
-            "/bots/{bot_id}/candidates",
-            get(list_candidates),
-        )
-        .route(
-            "/bots/{bot_id}/candidates/search",
-            get(search_candidates),
-        )
         .route("/bots/query", post(query_bots))
         .route("/bots/mine", get(list_mine))
-        .route(
-            "/bots/{bot_id}",
-            get(get_bot).patch(update_bot),
-        )
-}
-
-async fn search_candidates(
-    State(state): State<ApiState>,
-    Extension(caller): Extension<AuthenticatedCaller>,
-    Extension(request_id): Extension<RequestId>,
-    path: Result<Path<String>, PathRejection>,
-    query: Result<Query<SearchBotCandidatesQuery>, QueryRejection>,
-) -> Result<Response, ErrorResponse> {
-    let Path(bot_id) = path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
-    let Query(query) = query.map_err(|error| invalid_request(&request_id, error.body_text()))?;
-    let result = service(&state, &request_id)?
-        .search_candidates(SearchBotCandidates {
-            caller,
-            bot_id,
-            purpose: query.purpose.into(),
-            query: query.q,
-        })
-        .await
-        .map_err(|error| application_error_response(&request_id, error))?;
-    Ok((
-        StatusCode::OK,
-        Json(Envelope::success(20_000, "OK", result, request_id.0)),
-    )
-        .into_response())
+        .route("/bots/{bot_id}", get(get_bot).patch(update_bot))
 }
 
 fn service(state: &ApiState, request_id: &RequestId) -> Result<Arc<dyn BotService>, ErrorResponse> {
@@ -69,33 +30,6 @@ fn service(state: &ApiState, request_id: &RequestId) -> Result<Arc<dyn BotServic
             ApplicationError::internal("Bot V1 service is not configured"),
         )
     })
-}
-
-async fn list_candidates(
-    State(state): State<ApiState>,
-    Extension(caller): Extension<AuthenticatedCaller>,
-    Extension(request_id): Extension<RequestId>,
-    path: Result<Path<String>, PathRejection>,
-    query: Result<Query<ListBotCandidatesQuery>, QueryRejection>,
-) -> Result<Response, ErrorResponse> {
-    let Path(bot_id) = path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
-    let Query(query) = query.map_err(|error| invalid_request(&request_id, error.body_text()))?;
-    let result = service(&state, &request_id)?
-        .list_candidates(ListBotCandidates {
-            caller,
-            bot_id,
-            purpose: query.purpose.into(),
-            name: query.name,
-            offset: query.offset,
-            limit: query.limit,
-        })
-        .await
-        .map_err(|error| application_error_response(&request_id, error))?;
-    Ok((
-        StatusCode::OK,
-        Json(Envelope::success(20_000, "OK", result, request_id.0)),
-    )
-        .into_response())
 }
 
 async fn query_bots(

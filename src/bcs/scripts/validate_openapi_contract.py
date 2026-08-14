@@ -101,8 +101,8 @@ def _resolve(
     }
 
 
-def load_contract(root: Path) -> dict[str, Any]:
-    entrypoint = root / "openapi.yaml"
+def load_contract(root: Path, entrypoint: str = "openapi.yaml") -> dict[str, Any]:
+    entrypoint = root / entrypoint
     cache: dict[Path, Any] = {}
     document = _read_yaml(entrypoint, cache)
     resolved = _resolve(document, current_file=entrypoint, cache=cache)
@@ -127,16 +127,22 @@ def _response_schema(response: dict[str, Any]) -> dict[str, Any] | None:
     return schema if isinstance(schema, dict) else None
 
 
-def validate_contract(contract: dict[str, Any]) -> list[str]:
+def validate_contract(
+    contract: dict[str, Any],
+    *,
+    path_prefix: str = "/openapi/v1/",
+    forbidden_prefixes: tuple[str, ...] = ("/openapi/v1/internal/",),
+) -> list[str]:
     errors: list[str] = []
     operation_ids: set[str] = set()
 
     for method, path, operation in _iter_operations(contract):
         location = f"{method.upper()} {path}"
-        if not path.startswith("/openapi/v1/"):
-            errors.append(f"{location}: path is outside /openapi/v1/**")
-        if path.startswith("/openapi/v1/internal/"):
-            errors.append(f"{location}: Internal API is not in the first batch")
+        if not path.startswith(path_prefix):
+            errors.append(f"{location}: path is outside {path_prefix}**")
+        for forbidden_prefix in forbidden_prefixes:
+            if forbidden_prefix and path.startswith(forbidden_prefix):
+                errors.append(f"{location}: path uses forbidden prefix {forbidden_prefix}")
 
         operation_id = operation.get("operationId")
         if not operation_id:
@@ -191,22 +197,29 @@ def validate_contract(contract: dict[str, Any]) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--entrypoint", default="openapi.yaml")
+    parser.add_argument("--path-prefix", default="/openapi/v1/")
+    parser.add_argument("--forbid-prefix", action="append", default=[])
     args = parser.parse_args()
 
     try:
-        contract = load_contract(args.root)
+        contract = load_contract(args.root, entrypoint=args.entrypoint)
     except (OSError, ValueError, yaml.YAMLError) as error:
         print(f"OpenAPI contract load failed: {error}")
         return 1
 
-    errors = validate_contract(contract)
+    errors = validate_contract(
+        contract,
+        path_prefix=args.path_prefix,
+        forbidden_prefixes=tuple(args.forbid_prefix),
+    )
     if errors:
         for error in errors:
             print(error)
         return 1
 
     operation_count = sum(1 for _ in _iter_operations(contract))
-    print(f"{operation_count} operations validated")
+    print(f"{operation_count} operations validated for {args.entrypoint}")
     return 0
 
 

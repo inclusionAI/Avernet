@@ -64,9 +64,20 @@ def _rewrite_discriminator_mappings(
         _rewrite_discriminator_mappings(item, (*path, key))
 
 
-def bundle_contract(root: Path, output_dir: Path) -> Path:
-    contract = load_contract(root)
-    errors = validate_contract(contract)
+def bundle_contract(
+    root: Path,
+    output_dir: Path,
+    *,
+    entrypoint: str = "openapi.yaml",
+    path_prefix: str = "/openapi/v1/",
+    forbidden_prefixes: tuple[str, ...] = ("/openapi/v1/internal/",),
+) -> Path:
+    contract = load_contract(root, entrypoint=entrypoint)
+    errors = validate_contract(
+        contract,
+        path_prefix=path_prefix,
+        forbidden_prefixes=forbidden_prefixes,
+    )
     if errors:
         raise ValueError("\n".join(errors))
     _rewrite_discriminator_mappings(contract)
@@ -83,11 +94,20 @@ def bundle_contract(root: Path, output_dir: Path) -> Path:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--entrypoint", default="openapi.yaml")
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--path-prefix", default="/openapi/v1/")
+    parser.add_argument("--forbid-prefix", action="append", default=[])
     args = parser.parse_args()
 
     try:
-        output = bundle_contract(args.root, args.output_dir)
+        output = bundle_contract(
+            args.root,
+            args.output_dir,
+            entrypoint=args.entrypoint,
+            path_prefix=args.path_prefix,
+            forbidden_prefixes=tuple(args.forbid_prefix),
+        )
     except (OSError, ValueError, yaml.YAMLError) as error:
         print(error)
         return 1
