@@ -787,9 +787,15 @@ impl OrganizationCoreService for OrganizationCore {
             if !matches_query(&record.bot_uuid, &capabilities, &query) {
                 continue;
             }
+            let agent_code = self
+                .registry
+                .get_agent_credentials(&record.bot_uuid)
+                .await
+                .and_then(|credentials| credentials.agent_code);
             candidates.push(OrganizationCandidateBot {
                 bot_uuid: record.bot_uuid,
                 provider_id: record.provider_id,
+                agent_code,
                 capabilities,
             });
         }
@@ -901,9 +907,15 @@ impl OrganizationCoreService for OrganizationCore {
                         None => continue,
                     },
                 };
+                let agent_code = self
+                    .registry
+                    .get_agent_credentials(&record.bot_uuid)
+                    .await
+                    .and_then(|credentials| credentials.agent_code);
                 bots.push(OrganizationCandidateBot {
                     bot_uuid: record.bot_uuid,
                     provider_id: record.provider_id,
+                    agent_code,
                     capabilities,
                 });
             }
