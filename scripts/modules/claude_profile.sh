@@ -69,7 +69,7 @@ if bot["source"] != "platform-data" or bot["profile"] != "platform-data-analyst"
     raise SystemExit("Claude profile must define platform-data analyst")
 
 runtime = bot["runtime"]
-required_runtime = {"type", "relay_port", "claude_config_dir", "workspace", "model", "permission_mode", "system_prompt_md"}
+required_runtime = {"type", "relay_port", "claude_config_dir", "workspace", "permission_mode", "system_prompt_md"}
 if not isinstance(runtime, dict) or set(runtime) != required_runtime:
     raise SystemExit("Claude runtime fields are invalid")
 if runtime["type"] != "claude_code" or runtime["relay_port"] != 18900:
@@ -83,8 +83,6 @@ for field in ("claude_config_dir", "workspace", "system_prompt_md"):
 for field in ("claude_config_dir", "workspace"):
     if not os.path.isabs(os.path.expanduser(runtime[field])):
         raise SystemExit(f"runtime.{field} must resolve to an absolute path")
-if runtime["model"] != "Kimi-K2.6":
-    raise SystemExit("runtime.model must be Kimi-K2.6 for hybrid Claude mode")
 
 prompt_rel = runtime["system_prompt_md"]
 if os.path.isabs(prompt_rel) or ".." in Path(prompt_rel).parts or Path(prompt_rel).suffix.lower() != ".md":
@@ -107,22 +105,26 @@ PY
 }
 
 # Emits unit-separator-delimited source/name/summary/port/config/workspace/model/prompt/permission.
+# The model is resolved from the selected Singlebox runtime configuration, not
+# persisted in the reusable Claude role profile.
 claude_profile_entries() {
-    local manifest
+    local manifest runtime_model
     manifest="$(claude_profile_manifest)" || return 1
-    python3 - "$manifest" <<'PY'
+    runtime_model="${HYBRID_MODEL_ID:-${OPENCLAW_OPENAI_MODEL_ID:-}}"
+    python3 - "$manifest" "$runtime_model" <<'PY'
 import json
 import os
 import sys
 
 with open(sys.argv[1], encoding="utf-8") as stream:
     root = json.load(stream)
+runtime_model = sys.argv[2]
 bot = root["bots"][0]
 runtime = bot["runtime"]
 values = [
     bot["source"], bot["name"], bot["summary"], str(runtime["relay_port"]),
     os.path.expanduser(runtime["claude_config_dir"]), os.path.expanduser(runtime["workspace"]),
-    runtime["model"], os.path.join(os.path.dirname(os.path.abspath(sys.argv[1])), runtime["system_prompt_md"]),
+    runtime_model, os.path.join(os.path.dirname(os.path.abspath(sys.argv[1])), runtime["system_prompt_md"]),
     runtime["permission_mode"],
 ]
 if any("\x1f" in value or "\t" in value or "\n" in value or "\r" in value for value in values):

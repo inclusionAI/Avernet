@@ -1,7 +1,9 @@
 # 平台数据分析 Claude Code Profile
 
-此 profile 用于 `hybrid` 的 Claude Code 数据分析 Bot。模型和认证沿用本机
-Claude 配置；不在该目录保存凭据。`CLAUDE.md` 是受控角色 prompt 的入口。
+此 profile 用于 `hybrid` 的 Claude Code 数据分析 Bot。模型沿用 Singlebox
+本次选择的配置：`manual` 模式读取仓库根目录 `.env.local`，`home` 模式读取
+本机 OpenClaw 配置。Claude Code 的本机认证配置不会写入该目录。
+`CLAUDE.md` 是受控角色 prompt 的入口。
 
 ## 本地启动
 

@@ -35,7 +35,11 @@ bcsfuse_load_env() {
     # Its generated BCSFuse env file may predate that policy, so restore the
     # five SOP model selectors only after that file has been loaded.
     if [ "${HYBRID_CLAUDE_ACTIVE:-${MERCHANT_HYBRID_ACTIVE:-0}}" = "1" ]; then
-        local hybrid_model="${HYBRID_MODEL_ID:-Kimi-K2.6}"
+        local hybrid_model="${HYBRID_MODEL_ID:-${OPENCLAW_OPENAI_MODEL_ID:-}}"
+        if [ -z "$hybrid_model" ]; then
+            log_error "Hybrid model policy has no model resolved from the selected Singlebox configuration"
+            return 1
+        fi
         export LLM_FAST_MODEL="$hybrid_model"
         export LLM_BALANCED_MODEL="$hybrid_model"
         export LLM_REASONING_MODEL="$hybrid_model"
