@@ -175,8 +175,10 @@ claude_relay_thinking_env() {
     CLAUDE_RELAY_THINKING_ENV=()
     local thinking_enabled
     thinking_enabled="$(singlebox_model_config_thinking_enabled)" || return 1
-    if [ "$thinking_enabled" = "false" ] && [ -z "${MAX_THINKING_TOKENS+x}" ]; then
-        CLAUDE_RELAY_THINKING_ENV=("MAX_THINKING_TOKENS=0")
+    if [ "$thinking_enabled" = "false" ]; then
+        [ -n "${MAX_THINKING_TOKENS+x}" ] || CLAUDE_RELAY_THINKING_ENV+=("MAX_THINKING_TOKENS=0")
+        [ -n "${CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING+x}" ] \
+            || CLAUDE_RELAY_THINKING_ENV+=("CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1")
     fi
 }
 

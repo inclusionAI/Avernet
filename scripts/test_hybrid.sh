@@ -131,15 +131,20 @@ claude_relays_manual_model_env "$model"
 
 test_claude_relay_thinking_defaults_follow_openclaw_policy() (
     export OPENCLAW_ENABLE_THINKING=false
-    unset MAX_THINKING_TOKENS
+    unset MAX_THINKING_TOKENS CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING
     claude_relay_thinking_env
-    [[ "${CLAUDE_RELAY_THINKING_ENV[*]}" == "MAX_THINKING_TOKENS=0" ]]
+    [[ "${CLAUDE_RELAY_THINKING_ENV[*]}" == \
+        "MAX_THINKING_TOKENS=0 CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1" ]]
 
     export MAX_THINKING_TOKENS=8192
     claude_relay_thinking_env
+    [[ "${CLAUDE_RELAY_THINKING_ENV[*]}" == "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1" ]]
+
+    export CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=0
+    claude_relay_thinking_env
     [[ "${#CLAUDE_RELAY_THINKING_ENV[@]}" == "0" ]]
 
-    unset MAX_THINKING_TOKENS
+    unset MAX_THINKING_TOKENS CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING
     export OPENCLAW_ENABLE_THINKING=true
     claude_relay_thinking_env
     [[ "${#CLAUDE_RELAY_THINKING_ENV[@]}" == "0" ]]
