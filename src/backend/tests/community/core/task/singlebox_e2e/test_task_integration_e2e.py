@@ -96,6 +96,11 @@ class TestTaskIntegrationE2E(unittest.TestCase):
             owner_id, [str(SKILLS_DIR / "planning"), str(SKILLS_DIR / "search")]
         )
         role_ids = {nid: await prov.create_bot(bot_name=name) for nid, name in ROLE_BOTS.items()}
+        # 角色 bot(真实叶节点 worker)装 acceptance skill:叶子 execute 时 worker 自调自验收(方案 Y)
+        _acceptance = str(SKILLS_DIR / "acceptance")
+        for nid, rid in role_ids.items():
+            await prov.install_skills(rid, [_acceptance])
+            print(f"[provision] role {nid}({rid}) ← acceptance")
         await prov._aclose()
         print(f"[provision] owner={owner_id} roles={role_ids}")
 
