@@ -214,6 +214,231 @@ class SingleboxEngineAdapter(OpenApiBotPort):
             return {"status": "FAILED", "error": f"{type(e).__name__}: {e}"}
 
 
+class SingleboxBotProvisioner:
+    """singlebox 本地集成测试 provisioning 助手(建 bot + 装 skill),非框架运行时。
+
+    framework 运行时(``SingleboxEngineAdapter``)不感知 bot/skill 存在;本类复刻产品界面操作,
+    供 e2e 跑前 reproducible 拉起环境(singlebox 重启清空内存后一键重建 bot+skill)。仅本地集成用:
+    ``SingleboxEngineAdapter`` 收 bot_id 即开跑,本类负责把那个 bot_id 连同其 skill 准备出来。
+
+    - ``create_bot`` → ``POST /api/bots`` + 轮询等 ACTIVE + set public=1 → 返 ``bot_id``
+    - ``install_skills`` → 逐 skill 目录 upload → 建 skill set → 加技能(自动激活)→ 落 activate → 返 ``skill_set_id``
+    """
+
+    def __init__(
+        self,
+        *,
+        backend_base_url: str,
+        user_id: str,
+        http_client: httpx.AsyncClient | None = None,
+        default_engine_type: str = "openclaw",
+        wait_active_timeout: float = 120.0,
+        wait_active_interval: float = 1.5,
+    ) -> None:
+        self._backend = backend_base_url.rstrip("/")
+        self._user_id = user_id
+        self._default_engine = default_engine_type
+        self._wait_active_timeout = wait_active_timeout
+        self._wait_active_interval = wait_active_interval
+        self._http = http_client or httpx.AsyncClient(timeout=60.0)
+
+    async def _aclose(self) -> None:
+        await self._http.aclose()
+
+    def _hdrs(self) -> dict[str, str]:
+        return {"x-user-id": self._user_id, "accept": "application/json"}
+
+    # ===== create bot =====
+    async def create_bot(
+        self,
+        *,
+        bot_name: str | None = None,
+        bot_desc: str | None = None,
+        engine_type: str | None = None,
+        bot_type: str = "personal",
+        set_public: bool = True,
+        wait_active: bool = True,
+    ) -> str:
+        """``POST /api/bots`` 建个人 bot(singlebox mock passport 即时签发)→ 轮询等 ACTIVE → set public=1。返 ``bot_id``。
+
+        singlebox 本地走 LocalAuth(``x-user-id`` 无 ctoken);engine 默认 openclaw(对齐 singlebox 主链路)。
+        public=1 仅为 BCSFuse discover 可见,设置失败不阻断(本地直连 WS 不经 discover)。
+        """
+        body: dict[str, Any] = {
+            "bot_name": bot_name,
+            "bot_desc": bot_desc,
+            "engine_type": engine_type or self._default_engine,
+            "bot_type": bot_type,
+            "entity_id": self._user_id,
+            "entity_type": "staff",
+        }
+        r = await self._http.post(f"{self._backend}/api/bots", headers=self._hdrs(), json=body)
+        r.raise_for_status()
+        data = r.json()
+        if not data.get("success"):
+            raise RuntimeError(f"create_bot failed: {data.get('message') or data}")
+        bot = (data.get("data") or {}).get("bot") or {}
+        bot_id = bot.get("bot_id")
+        if not bot_id:
+            raise RuntimeError(f"create_bot: no bot_id in response: {data}")
+        if wait_active:
+            await self.wait_active(bot_id)
+        if set_public:
+            try:
+                await self.set_public(bot_id, True)
+            except Exception:  # noqa: BLE001  public 设置失败不阻断主流程
+                pass
+        return bot_id
+
+    async def wait_active(self, bot_id: str) -> dict[str, Any]:
+        """轮询 ``GET /api/bots/by-owner-or-collaborator`` 等 ``bot_id`` 状态 ACTIVE,返该 bot dict。"""
+        deadline = time.monotonic() + self._wait_active_timeout
+        last: dict[str, Any] = {}
+        while time.monotonic() < deadline:
+            r = await self._http.get(
+                f"{self._backend}/api/bots/by-owner-or-collaborator",
+                params={"user_id": self._user_id},
+                headers=self._hdrs(),
+            )
+            if r.status_code == 200:
+                items = (r.json().get("data") or {}).get("items") or []
+                for it in items:
+                    if it.get("bot_id") == bot_id:
+                        last = it
+                        if str(it.get("status") or "").upper() == "ACTIVE":
+                            return it
+            await asyncio.sleep(self._wait_active_interval)
+        raise RuntimeError(f"bot {bot_id} not ACTIVE within {self._wait_active_timeout}s (last={last})")
+
+    async def set_public(self, bot_id: str, public: bool = True) -> dict[str, Any]:
+        """``POST /api/bots/{bot_id}/public`` 设公开(供 BCSFuse discover 可见)。"""
+        r = await self._http.post(
+            f"{self._backend}/api/bots/{bot_id}/public",
+            headers=self._hdrs(),
+            json={"public": "1" if public else "0", "user_id": self._user_id},
+        )
+        r.raise_for_status()
+        return r.json()
+
+    # ===== install skills =====
+    async def install_skills(
+        self,
+        bot_id: str,
+        skill_dirs: list[str],
+        *,
+        skill_set_name: str = "task-framework-skills",
+        skill_set_desc: str | None = None,
+        upload_mode: str = "create",
+        entity_type: str = "staff",
+    ) -> str:
+        """装 skill:逐目录(含 ``SKILL.md``)upload → 建 skill set → 加技能(自动激活)→ 落 activate。返 ``skill_set_id``。
+
+        每个 ``skill_dir`` 形如 ``…/skills/planning/(SKILL.md)``;``SKILL.md`` frontmatter.name 即 skill 名,
+        同名重传走 upgrade(``upload_mode`` 控制)。加技能触发的自动激活 + 显式 ``activate`` 调用均幂等。
+        """
+        import os as _os
+
+        # 1) upload each skill dir (multipart: SKILL.md, file_paths=["SKILL.md"])
+        skill_ids: list[str] = []
+        for sd in skill_dirs:
+            skill_md_path = _os.path.join(sd, "SKILL.md")
+            with open(skill_md_path, "rb") as fh:
+                content = fh.read()
+            files = {"files": ("SKILL.md", content, "text/markdown")}
+            form = {"file_paths": json.dumps(["SKILL.md"])}
+            r = await self._http.post(
+                f"{self._backend}/api/skills/upload",
+                params={"user_id": self._user_id, "bot_id": bot_id, "upload_mode": upload_mode},
+                headers=self._hdrs(),
+                files=files,
+                data=form,
+            )
+            r.raise_for_status()
+            body = r.json()
+            sid = (body.get("data") or {}).get("id") if body.get("success") else None
+            if not sid:
+                raise RuntimeError(f"upload skill {sd} failed: {body.get('message') or body}")
+            skill_ids.append(str(sid))
+
+        # 2) ensure skill set (同名已存则复用其 id,避免重复建)
+        skill_set_id = await self._ensure_skill_set(bot_id, skill_set_name, skill_set_desc)
+
+        # 3) add skills to set (自动激活;重复添加返回 already-in-set,不视为失败)
+        if skill_ids:
+            r = await self._http.post(
+                f"{self._backend}/api/skillsets/{skill_set_id}/skills",
+                params={"user_id": self._user_id, "bot_id": bot_id},
+                headers=self._hdrs(),
+                json={"skill_ids": skill_ids, "user_id": self._user_id, "bot_id": bot_id},
+            )
+            r.raise_for_status()
+
+        # 4) 落 activate (幂等:已激活返 already active)
+        await self._activate_skill_set(skill_set_id, bot_id, entity_type)
+        return skill_set_id
+
+    async def get_active_skill_bots(self, bot_id: str) -> list[dict[str, Any]]:
+        """``GET /api/skills/active/list`` 取 bot 当前激活 skill 列表(注:singlebox community 模式下可能为空,
+        因 active/list 扫 symlink 而 device_sync 为 no-op;以 ``skill_sets.json`` / 实际触达判定为准)。"""
+        r = await self._http.get(
+            f"{self._backend}/api/skills/active/list",
+            params={"entity_id": self._user_id, "bot_id": bot_id},
+            headers=self._hdrs(),
+        )
+        r.raise_for_status()
+        return (r.json().get("data") or [])
+
+    async def list_skill_sets(self, bot_id: str) -> list[dict[str, Any]]:
+        """``GET /api/skillsets`` 取 bot 的能力集列表(is_active 标志即引擎加载态)。"""
+        r = await self._http.get(
+            f"{self._backend}/api/skillsets",
+            params={"user_id": self._user_id, "bot_id": bot_id},
+            headers=self._hdrs(),
+        )
+        r.raise_for_status()
+        return r.json().get("data") or []
+
+    async def _ensure_skill_set(self, bot_id: str, name: str, desc: str | None) -> str:
+        """建 skill set;同名已存则复用其 id。"""
+        r = await self._http.get(
+            f"{self._backend}/api/skillsets",
+            params={"user_id": self._user_id, "bot_id": bot_id},
+            headers=self._hdrs(),
+        )
+        if r.status_code == 200:
+            for s in r.json().get("data") or []:
+                if s.get("name") == name:
+                    return str(s.get("id"))
+        r = await self._http.post(
+            f"{self._backend}/api/skillsets",
+            params={"user_id": self._user_id, "bot_id": bot_id},
+            headers=self._hdrs(),
+            json={"name": name, "description": desc or "", "user_id": self._user_id, "bot_id": bot_id},
+        )
+        r.raise_for_status()
+        body = r.json()
+        sid = (body.get("data") or {}).get("id") if body.get("success") else None
+        if not sid:
+            raise RuntimeError(f"create skillset failed: {body}")
+        return str(sid)
+
+    async def _activate_skill_set(self, skill_set_id: str, bot_id: str, entity_type: str) -> dict[str, Any]:
+        r = await self._http.post(
+            f"{self._backend}/api/skills/skillset/activate",
+            headers=self._hdrs(),
+            json={
+                "skill_set_id": skill_set_id,
+                "entity_id": self._user_id,
+                "entity_type": entity_type,
+                "bot_id": bot_id,
+            },
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+
+
 def _extract_final_text(payload: dict[str, Any]) -> str:
     """从 chat final 事件取完整文本(message.content[0].text),缺失返空串。"""
     msg = payload.get("message") or {}
