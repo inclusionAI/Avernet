@@ -129,6 +129,24 @@ export SINGLEBOX_MODEL_CONFIG_MODE="home"
 claude_relays_manual_model_env "$model"
 [[ "${#CLAUDE_RELAY_MANUAL_MODEL_ENV[@]}" == "0" ]]
 
+test_claude_relay_thinking_defaults_follow_openclaw_policy() (
+    export OPENCLAW_ENABLE_THINKING=false
+    unset MAX_THINKING_TOKENS
+    claude_relay_thinking_env
+    [[ "${CLAUDE_RELAY_THINKING_ENV[*]}" == "MAX_THINKING_TOKENS=0" ]]
+
+    export MAX_THINKING_TOKENS=8192
+    claude_relay_thinking_env
+    [[ "${#CLAUDE_RELAY_THINKING_ENV[@]}" == "0" ]]
+
+    unset MAX_THINKING_TOKENS
+    export OPENCLAW_ENABLE_THINKING=true
+    claude_relay_thinking_env
+    [[ "${#CLAUDE_RELAY_THINKING_ENV[@]}" == "0" ]]
+)
+
+test_claude_relay_thinking_defaults_follow_openclaw_policy
+
 test_claude_relay_build_uses_configured_registry() (
     local gateway="$TMP/claude-relay-gateway"
     local npm_calls="$TMP/claude-relay-npm-calls"

@@ -35,8 +35,13 @@ log_error() { :; }
 check_rust_installed() { return 1; }
 check_protobuf_installed() { return 1; }
 
+unset REQUIRED_RUST_TOOLCHAIN
 # shellcheck source=/dev/null
 source "${ROOT}/scripts/toolchain.sh"
+
+test_default_rust_toolchain() {
+  assert_eq "stable" "$REQUIRED_RUST_TOOLCHAIN" "default Rust toolchain"
+}
 
 test_command_package_mapping() {
   assert_eq "pkgconf-pkg-config" "$(system_command_package dnf pkg-config)" "Fedora pkg-config package"
@@ -185,6 +190,7 @@ test_shell_reload_hint_uses_detected_profile() (
   assert_contains "source \"${temp_home}/.zshrc\"" "$output" "shell reload command"
 )
 
+test_default_rust_toolchain
 test_command_package_mapping
 test_library_package_mapping
 test_manual_install_hints

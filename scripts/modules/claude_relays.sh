@@ -171,6 +171,15 @@ claude_relays_manual_model_env() {
     log_info "Claude relay model provider resolved from .env.local Anthropic configuration (model=${model})"
 }
 
+claude_relay_thinking_env() {
+    CLAUDE_RELAY_THINKING_ENV=()
+    local thinking_enabled
+    thinking_enabled="$(singlebox_model_config_thinking_enabled)" || return 1
+    if [ "$thinking_enabled" = "false" ] && [ -z "${MAX_THINKING_TOKENS+x}" ]; then
+        CLAUDE_RELAY_THINKING_ENV=("MAX_THINKING_TOKENS=0")
+    fi
+}
+
 claude_relays_start() {
     claude_relays_enabled || return 0
     claude_relays_setup || return 1
@@ -191,6 +200,7 @@ claude_relays_start() {
     require_port_available_after_owned_stop "$port" "Claude ${role} relay" || return 1
     model_source=""
     claude_relays_manual_model_env "$model" || return 1
+    claude_relay_thinking_env || return 1
     if [ "${HYBRID_CLAUDE_CONFIG_MODE:-}" = "user" ] && [ -f "$HOME/.claude/settings.json" ]; then
         model_source="$HOME/.claude/settings.json"
     elif [ "${SINGLEBOX_MODEL_CONFIG_MODE:-}" != "manual" ] && [ ! -f "${config_dir}/settings.json" ] && [ -f "$HOME/.claude/settings.json" ]; then
@@ -208,6 +218,7 @@ claude_relays_start() {
             RELAY_SYSTEM_PROMPT_FILE="$prompt_file" RELAY_SYSTEM_PROMPT_ROOT="$(dirname "$prompt_file")" \
             CLAUDE_CODE_PATH="$cli" \
             "${CLAUDE_RELAY_MANUAL_MODEL_ENV[@]}" \
+            "${CLAUDE_RELAY_THINKING_ENV[@]}" \
             perl -MPOSIX=setsid -e 'setsid() or die "setsid failed: $!\\n"; exec @ARGV' node dist/esm/server.js
     ) </dev/null >> "$CLAUDE_RELAY_LOG" 2>&1 &
     printf '%s\n' "$!" > "$pid_file"
