@@ -111,7 +111,7 @@ class TaskModule(Module):
                 SingleboxEngineAdapter,
             )
             backend = os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
-            user_id = os.environ.get("SINGLEBOX_USER_ID", "000001")
+            user_id = os.environ.get("SINGLEBOX_USER_ID", "146836")
             return SingleboxEngineAdapter(backend_base_url=backend, user_id=user_id), _DoubleBcsClient()
         # corp 接真实 OpenApiBotAdapter/BcsHttpAdapter 时,在 corp overlay 覆写本 provider 或经 env_url。
         # community 默认:即便 TASK_ENGINE 开,也无端口实现 → 退化 stub(可被测试用 double 覆盖)。

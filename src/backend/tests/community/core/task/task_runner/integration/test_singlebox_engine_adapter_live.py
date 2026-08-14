@@ -24,7 +24,7 @@ _LIVE_ENABLED = os.environ.get("SINGLEBOX_TASK_E2E", "").strip() in {"1", "true"
     os.environ.get("SINGLEBOX_BOT_ID", "").strip()
 )
 _BACKEND = os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
-_USER_ID = os.environ.get("SINGLEBOX_USER_ID", "000001")
+_USER_ID = os.environ.get("SINGLEBOX_USER_ID", "146836")
 _BOT_ID = os.environ.get("SINGLEBOX_BOT_ID", "")
 
 
