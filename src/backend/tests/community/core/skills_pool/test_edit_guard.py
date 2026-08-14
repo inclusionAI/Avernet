@@ -11,6 +11,7 @@ from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditLockUnavailableError,
     SkillsPoolEditRollbackError,
 )
+from agentclaw.community.core.skills_pool.participation import SkillLayoutParticipation
 from agentclaw.community.plugin_api.cache import CacheLockInfrastructureError
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
@@ -59,14 +60,16 @@ class _Layouts:
         return self.state
 
 
-class _Bots:
-    def __init__(self, *, engine: str = "openclaw") -> None:
-        self.engine = engine
+class _Participation:
+    def __init__(self, *, participates: bool = True, label: str = "pool") -> None:
+        self._value = SkillLayoutParticipation(
+            participates_in_pool_layout=participates,
+            label=label,
+        )
 
-    def get_by_id_and_entity(self, bot_id: str, entity_id: str):
-        assert bot_id == SCOPE.bot_id
-        assert entity_id == SCOPE.entity_id
-        return {"env": SCOPE.env, "active_engine": self.engine}
+    def resolve(self, *, scope: BotSkillLayoutScope) -> SkillLayoutParticipation:
+        assert scope == SCOPE
+        return self._value
 
 
 class _UnavailableCache(_Cache):
@@ -94,7 +97,7 @@ def test_rollback_lease_excludes_new_local_edits() -> None:
     guard = SkillsPoolEditGuard(
         cache=_Cache(),
         layout_repository=layouts,
-        bot_repository=_Bots(),
+        participation_resolver=_Participation(),
     )
     rollback_lease = guard.acquire_for_rollback(scope=SCOPE)
     assert rollback_lease is not None
@@ -109,7 +112,7 @@ def test_lock_identity_includes_entity_for_reused_bot_ids() -> None:
     guard = SkillsPoolEditGuard(
         cache=_Cache(),
         layout_repository=_Layouts(),
-        bot_repository=_Bots(),
+        participation_resolver=_Participation(),
     )
     other_scope = replace(SCOPE, entity_id="entity-2")
 
@@ -126,7 +129,7 @@ async def test_waiting_edit_acquires_lock_after_ordinary_edit_releases() -> None
     guard = SkillsPoolEditGuard(
         cache=_Cache(),
         layout_repository=_Layouts(),
-        bot_repository=_Bots(),
+        participation_resolver=_Participation(),
     )
     first = guard.acquire_for_edit(scope=SCOPE)
 
@@ -151,7 +154,7 @@ def test_rollback_phase_rejects_edit_even_after_lock_becomes_available() -> None
     guard = SkillsPoolEditGuard(
         cache=_Cache(),
         layout_repository=layouts,
-        bot_repository=_Bots(),
+        participation_resolver=_Participation(),
     )
 
     with pytest.raises(SkillsPoolEditRollbackError, match="rollback"):
@@ -164,7 +167,7 @@ def test_lock_contention_rechecks_for_a_rollback_before_reporting_busy() -> None
     guard = SkillsPoolEditGuard(
         cache=cache,
         layout_repository=layouts,
-        bot_repository=_Bots(),
+        participation_resolver=_Participation(),
     )
     assert cache.acquire_lock(guard._key(scope=SCOPE)) is not None
     layouts.state = replace(
@@ -183,7 +186,7 @@ def test_rollback_starting_after_lock_acquisition_releases_edit_lease() -> None:
     guard = SkillsPoolEditGuard(
         cache=cache,
         layout_repository=layouts,
-        bot_repository=_Bots(),
+        participation_resolver=_Participation(),
     )
 
     with pytest.raises(SkillsPoolEditRollbackError, match="rollback"):
@@ -197,7 +200,9 @@ def test_teclaw_bypasses_an_abandoned_pool_edit_lock() -> None:
     guard = SkillsPoolEditGuard(
         cache=cache,
         layout_repository=_Layouts(),
-        bot_repository=_Bots(engine="teclaw"),
+        participation_resolver=_Participation(
+            participates=False, label="teclaw_no_pool_layout"
+        ),
     )
     # Simulates a previous worker acquiring the legacy generic lock and then
     # exiting before its finally block.  Teclaw never owns Pool rollback, so a
@@ -216,7 +221,7 @@ def test_cache_outage_is_not_reported_as_lock_contention() -> None:
     guard = SkillsPoolEditGuard(
         cache=_UnavailableCache(),
         layout_repository=_Layouts(),
-        bot_repository=_Bots(),
+        participation_resolver=_Participation(),
     )
 
     with pytest.raises(SkillsPoolEditLockUnavailableError, match="lock service"):
@@ -228,7 +233,7 @@ async def test_wait_does_not_retry_a_cache_outage_as_ordinary_contention() -> No
     guard = SkillsPoolEditGuard(
         cache=_UnavailableCache(),
         layout_repository=_Layouts(),
-        bot_repository=_Bots(),
+        participation_resolver=_Participation(),
     )
 
     with pytest.raises(SkillsPoolEditLockUnavailableError, match="lock service"):

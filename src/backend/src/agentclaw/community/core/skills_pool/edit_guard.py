@@ -8,8 +8,11 @@ import time
 
 from injector import inject
 
-from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolLayoutRepositoryProtocol
+from agentclaw.community.core.skills_pool.participation import (
+    SkillLayoutParticipation,
+    SkillLayoutParticipationResolver,
+)
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     SkillLayoutPhase,
@@ -61,11 +64,11 @@ class SkillsPoolEditGuard:
         *,
         cache: CachePlugin,
         layout_repository: SkillsPoolLayoutRepositoryProtocol,
-        bot_repository: BotRepository,
+        participation_resolver: SkillLayoutParticipationResolver,
     ) -> None:
         self._cache = cache
         self._layouts = layout_repository
-        self._bots = bot_repository
+        self._participation_resolver = participation_resolver
 
     @staticmethod
     def _key(*, scope: BotSkillLayoutScope) -> str:
@@ -76,14 +79,14 @@ class SkillsPoolEditGuard:
         *,
         scope: BotSkillLayoutScope,
     ) -> SkillsPoolEditLease:
-        # Teclaw never participates in a Pool filesystem layout or its
-        # rollback.  Its draft-container I/O must therefore not be serialized
-        # behind a Pool-only lock held by an unrelated long-running upload.
-        if self._is_teclaw(scope):
+        participation = self._participation_resolver.resolve(scope=scope)
+        if not participation.participates_in_pool_layout:
             return SkillsPoolEditLease(key="", token=None)
 
         if self._is_rollback_phase(scope):
-            self._log_rejection(scope=scope, reason="rollback_phase")
+            self._log_rejection(
+                scope=scope, participation=participation, reason="rollback_phase"
+            )
             raise SkillsPoolEditRollbackError(
                 "Skills are temporarily read-only during layout rollback"
             )
@@ -91,23 +94,31 @@ class SkillsPoolEditGuard:
         try:
             lease = self._acquire_for_edit(scope=scope)
         except CacheLockInfrastructureError as exc:
-            self._log_rejection(scope=scope, reason="cache_unavailable")
+            self._log_rejection(
+                scope=scope, participation=participation, reason="cache_unavailable"
+            )
             raise SkillsPoolEditLockUnavailableError(
                 "Skill updates are temporarily unavailable because the lock service is unavailable"
             ) from exc
         if lease is None:
             if self._is_rollback_phase(scope):
-                self._log_rejection(scope=scope, reason="rollback_phase")
+                self._log_rejection(
+                    scope=scope, participation=participation, reason="rollback_phase"
+                )
                 raise SkillsPoolEditRollbackError(
                     "Skills are temporarily read-only during layout rollback"
                 )
-            self._log_rejection(scope=scope, reason="lock_busy")
+            self._log_rejection(
+                scope=scope, participation=participation, reason="lock_busy"
+            )
             raise SkillsPoolEditBusyError(
                 "Another skill update is already in progress; please retry shortly"
             )
         if self._is_rollback_phase(scope):
             self.release(lease)
-            self._log_rejection(scope=scope, reason="rollback_phase")
+            self._log_rejection(
+                scope=scope, participation=participation, reason="rollback_phase"
+            )
             raise SkillsPoolEditRollbackError(
                 "Skills are temporarily read-only during layout rollback"
             )
@@ -168,24 +179,20 @@ class SkillsPoolEditGuard:
     def _is_rollback_phase(self, scope: BotSkillLayoutScope) -> bool:
         return self._layouts.get(scope).phase in self._ROLLBACK_PHASES
 
-    def _is_teclaw(self, scope: BotSkillLayoutScope) -> bool:
-        bot = self._bots.get_by_id_and_entity(scope.bot_id, scope.entity_id)
-        return bool(
-            bot
-            and bot.get("env") == scope.env
-            and bot.get("active_engine") == "teclaw"
-        )
-
-    def _log_rejection(self, *, scope: BotSkillLayoutScope, reason: str) -> None:
-        bot = self._bots.get_by_id_and_entity(scope.bot_id, scope.entity_id)
-        engine = bot.get("active_engine") if bot else "unknown"
+    def _log_rejection(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        participation: SkillLayoutParticipation,
+        reason: str,
+    ) -> None:
         logger.warning(
             "[skills_pool.edit_guard] edit rejected env=%s entity_id=%s "
-            "bot_id=%s engine=%s reason=%s",
+            "bot_id=%s layout_participation=%s reason=%s",
             scope.env,
             scope.entity_id,
             scope.bot_id,
-            engine,
+            participation.label,
             reason,
         )
 
