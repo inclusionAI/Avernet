@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from agentclaw.community.core.task.domain.json_extract import extract_json
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
@@ -198,12 +199,11 @@ def _compose_planning_prompt(graph: TaskExecutionGraph, target: TaskNode) -> str
 def _parse_children(run: dict, target: TaskNode, graph: TaskExecutionGraph) -> list[TaskNode]:
     """解析 owner bot round-trip 结果 run{status,result,error} → TaskNode[](PENDING,空 RuntimeInfo)。
 
-    约定 result.content 为 JSON 字符串表示的 ``List[TaskSpec]`` 数组(对齐领域模型):
+    约定 result.content 为 JSON(裸或被散文/```json 代码块包裹均支持,经 ``extract_json`` 提取)表示的 ``List[TaskSpec]`` 数组:
     每元素 {"metadata":{task_id=node_id,title,instruction}, "context":{background,...}, "goal":{objective,acceptances:[...]}}
     空数组 ``[]`` 表 gap 已闭(验收通过)。异常/非终态/解析失败 → 返 [](由编排核据 gap 闭语义处理)。
     node_id 取自 metadata.task_id;与已存 nodes 去重;task_id(根任务)取自 target.task_id。
     """
-    import json as _json
     status = str(run.get("status") or "").upper()
     if status != "COMPLETED":
         return []
@@ -211,11 +211,11 @@ def _parse_children(run: dict, target: TaskNode, graph: TaskExecutionGraph) -> l
     if not content:
         return []
     try:
-        data = _json.loads(content) if isinstance(content, str) else content
+        data = extract_json(content)  # 鲁棒解析:裸 JSON / ```json 代码块 / 散文包裹
     except (ValueError, TypeError):
         return []
     if not isinstance(data, list):
-        return []  # 非数组(旧版 dict 包裹兼容已删,强制 List[TaskSpec])
+        return []  # 非数组(强制 List[TaskSpec])
     out: list[TaskNode] = []
     existing = {n.node_id for n in graph.tasks}
     for ch in data:

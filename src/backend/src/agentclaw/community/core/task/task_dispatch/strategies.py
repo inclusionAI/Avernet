@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol
 
+from agentclaw.community.core.task.domain.json_extract import extract_json
 from agentclaw.community.core.task.domain.models import TaskExecutionGraph, TaskNode
 
 
@@ -215,7 +216,7 @@ def _compose_search_prompt(node: TaskNode, candidates: list[dict]) -> str:
 def _parse_search_result(run: dict) -> SearchResult:
     """解析 owner bot round-trip 结果 run{status,result,error} → SearchResult 4 态。
 
-    约定 result.content 为 JSON 字符串:
+    约定 result.content 为 JSON(裸或被散文/```json 代码块包裹均支持,经 ``extract_json`` 提取):
         {"outcome": "HIT_SINGLE", "bot_id": "..."}
         {"outcome": "HIT_GROUP", "group_id": "..."}
         {"outcome": "HIT_MULTI_BOTS", "bot_ids": [...], "collab_mode": "chat|manager_worker|state_machine",
@@ -223,7 +224,6 @@ def _parse_search_result(run: dict) -> SearchResult:
         {"outcome": "MISS", "miss_reason": "..."}
     异常/非终态 → MISS(parse_error / run_status_xxx)。
     """
-    import json as _json
     status = str(run.get("status") or "").upper()
     if status != "COMPLETED":
         return SearchResult(outcome=SearchOutcome.MISS, miss_reason=f"run_status_{status or 'unknown'}")
@@ -231,7 +231,7 @@ def _parse_search_result(run: dict) -> SearchResult:
     if not content:
         return SearchResult(outcome=SearchOutcome.MISS, miss_reason="empty_content")
     try:
-        data = _json.loads(content) if isinstance(content, str) else content
+        data = extract_json(content)  # 鲁棒解析:裸 JSON / ```json 代码块 / 散文包裹
     except (ValueError, TypeError):
         return SearchResult(outcome=SearchOutcome.MISS, miss_reason="parse_error")
     if not isinstance(data, dict):
