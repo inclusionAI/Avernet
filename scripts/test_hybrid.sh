@@ -42,8 +42,14 @@ hybrid_validate_profiles
 [[ "$(bots_dynamic_specs | awk -F '\t' '$4 == "platform-supply-chain" { print $3 }')" == "30631" ]]
 
 MANAGER_WORKSPACE="$TMP/manager-workspace"
+mkdir -p "$MANAGER_WORKSPACE"
+touch "$MANAGER_WORKSPACE/TOOLS.md"
 bots_dynamic_copy_profile_files merchant-operations "$MANAGER_WORKSPACE"
 bots_dynamic_setup_bcs_skill "$MANAGER_WORKSPACE"
+for profile_file in AGENTS.md IDENTITY.md KNOWLEDGE.md; do
+    [[ -f "$MANAGER_WORKSPACE/$profile_file" ]]
+done
+[[ ! -e "$MANAGER_WORKSPACE/TOOLS.md" ]]
 for reference in \
     'skills/bcs-coordination/SKILL.md' \
     'skills/bcs-coordination/references/custom-collaboration.md' \
@@ -51,7 +57,7 @@ for reference in \
     [[ -f "$MANAGER_WORKSPACE/$reference" ]]
 done
 grep -Fq 'skills/bcs-coordination/references/custom-collaboration.md' "$MANAGER_WORKSPACE/AGENTS.md"
-grep -Fq 'skills/bcs-coordination/references/custom-collaboration-schema.md' "$MANAGER_WORKSPACE/TOOLS.md"
+grep -Fq 'skills/bcs-coordination/references/custom-collaboration-schema.md' "$MANAGER_WORKSPACE/AGENTS.md"
 
 grep -Fq 'AskUserQuestion' "$CLAUDE_PROFILE/platform-data/CLAUDE.md"
 jq -e '.bots[0].runtime | has("model") | not' "$CLAUDE_PROFILE/bots.json" >/dev/null

@@ -12,10 +12,14 @@ bots_stack_script() {
     echo "$stack_script"
 }
 
-BOTS_DYNAMIC_PROFILE_FILES=(
-    "SOUL.md"
+BOTS_DYNAMIC_REQUIRED_PROFILE_FILES=(
     "AGENTS.md"
     "IDENTITY.md"
+    "KNOWLEDGE.md"
+)
+
+BOTS_DYNAMIC_OPTIONAL_PROFILE_FILES=(
+    "SOUL.md"
     "USER.md"
     "TOOLS.md"
     "HEARTBEAT.md"
@@ -25,7 +29,6 @@ BOTS_DYNAMIC_PROFILE_FILES=(
     "OUTPUT.md"
     "RULES.md"
     "SAFETY.md"
-    "KNOWLEDGE.md"
 )
 
 bots_dynamic_enabled() {
@@ -446,7 +449,7 @@ bots_dynamic_validate_manifest() {
                 log_error "${name}: source directory not found: ${source_dir}"
                 has_error=true
             else
-                for file in "${BOTS_DYNAMIC_PROFILE_FILES[@]}"; do
+                for file in "${BOTS_DYNAMIC_REQUIRED_PROFILE_FILES[@]}"; do
                     if [ ! -f "${source_dir}/${file}" ]; then
                         log_error "${name}: required profile file missing: ${source_dir}/${file}"
                         has_error=true
@@ -684,8 +687,17 @@ bots_dynamic_copy_profile_files() {
 
     source_dir="$(bots_dynamic_profile_dir)/${source}"
     mkdir -p "$workspace_dir"
-    for file in "${BOTS_DYNAMIC_PROFILE_FILES[@]}"; do
+    for file in "${BOTS_DYNAMIC_REQUIRED_PROFILE_FILES[@]}"; do
         cp "${source_dir}/${file}" "${workspace_dir}/${file}" || return 1
+    done
+    for file in "${BOTS_DYNAMIC_OPTIONAL_PROFILE_FILES[@]}"; do
+        if [ -f "${source_dir}/${file}" ]; then
+            cp "${source_dir}/${file}" "${workspace_dir}/${file}" || return 1
+        else
+            # Profile refresh is authoritative: do not retain prompts removed
+            # from the source profile in an existing runtime workspace.
+            rm -f "${workspace_dir}/${file}"
+        fi
     done
 }
 
