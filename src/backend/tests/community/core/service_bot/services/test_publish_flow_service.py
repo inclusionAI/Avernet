@@ -272,6 +272,105 @@ def test_bot_build_service_upgrade_raises_for_other_errors():
 
 
 @pytest.mark.asyncio
+async def test_verify_first_release_injects_engine_extra_envs_for_service_coding_bot():
+    publish_service = Mock()
+    publish_service.create_device_binding.return_value = 55
+    build_service = Mock()
+    build_service.release_async = AsyncMock(return_value={"bot_uuid": "BOT-1", "publish_id": 9})
+    svc = _pf(publish_service, build_service, Mock(), Mock(), _arca_router(build_service))
+    svc._ext_state.get_latest_ext = Mock(return_value={"migration_path": "/snapshot/1/openclaw"})
+    svc._ext_state.update_status = Mock()
+
+    record = _make_publish_record(
+        status=PublishStatus.BUILT.value,
+        ext={"migration_path": "/snapshot/1/openclaw"},
+    )
+
+    await svc._execute_verify_first_release(
+        publish_record=record,
+        operator="op",
+        migration_path="/snapshot/1/openclaw",
+        bot={
+            "bot_id": "b2",
+            "owner_id": "u1",
+            "bot_type": "service",
+            "active_engine": "claude_code",
+            "template_type": "applicationCoding",
+            "template_config": {
+                "devflow_workflow": {"path": "devflow/app.yaml"},
+                "backend_repo": [{"repo_url": "git@x/y.git"}],
+                "model": "antchat/Ling-2.6-1T",
+                "runtime": "python",
+            },
+        },
+    )
+
+    assert build_service.release_async.await_args.kwargs["extra_envs"] == {
+        "AGENTCLAW_SKILLS_LAYOUT": "legacy",
+        "BOT_TYPE": "application",
+        "AIX_DEVFLOW_INFO": "devflow/app.yaml",
+        "GIT_ADDRESSES": '["git@x/y.git"]',
+        "RELAY_DEFAULT_MODEL": "antchat/Ling-2.6-1T",
+        "RELAY_DEFAULT_RUNTIME": "python",
+    }
+
+
+@pytest.mark.asyncio
+async def test_verify_upgrade_preserves_skills_env_and_injects_engine_extra_envs():
+    publish_service = Mock()
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock(return_value={"publish_id": 9})
+    svc = _pf(publish_service, build_service, Mock(), Mock(), _arca_router(build_service))
+    svc._ext_state.get_latest_ext = Mock(return_value={
+        "migration_path": "/snapshot/1/openclaw",
+        "skills_manifest": {
+            "schema_version": 1,
+            "engine": "claude_code",
+            "active_layout": "pool",
+            "layout_contract_version": "skills-pool-p3-v1",
+        },
+    })
+    svc._ext_state.update_status = Mock()
+    svc.refresh_publish_handle = Mock()
+
+    record = _make_publish_record(
+        status=PublishStatus.BUILT.value,
+        ext={
+            "migration_path": "/snapshot/1/openclaw",
+            "skills_manifest": {
+                "schema_version": 1,
+                "engine": "claude_code",
+                "active_layout": "pool",
+                "layout_contract_version": "skills-pool-p3-v1",
+            },
+        },
+    )
+
+    await svc._execute_verify_upgrade(
+        publish_record=record,
+        operator="op",
+        migration_path="/snapshot/1/openclaw",
+        bot={
+            "bot_id": "b2",
+            "owner_id": "u1",
+            "bot_type": "service",
+            "active_engine": "claude_code",
+            "template_type": "applicationCoding",
+            "template_config": {"model": "m1"},
+        },
+        bot_uuid="BOT-old",
+        verify_binding_id=123,
+    )
+
+    assert build_service.upgrade_async.await_args.kwargs["extra_envs"] == {
+        "AGENTCLAW_SKILLS_LAYOUT": "pool",
+        "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "skills-pool-p3-v1",
+        "BOT_TYPE": "application",
+        "RELAY_DEFAULT_MODEL": "m1",
+    }
+
+
+@pytest.mark.asyncio
 async def test_execute_verify_upgrade_falls_back_to_first_release_on_bot_not_found():
     publish_service = Mock()
     build_service = Mock()

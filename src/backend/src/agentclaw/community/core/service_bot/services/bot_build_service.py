@@ -466,6 +466,7 @@ class BotBuildService:
         extra_envs: Optional[Dict[str, Any]] = None,
         docker_image: str | None = None,
         runtime_kind: str | None = None,
+        template_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """发布 Bot 到 BaaS 层。
 
@@ -563,8 +564,15 @@ class BotBuildService:
                 )
                 if template_uuid is not None:
                     create_kwargs["template_uuid"] = template_uuid
+                if template_config:
+                    create_kwargs["template_config"] = dict(template_config)
                 if docker_image:
-                    create_kwargs["template_config"] = {"image": docker_image}
+                    # Preserve template_config sandbox overrides (envs/resource_spec)
+                    # while applying the publish-time image pin with highest priority.
+                    create_kwargs["template_config"] = {
+                        **create_kwargs.get("template_config", {}),
+                        "image": docker_image,
+                    }
                 new_bot = self._baas_service.create_bot(**create_kwargs)
 
             bot_uuid = new_bot.get("bot_uuid")
@@ -594,6 +602,7 @@ class BotBuildService:
         extra_envs: Optional[Dict[str, Any]] = None,
         docker_image: str | None = None,
         runtime_kind: str | None = None,
+        template_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """异步发布 Bot 到 BaaS 层。
 
@@ -634,6 +643,7 @@ class BotBuildService:
             extra_envs=extra_envs,
             docker_image=docker_image,
             runtime_kind=runtime_kind,
+            template_config=template_config,
         )
 
     def _run_local_command(
@@ -1045,6 +1055,7 @@ class BotBuildService:
             extra_envs: Optional[Dict[str, Any]] = None,
             docker_image: str | None = None,
             runtime_kind: str | None = None,
+            template_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """升级 Bot 到 BaaS 层（复用现有 Bot）。
 
@@ -1121,8 +1132,15 @@ class BotBuildService:
                 )
                 if template_uuid is not None:
                     upgrade_kwargs["template_uuid"] = template_uuid
+                if template_config:
+                    upgrade_kwargs["template_config"] = dict(template_config)
                 if docker_image:
-                    upgrade_kwargs["template_config"] = {"image": docker_image}
+                    # Preserve template_config sandbox overrides (envs/resource_spec)
+                    # while applying the publish-time image pin with highest priority.
+                    upgrade_kwargs["template_config"] = {
+                        **upgrade_kwargs.get("template_config", {}),
+                        "image": docker_image,
+                    }
                 upgrade_result = self._baas_service.upgrade_bot(**upgrade_kwargs)
 
             logger.info(
@@ -1542,6 +1560,7 @@ class BotBuildService:
         extra_envs: Optional[Dict[str, Any]] = None,
         docker_image: str | None = None,
         runtime_kind: str | None = None,
+        template_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """异步升级 Bot 到 BaaS 层。
 
@@ -1566,4 +1585,5 @@ class BotBuildService:
             extra_envs=extra_envs,
             docker_image=docker_image,
             runtime_kind=runtime_kind,
+            template_config=template_config,
         )
