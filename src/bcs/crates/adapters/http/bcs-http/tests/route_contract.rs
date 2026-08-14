@@ -4,7 +4,10 @@ use axum::{
 };
 use bcs_auth_api::{AuthPluginChain, AuthPrincipal};
 use bcs_auth_local::StaticAuthPlugin;
-use bcs_bot::{ActorDirectory, Bot, BotOnboarding, BotCore, HumanActor};
+use bcs_bot::{
+    ActorDirectory, Bot, BotCandidateSearchCore, BotOnboarding, BotCore,
+    EmptyWorkerProfileCoreService, HumanActor,
+};
 use bcs_friend::Friend;
 use bcs_group::{GroupManagement, GroupStore};
 use bcs_group_store::MemoryGroupRepo;
@@ -239,7 +242,20 @@ fn actor_directory_use_cases(
     registry: Arc<dyn BotRegistryCoreService>,
     friend: Arc<dyn FriendCoreService>,
 ) -> Arc<dyn ActorDirectoryService> {
-    Arc::new(ActorDirectory::new(registry, friend, noop_relation()))
+    let worker_profiles = Arc::new(EmptyWorkerProfileCoreService);
+    let candidate_search = Arc::new(BotCandidateSearchCore::new(
+        registry.clone(),
+        friend.clone(),
+        worker_profiles.clone(),
+        0.0,
+    ));
+    Arc::new(ActorDirectory::new(
+        registry,
+        friend,
+        noop_relation(),
+        worker_profiles,
+        candidate_search,
+    ))
 }
 
 fn friend_use_cases(

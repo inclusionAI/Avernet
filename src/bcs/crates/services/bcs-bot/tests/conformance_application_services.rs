@@ -1,13 +1,22 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bcs_bot::{ActorDirectory, Bot, BotCore, BotOnboarding, HumanActor};
+use bcs_bot::{
+    ActorDirectory, Bot, BotCandidateSearchCore, BotCore, BotOnboarding,
+    EmptyWorkerProfileCoreService, HumanActor,
+};
 use bcs_bot_store::MemoryBotRepo;
+use bcs_service_api::core::WorkerProfileCoreService;
 use bcs_service_api::port::repo::BotRepoPort;
 use bcs_service_api::{
-    ActorStatus, AgentCredentials, BotCapabilities, BotConnectParams, BotDynamicStatus,
-    BotRegistryCoreService, ConnectionKind, EnsureHumanResult, RegisteredBot, ServiceResult,
+    ActorStatus, AgentCredentials, BotCandidateSearchQuery, BotCandidateVisibility,
+    BotCapabilities, BotConnectParams, BotDynamicStatus, BotRegistryCoreService, ConnectionKind,
+    EnsureHumanResult, RegisteredBot, ServiceError, ServiceResult, WorkerProfile,
+    WorkerRecommendCommand, WorkerRecommendResult, WorkerRecommendation,
+};
+use bcs_test_support::contract::core::{
+    BotCandidateSearchContractScenario, BotCandidateSearchHitExpectation,
 };
 use bcs_test_support::{
     NoopBotRegistryCoreService, NoopFriendCoreService, NoopRelationCoreService,
@@ -338,13 +347,147 @@ impl BotRepoPort for NoConnectBotRepo {
 
 #[tokio::test]
 async fn actor_directory_passes_application_contract() {
+    let registry: Arc<dyn BotRegistryCoreService> = Arc::new(NoopBotRegistryCoreService);
+    let friend = Arc::new(NoopFriendCoreService);
+    let worker_profiles = Arc::new(EmptyWorkerProfileCoreService);
+    let candidate_search = Arc::new(BotCandidateSearchCore::new(
+        registry.clone(),
+        friend.clone(),
+        worker_profiles.clone(),
+        0.0,
+    ));
     let svc = ActorDirectory::new(
-        Arc::new(NoopBotRegistryCoreService),
-        Arc::new(NoopFriendCoreService),
+        registry,
+        friend,
         Arc::new(NoopRelationCoreService),
+        worker_profiles,
+        candidate_search,
     );
 
     bcs_test_support::contract::application::actor_directory_service_contract_tests(&svc).await;
+}
+
+#[tokio::test]
+async fn conformance_candidate_search_passes_core_contract() {
+    struct ContractWorkerProfiles;
+
+    #[async_trait]
+    impl WorkerProfileCoreService for ContractWorkerProfiles {
+        async fn recommend_workers(
+            &self,
+            command: WorkerRecommendCommand,
+        ) -> ServiceResult<WorkerRecommendResult> {
+            if command.query == "semantic-contract" {
+                Ok(WorkerRecommendResult {
+                    recommendations: vec![WorkerRecommendation {
+                        worker_id: "semantic-contract-bot".to_string(),
+                        score: 0.0,
+                        short_profile: Some("contract semantic profile".to_string()),
+                    }],
+                    raw_response: serde_json::json!({"contract": "semantic"}),
+                })
+            } else {
+                Err(ServiceError::InternalError("contract fallback".to_string()))
+            }
+        }
+
+        async fn batch_query_worker_profiles(
+            &self,
+            _worker_ids: &[String],
+        ) -> ServiceResult<Vec<WorkerProfile>> {
+            Ok(vec![WorkerProfile {
+                worker_id: "semantic-contract-bot".to_string(),
+                tags: BTreeMap::from([("contract".to_string(), serde_json::json!("semantic"))]),
+            }])
+        }
+    }
+
+    let registry = Arc::new(BotCore::memory());
+    registry
+        .register(
+            "semantic-contract-bot".to_string(),
+            BotCapabilities {
+                name: Some("Semantic Contract".to_string()),
+                visibility: "public".to_string(),
+                ..BotCapabilities::default()
+            },
+        )
+        .await
+        .expect("register semantic contract bot");
+    registry
+        .register(
+            "fallback-contract-bot".to_string(),
+            BotCapabilities {
+                name: Some("Fallback Contract".to_string()),
+                visibility: "public".to_string(),
+                ..BotCapabilities::default()
+            },
+        )
+        .await
+        .expect("register fallback contract bot");
+    let candidate_search = BotCandidateSearchCore::new(
+        registry,
+        Arc::new(NoopFriendCoreService),
+        Arc::new(ContractWorkerProfiles),
+        0.0,
+    );
+
+    bcs_test_support::contract::core::bot_candidate_search_core_service_contract_tests(
+        &candidate_search,
+        BotCandidateSearchContractScenario {
+            query: BotCandidateSearchQuery {
+                query: "semantic-contract".to_string(),
+                acting_actor_id: "contract-actor".to_string(),
+                visibility: BotCandidateVisibility::Discovery,
+                limit: 20,
+            },
+            expected_mode: bcs_service_api::BotCandidateSearchMode::Semantic,
+            expected_hits: vec![BotCandidateSearchHitExpectation {
+                bot_id: "semantic-contract-bot".to_string(),
+                is_friend: false,
+                tags: BTreeMap::from([("contract".to_string(), serde_json::json!("semantic"))]),
+                score: Some(0.0),
+                short_profile: Some("contract semantic profile".to_string()),
+            }],
+            expected_legacy_recommend_response: Some(serde_json::json!({"contract": "semantic"})),
+        },
+        BotCandidateSearchContractScenario {
+            query: BotCandidateSearchQuery {
+                query: "fallback contract".to_string(),
+                acting_actor_id: "contract-actor".to_string(),
+                visibility: BotCandidateVisibility::Discovery,
+                limit: 20,
+            },
+            expected_mode: bcs_service_api::BotCandidateSearchMode::NameFallback,
+            expected_hits: vec![BotCandidateSearchHitExpectation {
+                bot_id: "fallback-contract-bot".to_string(),
+                is_friend: false,
+                tags: BTreeMap::new(),
+                score: None,
+                short_profile: None,
+            }],
+            expected_legacy_recommend_response: None,
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn conformance_empty_worker_profile_core_service() {
+    let service = EmptyWorkerProfileCoreService;
+    bcs_test_support::contract::core::worker_profile_core_service_contract_tests(
+        &service,
+        WorkerRecommendCommand {
+            query: "contract query".to_string(),
+            top_k: 7,
+            min_score: 0.42,
+        },
+        &[],
+        &serde_json::Value::Null,
+        &["contract-worker".to_string()],
+        &[],
+    )
+    .await;
 }
 
 #[tokio::test]

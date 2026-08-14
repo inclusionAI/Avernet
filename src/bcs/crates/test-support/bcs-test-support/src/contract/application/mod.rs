@@ -7,7 +7,6 @@ use bcs_service_api::{
     GroupProposalService, GroupQueryService, HumanActorService, MessageFlowService,
     CreateOrganizationCommand, OrganizationAuth, OrganizationManagementService,
     OrganizationMemberAuth, ServiceError, SystemMessageService, WorkbenchSessionService,
-    WorkerProfileService,
 };
 use bcs_service_api::application::v1::{
     AuthenticatedBotIdentity, AuthenticatedCaller, BotService, QueryBots,
@@ -113,8 +112,6 @@ pub async fn organization_management_service_contract_tests<
         .expect("get organization through application service");
     assert_eq!(fetched.name, "Application Contract");
 }
-
-pub async fn worker_profile_service_contract_tests<T: WorkerProfileService + ?Sized>(_svc: &T) {}
 
 pub async fn system_message_service_contract_tests<T: SystemMessageService + ?Sized>(_svc: &T) {}
 
