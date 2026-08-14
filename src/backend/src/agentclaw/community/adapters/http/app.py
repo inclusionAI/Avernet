@@ -315,6 +315,8 @@ from agentclaw.community.core.aicoding.services.data_proxy_service import (  # n
     EngineUrlNotConfigured,
 )
 from agentclaw.community.core.errors import (  # noqa: E402
+    CallbackAuthError,
+    CallbackCorrelationError,
     Conflict,
     DomainError,
     Forbidden,
@@ -350,6 +352,8 @@ from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
 _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     ValidationError:       400,
     Unauthorized:          401,
+    CallbackAuthError:     401,
+    CallbackCorrelationError: 400,
     LoginRedirectRequired: 302,
     Forbidden:             403,
     NotFound:              404,
