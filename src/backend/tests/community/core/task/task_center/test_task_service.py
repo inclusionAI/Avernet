@@ -251,26 +251,20 @@ class TestHarnessWiring:
 
 # ===== V1/V2 回归:验收 100% 回投(无 verify port);BBS 投递归 runner(无 bbs market)=====
 class TestAcceptanceViaReport:
-    def test_root_terminal_pass_via_report_only(self):
-        # V1:根验收不主动触发;全子 DONE + plan[] → 根 PLANNING 等回投 → 回投 root PASS → graph DONE
+    def test_root_terminal_pass_via_gap_closed(self):
+        # 语义A:全子 DONE + plan[]→ gap 闭=终验通过 → 翻根 DONE + graph DONE(无需 owner bot 回投)
         from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
         svc = TaskGraphService()
-        # decomposer 首批产 c1,c1 DONE 后 plan[]→ 根等回投 → 回投 root PASS → DONE
+        # decomposer 首批产 c1,c1 DONE 后 plan[]→ gap 闭=终验通过 → 翻根 DONE
         facade = _CaseTaskService(svc, planner_factory=lambda g: [_child("c1")])
         _run(facade.execute(_task_info()))
         _run(facade.callback.report_result(TaskCallbackData(
             loop_task_id="t1::c1", workflow_type="single_bot", workflow_id=1, instance_id=1,
             result={"success": True, "data": "x"},
         )))
-        # c1 DONE → 根 plan[](无新子)→ 根 PLANNING 等回投
+        # c1 DONE → 根 plan[](无新子,去重空)→ gap 闭=终验通过 → 翻根 DONE + graph DONE
         graph = svc.query_task_dashboard("t1")
-        assert svc._get_node(graph, "t1").status == Status.PLANNING
-        # 模拟 owner bot 终验回投 root PASS → graph DONE(无 verify port 注入)
-        _run(facade.callback.report_result(TaskCallbackData(
-            loop_task_id="t1::t1", workflow_type="single_bot", workflow_id=1, instance_id=2,
-            result={"success": True, "data": "root PASS"},
-        )))
-        graph = svc.query_task_dashboard("t1")
+        assert svc._get_node(graph, "t1").status == Status.DONE
         assert graph.status == Status.DONE
 
 

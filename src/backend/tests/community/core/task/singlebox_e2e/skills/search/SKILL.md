@@ -41,6 +41,11 @@ tags: [task, search, dispatch]
 
 ## 确定式决策剧本(案例 gwqie46v7hzr1w6h)
 
+> **强约束(确定性优先)**:严格按 `demand.node_id` 查下表返回对应 outcome —— **禁止自由组合候选 bot**。
+> catalog 里下表未提及的 bot(如 `task-owner-bot`、与该 node_id 剧本无关的角色)是预查噪音,**必须忽略**,
+> 不得因"多 bot 协作更全面"擅自改 `HIT_SINGLE` 为 `HIT_MULTI_BOTS`。表中角色名须在 catalog 里按
+> `bot_name` 匹配真实 `bot_id`;匹配不到 → 该节点返 `MISS`(候选不匹配),**不得用其它 bot 顶替**。
+
 按 `demand.node_id` 返回(knowledge 只在本 skill):
 
 | node_id | 输出 outcome | 执行者/拉群 |

@@ -545,15 +545,16 @@ class SingleboxKeywordBotDiscover:
         top_k: int = 10,
         min_score: float = 0.01,
         filters: dict[str, Any] | None = None,
+        fallback_to_all: bool = False,
     ) -> dict[str, Any]:
-        """singlebox 候选预查:**决策非查找**——关键字命中返命中;命中 0 回落到全部公开 bot,
-        不让"bot 名字与需求关键字对不上"把唯一候选 filter 掉(本地 bot 不按能力命名、目录极小)。
-        真正谁执行由 ``SearchBasedDispatchStrategy`` 投 search skill 在候选里决,本层只供候选。"""
+        """singlebox 候选预查:**决策非查找**——关键字命中返命中;命中 0 默认返空(收窄,不盲目塞全量
+        噪音 bot,避免 search skill 在无关候选里自由组合)。``fallback_to_all=True`` 时回落全量公开 bot
+        (显式场景:产品搜索等需要"有结果"兜底)。谁执行仍由 search skill 在候选里决,本层只供候选。"""
         # 1) 关键字 LIKE 命中(bot 按能力命名时能命中)
         hits = self._query(user_id=user_id, search=keyword or None, top_k=top_k)
         used_fallback = False
-        if not hits:
-            # 2) 回落:全部公开 bot(候选不误杀空)
+        if not hits and fallback_to_all:
+            # 2) 显式回落:全部公开 bot(仅 fallback_to_all=True 时)
             hits = self._query(user_id=user_id, search=None, top_k=top_k)
             used_fallback = bool(hits)
         # 合成 recommend.score(命中次序降权),对齐 BCSFuse items 形态供策略排序

@@ -150,6 +150,27 @@ def _wf_node(node_id: str, task_id: str, task_spec) -> TaskNode:
     )
 
 
+def _done_children(graph: TaskExecutionGraph, target: TaskNode) -> list[dict]:
+    """取 target 的**已 DONE 子节点**列表 [{node_id, title, output}](结构子,经 DEPENDENCY 边)。
+
+    供 planning prompt 的 ``snapshot.done_children``:让 skill 据已产出算 gap 产下一批,
+    而非在只看到 target 自身 + 空 gaps 时误判"gap 已闭"提前结束。零 case 知识(不写节点名)。
+    """
+    child_ids = [
+        r.dst_id for r in graph.relations
+        if r.src_id == target.node_id and r.type == RelationType.DEPENDENCY
+    ]
+    out: list[dict] = []
+    for n in graph.tasks:
+        if n.node_id in child_ids and n.status == Status.DONE:
+            out.append({
+                "node_id": n.node_id,
+                "title": n.task_spec.metadata.title,
+                "output": (n.run_info.output if n.run_info else None),
+            })
+    return out
+
+
 def _compose_planning_prompt(graph: TaskExecutionGraph, target: TaskNode) -> str:
     """组 planning prompt:{goal, context, target_node, graph_snapshot, gaps} + 约定返回格式 + 示例。
 
@@ -170,6 +191,7 @@ def _compose_planning_prompt(graph: TaskExecutionGraph, target: TaskNode) -> str
         "acceptances": [
             {"id": a.id, "description": a.description} for a in goal.acceptances
         ],
+        "done_children": _done_children(graph, target),
         "gaps": gaps,
         "loop_round": graph.loop_round,
     }
@@ -199,6 +221,7 @@ def _compose_planning_prompt(graph: TaskExecutionGraph, target: TaskNode) -> str
     )
     return (f"[planning] 请基于以下任务状态计算 gap,产下一步可执行子任务 List[TaskSpec];gap 已闭返回 []。\n"
             f"目标节点 node_id={target.node_id}\n"
+            f"已完成的子节点及其产出见快照 done_children;gap = 目标 - 已完成产出,据此产**尚未完成**的下一批子任务。\n"
             f"任务态快照\n{_json.dumps(snapshot, ensure_ascii=False)}\n\n{return_fmt}")
 
 

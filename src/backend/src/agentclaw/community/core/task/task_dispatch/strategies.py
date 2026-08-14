@@ -133,31 +133,55 @@ def _query_text(node: TaskNode) -> dict:
     }
 
 
+def _tokenize(text: str) -> list[str]:
+    """中文分词(jieba)取 ≥2 字语义词供 LIKE 预查;jieba 未装→退回整串(可跑但精度降级)。
+    拆词避免整串 ``LIKE '%长句%'`` 命中 0 → fallback 塞全量噪音 bot 的问题(决策非查找)。"""
+    if not text:
+        return []
+    try:
+        import jieba  # type: ignore[import-untyped]
+    except ImportError:
+        return [text]
+    return [w for w in jieba.cut(text) if len(w.strip()) >= 2]
+
+
 async def _prefetch_candidates(discover, node: TaskNode, graph: TaskExecutionGraph) -> list[dict]:
-    """框架语义预查候选集:分字段(title/objective/background)各调 discover.search_by_keyword 一次,
-    合并去重按 recommend.score 降序。discover.search_by_keyword 是同步 requests,经 asyncio.to_thread 包。
-    user_id 取 graph 派生 source_channel_id;filters={"runtime_state":["online"]},top_k=10,min_score=0.01。"""
+    """框架候选预查:对 node 的 title/objective/background 各 jieba 分词,每 token 调 search_by_keyword
+    (命中 0→空,不 fallback 全量),合并去重按 recommend.score 降序。discover.search_by_keyword 是同步
+    requests,经 asyncio.to_thread 包;多 token 用 asyncio.gather 并发。user_id 取 graph 派生
+    source_channel_id;filters={"runtime_state":["online"]},top_k=10,min_score=0.01。"""
     import asyncio
     texts = _query_text(node)
     user_id = str(graph.extend_props.get("source_channel_id") or "")
-    seen: dict[str, dict] = {}
+    # 三字段分词 → tokens 去重保序
+    tokens: list[str] = []
+    seen_tok: set[str] = set()
     for fld in ("title", "objective", "background"):
-        kw = texts.get(fld)
-        if not kw:
-            continue
+        for t in _tokenize(texts.get(fld) or ""):
+            if t not in seen_tok:
+                seen_tok.add(t)
+                tokens.append(t)
+    if not tokens:
+        return []
+    logger.info("[search] node=%s 分词 tokens=%s", node.node_id, tokens)
+
+    async def _q(kw: str) -> list[dict]:
         try:
             res = await asyncio.to_thread(
                 discover.search_by_keyword,
                 keyword=kw, user_id=user_id, top_k=10, min_score=0.01,
                 filters={"runtime_state": ["online"]},
             )
-        except Exception:  # noqa: BLE001  端口异常→该字段无候选,不阻断其它字段
-            continue
-        for item in (res or {}).get("items") or []:
+        except Exception:  # noqa: BLE001  端口异常→该 token 无候选,不阻断其它
+            return []
+        return (res or {}).get("items") or []
+
+    items_lists = await asyncio.gather(*[_q(t) for t in tokens])
+    seen: dict[str, dict] = {}
+    for items in items_lists:
+        for item in items:
             bid = item.get("bot_id")
-            if not bid:
-                continue
-            if bid not in seen:
+            if bid and bid not in seen:
                 seen[bid] = item
     return sorted(seen.values(), key=lambda x: (x.get("recommend") or {}).get("score", 0.0), reverse=True)
 

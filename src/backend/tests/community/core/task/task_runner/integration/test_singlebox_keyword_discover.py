@@ -1,7 +1,8 @@
-"""SingleboxKeywordBotDiscover 单测:锁住"关键字命不中→回落全量"的候选预查策略。
+"""SingleboxKeywordBotDiscover 单测:锁住"关键字命中→候选;命中 0 默认空(收窄,不塞全量噪音 bot)"策略。
 
-这层是**决策非查找**:候选集不该被"bot 名字与需求关键字对不上"误杀空。本地 bot 不按能力命名、
-目录极小,关键字 LIKE 命中 0 时回落到全部公开 bot 当候选,谁执行仍由下游 search skill 在候选里决。
+这层是**决策非查找**:候选集不该被无关 bot 污染。本地 bot 按能力命名时关键字 LIKE 能命中;
+命中 0 → 默认返空(避免 search skill 在无关候选里自由组合)。``fallback_to_all=True`` 时显式回落全量
+(产品搜索等需要"有结果"兜底的场景)。
 """
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adap
 
 
 class _FakeBps:
-    """假 BotPublicServiceProtocol:按 search 关键字返回不同结果,模拟 singlebox 行为。"""
+    """假 BotPublicServiceProtocol:按 search 关键字返回不同结果,模拟 singlebox DB LIKE 行为。"""
 
     def search_public_bots_by_keyword(self, *, user_id, search=None, page=1, page_size=10, **_):
         all_bots = [
@@ -34,7 +35,7 @@ class _ExplodingBps:
         raise RuntimeError("boom")
 
 
-class TestSingleboxKeywordDiscoverFallback(unittest.TestCase):
+class TestSingleboxKeywordDiscover(unittest.TestCase):
     def test_keyword_hit_returns_hits_no_fallback(self) -> None:
         d = SingleboxKeywordBotDiscover(_FakeBps())
         res = d.search_by_keyword(keyword="市场", user_id="146836")
@@ -42,13 +43,20 @@ class TestSingleboxKeywordDiscoverFallback(unittest.TestCase):
         self.assertEqual(res["items"][0]["bot_id"], "B_MARKET")
         self.assertFalse(res["context"]["fallback_to_all"])
 
-    def test_keyword_miss_falls_back_to_all(self) -> None:
-        """核心:需求关键字跟任何 bot 名都对不上→回落全量,候选不误杀空。"""
+    def test_keyword_miss_returns_empty_by_default(self) -> None:
+        """核心:关键字命不中→默认返空(收窄),不盲目塞全量噪音 bot。"""
         d = SingleboxKeywordBotDiscover(_FakeBps())
         res = d.search_by_keyword(keyword="存储行业尽调", user_id="146836")
-        self.assertEqual(res["total"], 2)  # 全量公开 bot
-        bot_ids = {it["bot_id"] for it in res["items"]}
-        self.assertEqual(bot_ids, {"B_MARKET", "B_BBS"})
+        self.assertEqual(res["total"], 0)
+        self.assertEqual(res["items"], [])
+        self.assertFalse(res["context"]["fallback_to_all"])
+
+    def test_keyword_miss_explicit_fallback_to_all(self) -> None:
+        """显式 fallback_to_all=True→回落全量公开 bot(产品搜索等兜底场景)。"""
+        d = SingleboxKeywordBotDiscover(_FakeBps())
+        res = d.search_by_keyword(keyword="存储行业尽调", user_id="146836", fallback_to_all=True)
+        self.assertEqual(res["total"], 2)
+        self.assertEqual({it["bot_id"] for it in res["items"]}, {"B_MARKET", "B_BBS"})
         self.assertTrue(res["context"]["fallback_to_all"])
 
     def test_empty_keyword_returns_all_not_marked_fallback(self) -> None:
@@ -66,7 +74,7 @@ class TestSingleboxKeywordDiscoverFallback(unittest.TestCase):
 
     def test_items_carry_recommend_score(self) -> None:
         d = SingleboxKeywordBotDiscover(_FakeBps())
-        res = d.search_by_keyword(keyword="存储行业尽调", user_id="146836")
+        res = d.search_by_keyword(keyword="存储行业尽调", user_id="146836", fallback_to_all=True)
         for it in res["items"]:
             self.assertIn("recommend", it)
             self.assertIn("score", it["recommend"])

@@ -196,21 +196,21 @@ class TestOnReportPass:
         assert svc._get_node(graph, "c_proceed").status == Status.RUNNING
         assert len(runner.run_calls) == 1
 
-    def test_pass_all_siblings_gap_closed_root_waits_report(self, svc, graph):
-        # V1:根验收不主动触发;gap 闭 + 根 → 根保持 PLANNING 等 owner bot 回投(engine 不调 verify)
+    def test_pass_all_siblings_gap_closed_root_done(self, svc, graph):
+        # 语义A:plan 返 []=gap 闭=终验通过 → 翻根 DONE + 图 DONE(无需 owner bot 单独回投)
         self._setup_running_children(svc, graph, 2)
         eng = _engine(svc, planner=StubPlanner(lambda g: []))
         _run(eng.on_report(_patch("t1", "c0", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))))
         _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))))
-        assert svc._get_node(graph, "t1").status == Status.PLANNING  # 等回投,不自动验
+        assert svc._get_node(graph, "t1").status == Status.DONE  # gap 闭=终验通过→翻根 DONE
+        assert graph.status == Status.DONE
 
-    def test_root_terminal_pass_finish_graph(self, svc, graph):
-        # 全图 DONE → plan[]→ 根 PLANNING 等回投 → 模拟 owner bot 回投 root PASS → graph DONE
+    def test_root_gap_closed_finish_graph(self, svc, graph):
+        # 语义A:c0 PASS → plan[]→ gap 闭=终验通过 → 翻根 DONE + graph DONE(一步到位,不再等回投)
         self._setup_running_children(svc, graph, 1)
         eng = _engine(svc, planner=StubPlanner(lambda g: []))
         _run(eng.on_report(_patch("t1", "c0", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))))
-        # 模拟 owner bot 终验回投 root PASS(验收 100% 回投,engine 不主动验)
-        _run(eng.on_report(_patch("t1", "t1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))))
+        assert svc._get_node(graph, "t1").status == Status.DONE  # 不再等回投
         assert graph.status == Status.DONE
 
 

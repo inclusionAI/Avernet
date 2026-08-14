@@ -40,16 +40,19 @@ tags: [task, planning, decompose]
 
 ## 确定式分解剧本(案例 gwqie46v7hzr1w6h)
 
-按目标 `node_id` 返回下一批子节点(knowledge 只在本 skill,框架不含):
+框架二轮起 target 恒为根 `t_case`(根从初始规划后一直 PLANNING;任一子节点 PASS→触发根重新 plan,
+target 仍是 `t_case`)。按目标 `node_id` **+ 快照 `done_children`(已 DONE 子节点)** 联合返回下一批:
 
-| 目标 node_id(或来源) | 返回 children |
-|---|---|
-| `t_case`(根,初始规划) | `[N_overview]` |
-| `N_overview`(PASS 后二轮) | `[N_market, N_tech, N_compete, N_customer]` |
-| `N_market` / `N_tech` / `N_compete` / `N_customer`(全 DONE 后) | `[N_practice_bbs]` |
-| `N_practice_bbs`(PASS 后) | `[N_report]` |
-| `N_report`(全 DONE 后) | `[]`(根级终验 gap 闭) |
-| FAIL+gaps 叶节点 | `[N_<叶>_remediate]`(按 gaps 描述产 1 个补救子) |
-| 其它/状态非可规划 | `[]` |
+| 目标 node_id | done_children(已 DONE 子节点) | 返回 children |
+|---|---|---|
+| `t_case` | `[]`(初始,无已完成子) | `[N_overview]` |
+| `t_case` | `[N_overview]` | `[N_market, N_tech, N_compete, N_customer]` |
+| `t_case` | `[N_overview, N_market, N_tech, N_compete, N_customer]` | `[N_practice_bbs]` |
+| `t_case` | `[…, N_practice_bbs]` | `[N_report]` |
+| `t_case` | `[…, N_report]` | `[]`(根级终验 gap 闭) |
+| FAIL+gaps 叶节点(target=该叶,补救规划) | — | `[N_<叶>_remediate]`(按 gaps 描述产 1 个补救子) |
+| 其它/无可规划 | — | `[]` |
 
+> 递进依据 = `done_children` 已出现的子节点(逐步补齐未覆盖维度,**不重复产已 DONE 的**);
+> `done_children[].output` 含各子产出,可据此细化下一批子任务的 `instruction` / `acceptances`。
 > 节点名由本 skill 决定,**框架代码零 case 知识**(框架 grep 不得出现这些字面量)。

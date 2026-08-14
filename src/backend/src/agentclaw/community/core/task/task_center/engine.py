@@ -431,7 +431,9 @@ class ExecutionEngine:
             await self._runner.start_run(run_nodes)
 
     def _maybe_finish_graph(self, task_id: str) -> None:
-        """根 PASS(终验回投通过)→ 全图 DONE。图级写收口 update_task_graph_info(SSOT 唯一网关)。"""
+        """根 gap 闭(终验通过)→ 全图 DONE。图级写收口 + 根节点翻 DONE。
+        若不翻根:图 status=DONE 但根 t_case 仍 PLANNING(根从初始规划后一直 PLANNING,从未被回投 PASS),
+        造成"图 DONE / 根 PLANNING"状态不一致。两写均经 SSOT 网关(锁内同步落库,无 await)。"""
         self._graph.update_task_graph_info(
             task_id,
             TaskGraphPatch(
@@ -439,3 +441,8 @@ class ExecutionEngine:
                 output_patch={"result": "all_done"},
             ),
         )
+        root = self._root(task_id)
+        if root is not None and root.status != Status.DONE:
+            self._graph.update_task_node_info(
+                TaskNodePatch(task_id=task_id, node_id=root.node_id, status=Status.DONE)
+            )

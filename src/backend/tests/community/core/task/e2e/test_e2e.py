@@ -324,14 +324,11 @@ class TestThreeModesHappyToDone:
         assert svc._get_node(g, "N_report").run_info.run_mode == "single_bot"
         assert svc._get_node(g, "N_report").status == Status.RUNNING
 
-        # 回投 N_report PASS → 根 plan[]→ 根 PLANNING 等回投 → owner bot 回投根 PASS → graph DONE(V1:无 verify)
+        # 语义A:回投 N_report PASS → 根 plan[]→ gap 闭=终验通过 → 翻根 DONE + graph DONE(无需回投根 PASS)
         _run(facade.callback.report_result(_cb(True, f"{root_id}::N_report", data="尽调报告")))
         g = svc.query_task_dashboard(root_id)
-        assert svc._get_node(g, root_id).status == Status.PLANNING  # 等回投,不主动验
-        _run(facade.callback.report_result(_cb(True, f"{root_id}::{root_id}", data="root PASS")))
-        g = svc.query_task_dashboard(root_id)
+        assert svc._get_node(g, root_id).status == Status.DONE  # gap 闭=终验通过→翻根 DONE(语义A)
         assert g.status == Status.DONE
-        assert svc._get_node(g, root_id).status == Status.DONE
         assert all(n.status == Status.DONE for n in g.tasks)
 
     def test_relations_decomposition_tree_single_in(self):
@@ -412,9 +409,8 @@ class TestMissEscalateBbs:
         assert svc._get_node(g, "N_report").status == Status.RUNNING
         _run(facade.callback.report_result(_cb(True, "t_case::N_report", data="尽调报告聚合")))
         g = svc.query_task_dashboard("t_case")
-        assert svc._get_node(g, "t_case").status == Status.PLANNING  # V1:等回投,无 verify
-        _run(facade.callback.report_result(_cb(True, "t_case::t_case", data="root PASS")))
-        g = svc.query_task_dashboard("t_case")
+        # 语义A:根 plan[]→ gap 闭=终验通过 → 翻根 DONE + graph DONE(无需回投根 PASS)
+        assert svc._get_node(g, "t_case").status == Status.DONE
         assert g.status == Status.DONE
 
 
