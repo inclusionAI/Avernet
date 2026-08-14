@@ -462,6 +462,25 @@ async def upload_resource(
             # safe to do unconditionally on this branch — ``delete_file_record``
             # reports "nothing matched" with a ``False`` rather than raising, and
             # a bot-created file being overwritten never had a row to begin with.
+            #
+            # This is a *reduction*, not a guarantee, and the difference matters.
+            # The drop and the insert are two statements with no lock between
+            # them, so two overwrites racing on one path can both drop, then both
+            # insert, and leave two live rows — the publish pipeline would list
+            # the file twice. Without the drop the same race leaves three, so
+            # this strictly improves it, but it does not close it.
+            #
+            # It is the same race the duplicate check above already documents,
+            # one table down: concurrent *fresh* uploads to an absent path both
+            # pass ``exists``, both write, and both insert, which is the
+            # pre-existing behaviour this branch inherits rather than introduces.
+            # Closing it properly needs a uniqueness constraint on
+            # ``(bolt_id, path)`` plus an upsert in the repository — a DDL on
+            # ``ac_resource``, a table the console and the publish pipeline share.
+            # That has to be deployed before code that depends on it (see the
+            # module docstring's Phase 0 note on ``avernet_tenant``: code first /
+            # DDL later breaks bot reads), so it is not an adapter-level fix and
+            # is deliberately not attempted here.
             await factory.create(bot_id=bot_id).delete_file_record(path=safe)
         await factory.create(bot_id=bot_id).record_uploaded_file(
             path=info["path"],

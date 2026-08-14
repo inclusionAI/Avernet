@@ -1665,9 +1665,16 @@ async def test_real_factory_service_supports_every_handler_path_e2e():
 
 
 @pytest.mark.asyncio
-async def test_overwrite_leaves_one_live_record_for_the_path_e2e():
-    """Against the real service: the replaced row is soft-deleted and exactly one
-    live row remains, so the publish manifest lists the file once."""
+async def test_sequential_overwrite_leaves_one_live_record_for_the_path_e2e():
+    """Against the real service: the replaced row is soft-deleted and one live
+    row remains, so the publish manifest lists the file once.
+
+    **Sequential**, and the name says so deliberately. The drop and the insert
+    are two statements with no lock between them, so concurrent overwrites on one
+    path can still leave two live rows — see the router comment. Naming this
+    ``leaves_one_live_record`` unqualified would read as a concurrency invariant
+    the code does not provide.
+    """
     factory, repo = _real_factory_with_inmemory_repo()
     file_svc = _StubReadFileService({})
 
