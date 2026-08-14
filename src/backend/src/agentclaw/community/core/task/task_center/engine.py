@@ -176,10 +176,18 @@ class ExecutionEngine:
         for attempt in range(max_h):
             pr = await self._planner.plan(graph, target_node_id=target_node_id)
             if pr.children or not (pr.gap_detail or "").startswith("plan_"):
-                return pr  # 有子 / 真 gap 闭 / 真拆不出 → 不重试
+                break  # 有子 / 真 gap 闭 / 真拆不出 → 不重试
             logger.warning("[plan-retry] task=%s attempt=%d/%d gap_detail=%s",
                            task_id, attempt + 1, max_h, pr.gap_detail)
-        return pr  # 重试耗尽 → has_gap=True(plan_ 失败)→ 编排核 HUNG 升 BBS
+        # 可观测:落最近一次 plan 结果到图 extend_props(dashboard 可见,便于诊断 plan 为何产 []/HUNG)
+        self._graph.update_task_graph_info(
+            task_id, TaskGraphPatch(extend_props_patch={
+                "last_plan_target": target_node_id or "<root>",
+                "last_plan_children": len(pr.children),
+                "last_plan_has_gap": pr.has_gap,
+                "last_plan_detail": pr.gap_detail,
+            }))
+        return pr
 
     def _mark_planning(self, task_id: str, node_id: str) -> None:
         """节点被 owner bot 规划时,落 run_mode="planning" + assignee=owner(source_channel_id)。
