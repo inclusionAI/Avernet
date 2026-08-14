@@ -21,6 +21,8 @@ paths:
     $ref: ./openapi/bots.yaml#/QueryBotsPath
   /openapi/v1/collaboration/bots/{bot_id}:
     $ref: ./openapi/bots.yaml#/BotPath
+  /openapi/v1/collaboration/bots/{bot_id}/candidates:
+    $ref: ./openapi/bots.yaml#/BotCandidatesPath
   /openapi/v1/collaboration/bots/{bot_uuid}/friendships:
     $ref: ./openapi/friendships.yaml#/ListFriendshipsPath
   /openapi/v1/collaboration/bots/{bot_uuid}/friendships/{friend_bot_uuid}:

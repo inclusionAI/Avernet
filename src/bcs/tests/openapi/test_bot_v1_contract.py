@@ -26,8 +26,16 @@ def _operation(method: str, path: str):
     return _contract()["paths"][path][method]
 
 
+def _public_contract():
+    return load_contract(CONTRACT_ROOT)
+
+
 def _internal_contract():
     return load_contract(CONTRACT_ROOT, entrypoint="internal.yaml")
+
+
+def _public_operation(method: str, path: str):
+    return _public_contract()["paths"][path][method]
 
 
 def _internal_operation(method: str, path: str):
@@ -127,8 +135,8 @@ def test_bot_domain_model_is_a_strict_bot_human_union() -> None:
 
 
 def test_candidates_contract_matches_legacy_list_semantics() -> None:
-    operation = _internal_operation(
-        "get", "/api/v1/collaboration/bots/{bot_id}/candidates"
+    operation = _public_operation(
+        "get", "/openapi/v1/collaboration/bots/{bot_id}/candidates"
     )
     parameters = _parameters(operation)
 

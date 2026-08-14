@@ -72,7 +72,8 @@ class TestApiDocsEnabled:
         data = response.json()
         paths = data["paths"]
         assert "/api/v1/collaboration/sessions/{session_id}/files" in paths
-        assert "/api/v1/collaboration/bots/{bot_id}/candidates" in paths
+        assert "/api/v1/collaboration/bots/{bot_id}/candidates" not in paths
+        assert "/api/v1/collaboration/bots/{bot_id}/candidates/search" in paths
         assert "/openapi/v1/collaboration/groups" not in paths
 
     def test_openapi_schema_has_metadata(self, client: TestClient) -> None:

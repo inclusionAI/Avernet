@@ -12,7 +12,6 @@ from scripts.validate_openapi_contract import load_contract  # noqa: E402
 HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
 
 EXPECTED_OPERATIONS = {
-    ("get", "/api/v1/collaboration/bots/{bot_id}/candidates"),
     ("get", "/api/v1/collaboration/bots/{bot_id}/candidates/search"),
     ("get", "/api/v1/collaboration/sessions/{session_id}/files"),
     ("post", "/api/v1/collaboration/sessions/{session_id}/files"),
@@ -36,7 +35,7 @@ def _actual_operations():
     }
 
 
-def test_contract_contains_exactly_the_11_approved_internal_operations() -> None:
+def test_contract_contains_exactly_the_10_approved_internal_operations() -> None:
     assert _actual_operations() == EXPECTED_OPERATIONS
 
 
