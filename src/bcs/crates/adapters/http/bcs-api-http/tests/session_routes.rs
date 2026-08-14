@@ -15,12 +15,13 @@ use bcs_service_api::application::v1::{
 use bcs_service_api::application::v1::{
     AddGroupParticipant, AddSessionParticipant, ApplicationError, AuthenticatedAppIdentity,
     AuthenticatedBotIdentity, AuthenticatedCaller, AuthenticatedUserIdentity, BotParticipantMode,
-    CompleteSession, CreateGroup, CreateSession, CreateSessionOutcome, DeleteGroup,
-    DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant, GetGroup,
-    GetSession, GroupDetail, GroupService, GroupSummary, ListGroups, ListSessionMessages,
-    ListSessions, Page, SessionCompletionResult, SessionDetail, SessionMessageService,
-    SessionParticipant, SessionService, SessionStatus, SessionSummary, UpdateGroup,
-    UpdateGroupParticipant, UpdateSession, UpdateSessionParticipant,
+    CollectSession, CompleteSession, CreateGroup, CreateSession, CreateSessionOutcome,
+    DeleteGroup, DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant,
+    GetGroup, GetSession, GroupDetail, GroupService, GroupSummary, ListGroups,
+    ListSessionMessages, ListSessions, Page, SessionCollectionResult, SessionCompletionResult,
+    SessionDetail, SessionMessageService, SessionParticipant, SessionService, SessionStatus,
+    SessionSummary, UncollectSession, UpdateGroup, UpdateGroupParticipant, UpdateSession,
+    UpdateSessionParticipant,
 };
 use bcs_service_api::types::{AttachmentType, MessageAttachment};
 use bcs_service_api::{
@@ -378,6 +379,10 @@ struct FakeSessionService {
     updated: Mutex<Option<UpdateSession>>,
     deleted: Mutex<Option<DeleteSession>>,
     completed: Mutex<Option<CompleteSession>>,
+    collected: Mutex<Option<CollectSession>>,
+    uncollected: Mutex<Option<UncollectSession>>,
+    collection_forbidden: AtomicBool,
+    collection_not_found: AtomicBool,
     added_participant: Mutex<Option<AddSessionParticipant>>,
     updated_participant: Mutex<Option<UpdateSessionParticipant>>,
     removed_participant: Mutex<Option<DeleteSessionParticipant>>,
@@ -432,6 +437,39 @@ impl SessionService for FakeSessionService {
             session_id: "session-1".into(),
             status: SessionStatus::Completed,
             completed_at: 3,
+        })
+    }
+
+    async fn collect(
+        &self,
+        command: CollectSession,
+    ) -> Result<SessionCollectionResult, ApplicationError> {
+        *self.collected.lock().expect("collect lock") = Some(command.clone());
+        if self.collection_forbidden.load(Ordering::Relaxed) {
+            return Err(ApplicationError::forbidden("collection forbidden"));
+        }
+        if self.collection_not_found.load(Ordering::Relaxed) {
+            return Err(ApplicationError::not_found(
+                "session_not_found",
+                "Session was not found",
+            ));
+        }
+        Ok(SessionCollectionResult {
+            session_id: command.session_id,
+            participant: command.participant,
+            collected: true,
+        })
+    }
+
+    async fn uncollect(
+        &self,
+        command: UncollectSession,
+    ) -> Result<SessionCollectionResult, ApplicationError> {
+        *self.uncollected.lock().expect("uncollect lock") = Some(command.clone());
+        Ok(SessionCollectionResult {
+            session_id: command.session_id,
+            participant: command.participant,
+            collected: false,
         })
     }
 
@@ -1085,6 +1123,145 @@ async fn complete_session_route_is_not_mounted() {
         .expect("complete response");
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     assert!(session.completed.lock().expect("complete lock").is_none());
+}
+
+#[tokio::test]
+async fn collect_session_returns_v1_envelope_and_forwards_command() {
+    let session = Arc::new(FakeSessionService::default());
+    let app = test_session_router(
+        session.clone(),
+        Arc::new(FakeSessionMessageService::default()),
+    );
+
+    let response = app
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/collaboration/sessions/session-1/collect",
+            json!({"participant": "bot-1"}),
+        ))
+        .await
+        .expect("collect response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["code"], 20_000);
+    assert_eq!(body["message"], "OK");
+    assert_eq!(body["request_id"], "request-123");
+    assert_eq!(body["data"]["session_id"], "session-1");
+    assert_eq!(body["data"]["participant"], "bot-1");
+    assert_eq!(body["data"]["collected"], true);
+    let command = session.collected.lock().expect("collect lock");
+    let command = command.as_ref().expect("collect command");
+    assert_eq!(caller_user_id(&command.caller), "staff-1");
+    assert_eq!(command.session_id, "session-1");
+    assert_eq!(command.participant, "bot-1");
+}
+
+#[tokio::test]
+async fn uncollect_session_returns_v1_envelope_and_forwards_command() {
+    let session = Arc::new(FakeSessionService::default());
+    let app = test_session_router(
+        session.clone(),
+        Arc::new(FakeSessionMessageService::default()),
+    );
+
+    let response = app
+        .oneshot(authenticated_request(
+            "DELETE",
+            "/openapi/v1/collaboration/sessions/session-1/collect?participant=bot-1",
+            Value::Null,
+        ))
+        .await
+        .expect("uncollect response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["data"]["session_id"], "session-1");
+    assert_eq!(body["data"]["participant"], "bot-1");
+    assert_eq!(body["data"]["collected"], false);
+    let command = session.uncollected.lock().expect("uncollect lock");
+    let command = command.as_ref().expect("uncollect command");
+    assert_eq!(caller_user_id(&command.caller), "staff-1");
+    assert_eq!(command.session_id, "session-1");
+    assert_eq!(command.participant, "bot-1");
+}
+
+#[tokio::test]
+async fn collection_requests_reject_invalid_participant_input_before_service_call() {
+    for (method, uri, body) in [
+        (
+            "POST",
+            "/openapi/v1/collaboration/sessions/session-1/collect",
+            Value::Null,
+        ),
+        (
+            "POST",
+            "/openapi/v1/collaboration/sessions/session-1/collect",
+            json!({"participant": ""}),
+        ),
+        (
+            "POST",
+            "/openapi/v1/collaboration/sessions/session-1/collect",
+            json!({"participant": "bot-1", "unknown": true}),
+        ),
+        (
+            "DELETE",
+            "/openapi/v1/collaboration/sessions/session-1/collect",
+            Value::Null,
+        ),
+        (
+            "DELETE",
+            "/openapi/v1/collaboration/sessions/session-1/collect?participant=",
+            Value::Null,
+        ),
+    ] {
+        let session = Arc::new(FakeSessionService::default());
+        let app = test_session_router(
+            session.clone(),
+            Arc::new(FakeSessionMessageService::default()),
+        );
+        let response = app
+            .oneshot(authenticated_request(method, uri, body))
+            .await
+            .expect("invalid collection response");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{method} {uri}");
+        let response_body = response_json(response).await;
+        assert_eq!(response_body["data"]["error_code"], "invalid_request");
+        assert!(session.collected.lock().expect("collect lock").is_none());
+        assert!(session.uncollected.lock().expect("uncollect lock").is_none());
+    }
+}
+
+#[tokio::test]
+async fn collection_application_errors_use_declared_v1_envelopes() {
+    for (forbidden, expected_status, expected_code) in [
+        (true, StatusCode::FORBIDDEN, "forbidden"),
+        (false, StatusCode::NOT_FOUND, "session_not_found"),
+    ] {
+        let session = Arc::new(FakeSessionService::default());
+        session
+            .collection_forbidden
+            .store(forbidden, Ordering::Relaxed);
+        session
+            .collection_not_found
+            .store(!forbidden, Ordering::Relaxed);
+        let app = test_session_router(
+            session,
+            Arc::new(FakeSessionMessageService::default()),
+        );
+        let response = app
+            .oneshot(authenticated_request(
+                "POST",
+                "/openapi/v1/collaboration/sessions/session-1/collect",
+                json!({"participant": "bot-1"}),
+            ))
+            .await
+            .expect("collection error response");
+        assert_eq!(response.status(), expected_status);
+        let body = response_json(response).await;
+        assert_eq!(body["data"]["error_code"], expected_code);
+        assert_eq!(body["request_id"], "request-123");
+    }
 }
 
 #[tokio::test]

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,6 +62,9 @@ pub struct ProviderCoordinationConfig {
     pub mcp_server: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcporter_command: Option<String>,
+    /// Exact provider-emitted MCP tool name to canonical BCS coordination tool.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tool_name_mapping: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,6 +89,7 @@ impl ProviderCoordinationConfig {
             mode: CoordinationMode::Disabled,
             mcp_server: None,
             mcporter_command: None,
+            tool_name_mapping: BTreeMap::new(),
         }
     }
 }

@@ -1,11 +1,12 @@
 use async_trait::async_trait;
 use bcs_service_api::application::v1::{
     ActorKind, AddSessionParticipant, ApplicationError, AuthenticatedCaller,
-    AuthenticatedUserIdentity, BotParticipantMode, CompleteSession, CreateSession,
-    CreateSessionOutcome, DeleteResult, DeleteSession, DeleteSessionParticipant, GetSession,
-    ListSessionMessages, ListSessions, Page, ParticipantMode, SessionCompletionResult,
-    SessionDetail, SessionMessageService, SessionParticipant, SessionService, SessionStatus,
-    UpdateSession, UpdateSessionParticipant,
+    AuthenticatedUserIdentity, BotParticipantMode, CollectSession, CompleteSession,
+    CreateSession, CreateSessionOutcome, DeleteResult, DeleteSession, DeleteSessionParticipant,
+    GetSession, ListSessionMessages, ListSessions, Page, ParticipantMode,
+    SessionCollectionResult, SessionCompletionResult, SessionDetail, SessionMessageService,
+    SessionParticipant, SessionService, SessionStatus, UncollectSession, UpdateSession,
+    UpdateSessionParticipant,
 };
 use bcs_service_api::types::{AttachmentType, MessageAttachment};
 use bcs_service_api::{GroupMessage, GroupMessageType, MessageRole};
@@ -56,6 +57,20 @@ impl SessionService for NoopSessionService {
         &self,
         _command: CompleteSession,
     ) -> Result<SessionCompletionResult, ApplicationError> {
+        Err(ApplicationError::internal("not implemented"))
+    }
+
+    async fn collect(
+        &self,
+        _command: CollectSession,
+    ) -> Result<SessionCollectionResult, ApplicationError> {
+        Err(ApplicationError::internal("not implemented"))
+    }
+
+    async fn uncollect(
+        &self,
+        _command: UncollectSession,
+    ) -> Result<SessionCollectionResult, ApplicationError> {
         Err(ApplicationError::internal("not implemented"))
     }
 
@@ -139,6 +154,16 @@ fn session_commands_carry_caller_and_no_raw_credentials() {
         caller: caller.clone(),
         session_id: "s1".into(),
     };
+    let collect = CollectSession {
+        caller: caller.clone(),
+        session_id: "s1".into(),
+        participant: "bot-1".into(),
+    };
+    let uncollect = UncollectSession {
+        caller: caller.clone(),
+        session_id: "s1".into(),
+        participant: "bot-1".into(),
+    };
     let add = AddSessionParticipant {
         caller: caller.clone(),
         session_id: "s1".into(),
@@ -162,6 +187,8 @@ fn session_commands_carry_caller_and_no_raw_credentials() {
         &update.caller,
         &delete.caller,
         &complete.caller,
+        &collect.caller,
+        &uncollect.caller,
         &add.caller,
         &update_p.caller,
         &remove_p.caller,
@@ -171,6 +198,17 @@ fn session_commands_carry_caller_and_no_raw_credentials() {
     }
     assert_eq!(create.group_id, "g1");
     assert_eq!(list.status, Some(SessionStatus::Running));
+    assert_eq!(collect.session_id, "s1");
+    assert_eq!(collect.participant, "bot-1");
+    assert_eq!(uncollect.session_id, "s1");
+    assert_eq!(uncollect.participant, "bot-1");
+
+    let result = SessionCollectionResult {
+        session_id: "s1".into(),
+        participant: "bot-1".into(),
+        collected: true,
+    };
+    assert_eq!(serde_json::to_value(result).unwrap()["collected"], true);
 }
 
 #[test]

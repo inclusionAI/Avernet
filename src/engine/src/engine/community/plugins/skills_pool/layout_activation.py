@@ -903,10 +903,16 @@ def _mapping_plan(
     )
 
 
-def _mapping_target_invalid(layout: _Layout, target: Path) -> bool:
+def _mapping_target_invalid(
+    layout: _Layout,
+    target: Path,
+    *,
+    additional_retirement_roots: Sequence[Path] = (),
+) -> bool:
     return (
         not target.is_absolute()
-        or target.parent != layout.active_root
+        or target.parent
+        not in {layout.active_root, *additional_retirement_roots}
         or target
         in {
             layout.legacy_local,
@@ -944,6 +950,7 @@ def _retirement_plan(
     mappings: list[SkillMapping],
     retired_mappings: list[SkillMapping],
     source_layout: MappingSourceLayout,
+    additional_retirement_roots: Sequence[Path] = (),
 ) -> _MappingRetirementPlan:
     """Validate exact managed identities that may be removed.
 
@@ -979,7 +986,11 @@ def _retirement_plan(
                 if source_layout is MappingSourceLayout.LEGACY
                 else "source_outside_pool"
             )
-        elif _mapping_target_invalid(layout, target):
+        elif _mapping_target_invalid(
+            layout,
+            target,
+            additional_retirement_roots=additional_retirement_roots,
+        ):
             reason = "target_invalid"
         elif target in seen and seen[target] != source:
             reason = "retired_target_ambiguous"
@@ -2276,6 +2287,7 @@ def verify_skill_mappings(
     home: str | Path = "/home/admin",
     engine: str = "openclaw",
     source_layout: MappingSourceLayout = MappingSourceLayout.POOL,
+    additional_retirement_roots: Sequence[Path] = (),
 ) -> MappingVerificationResult:
     """验证受管激活入口精确解析到声明 layout 的 source。"""
 
@@ -2285,6 +2297,7 @@ def verify_skill_mappings(
         mappings=mappings,
         retired_mappings=list(retired_mappings),
         source_layout=source_layout,
+        additional_retirement_roots=additional_retirement_roots,
     )
     plan = _mapping_plan(
         layout=layout,
@@ -2331,6 +2344,7 @@ def publish_pool_mappings(
     home: str | Path = "/home/admin",
     engine: str = "openclaw",
     source_layout: MappingSourceLayout = MappingSourceLayout.POOL,
+    additional_retirement_roots: Sequence[Path] = (),
 ) -> MappingPublishResult:
     """按声明 layout 对齐全部受管 mapping，并保留外部入口。"""
 
@@ -2340,6 +2354,7 @@ def publish_pool_mappings(
         mappings=mappings,
         retired_mappings=list(retired_mappings),
         source_layout=source_layout,
+        additional_retirement_roots=additional_retirement_roots,
     )
     plan = _mapping_plan(
         layout=layout,

@@ -31,17 +31,17 @@ bcsfuse_load_env() {
     # Without this, BCSFUSE_AUTH_TOKEN is never set → 401 on all protected routes.
     load_repo_env_file "${BCSFUSE_ENV_FILE}"
 
-    # merchant_hybrid has one model policy for OpenClaw, Claude Code, and SOP.
+    # Hybrid Claude mode has one model policy for OpenClaw, Claude Code, and SOP.
     # Its generated BCSFuse env file may predate that policy, so restore the
     # five SOP model selectors only after that file has been loaded.
-    if [ "${MERCHANT_HYBRID_ACTIVE:-0}" = "1" ]; then
-        local merchant_hybrid_model="${MERCHANT_HYBRID_MODEL_ID:-Kimi-K2.6}"
-        export LLM_FAST_MODEL="$merchant_hybrid_model"
-        export LLM_BALANCED_MODEL="$merchant_hybrid_model"
-        export LLM_REASONING_MODEL="$merchant_hybrid_model"
-        export LLM_LONG_CONTEXT_MODEL="$merchant_hybrid_model"
-        export LLM_EXTRACTION_MODEL="$merchant_hybrid_model"
-        log_info "merchant_hybrid model policy: reapplied ${merchant_hybrid_model} for BCSFuse SOP"
+    if [ "${HYBRID_CLAUDE_ACTIVE:-${MERCHANT_HYBRID_ACTIVE:-0}}" = "1" ]; then
+        local hybrid_model="${HYBRID_MODEL_ID:-Kimi-K2.6}"
+        export LLM_FAST_MODEL="$hybrid_model"
+        export LLM_BALANCED_MODEL="$hybrid_model"
+        export LLM_REASONING_MODEL="$hybrid_model"
+        export LLM_LONG_CONTEXT_MODEL="$hybrid_model"
+        export LLM_EXTRACTION_MODEL="$hybrid_model"
+        log_info "Hybrid model policy: reapplied ${hybrid_model} for BCSFuse SOP"
     fi
 
     # Ensure provider mode defaults to dev

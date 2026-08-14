@@ -4,7 +4,7 @@
 models and resource path items live in separate YAML fragments so a domain can
 evolve without creating one monolithic file.
 
-The current contract contains 41 approved operations across Bot, Group,
+The current contract contains 43 approved operations across Bot, Group,
 GroupParticipant, Session, SessionParticipant, Invitation, Friendship,
 FriendRequest, SessionFile, and session-bound WebSocket resources. Every operation is published below the single BCN
 ownership prefix `/openapi/v1/collaboration/**`. These are the exact endpoints
@@ -36,6 +36,13 @@ Group's Sessions remains nested at
 `/openapi/v1/collaboration/groups/{group_id}/sessions`. The shared ownership
 prefix separates both resources from Backend and BaaS paths while preserving
 their natural names.
+
+Session collection adds two idempotent Human control-plane operations at
+`/openapi/v1/collaboration/sessions/{session_id}/collect`. `POST` collects and
+`DELETE` uncollects on behalf of the required `participant` Bot. BCN verifies
+that the authenticated Human owns that Bot and that the Bot participates in
+the Session; collection state remains attributed to the Bot rather than the
+Human caller.
 
 Session-bound WebSocket access adds two operations to that HTTP surface:
 

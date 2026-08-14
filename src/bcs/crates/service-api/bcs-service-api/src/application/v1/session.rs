@@ -85,6 +85,13 @@ pub struct SessionCompletionResult {
     pub completed_at: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionCollectionResult {
+    pub session_id: String,
+    pub participant: String,
+    pub collected: bool,
+}
+
 /// Input shape for a session participant on creation.
 ///
 /// Session participants are Bot-only in V1; the facade resolves `bot_uuid`
@@ -145,6 +152,20 @@ pub struct CompleteSession {
 }
 
 #[derive(Debug, Clone)]
+pub struct CollectSession {
+    pub caller: AuthenticatedCaller,
+    pub session_id: String,
+    pub participant: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct UncollectSession {
+    pub caller: AuthenticatedCaller,
+    pub session_id: String,
+    pub participant: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct AddSessionParticipant {
     pub caller: AuthenticatedCaller,
     pub session_id: String,
@@ -189,6 +210,16 @@ pub trait SessionService: Send + Sync {
         &self,
         command: CompleteSession,
     ) -> Result<SessionCompletionResult, ApplicationError>;
+
+    async fn collect(
+        &self,
+        command: CollectSession,
+    ) -> Result<SessionCollectionResult, ApplicationError>;
+
+    async fn uncollect(
+        &self,
+        command: UncollectSession,
+    ) -> Result<SessionCollectionResult, ApplicationError>;
 
     async fn add_participant(
         &self,

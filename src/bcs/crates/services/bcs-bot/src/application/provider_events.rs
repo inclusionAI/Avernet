@@ -1012,11 +1012,6 @@ fn coordination_call_from_command(
             })
         }
         CoordinationMode::NativeMcp => {
-            if command.kind != ProviderCoordinationEventKind::CoordinationIntent {
-                return Err(ProviderBotEventError::InvalidRequest(
-                    "native_mcp coordination requires coordination_intent callbacks".to_string(),
-                ));
-            }
             let expected_server = coordination
                 .mcp_server
                 .as_deref()
@@ -1027,23 +1022,77 @@ fn coordination_call_from_command(
                         "native_mcp coordination is missing mcp_server config".to_string(),
                     )
                 })?;
-            let actual_server = command
+            if let Some(actual_server) = command
                 .mcp_server
                 .as_deref()
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .ok_or_else(|| {
-                    ProviderBotEventError::InvalidRequest(
-                        "native_mcp coordination requires mcp_server".to_string(),
-                    )
-                })?;
-            if actual_server != expected_server {
+                && actual_server != expected_server
+            {
                 return Err(ProviderBotEventError::Forbidden(format!(
-                    "mcp_server mismatch: expected '{}'",
-                    expected_server
+                    "mcp_server mismatch: expected '{expected_server}'"
                 )));
             }
-            coordination_intent_to_call(command.intent.as_ref())
+            match command.kind {
+                ProviderCoordinationEventKind::CoordinationIntent => {
+                    if command
+                        .mcp_server
+                        .as_deref()
+                        .map(str::trim)
+                        .map_or(true, |value| value.is_empty())
+                    {
+                        return Err(ProviderBotEventError::InvalidRequest(
+                            "native_mcp coordination_intent requires mcp_server".to_string(),
+                        ));
+                    }
+                    coordination_intent_to_call(command.intent.as_ref())
+                }
+                ProviderCoordinationEventKind::ToolResult => {
+                    let provider_tool_name = command
+                        .tool_name
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .ok_or_else(|| {
+                            ProviderBotEventError::InvalidRequest(
+                                "native_mcp tool_result requires tool_name".to_string(),
+                            )
+                        })?;
+                    // COSEC: only an exact provider-configured tool name may
+                    // translate an authenticated tool result into a BCS side effect.
+                    let canonical_tool_name = coordination
+                        .tool_name_mapping
+                        .get(provider_tool_name)
+                        .ok_or_else(|| {
+                            ProviderBotEventError::Forbidden(
+                                "native_mcp tool_name is not configured for coordination"
+                                    .to_string(),
+                            )
+                        })?;
+                    let result_text = command
+                        .result_text
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .ok_or_else(|| {
+                            ProviderBotEventError::InvalidRequest(
+                                "native_mcp tool_result requires result_text".to_string(),
+                            )
+                        })?;
+                    let call = CoordinationCall::from_stdout(result_text).ok_or_else(|| {
+                        ProviderBotEventError::InvalidRequest(
+                            "tool_result did not contain a BCS coordination echo".to_string(),
+                        )
+                    })?;
+                    if call.tool != *canonical_tool_name {
+                        return Err(ProviderBotEventError::Forbidden(
+                            "native_mcp tool result does not match configured canonical tool"
+                                .to_string(),
+                        ));
+                    }
+                    Ok(call)
+                }
+            }
         }
         CoordinationMode::NativeTool => {
             if command.kind != ProviderCoordinationEventKind::CoordinationIntent {

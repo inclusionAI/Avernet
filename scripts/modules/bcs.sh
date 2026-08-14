@@ -156,6 +156,14 @@ prepare_bcs_runtime_config() {
         # count) inside the double-quoted script.
         sed_args+=("-e" "s#^bots_base_dir = \".*\"\$#bots_base_dir = \"${escaped_bcs_bot_profile_dir}\"#")
     fi
+    if [ "${BCS_SERVER_ENV:-}" = "local" ]; then
+        # Local singlebox starts with the judge disabled. A complete environment
+        # configuration below may opt it back in. Never carry a plaintext key
+        # from a developer-edited template into the generated runtime config.
+        sed_args+=(
+            "-e" "/^\[llm\]/,/^\[/{s|^type = \".*\"$|type = \"none\"|;/^api_key = /d;}"
+        )
+    fi
     if [ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]; then
         local escaped_e2e_judge_url
         escaped_e2e_judge_url="$(toml_sed_replacement "${BCS_E2E_MOCK_BASE_URL}/v1")"
@@ -164,14 +172,41 @@ prepare_bcs_runtime_config() {
             "-e" "/^\[security.outbound_url\]/,/^\[/{s|^block_private_networks = .*|block_private_networks = false|;s|^allow_loopback = .*|allow_loopback = true|;}"
         )
         log_info "Enabling local Provider/Judge mock for BCS E2E"
+    elif [ "${BCS_SERVER_ENV:-}" = "local" ]; then
+        local bcs_llm_env_count=0
+        local bcs_llm_missing=()
+        local bcs_llm_env_name
+        for bcs_llm_env_name in \
+            OPENCLAW_OPENAI_BASE_URL \
+            OPENCLAW_OPENAI_API_KEY \
+            OPENCLAW_OPENAI_MODEL_ID; do
+            if [ -n "${!bcs_llm_env_name:-}" ]; then
+                bcs_llm_env_count=$((bcs_llm_env_count + 1))
+            else
+                bcs_llm_missing+=("${bcs_llm_env_name}")
+            fi
+        done
+
+        if [ "$bcs_llm_env_count" -eq 3 ]; then
+            local escaped_bcs_llm_base_url
+            local escaped_bcs_llm_model
+            escaped_bcs_llm_base_url="$(toml_sed_replacement "${OPENCLAW_OPENAI_BASE_URL}")"
+            escaped_bcs_llm_model="$(toml_sed_replacement "${OPENCLAW_OPENAI_MODEL_ID}")"
+            sed_args+=(
+                "-e" "/^\[llm\]/,/^\[/{s|^type = \".*\"$|type = \"openai_compatible\"|;s|^base_url = \".*\"$|base_url = \"${escaped_bcs_llm_base_url}\"|;s|^api_key_env = \".*\"$|api_key_env = \"OPENCLAW_OPENAI_API_KEY\"|;s|^model = \".*\"$|model = \"${escaped_bcs_llm_model}\"|;}"
+            )
+            log_info "Configuring the local BCS LLM judge from OPENCLAW_OPENAI_*"
+        elif [ "$bcs_llm_env_count" -gt 0 ]; then
+            log_warn "Ignoring incomplete OPENCLAW_OPENAI_* config for the local BCS LLM judge; missing: ${bcs_llm_missing[*]}"
+        fi
     fi
-    if [ "${MERCHANT_HYBRID_ACTIVE:-0}" = "1" ]; then
+    if [ "${HYBRID_CLAUDE_ACTIVE:-${MERCHANT_HYBRID_ACTIVE:-0}}" = "1" ]; then
         # The opt-in local Provider bridge listens on 127.0.0.1. Keep private
         # networks blocked while allowing this one local callback route.
         sed_args+=(
             "-e" "/^\[security.outbound_url\]/,/^\[/{s|^block_private_networks = .*|block_private_networks = true|;s|^allow_loopback = .*|allow_loopback = true|;}"
         )
-        log_info "Allowing loopback-only BCS Provider callbacks for merchant_hybrid"
+        log_info "Allowing loopback-only BCS Provider callbacks for hybrid Claude mode"
     fi
 
     local config_file tmp_file
@@ -184,7 +219,7 @@ prepare_bcs_runtime_config() {
         mv "$tmp_file" "$config_file" || return 1
     done
 
-    if [ "${MERCHANT_HYBRID_ACTIVE:-0}" = "1" ]; then
+    if [ "${HYBRID_CLAUDE_ACTIVE:-${MERCHANT_HYBRID_ACTIVE:-0}}" = "1" ]; then
         # This checkout's already-built BCS binary predates the optional
         # OpenAPI-v1 config schema. Keep the tracked template untouched and
         # remove only that unsupported section from the generated local copy.
@@ -198,7 +233,7 @@ prepare_bcs_runtime_config() {
             fi
             mv "$tmp_file" "$config_file" || return 1
         done
-        log_info "Removed unsupported OpenAPI-v1 block from merchant_hybrid BCS runtime config"
+        log_info "Removed unsupported OpenAPI-v1 block from hybrid BCS runtime config"
     fi
 
     prepare_bcs_runtime_config_resources "$config_dir" || return 1

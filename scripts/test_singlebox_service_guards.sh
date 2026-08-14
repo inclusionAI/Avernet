@@ -103,6 +103,24 @@ test_backend_wait_fails_when_started_process_exits() {
   assert_eq "backend_stop" "$(cat "$events_file")" "exited backend process should trigger cleanup"
 }
 
+test_backend_default_readiness_window_covers_cold_start() (
+  setup_env
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/backend.sh"
+
+  local attempts=0
+  unset BACKEND_READY_ATTEMPTS
+  backend_ready() {
+    attempts=$((attempts + 1))
+    [ "$attempts" -ge 120 ]
+  }
+  backend_stop() { fail "backend should not stop during a normal cold start"; }
+  sleep() { :; }
+
+  backend_wait_until_ready
+  assert_eq "120" "$attempts" "default backend readiness attempts"
+)
+
 test_frontend_start_prepares_dependencies_before_launch() (
   setup_env
   export FRONTEND_DIR="$(mktemp -d)"
@@ -560,6 +578,7 @@ test_backend_separates_profile_env_and_workspace_folder() {
 test_all_start_rolls_back_started_services_on_failure
 test_backend_health_failure_stops_backend
 test_backend_wait_fails_when_started_process_exits
+test_backend_default_readiness_window_covers_cold_start
 test_frontend_start_prepares_dependencies_before_launch
 test_frontend_deps_require_dev_commands
 test_frontend_install_includes_dev_dependencies
