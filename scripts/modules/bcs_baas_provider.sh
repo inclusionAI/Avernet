@@ -146,7 +146,7 @@ bcs_baas_provider_register() {
     local role bot_id name provider_ref payload bot_response runtime_token bot_uuid visibility state_bots='[]'
     while IFS=$'\t' read -r role bot_id name; do
         provider_ref="${bot_id}:${entity_id}"
-        payload="$(jq -n --arg name "${name}（当前）" --arg ref "$provider_ref" --arg owner "$owner" '{name: $name, provider_bot_ref: $ref, owners: [$owner], summary: "Local Claude Code platform data bot", domains: ["claude_code", "local-commerce"], skills: ["chat", "data-analysis"], scopes: ["local"]}')"
+        payload="$(jq -n --arg name "$name" --arg ref "$provider_ref" --arg owner "$owner" '{name: $name, provider_bot_ref: $ref, owners: [$owner], summary: "Local Claude Code platform data bot", domains: ["claude_code", "local-commerce"], skills: ["chat", "data-analysis"], scopes: ["local"]}')"
         bot_response="$(curl --noproxy '*' --connect-timeout 2 --max-time 20 -fsS -X POST "http://127.0.0.1:${BCS_PORT}/providers/${provider_id}/bots" -H "Authorization: Bearer ${provider_admin_token}" -H 'Content-Type: application/json' -d "$payload")" || return 1
         runtime_token="$(jq -r '.bot_runtime_token // empty' <<< "$bot_response")"
         bot_uuid="$(jq -r '.bot_uuid // empty' <<< "$bot_response")"
@@ -155,6 +155,7 @@ bcs_baas_provider_register() {
         jq -e '.success == true and .data.visibility == "public"' <<< "$visibility" >/dev/null || { log_error "BCS Provider bot is not discoverable"; return 1; }
         bcs_baas_provider_add_bot_token "$role" "$provider_ref" "$runtime_token" || return 1
         state_bots="$(jq -c --arg role "$role" --arg ref "$provider_ref" --arg uuid "$bot_uuid" '. + [{role: $role, provider_bot_ref: $ref, bot_uuid: $uuid}]' <<< "$state_bots")"
+        log_info "Registered local Claude Provider bot role=${role} bot_uuid=${bot_uuid} visibility=public"
     done < <(jq -r '.bots[] | [.role, .bot_id, .name] | @tsv' "$CLAUDE_BOTS_STATE_FILE")
     umask 077
     jq -n --arg provider_id "$provider_id" --arg owner "$owner" --argjson bots "$state_bots" '{provider_id: $provider_id, bcs_owner_id: $owner, bots: $bots}' > "$BCS_BAAS_PROVIDER_STATE_FILE"

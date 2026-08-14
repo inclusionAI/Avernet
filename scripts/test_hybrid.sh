@@ -184,6 +184,96 @@ with open(path, 'w', encoding='utf-8') as stream:
     json.dump(profile, stream)
 PY
 
+test_provider_bot_registration_keeps_profile_display_name() (
+    export CLAUDE_BOTS_STATE_FILE="$TMP/claude-bots-state.json"
+    export BCS_BAAS_PROVIDER_STATE_FILE="$TMP/provider-state.json"
+    export BCS_BAAS_PROVIDER_TOKEN_FILE="$TMP/provider-tokens.json"
+    export BCS_PORT=21000
+
+    printf '%s\n' '{"entity_id":"mock-user","bots":[{"role":"platform-data","bot_id":"bot-data","name":"平台数据分析"}]}' \
+        > "$CLAUDE_BOTS_STATE_FILE"
+
+    local captured_provider_bot_payload
+    captured_provider_bot_payload="$TMP/provider-bot-payload.json"
+
+    bcs_baas_provider_bcs_owner_id() { printf '%s\n' '001'; }
+    bcs_baas_provider_update_tokens() { :; }
+    bcs_baas_provider_add_bot_token() { :; }
+    log_info() { :; }
+    curl() {
+        local data='' url=''
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                -d)
+                    data="$2"
+                    shift 2
+                    ;;
+                http://*|https://*)
+                    url="$1"
+                    shift
+                    ;;
+                *)
+                    shift
+                    ;;
+            esac
+        done
+        case "$url" in
+            */providers)
+                printf '%s\n' '{"provider_id":"provider-test","provider_admin_token":"provider-admin-test","bcs_to_provider_token":"bcs-to-provider-test"}'
+                ;;
+            */providers/provider-test/bots)
+                printf '%s' "$data" > "$captured_provider_bot_payload"
+                printf '%s\n' '{"bot_runtime_token":"bot-runtime-test","bot_uuid":"bot-provider-test"}'
+                ;;
+            */bots/bot-provider-test/visibility)
+                printf '%s\n' '{"success":true,"data":{"visibility":"public"}}'
+                ;;
+            *)
+                return 1
+                ;;
+        esac
+    }
+
+    bcs_baas_provider_register
+    [ "$(jq -r '.name' "$captured_provider_bot_payload")" = '平台数据分析' ]
+    ! jq -e '.name | contains("（当前）")' "$captured_provider_bot_payload" >/dev/null
+)
+
+test_provider_bot_registration_keeps_profile_display_name
+
+test_merchant_hybrid_profile_defaults() (
+    log_info() { :; }
+
+    unset BOTS_PROFILE_DIR BOTS_EXCLUDED_PROFILE_SOURCE CLAUDE_PROFILE_DIR
+    apply_merchant_hybrid_profile_defaults start merchant_hybrid
+    [ "$BOTS_PROFILE_DIR" = "scripts/4bots_merchant_operations_profile" ]
+    [ "$BOTS_EXCLUDED_PROFILE_SOURCE" = "platform-data" ]
+    [ "$CLAUDE_PROFILE_DIR" = "scripts/4bots_merchant_operations_profile_for_claude" ]
+
+    unset BOTS_EXCLUDED_PROFILE_SOURCE CLAUDE_PROFILE_DIR
+    BOTS_PROFILE_DIR="scripts/custom_profile"
+    apply_merchant_hybrid_profile_defaults start merchant_hybrid
+    [ "$BOTS_PROFILE_DIR" = "scripts/custom_profile" ]
+    [ "$BOTS_EXCLUDED_PROFILE_SOURCE" = "platform-data" ]
+    [ "$CLAUDE_PROFILE_DIR" = "scripts/4bots_merchant_operations_profile_for_claude" ]
+
+    BOTS_PROFILE_DIR="scripts/custom_profile"
+    BOTS_EXCLUDED_PROFILE_SOURCE="custom-platform-data"
+    CLAUDE_PROFILE_DIR="scripts/custom_claude_profile"
+    apply_merchant_hybrid_profile_defaults start merchant_hybrid
+    [ "$BOTS_PROFILE_DIR" = "scripts/custom_profile" ]
+    [ "$BOTS_EXCLUDED_PROFILE_SOURCE" = "custom-platform-data" ]
+    [ "$CLAUDE_PROFILE_DIR" = "scripts/custom_claude_profile" ]
+
+    unset BOTS_PROFILE_DIR BOTS_EXCLUDED_PROFILE_SOURCE CLAUDE_PROFILE_DIR
+    apply_merchant_hybrid_profile_defaults status merchant_hybrid
+    [ -z "${BOTS_PROFILE_DIR:-}" ]
+    [ -z "${BOTS_EXCLUDED_PROFILE_SOURCE:-}" ]
+    [ -z "${CLAUDE_PROFILE_DIR:-}" ]
+)
+
+test_merchant_hybrid_profile_defaults
+
 events="$TMP/events"
 hybrid_port_preflight() { return 0; }
 check_prereqs_for_services() { return 97; }
