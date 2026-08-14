@@ -17,7 +17,9 @@ backend_setup() {
 
     cd "${BACKEND_DIR}"
     log_info "Syncing Python dependencies with uv..."
-    if ! uv sync --index-url "${PYPI_INDEX_URL}"; then
+    # backend requires Python >=3.12,<3.13; be explicit so a root .python-version
+    # of 3.13 does not cause resolution failures during setup.
+    if ! uv sync --python ">=3.12,<3.13" --index-url "${PYPI_INDEX_URL}"; then
         log_error "Failed to sync Python dependencies"
         return 1
     fi
