@@ -12,6 +12,8 @@ from secbaas.community.api.device_manage import (
     Storage,
 )
 
+from ._arca_sandbox_info import ArcaSandboxInfo
+
 if TYPE_CHECKING:
     from secbaas.community.api.bot_runtime import HttpConnectionInfo, WsConnectionInfo
 
@@ -26,12 +28,12 @@ class ArcaSandbox(Protocol):
     is_ready: bool
     sandbox_id: str
 
-    def get_info(self) -> Any:
+    def get_info(self) -> ArcaSandboxInfo:
         """Get sandbox info including status, template_id, resources, ttl, etc.
 
         Returns:
-            An info object with at minimum: sandbox_id, status, template_id.
-            Optional fields depend on the implementation.
+            An ``ArcaSandboxInfo`` with at minimum: sandbox_id, status, template_id.
+            Backends may attach backend-specific optional attributes.
         """
         ...
 

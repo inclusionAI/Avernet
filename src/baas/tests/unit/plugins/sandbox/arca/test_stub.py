@@ -77,6 +77,50 @@ class TestStubArcaSandboxGetInfo:
         info = device.get_info()
         assert info.template_id == "mock-template"
 
+    def test_returns_unified_sandbox_info(self) -> None:
+        from secbaas.community.plugins.sandbox.arca._stub import StubSandboxInfo
+        from secbaas.community.spi.sandbox.arca import ArcaSandboxInfo
+
+        device = StubArcaSandbox("sb-unified", template_id="tpl-unified")
+        info = device.get_info()
+
+        assert isinstance(info, ArcaSandboxInfo)
+        assert isinstance(info, StubSandboxInfo)
+        # Full SDK-aligned surface with optional fields defaulted
+        for attr in (
+            "sandbox_id",
+            "status",
+            "template_id",
+            "resources",
+            "ttl_in_minutes",
+            "ttl_timestamp",
+            "envs",
+            "snapshot_id",
+            "metadata",
+            "outbound_operation_rule",
+            "storage",
+        ):
+            assert hasattr(info, attr)
+        assert info.resources is None
+        assert info.storage is None
+        assert info.outbound_operation_rule is None
+        # status is a plain string; consumer normalize convention works
+        assert (
+            str(info.status.value)
+            if hasattr(info.status, "value")
+            else str(info.status) == "RUNNING"
+        )
+
+    def test_stub_sandbox_info_is_backward_compatible_alias(self) -> None:
+        from secbaas.community.plugins.sandbox.arca._stub import StubSandboxInfo
+        from secbaas.community.spi.sandbox.arca import ArcaSandboxInfo
+
+        info = StubSandboxInfo("sb-alias", "tpl-alias")
+        assert isinstance(info, ArcaSandboxInfo)
+        assert info.sandbox_id == "sb-alias"
+        assert info.template_id == "tpl-alias"
+        assert info.status == "RUNNING"
+
 
 class TestStubArcaSandboxDestroy:
     """Test StubArcaSandbox.destroy()."""

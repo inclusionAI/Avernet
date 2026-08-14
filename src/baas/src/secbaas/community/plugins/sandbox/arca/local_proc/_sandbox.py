@@ -10,7 +10,7 @@ from secbaas.community.api.device_manage import (
     OutBoundOperationRuleUpdatedMode,
 )
 from secbaas.community.logger import get_logger
-from secbaas.community.spi.sandbox.arca import ArcaSandbox
+from secbaas.community.spi.sandbox.arca import ArcaSandbox, ArcaSandboxInfo
 
 if TYPE_CHECKING:
     from ._process_manager import ProcessEntry
@@ -18,13 +18,13 @@ if TYPE_CHECKING:
 logger = get_logger("plugin-sandbox-arca-local-proc")
 
 
-class LocalProcessSandboxInfo:
-    """本地进程沙箱信息对象。
+class LocalProcessSandboxInfo(ArcaSandboxInfo):
+    """Backward-compatible subclass of the unified :class:`ArcaSandboxInfo`.
 
-    支持属性访问（info.status），与 Arca SDK 的 SandboxInfo 接口对齐。
-    ArcaPaasService 通过属性访问以下字段：
-    status, template_id, sandbox_id, resources, ttl_in_minutes, envs,
-    snapshot_id, metadata, outbound_operation_rule, ttl_timestamp。
+    Retained so existing imports, ``isinstance`` checks, and the extra local-process
+    fields keep working. The SDK-common fields align to the unified model; the local-only
+    fields (``bot_id``, ports, pids, config/workspace dirs, ``is_ready``) are carried as
+    attributes.
     """
 
     def __init__(
@@ -48,24 +48,27 @@ class LocalProcessSandboxInfo:
         metadata: dict[str, str] | None = None,
         outbound_operation_rule: Any = None,
     ) -> None:
-        self.sandbox_id = sandbox_id
-        self.status = status
-        self.template_id = template_id
-        self.is_ready = is_ready
-        self.ttl_in_minutes = ttl_in_minutes
-        self.ttl_timestamp = ttl_timestamp
-        self.bot_id = bot_id
-        self.adapter_port = adapter_port
-        self.adapter_pid = adapter_pid
-        self.engine_port = engine_port
-        self.engine_pid = engine_pid
-        self.config_dir = config_dir
-        self.workspace_dir = workspace_dir
-        self.resources = resources
-        self.envs = envs
-        self.snapshot_id = snapshot_id
-        self.metadata = metadata
-        self.outbound_operation_rule = outbound_operation_rule
+        super().__init__(
+            sandbox_id=sandbox_id,
+            status=status,
+            template_id=template_id,
+            resources=resources,
+            ttl_in_minutes=ttl_in_minutes,
+            ttl_timestamp=ttl_timestamp,
+            envs=envs,
+            snapshot_id=snapshot_id,
+            metadata=metadata,
+            outbound_operation_rule=outbound_operation_rule,
+            storage=None,
+            is_ready=is_ready,
+            bot_id=bot_id,
+            adapter_port=adapter_port,
+            adapter_pid=adapter_pid,
+            engine_port=engine_port,
+            engine_pid=engine_pid,
+            config_dir=config_dir,
+            workspace_dir=workspace_dir,
+        )
 
     def __repr__(self) -> str:
         """返回结构化、日志友好的字符串表示。
@@ -135,12 +138,13 @@ class LocalProcessArcaSandbox(ArcaSandbox):
     def _ttl_minutes(self, value: int | None) -> None:
         self.__ttl_minutes = value
 
-    def get_info(self) -> LocalProcessSandboxInfo:
+    def get_info(self) -> ArcaSandboxInfo:
         """获取沙箱信息。
 
         Returns:
-            LocalProcSandboxInfo 对象，包含 sandbox_id, status, template_id 等属性。
+            ArcaSandboxInfo 对象，包含 sandbox_id, status, template_id 等属性。
             返回对象支持属性访问（info.status），与 Arca SDK 的 SandboxInfo 接口对齐。
+            本地进程模式额外字段（bot_id/端口/pid/目录）也会附加到返回对象上。
         """
         entry = self._process_entry
         return LocalProcessSandboxInfo(

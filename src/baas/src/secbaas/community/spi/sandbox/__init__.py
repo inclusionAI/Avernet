@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from secbaas.community.spi.sandbox.arca import ArcaSandbox, ArcaSandboxPlugin
+from secbaas.community.spi.sandbox.arca import (
+    ArcaSandbox,
+    ArcaSandboxInfo,
+    ArcaSandboxPlugin,
+)
 from secbaas.community.spi.sandbox.desktop import DesktopSandbox, DesktopSandboxPlugin
 from secbaas.community.spi.sandbox.docker import DockerSandbox, DockerSandboxPlugin
 from secbaas.community.spi.sandbox.k8s import K8sSandbox, K8sSandboxPlugin
@@ -53,6 +57,7 @@ class PaasSandboxPlugins:
 __all__ = [
     "ArcaSandboxPlugin",
     "ArcaSandbox",
+    "ArcaSandboxInfo",
     "DesktopSandboxPlugin",
     "DesktopSandbox",
     "DockerSandbox",
