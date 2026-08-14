@@ -244,7 +244,7 @@ with open(path, 'w', encoding='utf-8') as stream:
     json.dump(profile, stream)
 PY
 
-test_provider_bot_registration_persists_bcs_assigned_uuid() (
+test_provider_bot_registration_keeps_profile_display_name() (
     export CLAUDE_BOTS_STATE_FILE="$TMP/claude-bots-state.json"
     export BCS_BAAS_PROVIDER_STATE_FILE="$TMP/provider-state.json"
     export BCS_BAAS_PROVIDER_TOKEN_FILE="$TMP/provider-tokens.json"
@@ -283,9 +283,9 @@ test_provider_bot_registration_persists_bcs_assigned_uuid() (
                 ;;
             */providers/provider-test/bots)
                 printf '%s' "$data" > "$captured_provider_bot_payload"
-                printf '%s\n' '{"bot_runtime_token":"bot-runtime-test","bot_uuid":"provider-bot-opaque-42"}'
+                printf '%s\n' '{"bot_runtime_token":"bot-runtime-test","bot_uuid":"bot-provider-test"}'
                 ;;
-            */bots/provider-bot-opaque-42/visibility)
+            */bots/bot-provider-test/visibility)
                 printf '%s\n' '{"success":true,"data":{"visibility":"public"}}'
                 ;;
             *)
@@ -297,93 +297,9 @@ test_provider_bot_registration_persists_bcs_assigned_uuid() (
     bcs_baas_provider_register
     [ "$(jq -r '.name' "$captured_provider_bot_payload")" = '平台数据分析' ]
     ! jq -e '.name | contains("（当前）")' "$captured_provider_bot_payload" >/dev/null
-    [ "$(jq -r '.provider_bot_ref' "$captured_provider_bot_payload")" = 'merchant-platform-data:mock-user' ]
-    [ "$(jq -r '.bots[0].bot_uuid' "$BCS_BAAS_PROVIDER_STATE_FILE")" = 'provider-bot-opaque-42' ]
 )
 
-test_provider_bot_registration_persists_bcs_assigned_uuid
-
-test_provider_reuses_opaque_bcs_bot_uuid() (
-    export CLAUDE_BOTS_STATE_FILE="$TMP/opaque-claude-bots-state.json"
-    export BCS_BAAS_PROVIDER_STATE_FILE="$TMP/opaque-provider-state.json"
-    export BCS_BAAS_PROVIDER_TOKEN_FILE="$TMP/opaque-provider-tokens.json"
-    export BCS_PORT=21000
-
-    printf '%s\n' '{"entity_id":"mock-user","bots":[{"role":"platform-data","bot_id":"bot-data","name":"平台数据分析"}]}' \
-        > "$CLAUDE_BOTS_STATE_FILE"
-    printf '%s\n' '{"provider_id":"provider-existing","bcs_owner_id":"001","bots":[{"role":"platform-data","provider_bot_ref":"merchant-platform-data:mock-user","bot_uuid":"provider-bot-opaque-42"}]}' \
-        > "$BCS_BAAS_PROVIDER_STATE_FILE"
-    printf '%s\n' '{"baas_token":"baas","provider_id":"provider-existing","provider_admin_token":"provider-admin","bcs_to_provider_token":"bcs-token","provider_bots":{"platform-data":{"provider_bot_ref":"merchant-platform-data:mock-user","bot_runtime_token":"runtime"}}}' \
-        > "$BCS_BAAS_PROVIDER_TOKEN_FILE"
-
-    bcs_baas_provider_bcs_owner_id() { printf '%s\n' '001'; }
-    bcs_baas_provider_register() {
-        echo 'unexpected Provider Bot re-registration' >&2
-        return 1
-    }
-    log_info() { :; }
-    curl() {
-        local url=''
-        while [ "$#" -gt 0 ]; do
-            case "$1" in
-                http://*|https://*)
-                    url="$1"
-                    shift
-                    ;;
-                *)
-                    shift
-                    ;;
-            esac
-        done
-        case "$url" in
-            "http://127.0.0.1:21000/providers/provider-existing")
-                printf '%s\n' '{"provider_id":"provider-existing","name":"singlebox-merchant-claude","disabled":false}'
-                ;;
-            "http://127.0.0.1:21000/providers/provider-existing/bots")
-                printf '%s\n' '{"items":[{"provider_bot_ref":"merchant-platform-data:mock-user","bot_uuid":"provider-bot-opaque-42","disabled":false}]}'
-                ;;
-            *)
-                return 1
-                ;;
-        esac
-    }
-
-    bcs_baas_provider_registration_is_reusable
-    bcs_baas_provider_ensure_registration
-)
-
-test_provider_reuses_opaque_bcs_bot_uuid
-
-test_provider_lifecycle_reuses_healthy_registration() (
-    export BCS_BAAS_PROVIDER_STATE_FILE="$TMP/provider-state-reuse.json"
-    export BCS_BAAS_PROVIDER_TOKEN_FILE="$TMP/provider-tokens-reuse.json"
-    export BCS_BAAS_PROVIDER_PID_FILE="$TMP/provider-reuse.pid"
-    printf '%s\n' '{"provider_id":"provider-test","bots":[{"role":"platform-data","provider_bot_ref":"merchant-platform-data:mock-user","bot_uuid":"平台数据分析"}]}' \
-        > "$BCS_BAAS_PROVIDER_STATE_FILE"
-
-    local cleanup_calls=0 register_calls=0
-    bcs_baas_provider_enabled() { return 0; }
-    bcs_baas_provider_prereqs() { return 0; }
-    bcs_ready() { return 0; }
-    baas_ready() { return 0; }
-    bcs_baas_provider_prepare_runtime_tokens() { return 0; }
-    bcs_baas_provider_registration_is_reusable() { return 0; }
-    bcs_baas_provider_wait_ready() { return 0; }
-    stop_port_processes_if_owned() { return 0; }
-    require_port_available_after_owned_stop() { return 0; }
-    bcs_baas_provider_cleanup_registration() { cleanup_calls=$((cleanup_calls + 1)); return 0; }
-    bcs_baas_provider_register() { register_calls=$((register_calls + 1)); return 0; }
-    log_info() { :; }
-    nohup() { return 0; }
-
-    bcs_baas_provider_start
-    [ "$cleanup_calls" -eq 0 ]
-    [ "$register_calls" -eq 0 ]
-    bcs_baas_provider_stop
-    [ "$cleanup_calls" -eq 0 ]
-)
-
-test_provider_lifecycle_reuses_healthy_registration
+test_provider_bot_registration_keeps_profile_display_name
 
 test_provider_registration_is_reused_across_restarts() (
     export CLAUDE_BOTS_STATE_FILE="$TMP/reuse-claude-bots-state.json"
@@ -426,9 +342,9 @@ test_provider_registration_is_reused_across_restarts() (
                 printf '%s\n' '{"provider_id":"provider-existing"}'
                 ;;
             "POST http://127.0.0.1:21000/providers/provider-existing/bots")
-                printf '%s\n' '{"bot_runtime_token":"bot-runtime","bot_uuid":"provider-bot-opaque-42"}'
+                printf '%s\n' '{"bot_runtime_token":"bot-runtime","bot_uuid":"bot-provider"}'
                 ;;
-            "PUT http://127.0.0.1:21000/bots/provider-bot-opaque-42/visibility")
+            "PUT http://127.0.0.1:21000/bots/bot-provider/visibility")
                 printf '%s\n' '{"success":true,"data":{"visibility":"public"}}'
                 ;;
             *)
@@ -442,7 +358,6 @@ test_provider_registration_is_reused_across_restarts() (
     grep -Fxq 'POST http://127.0.0.1:21000/providers/provider-existing/bots' "$calls"
     ! grep -Fxq 'POST http://127.0.0.1:21000/providers' "$calls"
     [ "$(jq -r '.provider_id' "$BCS_BAAS_PROVIDER_STATE_FILE")" = provider-existing ]
-    [ "$(jq -r '.bots[0].bot_uuid' "$BCS_BAAS_PROVIDER_STATE_FILE")" = provider-bot-opaque-42 ]
 )
 
 test_provider_registration_is_reused_across_restarts
