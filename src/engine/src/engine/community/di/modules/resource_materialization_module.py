@@ -69,6 +69,7 @@ class ResourceMaterializationModule(Module):
             pull_client=pull_client,
             callback_client=callback_client,
             temporary_url_pull_client=temporary_url_pull_client,
+            max_chat_image_bytes=load_temporary_url_settings().image_max_bytes,
         )
 
     @singleton

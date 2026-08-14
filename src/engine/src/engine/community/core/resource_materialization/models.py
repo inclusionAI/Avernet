@@ -63,6 +63,8 @@ class ChatAttachmentMaterializationRequest(BaseModel):
     expires_at_ms: int | None = Field(default=None, ge=0)
     size_bytes: int | None = Field(default=None, ge=0)
     content_hash: str | None = Field(default=None, pattern=r"^[a-fA-F0-9]{64}$")
+    media_type: str | None = Field(default=None, min_length=1, max_length=255)
+    download_max_bytes: int | None = Field(default=None, gt=0)
 
     @field_validator("temporary_url")
     @classmethod
@@ -112,6 +114,16 @@ class ManifestEntry(BaseModel):
     source_kind: Literal["baas_session_file", "temporary_url"] = "baas_session_file"
     source_attachment_id: str | None = None
     source_url_hash: str | None = None
+
+
+@dataclass(frozen=True)
+class PreparedChatAttachment:
+    """Validated in-memory attachment ready for an Engine adapter."""
+
+    attachment_id: str
+    filename: str
+    media_type: str
+    content: bytes
 
 
 @dataclass(frozen=True)

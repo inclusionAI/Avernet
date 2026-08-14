@@ -177,6 +177,10 @@ class HttpTemporaryUrlPullClient:
         request: ChatAttachmentMaterializationRequest,
         destination: Path,
     ) -> None:
+        max_bytes = min(
+            self._max_bytes,
+            request.download_max_bytes or self._max_bytes,
+        )
         host, port = self._validate_url(request.temporary_url)
         resolved_ips = await self._resolve_public_ips(host, port)
         pinned_ip = min(resolved_ips)
@@ -221,13 +225,13 @@ class HttpTemporaryUrlPullClient:
                     declared_size = int(content_length)
                 except ValueError as exc:
                     raise ValueError("invalid temporary URL content length") from exc
-                if declared_size > self._max_bytes:
+                if declared_size > max_bytes:
                     raise ValueError("temporary URL response exceeds size limit")
             observed = 0
             async with aiofiles.open(destination, "wb") as stream:
                 async for chunk in response.aiter_bytes():
                     observed += len(chunk)
-                    if observed > self._max_bytes:
+                    if observed > max_bytes:
                         raise ValueError("temporary URL response exceeds size limit")
                     await stream.write(chunk)
 
