@@ -2,7 +2,7 @@
 
 The public contract must expose exactly the approved operations across Bot,
 Group, GroupParticipant, Session, SessionParticipant, Invitation, and
-Friendship / FriendRequest, and must not expose session-file, bot discovery,
+Friendship / FriendRequest, and must not expose session-file, bot candidate search,
 message-send, Internal API, or routing-only path aliases.
 """
 
@@ -20,6 +20,7 @@ HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options", "tra
 EXPECTED_OPERATIONS = {
     ("post", "/openapi/v1/collaboration/bots/query"),
     ("get", "/openapi/v1/collaboration/bots/{bot_id}"),
+    ("get", "/openapi/v1/collaboration/bots/{bot_id}/candidates"),
     ("patch", "/openapi/v1/collaboration/bots/{bot_id}"),
     ("get", "/openapi/v1/collaboration/bots/mine"),
     ("get", "/openapi/v1/collaboration/groups"),
@@ -64,7 +65,7 @@ def _actual_operations():
     }
 
 
-def test_contract_contains_exactly_the_35_approved_operations() -> None:
+def test_contract_contains_exactly_the_34_approved_operations() -> None:
     assert _actual_operations() == EXPECTED_OPERATIONS
 
 
@@ -101,7 +102,6 @@ def test_contract_excludes_unapproved_runtime_and_routing_surfaces() -> None:
     ) not in actual
     assert ("get", "/openapi/v1/collaboration/sessions/{session_id}/files") not in actual
     assert ("post", "/openapi/v1/collaboration/sessions/{session_id}/files") not in actual
-    assert ("get", "/openapi/v1/collaboration/bots/{bot_id}/candidates") not in actual
     assert ("get", "/openapi/v1/collaboration/bots/{bot_id}/candidates/search") not in actual
     assert ("get", "/openapi/v1/bots") not in actual
     assert ("get", "/openapi/v1/bots/discover") not in actual

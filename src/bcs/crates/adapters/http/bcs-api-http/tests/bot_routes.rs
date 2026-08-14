@@ -337,7 +337,7 @@ async fn all_six_bot_routes_forward_verified_human_and_contract_inputs() {
         .clone()
         .oneshot(request(
             "GET",
-            "/api/v1/collaboration/bots/human_staff-1/candidates?purpose=collaboration&name=planner&offset=5&limit=10",
+            "/openapi/v1/collaboration/bots/human_staff-1/candidates?purpose=collaboration&name=planner&offset=5&limit=10",
             Value::Null,
         ))
         .await
@@ -603,6 +603,7 @@ async fn previous_bcn_path_families_are_not_mounted() {
         "/openapi/v1/group-sessions/session-1",
         "/openapi/v1/friend-requests/request-1/accept",
         "/openapi/v1/invitations/token-1/accept",
+        "/api/v1/collaboration/bots/bot-1/candidates",
     ] {
         let response = app
             .clone()

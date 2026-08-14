@@ -5,22 +5,22 @@
 collaboration API. Domain models and resource path items live in separate YAML
 fragments so a domain can evolve without creating one monolithic file.
 
-The current public OpenAPI contract contains 33 approved operations across Bot,
+The current public OpenAPI contract contains 34 approved operations across Bot,
 Group, GroupParticipant, Session, SessionParticipant, Invitation, Friendship,
 FriendRequest, and session-bound WebSocket resources. Every public operation is
 published below the single BCN ownership prefix `/openapi/v1/collaboration/**`.
 These are the exact endpoints served externally by BCN.
 
-The Human control-plane Bot batch contains exactly four public operations:
+The Human control-plane Bot batch contains exactly five public operations:
 
 - `POST /openapi/v1/collaboration/bots/query`
 - `GET /openapi/v1/collaboration/bots/{bot_id}`
 - `PATCH /openapi/v1/collaboration/bots/{bot_id}`
 - `GET /openapi/v1/collaboration/bots/mine`
+- `GET /openapi/v1/collaboration/bots/{bot_id}/candidates`
 
-Bot candidates moved to the internal contract:
+Bot candidate search moved to the internal contract:
 
-- `GET /api/v1/collaboration/bots/{bot_id}/candidates`
 - `GET /api/v1/collaboration/bots/{bot_id}/candidates/search`
 
 The candidates operation accepts either a physical Bot managed by the current

@@ -4,8 +4,6 @@ info:
   version: 1.0.0
   description: Versioned internal contract for trusted BCN collaboration services.
 paths:
-  /api/v1/collaboration/bots/{bot_id}/candidates:
-    $ref: ./openapi/bots.yaml#/BotCandidatesPath
   /api/v1/collaboration/bots/{bot_id}/candidates/search:
     $ref: ./openapi/bots.yaml#/BotCandidateSearchPath
   /api/v1/collaboration/sessions/{session_id}/files:
