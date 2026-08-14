@@ -90,6 +90,7 @@ prepare_bcs_runtime_config() {
     local local_config="${config_dir}/bcs-config-local.toml"
     local bcs_url="http://127.0.0.1:${BCS_PORT}"
     local bcs_bind="${BCS_BIND:-}"
+    local bcs_botchat_url="${BCS_BOTCHAT_URL:-}"
     local bcs_mock_user_id="${BCS_MOCK_USER_ID:-}"
     local bcs_mock_user_name="${BCS_MOCK_USER_NICK_NAME:-}"
     # BCS_BOT_PROFILE_DIR is the explicit override. If the caller used the
@@ -137,6 +138,11 @@ prepare_bcs_runtime_config() {
         local escaped_bind
         escaped_bind="$(toml_sed_replacement "$bcs_bind")"
         sed_args+=("-e" "s|^bind = \".*\"$|bind = \"${escaped_bind}\"|")
+    fi
+    if [ -n "$bcs_botchat_url" ]; then
+        local escaped_botchat_url
+        escaped_botchat_url="$(toml_sed_replacement "$bcs_botchat_url")"
+        sed_args+=("-e" "s|^botchat_url = \".*\"$|botchat_url = \"${escaped_botchat_url}\"|")
     fi
     if [ -n "$bcs_mock_user_id" ]; then
         local escaped_mock_user_id
