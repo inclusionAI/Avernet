@@ -437,6 +437,40 @@ CREATE TABLE IF NOT EXISTS `bcs_channel_im_participants` (
   PRIMARY KEY (`channel_type`, `account_ref`, `im_user_id`)
 ) DEFAULT CHARSET = utf8mb4;
 
+-- Table: bcs_human_input_requests
+CREATE TABLE IF NOT EXISTS `bcs_human_input_requests` (
+  `request_id` varchar(512) NOT NULL,
+  `gmt_create` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `gmt_modified` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `session_id` varchar(128) NOT NULL,
+  `run_id` varchar(128) NOT NULL,
+  `node_id` varchar(128) NOT NULL,
+  `binding_id` varchar(64) NOT NULL,
+  `channel_type` varchar(32) NOT NULL,
+  `account_ref` varchar(128) NOT NULL,
+  `notification_mode` varchar(32) NOT NULL,
+  `reply_scope_key` varchar(768) NOT NULL,
+  `active_slot_key` varchar(768) DEFAULT NULL,
+  `assignee_actor_id` varchar(256) NOT NULL,
+  `im_conversation_id` varchar(256) NOT NULL,
+  `im_conversation_type` varchar(16) NOT NULL,
+  `im_user_id` varchar(128) DEFAULT NULL,
+  `node_display_name` varchar(256) NOT NULL,
+  `notification_text` text NOT NULL,
+  `deadline_ms` bigint(20) unsigned NOT NULL,
+  `status` varchar(32) NOT NULL,
+  `provider_message_ref` varchar(256) DEFAULT NULL,
+  `delivery_attempts` bigint(20) unsigned NOT NULL DEFAULT '0',
+  `last_delivery_error` text DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `activated_at` bigint(20) unsigned DEFAULT NULL,
+  `responded_at` bigint(20) unsigned DEFAULT NULL,
+  PRIMARY KEY (`request_id`),
+  UNIQUE KEY `uk_human_input_active_slot` (`active_slot_key`),
+  KEY `idx_human_input_scope_status` (`reply_scope_key`, `status`, `deadline_ms`, `created_at`),
+  KEY `idx_human_input_run_node` (`run_id`, `node_id`)
+) DEFAULT CHARSET = utf8mb4;
+
 -- Table: bcs_provider_credentials
 CREATE TABLE IF NOT EXISTS `bcs_provider_credentials` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,

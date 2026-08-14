@@ -40,16 +40,16 @@ class BotRunQueueRepository(Protocol):
         """无锁乐观认领指定 bot 的一个 PENDING 工作项（PENDING→RUNNING）。"""
         ...
 
-    def touch_heartbeat(self, run_id: str) -> None:
-        """刷新执行中工作项的心跳时间戳（供宕机恢复判活）。"""
+    def touch_heartbeat(self, run_id: str, worker_id: str) -> None:
+        """刷新当前 Worker 持有的 RUNNING 工作项心跳（供宕机恢复判活）。"""
         ...
 
-    def release_to_pending(self, run_id: str) -> int:
-        """把已置 RUNNING 但未能开跑的工作项放回 PENDING，返回受影响行数。"""
+    def release_to_pending(self, run_id: str, worker_id: str) -> int:
+        """把当前 Worker 持有的 RUNNING 工作项放回 PENDING，返回受影响行数。"""
         ...
 
-    def mark_done(self, run_id: str) -> int:
-        """工作项执行写入终态后标记 DONE（RUNNING→DONE），返回受影响行数。"""
+    def mark_done(self, run_id: str, worker_id: str) -> int:
+        """当前 Worker 执行写入终态后标记 DONE（RUNNING→DONE），返回受影响行数。"""
         ...
 
     def force_done(self, run_id: str) -> int:

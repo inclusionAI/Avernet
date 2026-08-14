@@ -6,25 +6,15 @@ use crate::{ServiceError, ServiceResult};
 
 pub use bcs_protocol::{BotDeliveryKind, FrontendDeliveryKind, FrontendDeliveryTarget};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ProviderTransportPreference {
-    Callback,
-    CallbackSse,
-}
-
-impl Default for ProviderTransportPreference {
-    fn default() -> Self {
-        Self::Callback
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct BotDeliveryCommand {
     pub target: BotDeliveryTarget,
     pub run_id: String,
     pub frame: BcsFrame,
     pub delivery_kind: BotDeliveryKind,
-    pub provider_transport: ProviderTransportPreference,
+    /// Opaque inbound HTTP headers explicitly allowlisted by BCS configuration
+    /// for forwarding to HTTP provider webhooks. Empty for non-HTTP ingress.
+    pub provider_bypass_headers: Vec<(String, String)>,
 }
 
 impl BotDeliveryCommand {

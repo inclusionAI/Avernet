@@ -73,6 +73,7 @@ from starlette.middleware.base import BaseHTTPMiddleware  # noqa: E402
 
 from engine.community.api.cron.router import router as cron  # noqa: E402
 from engine.community.api.session.router import router as session_router  # noqa: E402
+from engine.community.api.session_favorites import router as session_favorites_router  # noqa: E402
 from engine.community.manager import EngineManager  # noqa: E402
 from engine.community.di import Injected  # noqa: E402
 from engine.community.plugin_api.auth_gate.protocol import AuthGateService  # noqa: E402
@@ -84,6 +85,13 @@ from engine.community.api.file import router as file_router  # noqa: E402
 from engine.community.api.bash import router as bash_router  # noqa: E402
 from engine.community.api.mcp import router as mcp  # noqa: E402
 from engine.community.api.models import router as models  # noqa: E402
+from engine.community.api.resource_materialization import (  # noqa: E402
+    router as resource_materialization_router,
+)
+from engine.community.core.resource_materialization.service import (  # noqa: E402
+    ResourceMaterializationService,
+)
+from engine.community.api.session_files import router as session_files_router  # noqa: E402
 from engine.community.api.node import router as node  # noqa: E402
 from engine.community.api.skills import router as skills_router  # noqa: E402
 from engine.community.api.web_shell import router as web_shell_router  # noqa: E402
@@ -202,6 +210,22 @@ async def lifespan(app: FastAPI):
     manager = EngineManager.get_instance()
     await manager.initialize()
 
+    # Engine initialization installs the engine's existing Legacy bridges.
+    # Retry the same sidecar-only preparation afterwards so every filesystem
+    # engine can publish a valid Pool-ready marker without changing active
+    # mappings or blocking startup.
+    try:
+        import asyncio
+        from engine.community.config import is_agentbox_runtime
+        from engine.community.core.skills.skills_repo_download import (
+            prepare_pool_layout,
+        )
+
+        if is_agentbox_runtime():
+            asyncio.create_task(asyncio.to_thread(prepare_pool_layout))
+    except Exception:
+        pass
+
     yield
 
     # ── shutdown ──
@@ -239,7 +263,10 @@ attach_injector(app, _INJECTOR)
 
 app.include_router(engine_router)
 app.include_router(session_router)
+app.include_router(session_favorites_router)
 app.include_router(models)
+app.include_router(resource_materialization_router)
+app.include_router(session_files_router)
 app.include_router(cron)
 app.include_router(approvals)
 app.include_router(mcp)
@@ -293,10 +320,13 @@ def _get_openclaw_modules(engine: str | None = None):
 async def websocket_endpoint_default(
     websocket: WebSocket,
     auth_gate_service: AuthGateService = Injected(AuthGateService),
+    resource_materialization_service: ResourceMaterializationService = Injected(
+        ResourceMaterializationService
+    ),
 ):
     """WebSocket entrypoint — dispatches through the engine-agnostic server."""
     from engine.community.api.transport.ws_server import get_server
-    server = get_server()
+    server = get_server(resource_materialization_service)
     log.info(f"[ws] Using engine: {EngineManager.get_instance().engine}")
     await server.handle_connection(websocket, auth_gate_service=auth_gate_service)
 
@@ -306,6 +336,9 @@ async def websocket_endpoint(
     websocket: WebSocket,
     engine: str,
     auth_gate_service: AuthGateService = Injected(AuthGateService),
+    resource_materialization_service: ResourceMaterializationService = Injected(
+        ResourceMaterializationService
+    ),
 ):
     """WebSocket entrypoint — path-pinned to a specific engine. Rejects if the
     pinned engine isn't currently active on the manager."""
@@ -318,7 +351,7 @@ async def websocket_endpoint(
         )
         return
     from engine.community.api.transport.ws_server import get_server
-    server = get_server()
+    server = get_server(resource_materialization_service)
     log.info(f"[ws] Using engine from path: {engine}")
     await server.handle_connection(websocket, auth_gate_service=auth_gate_service)
 

@@ -6,11 +6,37 @@ _normalize_model_id, and _get_provider_map.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from engine.community.openclaw.client.gateway_client import OpenClawGatewayClient
 
 log = logging.getLogger("openclaw-port")
+
+_BCS_GROUP_SESSION_MARKER = "bcs:group:"
+_BCS_INTERNAL_SESSION_PREFIX = "agent:main:bcs_grp_"
+_BCS_DM_GROUP_PATTERN = re.compile(r"(?:^|:)bcs_grp_(?:[^:]*_)?dm_[^:]+")
+
+
+def _is_bcs_dm_session_key(key: str) -> bool:
+    """Return whether an OpenClaw key belongs to a BCS DM group."""
+    return _BCS_DM_GROUP_PATTERN.search(key) is not None
+
+
+def _should_keep_session(session: dict[str, Any]) -> bool:
+    """Return whether a valid gateway session should remain visible."""
+    key = session.get("key")
+    if not isinstance(key, str):
+        return False
+    if _is_bcs_dm_session_key(key):
+        return True
+    if key.startswith(_BCS_INTERNAL_SESSION_PREFIX):
+        return False
+    return (
+        "bcs:group" not in key
+        or "bcs:group:bcs-cli" in key
+        or _is_bcs_dm_session_key(key)
+    )
 
 
 class _SessionPortMixin:
@@ -108,7 +134,8 @@ class _SessionPortMixin:
 
         Exact sequence (mirrors `engines/openclaw/session.py:list`):
           1. `sessions.list` RPC → raw sessions
-          2. Filter `bcs:group` sessions (gateway-cleanup, fixed)
+          2. Filter internal BCS sessions and `bcs:group` sessions, keeping
+             namespaced `bcs_grp_*_dm_*` and bcs-cli
           3. Filter by `agent_id` if provided
           4. Filter by exact non-blank `session_key` if provided
           5. Paginate: slice `[offset : offset+limit]` — BEFORE history fetch
@@ -117,18 +144,19 @@ class _SessionPortMixin:
           8. Normalise model strings (cached provider map)
           9. Return the final page dicts with `_messages`/`_message_count` set
 
-        Returns `[]` on gateway error.  A page may return fewer than `limit`
-        items when "Bot 初始化配置" sessions fall within it (exact legacy
-        behaviour).
+        Returns `[]` for gateway business errors. Transport failures propagate
+        so callers never mistake an unavailable gateway for an empty session
+        collection. A page may return fewer than `limit` items when "Bot 初始化配置"
+        sessions fall within it (exact legacy behaviour).
         """
         client = await self._pooled_client(token)
 
         # Step 1: sessions.list RPC
         try:
             response = await client.send_request("sessions.list", {})
-        except ConnectionError as e:
-            log.error("[sessions_list] connection failed: %s", e)
-            return []
+        except (ConnectionError, TimeoutError):
+            # An empty list is a valid answer, so it must not mask an upstream outage.
+            raise
         except Exception as e:
             log.exception("[sessions_list] unexpected error: %s", e)
             return []
@@ -149,14 +177,8 @@ class _SessionPortMixin:
 
         raw_sessions = [s for s in raw_sessions if isinstance(s, dict)]
 
-        # Step 2: Filter bcs:group sessions (fixed gateway-cleanup).
-        raw_sessions = [
-            s for s in raw_sessions
-            if (
-                "bcs:group" not in s.get("key", "")
-                or "bcs:group:bcs-cli" in s.get("key", "")
-            )
-        ]
+        # Step 2: Hide BCS group chats while keeping user-visible DM sessions.
+        raw_sessions = [s for s in raw_sessions if _should_keep_session(s)]
 
         # Step 3: Filter by agent_id if provided (primitive, not DTO-driven).
         if agent_id is not None:

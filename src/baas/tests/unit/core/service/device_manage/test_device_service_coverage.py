@@ -174,6 +174,7 @@ def _make_service(platform_type="ARCA"):
         repository=mock_repo,
         device_template_service=mock_template_svc,
         secret_plugin=mock_secret,
+        callback_handler=MagicMock(handle=AsyncMock(return_value={"status": "ok"})),
     )
 
     template = _make_template(platform_type)

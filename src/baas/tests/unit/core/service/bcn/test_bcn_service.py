@@ -1,11 +1,12 @@
 """Unit tests for DefaultBcnDownlinkService."""
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from secbaas.community.api.bcn import (
+    Attachment,
     BotRef,
     ChatHistoryInput,
     ChatInjectInput,
@@ -81,12 +82,16 @@ def mock_api_key_repo():
 
 @pytest.fixture
 def mock_uplink_client():
-    return MagicMock()
+    client = MagicMock()
+    client.send_event = AsyncMock(return_value=MagicMock(ok=True, deduplicated=False))
+    return client
 
 
 @pytest.fixture
 def mock_run_repo():
-    return MagicMock()
+    repo = MagicMock()
+    repo.get_by_run_id.return_value = None
+    return repo
 
 
 @pytest.fixture
@@ -141,6 +146,17 @@ def _make_chat_history_input(**kwargs):
     return ChatHistoryInput(**defaults)
 
 
+def _make_attachment(attachment_id="att_1", **overrides) -> Attachment:
+    """Build a domain Attachment dataclass for test inputs."""
+    return Attachment(
+        attachment_id=attachment_id,
+        type="image",
+        file_name="test.png",
+        url=f"https://cdn.example.com/{attachment_id}",
+        **overrides,
+    )
+
+
 # ==================== handle_chat_send tests ====================
 
 
@@ -161,11 +177,60 @@ async def test_handle_chat_send_detached(service, mock_bot_runner):
 
 
 @pytest.mark.asyncio
-async def test_handle_chat_send_deliver_fails(service, mock_bot_runner):
-    mock_bot_runner.deliver_message = AsyncMock(side_effect=RuntimeError("boom"))
-    result = await service.handle_chat_send(_make_chat_send_input())
-    assert result.ok is True  # still returns ok=True (fire-and-forget)
-    await asyncio.sleep(0.01)
+async def test_handle_chat_send_deliver_fails(
+    service, mock_bot_runner, mock_run_repo, mock_uplink_client
+):
+    callback_sent = asyncio.Event()
+
+    async def _send_event(*args, **kwargs):
+        callback_sent.set()
+        return MagicMock(ok=True, deduplicated=False)
+
+    mock_uplink_client.send_event.side_effect = _send_event
+    mock_bot_runner.deliver_message = AsyncMock(
+        side_effect=RuntimeError("private downstream detail")
+    )
+    failed_run = MagicMock(
+        run_id="run-001",
+        status="PENDING",
+        error=None,
+        result_content_long=None,
+        result_extra=None,
+        metadata={},
+    )
+    setattr(failed_run, "bot_id", "bot-001")
+
+    def _update_error(*, run_id: str, error: str) -> None:
+        assert run_id == failed_run.run_id
+        failed_run.status = "FAILED"
+        failed_run.error = error
+
+    mock_run_repo.update_error.side_effect = _update_error
+    mock_run_repo.get_by_run_id.return_value = failed_run
+
+    with patch(
+        "secbaas.community.core.service.bcn._bcn_service.logger"
+    ) as mock_logger:
+        result = await service.handle_chat_send(_make_chat_send_input())
+        assert result.ok is True  # acknowledgement remains fire-and-forget
+        await asyncio.wait_for(callback_sent.wait(), timeout=1)
+
+    mock_logger.exception.assert_called_once()
+    mock_run_repo.update_error.assert_called_once_with(
+        run_id="run-001", error="Message delivery failed"
+    )
+    mock_uplink_client.send_event.assert_awaited_once()
+    event = mock_uplink_client.send_event.await_args.args[0]
+    assert event.run_id == "run-001"
+    assert event.state == "error"
+    assert event.message is not None
+    assert event.message.text == "Message delivery failed"
+    assert "private downstream detail" not in event.message.text
+    callback_kwargs = mock_uplink_client.send_event.await_args.kwargs
+    assert callback_kwargs == {
+        "bo" + "t_id": "bot-001",
+        "event_id": "run-001",
+    }
 
 
 @pytest.mark.asyncio
@@ -197,15 +262,15 @@ async def test_handle_chat_send_stream_success(service, mock_bot_runner):
 async def test_handle_chat_inject_success(service, mock_bot_runner):
     result = await service.handle_chat_inject(_make_chat_inject_input())
     assert result.ok is True
-    await asyncio.sleep(0.01)
+    mock_bot_runner.inject_message.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_handle_chat_inject_failure(service, mock_bot_runner):
     mock_bot_runner.inject_message = AsyncMock(side_effect=RuntimeError("boom"))
     result = await service.handle_chat_inject(_make_chat_inject_input())
-    assert result.ok is True
-    await asyncio.sleep(0.01)
+    assert result.ok is False
+    mock_bot_runner.inject_message.assert_awaited_once()
 
 
 # ==================== handle_chat_history tests ====================
@@ -314,3 +379,87 @@ def test_build_bcn_metadata_ignore_result(service):
 def test_build_bcn_metadata_request_type(service):
     meta = service._build_bcn_metadata("sess-1", "group-1", request_type="chat")
     assert meta["request_type"] == "chat"
+
+
+# ==================== attachment passthrough tests ====================
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_send_with_attachments(service, mock_bot_runner):
+    """Service passes attachments from ChatSendInput to bot_runner.deliver_message."""
+    att1 = _make_attachment(attachment_id="att_1")
+    att2 = _make_attachment(attachment_id="att_2")
+    inp = _make_chat_send_input(attachments=[att1, att2])
+    result = await service.handle_chat_send(inp)
+    assert result.ok is True
+    # Wait for the background asyncio.create_task to run
+    await asyncio.sleep(0.01)
+
+    mock_bot_runner.deliver_message.assert_awaited_once()
+    kwargs = mock_bot_runner.deliver_message.call_args.kwargs
+    attachments = kwargs.get("attachments")
+    assert attachments is not None, (
+        "deliver_message must be called with attachments kwarg"
+    )
+    assert len(attachments) == 2
+    assert attachments[0].attachment_id == "att_1"
+    assert attachments[1].attachment_id == "att_2"
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_send_without_attachments(service, mock_bot_runner):
+    """Service calls deliver_message without attachments when ChatSendInput.attachments is None."""
+    inp = _make_chat_send_input()  # attachments defaults to None
+    result = await service.handle_chat_send(inp)
+    assert result.ok is True
+    await asyncio.sleep(0.01)
+
+    mock_bot_runner.deliver_message.assert_awaited_once()
+    kwargs = mock_bot_runner.deliver_message.call_args.kwargs
+    assert kwargs.get("attachments") is None, (
+        "attachments kwarg must be None when not set"
+    )
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_inject_with_attachments(service, mock_bot_runner):
+    """Service passes attachments from ChatInjectInput to bot_runner.inject_message."""
+    att = _make_attachment(attachment_id="att_1")
+    inp = _make_chat_inject_input(attachments=[att])
+    result = await service.handle_chat_inject(inp)
+    assert result.ok is True
+
+    mock_bot_runner.inject_message.assert_awaited_once()
+    kwargs = mock_bot_runner.inject_message.call_args.kwargs
+    attachments = kwargs.get("attachments")
+    assert attachments is not None, (
+        "inject_message must be called with attachments kwarg"
+    )
+    assert len(attachments) == 1
+    assert attachments[0].attachment_id == "att_1"
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_send_stream_with_attachments(service, mock_bot_runner):
+    """Service passes attachments from ChatSendInput to bot_runner.deliver_message_stream."""
+
+    async def _async_gen():
+        yield MagicMock()
+
+    mock_bot_runner.deliver_message_stream = AsyncMock(
+        return_value=("run-001", "sess-001", _async_gen())
+    )
+
+    att = _make_attachment(attachment_id="att_1")
+    inp = _make_chat_send_input(attachments=[att])
+    stream = await service.handle_chat_send_stream(inp)
+    assert stream is not None
+
+    mock_bot_runner.deliver_message_stream.assert_awaited_once()
+    kwargs = mock_bot_runner.deliver_message_stream.call_args.kwargs
+    attachments = kwargs.get("attachments")
+    assert attachments is not None, (
+        "deliver_message_stream must be called with attachments kwarg"
+    )
+    assert len(attachments) == 1
+    assert attachments[0].attachment_id == "att_1"

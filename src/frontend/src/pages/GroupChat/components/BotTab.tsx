@@ -56,6 +56,8 @@ interface BotTabProps {
   onRefreshName?: (botUuid: string) => Promise<void>;
   /** 是否正在刷新名称 */
   isRefreshingName?: boolean;
+  /** 用户展示名（当 bot 为 human 类型时） */
+  userDisplayName?: string;
   /** 用户头像 URL（当 bot 为 human 类型时） */
   userAvatarUrl?: string;
   /** 点击初始化 Human Actor */
@@ -125,6 +127,7 @@ const BotTab: React.FC<BotTabProps> = ({
   isOnboarding,
   onRefreshName,
   isRefreshingName,
+  userDisplayName,
   userAvatarUrl,
   onInitHuman,
   isInitingHuman,
@@ -140,6 +143,12 @@ const BotTab: React.FC<BotTabProps> = ({
     !isHidden &&
     bot.dynamic_status?.status === 'offline';
   const isOnline = bot.status === 'online';
+  const displayName =
+    bot.actor_kind === 'human' && userDisplayName
+      ? userDisplayName
+      : bot.bot_name;
+  const avatarUrl =
+    bot.actor_kind === 'human' ? userAvatarUrl || bot.avatar_url : bot.avatar_url;
   const [showConfirm, setShowConfirm] = useState(false);
   const [pendingVisibility, setPendingVisibility] =
     useState<BotVisibility | null>(null);
@@ -156,7 +165,7 @@ const BotTab: React.FC<BotTabProps> = ({
 
   useEffect(() => {
     setIsNameTooltipOpen(false);
-  }, [bot.bot_name]);
+  }, [displayName]);
 
   // 处理可见性切换
   const handleVisibilityClick = (newVisibility: BotVisibility) => {
@@ -230,11 +239,9 @@ const BotTab: React.FC<BotTabProps> = ({
           <BotAvatar
             type={bot.actor_kind === 'human' ? 'user' : 'expert'}
             size="sm"
-            name={bot.bot_name}
+            name={displayName}
             botId={bot.bot_uuid.split(':')[0]}
-            avatarUrl={
-              bot.actor_kind === 'human' ? userAvatarUrl : bot.avatar_url
-            }
+            avatarUrl={avatarUrl}
           />
           {/* 在线状态呼吸灯在头像右下角（用户头像不显示状态图标） */}
           {!isUserTab && (
@@ -274,11 +281,11 @@ const BotTab: React.FC<BotTabProps> = ({
                   ref={botNameRef}
                   className="text-sm font-medium truncate max-w-[80px]"
                 >
-                  {bot.bot_name}
+                  {displayName}
                 </span>
               </TooltipTrigger>
               <TooltipContent side="top" className="max-w-[240px] text-xs">
-                {bot.bot_name}
+                {displayName}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>

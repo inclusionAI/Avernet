@@ -398,6 +398,7 @@ fn session_from_params(id: &str, group_id: &str, params: &NewSessionParams) -> S
         meta: params.meta.clone(),
         current_msg_seq: 0,
         participant_join_seq: None,
+        collected_at: None,
     }
 }
 
@@ -670,6 +671,7 @@ async fn get_service_session_rejects_cross_caller_principal_access() {
         updated_at: 1,
         completed_at: None,
         meta: None,
+        collected_at: None,
     };
 
     let sessions = Arc::new(StaticSessionStore {
@@ -901,6 +903,7 @@ async fn post_invocation_running_session_returns_409() {
         updated_at: 1,
         completed_at: None,
         meta: None,
+        collected_at: None,
     };
     let sessions = Arc::new(ReactivateConflictSessions {
         session: Mutex::new(Some(session)),
@@ -1101,6 +1104,7 @@ async fn post_invocation_honors_belongs_to_group_contract_over_field_match() {
         updated_at: 1,
         completed_at: Some(2),
         meta: None,
+        collected_at: None,
     };
     let sessions = Arc::new(ContractMismatchSessions {
         session: Mutex::new(Some(session)),

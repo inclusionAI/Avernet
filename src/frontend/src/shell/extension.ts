@@ -5,6 +5,8 @@
  */
 import { defineExt } from '@/capabilities';
 import * as BcnController from '@/services/backend-api/BcnController';
+import BotProfilePublicToggle from '@/pages/GroupChat/components/BotProfilePublicToggle';
+import FuseChat from '@/pages/GroupChat/components/FuseChat';
 import { Bell, Bot, Clock, Globe, User } from 'lucide-react';
 import type { ServerConfigMap } from '../../config/servers.config';
 import { SERVERS } from '../../config/servers.config';
@@ -32,12 +34,16 @@ const defaultAuthAdapter: AuthAdapter = {
     return null;
   },
   async refresh() {},
-  /** 开源默认 human 身份：走 /bcnproxy/me；未登录后端字段全 null → 返回 null。 */
+  /** 开源默认 human 身份：走 /auth/user；未登录或异常时返回 null。 */
   async getCurrentUser() {
     try {
-      const u = await BcnController.getMe();
-      return u?.staff_no
-        ? { userId: u.staff_no, nickName: u.nick_name || u.staff_no }
+      const u = await BcnController.getAuthUser();
+      return u?.user_id
+        ? {
+            userId: u.user_id,
+            nickName: u.name || u.user_id,
+            avatarUrl: u.avatar ?? undefined,
+          }
         : null;
     } catch (error) {
       console.error('[defaultAuthAdapter] getCurrentUser', error);
@@ -125,15 +131,14 @@ export const AppExt = defineExt('App', {
   } as FeatureFlags,
 
   /**
-   * 组件注入插槽（差异类型「实现/组件注入」）：开源默认全 null（三个内部专属功能不渲染、
-   * 组件代码不进开源闭包），内部 src/internal/slots.ts extend 注入真实组件。
-   * 见 docs/重构/一期BCN开源/BCN 内部组件代码不可见隔离方案.md。
+   * 组件注入插槽（差异类型「实现/组件注入」）：仍未公开的内部能力开源默认 null。
+   * 融合模式与 Bot 画像公开已迁回 open core，但过渡期继续保留 slot，open 默认非空。
    */
   slots: {
     advancedSettings: null,
-    fuseChat: null,
+    fuseChat: FuseChat,
     groupVisibility: null,
-    botProfilePublic: null,
+    botProfilePublic: BotProfilePublicToggle,
   } as AppSlots,
 
   /** 埋点适配器（差异类型 C）：开源默认 no-op，内部 extend 注入 Tracert */

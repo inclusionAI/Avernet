@@ -7,6 +7,8 @@ from ._tasks import (
     BotRunRecoveryTaskConfig,
     DeviceTtlTimerTask,
     DeviceTtlTimerTaskConfig,
+    FileTransferPoller,
+    FileTransferPollerConfig,
 )
 
 __all__ = [
@@ -16,4 +18,6 @@ __all__ = [
     "BotRunRecoveryTaskConfig",
     "DeviceTtlTimerTask",
     "DeviceTtlTimerTaskConfig",
+    "FileTransferPoller",
+    "FileTransferPollerConfig",
 ]

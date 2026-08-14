@@ -76,10 +76,11 @@ def test_consumer_surfaces_empty_engine_ext_from_local_noop() -> None:
 
     assert result.success is True
     # Engine payload empty (Noop); producer injects identity + draft stage (owner_id
-    # defaults to "" — no owner_id on this bot row).
+    # / bot_name default to "" — neither on this bot row).
     assert result.ext["config_artifact"]["engine_ext"] == {
         "bot_id": "b1",
         "owner_id": "",
+        "bot_name": "",
         "stage": "draft",
     }
     # ...and the plugin was actually consulted (MockSeam records the call) — no bypass.
@@ -116,6 +117,7 @@ def test_consumer_carries_mock_engine_ext_verbatim() -> None:
         **opaque,
         "bot_id": "b2",
         "owner_id": "",
+        "bot_name": "",
         "stage": "draft",
     }
     # the engine-owned keys are untouched (opacity preserved)...

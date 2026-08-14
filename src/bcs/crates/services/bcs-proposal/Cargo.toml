@@ -16,6 +16,7 @@ async-trait = { workspace = true }
 
 # UUID
 uuid = { workspace = true }
+urlencoding = { workspace = true }
 
 # Workspace crates
 bcs-service-api = { workspace = true }

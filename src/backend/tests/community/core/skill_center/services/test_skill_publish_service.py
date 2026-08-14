@@ -7,6 +7,7 @@
   - 打包上传 (O1-O4)
   - SC_STATUS_MAP 映射 (M1-M8)
 """
+import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -24,6 +25,16 @@ from agentclaw.community.plugins.local.oss_storage import MockObjectStoragePlugi
 # ── helpers ──────────────────────────────────────────────────────────
 
 
+# Every ``publish()`` / ``upgrade()`` test reaches ``_pack_and_upload``, which zips
+# the skill's ``git_path`` directory for real. Point the default at one tiny
+# directory created once for this module so each of those tests packs a single
+# file. The default used to be ``""``; ``_resolve_skill_dir("")`` hands back
+# ``Path("")`` — the process CWD — so every one of them zipped the whole
+# ``src/backend`` checkout (``.venv`` included, ~250MB) and took ~11s apiece.
+_DEFAULT_SKILL_DIR = Path(tempfile.mkdtemp(prefix="skill-publish-default-"))
+(_DEFAULT_SKILL_DIR / "SKILL.md").write_text("test")
+
+
 def _make_skill(**overrides) -> dict:
     """构造一个 skill dict，可按需覆盖字段。"""
     base = {
@@ -34,7 +45,7 @@ def _make_skill(**overrides) -> dict:
         "version": 1,
         "skill_uuid": "uuid-abc",
         "link_name": "test-skill",
-        "git_path": "",
+        "git_path": str(_DEFAULT_SKILL_DIR),
         "source_type": "git",
         "category": "general",
         "tags": "[]",
@@ -586,6 +597,21 @@ class TestPackAndUpload:
         svc, _, _, _, oss = _make_service(skill=skill)
 
         with pytest.raises(FileNotFoundError, match="技能目录不存在"):
+            svc.publish("1")
+
+        oss.put_object.assert_not_called()
+
+    def test_empty_git_path_raises_instead_of_packing_cwd(self):
+        """O5: git_path 为空 → FileNotFoundError，绝不打包 CWD。
+
+        ``_resolve_skill_dir("")`` returns ``Path("")``, which normalises to the
+        process CWD and passes ``is_dir()``. Without the empty-``git_path`` guard
+        the packer would zip the whole working directory and upload it to OSS.
+        """
+        skill = _make_skill(status="DEVELOPING", git_path="")
+        svc, _, _, _, oss = _make_service(skill=skill)
+
+        with pytest.raises(FileNotFoundError, match="git_path 为空"):
             svc.publish("1")
 
         oss.put_object.assert_not_called()

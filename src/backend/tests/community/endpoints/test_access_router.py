@@ -4,17 +4,18 @@ PUT /api/v1/access/bots-ceiling
 
 Covered branches:
 - happy path (operator user) → success=True with echoed entityId/ceiling
-- service error (patched ``PolicyService.set_bots_ceiling``) → success=False, error_code=500
+- non-operator caller → ``require_operator`` raises ``Forbidden`` → 403
 - quota happy path with no seed rows → zero quota envelope
 - quota config parse errors through the real service → success=False, error_code=500
 
 In local mode ``AuthPlugin.is_operator_allowed`` returns True for every
 user, so any seeded staff user satisfies ``require_operator`` — mirroring
-the operator-flow setup in ``test_bot_admin_router.py``.
+the operator-flow setup in ``test_bot_admin_router.py``. The denial case
+drives that same policy decision through the plugin's DI seam
+(``set_response``), so the real ``require_operator`` dependency runs and
+the real error handler renders the 403.
 """
 from __future__ import annotations
-
-from unittest.mock import patch
 
 from tests.community.factories.access import make_staff_user
 from tests.community.framework import (
@@ -36,19 +37,20 @@ def _seed_operator(world):
     make_staff_user(world, user_id="u_target")
 
 
-def _seed_operator_with_service_error(world):
-    """Seed operator + target, then patch ``set_bots_ceiling`` to raise."""
+def _seed_non_operator(world):
+    """Seed the caller, then have the auth plugin refuse operator rights.
+
+    ``is_operator_allowed`` is the policy the local plugin answers ``True``
+    to for everyone; driving it through the plugin's DI seam is the only
+    way to reach the denial branch without a fake ``require_operator``.
+    Everything downstream — the dependency, the raised ``Forbidden``, the
+    error handler — is the production path.
+    """
+    from agentclaw.community.plugin_api.auth import AuthPlugin
+
     make_staff_user(world, user_id="u_operator")
     make_staff_user(world, user_id="u_target")
-
-    from agentclaw.community.core.access.services.policy_service import PolicyService
-
-    def mock_set_bots_ceiling(*args, **kwargs):
-        raise RuntimeError("Mock policy service error")
-
-    patcher = patch.object(PolicyService, "set_bots_ceiling", mock_set_bots_ceiling)
-    patcher.start()
-    world._set_bots_ceiling_error_patcher = patcher
+    world.get(AuthPlugin).set_response("is_operator_allowed", False)
 
 
 def _seed_quota_invalid_daily_config(world):
@@ -116,6 +118,14 @@ def _assert_ceiling_persisted(response, world):
 
     svc = world.get(PolicyService)
     assert svc.get_bots_ceiling(entity_id="u_target") == 10
+
+
+def _assert_ceiling_not_written(response, world):
+    """A rejected caller must not have moved the target's ceiling."""
+    from agentclaw.community.core.access.services.policy_service import PolicyService
+
+    svc = world.get(PolicyService)
+    assert svc.get_bots_ceiling(entity_id="u_target", default=5) == 5
 
 
 # ============================================================================
@@ -201,16 +211,17 @@ def set_bots_ceiling_ok():
 @endpoint_test(
     method="PUT",
     path="/api/v1/access/bots-ceiling",
-    scenario="service_error",
-    seed=_seed_operator_with_service_error,
+    scenario="forbidden_non_operator",
+    seed=_seed_non_operator,
     input=CaseInput(
         json_body={"entity_id": "u_target", "ceiling": 10},
         headers={"x-user-id": "u_operator"},
     ),
     expect=ExpectError(
-        status=200,
-        json_contains={"success": False, "error_code": 500},
+        status=403,
+        json_contains={"detail": "权限不足：您没有操作员权限"},
     ),
+    extra_assertions=(_assert_ceiling_not_written,),
 )
-def set_bots_ceiling_service_error():
-    """Set ceiling returns success=False, error_code=500 when the service raises."""
+def set_bots_ceiling_forbidden_non_operator():
+    """A caller outside the operator allowlist is rejected before any write."""

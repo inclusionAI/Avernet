@@ -160,6 +160,7 @@ class FusionRequest(BaseModel):
         driver_bot_id: Explicit driver bot ID
         mode: Fusion mode (backward compatible, fixed to "agent")
         fusion_mode: Fusion mode (G1/G2/G5)
+        session_id: Caller-supplied session id (accepted for compatibility, unused; context uses group_id)
         options: Fusion options
         metadata: Request metadata
     """
@@ -191,6 +192,13 @@ class FusionRequest(BaseModel):
     fusion_mode: Literal["agent", "conflict_alignment", "expert_diagnosis", "bot_profile_fuse"] = Field(
         default="agent",
         description="Fusion mode: agent (G1), conflict_alignment (G2), expert_diagnosis (G5), bot_profile_fuse (G9)",
+    )
+
+    session_id: Optional[str] = Field(
+        default=None,
+        max_length=128,
+        description="Session identifier (accepted for caller compatibility; not "
+        "used — Avernet G9 scopes context by the path group_id).",
     )
 
     options: FuseOptions = Field(
@@ -301,6 +309,36 @@ class FusionPerspective(BaseModel):
     concerns: Optional[list[str]] = Field(
         default_factory=list,
         description="Concerns (G2)",
+    )
+
+
+class Recommendation(BaseModel):
+    """
+    Final fusion recommendation.
+
+    Attributes:
+        summary: Recommendation summary
+        decision: Decision conclusion
+        risks: Identified risks
+        next_actions: Suggested next actions
+    """
+
+    summary: str = Field(
+        description="Recommendation summary",
+    )
+
+    decision: Literal["yes", "no", "conditional_yes", "needs_more_information"] = Field(
+        description="Decision conclusion",
+    )
+
+    risks: list[str] = Field(
+        default_factory=list,
+        description="Identified risks",
+    )
+
+    next_actions: list[str] = Field(
+        default_factory=list,
+        description="Suggested next actions",
     )
 
 
@@ -527,7 +565,7 @@ class FusionResult(BaseModel):
         description="Risk assessments (G5)",
     )
 
-    recommendation: Optional[str] = Field(
+    recommendation: Optional[Recommendation] = Field(
         default=None,
         description="Final recommendation",
     )

@@ -9,10 +9,11 @@ from typing import Dict, Any
 
 from injector import inject
 
-from agentclaw.community.core.skill_center.services.repositories import (
-    SkillRepository,
-    SkillSetRepository,
+from agentclaw.community.core.bot_startup_script.protocols import (
+    StartupScriptPurgeProtocol,
 )
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 
 logger = get_logger()
 
@@ -25,17 +26,44 @@ class BotCleanupService:
         self,
         skill_repo: SkillRepository,
         skill_set_repo: SkillSetRepository,
+        startup_script_purge: StartupScriptPurgeProtocol,
     ):
         """
         Args:
             skill_repo: SkillRepository 实例（支持 delete_by_bot_id）
             skill_set_repo: SkillSetRepository 实例（支持 delete_by_bot_id）
+            startup_script_purge: 启动脚本的删除side。必填而非可选——漏接的后果
+                是脚本行静默残留，正是本次要修的问题本身。
         """
         self._skill_repo = skill_repo
         self._skill_set_repo = skill_set_repo
+        self._startup_script_purge = startup_script_purge
+
+    def purge_startup_script(self, *, entity_id: str, bot_id: str) -> bool:
+        """删除 Bot 存储的启动脚本。**失败向上抛，不吞。**
+
+        与下面 ``cleanup_single_bot_data`` 里的技能清理不同，这一项刻意不走
+        "记录日志然后继续"：
+
+        * 残留的不是惰性元数据，而是**明文可执行内容**：用户写的脚本原文会在
+          Bot 删除后无限期留在库里，谁查这张表都能读到。
+        * 本仓库对同类清理已经有先例：``delete_bot`` 里的 app grant 回收同样
+          "先于一切破坏性步骤、失败直接抛"，理由写在那里——失败时 Bot 还完好，
+          最坏的结果只是脚本被删而 Bot 存活，重新 PUT 即可恢复。
+        * 本 PR 自己也已经做过同一个判断：``_resolve_startup_script`` 原本吞掉
+          读失败，现在改为上抛，理由是吞掉只会得到"启动了、报告就绪、其实没配置"
+          的静默错误状态。删除侧吞掉失败是同一个形状。
+
+        真被卡住的风险比看上去小：这次写入和软删打的是**同一个后端数据库**，
+        写不进去通常意味着这次删除本来也会失败。
+        """
+        return self._startup_script_purge.delete(entity_id=entity_id, bot_id=bot_id)
 
     def cleanup_single_bot_data(self, bot_id: str, user_id: str) -> Dict[str, Any]:
         """清理单个 Bot 的关联数据。
+
+        启动脚本**不在**这里清理——它由 ``purge_startup_script`` 在软删之前
+        单独处理，失败要上抛。见那里的说明。
 
         Args:
             bot_id: Bot ID

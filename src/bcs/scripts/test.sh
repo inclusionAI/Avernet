@@ -896,7 +896,7 @@ send_and_wait() {
 
     if [ "$use_bcs_routing" = "true" ]; then
         # BCS-mediated mode: single call, response comes back directly
-        echo -e "${DIM}[IM→BCS] POST /bots/${real_target}/chat${NC}" >&2
+        echo -e "${DIM}[IM→BCS] POST /bots/${real_target}/chat-async${NC}" >&2
         echo -e "${DIM}    from: $from_display, message: ${message:0:50}...${NC}" >&2
 
         local result
@@ -2049,7 +2049,7 @@ test_g4() {
     # New member will receive SessionContext with originator=张三
     print_info "Adding PM to project group..."
     local add_result
-    add_result=$(run_bcs_cli_as "张三" --json add-member --group "$group_id" --bot "PM" --role "consultant" 2>/dev/null)
+    add_result=$(run_bcs_cli_as "张三" --json add-member --group "$group_id" --bot "PM" 2>/dev/null)
 
     if [ -z "$add_result" ]; then
         print_error "Failed to add PM to project group"

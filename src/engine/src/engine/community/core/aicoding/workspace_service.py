@@ -1,8 +1,10 @@
 """WorkspaceService — file tree + git diff + file preview for AICoding sessions.
 
 Composes :class:`engine.community.core.file.protocol.FileService` and
-:class:`engine.community.core.bash.protocol.BashService` to serve the four
-``/api/aicoding/sessions/*`` endpoints.
+:class:`engine.community.core.bash.protocol.BashService` for workspace file
+and git operations.  The file-tree endpoint invokes GNU ``find`` inside the
+container-local AICoding workspace so it can prune infrastructure mounts before
+traversal without issuing a separate size ``stat`` for every file.
 
 The container workspace base path is ``/home/admin/.aicoding/workspace``
 (matches the relay ``DEFAULT_CWD`` and the AiCodingFileService
@@ -24,7 +26,6 @@ from engine.community.core.aicoding.models import (
     GitDiffResult,
     GitDiffTreeResult,
     GitProjectDiff,
-    _FILTERED_DIRS,
     build_diff_tree,
     build_file_tree,
     parse_porcelain_status,
@@ -44,6 +45,82 @@ CONTAINER_WORKSPACE_BASE = "/home/admin/.aicoding/workspace"
 # 10 MiB cap for inline preview to keep responses bounded.
 PREVIEW_MAX_BYTES = 10 * 1024 * 1024
 
+_ENCODING_ALIASES = {
+    "utf-8": "utf-8",
+    "utf8": "utf-8",
+    "utf_8": "utf-8",
+    "gb18030": "gb18030",
+    "gbk": "gbk",
+}
+_AUTO_DECODE_ENCODINGS = ("utf-8", "gb18030", "gbk")
+
+# Default number of workspace-relative levels returned by the file-tree API.
+# ``0`` is reserved for an unlimited recursive scan.
+DEFAULT_FILE_TREE_MAX_DEPTH = 3
+
+# Keep the expression static and pass the validated workspace separately as
+# BashService.cwd. GNU find's ``%y`` supplies the entry type and ``%P`` the
+# workspace-relative path; NUL delimiters preserve whitespace/newlines in file
+# names. Deliberately omit ``%s`` so NAS-backed workspaces do not pay one
+# explicit size metadata lookup per file.
+_FILE_TREE_FIND_EXPRESSION = (
+    r"\( -type d \( -name .git -o -name node_modules "
+    r"-o -path './skills' -o -path './skills-repo' -o -path './skills-pool' "
+    r"-o -path './.repos' \) -prune \) "
+    r"-o -printf '%y\0%P\0'"
+)
+
+
+def _build_file_tree_find_command(max_depth: int) -> str:
+    """Build the GNU find command for a depth-limited workspace scan.
+
+    ``find`` counts direct children of ``.`` at depth 1. A ``max_depth`` of
+    zero means unlimited traversal, so no ``-maxdepth`` option is emitted.
+    """
+    if max_depth < 0:
+        raise ValueError("max_depth must be greater than or equal to 0")
+
+    max_depth_arg = "" if max_depth == 0 else f"-maxdepth {max_depth} "
+    return (
+        "find -P . -ignore_readdir_race -mindepth 1 "
+        f"{max_depth_arg}{_FILE_TREE_FIND_EXPRESSION}"
+    )
+
+
+def _normalize_encoding(encoding: str | None) -> str | None:
+    """Normalize a supported preview encoding; blank values select auto mode."""
+    if encoding is None:
+        return None
+
+    value = encoding.strip().lower()
+    if not value:
+        return None
+
+    normalized = _ENCODING_ALIASES.get(value)
+    if normalized is None:
+        raise ValueError(f"unsupported file encoding: {encoding}")
+    return normalized
+
+
+def _decode_file_content(raw: bytes, encoding: str | None = None) -> str:
+    """Decode preview bytes using an explicit encoding or ordered fallbacks."""
+    normalized = _normalize_encoding(encoding)
+    if normalized is not None:
+        try:
+            return raw.decode(normalized)
+        except UnicodeDecodeError as exc:
+            raise ValueError(
+                f"file content cannot be decoded with encoding {normalized}"
+            ) from exc
+
+    for candidate in _AUTO_DECODE_ENCODINGS:
+        try:
+            return raw.decode(candidate)
+        except UnicodeDecodeError:
+            continue
+
+    return raw.decode("utf-8", errors="replace")
+
 
 def _resolve_workspace_base() -> str:
     """读取 workspace base。env 优先，未设置回落到硬编码。
@@ -52,6 +129,37 @@ def _resolve_workspace_base() -> str:
     """
     raw = os.getenv("RELAY_DEFAULT_CWD", "").strip()
     return raw or CONTAINER_WORKSPACE_BASE
+
+
+def _parse_find_file_tree_entries(
+    output: str,
+    workspace: str,
+) -> list[dict]:
+    """Parse ``type\0relative-path\0`` pairs emitted by GNU ``find``."""
+    fields = output.split("\0")
+    if fields and fields[-1] == "":
+        fields.pop()
+    if len(fields) % 2 != 0:
+        raise RuntimeError("invalid file-tree find output")
+
+    workspace_norm = os.path.normpath(workspace)
+    entries: list[dict] = []
+    for index in range(0, len(fields), 2):
+        file_type = fields[index]
+        relative_path = fields[index + 1]
+        if not relative_path:
+            raise RuntimeError("invalid empty path in file-tree find output")
+
+        entries.append(
+            {
+                "name": os.path.basename(relative_path),
+                "path": os.path.join(workspace_norm, relative_path),
+                "relative_path": relative_path,
+                "is_dir": file_type == "d",
+            }
+        )
+
+    return entries
 
 
 def _strip_trailing_sep(path: str) -> str:
@@ -205,29 +313,50 @@ class WorkspaceService:
     # ── file tree ─────────────────────────────────────────────────────
 
     async def list_file_tree(
-        self, session_id: str, cwd: str | None = None
+        self,
+        session_id: str | None,
+        cwd: str | None = None,
+        max_depth: int = DEFAULT_FILE_TREE_MAX_DEPTH,
     ) -> list[FileTreeNode]:
-        """List workspace files recursively, grouped by project."""
-        workspace = self.ensure_workspace_exists(session_id, cwd)
-        result = await self._file.list_dir(
-            workspace, recursive=True, exclude_dirs=_FILTERED_DIRS
+        """List workspace files up to ``max_depth``, excluding mounts.
+
+        Direct children of the workspace are level 1. ``max_depth=0`` means
+        unlimited recursive traversal.
+        """
+        normalized_session_id = (
+            (session_id.strip() or None) if session_id else None
         )
-        entries = [
-            {
-                "name": f.name,
-                "path": f.path,
-                "relative_path": f.relative_path,
-                "is_dir": f.is_dir,
-                "size": f.size,
-            }
-            for f in result.files
-        ]
+        normalized_cwd = (cwd.strip() or None) if cwd else None
+        if not normalized_session_id and not normalized_cwd:
+            raise ValueError("session_id and cwd cannot both be empty")
+
+        find_command = _build_file_tree_find_command(max_depth)
+        workspace = self.ensure_workspace_exists(
+            normalized_session_id or "",
+            normalized_cwd,
+        )
+        result = await self._bash.exec(
+            cmd=find_command,
+            cwd=workspace,
+            timeout=30,
+        )
+        if result.exit_code != 0:
+            detail = (
+                result.stderr.strip() or f"exit code {result.exit_code}"
+            )[:1000]
+            raise RuntimeError(f"file-tree find failed: {detail}")
+
+        entries = _parse_find_file_tree_entries(result.stdout, workspace)
         return build_file_tree(entries)
 
     # ── file preview ──────────────────────────────────────────────────
 
     async def preview_file(
-        self, session_id: str, path: str, cwd: str | None = None
+        self,
+        session_id: str,
+        path: str,
+        cwd: str | None = None,
+        encoding: str | None = None,
     ) -> FileContent:
         """Read a single workspace file (size-bounded, traversal-safe)."""
         if not path or not path.strip():
@@ -246,7 +375,7 @@ class WorkspaceService:
             )
 
         return FileContent(
-            content=raw.decode("utf-8", errors="replace"),
+            content=_decode_file_content(raw, encoding),
             size=size,
         )
 

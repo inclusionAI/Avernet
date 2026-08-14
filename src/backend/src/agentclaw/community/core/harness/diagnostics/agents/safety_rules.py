@@ -3,6 +3,7 @@ import logging
 
 from agentclaw.community.core.harness.diagnostics.base import Diagnostic, DiagnosticContext
 from agentclaw.community.core.harness.models import Finding
+from agentclaw.community.core.harness.services.llm import DIAGNOSTIC_MAX_TOKENS
 
 logger = logging.getLogger(__name__)
 
@@ -76,5 +77,5 @@ class AgentsSafetyRulesDiagnostic(Diagnostic):
             return []
         user_msg = f"--- AGENTS.md Safety Rules 诊断 ---\n{content}\n--- end ---"
         system = self.system_prompt.format(fix_suggestion=self.fix_suggestion)
-        response = await ctx.llm.chat(system=system, user=user_msg)
+        response = await ctx.llm.chat(system=system, user=user_msg, max_tokens=DIAGNOSTIC_MAX_TOKENS)
         return self._analyze_response(response, ctx.bot_id)

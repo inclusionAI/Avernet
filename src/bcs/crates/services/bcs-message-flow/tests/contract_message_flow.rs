@@ -1,13 +1,14 @@
 use bcs_message_flow::{BcsGroupMessageHistory, BcsMessageFlow, MemoryBotRunContextStore};
 use bcs_protocol::BcsFrame;
 use bcs_service_api::{
-    ActorKind, BotDeliveryKind, BotDeliveryTarget, BotEventCommand, BotRegistryCoreService,
+    ActorKind, BotActor, BotDeliveryKind, BotDeliveryTarget, BotEventCommand, BotRegistryCoreService,
     BotRunContextPort,
     CallerContext, ChatAbortCommand, ChatEventState, GroupCallbackCommand, GroupChatCommand, GroupHistoryBotRequestPort,
     FrontendDeliveryTarget, Group, GroupHistoryCommand, GroupKind, GroupMessage, GroupMessageHistoryService, GroupMessageType,
     GroupCoreService, GroupStatus, GroupStrategy, HumanActor, MessageFlowService, MessageRole, Participant,
     ParticipantMode, ParticipantRole, PersistentGroupSendCommand, ProviderStreamGrayList,
-    ProviderTransportPreference, RedactedToken, ServiceError, WebSendCommand,
+    RedactedToken, ServiceError, WebSendCommand,
+    DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
     ServiceResult, Session, SessionHistoryCommand, SessionKind, SessionManagementService,
     SessionStatus, SessionUseCaseError,
     interceptor::{BlockReason, InterceptorDecision, MessageInterceptor, OutboundMessage},
@@ -340,6 +341,7 @@ fn test_session(session_id: &str, group_id: &str, participants: Vec<Participant>
         meta: None,
         current_msg_seq: 0,
         participant_join_seq: None,
+        collected_at: None,
     }
 }
 
@@ -607,6 +609,151 @@ async fn session_history_denies_human_with_no_session_or_group_stake() {
 }
 
 #[tokio::test]
+async fn session_history_rejects_public_caller() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let bot_request = Arc::new(ControllableHistoryBotRequest::with_delays(
+        HashMap::new(),
+        HashMap::new(),
+    ));
+    let history = BcsGroupMessageHistory::new(
+        support.group.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        bot_request,
+    );
+
+    let err = history
+        .get_session_history(SessionHistoryCommand {
+            caller: CallerContext::Public,
+            group_id: "group-1".to_string(),
+            session_id: "group-1:abcdef12".to_string(),
+            session_participants: vec![Participant::bot("bot-driver", ParticipantRole::Driver)],
+            view_bot_id: None,
+            limit: 500,
+            before: None,
+        })
+        .await
+        .expect_err("public session history reads must be rejected");
+
+    assert!(
+        matches!(err, bcs_service_api::GroupUseCaseError::Unauthorized(_)),
+        "expected Unauthorized, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn session_history_denies_group_owner_when_not_in_session_and_owns_no_session_bot() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    support
+        .registry
+        .save_created_by("bot-observer", "1", true)
+        .await
+        .unwrap();
+
+    let bot_request = Arc::new(ControllableHistoryBotRequest::with_delays(
+        HashMap::new(),
+        HashMap::new(),
+    ));
+    let history = BcsGroupMessageHistory::new(
+        support.group.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        bot_request,
+    );
+
+    let err = history
+        .get_session_history(SessionHistoryCommand {
+            caller: CallerContext::Human(HumanActor {
+                actor_id: "human_1".to_string(),
+                staff_no: "1".to_string(),
+            }),
+            group_id: "group-1".to_string(),
+            session_id: "group-1:abcdef12".to_string(),
+            session_participants: vec![Participant::bot("bot-driver", ParticipantRole::Driver)],
+            view_bot_id: None,
+            limit: 500,
+            before: None,
+        })
+        .await
+        .expect_err("group ownership alone must not grant session history access");
+
+    assert!(
+        matches!(err, bcs_service_api::GroupUseCaseError::Forbidden(_)),
+        "expected Forbidden, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn session_history_denies_group_participant_bot_not_in_session() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let bot_request = Arc::new(ControllableHistoryBotRequest::with_delays(
+        HashMap::new(),
+        HashMap::new(),
+    ));
+    let history = BcsGroupMessageHistory::new(
+        support.group.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        bot_request,
+    );
+
+    let err = history
+        .get_session_history(SessionHistoryCommand {
+            caller: CallerContext::Bot(BotActor {
+                bot_uuid: "bot-observer".to_string(),
+            }),
+            group_id: "group-1".to_string(),
+            session_id: "group-1:abcdef12".to_string(),
+            session_participants: vec![Participant::bot("bot-driver", ParticipantRole::Driver)],
+            view_bot_id: None,
+            limit: 500,
+            before: None,
+        })
+        .await
+        .expect_err("group participant bot must be rejected when absent from the session");
+
+    assert!(
+        matches!(err, bcs_service_api::GroupUseCaseError::Forbidden(_)),
+        "expected Forbidden, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn session_history_denies_non_participant_bot() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let bot_request = Arc::new(ControllableHistoryBotRequest::with_delays(
+        HashMap::new(),
+        HashMap::new(),
+    ));
+    let history = BcsGroupMessageHistory::new(
+        support.group.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        bot_request,
+    );
+
+    let err = history
+        .get_session_history(SessionHistoryCommand {
+            caller: CallerContext::Bot(BotActor {
+                bot_uuid: "intruder-bot".to_string(),
+            }),
+            group_id: "group-1".to_string(),
+            session_id: "group-1:abcdef12".to_string(),
+            session_participants: vec![Participant::bot("bot-driver", ParticipantRole::Driver)],
+            view_bot_id: None,
+            limit: 500,
+            before: None,
+        })
+        .await
+        .expect_err("non-participant bot must be rejected");
+
+    assert!(
+        matches!(err, bcs_service_api::GroupUseCaseError::Forbidden(_)),
+        "expected Forbidden, got {err:?}"
+    );
+}
+
+#[tokio::test]
 async fn session_history_resolves_from_prefix_using_session_participants() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let mut group = support.group.get("group-1").await.unwrap();
@@ -750,7 +897,9 @@ async fn session_history_v3_falls_back_to_session_key_when_explicit_session_requ
 
     let result = history
         .get_session_history(SessionHistoryCommand {
-            caller: CallerContext::Public,
+            caller: CallerContext::Bot(BotActor {
+                bot_uuid: "bot-driver".to_string(),
+            }),
             group_id: "group-1".to_string(),
             session_id: "group-1:abcdef12".to_string(),
             session_participants: vec![Participant::bot("bot-driver", ParticipantRole::Driver)],
@@ -935,6 +1084,7 @@ async fn group_history_falls_back_to_store_when_bot_window_has_no_older_messages
                 history_meta: None,
                 metadata: None,
                 run_id: String::new(),
+                attachments: None,
             },
         )
         .await
@@ -954,6 +1104,7 @@ async fn group_history_falls_back_to_store_when_bot_window_has_no_older_messages
                 history_meta: None,
                 metadata: None,
                 run_id: String::new(),
+                attachments: None,
             },
         )
         .await
@@ -1049,7 +1200,9 @@ async fn web_send_resets_message_count_routes_and_delivers() {
             attachments: None,
             thinking: None,
             idempotency_key: None,
-        sender_conn_id: None,
+            source_im_message_id: None,
+            sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -1112,7 +1265,9 @@ async fn web_send_persists_public_human_owner_for_manager_worker() {
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -1149,7 +1304,9 @@ async fn web_send_persists_public_human_owner_for_manager_worker() {
             attachments: None,
             thinking: None,
             idempotency_key: None,
+            source_im_message_id: None,
             sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -1172,6 +1329,7 @@ async fn accepted_chat_send_records_run_context_for_callback() {
     )
     .with_bot_run_context(run_context.clone());
 
+    let before_send_ms = bcs_protocol::now_ms();
     let outcome = flow
         .handle_web_send(WebSendCommand {
             caller: CallerContext::Human(HumanActor {
@@ -1186,11 +1344,14 @@ async fn accepted_chat_send_records_run_context_for_callback() {
             mentions: vec![],
             attachments: None,
             thinking: None,
-            idempotency_key: None,
+            idempotency_key: Some("idempotency-1".to_string()),
+            source_im_message_id: Some("source-msg-1".to_string()),
             sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
+    let after_send_ms = bcs_protocol::now_ms();
 
     let context = run_context
         .get_context(&outcome.primary_run_id)
@@ -1200,6 +1361,21 @@ async fn accepted_chat_send_records_run_context_for_callback() {
     assert_eq!(context.group_id, "group-1");
     assert_eq!(context.bcs_session_id.as_deref(), Some("group-1:abcdef12"));
     assert!(!context.terminal);
+    assert_eq!(
+        flow.message_tracker
+            .channel_source_message_id(&outcome.primary_run_id)
+            .await
+            .as_deref(),
+        Some("source-msg-1")
+    );
+    assert!(
+        context.deadline_ms
+            >= before_send_ms.saturating_add(DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS)
+    );
+    assert!(
+        context.deadline_ms
+            <= after_send_ms.saturating_add(DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS)
+    );
 }
 
 #[tokio::test]
@@ -1257,7 +1433,9 @@ async fn web_send_delivers_to_registered_provider_target_without_ws_connection()
             attachments: None,
             thinking: None,
             idempotency_key: None,
+            source_im_message_id: None,
             sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -1269,7 +1447,7 @@ async fn web_send_delivers_to_registered_provider_target_without_ws_connection()
 }
 
 #[tokio::test]
-async fn provider_stream_gray_created_by_enables_sse_for_provider_chat_send() {
+async fn deprecated_provider_stream_gray_match_keeps_provider_delivery_target() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     install_provider_driver_group(&support, "gray-user").await;
     let flow = BcsMessageFlow::new(
@@ -1297,19 +1475,18 @@ async fn provider_stream_gray_created_by_enables_sse_for_provider_chat_send() {
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
 
-    assert_eq!(
-        support.bot_delivery.provider_transports().await,
-        vec![ProviderTransportPreference::CallbackSse]
-    );
+    assert!(support.bot_delivery.targets().await[0].is_http_provider());
 }
 
 #[tokio::test]
-async fn provider_stream_gray_created_by_miss_keeps_provider_callback() {
+async fn deprecated_provider_stream_gray_miss_keeps_provider_delivery_target() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     install_provider_driver_group(&support, "other-user").await;
     let flow = BcsMessageFlow::new(
@@ -1337,19 +1514,18 @@ async fn provider_stream_gray_created_by_miss_keeps_provider_callback() {
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
 
-    assert_eq!(
-        support.bot_delivery.provider_transports().await,
-        vec![ProviderTransportPreference::Callback]
-    );
+    assert!(support.bot_delivery.targets().await[0].is_http_provider());
 }
 
 #[tokio::test]
-async fn provider_stream_gray_mode_disabled_sends_provider_chat_send_over_sse() {
+async fn deprecated_provider_stream_gray_disabled_keeps_provider_delivery_target() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     install_provider_driver_group(&support, "gray-user").await;
     let flow = BcsMessageFlow::new(
@@ -1377,19 +1553,18 @@ async fn provider_stream_gray_mode_disabled_sends_provider_chat_send_over_sse() 
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
 
-    assert_eq!(
-        support.bot_delivery.provider_transports().await,
-        vec![ProviderTransportPreference::CallbackSse]
-    );
+    assert!(support.bot_delivery.targets().await[0].is_http_provider());
 }
 
 #[tokio::test]
-async fn provider_stream_gray_created_by_still_keeps_inject_on_callback() {
+async fn deprecated_provider_stream_gray_does_not_change_inject_delivery_target() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     support
         .registry
@@ -1435,17 +1610,17 @@ async fn provider_stream_gray_created_by_still_keeps_inject_on_callback() {
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
 
     let kinds = support.bot_delivery.kinds().await;
     let targets = support.bot_delivery.targets().await;
-    let transports = support.bot_delivery.provider_transports().await;
     assert_eq!(kinds, vec![BotDeliveryKind::Send, BotDeliveryKind::Inject]);
     assert!(targets[1].is_http_provider());
-    assert_eq!(transports[1], ProviderTransportPreference::Callback);
 }
 
 async fn install_provider_driver_group(
@@ -1554,7 +1729,9 @@ async fn web_send_explicit_mentions_do_not_inject_manager_worker_workers() {
             attachments: None,
             thinking: None,
             idempotency_key: None,
+            source_im_message_id: None,
             sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -1598,7 +1775,9 @@ async fn web_send_in_human_bot_dm_uses_dm_routing_and_keeps_frontend_echo() {
             attachments: None,
             thinking: None,
             idempotency_key: None,
-        sender_conn_id: None,
+            source_im_message_id: None,
+            sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -1647,7 +1826,9 @@ async fn web_send_in_human_bot_dm_omits_group_context_by_default() -> ServiceRes
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await?;
 
@@ -1699,7 +1880,9 @@ async fn web_send_blocking_interceptor_prevents_bot_delivery() {
             attachments: None,
             thinking: None,
             idempotency_key: None,
-        sender_conn_id: None,
+            source_im_message_id: None,
+            sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -1740,7 +1923,9 @@ async fn web_send_delivery_frame_contains_recipient_group_context() {
         attachments: None,
         thinking: None,
         idempotency_key: None,
-    sender_conn_id: None,
+        source_im_message_id: None,
+        sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -1809,7 +1994,9 @@ async fn web_send_with_session_id_routes_v2_by_substituting_wire_group_id() {
         attachments: None,
         thinking: None,
         idempotency_key: None,
-    sender_conn_id: None,
+        source_im_message_id: None,
+        sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -1875,7 +2062,9 @@ async fn web_send_with_legacy_session_id_routes_v2_with_group_wire_id() {
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -1931,7 +2120,9 @@ async fn web_send_with_session_id_routes_v3_with_explicit_bcs_session_id() {
         attachments: None,
         thinking: None,
         idempotency_key: None,
-    sender_conn_id: None,
+        source_im_message_id: None,
+        sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -1993,7 +2184,9 @@ async fn web_send_to_provider_with_session_id_uses_explicit_bcs_session_id() {
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -2057,7 +2250,9 @@ async fn web_send_direct_bot_projection_hides_bcs_group_context() -> ServiceResu
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await?;
 
@@ -2116,7 +2311,9 @@ async fn web_send_prefers_human_from_name_in_delivered_frame() {
         attachments: None,
         thinking: None,
         idempotency_key: None,
-    sender_conn_id: None,
+        source_im_message_id: None,
+        sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -2167,7 +2364,9 @@ async fn web_send_inject_delivery_uses_event_frame() {
         attachments: None,
         thinking: None,
         idempotency_key: None,
-    sender_conn_id: None,
+        source_im_message_id: None,
+        sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -2220,7 +2419,9 @@ async fn web_send_delivers_to_private_group_targets() {
             attachments: None,
             thinking: None,
             idempotency_key: None,
-        sender_conn_id: None,
+            source_im_message_id: None,
+            sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -2266,7 +2467,9 @@ async fn web_send_partial_delivery_failure_is_represented_in_outcome() {
             attachments: None,
             thinking: None,
             idempotency_key: None,
-        sender_conn_id: None,
+            source_im_message_id: None,
+            sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -2307,6 +2510,7 @@ async fn group_chat_validates_sender_and_returns_legacy_delivery_projection() {
             requested_sender_id: Some("bot-driver".to_string()),
             message: "hello as my bot".to_string(),
             session_id: Some("session-1".to_string()),
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -2325,6 +2529,176 @@ async fn group_chat_validates_sender_and_returns_legacy_delivery_projection() {
             .iter()
             .any(|frame| matches!(frame, BcsFrame::Request(req) if req.method == "chat.send"))
     );
+}
+
+#[tokio::test]
+async fn group_chat_uses_session_participants_for_human_sender_validation() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let session_id = "group-1:human-chat";
+    let session = test_session(
+        session_id,
+        "group-1",
+        vec![
+            Participant::bot("bot-driver", ParticipantRole::Driver),
+            Participant::human("human_2", ParticipantRole::Observer),
+        ],
+    );
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_session_management(Arc::new(StaticSessionManagement::new(session)));
+
+    let outcome = flow
+        .handle_group_chat(GroupChatCommand {
+            caller: CallerContext::Human(HumanActor {
+                actor_id: "human_2".to_string(),
+                staff_no: "2".to_string(),
+            }),
+            group_id: "group-1".to_string(),
+            requested_sender_id: Some("human_2".to_string()),
+            message: "hello from the session Human".to_string(),
+            session_id: Some(session_id.to_string()),
+            provider_bypass_headers: Vec::new(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.delivered_count, 1);
+    let frames = support.bot_delivery.frames().await;
+    let send_frame = frames
+        .iter()
+        .find(|frame| matches!(frame, BcsFrame::Request(req) if req.method == "chat.send"))
+        .expect("chat.send frame");
+    let BcsFrame::Request(req) = send_frame else {
+        panic!("expected request frame");
+    };
+    let params = req.params.as_ref().expect("params");
+    assert_eq!(params["channel"]["actor_id"], "human_2");
+    assert_eq!(params["session_context"]["from_bot_id"], "human_2");
+}
+
+#[tokio::test]
+async fn group_chat_rejects_bot_that_is_not_a_session_participant() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let session_id = "group-1:driver-only";
+    let session = test_session(
+        session_id,
+        "group-1",
+        vec![Participant::bot(
+            "bot-driver",
+            ParticipantRole::Driver,
+        )],
+    );
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_session_management(Arc::new(StaticSessionManagement::new(session)));
+
+    let error = flow
+        .handle_group_chat(GroupChatCommand {
+            caller: CallerContext::Bot(BotActor {
+                bot_uuid: "bot-observer".to_string(),
+            }),
+            group_id: "group-1".to_string(),
+            requested_sender_id: Some("bot-observer".to_string()),
+            message: "should not be delivered".to_string(),
+            session_id: Some(session_id.to_string()),
+            provider_bypass_headers: Vec::new(),
+        })
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(error, ServiceError::Unauthorized(message) if message.contains("not a participant"))
+    );
+    assert!(support.bot_delivery.frames().await.is_empty());
+}
+
+#[tokio::test]
+async fn group_chat_rejects_session_from_another_group() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let session_id = "other-group:mismatched";
+    let session = test_session(
+        session_id,
+        "other-group",
+        vec![Participant::bot(
+            "bot-driver",
+            ParticipantRole::Driver,
+        )],
+    );
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_session_management(Arc::new(StaticSessionManagement::new(session)));
+
+    let error = flow
+        .handle_group_chat(GroupChatCommand {
+            caller: CallerContext::Bot(BotActor {
+                bot_uuid: "bot-driver".to_string(),
+            }),
+            group_id: "group-1".to_string(),
+            requested_sender_id: Some("bot-driver".to_string()),
+            message: "should not be delivered".to_string(),
+            session_id: Some(session_id.to_string()),
+            provider_bypass_headers: Vec::new(),
+        })
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        ServiceError::InvalidOperation { message, .. }
+            if message == "session 'other-group:mismatched' does not belong to group 'group-1'"
+    ));
+    assert!(support.bot_delivery.frames().await.is_empty());
+}
+
+#[tokio::test]
+async fn group_chat_rejects_session_without_participants() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let session_id = "group-1:empty";
+    let session = test_session(session_id, "group-1", Vec::new());
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_session_management(Arc::new(StaticSessionManagement::new(session)));
+
+    let error = flow
+        .handle_group_chat(GroupChatCommand {
+            caller: CallerContext::Bot(BotActor {
+                bot_uuid: "bot-driver".to_string(),
+            }),
+            group_id: "group-1".to_string(),
+            requested_sender_id: Some("bot-driver".to_string()),
+            message: "should not be delivered".to_string(),
+            session_id: Some(session_id.to_string()),
+            provider_bypass_headers: Vec::new(),
+        })
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        ServiceError::InvalidOperation { message, .. }
+            if message == "session 'group-1:empty' has no participants"
+    ));
+    assert!(support.bot_delivery.frames().await.is_empty());
 }
 
 #[tokio::test]
@@ -2353,6 +2727,7 @@ async fn group_chat_treats_requested_sender_id_literally_without_trimming() {
             requested_sender_id: Some(" bot-driver ".to_string()),
             message: "hello as my bot".to_string(),
             session_id: Some("session-1".to_string()),
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap_err();
@@ -2387,6 +2762,7 @@ async fn group_chat_uses_human_staff_number_as_display_name_when_speaking_as_own
         requested_sender_id: Some("bot-driver".to_string()),
         message: "hello as my bot".to_string(),
         session_id: Some("session-1".to_string()),
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -2835,6 +3211,7 @@ async fn chat_abort_delivers_abort_frame_to_bot_participants() {
                 staff_no: "1".to_string(),
             }),
             group_id: "group-1".to_string(),
+            session_id: None,
             run_id: Some("run-1".to_string()),
         })
         .await
@@ -2878,6 +3255,7 @@ async fn chat_abort_publishes_frontend_event_through_port() {
                 staff_no: "1".to_string(),
             }),
             group_id: "group-1".to_string(),
+            session_id: None,
             run_id: Some("run-1".to_string()),
         })
         .await
@@ -2888,6 +3266,128 @@ async fn chat_abort_publishes_frontend_event_through_port() {
     assert_eq!(events.len(), 1);
     assert!(events[0].contains(r#""event":"chat.abort""#));
     assert!(events[0].contains(r#""run_id":"run-1""#));
+}
+
+#[tokio::test]
+async fn chat_abort_with_session_rejects_a_run_from_another_session() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let run_context = Arc::new(MemoryBotRunContextStore::new());
+    run_context
+        .put_context(bcs_service_api::BotRunContext {
+            run_id: "run-other-session".to_string(),
+            bot_id: "bot-driver".to_string(),
+            group_id: "group-1".to_string(),
+            bcs_session_id: Some("session-other".to_string()),
+            deadline_ms: u64::MAX,
+            terminal: false,
+        })
+        .await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_bot_run_context(run_context);
+
+    let outcome = flow
+        .handle_chat_abort(ChatAbortCommand {
+            caller: CallerContext::Human(HumanActor {
+                actor_id: "human_1".to_string(),
+                staff_no: "1".to_string(),
+            }),
+            group_id: "group-1".to_string(),
+            session_id: Some("session-bound".to_string()),
+            run_id: Some("run-other-session".to_string()),
+        })
+        .await
+        .unwrap();
+
+    assert!(!outcome.aborted);
+    assert!(outcome.aborted_run_ids.is_empty());
+    assert!(support.bot_delivery.frames().await.is_empty());
+    assert!(support.frontend_delivery.events().await.is_empty());
+}
+
+#[tokio::test]
+async fn chat_abort_with_session_accepts_a_run_from_the_same_session() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let run_context = Arc::new(MemoryBotRunContextStore::new());
+    run_context
+        .put_context(bcs_service_api::BotRunContext {
+            run_id: "run-bound".to_string(),
+            bot_id: "bot-driver".to_string(),
+            group_id: "group-1".to_string(),
+            bcs_session_id: Some("session-bound".to_string()),
+            deadline_ms: u64::MAX,
+            terminal: false,
+        })
+        .await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_bot_run_context(run_context);
+
+    let outcome = flow
+        .handle_chat_abort(ChatAbortCommand {
+            caller: CallerContext::Human(HumanActor {
+                actor_id: "human_1".to_string(),
+                staff_no: "1".to_string(),
+            }),
+            group_id: "group-1".to_string(),
+            session_id: Some("session-bound".to_string()),
+            run_id: Some("run-bound".to_string()),
+        })
+        .await
+        .unwrap();
+
+    assert!(outcome.aborted);
+    assert_eq!(outcome.aborted_run_ids, vec!["run-bound".to_string()]);
+    assert!(!support.bot_delivery.frames().await.is_empty());
+}
+
+#[tokio::test]
+async fn chat_abort_without_run_id_uses_only_the_bound_session_key() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    );
+
+    flow.handle_chat_abort(ChatAbortCommand {
+        caller: CallerContext::Human(HumanActor {
+            actor_id: "human_1".to_string(),
+            staff_no: "1".to_string(),
+        }),
+        group_id: "group-1".to_string(),
+        session_id: Some("session-bound".to_string()),
+        run_id: None,
+    })
+    .await
+    .unwrap();
+
+    assert!(
+        support
+            .bot_delivery
+            .frames()
+            .await
+            .into_iter()
+            .all(|frame| matches!(
+                frame,
+                BcsFrame::Request(req)
+                    if req.params.as_ref().and_then(|params| params["session_key"].as_str())
+                        == Some("session-bound")
+                    && req.params.as_ref().and_then(|params| params.get("run_id")).is_none()
+            ))
+    );
 }
 
 #[tokio::test]
@@ -3056,4 +3556,249 @@ fn request_id_for_method(frames: &[BcsFrame], method: &str) -> String {
             _ => None,
         })
         .unwrap_or_else(|| panic!("{method} request frame not found"))
+}
+
+// ==== Workbench realtime attachment echo ====
+
+fn image_attachment() -> bcs_domain::Attachment {
+    bcs_domain::Attachment {
+        attachment_id: "file_1".to_string(),
+        attachment_type: bcs_domain::AttachmentType::Image,
+        file_name: "a.png".to_string(),
+        mime_type: Some("image/png".to_string()),
+        size: Some(4),
+        sha256: Some("abcd".to_string()),
+        url: "https://bcs.test/sessions/shared-file/content?token=fromsender".to_string(),
+        expires_at: Some(1_786_346_756_000),
+    }
+}
+
+fn file_attachment() -> bcs_domain::Attachment {
+    bcs_domain::Attachment {
+        attachment_id: "file_2".to_string(),
+        attachment_type: bcs_domain::AttachmentType::File,
+        file_name: "design.pdf".to_string(),
+        mime_type: Some("application/pdf".to_string()),
+        size: None,
+        sha256: None,
+        url: "https://download.example.com/temporary".to_string(),
+        expires_at: None,
+    }
+}
+
+fn human_web_send(message: &str, attachments: Option<Vec<bcs_domain::Attachment>>) -> WebSendCommand {
+    WebSendCommand {
+        caller: CallerContext::Human(HumanActor {
+            actor_id: "human_1".to_string(),
+            staff_no: "1".to_string(),
+        }),
+        group_id: "group-1".to_string(),
+        session_id: Some("session-1".to_string()),
+        from_actor_id: "human_1".to_string(),
+        from_name: Some("Human One".to_string()),
+        message: message.to_string(),
+        mentions: vec![],
+        attachments,
+        thinking: None,
+        idempotency_key: None,
+        source_im_message_id: None,
+        sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
+    }
+}
+
+#[tokio::test]
+async fn web_send_event_echoes_attachments_verbatim() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    );
+
+    flow.handle_web_send(human_web_send("看图", Some(vec![image_attachment()])))
+        .await
+        .unwrap();
+
+    let events = support.frontend_delivery.events().await;
+    assert_eq!(events.len(), 1);
+    let event: serde_json::Value = serde_json::from_str(&events[0]).unwrap();
+    let atts = &event["payload"]["message"]["attachments"];
+    assert!(atts.is_array(), "event: {event}");
+    assert_eq!(atts[0]["attachment_id"], "file_1");
+    assert_eq!(atts[0]["type"], "image");
+    assert_eq!(atts[0]["file_name"], "a.png");
+    assert_eq!(atts[0]["mime_type"], "image/png");
+    assert_eq!(atts[0]["size"], 4);
+    assert_eq!(atts[0]["sha256"], "abcd");
+    // url and expires_at are echoed verbatim (expires_at in milliseconds).
+    assert_eq!(
+        atts[0]["url"],
+        "https://bcs.test/sessions/shared-file/content?token=fromsender"
+    );
+    assert_eq!(atts[0]["expires_at"], 1_786_346_756_000_u64);
+    // Existing content shape is untouched.
+    assert_eq!(event["payload"]["message"]["content"][0]["text"], "看图");
+}
+
+#[tokio::test]
+async fn temporary_file_attachment_is_sent_only_to_active_chat_send() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    );
+
+    flow.handle_web_send(human_web_send("", Some(vec![file_attachment()])))
+        .await
+        .unwrap();
+
+    let frames = support.bot_delivery.frames().await;
+    let send = frames
+        .iter()
+        .find_map(|frame| match frame {
+            BcsFrame::Request(request) if request.method == "chat.send" => request.params.as_ref(),
+            _ => None,
+        })
+        .expect("chat.send params");
+    let inject = frames
+        .iter()
+        .find_map(|frame| match frame {
+            BcsFrame::Request(request) if request.method == "chat.inject" => request.params.as_ref(),
+            _ => None,
+        })
+        .expect("chat.inject params");
+    assert_eq!(send["attachments"][0]["type"], "file");
+    assert!(inject.get("attachments").is_none());
+
+    let events = support.frontend_delivery.events().await;
+    assert_eq!(events.len(), 1);
+    let event: serde_json::Value = serde_json::from_str(&events[0]).unwrap();
+    let attachment = &event["payload"]["message"]["attachments"][0];
+    assert_eq!(attachment["attachment_id"], "file_2");
+    assert_eq!(attachment["type"], "file");
+    assert!(attachment.get("url").is_none(), "event: {event}");
+    assert!(attachment.get("expires_at").is_none(), "event: {event}");
+    assert!(!events[0].contains("download.example.com"));
+}
+
+#[tokio::test]
+async fn web_send_event_without_attachments_has_no_attachments_key() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    );
+
+    flow.handle_web_send(human_web_send("plain", None))
+        .await
+        .unwrap();
+
+    let events = support.frontend_delivery.events().await;
+    assert_eq!(events.len(), 1);
+    let event: serde_json::Value = serde_json::from_str(&events[0]).unwrap();
+    assert!(
+        event["payload"]["message"].get("attachments").is_none(),
+        "event: {event}"
+    );
+}
+
+#[tokio::test]
+async fn web_send_event_omits_attachments_key_for_empty_attachment_list() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    );
+
+    flow.handle_web_send(human_web_send("plain", Some(Vec::new())))
+        .await
+        .unwrap();
+
+    let events = support.frontend_delivery.events().await;
+    assert_eq!(events.len(), 1);
+    let event: serde_json::Value = serde_json::from_str(&events[0]).unwrap();
+    assert!(
+        event["payload"]["message"].get("attachments").is_none(),
+        "event: {event}"
+    );
+}
+
+#[tokio::test]
+async fn web_send_persists_raw_mention_text_while_bots_receive_cleaned_text() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let repo = Arc::new(RecordingMessageRepo::default());
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_message_repo(repo.clone());
+
+    flow.handle_web_send(WebSendCommand {
+        caller: CallerContext::Human(HumanActor {
+            actor_id: "human_1".to_string(),
+            staff_no: "1".to_string(),
+        }),
+        group_id: "group-1".to_string(),
+        session_id: None,
+        from_actor_id: "human_1".to_string(),
+        from_name: Some("Human One".to_string()),
+        message: "@Driver please review".to_string(),
+        mentions: vec!["bot-driver".to_string()],
+        attachments: None,
+        thinking: None,
+        idempotency_key: None,
+        source_im_message_id: None,
+        sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
+    })
+    .await
+    .unwrap();
+
+    // Human-facing history keeps the sender's text verbatim and stores the
+    // structured mention targets for rendering.
+    let appended = repo.appended().await;
+    assert_eq!(appended.len(), 1);
+    assert_eq!(appended[0].content["text"], "@Driver please review");
+    assert_eq!(appended[0].content["mentions"][0], "bot-driver");
+    assert!(appended[0].content.get("attachments").is_none());
+
+    // Bot-bound deliveries still get the @-stripped routing text.
+    let frames = support.bot_delivery.frames().await;
+    assert_eq!(frames.len(), 2);
+    for frame in frames {
+        let BcsFrame::Request(req) = frame else {
+            panic!("expected request frame");
+        };
+        let params = req.params.as_ref().expect("params");
+        let text = params["message"]["content"][0]["text"]
+            .as_str()
+            .expect("text");
+        assert!(text.contains("Driver please review"), "text: {text}");
+        assert!(!text.contains("@Driver"), "text: {text}");
+    }
+
+    // The realtime workbench event already echoes the raw text and mentions.
+    let events = support.frontend_delivery.events().await;
+    assert_eq!(events.len(), 1);
+    let event: serde_json::Value = serde_json::from_str(&events[0]).unwrap();
+    assert_eq!(
+        event["payload"]["message"]["content"][0]["text"],
+        "@Driver please review"
+    );
+    assert_eq!(event["payload"]["message"]["mentions"][0], "bot-driver");
 }

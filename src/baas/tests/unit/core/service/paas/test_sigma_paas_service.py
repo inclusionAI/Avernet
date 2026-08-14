@@ -172,3 +172,23 @@ class TestSigmaPaasService:
             await service.restart_device("sigma-device")
 
         assert "restart_device not yet implemented" in str(exc_info.value).lower()
+
+    @pytest.mark.asyncio
+    async def test_pull_file_from_url_raises_not_implemented(self, sigma_credentials):
+        """pull_file_from_url raises NotImplementedError with Sigma platform message."""
+        service = SigmaPaasService(credentials=sigma_credentials)
+
+        with pytest.raises(
+            NotImplementedError, match="File transfer not supported on Sigma platform"
+        ):
+            await service.pull_file_from_url("sigma-device", "http://src", "/dst")
+
+    @pytest.mark.asyncio
+    async def test_push_file_to_url_raises_not_implemented(self, sigma_credentials):
+        """push_file_to_url raises NotImplementedError with Sigma platform message."""
+        service = SigmaPaasService(credentials=sigma_credentials)
+
+        with pytest.raises(
+            NotImplementedError, match="File transfer not supported on Sigma platform"
+        ):
+            await service.push_file_to_url("sigma-device", "/src", "http://dst")

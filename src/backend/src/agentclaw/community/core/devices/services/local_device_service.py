@@ -40,10 +40,8 @@ from agentclaw.community.core.devices.models import (
     OperatorContext,
     SynlinkMappingInfo,
 )
-from agentclaw.community.core.devices.repository.protocol import (
-    DeviceBindingRepository,
-    OssToNasRecordRepository,
-)
+from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.baas_device_lifecycle_executor import (
     BaasDeviceLifecycleError,
     BaasDeviceLifecycleExecutor,
@@ -56,6 +54,7 @@ from agentclaw.community.core.devices.services.device_service import (
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE  # noqa: E402
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils import env_utils
+from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 
 
 logger = get_logger()
@@ -503,6 +502,12 @@ class LocalDeviceService(DeviceService):
             )
             url = http_info.http_url
             token = http_info.token
+            # http-info 不带过期时间，而返回的 token 是它的——ws-info 的
+            # expires_at 描述的是另一个 token，填上就是错的。
+            expires_at = ""
+            # http_info 返回的 target 是 3 段格式 LOCAL_{dev}@{tpl}:{port}，
+            # 与 token（JWT 中的 target claim）对齐。
+            target = http_info.target
         except Exception as e:
             logger.warning(
                 "[_compose_device_conn_info] http-info unavailable bind=%s: %s "
@@ -511,11 +516,20 @@ class LocalDeviceService(DeviceService):
             )
             url = ""
             token = ws_info.token
-
+            # 回落到 ws-info 的 token，所以 ws-info 的过期时间此刻是对的。
+            expires_at = ws_info.expires_at
+            # 回退到 WS 链路的 target，与 ws_info.token 对齐。
+            target = ws_info.target
         return DeviceConnectionInfo(
             type=LOCAL_DEVICE_PROVIDER,
-            target=ws_info.target,
+            target=target,
             token=token,
+            expires_at=expires_at,
+            # HTTP 与 WS 的 target/token 都来自各自同一次签发，避免代理校验时
+            # 把一条链路的 JWT 与另一条链路的 target 错配。
+            ws_target=ws_info.target,
+            ws_token=ws_info.token,
+            ws_expires_at=ws_info.expires_at,
             engine_type=device.device_props.get("engine", DEFAULT_ENGINE_TYPE),
             baas_base_url=ws_info.baas_base_url,
             bot_uuid=ws_info.bot_uuid,
@@ -598,6 +612,7 @@ class LocalDeviceService(DeviceService):
         admins: list[str] | None = None,
         template_type: str | None = None,
         template_config: dict | None = None,
+        device_props_extra: dict[str, Any] | None = None,
     ):
         """Apply for a device — singlebox mode backed by BaaS.
 
@@ -653,6 +668,7 @@ class LocalDeviceService(DeviceService):
             **allocated.device_props,
             "nas_mappings": json.dumps([], ensure_ascii=False),
             "symbol": json.dumps([s.to_dict() for s in symbol]) if symbol else "[]",
+            **(device_props_extra or {}),
         }
 
         # Start as PENDING — transitions to ACTIVE when BaasPublishPoller
@@ -726,7 +742,9 @@ class LocalDeviceService(DeviceService):
                     error=str(e),
                 )
 
-        thread = threading.Thread(target=start_service_async, daemon=True)
+        thread = threading.Thread(
+            target=bind_current_avernet_tenant(start_service_async), daemon=True
+        )
         thread.start()
 
         return result
@@ -745,11 +763,16 @@ class LocalDeviceService(DeviceService):
         ttl: int | None = None,
         device_uuid: str | None = None,
         ws_conn_mode: str | None = None,
+        path: str | None = None,
     ) -> DeviceConnectionInfo:
         """Get device connection info.
 
         ``device_uuid`` targets a specific instance for multi-instance BaaS bots;
         local devices are single-instance and ignore it.
+
+        ``path`` is ignored here: this provider returns a bare routing target
+        (and an HTTP base URL), never a finished WebSocket URL, so the caller
+        appends the path itself. Accepted to keep the provider signatures equal.
         """
         record = self._repo.get_by_id(binding_id)
         if record is None:

@@ -5,7 +5,7 @@
 from injector import inject
 
 from agentclaw.community.core.bot_management.render_screen.models import RenderScreenRecord
-from agentclaw.community.core.bot_management.render_screen.repositories import RenderScreenRepository
+from agentclaw.community.core.repository.protocols.bot import RenderScreenRepository
 from agentclaw.community.log import get_logger
 
 

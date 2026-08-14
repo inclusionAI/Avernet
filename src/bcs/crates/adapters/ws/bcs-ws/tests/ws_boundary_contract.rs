@@ -2,6 +2,7 @@ use std::fs;
 use std::path::Path;
 
 const WS_SOURCES: &[&str] = &[
+    "src/web/auth.rs",
     "src/bot/connection_registry.rs",
     "src/bot/dispatcher.rs",
     "src/bot/handler.rs",

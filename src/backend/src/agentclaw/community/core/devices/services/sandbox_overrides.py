@@ -45,8 +45,32 @@ class SandboxOverrides:
             return cls()
 
         image = tc.get("image")
+        if image is None:
+            raw_image_config = tc.get("image_config")
+            if isinstance(raw_image_config, dict):
+                # AC template-factory snapshots keep administrator-chosen
+                # image data under image_config.  Consume it at the device edge
+                # so TC frontend/BotService never hard-code architect CLI setup.
+                image = (
+                    raw_image_config.get("image")
+                    or raw_image_config.get("name")
+                    or raw_image_config.get("docker_image")
+                )
+                tag = raw_image_config.get("tag")
+                if (
+                    isinstance(image, str)
+                    and image.strip()
+                    and isinstance(tag, str)
+                    and tag.strip()
+                    and ":" not in image.rsplit("/", 1)[-1]
+                ):
+                    image = f"{image}:{tag}"
 
         raw_command = tc.get("command")
+        if raw_command is None:
+            raw_startup_config = tc.get("startup_config")
+            if isinstance(raw_startup_config, dict):
+                raw_command = raw_startup_config.get("command")
         command: Optional[str] = None
         if raw_command is not None:
             if isinstance(raw_command, list):

@@ -33,12 +33,19 @@ If you want the script to help check and install missing tools, use:
 ./scripts/singlebox.sh install-tools
 ```
 
-`install-tools` may install Node.js, uv, OpenClaw, Rust/Cargo, and
-protobuf/protoc, and may write to the user directory or call the local package
-manager. The current script asks for confirmation before installing OpenClaw,
-Rust/Cargo, and protobuf/protoc. When Node.js 22+ is missing or too old, it
-installs Node.js through nvm; when uv is missing, it tries `pip` or the official
-installer. Run it only after confirming those local writes are acceptable.
+`install-tools` first checks the basic compiler and build environment. If a
+compiler or another basic build tool is missing, it prints a platform-specific
+manual installation command. It asks for confirmation before installing
+missing system commands and development libraries, OpenClaw, Rust/Cargo, and
+protobuf/protoc. Node.js and uv are the current exceptions: when Node.js 22+ is
+missing or too old, the script automatically installs it through nvm; when uv
+is missing, it automatically tries `pip` and then the official installer. If a
+system package installation is rejected by host permissions or otherwise
+fails, the script prints a command that can be run manually. On macOS, a
+missing Homebrew install is reported with a link to
+[brew.sh](https://brew.sh/) and instructions to rerun `install-tools`. Run it
+only after confirming that all of these local writes, including the automatic
+Node.js and uv paths, are acceptable.
 
 Running `singlebox.sh` also installs the repo-local pre-push hook by setting
 `core.hooksPath=.githooks`. Set `OCB_SKIP_GIT_HOOKS=1` if you need to skip hook
@@ -46,8 +53,9 @@ installation for a one-off command.
 
 ## Safety rules
 
-- Stop for confirmation before running `sudo`, global installs,
-  `brew link --force`, `curl | sh`, or any equivalent system-level write.
+- Outside the disclosed `install-tools` Node.js and uv auto-install paths, stop
+  for confirmation before running `sudo`, global installs, `brew link --force`,
+  `curl | sh`, or any equivalent system-level write.
 - Print the target path before creating directories, symlinks, generated files,
   or logs.
 - Check ports before starting long-running processes.
@@ -77,7 +85,7 @@ installation for a one-off command.
 | --- | --- | --- |
 | `pnpm` enabled through `corepack` | Developing other plugin workspace packages | Not required by quick start. |
 | Docker and Docker Compose | Using the Docker source-build path | Docker Desktop includes Compose; Linux can install Docker Engine and the Compose plugin. See the [Docker Guide](docker.md). |
-| Model API endpoint and key | Letting test bots make real model calls, or using LLM judge nodes in structured collaboration | Do not commit keys and do not write them into shell rc files. |
+| Model API endpoint and key | Letting test bots make real model calls, or using LLM judge nodes in custom collaboration | Do not commit keys and do not write them into shell rc files. |
 | `USE_CN_MIRROR=1` | Network acceleration in mainland China | Use only when you explicitly want npm, PyPI, nvm, rustup, corepack, and similar downloads to use public mirrors. |
 
 ## Installation guide

@@ -18,10 +18,12 @@ from secbaas.community.adapters.web.routers.bcn_downlink import (
 )
 from secbaas.community.adapters.web.routers.bot_service import (
     bot_cmd_router,
+    bot_file_transfer_router,
     bot_http_conn_router,
     bot_http_router,
     bot_management_router,
     bot_open_folder_router,
+    bot_transfer_query_router,
     bot_wss_router,
     callback_router,
     publish_router,
@@ -35,6 +37,10 @@ from secbaas.community.adapters.web.routers.config_management import (
     device_template_router,
     system_config_router,
     tenant_router,
+)
+from secbaas.community.adapters.web.routers.gateway import (
+    gateway_message_router,
+    gateway_session_router,
 )
 from secbaas.community.adapters.web.routers.health_checker import (
     bot_health_checker_router,
@@ -57,6 +63,9 @@ from secbaas.community.adapters.web.routers.paas_service import (
 )
 from secbaas.community.adapters.web.routers.relay_session_router import (
     router as relay_session_router,
+)
+from secbaas.community.adapters.web.routers.session_file_sharing import (
+    session_file_sharing_router,
 )
 from secbaas.community.adapters.web.websocket import local_management_router
 from secbaas.community.api import DomainError
@@ -160,6 +169,7 @@ def create_app() -> FastAPI:
         description="SecBaaS API",
         version="1.0.0",
         lifespan=lifespan,
+        swagger_ui_parameters={"supportedSubmitMethods": []},
     )
 
     # ── tracer plugin selection ────────────────────────────────────────────────
@@ -255,6 +265,9 @@ def create_app() -> FastAPI:
     app.include_router(bot_http_router)
     app.include_router(bot_cmd_router)
     app.include_router(bot_open_folder_router)
+    app.include_router(bot_file_transfer_router)
+    app.include_router(bot_transfer_query_router)
+    app.include_router(session_file_sharing_router)
     app.include_router(bot_qpm_router)
     app.include_router(tenant_router)
     app.include_router(paas_facade_router)
@@ -269,6 +282,8 @@ def create_app() -> FastAPI:
     app.include_router(open_api_run_router)
     app.include_router(open_api_session_router)
     app.include_router(bcn_downlink_router)
+    app.include_router(gateway_message_router)
+    app.include_router(gateway_session_router)
     app.include_router(local_management_router)
     app.include_router(internal_router)
     app.include_router(internal_health_router)

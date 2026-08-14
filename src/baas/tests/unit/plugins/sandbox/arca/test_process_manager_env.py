@@ -274,7 +274,7 @@ def test_create_openclaw_config_merges_singlebox_model_config(monkeypatch, tmp_p
                     },
                 },
                 "agents": {"defaults": {"model": {"primary": "antchat/Kimi-K2.5"}}},
-                "gateway": {},
+                "gateway": {"bind": "auto"},
             }
         ),
         encoding="utf-8",
@@ -324,6 +324,7 @@ def test_create_openclaw_config_merges_singlebox_model_config(monkeypatch, tmp_p
     assert config["models"]["providers"]["manual-provider"]["apiKey"] == "sk-test"
     assert config["agents"]["defaults"]["model"]["primary"] == "manual-provider/model-a"
     assert config["gateway"]["port"] == 18888
+    assert config["gateway"]["bind"] == "loopback"
     assert stat.S_IMODE((config_dir / "openclaw.json").stat().st_mode) == 0o600
 
 
@@ -382,12 +383,12 @@ def test_create_openclaw_config_removes_template_model_fields_for_mock_config(
         entity_id="mock-user",
     )
 
-    defaults = json.loads((config_dir / "openclaw.json").read_text(encoding="utf-8"))[
-        "agents"
-    ]["defaults"]
+    config = json.loads((config_dir / "openclaw.json").read_text(encoding="utf-8"))
+    defaults = config["agents"]["defaults"]
     assert "model" not in defaults
     assert defaults["models"] == {}
     assert "imageModel" not in defaults
+    assert config["gateway"]["bind"] == "loopback"
 
 
 def test_create_openclaw_config_rejects_non_object_singlebox_model_config(

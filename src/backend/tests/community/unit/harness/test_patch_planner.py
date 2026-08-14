@@ -1,4 +1,4 @@
-"""PatchPlanner behaviour: LLM-disabled fallback + generate_and_save_patches persistence."""
+"""PatchPlanner behaviour: LLM-disabled skip + generate_and_save_patches persistence."""
 from __future__ import annotations
 
 import pytest
@@ -20,7 +20,7 @@ def _planner(llm):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_llm_disabled_fix_returns_src_and_desc():
+async def test_llm_disabled_fix_returns_none():
     llm = MagicMock()
     llm.chat = AsyncMock(return_value="[llm disabled]")
     planner = _planner(llm)
@@ -28,11 +28,9 @@ async def test_llm_disabled_fix_returns_src_and_desc():
         file_type="AGENTS.md", src="# original",
         issues="- missing summary\n- weak rules", template_instructions="",
     )
-    assert out is not None
-    fixed, desc = out
-    assert fixed == "# original"        # fallback returns source unchanged
-    # fallback derives the desc from the issue lines (strip "- ", join with "; ")
-    assert desc == "修复: missing summary; weak rules"
+    # LLM unavailable (no token / retries exhausted) → skip cleanly; never
+    # fabricate a no-op patch (dst==src) that masquerades as a fix.
+    assert out is None
 
 
 @pytest.mark.unit
@@ -42,6 +40,47 @@ async def test_llm_exception_returns_none():
     llm.chat = AsyncMock(side_effect=RuntimeError("net down"))
     out = await _planner(llm)._llm_generate_fix(
         file_type="AGENTS.md", src="x", issues="- y", template_instructions="",
+    )
+    assert out is None
+
+
+@pytest.mark.unit
+def test_prompt_does_not_instruct_todo_placeholders():
+    """Regression guard: the patch LLM must never be told to insert
+    `<!-- TODO -->` placeholders for advisory (no-concrete-content) findings —
+    those leak invisible comments into SOUL.md/TOOLS.md. Advisory findings are
+    handled at the diagnostic source (see mcp_format/soul); the patch step
+    either applies concrete fixes or leaves the file unchanged (skipped)."""
+    system = PatchPlanner._build_system_prompt_with_summary("TOOLS.md")
+    user = PatchPlanner._build_user_prompt_with_summary(
+        file_type="TOOLS.md",
+        original_content="# Tools",
+        issues="- advisory only: 建议补充调用规范",
+        template_instructions="",
+    )
+    # The removed clauses must not reappear in either prompt.
+    assert "用 `<!-- TODO" not in system
+    assert "用 `<!-- TODO" not in user
+    assert "禁止原样返回" not in system
+    assert "禁止原样返回" not in user
+    # And it must explicitly forbid TODO insertion and allow unchanged return.
+    assert "禁止插入" in system
+    assert "原样返回" in system  # "...原样返回是允许的..."
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_advisory_no_content_skips_patch():
+    """Advisory finding (no concrete content): the patch LLM returns the file
+    unchanged (allowed by the new contract) → PatchPlanner skips it (no no-op
+    patch persisted) via the fixed==src guard."""
+    llm = MagicMock()
+    src = "# Tools\n\n- existing"
+    llm.chat = AsyncMock(return_value=src)  # LLM changes nothing → advisory
+    out = await _planner(llm)._llm_generate_fix(
+        file_type="TOOLS.md", src=src,
+        issues="- 建议补充调用规范 (无具体内容)",
+        template_instructions="",
     )
     assert out is None
 

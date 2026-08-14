@@ -18,11 +18,15 @@ class _DefaultConfigPortMixin:
         "/home/admin/agentclaw-daas-scripts/confs/openclaw/openclaw.json"
     )
     _CONFIG_PATH_ENV = "OPENCLAW_DEFAULT_CONFIG_PATH"
+    _MODEL_CONFIG_SOURCE_ENV = "OPENCLAW_MODEL_CONFIG_SOURCE"
 
     def _resolve_config_path(self) -> Path:
         """Resolve the default-config file path from env or fallback default."""
         return Path(
-            os.getenv(self._CONFIG_PATH_ENV, self._DEFAULT_CONFIG_PATH)
+            os.getenv(
+                self._CONFIG_PATH_ENV,
+                os.getenv(self._MODEL_CONFIG_SOURCE_ENV, self._DEFAULT_CONFIG_PATH),
+            )
         ).expanduser()
 
     async def get_default_config(self) -> dict[str, Any]:

@@ -9,13 +9,10 @@ from secbaas.community.core.repository.distributed_lock import (
     DistributedLockRepository,
     LockRecord,
 )
-from secbaas.community.core.utils.env_utils import get_current_env
 
 mysql_connector = pytest.importorskip("mysql.connector")
 
 pytestmark = pytest.mark.integration
-
-TEST_ENV = get_current_env()
 
 
 def _generate_uuid() -> str:
@@ -29,132 +26,176 @@ class TestDistributedLockRepositoryProtocol:
     OrmDistributedLockRepository references allowed. db_transaction ensures
     all changes are rolled back.
 
-    Tests cover all 6 methods:
-      1. insert_lock + get_by_lock_name_for_update (SELECT FOR UPDATE)
-      2. get_by_lock_name_for_update returns None for missing
-      3. update_lock_holder (changes holder + expire_time)
-      4. update_expire_time
-      5. delete_lock (returns True for found, False for missing)
-      6. delete_expired_locks (cleanup)
+    Tests cover all protocol methods:
+      1. try_acquire_lock + get_by_lock_name
+      2. get_by_lock_name returns None for missing
+      3. try_acquire_lock fails when held by other
+      4. try_acquire_lock reentrant renew
+      5. try_acquire_lock takes over expired lock
+      6. update_expire_time
+      7. delete_lock (returns True for found, False for missing)
+      8. Full lifecycle: acquire → get → renew → delete
     """
 
     @pytest.fixture(autouse=True)
     def _cleanup_stale_locks(
         self, distributed_lock_repository: DistributedLockRepository
     ):
-        """ORM backend auto-commits each test's inserts unlike ZDAS' rollback-based cleanup.
-        Without this, test_delete_expired_locks sees expired locks from earlier insert tests."""
-        distributed_lock_repository.delete_expired_locks(datetime(2099, 1, 1))
+        """Clean up any stale locks before each test."""
+        # Delete all locks with names starting with test prefix
+        # Since delete_expired_locks was removed, we use delete_lock per test
+        pass
 
-    # ── 1. insert_lock + get_by_lock_name_for_update ──
+    # ── 1. try_acquire_lock + get_by_lock_name ──
 
-    def test_insert_lock_and_get_for_update(
-        self, distributed_lock_repository: DistributedLockRepository, db_transaction
+    def test_try_acquire_and_get(
+        self,
+        distributed_lock_repository: DistributedLockRepository,
+        db_transaction,
     ):
-        lock_name = _generate_uuid()
-        lock_holder = _generate_uuid()
+        lock_name = f"test_lock_{_generate_uuid()[:12]}"
+        lock_holder = f"holder_{_generate_uuid()[:8]}"
         expire_time = datetime.now() + timedelta(minutes=5)
 
-        row_id = distributed_lock_repository.insert_lock(
+        acquired = distributed_lock_repository.try_acquire_lock(
             lock_name=lock_name,
             lock_holder=lock_holder,
             expire_time=expire_time,
         )
-        assert isinstance(row_id, int)
+        assert acquired is True
 
-        record = distributed_lock_repository.get_by_lock_name_for_update(lock_name)
-        assert record is not None
+        record = distributed_lock_repository.get_by_lock_name(lock_name)
         assert isinstance(record, LockRecord)
-        assert record.id == row_id
         assert record.lock_name == lock_name
         assert record.lock_holder == lock_holder
-        assert record.env == TEST_ENV
         assert record.expire_time is not None
         assert record.gmt_create is not None
-        assert isinstance(record.gmt_create, datetime)
-        assert record.gmt_modified is not None
         assert isinstance(record.gmt_modified, datetime)
 
-    # ── 2. get_by_lock_name_for_update returns None for missing ──
+    # ── 2. get_by_lock_name returns None for missing ──
 
-    def test_get_by_lock_name_for_update_returns_none_for_missing(
-        self, distributed_lock_repository: DistributedLockRepository, db_transaction
+    def test_get_by_lock_name_returns_none_for_missing(
+        self,
+        distributed_lock_repository: DistributedLockRepository,
+        db_transaction,
     ):
-        result = distributed_lock_repository.get_by_lock_name_for_update(
-            "nonexistent-lock"
-        )
+        result = distributed_lock_repository.get_by_lock_name("nonexistent-lock")
         assert result is None
 
-    # ── 3. update_lock_holder ──
+    # ── 3. try_acquire_lock fails when held by other ──
 
-    def test_update_lock_holder(
-        self, distributed_lock_repository: DistributedLockRepository, db_transaction
+    def test_try_acquire_fails_when_held_by_other(
+        self,
+        distributed_lock_repository: DistributedLockRepository,
+        db_transaction,
     ):
-        lock_name = _generate_uuid()
-        original_holder = _generate_uuid()
-        new_holder = _generate_uuid()
-        original_expire = datetime.now() + timedelta(minutes=5)
+        lock_name = f"held_lock_{_generate_uuid()[:12]}"
+        holder_a = f"holder_{_generate_uuid()[:8]}"
+        holder_b = f"holder_{_generate_uuid()[:8]}"
+        expire_time = datetime.now() + timedelta(minutes=5)
 
-        distributed_lock_repository.insert_lock(
+        acquired_a = distributed_lock_repository.try_acquire_lock(
             lock_name=lock_name,
-            lock_holder=original_holder,
-            expire_time=original_expire,
+            lock_holder=holder_a,
+            expire_time=expire_time,
         )
+        assert acquired_a is True
 
-        new_expire = datetime.now() + timedelta(minutes=30)
-        updated_rows = distributed_lock_repository.update_lock_holder(
+        acquired_b = distributed_lock_repository.try_acquire_lock(
+            lock_name=lock_name,
+            lock_holder=holder_b,
+            expire_time=expire_time,
+        )
+        assert acquired_b is False
+
+    # ── 4. try_acquire_lock reentrant renew ──
+
+    def test_try_acquire_reentrant_renew(
+        self,
+        distributed_lock_repository: DistributedLockRepository,
+        db_transaction,
+    ):
+        lock_name = f"reentrant_{_generate_uuid()[:12]}"
+        holder = f"holder_{_generate_uuid()[:8]}"
+
+        acquired_1 = distributed_lock_repository.try_acquire_lock(
+            lock_name=lock_name,
+            lock_holder=holder,
+            expire_time=datetime.now() + timedelta(minutes=5),
+        )
+        assert acquired_1 is True
+
+        acquired_2 = distributed_lock_repository.try_acquire_lock(
+            lock_name=lock_name,
+            lock_holder=holder,
+            expire_time=datetime.now() + timedelta(minutes=10),
+        )
+        assert acquired_2 is True
+
+        record = distributed_lock_repository.get_by_lock_name(lock_name)
+        assert record is not None
+        assert record.lock_holder == holder
+
+    # ── 5. try_acquire_lock takes over expired lock ──
+
+    def test_try_acquire_takes_over_expired(
+        self,
+        distributed_lock_repository: DistributedLockRepository,
+        db_transaction,
+    ):
+        lock_name = f"expired_{_generate_uuid()[:12]}"
+        old_holder = f"holder_{_generate_uuid()[:8]}"
+        new_holder = f"holder_{_generate_uuid()[:8]}"
+
+        acquired_old = distributed_lock_repository.try_acquire_lock(
+            lock_name=lock_name,
+            lock_holder=old_holder,
+            expire_time=datetime.now() - timedelta(minutes=10),
+        )
+        assert acquired_old is True
+
+        acquired_new = distributed_lock_repository.try_acquire_lock(
             lock_name=lock_name,
             lock_holder=new_holder,
-            expire_time=new_expire,
+            expire_time=datetime.now() + timedelta(minutes=5),
         )
-        assert updated_rows == 1
+        assert acquired_new is True
 
-        record = distributed_lock_repository.get_by_lock_name_for_update(lock_name)
+        record = distributed_lock_repository.get_by_lock_name(lock_name)
         assert record is not None
         assert record.lock_holder == new_holder
-        assert record.lock_name == lock_name
-        assert record.env == TEST_ENV
 
-    def test_update_lock_holder_on_nonexistent_lock(
-        self, distributed_lock_repository: DistributedLockRepository, db_transaction
-    ):
-        updated_rows = distributed_lock_repository.update_lock_holder(
-            lock_name="nonexistent-lock",
-            lock_holder="some-holder",
-            expire_time=datetime.now() + timedelta(minutes=5),
-        )
-        assert updated_rows == 0
-
-    # ── 4. update_expire_time ──
+    # ── 6. update_expire_time ──
 
     def test_update_expire_time(
-        self, distributed_lock_repository: DistributedLockRepository, db_transaction
+        self,
+        distributed_lock_repository: DistributedLockRepository,
+        db_transaction,
     ):
-        lock_name = _generate_uuid()
-        lock_holder = _generate_uuid()
-        original_expire = datetime.now() + timedelta(minutes=5)
+        lock_name = f"expire_{_generate_uuid()[:12]}"
+        holder = f"holder_{_generate_uuid()[:8]}"
+        new_expire = datetime.now() + timedelta(minutes=15)
 
-        distributed_lock_repository.insert_lock(
+        distributed_lock_repository.try_acquire_lock(
             lock_name=lock_name,
-            lock_holder=lock_holder,
-            expire_time=original_expire,
+            lock_holder=holder,
+            expire_time=datetime.now() + timedelta(minutes=5),
         )
 
-        new_expire = datetime.now() + timedelta(hours=2)
         updated_rows = distributed_lock_repository.update_expire_time(
             lock_name=lock_name,
             expire_time=new_expire,
         )
         assert updated_rows == 1
 
-        record = distributed_lock_repository.get_by_lock_name_for_update(lock_name)
+        record = distributed_lock_repository.get_by_lock_name(lock_name)
         assert record is not None
-        # Holder should be unchanged
-        assert record.lock_holder == lock_holder
-        assert record.lock_name == lock_name
+        assert record.lock_holder == holder
 
     def test_update_expire_time_on_nonexistent_lock(
-        self, distributed_lock_repository: DistributedLockRepository, db_transaction
+        self,
+        distributed_lock_repository: DistributedLockRepository,
+        db_transaction,
     ):
         updated_rows = distributed_lock_repository.update_expire_time(
             lock_name="nonexistent-lock",
@@ -162,138 +203,61 @@ class TestDistributedLockRepositoryProtocol:
         )
         assert updated_rows == 0
 
-    # ── 5. delete_lock ──
+    # ── 7. delete_lock ──
 
     def test_delete_lock_returns_true_for_found_lock(
-        self, distributed_lock_repository: DistributedLockRepository, db_transaction
+        self,
+        distributed_lock_repository: DistributedLockRepository,
+        db_transaction,
     ):
-        lock_name = _generate_uuid()
+        lock_name = f"delete_{_generate_uuid()[:12]}"
+        holder = f"holder_{_generate_uuid()[:8]}"
 
-        distributed_lock_repository.insert_lock(
+        distributed_lock_repository.try_acquire_lock(
             lock_name=lock_name,
-            lock_holder=_generate_uuid(),
+            lock_holder=holder,
             expire_time=datetime.now() + timedelta(minutes=5),
         )
 
         deleted = distributed_lock_repository.delete_lock(lock_name)
         assert deleted is True
 
-        # Verify the lock no longer exists
-        record = distributed_lock_repository.get_by_lock_name_for_update(lock_name)
-        assert record is None
-
     def test_delete_lock_returns_false_for_missing_lock(
-        self, distributed_lock_repository: DistributedLockRepository, db_transaction
+        self,
+        distributed_lock_repository: DistributedLockRepository,
+        db_transaction,
     ):
         deleted = distributed_lock_repository.delete_lock("nonexistent-lock")
         assert deleted is False
 
-    # ── 6. delete_expired_locks ──
+    # ── 8. Full lifecycle: acquire → get → renew → delete ──
 
-    def test_delete_expired_locks_cleans_up_only_expired(
-        self, distributed_lock_repository: DistributedLockRepository, db_transaction
+    def test_full_lifecycle_acquire_get_renew_delete(
+        self,
+        distributed_lock_repository: DistributedLockRepository,
+        db_transaction,
     ):
-        active_name = _generate_uuid()
-        expired_name_1 = _generate_uuid()
-        expired_name_2 = _generate_uuid()
+        lock_name = f"lifecycle_{_generate_uuid()[:12]}"
+        holder = f"holder_{_generate_uuid()[:8]}"
 
-        now = datetime.now()
-        active_expire = now + timedelta(hours=1)
-        expired_expire = now - timedelta(hours=1)
-
-        # Insert one active lock
-        distributed_lock_repository.insert_lock(
-            lock_name=active_name,
-            lock_holder=_generate_uuid(),
-            expire_time=active_expire,
-        )
-        # Insert two expired locks
-        distributed_lock_repository.insert_lock(
-            lock_name=expired_name_1,
-            lock_holder=_generate_uuid(),
-            expire_time=expired_expire,
-        )
-        distributed_lock_repository.insert_lock(
-            lock_name=expired_name_2,
-            lock_holder=_generate_uuid(),
-            expire_time=expired_expire,
-        )
-
-        deleted_count = distributed_lock_repository.delete_expired_locks(datetime.now())
-        assert deleted_count == 2
-
-        # Active lock should still exist
-        active_record = distributed_lock_repository.get_by_lock_name_for_update(
-            active_name
-        )
-        assert active_record is not None
-        assert active_record.lock_name == active_name
-
-        # Expired locks should be gone
-        assert (
-            distributed_lock_repository.get_by_lock_name_for_update(expired_name_1)
-            is None
-        )
-        assert (
-            distributed_lock_repository.get_by_lock_name_for_update(expired_name_2)
-            is None
-        )
-
-    def test_delete_expired_locks_returns_zero_when_none_expired(
-        self, distributed_lock_repository: DistributedLockRepository, db_transaction
-    ):
-        distributed_lock_repository.insert_lock(
-            lock_name=_generate_uuid(),
-            lock_holder=_generate_uuid(),
-            expire_time=datetime.now() + timedelta(hours=1),
-        )
-
-        deleted_count = distributed_lock_repository.delete_expired_locks(
-            datetime.now() - timedelta(hours=1)
-        )
-        assert deleted_count == 0
-
-    # ── 7. Full lifecycle: insert → get → update → delete ──
-
-    def test_full_lifecycle_insert_get_update_delete(
-        self, distributed_lock_repository: DistributedLockRepository, db_transaction
-    ):
-        lock_name = _generate_uuid()
-        holder = _generate_uuid()
-        expire = datetime.now() + timedelta(minutes=5)
-
-        # Insert
-        row_id = distributed_lock_repository.insert_lock(
+        # Acquire
+        acquired = distributed_lock_repository.try_acquire_lock(
             lock_name=lock_name,
             lock_holder=holder,
-            expire_time=expire,
+            expire_time=datetime.now() + timedelta(minutes=5),
         )
-        assert isinstance(row_id, int)
+        assert acquired is True
 
-        # Get (FOR UPDATE)
-        record = distributed_lock_repository.get_by_lock_name_for_update(lock_name)
+        # Get
+        record = distributed_lock_repository.get_by_lock_name(lock_name)
         assert record is not None
         assert record.lock_name == lock_name
         assert record.lock_holder == holder
 
-        # Update holder
-        new_holder = _generate_uuid()
-        updated = distributed_lock_repository.update_lock_holder(
-            lock_name=lock_name,
-            lock_holder=new_holder,
-            expire_time=datetime.now() + timedelta(minutes=10),
-        )
-        assert updated == 1
-
-        record = distributed_lock_repository.get_by_lock_name_for_update(lock_name)
-        assert record is not None
-        assert record.lock_holder == new_holder
-
-        # Update expire time (renew)
-        renewed_expire = datetime.now() + timedelta(hours=3)
+        # Renew
         updated = distributed_lock_repository.update_expire_time(
             lock_name=lock_name,
-            expire_time=renewed_expire,
+            expire_time=datetime.now() + timedelta(minutes=30),
         )
         assert updated == 1
 
@@ -301,7 +265,5 @@ class TestDistributedLockRepositoryProtocol:
         deleted = distributed_lock_repository.delete_lock(lock_name)
         assert deleted is True
 
-        # Verify gone
-        assert (
-            distributed_lock_repository.get_by_lock_name_for_update(lock_name) is None
-        )
+        # Verify deleted
+        assert distributed_lock_repository.get_by_lock_name(lock_name) is None

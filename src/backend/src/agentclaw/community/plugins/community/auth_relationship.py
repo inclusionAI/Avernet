@@ -1,13 +1,13 @@
 """CommunityAuthRelationshipPlugin — community user↔agent relationship registry.
 
-The corp ``AuthRelationshipPlugin`` records advisory authorization edges in the
-AceAgent governance system. Every consumer is fire-and-forget (the return value
-never gates control flow), and a community deployment's own ownership model
-already encodes "who owns what" — so there is no external registry to talk to.
+The corp ``AuthRelationshipPlugin`` records authorization edges in the AceAgent
+governance system. Approval callbacks gate success on these operations. A
+community deployment's own ownership model already encodes "who owns what", so
+there is no external registry to talk to and the operations succeed vacuously.
 
 This is a real, deployable implementation (not a ``MockSeam`` test double) that
-succeeds vacuously: nothing reads these returns for behavior, so a no-op is the
-correct community semantics, not a loss of function.
+succeeds vacuously: the successful return envelope lets the shared callback
+orchestration complete without adding a community-only external dependency.
 """
 from __future__ import annotations
 

@@ -12,8 +12,8 @@ use bcs_test_support::{
     NoopOrganizationManagementService, NoopProposalCoreService,
     NoopProviderBotCoreService, NoopProviderBotEventService, NoopProviderCoreService,
     NoopProviderManagementService, NoopRelationCoreService, NoopRoutingCoreService,
-    NoopSecretService, NoopSessionManagementService, NoopSystemMessageService,
-    NoopWorkbenchSessionService,
+    NoopSecretService, NoopSessionFileService, NoopSessionManagementService,
+    NoopSystemMessageService, NoopWorkbenchSessionService,
 };
 use std::sync::Arc;
 
@@ -76,6 +76,7 @@ fn build_succeeds_when_all_required_services_set() {
         .session_management(Arc::new(NoopSessionManagementService))
         .channel(Arc::new(NoopChannelService))
         .secret(Arc::new(NoopSecretService))
+        .session_files(Arc::new(NoopSessionFileService))
         .build()
         .expect("all required services are wired");
     assert!(Arc::ptr_eq(&services.registry, &services.registry));
@@ -120,4 +121,5 @@ fn fully_wired_builder_without_organization_management() -> ServicesBuilder {
         .session_management(Arc::new(NoopSessionManagementService))
         .channel(Arc::new(NoopChannelService))
         .secret(Arc::new(NoopSecretService))
+        .session_files(Arc::new(NoopSessionFileService))
 }

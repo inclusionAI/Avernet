@@ -7,7 +7,7 @@ from datetime import datetime
 
 from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
 from agentclaw.community.core.channel.services.channel_service import ChannelService
-from agentclaw.community.core.channel.services.repositories import ChannelRecord
+from agentclaw.community.core.channel.models import ChannelRecord
 
 
 @pytest.fixture

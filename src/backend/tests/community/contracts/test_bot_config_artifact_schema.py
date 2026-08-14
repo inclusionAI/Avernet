@@ -80,7 +80,6 @@ class _FakeCollector:
     def skills(self, req): return self._skills
     def mcps(self, req): return self._mcps
     def resources(self, req): return self._resources
-    def bot_files(self, req): return getattr(self, "_bot_files", [])
     def identity_files(self, req): return self._identity
     def engine_overrides(self, req): return self._overrides
 
@@ -252,11 +251,12 @@ def test_frozen_artifact_with_opaque_engine_ext_still_conforms() -> None:
     pinned = result.ext["config_artifact"]
     jsonschema.validate(instance=pinned, schema=_schema())
     # opaque engine payload carried verbatim, plus the backend identity/stage keys
-    # (owner_id defaults to "" — the bot row here carries no owner_id).
+    # (owner_id / bot_name default to "" — the bot row here carries neither).
     assert pinned["engine_ext"] == {
         "memory_ref": "oss://ws/MEMORY.md",
         "nested": {"x": [1, 2]},
         "bot_id": "bot7",
         "owner_id": "",
+        "bot_name": "",
         "stage": "draft",
     }

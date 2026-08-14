@@ -7,7 +7,7 @@ Plugin Protocol declarations (the kernel's outbound interface to swappable capab
 ```yaml
 purpose: "Plugin Protocol declarations (the kernel's outbound interface to swappable capabilities)."
 provides:
-  - "23 plugin Protocol classes (AuthPlugin, CachePlugin, DatabasePlugin, …)"
+  - "27 plugin Protocol classes (AuthPlugin, CachePlugin, DatabasePlugin, …)"
   - "Plugin marker"
   - "@plugin_impl decorator + Mode/Flavor enums"
   - "IMPL_REGISTRY"
@@ -19,6 +19,7 @@ internal_dependencies:
   - agentclaw.community.core.service_bot.types                  # PublishStage enum, default value in BaasServiceProtocol signatures
   - agentclaw.community.core.workspace
   - agentclaw.community.kernel.device_dto                       # OutBoundOperationRule — typed in OutboundRuleProvider + BaasServiceProtocol (B6)
+  - agentclaw.community.utils.avernet_tenant_guard              # BotModel registers with the model-agnostic tenant guard
   - agentclaw.community.utils.env_utils
 ```
 

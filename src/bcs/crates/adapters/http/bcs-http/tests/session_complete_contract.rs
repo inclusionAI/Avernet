@@ -156,6 +156,7 @@ fn stub_session(kind: SessionKind, participants: Vec<Participant>) -> Session {
         meta: None,
         current_msg_seq: 0,
         participant_join_seq: None,
+        collected_at: None,
     }
 }
 

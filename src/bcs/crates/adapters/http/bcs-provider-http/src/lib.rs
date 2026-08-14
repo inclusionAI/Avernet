@@ -14,22 +14,31 @@ use bcs_protocol::stream::{ChatState, StreamEvent, parse_stream_event};
 use bcs_route_security::{OutboundUrlError, OutboundUrlGuard};
 use bcs_service_api::{
     BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotEventCommand,
-    BotRunContext, BotRunContextPort, ChatEventState, GroupHistoryBotRequestPort, MessageFlowService,
-    ProviderTransportPreference, ServiceError, ServiceResult,
+    BotRunContext, BotRunContextPort, ChatEventState, GroupHistoryBotRequestPort,
+    ProviderEventIngestCommand, ProviderEventIngestService, ProviderEventSource,
+    ProviderRunTransport, ServiceError, ServiceResult,
+    DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
 };
+use opentelemetry::global;
+use opentelemetry_http::HeaderInjector;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use tracing::{info, warn};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 mod sse;
 
 use crate::sse::{IngestKind, SeqDecision, SeqDedup, classify, parse_sse_block};
 
-const DEFAULT_PROVIDER_DOWNLINK_TIMEOUT_MS: u64 = 60 * 60 * 1_000;
-
 /// Idle timeout for an SSE read loop: if no bytes arrive within this window the
 /// run is considered stuck and closed with a synthesized error terminal (#3).
-const SSE_IDLE_TIMEOUT_MS: u64 = 120_000;
+const SSE_IDLE_TIMEOUT_MS: u64 = 15 * 60 * 1_000;
+/// Maximum time for an SSE request to receive response headers. Body liveness
+/// is governed separately by `SSE_IDLE_TIMEOUT_MS` after the stream is accepted.
+const SSE_RESPONSE_HEADER_TIMEOUT_MS: u64 = 125_000;
+/// Maximum time to read the finite JSON acknowledgement when an SSE-preferred
+/// request falls back to `application/json`.
+const JSON_FALLBACK_BODY_TIMEOUT_MS: u64 = SSE_RESPONSE_HEADER_TIMEOUT_MS;
 /// Bounded retry for resolving run context after `deliver()` returns but before
 /// `put_context` lands (#2 put_context race): ~50ms * 20 ≈ 1s.
 const SSE_CTX_RETRY_INTERVAL_MS: u64 = 50;
@@ -40,10 +49,28 @@ const SSE_CTX_RETRY_MAX: u32 = 20;
 /// twice (enter + recover), not once per frame.
 const SSE_LAG_ALERT_MS: u64 = 5_000;
 
+#[derive(Debug)]
+enum ProviderAckBodyError {
+    Decode(reqwest::Error),
+    Timeout,
+}
+
+async fn read_provider_ack_body(
+    response: reqwest::Response,
+    timeout: Duration,
+) -> Result<ProviderAckResponse, ProviderAckBodyError> {
+    match tokio::time::timeout(timeout, response.json::<ProviderAckResponse>()).await {
+        Ok(Ok(ack)) => Ok(ack),
+        Ok(Err(error)) => Err(ProviderAckBodyError::Decode(error)),
+        Err(_) => Err(ProviderAckBodyError::Timeout),
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ProviderClientPolicy {
     total_timeout: Option<Duration>,
     read_timeout: Option<Duration>,
+    response_header_timeout: Option<Duration>,
     http2_only: bool,
 }
 
@@ -52,13 +79,19 @@ impl ProviderClientPolicy {
         if accept_sse {
             Self {
                 total_timeout: None,
-                read_timeout: Some(Duration::from_secs(125)),
-                http2_only: true,
+                read_timeout: None,
+                response_header_timeout: Some(Duration::from_millis(
+                    SSE_RESPONSE_HEADER_TIMEOUT_MS,
+                )),
+                // Content negotiation must also reach HTTP/1.1 providers so
+                // they can select JSON callback fallback on this same POST.
+                http2_only: false,
             }
         } else {
             Self {
                 total_timeout: Some(Duration::from_secs(65)),
                 read_timeout: None,
+                response_header_timeout: None,
                 http2_only: false,
             }
         }
@@ -77,11 +110,11 @@ struct LagTracker {
 pub struct HttpProviderTransport {
     /// Callback / history client with a 65s total timeout.
     client: reqwest::Client,
-    /// HTTP/2-only SSE client with NO total timeout (#3): a total `.timeout()`
-    /// would cut a long-lived stream. Idle detection is handled in the read loop.
+    /// SSE-capable client with NO total timeout: a total `.timeout()` would cut
+    /// a long-lived stream. HTTP/1.1 remains enabled for JSON callback fallback.
     sse_client: reqwest::Client,
     url_guard: OutboundUrlGuard,
-    message_flow: std::sync::RwLock<Option<Arc<dyn MessageFlowService>>>,
+    event_ingest: std::sync::RwLock<Option<Arc<dyn ProviderEventIngestService>>>,
     bot_run_context: std::sync::RwLock<Option<Arc<dyn BotRunContextPort>>>,
 }
 
@@ -91,14 +124,9 @@ impl HttpProviderTransport {
     }
 
     pub fn allowing_private_networks_for_tests() -> Self {
-        // Local contract servers are HTTP/1. Production constructors and every
-        // DNS-pinned SSE client keep the strict HTTP/2-only policy.
         Self::with_url_guard_and_sse_policy(
             OutboundUrlGuard::allowing_private_networks_for_tests(),
-            ProviderClientPolicy {
-                http2_only: false,
-                ..ProviderClientPolicy::for_request(true)
-            },
+            ProviderClientPolicy::for_request(true),
         )
     }
 
@@ -121,7 +149,7 @@ impl HttpProviderTransport {
                 .build()
                 .expect("build provider sse client"),
             url_guard,
-            message_flow: std::sync::RwLock::new(None),
+            event_ingest: std::sync::RwLock::new(None),
             bot_run_context: std::sync::RwLock::new(None),
         }
     }
@@ -132,10 +160,10 @@ impl HttpProviderTransport {
     /// circular-dependency bootstrap cycle.
     pub fn set_ingest(
         &self,
-        message_flow: Arc<dyn MessageFlowService>,
+        event_ingest: Arc<dyn ProviderEventIngestService>,
         bot_run_context: Arc<dyn BotRunContextPort>,
     ) {
-        *self.message_flow.write().expect("message_flow lock poisoned") = Some(message_flow);
+        *self.event_ingest.write().expect("event_ingest lock poisoned") = Some(event_ingest);
         *self.bot_run_context.write().expect("bot_run_context lock poisoned") = Some(bot_run_context);
     }
 }
@@ -177,7 +205,7 @@ impl BotDeliveryPort for HttpProviderTransport {
         let body = provider_request_from_frame(
             &cmd.target,
             &cmd.frame,
-            DEFAULT_PROVIDER_DOWNLINK_TIMEOUT_MS,
+            DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
         )?;
         let provider_id = body.to_bot.provider_id.clone();
         let provider_bot_ref = body.to_bot.provider_bot_ref.clone();
@@ -201,14 +229,47 @@ impl BotDeliveryPort for HttpProviderTransport {
             BotDeliveryTarget::HttpProvider { protocol_version, .. } if protocol_version == "2.0"
         );
         if is_proto2 {
-            let wants_sse = matches!(
-                cmd.provider_transport,
-                ProviderTransportPreference::CallbackSse
-            ) && method == "chat.send";
+            let wants_sse = method == "chat.send";
             let client = if wants_sse { &self.sse_client } else { &self.client };
-            let resp =
-                send_provider_request(client, &self.url_guard, &cmd.target, &body, wants_sse)
-                    .await?;
+            let run_context = self
+                .bot_run_context
+                .read()
+                .expect("bot_run_context lock poisoned")
+                .clone();
+            if wants_sse {
+                if let Some(context) = run_context.as_ref() {
+                    let began = context
+                        .begin_provider_transport(
+                            &run_id,
+                            bcs_protocol::now_ms().saturating_add(body.timeout_ms),
+                        )
+                        .await;
+                    if !began {
+                        return Err(ServiceError::InvalidOperation {
+                            message: "provider run transport is already registered".to_string(),
+                            request_id: Some(run_id),
+                        });
+                    }
+                }
+            }
+            let resp = match send_provider_request(
+                client,
+                &self.url_guard,
+                &cmd.target,
+                &body,
+                wants_sse,
+                &cmd.provider_bypass_headers,
+            )
+            .await
+            {
+                Ok(response) => response,
+                Err(error) => {
+                    if let Some(context) = run_context.as_ref() {
+                        context.clear_provider_transport(&run_id).await;
+                    }
+                    return Err(error);
+                }
+            };
             let ctype = resp
                 .headers()
                 .get(reqwest::header::CONTENT_TYPE)
@@ -216,9 +277,24 @@ impl BotDeliveryPort for HttpProviderTransport {
                 .unwrap_or("")
                 .to_string();
             if wants_sse && ctype.starts_with("text/event-stream") {
+                if let Some(context) = run_context.as_ref() {
+                    let bound = context
+                        .bind_provider_transport(&run_id, ProviderRunTransport::Sse)
+                        .await;
+                    if !bound {
+                        return Err(ServiceError::InvalidOperation {
+                            message: "provider run is already bound to another transport"
+                                .to_string(),
+                            request_id: Some(run_id),
+                        });
+                    }
+                }
                 let (Some(flow), Some(ctx)) =
-                    (self.message_flow.read().expect("message_flow lock poisoned").clone(), self.bot_run_context.read().expect("bot_run_context lock poisoned").clone())
+                    (self.event_ingest.read().expect("event_ingest lock poisoned").clone(), self.bot_run_context.read().expect("bot_run_context lock poisoned").clone())
                 else {
+                    if let Some(context) = run_context.as_ref() {
+                        context.clear_provider_transport(&run_id).await;
+                    }
                     warn!(
                         target_bot_id = %target_bot_id,
                         provider_id = %provider_id,
@@ -257,10 +333,13 @@ impl BotDeliveryPort for HttpProviderTransport {
             //     events are honored is gated by submit_event's protocol_version
             //     check (Capability B). We do NOT require SSE for send anymore.
             let status = resp.status();
-            let ack = resp
-                .json::<ProviderAckResponse>()
-                .await
-                .map_err(|error| {
+            let json_body_timeout = Duration::from_millis(JSON_FALLBACK_BODY_TIMEOUT_MS);
+            let ack = match read_provider_ack_body(resp, json_body_timeout).await {
+                Ok(ack) => ack,
+                Err(ProviderAckBodyError::Decode(error)) => {
+                    if let Some(context) = run_context.as_ref() {
+                        context.clear_provider_transport(&run_id).await;
+                    }
                     warn!(
                         target_bot_id = %target_bot_id,
                         provider_id = %provider_id,
@@ -270,9 +349,44 @@ impl BotDeliveryPort for HttpProviderTransport {
                         error = %error,
                         "provider downlink: 2.0 JSON ack decode failed"
                     );
-                    ServiceError::InternalError(format!("decode 2.0 json ack: {error}"))
-                })?;
+                    return Err(ServiceError::InternalError(format!(
+                        "decode 2.0 json ack: {error}"
+                    )));
+                }
+                Err(ProviderAckBodyError::Timeout) => {
+                    if let Some(context) = run_context.as_ref() {
+                        context.clear_provider_transport(&run_id).await;
+                    }
+                    warn!(
+                        target_bot_id = %target_bot_id,
+                        provider_id = %provider_id,
+                        method = %method,
+                        run_id = %run_id,
+                        status = %status.as_u16(),
+                        json_body_timeout_ms = %json_body_timeout.as_millis(),
+                        "provider downlink: 2.0 JSON ack body timeout"
+                    );
+                    return Err(ServiceError::InternalError(format!(
+                        "provider 2.0 JSON ack body timeout after {}ms",
+                        json_body_timeout.as_millis()
+                    )));
+                }
+            };
             if ack.ok {
+                if wants_sse {
+                    if let Some(context) = run_context.as_ref() {
+                        let bound = context
+                            .bind_provider_transport(&run_id, ProviderRunTransport::Callback)
+                            .await;
+                        if !bound {
+                            return Err(ServiceError::InvalidOperation {
+                                message: "provider run is already bound to another transport"
+                                    .to_string(),
+                                request_id: Some(run_id),
+                            });
+                        }
+                    }
+                }
                 info!(
                     target_bot_id = %target_bot_id,
                     provider_id = %provider_id,
@@ -281,6 +395,9 @@ impl BotDeliveryPort for HttpProviderTransport {
                     "provider downlink: 2.0 JSON ack accepted (callback transport)"
                 );
             } else {
+                if let Some(context) = run_context.as_ref() {
+                    context.clear_provider_transport(&run_id).await;
+                }
                 warn!(
                     target_bot_id = %target_bot_id,
                     provider_id = %provider_id,
@@ -303,7 +420,7 @@ impl BotDeliveryPort for HttpProviderTransport {
 
         let started = Instant::now();
         let ack_result: ServiceResult<ProviderAckResponse> =
-            post_provider(&self.client, &self.url_guard, &cmd.target, &body).await;
+            post_provider(&self.client, &self.url_guard, &cmd.target, &body, &cmd.provider_bypass_headers).await;
         let elapsed_ms = started.elapsed().as_millis();
         let ack = match ack_result {
             Ok(ack) => ack,
@@ -371,7 +488,7 @@ impl GroupHistoryBotRequestPort for HttpProviderTransport {
             .map_err(|error| error.to_string())?;
         let target_bot_id = target.bot_id().to_string();
         let response: ProviderHistoryResponse =
-            post_provider(&self.client, &self.url_guard, &target, &body)
+            post_provider(&self.client, &self.url_guard, &target, &body, &[])
                 .await
                 .map_err(|error| error.to_string())?;
         let history_body = provider_history_log(&response);
@@ -613,8 +730,9 @@ async fn post_provider<T: DeserializeOwned>(
     url_guard: &OutboundUrlGuard,
     target: &BotDeliveryTarget,
     body: &ProviderWebhookRequest,
+    provider_bypass_headers: &[(String, String)],
 ) -> ServiceResult<T> {
-    let response = send_provider_request(client, url_guard, target, body, false).await?;
+    let response = send_provider_request(client, url_guard, target, body, false, provider_bypass_headers).await?;
     let status = response.status();
     let method = body.method.clone();
     let frame_id = body.id.clone();
@@ -642,6 +760,48 @@ async fn send_provider_request(
     target: &BotDeliveryTarget,
     body: &ProviderWebhookRequest,
     accept_sse: bool,
+    provider_bypass_headers: &[(String, String)],
+) -> ServiceResult<reqwest::Response> {
+    send_provider_request_with_policy(
+        client,
+        url_guard,
+        target,
+        body,
+        accept_sse,
+        provider_bypass_headers,
+        ProviderClientPolicy::for_request(accept_sse),
+    )
+    .await
+}
+
+fn is_safe_provider_bypass_header(name: &str) -> bool {
+    let trimmed = name.trim();
+    if trimmed.is_empty() || reqwest::header::HeaderName::try_from(trimmed).is_err() {
+        return false;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    !matches!(
+        lower.as_str(),
+        "authorization"
+            | "cookie"
+            | "host"
+            | "content-length"
+            | "content-type"
+            | "x-bcs-bot-token"
+            | "x-bcs-service-key"
+    ) && lower != "bcn"
+        && !lower.starts_with("bcn-")
+        && !lower.starts_with("x-bcn-")
+}
+
+async fn send_provider_request_with_policy(
+    client: &reqwest::Client,
+    url_guard: &OutboundUrlGuard,
+    target: &BotDeliveryTarget,
+    body: &ProviderWebhookRequest,
+    accept_sse: bool,
+    provider_bypass_headers: &[(String, String)],
+    client_policy: ProviderClientPolicy,
 ) -> ServiceResult<reqwest::Response> {
     let BotDeliveryTarget::HttpProvider {
         webhook_url,
@@ -671,7 +831,6 @@ async fn send_provider_request(
             });
         }
     };
-    let client_policy = ProviderClientPolicy::for_request(accept_sse);
     let pinned_client = provider_client_for_url(&guarded_url, client_policy).map_err(|error| {
         ServiceError::InternalError(format!("provider HTTP client build failed: {error}"))
     })?;
@@ -721,6 +880,7 @@ async fn send_provider_request(
         http2_only = client_policy.http2_only,
         total_timeout_ms = ?client_policy.total_timeout.map(|timeout| timeout.as_millis()),
         read_timeout_ms = ?client_policy.read_timeout.map(|timeout| timeout.as_millis()),
+        response_header_timeout_ms = ?client_policy.response_header_timeout.map(|timeout| timeout.as_millis()),
         request_started_ms,
         "provider downlink: posting webhook"
     );
@@ -732,29 +892,64 @@ async fn send_provider_request(
         .header(BCN_PROTOCOL_VERSION_HEADER, protocol_version)
         .header(BCN_MESSAGE_ID_HEADER, &message_id)
         .header(BCN_TIMESTAMP_HEADER, bcs_protocol::now_ms().to_string());
+    for (name, value) in provider_bypass_headers {
+        if is_safe_provider_bypass_header(name) {
+            request = request.header(name.as_str(), value.as_str());
+        }
+    }
     if protocol_version == "2.0" {
         request = request.header(BCN_TRANSPORT_HEADER, transport);
     }
-    let response = request
-        .json(body)
-        .send()
-        .await
-        .map_err(|error| {
-            let elapsed_ms = request_started.elapsed().as_millis();
-            warn!(
-                provider_id = %body.to_bot.provider_id,
-                method = %body.method,
-                frame_id = %body.id,
-                message_id = %message_id,
-                webhook_url = %webhook_url,
-                dns_pinned,
-                http2_only = client_policy.http2_only,
-                elapsed_ms,
-                error = %error,
-                "provider downlink: webhook transport error"
-            );
-            ServiceError::InternalError(format!("provider request failed: {error}"))
-        })?;
+    let context = tracing::Span::current().context();
+    let mut trace_headers = reqwest::header::HeaderMap::new();
+    global::get_text_map_propagator(|propagator| {
+        propagator.inject_context(&context, &mut HeaderInjector(&mut trace_headers));
+    });
+    request = request.headers(trace_headers);
+    let send = request.json(body).send();
+    let response_result =
+        if let Some(response_header_timeout) = client_policy.response_header_timeout {
+            match tokio::time::timeout(response_header_timeout, send).await {
+                Ok(result) => result,
+                Err(_) => {
+                    let elapsed_ms = request_started.elapsed().as_millis();
+                    warn!(
+                        provider_id = %body.to_bot.provider_id,
+                        method = %body.method,
+                        frame_id = %body.id,
+                        message_id = %message_id,
+                        webhook_url = %webhook_url,
+                        dns_pinned,
+                        http2_only = client_policy.http2_only,
+                        elapsed_ms,
+                        response_header_timeout_ms = response_header_timeout.as_millis(),
+                        "provider downlink: response header timeout"
+                    );
+                    return Err(ServiceError::InternalError(format!(
+                        "provider response header timeout after {}ms",
+                        response_header_timeout.as_millis()
+                    )));
+                }
+            }
+        } else {
+            send.await
+        };
+    let response = response_result.map_err(|error| {
+        let elapsed_ms = request_started.elapsed().as_millis();
+        warn!(
+            provider_id = %body.to_bot.provider_id,
+            method = %body.method,
+            frame_id = %body.id,
+            message_id = %message_id,
+            webhook_url = %webhook_url,
+            dns_pinned,
+            http2_only = client_policy.http2_only,
+            elapsed_ms,
+            error = %error,
+            "provider downlink: webhook transport error"
+        );
+        ServiceError::InternalError(format!("provider request failed: {error}"))
+    })?;
 
     let status = response.status();
     let response_version = response.version();
@@ -921,7 +1116,7 @@ async fn stream_and_drive(
     resp: reqwest::Response,
     bcn_run_id: String,
     bot_id: String,
-    flow: Arc<dyn MessageFlowService>,
+    flow: Arc<dyn ProviderEventIngestService>,
     ctx: Arc<dyn BotRunContextPort>,
 ) {
     use futures::StreamExt;
@@ -1060,6 +1255,7 @@ async fn stream_and_drive(
     }
     // #2: mark the run terminal in the run-context store after closing.
     ctx.mark_terminal(&bcn_run_id).await;
+    ctx.mark_provider_transport_terminal(&bcn_run_id).await;
 }
 
 /// Resolve the run context for `run_id`, retrying a bounded number of times to
@@ -1090,7 +1286,7 @@ async fn drive_frame_bytes(
     deadline_ms: u64,
     dedup: &mut SeqDedup,
     lag: &mut LagTracker,
-    flow: &Arc<dyn MessageFlowService>,
+    flow: &Arc<dyn ProviderEventIngestService>,
 ) -> Option<bool> {
     // Decode only the complete frame bytes (#5). Lossy + WARN on invalid UTF-8.
     let text = match std::str::from_utf8(frame_bytes) {
@@ -1129,7 +1325,7 @@ async fn drive_sse_frame(
     deadline_ms: u64,
     dedup: &mut SeqDedup,
     lag: &mut LagTracker,
-    flow: &Arc<dyn MessageFlowService>,
+    flow: &Arc<dyn ProviderEventIngestService>,
 ) -> Option<bool> {
     let frame = parse_sse_block(block)?;
     let data: Value = match serde_json::from_str(&frame.data) {
@@ -1384,6 +1580,7 @@ fn build_event_payload(event: &StreamEvent, run_id: &str, group_id: &str) -> Val
                 stop_reason: chat.stop_reason.clone(),
                 error_message: chat.error_message.clone(),
                 error_kind: chat.error_kind.clone(),
+                error_code: chat.error_code.clone(),
                 tool_call_id: None,
                 tool_name: None,
                 args: None,
@@ -1427,6 +1624,7 @@ fn build_chat_error_payload(run_id: &str, group_id: &str) -> Value {
         stop_reason: None,
         error_message: None,
         error_kind: None,
+        error_code: None,
         tool_call_id: None,
         tool_name: None,
         args: None,
@@ -1444,7 +1642,7 @@ async fn ingest_synthesized_error(
     group_id: &str,
     bot_id: &str,
     bcs_session_id: &Option<String>,
-    flow: &Arc<dyn MessageFlowService>,
+    flow: &Arc<dyn ProviderEventIngestService>,
 ) {
     warn!(run_id = %bcn_run_id, "sse closed without chat terminal; synthesizing error terminal");
     let payload = build_chat_error_payload(bcn_run_id, group_id);
@@ -1471,7 +1669,7 @@ async fn ingest(
     event_type: String,
     state: ChatEventState,
     payload: Value,
-    flow: &Arc<dyn MessageFlowService>,
+    flow: &Arc<dyn ProviderEventIngestService>,
 ) {
     let cmd = BotEventCommand {
         bot_id: bot_id.to_string(),
@@ -1482,7 +1680,13 @@ async fn ingest(
         state,
         bcs_session_id: bcs_session_id.clone(),
     };
-    if let Err(error) = flow.handle_bot_event(cmd).await {
+    if let Err(error) = flow
+        .ingest_provider_event(ProviderEventIngestCommand {
+            source: ProviderEventSource::Sse,
+            event: cmd,
+        })
+        .await
+    {
         warn!(run_id = %bcn_run_id, %error, "ingest handle_bot_event failed");
     }
 }
@@ -1490,6 +1694,7 @@ async fn ingest(
 #[cfg(test)]
 mod client_policy_tests {
     use super::*;
+    use bcs_domain::RedactedToken;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     async fn spawn_http1_server() -> std::net::SocketAddr {
@@ -1507,13 +1712,60 @@ mod client_policy_tests {
         addr
     }
 
+    async fn spawn_delayed_http1_server(delay: Duration) -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request).await.unwrap();
+            tokio::time::sleep(delay).await;
+            let _ = stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+                .await;
+        });
+        addr
+    }
+
+    async fn spawn_stalled_json_body_server(delay: Duration) -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request).await.unwrap();
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\n\
+Content-Type: application/json\r\n\
+Content-Length: 64\r\n\
+Connection: keep-alive\r\n\
+\r\n\
+{\"ok\":",
+                )
+                .await
+                .unwrap();
+            tokio::time::sleep(delay).await;
+        });
+        addr
+    }
+
     #[test]
-    fn sse_policy_is_http2_only_without_total_timeout() {
+    fn sse_policy_allows_http1_fallback_without_total_timeout() {
         let policy = ProviderClientPolicy::for_request(true);
 
         assert_eq!(policy.total_timeout, None);
-        assert_eq!(policy.read_timeout, Some(Duration::from_secs(125)));
-        assert!(policy.http2_only);
+        assert_eq!(policy.read_timeout, None);
+        assert_eq!(
+            policy.response_header_timeout,
+            Some(Duration::from_secs(125))
+        );
+        assert!(!policy.http2_only);
+    }
+
+    #[test]
+    fn sse_idle_timeout_is_fifteen_minutes() {
+        assert_eq!(SSE_IDLE_TIMEOUT_MS, 15 * 60 * 1_000);
     }
 
     #[test]
@@ -1522,7 +1774,83 @@ mod client_policy_tests {
 
         assert_eq!(policy.total_timeout, Some(Duration::from_secs(65)));
         assert_eq!(policy.read_timeout, None);
+        assert_eq!(policy.response_header_timeout, None);
         assert!(!policy.http2_only);
+    }
+
+    #[tokio::test]
+    async fn provider_request_times_out_waiting_for_response_headers() {
+        let addr = spawn_delayed_http1_server(Duration::from_millis(100)).await;
+        let policy = ProviderClientPolicy {
+            response_header_timeout: Some(Duration::from_millis(10)),
+            http2_only: false,
+            ..ProviderClientPolicy::for_request(true)
+        };
+        let client = provider_client_builder(policy).build().unwrap();
+        let url_guard = OutboundUrlGuard::allowing_private_networks_for_tests();
+        let target = BotDeliveryTarget::HttpProvider {
+            bot_id: "bot-1".to_string(),
+            provider_id: "provider-1".to_string(),
+            provider_bot_ref: "bot-1".to_string(),
+            webhook_url: format!("http://{addr}"),
+            bcs_to_provider_token: RedactedToken::new("secret"),
+            protocol_version: "2.0".to_string(),
+        };
+        let body = ProviderWebhookRequest {
+            frame_type: "request".to_string(),
+            id: "frame-timeout".to_string(),
+            method: "chat.send".to_string(),
+            session_id: "session-1".to_string(),
+            bcn_group_id: "group-1".to_string(),
+            to_bot: ProviderWebhookBotRef {
+                provider_id: "provider-1".to_string(),
+                provider_bot_ref: "bot-1".to_string(),
+                tags: Vec::new(),
+            },
+            from: None,
+            message: None,
+            attachments: Vec::new(),
+            before: None,
+            after: None,
+            limit: None,
+            timeout_ms: 1_000,
+            extensions: None,
+        };
+
+        let error = send_provider_request_with_policy(
+            &client,
+            &url_guard,
+            &target,
+            &body,
+            true,
+            &[],
+            policy,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.to_string().contains(
+            "provider response header timeout after 10ms"
+        ));
+    }
+
+    #[tokio::test]
+    async fn json_fallback_body_timeout_bounds_incomplete_response() {
+        let addr = spawn_stalled_json_body_server(Duration::from_secs(1)).await;
+        let response = reqwest::Client::new()
+            .get(format!("http://{addr}"))
+            .send()
+            .await
+            .unwrap();
+
+        let result = tokio::time::timeout(
+            Duration::from_millis(250),
+            read_provider_ack_body(response, Duration::from_millis(10)),
+        )
+        .await
+        .expect("ack body reader must not remain pending");
+
+        assert!(matches!(result, Err(ProviderAckBodyError::Timeout)));
     }
 
     #[test]
@@ -1568,7 +1896,7 @@ mod client_policy_tests {
     }
 
     #[tokio::test]
-    async fn sse_builder_rejects_http1_while_callback_builder_accepts_it() {
+    async fn sse_and_callback_builders_accept_http1() {
         let callback_addr = spawn_http1_server().await;
         let callback_client = provider_client_builder(ProviderClientPolicy::for_request(false))
             .build()
@@ -1584,12 +1912,12 @@ mod client_policy_tests {
         let sse_client = provider_client_builder(ProviderClientPolicy::for_request(true))
             .build()
             .unwrap();
-        let error = sse_client
+        let sse_response = sse_client
             .get(format!("http://{sse_addr}"))
             .send()
             .await
-            .unwrap_err();
-        assert!(error.is_request());
+            .unwrap();
+        assert_eq!(sse_response.version(), reqwest::Version::HTTP_11);
     }
 }
 
@@ -1598,7 +1926,8 @@ mod sse_loop_tests {
     use super::*;
     use bcs_service_api::{
         BotEventOutcome, ChatAbortCommand, ChatAbortOutcome, GroupCallbackCommand,
-        GroupCallbackOutcome, TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand,
+        GroupCallbackOutcome, MessageFlowService, TaskCompleteCommand, TaskCompleteOutcome,
+        TaskDispatchCommand,
         TaskDispatchOutcome, TaskRunAliasRegistration, WebSendCommand, WebSendOutcome,
     };
     use std::sync::Mutex;
@@ -1681,6 +2010,16 @@ mod sse_loop_tests {
         }
     }
 
+    #[async_trait]
+    impl ProviderEventIngestService for RecordingFlow {
+        async fn ingest_provider_event(
+            &self,
+            cmd: ProviderEventIngestCommand,
+        ) -> ServiceResult<BotEventOutcome> {
+            self.handle_bot_event(cmd.event).await
+        }
+    }
+
     /// Fixed run-context fake: always resolves with the given group/bot and a
     /// configurable deadline (so the per-frame deadline guard can be exercised).
     struct FixedCtx {
@@ -1707,6 +2046,21 @@ mod sse_loop_tests {
             true
         }
         async fn release_terminal(&self, _run_id: &str) {}
+        async fn begin_provider_transport(&self, _run_id: &str, _deadline_ms: u64) -> bool {
+            false
+        }
+        async fn bind_provider_transport(
+            &self,
+            _run_id: &str,
+            _transport: ProviderRunTransport,
+        ) -> bool {
+            false
+        }
+        async fn get_provider_transport(&self, _run_id: &str) -> Option<ProviderRunTransport> {
+            None
+        }
+        async fn mark_provider_transport_terminal(&self, _run_id: &str) {}
+        async fn clear_provider_transport(&self, _run_id: &str) {}
     }
 
     /// Test wrapper: drive the per-frame ingest core over an in-memory SSE text
@@ -1717,7 +2071,7 @@ mod sse_loop_tests {
         bcn_run_id: &str,
         group_id: &str,
         bot_id: &str,
-        flow: &Arc<dyn MessageFlowService>,
+        flow: &Arc<dyn ProviderEventIngestService>,
     ) -> bool {
         run_sse_text_with_deadline(sse_text, bcn_run_id, group_id, bot_id, u64::MAX, flow).await
     }
@@ -1730,7 +2084,7 @@ mod sse_loop_tests {
         group_id: &str,
         bot_id: &str,
         deadline_ms: u64,
-        flow: &Arc<dyn MessageFlowService>,
+        flow: &Arc<dyn ProviderEventIngestService>,
     ) -> bool {
         let mut dedup = SeqDedup::default();
         let mut lag = LagTracker::default();
@@ -1761,7 +2115,7 @@ mod sse_loop_tests {
     #[tokio::test]
     async fn read_loop_ingests_delta_then_final_and_dedupes() {
         let recording = Arc::new(RecordingFlow::default());
-        let flow: Arc<dyn MessageFlowService> = recording.clone();
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
         let sse = "event: agent\nid: 1\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\n\n\
 event: ping\ndata: {\"ts\":1}\n\n\
 event: agent\nid: 1\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\n\n\
@@ -1788,7 +2142,7 @@ event: chat\nid: 2\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"messa
     #[tokio::test]
     async fn read_loop_synthesizes_error_message_body() {
         let recording = Arc::new(RecordingFlow::default());
-        let flow: Arc<dyn MessageFlowService> = recording.clone();
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
         let sse = "event: chat\nid: 1\ndata: {\"runId\":\"engine-run\",\"seq\":1,\"state\":\"error\",\"errorMessage\":\"engine crashed\",\"errorKind\":\"provider_error\"}\n\n";
         let terminal = run_sse_text_for_test(sse, "bcn-run-err", "grp-1", "bot-1", &flow).await;
         assert!(terminal, "error should close the run");
@@ -1808,7 +2162,7 @@ event: chat\nid: 2\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"messa
     #[tokio::test]
     async fn read_loop_falls_back_from_blank_error_message_body() {
         let recording = Arc::new(RecordingFlow::default());
-        let flow: Arc<dyn MessageFlowService> = recording.clone();
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
         let sse = "event: chat\nid: 1\ndata: {\"runId\":\"engine-run\",\"seq\":1,\"state\":\"error\",\"errorMessage\":\"engine crashed\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"   \"}],\"timestamp\":0}}\n\n";
         let terminal = run_sse_text_for_test(sse, "bcn-run-err", "grp-1", "bot-1", &flow).await;
         assert!(terminal, "error should close the run");
@@ -1823,7 +2177,7 @@ event: chat\nid: 2\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"messa
     #[tokio::test]
     async fn crlf_frame_separators_are_split() {
         let recording = Arc::new(RecordingFlow::default());
-        let flow: Arc<dyn MessageFlowService> = recording.clone();
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
         // CRLF line endings AND CRLF-CRLF frame separators across the byte path.
         let sse = "event: agent\r\nid: 1\r\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\r\n\r\n\
 event: chat\r\nid: 2\r\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"message\":{\"role\":\"assistant\",\"content\":[],\"timestamp\":0}}\r\n\r\n";
@@ -1866,7 +2220,7 @@ event: chat\r\nid: 2\r\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"m
     #[tokio::test]
     async fn dedupe_works_without_sse_id_using_payload_seq() {
         let recording = Arc::new(RecordingFlow::default());
-        let flow: Arc<dyn MessageFlowService> = recording.clone();
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
         // No `id:` lines at all — dedupe must come from StreamEvent.seq (#4).
         let sse = "event: agent\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\n\n\
 event: agent\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\n\n\
@@ -1885,7 +2239,7 @@ event: agent\ndata: {\"runId\":\"e\",\"seq\":2,\"stream\":\"thinking\",\"delta\"
     #[tokio::test]
     async fn stream_end_without_terminal_synthesizes_error() {
         let recording = Arc::new(RecordingFlow::default());
-        let flow: Arc<dyn MessageFlowService> = recording.clone();
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
         let resp = sse_response(
             "event: agent\nid: 1\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\n\n",
         )
@@ -1906,7 +2260,7 @@ event: agent\ndata: {\"runId\":\"e\",\"seq\":2,\"stream\":\"thinking\",\"delta\"
     #[tokio::test]
     async fn approval_frame_closes_run_unsupported() {
         let recording = Arc::new(RecordingFlow::default());
-        let flow: Arc<dyn MessageFlowService> = recording.clone();
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
         let sse = "event: agent\nid: 1\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"approval\",\"phase\":\"requested\",\"kind\":\"exec\"}\n\n";
         let terminal = run_sse_text_for_test(sse, "bcn-run-1", "grp-1", "bot-1", &flow).await;
         assert!(terminal, "approval gate must close the run");
@@ -1921,7 +2275,7 @@ event: agent\ndata: {\"runId\":\"e\",\"seq\":2,\"stream\":\"thinking\",\"delta\"
         // A run whose deadline is already in the past must not ingest any frame:
         // the per-frame guard (#2) drops every frame + WARNs before ingest.
         let recording = Arc::new(RecordingFlow::default());
-        let flow: Arc<dyn MessageFlowService> = recording.clone();
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
         let sse = "event: agent\nid: 1\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\n\n\
 event: chat\nid: 2\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"message\":{\"role\":\"assistant\",\"content\":[],\"timestamp\":0}}\n\n";
         // deadline_ms = 0 is always in the past relative to now_ms().
@@ -1935,7 +2289,7 @@ event: chat\nid: 2\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"messa
 
         // Sanity: the very same stream with a fresh deadline ingests normally.
         let recording_ok = Arc::new(RecordingFlow::default());
-        let flow_ok: Arc<dyn MessageFlowService> = recording_ok.clone();
+        let flow_ok: Arc<dyn ProviderEventIngestService> = recording_ok.clone();
         let terminal_ok = run_sse_text_with_deadline(
             sse, "bcn-run-1", "grp-1", "bot-1", u64::MAX, &flow_ok,
         )

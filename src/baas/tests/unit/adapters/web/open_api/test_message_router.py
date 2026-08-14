@@ -5,6 +5,7 @@ NOT TestClient. Covers deliver_message and get_message_result
 endpoints plus _normalize_bot_id helper.
 """
 
+import json
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -12,10 +13,10 @@ import pytest
 from fastapi import HTTPException
 
 from secbaas.community.adapters.web.routers.open_api.message_router import (
-    _normalize_bot_id,
     deliver_message,
     deliver_message_stream,
     get_message_result,
+    normalize_bot_id,
 )
 from secbaas.community.api.api_gateway import APIKeyRecord
 from secbaas.community.api.bot_runtime import (
@@ -107,19 +108,19 @@ def _make_stream_message_request(
 
 class TestNormalizeBotId:
     def test_no_colon_passthrough(self):
-        assert _normalize_bot_id("simple") == "simple"
+        assert normalize_bot_id("simple") == "simple"
 
     def test_colon_strips_leading_zeros(self):
-        assert _normalize_bot_id("bot:000123") == "bot:123"
+        assert normalize_bot_id("bot:000123") == "bot:123"
 
     def test_colon_no_leading_zeros_unchanged(self):
-        assert _normalize_bot_id("bot:123") == "bot:123"
+        assert normalize_bot_id("bot:123") == "bot:123"
 
     def test_colon_all_zeros_returns_zero(self):
-        assert _normalize_bot_id("bot:000") == "bot:0"
+        assert normalize_bot_id("bot:000") == "bot:0"
 
     def test_multiple_colons_strips_last_part(self):
-        assert _normalize_bot_id("a:b:007") == "a:b:7"
+        assert normalize_bot_id("a:b:007") == "a:b:7"
 
 
 # ── deliver_message ──────────────────────────────────────────
@@ -659,6 +660,51 @@ class TestDeliverMessageStream:
         call_kwargs = mock_runner.deliver_message_stream.call_args.kwargs
         assert call_kwargs["metadata"]["stream"] == "true"
         assert call_kwargs["metadata"]["timeout"] == "30"
+
+    @pytest.mark.asyncio
+    async def test_chunk_error_yields_error_sse(self):
+        """When chunk_iter raises, on_error produces an error SSE event."""
+
+        async def failing_chunks():
+            yield StreamChunk(type="delta", content="hi")
+            raise RuntimeError("chunk boom")
+
+        api_key = _make_api_key_record(app_type="system")
+        ctx = _make_context()
+        req = _make_stream_message_request()
+
+        mock_runner = AsyncMock()
+        mock_runner.deliver_message_stream = AsyncMock(
+            return_value=("msg-e1", "sess-e1", failing_chunks())
+        )
+
+        with patch(
+            "secbaas.community.adapters.web.routers.open_api.message_router.validate_policy",
+            return_value="bot-1:entity-1",
+        ):
+            result = await deliver_message_stream(
+                request=req,
+                api_key_record=api_key,
+                context=ctx,
+                bot_runner=mock_runner,
+                converter_factory=_make_converter_factory(),
+            )
+
+        items = []
+        async for item in result.body_iterator:
+            items.append(item)
+
+        # ready + delta + error
+        assert len(items) == 3
+        assert items[0].startswith("event: ready\n")
+        assert "event: chat\n" in items[1]
+        assert items[2].startswith("event: error\n")
+        data_line = next(
+            line for line in items[2].splitlines() if line.startswith("data: ")
+        )
+        data = json.loads(data_line.removeprefix("data: "))
+        assert data["message_id"] == "msg-e1"
+        assert "chunk boom" in data["error"]
 
 
 # ── get_message_result ──────────────────────────────────────

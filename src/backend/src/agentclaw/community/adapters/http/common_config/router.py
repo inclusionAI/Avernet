@@ -193,7 +193,10 @@ async def enable_common_config(
     user: AuthenticatedUser = Depends(require_operator),
     service: CommonConfigServiceProtocol = Injected(CommonConfigServiceProtocol),
 ):
-    success = service.enable_config(config_id=req.id)
+    try:
+        success = service.enable_config(config_id=req.id)
+    except ValueError as exc:
+        return ApiResponse(success=False, message=str(exc), error_code=40001, data=None)
     if not success:
         return ApiResponse(success=False, message="配置不存在", error_code=40401, data=None)
     return ApiResponse(success=True, message="配置已启用", error_code=200, data=None)
@@ -205,7 +208,10 @@ async def disable_common_config(
     user: AuthenticatedUser = Depends(require_operator),
     service: CommonConfigServiceProtocol = Injected(CommonConfigServiceProtocol),
 ):
-    success = service.disable_config(config_id=req.id)
+    try:
+        success = service.disable_config(config_id=req.id)
+    except ValueError as exc:
+        return ApiResponse(success=False, message=str(exc), error_code=40001, data=None)
     if not success:
         return ApiResponse(success=False, message="配置不存在", error_code=40401, data=None)
     return ApiResponse(success=True, message="配置已禁用", error_code=200, data=None)

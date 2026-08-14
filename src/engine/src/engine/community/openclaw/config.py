@@ -36,6 +36,7 @@ class OpenClawConfig:
     """OpenClaw Gateway 配置"""
 
     gateway_url: str = "ws://127.0.0.1:18789"
+    session_transcript_dir: str = "/home/admin/.openclaw/agents/main/sessions"
     # Cloud envs auto-generate OPENCLAW_GATEWAY_TOKEN (stable across restarts).
     # Resolution: env > internal_defaults (local dev, export-excluded) > "".
     # No secret is hardcoded in this exported file.
@@ -48,6 +49,10 @@ class OpenClawConfig:
         """从环境变量加载配置"""
         return cls(
             gateway_url=os.getenv("OPENCLAW_GATEWAY_URL", cls.gateway_url),
+            session_transcript_dir=os.getenv(
+                "OPENCLAW_SESSION_TRANSCRIPT_DIR",
+                cls.session_transcript_dir,
+            ),
             gateway_token=os.getenv("OPENCLAW_GATEWAY_TOKEN", cls.gateway_token),
             connection_timeout=int(
                 os.getenv("OPENCLAW_CONNECTION_TIMEOUT", str(DEFAULT_CONNECTION_TIMEOUT))

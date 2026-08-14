@@ -10,7 +10,7 @@ async fn metrics_cardinality_excludes_raw_ids_and_bcn_catalog() {
     let bots_dir = helpers::create_temp_bots_dir();
     let mut config = helpers::create_test_config(&bots_dir.path().to_path_buf());
     config.metrics.enabled = true;
-    let server = BcsServer::new(config);
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
     let (addr, handle) = server.run_on_random_port().await.expect("start server");
 
     let raw_group_id = "group_raw_sensitive_789";

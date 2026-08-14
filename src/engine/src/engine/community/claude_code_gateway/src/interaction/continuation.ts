@@ -97,8 +97,9 @@ export async function continueByFollowUpChat(opts: {
   runtimeRegistry: SessionRuntimeRegistry;
   contextTurns: number;
   maxContextChars: number;
+  systemPromptPrefix?: string;
 }): Promise<void> {
-  const { ctx, pending, params, store, bridge, runtimeRegistry, contextTurns, maxContextChars } = opts;
+  const { ctx, pending, params, store, bridge, runtimeRegistry, contextTurns, maxContextChars, systemPromptPrefix } = opts;
   const binding = store.getByGatewaySessionKey(pending.sessionKey);
   if (!binding) return;
 
@@ -121,11 +122,12 @@ export async function continueByFollowUpChat(opts: {
   }
 
   const priorHistory = [ ...(binding.history ?? []) ];
-  const systemPrompt = buildConversationContext({
+  const conversationContext = buildConversationContext({
     history: toOrchestratorHistory(priorHistory),
     contextTurns,
     maxContextChars,
   });
+  const systemPrompt = [systemPromptPrefix, conversationContext].filter(Boolean).join('\n\n') || undefined;
 
   const running = startChatRun({
     cwd,

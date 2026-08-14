@@ -18,6 +18,8 @@ pub struct DmActorSpec {
     pub display_name: Option<String>,
 }
 
+pub use crate::types::GroupMutableFieldsPatch;
+
 /// Validate sender_routes against group participants.
 ///
 /// Checks:
@@ -124,14 +126,43 @@ pub trait GroupCoreService: Send + Sync {
     /// Create or update a group.
     async fn upsert(&self, group: Group) -> ServiceResult<()>;
 
+    /// Atomically patch only the mutable OpenAPI v1 fields that are present.
+    async fn patch_mutable_fields(
+        &self,
+        id: &str,
+        patch: GroupMutableFieldsPatch,
+    ) -> ServiceResult<()> {
+        let _ = (id, patch);
+        Err(super::ServiceError::InvalidOperation {
+            message: "atomic mutable Group patch is not configured".to_string(),
+            request_id: None,
+        })
+    }
+
     /// Get a group by ID.
     async fn get(&self, id: &str) -> Option<Group>;
+
+    /// Fallible lookup for API boundaries that must distinguish storage
+    /// failures from a missing Group.
+    async fn try_get(&self, id: &str) -> ServiceResult<Option<Group>> {
+        Ok(self.get(id).await)
+    }
 
     /// Add a message to a group.
     async fn add_message(&self, id: &str, message: GroupMessage) -> ServiceResult<()>;
 
     /// Add a participant to a group.
     async fn add_participant(&self, id: &str, participant: Participant) -> ServiceResult<()>;
+
+    async fn add_participant_with_visibility_guard(
+        &self,
+        id: &str,
+        participant: Participant,
+        actor_is_public: bool,
+    ) -> ServiceResult<()> {
+        let _ = actor_is_public;
+        self.add_participant(id, participant).await
+    }
 
     /// Remove a participant from a group by bot_uuid.
     async fn remove_participant(&self, group_id: &str, bot_uuid: &str) -> ServiceResult<()>;
@@ -221,6 +252,10 @@ pub trait GroupCoreService: Send + Sync {
     /// Return order is intentionally undefined; externally visible callers
     /// must apply their own ordering before pagination or response mapping.
     async fn find_by_participant(&self, bot_uuid: &str) -> Vec<Group>;
+
+    async fn try_find_by_participant(&self, bot_uuid: &str) -> ServiceResult<Vec<Group>> {
+        Ok(self.find_by_participant(bot_uuid).await)
+    }
 
     /// Find groups by participant, optionally filtered by group kind and label
     /// query. `label_query` matches label only; group id is intentionally not

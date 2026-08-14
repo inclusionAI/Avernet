@@ -1,4 +1,6 @@
 pub mod actor;
+pub mod bot_control_plane;
+pub mod candidate_search;
 pub mod error;
 pub mod friend;
 pub mod fusion;
@@ -13,6 +15,8 @@ pub mod session;
 pub mod system_message;
 
 pub use actor::*;
+pub use bot_control_plane::*;
+pub use candidate_search::*;
 pub use error::*;
 pub use friend::*;
 pub use fusion::*;

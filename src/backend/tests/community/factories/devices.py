@@ -7,7 +7,7 @@ the in-memory adapter transport — without a live device process.
 """
 from __future__ import annotations
 
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from tests.community.framework.world import World
 
 

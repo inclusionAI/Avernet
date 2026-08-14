@@ -73,7 +73,7 @@ fn create_test_config(bots_dir: &PathBuf) -> BcsConfig {
 /// Start a BCS server on a random port.
 async fn start_test_server(bots_dir: &PathBuf) -> (SocketAddr, tokio::task::JoinHandle<Result<(), bcs::BcsError>>) {
     let config = create_test_config(bots_dir);
-    let server = BcsServer::new(config);
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
     server.run_on_random_port().await.expect("Failed to start server")
 }
 
@@ -1361,82 +1361,6 @@ async fn test_query_bots_malformed_body() {
     );
 }
 
-/// Send a chat message to a bot via HTTP API.
-/// Returns (status_code, json_body) on success, or error message on failure.
-async fn bot_chat_http(
-    addr: SocketAddr,
-    sender_token: &str,
-    target_bot_id: &str,
-    message: &str,
-) -> Result<(reqwest::StatusCode, serde_json::Value), String> {
-    let url = format!("http://{}/bots/{}/chat", addr, target_bot_id);
-    let client = reqwest::Client::new();
-
-    let response = client
-        .post(&url)
-        .header("Authorization", format!("Bearer {}", sender_token))
-        .json(&json!({
-            "message": message,
-            "from": "test-user"
-        }))
-        .send()
-        .await;
-
-    match response {
-        Ok(resp) => {
-            let status = resp.status();
-            let json: serde_json::Value = resp.json().await.expect("Failed to parse response");
-
-            if let Some(error) = extract_error_message(&json) {
-                Err(format!("HTTP {}: {}", status, error))
-            } else if !status.is_success() {
-                Err(format!("HTTP {}", status))
-            } else {
-                Ok((status, json))
-            }
-        }
-        Err(e) => Err(format!("Request failed: {}", e)),
-    }
-}
-
-/// Test that private bot cannot send chat messages (should return 403 FORBIDDEN).
-/// TDD test case for bot_chat endpoint: private bot发送消息时应返回403
-#[tokio::test]
-async fn test_private_bot_cannot_send_chat_returns_403() {
-    let _ = tracing_subscriber::fmt::try_init();
-    let bots_dir = create_temp_bots_dir();
-    let (addr, _server_handle) = start_test_server(&bots_dir.path().to_path_buf()).await;
-
-    tokio::time::sleep(Duration::from_millis(50)).await;
-
-    // Connect two bots: private_sender and public_target
-    let (sender_bot_id, sender_token) = connect_and_register_bot(addr).await;
-    let (target_bot_id, target_token) = connect_and_register_bot(addr).await;
-
-    let sender_client = create_client(addr, &sender_token);
-    let target_client = create_client(addr, &target_token);
-
-    // Set sender_bot to PRIVATE visibility (sender check triggers 403)
-    sender_client.set_visibility(&sender_bot_id, "private").await
-        .expect("Should set sender visibility");
-
-    // Set target_bot to PUBLIC visibility (target check passes)
-    target_client.set_visibility(&target_bot_id, "public").await
-        .expect("Should set target visibility");
-
-    // Private bot attempts to send a chat message to public target
-    let chat_response = bot_chat_http(
-        addr,
-        &sender_token,
-        &target_bot_id,
-        "Hello from private bot",
-    ).await;
-
-    // Private bot can now send chat (private only hides from discovery).
-    // May fail with "not connected" if target has no active WS, not with a visibility rejection.
-    let _ = chat_response; // best-effort: private status no longer blocks chat sending
-}
-
 /// Helper: get friends list as array from FriendApiResponse.
 fn get_friends_array(resp: &bcs_protocol::FriendApiResponse) -> Vec<serde_json::Value> {
     resp.data.as_ref()
@@ -1986,7 +1910,7 @@ async fn test_create_group_returns_chat_url() {
     });
 
     let config: BcsConfig = serde_json::from_value(config_json).expect("Failed to parse BcsConfig");
-    let server = BcsServer::new(config);
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
     let (addr, _server_handle) = server.run_on_random_port().await.expect("Failed to start server");
 
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -2018,6 +1942,10 @@ async fn test_create_group_returns_chat_url() {
     let get_data: serde_json::Value = get_resp.json().await.expect("parse group");
     let session_id = get_data["latest_running_session_id"].as_str()
         .expect("Group detail should expose the initial session id");
+    assert_eq!(
+        group_data["session_id"], session_id,
+        "Create response should expose the initial session id"
+    );
     let expected_url = format!(
         "https://botchat.example.com/bcn/chat/detail?id={}&bot_uuid={}&session={}",
         urlencoding::encode(group_id),

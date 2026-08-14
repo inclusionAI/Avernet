@@ -1,7 +1,7 @@
 """Access control & user management — Pydantic Request/Response models."""
 from typing import Generic, Literal, TypeVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 T = TypeVar("T")
 
@@ -33,6 +33,21 @@ class SetBotsCeilingRequest(BaseModel):
     ceiling: int = Field(..., gt=0, description="BOT count ceiling (must be > 0)")
 
 
+class UserListCorrectionRequest(BaseModel):
+    """One authenticated correction of a current-environment user-list entry."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    entity_id: str = Field(..., min_length=1, max_length=1024)
+    user_list_type: str = Field(
+        ...,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[a-z][a-z0-9_.-]*$",
+    )
+    in_whitelist: bool
+
+
 # ==================== Response Data Models ====================
 
 
@@ -53,6 +68,12 @@ class WhitelistCheckData(BaseModel):
     staff_no: str = Field(..., alias="staffNo", description="Staff number")
 
     model_config = {"populate_by_name": True}
+
+
+class UserListCheckData(BaseModel):
+    """Minimal boolean result used by the frontend rollout gate."""
+
+    in_whitelist: bool
 
 
 class AllowDisallowData(BaseModel):

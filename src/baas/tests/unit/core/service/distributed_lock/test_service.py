@@ -70,26 +70,26 @@ class TestLockContext:
         assert ctx.acquired is False
 
     def test_explicit_values(self):
-        stop_ev = threading.Event()
+        import datetime
+
+        ts = datetime.datetime(2024, 1, 1, 12, 0, 0)
+        thread = threading.Thread(target=lambda: None)
         ctx = LockContext(
-            lock_name="lk1",
-            lock_holder="h2",
-            expire_time=MagicMock(),
+            lock_name="test",
+            lock_holder="h1",
+            expire_time=ts,
             reentrant_count=3,
-            renew_thread=None,
-            stop_renew=stop_ev,
+            renew_thread=thread,
             acquired=True,
         )
+        assert ctx.expire_time == ts
         assert ctx.reentrant_count == 3
+        assert ctx.renew_thread is thread
         assert ctx.acquired is True
-        assert ctx.stop_renew is stop_ev
 
     def test_state_transitions(self):
-        ctx = LockContext(lock_name="lk", lock_holder="h", expire_time=MagicMock())
-        ctx.reentrant_count += 1
-        assert ctx.reentrant_count == 2
-        ctx.reentrant_count -= 1
-        assert ctx.reentrant_count == 1
+        ctx = LockContext(lock_name="test", lock_holder="h1", expire_time=MagicMock())
+        assert ctx.acquired is False
         ctx.acquired = True
         assert ctx.acquired is True
         ctx.acquired = False
@@ -101,8 +101,7 @@ class TestLockContext:
 
 class TestAcquireLock:
     def test_acquire_success(self, lock_service, repository):
-        repository.get_by_lock_name.return_value = None
-        repository.insert_lock.return_value = 1
+        repository.try_acquire_lock.return_value = True
 
         ctx = lock_service.acquire_lock("mylock", lock_holder="holder1")
 
@@ -110,11 +109,10 @@ class TestAcquireLock:
         assert ctx.lock_name == "mylock"
         assert ctx.lock_holder == "holder1"
         assert ctx.reentrant_count == 1
-        repository.insert_lock.assert_called_once()
+        repository.try_acquire_lock.assert_called_once()
 
     def test_acquire_auto_generates_holder(self, lock_service, repository):
-        repository.get_by_lock_name.return_value = None
-        repository.insert_lock.return_value = 1
+        repository.try_acquire_lock.return_value = True
 
         ctx = lock_service.acquire_lock("mylock")
 
@@ -123,8 +121,7 @@ class TestAcquireLock:
         assert "_" in ctx.lock_holder
 
     def test_acquire_default_expire(self, lock_service, repository):
-        repository.get_by_lock_name.return_value = None
-        repository.insert_lock.return_value = 1
+        repository.try_acquire_lock.return_value = True
 
         ctx = lock_service.acquire_lock("mylock", lock_holder="h1")
 
@@ -135,8 +132,7 @@ class TestAcquireLock:
         assert 28 <= delta.total_seconds() <= 32
 
     def test_acquire_custom_expire(self, lock_service, repository):
-        repository.get_by_lock_name.return_value = None
-        repository.insert_lock.return_value = 1
+        repository.try_acquire_lock.return_value = True
 
         ctx = lock_service.acquire_lock("mylock", lock_holder="h1", expire_seconds=60)
 
@@ -147,12 +143,7 @@ class TestAcquireLock:
         assert 58 <= delta.total_seconds() <= 62
 
     def test_acquire_fails_when_already_held_by_other(self, lock_service, repository):
-        import datetime
-
-        record = MagicMock()
-        record.expire_time = datetime.datetime.now() + datetime.timedelta(seconds=30)
-        record.lock_holder = "other_holder"
-        repository.get_by_lock_name.return_value = record
+        repository.try_acquire_lock.return_value = False
 
         ctx = lock_service.acquire_lock("mylock", lock_holder="holder1")
 
@@ -161,8 +152,7 @@ class TestAcquireLock:
         assert ctx.lock_holder == "holder1"
 
     def test_acquire_reentrant_same_holder(self, lock_service, repository):
-        repository.get_by_lock_name.return_value = None
-        repository.insert_lock.return_value = 1
+        repository.try_acquire_lock.return_value = True
 
         ctx1 = lock_service.acquire_lock("mylock", lock_holder="h1")
         assert ctx1.reentrant_count == 1
@@ -175,84 +165,52 @@ class TestAcquireLock:
         assert ctx3.reentrant_count == 3
 
     def test_acquire_expired_lock_taken_over(self, lock_service, repository):
-        import datetime
-
-        record = MagicMock()
-        record.expire_time = datetime.datetime.now() - datetime.timedelta(seconds=30)
-        record.lock_holder = "old_holder"
-        repository.get_by_lock_name.return_value = record
-        repository.delete_lock.return_value = True
-        repository.insert_lock.return_value = 1
+        repository.try_acquire_lock.return_value = True
 
         ctx = lock_service.acquire_lock("mylock", lock_holder="new_holder")
 
         assert ctx.acquired is True
         assert ctx.lock_holder == "new_holder"
-        repository.delete_lock.assert_called_once_with("mylock")
-        repository.insert_lock.assert_called_once()
 
-    def test_acquire_expired_lock_insert_fails(self, lock_service, repository):
-        import datetime
-
-        record = MagicMock()
-        record.expire_time = datetime.datetime.now() - datetime.timedelta(seconds=30)
-        record.lock_holder = "old_holder"
-        repository.get_by_lock_name.return_value = record
-        repository.delete_lock.return_value = True
-        repository.insert_lock.return_value = 0
+    def test_acquire_try_acquire_returns_false(self, lock_service, repository):
+        repository.try_acquire_lock.return_value = False
 
         ctx = lock_service.acquire_lock("mylock", lock_holder="new_holder")
 
         assert ctx.acquired is False
 
     def test_acquire_when_holder_already_owns_in_db(self, lock_service, repository):
-        import datetime
-
-        record = MagicMock()
-        record.expire_time = datetime.datetime.now() + datetime.timedelta(seconds=30)
-        record.lock_holder = "holder1"
-        repository.get_by_lock_name.return_value = record
-        repository.update_expire_time.return_value = 1
+        repository.try_acquire_lock.return_value = True
 
         ctx = lock_service.acquire_lock("mylock", lock_holder="holder1")
 
         assert ctx.acquired is True
         assert ctx.lock_holder == "holder1"
-        repository.update_expire_time.assert_called_once()
 
-    def test_acquire_insert_lock_raises_exception(self, lock_service, repository):
-        repository.get_by_lock_name.return_value = None
-        repository.insert_lock.side_effect = Exception("duplicate")
+    def test_acquire_try_acquire_raises_exception(self, lock_service, repository):
+        repository.try_acquire_lock.side_effect = Exception("db error")
 
         ctx = lock_service.acquire_lock("mylock", lock_holder="h1")
 
         assert ctx.acquired is False
 
     def test_acquire_general_exception(self, lock_service, repository):
-        repository.get_by_lock_name.side_effect = Exception("db error")
+        repository.try_acquire_lock.side_effect = Exception("db error")
 
         ctx = lock_service.acquire_lock("mylock", lock_holder="h1")
 
         assert ctx.acquired is False
 
     def test_acquire_blocking_success_after_retry(self, lock_service, repository):
-        import datetime
-
         call_count = [0]
 
-        def side_effect(lock_name):
+        def side_effect(*, lock_name, lock_holder, expire_time):
             call_count[0] += 1
             if call_count[0] <= 1:
-                record = MagicMock()
-                record.expire_time = datetime.datetime.now() + datetime.timedelta(
-                    seconds=300
-                )
-                record.lock_holder = "other"
-                return record
-            return None
+                return False
+            return True
 
-        repository.get_by_lock_name.side_effect = side_effect
-        repository.insert_lock.return_value = 1
+        repository.try_acquire_lock.side_effect = side_effect
 
         ctx = lock_service.acquire_lock(
             "mylock", lock_holder="h1", block=True, block_timeout=5.0
@@ -262,12 +220,7 @@ class TestAcquireLock:
         assert call_count[0] >= 2
 
     def test_acquire_blocking_timeout(self, lock_service, repository):
-        import datetime
-
-        record = MagicMock()
-        record.expire_time = datetime.datetime.now() + datetime.timedelta(seconds=300)
-        record.lock_holder = "other"
-        repository.get_by_lock_name.return_value = record
+        repository.try_acquire_lock.return_value = False
 
         ctx = lock_service.acquire_lock(
             "mylock", lock_holder="h1", block=True, block_timeout=0.05
@@ -289,8 +242,7 @@ class TestAcquireLock:
             )
             lock_service._lock_contexts["mylock"] = existing_ctx
 
-        repository.get_by_lock_name.return_value = None
-        repository.insert_lock.return_value = 1
+        repository.try_acquire_lock.return_value = True
 
         ctx = lock_service.acquire_lock("mylock", lock_holder="h1")
 
@@ -311,14 +263,13 @@ class TestReleaseLock:
 
         ctx = LockContext(
             lock_name="mylock",
-            lock_holder="holder_A",
+            lock_holder="h1",
             expire_time=datetime.datetime.now(),
-            acquired=True,
         )
         with lock_service._local_lock:
             lock_service._lock_contexts["mylock"] = ctx
 
-        result = lock_service.release_lock("mylock", lock_holder="holder_B")
+        result = lock_service.release_lock("mylock", lock_holder="h2")
         assert result is False
 
     def test_release_holder_in_context_uses_context_holder_when_none(
@@ -328,23 +279,20 @@ class TestReleaseLock:
 
         ctx = LockContext(
             lock_name="mylock",
-            lock_holder="holder_A",
+            lock_holder="h1",
             expire_time=datetime.datetime.now(),
-            reentrant_count=1,
-            acquired=True,
         )
         with lock_service._local_lock:
             lock_service._lock_contexts["mylock"] = ctx
 
         repository.delete_lock.return_value = True
 
-        result = lock_service.release_lock("mylock", lock_holder=None)
+        result = lock_service.release_lock("mylock")
 
         assert result is True
         repository.delete_lock.assert_called_once_with("mylock")
-        assert "mylock" not in lock_service._lock_contexts
 
-    def test_release_reentrant_decrements(self, lock_service):
+    def test_release_reentrant_decrements(self, lock_service, repository):
         import datetime
 
         ctx = LockContext(
@@ -352,13 +300,11 @@ class TestReleaseLock:
             lock_holder="h1",
             expire_time=datetime.datetime.now(),
             reentrant_count=3,
-            acquired=True,
         )
         with lock_service._local_lock:
             lock_service._lock_contexts["mylock"] = ctx
 
         result = lock_service.release_lock("mylock", lock_holder="h1")
-
         assert result is True
         assert ctx.reentrant_count == 2
         assert "mylock" in lock_service._lock_contexts
@@ -373,7 +319,6 @@ class TestReleaseLock:
             lock_holder="h1",
             expire_time=datetime.datetime.now(),
             reentrant_count=1,
-            acquired=True,
         )
         with lock_service._local_lock:
             lock_service._lock_contexts["mylock"] = ctx
@@ -383,8 +328,8 @@ class TestReleaseLock:
         result = lock_service.release_lock("mylock", lock_holder="h1")
 
         assert result is True
-        repository.delete_lock.assert_called_once_with("mylock")
         assert "mylock" not in lock_service._lock_contexts
+        repository.delete_lock.assert_called_once_with("mylock")
 
     def test_release_lock_delete_lock_returns_false(self, lock_service, repository):
         import datetime
@@ -394,7 +339,6 @@ class TestReleaseLock:
             lock_holder="h1",
             expire_time=datetime.datetime.now(),
             reentrant_count=1,
-            acquired=True,
         )
         with lock_service._local_lock:
             lock_service._lock_contexts["mylock"] = ctx
@@ -404,6 +348,7 @@ class TestReleaseLock:
         result = lock_service.release_lock("mylock", lock_holder="h1")
 
         assert result is False
+        assert "mylock" not in lock_service._lock_contexts
 
     def test_release_lock_exception(self, lock_service, repository):
         import datetime
@@ -413,7 +358,6 @@ class TestReleaseLock:
             lock_holder="h1",
             expire_time=datetime.datetime.now(),
             reentrant_count=1,
-            acquired=True,
         )
         with lock_service._local_lock:
             lock_service._lock_contexts["mylock"] = ctx
@@ -423,6 +367,7 @@ class TestReleaseLock:
         result = lock_service.release_lock("mylock", lock_holder="h1")
 
         assert result is False
+        assert "mylock" not in lock_service._lock_contexts
 
 
 # ── try_lock context manager tests ───────────────────────────────
@@ -430,8 +375,7 @@ class TestReleaseLock:
 
 class TestTryLock:
     def test_acquired_then_releases(self, lock_service, repository):
-        repository.get_by_lock_name.return_value = None
-        repository.insert_lock.return_value = 1
+        repository.try_acquire_lock.return_value = True
         repository.delete_lock.return_value = True
 
         with lock_service.try_lock("mylock", lock_holder="h1") as ctx:
@@ -441,12 +385,7 @@ class TestTryLock:
         assert "mylock" not in lock_service._lock_contexts
 
     def test_not_acquired_does_not_release(self, lock_service, repository):
-        import datetime
-
-        record = MagicMock()
-        record.expire_time = datetime.datetime.now() + datetime.timedelta(seconds=30)
-        record.lock_holder = "other"
-        repository.get_by_lock_name.return_value = record
+        repository.try_acquire_lock.return_value = False
 
         with lock_service.try_lock("mylock", lock_holder="h1") as ctx:
             assert ctx.acquired is False
@@ -454,8 +393,7 @@ class TestTryLock:
         assert "mylock" not in lock_service._lock_contexts
 
     def test_try_lock_with_blocking(self, lock_service, repository):
-        repository.get_by_lock_name.return_value = None
-        repository.insert_lock.return_value = 1
+        repository.try_acquire_lock.return_value = True
         repository.delete_lock.return_value = True
 
         with lock_service.try_lock(
@@ -464,8 +402,7 @@ class TestTryLock:
             assert ctx.acquired is True
 
     def test_try_lock_reentrant_with_cm(self, lock_service, repository):
-        repository.get_by_lock_name.return_value = None
-        repository.insert_lock.return_value = 1
+        repository.try_acquire_lock.return_value = True
         repository.delete_lock.return_value = True
 
         with lock_service.try_lock("mylock", lock_holder="h1") as ctx1:
@@ -484,8 +421,7 @@ class TestTryLock:
 
 class TestAutoRenew:
     def test_start_renew_starts_daemon_thread(self, lock_service, repository):
-        repository.get_by_lock_name.return_value = None
-        repository.insert_lock.return_value = 1
+        repository.try_acquire_lock.return_value = True
 
         ctx = lock_service.acquire_lock("mylock", lock_holder="h1")
 
@@ -496,17 +432,14 @@ class TestAutoRenew:
         _stop_thread(ctx)
 
     def test_renew_disabled_when_interval_zero(self, lock_service_no_renew, repository):
-        repository.get_by_lock_name.return_value = None
-        repository.insert_lock.return_value = 1
+        repository.try_acquire_lock.return_value = True
 
         ctx = lock_service_no_renew.acquire_lock("mylock", lock_holder="h1")
 
         assert ctx.renew_thread is None
 
     def test_renew_updates_expire_time(self, lock_service_short_renew, repository):
-
-        repository.get_by_lock_name.return_value = None
-        repository.insert_lock.return_value = 1
+        repository.try_acquire_lock.return_value = True
 
         call_counter = [0]
 
@@ -526,8 +459,7 @@ class TestAutoRenew:
         assert call_counter[0] >= 1
 
     def test_renew_thread_stops_on_release(self, lock_service, repository):
-        repository.get_by_lock_name.return_value = None
-        repository.insert_lock.return_value = 1
+        repository.try_acquire_lock.return_value = True
         repository.delete_lock.return_value = True
 
         ctx = lock_service.acquire_lock("mylock", lock_holder="h1")
@@ -540,8 +472,7 @@ class TestAutoRenew:
         assert ctx.renew_thread.is_alive() is False
 
     def test_renew_thread_breaks_on_failure(self, lock_service_short_renew, repository):
-        repository.get_by_lock_name.return_value = None
-        repository.insert_lock.return_value = 1
+        repository.try_acquire_lock.return_value = True
         repository.update_expire_time.return_value = 0
 
         ctx = lock_service_short_renew.acquire_lock("mylock", lock_holder="h1")
@@ -553,8 +484,7 @@ class TestAutoRenew:
     def test_renew_thread_breaks_on_exception(
         self, lock_service_short_renew, repository
     ):
-        repository.get_by_lock_name.return_value = None
-        repository.insert_lock.return_value = 1
+        repository.try_acquire_lock.return_value = True
         repository.update_expire_time.side_effect = Exception("renew error")
 
         ctx = lock_service_short_renew.acquire_lock("mylock", lock_holder="h1")
@@ -574,8 +504,7 @@ class TestAutoRenew:
         lock_service._stop_renew_thread(ctx)
 
     def test_renew_worker_stops_when_event_set(self, lock_service, repository):
-        repository.get_by_lock_name.return_value = None
-        repository.insert_lock.return_value = 1
+        repository.try_acquire_lock.return_value = True
 
         ctx = lock_service.acquire_lock("mylock", lock_holder="h1")
         assert ctx.renew_thread is not None

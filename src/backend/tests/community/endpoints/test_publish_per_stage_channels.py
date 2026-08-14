@@ -13,10 +13,8 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from agentclaw.community.core.channel.services.repositories import ChannelRepository
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.chat import ChannelRepository
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from tests.community.framework import CaseInput, ExpectSuccess, endpoint_test
 from tests.community.endpoints.test_service_bot_publish_flow import (

@@ -11,11 +11,13 @@ import json
 import os
 import shlex
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 # 默认连接超时时间（秒）
 DEFAULT_CONNECTION_TIMEOUT = 10
+AGENTBOX_ENV_VAR = "MAC_CONTAINER"
 
 CONFIG_DIR = Path(__file__).parent
 # 统一配置文件入口（Moltis/OpenClaw 共用）
@@ -57,6 +59,25 @@ class EngineProcessSettings:
         return len(self.start_cmd) > 0
 
 
+@dataclass(frozen=True)
+class TemporaryUrlSettings:
+    max_bytes: int
+    timeout_seconds: float
+
+
+def load_temporary_url_settings() -> TemporaryUrlSettings:
+    max_bytes = int(
+        os.getenv("ENGINE_TEMPORARY_URL_MAX_BYTES", str(100 * 1024 * 1024))
+    )
+    timeout_seconds = float(os.getenv("ENGINE_TEMPORARY_URL_TIMEOUT_SECONDS", "60"))
+    if max_bytes <= 0 or timeout_seconds <= 0:
+        raise ValueError("temporary URL limits must be positive")
+    return TemporaryUrlSettings(
+        max_bytes=max_bytes,
+        timeout_seconds=timeout_seconds,
+    )
+
+
 def _to_bool(value: Any, default: bool) -> bool:
     if isinstance(value, bool):
         return value
@@ -67,6 +88,27 @@ def _to_bool(value: Any, default: bool) -> bool:
         if normalized in {"0", "false", "no", "off"}:
             return False
     return default
+
+
+def is_agentbox_runtime() -> bool:
+    """Return whether this process uses Desktop's downloaded repo delivery."""
+
+    return os.getenv(AGENTBOX_ENV_VAR, "").strip().lower() in {"1", "true"}
+
+
+class RepoDelivery(StrEnum):
+    """Runtime provider's mechanism for exposing the current Skills repo."""
+
+    MOUNT = "mount"
+    DOWNLOAD = "download"
+
+
+def current_repo_delivery() -> RepoDelivery:
+    """Resolve the runtime-owned repo delivery mechanism."""
+
+    if is_agentbox_runtime():
+        return RepoDelivery.DOWNLOAD
+    return RepoDelivery.MOUNT
 
 
 def _normalize_header_name(value: Any) -> str:

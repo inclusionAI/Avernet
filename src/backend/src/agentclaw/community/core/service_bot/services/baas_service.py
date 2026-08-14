@@ -21,11 +21,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
+import base64
 import json
+import re
 import time
-import uuid
 
 import httpx
+from agentclaw.community.core.caller_identity.credential import (
+    CALLER_CREDENTIAL_REQUEST_INVALID,
+    CALLER_OUTBOUND_INVALID,
+    CALLER_OUTBOUND_UPDATE_FAILED,
+    CALLER_TARGET_AMBIGUOUS,
+    CALLER_TARGET_NOT_FOUND,
+    CallerCredentialError,
+    CallerToken,
+)
+from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 
 from agentclaw.community.plugin_api.http_client import HttpClient
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
@@ -51,10 +62,13 @@ from agentclaw.community.kernel.device_dto import (
 )
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.bot_startup_script.protocols import (
+        StartupScriptReaderProtocol,
+    )
     from agentclaw.community.plugin_api.outbound_rules import OutboundRuleProvider
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-    from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
-    from agentclaw.community.core.service_bot.repository.bot_publish_repository import BotPublishRepositoryProtocol
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
+    from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
+    from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
     from agentclaw.community.core.system_config.service import SystemConfigService
     from agentclaw.community.core.common_config import CommonWhiteListService
 
@@ -62,6 +76,39 @@ logger = get_logger()
 
 
 ENGINE_DIR_MOUNT_WHITELIST_BUSINESS_CODE = "nas_mount"
+
+#: Where the per-bot startup script's output is captured (issue #926).
+#:
+#: The body itself goes to a ``mktemp`` file and is removed after the run. Two
+#: reasons it must not be a fixed path under /home/admin: that directory is
+#: NAS-mounted for many bots, so a fixed path would persist a plaintext body
+#: across restarts and outlive a DELETE of the script; and an unpredictable
+#: name owned by ``admin`` cannot be pre-created by anyone else.
+STARTUP_SCRIPT_LOG = "/home/admin/logs/startup_script.log"
+
+#: Separates the platform boot chain from the per-bot user stage, and the marker
+#: log redaction splits on so the platform half stays readable.
+_USER_STAGE_MARKER = "\n__OCB_RC=$?\n"
+
+#: Wall-clock cap on the user stage.
+#:
+#: Sized against the create budget on the other side of the callback: the
+#: backend's publish poller gives up at _CREATE_PUBLISH_TIMEOUT_SECONDS (600s,
+#: baas_publish_task_handlers.py) and the device only reports once this whole
+#: sequence exits. Half that budget leaves room for the platform steps and for
+#: the callback's own retries.
+STARTUP_SCRIPT_TIMEOUT_SECONDS = 300
+
+#: Grace period between ``timeout``'s TERM and its KILL.
+#:
+#: ``timeout N`` alone sends TERM and then *waits* — a script that traps or
+#: ignores TERM keeps the hook alive indefinitely, and nothing upstream would
+#: cut it short (see the ``after_create_hook_wait_seconds`` note in
+#: ``_build_create_bot_payload``: BaaS accepts that value and ignores it, and
+#: the wrapper is nohup'd). ``-k`` follows up with KILL, which cannot be
+#: caught, so the cap holds against a hostile or merely buggy script. The grace
+#: is short but non-zero so a well-behaved trap can still flush its own log.
+STARTUP_SCRIPT_KILL_GRACE_SECONDS = 10
 ENGINE_DIR_MOUNT_WHITELIST_PARAM_CODE = "engine_dir_mount_whitelist"
 
 
@@ -90,6 +137,67 @@ DEFAULT_READ_ONLY_RULES = [
         "rule_type": "glob",
     },
 ]
+
+
+
+#: The encoded script body inside the emitted user stage — everything between
+#: ``echo `` and `` | base64 -d``. Only this is redacted: the shell around it is
+#: platform-authored and is what makes these log lines worth reading.
+_ENCODED_BODY_RE = re.compile(r"echo ([A-Za-z0-9+/=]+) \| base64 -d")
+
+
+def _elide_encoded_body(match: "re.Match[str]") -> str:
+    """Replace an encoded body with its *decoded* size."""
+    encoded = match.group(1)
+    # 4 base64 chars per 3 bytes, minus padding — the caller's actual size.
+    decoded_len = len(encoded) // 4 * 3 - encoded.count("=")
+    return f"echo <startup script elided, {decoded_len} bytes> | base64 -d"
+
+
+def _redact_payload_for_log(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Shallow copy of a create payload with the *script body* elided.
+
+    ``after_create_cmd_hook`` is mostly the platform's own boot chain, which is
+    exactly what someone reads these logs to debug — so everything the platform
+    authored stays verbatim, including the ``if``/``fi``/``exit`` scaffolding
+    around the user stage. Only the caller's encoded body is replaced: the
+    published contract's "no secrets in a script body" is advice, not an
+    enforcement mechanism, and these payloads are logged at INFO on every
+    create, release and restart.
+
+    A hook with no encoded body is returned unchanged, so this is a no-op for
+    every bot without a script.
+
+    **This covers this log only.** The same hook travels on to the device
+    service, which logs ``rendered_hook[:1024]`` at INFO
+    (``_device_service.py``) — and the encoded body usually starts inside that
+    window, so its opening bytes are recoverable from *those* logs no matter
+    what happens here. Redacting there would mean changing that service; until
+    then the published contract says plainly that a body is logged in
+    recoverable form, rather than implying this function makes it safe.
+    """
+    config = payload.get("config")
+    if not isinstance(config, dict):
+        return payload
+    deploy = config.get("deploy_config")
+    if not isinstance(deploy, dict):
+        return payload
+
+    hook = deploy.get("after_create_cmd_hook")
+    if not isinstance(hook, str):
+        return payload
+
+    elided, count = _ENCODED_BODY_RE.subn(_elide_encoded_body, hook)
+    if not count:
+        return payload
+
+    redacted = dict(payload)
+    redacted["config"] = dict(config)
+    redacted["config"]["deploy_config"] = {
+        **deploy,
+        "after_create_cmd_hook": elided,
+    }
+    return redacted
 
 
 class BaasServiceError(Exception):
@@ -355,7 +463,9 @@ class BaasService:  # pragma: no cover
         secret_resolver: SecretResolver,
         common_whitelist_service: "CommonWhiteListService",
         outbound_rule_provider: "OutboundRuleProvider",
+        startup_script_reader: "StartupScriptReaderProtocol",
         personal_bot_template_uuid: Optional[str] = None,
+        theta_master_key_secret: str = "",
     ):
         """初始化 BaasService。
 
@@ -403,6 +513,20 @@ class BaasService:  # pragma: no cover
         self._secret_resolver = secret_resolver
         self._common_whitelist_service = common_whitelist_service
         self._outbound_rule_provider = outbound_rule_provider
+        self._theta_master_key_secret = theta_master_key_secret
+        # Per-bot startup script (issue #926). Resolved here rather than passed
+        # down by each caller: _build_create_bot_payload is reached from create,
+        # from service-bot release, and from upgrade_bot (restart), and a script
+        # can only be written *after* a bot exists — so restart is the path that
+        # actually delivers it. Threading a parameter through every caller is
+        # how that path gets missed.
+        #
+        # Required, not optional. An optional reader means any composition that
+        # forgets to wire it still constructs, and then every start silently
+        # skips a stored script — the same invisible-unprovisioned failure this
+        # feature guards against elsewhere. Required, that mistake is a
+        # TypeError naming the argument at construction.
+        self._startup_script_reader = startup_script_reader
 
     def post_bots_api(
         self,
@@ -474,15 +598,17 @@ class BaasService:  # pragma: no cover
         path: str,
         payload: Dict[str, Any],
         action: str,
+        tenant: Optional[str] = None,
     ) -> Dict[str, Any]:
         """发送 POST 请求到 BaaS Bot API，处理响应和错误码（内部实现）。
 
         ``path`` 应为前导斜杠的相对路径（如 ``/api/v1/bots``）；base_url 由
-        ``self._http``（baas-qualified HttpClient）自动拼接。
+        ``self._http``（baas-qualified HttpClient）自动拼接。``tenant`` 留空时使用
+        ``self._tenant``（多实例重启等场景可显式覆盖）。
         """
         response = self._http.post(
             path,
-            params={"tenant": self._tenant},
+            params={"tenant": tenant or self._tenant},
             json=payload,
             timeout=30.0,
         )
@@ -565,6 +691,7 @@ class BaasService:  # pragma: no cover
         template_config: Optional[Dict[str, Any]] = None,
         mount_home_dir_storage: bool | None = None,
         ext_info: Optional[Dict[str, Any]] = None,
+        startup_script: str | None = None,
     ) -> Dict[str, Any]:
         """构建创建 Bot 的请求体。
 
@@ -617,6 +744,16 @@ class BaasService:  # pragma: no cover
                 mount_home_dir_storage=mount_home_dir_storage,
             )
 
+        # Per-bot startup script. No production caller passes one — create,
+        # release, restart and both device services all take the ``None`` branch
+        # — so resolving here is what makes every one of those paths deliver the
+        # script. The parameter exists for tests that pin an exact body; keep it
+        # honest by not reading it as evidence of a live caller.
+        if startup_script is None:
+            startup_script = self._resolve_startup_script(
+                entity_id=entity_id, bot_id=bot_id
+            )
+
         # 构建 sandbox 成功后执行的命令
         start_up_cmd = self._get_start_cmd(
             bot_id=bot_id,
@@ -630,6 +767,7 @@ class BaasService:  # pragma: no cover
             version=version,
             mount_home_dir_storage=mount_home_dir_storage,
             ext_info=ext_info,
+            startup_script=startup_script,
         )
 
         # 构建实例销毁前置hook命令
@@ -659,8 +797,30 @@ class BaasService:  # pragma: no cover
             stage=stage,
         )
 
+        # 引擎专属模板字段在 strategy 内集中消费；下游只接收通用 dict。
+        from agentclaw.community.core.bot_management.engines import resolve_provisioning
+
+        provisioning_ctx, provisioning_strategy = resolve_provisioning(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            bot_type=bot_type,
+            active_engine=engine,
+            template_type=bot.get("template_type"),
+            template_config=template_config,
+        )
+        extra_properties = provisioning_strategy.build_extra_properties(
+            provisioning_ctx,
+            secret_resolver=self._secret_resolver,
+            theta_master_key_secret=self._theta_master_key_secret,
+        )
+
         # 构建出站操作规则
-        outbound_operation_rule = self._build_outbound_operation_rule(bot_id, owner_id, agent_pass_token)
+        outbound_operation_rule = self._build_outbound_operation_rule(
+            bot_id,
+            owner_id,
+            agent_pass_token,
+            extra_properties=extra_properties,
+        )
 
         # 从 ac_bots.ext.service_bot_config 解析沙箱规格（cpu/memory 缺一则整组不传）
         resource_spec = self._resolve_service_bot_resource_spec(bot.get("ext"))
@@ -675,31 +835,24 @@ class BaasService:  # pragma: no cover
                 f"[BaasService._build_create_bot_payload] no resource_spec: bot_id={bot_id}"
             )
 
-        envs = {"AGENTCLAW_ENGINE": engine}
-        if extra_envs:
-            envs.update(extra_envs)
-
-        docker_image = None
-        overrides = SandboxOverrides.from_template_config(template_config)
-        if not overrides.is_empty():
-            try:
-                overrides.validate()
-            except InvalidSandboxOverridesError as e:
-                raise BaasServiceError(f"沙箱覆写参数校验失败: {e}") from e
-
-            # 旧 Arca 使用 template_config 覆盖模板默认镜像、规格和环境变量；
-            # BaaS Docker template 的镜像覆写字段名为 docker_image。
-            envs = overrides.merged_envs(envs)
-            if overrides.resource_spec is not None:
-                resource_spec = overrides.resource_spec
-            if overrides.image is not None:
-                docker_image = overrides.image
+        envs, resource_spec, docker_image = self._resolve_deploy_envs_spec_image(
+            engine=engine,
+            extra_envs=extra_envs,
+            template_config=template_config,
+            resource_spec=resource_spec,
+        )
 
         # 构建部署配置
         # user_id / tc_bot_id: BaaS 侧按 user_id+tc_bot_id 唯一确定 workspace 目录
         # (与 desktop_bot_service._build_create_bot_payload 同款姿势)
         deploy_config = BotDeployConfig(
             after_create_cmd_hook=start_up_cmd,
+            # NOTE: this does not bound the hook. BaaS threads it into
+            # dispatch_start_hook as ``hook_timeout`` and then ignores it
+            # (``# noqa: ARG001 - kept for API compatibility``); the wrapper is
+            # nohup'd and runs unbounded. So it does not contradict
+            # STARTUP_SCRIPT_TIMEOUT_SECONDS, which is enforced by ``timeout``
+            # in the command itself — and it is why that one has to be.
             after_create_hook_wait_seconds=10,
             before_destroy_cmd_hook=destroy_cmd,
             before_destroy_hook_wait_seconds=10,
@@ -742,6 +895,42 @@ class BaasService:  # pragma: no cover
 
         return payload
 
+    def _resolve_deploy_envs_spec_image(
+        self,
+        *,
+        engine: str,
+        extra_envs: Optional[Dict[str, Any]],
+        template_config: Optional[Dict[str, Any]],
+        resource_spec: Any,
+    ) -> tuple[Dict[str, Any], Any, Optional[str]]:
+        """Resolve the deploy config's ``(envs, resource_spec, docker_image)``.
+
+        Base envs carry the engine; ``extra_envs`` and any validated
+        ``template_config`` sandbox overrides (image/spec/envs) layer on top. Old
+        Arca used ``template_config`` to override the template's default image,
+        spec, and envs; the BaaS Docker template's image-override field is
+        ``docker_image``. Returns the possibly-overridden triple.
+        """
+        envs = {"AGENTCLAW_ENGINE": engine}
+        if extra_envs:
+            envs.update(extra_envs)
+
+        docker_image = None
+        overrides = SandboxOverrides.from_template_config(template_config)
+        if not overrides.is_empty():
+            try:
+                overrides.validate()
+            except InvalidSandboxOverridesError as e:
+                raise BaasServiceError(f"沙箱覆写参数校验失败: {e}") from e
+
+            envs = overrides.merged_envs(envs)
+            if overrides.resource_spec is not None:
+                resource_spec = overrides.resource_spec
+            if overrides.image is not None:
+                docker_image = overrides.image
+
+        return envs, resource_spec, docker_image
+
     def create_bot(
         self,
         bot: Dict[str, Any],
@@ -757,6 +946,8 @@ class BaasService:  # pragma: no cover
         version: str = "1",
         auto_approve_publish: bool = True,
         ext_info: Optional[Dict[str, Any]] = None,
+        extra_envs: Optional[Dict[str, Any]] = None,
+        template_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """调用 BaaS 层 API 创建 Bot。
 
@@ -776,6 +967,7 @@ class BaasService:  # pragma: no cover
             version: str = "1",发布版本
             auto_approve_publish: 是否由 BaaS 创建后自动审批发布单
             ext_info: Bot 额外信息
+            template_config: 沙箱覆写配置（镜像/规格/envs）
 
         Returns:
             BaaS 层返回的 Bot 信息，包含：
@@ -824,11 +1016,14 @@ class BaasService:  # pragma: no cover
             version=version,
             auto_approve_publish=auto_approve_publish,
             ext_info=ext_info,
+            extra_envs=extra_envs,
+            template_config=template_config,
         )
 
         logger.info(
             f"[BaasService.create_bot] "
-            f"Upgrading bot in BaaS: operator={owner_id}, request_id={request_id}, payload={payload}"
+            f"Upgrading bot in BaaS: operator={owner_id}, request_id={request_id}, "
+            f"payload={_redact_payload_for_log(payload)}"
         )
 
         try:
@@ -977,6 +1172,12 @@ class BaasService:  # pragma: no cover
         config = BotConfig(
             entity_id=bot.get("entity_id", ""),
             entity_type=bot.get("entity_type", "staff"),
+            # All-auto approval (#197): the teclaw create/update payloads used to
+            # omit this (BotConfig default False), making the client-side approve
+            # load-bearing. Under all-auto, BaaS approves server-side and every
+            # client approve call is removed, so this must be True for both the
+            # teclaw create and update paths (both build through here).
+            auto_approve_publish=True,
             deploy_config=deploy_config,
         )
         payload: Dict[str, Any] = {
@@ -1000,9 +1201,17 @@ class BaasService:  # pragma: no cover
         try:
             return self._post_bots_api(path=path, payload=payload, action=action)
         except httpx.HTTPStatusError as e:
-            raise BaasServiceError(
+            error = BaasServiceError(
                 f"BaaS API error: {e.response.status_code} - {e.response.text}"
             )
+            # Preserve the HTTP payload for structured extraction downstream:
+            # BotBuildService._extract_baas_error_info reads ``.response.json()``
+            # to classify errors like the 404 ``{"detail": {"error_code":
+            # "BOT_NOT_FOUND"}}``. Dropping it here made the teclaw path unable
+            # to take the gone-bot fallback (first-release / restart-recreate)
+            # that the ARCA path (which re-raises the HTTPStatusError) has.
+            error.response = e.response
+            raise error from e
         except BaasServiceError:
             raise
         except Exception as e:
@@ -1041,6 +1250,10 @@ class BaasService:  # pragma: no cover
         payload = {
             "operator": operator,
             "request_id": request_id,
+            # All-auto approval (#197): destroy previously relied on a client-side
+            # approve after the call; under all-auto BaaS approves the DESTROY
+            # workflow server-side and the client approve is removed.
+            "auto_approve_publish": True,
         }
 
         logger.info(
@@ -1049,36 +1262,15 @@ class BaasService:  # pragma: no cover
         )
 
         try:
-            response = self._http.post(
-                f"/api/v1/bots/{bot_uuid}/destroy",
-                params={"tenant": self._tenant},
-                json=payload,
-                timeout=30.0,
+            result = self._post_bots_api(
+                path=f"/api/v1/bots/{bot_uuid}/destroy",
+                payload=payload,
+                action="destroy_bot",
             )
-            response.raise_for_status()
-
-            response_data = response.json()
-
-            logger.info(
-                "[BaasService.destroy_bot] BaaS raw response: %s",
-                response_data,
-            )
-
-            # 检查响应码
-            if response_data.get("code") != 0:
-                raise BaasServiceError(
-                    f"BaaS API error: {response_data.get('message', 'Unknown error')}"
-                )
-
-            result = response_data.get("data", {})
-
-            publish_id = result.get("publish_id")
-
             logger.info(
                 f"[BaasService.destroy_bot] "
-                f"Bot destroy initiated: bot_uuid={bot_uuid}, publish_id={publish_id}"
+                f"Bot destroy initiated: bot_uuid={bot_uuid}, publish_id={result.get('publish_id')}"
             )
-
             return result
 
         except httpx.HTTPStatusError as e:
@@ -1089,6 +1281,8 @@ class BaasService:  # pragma: no cover
             raise BaasServiceError(
                 f"BaaS API error: {e.response.status_code} - {e.response.text}"
             )
+        except BaasServiceError:
+            raise
         except Exception as e:
             logger.error(
                 f"[BaasService.destroy_bot] "
@@ -1202,36 +1396,15 @@ class BaasService:  # pragma: no cover
         )
 
         try:
-            response = self._http.post(
-                f"/api/v1/bots/{bot_uuid}/stop",
-                params={"tenant": self._tenant},
-                json=payload,
-                timeout=30.0,
+            result = self._post_bots_api(
+                path=f"/api/v1/bots/{bot_uuid}/stop",
+                payload=payload,
+                action="stop_bot",
             )
-            response.raise_for_status()
-
-            response_data = response.json()
-
-            logger.info(
-                "[BaasService.stop_bot] BaaS raw response: %s",
-                response_data,
-            )
-
-            # 检查响应码
-            if response_data.get("code") != 0:
-                raise BaasServiceError(
-                    f"BaaS API error: {response_data.get('message', 'Unknown error')}"
-                )
-
-            result = response_data.get("data", {})
-
-            publish_id = result.get("publish_id")
-
             logger.info(
                 f"[BaasService.stop_bot] "
-                f"Bot destroy initiated: bot_uuid={bot_uuid}, publish_id={publish_id}"
+                f"Bot destroy initiated: bot_uuid={bot_uuid}, publish_id={result.get('publish_id')}"
             )
-
             return result
 
         except httpx.HTTPStatusError as e:
@@ -1242,6 +1415,8 @@ class BaasService:  # pragma: no cover
             raise BaasServiceError(
                 f"BaaS API error: {e.response.status_code} - {e.response.text}"
             )
+        except BaasServiceError:
+            raise
         except Exception as e:
             logger.error(
                 f"[BaasService.stop_bot] "
@@ -1256,6 +1431,7 @@ class BaasService:  # pragma: no cover
         request_id: str,
         target_count: int,
         auto_approve_publish: bool = False,
+        config: BotConfig | Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         """调用 BaaS 层 API 扩缩容 Bot。
 
@@ -1298,6 +1474,15 @@ class BaasService:  # pragma: no cover
             "request_id": request_id,
             "auto_approve_publish": auto_approve_publish,
         }
+        if config is not None:
+            # Scale config is a patch. Accept a sparse wire dict so callers can
+            # override only docker_image without materializing BotDeployConfig
+            # defaults (TTL/hooks), which would overwrite the frozen publish
+            # configuration in BaaS. Existing BotConfig callers keep the legacy
+            # full serialization behavior.
+            payload["config"] = (
+                config.to_dict() if isinstance(config, BotConfig) else dict(config)
+            )
 
         logger.info(
             f"[BaasService.scale_bot] "
@@ -1713,7 +1898,7 @@ class BaasService:  # pragma: no cover
         self,
         bind_id: int,
         port: int = 20003,
-        path: str = "api/openclaw/ws",
+        path: str = "/api/openclaw/ws",
         tenant: str = "",
         device_affinity: Optional[str] = None,
         device_uuid: Optional[str] = None,
@@ -1726,7 +1911,10 @@ class BaasService:  # pragma: no cover
         Args:
             bind_id: 设备绑定 ID
             port: 目标端口，默认 20003
-            path: WebSocket 路径，默认 api/openclaw/ws
+            path: WebSocket 路径，必须自带前导斜杠，默认 /api/openclaw/ws。
+                BaaS 侧 ``build_proxypass_url`` 是
+                ``f"{scheme}://{host}/proxypass/{target}{path}"`` 直接拼接，
+                不补分隔符；缺斜杠会拼出 ``…@0:20003api/openclaw/ws``。
             tenant: 租户名称；空则回落到 self._tenant（BaasConfig.tenant，各部署配置）
             device_affinity: 设备亲和性标识，用于指定目标设备（可选）
             device_uuid: 多实例场景锁定特定实例（可选）；不传则 BaaS 自动选活跃实例
@@ -1757,7 +1945,7 @@ class BaasService:  # pragma: no cover
         self,
         bot_uuid: str,
         port: int = 20003,
-        path: str = "api/openclaw/ws",
+        path: str = "/api/openclaw/ws",
         tenant: str = "",
         device_affinity: Optional[str] = None,
         device_uuid: Optional[str] = None,
@@ -1770,7 +1958,8 @@ class BaasService:  # pragma: no cover
         Args:
             bot_uuid: Bot UUID（= device_id）
             port: 目标端口，默认 20003
-            path: WebSocket 路径，默认 api/openclaw/ws
+            path: WebSocket 路径，必须自带前导斜杠，默认 /api/openclaw/ws
+                （拼接契约见 :meth:`get_ws_info`）
             tenant: 租户名称；空则回落到 self._tenant（BaasConfig.tenant，各部署配置）
             device_affinity: 设备亲和性标识，用于指定目标设备（可选）
             device_uuid: 多实例场景锁定特定实例（可选）；不传则 BaaS 自动选活跃实例
@@ -1847,9 +2036,22 @@ class BaasService:  # pragma: no cover
             # only floods the alarm/ticket pipeline. Whether a failure is truly
             # alarm-worthy is the caller's call, made where the business context
             # is known.
+            #
+            # The BaaS app only ever answers this endpoint with JSON
+            # (200/404/503/500); a 3xx status here is injected by the fronting
+            # gateway (Spanner) before the request reaches BaaS. Its ``Location``
+            # says where the request is being redirected (login/SSO host vs a
+            # moved route), and bot_uuid/tenant/device_affinity let us cluster
+            # intermittent redirects by bot/tenant/target device — the data
+            # needed to tell a partial-instance/routing fault apart from a
+            # blanket auth requirement.
+            location = e.response.headers.get("location")
             logger.warning(
                 f"[BaasService.get_ws_info_by_bot_uuid] "
-                f"HTTP error: {e.response.status_code} - {e.response.text}"
+                f"HTTP error: {e.response.status_code} - "
+                f"bot_uuid={bot_uuid}, tenant={effective_tenant}, "
+                f"device_affinity={device_affinity}, location={location!r} - "
+                f"{e.response.text}"
             )
             raise BaasServiceError(
                 f"BaaS API error: {e.response.status_code} - {e.response.text}"
@@ -1937,6 +2139,51 @@ class BaasService:  # pragma: no cover
                 f"Failed to list bots: {e}"
             )
             raise BaasServiceError(f"Failed to list bots: {e}")
+
+    def list_bot_publishes(self, bot_uuid: str) -> List[Dict[str, Any]]:
+        """List every publish workflow associated with a bot_uuid (including
+        terminal ones), newest first.
+
+        Maps to BaaS ``GET /api/v1/bots/{bot_uuid}/publishes``. Used by the
+        idempotent-recovery adopt-by-query differencing: the returned workflow ids
+        are differenced against the ids the local ledger has already claimed, and an
+        unclaimed one is this operation's in-doubt workflow.
+
+        Each element carries: ``id`` (workflow id), ``bot_id``, ``publish_type``,
+        ``status``, ``gmt_create``.
+
+        A 404 (bot_uuid unknown) is deliberately mapped to ``[]`` rather than
+        raised: this endpoint is bot-scoped, so a 404 means "this bot has no
+        publish workflows" — which is exactly the "no candidate to adopt" signal
+        adopt-by-query needs. It is load-bearing for the destroyed-bot cases: e.g.
+        an upgrade whose target bot is gone snapshots an empty baseline here and
+        then falls back to a first-release on the ``BOT_NOT_FOUND`` from the issue;
+        raising on the 404 would break that fallback. Non-404 failures still raise.
+
+        Raises:
+            BaasServiceError: on any non-404 call failure.
+        """
+        try:
+            data = self._get_bots_api(
+                f"/api/v1/bots/{bot_uuid}/publishes",
+                action="list_bot_publishes",
+            )
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.info(
+                    "[BaasService.list_bot_publishes] bot_uuid=%s not found (404) -> []",
+                    bot_uuid,
+                )
+                return []
+            logger.error(
+                "[BaasService.list_bot_publishes] HTTP error: %s - %s",
+                e.response.status_code, e.response.text,
+            )
+            raise BaasServiceError(
+                f"BaaS API error: {e.response.status_code} - {e.response.text}"
+            )
+        # A list `data` deserializes straight through _get_bots_api's data extract.
+        return data if isinstance(data, list) else []
 
     def get_bind_id(
         self,
@@ -2102,6 +2349,7 @@ class BaasService:  # pragma: no cover
             version: str | None = "1",
             mount_home_dir_storage: bool = False,
             ext_info: Optional[Dict[str, Any]] = None,
+            startup_script: str = "",
     ):
         # 1、Bootstrap 补偿脚本
         bootstrap_cmp = self._get_bootstrap_cmp()
@@ -2123,10 +2371,116 @@ class BaasService:  # pragma: no cover
         # 6、 Start watchdog
         watchdog_cmd = self._get_start_watchdog_cmd()
 
-        return (
+        chain = (
             f"{bootstrap_cmp} && ({install_engine_cmd}) && "
             f" {start_cmd} && {watchdog_cmd}"
         )
+
+        # 7、 Per-bot startup script (issue #926)
+        if not startup_script:
+            return chain
+
+        # The user stage runs LAST and cannot influence the boot's outcome.
+        #
+        # __OCB_RC is load-bearing, not defensive. The BaaS wrapper takes its
+        # EXIT_CODE from this script's *last* command, and that code is what
+        # drives the device to ACTIVE or FAILED. Ending on `... || true` would
+        # therefore report SUCCESS for every start — including boots where
+        # bootstrap failed. Capture the platform status first, run the user
+        # stage, then re-assert it.
+        return (
+            f"{chain}"
+            f"{_USER_STAGE_MARKER}"
+            f'if [ "$__OCB_RC" -eq 0 ]; then\n'
+            f"{self._get_startup_script_segment(startup_script)}\n"
+            f"fi\n"
+            f"exit $__OCB_RC\n"
+        )
+
+    def _resolve_startup_script(self, *, entity_id: str, bot_id: str) -> str:
+        """Read the bot's stored startup script, or ``""`` when it has none.
+
+        **A read failure propagates.** It used to be swallowed, on the reasoning
+        that a new feature should not be able to break provisioning — but the
+        result of swallowing is a bot that starts, reports ready, and is not
+        provisioned, indistinguishable from one that never had a script. That is
+        the silent-wrong-answer failure this feature guards against everywhere
+        else, and the published contract says a stored script runs on **every**
+        start the platform composes.
+
+        "A failure degrades rather than blocks" is about the script's own
+        execution — a bad script costs a feature, not the bot. It was never
+        about quietly omitting a script that exists.
+
+        The blast radius is narrower than it looks: this is one indexed read on
+        the backend's own database, and every other step of a create or restart
+        reads that same database. A failure here almost certainly means the
+        operation was failing anyway, so propagating costs little and buys a
+        start that is either provisioned or visibly failed.
+
+        ``""`` still means "no script" — either the bot has no identity to look
+        one up by, or the reader has none stored. Neither is an error. An
+        unwired reader is no longer among these cases: it is now a constructor
+        argument, so it cannot be missing here.
+
+        ``(entity_id, bot_id)`` is the whole lookup, and it is enough: it names
+        one bot for the life of the data, because ``ac_bots`` constrains
+        ``uk_bot_id_entity_id_env`` and its deletion is a soft update, so the
+        tuple stays occupied and no later bot can be created onto it. That is
+        what lets the device-allocation callers — which hand-build a bot dict
+        and call this *before* any ``ac_bots`` row exists — use the same read as
+        everyone else.
+        """
+        if not entity_id or not bot_id:
+            return ""
+        return self._startup_script_reader.get_body(
+            entity_id=entity_id, bot_id=bot_id
+        )
+
+    def _get_startup_script_segment(
+        self,
+        script: str,
+        timeout_seconds: int = STARTUP_SCRIPT_TIMEOUT_SECONDS,
+        kill_grace_seconds: int = STARTUP_SCRIPT_KILL_GRACE_SECONDS,
+    ) -> str:
+        """Emit the user stage: decode, run under a timeout, never fail the boot.
+
+        The body is base64-encoded here rather than quoted. Two reasons, both
+        load-bearing:
+
+        1. It is never spliced into shell syntax, so no quote, ``$(...)`` or
+           heredoc delimiter in a caller's script can break out of the command
+           this method builds.
+        2. base64's alphabet has no braces, so BaaS's ``_safe_format_hook`` —
+           which regex-substitutes ``{token}`` / ``{client_id}`` across the whole
+           hook before running it — cannot reach inside the body and rewrite it.
+
+        Output goes to its own log so the script's chatter is separable from the
+        platform's inside the container, even though the two share one exit
+        status upstream.
+        """
+        encoded = base64.b64encode(script.encode("utf-8")).decode("ascii")
+        # Runs as ``admin``, like every platform step (``_get_bootstrap_cmp``
+        # and friends all use ``su admin -c``). The hook itself runs as root, so
+        # an unwrapped user stage would hand a caller root inside their own
+        # container and leave root-owned files behind under /home/admin.
+        #
+        # The body goes to ``mktemp`` and is removed afterwards: a fixed path
+        # under the NAS-mounted home would persist a plaintext script across
+        # restarts and survive a DELETE of it.
+        #
+        # Single-quoting is safe here: everything interpolated is either a fixed
+        # path or base64 (alphabet [A-Za-z0-9+/=]), so the body cannot contain a
+        # quote that closes this string. ``$f`` is expanded by the su'd shell at
+        # runtime, not by this f-string.
+        inner = (
+            "f=$(mktemp)"
+            f' && echo {encoded} | base64 -d > "$f"'
+            f" && timeout -k {kill_grace_seconds} {timeout_seconds}"
+            f' bash "$f" >> {STARTUP_SCRIPT_LOG} 2>&1'
+            '; rm -f "$f"'
+        )
+        return f"  su admin -c '{inner}' || true"
 
     def _get_destroy_cmd(
             self
@@ -2219,7 +2573,7 @@ class BaasService:  # pragma: no cover
             stage_str = stage
             ext_info = ext_info or {}
             if ext_info.get("biz_id"):
-                stage_str += f"-{ext_info.get("biz_id")}"
+                stage_str += f"-{ext_info.get('biz_id')}"
             start_service_cmd += f" --stage {stage_str}"
 
         if version:
@@ -2631,6 +2985,8 @@ class BaasService:  # pragma: no cover
         owner_id: str,
         agent_pass_token: str = "",
         agent_code: str = "",
+        *,
+        extra_properties: dict[str, Any] | None = None,
     ) -> OutBoundOperationRule:
         """构建出站操作规则 — 委托给注入的 ``OutboundRuleProvider`` (Rule 20)。
 
@@ -2646,6 +3002,7 @@ class BaasService:  # pragma: no cover
             agent_pass_token=agent_pass_token,
             agent_code=agent_code,
             bot_type_resolver=self._resolve_bot_type,
+            extra_properties=extra_properties,
         )
 
     def _build_teclaw_outbound_operation_rule(
@@ -2666,13 +3023,27 @@ class BaasService:  # pragma: no cover
         bot_uuid: str,
         *,
         agent_pass_token: str = "",
-    ) -> list[dict[str, Any]]:
-        """创建/发布后按 BaaS bot_uuid 更新 Teclaw PaaS 设备出站规则。"""
+    ) -> list[dict[str, Any]] | None:
+        """创建/发布后按 BaaS bot_uuid 更新 Teclaw PaaS 设备出站规则。
+
+        三态返回值 —— 调用方需要区分"无需下发"和"设备还没准备好",
+        否则会把一次没写成的下发当成成功(#527 回归的形态之一):
+
+        - ``None``: 当前 provider 不做出站改写(community/local 的空规则),
+          没有任何东西要写,调用方应视为完成。
+        - ``[]``: 有规则要写,但设备还没就绪 —— BaaS 尚未返回设备,或设备的
+          ``provider_device_id`` 还没落库(``start_device`` 才写入)。调用方应
+          稍后重试,不能当成成功。
+        - 非空列表: 该 Bot 名下每台设备都写入成功。
+
+        为避免"部分成功"这种既不能重试也不算完成的中间态,先确认所有设备都有
+        ``provider_device_id``,再逐台下发。
+        """
         outbound_rule = self._build_teclaw_outbound_operation_rule(
             agent_pass_token=agent_pass_token,
         )
         if outbound_rule is None:
-            return []
+            return None
 
         devices = self.list_devices_by_bot_uuid(bot_uuid)
         if not devices:
@@ -2682,18 +3053,24 @@ class BaasService:  # pragma: no cover
             )
             return []
 
+        pending = [
+            device.get("device_uuid", "")
+            for device in devices
+            if not device.get("provider_device_id")
+        ]
+        if pending:
+            logger.warning(
+                "[BaasService.update_teclaw_outbound_rule_by_bot_uuid] Devices not ready "
+                "(missing provider_device_id): bot_uuid=%s, device_uuids=%s",
+                bot_uuid,
+                pending,
+            )
+            return []
+
         updated_devices: list[dict[str, Any]] = []
         for device in devices:
-            paas_device_id = device.get("provider_device_id")
+            paas_device_id = device["provider_device_id"]
             device_uuid = device.get("device_uuid", "")
-            if not paas_device_id:
-                logger.warning(
-                    "[BaasService.update_teclaw_outbound_rule_by_bot_uuid] Missing provider_device_id: "
-                    "bot_uuid=%s, device_uuid=%s",
-                    bot_uuid,
-                    device_uuid,
-                )
-                continue
             self.update_device_outbound_rule(paas_device_id, outbound_rule)
             updated_devices.append({
                 "device_uuid": device_uuid,
@@ -2839,6 +3216,7 @@ class BaasService:  # pragma: no cover
         device_uuids: list[str],
         *,
         operator: str,
+        request_id: str,
         tenant: str = "",
     ) -> dict[str, Any]:
         """重启指定设备（多实例场景）。
@@ -2851,6 +3229,8 @@ class BaasService:  # pragma: no cover
             bot_uuid: BaaS Bot UUID
             device_uuids: 要重启的设备 UUID 列表
             operator: 操作者身份（必填，BaaS 契约要求）
+            request_id: 调用方提供的确定性关联 id（#197：取代原 uuid4，
+                重试同一逻辑重启时保持稳定，便于日志追踪；BaaS 侧仅作关联，非去重键）
             tenant: 租户名称，默认使用 self._tenant
 
         Returns:
@@ -2859,8 +3239,9 @@ class BaasService:  # pragma: no cover
         Raises:
             BaasServiceError: 重启失败
         """
+        if not request_id:
+            raise BaasServiceError("request_id is required for restarting devices")
         effective_tenant = tenant or self._tenant
-        request_id = uuid.uuid4().hex
         logger.info(
             f"[BaasService.restart_devices] Restarting devices: "
             f"bot_uuid={bot_uuid}, device_uuids={device_uuids}, "
@@ -2876,21 +3257,12 @@ class BaasService:  # pragma: no cover
         }
 
         try:
-            response = self._http.post(
-                f"/api/v1/bots/{bot_uuid}/update-devices",
-                json=payload,
-                params={"tenant": effective_tenant},
-                timeout=30.0,
+            data = self._post_bots_api(
+                path=f"/api/v1/bots/{bot_uuid}/update-devices",
+                payload=payload,
+                action="restart_devices",
+                tenant=effective_tenant,
             )
-            response.raise_for_status()
-            response_data = response.json()
-
-            if response_data.get("code") != 0:
-                raise BaasServiceError(
-                    f"BaaS API error: {response_data.get('message', 'Unknown error')}"
-                )
-
-            data = response_data.get("data", {})
             logger.info(
                 f"[BaasService.restart_devices] Success: "
                 f"bot_uuid={bot_uuid}, publish_id={data.get('publish_id')}"
@@ -3025,7 +3397,8 @@ class BaasService:  # pragma: no cover
 
         logger.info(
             f"[BaasService.upgrade_bot] "
-            f"Upgrading bot in BaaS: bot_uuid={bot_uuid}, operator={owner_id}, request_id={request_id}, payload={payload}"
+            f"Upgrading bot in BaaS: bot_uuid={bot_uuid}, operator={owner_id}, "
+            f"request_id={request_id}, payload={_redact_payload_for_log(payload)}"
         )
 
         # 调用 BaaS 层 API
@@ -3100,6 +3473,232 @@ class BaasService:  # pragma: no cover
             raise BaasServiceError(
                 f"BaaS API error: {e.response.status_code} - {e.response.text}"
             )
+
+    def append_caller_outbound_rule(
+        self,
+        paas_device_id: str,
+        caller_rule: OutBoundOperationRule,
+    ) -> bool:
+        """Append one validated Caller overlay without replacing base rules."""
+        payload = self._outbound_rule_to_dict(caller_rule)
+        logger.info(
+            "caller_outbound_append_started rule_count=%s",
+            len(caller_rule.header_operation_rules),
+        )
+        try:
+            response = self._http.put(
+                f"/api/v1/paas/devices/{paas_device_id}/outbound-rule?mode=append",
+                json=payload,
+                timeout=30.0,
+            )
+            response.raise_for_status()
+            response_data = response.json()
+            if response_data.get("code") != 0:
+                logger.warning("caller_outbound_append_rejected")
+                raise BaasServiceError("BaaS Caller outbound append rejected")
+        except httpx.HTTPStatusError as exc:
+            logger.warning(
+                "caller_outbound_append_http_failed status_code=%s",
+                exc.response.status_code,
+            )
+            raise BaasServiceError("BaaS Caller outbound append failed") from exc
+        except BaasServiceError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "caller_outbound_append_failed error_type=%s",
+                type(exc).__name__,
+            )
+            raise BaasServiceError("BaaS Caller outbound append failed") from exc
+        logger.info("caller_outbound_append_succeeded")
+        return True
+
+    def update_caller_identity(
+        self,
+        *,
+        bot_id: str,
+        owner_user_id: str,
+        caller_user_id: str,
+        caller_token: CallerToken,
+        stage: str,
+        publish_id: int | None,
+        entity_id: str | None = None,
+        binding_id: int | None = None,
+        is_test_exchange: bool = False,
+    ) -> None:
+        """Install one Caller-token overlay on the Bot's current BaaS device."""
+        if (
+            not caller_token.access_token
+            or caller_token.subject_user_id != caller_user_id
+        ):
+            raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
+
+        if entity_id is not None:
+            bot = self._bot_repo.get_by_id_and_entity(bot_id, entity_id)
+        else:
+            try:
+                # COSEC: do not select an arbitrary duplicate Bot when callers
+                # omit entity_id; the caller credential target must be unique.
+                bot = self._bot_repo.get_unique_by_id(bot_id)
+            except BotLookupAmbiguousError as exc:
+                logger.warning(
+                    "caller_identity_update_rejected_ambiguous_bot bot_id=%s",
+                    bot_id,
+                )
+                raise CallerCredentialError(CALLER_TARGET_AMBIGUOUS) from exc
+        # COSEC: an entity-scoped lookup is not authorization; require the
+        # resolved Bot owner to match the identity already resolved upstream.
+        if (
+            not bot
+            or (not is_test_exchange and bot.get("bot_type") != "service")
+            or bot.get("status") != "ACTIVE"
+            or str(bot.get("owner_id") or "") != owner_user_id
+        ):
+            raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
+
+        use_supplied_binding_id = self._is_valid_caller_binding_id(binding_id)
+        resolved_binding_id = (
+            binding_id
+            if use_supplied_binding_id
+            else self._resolve_caller_binding_id(
+                bot=bot,
+                bot_id=bot_id,
+                owner_user_id=owner_user_id,
+                stage=stage,
+                publish_id=publish_id,
+            )
+        )
+        binding = self._device_binding_repo.get_by_id(resolved_binding_id)
+        if (
+            binding is None
+            or str(getattr(binding, "status", "")).upper() != "ACTIVE"
+            or not str(getattr(binding, "device_id", ""))
+        ):
+            raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
+
+        devices = self.list_devices_by_bot_uuid(str(binding.device_id), timeout=3.0)
+        if not devices:
+            raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
+        if len(devices) != 1:
+            raise CallerCredentialError(CALLER_TARGET_AMBIGUOUS)
+        paas_device_id = devices[0].get("provider_device_id")
+        if not self._is_valid_paas_device_id(paas_device_id):
+            raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
+
+        caller_rule = self._outbound_rule_provider.build_caller_rule(
+            caller_token=caller_token.access_token,
+        )
+        if not self._is_valid_caller_rule(caller_rule, caller_token.access_token):
+            raise CallerCredentialError(CALLER_OUTBOUND_INVALID)
+        assert caller_rule is not None
+        logger.info(
+            "caller_outbound_update_started bot_id=%s stage=%s rule_count=%s "
+            "entity_scoped=%s supplied_binding_id=%s test_exchange=%s",
+            bot_id,
+            stage,
+            len(caller_rule.header_operation_rules),
+            entity_id is not None,
+            use_supplied_binding_id,
+            is_test_exchange,
+        )
+        try:
+            updated = self.append_caller_outbound_rule(paas_device_id, caller_rule)
+        except Exception as exc:
+            logger.warning(
+                "caller_outbound_update_failed bot_id=%s stage=%s error_type=%s "
+                "entity_scoped=%s supplied_binding_id=%s test_exchange=%s",
+                bot_id,
+                stage,
+                type(exc).__name__,
+                entity_id is not None,
+                use_supplied_binding_id,
+                is_test_exchange,
+            )
+            raise CallerCredentialError(CALLER_OUTBOUND_UPDATE_FAILED) from exc
+        if not updated:
+            raise CallerCredentialError(CALLER_OUTBOUND_UPDATE_FAILED)
+        logger.info(
+            "caller_outbound_update_succeeded bot_id=%s stage=%s entity_scoped=%s "
+            "supplied_binding_id=%s test_exchange=%s",
+            bot_id,
+            stage,
+            entity_id is not None,
+            use_supplied_binding_id,
+            is_test_exchange,
+        )
+
+    @staticmethod
+    def _is_valid_caller_binding_id(binding_id: object) -> bool:
+        return (
+            isinstance(binding_id, int)
+            and not isinstance(binding_id, bool)
+            and binding_id > 0
+        )
+
+    def _resolve_caller_binding_id(
+        self,
+        *,
+        bot: Dict[str, Any],
+        bot_id: str,
+        owner_user_id: str,
+        stage: str,
+        publish_id: int | None,
+    ) -> int:
+        if stage == PublishStage.DRAFT.value:
+            binding_id = bot.get("binding_id")
+        elif stage in {PublishStage.VERIFY.value, PublishStage.ONLINE.value}:
+            if (
+                not isinstance(publish_id, int)
+                or isinstance(publish_id, bool)
+                or publish_id <= 0
+            ):
+                raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
+            record = self._bot_publish_repo.get_by_id(publish_id)
+            if (
+                record is None
+                or getattr(record, "source_bot_id", None) != bot_id
+                or getattr(record, "owner_id", None) != owner_user_id
+            ):
+                raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
+            ext = getattr(record, "ext", None)
+            binding_id = (
+                (ext.get("binding") or {}).get(stage)
+                if isinstance(ext, dict)
+                else None
+            )
+        else:
+            raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
+        if not self._is_valid_caller_binding_id(binding_id):
+            raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
+        return binding_id
+
+    @staticmethod
+    def _is_valid_caller_rule(
+        caller_rule: OutBoundOperationRule | None,
+        access_token: str,
+    ) -> bool:
+        if caller_rule is None:
+            return False
+        return any(
+            rule.header_name == "x-caller-token"
+            and rule.action == "set"
+            and rule.value == access_token
+            for rule in caller_rule.header_operation_rules
+        )
+
+    @staticmethod
+    def _is_valid_paas_device_id(value: object) -> bool:
+        if not isinstance(value, str) or not value or len(value) > 256:
+            return False
+        device_id, separator, template_id = value.partition("@")
+        if not (device_id and separator and template_id and "@" not in template_id):
+            return False
+        # COSEC: the BaaS client interpolates this database-sourced identifier
+        # into a fixed relative URL, so reject path/control characters first.
+        safe_chars = frozenset(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
+        )
+        return all(char in safe_chars for char in device_id + template_id)
 
     def get_sandbox_id_from_publish_record(
         self,

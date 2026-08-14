@@ -482,6 +482,10 @@ export class BcsWsClient {
       }
       const content = fs.readFileSync(sessionPath, 'utf-8');
       const session = JSON.parse(content) as SessionInfo;
+      if (typeof session.token !== 'string' || !session.token.trim()) {
+        this._log?.warn?.('Ignoring saved BCS session without reconnect token');
+        return null;
+      }
       // Verify URL matches
       if (session.bcs_url !== this._account.bcsUrl) {
         this._log?.warn?.(

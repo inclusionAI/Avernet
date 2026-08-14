@@ -55,13 +55,16 @@ def test_engine_ext_from_subclass_is_injected_verbatim() -> None:
     composer = _StubComposer(_artifact(engine_ext={}))
     producer = _Teclaw(composer=composer)
 
-    built = producer._compose_with_engine_ext({"bot_id": "b", "owner_id": "u1"}, 7)
+    built = producer._compose_with_engine_ext(
+        {"bot_id": "b", "owner_id": "u1", "bot_name": "Support Bot"}, 7
+    )
 
     # engine_ext carried verbatim, plus the backend-owned identity/stage keys.
     assert built.engine_ext == {
         **opaque,
         "bot_id": "b",
         "owner_id": "u1",
+        "bot_name": "Support Bot",
         "stage": "draft",
     }
     assert built.engine_type == "teclaw"
@@ -131,24 +134,32 @@ def test_produce_artifact_pins_refs_only_artifact() -> None:
         "memory_ref": "nas://ws/MEMORY.md",
         "bot_id": "b",
         "owner_id": "u1",
+        "bot_name": "",
         "stage": "draft",
     }
 
 
 @pytest.mark.unit
 def test_backend_keys_injected_with_defaults_and_win_collision() -> None:
-    # Engine payload tries to set bot_id/stage; backend keys are written last and win.
+    # Engine payload tries to set bot_id/bot_name/stage; backend keys are written
+    # last and win.
     producer = _ExtProducer(
         composer=_StubComposer(_artifact()),
-        ext={"bot_id": "ENGINE_WINS_NOT", "stage": "engine-set", "keep": "me"},
+        ext={
+            "bot_id": "ENGINE_WINS_NOT",
+            "bot_name": "ENGINE_WINS_NOT",
+            "stage": "engine-set",
+            "keep": "me",
+        },
     )
 
-    # owner_id absent on the bot row → defaults to "".
+    # owner_id / bot_name absent on the bot row → default to "".
     built = producer._compose_with_engine_ext({"bot_id": "b7"}, 1)
 
     assert built.engine_ext == {
         "keep": "me",
         "bot_id": "b7",
         "owner_id": "",
+        "bot_name": "",
         "stage": "draft",
     }

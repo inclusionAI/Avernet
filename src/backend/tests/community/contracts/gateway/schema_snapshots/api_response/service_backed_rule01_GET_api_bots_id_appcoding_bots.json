@@ -218,6 +218,15 @@
           },
           "template_type": {
             "type": "string"
+          },
+          "call_type": {
+            "type": "string"
+          },
+          "caller_config_revision": {
+            "type": "integer"
+          },
+          "members": {
+            "type": "array"
           }
         },
         "required": [
@@ -238,6 +247,7 @@
           "gmt_modified",
           "id",
           "is_delete",
+          "members",
           "modifier_id",
           "owner_id",
           "owner_name",
@@ -245,7 +255,9 @@
           "share_policy",
           "status",
           "template_config",
-          "template_type"
+          "template_type",
+          "call_type",
+          "caller_config_revision"
         ],
         "additionalProperties": false
       }

@@ -326,19 +326,15 @@ class LocalDeviceFileSystem(DeviceFileSystem):
         return body.get("data", {}).get("files", [])
 
     async def _baas_exists(self, path: str) -> bool:
-        """exists 是 bool 契约——异常吞掉返 False，避免炸 caller。
+        """Probe a BaaS path without confusing absence with unavailability.
 
-        策略与 prod BaasDeviceFileSystem.exists 一致：先 read_file（命中文件），
-        miss 再 list_dir（命中目录）。两者都 raise → 视为不存在/不可达。
+        ``_baas_read_file`` / ``_baas_list_dir`` map an explicit 404 to
+        ``None`` and propagate transport/server failures.  Keeping that
+        distinction is required by Pool deletion's fail-closed contract:
+        an unreachable runtime must never be treated as an absent source.
         """
-        try:
-            content = await self._baas_read_file(path)
-            if content is not None:
-                return True
-            files = await self._baas_list_dir(path)
-            return files is not None
-        except Exception as e:
-            logger.warning(
-                "[LocalDeviceFileSystem.baas.exists] swallowed: %s: %s", path, e
-            )
-            return False
+        content = await self._baas_read_file(path)
+        if content is not None:
+            return True
+        files = await self._baas_list_dir(path)
+        return files is not None

@@ -27,6 +27,7 @@ class NoopOutboundRuleProvider(MockSeam, OutboundRuleProvider):
         agent_pass_token: str = "",
         agent_code: str = "",
         bot_type_resolver: "Callable[[str, str], str | None] | None" = None,
+        extra_properties: dict[str, object] | None = None,
     ) -> OutBoundOperationRule:
         return OutBoundOperationRule()
 
@@ -34,5 +35,12 @@ class NoopOutboundRuleProvider(MockSeam, OutboundRuleProvider):
         self,
         *,
         agent_pass_token: str = "",
+    ) -> "OutBoundOperationRule | None":
+        return None
+
+    def build_caller_rule(
+        self,
+        *,
+        caller_token: str,
     ) -> "OutBoundOperationRule | None":
         return None

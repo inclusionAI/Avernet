@@ -66,3 +66,23 @@ model = "internal-model"
     assert!(config.is_enabled());
     assert_eq!(config.model, "internal-model");
 }
+
+#[test]
+fn llm_config_accepts_anthropic_provider_type() {
+    let config: LlmConfig = toml::from_str(
+        r#"
+type = "anthropic"
+base_url = "https://api.anthropic.com/v1"
+api_key_env = "ANTHROPIC_API_KEY"
+model = "claude-sonnet-4-6"
+structured_output = "json_schema"
+"#,
+    )
+    .expect("anthropic config should parse");
+
+    assert_eq!(config.provider_type, LlmProviderType::Anthropic);
+    assert_eq!(config.base_url, "https://api.anthropic.com/v1");
+    assert_eq!(config.api_key_env.as_deref(), Some("ANTHROPIC_API_KEY"));
+    assert_eq!(config.model, "claude-sonnet-4-6");
+    assert_eq!(config.structured_output, StructuredOutputMode::JsonSchema);
+}

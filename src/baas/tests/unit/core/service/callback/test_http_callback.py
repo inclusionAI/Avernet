@@ -439,3 +439,126 @@ class TestHttpCallbackSendOnce:
             )
 
         mock_client_cls.assert_called_once_with(timeout=30.0)
+
+
+# ── origin / Origin header / response body log ──────────────
+
+
+class TestHttpCallbackOrigin:
+    @pytest.mark.asyncio
+    async def test_origin_header_set_when_origin_provided(self):
+        cb = HttpCallback(_make_repo(), origin="https://my.origin")
+        mock_resp = _make_response(status_code=200, text="OK")
+        with patch(
+            "secbaas.community.core.service.callback._http_callback.httpx.AsyncClient"
+        ) as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client_cls.return_value = mock_client
+
+            await cb._send_once(
+                "http://example.com/cb",
+                CallbackPayload(
+                    run_id="r1",
+                    bot_id="b1",
+                    status="COMPLETED",
+                ),
+            )
+
+        headers = mock_client.post.call_args.kwargs["headers"]
+        assert headers["Origin"] == "https://my.origin"
+        assert headers["Content-Type"] == "application/json"
+
+    @pytest.mark.asyncio
+    async def test_no_origin_header_when_origin_is_none(self):
+        cb = HttpCallback(_make_repo())
+        mock_resp = _make_response(status_code=200, text="OK")
+        with patch(
+            "secbaas.community.core.service.callback._http_callback.httpx.AsyncClient"
+        ) as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client_cls.return_value = mock_client
+
+            await cb._send_once(
+                "http://example.com/cb",
+                CallbackPayload(
+                    run_id="r1",
+                    bot_id="b1",
+                    status="COMPLETED",
+                ),
+            )
+
+        headers = mock_client.post.call_args.kwargs["headers"]
+        assert "Origin" not in headers
+
+    @pytest.mark.asyncio
+    async def test_response_body_logged(self):
+        cb = HttpCallback(_make_repo())
+        mock_resp = _make_response(status_code=200, text="all good")
+        with (
+            patch(
+                "secbaas.community.core.service.callback._http_callback.httpx.AsyncClient"
+            ) as mock_client_cls,
+            patch(
+                "secbaas.community.core.service.callback._http_callback.logger"
+            ) as mock_logger,
+        ):
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client_cls.return_value = mock_client
+
+            await cb._send_once(
+                "http://example.com/cb",
+                CallbackPayload(
+                    run_id="r1",
+                    bot_id="b1",
+                    status="COMPLETED",
+                ),
+            )
+
+        resp_log_call = mock_logger.info.call_args_list[0]
+        assert (
+            resp_log_call.args[0]
+            == "[callback] response: run_id=%s, url=%s, status=%s, body=%s"
+        )
+        assert "all good" in resp_log_call.args
+
+    @pytest.mark.asyncio
+    async def test_response_body_logged_on_failure(self):
+        cb = HttpCallback(_make_repo())
+        mock_resp = _make_response(status_code=500, text="server error")
+        with (
+            patch(
+                "secbaas.community.core.service.callback._http_callback.httpx.AsyncClient"
+            ) as mock_client_cls,
+            patch(
+                "secbaas.community.core.service.callback._http_callback.logger"
+            ) as mock_logger,
+        ):
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client_cls.return_value = mock_client
+
+            await cb._send_once(
+                "http://example.com/cb",
+                CallbackPayload(
+                    run_id="r1",
+                    bot_id="b1",
+                    status="COMPLETED",
+                ),
+            )
+
+        log_messages = [call.args[0] for call in mock_logger.info.call_args_list]
+        assert any("response:" in msg for msg in log_messages)
+        assert any(
+            "failed:" in call.args[0] for call in mock_logger.error.call_args_list
+        )

@@ -2,7 +2,8 @@
 
 ## Provides
 
-- Bot service implementation for BCS.
+- Bot service implementations for BCS, including the independent Bot
+  control-plane Core.
 - Bot onboarding, discovery, status, connectivity, and binding metadata behavior.
 - Application-facing orchestration around registry reads and writes.
 
@@ -32,7 +33,9 @@
 
 ## Runtime ownership
 
-The crate owns registry business rules and status/connectivity semantics. It does not own socket runtime state or transport handling.
+The crate owns registry business rules, status/connectivity semantics, and Bot
+control-plane persistence orchestration such as Provider hydration. It does not
+own socket runtime state or transport handling.
 
 ## Tests
 

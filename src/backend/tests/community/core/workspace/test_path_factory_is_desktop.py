@@ -1,4 +1,6 @@
 """Test path_factory.get_bot_skills_{local,repo}_dir routing by is_desktop."""
+import pytest
+
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.plugins.local.skill_repo_sync import LocalSkillRepoSyncPlugin
 
@@ -7,20 +9,38 @@ def _factory() -> WorkspacePathFactory:
     return WorkspacePathFactory(skill_repo_sync=LocalSkillRepoSyncPlugin())
 
 
-def test_local_dir_desktop_returns_engine_view():
+@pytest.mark.parametrize(
+    ("engine_type", "expected"),
+    [
+        ("openclaw", "/home/admin/.openclaw/workspace/skills/skills-local"),
+        ("claude_code", "/home/admin/.claude_code/workspace/skills/skills-local"),
+        ("aicoding", "/home/admin/.aicoding/workspace/skills/skills-local"),
+        ("hermes", "/home/admin/.hermes/workspace/skills/skills-local"),
+    ],
+)
+def test_local_dir_desktop_returns_selected_engine_view(engine_type, expected):
     factory = _factory()
     p = factory.get_bot_skills_local_dir(
-        "user_001", "bot_x", "openclaw", "staff", is_desktop=True
+        "user_001", "bot_x", engine_type, "staff", is_desktop=True
     )
-    assert str(p) == "/home/admin/.openclaw/workspace/skills/skills-local"
+    assert str(p) == expected
 
 
-def test_repo_dir_desktop_returns_engine_view():
+@pytest.mark.parametrize(
+    ("engine_type", "expected"),
+    [
+        ("openclaw", "/home/admin/.openclaw/workspace/skills/skills-repo"),
+        ("claude_code", "/home/admin/.claude_code/skills-repo"),
+        ("aicoding", "/home/admin/.aicoding/skills-repo"),
+        ("hermes", "/home/admin/.hermes/skills-repo"),
+    ],
+)
+def test_repo_dir_desktop_returns_selected_engine_view(engine_type, expected):
     factory = _factory()
     p = factory.get_bot_skills_repo_dir(
-        "user_001", "bot_x", "openclaw", "staff", is_desktop=True
+        "user_001", "bot_x", engine_type, "staff", is_desktop=True
     )
-    assert str(p) == "/home/admin/.openclaw/workspace/skills/skills-repo"
+    assert str(p) == expected
 
 
 def test_local_dir_non_desktop_falls_to_cloud_or_local():

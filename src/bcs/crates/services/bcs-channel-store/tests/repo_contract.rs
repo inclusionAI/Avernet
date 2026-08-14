@@ -44,7 +44,9 @@ async fn conversation_repo_round_trips_and_reverse_lookups_session() -> ServiceR
 
     let by_session = repo.find_by_session("binding_1", "session_new").await?;
     assert_eq!(
-        by_session.as_ref().map(|map| map.im_conversation_id.as_str()),
+        by_session
+            .as_ref()
+            .map(|map| map.im_conversation_id.as_str()),
         Some("conv_1")
     );
     let by_bcs_session = repo.list_by_bcs_session("session_new").await?;
@@ -56,8 +58,50 @@ async fn conversation_repo_round_trips_and_reverse_lookups_session() -> ServiceR
 }
 
 #[tokio::test]
-async fn conversation_repo_isolates_per_sender_scope_for_same_im_conversation(
-) -> ServiceResult<()> {
+async fn conversation_repo_lists_and_deletes_only_requested_binding() -> ServiceResult<()> {
+    let repo = MemoryConversationSessionRepo::new();
+
+    repo.upsert(conversation_map(
+        "binding_1",
+        "conv_1",
+        SessionScope::Conversation,
+        None,
+        "session_1",
+        1,
+    ))
+    .await?;
+    repo.upsert(conversation_map(
+        "binding_1",
+        "conv_2",
+        SessionScope::PerSender,
+        Some("staff_a"),
+        "session_2",
+        2,
+    ))
+    .await?;
+    repo.upsert(conversation_map(
+        "binding_2",
+        "conv_3",
+        SessionScope::Conversation,
+        None,
+        "session_3",
+        3,
+    ))
+    .await?;
+
+    let binding_1 = repo.list_by_binding("binding_1").await?;
+    assert_eq!(binding_1.len(), 2);
+
+    assert_eq!(repo.delete_by_binding("binding_1").await?, 2);
+    assert!(repo.list_by_binding("binding_1").await?.is_empty());
+    assert_eq!(repo.list_by_binding("binding_2").await?.len(), 1);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn conversation_repo_isolates_per_sender_scope_for_same_im_conversation() -> ServiceResult<()>
+{
     let repo = MemoryConversationSessionRepo::new();
 
     repo.upsert(conversation_map(
@@ -125,8 +169,55 @@ async fn conversation_repo_isolates_per_sender_scope_for_same_im_conversation(
 }
 
 #[tokio::test]
-async fn im_participant_repo_round_trips_and_replaces_external_identity(
-) -> ServiceResult<()> {
+async fn conversation_repo_cleanup_only_deletes_expected_session() -> ServiceResult<()> {
+    let repo = MemoryConversationSessionRepo::new();
+    repo.upsert(conversation_map(
+        "binding_1",
+        "conv_1",
+        SessionScope::Conversation,
+        None,
+        "session_new",
+        2,
+    ))
+    .await?;
+
+    assert!(
+        !repo
+            .delete_if_session(
+                "binding_1",
+                "conv_1",
+                SessionScope::Conversation,
+                None,
+                "session_old",
+            )
+            .await?
+    );
+    assert!(
+        repo.get("binding_1", "conv_1", SessionScope::Conversation, None)
+            .await?
+            .is_some()
+    );
+    assert!(
+        repo.delete_if_session(
+            "binding_1",
+            "conv_1",
+            SessionScope::Conversation,
+            None,
+            "session_new",
+        )
+        .await?
+    );
+    assert!(
+        repo.get("binding_1", "conv_1", SessionScope::Conversation, None)
+            .await?
+            .is_none()
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn im_participant_repo_round_trips_and_replaces_external_identity() -> ServiceResult<()> {
     let repo = MemoryImParticipantRepo::new();
 
     repo.upsert(participant("staff_1", "human_old", Some("Old Name")))
@@ -160,7 +251,7 @@ async fn im_participant_repo_round_trips_and_replaces_external_identity(
 
 #[tokio::test]
 async fn binding_repo_lifecycle_filters_active_bindings() -> ServiceResult<()> {
-    let repo = MemoryChannelBindingRepo::new();
+    let repo = MemoryChannelBindingRepo::new("dev");
 
     repo.create(binding("binding_1", "robot_1", BindingStatus::Active))
         .await?;
@@ -227,8 +318,98 @@ async fn binding_repo_lifecycle_filters_active_bindings() -> ServiceResult<()> {
 }
 
 #[tokio::test]
+async fn binding_repo_rejects_cross_environment_writes() -> ServiceResult<()> {
+    let repo = MemoryChannelBindingRepo::new("pre");
+    let mut prod_binding = binding("binding_prod", "robot_1", BindingStatus::Active);
+    prod_binding.env = "prod".to_string();
+
+    let error = repo
+        .create(prod_binding)
+        .await
+        .expect_err("repository must reject a binding from another environment");
+
+    assert!(error.to_string().contains("does not match repository env"));
+    assert!(repo.list().await?.is_empty());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn binding_repo_lists_only_requested_target_and_optional_channel() -> ServiceResult<()> {
+    let repo = MemoryChannelBindingRepo::new("dev");
+
+    let mut group_dingtalk = binding("group_dingtalk", "robot_1", BindingStatus::Active);
+    group_dingtalk.target = BindingTarget::Group {
+        group_id: "group_1".to_string(),
+    };
+    repo.create(group_dingtalk).await?;
+
+    let mut group_other_channel = binding(
+        "group_other_channel",
+        "account_2",
+        BindingStatus::Active,
+    );
+    group_other_channel.target = BindingTarget::Group {
+        group_id: "group_1".to_string(),
+    };
+    group_other_channel.channel_type = "test_im".to_string();
+    repo.create(group_other_channel).await?;
+
+    let mut other_group = binding("other_group", "robot_2", BindingStatus::Active);
+    other_group.target = BindingTarget::Group {
+        group_id: "group_2".to_string(),
+    };
+    repo.create(other_group).await?;
+
+    let mut bot_binding = binding("bot_binding", "robot_3", BindingStatus::Active);
+    bot_binding.target = BindingTarget::Bot {
+        bot_id: "bot_1:user_1".to_string(),
+    };
+    repo.create(bot_binding).await?;
+
+    let group_target = BindingTarget::Group {
+        group_id: "group_1".to_string(),
+    };
+    let group_all_channels = repo.list_by_target(&group_target, None).await?;
+    assert_eq!(group_all_channels.len(), 2);
+
+    let group_dingtalk = repo
+        .list_by_target(&group_target, Some("dingtalk"))
+        .await?;
+    assert_eq!(group_dingtalk.len(), 1);
+    assert_eq!(group_dingtalk[0].id, "group_dingtalk");
+
+    let bot_target = BindingTarget::Bot {
+        bot_id: "bot_1:user_1".to_string(),
+    };
+    let bot_bindings = repo
+        .list_by_target(&bot_target, Some("dingtalk"))
+        .await?;
+    assert_eq!(bot_bindings.len(), 1);
+    assert_eq!(bot_bindings[0].id, "bot_binding");
+
+    assert_eq!(repo.delete_by_target(&group_target).await?, 2);
+    let remaining_group_bindings = repo.list_by_target(&group_target, None).await?;
+    assert!(remaining_group_bindings.is_empty());
+    assert_eq!(repo.list_by_target(&bot_target, None).await?.len(), 1);
+    assert_eq!(
+        repo.list_by_target(
+            &BindingTarget::Group {
+                group_id: "group_2".to_string(),
+            },
+            None,
+        )
+        .await?
+        .len(),
+        1
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn binding_repo_preserves_generic_channel_type_and_config() -> ServiceResult<()> {
-    let repo = MemoryChannelBindingRepo::new();
+    let repo = MemoryChannelBindingRepo::new("dev");
     let mut binding = binding("binding_generic", "account_1", BindingStatus::Active);
     binding.channel_type = "test_im".to_string();
     binding.config = serde_json::json!({
@@ -270,11 +451,7 @@ fn conversation_map(
     }
 }
 
-fn participant(
-    im_user_id: &str,
-    actor_id: &str,
-    display_name: Option<&str>,
-) -> ImParticipantMap {
+fn participant(im_user_id: &str, actor_id: &str, display_name: Option<&str>) -> ImParticipantMap {
     ImParticipantMap {
         channel_type: "dingtalk".to_string(),
         account_ref: "robot_1".to_string(),

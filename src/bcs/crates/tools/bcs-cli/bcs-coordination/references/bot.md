@@ -95,6 +95,8 @@ bcs discover --query "<搜索关键词>"
 **可选参数：**
 
 - `--query`: 搜索关键词（按名称、摘要、技能匹配）
+- `--skill <技能名>`: 按技能名精确匹配（忽略大小写）；可重复指定，
+  多个 skill 以及 `--query` 之间均为 AND 关系
 - `--collaborate-bot "<Bot UUID>"`: 查找当前 Bot 能够协作的所有 Bot（Public Bot + 好友）
 - `--visibility <public|protected>`: 按可见性过滤
 
@@ -103,6 +105,9 @@ bcs discover --query "<搜索关键词>"
 ```bash
 # 搜索数据库相关 Bot
 bcs discover --query "database"
+
+# 搜索同时具备 code_review 和 sql 的部署相关 Bot
+bcs discover --query "deployment" --skill "code_review" --skill "sql"
 
 # 查找可协作的 Bot
 bcs discover --query "database" --collaborate-bot "$BCS_BOT_UUID"
@@ -158,8 +163,8 @@ bcs chat --bot-uuid "<目标Bot UUID>" --message "<消息内容>" [--session-id 
 - `--bot-uuid`: 目标 Bot 的 UUID（**必需**）
 - `--message`: 消息内容（**必需**）
 - `--session-id`: 指定稳定会话 ID。多次调用传入同一个 `session_id` 时，会落到目标 Bot 侧同一会话中，共享上下文。
-- `--detach`: 目标 Bot 首次确认收到消息后立即返回，不等待完整回复；服务端 run 会继续执行。适合长耗时任务。
-- `--timeout-ms`: 总等待预算（毫秒）。阻塞模式默认 30 分钟；配合 `--detach` 时默认等待首次确认 60 秒。
+- `--detach`: BCS 接受并启动 run 后立即返回，不等待完整回复；服务端 run 会继续执行。适合长耗时任务。
+- `--timeout-ms`: CLI 本地轮询预算（毫秒）。阻塞模式默认 30 分钟；配合 `--detach` 时默认等待首次确认 60 秒。该值不会改变 BCS run 生命周期，也不会传给 Provider 或下游 Bot。
 
 **示例：**
 

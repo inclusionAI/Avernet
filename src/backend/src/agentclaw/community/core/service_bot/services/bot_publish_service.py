@@ -1,16 +1,46 @@
 """Bot Publish Service - Bot发布服务业务逻辑层。"""
-import asyncio
+import copy
 import threading
 from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 
 from agentclaw.community.core.service_bot.repository.models import BotPublishRecord, PublishStatus
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import BotPublishRepositoryProtocol
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
+from agentclaw.community.core.repository.protocols.publishing import PublishOperationRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.devices.models import DeviceBindingStatus
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
+from agentclaw.community.core.service_bot.services.bot_process import BotProcessRegistry
+from agentclaw.community.core.service_bot.services.publish_draft_restore_mixin import PublishDraftRestoreMixin
+from agentclaw.community.core.service_bot.services.publish_exceptions import (
+    BotAlreadyServiceTypeError,
+    BotNotFoundError,
+    BotNotServiceTypeError,
+    BotPublishServiceError,
+    BotTypeNotSupportedError,
+    PublishAlreadyExistsError,
+    PublishNotFoundError,
+    PublishStatusInvalidError,
+)
 from agentclaw.community.core.service_bot.services.publish_rollback_mixin import PublishRollbackMixin
+from agentclaw.community.core.service_bot.services.arca_image_pin import (
+    apply_image_pin_to_ext,
+    clear_image_policy_from_ext,
+    copy_image_policy_to_ext,
+    has_explicit_image_policy,
+    resolve_current_arca_image,
+    apply_runtime_kind_to_ext,
+    runtime_kind_from_provider,
+    RUNTIME_KIND_ARCA,
+    RUNTIME_KIND_TECLAW,
+    PublishImagePolicyResolver,
+    ServiceBotImagePin,
+    resolve_publish_runtime_kind,
+)
+from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
 from agentclaw.community.core.service_bot.types import PublishStage
+from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.log import get_logger
 
@@ -23,47 +53,7 @@ if TYPE_CHECKING:
 logger = get_logger()
 
 
-class BotPublishServiceError(Exception):
-    """Bot publish service error."""
-    pass
-
-
-class BotNotFoundError(BotPublishServiceError):
-    """Bot 不存在错误。"""
-    pass
-
-
-class BotNotServiceTypeError(BotPublishServiceError):
-    """Bot 不是服务型错误。"""
-    pass
-
-
-class PublishAlreadyExistsError(BotPublishServiceError):
-    """发布单已存在错误。"""
-    pass
-
-
-class PublishNotFoundError(BotPublishServiceError):
-    """发布单不存在错误。"""
-    pass
-
-
-class PublishStatusInvalidError(BotPublishServiceError):
-    """发布单状态无效错误。"""
-    pass
-
-
-class BotAlreadyServiceTypeError(BotPublishServiceError):
-    """Bot 已经是服务型错误。"""
-    pass
-
-
-class BotTypeNotSupportedError(BotPublishServiceError):
-    """Bot 类型不支持升级错误（如 aicoding 类型）。"""
-    pass
-
-
-class BotPublishService(PublishRollbackMixin):
+class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
     """Bot发布服务 - 管理Bot发布生命周期。"""
 
     def __init__(
@@ -75,6 +65,10 @@ class BotPublishService(PublishRollbackMixin):
         device_binding_repo: DeviceBindingRepository,
         bcn_service: "BcnService",
         quality_task_service: "QualityTaskService",
+        publish_operation_repo: PublishOperationRepository,
+        task_queue_service: TaskQueueService,
+        bot_process_registry: BotProcessRegistry,
+        common_config_service: CommonConfigService,
     ):
         self._repo = bot_publish_repo
         self._bot_repo = bot_repo
@@ -84,6 +78,15 @@ class BotPublishService(PublishRollbackMixin):
         self._device_binding_repo = device_binding_repo
         self._bcn_service = bcn_service
         self._quality_task_service = quality_task_service
+        self._publish_operation_repo = publish_operation_repo
+        self._task_queue_service = task_queue_service
+        self._bot_process_registry = bot_process_registry
+        self._common_config_service = common_config_service
+        self._image_policy_resolver = PublishImagePolicyResolver(
+            publish_repository=bot_publish_repo,
+            binding_repository=device_binding_repo,
+            common_config_service=common_config_service,
+        )
         self._env = get_current_env()
 
     def create_device_binding(
@@ -228,6 +231,47 @@ class BotPublishService(PublishRollbackMixin):
                     f"Publish record already exists: {publish_bot_id}, owner={owner_id}, v{version}"
                 )
 
+        source_bot = self._bot_repo.get_by_id_and_owner(source_bot_id, owner_id)
+        source_bot_ext = (
+            source_bot.get("ext") if isinstance(source_bot, dict) else None
+        )
+        ext = copy_image_policy_to_ext(source_bot_ext, ext)
+        image_policy_image: str | None = None
+        if isinstance(source_bot, dict) and source_bot.get("bot_type") == "service":
+            runtime_kind = None
+            binding_id = source_bot.get("binding_id")
+            if isinstance(binding_id, int):
+                binding = self._device_binding_repo.get_by_id(binding_id)
+                runtime_kind = runtime_kind_from_provider(
+                    getattr(binding, "device_provider", None)
+                )
+            if runtime_kind is None:
+                runtime_kind = (
+                    RUNTIME_KIND_TECLAW
+                    if self._bot_service.is_teclaw_bot(source_bot.get("active_engine"))
+                    else RUNTIME_KIND_ARCA
+                )
+            ext = apply_runtime_kind_to_ext(ext, runtime_kind)
+            if runtime_kind == RUNTIME_KIND_ARCA:
+                image_policy_image = resolve_current_arca_image(
+                    self._common_config_service, env=self._env
+                )
+            if image_policy_image is None:
+                ext = clear_image_policy_from_ext(ext)
+
+        # A new/default Bot carries an explicit marker and never consumes the
+        # legacy Pin switch. A pre-feature ARCA Bot has no policy marker; when
+        # protection is enabled, freeze the configured image on the new publish
+        # record so all published operations remain reproducible.
+        is_legacy_arca_service = (
+            isinstance(source_bot, dict)
+            and source_bot.get("bot_type") == "service"
+            and not self._bot_service.is_teclaw_bot(source_bot.get("active_engine"))
+            and not has_explicit_image_policy(source_bot_ext)
+        )
+        if is_legacy_arca_service and image_policy_image:
+            ext = apply_image_pin_to_ext(ext, image_policy_image)
+
         record = self._repo.insert({
             "source_bot_pk": source_bot_pk,
             "source_bot_id": source_bot_id,
@@ -303,6 +347,7 @@ class BotPublishService(PublishRollbackMixin):
         target_status: str,
         ext: Dict[str, Any],
         source_status: str,
+        expected_ext: Optional[Dict[str, Any]],
     ) -> BotPublishRecord:
         """更新发布记录状态和扩展字段（乐观锁）。
 
@@ -318,7 +363,13 @@ class BotPublishService(PublishRollbackMixin):
         Raises:
             PublishNotFoundError: 发布记录不存在或源状态不匹配
         """
-        record = self._repo.update_status_with_ext(publish_id, target_status, ext, source_status)
+        record = self._repo.compare_and_set_status_with_ext(
+            publish_id=publish_id,
+            source_status=source_status,
+            target_status=target_status,
+            expected_ext=expected_ext,
+            ext=ext,
+        )
         if not record:
             raise PublishNotFoundError(
                 f"Publish record not found or source status mismatch: "
@@ -331,11 +382,13 @@ class BotPublishService(PublishRollbackMixin):
         self,
         publish_id: int,
         ext: Dict[str, Any],
+        *,
+        expected_ext: Optional[Dict[str, Any]],
     ) -> BotPublishRecord:
         """仅更新发布记录的扩展字段（不更新状态）。
 
-        使用乐观锁：先读取当前状态，再以该状态作为 source_status 更新。
-        如果期间状态被并发修改，更新会失败并抛出异常。
+        使用调用方读取到的完整 ``expected_ext`` 做 compare-and-set；如果
+        期间任意并发写入改变了 ext，更新失败并抛出异常。
 
         Args:
             publish_id: 发布记录 ID
@@ -347,25 +400,58 @@ class BotPublishService(PublishRollbackMixin):
         Raises:
             PublishNotFoundError: 发布记录不存在或状态已被并发修改
         """
-        record = self._repo.get_by_id(publish_id)
-        if not record:
-            raise PublishNotFoundError(f"Publish record not found: {publish_id}")
-
-        current_status = record.status
-        updated_record = self._repo.update_status_with_ext(
+        updated_record = self._repo.compare_and_set_ext(
             publish_id=publish_id,
-            target_status=current_status,
+            expected_ext=expected_ext,
             ext=ext,
-            source_status=current_status,
         )
         if not updated_record:
             raise PublishNotFoundError(
-                f"Publish record not found or status changed concurrently: "
-                f"publish_id={publish_id}, expected source_status={current_status}"
+                f"Publish record not found or ext changed concurrently: "
+                f"publish_id={publish_id}"
             )
 
         logger.info(f"[update_publish_ext] id={publish_id}, ext updated")
         return updated_record
+
+    def mutate_publish_ext(
+        self,
+        publish_id: int,
+        mutator: Callable[[Dict[str, Any]], None],
+        *,
+        max_cas_attempts: int = 3,
+    ) -> BotPublishRecord:
+        """Apply a mutation to the latest ext and retry bounded CAS conflicts."""
+        for _attempt in range(max_cas_attempts):
+            record = self._repo.get_by_id(publish_id)
+            if record is None:
+                raise PublishNotFoundError(f"Publish record not found: {publish_id}")
+            expected_ext = copy.deepcopy(record.ext)
+            updated_ext = copy.deepcopy(record.ext or {})
+            mutator(updated_ext)
+            updated = self._repo.compare_and_set_ext(
+                publish_id=publish_id,
+                expected_ext=expected_ext,
+                ext=updated_ext,
+            )
+            if updated is not None:
+                return updated
+        raise BotPublishServiceError(
+            f"Publish ext CAS conflicted repeatedly: publish_id={publish_id}"
+        )
+
+    def resolve_publish_image_pin(
+        self, publish_record: BotPublishRecord
+    ) -> ServiceBotImagePin:
+        """Resolve image policy through the shared persisted-CAS seam."""
+        return self._image_policy_resolver.resolve(publish_record)
+
+    def resolve_publish_runtime_kind(self, publish_record: BotPublishRecord) -> str:
+        """Resolve provider identity only from Publish-owned persisted facts."""
+        return resolve_publish_runtime_kind(
+            publish_record,
+            binding_repository=self._device_binding_repo,
+        )
 
     def record_draft_artifact(
         self, *, bot_id: str, artifact: Dict[str, Any]
@@ -379,8 +465,9 @@ class BotPublishService(PublishRollbackMixin):
         )
         if not record:
             return False
-        self.update_publish_ext(
-            record.id, {**(record.ext or {}), "config_artifact": artifact}
+        self.mutate_publish_ext(
+            record.id,
+            lambda ext: ext.__setitem__("config_artifact", artifact),
         )
         return True
 
@@ -417,6 +504,8 @@ class BotPublishService(PublishRollbackMixin):
             raise BotNotFoundError(f"Bot not found: bot_id={bot_id}, owner_id={owner_id}")
 
         bot_type = bot.get("bot_type", "personal")
+        bot_process = self._bot_process_registry.get(bot_type)
+        active_runtime_engine_type = bot_process.get_active_runtime_engine_type(bot_id)
         if bot_type == "service" and stage != PublishStage.DRAFT.value:
             return self._get_service_bot_stage_binding_info(
                 bot=bot,
@@ -424,8 +513,14 @@ class BotPublishService(PublishRollbackMixin):
                 owner_id=owner_id,
                 stage=stage,
                 task_uuid=biz_id,
+                active_runtime_engine_type=active_runtime_engine_type,
             )
-        return self._get_personal_bot_binding_info(bot=bot, bot_id=bot_id, owner_id=owner_id)
+        return self._get_personal_bot_binding_info(
+            bot=bot,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            active_runtime_engine_type=active_runtime_engine_type,
+        )
 
     def _get_personal_bot_binding_info(
         self,
@@ -433,6 +528,7 @@ class BotPublishService(PublishRollbackMixin):
         bot: Dict[str, Any],
         bot_id: str,
         owner_id: str,
+        active_runtime_engine_type: str,
     ) -> Dict[str, Any]:
         binding_id = bot.get("binding_id")
         if not binding_id:
@@ -463,6 +559,7 @@ class BotPublishService(PublishRollbackMixin):
             "bot_type": bot.get("bot_type", "personal"),
             "engine_type": bot.get("active_engine", ""),
             "template_type": bot.get("template_type", ""),
+            "active_runtime_engine_type": active_runtime_engine_type,
             "publish_id": None,
             "publish_status": None,
             "binding_id": binding_id,
@@ -507,6 +604,7 @@ class BotPublishService(PublishRollbackMixin):
         owner_id: str,
         stage: str,
         task_uuid: Optional[str] = None,
+        active_runtime_engine_type: str = "",
     ) -> Dict[str, Any]:
         if stage == PublishStage.EVAL.value:
             task_record = self._quality_task_service.get_task_by_uuid(task_uuid)
@@ -526,6 +624,7 @@ class BotPublishService(PublishRollbackMixin):
                 "bot_type": "service",
                 "engine_type": bot.get("active_engine", ""),
                 "template_type": bot.get("template_type", ""),
+                "active_runtime_engine_type": active_runtime_engine_type,
                 "publish_id": None,
                 "publish_status": None,
                 "binding_id": None,
@@ -558,6 +657,7 @@ class BotPublishService(PublishRollbackMixin):
             "bot_type": "service",
             "engine_type": bot.get("active_engine", ""),
             "template_type": bot.get("template_type", ""),
+            "active_runtime_engine_type": active_runtime_engine_type,
             "publish_id": publish_record.id,
             "publish_status": publish_record.status,
             "binding_id": binding_id,
@@ -937,19 +1037,25 @@ class BotPublishService(PublishRollbackMixin):
 
         # Step 2: 根据状态判断 stage
         current_status = publish_record.status
-        stage = None
 
-        if current_status == PublishStatus.SUCCESS:
-            # 已发布上线成功，销毁线上 bot
-            stage = PublishStage.ONLINE
-        elif current_status == PublishStatus.VALIDATING:
-            # 验证中，销毁验证环境 bot
-            stage = PublishStage.VERIFY
-        else:
-            raise BotPublishServiceError(
-                f"发布单状态不支持下线: publish_id={publish_id}, status={current_status}，"
-                f"仅支持状态: {PublishStatus.SUCCESS}, {PublishStatus.VALIDATING}"
+        # RELEASED is terminal — the offline already ran. Return an idempotent
+        # no-op so a duplicate submit or a durable-task re-run lands cleanly
+        # instead of falling through to _resolve_offline_stage and raising.
+        # Recovering the narrow flip-then-crash window (record RELEASED but the
+        # durable destroy never enqueued) is handled separately, not here.
+        if current_status == PublishStatus.RELEASED:
+            logger.info(
+                f"[offline_publish] Record already RELEASED, no-op: publish_id={publish_id}"
             )
+            return {
+                "success": True,
+                "bot_destroyed": False,
+                "new_publish_id": None,
+                "new_publish_version": None,
+                "message": f"发布单已下线: publish_id={publish_id}",
+            }
+
+        stage = self._resolve_offline_stage(current_status, publish_id)
 
         logger.info(
             f"[offline_publish] Starting offline: publish_id={publish_id}, "
@@ -966,78 +1072,13 @@ class BotPublishService(PublishRollbackMixin):
 
         # Step 3: 如果是 SUCCESS 状态，检查是否有非终态发布单，有则不创建新发布单，没有则创建新草稿发布单
         if current_status == PublishStatus.SUCCESS:
-            bot_id = publish_record.source_bot_id
-            owner_id = publish_record.owner_id
-            source_bot_pk = publish_record.source_bot_pk
-            env = publish_record.env
+            self._release_or_redraft_on_offline(publish_record, publish_id, result)
 
-            # 定义终态
-            terminal_statuses = {
-                PublishStatus.SUCCESS,
-                PublishStatus.UPGRADED,
-                PublishStatus.RELEASED,
-                PublishStatus.FAILED,
-            }
-
-            # 查询该 bot 是否有非终态的发布单
-            all_publish_records = self._repo.list_by_source_bot(source_bot_pk, env)
-            non_terminal_records = [
-                r for r in all_publish_records
-                if r.status not in terminal_statuses and r.id != publish_id
-            ]
-            has_non_terminal = len(non_terminal_records) > 0
-
-            if has_non_terminal:
-                logger.info(
-                    f"[offline_publish] Found {len(non_terminal_records)} non-terminal publish record(s), "
-                    f"skipping bot deletion: bot_id={bot_id}, owner_id={owner_id}"
-                )
-                # 有非终态发布单，不删除 bot，仅将当前发布单状态置为 released
-                self._repo.update_status(publish_id, PublishStatus.RELEASED)
-                logger.info(
-                    f"[offline_publish] Publish status updated to released: publish_id={publish_id}"
-                )
-            else:
-                # 没有非终态发布单，不删除 bot，创建新的草稿发布单
-                logger.info(
-                    f"[offline_publish] No non-terminal publish record found, "
-                    f"creating new draft publish: bot_id={bot_id}, owner_id={owner_id}"
-                )
-
-                # 计算新版本号（基于最大版本号，避免回滚后冲突）
-                new_version = self._get_next_version(publish_record.publish_bot_id, publish_record.owner_id)
-
-                # 创建新的草稿发布单
-                new_record = self.create_publish(
-                    source_bot_pk=publish_record.source_bot_pk,
-                    source_bot_id=publish_record.source_bot_id,
-                    publish_bot_id=publish_record.publish_bot_id,
-                    name=publish_record.name,
-                    owner_id=publish_record.owner_id,
-                    permission_owner=publish_record.permission_owner,
-                    description=publish_record.description,
-                    owner_name=publish_record.owner_name,
-                    version=new_version,
-                    last_pub_id=publish_id,
-                    ext=None,
-                )
-
-                result["new_publish_id"] = new_record.id
-                result["new_publish_version"] = new_version
-                logger.info(
-                    f"[offline_publish] New draft publish created: "
-                    f"original_id={publish_id} -> new_id={new_record.id}, version={new_version}"
-                )
-
-                # 将当前发布单状态置为 released
-                self._repo.update_status(publish_id, PublishStatus.RELEASED)
-                logger.info(
-                    f"[offline_publish] Publish status updated to released: publish_id={publish_id}"
-                )
-
-        # Step 4: 如果是 VALIDATING 状态，将发布单置为草稿
+        # Step 4: 如果是 VALIDATING 状态，将发布单置为草稿 (#197 CAS-guarded)
         if current_status == PublishStatus.VALIDATING:
-            self._repo.update_status(publish_id, PublishStatus.DRAFT)
+            self._repo.update_status(
+                publish_id, PublishStatus.DRAFT, PublishStatus.VALIDATING
+            )
             logger.info(
                 f"[offline_publish] Publish status updated to draft: publish_id={publish_id}"
             )
@@ -1052,23 +1093,12 @@ class BotPublishService(PublishRollbackMixin):
             )
             return result
 
-        async def _destroy_in_background():
-            try:
-                destroy_result = publish_flow_service.destroy_publish_history(
-                    publish_id=publish_id,
-                    stage=stage,
-                )
-                logger.info(
-                    f"[offline_publish] Background destroy completed: publish_id={publish_id}, "
-                    f"stage={stage.value}, result={destroy_result}"
-                )
-            except Exception as e:
-                logger.error(
-                    f"[offline_publish] Background destroy failed: publish_id={publish_id}, "
-                    f"stage={stage.value}, error={e}"
-                )
-
-        asyncio.create_task(_destroy_in_background())
+        # (#197) Enqueue a DURABLE destroy task instead of a fire-and-forget
+        # asyncio task, so a pod restart mid-offline does not leak a running
+        # online bot (the DB said RELEASED but the bot was never destroyed).
+        publish_flow_service.enqueue_offline_destroy(
+            publish_id=publish_id, stage=stage, operator="system"
+        )
         result["message"] = f"下线请求已提交，销毁流程正在后台执行: stage={stage.value}"
 
         logger.info(
@@ -1077,6 +1107,101 @@ class BotPublishService(PublishRollbackMixin):
         )
 
         return result
+
+    def _resolve_offline_stage(self, current_status: str, publish_id: int) -> PublishStage:
+        """Map an offline-able publish status to its destroy stage.
+
+        SUCCESS (online) → ONLINE; VALIDATING (verify) → VERIFY; anything else is
+        not offline-able and raises."""
+        if current_status == PublishStatus.SUCCESS:
+            return PublishStage.ONLINE
+        if current_status == PublishStatus.VALIDATING:
+            return PublishStage.VERIFY
+        raise BotPublishServiceError(
+            f"发布单状态不支持下线: publish_id={publish_id}, status={current_status}，"
+            f"仅支持状态: {PublishStatus.SUCCESS}, {PublishStatus.VALIDATING}"
+        )
+
+    def _release_or_redraft_on_offline(
+        self,
+        publish_record: BotPublishRecord,
+        publish_id: int,
+        result: Dict[str, Any],
+    ) -> None:
+        """SUCCESS-branch offline transition: mark the record RELEASED and, when no
+        other non-terminal record exists for the bot, open a fresh draft for the
+        next cycle. Mutates ``result`` with the new draft's id/version. The bot is
+        never destroyed here (that is the durable destroy task's job); both status
+        writes are CAS-guarded (SUCCESS→RELEASED) so a lost race is a no-op."""
+        bot_id = publish_record.source_bot_id
+        owner_id = publish_record.owner_id
+
+        terminal_statuses = {
+            PublishStatus.SUCCESS,
+            PublishStatus.UPGRADED,
+            PublishStatus.RELEASED,
+            PublishStatus.FAILED,
+        }
+
+        all_publish_records = self._repo.list_by_source_bot(
+            publish_record.source_bot_pk, publish_record.env
+        )
+        non_terminal_records = [
+            r for r in all_publish_records
+            if r.status not in terminal_statuses and r.id != publish_id
+        ]
+
+        if non_terminal_records:
+            logger.info(
+                f"[offline_publish] Found {len(non_terminal_records)} non-terminal publish record(s), "
+                f"skipping bot deletion: bot_id={bot_id}, owner_id={owner_id}"
+            )
+            self._repo.update_status(
+                publish_id, PublishStatus.RELEASED, PublishStatus.SUCCESS
+            )
+            logger.info(
+                f"[offline_publish] Publish status updated to released: publish_id={publish_id}"
+            )
+            return
+
+        # No other non-terminal record → open a fresh draft for the next cycle.
+        logger.info(
+            f"[offline_publish] No non-terminal publish record found, "
+            f"creating new draft publish: bot_id={bot_id}, owner_id={owner_id}"
+        )
+
+        # 计算新版本号（基于最大版本号，避免回滚后冲突）
+        new_version = self._get_next_version(
+            publish_record.publish_bot_id, publish_record.owner_id
+        )
+
+        new_record = self.create_publish(
+            source_bot_pk=publish_record.source_bot_pk,
+            source_bot_id=publish_record.source_bot_id,
+            publish_bot_id=publish_record.publish_bot_id,
+            name=publish_record.name,
+            owner_id=publish_record.owner_id,
+            permission_owner=publish_record.permission_owner,
+            description=publish_record.description,
+            owner_name=publish_record.owner_name,
+            version=new_version,
+            last_pub_id=publish_id,
+            ext=None,
+        )
+
+        result["new_publish_id"] = new_record.id
+        result["new_publish_version"] = new_version
+        logger.info(
+            f"[offline_publish] New draft publish created: "
+            f"original_id={publish_id} -> new_id={new_record.id}, version={new_version}"
+        )
+
+        self._repo.update_status(
+            publish_id, PublishStatus.RELEASED, PublishStatus.SUCCESS
+        )
+        logger.info(
+            f"[offline_publish] Publish status updated to released: publish_id={publish_id}"
+        )
 
     def upgrade_bot_to_service(
         self,
@@ -1136,7 +1261,9 @@ class BotPublishService(PublishRollbackMixin):
                 except Exception as e:
                     logger.warning(f"[upgrade_bot_to_service] Failed to restart bot: bot_id={bot_id}, owner_id={owner_id}, error={e}")
 
-            threading.Thread(target=_do_restart, daemon=True).start()
+            threading.Thread(
+                target=bind_current_avernet_tenant(_do_restart), daemon=True
+            ).start()
 
         # 8. 检查是否已有发布记录，有则不创建
         existing = self._repo.get_by_publish_bot_id(bot_id, owner_id, self._env)

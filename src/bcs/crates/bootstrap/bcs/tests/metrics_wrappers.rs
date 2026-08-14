@@ -542,7 +542,6 @@ fn group_add_member_cmd() -> GroupAddMemberCommand {
         human_actor_id: None,
         group_id: "group-wrapper".to_string(),
         bot_id: "bot-member".to_string(),
-        role: None,
     }
 }
 
@@ -565,7 +564,9 @@ fn web_send_cmd() -> WebSendCommand {
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     }
 }
 
@@ -576,6 +577,7 @@ fn group_chat_cmd() -> GroupChatCommand {
         requested_sender_id: None,
         message: "hello".to_string(),
         session_id: None,
+        provider_bypass_headers: Vec::new(),
     }
 }
 
@@ -618,6 +620,7 @@ fn chat_abort_cmd() -> ChatAbortCommand {
     ChatAbortCommand {
         caller: CallerContext::Public,
         group_id: "group-wrapper".to_string(),
+        session_id: None,
         run_id: Some("run-wrapper".to_string()),
     }
 }
@@ -656,6 +659,7 @@ fn blocking_chat_cmd() -> BlockingA2aChatCommand {
         client: None,
         response_mode: ChatResponseMode::Full,
         organization_code: None,
+        provider_bypass_headers: Vec::new(),
     }
 }
 
@@ -667,7 +671,7 @@ fn bot_delivery_cmd(delivery_kind: BotDeliveryKind) -> BotDeliveryCommand {
         run_id: "run-wrapper".to_string(),
         frame: BcsFrame::Request(RequestFrame::new("run-wrapper", "chat.send", None)),
         delivery_kind,
-        provider_transport: Default::default(),
+        provider_bypass_headers: Vec::new(),
     }
 }
 

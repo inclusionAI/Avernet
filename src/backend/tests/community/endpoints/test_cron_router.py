@@ -8,8 +8,10 @@ Tests the following scenarios:
 """
 from __future__ import annotations
 
+import json
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from starlette.requests import Request
 
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.core.bot_collaborator.interceptor.extractors import PermissionParams
@@ -22,6 +24,54 @@ from tests.community.framework import (
     ExpectError,
     endpoint_test,
 )
+
+
+class _RecordingBotService:
+    """The slice of ``BotServiceProtocol`` ``_resolve_user_identity`` uses.
+
+    Hand-written rather than a mock so the recorded calls are the only thing
+    the assertions can read: an unexpected method would raise here instead of
+    being invented on demand.
+    """
+
+    def __init__(self, *, bot: dict | None = None, error: Exception | None = None):
+        self.get_bot_calls: list[tuple[str, str]] = []
+        self._bot = bot
+        self._error = error
+
+    def get_bot(self, bot_id, user_id):
+        self.get_bot_calls.append((bot_id, user_id))
+        if self._error is not None:
+            raise self._error
+        return self._bot
+
+
+class _InterceptorContext:
+    """The interceptor context shape ``extract_cron_body_params`` reads."""
+
+    def __init__(self, **route_kwargs):
+        self.route_kwargs = route_kwargs
+
+
+def _json_request(body: bytes) -> Request:
+    """A real Starlette ``Request`` carrying ``body``.
+
+    Using the real class means ``request.json()`` parses for real — so the
+    malformed-body case below fails the way a malformed body actually fails,
+    rather than because a stub was told to raise.
+    """
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/cron",
+        "headers": [(b"content-type", b"application/json")],
+        "query_string": b"",
+    }
+
+    async def receive():
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return Request(scope, receive)
 
 
 # =============================================================================
@@ -41,13 +91,13 @@ class TestResolveUserIdentity:
             nickName="Test User",
             operatorName="Test User",
         )
-        bot_service = MagicMock()
+        bot_service = _RecordingBotService()
         user_id, nick_name = _resolve_user_identity(None, "bot1", user, bot_service)
 
         assert user_id == "u001"
         assert nick_name == "Test User"
         # bot_service should not be called when owner_id is None
-        bot_service.get_bot.assert_not_called()
+        assert bot_service.get_bot_calls == []
 
     def test_owner_scenario_with_empty_owner_id(self):
         """When owner_id is empty string, returns current user's identity."""
@@ -59,12 +109,12 @@ class TestResolveUserIdentity:
             nickName="Test User",
             operatorName="Test User",
         )
-        bot_service = MagicMock()
+        bot_service = _RecordingBotService()
         user_id, nick_name = _resolve_user_identity("", "bot1", user, bot_service)
 
         assert user_id == "u001"
         assert nick_name == "Test User"
-        bot_service.get_bot.assert_not_called()
+        assert bot_service.get_bot_calls == []
 
     def test_bot_id_all_returns_current_user(self):
         """When bot_id is 'all', returns current user's identity regardless of owner_id."""
@@ -76,13 +126,13 @@ class TestResolveUserIdentity:
             nickName="Test User",
             operatorName="Test User",
         )
-        bot_service = MagicMock()
+        bot_service = _RecordingBotService()
         # Even with owner_id set, bot_id="all" should use current user
         user_id, nick_name = _resolve_user_identity("u_owner", "all", user, bot_service)
 
         assert user_id == "u001"
         assert nick_name == "Test User"
-        bot_service.get_bot.assert_not_called()
+        assert bot_service.get_bot_calls == []
 
     def test_collaborator_scenario_returns_owner_identity(self):
         """When owner_id is set, returns owner's identity from bot info."""
@@ -95,17 +145,15 @@ class TestResolveUserIdentity:
             operatorName="Collab User",
         )
 
-        bot_service = MagicMock()
-        bot_service.get_bot.return_value = {
-            "owner_id": "u_owner",
-            "owner_name": "Owner User",
-        }
+        bot_service = _RecordingBotService(
+            bot={"owner_id": "u_owner", "owner_name": "Owner User"},
+        )
 
         user_id, nick_name = _resolve_user_identity("u_owner", "bot1", user, bot_service)
 
         assert user_id == "u_owner"
         assert nick_name == "Owner User"
-        bot_service.get_bot.assert_called_once_with("bot1", "u_owner")
+        assert bot_service.get_bot_calls == [("bot1", "u_owner")]
 
     def test_collaborator_scenario_bot_not_found(self):
         """When bot is not found, falls back to owner_id."""
@@ -118,8 +166,7 @@ class TestResolveUserIdentity:
             operatorName="Collab User",
         )
 
-        bot_service = MagicMock()
-        bot_service.get_bot.side_effect = Exception("Bot not found")
+        bot_service = _RecordingBotService(error=Exception("Bot not found"))
 
         user_id, nick_name = _resolve_user_identity("u_owner", "bot1", user, bot_service)
 
@@ -138,11 +185,7 @@ class TestResolveUserIdentity:
             operatorName="Collab User",
         )
 
-        bot_service = MagicMock()
-        bot_service.get_bot.return_value = {
-            "owner_id": "u_owner",
-            # No owner_name
-        }
+        bot_service = _RecordingBotService(bot={"owner_id": "u_owner"})
 
         user_id, nick_name = _resolve_user_identity("u_owner", "bot1", user, bot_service)
 
@@ -162,16 +205,11 @@ class TestExtractCronBodyParams:
         """Extracts bot_id and owner_id from request body."""
         from agentclaw.community.adapters.http.cron.router import extract_cron_body_params
 
-        # Mock context with request
-        mock_request = MagicMock()
-        mock_request.json = AsyncMock(return_value={
+        ctx = _InterceptorContext(request=_json_request(json.dumps({
             "bot_id": "bot123",
             "owner_id": "u_owner",
             "name": "test cron",
-        })
-
-        ctx = MagicMock()
-        ctx.route_kwargs = {"request": mock_request}
+        }).encode()))
 
         result = await extract_cron_body_params(ctx)
 
@@ -184,14 +222,10 @@ class TestExtractCronBodyParams:
         """Handles missing owner_id in request body."""
         from agentclaw.community.adapters.http.cron.router import extract_cron_body_params
 
-        mock_request = MagicMock()
-        mock_request.json = AsyncMock(return_value={
+        ctx = _InterceptorContext(request=_json_request(json.dumps({
             "bot_id": "bot123",
             "name": "test cron",
-        })
-
-        ctx = MagicMock()
-        ctx.route_kwargs = {"request": mock_request}
+        }).encode()))
 
         result = await extract_cron_body_params(ctx)
 
@@ -203,8 +237,7 @@ class TestExtractCronBodyParams:
         """Returns empty params when request is missing."""
         from agentclaw.community.adapters.http.cron.router import extract_cron_body_params
 
-        ctx = MagicMock()
-        ctx.route_kwargs = {}
+        ctx = _InterceptorContext()
 
         result = await extract_cron_body_params(ctx)
 
@@ -216,11 +249,7 @@ class TestExtractCronBodyParams:
         """Returns empty params when JSON parsing fails."""
         from agentclaw.community.adapters.http.cron.router import extract_cron_body_params
 
-        mock_request = MagicMock()
-        mock_request.json = AsyncMock(side_effect=Exception("Invalid JSON"))
-
-        ctx = MagicMock()
-        ctx.route_kwargs = {"request": mock_request}
+        ctx = _InterceptorContext(request=_json_request(b"{not json"))
 
         result = await extract_cron_body_params(ctx)
 
@@ -715,7 +744,7 @@ class TestResolveUserIdentityEdgeCases:
             nickName=None,  # None nickName
             operatorName="Test User",
         )
-        bot_service = MagicMock()
+        bot_service = _RecordingBotService()
         user_id, nick_name = _resolve_user_identity(None, "bot1", user, bot_service)
 
         assert user_id == "u001"
@@ -732,8 +761,7 @@ class TestResolveUserIdentityEdgeCases:
             operatorName="Collab User",
         )
 
-        bot_service = MagicMock()
-        bot_service.get_bot.return_value = None
+        bot_service = _RecordingBotService(bot=None)
 
         user_id, nick_name = _resolve_user_identity("u_owner", "bot1", user, bot_service)
 

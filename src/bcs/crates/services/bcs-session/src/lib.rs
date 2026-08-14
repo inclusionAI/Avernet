@@ -3,5 +3,5 @@
 pub mod application;
 pub mod noop;
 
-pub use application::SessionManagementServiceImpl;
+pub use application::{SessionManagementServiceImpl, SessionManagementWithRuntimeCleanup};
 pub use noop::NoopSessionManagementService;

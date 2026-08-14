@@ -16,6 +16,7 @@ class RunStatus(Enum):
     RUNNING = "RUNNING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+    TIME_OUT = "TIME_OUT"
 
 
 @dataclass(slots=True)

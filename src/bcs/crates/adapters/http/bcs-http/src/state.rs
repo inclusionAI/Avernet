@@ -4,7 +4,9 @@ use bcs_channel_api::ChannelHttpIngressRegistry;
 use bcs_config_api::ManifestConfig;
 use bcs_domain::BotCapabilities;
 use bcs_route_security::OutboundUrlGuard;
+use axum::http::{HeaderMap, HeaderName};
 pub use bcs_service_api::{ChatRunCleanupPort, ChatRunEventPort};
+use bcs_service_api::application::v1::SessionFileApplicationService;
 use bcs_service_api::{ProviderCredentialRepoPort, ProviderStreamGrayList};
 use bcs_services_container::Services;
 use std::sync::Arc;
@@ -40,7 +42,7 @@ pub struct HttpUserIdentity {
 pub trait UserIdentityPort: Send + Sync {
     async fn extract(
         &self,
-        headers: &axum::http::HeaderMap,
+        headers: &HeaderMap,
         uri: &axum::http::Uri,
     ) -> Option<HttpUserIdentity>;
 
@@ -103,7 +105,7 @@ impl ChainUserIdentityPort {
 impl UserIdentityPort for ChainUserIdentityPort {
     async fn extract(
         &self,
-        headers: &axum::http::HeaderMap,
+        headers: &HeaderMap,
         _uri: &axum::http::Uri,
     ) -> Option<HttpUserIdentity> {
         let result = self.chain.authenticate(headers).await.ok()?;
@@ -429,6 +431,7 @@ fn purge_expired(runs: &mut HashMap<String, AdminInvocationRun>) {
 #[derive(Clone)]
 pub struct HttpAppState {
     pub services: Services,
+    pub session_file_application: Option<Arc<dyn SessionFileApplicationService>>,
     pub health: Arc<dyn HealthPort>,
     pub async_chat_poll_wait_max_ms: u64,
     pub botchat_url: Option<String>,
@@ -463,6 +466,7 @@ pub struct HttpAppState {
     pub manifest: ManifestConfig,
     pub allowed_switch_provider_ids: Arc<Vec<String>>,
     pub provider_stream_gray_list: Arc<ProviderStreamGrayList>,
+    pub provider_bypass_header_names: Arc<Vec<HeaderName>>,
     pub judge_enabled: bool,
     pub channel_http_ingress: Option<Arc<ChannelHttpIngressRegistry>>,
     pub auth_chain: Option<Arc<bcs_auth_api::AuthPluginChain>>,
@@ -475,6 +479,7 @@ impl HttpAppState {
     pub fn new(services: Services) -> Self {
         Self {
             services,
+            session_file_application: None,
             health: Arc::new(DefaultHealthPort),
             async_chat_poll_wait_max_ms: 30_000,
             botchat_url: None,
@@ -511,6 +516,7 @@ impl HttpAppState {
             manifest: ManifestConfig::default(),
             allowed_switch_provider_ids: Arc::new(Vec::new()),
             provider_stream_gray_list: Arc::new(ProviderStreamGrayList::default()),
+            provider_bypass_header_names: Arc::new(Vec::new()),
             judge_enabled: false,
             channel_http_ingress: None,
             auth_chain: None,
@@ -522,6 +528,14 @@ impl HttpAppState {
 
     pub fn with_async_chat_poll_wait_max_ms(mut self, value: u64) -> Self {
         self.async_chat_poll_wait_max_ms = value;
+        self
+    }
+
+    pub fn with_session_file_application(
+        mut self,
+        service: Option<Arc<dyn SessionFileApplicationService>>,
+    ) -> Self {
+        self.session_file_application = service;
         self
     }
 
@@ -674,6 +688,23 @@ impl HttpAppState {
         self
     }
 
+    pub fn with_provider_bypass_header_names(mut self, names: Vec<HeaderName>) -> Self {
+        self.provider_bypass_header_names = Arc::new(names);
+        self
+    }
+
+    pub fn provider_bypass_headers_from(&self, headers: &HeaderMap) -> Vec<(String, String)> {
+        self.provider_bypass_header_names
+            .iter()
+            .filter_map(|name| {
+                headers
+                    .get(name)
+                    .and_then(|value| value.to_str().ok())
+                    .map(|value| (name.as_str().to_string(), value.to_string()))
+            })
+            .collect()
+    }
+
     pub fn with_channel_http_ingress(
         mut self,
         ingress: Option<Arc<ChannelHttpIngressRegistry>>,
@@ -713,7 +744,7 @@ impl HttpAppState {
     /// default to `["local"]`), resolve a non-JWT session token directly via the
     /// registry — mirroring the legacy `SessionTokenPlugin` non-JWT branch. JWT
     /// tokens without a chain are not resolvable (production always has a chain).
-    pub async fn bot_uuid_from_headers(&self, headers: &axum::http::HeaderMap) -> Option<String> {
+    pub async fn bot_uuid_from_headers(&self, headers: &HeaderMap) -> Option<String> {
         if let Some(chain) = self.auth_chain.as_ref() {
             if let Ok(result) = chain.authenticate(headers).await {
                 if let Some(bot_uuid) = result.principal.and_then(|p| p.bot_uuid) {
@@ -735,7 +766,7 @@ impl HttpAppState {
 /// [`crate::headers::extract_bearer_token`]; kept private to `state` only to
 /// preserve the `X-BCS-Bot-Token` precedence and mirror
 /// `routes::caller::bot_token_from_headers`.
-fn bot_token_from_headers(headers: &axum::http::HeaderMap) -> Option<String> {
+fn bot_token_from_headers(headers: &HeaderMap) -> Option<String> {
     if let Some(token) = headers
         .get("X-BCS-Bot-Token")
         .and_then(|value| value.to_str().ok())

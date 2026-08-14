@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shlex
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse, urlunparse
 
 from secbaas.community.api.bot_runtime import HttpConnectionInfo, WsConnectionInfo
 from secbaas.community.api.device_manage import (
@@ -428,27 +430,44 @@ class ArcaPaasService(PaasService):
                         f"Storage cleanup skipped: storage attribute missing, "
                         f"paas_device_id={paas_device_id}"
                     )
-                elif not isinstance(storage, dict):
-                    self._logger.warning(
-                        f"Storage cleanup skipped: storage is not a dict, "
-                        f"paas_device_id={paas_device_id}, "
-                        f"get_info={_safe_repr(info)}"
-                    )
-                elif storage.get("storage_id") is None:
-                    self._logger.warning(
-                        f"Storage cleanup skipped: storage_id key missing, "
-                        f"paas_device_id={paas_device_id}, "
-                        f"get_info={_safe_repr(info)}"
-                    )
                 else:
-                    storage_id = storage["storage_id"]
-                    if not isinstance(storage_id, str):
+                    # Compatible with both dict and object types
+                    raw_storage_id = None
+                    _storage_type_ok = False
+                    if isinstance(storage, dict):
+                        raw_storage_id = storage.get("storage_id")
+                        _storage_type_ok = True
+                    elif hasattr(storage, "storage_id"):
+                        raw_storage_id = getattr(storage, "storage_id", None)
+                        _storage_type_ok = True
+                    else:
                         self._logger.warning(
-                            f"Storage cleanup skipped: storage_id is not a string, "
+                            f"Storage cleanup skipped: unrecognized storage type, "
                             f"paas_device_id={paas_device_id}, "
-                            f"storage_id={_safe_repr(storage_id)}"
+                            f"storage_type={type(storage).__name__}"
                         )
-                        storage_id = None
+
+                    if _storage_type_ok:
+                        # Final validation: must be a non-empty string
+                        if raw_storage_id is None:
+                            self._logger.warning(
+                                f"Storage cleanup skipped: storage_id missing, "
+                                f"paas_device_id={paas_device_id}, "
+                                f"get_info={_safe_repr(info)}"
+                            )
+                        elif not isinstance(raw_storage_id, str):
+                            self._logger.warning(
+                                f"Storage cleanup skipped: storage_id is not a string, "
+                                f"paas_device_id={paas_device_id}, "
+                                f"storage_id={_safe_repr(raw_storage_id)}"
+                            )
+                        elif raw_storage_id == "":
+                            self._logger.warning(
+                                f"Storage cleanup skipped: storage_id is empty string, "
+                                f"paas_device_id={paas_device_id}"
+                            )
+                        else:
+                            storage_id = raw_storage_id
             except Exception:
                 self._logger.warning(
                     f"Storage cleanup skipped: get_info failed, "
@@ -490,11 +509,15 @@ class ArcaPaasService(PaasService):
             )
         except ArcaSandboxError as e:
             error_str = str(e).lower()
-            # Only "not found" / "does not exist" are idempotent.
-            # "failed to connect" is NOT idempotent — it may be a transient
-            # network error and the sandbox is still running.
+            # ARCA reports an externally reclaimed sandbox as either "not
+            # found", "does not exist", or "sandbox destroyed". All three
+            # mean there is no resource left to destroy. Other connection
+            # failures remain non-idempotent because the sandbox may still be
+            # running.
             if "sandbox" in error_str and (
-                "not found" in error_str or "does not exist" in error_str
+                "not found" in error_str
+                or "does not exist" in error_str
+                or "sandbox destroyed" in error_str
             ):
                 self._logger.warning(
                     "Sandbox %s not found during destroy, "
@@ -639,12 +662,14 @@ class ArcaPaasService(PaasService):
         self,
         paas_device_id: str,
         outbound_operation_rule: OutBoundOperationRule,
+        mode: OutBoundOperationRuleUpdatedMode | None = None,
     ) -> bool:
         """Update outbound operation rule for Arca sandbox.
 
         Args:
             paas_device_id: Arca sandbox_id to update.
             outbound_operation_rule: New outbound operation rule to apply.
+            mode: Update mode (REPLACE or APPEND). Defaults to REPLACE if not provided.
 
         Returns:
             True if successful.
@@ -657,12 +682,14 @@ class ArcaPaasService(PaasService):
             self._update_outbound_operation_rule_sync,
             paas_device_id,
             outbound_operation_rule,
+            mode,
         )
 
     def _update_outbound_operation_rule_sync(
         self,
         paas_device_id: str,
         outbound_operation_rule: OutBoundOperationRule,
+        mode: OutBoundOperationRuleUpdatedMode | None = None,
     ) -> bool:
         """Synchronous implementation of update_outbound_operation_rule for use in to_thread()."""
         try:
@@ -670,9 +697,13 @@ class ArcaPaasService(PaasService):
                 f"Updating outbound operation rule for sandbox: {paas_device_id}"
             )
             sandbox = self._arca_sandbox_plugin.connect_sync_sandbox(paas_device_id)
+            update_mode = OutBoundOperationRuleUpdatedMode.REPLACE
+            if mode and mode == OutBoundOperationRuleUpdatedMode.APPEND:
+                update_mode = OutBoundOperationRuleUpdatedMode.APPEND
+
             result = sandbox.update_outbound_rule(
                 rule=outbound_operation_rule,
-                updated_mode=OutBoundOperationRuleUpdatedMode.REPLACE,
+                updated_mode=update_mode,
             )
             self._logger.info(
                 f"Outbound operation rule updated successfully: {paas_device_id}, result={result}"
@@ -964,6 +995,136 @@ class ArcaPaasService(PaasService):
             )
         except Exception as e:
             raise self._translate_error(e, ErrorCode.DEVICE_UNAVAILABLE)
+
+    # ------------------------------------------------------------------
+    # File transfer — Arca curl-based implementation (v1.4 launch platform)
+    # ------------------------------------------------------------------
+
+    async def pull_file_from_url(
+        self,
+        paas_device_id: str,
+        source_url: str,
+        device_path: str,
+        timeout_seconds: int = 300,
+    ) -> None:
+        """Download file from URL to device path via curl in Arca sandbox.
+
+        Args:
+            paas_device_id: Arca sandbox_id.
+            source_url: URL to download from (e.g. OSS pre-signed GET URL).
+            device_path: Absolute path on device to save the file to.
+            timeout_seconds: Maximum download time in seconds (default: 300).
+
+        Raises:
+            PaasError: With FILE_TRANSFER_FAILED if download fails or times out.
+        """
+        return await asyncio.to_thread(
+            self._pull_file_sync,
+            paas_device_id,
+            source_url,
+            device_path,
+            timeout_seconds,
+        )
+
+    def _pull_file_sync(
+        self,
+        paas_device_id: str,
+        source_url: str,
+        device_path: str,
+        timeout_seconds: int,
+    ) -> None:
+        """Synchronous implementation of pull_file_from_url for use in to_thread()."""
+        try:
+            sandbox = self._arca_sandbox_plugin.connect_sync_sandbox(paas_device_id)
+            cmd = (
+                f"curl -fSL --create-dirs -o {shlex.quote(device_path)} "
+                f"{shlex.quote(source_url)}"
+            )
+            result = sandbox.exec_command(
+                cmd=cmd,
+                timeout_in_millis=timeout_seconds * 1000,
+                envs=None,
+            )
+            if result.exit_code != 0:
+                raise PaasError(
+                    ErrorCode.FILE_TRANSFER_FAILED,
+                    f"curl pull failed with exit code {result.exit_code}: {result.stderr}",
+                )
+            safe_url = urlunparse(urlparse(source_url)._replace(query="", fragment=""))
+            self._logger.info(
+                f"File pulled: {safe_url} -> {device_path} (sandbox={paas_device_id})"
+            )
+        except ArcaSandboxTimeoutError as e:
+            raise PaasError(
+                ErrorCode.FILE_TRANSFER_FAILED,
+                f"File pull timed out after {timeout_seconds}s: {e}",
+                e,
+            )
+        except Exception as e:
+            raise self._translate_error(e, ErrorCode.FILE_TRANSFER_FAILED)
+
+    async def push_file_to_url(
+        self,
+        paas_device_id: str,
+        device_path: str,
+        target_url: str,
+        timeout_seconds: int = 300,
+    ) -> None:
+        """Upload file from device path to URL via curl in Arca sandbox.
+
+        Args:
+            paas_device_id: Arca sandbox_id.
+            device_path: Absolute path on device of the file to upload.
+            target_url: URL to upload to (e.g. OSS pre-signed PUT URL).
+            timeout_seconds: Maximum upload time in seconds (default: 300).
+
+        Raises:
+            PaasError: With FILE_TRANSFER_FAILED if upload fails or times out.
+        """
+        return await asyncio.to_thread(
+            self._push_file_sync,
+            paas_device_id,
+            device_path,
+            target_url,
+            timeout_seconds,
+        )
+
+    def _push_file_sync(
+        self,
+        paas_device_id: str,
+        device_path: str,
+        target_url: str,
+        timeout_seconds: int,
+    ) -> None:
+        """Synchronous implementation of push_file_to_url for use in to_thread()."""
+        try:
+            sandbox = self._arca_sandbox_plugin.connect_sync_sandbox(paas_device_id)
+            cmd = (
+                f"curl -fSL -X PUT -T {shlex.quote(device_path)} "
+                f"{shlex.quote(target_url)}"
+            )
+            result = sandbox.exec_command(
+                cmd=cmd,
+                timeout_in_millis=timeout_seconds * 1000,
+                envs=None,
+            )
+            if result.exit_code != 0:
+                raise PaasError(
+                    ErrorCode.FILE_TRANSFER_FAILED,
+                    f"curl push failed with exit code {result.exit_code}: {result.stderr}",
+                )
+            safe_url = urlunparse(urlparse(target_url)._replace(query="", fragment=""))
+            self._logger.info(
+                f"File pushed: {device_path} -> {safe_url} (sandbox={paas_device_id})"
+            )
+        except ArcaSandboxTimeoutError as e:
+            raise PaasError(
+                ErrorCode.FILE_TRANSFER_FAILED,
+                f"File push timed out after {timeout_seconds}s: {e}",
+                e,
+            )
+        except Exception as e:
+            raise self._translate_error(e, ErrorCode.FILE_TRANSFER_FAILED)
 
 
 class SandboxInfo:

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from agentclaw.community.core.skill_center.services.skill_cache import MarketCache
 from agentclaw.community.plugin_api.cache import CachePlugin
+from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 
 def test_marketcache_set_then_get_round_trips_through_cache_plugin(world) -> None:
@@ -53,3 +54,17 @@ def test_marketcache_round_trips_through_community_cache(community_world) -> Non
     assert cache.get(full_key) is not None, (
         "community CachePlugin must surface the consumer's write"
     )
+
+
+def test_marketcache_partitions_persisted_skill_data_by_current_tenant(world) -> None:
+    mc = world.get(MarketCache)
+
+    with avernet_tenant_scope("tenant-a"):
+        mc.set("market_skills_list_default", {"skills": ["tenant-a"]})
+
+    with avernet_tenant_scope("tenant-b"):
+        assert mc.get("market_skills_list_default") is None
+        mc.set("market_skills_list_default", {"skills": ["tenant-b"]})
+
+    with avernet_tenant_scope("tenant-a"):
+        assert mc.get("market_skills_list_default") == {"skills": ["tenant-a"]}

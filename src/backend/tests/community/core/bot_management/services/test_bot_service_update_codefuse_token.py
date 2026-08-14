@@ -29,6 +29,7 @@ def _make_bot_service(repository=None, template_service=None) -> BotService:
         oss_record_repo=MagicMock(),
         bot_publish_service_provider=lambda: MagicMock(),
         device_service_provider=lambda: MagicMock(),
+        bot_app_grant_service_provider=lambda: MagicMock(),
         path_factory=MagicMock(),
         template_service=template_service or MagicMock(),
         workspace_hosting_service=MagicMock(),
@@ -197,9 +198,33 @@ class TestUpdateBotCodefuseTokenDispatch:
 
     # ── 条件过滤 ─────────────────────────────────────────────────
 
-    def test_no_dispatch_when_not_application_coding(self, repo, template_svc):
+    def test_dispatch_when_personal_coding(self, repo, template_svc):
         repo.get_by_id_and_owner.return_value = _bot_record(template_type="personalCoding")
         repo.update_by_owner.return_value = _bot_record(template_type="personalCoding")
+        service = _make_bot_service(repository=repo, template_service=template_svc)
+
+        with patch(
+            "agentclaw.community.core.bot_management.services.bot_service.threading.Thread",
+            _FakeThread,
+        ):
+            with patch.object(
+                service, "_refresh_codefuse_token_on_device"
+            ) as mock_refresh:
+                service.update_bot(
+                    bot_id="bot-1",
+                    user_id="user1",
+                    template_config={"token": "enc:v1:NEW"},
+                    cookie="c",
+                )
+                mock_refresh.assert_called_once_with(
+                    bot_id="bot-1",
+                    user_id="user1",
+                    plaintext_token="new-plaintext-auth-code",
+                )
+
+    def test_no_dispatch_when_normal_template(self, repo, template_svc):
+        repo.get_by_id_and_owner.return_value = _bot_record(template_type="normalCC")
+        repo.update_by_owner.return_value = _bot_record(template_type="normalCC")
         service = _make_bot_service(repository=repo, template_service=template_svc)
 
         with patch(

@@ -1,5 +1,7 @@
 from dependency_injector import containers, providers
 
+from secbaas.community.api.publish_manage import PublishService
+from secbaas.community.core.service.paas import DeviceCallbackHandler
 from secbaas.community.core.service.paas.desktop import ConnectionManager
 from secbaas.community.logger import get_logger
 
@@ -14,10 +16,25 @@ from ._lifecycle import (
     LocalProcessManagerLifecycle,
 )
 
+
+def _lazy_publish_service() -> PublishService:
+    """Resolve the publish_service from the live ApplicationContainer services.
+
+    Referenced lazily (at device-callback time) to break the
+    ``device_service ↔ publish_service`` object-graph cycle: publish service is
+    only resolved when a callback actually fires, not during container resolution.
+    Uses the live container singleton via ``get_container()`` so config/Selector
+    overrides applied at bootstrap are visible.
+    """
+    from secbaas.community.bootstrap import get_container
+
+    return get_container().services.publish_service()
+
+
 # Enterprise registers extra plugin options via plugin_registry at import
 # time. PluginContainer reads from the registry to build its Selectors, so
 # no enterprise import is needed here.
-from .plugins import PluginContainer as PluginContainer
+from .plugins import PluginContainer  # noqa: E402
 
 logger = get_logger("bootstrap")
 
@@ -33,7 +50,33 @@ def _build_db_config(config) -> DatabaseConfig:
         if plugin_type == PluginDatabaseType.SQLITE_ORM:
             raise
         db_url = ""
-    return DatabaseConfig(plugin_type=plugin_type, db_url=db_url)
+
+    def _opt(key: ConfigKey) -> str:
+        try:
+            return _read_config(config, key)
+        except ConfigError:
+            return ""
+
+    def _opt_bool_default_false(key: ConfigKey, default: bool = False) -> bool:
+        try:
+            val = _read_config(config, key)
+        except ConfigError:
+            return default
+        if isinstance(val, bool):
+            return val
+        return str(val).strip().lower() in {"1", "true", "yes", "on"}
+
+    return DatabaseConfig(
+        plugin_type=plugin_type,
+        db_url=db_url,
+        create_schema=_opt_bool_default_false(ConfigKey.CREATE_SCHEMA),
+        seed_data=_opt_bool_default_false(ConfigKey.SEED_DATA),
+        mariadb_host=_opt(ConfigKey.MARIADB_HOST) or "127.0.0.1",
+        mariadb_port=int(_opt(ConfigKey.MARIADB_PORT) or 3306),
+        mariadb_database=_opt(ConfigKey.MARIADB_DATABASE),
+        mariadb_user=_opt(ConfigKey.MARIADB_USER),
+        mariadb_password=_opt(ConfigKey.MARIADB_PASSWORD),
+    )
 
 
 def _provider_label(provider) -> str:
@@ -129,7 +172,14 @@ class ApplicationContainer(containers.DeclarativeContainer):
         bot_qpm_repository=repository.bot_qpm_repository,
         distributed_lock_repository=repository.distributed_lock_repository,
         cache_plugin=plugins.cache_plugin,
+        file_transfer_backend=plugins.file_transfer_backend,
         ws_relay_session_repo=repository.ws_relay_session_repository,
+        ticket_repository=repository.ticket_repository,
+        session_ticket_repository=repository.session_ticket_repository,
+        device_callback_handler=providers.Singleton(
+            DeviceCallbackHandler,
+            publish_service_factory=_lazy_publish_service,
+        ),
     )
 
     tasks = providers.Container(
@@ -139,6 +189,9 @@ class ApplicationContainer(containers.DeclarativeContainer):
         device_binding_repo=repository.device_binding_repository,
         sandbox_device_router=services.sandbox_device_router,
         bot_run_queue_repository=repository.bot_run_queue_repository,
+        ticket_repository=repository.ticket_repository,
+        paas_service_facade=services.paas_facade,
+        file_transfer_backend=services.file_transfer_backend,
     )
 
     cron_lifecycle = providers.Singleton(
@@ -147,6 +200,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         tasks=providers.List(
             tasks.device_ttl_timer_task,
             tasks.bot_run_recovery_task,
+            tasks.file_transfer_poller_task,
         ),
     )
 
@@ -264,3 +318,21 @@ def _log_config_summary(container: containers.DeclarativeContainer) -> None:
         return
     formatted = json.dumps(config_dict, indent=2, default=str, ensure_ascii=False)
     logger.info("Container config:\n%s", formatted)
+
+
+def _inject_enterprise_plugins(container: ApplicationContainer) -> None:
+    """Inject enterprise plugin options into a container instance's Selectors.
+
+    Runs at instance level (not class level) so that only this container
+    is affected.  Called after every container creation.
+    """
+    try:
+        from secbaas.community.plugin_registry import (
+            has_enterprise_plugins,
+            inject_into_plugin_container,
+        )
+
+        if has_enterprise_plugins():
+            inject_into_plugin_container(container)
+    except ImportError:
+        pass

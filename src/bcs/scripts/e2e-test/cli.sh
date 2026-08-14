@@ -247,9 +247,10 @@ test_cli_chat() {
             TESTS_FAILED=$((TESTS_FAILED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1)); return
         fi
     fi
-    # chat --detach prints "Run: <uuid>" / "Session: ..." / "State: running"
-    # (capital). Assert a run/session handle is present (no unasserted pass).
-    if _cli_contains "$BCS_CLI_STDOUT" "Run:" || _cli_contains "$BCS_CLI_STDOUT" "Session:"; then
+    # chat --detach prints a run/session handle. The default (no --json) now
+    # returns a single JSON object with lowercase "run_id"/"session_id" keys;
+    # --no-json still prints the human "Run:"/"Session:" lines. Accept either.
+    if _cli_contains "$BCS_CLI_STDOUT" "Run:" || _cli_contains "$BCS_CLI_STDOUT" "Session:" || _cli_contains "$BCS_CLI_STDOUT" '"run_id"' || _cli_contains "$BCS_CLI_STDOUT" '"session_id"'; then
         pass "bcs-cli chat returned a run/session handle"
         TESTS_PASSED=$((TESTS_PASSED+1))
     else
@@ -259,7 +260,7 @@ test_cli_chat() {
     TESTS_TOTAL=$((TESTS_TOTAL+1))
 }
 
-# list-groups: list all groups (no specific group filter).
+# list-groups: list groups where the current session bot is a formal member.
 test_cli_list_groups() {
     info "CLI: bcs-cli list-groups"
     ensure_cli_token CEO || { skip_case "no token"; TESTS_TOTAL=$((TESTS_TOTAL+1)); return; }
@@ -269,12 +270,23 @@ test_cli_list_groups() {
     fi
     local valid_shape
     valid_shape=$(printf '%s\n' "$BCS_CLI_STDOUT" | python3 -c '
-import re, sys
-lines = [line for line in sys.stdin.read().splitlines() if line.strip()]
-header = re.fullmatch(r"Groups \((\d+)\):", lines[0]) if lines else None
-expected = int(header.group(1)) if header else -1
-entry = re.compile(r"\s+- bcs_grp_[0-9a-f-]+ \[[^]]+\] driver=\S+")
-ok = header is not None and len(lines[1:]) == expected and all(entry.fullmatch(line) for line in lines[1:])
+import json, sys
+try:
+    payload = json.load(sys.stdin)
+    items = payload["items"]
+    returned = payload["returned"]
+    total = payload["total"]
+    has_more = payload["has_more"]
+    ok = (
+        isinstance(items, list)
+        and returned == len(items)
+        and isinstance(total, int)
+        and total >= returned
+        and isinstance(has_more, bool)
+        and all(isinstance(item, dict) and (item.get("group_id") or item.get("id")) for item in items)
+    )
+except Exception:
+    ok = False
 print("1" if ok else "0")
 ' 2>/dev/null)
     if [[ "$valid_shape" = "1" ]]; then

@@ -7,9 +7,9 @@ repo_root="$(cd "$baas_root/../.." && pwd)"
 baas_dir="${BAAS_COMMUNITY_DIR:-$baas_root}"
 ci_workspace="${CITEST_WORKSPACE:-$repo_root}"
 report_dir="$baas_dir/pytest_report"
-junit_report="$report_dir/TEST-junit.xml"
-coverage_report="$report_dir/TEST-cov.xml"
-line_coverage_min="${BAAS_CI_LINE_COVERAGE_MIN:-0}"
+unit_report="$report_dir/ci.xml"
+coverage_report="$report_dir/cov-ci.xml"
+line_coverage_min="${BAAS_CI_LINE_COVERAGE_MIN:-90}"
 python_bin="$(command -v python || command -v python3 || true)"
 base=""
 head="HEAD"
@@ -21,6 +21,19 @@ while [[ "$#" -gt 0 ]]; do
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+# When --base is omitted (e.g. `just test` / `just test-ci` / a direct local
+# invocation), derive the changed-line coverage base ref so the gate runs
+# locally with the same threshold as GitHub CI instead of being skipped.
+# CI always passes an explicit --base, so this branch only affects local runs.
+if [[ -z "$base" ]]; then
+  # shellcheck source=../../../scripts/lib/resolve_base_ref.sh
+  source "$repo_root/scripts/lib/resolve_base_ref.sh"
+  base="$(resolve_base_ref)" || {
+    echo "baas CI failed: could not resolve changed-line coverage base ref" >&2
+    exit 1
+  }
+fi
 
 if [[ ! -d "$baas_dir" ]]; then
   echo "baas CI failed: community package not found: $baas_dir" >&2
@@ -46,31 +59,44 @@ fi
 mkdir -p "$report_dir"
 
 set +e
-PYTHONPATH="$baas_dir/src:$baas_dir:${PYTHONPATH:-}" \
-"$baas_python" -m pytest tests -v \
-  --junitxml="$junit_report" \
-  --cov="$baas_dir/src" \
-  --cov-report="xml:$coverage_report" \
-  --cov-report=term-missing
-pytest_status=$?
+source scripts/lib/pipeline.sh && run_ci_pipeline bare e2e-sqlite
+baas_ci_status=$?
 set -e
 
-touch "$junit_report" "$coverage_report"
-if [[ "$pytest_status" -ne 0 ]]; then
-  echo "baas CI failed: pytest did not pass cleanly" >&2
-  exit "$pytest_status"
+touch "$unit_report" "$coverage_report"
+if [[ "$baas_ci_status" -ne 0 ]]; then
+  echo "BaaS CI failed: baas ci did not pass cleanly" >&2
+  exit "$baas_ci_status"
 fi
 
-check_args=(
+echo "=== CI COVERAGE REPORT ==="
+ci_check_args=(
   "$repo_root/scripts/ci/report_check.py"
-  --junit "$junit_report"
+  --junit "$unit_report"
   --coverage "$coverage_report"
   --source-root "$baas_dir/src"
   --min-case-pass-rate 100
   --min-line-coverage "$line_coverage_min"
 )
 if [[ -n "$base" ]]; then
-  check_args+=(--base "$base" --head "$head" --min-change-line-coverage 90)
+  ci_check_args+=(--base "$base" --head "$head" --min-change-line-coverage 90)
 fi
-"$python_bin" "${check_args[@]}"
-echo "baas CI gate passed"
+"$python_bin" "${ci_check_args[@]}"
+echo "=== END CI COVERAGE REPORT ==="
+echo "BAAS CI GATE PASSED"
+
+echo "=== E2E COVERAGE REPORT ==="
+asgi_check_args=(
+  "$repo_root/scripts/ci/report_check.py"
+  --junit "$report_dir/asgi.xml"
+  --coverage "$report_dir/cov-asgi.xml"
+  --source-root "$baas_dir/src"
+  --min-case-pass-rate 100
+  --min-line-coverage "40"
+)
+#if [[ -n "$base" ]]; then
+#  asgi_check_args+=(--base "$base" --head "$head" --min-change-line-coverage 40)
+#fi
+"$python_bin" "${asgi_check_args[@]}"
+echo "=== END ASGI COVERAGE REPORT ==="
+echo "BAAS ASGI GATE PASSED"

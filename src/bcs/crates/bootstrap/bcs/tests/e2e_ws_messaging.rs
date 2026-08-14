@@ -48,7 +48,7 @@ fn create_test_config(bots_dir: &PathBuf) -> BcsConfig {
         leader_election: None,
         cache: Default::default(),
         database: Default::default(),
-        mist: bcs::MistConfig::default(),
+        secret: Default::default(),
         channels: Default::default(),
         collaboration: Default::default(),
         store_messages: true,
@@ -85,13 +85,14 @@ fn create_test_config(bots_dir: &PathBuf) -> BcsConfig {
         api_keys: vec![],
         metrics: Default::default(),
         invite: Default::default(),
+        ..BcsConfig::default()
     }
 }
 
 /// Start a BCS server on a random port.
 async fn start_test_server(bots_dir: &PathBuf) -> (SocketAddr, tokio::task::JoinHandle<Result<(), bcs::BcsError>>) {
     let config = create_test_config(bots_dir);
-    let server = BcsServer::new(config);
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
     server.run_on_random_port().await.expect("Failed to start server")
 }
 
@@ -581,49 +582,23 @@ async fn test_1to1_chat_http_to_ws() {
 
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // Connect Bot B (receiver) via WebSocket
-    let mut ws_b = connect_bot(addr, None).await;
-    let resp_b = send_frame(&mut ws_b, json!({
-        "type": "req", "id": "1", "method": "bot.connect", "params": {}
-    })).await.unwrap();
-    let bot_b_id = resp_b["payload"]["bot_uuid"].as_str().unwrap().to_string();
-    let bot_b_token = resp_b["payload"]["token"].as_str().unwrap().to_string();
-
-    // Onboard Bot B
-    let client = create_client(addr, &bot_b_token);
-    client.onboard("ReceiverBot", None, None, None, None, None).await.ok();
-
-    // Bot A sends 1:1 message to Bot B via HTTP API
-    // Note: This requires Bot A to be connected via WS with a token
-    let result = client.chat(&bot_b_id, "Hello from Bot A", Some("bot_a"), None);
-    // The chat might fail if bot_a is not in registry, but we test the flow
-    let _ = result.await;
-
-    // The test verifies the infrastructure works
-}
-
-#[tokio::test]
-async fn test_legacy_chat_times_out_when_bot_silent() {
-    let _ = tracing_subscriber::fmt::try_init();
-    let temp_dir = create_temp_bots_dir();
-    let bots_dir = temp_dir.path().to_path_buf();
-    let (addr, _handle) = start_test_server(&bots_dir).await;
-
-    tokio::time::sleep(Duration::from_millis(50)).await;
-
     let (_sender_ws, sender_bot_id, sender_client) =
         connect_and_onboard_public_bot(addr, "SenderBot").await;
     let (mut receiver_ws, receiver_bot_id, _receiver_client) =
         connect_and_onboard_public_bot(addr, "ReceiverBot").await;
 
-    let started = std::time::Instant::now();
     let chat_task = tokio::spawn(async move {
         sender_client
-            .chat(
+            .chat_async(
                 &receiver_bot_id,
-                "Hello from sender",
+                "Hello from Bot A",
                 Some(&sender_bot_id),
-                Some(200),
+                None,
+                &[],
+                None,
+                None,
+                2_000,
+                false,
             )
             .await
     });
@@ -633,26 +608,9 @@ async fn test_legacy_chat_times_out_when_bot_silent() {
         .expect("Receiver bot should receive chat.send");
     assert_eq!(frame["method"], "chat.send");
 
-    let err = chat_task
-        .await
-        .expect("chat task should join")
-        .expect_err("silent bot should cause timeout");
-    let elapsed = started.elapsed();
-
-    assert!(err.to_string().contains("Timeout waiting for bot response"));
-    assert!(
-        elapsed < Duration::from_secs(3),
-        "timeout should follow request window, got {:?}",
-        elapsed
-    );
+    let _ = chat_task.await.expect("chat task should join");
 }
 
-
-// ============================================================================
-// Group Lifecycle Tests
-// ============================================================================
-
-/// Test group creation and listing.
 #[tokio::test]
 async fn test_group_create_and_list() {
     let _ = tracing_subscriber::fmt::try_init();

@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-from unittest.mock import MagicMock
 
 
 async def drain_background_tasks(timeout: float = 30.0) -> None:
@@ -46,9 +45,45 @@ async def drain_background_tasks(timeout: float = 30.0) -> None:
         )
 
 
+class StubResponse:
+    """The slice of ``httpx.Response`` a service touches on a stubbed reply.
+
+    Deliberately a real class rather than a mock: an attribute a service reads
+    but this stub does not define should fail loudly here, in the seam, instead
+    of silently resolving to an auto-created attribute that makes the service
+    take a branch no real response would.
+    """
+
+    def __init__(self, payload: Any, *, status_code: int = 200) -> None:
+        self._payload = payload
+        self.status_code = status_code
+
+    def raise_for_status(self) -> "StubResponse":
+        return self
+
+    def json(self) -> Any:
+        return self._payload
+
+    @property
+    def text(self) -> str:
+        import json as _json
+
+        return _json.dumps(self._payload, ensure_ascii=False)
+
+
+def json_response(payload: Any, *, status_code: int = 200) -> StubResponse:
+    """A stubbed HTTP reply carrying ``payload`` as its JSON body.
+
+    For upstreams whose envelope is their own; use
+    :func:`http_envelope_response` for the BaaS/BCN ``{code, message, data}``
+    shape.
+    """
+    return StubResponse(payload, status_code=status_code)
+
+
 def http_envelope_response(
     data: Any = None, *, code: int = 0, message: str = "ok"
-) -> MagicMock:
+) -> StubResponse:
     """A stub ``httpx.Response`` for a BaaS/BCN ``HttpClient`` MockSeam.
 
     Models the upstream ``{code, message, data}`` envelope: ``raise_for_status``
@@ -57,9 +92,6 @@ def http_envelope_response(
     service's ``self._http.get/post(...)`` sees a realistic success/error reply
     without any network.
     """
-    r = MagicMock()
-    r.raise_for_status.return_value = None
-    r.json.return_value = {
-        "code": code, "message": message, "data": {} if data is None else data
-    }
-    return r
+    return StubResponse(
+        {"code": code, "message": message, "data": {} if data is None else data}
+    )

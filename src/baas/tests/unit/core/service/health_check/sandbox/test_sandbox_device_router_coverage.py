@@ -161,7 +161,7 @@ class TestAcBindingHandler:
         result = await handler.warn_device(table_id=1)
         assert result.action == "STOPPED"
         assert result.refresh_fail_count == 10
-        handler._binding_repo.update_status.assert_called_once()
+        handler._binding_repo.update_status.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_warn_device_probe_success_with_ttl(self, handler):
@@ -316,7 +316,8 @@ class TestBaasHandler:
         }
         result = await handler.warn_device(table_id=1)
         assert result.action == "STOPPED"
-        handler._binding_repo.update_baas_device_status_by_id.assert_called_once()
+        # Per current design: threshold escalation only logs, never writes STOPPED to DB.
+        handler._binding_repo.update_baas_device_status_by_id.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_warn_device_probe_success_with_ttl(self, handler):
@@ -368,6 +369,35 @@ class TestBaasHandler:
         }
         with pytest.raises(ValueError, match="No provider_device_id"):
             await handler.renew_ttl(table_id=1)
+
+    @pytest.mark.asyncio
+    async def test_renew_ttl_stopped_skips(self, handler):
+        handler._binding_repo.get_baas_device_by_id.return_value = {
+            "status": "STOPPED",
+            "provider_device_id": "sb-1",
+            "provider_device_props": '{"refresh_fail_count": 1}',
+        }
+        result = await handler.renew_ttl(table_id=1)
+        assert result.success is False
+        assert result.error == "Device is stopped"
+        assert result.refresh_fail_count == 1
+        handler._paas_facade.update_device_ttl.assert_not_called()
+        handler._binding_repo.update_baas_device_ttl_by_id.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_renew_ttl_non_active_not_gated(self, handler):
+        handler._binding_repo.get_baas_device_by_id.return_value = {
+            "status": "OFFLINE",
+            "provider_device_id": "sb-1",
+            "provider_device_props": '{"refresh_fail_count": 0}',
+        }
+        ttl_info = MagicMock()
+        ttl_info.success = True
+        ttl_info.new_expiration_time = datetime(2024, 6, 1, 12, 0, 0)
+        handler._paas_facade.update_device_ttl = AsyncMock(return_value=ttl_info)
+        result = await handler.renew_ttl(table_id=1)
+        assert result.success is True
+        handler._paas_facade.update_device_ttl.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_renew_ttl_success(self, handler):

@@ -10,4 +10,9 @@ Single-claimer-at-a-time is enforced entirely at the database level by the
 claim CAS predicate — no ``SELECT ... FOR UPDATE``. A crashed worker's task
 is reclaimed once its lease expires. Give-up is a wall-clock deadline
 measured from first enqueue (not an attempt cap).
+
+Callers may additionally pass an ``idempotency_key`` to dedupe the *submission*
+itself: at most one **live** task per key within an ``(env, task_type)``.
+Opt-in — no key means every enqueue creates a row, as it always has. See the
+README's "How idempotency works".
 """

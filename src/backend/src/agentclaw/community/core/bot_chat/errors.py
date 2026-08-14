@@ -2,6 +2,10 @@ class BotChatError(Exception):
     """Base exception for bot chat module."""
 
 
+class InvalidBotLogQueryError(BotChatError, ValueError):
+    """Raised when an OpenAPI log query does not select one valid scope."""
+
+
 class SessionNotFoundError(BotChatError):
     """Raised when a conversation session is not found or not accessible."""
 

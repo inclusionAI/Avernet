@@ -20,6 +20,7 @@ def _make_registry() -> EngineSandboxRegistry:
 
 def _make_service(bot_repo=None) -> BaasService:
     return BaasService(
+        startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base="http://test",
         tenant="test",
         template_uuid="test",
@@ -42,6 +43,7 @@ class TestGetSetReadOnlyRule:
     def test_openclaw_default_rules(self):
         bot_repo = MagicMock()
         bot_repo.get_by_id_and_owner.return_value = {
+            "id": 501,
             "bot_id": "bot-1",
             "active_engine": "openclaw",
             "ext": {},
@@ -61,6 +63,7 @@ class TestGetSetReadOnlyRule:
         # workspace/config/mcporter.json。
         bot_repo = MagicMock()
         bot_repo.get_by_id_and_owner.return_value = {
+            "id": 501,
             "bot_id": "bot-1",
             "active_engine": "claude_code",
             "ext": {},
@@ -82,6 +85,7 @@ class TestGetSetReadOnlyRule:
     def test_custom_rules_support_absolute_and_relative_paths(self):
         bot_repo = MagicMock()
         bot_repo.get_by_id_and_owner.return_value = {
+            "id": 501,
             "bot_id": "bot-1",
             "active_engine": "claude_code",
             "ext": {

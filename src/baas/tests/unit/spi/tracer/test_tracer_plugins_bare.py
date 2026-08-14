@@ -21,6 +21,9 @@ def _has_tracer_plugin_attrs(obj: object) -> bool:
         hasattr(obj, "setup")
         and hasattr(obj, "install_middleware")
         and hasattr(obj, "get_trace_id")
+        and hasattr(obj, "capture_context")
+        and hasattr(obj, "attach_context")
+        and hasattr(obj, "detach_context")
     )
 
 
@@ -121,3 +124,56 @@ class TestOtlpTracerPlugin:
             opentelemetry.trace, "get_current_span", return_value=mock_span
         ):
             assert BareTracerPlugin().get_trace_id() == "-"
+
+    def test_capture_context_returns_none_when_no_valid_span(self) -> None:
+        import opentelemetry.context
+        import opentelemetry.trace
+
+        mock_span = MagicMock()
+        mock_ctx = MagicMock()
+        mock_ctx.is_valid = False
+        mock_span.get_span_context.return_value = mock_ctx
+
+        with (
+            patch.object(opentelemetry.context, "get_current", return_value={}),
+            patch.object(
+                opentelemetry.trace, "get_current_span", return_value=mock_span
+            ),
+        ):
+            assert BareTracerPlugin().capture_context() is None
+
+    def test_capture_context_returns_context_when_valid_span(self) -> None:
+        import opentelemetry.context
+        import opentelemetry.trace
+
+        mock_ctx = MagicMock()
+        mock_ctx.is_valid = True
+        mock_span = MagicMock()
+        mock_span.get_span_context.return_value = mock_ctx
+
+        sentinel_ctx = object()
+        with (
+            patch.object(
+                opentelemetry.context, "get_current", return_value=sentinel_ctx
+            ),
+            patch.object(
+                opentelemetry.trace, "get_current_span", return_value=mock_span
+            ),
+        ):
+            assert BareTracerPlugin().capture_context() is sentinel_ctx
+
+    def test_attach_and_detach_context(self) -> None:
+        import opentelemetry.context
+
+        sentinel_token = object()
+        with patch.object(
+            opentelemetry.context, "attach", return_value=sentinel_token
+        ) as mock_attach:
+            plugin = BareTracerPlugin()
+            token = plugin.attach_context({"fake": "ctx"})
+            assert token is sentinel_token
+            mock_attach.assert_called_once_with({"fake": "ctx"})
+
+        with patch.object(opentelemetry.context, "detach") as mock_detach:
+            plugin.detach_context(sentinel_token)
+            mock_detach.assert_called_once_with(sentinel_token)

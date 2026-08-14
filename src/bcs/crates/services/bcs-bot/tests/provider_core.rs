@@ -108,6 +108,7 @@ async fn register_provider_persists_mcporter_coordination_config() {
                 mode: CoordinationMode::McporterMcp,
                 mcp_server: Some("bcs".to_string()),
                 mcporter_command: Some("mcporter".to_string()),
+                tool_name_mapping: Default::default(),
             }),
         )
         .await
@@ -118,6 +119,167 @@ async fn register_provider_persists_mcporter_coordination_config() {
     assert_eq!(config["coordination"]["mode"], "mcporter_mcp");
     assert_eq!(config["coordination"]["mcp_server"], "bcs");
     assert_eq!(config["coordination"]["mcporter_command"], "mcporter");
+}
+
+#[tokio::test]
+async fn register_provider_persists_native_mcp_tool_name_mapping() {
+    let ctx = test_context();
+    let assign_tool = "mcp_mcp.ant.agentclawscs.bcs_mcp_bcs_assign_task";
+    let send_message_tool = "mcp_mcp.ant.agentclawscs.bcs_mcp_bcs_send_task_message";
+    let complete_tool = "mcp_mcp.ant.agentclawscs.bcs_mcp_bcs_task_complete";
+    let registered = ctx
+        .core
+        .register_provider(
+            "Provider".to_string(),
+            "https://provider.example.com/bcs/webhook".to_string(),
+            ProviderAuthMode::StaticBearer,
+            "197262".to_string(),
+            None,
+            Some(ProviderCoordinationConfig {
+                mode: CoordinationMode::NativeMcp,
+                mcp_server: Some("mcp.ant.agentclawscs.bcs".to_string()),
+                mcporter_command: None,
+                tool_name_mapping: [
+                    (assign_tool.to_string(), "bcs_assign_task".to_string()),
+                    (
+                        send_message_tool.to_string(),
+                        "bcs_send_task_message".to_string(),
+                    ),
+                    (
+                        complete_tool.to_string(),
+                        "bcs_task_complete".to_string(),
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+            }),
+        )
+        .await
+        .expect("register provider");
+
+    let config: serde_json::Value =
+        serde_json::from_str(&registered.provider.config).expect("provider config json");
+    assert_eq!(config["coordination"]["mode"], "native_mcp");
+    assert_eq!(
+        config["coordination"]["tool_name_mapping"][assign_tool],
+        "bcs_assign_task"
+    );
+    assert_eq!(
+        config["coordination"]["tool_name_mapping"][send_message_tool],
+        "bcs_send_task_message"
+    );
+    assert_eq!(
+        config["coordination"]["tool_name_mapping"][complete_tool],
+        "bcs_task_complete"
+    );
+}
+
+#[tokio::test]
+async fn register_provider_rejects_non_native_mcp_tool_name_mapping() {
+    let ctx = test_context();
+    let err = ctx
+        .core
+        .register_provider(
+            "Provider".to_string(),
+            "https://provider.example.com/bcs/webhook".to_string(),
+            ProviderAuthMode::StaticBearer,
+            "197262".to_string(),
+            None,
+            Some(ProviderCoordinationConfig {
+                mode: CoordinationMode::McporterMcp,
+                mcp_server: Some("bcs".to_string()),
+                mcporter_command: Some("mcporter".to_string()),
+                tool_name_mapping: [(
+                    "provider-specific-tool".to_string(),
+                    "bcs_assign_task".to_string(),
+                )]
+                .into_iter()
+                .collect(),
+            }),
+        )
+        .await
+        .expect_err("non-native MCP mapping should fail");
+
+    assert!(matches!(err, ServiceError::InvalidOperation { message, .. } if message.contains("mcporter_mcp") && message.contains("tool_name_mapping")));
+}
+
+#[tokio::test]
+async fn register_provider_rejects_too_many_tool_name_mappings() {
+    let ctx = test_context();
+    let tool_name_mapping = (0..33)
+        .map(|index| (format!("provider-tool-{index}"), "bcs_assign_task".to_string()))
+        .collect();
+    let err = ctx
+        .core
+        .register_provider(
+            "Provider".to_string(),
+            "https://provider.example.com/bcs/webhook".to_string(),
+            ProviderAuthMode::StaticBearer,
+            "197262".to_string(),
+            None,
+            Some(ProviderCoordinationConfig {
+                mode: CoordinationMode::NativeMcp,
+                mcp_server: Some("bcs".to_string()),
+                mcporter_command: None,
+                tool_name_mapping,
+            }),
+        )
+        .await
+        .expect_err("more than 32 mappings should fail");
+
+    assert!(matches!(err, ServiceError::InvalidOperation { message, .. } if message.contains("must not exceed 32")));
+}
+
+#[tokio::test]
+async fn register_provider_rejects_invalid_provider_tool_name() {
+    let ctx = test_context();
+    let err = ctx
+        .core
+        .register_provider(
+            "Provider".to_string(),
+            "https://provider.example.com/bcs/webhook".to_string(),
+            ProviderAuthMode::StaticBearer,
+            "197262".to_string(),
+            None,
+            Some(ProviderCoordinationConfig {
+                mode: CoordinationMode::NativeMcp,
+                mcp_server: Some("bcs".to_string()),
+                mcporter_command: None,
+                tool_name_mapping: [(" provider-tool".to_string(), "bcs_assign_task".to_string())]
+                    .into_iter()
+                    .collect(),
+            }),
+        )
+        .await
+        .expect_err("tool names with surrounding whitespace should fail");
+
+    assert!(matches!(err, ServiceError::InvalidOperation { message, .. } if message.contains("invalid provider tool name")));
+}
+
+#[tokio::test]
+async fn register_provider_rejects_unsupported_canonical_tool_name() {
+    let ctx = test_context();
+    let err = ctx
+        .core
+        .register_provider(
+            "Provider".to_string(),
+            "https://provider.example.com/bcs/webhook".to_string(),
+            ProviderAuthMode::StaticBearer,
+            "197262".to_string(),
+            None,
+            Some(ProviderCoordinationConfig {
+                mode: CoordinationMode::NativeMcp,
+                mcp_server: Some("bcs".to_string()),
+                mcporter_command: None,
+                tool_name_mapping: [("provider-tool".to_string(), "unknown-tool".to_string())]
+                    .into_iter()
+                    .collect(),
+            }),
+        )
+        .await
+        .expect_err("unknown canonical tool names should fail");
+
+    assert!(matches!(err, ServiceError::InvalidOperation { message, .. } if message.contains("unsupported canonical tool 'unknown-tool'")));
 }
 
 #[tokio::test]
@@ -135,6 +297,7 @@ async fn register_provider_rejects_native_tool_with_mcp_fields() {
                 mode: CoordinationMode::NativeTool,
                 mcp_server: Some("bcs".to_string()),
                 mcporter_command: None,
+                tool_name_mapping: Default::default(),
             }),
         )
         .await
@@ -153,6 +316,12 @@ async fn provider_bot_resolves_coordination_surface_from_provider_config() {
             mode: CoordinationMode::NativeMcp,
             mcp_server: Some("bcs".to_string()),
             mcporter_command: None,
+            tool_name_mapping: [(
+                "provider_assign_task".to_string(),
+                "bcs_assign_task".to_string(),
+            )]
+            .into_iter()
+            .collect(),
         },
     )
     .await;
@@ -181,6 +350,10 @@ async fn provider_bot_resolves_coordination_surface_from_provider_config() {
     assert_eq!(surface.mode, CoordinationMode::NativeMcp);
     assert_eq!(surface.mcp_server.as_deref(), Some("bcs"));
     assert_eq!(surface.mcporter_command, None);
+    assert_eq!(
+        surface.tool_name_mapping.get("provider_assign_task").map(String::as_str),
+        Some("bcs_assign_task")
+    );
 }
 
 #[tokio::test]
@@ -209,6 +382,7 @@ async fn websocket_plugin_bot_resolves_native_tool_surface() {
     assert_eq!(surface.mode, CoordinationMode::NativeTool);
     assert_eq!(surface.mcp_server, None);
     assert_eq!(surface.mcporter_command, None);
+    assert!(surface.tool_name_mapping.is_empty());
 }
 
 #[tokio::test]
@@ -283,6 +457,7 @@ async fn update_provider_normalizes_organization_management_and_preserves_other_
             mode: CoordinationMode::NativeMcp,
             mcp_server: Some("bcs".to_string()),
             mcporter_command: None,
+            tool_name_mapping: Default::default(),
         },
     )
     .await;

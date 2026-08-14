@@ -12,6 +12,8 @@ __all__ = [
 ]
 
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from secbaas.community.spi.tracer import TracerPlugin
@@ -80,3 +82,49 @@ class BareTracerPlugin(TracerPlugin):
             if ctx is not None and ctx.is_valid:
                 return format(ctx.trace_id, "032x")
         return "-"
+
+    def capture_context(self) -> Any:
+        """Capture the current OTel context for later restoration."""
+        from opentelemetry import context as otel_context
+        from opentelemetry import trace as otel_trace
+
+        ctx = otel_context.get_current()
+        span = otel_trace.get_current_span(ctx)
+        if span is not None and span.get_span_context().is_valid:
+            return ctx
+        return None
+
+    def attach_context(self, ctx: Any) -> Any:
+        """Activate a previously captured OTel context.
+
+        Returns a detach token to be passed to :meth:`detach_context`.
+        """
+        from opentelemetry import context as otel_context
+
+        return otel_context.attach(ctx)
+
+    def detach_context(self, token: Any) -> None:
+        """Restore the previous OTel context."""
+        from opentelemetry import context as otel_context
+
+        otel_context.detach(token)
+
+    def inject_context(self, carrier: dict[str, str]) -> None:
+        """Serialize the current trace context into *carrier* as W3C traceparent."""
+        from opentelemetry import propagate
+
+        propagate.inject(carrier)
+
+    def extract_context(self, carrier: dict[str, str]) -> Any:
+        """Deserialize a trace context from *carrier* (W3C traceparent)."""
+        from opentelemetry import propagate
+
+        return propagate.extract(carrier)
+
+    @contextmanager
+    def start_span(self, name: str, *, child_of: Any = None) -> Iterator[None]:
+        """Start an OTel span; *child_of* is an OTel context from extract_context."""
+        from opentelemetry import trace
+
+        with trace.get_tracer(__name__).start_as_current_span(name, context=child_of):
+            yield

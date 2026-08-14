@@ -45,10 +45,17 @@ class TestValidateStatusFilter:
 
     @pytest.mark.parametrize(
         "value",
-        [["open"], ["closed"], ["open", "scheduled"], ["waiting_review", "closed"]],
+        [
+            ["open"], ["closed"], ["open", "scheduled"],
+            ["waiting_review", "closed"],
+            ["observed"], ["open", "observed"], ["observed", "closed"],
+        ],
     )
     def test_valid_statuses_passed_through(self, value: list[str]) -> None:
-        """合法状态集合原样返回(不过滤、不去重、不改序)。"""
+        """合法状态集合原样返回(不过滤、不去重、不改序)。
+
+        observed = 白名单观察态(Task 13 加入合法集),评审可显式筛观察单。
+        """
         assert _validate_status_filter(value) == value
 
     @pytest.mark.parametrize(

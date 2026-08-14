@@ -1,8 +1,7 @@
 """MCP API router — facade layer over core/mcp/services."""
 from __future__ import annotations
 
-from copy import deepcopy
-from typing import Any, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
@@ -24,6 +23,23 @@ from agentclaw.community.api.mcp_auth_service import MCPAuthServiceProtocol
 from agentclaw.community.api.mcp_config_service import MCPConfigServiceProtocol
 from agentclaw.community.api.mcp_market_service import MCPMarketServiceProtocol
 from agentclaw.community.api.mcp_sync_service import MCPSyncServiceProtocol
+from agentclaw.community.core.mcp.config_flow import (
+    read_unified_config,
+    write_unified_config,
+)
+from agentclaw.community.core.mcp.errors import (
+    McpConfigValueError,
+    McpHeadersInvalidError,
+    McpServerNotFoundError,
+    McpSyncFailedError,
+)
+from agentclaw.community.core.mcp.presentation import (
+    ALLOWED_NETWORK_TYPES,
+    is_network_type_visible,
+    mask_api_key,
+    strip_ext_info,
+    strip_ext_info_from_list,
+)
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 
@@ -55,36 +71,6 @@ def _get_path_params(
     return effective_entity_id, effective_bot_id, effective_entity_type
 
 
-def _remove_ext_info_from_mcp_tools(mcp_data: dict[str, Any]) -> dict[str, Any]:
-    sanitized = deepcopy(mcp_data)
-    tools = sanitized.get("tools")
-    if not isinstance(tools, list):
-        return sanitized
-
-    for tool in tools:
-        if not isinstance(tool, dict):
-            continue
-        input_schema = tool.get("inputSchema")
-        if not isinstance(input_schema, dict):
-            continue
-        properties = input_schema.get("properties")
-        if isinstance(properties, dict):
-            properties.pop("extInfo", None)
-
-    return sanitized
-
-
-def _remove_ext_info_from_mcp_list_result(result: dict[str, Any]) -> dict[str, Any]:
-    sanitized = deepcopy(result)
-    data = sanitized.get("data")
-    if isinstance(data, list):
-        sanitized["data"] = [
-            _remove_ext_info_from_mcp_tools(item) if isinstance(item, dict) else item
-            for item in data
-        ]
-    return sanitized
-
-
 # ==================== MCP Market APIs ====================
 
 @router.get("/market/list", response_model=MCPListResponse)
@@ -105,7 +91,7 @@ async def list_mcp_servers(
     market_service: MCPMarketServiceProtocol = Injected(MCPMarketServiceProtocol),
 ) -> MCPListResponse:
     """Get MCP list from market."""
-    allowed_network_types = ["INTERNET", "OFFICE"]
+    allowed_network_types = list(ALLOWED_NETWORK_TYPES)
     if network_types:
         filtered = [t for t in network_types if t in allowed_network_types]
         if not filtered:
@@ -131,7 +117,7 @@ async def list_mcp_servers(
     )
     if not result.get("success"):
         raise HTTPException(status_code=500, detail=result.get("message", "Failed to fetch MCP list"))
-    return MCPListResponse(**_remove_ext_info_from_mcp_list_result(result))
+    return MCPListResponse(**strip_ext_info_from_list(result))
 
 
 @router.get("/market/detail", response_model=MCPDetailResponse)
@@ -159,12 +145,10 @@ async def get_mcp_detail(
     if not detail:
         raise HTTPException(status_code=404, detail="MCP server not found")
 
-    allowed_network_types = ["INTERNET", "OFFICE"]
-    network_types = detail.get("networkTypes") or []
-    if network_types and not any(nt in allowed_network_types for nt in network_types):
+    if not is_network_type_visible(detail):
         raise HTTPException(status_code=404, detail="MCP server not found")
 
-    return MCPDetailResponse(success=True, data=_remove_ext_info_from_mcp_tools(detail))
+    return MCPDetailResponse(success=True, data=strip_ext_info(detail))
 
 
 @router.get("/market/permission", response_model=MCPPermissionResponse)
@@ -246,72 +230,37 @@ async def update_mcp_unified_config(
     sync_service: MCPSyncServiceProtocol = Injected(MCPSyncServiceProtocol),
     market_service: MCPMarketServiceProtocol = Injected(MCPMarketServiceProtocol),
 ) -> MCPUnifiedConfigResponse:
-    """更新MCP统一配置并同步到设备。"""
-    # 校验 endpoint_env
-    if request.endpoint_env is not None and request.endpoint_env not in ("PROD", "PRE"):
-        raise HTTPException(status_code=400, detail="endpoint_env must be PROD or PRE")
+    """更新MCP统一配置并同步到设备。
 
-    # 校验 transport_protocol
-    if request.transport_protocol is not None:
-        normalized_tp = request.transport_protocol.upper()
-        if normalized_tp not in ("SSE", "STREAMABLE_HTTP"):
-            raise HTTPException(status_code=400, detail="transport_protocol must be SSE or STREAMABLE_HTTP")
-
-    # 校验 headers
-    if request.headers is not None:
-        validation = config_service.validate_headers_for_mcp(request.server_code, request.headers)
-        if not validation["valid"]:
-            raise HTTPException(status_code=400, detail=validation["error"])
-
+    Validation, the write→push→rollback sequence, and masking now live in
+    ``core/mcp/config_flow.write_unified_config`` so this surface and the public
+    ``/openapi/v1`` surface share one implementation. This handler is the thin
+    adapter: it maps the flow's typed errors back onto the exact
+    ``HTTPException`` bodies this route has always returned, and shapes the
+    response identically (headers not echoed on the write path; ``sync_results``
+    mapped through :class:`MCPSyncResult`).
+    """
     try:
-        effective_entity_id, effective_bot_id, effective_entity_type = _get_path_params(
+        effective_entity_id, _effective_bot_id, effective_entity_type = _get_path_params(
             user, default_bot_id, entity_id, entity_type, bot_id
         )
 
-        # 步骤1：校验 MCP 存在性（外部依赖先校验，避免写库后再回滚）
-        mcp_data = market_service.get_mcp_detail(request.server_code)
-        if not mcp_data:
-            raise HTTPException(status_code=404, detail=f"MCP server {request.server_code} not found")
-
-        # 步骤2：写库，保留旧配置供回滚
-        old_config = config_service.update_user_unified_config(
+        result = await write_unified_config(
             user_id=user.staffId,
             server_code=request.server_code,
-            api_key=request.api_key,
-            headers=request.headers,
-            endpoint_env=request.endpoint_env,
-            transport_protocol=request.transport_protocol.upper() if request.transport_protocol else None,
-        )
-
-        # 步骤3：推送到该用户/实体下的所有设备
-        result = await sync_service.sync_mcp_detail_to_all_bots(
-            user_id=user.staffId,
-            server_code=request.server_code,
-            mcp_data=mcp_data,
             entity_id=effective_entity_id,
             entity_type=effective_entity_type,
             api_key=request.api_key,
-            custom_headers=request.headers,
+            headers=request.headers,
             endpoint_env=request.endpoint_env,
-            transport_protocol=request.transport_protocol.upper() if request.transport_protocol else None,
+            transport_protocol=request.transport_protocol,
+            config_service=config_service,
+            market_service=market_service,
+            sync_service=sync_service,
         )
 
-        if not result["success"]:
-            config_service.rollback_unified_config(
-                user_id=user.staffId,
-                server_code=request.server_code,
-                old_config=old_config,
-            )
-            raise HTTPException(status_code=500, detail=result.get("error", "Failed to sync to all devices"))
-
-        masked_key = None
-        if request.api_key:
-            masked_key = request.api_key[:4] + "****" + request.api_key[-4:] if len(request.api_key) > 8 else "****"
-
-        response_transport_protocol = request.transport_protocol.upper() if request.transport_protocol else None
-
         sync_results = None
-        if result.get("sync_results") is not None:
+        if result.sync_results is not None:
             sync_results = [
                 MCPSyncResult(
                     conn_info=r.get("conn_info"),
@@ -320,23 +269,33 @@ async def update_mcp_unified_config(
                     reason=r.get("reason"),
                     error=r.get("error"),
                 )
-                for r in result["sync_results"]
+                for r in result.sync_results
             ]
 
         return MCPUnifiedConfigResponse(
             success=True,
             message="MCP config updated and synced to all devices",
             data=MCPUnifiedConfigData(
-                server_code=request.server_code,
-                api_key=masked_key,
-                endpoint_env=request.endpoint_env,
-                transport_protocol=response_transport_protocol,
-                has_config=bool(request.api_key or request.headers or request.transport_protocol),
+                server_code=result.server_code,
+                api_key=result.api_key,
+                endpoint_env=result.endpoint_env,
+                transport_protocol=result.transport_protocol,
+                headers=result.headers,
+                has_config=result.has_config,
                 sync_results=sync_results,
             ),
         )
     except HTTPException:
         raise
+    except (McpConfigValueError, McpHeadersInvalidError) as e:
+        # Both were 400s with the flow's own message before extraction.
+        raise HTTPException(status_code=400, detail=str(e))
+    except McpServerNotFoundError:
+        raise HTTPException(
+            status_code=404, detail=f"MCP server {request.server_code} not found"
+        )
+    except McpSyncFailedError as e:
+        raise HTTPException(status_code=500, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -350,37 +309,25 @@ async def get_mcp_unified_config(
     user: AuthenticatedUser = Depends(get_current_user),
     config_service: MCPConfigServiceProtocol = Injected(MCPConfigServiceProtocol),
 ) -> MCPUnifiedConfigResponse:
-    """获取MCP统一配置。"""
-    config = config_service.get_user_unified_config(user.staffId, server_code)
+    """获取MCP统一配置。
 
-    if not config:
-        return MCPUnifiedConfigResponse(
-            success=True,
-            message="No config found",
-            data=MCPUnifiedConfigData(
-                server_code=server_code,
-                api_key=None,
-                headers={},
-                endpoint_env="PROD",
-                transport_protocol=None,
-                has_config=False,
-            ),
-        )
-
-    api_key = config.get("api_key")
-    masked_key = None
-    if api_key:
-        masked_key = api_key[:4] + "****" + api_key[-4:] if len(api_key) > 8 else "****"
-
+    Delegates to ``read_unified_config`` for the read + masking; the message
+    keys off whether a stored row exists (``exists``), not ``has_config`` — a row
+    can exist while carrying no api_key/headers/transport, and it read
+    "Config retrieved" before extraction.
+    """
+    config = read_unified_config(
+        user_id=user.staffId, server_code=server_code, config_service=config_service
+    )
     return MCPUnifiedConfigResponse(
         success=True,
-        message="Config retrieved",
+        message="Config retrieved" if config.exists else "No config found",
         data=MCPUnifiedConfigData(
-            server_code=server_code,
-            api_key=masked_key,
-            headers=config.get("headers", {}),
-            endpoint_env=config.get("endpoint_env", "PROD"),
-            transport_protocol=config.get("transport_protocol"),
-            has_config=bool(api_key or config.get("headers") or config.get("transport_protocol")),
+            server_code=config.server_code,
+            api_key=config.api_key,
+            headers=config.headers,
+            endpoint_env=config.endpoint_env,
+            transport_protocol=config.transport_protocol,
+            has_config=config.has_config,
         ),
     )

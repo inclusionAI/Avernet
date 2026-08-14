@@ -18,10 +18,8 @@ from agentclaw.community.plugin_api.cache import CachePlugin
 from agentclaw.community.plugin_api.skill_scanner import SkillScannerPlugin
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.skill_center.services.repositories import SkillRepository
-    from agentclaw.community.core.skill_center.services.skill_center_sync_service import (
-        SkillCenterSyncService,
-    )
+    from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+    from agentclaw.community.core.skill_center.services.skill_center_sync_service import SkillCenterSyncService
 
 
 logger = get_logger()

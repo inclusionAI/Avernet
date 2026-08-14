@@ -3,7 +3,13 @@ from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
 
-from agentclaw.community.core.skill_center.services.repositories import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+
+
+def _edit_guard():
+    guard = MagicMock()
+    guard.acquire_for_edit_wait = AsyncMock(return_value=object())
+    return guard
 
 
 # ── fixtures ────────────────────────────────────────────────────────
@@ -578,6 +584,37 @@ class TestRemoveSkillFromDefaultSet:
         )
 
     @pytest.mark.asyncio
+    async def test_default_set_deactivates_pool_local_by_entry_name(self):
+        mock_repo = MagicMock()
+        mock_repo.get_by_id.return_value = {
+            "id": "1",
+            "is_default": True,
+            "bolt_id": "default",
+        }
+        mock_skill_repo = MagicMock()
+        mock_skill_repo.get_by_id.return_value = {
+            "id": "42",
+            "git_path": (
+                "local:///home/admin/.openclaw/workspace/"
+                "skills-pool/skills-local/my-skill"
+            ),
+        }
+        mock_skill_svc = MagicMock()
+        mock_skill_svc.deactivate_skill = AsyncMock(return_value=True)
+        svc = self._make_svc(
+            mock_repo,
+            skill_repo=mock_skill_repo,
+            skill_service=mock_skill_svc,
+        )
+
+        assert await svc.remove_skill_from_set("1", "42", user_id="user1")
+        mock_skill_svc.deactivate_skill.assert_called_once_with(
+            "my-skill",
+            bolt_id="default",
+            user_id="user1",
+        )
+
+    @pytest.mark.asyncio
     async def test_default_set_deactivate_failure_rollback(self):
         """Default set: deactivate_skill failure rolls back exclusion."""
         mock_repo = MagicMock()
@@ -796,6 +833,53 @@ class TestAddSkillsToSetExclusion:
         )
 
     @pytest.mark.asyncio
+    async def test_repository_rejection_is_reported_as_a_failed_skill_add(self):
+        mock_repo = MagicMock()
+        mock_repo.get_by_id.return_value = {
+            "id": "2", "name": "Custom", "is_default": False, "is_active": False
+        }
+        mock_repo.list_all.return_value = []
+        mock_repo.get_skills_in_set.return_value = []
+        mock_repo.add_skill_to_set.return_value = False
+        mock_skill_repo = MagicMock()
+        mock_skill_repo.get_by_id.return_value = {
+            "id": "42", "name": "catalog-skill", "bolt_id": "default"
+        }
+        svc = self._make_svc(mock_repo, mock_skill_repo)
+
+        with patch("agentclaw.community.core.skill_center.services.skill_set_service.SkillSetMetadataWriter"):
+            result = await svc.add_skills_to_set("2", ["42"], user_id="user1")
+
+        assert result["success"] == []
+        assert result["failed"] == [{
+            "skill_id": "42", "error": "Failed to add skill to skill set"
+        }]
+
+    @pytest.mark.asyncio
+    async def test_repository_rejection_skips_mcp_device_sync(self):
+        mock_repo = MagicMock()
+        mock_repo.get_by_id.return_value = {
+            "id": "2", "name": "Custom", "is_default": False
+        }
+        mock_repo.get_mcp_servers_in_set.return_value = []
+        mock_repo.add_mcp_to_set.return_value = False
+        svc = self._make_svc(mock_repo, MagicMock())
+        svc.entity_id = "user1"
+        svc.mcp_center.get_mcp_detail.return_value = {
+            "server_code": "mcp.example", "name": "Example MCP"
+        }
+        svc._mcp_sync_service = MagicMock()
+
+        result = await svc.add_mcp_to_skill_set("2", "mcp.example", user_id="user1")
+
+        assert result == {
+            "success": False,
+            "error": "Failed to add MCP server to skill set",
+            "server_code": "mcp.example",
+        }
+        svc._mcp_sync_service.sync_mcp_detail.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_unexcluded_default_skill_still_blocks_normal_set(self):
         mock_repo = MagicMock()
         mock_repo.get_by_id.side_effect = lambda skill_set_id: {
@@ -988,6 +1072,58 @@ class TestAddSkillsToSetOwnerIdResolution:
         )
 
     @pytest.mark.asyncio
+    async def test_auto_activate_false_is_reported_and_not_synced(self):
+        bot_repo = MagicMock()
+        bot_repo.get_by_id.return_value = {
+            "id": "bot-1",
+            "owner_id": "owner_abc",
+        }
+        skill_repo = MagicMock()
+        skill_repo.get_by_id.return_value = {
+            "id": "10",
+            "name": "skill-a",
+            "git_path": "local:///legacy/skills-local/skill-a",
+        }
+        skill_service = MagicMock()
+        skill_service.activate_skill = AsyncMock(return_value=False)
+        skill_service.RESERVED_SKILL_NAMES = set()
+        mock_set_repo = MagicMock()
+        mock_set_repo.get_by_id.return_value = {
+            "id": "1",
+            "is_default": False,
+            "is_active": True,
+        }
+        mock_set_repo.get_skills_in_set.return_value = []
+        mock_set_repo.list_all.return_value = []
+        mock_set_repo.add_skill_to_set.return_value = True
+        svc = self._make_svc(
+            bot_repo=bot_repo,
+            skill_repo=skill_repo,
+            skill_service=skill_service,
+        )
+        svc.skill_set_repo = mock_set_repo
+        svc._sync_symlinks_to_device_if_needed = MagicMock()
+
+        with patch(
+            "agentclaw.community.core.skill_center.services."
+            "skill_set_service.SkillSetMetadataWriter"
+        ):
+            result = await svc.add_skills_to_set(
+                "1",
+                ["10"],
+                user_id="user1",
+            )
+
+        assert result["activation_failed"] == [
+            {
+                "skill_id": "10",
+                "name": "skill-a",
+                "reason": "activation source is unavailable",
+            }
+        ]
+        svc._sync_symlinks_to_device_if_needed.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_auto_activate_fallback_to_entity_id_when_no_owner(self):
         """When bot exists but owner_id is None, fallback to entity_id."""
         bot_repo = MagicMock()
@@ -1094,6 +1230,7 @@ class TestSwitchToSkillSetOwnerIdResolution:
             device_plugin=MagicMock(),
             path_factory=MagicMock(),
             device_fs_dispatcher=MagicMock(),
+            edit_guard=_edit_guard(),
             skills_dir=MagicMock(),
             bot_id="bot-1",
             user_id="user1",
@@ -1250,6 +1387,7 @@ class TestSyncSkillSetToActiveOwnerIdResolution:
             device_plugin=MagicMock(),
             path_factory=MagicMock(),
             device_fs_dispatcher=MagicMock(),
+            edit_guard=_edit_guard(),
             skills_dir=MagicMock(),
             bot_id="bot-1",
             user_id="user1",

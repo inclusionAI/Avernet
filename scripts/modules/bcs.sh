@@ -92,6 +92,19 @@ prepare_bcs_runtime_config() {
     local bcs_bind="${BCS_BIND:-}"
     local bcs_mock_user_id="${BCS_MOCK_USER_ID:-}"
     local bcs_mock_user_name="${BCS_MOCK_USER_NICK_NAME:-}"
+    # BCS_BOT_PROFILE_DIR is the explicit override. If the caller used the
+    # dynamic --profile-dir form (BOTS_PROFILE_DIR), wire the same source
+    # directory into BCS so bot context files can be found by bcs-fusion.
+    local bcs_bot_profile_dir="${BCS_BOT_PROFILE_DIR:-${BOTS_PROFILE_DIR:-}}"
+    if [ -n "$bcs_bot_profile_dir" ]; then
+        case "$bcs_bot_profile_dir" in
+            /*) ;;
+            *) bcs_bot_profile_dir="${PROJECT_ROOT}/${bcs_bot_profile_dir}" ;;
+        esac
+        if [ ! -d "$bcs_bot_profile_dir" ]; then
+            log_warn "Configured bot profile directory does not exist: ${bcs_bot_profile_dir}"
+        fi
+    fi
 
     if [ "${BCS_SERVER_ENV:-}" = "dev" ]; then
         if [ -f "${BCS_DIR}/configs/bcs-config-dev.toml" ]; then
@@ -135,6 +148,66 @@ prepare_bcs_runtime_config() {
         escaped_mock_user_name="$(toml_sed_replacement "$bcs_mock_user_name")"
         sed_args+=("-e" "s|^mock_user_name = \".*\"$|mock_user_name = \"${escaped_mock_user_name}\"|")
     fi
+    if [ -n "$bcs_bot_profile_dir" ]; then
+        local escaped_bcs_bot_profile_dir
+        escaped_bcs_bot_profile_dir="$(toml_sed_replacement "$bcs_bot_profile_dir")"
+        # Use # as the sed delimiter because the path contains /. Escape the
+        # trailing $ because # would otherwise make it "$#" (positional param
+        # count) inside the double-quoted script.
+        sed_args+=("-e" "s#^bots_base_dir = \".*\"\$#bots_base_dir = \"${escaped_bcs_bot_profile_dir}\"#")
+    fi
+    if [ "${BCS_SERVER_ENV:-}" = "local" ]; then
+        # Local singlebox starts with the judge disabled. A complete environment
+        # configuration below may opt it back in. Never carry a plaintext key
+        # from a developer-edited template into the generated runtime config.
+        sed_args+=(
+            "-e" "/^\[llm\]/,/^\[/{s|^type = \".*\"$|type = \"none\"|;/^api_key = /d;}"
+        )
+    fi
+    if [ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]; then
+        local escaped_e2e_judge_url
+        escaped_e2e_judge_url="$(toml_sed_replacement "${BCS_E2E_MOCK_BASE_URL}/v1")"
+        sed_args+=(
+            "-e" "/^\[llm\]/,/^\[/{s|^type = \".*\"$|type = \"openai_compatible\"|;s|^base_url = \".*\"$|base_url = \"${escaped_e2e_judge_url}\"|;s|^api_key_env = \".*\"$|api_key_env = \"BCS_E2E_JUDGE_API_KEY\"|;s|^model = \".*\"$|model = \"e2e-judge\"|;s|^timeout_ms = [0-9][0-9]*$|timeout_ms = 30000|;}"
+            "-e" "/^\[security.outbound_url\]/,/^\[/{s|^block_private_networks = .*|block_private_networks = false|;s|^allow_loopback = .*|allow_loopback = true|;}"
+        )
+        log_info "Enabling local Provider/Judge mock for BCS E2E"
+    elif [ "${BCS_SERVER_ENV:-}" = "local" ]; then
+        local bcs_llm_env_count=0
+        local bcs_llm_missing=()
+        local bcs_llm_env_name
+        for bcs_llm_env_name in \
+            OPENCLAW_OPENAI_BASE_URL \
+            OPENCLAW_OPENAI_API_KEY \
+            OPENCLAW_OPENAI_MODEL_ID; do
+            if [ -n "${!bcs_llm_env_name:-}" ]; then
+                bcs_llm_env_count=$((bcs_llm_env_count + 1))
+            else
+                bcs_llm_missing+=("${bcs_llm_env_name}")
+            fi
+        done
+
+        if [ "$bcs_llm_env_count" -eq 3 ]; then
+            local escaped_bcs_llm_base_url
+            local escaped_bcs_llm_model
+            escaped_bcs_llm_base_url="$(toml_sed_replacement "${OPENCLAW_OPENAI_BASE_URL}")"
+            escaped_bcs_llm_model="$(toml_sed_replacement "${OPENCLAW_OPENAI_MODEL_ID}")"
+            sed_args+=(
+                "-e" "/^\[llm\]/,/^\[/{s|^type = \".*\"$|type = \"openai_compatible\"|;s|^base_url = \".*\"$|base_url = \"${escaped_bcs_llm_base_url}\"|;s|^api_key_env = \".*\"$|api_key_env = \"OPENCLAW_OPENAI_API_KEY\"|;s|^model = \".*\"$|model = \"${escaped_bcs_llm_model}\"|;}"
+            )
+            log_info "Configuring the local BCS LLM judge from OPENCLAW_OPENAI_*"
+        elif [ "$bcs_llm_env_count" -gt 0 ]; then
+            log_warn "Ignoring incomplete OPENCLAW_OPENAI_* config for the local BCS LLM judge; missing: ${bcs_llm_missing[*]}"
+        fi
+    fi
+    if [ "${HYBRID_CLAUDE_ACTIVE:-${MERCHANT_HYBRID_ACTIVE:-0}}" = "1" ]; then
+        # The opt-in local Provider bridge listens on 127.0.0.1. Keep private
+        # networks blocked while allowing this one local callback route.
+        sed_args+=(
+            "-e" "/^\[security.outbound_url\]/,/^\[/{s|^block_private_networks = .*|block_private_networks = true|;s|^allow_loopback = .*|allow_loopback = true|;}"
+        )
+        log_info "Allowing loopback-only BCS Provider callbacks for hybrid Claude mode"
+    fi
 
     local config_file tmp_file
     for config_file in "$base_config" "$local_config"; do
@@ -145,6 +218,23 @@ prepare_bcs_runtime_config() {
         fi
         mv "$tmp_file" "$config_file" || return 1
     done
+
+    if [ "${HYBRID_CLAUDE_ACTIVE:-${MERCHANT_HYBRID_ACTIVE:-0}}" = "1" ]; then
+        # This checkout's already-built BCS binary predates the optional
+        # OpenAPI-v1 config schema. Keep the tracked template untouched and
+        # remove only that unsupported section from the generated local copy.
+        # Without this, BCS falls back after parsing fails and misleadingly
+        # reports that no config file was supplied.
+        for config_file in "$base_config" "$local_config"; do
+            tmp_file="${config_file}.tmp"
+            if ! sed '/^\[openapi_v1\]/,/^\[/{ /^\[openapi_v1\]/d; /^\[/{ p; }; d; }' "$config_file" > "$tmp_file"; then
+                rm -f "$tmp_file"
+                return 1
+            fi
+            mv "$tmp_file" "$config_file" || return 1
+        done
+        log_info "Removed unsupported OpenAPI-v1 block from hybrid BCS runtime config"
+    fi
 
     prepare_bcs_runtime_config_resources "$config_dir" || return 1
 
@@ -764,6 +854,10 @@ start_bcs_binary() {
     export BCS_MOCK_USER_ID="${BCS_MOCK_USER_ID:-001}"
     export BCS_MOCK_USER_NICK_NAME="${BCS_MOCK_USER_NICK_NAME:-admin}"
     export BCS_MOCK_USER_CHANNEL="${BCS_MOCK_USER_CHANNEL:-mock}"
+    if [ "${BCS_SERVER_ENV}" = "local" ]; then
+        export AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"
+        export BCS_SECRET_BCN_GROUP_SESSION_WS_JWT="${BCS_SECRET_BCN_GROUP_SESSION_WS_JWT:-local-only-bcn-group-session-ws-jwt-signing-key}"
+    fi
     if [ "${BCS_AUTH_MOCK}" = "1" ] && [ -z "${BCS_MOCK_USER_ID}" ]; then
         log_warn "BCS_AUTH_MOCK=1 but BCS_MOCK_USER_ID is empty; caller identity mock is disabled until configured."
     fi
@@ -773,7 +867,10 @@ start_bcs_binary() {
 
     # Start BCS service
     local bcs_bin="${BCS_BIN:-./target/debug/bcs}"
-    SERVER_ENV="${BCS_SERVER_ENV}" nohup "$bcs_bin" >> "${BCS_LOG}" 2>&1 &
+    # Pass the directory explicitly as well as exporting BCS_CONFIG_DIR.  The
+    # CLI flag avoids an inherited-environment ambiguity when this launcher is
+    # itself called from another service group.
+    SERVER_ENV="${BCS_SERVER_ENV}" start_in_detached_session "$bcs_bin" --config-dir "${bcs_config_dir}" >> "${BCS_LOG}" 2>&1 &
     local bcs_pid=$!
 
     # Verify process started successfully

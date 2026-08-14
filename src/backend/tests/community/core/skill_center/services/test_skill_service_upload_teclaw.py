@@ -25,6 +25,7 @@ description: a test skill
 def _service(local_dir: Path, adapter, fake_fs) -> SkillService:
     repo = MagicMock()
     repo.list_skills.return_value = []  # get_skill_by_path -> None -> create path
+    repo.get_bot_local_by_name.return_value = None
     svc = SkillService(
         skill_repo=repo,
         skill_repo_sync=MagicMock(get_local_skills_root=MagicMock(return_value=None)),
@@ -61,6 +62,46 @@ async def test_teclaw_upload_adapts_path_and_stores_logical_git_path():
 
 
 @pytest.mark.asyncio
+async def test_upload_uses_bot_owner_for_skill_metadata():
+    fake_fs = MagicMock()
+    fake_fs.delete_tree = AsyncMock(return_value=True)
+    fake_fs.write_file = AsyncMock()
+    svc = _service(Path("skills-local"), to_local_skill_engine_path, fake_fs)
+
+    uploaded = [{"filename": "SKILL.md", "relative_path": "SKILL.md", "content": SKILL_MD}]
+    await svc.upload_skill(
+        uploaded,
+        user_id="bot-owner",
+        bolt_id="b1",
+    )
+
+    assert svc.create_skill.call_args.kwargs["user_id"] == "bot-owner"
+
+
+@pytest.mark.asyncio
+@pytest.mark.asyncio
+async def test_default_bot_upload_never_uses_unscoped_owner_lookup():
+    """Shared ``default`` Bot IDs must not select another owner's same-name row."""
+    fake_fs = MagicMock()
+    fake_fs.delete_tree = AsyncMock(return_value=True)
+    fake_fs.write_file = AsyncMock()
+    svc = _service(Path("skills-local"), to_local_skill_engine_path, fake_fs)
+
+    await svc.upload_skill(
+        [{"filename": "SKILL.md", "relative_path": "SKILL.md", "content": SKILL_MD}],
+        user_id="bot-owner",
+        bolt_id="default",
+    )
+
+    svc._skill_repo.get_bot_local_by_name.assert_called_once_with(
+        bot_id="default",
+        name="sync-and-pr",
+        user_id="bot-owner",
+    )
+    svc._skill_repo.update.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_non_teclaw_upload_passes_host_path_through_unchanged():
     fake_fs = MagicMock()
     fake_fs.delete_tree = AsyncMock(return_value=True)
@@ -81,6 +122,7 @@ async def test_non_teclaw_upload_passes_host_path_through_unchanged():
 def _readonly_service(adapter, fake_fs, skill_row) -> SkillService:
     repo = MagicMock()
     repo.get_by_id.return_value = skill_row
+    repo.list_skill_set_references.return_value = []
     svc = SkillService(
         skill_repo=repo,
         skill_repo_sync=MagicMock(get_local_skills_root=MagicMock(return_value=None)),
@@ -114,6 +156,7 @@ async def test_teclaw_get_skill_readme_reads_adapted_path():
 @pytest.mark.asyncio
 async def test_teclaw_delete_skill_removes_adapted_path():
     fake_fs = MagicMock()
+    fake_fs.exists = AsyncMock(return_value=True)
     fake_fs.delete_tree = AsyncMock(return_value=True)
     fake_fs.delete_file = AsyncMock(return_value=True)
     fake_fs.read_file = AsyncMock(return_value=None)

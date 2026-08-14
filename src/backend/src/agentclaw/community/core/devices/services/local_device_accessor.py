@@ -13,8 +13,8 @@ from typing import Any
 
 from injector import inject
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.log import get_logger

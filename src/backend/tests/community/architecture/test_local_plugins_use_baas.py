@@ -24,7 +24,6 @@ Allow-listed files (intentional, documented exceptions):
     Tracked in spec §1.4.
   - ``_mock_seam.py``: test infrastructure mixin, not a real plugin.
   - ``__init__.py``: package marker.
-  - ``sqlite_models.py`` / ``system_config_models.py``: pure data models.
 """
 import ast
 from pathlib import Path
@@ -51,8 +50,6 @@ ALLOWLIST_FILES = {
     "process_manager.py",     # legacy LocalProcessManager (spec §1.4 cleanup)
     "_mock_seam.py",          # test infrastructure
     "__init__.py",            # pkg marker
-    "sqlite_models.py",       # pure data
-    "system_config_models.py",
     "baas_service.py",        # added by upstream BaaS refactor (post-merge)
 }
 

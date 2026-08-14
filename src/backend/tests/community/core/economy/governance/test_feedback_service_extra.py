@@ -11,21 +11,19 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
+import pytest
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.economy.governance.repositories.orm import (
+from agentclaw.community.core.economy.governance.orm import (
+    AuditLogOrm,
     GovernanceNotificationOrm,
     GovernanceTicketOrm,
+    WhitelistEntryOrm,
 )
-from agentclaw.community.core.economy.governance.repositories.audit_repo import (
-    GovernanceAuditRepository,
-)
-from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
-    NotifyLogRepository,
-)
-from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
-    TaskRecordRepository,
-)
+from agentclaw.community.core.economy.governance.domain.enums import AuditAction
+from agentclaw.community.core.repository.implementations.governance.audit import GovernanceAuditRepository
+from agentclaw.community.core.repository.implementations.governance.notify_log import NotifyLogRepository
+from agentclaw.community.core.repository.implementations.governance.task_record import TaskRecordRepository
 from agentclaw.community.core.economy.governance.services.feedback_service import (
     GovernanceFeedbackService,
 )
@@ -33,23 +31,7 @@ from agentclaw.community.core.economy.governance.services.lifecycle_service impo
     GovernanceLifecycleService,
 )
 
-from .conftest import FakeDB, FakeGovernanceConfig, FakeWhitelistService
-
-
-class _RaisingWhitelistService:
-    """Whitelist service whose add always raises — exercises except path."""
-
-    def bulk_whitelist(self, bot_ids, reason, operator):
-        raise RuntimeError("boom")
-
-    def delete_whitelist_entry(self, *, bot_id, owner_id, reason, operator):
-        raise RuntimeError("boom")
-
-    def count_by_type(self, **kwargs):
-        return 0
-
-    def add(self, *, bot_id, owner_id, created_by, **kwargs):
-        raise RuntimeError("boom")
+from .conftest import FakeDB, FakeGovernanceConfig
 
 
 def _make_notification(session, **overrides):
@@ -110,24 +92,18 @@ def _make_notification(session, **overrides):
     return row
 
 
-def _make_svc(engine, whitelist_service=None):
+def _make_svc(engine):
     Session = sessionmaker(bind=engine, expire_on_commit=False)
     db = FakeDB(lambda: Session(bind=engine))
     notify_repo = NotifyLogRepository(db=db)
     task_repo = TaskRecordRepository(db=db)
     audit_repo = GovernanceAuditRepository(db=db)
-    wl_svc = whitelist_service or FakeWhitelistService()
-    # whitelist-add side effect is owned by feedback_service (not the driver)
-    # to keep lifecycle_service free of a whitelist_service dependency. Wire
-    # the same wl_svc into the feedback_service — keeps the raise-failure
-    # test exercising feedback_service's whitelist-add swallow path.
     lifecycle_svc = GovernanceLifecycleService(
         task_repo=task_repo,
         notify_repo=notify_repo,
         audit_repo=audit_repo,
     )
     return GovernanceFeedbackService(
-        whitelist_service=wl_svc,
         notify_repo=notify_repo,
         task_repo=task_repo,
         audit_repo=audit_repo,
@@ -138,6 +114,49 @@ def _make_svc(engine, whitelist_service=None):
 
 class TestResolveEdgeBranches:
     """Uncovered branches inside resolve()."""
+
+    @pytest.mark.parametrize(
+        ("notification_overrides", "expected_action", "expected_success"),
+        [
+            ({}, AuditAction.USER_OPTIMIZED, True),
+            ({"response": "optimized"}, AuditAction.FEEDBACK_DUPLICATE_IGNORED, True),
+            (
+                {"governance_status": "closed"},
+                AuditAction.FEEDBACK_TERMINAL_IGNORED,
+                False,
+            ),
+        ],
+    )
+    def test_audit_records_explicit_actor_instead_of_ticket_owner(
+        self,
+        session,
+        engine,
+        notification_overrides,
+        expected_action,
+        expected_success,
+    ):
+        """Audit attribution follows the acting operator, not the ticket owner."""
+        svc = _make_svc(engine)
+        _make_notification(session, owner_id="owner-1", **notification_overrides)
+
+        result = svc.resolve(
+            "n-001",
+            "optimized",
+            "owner-1",
+            actor_id="operator-9",
+            source="admin_api",
+        )
+
+        assert result.success is expected_success
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as audit_session:
+            audit = (
+                audit_session.query(AuditLogOrm)
+                .filter_by(action_taken=expected_action)
+                .one()
+            )
+            assert audit.owner_id == "owner-1"
+            assert audit.actor_id == "operator-9"
 
     def test_existing_response_duplicate_ignored(self, session, engine):
         """ticket.response already set → duplicate_ignored (§7.4.1 step 2)."""
@@ -184,19 +203,39 @@ class TestResolveEdgeBranches:
         assert stored["feedback_schema_version"] == 2
         assert "bad" not in stored
 
-    def test_whitelist_add_failure_is_swallowed(self, session, engine):
-        """add raising must not fail the resolve (lines 200-201)."""
-        svc = _make_svc(engine, whitelist_service=_RaisingWhitelistService())
+    def test_whitelist_feedback_does_not_write_whitelist(self, session, engine):
+        """Spec B 契约:用户反馈选加白只转 waiting_review,不直接写白单表。
+
+        加白唯一入口收敛为 admin 两条路径(批量 / 审阅 approve_whitelist);
+        用户反馈加白直接 add 的旧行为已删(绕过审阅 + 与待审静默矛盾)。
+        审计 user_whitelisted(申请动作)仍写。
+        """
+        from sqlalchemy.orm import sessionmaker
+
+        svc = _make_svc(engine)
         _make_notification(session)
 
         result = svc.resolve(
             "n-001", "whitelist", "user-1", remark="Internal tool",
         )
-        # Whitelist side-effect failed but resolve still succeeds/closes.
         assert result.success
-        assert result.close_reason is None
+
+        # 1. 白单表无该 (bot, owner) 条目(反馈不直接加白)
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            assert s.query(WhitelistEntryOrm).count() == 0
+
+        # 2. 工单转 waiting_review(待审,等 admin approve_whitelist)
+        with Session() as s:
+            ticket = s.query(GovernanceTicketOrm).filter_by(ticket_id="t-n-001").one()
+            assert ticket.governance_status == "waiting_review"
+
+        # 3. 审计 user_whitelisted(申请动作)仍写
+        with Session() as s:
+            audits = [a for a in s.query(AuditLogOrm).all()
+                      if a.action_taken == AuditAction.USER_WHITELIST]
+            assert len(audits) >= 1
 
     # NOTE: test_commit_failure_returns_db_error removed — session commit
 # failure is now an internal implementation detail of self-managed
 # orm_session contexts and cannot be cleanly tested from the outside.
-

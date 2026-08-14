@@ -19,6 +19,7 @@ tracing = { workspace = true }
 [dev-dependencies]
 bcs-channel-store = { workspace = true }
 bcs-group = { workspace = true }
+bcs-session-store = { workspace = true }
 bcs-test-support = { workspace = true }
 tracing-subscriber = { workspace = true }
 

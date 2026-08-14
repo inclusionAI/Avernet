@@ -6,7 +6,7 @@ error path (non-applicationCoding bot → 400 in app envelope).
 """
 from __future__ import annotations
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
 from tests.community.factories.access import make_staff_user
 from tests.community.framework import (

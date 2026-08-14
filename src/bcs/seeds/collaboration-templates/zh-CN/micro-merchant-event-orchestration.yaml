@@ -1,0 +1,282 @@
+# 小微商家活动协同模板。
+# 这个 YAML 只描述协同策略，不存储具体 bot id。
+# 创建群时，通过 CreateGroupRequest.participant_bindings 把下面的逻辑角色绑定到实际 bot。
+
+name: 小微商家活动协同
+
+metadata:
+  description: 活动策划统筹整体流程，租赁和店面并发给出物品、商品、展位和物流需求，布展小妹与物流小哥并发安排落地执行，最后汇总成活动执行单。
+  labels:
+    scenario: micro_merchant_event
+
+participants:
+  event_planner:
+    display_name: 活动策划
+    description: 负责澄清活动目标、拆解整体流程、汇聚各方方案，并输出最终活动执行单。
+    required: true
+
+  event_rental:
+    display_name: 活动物品租赁
+    description: 负责租赁展位物品、核对规格数量、提出装卸和归还要求。
+    required: true
+
+  onsite_decorator:
+    display_name: 布展小妹
+    description: 负责展位布局、现场陈列、布展顺序、动线和撤场安排。
+    required: true
+
+  flower_shop:
+    display_name: 鲜花店
+    description: 负责花艺商品方案，并提出花材陈列、保鲜和运输保护需求。
+    required: true
+
+  convenience_store:
+    display_name: 便利店
+    description: 负责现场补给和应急商品方案，并提出陈列、补货和配送需求。
+    required: true
+
+  coffee_shop:
+    display_name: 咖啡店
+    description: 负责饮品商品方案，并提出出杯、保温冷藏、供电和配送需求。
+    required: true
+
+  bakery_shop:
+    display_name: 烘焙店
+    description: 负责烘焙甜点商品方案，并提出保存、摆台和防损配送需求。
+    required: true
+
+  delivery_runner:
+    display_name: 物流小哥
+    description: 负责多商家取货、路线规划、送达窗口、现场交接和异常预案。
+    required: true
+
+runtime:
+  kind: state_machine
+  state_machine:
+    defaults:
+      node_timeout_ms: 120000
+      max_attempts: 2
+
+    nodes:
+      frame_event_brief:
+        kind: bot_task
+        display_name: 明确活动简报
+        node_timeout_ms: 90000
+        assignee:
+          type: bot_binding
+          binding: event_planner
+        instruction: |
+          你是活动策划。请把用户输入整理成一份活动简报，作为后续商家协同的统一输入。
+
+          简报必须包含：
+          1. 活动目标、人数、时间、地点和预算假设。
+          2. 展位/茶歇/互动区等主要区域。
+          3. 各角色需要并发补充的信息。
+          4. 已知风险和需要优先确认的问题。
+
+          请只输出活动简报，不要给最终执行单。
+        transitions:
+          complete:
+            targets:
+              - plan_rental_equipment
+              - propose_flower_goods
+              - propose_convenience_goods
+              - propose_coffee_goods
+              - propose_bakery_goods
+
+      plan_rental_equipment:
+        kind: bot_task
+        display_name: 租赁展位物品
+        assignee:
+          type: bot_binding
+          binding: event_rental
+        instruction: |
+          你是活动物品租赁。请基于活动简报，给出展位物品租赁方案。
+
+          请输出：
+          1. 建议租赁物品清单、数量、规格和替代方案。
+          2. 每类物品对应的展位面积、承重、供电或安全要求。
+          3. 装卸、送达、归还、押金和损坏责任注意事项。
+          4. 需要布展小妹和物流小哥配合的事项。
+        transitions:
+          complete:
+            targets:
+              - consolidate_supply_plan
+
+      propose_flower_goods:
+        kind: bot_task
+        display_name: 鲜花商品与需求
+        assignee:
+          type: bot_binding
+          binding: flower_shop
+        instruction: |
+          你是鲜花店。请基于活动简报，提供花艺商品方案，并明确展位和物流需求。
+
+          请输出：
+          1. 花束、桌花、签到台花艺或拍照点花艺等商品清单和数量。
+          2. 展示面积、花器、桌面高度、避晒、补水和现场摆放要求。
+          3. 最晚下单时间、制作时间、送达窗口、易损保护和保鲜要求。
+          4. 可接受的替代花材和缺货应对方案。
+        transitions:
+          complete:
+            targets:
+              - consolidate_supply_plan
+
+      propose_convenience_goods:
+        kind: bot_task
+        display_name: 便利商品与需求
+        assignee:
+          type: bot_binding
+          binding: convenience_store
+        instruction: |
+          你是便利店。请基于活动简报，提供现场补给和应急商品方案，并明确展位和物流需求。
+
+          请输出：
+          1. 饮用水、纸巾、餐具、胶带、雨具、充电线、零食等商品清单和数量。
+          2. 陈列方式、补货频次、备用箱位置和现场领取动线。
+          3. 送达窗口、打包方式、重货搬运和临时补货条件。
+          4. 必须优先保障的应急物品。
+        transitions:
+          complete:
+            targets:
+              - consolidate_supply_plan
+
+      propose_coffee_goods:
+        kind: bot_task
+        display_name: 咖啡饮品与需求
+        assignee:
+          type: bot_binding
+          binding: coffee_shop
+        instruction: |
+          你是咖啡店。请基于活动简报，提供饮品方案，并明确展位和物流需求。
+
+          请输出：
+          1. 咖啡、茶饮、冷热饮比例、杯数和批次安排。
+          2. 出杯台、保温/冷藏、供电、垃圾回收和排队动线需求。
+          3. 送达窗口、保温箱或冰袋需求、防洒包装和现场交接方式。
+          4. 咖啡因、过敏或儿童饮品替代提醒。
+        transitions:
+          complete:
+            targets:
+              - consolidate_supply_plan
+
+      propose_bakery_goods:
+        kind: bot_task
+        display_name: 烘焙商品与需求
+        assignee:
+          type: bot_binding
+          binding: bakery_shop
+        instruction: |
+          你是烘焙店。请基于活动简报，提供烘焙甜点方案，并明确展位和物流需求。
+
+          请输出：
+          1. 蛋糕、面包、甜点台、伴手礼等商品清单和份数。
+          2. 摆台面积、托盘、标签、过敏原提示和防尘要求。
+          3. 保存温度、切分时间、送达窗口、防压防晃和破损补救方案。
+          4. 与咖啡店或鲜花店搭配陈列的建议。
+        transitions:
+          complete:
+            targets:
+              - consolidate_supply_plan
+
+      consolidate_supply_plan:
+        kind: bot_task
+        display_name: 汇聚供应清单
+        node_timeout_ms: 180000
+        max_attempts: 3
+        assignee:
+          type: bot_binding
+          binding: event_planner
+        instruction: |
+          你是活动策划。请汇总租赁物品和四类店面的并发输出，形成第一层供应计划。
+
+          请输出：
+          1. 按区域划分的商品、物品和服务清单。
+          2. 每个商家给出的展位、设备、供电、温控和陈列需求。
+          3. 所有取货、送达、保鲜、防损和现场交接需求。
+          4. 需要布展小妹和物流小哥继续并发处理的输入。
+          5. 仍需用户确认的冲突或缺口。
+        transitions:
+          complete:
+            targets:
+              - design_booth_setup_plan
+              - plan_delivery_route
+
+      design_booth_setup_plan:
+        kind: bot_task
+        display_name: 安排布展方案
+        assignee:
+          type: bot_binding
+          binding: onsite_decorator
+        instruction: |
+          你是布展小妹。请基于活动简报和供应计划，安排整体布展。
+
+          请输出：
+          1. 区域布局、展位顺序、动线和拍照/签到/茶歇位置。
+          2. 每个租赁物品和商家商品的落位、陈列方式和依赖顺序。
+          3. 布展时间表、人员动作、现场验收点和撤场顺序。
+          4. 物流小哥送达时的卸货点、优先级和交接注意事项。
+        transitions:
+          complete:
+            targets:
+              - align_setup_and_delivery
+
+      plan_delivery_route:
+        kind: bot_task
+        display_name: 安排送货路线
+        assignee:
+          type: bot_binding
+          binding: delivery_runner
+        instruction: |
+          你是物流小哥。请基于活动简报和供应计划，安排整体送货。
+
+          请输出：
+          1. 多商家取货顺序、路线、预计时间和备用路线。
+          2. 冷链、保温、防压、防洒、易损品保护和重货搬运方案。
+          3. 分批送达窗口、现场卸货点、联系人和签收方式。
+          4. 延误、破损、缺货或临时加单的应急处理。
+        transitions:
+          complete:
+            targets:
+              - align_setup_and_delivery
+
+      align_setup_and_delivery:
+        kind: bot_task
+        display_name: 对齐布展送货
+        node_timeout_ms: 150000
+        assignee:
+          type: bot_binding
+          binding: onsite_decorator
+        instruction: |
+          你是布展小妹。请综合布展方案和物流方案，做第二层执行对齐。
+
+          请输出：
+          1. 送达批次与布展动作的对应关系。
+          2. 先到先摆、后到暂存、冷链/易损/重货优先级。
+          3. 可能冲突的时间点、空间点和人员动作。
+          4. 给活动策划最终汇总使用的现场执行表。
+        transitions:
+          complete:
+            targets:
+              - finalize_event_runbook
+
+      finalize_event_runbook:
+        kind: bot_task
+        display_name: 生成活动执行单
+        node_timeout_ms: 180000
+        max_attempts: 3
+        assignee:
+          type: bot_binding
+          binding: event_planner
+        instruction: |
+          你是活动策划。请综合所有上游结果，生成一份可直接展示给用户的活动执行单。
+
+          最终执行单必须包含：
+          1. 活动整体流程和关键时间线。
+          2. 租赁物品清单、店面商品清单、展位布局和布展动作。
+          3. 各角色责任分工、交付物、截止时间和现场交接点。
+          4. 物流路线、送达批次、温控/易损/重货处理和异常预案。
+          5. 需要用户最终确认的问题。
+
+          请不要暴露内部协同过程，只输出最终执行单。
+        final_output: true

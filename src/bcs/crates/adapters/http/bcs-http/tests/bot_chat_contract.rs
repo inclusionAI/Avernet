@@ -1,18 +1,19 @@
 use axum::{
     body::{Body, to_bytes},
-    http::{Request, StatusCode},
+    http::{HeaderName, Request, StatusCode},
 };
 use bcs_auth_api::{AuthPluginChain, AuthPrincipal};
 use bcs_auth_local::StaticAuthPlugin;
 use bcs_bot::BotCore;
 use bcs_http::{
+    gateway_trace::{BcnMakeSpan, BcnOnResponse},
     router::build_router,
     state::{ChatRunEventPort, ChainUserIdentityPort, HttpAppState},
 };
 use bcs_service_api::{
     A2aChatCommand, A2aChatOutcome, A2aChatRunService, A2aChatService, A2aRunStatus,
     AsyncA2aChatAccepted, AsyncA2aChatCommand, BlockingA2aChatCommand, BlockingA2aChatOutcome,
-    BotActor, BotCapabilities, BotDeliveryCommand, BotDeliveryPort, BotDeliveryResult,
+    BotCapabilities, BotDeliveryCommand, BotDeliveryPort, BotDeliveryResult,
     BotDeliveryTarget, BotRegistryCoreService, CallerContext, ChatResponseMode, ChatRunCancelCommand,
     ChatRunQueryCommand, ServiceError, ServiceResult,
 };
@@ -25,6 +26,9 @@ use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::sync::{Mutex, RwLock, mpsc};
 use tower::ServiceExt;
+use tower_http::trace::TraceLayer;
+use tracing::instrument::WithSubscriber;
+use tracing_subscriber::prelude::*;
 
 #[derive(Default)]
 struct RecordingA2aChat {
@@ -37,6 +41,8 @@ struct RecordingA2aChat {
     blocking_content: Mutex<String>,
     blocking_failure: Mutex<Option<String>>,
     blocking_returns_error: Mutex<bool>,
+    async_unauthorized: Mutex<bool>,
+    async_forbidden: Mutex<bool>,
 }
 
 #[derive(Clone, Default)]
@@ -217,6 +223,7 @@ impl A2aChatRunService for RecordingA2aChat {
             response_mode: cmd.response_mode,
             caller_wait_mode: None,
             organization_code: cmd.organization_code,
+            provider_bypass_headers: cmd.provider_bypass_headers,
         });
         self.run_channel_froms
             .lock()
@@ -245,6 +252,12 @@ impl A2aChatRunService for RecordingA2aChat {
         &self,
         cmd: AsyncA2aChatCommand,
     ) -> ServiceResult<AsyncA2aChatAccepted> {
+        if *self.async_unauthorized.lock().await {
+            return Err(ServiceError::Unauthorized("owner mismatch".to_string()));
+        }
+        if *self.async_forbidden.lock().await {
+            return Err(ServiceError::Forbidden("access denied".to_string()));
+        }
         if let Some(bot_id) = self.not_connected_bot_id.lock().await.clone() {
             return Err(ServiceError::BotNotConnected(bot_id));
         }
@@ -266,6 +279,7 @@ impl A2aChatRunService for RecordingA2aChat {
             response_mode: cmd.response_mode,
             caller_wait_mode: cmd.caller_wait_mode,
             organization_code: cmd.organization_code,
+            provider_bypass_headers: cmd.provider_bypass_headers,
         });
         self.run_channel_froms
             .lock()
@@ -394,6 +408,18 @@ async fn build_chat_app_with_events(
     Arc<RecordingA2aChat>,
     Arc<RecordingChatRunEvents>,
 ) {
+    build_chat_app_with_events_and_bypass(events, keep_open_after_send, Vec::new()).await
+}
+
+async fn build_chat_app_with_events_and_bypass(
+    events: Vec<String>,
+    keep_open_after_send: bool,
+    provider_bypass_header_names: Vec<HeaderName>,
+) -> (
+    axum::Router,
+    Arc<RecordingA2aChat>,
+    Arc<RecordingChatRunEvents>,
+) {
     let temp_dir = TempDir::new().unwrap();
     let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
     for bot_id in ["caller-bot", "target-bot"] {
@@ -444,7 +470,8 @@ async fn build_chat_app_with_events(
     let app = build_router(
         HttpAppState::new(services)
             .with_user_identity(Arc::new(ChainUserIdentityPort::new(chain)))
-            .with_chat_run_events(run_events.clone()),
+            .with_chat_run_events(run_events.clone())
+            .with_provider_bypass_header_names(provider_bypass_header_names),
     );
     (app, a2a, run_events)
 }
@@ -479,9 +506,6 @@ fn final_event(text: &str) -> String {
     chat_event("final", text)
 }
 
-fn delta_event(text: &str) -> String {
-    chat_event("delta", text)
-}
 
 fn chat_event(state: &str, text: &str) -> String {
     serde_json::json!({
@@ -497,12 +521,6 @@ fn chat_event(state: &str, text: &str) -> String {
     .to_string()
 }
 
-async fn build_not_connected_app() -> axum::Router {
-    let (app, a2a, _run_events) = build_chat_app().await;
-    *a2a.not_connected_bot_id.lock().await = Some("target-bot".to_string());
-    app
-}
-
 async fn build_not_friends_app() -> axum::Router {
     let (app, a2a, _run_events) = build_chat_app().await;
     *a2a.not_friends_bot_ids.lock().await = Some(vec!["target-bot".to_string()]);
@@ -510,7 +528,7 @@ async fn build_not_friends_app() -> axum::Router {
 }
 
 #[tokio::test]
-async fn bot_chat_waits_for_final_event_and_preserves_response_shape() {
+async fn legacy_blocking_bot_chat_route_is_not_mounted() {
     let (app, a2a, _run_events) = build_chat_app().await;
 
     let response = app
@@ -533,34 +551,8 @@ async fn bot_chat_waits_for_final_event_and_preserves_response_shape() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["delivered"], true);
-    assert_eq!(json["bot_uuid"], "target-bot");
-    assert_eq!(json["session_id"], "stable-session");
-    assert_eq!(json["response"]["content"], "pong");
-
-    let commands = a2a.commands.lock().await;
-    assert_eq!(commands.len(), 1);
-    assert!(matches!(
-        &commands[0].caller,
-        CallerContext::Bot(bot) if bot.bot_uuid == "caller-bot"
-    ));
-    assert_eq!(commands[0].target_bot_id, "target-bot");
-    assert_eq!(commands[0].message, "ping");
-    assert!(commands[0].run_id.as_deref().is_some_and(|id| id.len() > 8));
-    assert_eq!(commands[0].async_mode, false);
-    assert_eq!(commands[0].session_key.as_deref(), Some("stable-session"));
-    assert_eq!(commands[0].timeout_ms, Some(300_000));
-    assert_eq!(commands[0].client, None);
-    assert_eq!(commands[0].from_actor_id.as_deref(), Some("human_123"));
-    assert_eq!(commands[0].authenticated_staff_id.as_deref(), Some("123"));
-    assert_eq!(commands[0].organization_code, None);
-    assert_eq!(
-        a2a.run_channel_froms.lock().await.as_slice(),
-        &[Some("human_123".to_string())]
-    );
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert!(a2a.commands.lock().await.is_empty());
 }
 
 #[tokio::test]
@@ -623,32 +615,256 @@ async fn bot_chat_async_returns_accepted_and_preserves_cli_session_fallback() {
 }
 
 #[tokio::test]
-async fn bot_chat_forwards_organization_code_to_blocking_service() {
-    let (app, a2a, _run_events) = build_chat_app().await;
+async fn bot_chat_async_marks_unauthorized_content_untrusted_without_business_attributes() {
+    let (app, _, _) = build_chat_app().await;
+    let app = app.layer(
+        TraceLayer::new_for_http()
+            .make_span_with(BcnMakeSpan)
+            .on_response(BcnOnResponse),
+    );
+    let message = "unauthorized-sensitive-content";
 
-    let response = app
-        .oneshot(
+    let (status, spans) = capture_otel_spans(async move {
+        let response = app.oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/bots/target-bot/chat")
+                .uri("/bots/target-bot/chat-async")
+                .header("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+                .header("authorization", "Bearer invalid-token")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::json!({ "message": message }).to_string()))
+                .unwrap(),
+        ).await.unwrap();
+        let status = response.status();
+        drop(response);
+        status
+    })
+    .await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let span = spans.iter().find(|span| span.name == "bcn.gateway.dispatch").unwrap();
+    assert_span_string_attribute(span, "bcn.auth.result", "failed");
+    assert!(!span.attributes.iter().any(|attr| attr.key.as_str() == "bcn.target.bot_id"));
+    assert!(!span.attributes.iter().any(|attr| attr.key.as_str() == "url.path"));
+    assert_span_string_attribute(span, "http.route", "/bots/{id}/chat-async");
+    assert!(span.events.events.is_empty());
+    assert_span_bool_attribute(span, "bcn.content.untrusted", true);
+    assert_gen_ai_input_message(span, message);
+}
+
+#[tokio::test]
+async fn bot_chat_async_marks_authenticated_content_trusted() {
+    let (app, _, _) = build_chat_app().await;
+    let app = app.layer(
+        TraceLayer::new_for_http()
+            .make_span_with(BcnMakeSpan)
+            .on_response(BcnOnResponse),
+    );
+
+    let (status, spans) = capture_otel_spans(async move {
+        let response = app.oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/bots/target-bot/chat-async")
+                .header("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
                 .header("authorization", "Bearer caller-token")
                 .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::json!({
-                        "message": "ping",
-                        "organization_code": "promo-2026"
-                    })
-                    .to_string(),
-                ))
+                .body(Body::from(r#"{"message":"trusted-content"}"#))
                 .unwrap(),
-        )
-        .await
-        .unwrap();
+        ).await.unwrap();
+        let status = response.status();
+        drop(response);
+        status
+    })
+    .await;
 
-    assert_eq!(response.status(), StatusCode::OK);
-    let commands = a2a.commands.lock().await;
-    assert_eq!(commands.len(), 1);
-    assert_eq!(commands[0].organization_code.as_deref(), Some("promo-2026"));
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let span = spans.iter().find(|span| span.name == "bcn.gateway.dispatch").unwrap();
+    assert_span_string_attribute(span, "bcn.auth.result", "success");
+    assert_span_string_attribute(span, "bcn.target.bot_id", "target-bot");
+    assert!(span.events.events.is_empty());
+    assert_span_bool_attribute(span, "bcn.content.untrusted", false);
+    assert_gen_ai_input_message(span, "trusted-content");
+}
+
+#[tokio::test]
+async fn bot_chat_async_marks_service_authorization_failure_untrusted() {
+    let (app, a2a, _) = build_chat_app().await;
+    *a2a.async_unauthorized.lock().await = true;
+    let app = app.layer(
+        TraceLayer::new_for_http()
+            .make_span_with(BcnMakeSpan)
+            .on_response(BcnOnResponse),
+    );
+
+    let (status, spans) = capture_otel_spans(async move {
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/bots/unverified-target/chat-async")
+                    .header("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+                    .header("authorization", "Bearer caller-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"message":"authorization-failure-content"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        drop(response);
+        status
+    })
+    .await;
+
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let span = spans.iter().find(|span| span.name == "bcn.gateway.dispatch").unwrap();
+    assert_span_string_attribute(span, "bcn.auth.result", "failed");
+    assert!(!span.attributes.iter().any(|attr| attr.key.as_str() == "bcn.target.bot_id"));
+    assert!(!span.attributes.iter().any(|attr| attr.key.as_str() == "bcn.run.id"));
+    assert!(span.events.events.is_empty());
+    assert_span_bool_attribute(span, "bcn.content.untrusted", true);
+    assert_gen_ai_input_message(span, "authorization-failure-content");
+}
+
+#[tokio::test]
+async fn bot_chat_async_marks_service_forbidden_failure_untrusted() {
+    let (app, a2a, _) = build_chat_app().await;
+    *a2a.async_forbidden.lock().await = true;
+    let app = app.layer(
+        TraceLayer::new_for_http()
+            .make_span_with(BcnMakeSpan)
+            .on_response(BcnOnResponse),
+    );
+
+    let (status, spans) = capture_otel_spans(async move {
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/bots/unverified-target/chat-async")
+                    .header("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+                    .header("authorization", "Bearer caller-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"message":"forbidden-content"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        drop(response);
+        status
+    })
+    .await;
+
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let span = spans.iter().find(|span| span.name == "bcn.gateway.dispatch").unwrap();
+    assert_span_string_attribute(span, "bcn.auth.result", "failed");
+    assert!(!span.attributes.iter().any(|attr| attr.key.as_str() == "bcn.target.bot_id"));
+    assert!(!span.attributes.iter().any(|attr| attr.key.as_str() == "bcn.run.id"));
+    assert!(span.events.events.is_empty());
+    assert_span_bool_attribute(span, "bcn.content.untrusted", true);
+    assert_gen_ai_input_message(span, "forbidden-content");
+}
+
+#[tokio::test]
+async fn bot_chat_async_records_trusted_content_after_auth_when_session_is_invalid() {
+    let (app, _, _) = build_chat_app().await;
+    let app = app.layer(
+        TraceLayer::new_for_http()
+            .make_span_with(BcnMakeSpan)
+            .on_response(BcnOnResponse),
+    );
+
+    let (status, spans) = capture_otel_spans(async move {
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/bots/target-bot/chat-async")
+                    .header("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+                    .header("authorization", "Bearer caller-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"message":"invalid-session-content","session_id":" "}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        drop(response);
+        status
+    })
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let span = spans.iter().find(|span| span.name == "bcn.gateway.dispatch").unwrap();
+    assert_span_string_attribute(span, "bcn.auth.result", "success");
+    assert!(span.events.events.is_empty());
+    assert_span_bool_attribute(span, "bcn.content.untrusted", false);
+    assert_gen_ai_input_message(span, "invalid-session-content");
+}
+
+async fn capture_otel_spans<F, T>(future: F) -> (T, Vec<opentelemetry_sdk::trace::SpanData>)
+where
+    F: Future<Output = T>,
+{
+    opentelemetry::global::set_text_map_propagator(
+        opentelemetry_sdk::propagation::TraceContextPropagator::new(),
+    );
+    let exporter = opentelemetry_sdk::trace::InMemorySpanExporterBuilder::new().build();
+    let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+        .with_simple_exporter(exporter.clone())
+        .build();
+    let tracer = opentelemetry::trace::TracerProvider::tracer(&provider, "bot-chat-contract");
+    let subscriber = tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::new("bcn_otel=info"))
+        .with(tracing_opentelemetry::layer().with_tracer(tracer));
+
+    let output = future.with_subscriber(subscriber).await;
+    provider.force_flush().unwrap();
+    (output, exporter.get_finished_spans().unwrap())
+}
+
+fn assert_span_string_attribute(
+    span: &opentelemetry_sdk::trace::SpanData,
+    key: &str,
+    expected: &str,
+) {
+    assert!(span.attributes.iter().any(|attr| {
+        attr.key.as_str() == key
+            && matches!(&attr.value, opentelemetry::Value::String(value) if value.as_str() == expected)
+    }));
+}
+
+fn assert_span_bool_attribute(
+    span: &opentelemetry_sdk::trace::SpanData,
+    key: &str,
+    expected: bool,
+) {
+    assert!(span.attributes.iter().any(|attr| {
+        attr.key.as_str() == key && attr.value == opentelemetry::Value::Bool(expected)
+    }));
+}
+
+fn assert_gen_ai_input_message(span: &opentelemetry_sdk::trace::SpanData, expected: &str) {
+    let value = span
+        .attributes
+        .iter()
+        .find_map(|attr| match &attr.value {
+            opentelemetry::Value::String(value)
+                if attr.key.as_str() == "gen_ai.input.messages" =>
+            {
+                Some(value.as_str())
+            }
+            _ => None,
+        })
+        .expect("gen_ai.input.messages string attribute");
+    let messages: Value = serde_json::from_str(value).expect("schema-compliant input messages JSON");
+    assert_eq!(messages.as_array().map(Vec::len), Some(1));
+    assert_eq!(messages[0]["role"], "user");
+    assert_eq!(messages[0]["parts"].as_array().map(Vec::len), Some(1));
+    assert_eq!(messages[0]["parts"][0]["type"], "text");
+    assert_eq!(messages[0]["parts"][0]["content"], expected);
 }
 
 #[tokio::test]
@@ -707,95 +923,6 @@ async fn bot_chat_async_logs_server_side_digest_on_success() {
 }
 
 #[tokio::test]
-async fn bot_chat_maps_typed_not_connected_error_to_legacy_404_body() {
-    let app = build_not_connected_app().await;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/bots/target-bot/chat")
-                .header("authorization", "Bearer caller-token")
-                .header("content-type", "application/json")
-                .body(Body::from(r#"{"message":"ping"}"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(
-        json["error"],
-        "Bot 'target-bot' is not connected via WebSocket"
-    );
-    assert_eq!(json["status"], 404);
-}
-
-#[tokio::test]
-async fn bot_chat_logs_server_side_digest_on_failure() {
-    let app = build_not_connected_app().await;
-
-    let logs = capture_tracing_logs(async {
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/bots/target-bot/chat")
-                    .header("authorization", "Bearer caller-token")
-                    .header("content-type", "application/json")
-                    .body(Body::from(r#"{"message":"ping"}"#))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    })
-    .await;
-
-    assert!(logs.contains("bcs_chat_digest"));
-    assert!(logs.contains("endpoint=bot_chat"));
-    assert!(logs.contains("from_bot_id=caller-bot"));
-    assert!(logs.contains("target_bot_id=target-bot"));
-    assert!(logs.contains("success=false"));
-    assert!(logs.contains("status_code=404"));
-    assert!(logs.contains("error_kind=BotNotConnected"));
-}
-
-#[tokio::test]
-async fn bot_chat_logs_not_friends_as_business_success() {
-    let app = build_not_friends_app().await;
-
-    let logs = capture_tracing_logs(async {
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/bots/target-bot/chat")
-                    .header("authorization", "Bearer caller-token")
-                    .header("content-type", "application/json")
-                    .body(Body::from(r#"{"message":"ping"}"#))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::FORBIDDEN);
-    })
-    .await;
-
-    assert!(logs.contains("bcs_chat_digest"));
-    assert!(logs.contains("endpoint=bot_chat"));
-    assert!(logs.contains("from_bot_id=caller-bot"));
-    assert!(logs.contains("target_bot_id=target-bot"));
-    assert!(logs.contains("success=true"));
-    assert!(logs.contains("status_code=403"));
-    assert!(logs.contains("error_kind=NotFriends"));
-}
-
-#[tokio::test]
 async fn bot_chat_async_logs_not_friends_as_business_success() {
     let app = build_not_friends_app().await;
 
@@ -824,83 +951,4 @@ async fn bot_chat_async_logs_not_friends_as_business_success() {
     assert!(logs.contains("success=true"));
     assert!(logs.contains("status_code=403"));
     assert!(logs.contains("error_kind=NotFriends"));
-}
-
-#[tokio::test]
-async fn bot_chat_channel_close_without_content_fails_open_run() {
-    let (app, a2a, _run_events) = build_chat_app_with_events(Vec::new(), false).await;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/bots/target-bot/chat")
-                .header("authorization", "Bearer caller-token")
-                .header("content-type", "application/json")
-                .body(Body::from(r#"{"message":"ping"}"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["error"], "Bot channel closed without response");
-    assert_eq!(json["status"], 500);
-
-    let failed_runs = a2a.failed_runs.lock().await;
-    assert_eq!(failed_runs.len(), 1);
-    assert_eq!(failed_runs[0].1, "Bot channel closed without response");
-}
-
-#[tokio::test]
-async fn bot_chat_partial_timeout_returns_content_and_completes_open_run() {
-    let (app, a2a, _run_events) =
-        build_chat_app_with_events(vec![delta_event("partial")], true).await;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/bots/target-bot/chat")
-                .header("authorization", "Bearer caller-token")
-                .header("content-type", "application/json")
-                .body(Body::from(r#"{"message":"ping","timeout_ms":5}"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["response"]["content"], "partial");
-
-    {
-        let failed_runs = a2a.failed_runs.lock().await;
-        assert_eq!(failed_runs.len(), 1);
-        assert_eq!(failed_runs[0].1, "Timeout waiting for bot response");
-    }
-
-    let commands = a2a.commands.lock().await;
-    let run_id = commands[0].run_id.as_deref().unwrap();
-    let status = A2aChatService::get_run(
-        a2a.as_ref(),
-        CallerContext::Bot(BotActor {
-            bot_uuid: "caller-bot".to_string(),
-        }),
-        run_id,
-    )
-    .await
-    .unwrap();
-    assert_eq!(status.status, "completed");
-    assert_eq!(
-        status
-            .response
-            .as_ref()
-            .and_then(|response| response.get("is_terminal"))
-            .and_then(|value| value.as_bool()),
-        Some(true)
-    );
 }

@@ -5,7 +5,7 @@ from datetime import datetime
 import pytest
 
 from secbaas.community.adapters.web.routers.open_api.dependencies import (
-    _normalize_bot_id,
+    normalize_bot_id,
     resolve_bot_id_from_api_key,
 )
 from secbaas.community.api.api_gateway import APIKeyRecord
@@ -85,40 +85,40 @@ class TestResolveBotIdFromApiKey:
 class TestNormalizeBotId:
     def test_normalizes_leading_zeros(self):
         """'real_bot_id:000123' → 'real_bot_id:123'."""
-        result = _normalize_bot_id("real_bot_id:000123")
+        result = normalize_bot_id("real_bot_id:000123")
         assert result == "real_bot_id:123"
 
     def test_no_colon_passthrough(self):
         """'simple_id' without colon passes through unchanged."""
-        result = _normalize_bot_id("simple_id")
+        result = normalize_bot_id("simple_id")
         assert result == "simple_id"
 
     def test_zero_entity_id_preserved(self):
         """'bot:0' → 'bot:0' (stripping leading zeros from '0' gives '0')."""
-        result = _normalize_bot_id("bot:0")
+        result = normalize_bot_id("bot:0")
         assert result == "bot:0"
 
     def test_strips_leading_zeros_from_entity(self):
         """'bot:007' → 'bot:7'."""
-        result = _normalize_bot_id("bot:007")
+        result = normalize_bot_id("bot:007")
         assert result == "bot:7"
 
     def test_all_zeros_entity(self):
         """'bot:000' → 'bot:0'."""
-        result = _normalize_bot_id("bot:000")
+        result = normalize_bot_id("bot:000")
         assert result == "bot:0"
 
     def test_already_normalized(self):
         """Already normalised value stays the same."""
-        result = _normalize_bot_id("bot:42")
+        result = normalize_bot_id("bot:42")
         assert result == "bot:42"
 
     def test_empty_string_no_colon(self):
         """Empty string has no colon → passes through."""
-        result = _normalize_bot_id("")
+        result = normalize_bot_id("")
         assert result == ""
 
     def test_colon_with_empty_entity(self):
         """'bot:' has empty entity_id after colon → stripping gives '0'."""
-        result = _normalize_bot_id("bot:")
+        result = normalize_bot_id("bot:")
         assert result == "bot:0"

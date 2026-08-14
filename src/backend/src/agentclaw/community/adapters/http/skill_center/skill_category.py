@@ -10,10 +10,8 @@ from agentclaw.community.adapters.http.skill_center.schemas import (
     CategoryDetailResponse,
     CategoryListResponse,
 )
-from agentclaw.community.core.skill_center.services.repositories import (
-    SkillCategoryRepository,
-    SkillRepository,
-)
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillCategoryRepository
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 from fastapi import APIRouter, HTTPException

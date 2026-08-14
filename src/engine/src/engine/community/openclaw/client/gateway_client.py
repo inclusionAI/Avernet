@@ -48,6 +48,8 @@ from engine.community.openclaw.config import OpenClawConfig, get_config
 log = logging.getLogger("openclaw-client")
 _DEBUG = os.getenv("OPENCLAW_DEBUG_EVENTS", "").lower() in {"1", "true", "yes", "on"}
 _DEFAULT_EARLY_FINAL_GRACE_SECONDS = 3.0
+# Long-running subagent workflows can be quiet while work continues upstream.
+_DEFAULT_CHAT_STREAM_TIMEOUT_SECONDS = 20 * 60
 
 
 def _summarize_attachments(attachments: Any) -> dict[str, Any]:
@@ -627,6 +629,7 @@ class OpenClawGatewayClient:
         expected_run_id = idempotency_key or uuid.uuid4().hex
         run_id: Optional[str] = expected_run_id
         allowed_run_ids: set[str] = {expected_run_id}
+        trusted_parent_session_keys: set[str] = {session_key}
         pending_early_final: Optional[EventFrame] = None
         emitted_non_terminal = False
         early_final_grace_seconds = _get_early_final_grace_seconds()
@@ -669,6 +672,40 @@ class OpenClawGatewayClient:
                     return False
             return True
 
+        def is_announce_event(payload: Dict[str, Any]) -> bool:
+            payload_run_id = payload.get("runId")
+            # Caller-provided foreground IDs may use an announce-like prefix;
+            # correlated run identity takes precedence over prefix classification.
+            return (
+                isinstance(payload_run_id, str)
+                and payload_run_id.startswith("announce:")
+                and payload_run_id not in allowed_run_ids
+                and payload_run_id != run_id
+            )
+
+        def remember_trusted_parent_session(payload: Dict[str, Any]) -> None:
+            payload_run_id = payload.get("runId")
+            payload_session_key = payload.get("sessionKey")
+            if (
+                is_announce_event(payload)
+                or not isinstance(payload_run_id, str)
+                or not payload_run_id
+                or not isinstance(payload_session_key, str)
+                or not payload_session_key
+            ):
+                return
+            if payload_run_id in allowed_run_ids or payload_run_id == run_id:
+                # COSEC: Only the correlated foreground run may establish
+                # the canonical parent session used to isolate announce events.
+                trusted_parent_session_keys.add(payload_session_key)
+
+        def announce_matches_parent_session(payload: Dict[str, Any]) -> bool:
+            payload_session_key = payload.get("sessionKey")
+            return (
+                isinstance(payload_session_key, str)
+                and payload_session_key in trusted_parent_session_keys
+            )
+
         def matches_current_stream(payload: Dict[str, Any]) -> bool:
             payload_run_id = payload.get("runId")
             if isinstance(payload_run_id, str) and payload_run_id:
@@ -676,8 +713,8 @@ class OpenClawGatewayClient:
                     return True
                 if payload_run_id.startswith("inject-"):
                     return True
-                if payload_run_id.startswith("announce:") and pending_announces > 0:
-                    return True
+                if is_announce_event(payload) and pending_announces > 0:
+                    return announce_matches_parent_session(payload)
                 if pending_early_final is not None and payload.get("state") not in ("final", "error", "aborted"):
                     payload_session_key = payload.get("sessionKey")
                     return payload_session_key == session_key
@@ -693,6 +730,13 @@ class OpenClawGatewayClient:
             if done:
                 return
             payload = event.payload or {}
+            remember_trusted_parent_session(payload)
+            if is_announce_event(payload) and not announce_matches_parent_session(payload):
+                # COSEC: Reject cross-session completion events before any
+                # pending counter or stream terminal state can be changed.
+                filter_drop_count += 1
+                log.info("[chat_stream][foreign_announce_drop]")
+                return
             if not matches_current_stream(payload):
                 filter_drop_count += 1
                 log.info("[chat_stream][filter_drop] %s", event_summary(event, payload))
@@ -749,7 +793,7 @@ class OpenClawGatewayClient:
                     payload["_source_event"] = event.event
                     event_queue.put_nowait(event)
                 elif pending_announces > 0:
-                    is_announce = isinstance(payload_run_id, str) and payload_run_id.startswith("announce:")
+                    is_announce = is_announce_event(payload)
                     if is_announce:
                         pending_announces -= 1
                     if is_announce and pending_announces <= 0:
@@ -888,7 +932,11 @@ class OpenClawGatewayClient:
             if not run_id:
                 log.warning("chat.send response missing runId, falling back to unfiltered mode")
 
-            timeout = (timeout_ms / 1000) if timeout_ms else 300
+            timeout = (
+                timeout_ms / 1000
+                if timeout_ms
+                else _DEFAULT_CHAT_STREAM_TIMEOUT_SECONDS
+            )
             while True:
                 try:
                     wait_timeout = (

@@ -38,6 +38,10 @@ pub struct AuthPrincipal {
     pub source_name: Option<String>,
     pub user_id: Option<String>,
     pub user_name: Option<String>,
+    /// Human user avatar URL. Populated only by identity-backed plugins that
+    /// resolve it from a store (e.g. OAuth sessions read it from the identity
+    /// table during verification). `None` for bot / mock principals.
+    pub avatar: Option<String>,
     pub bot_uuid: Option<String>,
     pub external_bot_id: Option<String>,
     pub owner_id: Option<String>,

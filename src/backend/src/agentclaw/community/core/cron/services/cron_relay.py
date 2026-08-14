@@ -19,9 +19,7 @@ from typing import Any, Optional
 from injector import inject
 
 from agentclaw.community.core.bot_management.services.bot_service import BotService
-from agentclaw.community.core.bot_management.repository.template_repository_protocol import (
-    TemplateRepository,
-)
+from agentclaw.community.core.repository.protocols.bot import TemplateRepository
 from agentclaw.community.core.cron.protocols import (
     BotInfoProvider,
     DeviceConnectionProvider,
@@ -32,9 +30,7 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
 )
 from agentclaw.community.core.devices.services.device_service import DeviceService
 from agentclaw.community.core.cron.errors import CronRelayError
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.cron.services.cron_runtime_targets import (
     CronRuntimeTarget,
@@ -100,7 +96,8 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
         self,
         user_id: str,
         nick_name: str,
-        bot_id: Optional[str] = None
+        bot_id: Optional[str] = None,
+        runtime_stage: Optional[str] = None,
     ) -> dict:
         """获取用户所有 Bots 的定时任务（平铺展示）
 
@@ -108,10 +105,16 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
             user_id: 用户ID
             nick_name: 用户花名
             bot_id: 如果为 "all" 或 None，返回所有 bots 的任务；否则返回指定 bot 的任务
+            runtime_stage: 仅返回该运行态的任务；None 表示全部运行态。openapi_v1
+                传 draft——公开面只操作草稿态；内部控制台不传，保持全运行态聚合。
 
         Returns:
             {"success": True, "data": [...], "total": N}
         """
+        if runtime_stage is not None and runtime_stage not in VALID_RUNTIME_STAGES:
+            raise CronRelayError(
+                f"Invalid runtime_stage: {runtime_stage}", error_code=400
+            )
         # 1. 获取用户的所有 bots
         if bot_id and bot_id != "all":
             bot = self._bot_provider.get_bot(bot_id, user_id)
@@ -136,6 +139,13 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
             bot_targets, bot_failed_targets = self._build_runtime_targets(bot, user_id)
             targets.extend(bot_targets)
             failed_targets.extend(bot_failed_targets)
+
+        if runtime_stage is not None:
+            # 过滤在取数之前：范围之外的运行态既不查询也不产生失败项。
+            targets = [t for t in targets if t.runtime_stage == runtime_stage]
+            failed_targets = [
+                t for t in failed_targets if t.get("runtime_stage") == runtime_stage
+            ]
 
         tasks = []
         for target in targets:
@@ -339,12 +349,10 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
     ) -> dict:
         """查找 Bot 的 autoInitiate 类型定时任务并触发执行。
 
-        免鉴权场景下由调用方提供 user_id/nick_name，无需登录态。
-
         Args:
             bot_id: Bot ID
-            user_id: 用户ID（调用方传入）
-            nick_name: 用户花名（调用方传入，死参，缺省用 user_id）
+            user_id: 用户ID
+            nick_name: 用户花名（死参，缺省用 user_id）
             force: 是否强制执行，默认 True
 
         Returns:
@@ -418,16 +426,16 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
         append_message: str = "",
         model: str | None = None,
     ) -> dict:
-        """为单个 DIMA 需求直接发起会话（免鉴权）。
+        """为单个需求直接发起会话。
 
         workflow 从 bot 的 template_config.ext.devflow_workflow 中读取，
         与 cron_auto_setup 保持一致，调用方无需传入。
 
         Args:
             bot_id: Bot ID
-            user_id: 用户 ID（调用方传入）
+            user_id: 用户 ID
             nick_name: 用户花名
-            dima_url: DIMA 需求 URL
+            dima_url: 需求 URL
             append_message: 补充说明
             model: 可选模型覆盖
 

@@ -7,12 +7,158 @@ singlebox_model_config_output_file() {
     printf '%s\n' "${SINGLEBOX_MODEL_CONFIG_FILE:-${DEP_DIR}/openclaw/model-config/openclaw.json}"
 }
 
+singlebox_mock_model_base_url() {
+    printf 'http://127.0.0.1:%s\n' "${SINGLEBOX_MOCK_MODEL_PORT:-18080}"
+}
+
+singlebox_mock_model_pid_file() {
+    printf '%s\n' "${DEP_DIR}/openclaw/model-config/mock-model.pid"
+}
+
+singlebox_mock_model_is_ready() {
+    local base_url="${1:-$(singlebox_mock_model_base_url)}"
+    curl --noproxy '*' -fsS "${base_url}/health" 2>/dev/null |
+        jq -e '
+            .status == "ok"
+            and .service == "singlebox-mock-model"
+            and (keys | sort) == ["service", "status"]
+        ' >/dev/null
+}
+
+singlebox_mock_model_start() {
+    SINGLEBOX_MOCK_MODEL_STARTED_BY_COMMAND=0
+    [ "${SINGLEBOX_MODEL_CONFIG_MODE:-}" = "mock" ] || return 0
+
+    local base_url pid_file log_file pid command
+    base_url="$(singlebox_mock_model_base_url)"
+    pid_file="$(singlebox_mock_model_pid_file)"
+    log_file="${LOG_DIR}/mock-model.log"
+
+    if singlebox_mock_model_is_ready "$base_url"; then
+        log_info "Mock model server is ready: ${base_url}"
+        return 0
+    fi
+
+    mkdir -p "$(dirname "$pid_file")" "$LOG_DIR"
+    if [ -f "$pid_file" ]; then
+        pid="$(tr -d '\r\n' < "$pid_file")"
+        case "$pid" in
+            ''|*[!0-9]*)
+                rm -f "$pid_file"
+                ;;
+            *)
+                if kill -0 "$pid" 2>/dev/null; then
+                    command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+                    case "$command" in
+                        *"${PROJECT_ROOT}/scripts/modules/mock_model_server.py"*)
+                            log_error "Owned mock model server PID ${pid} is running but is not ready at ${base_url}."
+                            log_error "Run 'restart all' to apply a mode or port change."
+                            ;;
+                        *)
+                            log_error "Mock model PID file points to another process: ${pid}."
+                            ;;
+                    esac
+                    return 1
+                fi
+                rm -f "$pid_file"
+                ;;
+        esac
+    fi
+
+    python3 "${PROJECT_ROOT}/scripts/modules/mock_model_server.py" \
+        --port "${SINGLEBOX_MOCK_MODEL_PORT:-18080}" >"$log_file" 2>&1 &
+    pid=$!
+
+    local attempt
+    for attempt in $(seq 1 100); do
+        if kill -0 "$pid" 2>/dev/null && singlebox_mock_model_is_ready "$base_url"; then
+            printf '%s\n' "$pid" > "$pid_file"
+            SINGLEBOX_MOCK_MODEL_STARTED_BY_COMMAND=1
+            log_info "Mock model server started: ${base_url}"
+            return 0
+        fi
+        if ! kill -0 "$pid" 2>/dev/null; then
+            break
+        fi
+        sleep 0.05
+    done
+
+    log_error "Mock model server failed to start; log: ${log_file}"
+    if kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+    fi
+    rm -f "$pid_file"
+    return 1
+}
+
+singlebox_mock_model_stop() {
+    local pid_file pid command attempt
+    pid_file="$(singlebox_mock_model_pid_file)"
+    [ -f "$pid_file" ] || return 0
+    pid="$(tr -d '\r\n' < "$pid_file")"
+    case "$pid" in
+        ''|*[!0-9]*)
+            rm -f "$pid_file"
+            return 0
+            ;;
+    esac
+    if ! kill -0 "$pid" 2>/dev/null; then
+        rm -f "$pid_file"
+        return 0
+    fi
+    command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+    case "$command" in
+        *"${PROJECT_ROOT}/scripts/modules/mock_model_server.py"*) ;;
+        *)
+            log_warn "Refusing to stop PID ${pid}; it is not the singlebox mock model server."
+            return 0
+            ;;
+    esac
+    if ! kill "$pid" 2>/dev/null; then
+        log_error "Failed to stop mock model server PID ${pid}; preserving ${pid_file}."
+        return 1
+    fi
+    for attempt in $(seq 1 100); do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            rm -f "$pid_file"
+            log_info "Mock model server stopped."
+            return 0
+        fi
+        sleep 0.05
+    done
+    log_error "Mock model server PID ${pid} did not exit; preserving ${pid_file}."
+    return 1
+}
+
+singlebox_model_config_required_for_services() {
+    local service
+    for service in "$@"; do
+        case "$service" in
+            all|baas|bots|bcs_bots|hybrid|merchant_hybrid)
+                return 0
+                ;;
+        esac
+    done
+    return 1
+}
+
+singlebox_mock_model_stop_required_for_services() {
+    local service
+    for service in "$@"; do
+        if [ "$service" = "all" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 singlebox_model_config_prompt() {
     local selection=""
     while true; do
         {
             echo "Choose model config mode:"
-            echo "  1) mock     Start without real model replies"
+            echo "  1) mock     Use fixed-format local model replies"
             echo "  2) manual   Use values from .env.local"
             echo "  3) home     Import model fields from ~/.openclaw/openclaw.json"
             echo ""
@@ -79,6 +225,138 @@ singlebox_model_config_require_manual_env() {
         log_error "Set them in ${PROJECT_ROOT}/.env.local or choose SINGLEBOX_MODEL_CONFIG_MODE=mock."
         return 1
     fi
+}
+
+singlebox_model_config_thinking_enabled() {
+    case "${OPENCLAW_ENABLE_THINKING:-false}" in
+        1|true|TRUE|yes|YES|on|ON)
+            printf 'true\n'
+            ;;
+        0|false|FALSE|no|NO|off|OFF|'')
+            printf 'false\n'
+            ;;
+        *)
+            log_error "Invalid OPENCLAW_ENABLE_THINKING: ${OPENCLAW_ENABLE_THINKING}"
+            log_error "Valid values: true, false"
+            return 1
+            ;;
+    esac
+}
+
+singlebox_model_config_apply_thinking_policy() {
+    local output_file="$1"
+    local thinking_enabled thinking_default temporary_file
+    thinking_enabled="$(singlebox_model_config_thinking_enabled)" || return 1
+    if [ "$thinking_enabled" = "true" ]; then
+        thinking_default="medium"
+    else
+        thinking_default="off"
+    fi
+    temporary_file="${output_file}.thinking.$$"
+
+    (
+        umask 077
+        jq \
+            --argjson thinking_enabled "$thinking_enabled" \
+            --arg thinking_default "$thinking_default" '
+          def model_provider_id($model_ref):
+            $model_ref | split("/")[0];
+          def model_id($model_ref):
+            $model_ref | split("/")[1:] | join("/");
+          def needs_bailian_glm_thinking_override($config; $model_ref):
+            ($config.models.providers[model_provider_id($model_ref)] // {}) as $provider
+            | (($provider.api // "") == "openai-completions"
+               or ($provider.api // "") == "openai")
+              and (($provider.baseUrl // "" | ascii_downcase)
+                   | contains("aliyuncs.com/compatible-mode/"))
+              and ((model_id($model_ref) | ascii_downcase)
+                   | test("(^|/)glm-(4\\.(5|6|7)|5([.-]|$))"));
+          def set_bailian_glm_thinking_override:
+            if type != "object" then {} else . end
+            | .params = (if (.params? | type) == "object" then .params else {} end)
+            | .params.extra_body = (
+                if (.params.extra_body? | type) == "object" then .params.extra_body else {} end
+              )
+            | .params.extra_body.enable_thinking = $thinking_enabled;
+          def toggle_thinking_object:
+            if type != "object" then .
+            else
+              (if has("enable_thinking") then
+                 .enable_thinking = $thinking_enabled
+               else . end)
+              | (if (.thinking? | type) == "object" then
+                   if $thinking_enabled then
+                     .thinking |= del(.type)
+                     | if .thinking == {} then del(.thinking) else . end
+                   else
+                     .thinking.type = "disabled"
+                   end
+                 else . end)
+            end;
+          def toggle_model_params:
+            if type != "object" then .
+            else
+              toggle_thinking_object
+              | (if (.extra_body? | type) == "object" then
+                   .extra_body |= toggle_thinking_object
+                 else . end)
+              | (if (.extraBody? | type) == "object" then
+                   .extraBody |= toggle_thinking_object
+                 else . end)
+              | (if (.chat_template_kwargs? | type) == "object"
+                       and (.chat_template_kwargs | has("enable_thinking")) then
+                   .chat_template_kwargs.enable_thinking = $thinking_enabled
+                 else . end)
+              | (if (.chatTemplateKwargs? | type) == "object"
+                       and (.chatTemplateKwargs | has("enable_thinking")) then
+                   .chatTemplateKwargs.enable_thinking = $thinking_enabled
+                 else . end)
+            end;
+          . as $source_config
+          | (.agents.defaults.model.primary? // null) as $primary_model
+          | .agents = (if (.agents? | type) == "object" then .agents else {} end)
+          | .agents.defaults = (
+              if (.agents.defaults? | type) == "object" then .agents.defaults else {} end
+            )
+          | .agents.defaults.thinkingDefault = $thinking_default
+          | if (.agents.defaults.models? | type) == "object" then
+              .agents.defaults.models |= with_entries(
+                .value |= (
+                  if type == "object" and (.params? | type) == "object" then
+                    .params |= toggle_model_params
+                  else . end
+                )
+              )
+            else . end
+          | if ($primary_model | type) == "string"
+               and needs_bailian_glm_thinking_override($source_config; $primary_model) then
+              .agents.defaults.models = (
+                if (.agents.defaults.models? | type) == "object" then
+                  .agents.defaults.models
+                else
+                  {}
+                end
+              )
+              | .agents.defaults.models[$primary_model] = (
+                  (.agents.defaults.models[$primary_model] // {})
+                  | set_bailian_glm_thinking_override
+                )
+            else . end
+          | if (.agents.defaults.models? | type) == "object" then
+              .agents.defaults.models |= with_entries(
+                .key as $model_ref
+                | if needs_bailian_glm_thinking_override($source_config; $model_ref) then
+                    .value |= set_bailian_glm_thinking_override
+                  else . end
+              )
+            else . end
+        ' "$output_file" > "$temporary_file"
+    ) || {
+        rm -f "$temporary_file"
+        return 1
+    }
+    mv "$temporary_file" "$output_file"
+    chmod 600 "$output_file"
 }
 
 singlebox_model_config_write_manual() {
@@ -239,21 +517,130 @@ singlebox_model_config_write_home() {
 
 singlebox_model_config_write_mock() {
     local output_file="$1"
+    local base_url
+    base_url="$(singlebox_mock_model_base_url)/v1"
     (
         umask 077
-        jq -n '{
+        jq -n --arg base_url "$base_url" '{
           models: {
             mode: "merge",
-            providers: {}
+            providers: {
+              "singlebox-mock": {
+                baseUrl: $base_url,
+                apiKey: "singlebox-local",
+                api: "openai-completions",
+                models: [
+                  {
+                    id: "singlebox-mock",
+                    name: "singlebox-mock",
+                    reasoning: false,
+                    input: ["text"],
+                    cost: {
+                      input: 0,
+                      output: 0,
+                      cacheRead: 0,
+                      cacheWrite: 0
+                    },
+                    contextWindow: 200000,
+                    maxTokens: 8192
+                  }
+                ]
+              }
+            }
           },
           agents: {
             defaults: {
-              models: {}
+              model: {
+                primary: "singlebox-mock/singlebox-mock"
+              },
+              models: {
+                "singlebox-mock/singlebox-mock": {
+                  alias: "singlebox-mock"
+                }
+              }
             }
           }
         }' > "$output_file"
     ) || return 1
     chmod 600 "$output_file"
+}
+
+singlebox_model_config_export_llm_env() {
+    # Export bcsfuse LLM env vars from the openclaw home config.
+    # This lets bcsfuse reuse the same model/key that singlebox bots use in
+    # home mode, without manually duplicating them in .env.local.
+    local source_file primary provider_id model_name base_url api_key api_type
+    source_file="$(singlebox_model_config_home_source)"
+
+    if [ ! -f "$source_file" ]; then
+        return 0
+    fi
+    if ! command -v jq >/dev/null 2>&1; then
+        log_warn "jq not found; cannot export LLM env from ${source_file}"
+        return 0
+    fi
+
+    primary="$(jq -r '.agents.defaults.model.primary // empty' "$source_file")"
+    if [ -z "$primary" ]; then
+        return 0
+    fi
+
+    provider_id="${primary%%/*}"
+    model_name="${primary#*/}"
+
+    base_url="$(jq -r --arg p "$provider_id" '.models.providers[$p].baseUrl // empty' "$source_file")"
+    api_key="$(jq -r --arg p "$provider_id" '.models.providers[$p].apiKey // empty' "$source_file")"
+    api_type="$(jq -r --arg p "$provider_id" '.models.providers[$p].api // "anthropic"' "$source_file")"
+
+    if [ -z "$base_url" ] || [ -z "$api_key" ]; then
+        return 0
+    fi
+
+    case "$api_type" in
+        openai-completions|openai)
+            api_type="openai"
+            ;;
+        *)
+            api_type="anthropic"
+            ;;
+    esac
+
+    # Pick a fallback reasoning model: prefer a faster non-primary model from the
+    # same provider (e.g. GLM-5.1 for antchat) so local fusion answers finish
+    # before the antchat 90s gateway window. Respect explicit LLM_*_MODEL env vars.
+    local preferred_model="$model_name"
+    if [ -z "${LLM_REASONING_MODEL:-}" ]; then
+        local models fast_candidate
+        models="$(jq -r --arg p "$provider_id" --arg primary "$model_name" '
+            .models.providers[$p].models[]? | select(.id != $primary) | .id
+        ' "$source_file" 2>/dev/null || true)"
+        fast_candidate="$(printf '%s\n' $models | awk '$0=="GLM-5.1"{print; exit}')"
+        if [ -z "$fast_candidate" ]; then
+            fast_candidate="$(printf '%s\n' $models | awk '$0=="Qwen3.5-397B-A17B"{print; exit}')"
+        fi
+        if [ -z "$fast_candidate" ]; then
+            fast_candidate="$(printf '%s\n' $models | awk '$0=="claude-3-5-sonnet"{print; exit}')"
+        fi
+        if [ -z "$fast_candidate" ]; then
+            fast_candidate="$(printf '%s\n' $models | head -1 || true)"
+        fi
+        if [ -n "$fast_candidate" ]; then
+            preferred_model="$fast_candidate"
+        fi
+    fi
+
+    export LLM_BASE_URL="${LLM_BASE_URL:-$base_url}"
+    export LLM_AUTH_TOKEN="${LLM_AUTH_TOKEN:-$api_key}"
+    export LLM_API_TYPE="${LLM_API_TYPE:-$api_type}"
+    export LLM_FAST_MODEL="${LLM_FAST_MODEL:-$preferred_model}"
+    export LLM_BALANCED_MODEL="${LLM_BALANCED_MODEL:-$preferred_model}"
+    export LLM_REASONING_MODEL="${LLM_REASONING_MODEL:-$preferred_model}"
+    export LLM_LONG_CONTEXT_MODEL="${LLM_LONG_CONTEXT_MODEL:-$preferred_model}"
+    export LLM_EXTRACTION_MODEL="${LLM_EXTRACTION_MODEL:-$preferred_model}"
+    export LLM_DEFAULT_TIMEOUT_MS="${LLM_DEFAULT_TIMEOUT_MS:-120000}"
+    export LLM_REASONING_TIMEOUT_MS="${LLM_REASONING_TIMEOUT_MS:-600000}"
+
+    log_info "Exported bcsfuse LLM config from ${source_file} (provider=${provider_id}, api_type=${api_type}, model=${model_name})"
 }
 
 singlebox_model_config_prepare() {
@@ -274,12 +661,14 @@ singlebox_model_config_prepare() {
             ;;
         home)
             singlebox_model_config_write_home "$output_file" || return 1
+            singlebox_model_config_export_llm_env || true
             ;;
         mock)
             singlebox_model_config_write_mock "$output_file" || return 1
-            log_warn "Singlebox model config mode is mock; bots can join BCN but cannot produce real model replies."
+            log_warn "Singlebox model config mode is mock; bots use fixed-format local model replies."
             ;;
     esac
+    singlebox_model_config_apply_thinking_policy "$output_file" || return 1
 
     SINGLEBOX_MODEL_CONFIG_MODE="$mode"
     SINGLEBOX_MODEL_CONFIG_FILE="$output_file"
@@ -289,4 +678,5 @@ singlebox_model_config_prepare() {
 
     log_info "Singlebox model config mode: ${mode}"
     log_info "Singlebox model config: ${output_file}"
+    log_info "Singlebox model thinking default: $(jq -r '.agents.defaults.thinkingDefault' "$output_file")"
 }

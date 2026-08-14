@@ -226,6 +226,59 @@ test_stack_script_has_npm_branch() {
   assert_contains "$src" '[ "$BCN_PLUGIN_SOURCE" != "npm" ]'
 }
 
+test_session_bot_uuid_requires_usable_session() {
+  local tmp; tmp="$(mktemp -d)"
+  local funcs="${tmp}/stack-session-functions.sh"
+  local profile_root="${tmp}/profiles"
+  local session_file="${profile_root}/.openclaw-ceo/.bcs/session.json"
+
+  awk '
+    /^profile_dir_for\(\)/ {emit=1}
+    /^workspace_dir_for\(\)/ {emit=0}
+    emit {print}
+  ' "${PROJECT_ROOT}/src/bcs/scripts/start_bcs_bots.sh" > "$funcs"
+  mkdir -p "$(dirname "$session_file")"
+
+  cat > "$session_file" <<JSON
+{"bot_uuid":"default:545716","token":"saved-token","bcs_url":"ws://127.0.0.1:21000/ws/bot"}
+JSON
+  local bot_uuid
+  bot_uuid="$(
+    OPENCLAW_PROFILE_ROOT="$profile_root"
+    OPENCLAW_PROFILE_PREFIX=".openclaw-"
+    BCS_URL="ws://127.0.0.1:21000/ws/bot"
+    . "$funcs"
+    session_bot_uuid_for ceo
+  )"
+  assert_eq "$bot_uuid" "default:545716" "usable session should preserve bot identity"
+
+  cat > "$session_file" <<JSON
+{"bot_uuid":"default:545716","token":"","bcs_url":"ws://127.0.0.1:21000/ws/bot"}
+JSON
+  bot_uuid="$(
+    OPENCLAW_PROFILE_ROOT="$profile_root"
+    OPENCLAW_PROFILE_PREFIX=".openclaw-"
+    BCS_URL="ws://127.0.0.1:21000/ws/bot"
+    . "$funcs"
+    session_bot_uuid_for ceo
+  )"
+  assert_eq "$bot_uuid" "" "session without token must not pin bot identity"
+
+  cat > "$session_file" <<JSON
+{"bot_uuid":"default:545716","token":"saved-token","bcs_url":"ws://127.0.0.1:29999/ws/bot"}
+JSON
+  bot_uuid="$(
+    OPENCLAW_PROFILE_ROOT="$profile_root"
+    OPENCLAW_PROFILE_PREFIX=".openclaw-"
+    BCS_URL="ws://127.0.0.1:21000/ws/bot"
+    . "$funcs"
+    session_bot_uuid_for ceo
+  )"
+  assert_eq "$bot_uuid" "" "session for a different BCS URL must not pin bot identity"
+
+  rm -rf "$tmp"
+}
+
 test_stack_config_allows_plugin_path_refresh() {
   local tmp; tmp="$(mktemp -d)"
   local funcs="${tmp}/stack-match-functions.sh"
@@ -354,7 +407,7 @@ JSON
     . "${SCRIPT_DIR}/modules/bcs.sh"
     . "${SCRIPT_DIR}/modules/bots.sh"
     bots_bcn_plugin_load_dir() { printf '%s\n' "$npm_plugin"; }
-    bots_dynamic_specs() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "CEO" "ceo" "30001" "ceo" "CEO summary" "strategy" "routing" "production"; }
+    bots_dynamic_specs() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "CEO" "ceo" "30001" "ceo" "CEO summary" "strategy" "routing" "production" "openclaw"; }
     bots_dynamic_copy_profile_files() { return 0; }
     bots_dynamic_setup_bcs_skill() { return 0; }
     bots_dynamic_model_source_has_fields() { return 1; }
@@ -369,11 +422,99 @@ JSON
   rm -rf "$tmp"
 }
 
+test_dynamic_config_copies_thinking_default() {
+  local tmp; tmp="$(mktemp -d)"
+  local model_source="${tmp}/model-source.json"
+  local matching_config="${tmp}/matching-config.json"
+  local stale_config="${tmp}/stale-config.json"
+  cat > "$model_source" <<'JSON'
+{
+  "models": {"mode": "merge", "providers": {}},
+  "agents": {
+    "defaults": {
+      "model": {"primary": "test/model"},
+      "models": {"test/model": {"alias": "Test Model"}},
+      "thinkingDefault": "off"
+    }
+  }
+}
+JSON
+  cat > "$matching_config" <<'JSON'
+{
+  "models": {"mode": "merge", "providers": {}},
+  "agents": {
+    "defaults": {
+      "model": {"primary": "test/model"},
+      "models": {"test/model": {"alias": "Test Model"}},
+      "thinkingDefault": "off",
+      "workspace": "/runtime/workspace"
+    }
+  }
+}
+JSON
+  cat > "$stale_config" <<'JSON'
+{
+  "models": {"mode": "merge", "providers": {}},
+  "agents": {
+    "defaults": {
+      "model": {"primary": "test/model"},
+      "models": {"test/model": {"alias": "Test Model"}},
+      "workspace": "/runtime/workspace"
+    }
+  }
+}
+JSON
+
+  local model_fields
+  model_fields="$({
+    PROJECT_ROOT="${PROJECT_ROOT}"
+    BCS_DIR="${PROJECT_ROOT}/src/bcs"
+    OPENCLAW_MODEL_CONFIG_SOURCE="$model_source"
+    LOG_DIR="${tmp}/logs"
+    DEP_DIR="${tmp}/dep"
+    BCS_PORT=21000
+    . "${SCRIPT_DIR}/modules/bots.sh"
+    bots_dynamic_agent_model_fields_json
+  })"
+  printf '%s\n' "$model_fields" | jq -e '
+    .model.primary == "test/model"
+    and .models["test/model"].alias == "Test Model"
+    and .thinkingDefault == "off"
+  ' >/dev/null || fail "dynamic profile should copy the model thinking default"
+
+  (
+    PROJECT_ROOT="${PROJECT_ROOT}"
+    BCS_DIR="${PROJECT_ROOT}/src/bcs"
+    OPENCLAW_MODEL_CONFIG_SOURCE="$model_source"
+    LOG_DIR="${tmp}/logs"
+    DEP_DIR="${tmp}/dep"
+    BCS_PORT=21000
+    . "${SCRIPT_DIR}/modules/bots.sh"
+    bots_dynamic_config_matches_model_source "$matching_config"
+  ) || fail "matching dynamic model config should be preserved"
+  if (
+    PROJECT_ROOT="${PROJECT_ROOT}"
+    BCS_DIR="${PROJECT_ROOT}/src/bcs"
+    OPENCLAW_MODEL_CONFIG_SOURCE="$model_source"
+    LOG_DIR="${tmp}/logs"
+    DEP_DIR="${tmp}/dep"
+    BCS_PORT=21000
+    . "${SCRIPT_DIR}/modules/bots.sh"
+    bots_dynamic_config_matches_model_source "$stale_config"
+  ); then
+    fail "stale dynamic model config should be refreshed"
+  fi
+
+  rm -rf "$tmp"
+}
+
 test_load_dir_source_mode
 test_load_dir_npm_mode
 test_stack_script_forwards_mode
 test_stack_script_has_npm_branch
+test_session_bot_uuid_requires_usable_session
 test_stack_config_allows_plugin_path_refresh
 test_dynamic_config_refreshes_plugin_path
+test_dynamic_config_copies_thinking_default
 
 if [ "$FAILS" -eq 0 ]; then echo "ALL PASS"; else echo "${FAILS} FAILURE(S)"; exit 1; fi

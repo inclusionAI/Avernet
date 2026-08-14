@@ -15,6 +15,7 @@ from agentclaw.community.plugins.local.http_client import LocalHttpClient
 def _make_service() -> tuple[BaasService, LocalHttpClient]:
     http = LocalHttpClient(base_url="http://baas.test")
     service = BaasService(
+        startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base="http://baas.test",
         tenant="tnt",
         template_uuid="tpl",
@@ -64,6 +65,26 @@ class TestBaasServiceScaleBot:
             "operator": "op",
             "request_id": "req-1",
             "auto_approve_publish": False,
+        }
+
+    def test_scale_bot_sends_optional_image_config(self):
+        service, http = _make_service()
+        http.set_response("post", _resp({"bot_uuid": "BOT-1", "publish_id": 9}))
+
+        service.scale_bot(
+            bot_uuid="BOT-1",
+            owner_id="op",
+            request_id="req-1",
+            target_count=3,
+            config={
+                "deploy_config": {"docker_image": "registry/arca:v2"},
+            },
+        )
+
+        assert http.calls_to("post")[0].kwargs["json"]["config"] == {
+            "deploy_config": {
+                "docker_image": "registry/arca:v2",
+            },
         }
 
     @pytest.mark.parametrize(

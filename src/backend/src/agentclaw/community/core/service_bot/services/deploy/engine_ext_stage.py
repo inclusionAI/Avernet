@@ -1,9 +1,10 @@
 """Stage vocabulary + re-stamp for the artifact's ``engine_ext`` payload.
 
-The external-container publish path enriches ``engine_ext`` with three
-backend-owned keys (``bot_id`` / ``owner_id`` / ``stage``). ``bot_id`` and
-``owner_id`` are constant for an artifact; ``stage`` is re-stamped as the version
-is promoted across environments (draft → canary → release).
+The external-container publish path enriches ``engine_ext`` with four
+backend-owned keys (``bot_id`` / ``owner_id`` / ``bot_name`` / ``stage``).
+``bot_id``, ``owner_id`` and ``bot_name`` are constant for an artifact; ``stage``
+is re-stamped as the version is promoted across environments
+(draft → canary → release).
 
 This module is the single source of truth for those key names and for the
 ``PublishStage`` → engine-facing stage-string mapping, and exposes a pure
@@ -21,6 +22,7 @@ from agentclaw.community.core.service_bot.types import PublishStage
 #: engine's opaque payload).
 KEY_BOT_ID = "bot_id"
 KEY_OWNER_ID = "owner_id"
+KEY_BOT_NAME = "bot_name"
 KEY_STAGE = "stage"
 
 #: ``PublishStage`` → the engine-facing ``engine_ext.stage`` string. The engine
@@ -38,20 +40,22 @@ def enrich_engine_ext(
     *,
     bot_id: Any,
     owner_id: Any,
+    bot_name: Any,
     stage: PublishStage,
 ) -> dict[str, Any]:
     """Merge the backend-owned identity/stage keys onto a copy of ``engine_ext``.
 
-    The three keys are written **last** so they are explicit and deterministically
-    win on collision with the engine's opaque payload. ``None`` ids normalize to
-    ``""``. Used by both the publish producer (stage=draft at build, promoted later)
-    and the teclaw device-sync plugin (runtime edits, always stage=draft) so the two
-    paths agree on the vocabulary.
+    The four keys are written **last** so they are explicit and deterministically
+    win on collision with the engine's opaque payload. ``None`` ids/name normalize
+    to ``""``. Used by both the publish producer (stage=draft at build, promoted
+    later) and the teclaw device-sync plugin (runtime edits, always stage=draft) so
+    the two paths agree on the vocabulary.
     """
     return {
         **engine_ext,
         KEY_BOT_ID: "" if bot_id is None else str(bot_id),
         KEY_OWNER_ID: "" if owner_id is None else owner_id,
+        KEY_BOT_NAME: "" if bot_name is None else str(bot_name),
         KEY_STAGE: STAGE_VALUE[stage],
     }
 

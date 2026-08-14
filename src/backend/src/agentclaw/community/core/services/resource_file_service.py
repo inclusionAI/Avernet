@@ -34,7 +34,7 @@ from typing import Any
 
 from injector import inject
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.config_compose.teclaw_paths import WORKSPACE_NS
 from agentclaw.community.core.devices.services.device_context import (
     ConnInfoBuildError,
@@ -50,9 +50,7 @@ from agentclaw.community.core.resources.services.file_service import (
     MAX_FILE_SIZE,
     FileNode,
 )
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.workspace.constants import SUPPORTED_ENGINE_TYPES
 from agentclaw.community.di.modules.skill_center_module import DeviceFilesystemDispatcher
 from agentclaw.community.log import get_logger
@@ -66,6 +64,7 @@ logger = get_logger()
 # users can browse/edit their local skill files (arca/local layout). teclaw keeps
 # local skills flat at /workspace/skills-local, so it needs no injection.
 _SKILLS_LOCAL_RELPATH = "skills/skills-local"
+_POOL_SKILLS_LOCAL_RELPATH = "skills-pool/skills-local"
 
 # System files hidden from the resource browser (OpenClaw identity/config .md files).
 _HIDDEN_BASENAMES = {
@@ -78,6 +77,7 @@ _HIDDEN_BASENAMES = {
 _HIDDEN_DIRNAMES = {
     "state",
     "skills",
+    "skills-pool",
     "conf",
     *(f"{engine}_conf" for engine in SUPPORTED_ENGINE_TYPES),
 }
@@ -264,20 +264,40 @@ class ResourceFileService:
         # so it must be injected; teclaw keeps it flat at /workspace/skills-local and
         # lists naturally; baas/desktop never injected — don't probe it for them).
         if not path and ctx.provider in ("arca", "local", "baas"):
-            try:
-                skills_entries = await device_fs.list_dir(f"{WORKSPACE_NS}/skills")
-            except Exception as e:
-                # the skills dir is optional; a container without it returns 404.
-                # the root listing must not crash when this probe is unavailable.
-                logger.warning("[list_dir] skills-local probe skipped (no skills dir): %s", e)
-                skills_entries = None
-            for s in skills_entries or []:
-                if s.get("name") == "skills-local" and s.get("is_dir", False):
+            for local_relpath in (
+                _SKILLS_LOCAL_RELPATH,
+                _POOL_SKILLS_LOCAL_RELPATH,
+            ):
+                parent = local_relpath.rsplit("/", 1)[0]
+                try:
+                    skills_entries = await device_fs.list_dir(
+                        f"{WORKSPACE_NS}/{parent}"
+                    )
+                except Exception as e:
+                    # Either layout may be absent. Keep probing the other one
+                    # and never fail the root listing for this optional entry.
+                    logger.warning(
+                        "[list_dir] skills-local probe skipped path=%s: %s",
+                        parent,
+                        e,
+                    )
+                    continue
+                skill_local = next(
+                    (
+                        entry
+                        for entry in skills_entries or []
+                        if entry.get("name") == "skills-local"
+                        and entry.get("is_dir", False)
+                    ),
+                    None,
+                )
+                if skill_local is not None:
                     items.append({
                         "name": "skills-local",
-                        "path": _SKILLS_LOCAL_RELPATH,
+                        "path": local_relpath,
                         # the probed entry's own absolute path (logic-view fallback).
-                        "absolute_path": s.get("path") or self._logical(_SKILLS_LOCAL_RELPATH),
+                        "absolute_path": skill_local.get("path")
+                        or self._logical(local_relpath),
                         "is_dir": True,
                         "readonly": False,
                         "size": None,
@@ -321,6 +341,32 @@ class ResourceFileService:
             self._logical(path), enforce_download_limit=enforce_download_limit
         )
 
+    async def exists(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+        path: str,
+        publish_id: str | None = None,
+        device_uuid: str | None = None,
+    ) -> bool:
+        """Whether ``path`` is present in the bot's workspace, provider-blind.
+
+        Same addressing as every other method here — the caller passes a
+        workspace-relative path and never learns the container's layout.
+        """
+        ctx = self._resolve_ctx(
+            bot_id=bot_id, entity_id=entity_id, publish_id=publish_id,
+            device_uuid=device_uuid,
+        )
+        device_fs = self._device_fs(
+            ctx, entity_type=entity_type, entity_id=entity_id,
+            bot_id=bot_id, engine_type=engine_type,
+        )
+        return await device_fs.exists(self._logical(path))
+
     async def create_directory(
         self,
         *,
@@ -349,13 +395,50 @@ class ResourceFileService:
         engine_type: str,
         path: str,
     ) -> bool:
-        """Delete a file or directory; returns False when nothing was deleted."""
+        """Delete a file or directory; returns False when nothing was deleted.
+
+        A directory needs ``delete_tree``: the engines route the two through
+        separate operations (``/api/file/remove`` vs ``/api/file/rmtree``), and
+        the single-file one does not recurse — so sending every path to
+        ``delete_file`` made the documented "or directory" half of this method
+        silently unable to delete one.
+        """
         ctx = self._resolve_ctx(bot_id=bot_id, entity_id=entity_id)
         device_fs = self._device_fs(
             ctx, entity_type=entity_type, entity_id=entity_id,
             bot_id=bot_id, engine_type=engine_type,
         )
-        return await device_fs.delete_file(self._logical(path))
+        logical = self._logical(path)
+        if await self._is_dir(device_fs, path):
+            return await device_fs.delete_tree(logical)
+        return await device_fs.delete_file(logical)
+
+    async def _is_dir(self, device_fs: Any, path: str) -> bool:
+        """Whether *path* names a directory, asked of the parent's listing.
+
+        The parent rather than the path itself: listing a *file* is not a
+        defined operation on the engines — ``list_dir`` raises rather than
+        answering "not a directory" — so probing directly would turn every file
+        delete into an error.
+
+        Uses the raw device listing, not this class's filtered ``list_dir``, so
+        the hidden system names stay deletable exactly as before. A listing
+        failure answers "not a directory": the delete then takes the file
+        branch, which is what it did unconditionally until now.
+        """
+        parent, _, leaf = path.rpartition("/")
+        try:
+            entries = await device_fs.list_dir(self._logical(parent))
+        except Exception as exc:
+            logger.warning(
+                "[%s._is_dir] listing %r failed, assuming file: %s",
+                type(self).__name__, parent, exc,
+            )
+            return False
+        for entry in entries or ():
+            if entry.get("name") == leaf:
+                return bool(entry.get("is_dir", False))
+        return False
 
     async def upload_file(
         self,

@@ -65,6 +65,85 @@ export interface CollaborationTemplatesResponse {
   supported_languages: string[];
 }
 
+/** 自定义协作 YAML 校验诊断 */
+export interface CollaborationDefinitionValidationDiagnostic {
+  code: string;
+  path: string;
+  message: string;
+  hint?: string;
+}
+
+/** 自定义协作 YAML 校验后的参与者槽位 */
+export interface CollaborationDefinitionParticipantSlot {
+  binding: string;
+  display_name?: string;
+  description?: string;
+  required: boolean;
+  assigned: boolean;
+}
+
+/** 自定义协作 YAML 校验摘要 */
+export interface CollaborationDefinitionValidationSummary {
+  participants: number;
+  nodes: number;
+  initial_nodes: string[];
+  final_output_node?: string;
+}
+
+export type CollaborationDefinitionGraphMode =
+  | 'acyclic'
+  | 'cyclic'
+  | 'event_driven'
+  | 'hierarchical';
+
+export type CollaborationDefinitionGraphNodeKind =
+  | 'bot_task'
+  | 'group_chat'
+  | 'human_input'
+  | 'tool_action'
+  | 'sub_state_machine';
+
+export type CollaborationDefinitionGraphAssignee =
+  | {
+      type: 'bot_binding';
+      binding: string;
+    }
+  | {
+      type: 'runtime_actor';
+      actor: string;
+    };
+
+export interface CollaborationDefinitionGraphNode {
+  node_id: string;
+  display_name: string;
+  kind: CollaborationDefinitionGraphNodeKind;
+  assignee?: CollaborationDefinitionGraphAssignee;
+  final_output: boolean;
+  judge: boolean;
+}
+
+export interface CollaborationDefinitionGraphEdge {
+  source: string;
+  target: string;
+  outcome: string;
+}
+
+export interface CollaborationDefinitionGraphPreview {
+  graph_mode: CollaborationDefinitionGraphMode;
+  nodes: CollaborationDefinitionGraphNode[];
+  edges: CollaborationDefinitionGraphEdge[];
+}
+
+/** 自定义协作 YAML 校验响应 */
+export interface CollaborationDefinitionValidationResponse {
+  valid: boolean;
+  errors?: CollaborationDefinitionValidationDiagnostic[];
+  warnings?: CollaborationDefinitionValidationDiagnostic[];
+  summary: CollaborationDefinitionValidationSummary;
+  participants?: CollaborationDefinitionParticipantSlot[];
+  graph?: CollaborationDefinitionGraphPreview;
+}
+
 /** 创建群聊响应 */
 export interface CreateGroupResponse {
   context_injected: number;
@@ -305,6 +384,28 @@ export async function getCollaborationTemplateYaml(
   );
 
   return typeof response === 'string' ? response : String(response ?? '');
+}
+
+/**
+ * 校验自定义协作 YAML
+ * POST /bcnproxy/collaboration/definitions/validate
+ */
+export async function validateCollaborationDefinitionYaml(
+  params: { definition_yaml: string },
+  options?: { [key: string]: any },
+) {
+  return request<CollaborationDefinitionValidationResponse>(
+    '/bcnproxy/collaboration/definitions/validate',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      data: params,
+      skipErrorHandler: true,
+      ...(options || {}),
+    },
+  );
 }
 
 // === Bot 管理接口 ===
@@ -1252,6 +1353,75 @@ export interface RegisterTokenResponse {
 export async function getRegisterToken(options?: { [key: string]: any }) {
   return request<RegisterTokenResponse>('/bcnproxy/register/token', {
     method: 'GET',
+    skipErrorHandler: true,
+    ...(options || {}),
+  });
+}
+
+
+// === OAuth 登录接口（一期 BCN 开源） ===
+
+/** 获取当前 OAuth 登录用户响应 */
+export interface AuthUserResponse {
+  /** 用户唯一标识 */
+  user_id: string;
+  /** 展示名称 */
+  name?: string | null;
+  /** 登录 provider */
+  provider: string;
+  /** 头像 URL */
+  avatar?: string | null;
+}
+
+/** OAuth 登录跳转地址 provider */
+export interface AuthUrlProvider {
+  name: string;
+  url: string;
+}
+
+/** 获取 OAuth 登录跳转地址响应 */
+export interface AuthUrlResponse {
+  providers: AuthUrlProvider[];
+}
+
+/**
+ * 获取当前 OAuth 登录用户信息
+ * GET /auth/user（前端经 /bcnproxy/auth/user 代理到 BCN 后端）
+ */
+export async function getAuthUser(options?: { [key: string]: any }) {
+  return request<AuthUserResponse>('/bcnproxy/auth/user', {
+    method: 'GET',
+    skipErrorHandler: true,
+    ...(options || {}),
+  });
+}
+
+/**
+ * 获取 OAuth 登录跳转地址
+ * GET /auth/url（前端经 /bcnproxy/auth/url 代理到 BCN 后端）
+ *
+ * 多 provider 时调用方默认选择 providers[0]；return_to 为前端回跳兜底，
+ * 后端不识别时也不影响前端 localStorage returnTo 恢复逻辑。
+ */
+export async function getAuthUrl(
+  params?: { returnTo?: string },
+  options?: { [key: string]: any },
+) {
+  return request<AuthUrlResponse>('/bcnproxy/auth/url', {
+    method: 'GET',
+    params: params?.returnTo ? { return_to: params.returnTo } : undefined,
+    skipErrorHandler: true,
+    ...(options || {}),
+  });
+}
+
+/**
+ * 退出 OAuth 登录
+ * POST /auth/logout（前端经 /bcnproxy/auth/logout 代理到 BCN 后端）
+ */
+export async function logoutAuth(options?: { [key: string]: any }) {
+  return request<{ success?: boolean }>('/bcnproxy/auth/logout', {
+    method: 'POST',
     skipErrorHandler: true,
     ...(options || {}),
   });

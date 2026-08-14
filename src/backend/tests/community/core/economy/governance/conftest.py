@@ -184,7 +184,7 @@ def engine():
 @pytest.fixture()
 def tables(engine):
     """Create all governance tables, drop after test."""
-    import agentclaw.community.core.economy.governance.repositories.orm  # noqa: F401
+    import agentclaw.community.core.economy.governance.orm  # noqa: F401
     Base.metadata.create_all(engine)
     yield
     Base.metadata.drop_all(engine)

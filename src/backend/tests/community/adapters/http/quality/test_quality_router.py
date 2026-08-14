@@ -16,7 +16,7 @@ from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.quality import router
 from agentclaw.community.api.quality_service import QualityTaskServiceProtocol
 from agentclaw.community.api.task_processor_service import TaskProcessorProtocol
-from agentclaw.community.core.quality.repositories import QualityTaskRecord
+from agentclaw.community.core.quality.models import QualityTaskRecord
 
 
 def _run(coro):

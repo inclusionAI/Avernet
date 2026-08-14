@@ -20,7 +20,7 @@ async fn bot_registry_delivers_frame_to_connected_bot() {
             run_id: "run-1".to_string(),
             frame,
             delivery_kind: BotDeliveryKind::Send,
-            provider_transport: Default::default(),
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -46,7 +46,7 @@ async fn bot_registry_returns_not_delivered_when_bot_disconnected() {
             run_id: "run-1".to_string(),
             frame,
             delivery_kind: BotDeliveryKind::Send,
-            provider_transport: Default::default(),
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();

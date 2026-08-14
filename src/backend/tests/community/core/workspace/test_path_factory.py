@@ -18,6 +18,80 @@ def test_get_bolt_base_dir_structure():
             assert result == Path("/aidesktop/aidesktop_dev/bolt_data")
 
 
+def test_engine_paths_reuse_cached_config_provider(monkeypatch, tmp_path):
+    from agentclaw.community.core.config import provider as config_provider
+    from agentclaw.community.core.config.provider import AppConfig
+    from agentclaw.community.core.workspace.path_factory import get_bot_engine_dir
+
+    class CountingProvider:
+        def __init__(self):
+            self.loads = 0
+
+        def load(self):
+            self.loads += 1
+            return AppConfig(
+                user_config={
+                    "aidesktop_root": str(tmp_path),
+                    "workspace": {"env_folder": "aidesktop_prod"},
+                },
+                raw={},
+                app_name="agentclaw",
+                delegate=None,
+            )
+
+    provider = CountingProvider()
+    monkeypatch.delenv("AIDESKTOP_ROOT", raising=False)
+    monkeypatch.setattr(config_provider, "_provider", provider)
+    monkeypatch.setattr(config_provider, "_cached", None)
+    paths = [
+        get_bot_engine_dir("user-1", f"bot-{index}", "openclaw")
+        for index in range(40)
+    ]
+
+    assert provider.loads == 1
+    assert paths[0] == (
+        tmp_path
+        / "aidesktop_prod"
+        / "bolt_data"
+        / "staff_user-1"
+        / "bot-0"
+        / "openclaw"
+    )
+
+
+def test_aidesktop_root_uses_default_when_config_is_absent(monkeypatch):
+    from agentclaw.community.core.config.provider import AppConfig
+    from agentclaw.community.core.workspace.path_factory import (
+        DEFAULT_AIDESKTOP_ROOT,
+        _get_aidesktop_root,
+    )
+
+    config = AppConfig(user_config={}, raw={}, app_name="agentclaw", delegate=None)
+    monkeypatch.delenv("AIDESKTOP_ROOT", raising=False)
+    monkeypatch.setattr(
+        "agentclaw.community.core.config.provider.load_config",
+        lambda: config,
+    )
+
+    assert _get_aidesktop_root() == DEFAULT_AIDESKTOP_ROOT
+
+
+def test_aidesktop_root_env_overrides_config(monkeypatch, tmp_path):
+    from agentclaw.community.core.workspace.path_factory import _get_aidesktop_root
+
+    def fail_if_config_is_read():
+        raise AssertionError("config provider must not be read when env is set")
+
+    expected = tmp_path / "from-env"
+    monkeypatch.setenv("AIDESKTOP_ROOT", str(expected))
+    monkeypatch.setattr(
+        "agentclaw.community.core.config.provider.load_config",
+        fail_if_config_is_read,
+    )
+
+    assert _get_aidesktop_root() == expected
+
+
 def test_singlebox_workspace_folder_is_profile_field(monkeypatch, tmp_path):
     from agentclaw.community.core.workspace.path_factory import get_bolt_base_dir
     from agentclaw.community.core.config.provider import AppConfig

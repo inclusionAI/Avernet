@@ -22,9 +22,13 @@ serde           = { workspace = true }
 serde_json      = { workspace = true }
 tokio           = { workspace = true }
 tracing         = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+opentelemetry   = { workspace = true }
+opentelemetry-http = { workspace = true }
 uuid            = { workspace = true }
 
 [dev-dependencies]
 axum               = { workspace = true }
 tower              = { workspace = true, features = ["util"] }
 tracing-subscriber = { workspace = true }
+opentelemetry_sdk  = { workspace = true, features = ["testing"] }

@@ -83,6 +83,7 @@ source "$SCRIPT_DIR/actor.sh"
 source "$SCRIPT_DIR/register.sh"
 source "$SCRIPT_DIR/stories.sh"
 source "$SCRIPT_DIR/cli-stories.sh"
+source "$SCRIPT_DIR/session_files.sh"
 
 # ============================================================================
 # Collect All Tests (Bash 3.2 compatible — no associative arrays)

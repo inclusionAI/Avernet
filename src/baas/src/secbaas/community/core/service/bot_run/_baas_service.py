@@ -65,6 +65,23 @@ DEFAULT_ADAPTER_PORT = 20003
 DEFAULT_REQUEST_TIMEOUT = 30
 DEFAULT_CONNECT_TIMEOUT = 10
 
+# openclaw 给持久化 session id 加的固定前缀; 路由亲和键必须对有无该前缀不敏感,
+# 否则同一会话经 DingTalk(裸 id)与 Open API(带前缀 id)两次投递会哈希到不同实例。
+_AGENT_MAIN_PREFIX = "agent:main:"
+
+
+def _strip_agent_main_prefix(session_id: str) -> str:
+    """剥离前导 ``agent:main:`` 前缀,使设备路由亲和键对前缀有无不敏感。
+
+    openclaw 会在持久化/返回 session id 时加上 ``agent:main:`` 前缀,而 DingTalk 入站
+    携带的是裸 id;若直接把调用方原样传入的 session_id 作为 ``device_affinity`` 哈希,
+    同一会话两次调用(裸 id vs 带前缀 id)会命中不同实例。在构造亲和键处统一剥离前缀,
+    使两种形式哈希到同一设备。循环剥离以对重复前缀幂等。
+    """
+    while session_id.startswith(_AGENT_MAIN_PREFIX):
+        session_id = session_id[len(_AGENT_MAIN_PREFIX) :]
+    return session_id
+
 
 def _safe_client_msg(exc: Exception) -> str:
     """返回可安全外抛给客户端的异常消息(剥离 aiohttp 请求 url 等内部信息)。
@@ -353,8 +370,9 @@ class BaasBotService(BotService):
         binding_info: BotBindingInfo,
         wait_result: bool = True,
         context: BotChatContext | None = None,
-        timeout: int | None = None,
+        timeout: float,
         chat_metadata: dict[str, str] | None = None,
+        attachments: list[Any] | None = None,
     ) -> BotResponse:
         """Send a message and get response via ChatClient.
 
@@ -397,26 +415,19 @@ class BaasBotService(BotService):
         try:
             auth_token = context.build_auth_token() if context else None
             app_id = context.app_id if context else None
-            content, state = await client.send_message(
+            content, agent_events = await client.send_message(
                 message=message,
                 session_key=session_id,
                 wait_result=wait_result,
-                timeout=timeout
-                if timeout is not None
-                else self._config.request_timeout,
+                timeout=timeout,
                 auth_token=auth_token,
                 app_id=app_id,
                 chat_metadata=chat_metadata,
+                attachments=attachments,
             )
-
-            if state == "error":  # type: ignore[comparison-overlap]
-                self._mark_session_failed(baas_session_id, err_msg=content)
-                raise BotServiceError(content)
-
             self._mark_session_completed(baas_session_id, result={"content": content})
             return BotResponse(content=content)
-
-        except BotServiceError:
+        except TimeoutError:
             raise
         except ConcurrentSessionError as e:
             self._mark_session_failed(
@@ -439,7 +450,8 @@ class BaasBotService(BotService):
         message: str,
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
-        timeout: int | None = None,
+        timeout: float,
+        attachments: list[Any] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """流式发送消息，逐 chunk 产出 StreamChunk。
 
@@ -470,17 +482,22 @@ class BaasBotService(BotService):
         app_id = context.app_id if context else None
 
         try:
+            stream_error = False
             async for chunk in client.send_message_stream(
                 message=message,
                 session_key=session_id,
-                timeout=timeout
-                if timeout is not None
-                else self._config.request_timeout,
+                timeout=timeout,
                 auth_token=auth_token,
                 app_id=app_id,
+                attachments=attachments,
             ):
+                if chunk.type == "error":
+                    stream_error = True
                 yield replace(chunk, engine_type=engine_type)
-            self._mark_session_completed(baas_session_id)
+            if stream_error:
+                self._mark_session_failed(baas_session_id)
+            else:
+                self._mark_session_completed(baas_session_id)
         except ConcurrentSessionError as e:
             self._mark_session_failed(
                 baas_session_id, err_msg=f"Concurrent request: {e}"
@@ -504,6 +521,7 @@ class BaasBotService(BotService):
         message: str,
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
+        attachments: list[Any] | None = None,
     ) -> None:
         """注入消息到已有会话
 
@@ -539,6 +557,7 @@ class BaasBotService(BotService):
                 message=message,
                 session_key=session_id,
                 auth_token=auth_token,
+                attachments=attachments,
             )
             self._mark_session_completed(
                 baas_session_id, result={"content": "inject success"}
@@ -669,6 +688,63 @@ class BaasBotService(BotService):
                 f"Failed to get session: {_safe_client_msg(e)}"
             ) from e
 
+    async def list_sessions(
+        self,
+        *,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[SessionInfo]:
+        """List sessions for a given bot binding (read-only).
+
+        通过 AsyncSessionClient 从 adapter 侧查询会话列表，不创建新会话。
+
+        Args:
+            binding_info: Binding info for HTTP connection.
+            context: Optional request context for tenant extraction.
+            limit: Maximum number of sessions to return.
+            offset: Number of sessions to skip.
+
+        Returns:
+            List of SessionInfo objects.
+
+        Raises:
+            BotServiceError: 请求失败
+        """
+        try:
+            conn_info = await self._resolve_ws_connection_for_binding(
+                binding_info, context=context
+            )
+        except Exception as e:
+            logger.warning("Failed to resolve WS connection: %s", e)
+            raise BotServiceError(
+                f"Failed to resolve WS connection: {_safe_client_msg(e)}"
+            ) from e
+
+        session_client = self._create_session_client(
+            conn_info, binding_info.engine_type
+        )
+        try:
+            async with session_client:
+                adapter_sessions = await session_client.list_sessions(
+                    agent_id=binding_info.bot_id,
+                    limit=limit,
+                    offset=offset,
+                    engine=binding_info.engine_type,
+                )
+                return [
+                    _map_adapter_session_info(s, binding_info.bot_id)
+                    for s in adapter_sessions
+                ]
+        except BotServiceError:
+            raise
+        except Exception as e:
+            logger.warning("Failed to list sessions: %s", e)
+            raise BotServiceError(
+                f"Failed to list sessions: {_safe_client_msg(e)}"
+            ) from e
+
     # ── 私有方法 ─────────────────────────────────────────────────────────────
 
     def _adapter_for(self, engine_type: str | None) -> BotEngineAdapter | None:
@@ -759,11 +835,16 @@ class BaasBotService(BotService):
         if not tenant and binding_info.device_props:
             tenant = binding_info.device_props.get("tenant", "")
 
+        # 与 create_session 路径一致:剥离前导 agent:main: 前缀,使 send/inject 等
+        # API 路径的 device 路由对前缀有无不敏感(同一会话跨通道落到同一实例)。
+        affinity = (
+            _strip_agent_main_prefix(session_id) if session_id is not None else None
+        )
         return await self._resolve_ws_connection(
             bot_uuid,
             tenant,
             engine_type=binding_info.engine_type,
-            session_consistency_key=session_id,
+            session_consistency_key=affinity,
         )
 
     @staticmethod
@@ -786,17 +867,20 @@ class BaasBotService(BotService):
 
     @staticmethod
     def _strip_ws_url_to_base(ws_url: str, ws_path_suffix: str) -> str:
-        """wss:// → https:// 并 strip 指定 WS path 后缀。"""
+        """Map a WebSocket URL to its HTTP peer and strip the WS path suffix."""
         if ws_url.startswith("wss://"):
             base = ws_url[6:]
+            scheme = "https"
         elif ws_url.startswith("ws://"):
             base = ws_url[5:]
+            scheme = "http"
         else:
             base = ws_url
+            scheme = "https"
         # The target is embedded in the path: /proxypass/{target}/api/openclaw/ws
         if base.endswith(ws_path_suffix):
             base = base[: -len(ws_path_suffix)]
-        return f"https://{base}"
+        return f"{scheme}://{base}"
 
     def _create_session_client(
         self, conn_info: WsConnectionInfo, engine_type: str = "openclaw"
@@ -1036,9 +1120,17 @@ class BaasBotService(BotService):
         run_id: str,
         session_id: str | None = None,
     ) -> str | None:
-        """Create consistency key for session routing."""
+        """Create consistency key for session routing.
+
+        The affinity key drives consistent-hash device routing, so it must be
+        stable for a conversation regardless of whether the caller supplied the
+        ``agent:main:`` prefix. A caller-supplied ``session_id`` is therefore
+        canonicalized by stripping a leading ``agent:main:`` so the DingTalk
+        path (raw id) and the Open API path (prefixed id) hash to the same
+        device. The persisted/returned session id contract is unchanged.
+        """
         if session_id is not None:
-            return session_id
+            return _strip_agent_main_prefix(session_id)
 
         if engine_type == "openclaw":
             # Fixed prefix 'agent:main:'

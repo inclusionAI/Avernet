@@ -32,6 +32,12 @@ pub struct OAuthRouteState {
     pub providers: HashMap<String, Arc<dyn OAuthProvider>>,
     pub state_store: OAuthStateStore,
     pub config: OAuthConfig,
+    /// Non-OAuth fallback identity source. When a request has no valid
+    /// `bcs_session` cookie (or OAuth is not configured at all),
+    /// `current_user_handler` resolves the caller via this chain — e.g. the
+    /// local mock plugin. `None` only in contract-test state that never serves
+    /// real traffic.
+    pub auth_chain: Option<Arc<bcs_auth_api::AuthPluginChain>>,
 }
 
 impl OAuthRouteState {
@@ -40,6 +46,7 @@ impl OAuthRouteState {
         user_port: Arc<dyn UserIdentityPort>,
         providers: HashMap<String, Arc<dyn OAuthProvider>>,
         config: OAuthConfig,
+        auth_chain: Option<Arc<bcs_auth_api::AuthPluginChain>>,
     ) -> Self {
         Self {
             jwt_service: JwtService::new(jwt_secret),
@@ -47,6 +54,25 @@ impl OAuthRouteState {
             providers,
             state_store: OAuthStateStore::new(Duration::from_secs(300)), // 5 min TTL
             config,
+            auth_chain,
+        }
+    }
+
+    /// Identity-only state for the no-OAuth case: `/auth/user` is backed solely
+    /// by the auth chain. The `JwtService` is unused on this path — the cookie
+    /// lookup is only attempted when `config.jwt_secret` is non-empty, which this
+    /// state leaves empty, so no cookie is ever verified here.
+    pub fn new_chain_only(
+        user_port: Arc<dyn UserIdentityPort>,
+        auth_chain: Arc<bcs_auth_api::AuthPluginChain>,
+    ) -> Self {
+        Self {
+            jwt_service: JwtService::new(""),
+            user_port,
+            providers: HashMap::new(),
+            state_store: OAuthStateStore::new(Duration::from_secs(300)), // 5 min TTL
+            config: OAuthConfig::default(),
+            auth_chain: Some(auth_chain),
         }
     }
 }
@@ -61,6 +87,16 @@ pub fn routes(state: Arc<OAuthRouteState>) -> Router {
         .route("/auth/refresh", post(refresh_handler))
         .route("/auth/user", get(current_user_handler))
         .route("/auth/user/{user_id}", get(get_user_handler))
+        .with_state(state)
+}
+
+/// Identity-only router: mounts just `GET /auth/user`. Used when no OAuth
+/// provider is configured but an auth chain exists, so non-OAuth callers
+/// (e.g. the local mock plugin) can still ask "who am I?" without registering
+/// the OAuth protocol routes that would otherwise 404/empty.
+pub fn identity_routes(state: Arc<OAuthRouteState>) -> Router {
+    Router::new()
+        .route("/auth/user", get(current_user_handler))
         .with_state(state)
 }
 
@@ -342,39 +378,58 @@ pub struct UserInfoResponse {
 
 /// GET /auth/user — "Who am I?"
 ///
-/// Identifies the user by their session cookie JWT. The JWT fingerprint
-/// (`SHA-256`) is used as a DB lookup key, so only the most-recently-issued
-/// cookie per user is valid (single-session model) and a revoked session
-/// (cleared hash on logout) returns 401.
+/// Identity is resolved solely through the request-time auth chain, which
+/// already encapsulates every authentication source:
+///
+/// - `oauth_session` plugin: verifies the `bcs_session` cookie JWT against the
+///   identity store and carries `user_name` / `avatar` from the resolved
+///   `UserIdentityInfo` row (no extra IO beyond the chain itself).
+/// - `local` plugin (non-OAuth / mock): resolves a principal from config or
+///   `X-Mock-*` headers.
+///
+/// This keeps `/auth/user` source-agnostic: new authentication plugins work
+/// here without changes, and there is no duplicated JWT/cookie logic. 401 is
+/// returned when the chain yields no identity OR yields a principal whose
+/// `user_id` is `None`/empty (a non-human principal is not a human login;
+/// returning 200 with an empty user_id would make the caller appear logged
+/// in), preserving the `require_authentication` semantics.
 pub async fn current_user_handler(
     State(state): State<Arc<OAuthRouteState>>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    // 1. Extract JWT from cookie
-    let jwt = match extract_session_cookie(&headers) {
-        Some(t) => t,
-        None => return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "not authenticated"}))).into_response(),
+    let Some(chain) = state.auth_chain.as_ref() else {
+        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "not authenticated"})))
+            .into_response();
     };
 
-    // 2. Verify JWT signature + expiration
-    match state.jwt_service.verify(&jwt) {
-        Ok(_) => {}
-        Err(_) => return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "not authenticated"}))).into_response(),
-    };
-
-    // 3. Look up user by the JWT fingerprint in DB (single-session bind)
-    match state.user_port.get_identity_by_token(&bcs_jwt::token_hash(&jwt)).await {
-        Ok(Some(info)) => (StatusCode::OK, Json(UserInfoResponse {
-            user_id: info.user_id,
-            // Prefer the internal display name; fall back to the external one
-            // for legacy rows where user_name was never populated.
-            name: info.user_name.or(info.external_user_name),
-            provider: info.auth_source,
-            avatar: info.avatar,
-        })).into_response(),
-        Ok(None) => (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "not authenticated"}))).into_response(),
+    match chain.authenticate(&headers).await {
+        Ok(result) => match result.principal {
+            // A principal without a non-empty `user_id` is not a human login
+            // (e.g. a bot-only principal). `/auth/user` is the "who am I?"
+            // endpoint for human users: returning 200 with an empty user_id
+            // would make the frontend treat the caller as logged in. Treat
+            // `None` / empty the same as an anonymous request.
+            Some(principal)
+                if principal
+                    .user_id
+                    .as_deref()
+                    .is_some_and(|id| !id.is_empty()) =>
+            {
+                (StatusCode::OK, Json(UserInfoResponse {
+                    user_id: principal.user_id.unwrap(),
+                    name: principal.user_name,
+                    provider: principal
+                        .source_name
+                        .unwrap_or_else(|| "chain".to_string()),
+                    avatar: principal.avatar,
+                }))
+                    .into_response()
+            }
+            _ => (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "not authenticated"})))
+                .into_response(),
+        },
         Err(e) => {
-            warn!(error = %e, "get_identity_by_token failed");
+            warn!(error = %e, "auth chain failed in /auth/user");
             (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response()
         }
     }
@@ -418,5 +473,88 @@ pub async fn get_user_handler(
             warn!(error = %e, "get_identity_by_user_id failed");
             (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use axum::body::to_bytes;
+    use bcs_auth_api::{AuthError, AuthPlugin, AuthPluginChain, AuthPrincipal, AuthSource};
+    use bcs_test_support::{NoopAuthPlugin, NoopUserIdentityPort};
+
+    /// A chain plugin that always yields a principal with the given `user_id`
+    /// (which may be `None`), so the empty/missing-user_id branch of
+    /// `current_user_handler` is reachable without depending on any specific
+    /// config-driven plugin's input validation.
+    struct FixedUserPlugin {
+        user_id: Option<String>,
+    }
+
+    #[async_trait]
+    impl AuthPlugin for FixedUserPlugin {
+        fn can_authenticate(&self, _headers: &HeaderMap) -> bool {
+            true
+        }
+        async fn authenticate(
+            &self,
+            _headers: &HeaderMap,
+        ) -> Result<Option<AuthPrincipal>, AuthError> {
+            let mut p = AuthPrincipal::new(AuthSource::Local);
+            p.user_id = self.user_id.clone();
+            Ok(Some(p))
+        }
+        fn priority(&self) -> u8 {
+            10
+        }
+        fn name(&self) -> &'static str {
+            "fixed"
+        }
+    }
+
+    fn chain_with(user_id: Option<String>) -> Arc<AuthPluginChain> {
+        Arc::new(AuthPluginChain::new(vec![
+            Box::new(FixedUserPlugin { user_id }),
+            Box::new(NoopAuthPlugin),
+        ]))
+    }
+
+    async fn run_current_user(chain: Arc<AuthPluginChain>) -> (StatusCode, serde_json::Value) {
+        let state = Arc::new(OAuthRouteState::new_chain_only(
+            Arc::new(NoopUserIdentityPort),
+            chain,
+        ));
+        let resp = current_user_handler(State(state), HeaderMap::new())
+            .await
+            .into_response();
+        let status = resp.status();
+        let bytes = to_bytes(resp.into_body(), usize::MAX).await.expect("body");
+        let body = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+        (status, body)
+    }
+
+    /// A principal whose `user_id` is `None` is not a human login — `/auth/user`
+    /// must NOT return 200 with an empty user_id.
+    #[tokio::test]
+    async fn current_user_rejects_principal_without_user_id() {
+        let (status, body) = run_current_user(chain_with(None)).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "no user_id => 401, got {body}");
+    }
+
+    /// A principal whose `user_id` is an empty string must likewise be treated
+    /// as not authenticated, not as a logged-in user with id "".
+    #[tokio::test]
+    async fn current_user_rejects_principal_with_empty_user_id() {
+        let (status, body) = run_current_user(chain_with(Some(String::new()))).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "empty user_id => 401, got {body}");
+    }
+
+    /// Regression guard: a populated user_id still returns 200.
+    #[tokio::test]
+    async fn current_user_accepts_principal_with_user_id() {
+        let (status, body) = run_current_user(chain_with(Some("u-123".to_string()))).await;
+        assert_eq!(status, StatusCode::OK, "real user_id => 200, got {body}");
+        assert_eq!(body["user_id"], "u-123");
     }
 }

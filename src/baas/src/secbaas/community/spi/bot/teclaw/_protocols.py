@@ -10,11 +10,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Protocol
 
 from ._types import (
-    _BotCreateResult,
-    _BotDestroyResult,
-    _BotInfo,
-    _BotRestartResult,
-    _BotUpdateResult,
+    BotCreateResult,
+    BotDestroyResult,
+    BotInfo,
+    BotRestartResult,
+    BotUpdateResult,
 )
 
 if TYPE_CHECKING:
@@ -31,31 +31,31 @@ class TeClawBotPlugin(Protocol):
     All methods are async — TeClaw operations involve I/O over HTTP.
     """
 
-    async def create_bot(self, bot_config: dict[str, Any]) -> _BotCreateResult:
+    async def create_bot(self, bot_config: dict[str, Any]) -> BotCreateResult:
         """Create a new bot on the TeClaw platform.
 
         Args:
             bot_config: Bot configuration dict (opaque passthrough from caller).
 
         Returns:
-            _BotCreateResult with teclaw_bot_id, status, and optional config.
+            BotCreateResult with teclaw_bot_id, status, and optional config.
         """
         ...
 
-    async def destroy_bot(self, bot_id: str) -> _BotDestroyResult:
+    async def destroy_bot(self, bot_id: str) -> BotDestroyResult:
         """Destroy (delete) a bot on the TeClaw platform.
 
         Args:
             bot_id: The teclaw_bot_id to destroy.
 
         Returns:
-            _BotDestroyResult with teclaw_bot_id and status.
+            BotDestroyResult with teclaw_bot_id and status.
         """
         ...
 
     async def update_bot(
         self, bot_id: str, bot_config: dict[str, Any]
-    ) -> _BotUpdateResult:
+    ) -> BotUpdateResult:
         """Update a bot's configuration on the TeClaw platform.
 
         Args:
@@ -63,11 +63,11 @@ class TeClawBotPlugin(Protocol):
             bot_config: New bot configuration dict (opaque passthrough).
 
         Returns:
-            _BotUpdateResult with teclaw_bot_id, status, and optional config.
+            BotUpdateResult with teclaw_bot_id, status, and optional config.
         """
         ...
 
-    async def restart_bot(self, bot_id: str) -> _BotRestartResult:
+    async def restart_bot(self, bot_id: str) -> BotRestartResult:
         """Restart a bot by re-applying its last-known configuration.
 
         Internally proxies to the UPDATE operation with the cached config.
@@ -76,18 +76,18 @@ class TeClawBotPlugin(Protocol):
             bot_id: The teclaw_bot_id to restart.
 
         Returns:
-            _BotRestartResult with teclaw_bot_id and status.
+            BotRestartResult with teclaw_bot_id and status.
         """
         ...
 
-    async def get_bot(self, bot_id: str) -> _BotInfo:
+    async def get_bot(self, bot_id: str) -> BotInfo:
         """Get a bot's current info from the TeClaw platform.
 
         Args:
             bot_id: The teclaw_bot_id to query.
 
         Returns:
-            _BotInfo with teclaw_bot_id, status, and optional config.
+            BotInfo with teclaw_bot_id, status, and optional config.
         """
         ...
 

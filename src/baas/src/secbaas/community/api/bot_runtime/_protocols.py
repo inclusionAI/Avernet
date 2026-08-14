@@ -12,6 +12,15 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from ..bot_manage import BotStartProgressResponse
 from ..device_manage import CommandResult
+from ._file_transfer_models import (
+    CancelUploadResponse,
+    CompleteUploadResponse,
+    DeleteTransferResponse,
+    GetDownloadUrlResponse,
+    GetTransferStatusResponse,
+    GetUploadUrlResponse,
+    ShareLinkResponse,
+)
 from ._http_connection_info import HttpConnectionInfo
 from ._models import (
     BotChatContext,
@@ -109,6 +118,73 @@ class BotFetchStartProgressDispatcher(Protocol):
         tenant: str,
         device_affinity: str | None = None,
     ) -> BotStartProgressResponse: ...
+
+
+@runtime_checkable
+class BotFileTransferDispatcher(Protocol):
+    """文件传输调度器协议"""
+
+    async def dispatch_get_upload_url(
+        self,
+        bot_uuid: str,
+        tenant: str,
+        device_path: str | None = None,
+        filename: str | None = None,
+        expire_seconds: int = 3600,
+        staging_subdir: str | None = None,
+        device_affinity: str | None = None,
+        file_size: int = 0,
+        part_size: int | None = None,
+        operator: str | None = None,
+    ) -> GetUploadUrlResponse: ...
+
+    async def dispatch_get_download_url(
+        self,
+        bot_uuid: str,
+        tenant: str,
+        device_path: str,
+        expire_seconds: int = 3600,
+        device_affinity: str | None = None,
+        operator: str | None = None,
+    ) -> GetDownloadUrlResponse: ...
+
+    async def dispatch_get_transfer_status(
+        self,
+        transfer_id: str,
+        tenant: str | None = None,
+        bot_uuid: str | None = None,
+    ) -> GetTransferStatusResponse: ...
+
+    async def dispatch_complete_upload(
+        self,
+        transfer_id: str,
+        tenant: str | None = None,
+    ) -> CompleteUploadResponse: ...
+
+    async def dispatch_cancel_upload(
+        self,
+        transfer_id: str,
+        tenant: str | None = None,
+    ) -> CancelUploadResponse: ...
+
+    async def dispatch_delete_transfer(
+        self,
+        transfer_id: str,
+        tenant: str | None = None,
+    ) -> DeleteTransferResponse:
+        """Delete a transfer ticket and its associated OSS staging object (D-09, D-10).
+
+        Only tickets in terminal states (DONE/FAILED/CANCELLED/DELETED) can be
+        deleted. Already-DELETED tickets return 200 (idempotent).
+        """
+        ...
+
+    async def dispatch_generate_share_link(
+        self,
+        transfer_id: str,
+        expire_seconds: int = 86400,
+        tenant: str | None = None,
+    ) -> ShareLinkResponse: ...
 
 
 @runtime_checkable
@@ -325,6 +401,29 @@ class BotRunner(Protocol):
 
         Returns:
             消息信息列表
+        """
+        ...
+
+    async def list_sessions(
+        self,
+        *,
+        bot_id: str,
+        context: "BotChatContext",
+        metadata: dict[str, Any],
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list["SessionInfo"]:
+        """List sessions for a given bot (read-only).
+
+        Args:
+            bot_id: Bot 唯一标识，格式为 <real_bot_id>:<entity_id>
+            context: 请求上下文
+            metadata: 元数据，支持 bot_options.lifecycle_stage 指定生命周期阶段
+            limit: Maximum number of sessions to return
+            offset: Number of sessions to skip
+
+        Returns:
+            List of SessionInfo objects
         """
         ...
 

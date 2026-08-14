@@ -10,6 +10,7 @@ from secbaas.community.core.repository.bot_run_queue import (
 
 from ._async_chat_client import (
     AsyncChatClient,
+    BotSessionError,
     ConcurrentSessionError,
     NotConnectedError,
 )
@@ -28,10 +29,10 @@ from ._bot_run_utils import (
     resolve_user_id,
 )
 from ._bot_service_selector import BotServiceSelector
-from ._bot_websocket_client import BotWebSocketClient
+from ._bot_websocket_client import BotWebSocketClient, ChatRequestError
 from ._claw_service import BotServiceConfig, ClawBotService
 from ._engine_adapter_registry import BotEngineAdapterRegistry
-from ._executor import BotRunRequestExecutor, SerializingExecutor
+from ._executor import BotRunRequestExecutor, ResultGuardExecutor, SerializingExecutor
 from ._internal_protocols import (
     BotService,
     MessageDispatcher,
@@ -54,7 +55,9 @@ __all__ = [
     "BotBindingNotFoundError",
     "BotServiceConfig",
     "BotWebSocketClient",
+    "ChatRequestError",
     "ClawBotService",
+    "BotSessionError",
     "ConcurrentSessionError",
     "NotConnectedError",
     "BotBindingResolver",
@@ -84,5 +87,6 @@ __all__ = [
     "BotRunQueueRecord",
     "PostRunCallback",
     "QueueStatus",
+    "ResultGuardExecutor",
     "SerializingExecutor",
 ]

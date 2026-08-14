@@ -71,7 +71,6 @@ pub struct GroupAddMemberCommand {
     pub human_actor_id: Option<String>,
     pub group_id: String,
     pub bot_id: String,
-    pub role: Option<String>,
 }
 
 /// Request for deleting a group.
@@ -424,6 +423,9 @@ pub trait GroupManagementService: Send + Sync {
         cmd: GroupRemoveMemberCommand,
     ) -> Result<GroupRemoveMemberResult, GroupUseCaseError>;
 
+    /// Delete a group, abort its active StateMachine runs, and remove every
+    /// channel binding and StateMachine runtime binding that targets it.
+    /// Cleanup failures fail the use case instead of reporting a partial success.
     async fn delete_group(
         &self,
         cmd: GroupDeleteCommand,

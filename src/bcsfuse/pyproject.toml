@@ -7,7 +7,7 @@ name = "bcsfuse-oss"
 version = "0.1.0"
 description = "Open-source BCSFuse runtime candidate - Worker management, task understanding, retrieval, team composition, and OpenClaw handoff"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.13"
 license = { text = "Apache-2.0" }
 authors = [
     { name = "BCS Team" }

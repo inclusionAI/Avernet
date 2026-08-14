@@ -11,9 +11,11 @@ version = { workspace = true }
 hmac = { workspace = true }
 sha2 = { workspace = true }
 base64 = { workspace = true }
+bcs-service-api = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+time = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

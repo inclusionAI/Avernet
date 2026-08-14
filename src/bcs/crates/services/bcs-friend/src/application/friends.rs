@@ -204,7 +204,16 @@ impl FriendService for Friend {
                 let is_online = self.registry.is_effectively_online(&uuid).await;
                 (bot.capabilities.name, bot.capabilities.summary, is_online)
             } else {
-                (None, None, false)
+                // The friend bot is deleted or no longer registered.
+                // `BotRegistryCoreService::get` returns `None` for soft-deleted bots
+                // (bcs_bots.is_deleted = 1) and for unknown ids, so a missing entry
+                // means the friendship should not be surfaced. Exclude it instead of
+                // returning a null-named stub entry.
+                tracing::debug!(
+                    friend_uuid = %uuid,
+                    "skipping friend that is deleted or no longer registered"
+                );
+                continue;
             };
             let dynamic_status = DynamicStatusResponse {
                 status: if is_online { "active" } else { "offline" }.to_string(),

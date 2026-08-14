@@ -7,6 +7,10 @@ _BAAS_SH_LOADED=1
 BAAS_LOG="${LOG_DIR}/baas.log"
 BAAS_APP_DIR="${BAAS_APP_DIR:-${BAAS_DIR}}"
 
+baas_mixed_claude_enabled() {
+    type -t claude_profile_enabled >/dev/null && claude_profile_enabled
+}
+
 baas_normalize_dir_path() {
     local path="$1"
 
@@ -149,6 +153,17 @@ baas_start() {
 
     cd "${BAAS_APP_DIR}"
 
+    # BaaS creates OpenClaw's per-bot config later, when a Bot is allocated.
+    # Build and resolve the BCN plugin before launching BaaS so that creation
+    # always writes channels.bcs and the plugin entry into that config.
+    setup_bcn_plugin || return 1
+    local bcn_plugin_path
+    bcn_plugin_path="$(bots_bcn_plugin_load_dir)" || return 1
+    if [ ! -f "${bcn_plugin_path}/dist/esm/index.js" ]; then
+        log_error "BCN plugin is not built at ${bcn_plugin_path}; cannot start BAAS"
+        return 1
+    fi
+
     # Start baas (singlebox mode)
     # app.sh internally includes health check, no external retry needed
     log_info "Starting BAAS with singlebox mode..."
@@ -193,10 +208,36 @@ baas_start() {
         CHAT_ENGINE="${CHAT_ENGINE}"
         LOCAL_AIDESKTOP_ROOT="${LOCAL_AIDESKTOP_DIR}"
         SINGLEBOX_MODEL_CONFIG_FILE="${SINGLEBOX_MODEL_CONFIG_FILE:-}"
+        BCN_PLUGIN_PATH="${bcn_plugin_path}"
+        BCS_PORT="${BCS_PORT}"
     )
-    log_info "BAAS env: DATABASE_URL=${DATABASE_URL}, CHAT_ENGINE=${CHAT_ENGINE}, LOCAL_AIDESKTOP_ROOT=${LOCAL_AIDESKTOP_DIR}"
+    if baas_mixed_claude_enabled; then
+        bcs_baas_provider_prepare_runtime_tokens || {
+            log_error "Failed to prepare the local BaaS downlink credential"
+            return 1
+        }
+        local baas_downlink_token
+        baas_downlink_token="$(bcs_baas_provider_baas_token)" || return 1
+        [ -n "$baas_downlink_token" ] || {
+            log_error "Local BaaS downlink credential is empty"
+            return 1
+        }
+        baas_env_args+=(
+            SOFAPY_CONFIG_OVERLAY="mixed-claude-code"
+            BCS_BAAS_DOWNLINK_TOKEN="${baas_downlink_token}"
+        )
+        unset baas_downlink_token
+        log_info "BAAS hybrid mode: real Claude adapter and local Backend binding lookup enabled"
+    fi
+    log_info "BAAS env: DATABASE_URL=${DATABASE_URL}, CHAT_ENGINE=${CHAT_ENGINE}, LOCAL_AIDESKTOP_ROOT=${LOCAL_AIDESKTOP_DIR}, BCS_PORT=${BCS_PORT}, BCN_PLUGIN_PATH=${bcn_plugin_path}"
 
-    if ! env "${baas_env_args[@]}" "${BAAS_APP_DIR}/scripts/app.sh" start --singlebox >> "${BAAS_LOG}" 2>&1; then
+    # app.sh spawns its web process in the background. Run the wrapper in a
+    # new session so that child remains alive after the singlebox command
+    # shell exits (the desktop launcher otherwise reaps it).
+    if ! (
+        export "${baas_env_args[@]}"
+        start_in_detached_session "${BAAS_APP_DIR}/scripts/app.sh" start --singlebox
+    ) >> "${BAAS_LOG}" 2>&1; then
         log_error "Failed to start BAAS. Check logs at ${BAAS_LOG}"
         return 1
     fi
@@ -241,6 +282,11 @@ baas_status() {
     else
         echo "  BAAS:      Not installed"
     fi
+}
+
+baas_ready() {
+    curl --noproxy '*' --connect-timeout 1 --max-time 2 -fsS \
+        'http://127.0.0.1:8890/health' >/dev/null 2>&1
 }
 
 baas_prereqs() {

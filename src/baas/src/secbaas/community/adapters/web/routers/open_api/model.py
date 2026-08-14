@@ -1,4 +1,4 @@
-"""Open API 请求/响应模型定义"""
+"""Open API request/response model definitions"""
 
 from datetime import datetime
 from typing import Any
@@ -9,13 +9,13 @@ from secbaas.community.api import ApiResponse
 
 
 class RunRequest(BaseModel):
-    """单次对话请求模型"""
+    """Single-turn conversation request model"""
 
-    message: str = Field(..., description="用户消息内容", min_length=1)
+    message: str = Field(..., description="User message content", min_length=1)
     metadata: dict[str, Any] | None = Field(
         default=None,
         description=(
-            "可选的元数据信息。"
+            "Optional metadata information."
             "Recognized keys: "
             "biz_task_id (str, optional): Caller-assigned business task identifier. Defaults to run_id when absent. "
             "biz_scene (str, optional): Business scene/category tag. Defaults to 'default' when absent."
@@ -24,75 +24,84 @@ class RunRequest(BaseModel):
 
 
 class ExtraInfo(BaseModel):
-    """结果额外信息"""
+    """Result extra information"""
 
-    usage: dict[str, Any] | None = Field(default=None, description="Token 使用信息")
+    usage: dict[str, Any] | None = Field(
+        default=None, description="Token usage information"
+    )
 
 
 class RunResultData(BaseModel):
-    """对话结果数据"""
+    """Conversation result data"""
 
-    content: str | None = Field(default=None, description="Bot 回复内容")
-    extra: ExtraInfo | None = Field(default=None, description="结果额外信息")
+    content: str | None = Field(default=None, description="Bot reply content")
+    extra: ExtraInfo | None = Field(
+        default=None, description="Result extra information"
+    )
 
 
 class RunResultResponseData(BaseModel):
-    """运行结果响应数据"""
+    """Run result response data"""
 
-    run_id: str = Field(..., description="运行 ID")
+    run_id: str = Field(..., description="Run ID")
     bot_id: str = Field(..., description="Bot ID")
-    session_id: str = Field(..., description="会话 ID")
-    status: str = Field(..., description="运行状态: pending/running/completed/failed")
-    created_at: datetime = Field(..., description="创建时间")
-    completed_at: datetime | None = Field(default=None, description="完成时间")
-    result: RunResultData | None = Field(default=None, description="对话结果")
-    error: str | None = Field(default=None, description="错误信息")
+    session_id: str = Field(..., description="Session ID")
+    status: str = Field(..., description="Run status: pending/running/completed/failed")
+    created_at: datetime = Field(..., description="Creation time")
+    completed_at: datetime | None = Field(default=None, description="Completion time")
+    result: RunResultData | None = Field(
+        default=None, description="Conversation result"
+    )
+    error: str | None = Field(default=None, description="Error information")
 
 
 class RunResponseData(BaseModel):
-    """单次对话响应数据"""
+    """Single-turn conversation response data"""
 
-    run_id: str = Field(..., description="运行 ID")
+    run_id: str = Field(..., description="Run ID")
 
 
 class RunResponse(ApiResponse[RunResponseData]):
-    """单次对话标准响应"""
+    """Single-turn conversation standard response"""
 
-    data: RunResponseData | None = Field(default=None, description="响应数据")
+    data: RunResponseData | None = Field(default=None, description="Response data")
 
 
 class RunResultResponse(ApiResponse[RunResultResponseData]):
-    """运行结果查询响应"""
+    """Run result query response"""
 
-    data: RunResultResponseData | None = Field(default=None, description="运行结果数据")
+    data: RunResultResponseData | None = Field(
+        default=None, description="Run result data"
+    )
 
 
 class MessageRequest(BaseModel):
-    """消息投递请求模型"""
+    """Message delivery request model"""
 
-    message: str = Field(..., description="用户消息内容", min_length=1)
-    bot_id: str = Field(..., description="Bot 唯一标识", min_length=1)
+    message: str = Field(..., description="User message content", min_length=1)
+    bot_id: str = Field(..., description="Bot unique identifier", min_length=1)
+    callback_url: str | None = Field(default=None, description="Callback URL")
+    message_id: str | None = Field(default=None, description="Message ID")
     metadata: dict[str, Any] | None = Field(
         default=None,
         description=(
-            "可选的元数据信息。"
+            "Optional metadata information."
             "Recognized keys: "
             "biz_task_id (str, optional): Caller-assigned business task identifier. Defaults to run_id when absent. "
             "biz_scene (str, optional): Business scene/category tag. Defaults to 'default' when absent."
         ),
     )
-    callback_url: str | None = Field(default=None, description="Callback URL")
 
 
 class StreamMessageRequest(BaseModel):
-    """消息投递请求模型"""
+    """Streaming message delivery request model"""
 
-    message: str = Field(..., description="用户消息内容", min_length=1)
-    bot_id: str = Field(..., description="Bot 唯一标识", min_length=1)
+    message: str = Field(..., description="User message content", min_length=1)
+    bot_id: str = Field(..., description="Bot unique identifier", min_length=1)
     metadata: dict[str, Any] | None = Field(
         default=None,
         description=(
-            "可选的元数据信息。"
+            "Optional metadata information."
             "Recognized keys: "
             "biz_task_id (str, optional): Caller-assigned business task identifier. Defaults to run_id when absent. "
             "biz_scene (str, optional): Business scene/category tag. Defaults to 'default' when absent."
@@ -101,90 +110,130 @@ class StreamMessageRequest(BaseModel):
 
 
 class MessageResponseData(BaseModel):
-    """消息投递响应数据"""
+    """Message delivery response data"""
 
-    message_id: str = Field(..., description="消息 ID，用于追踪投递状态")
-    session_id: str | None = Field(default=None, description="会话 ID")
+    message_id: str = Field(
+        ..., description="Message ID, used for tracking delivery status"
+    )
+    session_id: str | None = Field(default=None, description="Session ID")
 
 
 class MessageResponse(ApiResponse[MessageResponseData]):
-    """消息投递标准响应"""
+    """Message delivery standard response"""
 
-    data: MessageResponseData | None = Field(default=None, description="响应数据")
+    data: MessageResponseData | None = Field(default=None, description="Response data")
 
 
 class MessageResultData(BaseModel):
-    """消息结果数据"""
+    """Message result data"""
 
-    content: str | None = Field(default=None, description="Bot 回复内容")
-    extra: ExtraInfo | None = Field(default=None, description="结果额外信息")
+    content: str | None = Field(default=None, description="Bot reply content")
+    extra: ExtraInfo | None = Field(
+        default=None, description="Result extra information"
+    )
 
 
 class MessageResultResponseData(BaseModel):
-    """消息结果响应数据"""
+    """Message result response data"""
 
-    message_id: str = Field(..., description="消息 ID")
+    message_id: str = Field(..., description="Message ID")
     bot_id: str = Field(..., description="Bot ID")
-    session_id: str = Field(..., description="会话 ID")
-    status: str = Field(..., description="消息状态: pending/running/completed/failed")
-    created_at: datetime = Field(..., description="创建时间")
-    completed_at: datetime | None = Field(default=None, description="完成时间")
-    result: MessageResultData | None = Field(default=None, description="消息处理结果")
-    error: str | None = Field(default=None, description="错误信息")
+    session_id: str = Field(..., description="Session ID")
+    status: str = Field(
+        ..., description="Message status: pending/running/completed/failed"
+    )
+    created_at: datetime = Field(..., description="Creation time")
+    completed_at: datetime | None = Field(default=None, description="Completion time")
+    result: MessageResultData | None = Field(
+        default=None, description="Message processing result"
+    )
+    error: str | None = Field(default=None, description="Error information")
 
 
 class MessageResultResponse(ApiResponse[MessageResultResponseData]):
-    """消息结果查询响应"""
+    """Message result query response"""
 
     data: MessageResultResponseData | None = Field(
-        default=None, description="消息结果数据"
+        default=None, description="Message result data"
     )
 
 
 class SessionQueryResponseData(BaseModel):
-    """会话查询响应数据"""
+    """Session query response data"""
 
     session_id: str = Field(..., description="Session ID")
     bot_id: str = Field(..., description="Bot ID")
     status: str = Field(..., description="Session status")
-    created_at: datetime | None = Field(default=None, description="创建时间")
-    updated_at: datetime | None = Field(default=None, description="更新时间")
+    created_at: datetime | None = Field(default=None, description="Creation time")
+    updated_at: datetime | None = Field(default=None, description="Update time")
 
 
 class SessionQueryResponse(ApiResponse[SessionQueryResponseData]):
-    """会话查询标准响应"""
+    """Session query standard response"""
 
     data: SessionQueryResponseData | None = Field(
-        default=None, description="会话查询数据"
+        default=None, description="Session query data"
     )
 
 
 class MessageItem(BaseModel):
-    """消息条目"""
+    """Message item"""
 
     id: str | None = Field(default=None, description="Message ID")
     session_id: str | None = Field(default=None, description="Session ID")
     role: str = Field(..., description="Message role: user / assistant / tool_result")
     content: str | None = Field(default=None, description="Message text content")
-    meta: dict[str, Any] | None = Field(default=None, description="消息元数据")
-    created_at: str | None = Field(default=None, description="消息创建时间 (ISO 8601)")
+    meta: dict[str, Any] | None = Field(default=None, description="Message metadata")
+    created_at: str | None = Field(
+        default=None, description="Message creation time (ISO 8601)"
+    )
     history_meta: dict[str, Any] | None = Field(
-        default=None, description="历史消息元数据"
+        default=None, description="Historical message metadata"
     )
 
 
 class SessionMessagesResponseData(BaseModel):
-    """会话消息列表响应数据"""
+    """Session message list response data"""
 
     session_id: str = Field(..., description="Session ID")
-    messages: list[MessageItem] = Field(default_factory=list, description="消息列表")
-    total: int = Field(default=0, description="消息总数")
-    has_more: bool = Field(default=False, description="是否还有更多消息")
+    messages: list[MessageItem] = Field(
+        default_factory=list, description="Message list"
+    )
+    total: int = Field(default=0, description="Total messages")
+    has_more: bool = Field(default=False, description="Whether there are more messages")
 
 
 class SessionMessagesResponse(ApiResponse[SessionMessagesResponseData]):
-    """会话消息列表标准响应"""
+    """Session message list standard response"""
 
     data: SessionMessagesResponseData | None = Field(
-        default=None, description="会话消息数据"
+        default=None, description="Session message data"
+    )
+
+
+class SessionListItem(BaseModel):
+    """Single session item in list response."""
+
+    session_id: str = Field(..., description="Session ID")
+    bot_id: str = Field(..., description="Bot ID")
+    status: str = Field(..., description="Session status")
+    created_at: datetime | None = Field(default=None, description="Creation time")
+    updated_at: datetime | None = Field(default=None, description="Update time")
+
+
+class SessionListResponseData(BaseModel):
+    """Session list response data."""
+
+    items: list[SessionListItem] = Field(
+        default_factory=list, description="Session list"
+    )
+    total: int = Field(default=0, description="Total sessions")
+    has_more: bool = Field(default=False, description="Whether there are more sessions")
+
+
+class SessionListResponse(ApiResponse[SessionListResponseData]):
+    """Session list standard response."""
+
+    data: SessionListResponseData | None = Field(
+        default=None, description="Response data"
     )

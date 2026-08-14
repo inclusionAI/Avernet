@@ -255,7 +255,7 @@ class TestRunChat:
             )
 
         assert exc.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-        assert "服务内部错误" in exc.value.detail["message"]
+        assert "Internal server error" in exc.value.detail["message"]
 
 
 # ── get_run_result ───────────────────────────────────────────

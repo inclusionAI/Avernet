@@ -9,6 +9,12 @@ from src.infra.llm.providers.anthropic_compatible_provider import (
     AnthropicAuthError,
     AnthropicProviderTimeout,
 )
+from src.infra.llm.providers.openai_compatible_provider import (
+    OpenAICompatibleProvider,
+    OpenAIProviderError,
+    OpenAIAuthError,
+    OpenAIProviderTimeout,
+)
 
 __all__ = [
     "FakeLLMProvider",
@@ -16,4 +22,8 @@ __all__ = [
     "AnthropicProviderError",
     "AnthropicAuthError",
     "AnthropicProviderTimeout",
+    "OpenAICompatibleProvider",
+    "OpenAIProviderError",
+    "OpenAIAuthError",
+    "OpenAIProviderTimeout",
 ]

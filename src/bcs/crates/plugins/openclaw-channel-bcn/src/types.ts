@@ -111,7 +111,7 @@ export interface MessageContent {
 
 export interface Attachment {
   attachment_id: string;
-  type: 'image';
+  type: 'image' | 'file';
   file_name: string;
   mime_type?: string;
   size?: number;
@@ -125,6 +125,8 @@ export type ChannelSource = 'webui' | 'dingtalk' | 'api';
 export interface ChannelInfo {
   source: ChannelSource;
   user_id?: string;
+  actor_id?: string;
+  actor_name?: string;
   thread_id?: string;
 }
 
@@ -295,6 +297,7 @@ export interface ChatEventPayload {
   message?: MessageContent;
   usage?: UsageInfo;
   stop_reason?: string;
+  errorCode?: string;
   /** Structured routing metadata (only on state=final). */
   routing?: ChatEventRouting;
 }

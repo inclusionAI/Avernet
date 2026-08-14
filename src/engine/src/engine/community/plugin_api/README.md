@@ -8,7 +8,8 @@ Per-engine plugin Protocol declarations — the shared abstraction both the
 ```yaml
 purpose: "Per-engine plugin Protocols (OpenClawPlugin, …) — the native-shaped interface each engine's ACL adapter delegates to."
 provides:
-  - "(none yet — per-engine ports land in F2)"
+  - "OpenClawPlugin and its per-domain native port Protocols"
+  - "ClaudeCodePlugin and its per-domain native port Protocols"
 consumes:
   []
 internal_dependencies:
@@ -17,8 +18,9 @@ internal_dependencies:
 
 ### Change impact
 
-Empty skeleton in F1. Once populated (F2+), changing a port Protocol's
-signature breaks that engine's `plugins/{prod,local}/<engine>/` impl and its
-`core/adapters/<engine>/` adapter — and nothing else, since the port is the
-only contract crossing the core↔plugins boundary. This package imports neither
-`engine.community.core` nor `engine.plugins`; that is what keeps the graph acyclic.
+Changing a port Protocol's signature affects that engine's plugin
+implementation, its `core/adapters/<engine>/` adapter, and the shared skills
+HTTP delivery surface. Skills Pool rollback is additive: new Backend and new
+Engine use `rollback_pool_layout`; old images remain compatible until an
+operator explicitly requests rollback. This package imports neither
+`engine.community.core` nor `engine.plugins`, preserving the acyclic graph.

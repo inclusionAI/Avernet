@@ -7,11 +7,12 @@ use bcs_domain::{
     MessageOwnerFilter, MessageQuery, NewMessage, SenderType,
 };
 use bcs_service_api::{
-    BindingChannel, BotCapabilities, BotRepoPort, FriendRepoPort, FriendRequest,
-    FriendRequestDirection, FriendRequestRepoPort, FriendRequestStatus, Group, GroupChatProposal,
-    GroupKind, GroupRepoPort, GroupStatus, NewSessionParams, Participant,
-    ParticipantMode, ParticipantRole, ProposalCoreService, RelationEdge, RelationRepoPort,
-    ServiceSpec, Session, SessionKind, SessionRepoPort, SessionStatus, Skill,
+    BindingChannel, BotCapabilities, BotControlPlaneRepoPort, BotRepoPort, DefaultDelivery,
+    FriendRepoPort, FriendRequest, FriendRequestDirection, FriendRequestRepoPort,
+    FriendRequestStatus, Group, GroupChatProposal, GroupKind, GroupMutableFieldsPatch,
+    GroupRepoPort, GroupStatus, NewSessionParams, Participant, ParticipantMode, ParticipantRole,
+    ProposalCoreService, RelationEdge, RelationRepoPort, RoutingMode, RoutingPolicy, ServiceSpec,
+    Session, SessionKind, SessionRepoPort, SessionStatus, Skill,
 };
 use bcs_service_api::ServiceError;
 use bcs_service_api::port::repo::{
@@ -246,6 +247,41 @@ pub async fn bot_repo_port_contract_tests<T: BotRepoPort + ?Sized>(repo: &T) {
     bot_repo_contract_tests(repo).await;
 }
 
+pub async fn bot_control_plane_repo_port_contract_tests<T: BotControlPlaneRepoPort + ?Sized>(
+    repo: &T,
+    env: &str,
+    known_bot_id: &str,
+) {
+    assert!(
+        repo.get_control_plane("control-plane-contract-missing", env)
+            .await
+            .expect("read missing control-plane Bot")
+            .is_none()
+    );
+
+    let record = repo
+        .get_control_plane(known_bot_id, env)
+        .await
+        .expect("read known control-plane Bot")
+        .expect("known control-plane Bot exists");
+    assert_eq!(record.bot_id, known_bot_id);
+    assert_eq!(record.env, env);
+
+    let batch = repo
+        .get_control_plane_by_ids(
+            &[
+                known_bot_id.to_string(),
+                "control-plane-contract-missing".to_string(),
+                known_bot_id.to_string(),
+            ],
+            env,
+        )
+        .await
+        .expect("batch read control-plane Bots");
+    assert_eq!(batch.len(), 1);
+    assert_eq!(batch[0].bot_id, known_bot_id);
+}
+
 pub async fn group_repo_contract_tests<T: GroupRepoPort + ?Sized>(repo: &T) {
     assert!(repo.get("repo-contract-missing-group").await.is_none());
     assert_eq!(repo.count().await, 0);
@@ -259,6 +295,14 @@ pub async fn group_repo_contract_tests<T: GroupRepoPort + ?Sized>(repo: &T) {
         ],
     );
     group.label = Some("initial label".to_string());
+    group.routing_policy = Some(RoutingPolicy {
+        mode: RoutingMode::Structured,
+        default_bot_final_delivery: DefaultDelivery::SendToDriver,
+        sender_routes: std::collections::HashMap::from([(
+            "repo-helper".to_string(),
+            vec!["repo-driver".to_string()],
+        )]),
+    });
 
     repo.upsert(group.clone()).await.expect("upsert group");
     let stored = repo
@@ -293,6 +337,30 @@ pub async fn group_repo_contract_tests<T: GroupRepoPort + ?Sized>(repo: &T) {
         .find(|p| p.bot_uuid == "repo-helper")
         .expect("helper participant");
     assert_eq!(helper.mode, Some(ParticipantMode::Muted));
+
+    repo.patch_mutable_fields(
+        &group.id,
+        GroupMutableFieldsPatch {
+            label: Some("patched label".to_string()),
+            default_bot_final_delivery: Some(DefaultDelivery::InjectObservers),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("patch mutable fields");
+    let stored = repo.get(&group.id).await.expect("group after mutable patch");
+    let routing = stored.routing_policy.expect("routing policy preserved");
+    assert_eq!(stored.label.as_deref(), Some("patched label"));
+    assert_eq!(stored.participants.len(), 3);
+    assert_eq!(routing.mode, RoutingMode::Structured);
+    assert_eq!(
+        routing.sender_routes.get("repo-helper"),
+        Some(&vec!["repo-driver".to_string()])
+    );
+    assert_eq!(
+        routing.default_bot_final_delivery,
+        DefaultDelivery::InjectObservers
+    );
 
     repo.update_label(&group.id, Some("updated label".to_string()))
         .await
@@ -798,6 +866,25 @@ pub async fn session_repo_contract_tests<T: SessionRepoPort + ?Sized>(repo: &T) 
         .await;
     assert_eq!(collected.len(), 1);
     assert_eq!(collected[0].id, collect_session.id);
+    // collected_at is surfaced on the collected-list context (COALESCE fallback
+    // to created_at guarantees Some here).
+    assert!(
+        collected[0].collected_at.is_some(),
+        "collected list must surface collected_at"
+    );
+    // Batch map lookup matches the collected-list view: only the collected
+    // session appears, with a collected_at timestamp.
+    let map = repo
+        .collected_at_map(&[collect_session.id.as_str()], "bot-collector")
+        .await;
+    assert_eq!(map.len(), 1);
+    assert_eq!(map[0].0, collect_session.id);
+    assert!(map[0].1 > 0, "collected_at_map must return a timestamp");
+    // A bot that has not collected gets an empty map.
+    let empty = repo
+        .collected_at_map(&[collect_session.id.as_str()], "bot-other")
+        .await;
+    assert!(empty.is_empty(), "collected_at_map must be empty for non-collector");
 
     // per-bot isolation: other participant sees nothing
     assert!(repo
@@ -830,6 +917,63 @@ pub async fn session_repo_contract_tests<T: SessionRepoPort + ?Sized>(repo: &T) 
     repo.uncollect(&collect_session.id, "bot-stranger")
         .await
         .expect("uncollect non-participant idempotent");
+
+    // count_by_group — mirrors list_by_group filters, returns total (no pagination).
+    // Group now has 3 sessions:
+    //   s               — Completed, title=None,    bot1
+    //   svc             — Running,   title="hello", bot1
+    //   collect_session — Running,   title=None,    bot-collector + bot-other
+    assert_eq!(
+        repo.count_by_group(group_id, None, None, None).await.expect("count_by_group none"),
+        3
+    );
+    assert_eq!(
+        repo.count_by_group(group_id, Some(SessionStatus::Running), None, None)
+            .await
+            .expect("count_by_group running"),
+        2
+    );
+    assert_eq!(
+        repo.count_by_group(group_id, Some(SessionStatus::Completed), None, None)
+            .await
+            .expect("count_by_group completed"),
+        1
+    );
+    assert_eq!(
+        repo.count_by_group(group_id, None, Some("hello"), None)
+            .await
+            .expect("count_by_group hello"),
+        1
+    );
+    assert_eq!(
+        repo.count_by_group(group_id, None, None, Some("bot1"))
+            .await
+            .expect("count_by_group bot1"),
+        2
+    );
+    assert_eq!(
+        repo.count_by_group(group_id, None, None, Some("bot-collector"))
+            .await
+            .expect("count_by_group bot-collector"),
+        1
+    );
+    // count_by_group must equal list_by_group total (large limit) — consistency.
+    let listed_all = repo.list_by_group(group_id, None, 0, 1000, None, None).await;
+    assert_eq!(
+        listed_all.len() as u64,
+        repo.count_by_group(group_id, None, None, None)
+            .await
+            .expect("count_by_group consistency")
+    );
+    // count != paginated subset
+    let listed_page = repo.list_by_group(group_id, None, 0, 1, None, None).await;
+    assert_eq!(listed_page.len(), 1);
+    assert_eq!(
+        repo.count_by_group(group_id, None, None, None)
+            .await
+            .expect("count_by_group after page"),
+        3
+    );
 }
 
 pub async fn session_repo_port_contract_tests<T: SessionRepoPort + ?Sized>(repo: &T) {
@@ -917,12 +1061,16 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
     assert!(page.has_more);
     assert!(page.next_cursor.is_some());
 
-    // query_messages — cursor
+    // query_messages — cursor. The repo surfaces a composite
+    // `(created_at, session_seq)` next_cursor; the legacy created_at-only
+    // cursor param extracts `.0` to preserve the legacy created_at-only
+    // predicate (the seed messages have distinct created_at values, so the
+    // composite and created_at-only cursors behave identically here).
     let page2 = repo
         .query_messages(MessageQuery {
             group_id: group_id.to_string(),
             session_id: session_id.to_string(),
-            cursor: page.next_cursor,
+            cursor: page.next_cursor.map(|c| c.0),
             limit: 10,
             keyword: None,
             sender_id: None,
@@ -1146,6 +1294,169 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
         .expect("query public owner rows");
     assert_eq!(public_owner_page.messages.len(), 1);
     assert_eq!(public_owner_page.messages[0].owner_bot_id, None);
+
+    // PublicOrOwner → 公共(owner=None) + 命中 viewer 的副本；他人 owner 不返回。
+    let public_or_mgr = repo
+        .query_messages(MessageQuery {
+            group_id: group_id.to_string(),
+            session_id: session_id.to_string(),
+            cursor: None,
+            limit: 10,
+            keyword: None,
+            sender_id: None,
+            message_type: None,
+            owner_filter: MessageOwnerFilter::PublicOrOwner("mgr".to_string()),
+            time_range: Some((5000, 5200)),
+            visible_from_seq: None,
+        })
+        .await
+        .expect("query public-or-mgr");
+    // sys(owner=None) + mgr(owner=mgr) 命中；workerA(owner=workerA) 不返回。
+    assert_eq!(public_or_mgr.messages.len(), 2);
+    assert!(public_or_mgr
+        .messages
+        .iter()
+        .all(|m| m.owner_bot_id.is_none() || m.owner_bot_id.as_deref() == Some("mgr")));
+    assert!(public_or_mgr
+        .messages
+        .iter()
+        .any(|m| m.owner_bot_id.is_none()));
+    assert!(public_or_mgr
+        .messages
+        .iter()
+        .any(|m| m.owner_bot_id.as_deref() == Some("mgr")));
+
+    // list_session_history — legacy direct-read contract: `created_at DESC,
+    // session_seq DESC` with composite `(created_at, session_seq)` cursor
+    // pagination + full `MessageOwnerFilter`. env isolation (VUlao) is the
+    // store's responsibility: the MySQL/SQLite store filters reads by its own
+    // `env`; the memory store does not track env.
+    let history = repo
+        .list_session_history(session_id, MessageOwnerFilter::Any, None, None, 3)
+        .await
+        .expect("list_session_history first page");
+    assert!(history.has_more);
+    assert!(history.next_cursor.is_some());
+    assert_eq!(
+        history.next_cursor,
+        Some((5000, 7)),
+        "next_cursor is the composite (created_at, session_seq) of the last row"
+    );
+    assert_eq!(
+        history.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
+        vec![9, 8, 7],
+        "must be created_at DESC, session_seq DESC"
+    );
+
+    // follow the cursor: before=(5000,7) excludes seq 7 (5000,7) and anything
+    // newer, so the next page is seqs 6,5,4 (still has_more). Verifies the
+    // VYQHI composite-cursor fix — a bare created_at cursor would skip seq 7.
+    let history_next = repo
+        .list_session_history(
+            session_id,
+            MessageOwnerFilter::Any,
+            None,
+            history.next_cursor,
+            3,
+        )
+        .await
+        .expect("list_session_history next page");
+    assert!(history_next.has_more);
+    assert_eq!(
+        history_next.next_cursor,
+        Some((2200, 4)),
+        "next page cursor is the composite (created_at, session_seq) of seq 4"
+    );
+    assert_eq!(
+        history_next
+            .messages
+            .iter()
+            .map(|m| m.session_seq)
+            .collect::<Vec<_>>(),
+        vec![6, 5, 4]
+    );
+
+    // IsNull → only NULL-owned messages (seqs 9,6,5,4,3,2,1) in DESC order.
+    let public_only = repo
+        .list_session_history(session_id, MessageOwnerFilter::IsNull, None, None, 100)
+        .await
+        .expect("list_session_history IsNull");
+    assert_eq!(
+        public_only
+            .messages
+            .iter()
+            .map(|m| m.session_seq)
+            .collect::<Vec<_>>(),
+        vec![9, 6, 5, 4, 3, 2, 1]
+    );
+    assert!(!public_only.has_more);
+
+    // Eq → only the given owner's messages (seq 8 is workerA).
+    let worker_only = repo
+        .list_session_history(
+            session_id,
+            MessageOwnerFilter::Eq("workerA".to_string()),
+            None,
+            None,
+            100,
+        )
+        .await
+        .expect("list_session_history Eq");
+    assert_eq!(
+        worker_only
+            .messages
+            .iter()
+            .map(|m| m.session_seq)
+            .collect::<Vec<_>>(),
+        vec![8]
+    );
+
+    // PublicOrOwner("workerA") → 公共(NULL seqs 9,6,5,4,3,2,1) + workerA(seq 8)，DESC；
+    // seq 7(mgr) 被排除。
+    let public_or_wa = repo
+        .list_session_history(
+            session_id,
+            MessageOwnerFilter::PublicOrOwner("workerA".to_string()),
+            None,
+            None,
+            100,
+        )
+        .await
+        .expect("list_session_history PublicOrOwner");
+    assert_eq!(
+        public_or_wa
+            .messages
+            .iter()
+            .map(|m| m.session_seq)
+            .collect::<Vec<_>>(),
+        vec![9, 8, 6, 5, 4, 3, 2, 1]
+    );
+    assert!(public_or_wa.messages.iter().all(|m| {
+        m.owner_bot_id.is_none() || m.owner_bot_id.as_deref() == Some("workerA")
+    }));
+    assert!(
+        !public_or_wa.messages.iter().any(|m| m.session_seq == 7),
+        "mgr-owned seq 7 must NOT appear under PublicOrOwner(workerA)"
+    );
+
+    // visible_from_seq cutoff: only seqs >= 4 survive, DESC.
+    let cutoff = repo
+        .list_session_history(session_id, MessageOwnerFilter::Any, Some(4), None, 100)
+        .await
+        .expect("list_session_history visible_from_seq");
+    assert_eq!(
+        cutoff.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
+        vec![9, 8, 7, 6, 5, 4]
+    );
+
+    // unknown session → empty page, no more.
+    let empty_history = repo
+        .list_session_history("no-such-session", MessageOwnerFilter::Any, None, None, 10)
+        .await
+        .expect("list_session_history unknown session");
+    assert!(empty_history.messages.is_empty());
+    assert!(!empty_history.has_more);
+    assert!(empty_history.next_cursor.is_none());
 }
 
 fn now_ms() -> u64 {

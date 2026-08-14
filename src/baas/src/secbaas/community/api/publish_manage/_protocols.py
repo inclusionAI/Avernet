@@ -10,6 +10,7 @@ from typing import Protocol, runtime_checkable
 
 from ._enums import PublishType
 from ._models import (
+    BotPublishSummary,
     DeviceCallbackRequest,
     DrainResult,
     ForceSuccessResult,
@@ -131,6 +132,12 @@ class PublishService(Protocol):
         tenant: str,
         publish_id: int,
     ) -> str: ...
+
+    async def list_publishes_by_bot_uuid(
+        self,
+        tenant: str,
+        bot_uuid: str,
+    ) -> list[BotPublishSummary]: ...
 
     async def handle_device_callback(
         self,

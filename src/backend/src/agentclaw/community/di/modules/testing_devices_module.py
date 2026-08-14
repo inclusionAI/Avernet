@@ -28,7 +28,7 @@ from injector import Binder, Injector, Module, inject, provider, singleton
 
 from agentclaw.community.api.baas_service import BaasServiceProtocol
 from agentclaw.community.core.bot_management.token_vault import TokenVault
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.bot_management.services.data_init_service import DataInitService
 from agentclaw.community.core.devices.protocols import (
@@ -36,10 +36,8 @@ from agentclaw.community.core.devices.protocols import (
     BotSyncProtocol,
     McpSyncProtocol,
 )
-from agentclaw.community.core.devices.repository.protocol import (
-    DeviceBindingRepository,
-    OssToNasRecordRepository,
-)
+from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.arca_bot_create_baas_rollout_policy import (
     ArcaBotCreateBaasRolloutDecision,
     ArcaBotCreateBaasRolloutPolicy,

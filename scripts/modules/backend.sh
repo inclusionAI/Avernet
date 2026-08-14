@@ -96,14 +96,14 @@ backend_start() {
             AIDESKTOP_ROOT="${LOCAL_AIDESKTOP_DIR}" \
             LOCAL_AIDESKTOP_ROOT="${LOCAL_AIDESKTOP_DIR}" \
             PYTHONPATH="${community_src}:${BACKEND_DIR}:${PYTHONPATH:-}" \
-            nohup "${backend_cmd[@]}" < /dev/null >> "${BACKEND_LOG}" 2>&1 &
+            start_in_detached_session "${backend_cmd[@]}" < /dev/null >> "${BACKEND_LOG}" 2>&1 &
         backend_pid=$!
     else
         SERVER_ENV=dev DEPLOY_PROFILE=corp CHAT_ENGINE="${CHAT_ENGINE}" \
             AIDESKTOP_ROOT="${LOCAL_AIDESKTOP_DIR}" \
             LOCAL_AIDESKTOP_ROOT="${LOCAL_AIDESKTOP_DIR}" \
             PYTHONPATH="${community_src}:${BACKEND_DIR}:${PYTHONPATH:-}" \
-            nohup "${backend_cmd[@]}" < /dev/null >> "${BACKEND_LOG}" 2>&1 &
+            start_in_detached_session "${backend_cmd[@]}" < /dev/null >> "${BACKEND_LOG}" 2>&1 &
         backend_pid=$!
     fi
 
@@ -121,7 +121,9 @@ backend_start() {
 backend_wait_until_ready() {
     local pid="${1:-}"
     local attempt=0
-    local max_attempts="${BACKEND_READY_ATTEMPTS:-20}"
+    # A clean singlebox boot seeds the local Skill catalog before the health
+    # endpoint becomes available, which can exceed ten seconds on macOS.
+    local max_attempts="${BACKEND_READY_ATTEMPTS:-120}"
     while [ "$attempt" -lt "$max_attempts" ]; do
         if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
             log_error "Backend process exited before becoming ready. Last backend log lines:"

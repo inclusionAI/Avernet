@@ -948,6 +948,16 @@ class TestSessionMixin:
         impl, _ = _impl(c)
         assert await impl.sessions_list() == [{"key": "a"}]
 
+    async def test_list_nested_none_sessions_returns_empty(self, caplog):
+        c = _FakeRelayClient()
+        c.set_response("sessions.list", _ok({"sessions": None}))
+        impl, _ = _impl(c)
+
+        with caplog.at_level("WARNING", logger="claude-code-community-port"):
+            assert await impl.sessions_list() == []
+
+        assert "[sessions_list] malformed nested sessions shape type=NoneType" in caplog.messages
+
     async def test_list_non_dict_non_list_returns_empty(self):
         c = _FakeRelayClient()
         c.set_response("sessions.list", _ok("raw"))
@@ -977,6 +987,79 @@ class TestSessionMixin:
         impl, _ = _impl(c)
         out = await impl.sessions_list(agent_id="g1")
         assert [s["key"] for s in out] == ["a", "c"]
+
+    async def test_list_agent_id_filter_uses_canonical_key_without_agent_id(self):
+        target_key = "agent:g1:session:target:user:u1"
+        legacy_key = "user:u1:session:legacy:agent:g1"
+        c = _FakeRelayClient()
+        c.set_response("sessions.list", _ok({"sessions": [
+            {"key": "agent:g2:session:other:user:u1"},
+            {"key": legacy_key},
+            {"key": target_key},
+        ]}))
+        impl, _ = _impl(c)
+
+        out = await impl.sessions_list(
+            agent_id="g1", session_key=target_key, offset=0, limit=1,
+        )
+
+        assert out == [{"key": target_key}]
+        assert await impl.sessions_list(
+            agent_id="g1", session_key=legacy_key, offset=0, limit=1,
+        ) == [{"key": legacy_key}]
+
+    async def test_list_agent_id_filter_skips_malformed_session_keys(self):
+        c = _FakeRelayClient()
+        c.set_response("sessions.list", _ok({"sessions": [
+            {"key": None},
+            {"key": "agent:g1:session:missing-user"},
+            {"key": "user:u1:session:missing-agent"},
+            {"key": "unknown:g1"},
+        ]}))
+        impl, _ = _impl(c)
+
+        assert await impl.sessions_list(agent_id="g1") == []
+
+    async def test_list_session_key_filters_before_pagination(self):
+        c = _FakeRelayClient()
+        c.set_response("sessions.list", _ok({"sessions": [
+            {"key": "first", "agentId": "g1"},
+            {"key": "target", "agentId": "g1"},
+            {"key": "other", "agentId": "g1"},
+        ]}))
+        impl, _ = _impl(c)
+
+        out = await impl.sessions_list(
+            agent_id="g1", session_key="target", offset=0, limit=1,
+        )
+
+        assert out == [{"key": "target", "agentId": "g1"}]
+
+    async def test_list_blank_session_key_preserves_existing_pagination(self):
+        c = _FakeRelayClient()
+        c.set_response("sessions.list", _ok({"sessions": [
+            {"key": "first"}, {"key": "second"},
+        ]}))
+        impl, _ = _impl(c)
+
+        assert await impl.sessions_list(session_key="   ", offset=1, limit=1) == [
+            {"key": "second"},
+        ]
+
+    async def test_list_session_key_matches_raw_key_exactly(self):
+        c = _FakeRelayClient()
+        c.set_response("sessions.list", _ok({"sessions": [
+            {"key": "target"},
+            {"key": " target "},
+            {"key": "prefix-target"},
+            {"key": "target-suffix"},
+        ]}))
+        impl, _ = _impl(c)
+
+        assert await impl.sessions_list(session_key="target") == [{"key": "target"}]
+        assert await impl.sessions_list(session_key=" target ") == [{"key": " target "}]
+        assert await impl.sessions_list(session_key="tar") == []
+        assert await impl.sessions_list(session_key="get") == []
 
     async def test_list_offset_limit(self):
         c = _FakeRelayClient()

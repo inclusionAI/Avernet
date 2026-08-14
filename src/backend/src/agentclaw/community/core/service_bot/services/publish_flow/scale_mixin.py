@@ -1,16 +1,13 @@
 """Service-bot scale operations + device-count resolution, mixed in."""
 from __future__ import annotations
 
-import asyncio
-import time
-from typing import Any, Dict
+from typing import Any
 
-from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishRecord,
+    PublishOperationKind,
     PublishStatus,
 )
-from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishNotFoundError,
     PublishStatusInvalidError,
@@ -31,7 +28,7 @@ DEVICE_COUNT_DEFAULT_PARAM_CODE = "default"
 class ScaleMixin:
     """Service-bot scale operations + device-count resolution, mixed in."""
 
-    def scale_bot(
+    async def scale_bot(
         self,
         publish_id: int,
         operator: str = "system",
@@ -39,7 +36,11 @@ class ScaleMixin:
         """Initiate a scale operation for a published service bot.
 
         Currently only supports service bots in the online stage (SUCCESS / ONLINE_PUB).
-        Obtains bot_uuid from the publish record's online binding, then calls the BaaS scale API.
+        Obtains bot_uuid from the publish record's online binding, then issues the
+        BaaS scale through the operation runner (#197): a crash after the scale call
+        but before the ext write adopts the in-doubt SCALE workflow by query on the
+        next invocation instead of issuing a second scale. The runner supplies the
+        deterministic, correlation-only request id (the old wall-clock id is gone).
         """
         logger.info(
             f"[PublishFlowService.scale_bot] called: publish_id={publish_id}, "
@@ -58,13 +59,13 @@ class ScaleMixin:
         if not bot:
             raise PublishFlowServiceError(f"Bot does not exist: {publish_record.source_bot_id}")
 
-        active_engine = (bot.get("active_engine") or "").strip().lower()
-        if not self._provider_behavior(bot).supports_scale:
+        publish_runtime_kind = self.resolve_publish_runtime_kind(publish_record)
+        if not self._publish_provider_behavior(publish_record).supports_scale:
             return {
                 "success": True,
                 "message": "Service bots on the teclaw engine do not support scaling",
                 "publish_id": publish_id,
-                "engine": active_engine,
+                "engine": publish_runtime_kind,
                 "supported": True,
             }
 
@@ -89,17 +90,51 @@ class ScaleMixin:
 
         bot_uuid = binding.device_id
         target_count = self._resolve_scale_target_count(publish_record)
-        request_id = f"scale_{bot_uuid}_{int(time.time() * 1000)}"
-
-        result = self._baas_service.scale_bot(
-            bot_uuid=bot_uuid,
-            owner_id=operator,
-            request_id=request_id,
-            target_count=target_count,
-            auto_approve_publish=True,
+        image_pin = self.resolve_publish_image_pin(publish_record)
+        pinned_image = image_pin.docker_image
+        scale_config = (
+            {"deploy_config": {"docker_image": pinned_image}}
+            if pinned_image
+            else None
         )
 
-        scale_publish_id = result.get("publish_id")
+        # (#197) Crash-safe issuance via the operation runner (existing bot →
+        # adopt-by-query on resume, never a second scale). The op's deterministic
+        # request id is passed to BaaS as the correlation id.
+        op = self._operation_runner.open_operation(
+            publish_id=publish_id,
+            kind=PublishOperationKind.SCALE,
+            stage=PublishStage.ONLINE,
+            bot_uuid=bot_uuid,
+            operator=operator,
+        )
+
+        async def _issue():
+            scale_kwargs = {
+                "bot_uuid": bot_uuid,
+                "owner_id": operator,
+                "request_id": op.request_id,
+                "target_count": target_count,
+                "auto_approve_publish": True,
+            }
+            if scale_config is not None:
+                scale_kwargs["config"] = scale_config
+            return self._baas_service.scale_bot(
+                **scale_kwargs,
+            )
+
+        op = await self._operation_runner.acquire_workflow(op, _issue)
+        scale_publish_id = op.baas_publish_id
+        if scale_publish_id is None:
+            # Defensive: acquire_workflow guarantees a recorded id for a BaaS op
+            # (issue/adopt), so completing with None would hide an un-recorded
+            # workflow now that complete() also accepts PENDING (#197).
+            raise PublishFlowServiceError(
+                f"scale did not record a BaaS publish_id: publish_id={publish_id}"
+            )
+
+        # Dual-write ext.scale.publish_id (the ledger op is the source of truth;
+        # ext is the read handle sync_scale_progress falls back to).
         if scale_publish_id is not None:
             def _mutate(latest_ext: dict) -> None:
                 latest_ext.setdefault("scale", {})["publish_id"] = scale_publish_id
@@ -109,9 +144,12 @@ class ScaleMixin:
                 mutator=_mutate,
             )
 
+        self._operation_runner.complete_operation(op)
+
         logger.info(
             f"[PublishFlowService.scale_bot] scale submitted: publish_id={publish_id}, "
-            f"bot_uuid={bot_uuid}, target_count={target_count}, result={result}"
+            f"bot_uuid={bot_uuid}, target_count={target_count}, "
+            f"scale_publish_id={scale_publish_id}"
         )
 
         return {
@@ -120,8 +158,8 @@ class ScaleMixin:
             "publish_id": publish_id,
             "bot_uuid": bot_uuid,
             "target_count": target_count,
-            "baas_publish_id": result.get("publish_id"),
-            "data": result,
+            "baas_publish_id": scale_publish_id,
+            "data": {"publish_id": scale_publish_id},
         }
 
     def _resolve_scale_target_count(self, publish_record: BotPublishRecord) -> int:
@@ -203,4 +241,3 @@ class ScaleMixin:
             )
             return None
         return count
-

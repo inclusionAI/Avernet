@@ -53,6 +53,8 @@ class BaasServiceProtocol(Protocol):
         template_uuid: Optional[str] = None,
         stage: str = PublishStage.ONLINE.value,
         version: str = "1",
+        ext_info: Optional[Dict[str, Any]] = None,
+        extra_envs: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Create a BaaS bot. Returns ``{bot_uuid, publish_id}``."""
         ...
@@ -114,13 +116,18 @@ class BaasServiceProtocol(Protocol):
         self,
         bind_id: int,
         port: int = 20003,
-        path: str = "api/openclaw/ws",
+        path: str = "/api/openclaw/ws",
         tenant: str = "",
         device_affinity: Optional[str] = None,
         device_uuid: Optional[str] = None,
         ws_conn_mode: Optional[str] = None,
     ) -> BotWsConnectionInfoResponse:
         """Resolve WebSocket / proxypass info for a device binding.
+
+        ``path`` carries its own leading slash. BaaS appends it to the routing
+        target verbatim — ``build_proxypass_url`` is
+        ``f"{scheme}://{host}/proxypass/{target}{path}"`` — so a value without
+        one yields ``…@0:20003api/openclaw/ws``, a URL no socket can open.
 
         ``device_uuid`` (optional) locks a specific instance in a multi-instance
         service bot; omitted → BaaS auto-selects an active instance.
@@ -233,8 +240,12 @@ class BaasServiceProtocol(Protocol):
         bot_uuid: str,
         *,
         agent_pass_token: str = "",
-    ) -> list[dict[str, Any]]:
-        """按 BaaS bot_uuid 更新 Teclaw PaaS 设备的出站规则。"""
+    ) -> list[dict[str, Any]] | None:
+        """按 BaaS bot_uuid 更新 Teclaw PaaS 设备的出站规则。
+
+        ``None`` = 当前 provider 无出站改写(无需下发);``[]`` = 设备尚未就绪
+        (调用方应重试);非空 = 全部设备写入成功。
+        """
         ...
 
     def get_bot_start_progress(

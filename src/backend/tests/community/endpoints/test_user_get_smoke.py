@@ -35,7 +35,10 @@ from tests.community.framework import (
     method="GET",
     path="/api/v1/user/{user_type}/{user_id}",
     scenario="ok",
-    input=CaseInput(path_params={"user_type": "staff", "user_id": "u_smoke"}),
+    input=CaseInput(
+        path_params={"user_type": "staff", "user_id": "u_smoke"},
+        headers={"x-user-id": "operator-user"},
+    ),
     seed=lambda world: make_staff_user(world, user_id="u_smoke"),
     expect=ExpectSuccess(
         status=200,
@@ -54,7 +57,10 @@ def get_user_ok():
     method="GET",
     path="/api/v1/user/{user_type}/{user_id}",
     scenario="not_found",
-    input=CaseInput(path_params={"user_type": "staff", "user_id": "does_not_exist"}),
+    input=CaseInput(
+        path_params={"user_type": "staff", "user_id": "does_not_exist"},
+        headers={"x-user-id": "operator-user"},
+    ),
     expect=ExpectError(
         status=200,
         json_contains={"success": False, "error_code": 404},

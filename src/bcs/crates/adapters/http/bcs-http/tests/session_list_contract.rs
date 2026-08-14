@@ -94,6 +94,7 @@ async fn participant_scoped_empty_result_does_not_create_legacy_session_when_gro
         meta: None,
         current_msg_seq: 0,
         participant_join_seq: None,
+        collected_at: None,
     });
 
     let response = app
@@ -156,6 +157,7 @@ async fn list_sessions_treats_human_owner_of_participant_bot_as_formal_member() 
         meta: None,
         current_msg_seq: 0,
         participant_join_seq: None,
+        collected_at: None,
     };
     sessions.sessions.lock().await.push(session);
     let _ = registry; // keep registry alive
@@ -438,6 +440,7 @@ impl SessionManagementService for RecordingSessions {
             updated_at: 1,
             completed_at: None,
             meta: cmd.params.meta.clone(),
+            collected_at: None,
         };
         self.sessions.lock().await.push(session.clone());
         self.create_calls.lock().await.push(cmd);

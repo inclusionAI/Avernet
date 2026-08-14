@@ -5,7 +5,7 @@ Covers:
   - Credential extraction: SM4 decryption, env-aware endpoint/image_id, error cases
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -90,6 +90,7 @@ def factory():
             poolab_sandbox_plugin_factory=StubPoolabSandboxPlugin,
         ),
         secret_plugin=MagicMock(),
+        callback_handler=MagicMock(handle=AsyncMock(return_value={"status": "ok"})),
     )
 
 

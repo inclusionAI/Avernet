@@ -77,11 +77,9 @@ from agentclaw.community.core.harness.models import (
     PatchOperation,
     FindingsReport,
 )
-from agentclaw.community.core.harness.repository_protocol import (
-    HarnessPatchRecordRepository,
-    HarnessPatchRepository,
-    HarnessScanRecordRepository,
-)
+from agentclaw.community.core.repository.protocols.harness import HarnessScanRecordRepository
+from agentclaw.community.core.repository.protocols.harness import HarnessPatchRepository
+from agentclaw.community.core.repository.protocols.harness import HarnessPatchRecordRepository
 from agentclaw.community.core.harness.services.content_scanner import ContentScanner
 from agentclaw.community.core.harness.services.patch_engine import PatchEngineError
 from agentclaw.community.api.content_scanner_service import ContentScannerProtocol
@@ -94,7 +92,7 @@ from agentclaw.community.core.bot_collaborator.interceptor import (
     CollaboratorPermissionInterceptor,
     with_interceptors,
 )
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 
 logger = get_logger()
 
@@ -2604,7 +2602,7 @@ async def delete_template(
 # async def llm_chat(body: LLMChatRequest):
 #     """Send a chat prompt to the configured LLM. For testing / dev use.
 #
-#     Returns [llm disabled] when LLM_BASE_URL / LLM_AUTH_TOKEN are missing.
+#     Returns [llm disabled] when the configured base_url / token are missing.
 #     """
 #     try:
 #         llm = get_llm()

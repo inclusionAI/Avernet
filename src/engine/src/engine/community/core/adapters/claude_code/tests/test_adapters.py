@@ -83,11 +83,11 @@ class _FakeSessionPort:
         self._create_response: dict[str, Any] = {}
 
     async def sessions_list(
-        self, token=None, offset=0, limit=50, agent_id=None,
+        self, token=None, offset=0, limit=50, agent_id=None, session_key=None,
     ) -> list[dict]:
         self.calls.append({
             "method": "sessions_list", "token": token, "offset": offset,
-            "limit": limit, "agent_id": agent_id,
+            "limit": limit, "agent_id": agent_id, "session_key": session_key,
         })
         return self._sessions
 
@@ -213,6 +213,26 @@ class TestSessionAdapter:
         assert port.calls[0]["token"] == "tok-1"
         assert port.calls[0]["agent_id"] == "b1"
         assert port.calls[0]["limit"] == 10
+
+    async def test_list_forwards_session_key_to_port(self):
+        port = _FakeSessionPort()
+        port._sessions = [
+            _make_raw_session(key="agent:b1:session:target:user:u1"),
+        ]
+        adapter = ClaudeCodeSessionAdapter(port)
+
+        sessions = await adapter.list(
+            SessionListRequest(
+                session_key="agent:b1:session:target:user:u1",
+                limit=1,
+            ),
+            auth=_auth("token-for-routing"),
+        )
+
+        assert [session.key for session in sessions] == [
+            "agent:b1:session:target:user:u1",
+        ]
+        assert port.calls[0]["session_key"] == "agent:b1:session:target:user:u1"
 
     async def test_list_filters_by_agent_id(self):
         port = _FakeSessionPort()

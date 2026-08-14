@@ -97,7 +97,7 @@ class NoDevicesFoundError(BotServiceError):
 
 class NoActiveDevicesError(BotServiceError):
     error_code = "NO_ACTIVE_DEVICES"
-    http_status = 503
+    http_status = 404
 
     def __init__(self, bot_uuid: str = ""):
         self.bot_uuid = bot_uuid
@@ -133,3 +133,67 @@ class TooManyRequestsError(BotServiceError):
             f"Too many concurrent tasks for bot_id={bot_id}: "
             f"active={active}, limit={limit}"
         )
+
+
+class TransferNotTerminalError(BotServiceError):
+    """Transfer is not in a terminal state.
+
+    Raised when an operation requiring a terminal transfer (DONE/FAILED/CANCELLED)
+    is attempted on a ticket that is still in progress.
+    """
+
+    error_code = "TRANSFER_NOT_TERMINAL"
+    http_status = 409
+
+    def __init__(self, transfer_id: str = "", status: str = ""):
+        self.transfer_id = transfer_id
+        self.status = status
+        super().__init__(f"Transfer {transfer_id} is not in a terminal state: {status}")
+
+
+class StagingObjectNotFoundError(BotServiceError):
+    """Staging object not found at the staging path.
+
+    Raised when complete upload detects no object at the staging path,
+    indicating the caller has not finished uploading.
+    """
+
+    error_code = "STAGING_OBJECT_NOT_FOUND"
+    http_status = 404
+
+    def __init__(self, staging_path: str = ""):
+        self.staging_path = staging_path
+        super().__init__(f"Staging object not found: {staging_path}")
+
+
+class DirectoryNotEmptyError(BotServiceError):
+    """Staging directory is not empty.
+
+    Raised when DELETE staging is called for a prefix that still contains objects.
+
+    TODO(phase-future): Implement directory-not-empty check in delete staging
+    flow to prevent accidental bulk deletion of non-empty prefixes.
+    """
+
+    error_code = "DIRECTORY_NOT_EMPTY"
+    http_status = 409
+
+    def __init__(self, key: str = ""):
+        self.key = key
+        super().__init__(f"Directory not empty: {key}")
+
+
+class TransferStateConflictError(BotServiceError):
+    """Raised when an invalid state transition is attempted on a file transfer.
+
+    This is the API-layer definition imported by adapters (routers).
+    The repo-layer equivalent inherits from this class so that except
+    clauses catching the API class also handle repo-originated instances.
+    """
+
+    error_code = "TRANSFER_STATE_CONFLICT"
+    http_status = 409
+
+    def __init__(self, message: str = ""):
+        self.message = message
+        super().__init__(message)

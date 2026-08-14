@@ -3,8 +3,10 @@ use std::sync::Arc;
 use bcs_db_api::{DbPlugin, DbStatement, DbValue};
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_group_store::{GroupBuilder, MemoryGroupRepo, MySqlGroupStore};
-use bcs_service_api::{GroupKind, GroupStatus, GroupStrategy};
 use bcs_service_api::port::repo::GroupRepoPort;
+use bcs_service_api::{
+    GroupKind, GroupStatus, GroupStrategy, Participant, ParticipantRole, ServiceError,
+};
 
 #[tokio::test]
 async fn memory_group_repo_passes_group_repo_contract() {
@@ -14,16 +16,37 @@ async fn memory_group_repo_passes_group_repo_contract() {
 }
 
 #[tokio::test]
+async fn visibility_guard_rejects_a_protected_bot_without_changing_group_version() {
+    let repo = MemoryGroupRepo::new();
+    let protected = Participant::bot("protected", ParticipantRole::Consultant);
+
+    let mut public = GroupBuilder::new("driver").id("public-group").build();
+    public.visibility = "public".to_string();
+    let original_version = public.version;
+    repo.upsert(public).await.expect("seed public group");
+    let rejected = repo
+        .add_participant_with_visibility_guard("public-group", protected, false)
+        .await;
+    assert!(matches!(
+        rejected,
+        Err(ServiceError::ExistNonPublicBots { .. })
+    ));
+    assert_eq!(
+        repo.get("public-group")
+            .await
+            .expect("public group exists")
+            .version,
+        original_version
+    );
+}
+
+#[tokio::test]
 async fn memory_group_metrics_snapshot_port_contract() {
     let repo = MemoryGroupRepo::new();
-    let mut normal = GroupBuilder::new("driver")
-        .id("metrics-normal")
-        .build();
+    let mut normal = GroupBuilder::new("driver").id("metrics-normal").build();
     normal.group_strategy = GroupStrategy::ManagerWorker;
     normal.service_mode = Some("master_slave".to_string());
-    let mut dm = GroupBuilder::new("driver")
-        .id("metrics-dm")
-        .build();
+    let mut dm = GroupBuilder::new("driver").id("metrics-dm").build();
     dm.group_kind = GroupKind::Dm;
     dm.group_strategy = GroupStrategy::StateMachine;
     dm.status = GroupStatus::Completed;

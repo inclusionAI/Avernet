@@ -101,3 +101,36 @@ def test_noop_returns_safe_zero_values(noop_cls: type) -> None:
         )
         is None
     )
+
+
+class TestNoopClaudeCodeAdapterCreateSession:
+    @pytest.mark.asyncio
+    async def test_session_error_env_var(self, monkeypatch):
+        monkeypatch.setenv("BAAS_STUB_ENGINE_SESSION_ERROR", "1")
+        adapter = NoopClaudeCodeAdapter()
+
+        with pytest.raises(RuntimeError, match="simulated session creation failure"):
+            await adapter.create_adapter_session(
+                session_client=_FakeSessionClient(),
+                session_id=None,
+                user_id="u1",
+                metadata={},
+                bot_id="agent-1",
+                run_id="run-1",
+            )
+
+    @pytest.mark.asyncio
+    async def test_session_slow_env_var(self, monkeypatch):
+        monkeypatch.setenv("BAAS_STUB_ENGINE_SESSION_SLOW", "1")
+        adapter = NoopClaudeCodeAdapter()
+
+        sid, reused = await adapter.create_adapter_session(
+            session_client=_FakeSessionClient(),
+            session_id=None,
+            user_id="u1",
+            metadata={},
+            bot_id="agent-1",
+            run_id="run-1",
+        )
+
+        assert (sid, reused) == ("", True)

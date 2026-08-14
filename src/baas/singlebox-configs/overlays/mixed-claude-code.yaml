@@ -1,0 +1,9 @@
+# Opt-in overlay used only by merchant_hybrid. The ordinary singlebox mode
+# keeps its local bot service and no-op engine adapters unchanged.
+user_config:
+  plugins:
+    bot_service: "real"
+    engine_adapter: "real"
+  bot_chat_log_relation:
+    base_url: "http://127.0.0.1:8888"
+    timeout: 10

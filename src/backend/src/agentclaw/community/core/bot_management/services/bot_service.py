@@ -11,10 +11,23 @@ import shutil
 import string
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional, Dict, Any, List, Tuple, TYPE_CHECKING
 
+from agentclaw.community.core.bot_management.capabilities import (
+    can_join_bcn_as_provider,
+    has_declared_capabilities,
+    is_template_factory_config,
+)
+from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
+    AICODING_ENGINE_TYPE,
+)
+from agentclaw.community.core.bot_management.engines.registry import (
+    normalize_engine_type,
+    resolve_baas_engine_bucket,
+)
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
 from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_service import WorkspaceHostingService
 from agentclaw.community.core.desktop_bot.device_status_client import DeviceStatusClient
@@ -24,9 +37,7 @@ if TYPE_CHECKING:
     from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
     from agentclaw.community.core.bot_management.services.bcn_service import BcnService
     from agentclaw.community.core.bot_management.services.cleanup_service import BotCleanupService
-    from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-        BotPublishRepositoryProtocol,
-    )
+    from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
     from agentclaw.community.core.service_bot.services.bot_publish_service import BotPublishService
     from agentclaw.community.core.service_bot.services.baas_service import BaasService
     from agentclaw.community.core.bot_management.services.teclaw_provision_service import (
@@ -37,6 +48,10 @@ if TYPE_CHECKING:
     )
     from agentclaw.community.core.cron.services.aicoding.cron_auto_setup import CronAutoSetupService
     from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
+    from agentclaw.community.core.common_config.service import CommonConfigService
+    from agentclaw.community.core.bot_app_grant.protocols import (
+        BotAppGrantSweepProtocol,
+    )
     # Type-only: importing ``agentclaw.community.di`` at runtime would form a cycle
     # (di/__init__ -> container -> aicoding_module -> workspace_service ->
     # bot_service). ``BotService`` is provider-constructed, so this
@@ -45,14 +60,15 @@ if TYPE_CHECKING:
     from agentclaw.community.di import config as cfg
     from agentclaw.community.api.policy_service import PolicyServiceProtocol
 from agentclaw.community.core.bot_management.repository.models import BotRestartLockRecord
-from agentclaw.community.core.bot_management.repository.protocol import (
-    BotRepository,
-    BotRestartLockRepositoryProtocol,
+from agentclaw.community.core.repository.protocols.bot import BotRestartLockRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.bot_management.services.default_image_policy_listener import (
+    DEFAULT_IMAGE_POLICY_VALUE,
+    IMAGE_POLICY_ON_ACTIVE_KEY,
 )
-from agentclaw.community.core.bot_management.utils import clear_baas_publish_failure_ext
 from agentclaw.community.core.bot_collaborator.models import CollaboratorRole
-from agentclaw.community.core.bot_collaborator.repository.protocol import CollaboratorRepositoryProtocol
-from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE, SUPPORTED_ENGINE_TYPES, _get_engine_types
+from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
+from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE, _get_engine_types
 from agentclaw.community.core.workspace.path_factory import (
     WorkspacePathFactory,
     get_bot_engine_dir,
@@ -60,6 +76,16 @@ from agentclaw.community.core.workspace.path_factory import (
 )
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.service_bot.types import PublishStage
+from agentclaw.community.core.service_bot.services.arca_image_pin import (
+    apply_default_image_to_ext,
+    clear_image_policy_from_ext,
+    overlay_image_pin_on_template_config,
+    persist_default_image_policy,
+    resolve_current_arca_image,
+)
+from agentclaw.community.utils.avernet_tenant import (
+    bind_current_avernet_tenant,
+)
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.devices.errors import (
     DeviceNotFoundError,
@@ -69,11 +95,14 @@ from agentclaw.community.core.devices.errors import (
     DeviceAllocateError,
 )
 from agentclaw.community.core.devices.models import AllocatedDevice, DeviceAllocationMode, DeviceBindingStatus, OperatorContext, SynlinkMappingInfo
-from agentclaw.community.core.devices.repository.protocol import (
-    DeviceBindingRepository,
-    OssToNasRecordRepository,
+from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
+from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
+from agentclaw.community.core.devices.services.device_service import (
+    ARCA_DEVICE_PROVIDER,
+    BAAS_DEVICE_PROVIDER,
+    DeviceService,
 )
-from agentclaw.community.core.devices.services.device_service import DeviceService
 from agentclaw.community.plugin_api.drm import DRMReaderPlugin
 from agentclaw.community.plugin_api.passport import PassportError
 from agentclaw.community.plugin_api.passport import PassportPlugin
@@ -88,6 +117,11 @@ logger = get_logger()
 # and is reaped on the next restart attempt so a bot is never permanently
 # blocked from restarting.
 RESTART_LOCK_TTL_SECONDS = 120
+
+# Passport refresh is callback-driven and retryable. Keep caller-instance
+# fan-out bounded while still attempting every instance before reporting an
+# aggregate failure.
+_CALLER_REFRESH_MAX_WORKERS = 5
 
 
 def _compose_operator_context(user_id: str, nick_name: str) -> OperatorContext:
@@ -115,6 +149,15 @@ class BotInvalidLifecycleStateError(BotServiceError):
         super().__init__(
             f"Bot {bot_id} cannot be restarted while status is {current_status}"
         )
+
+
+class BotOperationNotAllowedError(BotServiceError):
+    """The operation is not supported for this bot and never will be.
+
+    Distinct from a transient failure: retrying cannot help, so delivery
+    surfaces should report it as a client error rather than a server fault.
+    """
+    pass
 
 
 class BotNotFoundError(BotServiceError):
@@ -155,6 +198,18 @@ class BotNameInvalidError(BotServiceError):
 class BotLimitExceededError(BotServiceError):
     """Owner has reached the maximum number of bots allowed."""
     pass
+
+
+DEFAULT_BOT_TECLAW_NOT_ALLOWED_MESSAGE = (
+    "Teclaw Cloud Bot 不能作为 Default Bot，请先创建其他类型的 Bot。"
+)
+
+
+class DefaultBotTeclawNotAllowedError(BotServiceError):
+    """Default Bot cannot use a Teclaw Cloud engine."""
+
+    def __init__(self) -> None:
+        super().__init__(DEFAULT_BOT_TECLAW_NOT_ALLOWED_MESSAGE)
 
 
 # 仅允许中英文、数字、下划线、中划线、空格；禁止 @ # / 等特殊字符。
@@ -226,32 +281,17 @@ def _copy_tree_fast(src: Path, dst: Path, symlinks: bool = True) -> None:
 
 
 def generate_bot_id(owner_id: str, bot_repository: BotRepository) -> str:
+    """Return a globally-unique bot_id.
+
+    Never returns 'default' — that convention is retired. ``bot_repository`` is
+    retained in the signature for call-site compatibility; id allocation no
+    longer depends on owner history.
     """
-    Generate bot_id based on owner's bot history.
-
-    Rules:
-    - If user has no bot with id "default", return "default"
-    - Otherwise, return "yyyymmdd_{random_8_chars}"
-
-    Args:
-        owner_id: Owner user ID
-        bot_repository: Bot Repository
-
-    Returns:
-        Bot ID as string ("default" or "yyyymmdd_xxxx")
-    """
-    # Check if owner already has a bot with id "default"
-    if not bot_repository.exists_by_owner_and_bot_id(owner_id, "default"):
-        logger.info(f"[bot_service.generate_bot_id] Owner {owner_id} has no 'default' bot, using 'default' as bot_id")
-        return "default"
-
-    # Generate date-based id with random suffix
+    # owner_id retained as the semantic subject (whose bot); not used in id allocation.
+    del bot_repository  # unused; kept for call-site compatibility
     date_part = datetime.now().strftime("%Y%m%d")
-    # Generate 8 random lowercase letters and digits
-    random_part = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
-    bot_id = f"{date_part}_{random_part}"
-    logger.info(f"[bot_service.generate_bot_id] Owner {owner_id} already has 'default' bot, using generated bot_id: {bot_id}")
-    return bot_id
+    random_part = "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
+    return f"{date_part}_{random_part}"
 
 
 class BotService:
@@ -270,6 +310,7 @@ class BotService:
         oss_record_repo: "OssToNasRecordRepository",
         bot_publish_service_provider: "Callable[[], BotPublishService]",
         device_service_provider: "Callable[[], DeviceService]",
+        bot_app_grant_service_provider: "Callable[[], BotAppGrantSweepProtocol]",
         path_factory: WorkspacePathFactory,
         template_service: TemplateService,
         # Optional: DIMA (applicationCoding) hosting is corp-only. Community does
@@ -287,6 +328,7 @@ class BotService:
         baas_template_resolver: "BaasTemplateResolverProtocol | None" = None,
         baas_service_provider: "Callable[[], BaasService] | None" = None,
         task_queue_service: "TaskQueueService | None" = None,
+        common_config_service: "CommonConfigService | None" = None,
     ) -> None:
         self._repository = repository
         self._allocation_config = allocation_config
@@ -309,6 +351,19 @@ class BotService:
         # the cycle never closes during graph build.
         self._bot_publish_provider = bot_publish_service_provider
         self._device_service_provider = device_service_provider
+        # Typed against a **core-level protocol**, not the concrete service:
+        # selecting an implementation is the composition root's job. Not the
+        # Service API Protocol either — core may not import ``api/``, which the
+        # architecture suite enforces — hence
+        # ``core/bot_app_grant/protocols.py``, the same shape
+        # ``core/bot_collaborator`` uses for the same pair of rules.
+        #
+        # Required, not optional: deleting a bot has to withdraw the
+        # authorizations standing against it, and a BotService that could not
+        # would delete bots while leaving applications able to reach them.
+        # There is no "grants not configured" state worth modelling — the
+        # alternative to a provider here is a silent security hole.
+        self._bot_app_grant_provider = bot_app_grant_service_provider
         self._path_factory = path_factory
         self._template_service = template_service
         self._workspace_hosting_service = workspace_hosting_service
@@ -334,6 +389,204 @@ class BotService:
         self._policy_service = policy_service
         self._baas_template_resolver = baas_template_resolver
         self._task_queue_service = task_queue_service
+        self._common_config_service = common_config_service
+
+    def _service_bot_image_policy_enabled(self) -> bool:
+        """Whether draft create/restart should opt into image policy."""
+        return (
+            resolve_current_arca_image(
+                getattr(self, "_common_config_service", None),
+                env=get_current_env(),
+            )
+            is not None
+        )
+
+    def _mark_service_bot_default_image(
+        self,
+        bot: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Apply the draft ARCA image policy only when fully configured."""
+        if bot.get("bot_type") != "service" or self.is_teclaw_bot(
+            bot.get("active_engine")
+        ):
+            return bot
+        updated_bot = dict(bot)
+        if self._service_bot_image_policy_enabled():
+            updated_bot["ext"] = apply_default_image_to_ext(bot.get("ext"))
+        else:
+            updated_bot["ext"] = clear_image_policy_from_ext(bot.get("ext"))
+        return updated_bot
+
+    def _persist_service_bot_default_image(
+        self,
+        bot: Dict[str, Any],
+        *,
+        user_id: str,
+    ) -> None:
+        """Persist an accepted draft restart's default policy to Bot and Draft."""
+        if (
+            bot.get("bot_type") != "service"
+            or self.is_teclaw_bot(bot.get("active_engine"))
+            or not self._service_bot_image_policy_enabled()
+        ):
+            return
+
+        persist_default_image_policy(
+            bot_repository=self._repository,
+            publish_repository=self._bot_publish_repo,
+            bot_id=str(bot["bot_id"]),
+            owner_id=user_id,
+            env=get_current_env(),
+            common_config_service=self._common_config_service,
+        )
+
+    def _build_engine_extra_envs(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        active_engine: "str | None",
+        bot_type: str,
+        template_type: "str | None",
+        template_config: "Optional[Dict[str, Any]]",
+        log_context: str,
+    ) -> "Optional[Dict[str, Any]]":
+        """Build engine-specific extra_envs via the provisioning strategy.
+
+        Centralizes the create / restart / start provisioning so each call site
+        only supplies the metadata it actually has.  Fails soft: any strategy
+        error is logged and treated as "no extra envs" so device allocation is
+        never blocked by the engine layer.  Logging is engine-agnostic (logs the
+        whole ``extra_envs`` dict) so new engine strategies are picked up without
+        touching bot_service.
+        """
+        try:
+            from agentclaw.community.core.bot_management.engines import (
+                resolve_provisioning,
+            )
+
+            ctx, strategy = resolve_provisioning(
+                bot_id=bot_id,
+                owner_id=owner_id,
+                active_engine=active_engine,
+                bot_type=bot_type,
+                template_type=template_type,
+                template_config=template_config,
+            )
+            extra_envs = strategy.build_extra_envs(ctx)
+            if extra_envs:
+                logger.info(
+                    "[%s] Setting engine extra_envs for bot %s: %s",
+                    log_context,
+                    bot_id,
+                    extra_envs,
+                )
+            return extra_envs
+        except Exception as e:
+            logger.warning(
+                "[%s] Failed to build engine extra_envs for bot %s: %s",
+                log_context,
+                bot_id,
+                e,
+            )
+            return None
+
+    def _extract_engine_runtime_token(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        active_engine: "str | None",
+        bot_type: str,
+        template_type: "str | None",
+        template_config: "Optional[Dict[str, Any]]",
+        log_context: str,
+    ) -> "Optional[str]":
+        """Resolve the engine runtime token (symmetric to ``_build_engine_extra_envs``).
+
+        Used by the update_bot token-refresh path so it shares the same
+        ``resolve_provisioning`` entry point instead of rebuilding context +
+        strategy inline.  Fails soft (returns None).
+        """
+        try:
+            from agentclaw.community.core.bot_management.engines import (
+                resolve_provisioning,
+            )
+
+            ctx, strategy = resolve_provisioning(
+                bot_id=bot_id,
+                owner_id=owner_id,
+                active_engine=active_engine,
+                bot_type=bot_type,
+                template_type=template_type,
+                template_config=template_config,
+            )
+            token = strategy.extract_runtime_token(ctx)
+            if token:
+                logger.info(
+                    "[%s] Resolved engine runtime token for bot %s",
+                    log_context,
+                    bot_id,
+                )
+            return token
+        except Exception as e:
+            logger.warning(
+                "[%s] Failed to extract engine runtime token for bot %s: %s",
+                log_context,
+                bot_id,
+                e,
+            )
+            return None
+
+    @staticmethod
+    def _should_trigger_memory_initialization(
+        *,
+        active_engine: "str | None",
+        template_type: "str | None",
+        template_config: "Optional[Dict[str, Any]]",
+        old_template_config: "Optional[Dict[str, Any]]" = None,
+        on_create: bool = False,
+    ) -> bool:
+        """Whether to reuse the AppCoding memory/Wiki initialization path.
+
+        Template-factory bots consume business Wiki / RepoWiki through the same
+        AppCoding runtime pipeline, but the source of truth is AC resolved
+        ``template_config``.  Keep applicationCoding legacy behavior on create,
+        and let template-factory bots trigger only when their template snapshot
+        actually declares repo/wiki sources.
+        """
+        if active_engine != "claude_code" or not isinstance(template_config, dict):
+            return False
+
+        # Legacy applicationCoding keeps the original always-init-on-create
+        # behavior.  Template-factory bots (normalCC / architect / user-created)
+        # are detected from the resolved template snapshot instead of a backend
+        # template_type whitelist, and only initialize memory when repo/wiki
+        # sources are declared.
+        is_legacy_application_coding = template_type == "applicationCoding"
+        is_template_factory_bot = is_template_factory_config(template_config)
+        if not is_legacy_application_coding and not is_template_factory_bot:
+            return False
+
+        try:
+            from agentclaw.community.core.bot_management.utils import (
+                memory_sources_changed,
+            )
+
+            empty_config: Dict[str, Any] = {}
+            has_sources = memory_sources_changed(empty_config, template_config)
+            if on_create:
+                return is_legacy_application_coding or has_sources
+            return memory_sources_changed(old_template_config or empty_config, template_config)
+        except Exception as e:
+            logger.warning(
+                "[bot_service.memory_init] source detection failed: "
+                "template_type=%s active_engine=%s error=%s",
+                template_type,
+                active_engine,
+                e,
+            )
+            return template_type == "applicationCoding" and on_create
 
     def _attach_template_uid_context(
         self,
@@ -435,6 +688,82 @@ class BotService:
         )
         return template.template_uuid
 
+    def _resolve_restart_target_provider(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        bot: dict[str, Any],
+        source_provider: str | None,
+    ) -> str | None:
+        """Resolve an opt-in provider migration for an existing ARCA bot.
+
+        The database-backed template override is a positive-match switch. Any
+        absent, invalid, unmatched, or unreadable configuration preserves the
+        source provider and therefore the pre-existing restart behavior.
+        """
+        if source_provider != ARCA_DEVICE_PROVIDER:
+            return source_provider
+
+        active_engine = normalize_engine_type(bot.get("active_engine"), default="")
+        template_type = bot.get("template_type")
+        engine_bucket = resolve_baas_engine_bucket(
+            engine_type=active_engine,
+            template_type=template_type,
+        )
+        if active_engine not in {"openclaw", "hermes", "claude_code"}:
+            return source_provider
+        if engine_bucket == AICODING_ENGINE_TYPE:
+            return source_provider
+
+        template_resolver = getattr(self, "_baas_template_resolver", None)
+        if template_resolver is None:
+            return source_provider
+
+        owner_id = str(bot.get("owner_id") or user_id)
+        try:
+            override_uuid = template_resolver.resolve_template_override(
+                env=get_current_env(),
+                user_id=owner_id,
+                bot_type=str(bot.get("bot_type") or "personal"),
+            )
+        except Exception as e:
+            logger.warning(
+                "[bot_service.restart_provider] template override lookup failed; "
+                "preserving source provider: bot_id=%s owner_id=%s "
+                "source_provider=%s error=%s",
+                bot_id,
+                owner_id,
+                source_provider,
+                e,
+            )
+            return source_provider
+
+        if override_uuid is None:
+            logger.info(
+                "[bot_service.restart_provider] no template override hit; "
+                "preserving source provider: bot_id=%s owner_id=%s "
+                "source_provider=%s",
+                bot_id,
+                owner_id,
+                source_provider,
+            )
+            return source_provider
+
+        logger.info(
+            "[bot_service.restart_provider] template override hit; migrating provider: "
+            "bot_id=%s owner_id=%s source_provider=%s target_provider=%s "
+            "template_uuid=%s active_engine=%s template_type=%s",
+            bot_id,
+            owner_id,
+            source_provider,
+            BAAS_DEVICE_PROVIDER,
+            override_uuid,
+            active_engine,
+            template_type,
+        )
+        return BAAS_DEVICE_PROVIDER
+
     def _get_device_binding_repo(self):
         """Get the DeviceBindingRepository (injected via __init__)."""
         return self._device_binding_repo
@@ -459,6 +788,48 @@ class BotService:
                 bot_id, owner_id, e,
             )
             return None
+
+    def _list_bot_members(
+        self, bot_id: str, owner_id: Optional[str]
+    ) -> List[Dict[str, Any]]:
+        """List a bot's members (collaborators) for the appcoding-bots response.
+
+        Reads the ``ac_bot_collaborator`` table (added admin/member
+        collaborators) scoped to the current env. The bot owner is intentionally
+        not synthesized as a member here: owner identity lives on the bot record
+        itself (``owner_id`` / ``owner_name``); callers wanting the full roster
+        should combine that with this list.
+
+        Returns an empty list when there are no collaborators, when ``owner_id``
+        is missing, or when the lookup itself fails — member enrichment must
+        never break the coding-bots listing.
+
+        Args:
+            bot_id: Bot ID of the coding bot.
+            owner_id: Bot owner's work number (filters the collaborator index).
+
+        Returns:
+            A list of member dicts with ``user_id`` and ``user_name`` only
+            (operator_id / role / timestamps are not exposed on this public
+            surface).
+        """
+        if not owner_id:
+            return []
+        try:
+            env = get_current_env()
+            collaborators = self._collaborator_repo.list_by_bot(
+                bot_id=bot_id, owner_id=owner_id, env=env,
+            )
+            return [
+                {"user_id": c.user_id, "user_name": c.user_name}
+                for c in collaborators
+            ]
+        except Exception as e:
+            logger.warning(
+                "[bot_service._list_bot_members] Failed: bot_id=%s, owner_id=%s, error=%s",
+                bot_id, owner_id, e,
+            )
+            return []
 
     def _try_acquire_restart_lock(
         self, env: str, entity_id: str, bot_id: str, holder_user_id: str
@@ -587,17 +958,15 @@ class BotService:
             logger.error(f"[get_bot_by_ip_and_user] Error querying bot by IP {ip} and user {user_id}: {e}")
             return None
 
-    def _is_first_bot(self, user_id: str) -> bool:
-        """
-        Check if this is the user's first bot (user has no bot with id "default").
+    def is_first_bot(self, user_id: str) -> bool:
+        """First bot iff the owner has zero bots (current env; tenant enforced by guard)."""
+        return self._repository.count_by_owner(user_id) == 0
 
-        Args:
-            user_id: User ID to check
-
-        Returns:
-            True if user has no "default" bot, False otherwise
-        """
-        return not self._repository.exists_by_owner_and_bot_id(user_id, "default")
+    def is_first_personal_bot(self, user_id: str) -> bool:
+        """Return whether the owner has no live personal Bot in the current scope."""
+        return not self._repository.exists_by_owner_and_bot_type(
+            user_id, "personal"
+        )
 
     def _check_bot_count_limit(self, owner_id: str) -> None:
         """Enforce the per-owner bot count limit.
@@ -615,7 +984,7 @@ class BotService:
             BotLimitExceededError: 已达到该用户允许的最大 Bot 数量
         """
         # 1. 尝试从 policy 表读取用户专属上限
-        max_bots = self._get_bots_ceiling_for_owner(owner_id)
+        max_bots = self.get_bots_ceiling_for_owner(owner_id)
 
         if max_bots <= 0:
             return
@@ -640,8 +1009,15 @@ class BotService:
                 f"已达到 Bot 数量上限 ({max_bots})，当前 {current} 个。请删除部分 Bot 后再创建新的。"
             )
 
-    def _get_bots_ceiling_for_owner(self, owner_id: str) -> int:
+    def get_bots_ceiling_for_owner(self, owner_id: str) -> int:
         """获取用户的 BOT 数量上限，优先从 policy 表读取。
+
+        Public because it is the single definition of the ceiling: creation
+        enforces it here, and a surface that *reports* the quota must resolve it
+        the same way. Reading ``PolicyService.get_bots_ceiling`` directly instead
+        picks up that method's own hardcoded default (5) rather than the
+        configured allocation limit, so the advertised and enforced ceilings can
+        disagree whenever ``max_devices_per_entity`` is not 5.
 
         Priority:
         1. PolicyService.get_bots_ceiling (per-user, from DB)
@@ -663,7 +1039,7 @@ class BotService:
             )
         except Exception as e:
             logger.warning(
-                "[bot_service._get_bots_ceiling_for_owner] "
+                "[bot_service.get_bots_ceiling_for_owner] "
                 "policy_service.get_bots_ceiling failed for %s: %s",
                 owner_id, e,
             )
@@ -672,6 +1048,9 @@ class BotService:
     def check_create_bot_preflight(
         self,
         user_id: str,
+        bot_id: Optional[str] = None,
+        engine_type: Optional[str] = None,
+        bot_name: Optional[str] = None,
     ) -> None:
         """Validate whether a bot creation request can start external auth.
 
@@ -679,8 +1058,25 @@ class BotService:
         the bot is persisted later from /auth-status. Quota checks that can be
         evaluated before Passport should run here so users are not sent through
         authorization only to fail during the second phase.
+
+        ``bot_name`` (when known) is checked for uniqueness here for the same
+        reason: ``create_bot`` rejects a duplicate, but only *after* the Passport
+        application has already happened, leaving an identity behind with no bot
+        and repeating that external side effect on every retry. The service-level
+        check stays where it is — this one narrows the window, it does not close
+        it, since another create can take the name in between.
         """
         self._check_bot_count_limit(user_id)
+        if bot_name and bot_name.strip():
+            if self._repository.get_by_bot_name(bot_name.strip()):
+                raise BotNameExistsError(f"Bot name '{bot_name}' already exists")
+        if bot_id is not None and engine_type is not None:
+            self._validate_default_bot_engine(bot_id, engine_type)
+
+    def _validate_default_bot_engine(self, bot_id: str, engine_type: str) -> None:
+        """Reject Teclaw Cloud as the engine of the reserved Default Bot."""
+        if bot_id == "default" and self.is_teclaw_bot(engine_type):
+            raise DefaultBotTeclawNotAllowedError()
 
     def _check_device_limit(self, entity_id: str, entity_type: str, owner_id: str) -> None:
         """
@@ -689,7 +1085,7 @@ class BotService:
         Counts devices that are actively bound to user's bots (ACTIVE/PENDING/FAILED),
         regardless of whether the bot is ACTIVE, PENDING, or FAILED.
 
-        上限来源为 per-user ceiling（``_get_bots_ceiling_for_owner``，优先读
+        上限来源为 per-user ceiling（``get_bots_ceiling_for_owner``，优先读
         ``ac_access_control_policy.policy.bots_ceiling``，fallback 到
         ``device_allocation.max_devices_per_entity``），与 ``_check_bot_count_limit``
         同源，确保动态上限对绑定了 device 的 bot 同样生效。
@@ -704,7 +1100,7 @@ class BotService:
         """
         try:
             mode_str = self._allocation_config.mode
-            max_devices = self._get_bots_ceiling_for_owner(owner_id)
+            max_devices = self.get_bots_ceiling_for_owner(owner_id)
 
             # ceiling 无效（<=0）时放行，与 _check_bot_count_limit 语义一致，
             # 避免 active_device_count >= 0 恒真导致第一个 bot 就被拦。
@@ -765,6 +1161,7 @@ class BotService:
                         DeviceBindingStatus.ACTIVE.value,
                         DeviceBindingStatus.PENDING.value,
                         DeviceBindingStatus.FAILED.value,
+                        DeviceBindingStatus.STOPPED.value,
                     ]:
                         active_device_count += 1
                         bot_info = bot_binding_map.get(binding_id, {})
@@ -821,7 +1218,7 @@ class BotService:
             return bot_name.strip()
 
         # Check if this is the first bot for the user
-        is_first = self._is_first_bot(user_id)
+        is_first = self.is_first_bot(user_id)
 
         if is_first:
             # First bot: use nick_name (花名) as default
@@ -899,21 +1296,55 @@ class BotService:
             # 未传入 bot_id，生成新的
             bot_id = generate_bot_id(user_id, self._repository)
 
-        # ===== 数量上限校验：避免单用户无限创建 Bot =====
-        # 复用 device_allocation.max_devices_per_entity 作为每用户 Bot 上限
-        # （语义同源：每用户最多 N 个 Bot/设备）。
-        self._check_bot_count_limit(user_id)
+        # Resolve active engine before creation preflight validation.
+        resolved_active_engine = engine_type or DEFAULT_ENGINE_TYPE
+
+        # ===== 创建前置校验：数量上限 + Default Bot 引擎约束 =====
+        self.check_create_bot_preflight(
+            user_id=user_id,
+            bot_id=bot_id,
+            engine_type=resolved_active_engine,
+        )
 
         # Resolve entity info
         resolved_entity_id = entity_id or f"staff_{user_id}"
         resolved_entity_type = entity_type or "staff"
 
-        # Always use backend configured engine types, ignore frontend input
-        resolved_engine_types = SUPPORTED_ENGINE_TYPES
+        # Always use backend configured engine types, ignore frontend input.
+        # _get_engine_types() (ENGINE_TYPES env, falling back to the static list)
+        # is what validation and switch_engine both use; persisting the static
+        # list instead meant a bot created on a deployment-enabled engine (e.g.
+        # teclaw) stored an enabled-engine list that omitted its own active
+        # engine — so switch_engine would refuse to switch back to it.
+        resolved_engine_types = _get_engine_types()
 
-        # Resolve active engine: use frontend specified, otherwise use default
-        resolved_active_engine = engine_type or DEFAULT_ENGINE_TYPE
+        # A bot's active engine must be a member of its own enabled-engine list —
+        # switch_engine checks that list, so a row violating this can never
+        # return to the engine it was created on. The invariant held by accident
+        # while the static list was persisted (it contains DEFAULT_ENGINE_TYPE);
+        # persisting the configured registry broke it wherever the two differ.
+        #
+        # Guaranteed by construction rather than by rejecting: teclaw is a
+        # supported engine that is absent from the default registry, so
+        # rejecting would break teclaw creation on any deployment that does not
+        # set ENGINE_TYPES. Whether an engine outside the configured registry
+        # should be creatable at all is a separate question, decided by the
+        # callers that validate it — not something to enforce here by writing a
+        # row that contradicts itself.
+        if resolved_active_engine not in resolved_engine_types:
+            resolved_engine_types = [*resolved_engine_types, resolved_active_engine]
         resolved_bot_type = bot_type or "personal"
+
+        if resolved_bot_type == "service" and not self.is_teclaw_bot(
+            resolved_active_engine
+        ):
+            # The CommonConfig record is the master switch. Missing, disabled,
+            # or lacking a valid image preserves the pre-feature behavior and
+            # removes any caller-supplied image-policy fields.
+            if self._service_bot_image_policy_enabled():
+                ext = apply_default_image_to_ext(ext)
+            else:
+                ext = clear_image_policy_from_ext(ext)
 
         # Resolve bot name according to naming rules
         resolved_bot_name = self._resolve_bot_name(bot_name, bot_id, user_id, nick_name)
@@ -984,6 +1415,7 @@ class BotService:
                         bot_id=bot_id,
                         template_config=template_config,
                         template_type=template_type,
+                        active_engine=resolved_active_engine,
                     )
                     logger.info(f"[bot_service.create_bot] Template created for bot {bot_id}")
                 except Exception as e:
@@ -1015,16 +1447,12 @@ class BotService:
                         f"[bot_service.create_bot] Bot {bot_id} is teclaw, provisioning "
                         f"container via BaaS (skipping DeviceService.apply_device)"
                     )
-                    agent_pass_token = ""
-                    owner_id = bot_record["entity_id"]
-                    try:
-                        agent_pass_token = self._passport_plugin.query_token(bot_id, owner_id) or ""
-                    except Exception as e:
-                        logger.warning(f"[bot_service.create_bot] Teclaw passport token query failed: bot_id={bot_id}, owner_id={owner_id}, error={e}")
+                    # The passport token is fetched and pushed by the create
+                    # publish poll task once BaaS reports the container started —
+                    # the PaaS device it is written onto does not exist yet here.
                     provision = teclaw_provision.provision(
                         bot=bot_record,
                         owner_id=user_id,
-                        agent_pass_token=agent_pass_token,
                     )
                     binding_id = provision.binding_id
                     device_id = provision.device_id
@@ -1054,8 +1482,7 @@ class BotService:
                     except Exception as e:
                         logger.warning(f"[bot_service.create_bot] Failed to get symlink_mappings: {e}")
 
-                    # AIX coding bot 场景：传入额外的环境变量
-                    # applicationCoding / personalCoding 均触发；BOT_TYPE 始终随 template_type 注入
+                    # Engine strategy 场景：按具体引擎策略传入额外环境变量。
                     extra_envs = None
                     # 路由到具体 provider 前，先把 template_uid 上下文带给 device 层。
                     # 解析失败先记下来；只有后续真正走 BaaS 时才需要 fail-fast。
@@ -1067,17 +1494,19 @@ class BotService:
                         template_type=template_type,
                         template_config=template_config,
                     )
-                    if resolved_active_engine in ("claude_code", "aicoding") and template_type in ("applicationCoding", "personalCoding"):
-                        from agentclaw.community.core.bot_management.utils import build_aix_extra_envs
-
-                        extra_envs = build_aix_extra_envs(template_config, template_type=template_type)
-                        if extra_envs:
-                            logger.info(
-                                f"[bot_service.create_bot] Setting AIX extra_envs for coding bot {bot_id}: "
-                                f"bot_type={extra_envs.get('BOT_TYPE')}, "
-                                f"devflow={extra_envs.get('AIX_DEVFLOW_INFO', '')}, "
-                                f"repos={extra_envs.get('GIT_ADDRESSES', '[]')}"
-                            )
+                    device_template_config = overlay_image_pin_on_template_config(
+                        device_template_config,
+                        bot_record.get("ext"),
+                    )
+                    extra_envs = self._build_engine_extra_envs(
+                        bot_id=str(bot_id),
+                        owner_id=user_id,
+                        active_engine=resolved_active_engine,
+                        bot_type=resolved_bot_type,
+                        template_type=template_type,
+                        template_config=template_config,
+                        log_context="bot_service.create_bot",
+                    )
 
                     device_result = service.apply_device(
                         apply_reason=f"Create bot: {resolved_bot_name or bot_id}",
@@ -1133,6 +1562,7 @@ class BotService:
                     active_engine=resolved_active_engine,
                     bot_type=resolved_bot_type,
                     template_type=template_type,
+                    template_config=template_config,
                 )
                 if should_register_bcn:
                     logger.info(
@@ -1203,11 +1633,18 @@ class BotService:
                 if template_config and template_type:
                     bot_record["template_config"] = template_config
 
-                # 对于 applicationCoding 类型且使用 claude_code 引擎的 bot，触发 memory 初始化
-                if template_type == "applicationCoding" and resolved_active_engine == "claude_code":
+                # applicationCoding 保留原 memory 初始化；新通用 CC / 架构师 Bot
+                # 的业务知识库、Wiki、RepoWiki 复用同一链路，但从
+                # template_config resolved 快照检测配置来源。
+                if self._should_trigger_memory_initialization(
+                    active_engine=resolved_active_engine,
+                    template_type=template_type,
+                    template_config=template_config,
+                    on_create=True,
+                ):
                     logger.info(
                         f"[bot_service.create_bot] Triggering memory initialization for "
-                        f"applicationCoding bot {bot_id}"
+                        f"template-backed bot {bot_id}, template_type={template_type}"
                     )
                     from agentclaw.community.core.bot_management.utils import trigger_memory_initialization
 
@@ -1258,6 +1695,7 @@ class BotService:
         force_nas: bool = False,
         device_provider: Optional[str] = None,
         restart_lock_key: Optional[Tuple[str, str, str, str]] = None,
+        bot_ext_override: Optional[Dict[str, Any]] = None,
     ):
         """
         Allocate device asynchronously in background thread.
@@ -1342,6 +1780,8 @@ class BotService:
                 # restart / start-bot paths use the saved overrides (image,
                 # command, envs, resource_spec) instead of losing them.
                 bot_template_type = bot_record.get("template_type") if bot_record else None
+                # Get bot_type from bot_record before building provisioning context.
+                resolved_bot_type = bot_record.get("bot_type", "") if bot_record else ""
                 resolved_template_config = None
                 try:
                     resolved_template_config = self._template_service.get_template_config(bot_id)
@@ -1351,35 +1791,21 @@ class BotService:
                         bot_id, e,
                     )
 
-                # AIX coding bot 重启场景：传入额外的环境变量
-                # applicationCoding / personalCoding 均触发；BOT_TYPE 始终随 template_type 注入
-                # engine 口径与 create_bot（:997）对齐：claude_code + aicoding，
-                # 否则 aicoding bot 重启会丢失 extra_envs（含 RELAY_DEFAULT_MODEL）。
-                extra_envs = None
-                if active_engine in ("claude_code", "aicoding") and bot_template_type in ("applicationCoding", "personalCoding"):
-                    try:
-                        from agentclaw.community.core.bot_management.utils import build_aix_extra_envs
-
-                        extra_envs = build_aix_extra_envs(
-                            resolved_template_config,
-                            template_type=bot_template_type,
-                        )
-                        if extra_envs:
-                            logger.info(
-                                f"[bot_service._allocate_device_async] Setting AIX extra_envs for restart bot {bot_id}: "
-                                f"bot_type={extra_envs.get('BOT_TYPE')}, "
-                                f"devflow={extra_envs.get('AIX_DEVFLOW_INFO', '')}, "
-                                f"repos={extra_envs.get('GIT_ADDRESSES', '[]')}"
-                            )
-                    except Exception as e:
-                        logger.warning(f"[bot_service._allocate_device_async] Failed to build AIX extra_envs for bot {bot_id}: {e}")
+                # Engine strategy 重启场景：传入额外的环境变量。
+                extra_envs = self._build_engine_extra_envs(
+                    bot_id=str(bot_id),
+                    owner_id=owner_id or user_id,
+                    active_engine=active_engine,
+                    bot_type=resolved_bot_type,
+                    template_type=bot_template_type,
+                    template_config=resolved_template_config,
+                    log_context="bot_service._allocate_device_async",
+                )
 
                 # Call device service to allocate device
                 # This creates a record in ac_entity_device_binding table
                 resolved_owner_id = owner_id or user_id
                 admins = self._query_admin_worknos(bot_id=str(bot_id), owner_id=resolved_owner_id)
-                # Get bot_type from bot_record (already fetched above)
-                resolved_bot_type = bot_record.get("bot_type", "") if bot_record else ""
                 # 路由到具体 provider 前，先把 template_uid 上下文带给 device 层。
                 # 解析失败先记下来；只有后续真正走 BaaS 时才需要 fail-fast。
                 device_template_config = self._attach_template_uid_context(
@@ -1389,6 +1815,15 @@ class BotService:
                     engine_type=active_engine,
                     template_type=bot_template_type,
                     template_config=resolved_template_config,
+                )
+                effective_bot_ext = (
+                    bot_ext_override
+                    if bot_ext_override is not None
+                    else (bot_record.get("ext") if bot_record else None)
+                )
+                device_template_config = overlay_image_pin_on_template_config(
+                    device_template_config,
+                    effective_bot_ext,
                 )
                 logger.info(
                     f"[bot_service._allocate_device_async] allocation requested: "
@@ -1418,6 +1853,10 @@ class BotService:
                 # can still apply the create-time rollout policy.
                 if device_provider is not None:
                     apply_kwargs["device_provider"] = device_provider
+                if bot_ext_override is not None:
+                    apply_kwargs["device_props_extra"] = {
+                        IMAGE_POLICY_ON_ACTIVE_KEY: DEFAULT_IMAGE_POLICY_VALUE
+                    }
 
                 device_result = service.apply_device(**apply_kwargs)
 
@@ -1446,14 +1885,23 @@ class BotService:
 
                 # Update bot with binding_id, device_id and final status
                 # Use update_by_owner to ensure we only update the owner's bot
-                updated = self._repository.update_by_owner(bot_id, user_id, {
+                bot_update = {
                     "binding_id": binding_id,
                     "device_id": device_id,
-                    "status": final_status
-                })
+                    "status": final_status,
+                }
+                updated = self._repository.update_by_owner(bot_id, user_id, bot_update)
                 if not updated:
                     logger.error(f"[bot_service._allocate_device_async] Failed to update bot {bot_id} for user {user_id}: bot not found or not owner")
                     return
+                if (
+                    bot_ext_override is not None
+                    and device_status == DeviceBindingStatus.ACTIVE.value
+                ):
+                    self._persist_service_bot_default_image(
+                        {**(bot_record or {}), "bot_id": bot_id, "ext": bot_ext_override},
+                        user_id=user_id,
+                    )
 
                 logger.info(f"[bot_service._allocate_device_async] Bot {bot_id} updated with binding_id={binding_id}, status={final_status}")
 
@@ -1489,7 +1937,9 @@ class BotService:
                         )
 
         # Start device allocation in background thread
-        thread = threading.Thread(target=do_allocate, daemon=True)
+        thread = threading.Thread(
+            target=bind_current_avernet_tenant(do_allocate), daemon=True
+        )
         thread.start()
         logger.info(f"[bot_service._allocate_device_async] Started background thread for bot {bot_id} device allocation")
 
@@ -1578,6 +2028,16 @@ class BotService:
                     ext = template_ext_map.get(bot_id)
                     if ext is not None:
                         bot["template_config"] = ext
+                    # Attach bot member (collaborator) information. The owner
+                    # is intentionally NOT included here: it lives on the bot
+                    # record itself (owner_id / owner_name); only added admin/
+                    # member collaborators are returned. Failure is non-fatal:
+                    # an empty list is attached so enrichment never breaks the
+                    # coding-bots list.
+                    bot["members"] = self._list_bot_members(
+                        bot_id=bot_id,
+                        owner_id=bot.get("owner_id"),
+                    )
                     coding_bots.append(bot)
             except Exception as e:
                 logger.warning(
@@ -1587,6 +2047,47 @@ class BotService:
                 continue
 
         return coding_bots
+
+    def _attach_template_configs_to_bots(self, items: List[Dict[str, Any]]) -> None:
+        """Attach ac_templates.ext as template_config for bot list items in batch.
+
+        create/get/update paths store template details in ac_templates.ext while
+        list repository methods read only ac_bots fields.  Keep list APIs
+        consistent with get_bot() by enriching template-backed bots here.
+        Best-effort: template lookup failure must not break bot lists.
+        """
+        if not items:
+            return
+
+        bot_ids = list(dict.fromkeys(
+            str(bot.get("bot_id"))
+            for bot in items
+            if bot.get("bot_id") and bot.get("template_type")
+        ))
+        if not bot_ids:
+            return
+
+        try:
+            templates = self._template_service.list_templates_by_bot_ids(bot_ids)
+            ext_by_bot_id = {
+                str(template.get("bot_id")): template.get("ext")
+                for template in templates
+                if template.get("bot_id") and template.get("ext") is not None
+            }
+            if not ext_by_bot_id:
+                return
+            for bot in items:
+                bot_id = bot.get("bot_id")
+                if bot_id is None:
+                    continue
+                ext = ext_by_bot_id.get(str(bot_id))
+                if ext is not None:
+                    bot["template_config"] = ext
+        except Exception as e:
+            logger.warning(
+                "[bot_service._attach_template_configs_to_bots] Failed to attach template configs: %s",
+                e, exc_info=True,
+            )
 
     def list_bots(
         self,
@@ -1617,6 +2118,7 @@ class BotService:
         # Note: Device binding info is stored in ac_entity_device_binding table
         # To avoid N+1 queries, we don't fetch binding info for list operations
         # Use get_bot() to get detailed info including device_binding
+        self._attach_template_configs_to_bots(items)
 
         return {
             "total": total,
@@ -1629,8 +2131,12 @@ class BotService:
         bot_name: Optional[str] = None,
         owner_name: Optional[str] = None,
         bot_id: Optional[str] = None,
+        owner_id: Optional[str] = None,
+        engine: Optional[str] = None,
+        status: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
+        bot_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         List bots by conditions with pagination.
@@ -1640,8 +2146,15 @@ class BotService:
             bot_name: Filter by bot name (fuzzy search)
             owner_name: Filter by owner name
             bot_id: Filter by bot ID (exact match)
+            owner_id: Filter by owner id (exact match) — scopes to one owner
+            engine: Filter by active engine (exact match)
+            status: Filter by lifecycle status (exact match)
             page: Page number (1-based)
             page_size: Items per page
+            bot_ids: Restrict to this explicit set. ``None`` means unrestricted;
+                an empty list means none. The distinction is load-bearing —
+                treating empty as unrestricted would show a caller entitled to
+                nothing everything.
 
         Returns:
             Dictionary with 'total' and 'items' keys
@@ -1651,9 +2164,14 @@ class BotService:
             bot_name=bot_name,
             owner_name=owner_name,
             bot_id=bot_id,
+            owner_id=owner_id,
+            engine=engine,
+            status=status,
             page=page,
             page_size=page_size,
+            bot_ids=bot_ids,
         )
+        self._attach_template_configs_to_bots(items)
         return {
             "total": total,
             "items": items,
@@ -1679,6 +2197,7 @@ class BotService:
             Dictionary with 'total' and 'items' keys
         """
         total, items = self._repository.list_by_search(public=public, search=search, page=page, page_size=page_size)
+        self._attach_template_configs_to_bots(items)
         return {"total": total, "items": items}
 
     def list_domain_bots(
@@ -1785,6 +2304,8 @@ class BotService:
         except Exception as e:
             logger.warning(f"[bot_service.search_bots] Failed to add can_delete_bot/can_upgrade_publish: {e}")
 
+        self._attach_template_configs_to_bots(items)
+
         return {
             "total": total,
             "items": items,
@@ -1839,6 +2360,8 @@ class BotService:
         except Exception as e:
             logger.warning(f"[bot_service.list_bots_by_owner] Failed to add can_edit_bot: {e}")
 
+        self._attach_template_configs_to_bots(items)
+
         return {
             "total": total,
             "items": items,
@@ -1878,6 +2401,7 @@ class BotService:
 
         # List reads use the persisted status. Live desktop status is reconciled
         # outside this request path so a slow BaaS cannot delay first paint.
+        self._attach_template_configs_to_bots(items)
 
         return {
             "total": total,
@@ -1975,7 +2499,15 @@ class BotService:
             # Check if new bot_name already exists (and it's not the current bot)
             if bot_name.strip():
                 existing_bot = self._repository.get_by_bot_name(bot_name.strip())
-                if existing_bot and existing_bot.get("bot_id") != bot_id:
+                # Identify the current record by owner AND bot_id. bot_id is only
+                # unique per owner — every owner's first bot is "default" — so
+                # comparing bot_id alone made another owner's "default" bot look
+                # like this one, letting its name be taken even though create and
+                # check-name enforce the name tenant-wide.
+                if existing_bot and not (
+                    existing_bot.get("bot_id") == bot_id
+                    and existing_bot.get("owner_id") == bot.get("owner_id")
+                ):
                     raise BotNameExistsError(f"Bot name '{bot_name}' already exists")
             update_data["bot_name"] = bot_name
         if bot_desc is not None:
@@ -2012,6 +2544,7 @@ class BotService:
                         bot_id=bot_id,
                         template_config=template_config,
                         template_type=bot.get("template_type"),
+                        active_engine=bot.get("active_engine"),
                     )
                 else:
                     # Create new template (this should not normally happen in update)
@@ -2020,17 +2553,27 @@ class BotService:
                         bot_id=bot_id,
                         template_config=template_config,
                         template_type=bot.get("template_type"),
+                        active_engine=bot.get("active_engine"),
                     )
                 logger.info(f"[bot_service.update_bot] Template updated for bot {bot_id}")
 
-                # applicationCoding bot：token 变化时把新 token 下发到运行中容器
-                # 的 codefuse.json（与 save_codefuse_token / apply_device 启动写入、
-                # reconciler 重启写入同路径），使 PUT /api/bots/{bot_id} 改 token 后
-                # 无需前端再单独调 codefuse/auth。仅当本次入参携带 token 字段且与
-                # 旧值解密后不同才触发；异步执行，失败只告警不阻断主流程。
-                if bot.get("template_type") == "applicationCoding" and isinstance(
-                    template_config, dict
-                ) and "token" in template_config:
+                # Runtime token 变化时按引擎策略刷新运行中容器。仅当本次入参
+                # 携带 token 字段且与旧值解密后不同才触发；异步执行，失败只告警
+                # 不阻断主流程。
+                runtime_token = self._extract_engine_runtime_token(
+                    bot_id=bot_id,
+                    owner_id=bot.get("owner_id") or user_id,
+                    active_engine=bot.get("active_engine"),
+                    bot_type=bot.get("bot_type") or "",
+                    template_type=bot.get("template_type"),
+                    template_config=template_config if isinstance(template_config, dict) else None,
+                    log_context="bot_service.update_bot",
+                )
+                if (
+                    isinstance(template_config, dict)
+                    and "token" in template_config
+                    and runtime_token is not None
+                ):
                     self._maybe_refresh_codefuse_token_async(
                         bot_id=bot_id,
                         user_id=user_id,
@@ -2048,13 +2591,13 @@ class BotService:
                 bot_active_engine = bot.get("active_engine")
                 from agentclaw.community.core.bot_management.utils import (
                     trigger_memory_initialization,
-                    memory_sources_changed,
                 )
 
-                if (
-                    bot_template_type == "applicationCoding"
-                    and bot_active_engine == "claude_code"
-                    and memory_sources_changed(old_template_config, template_config)
+                if self._should_trigger_memory_initialization(
+                    active_engine=bot_active_engine,
+                    template_type=bot_template_type,
+                    template_config=template_config,
+                    old_template_config=old_template_config,
                 ):
                     logger.info(
                         f"[bot_service.update_bot] memory sources changed for bot {bot_id}, "
@@ -2108,7 +2651,7 @@ class BotService:
                                 )
 
                         threading.Thread(
-                            target=_update_cron_workflow,
+                            target=bind_current_avernet_tenant(_update_cron_workflow),
                             name=f"cron-workflow-update-{bot_id}",
                             daemon=True,
                         ).start()
@@ -2224,7 +2767,7 @@ class BotService:
             return
 
         thread = threading.Thread(
-            target=self._refresh_codefuse_token_on_device,
+            target=bind_current_avernet_tenant(self._refresh_codefuse_token_on_device),
             kwargs={"bot_id": bot_id, "user_id": user_id, "plaintext_token": plaintext},
             daemon=True,
             name=f"refresh-codefuse-token-{bot_id}",
@@ -2386,12 +2929,14 @@ class BotService:
                     bot_id=bot_id,
                     template_config=merged_config,
                     template_type=bot.get("template_type"),
+                    active_engine=bot.get("active_engine"),
                 )
             else:
                 self._template_service.create_template(
                     bot_id=bot_id,
                     template_config=merged_config,
                     template_type=bot.get("template_type"),
+                    active_engine=bot.get("active_engine"),
                 )
             logger.info("[bot_service.admin_update_bot] Template updated for bot %s by admin", bot_id)
 
@@ -2474,8 +3019,17 @@ class BotService:
         active_engine: Optional[str],
         bot_type: Optional[str],
         template_type: Optional[str],
+        template_config: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """统一 create / start 注册 BCN Provider 的触发条件."""
+        """统一 create / start 注册 BCN Provider 的触发条件.
+
+        如果 AC 模板工厂快照显式声明 capabilities，则 capabilities 是唯一事实源；
+        缺失能力节点按 False，不再混用 legacy template_type fallback。旧 Bot 没有
+        capabilities 时继续保留历史逻辑。
+        """
+        if is_template_factory_config(template_config) and has_declared_capabilities(template_config):
+            return can_join_bcn_as_provider(template_config)
+
         is_coding_personal = (
             active_engine in ("claude_code", "aicoding")
             and template_type == "personalCoding"
@@ -2755,6 +3309,8 @@ class BotService:
         if not bot:
             raise BotNotFoundError(f"Bot not found: {bot_id}")
 
+        self._validate_default_bot_engine(bot_id, engine_type)
+
         # Check if the engine is in bot's engine_types
         bot_engine_types = bot.get("engine_types", [])
         if engine_type not in bot_engine_types:
@@ -2816,11 +3372,74 @@ class BotService:
             if not bot:
                 raise BotNotFoundError(f"Bot not found: {bot_id}")
 
-            # default bot 是用户的常驻默认 Bot,不允许删除(重启请走 restart_bot)。
-            # 必须在 release_device / destroy_passport 之前拦截,否则会误销毁
+            # 保护 owner 名下最早创建的 bot 不能删除（等价于旧 "default" bot 不可删语义）。
+            # 含 owner 仅一只的情形（earliest 即该只 → 拒），自然保留 ≥1。
+            # 必须在 release_device / destroy_passport 之前拦截，否则会误销毁
             # agent 许可证 (Passport) 并重置引擎配置 (openclaw.json)。
-            if bot_id == "default":
-                raise BotServiceError("default bot 不允许删除")
+            # 用 BotOperationNotAllowedError（BotServiceError 子类）表达"这是客户端
+            # 不支持的操作"，而不是服务端故障：重试永远不会成功。内部路由的 except 链没有
+            # 这一分支，仍落到 `except BotServiceError` → 500，行为不变；公共 API 则按
+            # 4xx 映射。
+            _total_owner_bots, owner_bot_items = self._repository.list_by_owner(user_id, 1, 1000)
+            if owner_bot_items:
+                # gmt_create可能是 datetime 或 ISO 字符串;统一成字符串排序,避免类型混比。
+                # 空值兜底为空串(ISO 字符串排序下排最前,等同"最早")。
+                earliest = min(
+                    owner_bot_items,
+                    key=lambda b: str(b.get("gmt_create") or ""),
+                )
+                earliest_bot_id = earliest.get("bot_id")
+                if earliest_bot_id and bot_id == earliest_bot_id:
+                    raise BotOperationNotAllowedError("不能删除首个创建的 Bot，该 Bot 受保护")
+
+            # Withdraw every application authorization standing against this
+            # bot — whoever delegated it — before anything destructive happens.
+            # This is the first of two sweeps; the second runs after the soft
+            # delete, and the pair is what actually closes the gap. See there.
+            #
+            # Ordering is the whole point. Placed after the device release and
+            # the passport destruction, a failure here would leave a bot that is
+            # already unusable with live grants against it: applications still
+            # authorized to reach something that no longer works, and no
+            # deletion to trigger the sweep again. Placed here, a failure aborts
+            # while the bot is still intact, and the worst outcome is grants
+            # withdrawn from a bot that survived — recoverable by re-granting.
+            #
+            # Failures propagate deliberately. Swallowing this would reintroduce
+            # exactly the gap it closes, and quietly.
+            revoked = self._bot_app_grant_provider().revoke_all_for_bot(
+                bot_id=bot_id, owner_id=user_id
+            )
+            if revoked:
+                logger.info(
+                    "[bot_service.delete_bot] withdrew %s app authorization(s) "
+                    "on bot %s before deleting it",
+                    revoked,
+                    bot_id,
+                )
+
+            # Drop the stored startup script, here and not in the post-delete
+            # cleanup, for the same reason the grant sweep is here: a failure
+            # aborts while the bot is still intact.
+            #
+            # It is not filed with the skills and skill sets below because it is
+            # not the same kind of leftover. Those are inert metadata; this is
+            # the user's script in plaintext, which should not outlive the bot
+            # it was written for.
+            #
+            # Failures propagate, matching how this feature already treats a
+            # failed script read (`_resolve_startup_script`): swallowing a
+            # failure against the script store buys a silently wrong state, not
+            # resilience. The wedged-bot risk is smaller than it looks — this
+            # write and the soft delete hit the same database, so a purge that
+            # cannot write almost certainly precedes a deletion that would have
+            # failed anyway.
+            #
+            # The `default` bot is exempt on the same grounds its skills and
+            # config are: that delete is a restart, and the script is meant to
+            # survive it.
+            if bot_id != "default":
+                self._purge_startup_script(bot_id, bot)
 
             # Release device if binding exists (包括 ACTIVE 和 PENDING 状态)
             binding_id = bot.get("binding_id")
@@ -2830,7 +3449,9 @@ class BotService:
                 binding = service.get_device(binding_id=binding_id)
                 if binding and binding.status in [
                     DeviceBindingStatus.ACTIVE.value,
-                    DeviceBindingStatus.PENDING.value
+                    DeviceBindingStatus.PENDING.value,
+                    DeviceBindingStatus.FAILED.value,
+                    DeviceBindingStatus.STOPPED.value,
                 ]:
                     # Release the device
                     operator = _compose_operator_context(
@@ -2863,6 +3484,11 @@ class BotService:
             if not result:
                 raise BotNotFoundError(f"Bot not found: {bot_id}")
 
+            self._sweep_grants_that_raced_the_deletion(bot_id, user_id)
+
+            if bot_id != "default":
+                self._sweep_startup_script_that_raced_the_deletion(bot_id, bot)
+
             self._sync_provider_bot_delete_to_bcn(bot_id, user_id)
 
             # 清理关联的脏数据（仅限非 default bot）
@@ -2881,9 +3507,69 @@ class BotService:
             return True
         except BotNotFoundError:
             raise
+        except BotOperationNotAllowedError:
+            # 必须在 catch-all 之前放行：否则"不允许删除 default bot"这类客户端错误
+            # 会被重新包成通用 BotServiceError，调用方看到 500 并可能无谓重试。
+            raise
         except Exception as e:
             logger.error(f"[bot_service.delete_bot] Failed to delete bot {bot_id}: {e}")
             raise BotServiceError(f"Failed to delete bot: {e}")
+
+    def _sweep_grants_that_raced_the_deletion(
+        self, bot_id: str, user_id: str
+    ) -> None:
+        """Withdraw grants that landed while the deletion was in flight.
+
+        The first sweep commits, and then the deletion spends time in the device
+        release and the Passport destruction — both remote calls. A collaborator
+        granting in that window inserts a row *after* the sweep read, and it
+        would outlive the bot.
+
+        **This narrows the window; it does not close it, and an earlier
+        revision of this docstring wrongly claimed it did.** The claim was that
+        once ``soft_delete_by_owner`` commits no further grant can be created,
+        because every way the delegation gate resolves a bot filters
+        ``is_delete == 0``. Those filters are real, but they guard *resolution*,
+        which happens early in the request — the row is written later, in
+        ``BotAppGrantService.grant``. A request that had already resolved the
+        bot can still insert behind this sweep.
+
+        What remains is bounded on the other side by
+        :class:`~...bot_app_grant.errors.GrantBotNotLiveError`: the grant path
+        rechecks liveness at the write, so the surviving gap is between that
+        check and its insert rather than the whole request. Closing even that
+        would mean locking the bot row across every grant write, to prevent a
+        row that grants nothing — every read filters bots by liveness, and every
+        request re-adjudicates against a bot that cannot be resolved. Hygiene,
+        not the boundary. The boundary is that nothing is trusted from the row.
+
+        **Failures propagate, like the first sweep.** An earlier revision made
+        this best-effort, reasoning that the bot is already deleted so raising
+        reports a failure for an operation that succeeded. That reasoning is
+        real but it loses: `AGENTS.md` is explicit that persistence write
+        failures are propagated and never swallowed into a success, and a sweep
+        that could not commit is exactly a failed write. Reporting success
+        while the authorization table still holds rows for this bot makes the
+        two disagree with no signal that they do.
+
+        The cost is worth naming rather than hiding: the deletion really has
+        happened by then, so a caller who retries is answered "no such bot".
+        That is a confusing sequence, but it is an honest one — where silent
+        success is a wrong answer that no one can later discover.
+
+        A non-zero count here means the race actually happened, which is worth
+        seeing in the log rather than inferring later from an orphan row.
+        """
+        raced = self._bot_app_grant_provider().revoke_all_for_bot(
+            bot_id=bot_id, owner_id=user_id
+        )
+        if raced:
+            logger.warning(
+                "[bot_service.delete_bot] withdrew %s app authorization(s) "
+                "created on bot %s while it was being deleted",
+                raced,
+                bot_id,
+            )
 
     def _sync_provider_bot_delete_to_bcn(self, bot_id: str, user_id: str) -> None:
         """Best-effort sync of local bot deletion to BCN provider bot deletion."""
@@ -2905,11 +3591,85 @@ class BotService:
                 exc_info=True,
             )
 
+    def _sweep_startup_script_that_raced_the_deletion(
+        self, bot_id: str, bot: Dict[str, Any]
+    ) -> None:
+        """Second purge, after the soft delete. Paired with the first, and the
+        pairing is what makes the set of orderings complete.
+
+        The first purge runs early, while the bot is still intact, so a failure
+        aborts the deletion rather than stranding the row. But it is a long way
+        from the soft delete: ``release_device`` and ``destroy_passport`` — the
+        latter unconditional and a blocking call to an external plugin — both
+        sit in between. A ``PUT`` whose existence check, write **and** post-write
+        re-check all fall inside that gap sees a live bot at every point and
+        leaves its row behind. Neither the first purge nor the re-check catches
+        that ordering; only a purge on the far side of ``soft_delete_by_owner``
+        does.
+
+        With this in place the orderings are, for a write W, its re-check R, the
+        first purge P1, the soft delete S and this sweep P2:
+
+        * W before P1 — P1 removes it;
+        * W between P1 and S, R also before S — R sees a live bot and answers
+          200, and P2 removes the row;
+        * W between P1 and S, R after S — R sees the bot gone and withdraws;
+        * W after S — R is later still, so R withdraws, and P2 covers it too.
+
+        That assumes R reads committed state; a re-check served stale would fall
+        back on P2 for the third case.
+
+        Unconditional, and it needs no owner stamp. ``uk_bot_id_entity_id_env``
+        means the identifier cannot be handed to another bot, so whatever sits
+        at this key belongs to the bot being deleted.
+
+        Failures propagate, like the first purge and like the grant sweep. The
+        deletion has really happened by then, so a caller who retries is told
+        "no such bot" — confusing, but honest, where reporting success over a
+        row that survived is a wrong answer nobody can later discover.
+        """
+        if self._purge_startup_script(bot_id, bot):
+            logger.warning(
+                "[bot_service.delete_bot] removed a startup script written on "
+                "bot %s while it was being deleted",
+                bot_id,
+            )
+
+    def _purge_startup_script(self, bot_id: str, bot: Dict[str, Any]) -> bool:
+        """Delete the bot's stored startup script. Failures propagate.
+
+        Keyed by ``entity_id``, not the owner id. The two are usually equal —
+        this file says so in several places — but under a team entity they are
+        not, and using the owner would look correct in every single-owner case
+        while missing the row for every team-owned bot.
+
+        A bot with no ``entity_id`` never had a script: the write path requires
+        both halves of the key. There is nothing to delete and no id to invent.
+
+        Two call sites, and their failure semantics differ because the bot is in
+        a different state at each. The first runs before the soft delete, while
+        the bot is still intact, so a failure aborts the deletion and leaves it
+        retryable. The second is
+        :meth:`_sweep_startup_script_that_raced_the_deletion`, after the soft
+        delete, catching a write that landed in the gap between the two; a
+        failure there surfaces as well, but the bot is already gone by then, so
+        it cannot abort anything.
+        """
+        entity_id = str(bot.get("entity_id") or "")
+        if not entity_id:
+            return False
+        return self._cleanup_service.purge_startup_script(
+            entity_id=entity_id, bot_id=bot_id
+        )
+
     def _cleanup_bot_associated_data(self, bot_id: str, user_id: str) -> Dict[str, Any]:
         """
         清理 Bot 关联的脏数据（技能、技能集、资源等）
 
         注意：此方法仅应在确认 Bot 真正被删除时调用（非 default bot 的重启场景）
+
+        启动脚本不在此列：它在软删*之前*由 ``_purge_startup_script`` 单独删除，
+        失败要阻断删除而不是记录后继续。见那里的说明。
 
         Args:
             bot_id: Bot ID
@@ -3011,7 +3771,12 @@ class BotService:
             try:
                 service = self._device_service_provider()
                 binding = service.get_device(binding_id=binding_id)
-                if binding and binding.status in [DeviceBindingStatus.ACTIVE.value, DeviceBindingStatus.PENDING.value, DeviceBindingStatus.FAILED.value]:
+                if binding and binding.status in [
+                    DeviceBindingStatus.ACTIVE.value,
+                    DeviceBindingStatus.PENDING.value,
+                    DeviceBindingStatus.FAILED.value,
+                    DeviceBindingStatus.STOPPED.value,
+                ]:
                     operator = _compose_operator_context(user_id, resolved_nick_name)
                     service.release_device(
                         binding_id=binding_id,
@@ -3084,6 +3849,62 @@ class BotService:
 
         return str(provider), str(binding_status) if binding_status else None
 
+    def _resolve_historical_unbound_restart_provider(
+        self,
+        *,
+        bot_id: str,
+        entity_id: str,
+        entity_type: str,
+        env: str,
+    ) -> str | None:
+        """Return a safe provider for a failed bot whose current binding is lost."""
+        page = 1
+        page_size = 100
+        while True:
+            total, bindings = self._device_binding_repo.list_bindings(
+                env=env,
+                entity_id=entity_id,
+                entity_type=entity_type,
+                status=None,
+                page=page,
+                page_size=page_size,
+            )
+            for binding in bindings:
+                if (binding.device_props or {}).get("bolt_id") != bot_id:
+                    continue
+
+                status = str(binding.status or "").upper()
+                if status not in {
+                    DeviceBindingStatus.RELEASED.value,
+                    DeviceBindingStatus.FAILED.value,
+                    DeviceBindingStatus.STOPPED.value,
+                }:
+                    logger.warning(
+                        "[bot_service.restart_bot] reject unbound recovery with live historical binding: "
+                        "bot_id=%s binding_id=%s binding_status=%s",
+                        bot_id,
+                        binding.id,
+                        status or "UNKNOWN",
+                    )
+                    return None
+
+                provider = str(binding.device_provider or "")
+                if provider:
+                    logger.info(
+                        "[bot_service.restart_bot] recover failed unbound bot from historical provider: "
+                        "bot_id=%s binding_id=%s provider=%s binding_status=%s",
+                        bot_id,
+                        binding.id,
+                        provider,
+                        status,
+                    )
+                    return provider
+                return None
+
+            if not bindings or page * page_size >= total:
+                return None
+            page += 1
+
     @staticmethod
     def _activation_in_progress_result(bot: Dict[str, Any]) -> Dict[str, Any]:
         """Return an idempotent response without mutating lifecycle state."""
@@ -3109,6 +3930,7 @@ class BotService:
         force_nas: bool = False,
         device_provider: Optional[str] = None,
         restart_lock_key: Optional[Tuple[str, str, str, str]] = None,
+        bot_ext_override: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Start a bot by triggering async device allocation.
 
@@ -3146,6 +3968,14 @@ class BotService:
         resolved_nick_name = nick_name or user_id
         bot_owner_id = bot.get("owner_id") or user_id
 
+        try:
+            resolved_template_config = self._template_service.get_template_config(bot_id)
+        except Exception as e:
+            logger.warning(
+                f"[bot_service.start_bot] Failed to get template config for bot {bot_id}: {e}"
+            )
+            resolved_template_config = None
+
         # 启动前先在 BCN 注册为 Provider bot (下行链路).
         # 触发条件:
         #   - active_engine == "claude_code" 且 template_type == "normalCC"
@@ -3159,6 +3989,7 @@ class BotService:
             active_engine=active_engine,
             bot_type=bot_type,
             template_type=template_type,
+            template_config=resolved_template_config,
         )
         if should_register_bcn:
             logger.info(
@@ -3201,6 +4032,7 @@ class BotService:
             force_nas=force_nas,
             device_provider=device_provider,
             restart_lock_key=restart_lock_key,
+            bot_ext_override=bot_ext_override,
         )
 
         # The allocation thread is now spawned and (for the restart flow) owns
@@ -3230,6 +4062,7 @@ class BotService:
         bot_id: str,
         user_id: str,
         nick_name: Optional[str] = None,
+        extra_configs: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Restart a bot by releasing current device and allocating a new one.
@@ -3238,6 +4071,7 @@ class BotService:
             bot_id: Bot ID
             user_id: User ID for permission check (must be the owner)
             nick_name: Nick name for device allocation (optional, defaults to user_id)
+            extra_configs: Optional engine-agnostic restart extension envelope
 
         Returns:
             Updated bot record with PENDING status (device allocation in progress)
@@ -3254,6 +4088,15 @@ class BotService:
         if not bot:
             raise BotNotFoundError(f"Bot not found: {bot_id}")
 
+        if self.is_teclaw_bot(bot.get("active_engine")):
+            logger.warning(
+                "[bot_service.restart_bot] reject restart for teclaw bot: "
+                "bot_id=%s user_id=%s",
+                bot_id,
+                user_id,
+            )
+            raise BotOperationNotAllowedError("teclaw 类型的 Bot 不支持重启")
+
         if bot.get("bot_type") == "desktop":
             raise BotServiceError(
                 f"Desktop bot {bot_id} cannot be stopped via BotService.stop_bot, "
@@ -3261,7 +4104,11 @@ class BotService:
             )
 
         bot_status = str(bot.get("status") or "").upper()
-        if bot_status in {"REACTIVATING", "PENDING"}:
+        # REACTIVATING is an explicit lifecycle operation. PENDING is not:
+        # failed startup reporting can strand a bot there indefinitely, so a
+        # restart request must be allowed to reach the durable restart lock
+        # below instead of being treated as proof that work is still running.
+        if bot_status == "REACTIVATING":
             logger.info(
                 "[bot_service.restart_bot] skip restart while activation is in progress: "
                 "bot_id=%s user_id=%s bot_status=%s",
@@ -3271,7 +4118,7 @@ class BotService:
             )
             return self._activation_in_progress_result(bot)
 
-        if bot_status not in {"ACTIVE", "FAILED"}:
+        if bot_status not in {"ACTIVE", "FAILED", "PENDING"}:
             logger.warning(
                 "[bot_service.restart_bot] reject restart for invalid lifecycle state: "
                 "bot_id=%s user_id=%s bot_status=%s",
@@ -3284,6 +4131,36 @@ class BotService:
                 current_status=bot_status or "UNKNOWN",
             )
 
+        # Delegate optional engine-owned restart inputs after lifecycle guards
+        # pass and before device allocation consumes persisted configuration.
+        try:
+            from agentclaw.community.core.bot_management.engines import (
+                resolve_provisioning,
+            )
+
+            ctx, strategy = resolve_provisioning(
+                bot_id=bot_id,
+                owner_id=str(bot.get("owner_id") or ""),
+                bot_type=str(bot.get("bot_type") or ""),
+                active_engine=bot.get("active_engine"),
+                template_type=bot.get("template_type"),
+                template_config=None,
+            )
+            strategy.apply_restart_extra_configs(
+                ctx,
+                extra_configs,
+                template_service=self._template_service,
+            )
+        except Exception as exc:
+            # Optional engine extensions must never block the existing restart path.
+            logger.warning(
+                "[bot_service.restart_bot] applying restart extra configs failed; "
+                "continue with stored config: bot_id=%s error=%s",
+                bot_id,
+                exc,
+                exc_info=True,
+            )
+
         env = get_current_env()
         entity_id = bot.get("entity_id")
         if not entity_id:
@@ -3292,14 +4169,15 @@ class BotService:
             # against the wrong scope.
             raise BotServiceError(f"Bot {bot_id} has no entity_id; cannot restart")
 
-        # Restart is a lifecycle operation, not a fresh create rollout. When a
-        # current binding exists, preserve its provider so an existing ARCA bot
-        # cannot be migrated to BaaS merely because the owner later entered the
-        # create whitelist. An ACTIVE bot without a binding retains the legacy
-        # fallback to normal allocation. A FAILED bot without a binding cannot
-        # safely recover because its historical provider is unknown.
+        # Restart normally preserves its provider. Existing ARCA bots opt in to
+        # BaaS only when the same database-backed template override used during
+        # creation positively matches their owner; every other outcome keeps the
+        # legacy provider behavior. An ACTIVE bot without a binding retains the
+        # legacy fallback to normal allocation. FAILED bots require a trustworthy
+        # historical provider because their current binding may be lost.
         current_device_provider = None
         binding_id = bot.get("binding_id")
+        recovered_without_binding = False
         if binding_id:
             current_device_provider, binding_status = (
                 self._resolve_current_device_restart_context(
@@ -3307,7 +4185,13 @@ class BotService:
                     binding_id=binding_id,
                 )
             )
-            if binding_status == DeviceBindingStatus.PENDING.value:
+            # An ACTIVE bot with a PENDING binding is still converging. When
+            # both records are PENDING, however, allow the explicit restart to
+            # recover the stranded lifecycle through the lock-protected path.
+            if (
+                binding_status == DeviceBindingStatus.PENDING.value
+                and bot_status != "PENDING"
+            ):
                 logger.info(
                     "[bot_service.restart_bot] skip restart while binding is pending: "
                     "bot_id=%s user_id=%s binding_id=%s",
@@ -3320,7 +4204,9 @@ class BotService:
                 return current
             if binding_status and binding_status not in {
                 DeviceBindingStatus.ACTIVE.value,
+                DeviceBindingStatus.PENDING.value,
                 DeviceBindingStatus.FAILED.value,
+                DeviceBindingStatus.STOPPED.value,
             }:
                 logger.warning(
                     "[bot_service.restart_bot] reject restart for invalid binding state: "
@@ -3340,21 +4226,36 @@ class BotService:
                 f"device_provider={current_device_provider}"
             )
         elif bot_status == "FAILED":
-            logger.warning(
-                "[bot_service.restart_bot] reject failed bot without binding: "
-                "bot_id=%s user_id=%s",
-                bot_id,
-                user_id,
-            )
-            raise BotInvalidLifecycleStateError(
+            current_device_provider = self._resolve_historical_unbound_restart_provider(
                 bot_id=bot_id,
-                current_status="FAILED_WITHOUT_BINDING",
+                entity_id=str(entity_id),
+                entity_type=bot.get("entity_type", "staff"),
+                env=env,
             )
+            if not current_device_provider:
+                logger.warning(
+                    "[bot_service.restart_bot] reject failed bot without recoverable binding: "
+                    "bot_id=%s user_id=%s",
+                    bot_id,
+                    user_id,
+                )
+                raise BotInvalidLifecycleStateError(
+                    bot_id=bot_id,
+                    current_status="FAILED_WITHOUT_BINDING",
+                )
+            recovered_without_binding = True
         else:
             logger.info(
                 f"[bot_service.restart_bot] no binding provider to preserve: "
                 f"bot_id={bot_id}, user_id={user_id}"
             )
+
+        restart_target_provider = self._resolve_restart_target_provider(
+            bot_id=bot_id,
+            user_id=user_id,
+            bot=bot,
+            source_provider=current_device_provider,
+        )
 
         # Idempotency guard: acquire the per-bot restart lock. If a restart is
         # already in progress, suppress this duplicate and return the current
@@ -3396,7 +4297,15 @@ class BotService:
         lock_key = (env, entity_id, bot_id, lock.lock_token)
         handed_off = False
         try:
-            if current_device_provider == "baas" and self._baas_service_provider is not None:
+            if bot.get("bot_type") == "service" and not self.is_teclaw_bot(
+                bot.get("active_engine")
+            ):
+                bot = self._mark_service_bot_default_image(bot)
+            if (
+                binding_id
+                and current_device_provider == BAAS_DEVICE_PROVIDER
+                and self._baas_service_provider is not None
+            ):
                 # BaaS 原地重启：不 destroy、不 release binding，bot_uuid/device_uuid 不变,
                 # session NAS 目录复用，历史 session 留存。arca 永不进此支(provider 取自 binding 表)。
                 # 同步完成、无 async 接管，handed_off 保持 False → finally 当场释放锁。
@@ -3405,13 +4314,41 @@ class BotService:
                 )
                 logger.info(f"[bot_service.restart_bot] Bot {bot_id} in-place restart via BaaS, binding preserved")
                 return updated_bot
-            release_ok = self.stop_bot(bot_id=bot_id, user_id=user_id, nick_name=nick_name, release_reason=f"Bot {bot_id} restarted")
+            release_ok = True
+            if not recovered_without_binding:
+                release_ok = self.stop_bot(
+                    bot_id=bot_id,
+                    user_id=user_id,
+                    nick_name=nick_name,
+                    release_reason=f"Bot {bot_id} restarted",
+                )
+            else:
+                # There is no current binding to release, but the asynchronous
+                # allocation can take time. Publish PENDING before spawning it
+                # so status polling does not continue to report the old FAILED
+                # state while recovery is underway.
+                self._repository.update_by_owner(
+                    bot_id,
+                    user_id,
+                    {
+                        "status": "PENDING",
+                        "binding_id": None,
+                        "device_id": None,
+                    },
+                )
             updated_bot = self.start_bot(
                 bot_id=bot_id,
                 user_id=user_id,
                 nick_name=nick_name,
-                device_provider=current_device_provider,
+                device_provider=restart_target_provider,
                 restart_lock_key=lock_key,
+                bot_ext_override=(
+                    bot.get("ext")
+                    if bot.get("bot_type") == "service"
+                    and not self.is_teclaw_bot(bot.get("active_engine"))
+                    and (bot.get("ext") or {}).get("sbot_use_default_image") is True
+                    else None
+                ),
             )
             handed_off = True
 
@@ -3451,9 +4388,61 @@ class BotService:
         if not bot_uuid:
             raise BotServiceError(f"Bot {bot_id} binding {binding_id} missing bot_uuid; cannot baas restart")
 
+        from agentclaw.community.core.devices.services.baas_publish_task_handlers import (
+            RESTART_IMAGE_POLICY_ON_SUCCESS_KEY,
+            RESTART_REQUEST_ID_KEY,
+            RESTART_WORKFLOW_BASELINE_KEY,
+        )
+
+        raw_binding_props = (
+            binding.get("device_props", {})
+            if isinstance(binding, dict)
+            else (getattr(binding, "device_props", None) or {})
+        )
+        binding_props = raw_binding_props if isinstance(raw_binding_props, dict) else {}
+        restart_request_id = binding_props.get(RESTART_REQUEST_ID_KEY)
+        restart_workflow_baseline = binding_props.get(RESTART_WORKFLOW_BASELINE_KEY)
+        has_durable_recovery_intent = (
+            isinstance(restart_request_id, str)
+            and bool(restart_request_id)
+            and isinstance(restart_workflow_baseline, int)
+            and not isinstance(restart_workflow_baseline, bool)
+            and restart_workflow_baseline >= 0
+        )
+        if has_durable_recovery_intent:
+            logger.info(
+                "[bot_service._restart_bot_baas] restart already has a durable "
+                "recovery intent: bot_id=%s binding_id=%s request_id=%s baseline=%s",
+                bot_id,
+                binding_id,
+                restart_request_id,
+                restart_workflow_baseline,
+            )
+            return dict(self._repository.get_by_id_and_owner(bot_id, user_id) or bot)
+        if restart_request_id:
+            logger.warning(
+                "[bot_service._restart_bot_baas] ignoring legacy restart intent "
+                "without a valid workflow baseline: bot_id=%s binding_id=%s "
+                "request_id=%s baseline=%r",
+                bot_id,
+                binding_id,
+                restart_request_id,
+                restart_workflow_baseline,
+            )
+
         active_engine = (bot.get("active_engine") or "").strip()
         bot_type = bot.get("bot_type") or "personal"
         bot_template_type = (bot.get("template_type") or "").strip()
+
+        # 先读取模板快照：BCN 能力门控与后续 BaaS restart 均使用同一份 resolved config。
+        try:
+            resolved_template_config = self._template_service.get_template_config(bot_id)
+        except Exception as e:
+            logger.warning(
+                "[bot_service._restart_bot_baas] Failed to get template for bot %s: %s",
+                bot_id, e,
+            )
+            resolved_template_config = None
 
         # BaaS 原地重启不会经过 start_bot，这里补齐启动链路的 BCN Provider 注册。
         # 注册接口幂等：已注册时直接返回，也能重试创建阶段失败的注册。
@@ -3461,6 +4450,7 @@ class BotService:
             active_engine=active_engine,
             bot_type=bot_type,
             template_type=bot_template_type,
+            template_config=resolved_template_config,
         ):
             logger.info(
                 "[bot_service._restart_bot_baas] register bot to BCN as provider: "
@@ -3487,64 +4477,45 @@ class BotService:
             else None
         )
 
-        # 仅用于解析 template_uuid（避免 BaasService 走默认模板覆盖当前引擎模板）。
-        # 解析失败仅记 warning：template_uuid 退化为 None，upgrade 走 BaaS 默认模板。
+        # resolved_template_config 已在 BCN 能力门控前读取，后续 BaaS restart 复用同一快照。
+        # 与 _allocate_device_async（create / arca-restart 路径）同口径构造
+        # extra_envs，并独立透传 template_config。extra_envs 提供引擎策略
+        # 变量（BOT_TYPE / RELAY_DEFAULT_* / AIX_DEVFLOW_INFO / GIT_ADDRESSES），
+        # template_config 提供沙箱覆写（envs / image / resource_spec）。两者
+        # 不能互相门控。
+        extra_envs: Optional[Dict[str, Any]] = self._build_engine_extra_envs(
+            bot_id=str(bot_id),
+            owner_id=user_id,
+            active_engine=active_engine,
+            bot_type=bot.get("bot_type", ""),
+            template_type=bot_template_type,
+            template_config=resolved_template_config,
+            log_context="bot_service._restart_bot_baas",
+        )
+        # 与 _allocate_device_async 对齐：BaaS 原地重启也必须透传模板快照。
+        # template_config.envs / image / resource_spec 是独立的沙箱覆写能力，
+        # 不能被 extra_envs（引擎策略环境变量）是否命中门控影响。否则非
+        # coding 模板或仅配置 envs/image/spec 的模板在 restart -> /update 时会
+        # 退化成默认 envs，丢失创建 Bot 时使用的沙箱覆写。
         try:
-            resolved_template_config = self._template_service.get_template_config(bot_id)
+            device_template_config = self._attach_template_uid_context(
+                bot_id=str(bot_id),
+                user_id=user_id,
+                bot_type=bot.get("bot_type", ""),
+                engine_type=active_engine,
+                template_type=bot_template_type,
+                template_config=resolved_template_config,
+            )
         except Exception as e:
             logger.warning(
-                "[bot_service._restart_bot_baas] Failed to get template for bot %s: %s",
+                "[bot_service._restart_bot_baas] Failed to attach template uid context for bot %s: %s",
                 bot_id, e,
             )
-            resolved_template_config = None
-
-        # 与 _allocate_device_async（create / arca-restart 路径）同口径构造 extra_envs
-        # 与 template_config，让 BaaS 原地重启也消费 BOT_TYPE / RELAY_DEFAULT_MODEL /
-        # RELAY_DEFAULT_RUNTIME / AIX_DEVFLOW_INFO / GIT_ADDRESSES 及 sandbox overrides。
-        # 不补这段则 applicationCoding bot 走 baas 重启后 upgrade 不带 envs，容器拿不到
-        # BOT_TYPE=model/runtime 即便在 update_bot 改过也不生效。引擎口径与 create_bot
-        # 对齐（claude_code + aicoding），门控不命中时 extra_envs/template_config 保持
-        # None，upgrade 行为与改动前完全一致（envs 退化为 AGENTCLAW_ENGINE 单值）。
-        extra_envs: Optional[Dict[str, Any]] = None
-        device_template_config: Optional[Dict[str, Any]] = None
-        if active_engine in ("claude_code", "aicoding") and bot_template_type in ("applicationCoding", "personalCoding"):
-            try:
-                from agentclaw.community.core.bot_management.utils import build_aix_extra_envs
-
-                extra_envs = build_aix_extra_envs(
-                    resolved_template_config,
-                    template_type=bot_template_type,
-                )
-                if extra_envs:
-                    logger.info(
-                        f"[bot_service._restart_bot_baas] Setting AIX extra_envs for baas restart bot {bot_id}: "
-                        f"bot_type={extra_envs.get('BOT_TYPE')}, "
-                        f"model={extra_envs.get('RELAY_DEFAULT_MODEL', '')}, "
-                        f"runtime={extra_envs.get('RELAY_DEFAULT_RUNTIME', '')}, "
-                        f"devflow={extra_envs.get('AIX_DEVFLOW_INFO', '')}"
-                    )
-            except Exception as e:
-                logger.warning(
-                    "[bot_service._restart_bot_baas] Failed to build AIX extra_envs for bot %s: %s",
-                    bot_id, e,
-                )
-            # 与 _allocate_device_async 对齐：附加 template_uid 上下文给 BaaS device 层。
-            # 解析失败仅记 warning 不阻断（_attach_template_uid_context 内部已兜底）。
-            try:
-                device_template_config = self._attach_template_uid_context(
-                    bot_id=str(bot_id),
-                    user_id=user_id,
-                    bot_type=bot.get("bot_type", ""),
-                    engine_type=active_engine,
-                    template_type=bot_template_type,
-                    template_config=resolved_template_config,
-                )
-            except Exception as e:
-                logger.warning(
-                    "[bot_service._restart_bot_baas] Failed to attach template uid context for bot %s: %s",
-                    bot_id, e,
-                )
-                device_template_config = resolved_template_config
+            device_template_config = resolved_template_config
+        device_template_config = overlay_image_pin_on_template_config(
+            device_template_config,
+            bot.get("ext"),
+        )
 
         import uuid as _uuid
         request_id = _uuid.uuid4().hex
@@ -3562,8 +4533,8 @@ class BotService:
             "migration_path": mig,
             # 个人 Bot / 服务 Bot 草稿的普通重启不走发布产物迁移，但仍按 NAS home 目录运行。
             "mount_home_dir_storage": True,
-            # 门控命中时透传 envs / template_config，让容器拿到 BOT_TYPE / RELAY_DEFAULT_*
-            # 及 sandbox overrides；门控不命中保持 None，upgrade 行为与改动前一致。
+            # extra_envs 可能因引擎策略门控为 None；template_config 仍需透传，
+            # 以保留创建 Bot 时使用的 envs / image / resource_spec 沙箱覆写。
             "extra_envs": extra_envs,
             "template_config": device_template_config,
         }
@@ -3571,71 +4542,136 @@ class BotService:
             upgrade_kwargs["stage"] = restart_stage
         if template_uuid is not None:
             upgrade_kwargs["template_uuid"] = template_uuid
-        result = self._baas_service_provider().upgrade_bot(**upgrade_kwargs)
-
-        # 取 publish_id；置 bot/binding 双 PENDING；通过 durable queue 持久化轮询。
-        # publish_id 缺失 / enqueue 异常仅 log，不影响重启返回（前端轮 status 自然
-        # 收敛或下次操作触发）。
-        publish_id = (result or {}).get("publish_id") if isinstance(result, dict) else None
-
+        image_policy_on_success = (
+            DEFAULT_IMAGE_POLICY_VALUE
+            if bot_type == "service"
+            and not self.is_teclaw_bot(active_engine)
+            and (bot.get("ext") or {}).get("sbot_use_default_image") is True
+            else None
+        )
+        baas_service = self._baas_service_provider()
         try:
-            update_data: Dict[str, Any] = {"status": "PENDING"}
-            if publish_id is not None:
-                restart_publish_id = str(publish_id)
-                ext = clear_baas_publish_failure_ext(bot.get("ext"))
-                ext["restart_publish_id"] = restart_publish_id
-                update_data["ext"] = ext
+            workflows = baas_service.list_bot_publishes(bot_uuid)
+            workflow_baseline = max(
+                (
+                    int(workflow["id"])
+                    for workflow in (workflows or [])
+                    if isinstance(workflow, dict)
+                    and str(workflow.get("id", "")).isdigit()
+                ),
+                default=0,
+            )
+        except Exception as e:
+            raise BotServiceError(
+                f"Failed to snapshot BaaS restart workflow baseline: {e}"
+            ) from e
+
+        from agentclaw.community.core.devices.services.baas_publish_task_handlers import (
+            BAAS_RESTART_PUBLISH_POLL_TASK,
+            build_restart_publish_poll_payload,
+        )
+
+        # The durable task is the operation intent and must exist before the
+        # external BaaS mutation. If enqueue fails, no remote side effect has
+        # happened. The handler can adopt the workflow by baseline if the
+        # process exits after BaaS accepts but before publish_id is persisted.
+        task_queue_service = self._task_queue_service
+        if task_queue_service is None:
+            raise BotServiceError("BaaS restart task queue service is unavailable")
+        started_at_epoch_s = time.time()
+        try:
+            task_queue_service.enqueue(
+                BAAS_RESTART_PUBLISH_POLL_TASK,
+                build_restart_publish_poll_payload(
+                    binding_id=binding_id,
+                    bot_id=bot_id,
+                    owner_id=user_id,
+                    publish_id=None,
+                    started_at_epoch_s=started_at_epoch_s,
+                    bot_uuid=bot_uuid,
+                    image_policy_on_success=image_policy_on_success,
+                    request_id=request_id,
+                    workflow_baseline=workflow_baseline,
+                ),
+                deadline_seconds=86400,
+                delay_seconds=2,
+            )
+        except Exception as e:
+            raise BotServiceError(
+                "BaaS restart was not submitted because its durable task "
+                f"could not be persisted: {e}"
+            ) from e
+
+        previous_binding_status = (
+            binding.get("status")
+            if isinstance(binding, dict)
+            else getattr(binding, "status", DeviceBindingStatus.ACTIVE.value)
+        )
+        previous_bot_status = bot.get("status") or DeviceBindingStatus.ACTIVE.value
+        try:
+            self._device_binding_repo.update_device_props(
+                binding_id=binding_id,
+                props={
+                    RESTART_REQUEST_ID_KEY: request_id,
+                    RESTART_WORKFLOW_BASELINE_KEY: workflow_baseline,
+                    "restart_publish_id": None,
+                    RESTART_IMAGE_POLICY_ON_SUCCESS_KEY: image_policy_on_success,
+                },
+            )
+            self._device_binding_repo.update_status(
+                binding_id=binding_id, status=DeviceBindingStatus.PENDING
+            )
+            if self._repository.update_by_owner(
+                bot_id, user_id, {"status": DeviceBindingStatus.PENDING.value}
+            ) is None:
+                raise BotServiceError(f"Bot not found while preparing restart: {bot_id}")
+        except Exception as e:
+            # No BaaS call has happened yet. Invalidate the queued task's request
+            # identity and restore the previous visible lifecycle state.
+            try:
+                self._device_binding_repo.update_device_props(
+                    binding_id=binding_id,
+                    props={
+                        RESTART_REQUEST_ID_KEY: None,
+                        RESTART_WORKFLOW_BASELINE_KEY: None,
+                        RESTART_IMAGE_POLICY_ON_SUCCESS_KEY: None,
+                    },
+                )
+                self._device_binding_repo.update_status(
+                    binding_id=binding_id,
+                    status=previous_binding_status or DeviceBindingStatus.ACTIVE.value,
+                )
+                self._repository.update_by_owner(
+                    bot_id, user_id, {"status": previous_bot_status}
+                )
+            except Exception:
+                logger.exception(
+                    "[bot_service._restart_bot_baas] failed to roll back restart preparation"
+                )
+            raise BotServiceError(f"Failed to prepare durable BaaS restart: {e}") from e
+
+        # From this point on, every ambiguous failure is recoverable by the
+        # pre-existing task. It either reads the stored publish id or adopts the
+        # single workflow issued after workflow_baseline.
+        result = baas_service.upgrade_bot(**upgrade_kwargs)
+        publish_id = (result or {}).get("publish_id") if isinstance(result, dict) else None
+        if publish_id is not None:
+            restart_publish_id = str(publish_id)
+            try:
                 self._device_binding_repo.update_device_props(
                     binding_id=binding_id,
                     props={
                         "publish_id": restart_publish_id,
                         "restart_publish_id": restart_publish_id,
-                        "restart_request_id": request_id,
                     },
                 )
-            self._repository.update_by_owner(bot_id, user_id, update_data)
-            self._device_binding_repo.update_status(
-                binding_id=binding_id, status=DeviceBindingStatus.PENDING
-            )
-        except Exception as e:
-            logger.warning(
-                "[bot_service._restart_bot_baas] failed to mark PENDING "
-                "for bot_id=%s binding_id=%s: %s",
-                bot_id, binding_id, e,
-            )
-
-        task_queue_service = self._task_queue_service
-        if publish_id is not None and task_queue_service is not None:
-            try:
-                from agentclaw.community.core.devices.services.baas_publish_task_handlers import (
-                    BAAS_RESTART_PUBLISH_POLL_TASK,
-                    build_restart_publish_poll_payload,
+            except Exception:
+                logger.exception(
+                    "[bot_service._restart_bot_baas] publish_id persistence failed; "
+                    "durable task will adopt by baseline: bot_id=%s publish_id=%s",
+                    bot_id,
+                    publish_id,
                 )
-
-                task_queue_service.enqueue(
-                    BAAS_RESTART_PUBLISH_POLL_TASK,
-                    build_restart_publish_poll_payload(
-                        binding_id=binding_id,
-                        bot_id=bot_id,
-                        owner_id=user_id,
-                        publish_id=publish_id,
-                        started_at_epoch_s=time.time(),
-                        bot_uuid=bot_uuid,
-                    ),
-                    deadline_seconds=86400,
-                )
-            except Exception as e:
-                logger.warning(
-                    "[bot_service._restart_bot_baas] restart poll enqueue failed "
-                    "for bot_id=%s publish_id=%s: %s",
-                    bot_id, publish_id, e,
-                )
-        else:
-            logger.info(
-                "[bot_service._restart_bot_baas] no publish_id or task queue service; "
-                "skipping restart poll enqueue for bot_id=%s publish_id=%s",
-                bot_id, publish_id,
-            )
 
         return dict(self._repository.get_by_id_and_owner(bot_id, user_id) or {})
 
@@ -3856,10 +4892,14 @@ class BotService:
                     return index, None, str(e)
 
             # 使用线程池并行申请设备
+            # ThreadPoolExecutor threads do NOT copy context vars, so bind the
+            # request's tenant onto the submitted callable (captured now, in the
+            # request thread) — each worker then runs under the right tenant.
+            _apply_single_device = bind_current_avernet_tenant(apply_single_device)
             with concurrent.futures.ThreadPoolExecutor(max_workers=min(instance_count, 10)) as executor:
                 # 提交所有任务
                 future_to_index = {
-                    executor.submit(apply_single_device, i): i for i in range(instance_count)
+                    executor.submit(_apply_single_device, i): i for i in range(instance_count)
                 }
 
                 # 收集结果
@@ -4133,7 +5173,14 @@ class BotService:
         logger.info(f"[bot_service.refresh_passport_token] Starting refresh for bot_id={bot_id}, user_id={user_id}")
 
         # 1. 获取 bot 并校验权限
-        bot = self._repository.get_by_id_and_owner(bot_id, user_id)
+        # 回调走 /api 前缀 → AvernetTenantMiddleware 套 DEFAULT 租户 teamclaw,
+        # 但外部租户 bot 的 passport 刷新需跨租户直查。(bot_id, owner_workno)
+        # 全局唯一,跨租户直查安全。
+        bot = self._repository.get_by_id_and_owner(
+            bot_id,
+            user_id,
+            execution_options={"skip_avernet_tenant_guard": True},
+        )
         if not bot:
             logger.warning(f"[bot_service.refresh_passport_token] Bot not found: bot_id={bot_id}, user_id={user_id}")
             raise BotNotFoundError(f"Bot not found: {bot_id}")
@@ -4148,7 +5195,10 @@ class BotService:
 
         new_token = token
         token_prefix = new_token[:20]
-        logger.info(f"[bot_service.refresh_passport_token] Got new token for bot_id={bot_id}, user_id={user_id}, bot_type={bot_type}, token_prefix={token_prefix}...")
+        logger.info(
+            f"[bot_service.refresh_passport_token] Got new token for "
+            f"bot_id={bot_id}, user_id={user_id}, bot_type={bot_type}, has_token=yes"
+        )
 
         # 提取 agent_code
         from agentclaw.community.core.bot_management.utils import resolve_agent_code
@@ -4268,8 +5318,10 @@ class BotService:
     ) -> list[dict]:
         """Service Bot Passport Token 热更新入口。
 
-        同时更新草稿态和已发布态的 binding（如果存在）。
+        同时更新草稿态、已发布态和 ACTIVE caller 实例 binding（如果存在）。
         草稿态复用 `_hot_update_by_device_binding`，已发布态调用 `_hot_update_by_publish_binding`。
+        caller 实例使用同一份 owner Passport token；caller 自己的
+        ``x-caller-token`` 属于独立链路，不在这里处理。
 
         Args:
             bot_id: Bot ID
@@ -4278,10 +5330,12 @@ class BotService:
             bot: bot 字典（用于获取草稿态 binding_id）
 
         Returns:
-            成功更新的 binding 列表，每项为 {"binding_id": int, "type": "draft"|"online"|"verify"}
+            成功更新的 binding 列表，每项为
+            {"binding_id": int, "type": "draft"|"online"|"verify"|"caller"}
 
         Raises:
-            BotServiceError: 草稿态和发布态均无可用的设备 binding 时抛出
+            BotServiceError: 任一目标失败，或所有目标均不存在时抛出。所有
+                已发现目标都会先 best-effort 尝试完毕，再聚合失败。
         """
         updated_bindings: list[dict] = []
         errors: list[str] = []
@@ -4305,7 +5359,7 @@ class BotService:
                     "device_count": len(devices),
                     "devices": devices,
                 })
-            except BotServiceError as e:
+            except Exception as e:
                 logger.warning(
                     f"[_hot_update_service_bot_passport_token] Draft binding update failed: "
                     f"bot_id={bot_id}, user_id={user_id}, binding_id={draft_binding_id}, error={e}"
@@ -4328,10 +5382,18 @@ class BotService:
         has_publish_record = False
 
         for status, binding_key in _PUBLISHED_STATUS_BINDINGS:
-            publish_record = publish_repo.get_by_publish_bot_id(
-                publish_bot_id=bot_id, owner_id=user_id, env=env,
-                publish_status=status,
-            )
+            try:
+                publish_record = publish_repo.get_by_publish_bot_id(
+                    publish_bot_id=bot_id, owner_id=user_id, env=env,
+                    publish_status=status,
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[_hot_update_service_bot_passport_token] {binding_key} publish query failed: "
+                    f"bot_id={bot_id}, user_id={user_id}, status={status}, error={e}"
+                )
+                errors.append(f"{binding_key}: 发布记录查询失败: {e}")
+                continue
             if not publish_record:
                 continue
             has_publish_record = True
@@ -4362,7 +5424,7 @@ class BotService:
                     "device_count": len(devices),
                     "devices": devices,
                 })
-            except BotServiceError as e:
+            except Exception as e:
                 logger.warning(
                     f"[_hot_update_service_bot_passport_token] {binding_key} binding update failed: "
                     f"bot_id={bot_id}, user_id={user_id}, binding_id={binding_id}, error={e}"
@@ -4372,6 +5434,70 @@ class BotService:
         if not has_publish_record:
             logger.info(
                 f"[_hot_update_service_bot_passport_token] No publish record: "
+                f"bot_id={bot_id}, user_id={user_id}, env={env}"
+            )
+
+        # ========== 步骤 3: 并发更新 ACTIVE caller 实例 ==========
+        try:
+            caller_bindings = self._device_binding_repo.list_active_caller_instance_bindings(
+                bot_id=bot_id,
+                owner_id=user_id,
+                env=env,
+            )
+        except Exception as e:
+            logger.warning(
+                f"[_hot_update_service_bot_passport_token] Caller binding query failed: "
+                f"bot_id={bot_id}, user_id={user_id}, env={env}, error={e}"
+            )
+            errors.append(f"caller: binding 查询失败: {e}")
+            caller_bindings = []
+
+        if caller_bindings:
+            logger.info(
+                f"[_hot_update_service_bot_passport_token] Updating caller bindings: "
+                f"bot_id={bot_id}, user_id={user_id}, caller_count={len(caller_bindings)}, "
+                f"max_workers={_CALLER_REFRESH_MAX_WORKERS}"
+            )
+            update_caller = bind_current_avernet_tenant(
+                self._hot_update_by_caller_binding
+            )
+            try:
+                with ThreadPoolExecutor(
+                    max_workers=_CALLER_REFRESH_MAX_WORKERS
+                ) as executor:
+                    future_to_binding = {
+                        executor.submit(
+                            update_caller,
+                            bot_id=bot_id,
+                            user_id=user_id,
+                            token=token,
+                            binding=binding,
+                            agent_code=agent_code,
+                        ): binding
+                        for binding in caller_bindings
+                    }
+                    for future in as_completed(future_to_binding):
+                        binding = future_to_binding[future]
+                        try:
+                            updated_bindings.append(future.result())
+                        except Exception as e:
+                            logger.warning(
+                                f"[_hot_update_service_bot_passport_token] Caller binding update failed: "
+                                f"bot_id={bot_id}, user_id={user_id}, binding_id={binding.id}, "
+                                f"device_id={binding.device_id}, error={e}"
+                            )
+                            errors.append(
+                                f"caller(binding_id={binding.id}): {e}"
+                            )
+            except Exception as e:
+                logger.warning(
+                    f"[_hot_update_service_bot_passport_token] Caller fan-out failed: "
+                    f"bot_id={bot_id}, user_id={user_id}, error={e}"
+                )
+                errors.append(f"caller: 并发更新失败: {e}")
+        else:
+            logger.info(
+                f"[_hot_update_service_bot_passport_token] No active caller binding: "
                 f"bot_id={bot_id}, user_id={user_id}, env={env}"
             )
 
@@ -4387,6 +5513,48 @@ class BotService:
             f"bot_id={bot_id}, user_id={user_id}, updated_bindings={updated_bindings}"
         )
         return updated_bindings
+
+    def _hot_update_by_caller_binding(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        token: str,
+        binding: DeviceBindingRecord,
+        agent_code: str = "",
+    ) -> dict:
+        """用 owner Passport token 更新一个 caller BaaS Bot 的 ACTIVE 设备。"""
+        service = self._device_service_provider()
+        device = AllocatedDevice(
+            device_id=binding.device_id,
+            device_provider=binding.device_provider,
+            device_props={
+                **(binding.device_props or {}),
+                "bolt_id": bot_id,
+                "entity_id": user_id,
+            },
+        )
+        update_result = service.update_device_headers(
+            device=device,
+            agent_pass_token=token,
+            agent_code=agent_code,
+            active_only=True,
+        )
+        devices = update_result if isinstance(update_result, list) else []
+        if not devices:
+            raise BotServiceError("caller 实例没有 ACTIVE 物理设备")
+
+        logger.info(
+            f"[_hot_update_by_caller_binding] Hot-update succeeded: "
+            f"bot_id={bot_id}, user_id={user_id}, binding_id={binding.id}, "
+            f"device_id={binding.device_id}, updated_devices={len(devices)}"
+        )
+        return {
+            "binding_id": binding.id,
+            "type": "caller",
+            "device_count": len(devices),
+            "devices": devices,
+        }
 
     def _hot_update_by_publish_binding(
         self, bot_id: str, user_id: str, token: str, binding_id: int, agent_code: str = ""

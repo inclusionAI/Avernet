@@ -81,3 +81,7 @@ class CommunityDatabase(DatabasePlugin):
             raise
         finally:
             db.close()
+
+    def transactional_orm_session(self):
+        """Reuse the existing community commit/rollback transaction."""
+        return self.orm_session()

@@ -145,7 +145,7 @@ class TestGenerateOpenClawStageConfigs:
         class DummyProvider:
             plan: EngineBuildPlan
 
-            def get_build_plan(self) -> EngineBuildPlan:
+            def get_build_plan(self, build_rsync_excludes_append=None) -> EngineBuildPlan:
                 return self.plan
 
         plan = EngineBuildPlan(
@@ -203,7 +203,7 @@ class TestGenerateOpenClawStageConfigs:
         class DummyProvider:
             plan: EngineBuildPlan
 
-            def get_build_plan(self) -> EngineBuildPlan:
+            def get_build_plan(self, build_rsync_excludes_append=None) -> EngineBuildPlan:
                 return self.plan
 
         plan = EngineBuildPlan(
@@ -255,7 +255,7 @@ class TestGenerateOpenClawStageConfigs:
         class DummyProvider:
             plan: EngineBuildPlan
 
-            def get_build_plan(self) -> EngineBuildPlan:
+            def get_build_plan(self, build_rsync_excludes_append=None) -> EngineBuildPlan:
                 return self.plan
 
         plan = EngineBuildPlan(
@@ -315,7 +315,7 @@ class TestBuildMigrationPathWhitelist:
         class DummyProvider:
             plan: EngineBuildPlan
 
-            def get_build_plan(self) -> EngineBuildPlan:
+            def get_build_plan(self, build_rsync_excludes_append=None) -> EngineBuildPlan:
                 return self.plan
 
         plan = EngineBuildPlan(

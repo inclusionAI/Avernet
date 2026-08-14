@@ -16,7 +16,7 @@ import json
 from agentclaw.community.log import get_logger
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from injector import inject
@@ -28,20 +28,13 @@ from agentclaw.community.core.economy.governance.domain.enums import (
 )
 from agentclaw.community.core.economy.governance.services.service_protocols import (
     GovernanceLifecycleServiceProtocol,
-    GovernanceWhitelistServiceProtocol,
 )
 
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.economy.governance.repositories.audit_repo import (
-        GovernanceAuditRepository,
-    )
-    from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
-        NotifyLogRepository,
-    )
-    from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
-        TaskRecordRepository,
-    )
+    from agentclaw.community.core.repository.implementations.governance.audit import GovernanceAuditRepository
+    from agentclaw.community.core.repository.implementations.governance.notify_log import NotifyLogRepository
+    from agentclaw.community.core.repository.implementations.governance.task_record import TaskRecordRepository
 
 log = get_logger(__name__)
 
@@ -52,11 +45,13 @@ _FORMAL_RESPONSES = {e.value for e in Response}
 _BLOCKED_STATUSES = {GovernanceStatus.SCHEDULED, GovernanceStatus.WAITING_REVIEW, GovernanceStatus.CLOSED}
 
 # response → (target_status, review_reason) — all go to waiting_review (§7.4.2)
+# need_time 也进 waiting_review 待审(管理员用 approve_scheduled 同意排期 → scheduled);
+# repair_deadline 仍记录供 approve_scheduled 用,但反馈时不再直接 mute。
 _RESPONSE_TRANSITION_MAP: dict[str, tuple[str, str]] = {
     Response.OPTIMIZED: (GovernanceStatus.WAITING_REVIEW, "user_optimized"),
+    Response.NEED_TIME: (GovernanceStatus.WAITING_REVIEW, "user_need_time"),
     Response.DISPUTE: (GovernanceStatus.WAITING_REVIEW, "user_disputed"),
     Response.WHITELIST: (GovernanceStatus.WAITING_REVIEW, "user_whitelisted"),
-    # need_time → scheduled, handled separately
 }
 
 # ── v2 feedback_payload 归一化 ─────────────────────────────────────
@@ -359,19 +354,12 @@ class GovernanceFeedbackService:
     @inject
     def __init__(
         self,
-        whitelist_service: GovernanceWhitelistServiceProtocol,
         notify_repo: NotifyLogRepository,
         audit_repo: GovernanceAuditRepository,
         task_repo: TaskRecordRepository,
         config: Any,  # EconomyGovernanceConfig
         lifecycle_svc: GovernanceLifecycleServiceProtocol,
     ) -> None:
-        # ``whitelist_service`` / ``notify_repo`` retained as injected deps
-        # (constructor signature stable across migration); the resolve path
-        # now delegates whitelist-add + cancel-pending to lifecycle_svc, so
-        # these are read only by future admin/review paths. Group C cleanup
-        # may drop them if confirmed unused.
-        self._whitelist_service = whitelist_service
         self._notify_repo = notify_repo
         self._audit_repo = audit_repo
         self._task_repo = task_repo
@@ -440,7 +428,7 @@ class GovernanceFeedbackService:
                 ticket.bot_id,
                 ticket.owner_id,
                 notification_id=notification_id,
-                actor_id=effective_user_id,
+                actor_id=effective_actor,
                 action_taken=AuditAction.FEEDBACK_DUPLICATE_IGNORED,
                 source=source,
                 dry_run=0,
@@ -458,7 +446,7 @@ class GovernanceFeedbackService:
                 ticket.bot_id,
                 ticket.owner_id,
                 notification_id=notification_id,
-                actor_id=effective_user_id,
+                actor_id=effective_actor,
                 action_taken=AuditAction.FEEDBACK_TERMINAL_IGNORED,
                 source=source,
                 error_msg=f"status={ticket.governance_status}",
@@ -510,19 +498,11 @@ class GovernanceFeedbackService:
                 notification_id=notification_id,
             )
 
-        # Apply feedback (§7.4.2)
+        # Apply feedback (§7.4.2) — 四种反馈均进 waiting_review 待审。
+        # need_time 的 repair_deadline 记录到 ticket(供 approve_scheduled 用),
+        # 但反馈时不直接 mute(改由管理员 approve_scheduled 审批后进 scheduled)。
         now = datetime.now()
-        target_status: str
-        review_reason: str | None = None
-        mute_until: datetime | None = None
-
-        if response == Response.NEED_TIME:
-            target_status = GovernanceStatus.SCHEDULED
-            mute_until = repair_deadline + timedelta(
-                days=self._config.cooldown_days,
-            )
-        else:
-            target_status, review_reason = _RESPONSE_TRANSITION_MAP[response]
+        target_status, review_reason = _RESPONSE_TRANSITION_MAP[response]
 
         # Build self-contained v2 feedback_payload (enrich on server side).
         # Enrichment reads ticket.notification_structured; degrades gracefully,
@@ -562,8 +542,8 @@ class GovernanceFeedbackService:
             target_status=target_status,
             feedback_remark=remark,
             repair_deadline=repair_deadline if response == Response.NEED_TIME else None,
-            resume_at=mute_until if response == Response.NEED_TIME else None,
-            review_reason=review_reason if response != Response.NEED_TIME else None,
+            resume_at=None,  # waiting_review 不 mute;mute 改由 approve_scheduled 审批后决定
+            review_reason=review_reason,
             actor_id=effective_actor,
             feedback_payload=feedback_payload_json,
         )
@@ -575,25 +555,10 @@ class GovernanceFeedbackService:
                 notification_id=notification_id,
             )
 
-        # Whitelist feedback → add to the whitelist table. Owned by
-        # feedback_service (not the driver) to keep lifecycle_service free of
-        # a whitelist_service dependency (breaks the whitelist↔lifecycle DI
-        # cycle). Source & created_by carry the rich feedback semantics
-        # (effective_user_id = owner; original source e.g. card_callback).
-        if response == Response.WHITELIST:
-            try:
-                self._whitelist_service.add(
-                    bot_id=ticket.bot_id,
-                    owner_id=ticket.owner_id,
-                    created_by=effective_user_id,
-                    whitelist_type="governance",
-                    source=source,
-                )
-            except Exception:
-                log.exception(
-                    "[GovernanceFeedback] Failed to add whitelist for bot_id=%s",
-                    ticket.bot_id,
-                )
+        # 用户反馈选加白(whitelist):只转 waiting_review 待审,不直接写白单。
+        # 加白唯一入口收敛为 admin 两条路径(批量加白 / 审阅加白 approve_whitelist);
+        # 反馈直接 add 会绕过审阅,且与「待审静默」语义矛盾(待审单会被 scan 抢关)。
+        # 用户反馈加白的申请动作仍由下方 _RESPONSE_AUDIT_MAP 记 user_whitelisted 审计。
 
         # Audit (§7.4.3) — feedback_service keeps its per-response audit
         # (USER_OPTIMIZED / USER_NEED_TIME / USER_DISPUTE / USER_WHITELIST),
@@ -610,7 +575,7 @@ class GovernanceFeedbackService:
             ticket.bot_id,
             ticket.owner_id,
             notification_id=notification_id,
-            actor_id=effective_user_id,
+            actor_id=effective_actor,
             check_result="actionable",
             action_taken=audit_action,
             source=source,
@@ -623,7 +588,7 @@ class GovernanceFeedbackService:
             notification_id=notification_id,
             governance_status=target_status,
             close_reason=ticket.close_reason,
-            mute_until=mute_until if response == Response.NEED_TIME else None,
+            mute_until=None,  # waiting_review 不 mute;mute 由 approve_scheduled 决定
             response=response,
             response_source=source,
         )
@@ -633,5 +598,3 @@ class GovernanceFeedbackService:
     # 无真实用户主动调用,    治理反馈真入口是 card-callback(经 resolve)。完整移除于
     # admin-router-regroup Task 7。仅保留 resolve。
     # ------------------------------------------------------------------
-
-    

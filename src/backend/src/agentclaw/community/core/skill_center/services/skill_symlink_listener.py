@@ -11,9 +11,10 @@ just the event payload.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.events.types import DeviceActivatedEvent
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
@@ -24,9 +25,9 @@ if TYPE_CHECKING:
     )
     from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
     from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
-
-
 logger = get_logger()
+
+_TRANSITION_AUTHORITY = "transition"
 
 
 class SkillSymlinkListener(LifecycleBase):
@@ -42,11 +43,17 @@ class SkillSymlinkListener(LifecycleBase):
         skill_set_factory: "SkillSetServiceFactory",
         resolver: "DeviceContextResolver",
         device_sync_dispatcher: "DeviceSyncDispatcher",
+        desktop_layout_authority: Callable[[dict], str | None] | None = None,
+        desktop_reconcile_wakeup: (
+            Callable[[DeviceActivatedEvent], None] | None
+        ) = None,
     ) -> None:
         self._bot_repo = bot_repo
         self._skill_set_factory = skill_set_factory
         self._resolver = resolver
         self._device_sync_dispatcher = device_sync_dispatcher
+        self._desktop_layout_authority = desktop_layout_authority
+        self._desktop_reconcile_wakeup = desktop_reconcile_wakeup
 
     async def startup(self) -> None:
         """Lifecycle hook — subscribe ``self.handle`` to DeviceActivatedEvent.
@@ -100,6 +107,32 @@ class SkillSymlinkListener(LifecycleBase):
                 )
                 return
 
+            is_desktop = bot.get("bot_type") == "desktop"
+            self._enqueue_desktop_reconciliation(
+                event=event,
+                is_desktop=is_desktop,
+            )
+            initial_authority = self._resolve_desktop_layout_authority(bot)
+            if initial_authority == _TRANSITION_AUTHORITY:
+                logger.info(
+                    "[skill_symlink_listener] Desktop transitional mapping "
+                    "is owned by durable reconciliation: bot_id=%s",
+                    bot_id,
+                )
+                return
+
+            ctx = self._resolver.resolve_for_bot(bot_id, owner_id)
+            if ctx.binding_id != event.binding_id:
+                logger.info(
+                    "[skill_symlink_listener] activated binding is no longer "
+                    "current, skipping: bot_id=%s event_binding_id=%s "
+                    "current_binding_id=%s",
+                    bot_id,
+                    event.binding_id,
+                    ctx.binding_id,
+                )
+                return
+
             from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 
             service = self._skill_set_factory.create(
@@ -111,7 +144,6 @@ class SkillSymlinkListener(LifecycleBase):
             mappings = service.get_symlink_mappings(user_id=owner_id, bolt_id=bot_id)
             symlinks = [sm.to_dict() for sm in mappings]
 
-            ctx = self._resolver.resolve_for_bot(bot_id, owner_id)
             device_sync = self._device_sync_dispatcher.dispatch(ctx)
             logger.info(
                 "[skill_symlink_listener] syncing symlinks: plugin=%s count=%d "
@@ -122,7 +154,14 @@ class SkillSymlinkListener(LifecycleBase):
                 bot_id,
                 owner_id,
             )
-            result = device_sync.sync_symlinks(symlinks)
+            try:
+                result = device_sync.sync_symlinks(symlinks)
+            finally:
+                self._reenqueue_if_desktop_cutover_started(
+                    event=event,
+                    bot=bot if is_desktop else None,
+                    initial_authority=initial_authority,
+                )
             logger.info(
                 "[skill_symlink_listener] sync result: success=%s message=%s",
                 result.get("success"),
@@ -134,3 +173,69 @@ class SkillSymlinkListener(LifecycleBase):
                 event.device_id,
                 exc,
             )
+
+    def _resolve_desktop_layout_authority(self, bot: dict) -> str | None:
+        if (
+            bot.get("bot_type") != "desktop"
+            or self._desktop_layout_authority is None
+        ):
+            return None
+        try:
+            return self._desktop_layout_authority(bot)
+        except Exception:
+            logger.exception(
+                "[skill_symlink_listener] Desktop layout lookup failed; "
+                "preserving Legacy wake behavior: bot_id=%s",
+                bot.get("bot_id"),
+            )
+            return None
+
+    def _enqueue_desktop_reconciliation(
+        self,
+        *,
+        event: DeviceActivatedEvent,
+        is_desktop: bool,
+    ) -> None:
+        """Wake P3 from the existing Desktop activation callback.
+
+        Keeping the wake inside this already-subscribed listener avoids adding
+        a second required DeviceActivated subscriber for non-Desktop bots.  A
+        wake failure must never suppress the existing Legacy mapping refresh.
+        """
+
+        if not is_desktop or self._desktop_reconcile_wakeup is None:
+            return
+        try:
+            self._desktop_reconcile_wakeup(event)
+        except Exception:
+            logger.exception(
+                "[skill_symlink_listener] Desktop reconciliation wake failed; "
+                "continuing Legacy mapping refresh: binding_id=%s",
+                event.binding_id,
+            )
+
+    def _reenqueue_if_desktop_cutover_started(
+        self,
+        *,
+        event: DeviceActivatedEvent,
+        bot: dict | None,
+        initial_authority: str | None,
+    ) -> None:
+        if (
+            bot is None
+            or self._desktop_layout_authority is None
+            or self._desktop_reconcile_wakeup is None
+        ):
+            return
+        current_authority = self._resolve_desktop_layout_authority(bot)
+        if current_authority is None or current_authority == initial_authority:
+            return
+        logger.info(
+            "[skill_symlink_listener] Desktop layout authority changed during "
+            "mapping sync; enqueueing durable convergence: bot_id=%s "
+            "initial_authority=%s authority=%s",
+            bot.get("bot_id"),
+            initial_authority,
+            current_authority,
+        )
+        self._desktop_reconcile_wakeup(event)

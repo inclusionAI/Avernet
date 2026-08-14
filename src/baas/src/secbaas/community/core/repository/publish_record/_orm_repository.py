@@ -447,7 +447,7 @@ class OrmPublishRecordRepository(OrmConnectionMixin, PublishRecordRepository):
             LEFT JOIN baas_device d ON pr.device_id = d.id AND d.is_deleted = 0
             WHERE pr.publish_id = :publish_id
               AND pr.result_status = 'PROCESSING'
-              AND pr.gmt_create < :cutoff
+              AND pr.gmt_modified < :cutoff
               AND pr.tenant = :tenant AND pr.env = :env AND pr.is_deleted = 0"""
         )
         result = self._session.execute(

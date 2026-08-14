@@ -2,7 +2,7 @@
 //!
 //! Validates the unified `target_reachable_for_collab` helper across all four
 //! collaboration endpoints:
-//!   (i)   POST /bots/{T}/chat
+//!   (i)   POST /bots/{T}/chat-async
 //!   (ii)  POST /groups  (Normal group)
 //!   (iii) POST /groups  (DM sub-path: group_kind=Dm + target_actor_id)
 //!   (iv)  POST /groups/{id}/members
@@ -34,18 +34,17 @@ use serde_json::json;
 
 use helpers::{MockBot, create_temp_bots_dir, start_test_server};
 
-/// POST /bots/{target}/chat — returns (status_code, body) or error string.
+/// POST /bots/{target}/chat-async — returns (status_code, body) or error string.
 ///
-/// Uses a short HTTP timeout to avoid blocking when the target bot has no WS
-/// consumer.  A timeout is treated as "reachability OK, delivery timed out"
-/// — the permission check passed, which is what P-tests care about.
-async fn bot_chat_http(
+/// Submits an async chat run; a successful submission means the same
+/// collaboration reachability checks passed before the run was accepted.
+async fn bot_chat_async_http(
     addr: SocketAddr,
     sender_token: &str,
     target_bot_id: &str,
     message: &str,
 ) -> Result<(u16, serde_json::Value), String> {
-    let url = format!("http://{}/bots/{}/chat", addr, target_bot_id);
+    let url = format!("http://{}/bots/{}/chat-async", addr, target_bot_id);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
         .build()
@@ -53,29 +52,18 @@ async fn bot_chat_http(
     let response = client
         .post(&url)
         .header("Authorization", format!("Bearer {}", sender_token))
-        .json(&json!({ "message": message, "timeout_ms": 2000 }))
+        .json(&json!({ "message": message }))
         .send()
         .await;
     match response {
         Ok(resp) => {
             let status = resp.status().as_u16();
             let body: serde_json::Value = resp.json().await.unwrap_or(json!({}));
-            // Server returns 500 when the permission check passed but the bot
-            // has no WS consumer to respond ("Timeout waiting for bot response").
-            // For reachability tests, the permission check passing is what
-            // matters, so treat this 500 the same as a reqwest-level timeout.
-            if status == 500 && body.get("error").and_then(|e| e.as_str()).map_or(false, |s| s.contains("Timeout")) {
-                Ok((200, json!({"timeout": true})))
-            } else if !reqwest::StatusCode::from_u16(status).unwrap().is_success() {
+            if !reqwest::StatusCode::from_u16(status).unwrap().is_success() {
                 Err(format!("HTTP {}: {}", status, body))
             } else {
                 Ok((status, body))
             }
-        }
-        Err(e) if e.is_timeout() => {
-            // Timeout means permission check passed but target didn't respond.
-            // For reachability tests this counts as "allowed".
-            Ok((200, json!({"timeout": true})))
         }
         Err(e) => Err(format!("Request failed: {}", e)),
     }
@@ -376,8 +364,8 @@ async fn create_base_group(
 async fn p1_target_public_allows_all_endpoints() {
     let s = setup_two_bots("public", "public", false).await;
 
-    // (i) POST /bots/{T}/chat
-    let chat = bot_chat_http(s.addr, &s.caller.token, &s.target.bot_id, "hello").await;
+    // (i) POST /bots/{T}/chat-async
+    let chat = bot_chat_async_http(s.addr, &s.caller.token, &s.target.bot_id, "hello").await;
     assert!(chat.is_ok(), "P-1(i) chat should succeed: {:?}", chat.err());
 
     // (ii) POST /groups (Normal)
@@ -552,7 +540,7 @@ async fn dm_without_bot_token_or_human_identity_returns_401() {
 async fn p2_target_protected_friend_allows_all() {
     let s = setup_two_bots("public", "protected", true).await;
 
-    let chat = bot_chat_http(s.addr, &s.caller.token, &s.target.bot_id, "hello").await;
+    let chat = bot_chat_async_http(s.addr, &s.caller.token, &s.target.bot_id, "hello").await;
     assert!(chat.is_ok(), "P-2(i) chat should succeed: {:?}", chat.err());
 
     let group = create_group_http(
@@ -586,7 +574,7 @@ async fn p2_target_protected_friend_allows_all() {
 async fn p3_target_protected_stranger_rejects_403() {
     let s = setup_two_bots("public", "protected", false).await;
 
-    let chat = bot_chat_http(s.addr, &s.caller.token, &s.target.bot_id, "hello").await;
+    let chat = bot_chat_async_http(s.addr, &s.caller.token, &s.target.bot_id, "hello").await;
     assert!(chat.is_err(), "P-3(i) chat should fail");
     assert!(
         chat.unwrap_err().contains("403"),
@@ -636,7 +624,7 @@ async fn p3_target_protected_stranger_rejects_403() {
 async fn p4_target_private_friend_allows_all() {
     let s = setup_two_bots("public", "private", true).await;
 
-    let chat = bot_chat_http(s.addr, &s.caller.token, &s.target.bot_id, "hello").await;
+    let chat = bot_chat_async_http(s.addr, &s.caller.token, &s.target.bot_id, "hello").await;
     // Friends can chat with private bots
     assert!(chat.is_ok(), "P-4(i) private target chat should succeed for friends: {:?}", chat.err());
 
@@ -661,8 +649,7 @@ async fn p4_target_private_friend_allows_all() {
 
     let group_id = create_base_group(s.addr, &s.caller.token, &s.caller.bot_id).await;
     let add = add_member_http(s.addr, &s.caller.token, &group_id, &s.target.bot_id).await;
-    // Private target is invisible (404) even to friends via add_member
-    assert!(add.is_err(), "P-4(iv) private target add_member should be rejected (invisible), got: {:?}", add.ok());
+    assert!(add.is_ok(), "P-4(iv) private target add_member should succeed for friends: {:?}", add.err());
 }
 
 // ============================================================================
@@ -672,7 +659,7 @@ async fn p4_target_private_friend_allows_all() {
 async fn p5_target_private_stranger_rejects_404() {
     let s = setup_two_bots("public", "private", false).await;
 
-    let chat = bot_chat_http(s.addr, &s.caller.token, &s.target.bot_id, "hello").await;
+    let chat = bot_chat_async_http(s.addr, &s.caller.token, &s.target.bot_id, "hello").await;
     assert!(chat.is_err(), "P-5(i) chat should fail");
     assert!(
         chat.unwrap_err().contains("404"),
@@ -723,7 +710,7 @@ async fn p6_caller_private_target_reachable_allows_all() {
     // caller=private, target=public (no friendship needed for public target)
     let s = setup_two_bots("private", "public", false).await;
 
-    let chat = bot_chat_http(s.addr, &s.caller.token, &s.target.bot_id, "hello").await;
+    let chat = bot_chat_async_http(s.addr, &s.caller.token, &s.target.bot_id, "hello").await;
     assert!(chat.is_ok(), "P-6(i) chat should succeed: {:?}", chat.err());
 
     let group = create_group_http(

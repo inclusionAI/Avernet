@@ -24,17 +24,13 @@ from typing import Annotated
 
 import httpx
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
-from agentclaw.community.core.resources.repository.protocol import ResourceRepositoryProtocol
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
-from agentclaw.community.core.skill_center.services.repositories import (
-    SkillRepository,
-    SkillSetRepository,
-)
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.plugin_api.http_client import (
     QUALIFIER_BAAS,
@@ -449,13 +445,15 @@ def _assert_artifact_composed(response, world) -> None:
     extra_assertions=(
         _expect_status(_V1, PublishStatus.VALIDATE_PUB),
         _assert_artifact_composed,
-        _expect_post("/api/v1/bots", "/approve"),
+        _expect_post("/api/v1/bots"),
+        # #197 all-auto: BaaS auto-approves server-side — no client /approve POST.
+        _expect_no_post("/approve"),
         _expect_no_post("/destroy"),
     ),
 )
 def draft_process_builds_to_validate_pub():
-    """DRAFT /process backgrounds build+create+approve → VALIDATE_PUB, artifact
-    carries the seeded resource + user/shared skills."""
+    """DRAFT /process backgrounds build+create (auto-approved server-side) →
+    VALIDATE_PUB, artifact carries the seeded resource + user/shared skills."""
 
 
 @endpoint_test(

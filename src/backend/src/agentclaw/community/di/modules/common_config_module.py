@@ -11,7 +11,7 @@ from agentclaw.community.core.common_config import (
     CommonConfigService,
     CommonWhiteListService,
 )
-from agentclaw.community.core.common_config.repository import CommonConfigRepository
+from agentclaw.community.core.repository.implementations.config.common_config import CommonConfigRepository
 
 
 class CommonConfigModule(Module):

@@ -4,6 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::collaboration::HumanInputNotificationMode;
+
 pub type ChannelType = String;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,6 +77,46 @@ pub struct ImParticipantMap {
     pub im_user_id: String,
     pub actor_id: String,
     pub display_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HumanInputRequestStatus {
+    Queued,
+    Notifying,
+    Active,
+    Responded,
+    Expired,
+    Cancelled,
+    DeliveryFailed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HumanInputRequest {
+    pub request_id: String,
+    pub session_id: String,
+    pub run_id: String,
+    pub node_id: String,
+    pub binding_id: String,
+    pub channel_type: ChannelType,
+    pub account_ref: String,
+    pub notification_mode: HumanInputNotificationMode,
+    pub reply_scope_key: String,
+    pub active_slot_key: Option<String>,
+    pub assignee_actor_id: String,
+    pub im_conversation_id: String,
+    pub im_conversation_type: String,
+    pub im_user_id: Option<String>,
+    pub node_display_name: String,
+    pub notification_text: String,
+    pub deadline_ms: u64,
+    pub status: HumanInputRequestStatus,
+    pub provider_message_ref: Option<String>,
+    pub delivery_attempts: u32,
+    pub last_delivery_error: Option<String>,
+    pub created_at: u64,
+    pub activated_at: Option<u64>,
+    pub responded_at: Option<u64>,
 }
 
 #[cfg(test)]

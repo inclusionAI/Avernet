@@ -4,10 +4,8 @@ Skill set metadata writer for persisting skill set information to JSON.
 import json
 from pathlib import Path
 
-from agentclaw.community.core.skill_center.services.repositories import (
-    SkillRepository,
-    SkillSetRepository,
-)
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -100,7 +98,7 @@ class SkillSetMetadataWriter:
                 return Path(rel_path).name
             elif git_path.startswith("local://"):
                 # local://skill-name -> skill-name
-                return git_path[8:]  # Remove "local://"
+                return Path(git_path[8:]).name  # Remove "local://"
             else:
                 # Fallback: treat as path and get basename
                 return Path(git_path).name

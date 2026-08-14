@@ -126,7 +126,6 @@ fn group_status_and_history_commands_carry_route_inputs() {
         human_actor_id: Some("human_alice".to_string()),
         group_id: "group-1".to_string(),
         bot_id: "bot-a".to_string(),
-        role: Some("consultant".to_string()),
     };
     let history = GroupHistoryCommand {
         caller: CallerContext::Public,
@@ -141,7 +140,6 @@ fn group_status_and_history_commands_carry_route_inputs() {
     assert_eq!(add_member.caller_actor_id.as_deref(), Some("driver"));
     assert_eq!(add_member.group_id, "group-1");
     assert_eq!(add_member.bot_id, "bot-a");
-    assert_eq!(add_member.role.as_deref(), Some("consultant"));
     assert_eq!(history.group_id, "group-1");
     assert_eq!(history.view_bot_id.as_deref(), Some("bot-a"));
     assert_eq!(history.limit, 50);
@@ -232,6 +230,7 @@ fn group_result_dtos_are_route_friendly_views() {
         driver_bot_id: "driver".to_string(),
         participant_bot_ids: vec!["driver".to_string(), "bot-a".to_string()],
         chat_url: None,
+        session_id: "group-1:initial".to_string(),
         context_injected: 0,
     };
     let add_member = GroupAddMemberResult {
@@ -347,7 +346,6 @@ async fn noop_group_management_service_fails_closed() {
             human_actor_id: None,
             group_id: "group-1".to_string(),
             bot_id: "bot-a".to_string(),
-            role: Some("consultant".to_string()),
         })
         .await;
     assert_not_configured(added, "group management service is not configured");

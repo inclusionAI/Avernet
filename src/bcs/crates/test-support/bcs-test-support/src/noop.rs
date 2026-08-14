@@ -7,6 +7,7 @@ use bcs_domain::{
 };
 use bcs_service_api::core::{
     SystemMessageDispatchOutcome, SystemMessageDispatcherService, SystemMessageProducerService,
+    WorkerProfile, WorkerProfileCoreService, WorkerRecommendCommand, WorkerRecommendResult,
 };
 use bcs_service_api::*;
 
@@ -612,6 +613,15 @@ impl OrganizationCoreService for NoopOrganizationCoreService {
         Err(service_not_configured("organization service"))
     }
 
+    async fn candidate_bot_detail_for_manager(
+        &self,
+        _managing_provider_id: &str,
+        _organization_code: &str,
+        _bot_uuid: &str,
+    ) -> ServiceResult<Option<OrganizationCandidateBotDetail>> {
+        Err(service_not_configured("organization service"))
+    }
+
     async fn require_effective_member(
         &self,
         _organization_code: &str,
@@ -663,7 +673,11 @@ impl OrganizationManagementService for NoopOrganizationManagementService {
         Err(service_not_configured("organization service"))
     }
 
-    async fn get(&self, _auth: OrganizationAuth, _code: &str) -> ServiceResult<Organization> {
+    async fn get(
+        &self,
+        _auth: OrganizationMemberAuth,
+        _code: &str,
+    ) -> ServiceResult<Organization> {
         Err(service_not_configured("organization service"))
     }
 
@@ -735,6 +749,15 @@ impl OrganizationManagementService for NoopOrganizationManagementService {
         _auth: OrganizationAuth,
         _query: OrganizationCandidateQuery,
     ) -> ServiceResult<Vec<OrganizationCandidateBot>> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn candidate_bot_detail(
+        &self,
+        _auth: OrganizationAuth,
+        _organization_code: &str,
+        _bot_uuid: &str,
+    ) -> ServiceResult<Option<OrganizationCandidateBotDetail>> {
         Err(service_not_configured("organization service"))
     }
 }
@@ -831,6 +854,8 @@ impl FusionCoreService for NoopFusionCoreService {
             soul: None,
             rules: None,
             memory: None,
+            tools: None,
+            agents: None,
         })
     }
 
@@ -1132,6 +1157,13 @@ impl CollaborationRuntimeService for NoopCollaborationRuntimeService {
         _run_id: &str,
     ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
         Ok(None)
+    }
+
+    async fn handle_session_human_input(
+        &self,
+        _cmd: HandleSessionHumanInputCommand,
+    ) -> Result<HandleSessionHumanInputOutcome, CollaborationRuntimeError> {
+        Ok(HandleSessionHumanInputOutcome::NotStateMachine)
     }
 
     async fn get_state_machine_session_history(
@@ -1475,7 +1507,7 @@ impl HumanActorService for NoopHumanActorService {
 pub struct NoopWorkerProfileService;
 
 #[async_trait]
-impl WorkerProfileService for NoopWorkerProfileService {
+impl WorkerProfileCoreService for NoopWorkerProfileService {
     async fn recommend_workers(
         &self,
         _command: WorkerRecommendCommand,
@@ -1821,6 +1853,26 @@ impl BotRunContextPort for NoopBotRunContextPort {
     }
 
     async fn release_terminal(&self, _run_id: &str) {}
+
+    async fn begin_provider_transport(&self, _run_id: &str, _deadline_ms: u64) -> bool {
+        false
+    }
+
+    async fn bind_provider_transport(
+        &self,
+        _run_id: &str,
+        _transport: ProviderRunTransport,
+    ) -> bool {
+        false
+    }
+
+    async fn get_provider_transport(&self, _run_id: &str) -> Option<ProviderRunTransport> {
+        None
+    }
+
+    async fn mark_provider_transport_terminal(&self, _run_id: &str) {}
+
+    async fn clear_provider_transport(&self, _run_id: &str) {}
 }
 
 #[derive(Debug, Default)]
@@ -1855,6 +1907,7 @@ impl ChannelDeliveryPort for NoopChannelDeliveryPort {
     ) -> ServiceResult<ChannelDeliveryResult> {
         Ok(ChannelDeliveryResult {
             delivered: false,
+            provider_message_ref: None,
             error: None,
         })
     }
@@ -1887,6 +1940,14 @@ impl ChannelService for NoopChannelService {
     }
 
     async fn list_bindings(&self) -> Result<Vec<ChannelBinding>, ChannelUseCaseError> {
+        Ok(Vec::new())
+    }
+
+    async fn list_bindings_by_target(
+        &self,
+        _target: bcs_domain::BindingTarget,
+        _channel_type: Option<bcs_domain::ChannelType>,
+    ) -> Result<Vec<ChannelBinding>, ChannelUseCaseError> {
         Ok(Vec::new())
     }
 
@@ -1963,8 +2024,8 @@ impl SystemMessageProducerService for NoopSystemMessageProducer {
         _group: &Group,
         _registry: &dyn BotRegistryCoreService,
         _participants: &[Participant],
-    ) -> Vec<SystemGroupMessage> {
-        vec![]
+    ) -> (Vec<SystemGroupMessage>, Option<String>) {
+        (vec![], None)
     }
 }
 
@@ -1986,6 +2047,8 @@ fn service_not_configured(name: &str) -> ServiceError {
 }
 
 pub use bcs_session::NoopSessionManagementService;
+
+pub use bcs_session_file::NoopSessionFileService;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NoopSecretService;

@@ -157,6 +157,71 @@ async def test_skills_local_injected_for_arca_when_present():
 
 
 @pytest.mark.asyncio
+async def test_pool_skills_local_is_injected_when_legacy_bridge_is_retired():
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(side_effect=[
+        [
+            {"name": "skills-pool", "is_dir": True},
+            {"name": "data", "is_dir": True},
+        ],
+        [],
+        [
+            {
+                "name": "skills-local",
+                "is_dir": True,
+                "path": (
+                    "/home/admin/.openclaw/workspace/"
+                    "skills-pool/skills-local"
+                ),
+            }
+        ],
+    ])
+    svc, _ = _svc(provider="arca", device_fs=device_fs)
+
+    items = await svc.list_dir(**_COORDS, path="")
+
+    assert {item["name"] for item in items} == {"data", "skills-local"}
+    injected = next(item for item in items if item["name"] == "skills-local")
+    assert injected["path"] == "skills-pool/skills-local"
+    assert injected["absolute_path"].endswith("/skills-pool/skills-local")
+
+
+@pytest.mark.asyncio
+async def test_root_returns_only_one_skills_local_when_both_layouts_exist():
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(side_effect=[
+        [{"name": "data", "is_dir": True}],
+        [
+            {
+                "name": "skills-local",
+                "is_dir": True,
+                "path": (
+                    "/home/admin/.openclaw/workspace/skills/skills-local"
+                ),
+            }
+        ],
+        [
+            {
+                "name": "skills-local",
+                "is_dir": True,
+                "path": (
+                    "/home/admin/.openclaw/workspace/"
+                    "skills-pool/skills-local"
+                ),
+            }
+        ],
+    ])
+    svc, _ = _svc(provider="arca", device_fs=device_fs)
+
+    items = await svc.list_dir(**_COORDS, path="")
+
+    injected = [item for item in items if item["name"] == "skills-local"]
+    assert len(injected) == 1
+    assert injected[0]["path"] == "skills/skills-local"
+    assert device_fs.list_dir.await_count == 2
+
+
+@pytest.mark.asyncio
 async def test_skills_local_not_injected_for_teclaw():
     device_fs = MagicMock()
     device_fs.list_dir = AsyncMock(return_value=[{"name": "skills-local", "is_dir": True}])
@@ -194,12 +259,13 @@ async def test_root_listing_survives_skills_probe_404():
     device_fs.list_dir = AsyncMock(side_effect=[
         [{"name": "data", "is_dir": True}],                 # root → 200
         FileNotFoundError("workspace/skills not found"),    # skills probe → 404
+        FileNotFoundError("workspace/skills-pool not found"),
     ])
     svc, _ = _svc(provider="baas", device_fs=device_fs)
     items = await svc.list_dir(**_COORDS, path="")
     assert [i["name"] for i in items] == ["data"]
     assert all(i["path"] != "skills/skills-local" for i in items)
-    assert device_fs.list_dir.await_count == 2
+    assert device_fs.list_dir.await_count == 3
 
 
 # ── read / download-limit forwarding ─────────────────────────────────────────
@@ -242,14 +308,82 @@ async def test_create_directory_writes_keep_placeholder():
     device_fs.write_file.assert_awaited_once_with("workspace/newdir/.keep", b"")
 
 
+def _fs_listing(*entries: dict) -> MagicMock:
+    """A device whose parent listing answers the file-or-directory question."""
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(return_value=list(entries))
+    device_fs.delete_file = AsyncMock(return_value=True)
+    device_fs.delete_tree = AsyncMock(return_value=True)
+    return device_fs
+
+
 @pytest.mark.asyncio
 async def test_delete_addresses_workspace():
-    device_fs = MagicMock()
-    device_fs.delete_file = AsyncMock(return_value=True)
+    device_fs = _fs_listing({"name": "a.txt", "is_dir": False})
     svc, _ = _svc(provider="arca", device_fs=device_fs)
     ok = await svc.delete(**_COORDS, path="sub/a.txt")
     assert ok is True
     device_fs.delete_file.assert_awaited_once_with("workspace/sub/a.txt")
+    device_fs.delete_tree.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_routes_a_directory_through_delete_tree():
+    """The engines split these across two operations (``remove`` vs ``rmtree``)
+    and the single-file one does not recurse, so a directory sent to
+    ``delete_file`` is simply not deleted."""
+    device_fs = _fs_listing({"name": "docs", "is_dir": True})
+    svc, _ = _svc(provider="teclaw", device_fs=device_fs)
+
+    assert await svc.delete(**_COORDS, path="sub/docs") is True
+    device_fs.delete_tree.assert_awaited_once_with("workspace/sub/docs")
+    device_fs.delete_file.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_asks_the_parent_not_the_path_itself():
+    """Listing a *file* is not a defined operation on the engines, so probing
+    the path directly would turn every file delete into an error."""
+    device_fs = _fs_listing({"name": "a.txt", "is_dir": False})
+    svc, _ = _svc(provider="arca", device_fs=device_fs)
+
+    await svc.delete(**_COORDS, path="sub/a.txt")
+
+    device_fs.list_dir.assert_awaited_once_with("workspace/sub")
+
+
+@pytest.mark.asyncio
+async def test_delete_at_the_workspace_root_lists_the_root():
+    device_fs = _fs_listing({"name": "a.txt", "is_dir": False})
+    svc, _ = _svc(provider="arca", device_fs=device_fs)
+
+    await svc.delete(**_COORDS, path="a.txt")
+
+    device_fs.list_dir.assert_awaited_once_with("workspace")
+
+
+@pytest.mark.asyncio
+async def test_delete_falls_back_to_the_file_branch_when_the_listing_fails():
+    """A failed probe must not fail the delete — the file branch is what this
+    did unconditionally before the directory support existed."""
+    device_fs = _fs_listing()
+    device_fs.list_dir = AsyncMock(side_effect=RuntimeError("engine down"))
+    svc, _ = _svc(provider="arca", device_fs=device_fs)
+
+    assert await svc.delete(**_COORDS, path="sub/a.txt") is True
+    device_fs.delete_file.assert_awaited_once_with("workspace/sub/a.txt")
+
+
+@pytest.mark.asyncio
+async def test_delete_still_reaches_hidden_system_names():
+    """The probe uses the raw device listing rather than this class's filtered
+    ``list_dir``, which drops dotfiles and the hidden system directories — those
+    stay as deletable as they were before."""
+    device_fs = _fs_listing({"name": "state", "is_dir": True})
+    svc, _ = _svc(provider="arca", device_fs=device_fs)
+
+    assert await svc.delete(**_COORDS, path="state") is True
+    device_fs.delete_tree.assert_awaited_once_with("workspace/state")
 
 
 @pytest.mark.asyncio
@@ -276,13 +410,23 @@ async def test_upload_empty_filename_raises():
 
 
 @pytest.mark.asyncio
-async def test_upload_too_large_raises():
-    from agentclaw.community.core.resources.services.file_service import MAX_FILE_SIZE
+async def test_upload_too_large_raises(monkeypatch):
+    # The real ceiling is 500MB. Materialising ``b"x" * (500MB + 1)`` to trip the
+    # ``len(data) > MAX_FILE_SIZE`` check cost ~11.6s of allocation alone — the
+    # single slowest non-retry test in the suite. Shrink the ceiling instead: the
+    # guard being asserted compares a length against this module global, so a
+    # 16-byte limit exercises exactly the same branch.
+    # ``resource_file_service`` binds the constant into its own namespace with
+    # ``from ... import MAX_FILE_SIZE``, so that is the name the guard reads.
+    from agentclaw.community.core.services import resource_file_service
+
+    monkeypatch.setattr(resource_file_service, "MAX_FILE_SIZE", 16)
 
     svc, _ = _svc(provider="arca", device_fs=MagicMock())
     with pytest.raises(ValueError):
         await svc.upload_file(
-            **_COORDS, target_dir="", filename="big.csv", data=b"x" * (MAX_FILE_SIZE + 1),
+            **_COORDS, target_dir="", filename="big.csv",
+            data=b"x" * (resource_file_service.MAX_FILE_SIZE + 1),
         )
 
 

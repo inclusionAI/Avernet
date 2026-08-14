@@ -26,7 +26,7 @@ from secbaas.community.api.bot_runtime import BotChatContext, BotRunner
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.repository.api_gateway import APIKeyRepository
 from secbaas.community.core.repository.bot_run import BotRunRepository
-from secbaas.community.core.service.bcn.uplink import UplinkClient
+from secbaas.community.core.service.bcn.uplink import BcnUplinkCallback, UplinkClient
 from secbaas.community.logger import get_logger
 
 logger = get_logger("core-service")
@@ -74,6 +74,7 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
         self._bcn_api_key_prefix = bcn_api_key_prefix
         self._uplink_client = uplink_client
         self._run_repository = run_repository
+        self._uplink_callback = BcnUplinkCallback(uplink_client, run_repository)
 
     async def handle_chat_send(self, chat_send_input: ChatSendInput) -> ChatSendResult:
         """处理 chat.send 请求
@@ -100,7 +101,7 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
         ignore_result = False
         if (
             chat_send_input.extensions
-            and chat_send_input.extensions["caller_wait_mode"] == "detached"
+            and chat_send_input.extensions.get("caller_wait_mode") == "detached"
         ):
             ignore_result = True
             logger.info(
@@ -121,6 +122,7 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
         )
         metadata["timeout"] = chat_send_input.timeout_ms / 1000
         message_text = _extract_message_text(chat_send_input.message)
+        attachments = chat_send_input.attachments
 
         async def _async_deliver() -> None:
             try:
@@ -131,6 +133,7 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
                     metadata=metadata,
                     message_id=chat_send_input.run_id,
                     callback="bcn_uplink",
+                    attachments=attachments,
                 )
                 logger.info(
                     "[chat.send] Message delivered: run_id=%s message_id=%s session_id=%s",
@@ -139,11 +142,16 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
                     _session_id,
                 )
             except Exception as e:
-                logger.error(
+                logger.exception(
                     "[chat.send] deliver_message failed: run_id=%s err=%s",
                     chat_send_input.run_id,
                     e,
                 )
+                self._run_repository.update_error(
+                    run_id=chat_send_input.run_id,
+                    error="Message delivery failed",
+                )
+                await self._uplink_callback(chat_send_input.run_id)
 
         asyncio.create_task(_async_deliver())
 
@@ -179,6 +187,7 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
         metadata["timeout"] = chat_send_input.timeout_ms / 1000
         metadata["stream"] = "true"
         message_text = _extract_message_text(chat_send_input.message)
+        attachments = chat_send_input.attachments
 
         (
             _run_id,
@@ -190,6 +199,7 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
             context=context,
             metadata=metadata,
             message_id=chat_send_input.run_id,
+            attachments=attachments,
         )
 
         return stream_iter
@@ -226,33 +236,31 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
             request_type="inject",
         )
         message_text = _extract_message_text(chat_inject_input.message)
+        attachments = chat_inject_input.attachments
 
-        async def _async_inject() -> None:
-            try:
-                message_id, _session_id = await self._bot_runner.inject_message(
-                    bot_id=chat_inject_input.to_bot.provider_bot_ref,
-                    message=message_text,
-                    context=context,
-                    metadata=metadata,
-                    message_id=chat_inject_input.id,
-                )
-                logger.info(
-                    "[chat.inject] Message injected: id=%s message_id=%s session_id=%s",
-                    chat_inject_input.id,
-                    message_id,
-                    _session_id,
-                )
-            except Exception as e:
-                logger.error(
-                    "[chat.inject] inject_message failed: id=%s err=%s",
-                    chat_inject_input.id,
-                    e,
-                )
+        try:
+            message_id, _session_id = await self._bot_runner.inject_message(
+                bot_id=chat_inject_input.to_bot.provider_bot_ref,
+                message=message_text,
+                context=context,
+                metadata=metadata,
+                message_id=chat_inject_input.id,
+                attachments=attachments,
+            )
+        except Exception as e:
+            logger.error(
+                "[chat.inject] inject_message failed before acknowledgement: id=%s err=%s",
+                chat_inject_input.id,
+                e,
+            )
+            return ChatInjectResult(ok=False)
 
-        asyncio.create_task(_async_inject())
-
-        logger.info("[chat.inject] async message injected: id=%s", chat_inject_input.id)
-
+        logger.info(
+            "[chat.inject] persisted: id=%s message_id=%s session_id=%s",
+            chat_inject_input.id,
+            message_id,
+            _session_id,
+        )
         return ChatInjectResult(ok=True)
 
     async def handle_chat_history(

@@ -10,7 +10,6 @@ from secbaas.community.core.repository.distributed_lock import (
     DistributedLockRepository,
     LockRecord,
 )
-from secbaas.community.core.utils.env_utils import get_current_env
 
 pytestmark = pytest.mark.integration
 
@@ -20,7 +19,7 @@ def _generate_uuid() -> str:
 
 
 class TestDistributedLockSqliteOrmEquivalence:
-    def test_insert_and_get_roundtrip(self):
+    def test_try_acquire_and_get_roundtrip(self):
         repo: DistributedLockRepository = (
             get_container().repository.distributed_lock_repository()
         )
@@ -28,111 +27,91 @@ class TestDistributedLockSqliteOrmEquivalence:
         lock_holder = _generate_uuid()
         expire_time = datetime.now() + timedelta(minutes=5)
 
-        lock_id = repo.insert_lock(
+        acquired = repo.try_acquire_lock(
             lock_name=lock_name,
             lock_holder=lock_holder,
             expire_time=expire_time,
         )
-        assert lock_id > 0
+        assert acquired is True
 
-        record = repo.get_by_lock_name_for_update(lock_name)
+        record = repo.get_by_lock_name(lock_name)
         assert isinstance(record, LockRecord)
         assert record.lock_name == lock_name
         assert record.lock_holder == lock_holder
         assert record.expire_time is not None
-        assert record.gmt_create is not None
 
-    def test_get_for_update_nonexistent(self):
+    def test_get_nonexistent(self):
         repo = get_container().repository.distributed_lock_repository()
-        assert (
-            repo.get_by_lock_name_for_update(f"nonexistent_{_generate_uuid()}") is None
-        )
+        assert repo.get_by_lock_name(f"nonexistent_{_generate_uuid()}") is None
 
-    def test_deep_update_lock_holder(self):
+    def test_try_acquire_fails_when_held_by_other(self):
         repo = get_container().repository.distributed_lock_repository()
-        lock_name = f"sqlite_lock_{_generate_uuid()[:12]}"
-        new_holder = _generate_uuid()
+        lock_name = f"held_lock_{_generate_uuid()[:12]}"
+        holder_a = _generate_uuid()
+        holder_b = _generate_uuid()
+        expire_time = datetime.now() + timedelta(minutes=5)
 
-        repo.insert_lock(
-            lock_name=lock_name,
-            lock_holder=_generate_uuid(),
-            expire_time=datetime.now() + timedelta(minutes=5),
+        acquired_a = repo.try_acquire_lock(
+            lock_name=lock_name, lock_holder=holder_a, expire_time=expire_time
         )
-        repo.update_lock_holder(
+        assert acquired_a is True
+
+        acquired_b = repo.try_acquire_lock(
+            lock_name=lock_name, lock_holder=holder_b, expire_time=expire_time
+        )
+        assert acquired_b is False
+
+    def test_try_acquire_reentrant_renew(self):
+        repo = get_container().repository.distributed_lock_repository()
+        lock_name = f"reentrant_{_generate_uuid()[:12]}"
+        holder = _generate_uuid()
+        expire_time = datetime.now() + timedelta(minutes=5)
+
+        acquired_1 = repo.try_acquire_lock(
+            lock_name=lock_name, lock_holder=holder, expire_time=expire_time
+        )
+        assert acquired_1 is True
+
+        acquired_2 = repo.try_acquire_lock(
             lock_name=lock_name,
-            lock_holder=new_holder,
+            lock_holder=holder,
             expire_time=datetime.now() + timedelta(minutes=10),
         )
-        record = repo.get_by_lock_name_for_update(lock_name)
-        assert record is not None
-        assert record.lock_holder == new_holder
+        assert acquired_2 is True
 
-    def test_deep_delete_lock(self):
+    def test_try_acquire_takes_over_expired(self):
         repo = get_container().repository.distributed_lock_repository()
-        lock_name = f"sqlite_lock_{_generate_uuid()[:12]}"
-
-        repo.insert_lock(
-            lock_name=lock_name,
-            lock_holder=_generate_uuid(),
-            expire_time=datetime.now() + timedelta(minutes=5),
-        )
-        deleted = repo.delete_lock(lock_name)
-        assert deleted is True
-        assert repo.get_by_lock_name_for_update(lock_name) is None
-
-    def test_insert_lock_and_get_for_update(self):
-        repo: DistributedLockRepository = (
-            get_container().repository.distributed_lock_repository()
-        )
-        lock_name = f"equiv_lock_{_generate_uuid()[:12]}"
-        lock_holder = _generate_uuid()
-        expire_time = datetime.now() + timedelta(minutes=5)
-
-        lock_id = repo.insert_lock(
-            lock_name=lock_name,
-            lock_holder=lock_holder,
-            expire_time=expire_time,
-        )
-        assert lock_id > 0
-
-        record = repo.get_by_lock_name_for_update(lock_name)
-        assert isinstance(record, LockRecord)
-        assert record.id == lock_id
-        assert record.lock_name == lock_name
-        assert record.lock_holder == lock_holder
-        assert record.expire_time is not None
-        assert record.gmt_create is not None
-
-    def test_update_lock_holder(self):
-        repo = get_container().repository.distributed_lock_repository()
-        lock_name = f"equiv_lock_{_generate_uuid()[:12]}"
+        lock_name = f"expired_{_generate_uuid()[:12]}"
+        old_holder = _generate_uuid()
         new_holder = _generate_uuid()
-        new_expire = datetime.now() + timedelta(minutes=10)
 
-        repo.insert_lock(
+        acquired_old = repo.try_acquire_lock(
             lock_name=lock_name,
-            lock_holder=_generate_uuid(),
-            expire_time=datetime.now() + timedelta(minutes=5),
+            lock_holder=old_holder,
+            expire_time=datetime.now() - timedelta(minutes=10),
         )
-        repo.update_lock_holder(
+        assert acquired_old is True
+
+        acquired_new = repo.try_acquire_lock(
             lock_name=lock_name,
             lock_holder=new_holder,
-            expire_time=new_expire,
+            expire_time=datetime.now() + timedelta(minutes=5),
         )
+        assert acquired_new is True
 
-        record = repo.get_by_lock_name_for_update(lock_name)
+        record = repo.get_by_lock_name(lock_name)
         assert record is not None
         assert record.lock_holder == new_holder
 
     def test_update_expire_time(self):
         repo = get_container().repository.distributed_lock_repository()
-        lock_name = f"equiv_lock_{_generate_uuid()[:12]}"
-        original_holder = _generate_uuid()
+        lock_name = f"expire_{_generate_uuid()[:12]}"
+        holder = _generate_uuid()
         new_expire = datetime.now() + timedelta(minutes=15)
 
-        repo.insert_lock(
+        repo.try_acquire_lock(
             lock_name=lock_name,
-            lock_holder=original_holder,
+            lock_holder=holder,
             expire_time=datetime.now() + timedelta(minutes=5),
         )
         repo.update_expire_time(
@@ -140,16 +119,15 @@ class TestDistributedLockSqliteOrmEquivalence:
             expire_time=new_expire,
         )
 
-        record = repo.get_by_lock_name_for_update(lock_name)
+        record = repo.get_by_lock_name(lock_name)
         assert record is not None
-        assert record.lock_holder == original_holder
-        assert record.expire_time is not None
+        assert record.lock_holder == holder
 
     def test_delete_lock(self):
         repo = get_container().repository.distributed_lock_repository()
-        lock_name = f"equiv_lock_{_generate_uuid()[:12]}"
+        lock_name = f"delete_{_generate_uuid()[:12]}"
 
-        repo.insert_lock(
+        repo.try_acquire_lock(
             lock_name=lock_name,
             lock_holder=_generate_uuid(),
             expire_time=datetime.now() + timedelta(minutes=5),
@@ -157,22 +135,7 @@ class TestDistributedLockSqliteOrmEquivalence:
         deleted = repo.delete_lock(lock_name)
         assert deleted is True
 
-        result = repo.get_by_lock_name_for_update(lock_name)
-        assert result is None
-
-    def test_delete_expired_locks(self):
-        repo = get_container().repository.distributed_lock_repository()
-        lock_name = f"equiv_lock_{_generate_uuid()[:12]}"
-
-        repo.insert_lock(
-            lock_name=lock_name,
-            lock_holder=_generate_uuid(),
-            expire_time=datetime.now() - timedelta(minutes=10),
-        )
-        count = repo.delete_expired_locks(datetime.now())
-        assert count >= 0
-
-        result = repo.get_by_lock_name_for_update(lock_name)
+        result = repo.get_by_lock_name(lock_name)
         assert result is None
 
     def test_delete_nonexistent_lock(self):

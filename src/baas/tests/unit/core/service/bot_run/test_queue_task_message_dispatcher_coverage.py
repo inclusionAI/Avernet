@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from secbaas.community.api.bcn import Attachment
 from secbaas.community.api.bot_runtime import (
     BotBindingInfo,
     BotChatContext,
@@ -172,6 +173,28 @@ class TestDispatchInject:
         d._queue_repository.insert_queue.assert_called_once()
         call_kwargs = d._queue_repository.insert_queue.call_args.kwargs
         assert call_kwargs["meta"]["request_type"] == "inject"
+
+    @pytest.mark.asyncio
+    async def test_inject_with_attachments(self):
+        d = _make_dispatcher()
+        att = Attachment(
+            attachment_id="att_1",
+            type="image",
+            file_name="f.png",
+            url="https://cdn.example.com/f",
+        )
+        await d.dispatch_inject(
+            bot_service=MagicMock(),
+            run_id="run-1",
+            session_id="sess-1",
+            message="inject",
+            binding_info=_make_binding_info(),
+            bot_id="bot-1",
+            attachments=[att],
+        )
+        call_kwargs = d._queue_repository.insert_queue.call_args.kwargs
+        assert "attachments" in call_kwargs["meta"]
+        assert call_kwargs["meta"]["attachments"][0]["attachment_id"] == "att_1"
 
     @pytest.mark.asyncio
     async def test_inject_backpressure_raises(self):
@@ -541,7 +564,7 @@ class TestDispatchSendStream:
         d = _make_dispatcher()
         d._cache_plugin.get.return_value = None
         run = MagicMock()
-        run.status = "TIMEOUT"
+        run.status = "TIME_OUT"
         d._run_repository.get_by_run_id.return_value = run
 
         chunks = []
@@ -619,6 +642,39 @@ class TestDispatchSendStream:
             chunks.append(c)
         d._chunk_repository.delete_chunks_by_run.assert_called_once_with("run-1")
 
+    @pytest.mark.asyncio
+    async def test_stream_with_attachments_in_meta(self):
+        d = _make_dispatcher()
+        d._cache_plugin.get.return_value = None
+        run = MagicMock()
+        run.status = "FAILED"
+        d._run_repository.get_by_run_id.return_value = run
+
+        att = Attachment(
+            attachment_id="att_1",
+            type="image",
+            file_name="f.png",
+            url="https://cdn.example.com/f",
+        )
+
+        chunks = []
+        async for c in d.dispatch_send_stream(
+            bot_service=MagicMock(),
+            run_id="run-1",
+            session_id="sess-1",
+            message="hello",
+            binding_info=_make_binding_info(),
+            bot_id="bot-1",
+            attachments=[att],
+        ):
+            chunks.append(c)
+
+        # Verify attachments were serialized into meta on queue insert
+        d._queue_repository.insert_queue.assert_called_once()
+        call_kwargs = d._queue_repository.insert_queue.call_args.kwargs
+        assert "attachments" in call_kwargs["meta"]
+        assert call_kwargs["meta"]["attachments"][0]["attachment_id"] == "att_1"
+
 
 class TestShouldCleanupChunks:
     def test_no_system_config_service(self):
@@ -629,13 +685,13 @@ class TestShouldCleanupChunks:
         svc = MagicMock()
         svc.get_config.side_effect = RuntimeError("db error")
         d = _make_dispatcher(system_config_service=svc)
-        assert d._should_cleanup_chunks() is False
+        assert d._should_cleanup_chunks() is True
 
     def test_config_returns_none(self):
         svc = MagicMock()
         svc.get_config.return_value = None
         d = _make_dispatcher(system_config_service=svc)
-        assert d._should_cleanup_chunks() is False
+        assert d._should_cleanup_chunks() is True
 
     def test_config_true(self):
         svc = MagicMock()
@@ -717,6 +773,39 @@ class TestEnqueueWork:
             run_id="run-1", bot_id="bot-1", session_id=None, meta=None
         )
 
+    def test_enqueue_injects_traceparent_when_tracer_active(self):
+        """When a trace span is active, inject_context produces a carrier
+        that gets written into meta["traceparent"]."""
+        carrier = {"traceparent": "00-abc-def-03"}
+        mock_tracer = MagicMock()
+        mock_tracer.inject_context = MagicMock(side_effect=lambda c: c.update(carrier))
+        d = _make_dispatcher()
+        with patch(
+            "secbaas.community.core.service.bot_run."
+            "_queue_task_message_dispatcher.get_tracer_plugin",
+            return_value=mock_tracer,
+        ):
+            d._enqueue_work("run-1", "bot-1", "sess-1", meta={"k": "v"})
+        args = d._queue_repository.insert_queue.call_args
+        assert args.kwargs["meta"]["traceparent"] == carrier
+        assert args.kwargs["meta"]["k"] == "v"
+
+    def test_enqueue_injects_traceparent_into_none_meta(self):
+        """When meta is None and tracer produces a carrier, a fresh dict
+        is created with traceparent."""
+        carrier = {"traceparent": "00-abc-def-03"}
+        mock_tracer = MagicMock()
+        mock_tracer.inject_context = MagicMock(side_effect=lambda c: c.update(carrier))
+        d = _make_dispatcher()
+        with patch(
+            "secbaas.community.core.service.bot_run."
+            "_queue_task_message_dispatcher.get_tracer_plugin",
+            return_value=mock_tracer,
+        ):
+            d._enqueue_work("run-1", "bot-1", None)
+        args = d._queue_repository.insert_queue.call_args
+        assert args.kwargs["meta"] == {"traceparent": carrier}
+
 
 class TestBuildMetadata:
     def test_no_context_no_session(self):
@@ -749,3 +838,73 @@ class TestBuildMetadata:
         assert "session_id" not in result
         assert result["app_id"] == "app-1"
         assert result["request_type"] == "chat"
+
+
+class TestEnqueueWorkWithAttachments:
+    """Tests for _enqueue_work meta dict including/omitting attachments."""
+
+    @pytest.mark.asyncio
+    async def test_enqueue_work_includes_attachments_in_meta(self):
+        """meta dict includes 'attachments' key when attachments are provided."""
+        d = _make_dispatcher()
+        att1 = Attachment(
+            attachment_id="att_1",
+            type="image",
+            file_name="f1.png",
+            url="https://cdn.example.com/f1",
+        )
+        att2 = Attachment(
+            attachment_id="att_2",
+            type="document",
+            file_name="f2.pdf",
+            url="https://cdn.example.com/f2",
+        )
+        await d.dispatch_send(
+            bot_service=MagicMock(),
+            run_id="r1",
+            session_id="s1",
+            message="hello",
+            binding_info=_make_binding_info(),
+            timeout=30,
+            bot_id="bot-1",
+            attachments=[att1, att2],
+        )
+        d._queue_repository.insert_queue.assert_called_once()
+        call_kwargs = d._queue_repository.insert_queue.call_args.kwargs
+        meta = call_kwargs["meta"]
+
+        assert "attachments" in meta
+        assert len(meta["attachments"]) == 2
+
+        # Verify serialization format: list of dict (dataclasses.asdict output)
+        assert isinstance(meta["attachments"][0], dict)
+        assert meta["attachments"][0]["attachment_id"] == "att_1"
+        assert meta["attachments"][0]["type"] == "image"
+        assert meta["attachments"][0]["file_name"] == "f1.png"
+        assert meta["attachments"][0]["url"] == "https://cdn.example.com/f1"
+
+        assert isinstance(meta["attachments"][1], dict)
+        assert meta["attachments"][1]["attachment_id"] == "att_2"
+
+        # Verify existing meta fields still present
+        assert meta["request_type"] == "chat"
+        assert "bot_options" in meta
+
+    @pytest.mark.asyncio
+    async def test_enqueue_work_no_attachments_when_none(self):
+        """meta dict does not include 'attachments' key when attachments is None."""
+        d = _make_dispatcher()
+        await d.dispatch_send(
+            bot_service=MagicMock(),
+            run_id="r1",
+            session_id="s1",
+            message="hello",
+            binding_info=_make_binding_info(),
+            bot_id="bot-1",
+            attachments=None,
+        )
+        d._queue_repository.insert_queue.assert_called_once()
+        call_kwargs = d._queue_repository.insert_queue.call_args.kwargs
+        meta = call_kwargs["meta"]
+
+        assert "attachments" not in meta

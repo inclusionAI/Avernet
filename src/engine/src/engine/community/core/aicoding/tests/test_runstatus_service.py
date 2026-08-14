@@ -992,6 +992,48 @@ async def test_get_session_pull_requests_empty_outputs_returns_empty_list() -> N
     assert items == []
 
 
+async def test_get_session_issues_success_and_sort() -> None:
+    """issue outputs 使用 --kind issue，返回字段透传并按 at 倒序。"""
+    plugin = FakeBashPlugin()
+    plugin.add(
+        "aix run output list --kind issue",
+        WORKSPACE,
+        BashExecResult(
+            stdout=_pr_outputs_payload(
+                [
+                    {
+                        "runId": "r-old",
+                        "kind": "issue",
+                        "provider": "generic",
+                        "url": "https://issues.example.com/work-items/1",
+                        "title": "old issue",
+                        "at": 1_000,
+                        "projectDir": PROJECT_DIR,
+                    },
+                    {
+                        "runId": "r-new",
+                        "kind": "issue",
+                        "provider": "generic",
+                        "url": "https://issues.example.com/work-items/2",
+                        "title": "new issue",
+                        "at": 2_000,
+                        "projectDir": PROJECT_DIR,
+                    },
+                ]
+            ),
+            stderr="",
+            exit_code=0,
+        ),
+    )
+
+    service = _make_service(plugin)
+    items = await service.get_session_issues(SESSION_ID)
+
+    assert [o["runId"] for o in items] == ["r-new", "r-old"]
+    assert items[0]["provider"] == "generic"
+    assert "--kind issue" in plugin.calls[0][0]
+
+
 async def test_get_session_pull_requests_500_when_cmd_fails() -> None:
     """aix run output list exit_code != 0 → 500，detail 含 stderr。"""
     plugin = FakeBashPlugin()

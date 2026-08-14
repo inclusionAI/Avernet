@@ -44,7 +44,9 @@ fn initial_callback_status(kind: SessionKind) -> Option<String> {
 #[derive(Default)]
 struct MemoryState {
     sessions: HashMap<String, Session>,
-    collected: std::collections::HashSet<(String, String)>,
+    /// (session_id, bot_uuid) -> 收藏事件时间（epoch ms）。
+    /// 仅在 collect 时插入（幂等：已存在则保留原时间，不刷新），uncollect 移除。
+    collected: HashMap<(String, String), u64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -134,6 +136,7 @@ impl SessionRepoPort for MemorySessionRepo {
                 created_at: now,
                 updated_at: now,
                 completed_at: None,
+                collected_at: None,
             };
             st.sessions.insert(id.clone(), sess.clone());
             return Ok(sess);
@@ -141,12 +144,9 @@ impl SessionRepoPort for MemorySessionRepo {
 
         // Auto-generated id: retry 3 times to handle the ~0 probability collision.
         for _attempt in 0..3 {
-            let id = new_session_id(group_id);
-            if !validate_session_id(&id, group_id) {
-                return Err(ServiceError::SessionInvalidParams(format!(
-                    "generated session_id {id} failed format validation"
-                )));
-            }
+            let id = new_session_id(group_id).map_err(|error| {
+                ServiceError::SessionInvalidParams(error.to_string())
+            })?;
             let mut st = self.state.write().await;
             if st.sessions.contains_key(&id) {
                 continue;
@@ -174,6 +174,7 @@ impl SessionRepoPort for MemorySessionRepo {
                 created_at: now,
                 updated_at: now,
                 completed_at: None,
+                collected_at: None,
             };
             st.sessions.insert(id.clone(), sess.clone());
             return Ok(sess);
@@ -229,7 +230,13 @@ impl SessionRepoPort for MemorySessionRepo {
             })
             .cloned()
             .collect();
-        v.sort_by_key(|s| std::cmp::Reverse(s.created_at));
+        // VSN7M: order by created_at DESC with session_id DESC tie-breaker
+        // BEFORE pagination so same-timestamp sessions do not skip/duplicate
+        // across pages. The repo owns the deterministic order; the facade's
+        // post-pagination sort is now a no-op safety net. DESC tie-break keeps
+        // memory consistent with the MySQL ORDER BY s.id DESC tie-break
+        // (later-created rows sort first on timestamp ties).
+        v.sort_by(|a, b| b.created_at.cmp(&a.created_at).then(b.id.cmp(&a.id)));
         v.into_iter()
             .skip(offset as usize)
             .take(limit as usize)
@@ -253,6 +260,38 @@ impl SessionRepoPort for MemorySessionRepo {
                     && matches!(s.status, SessionStatus::Running)
             })
             .count() as u64
+    }
+
+    /// Mirrors [`SessionRepoPort::list_by_group`] filters exactly but returns
+    /// the total count without applying offset/limit pagination.
+    async fn count_by_group(
+        &self,
+        group_id: &str,
+        status: Option<SessionStatus>,
+        title_contains: Option<&str>,
+        participant_id: Option<&str>,
+    ) -> ServiceResult<u64> {
+        let st = self.state.read().await;
+        Ok(st
+            .sessions
+            .values()
+            .filter(|s| s.group_id == group_id)
+            .filter(|s| status.map(|want| s.status == want).unwrap_or(true))
+            .filter(|s| {
+                title_contains.map_or(true, |q| {
+                    s.session_title
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains(&q.to_lowercase())
+                })
+            })
+            .filter(|s| {
+                participant_id.map_or(true, |pid| {
+                    s.participants.iter().any(|p| p.bot_uuid == pid)
+                })
+            })
+            .count() as u64)
     }
 
     async fn list_running_service(&self, offset: u64, limit: u64) -> Vec<Session> {
@@ -404,7 +443,7 @@ impl SessionRepoPort for MemorySessionRepo {
         let updated = sess.clone();
         // collection mark is per-participant; leaving drops it
         st.collected
-            .retain(|(sid, bid)| !(sid == session_id && bid == bot_uuid));
+            .retain(|key, _| !(key.0 == session_id && key.1 == bot_uuid));
         Ok(updated)
     }
 
@@ -475,7 +514,7 @@ impl SessionRepoPort for MemorySessionRepo {
         let mut st = self.state.write().await;
         let existed = st.sessions.remove(session_id).is_some();
         if existed {
-            st.collected.retain(|(sid, _)| sid != session_id);
+            st.collected.retain(|key, _| key.0 != session_id);
         }
         Ok(existed)
     }
@@ -491,7 +530,11 @@ impl SessionRepoPort for MemorySessionRepo {
                 "participant {bot_uuid} not in session {session_id}"
             )));
         }
-        st.collected.insert((session_id.to_string(), bot_uuid.to_string()));
+        // Idempotent on the timestamp: a repeat collect keeps the original event time
+        // (entry().or_insert) so the list ordering reflects first-collection time.
+        st.collected
+            .entry((session_id.to_string(), bot_uuid.to_string()))
+            .or_insert(now_ms());
         Ok(())
     }
 
@@ -522,7 +565,7 @@ impl SessionRepoPort for MemorySessionRepo {
             .filter(|s| s.group_id == group_id)
             .filter(|s| {
                 st.collected
-                    .contains(&(s.id.clone(), bot_uuid.to_string()))
+                    .contains_key(&(s.id.clone(), bot_uuid.to_string()))
             })
             .filter(|s| status.map(|want| s.status == want).unwrap_or(true))
             .filter(|s| {
@@ -535,9 +578,42 @@ impl SessionRepoPort for MemorySessionRepo {
                 })
             })
             .cloned()
+            .map(|mut s| {
+                // Surface the collect-event time on the returned session; fall
+                // back to created_at (COALESCE semantics) for Ordering safety.
+                s.collected_at = st
+                    .collected
+                    .get(&(s.id.clone(), bot_uuid.to_string()))
+                    .copied()
+                    .or(Some(s.created_at));
+                s
+            })
             .collect();
-        v.sort_by_key(|s| std::cmp::Reverse(s.created_at));
+
+        v.sort_by(|a, b| {
+            let ka = a.collected_at.unwrap_or(a.created_at);
+            let kb = b.collected_at.unwrap_or(b.created_at);
+            kb.cmp(&ka).then(b.id.cmp(&a.id))
+        });
         v.into_iter().skip(offset as usize).take(limit as usize).collect()
+    }
+
+    async fn collected_at_map(
+        &self,
+        session_ids: &[&str],
+        bot_uuid: &str,
+    ) -> Vec<(String, u64)> {
+        let st = self.state.read().await;
+        session_ids
+            .iter()
+            .filter_map(|sid| {
+                let ts = st
+                    .collected
+                    .get(&(sid.to_string(), bot_uuid.to_string()))
+                    .copied()?;
+                Some((sid.to_string(), ts))
+            })
+            .collect()
     }
 }
 
@@ -568,6 +644,44 @@ mod tests {
         let sessions = repo.list_by_group("g1", None, 0, 10, Some("alpha"), None).await;
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].session_title.as_deref(), Some("Project Alpha"));
+    }
+
+    /// `list_by_group` orders by created_at DESC with id DESC tie-break
+    /// (mirrors the MySQL `ORDER BY s.gmt_create DESC, s.id DESC`). Two
+    /// sessions with explicit ids let us assert the deterministic order:
+    /// the later-created session (s2) sorts first whether the timestamps
+    /// differ (created_at DESC) or tie (id DESC, larger id first).
+    #[tokio::test]
+    async fn list_by_group_orders_desc_with_id_tiebreak() {
+        let repo = MemorySessionRepo::new();
+        let gid = "order-group";
+        let s1 = repo
+            .create(
+                gid,
+                NewSessionParams {
+                    id: Some(format!("{}:00000001", gid)),
+                    session_kind: SessionKind::Chat,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("create s1");
+        let s2 = repo
+            .create(
+                gid,
+                NewSessionParams {
+                    id: Some(format!("{}:00000002", gid)),
+                    session_kind: SessionKind::Chat,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("create s2");
+
+        let listed = repo.list_by_group(gid, None, 0, 10, None, None).await;
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].id, s2.id);
+        assert_eq!(listed[1].id, s1.id);
     }
 
     #[tokio::test]
@@ -686,6 +800,35 @@ mod tests {
         assert!(listed.is_empty());
     }
 
+    /// `list_collected_by_group` orders by collected_at DESC with id DESC
+    /// tie-break (mirrors the MySQL `ORDER BY COALESCE(sp.collected_at,
+    /// s.gmt_create) DESC, s.id DESC`). The single-session test above never
+    /// invokes the comparator (sort_by on <2 elements skips it); this test
+    /// collects two sessions so the sort closure runs and the DESC order is
+    /// asserted. s2 is collected after s1 and has the larger explicit id, so
+    /// it sorts first under both the timestamp and the tie-break.
+    #[tokio::test]
+    async fn list_collected_by_group_orders_desc_with_id_tiebreak() {
+        let repo = MemorySessionRepo::new();
+        let gid = "col-order";
+        let mk = |id: &str| NewSessionParams {
+            id: Some(id.to_string()),
+            session_kind: SessionKind::Chat,
+            participants: vec![Participant::bot("bot1", bcs_service_api::ParticipantRole::Driver)],
+            ..Default::default()
+        };
+        let s1 = repo.create(gid, mk(&format!("{}:00000001", gid))).await.expect("create s1");
+        let s2 = repo.create(gid, mk(&format!("{}:00000002", gid))).await.expect("create s2");
+
+        repo.collect(&s1.id, "bot1").await.expect("collect s1");
+        repo.collect(&s2.id, "bot1").await.expect("collect s2");
+
+        let listed = repo.list_collected_by_group(gid, "bot1", None, None, 0, 10).await;
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].id, s2.id);
+        assert_eq!(listed[1].id, s1.id);
+    }
+
     #[tokio::test]
     async fn collection_non_participant_collect_errors() {
         let repo = MemorySessionRepo::new();
@@ -788,5 +931,102 @@ mod tests {
             .list_collected_by_group(gid, "bot1", None, None, 0, 10)
             .await
             .is_empty());
+    }
+
+    /// `count_by_group` MUST mirror `list_by_group`'s filters and return the
+    /// total (pre-pagination) count, not the paginated subset length.
+    #[tokio::test]
+    async fn count_by_group_matches_list_filters_without_pagination() {
+        let repo = MemorySessionRepo::new();
+        // session in another group must be excluded from g1 counts
+        repo.create("other", sample_params(Some("Other"))).await.unwrap();
+
+        // 5 sessions in "g1" with mixed status / title / participant
+        let mut p1 = sample_params(Some("Alpha"));
+        p1.participants = vec![bot_participant("bot_1", "Alice")];
+        repo.create("g1", p1).await.unwrap(); // Alpha, Running, bot_1
+
+        let mut p2 = sample_params(Some("Alpha Beta"));
+        p2.participants = vec![bot_participant("bot_2", "Bob")];
+        repo.create("g1", p2).await.unwrap(); // Alpha Beta, Running, bot_2
+
+        let mut p3 = sample_params(Some("Beta"));
+        p3.participants = vec![bot_participant("bot_1", "Alice")];
+        let s3 = repo.create("g1", p3).await.unwrap();
+        repo.complete_if_running(&s3.id, None, None).await.unwrap(); // Beta, Completed, bot_1
+
+        let mut p4 = sample_params(Some("Gamma"));
+        p4.participants = vec![bot_participant("bot_3", "Carol")];
+        repo.create("g1", p4).await.unwrap(); // Gamma, Running, bot_3
+
+        let mut p5 = sample_params(Some("Alpha Gamma"));
+        p5.participants = vec![bot_participant("bot_1", "Alice")];
+        let s5 = repo.create("g1", p5).await.unwrap();
+        repo.complete_if_running(&s5.id, None, None).await.unwrap(); // Alpha Gamma, Completed, bot_1
+
+        // No filters → all 5 in g1 (other-group session excluded)
+        assert_eq!(
+            repo.count_by_group("g1", None, None, None).await.unwrap(),
+            5
+        );
+
+        // Count is NOT the paginated subset
+        let page = repo.list_by_group("g1", None, 0, 2, None, None).await;
+        assert_eq!(page.len(), 2);
+        assert_eq!(
+            repo.count_by_group("g1", None, None, None).await.unwrap(),
+            5
+        );
+
+        // Status filter: Running only → s1, s2, s4 = 3
+        assert_eq!(
+            repo.count_by_group("g1", Some(SessionStatus::Running), None, None)
+                .await
+                .unwrap(),
+            3
+        );
+
+        // Title filter: "alpha" (case-insensitive) → s1, s2, s5 = 3
+        assert_eq!(
+            repo.count_by_group("g1", None, Some("alpha"), None).await.unwrap(),
+            3
+        );
+
+        // Participant filter: bot_1 → s1, s3, s5 = 3
+        assert_eq!(
+            repo.count_by_group("g1", None, None, Some("bot_1")).await.unwrap(),
+            3
+        );
+
+        // Combined: Running + "alpha" + bot_1 → only s1 = 1
+        assert_eq!(
+            repo.count_by_group(
+                "g1",
+                Some(SessionStatus::Running),
+                Some("alpha"),
+                Some("bot_1")
+            )
+            .await
+            .unwrap(),
+            1
+        );
+
+        // count_by_group must equal list_by_group total (large limit) for each combo
+        let combos: [(Option<SessionStatus>, Option<&str>, Option<&str>); 5] = [
+            (None, None, None),
+            (Some(SessionStatus::Running), None, None),
+            (None, Some("alpha"), None),
+            (None, None, Some("bot_1")),
+            (Some(SessionStatus::Running), Some("alpha"), Some("bot_1")),
+        ];
+        for (status, title, pid) in combos {
+            let listed = repo.list_by_group("g1", status, 0, 1000, title, pid).await;
+            let counted = repo.count_by_group("g1", status, title, pid).await.unwrap();
+            assert_eq!(
+                listed.len() as u64,
+                counted,
+                "list vs count mismatch for status={status:?} title={title:?} pid={pid:?}"
+            );
+        }
     }
 }

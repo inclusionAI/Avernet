@@ -88,3 +88,30 @@ def test_community_passport_issues_deterministic_envelope(community_world) -> No
     assert result["iframe_url"] is None
     # query_token agrees with the issued token (device bootstrap depends on it).
     assert plugin.query_token("bot_x", "alice") == "community-passport-bot_x"
+
+
+def test_local_unfreeze_leaves_runtime_token_queryable(world) -> None:
+    plugin = world.get(PassportPlugin)
+
+    plugin.unfreeze_agent_passport(
+        bot_id="bot_local",
+        owner_workno="alice",
+        reason="manual reactivate",
+    )
+
+    assert plugin.query_token("bot_local", "alice") == "mock_token_bot_local"
+
+
+def test_community_unfreeze_leaves_runtime_token_queryable(community_world) -> None:
+    plugin = community_world.get(PassportPlugin)
+
+    plugin.unfreeze_agent_passport(
+        bot_id="bot_community",
+        owner_workno="alice",
+        reason="manual reactivate",
+    )
+
+    assert (
+        plugin.query_token("bot_community", "alice")
+        == "community-passport-bot_community"
+    )

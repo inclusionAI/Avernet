@@ -24,6 +24,10 @@ def write_codefuse_token_baas(
     (False, msg)，bot 停 FAILED（token 缺失则首聊鉴权失败，强一致阻断优于"假活"）。
     """
     if not codefuse_token:
+        logger.info(
+            "[_write_codefuse_token] codefuse_token empty, skip write: bot_uuid=%s",
+            bot_uuid,
+        )
         return
     from agentclaw.community.core.bot_management.codefuse_token import (
         build_codefuse_write_cmd_from_auth_code,

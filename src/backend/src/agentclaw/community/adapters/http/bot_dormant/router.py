@@ -13,7 +13,11 @@ from agentclaw.community.adapters.http.bot_dormant.schemas import (
     WhitelistBatchResponse,
 )
 from agentclaw.community.adapters.http.dependencies import RequestContext, get_request_context
-from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService, InvalidBotStateError
+from agentclaw.community.core.bot_dormant.activate_service import (
+    ActivateBotService,
+    BotNotFoundError,
+    InvalidBotStateError,
+)
 from agentclaw.community.core.bot_dormant.whitelist_service import WhitelistService
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
@@ -46,6 +50,8 @@ async def activate_bot(
             bot_id=bot_id, user_id=user_id, nick_name=ctx.nick_name
         )
         return ApiResponse(success=True, data=ActivateBotResponse(**result))
+    except BotNotFoundError:
+        return ApiResponse(success=False, message="Bot 不存在", error_code=404)
     except InvalidBotStateError as e:
         return ApiResponse(success=False, message=str(e), error_code=400)
     except Exception:

@@ -5,7 +5,8 @@ Flow:
   2. REACTIVATING → friendly early return (idempotent).
   3. non-RECYCLED  → InvalidBotStateError.
   4. RECYCLED      → update_status(REACTIVATING) + spawn background thread
-                      that calls passport unfreeze then start_bot;
+                      that calls passport unfreeze, verifies the runtime token,
+                      then starts the bot;
                       on failure rolls back: passport freeze + RECYCLED.
 """
 from __future__ import annotations
@@ -16,7 +17,8 @@ from injector import inject
 
 from agentclaw.community.core.bot_dormant.protocols import BotServiceProtocol
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.passport import PassportPlugin
+from agentclaw.community.plugin_api.passport import PassportError, PassportPlugin
+from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 
 
 logger = get_logger()
@@ -24,6 +26,10 @@ logger = get_logger()
 
 class InvalidBotStateError(Exception):
     """Raised when activate is called on a bot that is not RECYCLED."""
+
+
+class BotNotFoundError(Exception):
+    """Raised when the requested bot does not exist for the owner."""
 
 
 class ActivateBotService:
@@ -40,7 +46,8 @@ class ActivateBotService:
         """Activate a RECYCLED bot.
 
         Returns a dict with keys ``status`` and ``message``.
-        Raises ``InvalidBotStateError`` if the bot is not RECYCLED (or REACTIVATING).
+        Raises ``BotNotFoundError`` if the bot does not exist and
+        ``InvalidBotStateError`` if it is not RECYCLED (or REACTIVATING).
         """
         bot = self._bot_service.get_bot(bot_id=bot_id, user_id=user_id)
         if not bot:
@@ -48,7 +55,7 @@ class ActivateBotService:
                 "[activate] bot not found bot_id=%s user_id=%s",
                 bot_id, user_id,
             )
-            raise InvalidBotStateError(f"bot not found: {bot_id}")
+            raise BotNotFoundError(f"bot not found: {bot_id}")
 
         status = bot.get("status")
         logger.info(
@@ -84,7 +91,7 @@ class ActivateBotService:
 
         # Launch background task: unfreeze passport → start_bot; rollback on failure.
         thread = threading.Thread(
-            target=self._reactivate_async,
+            target=bind_current_avernet_tenant(self._reactivate_async),
             args=(bot_id, user_id, nick_name or user_id),
             daemon=True,
         )
@@ -121,6 +128,22 @@ class ActivateBotService:
             return
 
         try:
+            logger.info(
+                "[activate] passport token verify start bot_id=%s user_id=%s",
+                bot_id,
+                user_id,
+            )
+            token = self._passport.query_token(
+                bot_id=bot_id,
+                owner_workno=user_id,
+            )
+            if not token:
+                raise PassportError("passport token is unavailable after unfreeze")
+            logger.info(
+                "[activate] passport token verify success bot_id=%s user_id=%s",
+                bot_id,
+                user_id,
+            )
             # start_bot internally calls apply_device; on success sets status=ACTIVE.
             logger.info(
                 "[activate] start_bot start bot_id=%s user_id=%s nick_name=%s",

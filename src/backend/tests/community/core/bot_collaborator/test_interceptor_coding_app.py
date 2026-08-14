@@ -1,7 +1,7 @@
 """Tests for CollaboratorPermissionInterceptor coding-app logic.
 
 Covers two changes from the session-lock feature branch:
-1. ``_is_coding_app()`` — detects coding applications by active_engine + template_type.
+1. ``_is_coding_app()`` — legacy helper name; delegates to engine-specific member-management capability.
 2. The ``skip_lock`` branch in ``before()`` — coding apps with collaborators skip
    bot-level lock enforcement (session-level locks are used instead), but
    collaborator permission is still checked.
@@ -15,7 +15,31 @@ from agentclaw.community.core.bot_collaborator.interceptor import (
     InterceptorContext,
 )
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+from agentclaw.community.core.bot_collaborator.protocols import BotServiceProtocol
+from agentclaw.community.core.bot_collaborator.services.aicoding.member_management_capability import (
+    AICodingMemberManagementCapability,
+)
+from agentclaw.community.core.bot_collaborator.services.member_management_capability import (
+    MemberManagementCapabilityService,
+)
 
+
+
+
+def _wire_member_management_injector(mock_injector, mock_bot_service):
+    capability_service = MemberManagementCapabilityService(
+        engine_capabilities=(AICodingMemberManagementCapability(),),
+    )
+
+    def _get(dep):
+        if dep is BotServiceProtocol:
+            return mock_bot_service
+        if dep is MemberManagementCapabilityService:
+            return capability_service
+        return mock_bot_service
+
+    mock_injector.get.side_effect = _get
+    return capability_service
 
 # ============================================================================
 # _is_coding_app unit tests
@@ -37,12 +61,48 @@ class TestIsCodingApp:
             "active_engine": "claude_code",
             "template_type": "applicationCoding",
         }
-        mock_injector.get.return_value = mock_bot_service
+        _wire_member_management_injector(mock_injector, mock_bot_service)
         ctx.injector = mock_injector
 
         result = self.interceptor._is_coding_app(ctx, "bot_123", "owner_001")
         assert result is True
         mock_bot_service.get_bot.assert_called_once_with("bot_123", "owner_001")
+
+    def test_member_management_flag_return_true(self):
+        """advanced_config.member_management=true -> True even when not coding app."""
+        ctx = InterceptorContext(user=None, route_kwargs={})
+        mock_injector = MagicMock()
+        mock_bot_service = MagicMock()
+        mock_bot_service.get_bot.return_value = {
+            "active_engine": "openclaw",
+            "template_type": "chat",
+            "template_config": {
+                "bot_template_config": {"advanced_config": {"member_management": True}}
+            },
+        }
+        _wire_member_management_injector(mock_injector, mock_bot_service)
+        ctx.injector = mock_injector
+
+        result = self.interceptor._is_coding_app(ctx, "bot_123", "owner_001")
+        assert result is True
+
+    def test_member_management_flag_requires_boolean_true(self):
+        """member_management 字符串 true 不放行。"""
+        ctx = InterceptorContext(user=None, route_kwargs={})
+        mock_injector = MagicMock()
+        mock_bot_service = MagicMock()
+        mock_bot_service.get_bot.return_value = {
+            "active_engine": "openclaw",
+            "template_type": "chat",
+            "template_config": {
+                "bot_template_config": {"advanced_config": {"member_management": "true"}}
+            },
+        }
+        _wire_member_management_injector(mock_injector, mock_bot_service)
+        ctx.injector = mock_injector
+
+        result = self.interceptor._is_coding_app(ctx, "bot_123", "owner_001")
+        assert result is False
 
     def test_service_bot_return_false(self):
         """Service Bot (not claude_code) -> False."""
@@ -53,7 +113,7 @@ class TestIsCodingApp:
             "active_engine": "openai",
             "template_type": "service",
         }
-        mock_injector.get.return_value = mock_bot_service
+        _wire_member_management_injector(mock_injector, mock_bot_service)
         ctx.injector = mock_injector
 
         result = self.interceptor._is_coding_app(ctx, "bot_123", "owner_001")
@@ -68,7 +128,7 @@ class TestIsCodingApp:
             "active_engine": "claude_code",
             "template_type": "chat",  # not applicationCoding
         }
-        mock_injector.get.return_value = mock_bot_service
+        _wire_member_management_injector(mock_injector, mock_bot_service)
         ctx.injector = mock_injector
 
         result = self.interceptor._is_coding_app(ctx, "bot_123", "owner_001")
@@ -83,7 +143,7 @@ class TestIsCodingApp:
             "active_engine": "openai",
             "template_type": "applicationCoding",
         }
-        mock_injector.get.return_value = mock_bot_service
+        _wire_member_management_injector(mock_injector, mock_bot_service)
         ctx.injector = mock_injector
 
         result = self.interceptor._is_coding_app(ctx, "bot_123", "owner_001")
@@ -95,7 +155,7 @@ class TestIsCodingApp:
         mock_injector = MagicMock()
         mock_bot_service = MagicMock()
         mock_bot_service.get_bot.return_value = None
-        mock_injector.get.return_value = mock_bot_service
+        _wire_member_management_injector(mock_injector, mock_bot_service)
         ctx.injector = mock_injector
 
         result = self.interceptor._is_coding_app(ctx, "bot_123", "owner_001")
@@ -135,7 +195,7 @@ class TestIsCodingApp:
         mock_injector = MagicMock()
         mock_bot_service = MagicMock()
         mock_bot_service.get_bot.side_effect = RuntimeError("db error")
-        mock_injector.get.return_value = mock_bot_service
+        _wire_member_management_injector(mock_injector, mock_bot_service)
         ctx.injector = mock_injector
 
         result = self.interceptor._is_coding_app(ctx, "bot_123", "owner_001")
@@ -421,7 +481,7 @@ class TestCodingAppSkipLock:
         mock_injector = MagicMock()
         mock_bot_service = MagicMock()
         mock_bot_service.get_bot.side_effect = RuntimeError("db error")
-        mock_injector.get.return_value = mock_bot_service
+        _wire_member_management_injector(mock_injector, mock_bot_service)
         ctx.injector = mock_injector
 
         mock_lock_info = MagicMock()

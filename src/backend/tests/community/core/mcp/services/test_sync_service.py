@@ -223,6 +223,7 @@ class TestRefreshMcpScope:
             "qmx-invoke-cli",
             "serverless",
             "derisk-cli",
+            "yuque-cli",
         ]
 
     @pytest.mark.asyncio
@@ -293,7 +294,7 @@ class TestRefreshMcpScope:
         ]
         cli_codes = [item["cli_code"] for item in resource_scope["cli_items"]]
         assert "antcode-cli" in cli_codes
-        assert len(cli_codes) == 8
+        assert len(cli_codes) == 9
 
     @pytest.mark.asyncio
     async def test_does_not_update_passport_when_bot_metadata_query_fails(self):

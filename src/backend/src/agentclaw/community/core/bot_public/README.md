@@ -16,6 +16,7 @@ consumes:
   - "PassportPlugin"
   - "SkillCenter factories"
 internal_dependencies:
+  - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.devices
   - agentclaw.community.core.operator_context
@@ -29,6 +30,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.device_sync
   - agentclaw.community.plugin_api.models
   - agentclaw.community.plugin_api.passport
+  - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.utils.env_utils
 ```
 

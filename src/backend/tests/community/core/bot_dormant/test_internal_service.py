@@ -34,9 +34,10 @@ class FakeDB:
 
 def _insert_bot(
     session, bot_id: str, status: str = "RECYCLED", owner_id: str = "ow",
+    entity_id: str = "123",
 ) -> None:
     session.add(BotModel(
-        bot_id=bot_id, entity_id="123", entity_type="staff",
+        bot_id=bot_id, entity_id=entity_id, entity_type="staff",
         creator_id=owner_id, owner_id=owner_id, bot_name=bot_id,
         bot_type="personal", status=status, is_delete=0,
         gmt_create=datetime.now(), gmt_modified=datetime.now(),
@@ -158,8 +159,13 @@ def test_list_pending_recycle_gate_isolates_default_bot_per_owner():
     first and apply that single status to both notifies — wrong.
     """
     session = _make_session()
-    _insert_bot(session, "default", owner_id="ownerA", status="ACTIVE")
-    _insert_bot(session, "default", owner_id="ownerB", status="RECYCLED")
+    # Distinct entity_id per owner, as a personal bot really has: the two rows
+    # share bot_id="default" but are different bots, and
+    # uk_bot_id_entity_id_env_tenant is what says so.
+    _insert_bot(session, "default", owner_id="ownerA", status="ACTIVE",
+                entity_id="entA")
+    _insert_bot(session, "default", owner_id="ownerB", status="RECYCLED",
+                entity_id="entB")
     a_nid = _insert_notify(session, bot_id="default", owner_id="ownerA",
                            notify_type="recycle", send_status="pending")
     b_nid = _insert_notify(session, bot_id="default", owner_id="ownerB",

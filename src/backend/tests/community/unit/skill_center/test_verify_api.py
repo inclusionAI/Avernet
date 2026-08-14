@@ -7,8 +7,8 @@ from injector import Injector, Module
 
 
 def _bind_repos(skill_repo, bot_repo):
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-    from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
+    from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
     from agentclaw.community.di.modules.skill_center_module import DeviceFilesystemDispatcher
 
     class _M(Module):

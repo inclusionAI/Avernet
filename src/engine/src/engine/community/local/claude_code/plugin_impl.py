@@ -13,11 +13,40 @@ dict so round-trip assertions work.
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncGenerator
 from typing import Any
 
 from engine.community.kernel.frames import EventFrame
 from engine.community.plugin_api.claude_code.plugin import ClaudeCodePlugin
+
+log = logging.getLogger("local-claude-code-plugin")
+
+
+def _session_matches_agent_id(session: dict, agent_id: str) -> bool:
+    """Match an explicit agentId or the supported Claude Code session-key forms."""
+    if "agentId" in session:
+        return session["agentId"] == agent_id
+
+    key = session.get("key")
+    if not isinstance(key, str):
+        return False
+    if key.startswith("agent:"):
+        try:
+            key_agent_id, remainder = key.removeprefix("agent:").split(
+                ":session:", 1)
+            session_id, user_id = remainder.split(":user:", 1)
+        except ValueError:
+            return False
+        return bool(key_agent_id and session_id and user_id) and key_agent_id == agent_id
+    if key.startswith("user:"):
+        try:
+            user_id, remainder = key.removeprefix("user:").split(":session:", 1)
+            session_id, key_agent_id = remainder.split(":agent:", 1)
+        except ValueError:
+            return False
+        return bool(user_id and session_id and key_agent_id) and key_agent_id == agent_id
+    return False
 
 
 class LocalClaudeCodePluginImpl(ClaudeCodePlugin):
@@ -129,10 +158,29 @@ class LocalClaudeCodePluginImpl(ClaudeCodePlugin):
         offset: int = 0,
         limit: int = 50,
         agent_id: str | None = None,
+        session_key: str | None = None,
     ) -> list[dict]:
         items = list(self._sessions.values())
         if agent_id is not None:
-            items = [s for s in items if s.get("agentId") == agent_id]
+            before_count = len(items)
+            items = [s for s in items if _session_matches_agent_id(s, agent_id)]
+            log.info(
+                "[sessions_list] agent_filter has_agent_id=%s before=%s matched=%s",
+                True,
+                before_count,
+                len(items),
+            )
+        requested_session_key = session_key if session_key and session_key.strip() else None
+        if requested_session_key is not None:
+            before_count = len(items)
+            # COSEC: Log only non-sensitive filter state and aggregate counts.
+            items = [item for item in items if item.get("key") == requested_session_key]
+            log.info(
+                "[sessions_list] session_key_filter has_session_key=%s before=%s matched=%s",
+                True,
+                before_count,
+                len(items),
+            )
         return items[offset: offset + limit]
 
     async def session_create(

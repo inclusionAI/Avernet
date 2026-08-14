@@ -267,6 +267,11 @@ class LocalProcessManager:
 
         oc_config.setdefault("gateway", {})["port"] = openclaw_port
         oc_config["gateway"]["mode"] = "local"
+        # A singlebox gateway is only consumed by local BaaS/backend/adapter
+        # processes.  Be explicit instead of relying on OpenClaw's
+        # environment-dependent default: in a container it defaults to
+        # ``auto`` (0.0.0.0), which OpenClaw correctly rejects without auth.
+        oc_config["gateway"]["bind"] = "loopback"
         oc_config["gateway"].setdefault("auth", {})["mode"] = "none"
         oc_config.setdefault("agents", {}).setdefault("defaults", {})["workspace"] = (
             str(workspace_dir)
@@ -467,11 +472,10 @@ class LocalProcessManager:
         hermes_port = 0
 
         try:
-            # Step 1: Write credentials BEFORE spawning openclaw.
-            # The BCN plugin reads ~/.credentials on startup to determine
-            # bot_id for BCS connection. If this file doesn't exist when
-            # openclaw starts, the plugin sends bot_id=none and BCS
-            # assigns a random bot_uuid that won't match the onboard call.
+            # Step 1: Write runtime credentials before spawning OpenClaw.
+            # BCS identity is deliberately not derived from these credentials:
+            # create_openclaw_config() writes the per-bot channels.bcs.botId
+            # before this process is started.
             self._write_credentials(
                 device_id=device_id,
                 bot_id=bot_id,
@@ -992,11 +996,9 @@ class LocalProcessManager:
         credentials_path.write_text(content)
         credentials_path.chmod(0o600)
 
-        # Also write ~/.credentials so the BCN plugin (openclaw-channel-bcn)
-        # can discover the bot_id. The plugin hardcodes ~/.credentials and does
-        # not read CREDENTIALS_PATH. Without this, the plugin sends
-        # bot_id=none, BCS assigns a random bot_uuid, and onboard fails with
-        # "Bot 未在协作网络注册" because the bot_uuid doesn't match.
+        # Retain the production-compatible home credential location for
+        # runtime tools. BCN identity comes from channels.bcs.botId in the
+        # per-bot OpenClaw configuration, not from this shared file.
         home_credentials = Path.home() / ".credentials"
         home_credentials.write_text(content)
         home_credentials.chmod(0o600)
@@ -1103,8 +1105,20 @@ class LocalProcessManager:
     def _resolve_engine_python(engine_src_dir: Path) -> str:
         """Resolve the Python executable for the engine adapter.
 
-        Prefers the engine's own venv, falls back to current interpreter.
+        Prefers an explicitly configured interpreter, then the engine's own
+        venv, and finally the current interpreter.
         """
+        configured = os.environ.get("LOCAL_ENGINE_PYTHON")
+        if configured:
+            candidate = Path(configured).expanduser()
+            if not candidate.is_absolute():
+                candidate = Path.cwd() / candidate
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+            raise DeviceAllocateError(
+                f"Configured LOCAL_ENGINE_PYTHON is not executable: {candidate}"
+            )
+
         engine_venv = engine_src_dir.parent / ".venv" / "bin" / "python"
         if engine_venv.exists():
             return str(engine_venv)

@@ -12,13 +12,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.devices.errors import (
     DeviceServiceError,
     InvalidDeviceStatusError,
 )
 from agentclaw.community.core.devices.models import DeviceBindingStatus, OperatorContext
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.devices.services.device_service import (
     BAAS_DEVICE_PROVIDER,
@@ -27,9 +27,7 @@ from agentclaw.community.core.devices.services.device_service import (
 from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
     TECLAW_DEVICE_PROVIDER,
 )
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils import env_utils
 
@@ -381,7 +379,16 @@ class DeviceInstanceService:
         if baas_service is None:
             raise DeviceServiceError("BaasService not available for device restart")
 
+        # (#197) Deterministic, correlation-only request id (was uuid4): stable
+        # across retries of the same logical restart so a BaaS log line traces
+        # back to the exact binding + device. request_id is not a BaaS dedup key.
+        # Must satisfy BaaS's request_id contract (32-64 chars, ^[A-Za-z0-9_-]$):
+        # underscores, not dots — device_uuid ("BOT-"+32 hex) keeps it in range.
+        request_id = f"restart_dev_b{binding_id}_{device_uuid}"
         data = baas_service.restart_devices(
-            bot_uuid, device_uuids=[device_uuid], operator=operator.staff_id
+            bot_uuid,
+            device_uuids=[device_uuid],
+            operator=operator.staff_id,
+            request_id=request_id,
         )
         return {"publish_id": data.get("publish_id")}

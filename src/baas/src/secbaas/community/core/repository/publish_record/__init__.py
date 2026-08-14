@@ -3,9 +3,10 @@
 from ._orm_model import PublishRecordModel
 from ._orm_repository import OrmPublishRecordRepository
 from ._protocol import PublishRecordRepository
-from ._record import PublishRecordRecord
+from ._record import PublishRecordExtraConfig, PublishRecordRecord
 
 __all__ = [
+    "PublishRecordExtraConfig",
     "PublishRecordRecord",
     "PublishRecordRepository",
     "OrmPublishRecordRepository",

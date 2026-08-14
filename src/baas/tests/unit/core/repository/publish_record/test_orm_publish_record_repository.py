@@ -955,6 +955,61 @@ class TestGetLatestCreatedRecordByDevice:
         mock_session.query.return_value.filter.return_value.order_by.return_value.first.assert_called_once()
 
 
+# ==================== PublishRecordExtraConfig ====================
+
+
+class TestPublishRecordExtraConfig:
+    def test_creates_with_both_fields(self):
+        from dataclasses import asdict
+
+        from secbaas.community.core.repository.publish_record import (
+            PublishRecordExtraConfig,
+        )
+
+        cfg = PublishRecordExtraConfig(
+            device_uuid="dev-abc", provider_device_id="container-xyz"
+        )
+        assert cfg.device_uuid == "dev-abc"
+        assert cfg.provider_device_id == "container-xyz"
+
+        d = asdict(cfg)
+        assert d == {"device_uuid": "dev-abc", "provider_device_id": "container-xyz"}
+
+    def test_defaults_to_none(self):
+        from dataclasses import asdict
+
+        from secbaas.community.core.repository.publish_record import (
+            PublishRecordExtraConfig,
+        )
+
+        cfg = PublishRecordExtraConfig()
+        assert cfg.device_uuid is None
+        assert cfg.provider_device_id is None
+
+        d = asdict(cfg)
+        assert d == {"device_uuid": None, "provider_device_id": None}
+
+    def test_provider_device_id_none(self):
+        from dataclasses import asdict
+
+        from secbaas.community.core.repository.publish_record import (
+            PublishRecordExtraConfig,
+        )
+
+        cfg = PublishRecordExtraConfig(device_uuid="dev-1", provider_device_id=None)
+        d = asdict(cfg)
+        assert d == {"device_uuid": "dev-1", "provider_device_id": None}
+
+    def test_slots_enforced(self):
+        from secbaas.community.core.repository.publish_record import (
+            PublishRecordExtraConfig,
+        )
+
+        cfg = PublishRecordExtraConfig(device_uuid="d1")
+        with pytest.raises(AttributeError):
+            cfg.nonexistent_field = "value"
+
+
 # ==================== constructor ====================
 
 

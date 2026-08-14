@@ -3,10 +3,18 @@ use async_trait::async_trait;
 use crate::types::{
     CollaborationDefinition, CollaborationDefinitionRef, GroupRuntimeBinding,
     ResolvedParticipantBinding, RuntimeParticipantBinding, ServiceResult,
-    StateMachineDeliveryCorrelation, StateMachineNodeRun,
-    StateMachineRun, StateMachineRunStatus,
+    StateMachineDeliveryCorrelation, StateMachineNodeRun, StateMachineRun, StateMachineRunStatus,
 };
 use std::collections::BTreeMap;
+
+#[derive(Debug, Clone)]
+pub struct MarkHumanNodeRunningCommand {
+    pub run_id: String,
+    pub node_id: String,
+    pub attempt: i32,
+    pub started_at_ms: u64,
+    pub timeout_deadline_ms: u64,
+}
 
 #[derive(Debug, Clone)]
 pub struct CollaborationDefinitionRecord {
@@ -33,12 +41,15 @@ pub trait StateMachineDefinitionRepoPort: Send + Sync {
         id: &str,
         version: i32,
     ) -> ServiceResult<Option<CollaborationDefinitionRecord>> {
-        Ok(self.get(id, version).await?.map(|definition| CollaborationDefinitionRecord {
-            definition,
-            source_format: None,
-            yaml_text: None,
-            content_hash: None,
-        }))
+        Ok(self
+            .get(id, version)
+            .await?
+            .map(|definition| CollaborationDefinitionRecord {
+                definition,
+                source_format: None,
+                yaml_text: None,
+                content_hash: None,
+            }))
     }
     async fn save_run_snapshot(
         &self,
@@ -57,6 +68,8 @@ pub trait StateMachineDefinitionRepoPort: Send + Sync {
 pub trait GroupRuntimeBindingRepoPort: Send + Sync {
     async fn upsert(&self, binding: GroupRuntimeBinding) -> ServiceResult<()>;
     async fn get(&self, group_id: &str) -> ServiceResult<Option<GroupRuntimeBinding>>;
+    /// Delete all runtime binding state for a Group. Idempotent.
+    async fn delete(&self, group_id: &str) -> ServiceResult<bool>;
     async fn bind_default_definition(
         &self,
         group_id: &str,
@@ -99,11 +112,51 @@ pub trait StateMachineRunRepoPort: Send + Sync {
         nodes: Vec<StateMachineNodeRun>,
     ) -> ServiceResult<()>;
 
+    /// Atomically create a run only when the target session has no active run.
+    ///
+    /// Stores used by one-shot session launches must override this method with
+    /// backend-level serialization. The default preserves compatibility for
+    /// external implementations, but only provides best-effort protection.
+    async fn create_run_if_session_idle(
+        &self,
+        run: StateMachineRun,
+        nodes: Vec<StateMachineNodeRun>,
+    ) -> ServiceResult<bool> {
+        if self
+            .get_run_by_session_id(&run.session_id)
+            .await?
+            .is_some_and(|existing| {
+                matches!(
+                    existing.status,
+                    StateMachineRunStatus::Pending | StateMachineRunStatus::Running
+                )
+            })
+        {
+            return Ok(false);
+        }
+        self.create_run(run, nodes).await?;
+        Ok(true)
+    }
+
     async fn get_run(&self, run_id: &str) -> ServiceResult<Option<StateMachineRun>>;
     async fn get_run_by_session_id(
         &self,
         session_id: &str,
     ) -> ServiceResult<Option<StateMachineRun>>;
+    /// List every run associated with a session.
+    ///
+    /// The compatibility default preserves existing external implementations;
+    /// production stores override it so cleanup can cancel all active runs.
+    async fn list_runs_by_session_id(
+        &self,
+        session_id: &str,
+    ) -> ServiceResult<Vec<StateMachineRun>> {
+        Ok(self
+            .get_run_by_session_id(session_id)
+            .await?
+            .into_iter()
+            .collect())
+    }
     async fn list_node_runs(&self, run_id: &str) -> ServiceResult<Vec<StateMachineNodeRun>>;
     async fn get_node_run(
         &self,
@@ -138,8 +191,37 @@ pub trait StateMachineRunRepoPort: Send + Sync {
         run_id: &str,
         node_id: &str,
         attempt: i32,
+        outcome: String,
         artifact_text: String,
+        responded_by: Option<String>,
         completed_at: u64,
+    ) -> ServiceResult<bool>;
+
+    /// Persist the bot artifact while the node remains running so callers can
+    /// distinguish bot execution from the subsequent Judge evaluation.
+    async fn record_node_artifact_if_running(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        artifact_text: String,
+    ) -> ServiceResult<bool>;
+
+    /// Atomically accept the first Human response while the node remains
+    /// running. The accepted response stays available during Judge evaluation
+    /// and after a Judge failure.
+    async fn record_human_response_if_running(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        artifact_text: String,
+        responded_by: String,
+    ) -> ServiceResult<bool>;
+
+    async fn mark_human_node_running_if_run_active(
+        &self,
+        command: MarkHumanNodeRunningCommand,
     ) -> ServiceResult<bool>;
 
     async fn fail_node_attempt(
@@ -159,12 +241,7 @@ pub trait StateMachineRunRepoPort: Send + Sync {
         next_attempt: i32,
     ) -> ServiceResult<bool>;
 
-    async fn skip_node(
-        &self,
-        run_id: &str,
-        node_id: &str,
-        skipped_at: u64,
-    ) -> ServiceResult<bool>;
+    async fn skip_node(&self, run_id: &str, node_id: &str, skipped_at: u64) -> ServiceResult<bool>;
 
     async fn update_run_status(
         &self,

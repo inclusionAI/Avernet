@@ -181,8 +181,9 @@ demo_bot_admin_onboard_bcs() {
     printf '%s\n' "$response" | jq -e '.onboarded == true' >/dev/null 2>&1
 }
 
-# Return 0 when the BCS entry is exact, 1 when it is missing or repairable by
-# admin onboard, and 2 for fatal transport, authentication, or contract errors.
+# Return 0 when the BCS entry is exact, 1 when it is missing or requires
+# product-side onboarding, and 2 for fatal transport, authentication, or
+# contract errors.
 demo_bot_verify_bcn() {
     local backend_bot_id="$1"
     local bcs_bot_id base_url response_file response http_status curl_rc actual_bot_id actual_name actual_summary
@@ -265,9 +266,8 @@ demo_bot_ensure_bcn() {
         return "$verify_rc"
     fi
 
-    log_info "Registering demo bot in local BCS: ${bcs_bot_id}"
-    demo_bot_admin_onboard_bcs "$backend_bot_id" || return 1
-    demo_bot_verify_bcn "$backend_bot_id"
+    log_warn "Demo bot is not onboarded in BCS yet: ${bcs_bot_id}. Use the product Onboard action after the BCN plugin connects."
+    return 1
 }
 
 demo_bot_start() {
@@ -303,19 +303,14 @@ demo_bot_start() {
         return 1
     fi
 
-    if ! demo_bot_ensure_bcn "$backend_bot_id"; then
-        log_error "Failed to verify demo bot in local BCS/BCN: $(demo_bot_bcs_bot_id "$backend_bot_id"). Check ${DEMO_BOT_LOG}"
-        return 1
-    fi
-
-    log_info "Singlebox demo bot ready: $(demo_bot_bcs_bot_id "$backend_bot_id")"
+    log_info "Singlebox demo bot started: $(demo_bot_bcs_bot_id "$backend_bot_id"). The BCN plugin will self-register; use the product Onboard action to complete network onboarding."
 }
 
 demo_bot_ready() {
     demo_bot_defaults
     local backend_bot_id
     backend_bot_id="$(demo_bot_find_existing)"
-    [ -n "$backend_bot_id" ] && demo_bot_verify_bcn "$backend_bot_id"
+    [ -n "$backend_bot_id" ] && demo_bot_wait_ready "$backend_bot_id"
 }
 
 demo_bot_prereqs() {
@@ -339,13 +334,13 @@ demo_bot_status() {
     demo_bot_defaults
     local backend_bot_id
     backend_bot_id="$(demo_bot_find_existing)"
-    if [ -n "$backend_bot_id" ] && demo_bot_verify_bcn "$backend_bot_id"; then
-        echo "  Demo Bot:  Ready ($(demo_bot_bcs_bot_id "$backend_bot_id"))"
+    if [ -n "$backend_bot_id" ]; then
+        echo "  Demo Bot:  Started ($(demo_bot_bcs_bot_id "$backend_bot_id"); onboarding is user-triggered)"
     else
         echo "  Demo Bot:  Not ready"
     fi
 }
 
 demo_bot_help() {
-    echo "demo_bot - backend-created mock demo bot onboarded to local BCS"
+    echo "demo_bot - backend-created mock demo bot; onboarding is triggered in the product"
 }

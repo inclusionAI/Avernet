@@ -1,0 +1,1040 @@
+{
+  "components": {
+    "schemas": {
+      "ExtraInfo": {
+        "description": "Result extra information",
+        "properties": {
+          "usage": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Token usage information",
+            "title": "Usage"
+          }
+        },
+        "title": "ExtraInfo",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "MessageItem": {
+        "description": "Message item",
+        "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Message text content",
+            "title": "Content"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Message creation time (ISO 8601)",
+            "title": "Created At"
+          },
+          "history_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Historical message metadata",
+            "title": "History Meta"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Message ID",
+            "title": "Id"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Message metadata",
+            "title": "Meta"
+          },
+          "role": {
+            "description": "Message role: user / assistant / tool_result",
+            "title": "Role",
+            "type": "string"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Session ID",
+            "title": "Session Id"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "MessageItem",
+        "type": "object"
+      },
+      "MessageRequest": {
+        "description": "Message delivery request model",
+        "properties": {
+          "bot_id": {
+            "description": "Bot unique identifier",
+            "minLength": 1,
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "callback_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Callback URL",
+            "title": "Callback Url"
+          },
+          "message": {
+            "description": "User message content",
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Message ID",
+            "title": "Message Id"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional metadata information.Recognized keys: biz_task_id (str, optional): Caller-assigned business task identifier. Defaults to run_id when absent. biz_scene (str, optional): Business scene/category tag. Defaults to 'default' when absent.",
+            "title": "Metadata"
+          }
+        },
+        "required": [
+          "message",
+          "bot_id"
+        ],
+        "title": "MessageRequest",
+        "type": "object"
+      },
+      "MessageResponse": {
+        "description": "Message delivery standard response",
+        "properties": {
+          "code": {
+            "default": 0,
+            "description": "响应码，0 表示成功",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MessageResponseData"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response data"
+          },
+          "message": {
+            "default": "success",
+            "description": "响应消息",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "MessageResponse",
+        "type": "object"
+      },
+      "MessageResponseData": {
+        "description": "Message delivery response data",
+        "properties": {
+          "message_id": {
+            "description": "Message ID, used for tracking delivery status",
+            "title": "Message Id",
+            "type": "string"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Session ID",
+            "title": "Session Id"
+          }
+        },
+        "required": [
+          "message_id"
+        ],
+        "title": "MessageResponseData",
+        "type": "object"
+      },
+      "MessageResultData": {
+        "description": "Message result data",
+        "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Bot reply content",
+            "title": "Content"
+          },
+          "extra": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExtraInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Result extra information"
+          }
+        },
+        "title": "MessageResultData",
+        "type": "object"
+      },
+      "MessageResultResponse": {
+        "description": "Message result query response",
+        "properties": {
+          "code": {
+            "default": 0,
+            "description": "响应码，0 表示成功",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MessageResultResponseData"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Message result data"
+          },
+          "message": {
+            "default": "success",
+            "description": "响应消息",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "MessageResultResponse",
+        "type": "object"
+      },
+      "MessageResultResponseData": {
+        "description": "Message result response data",
+        "properties": {
+          "bot_id": {
+            "description": "Bot ID",
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Completion time",
+            "title": "Completed At"
+          },
+          "created_at": {
+            "description": "Creation time",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error information",
+            "title": "Error"
+          },
+          "message_id": {
+            "description": "Message ID",
+            "title": "Message Id",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MessageResultData"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Message processing result"
+          },
+          "session_id": {
+            "description": "Session ID",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "Message status: pending/running/completed/failed",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id",
+          "bot_id",
+          "session_id",
+          "status",
+          "created_at"
+        ],
+        "title": "MessageResultResponseData",
+        "type": "object"
+      },
+      "SessionMessagesResponse": {
+        "description": "Session message list standard response",
+        "properties": {
+          "code": {
+            "default": 0,
+            "description": "响应码，0 表示成功",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionMessagesResponseData"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Session message data"
+          },
+          "message": {
+            "default": "success",
+            "description": "响应消息",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "SessionMessagesResponse",
+        "type": "object"
+      },
+      "SessionMessagesResponseData": {
+        "description": "Session message list response data",
+        "properties": {
+          "has_more": {
+            "default": false,
+            "description": "Whether there are more messages",
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "messages": {
+            "description": "Message list",
+            "items": {
+              "$ref": "#/components/schemas/MessageItem"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "session_id": {
+            "description": "Session ID",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "total": {
+            "default": 0,
+            "description": "Total messages",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "SessionMessagesResponseData",
+        "type": "object"
+      },
+      "SessionQueryResponse": {
+        "description": "Session query standard response",
+        "properties": {
+          "code": {
+            "default": 0,
+            "description": "响应码，0 表示成功",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionQueryResponseData"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Session query data"
+          },
+          "message": {
+            "default": "success",
+            "description": "响应消息",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "SessionQueryResponse",
+        "type": "object"
+      },
+      "SessionQueryResponseData": {
+        "description": "Session query response data",
+        "properties": {
+          "bot_id": {
+            "description": "Bot ID",
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Creation time",
+            "title": "Created At"
+          },
+          "session_id": {
+            "description": "Session ID",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "Session status",
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Update time",
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "session_id",
+          "bot_id",
+          "status"
+        ],
+        "title": "SessionQueryResponseData",
+        "type": "object"
+      },
+      "StreamMessageRequest": {
+        "description": "Streaming message delivery request model",
+        "properties": {
+          "bot_id": {
+            "description": "Bot unique identifier",
+            "minLength": 1,
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "message": {
+            "description": "User message content",
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional metadata information.Recognized keys: biz_task_id (str, optional): Caller-assigned business task identifier. Defaults to run_id when absent. biz_scene (str, optional): Business scene/category tag. Defaults to 'default' when absent.",
+            "title": "Metadata"
+          }
+        },
+        "required": [
+          "message",
+          "bot_id"
+        ],
+        "title": "StreamMessageRequest",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "SecBaaS API",
+    "title": "SecBaaS API",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/openapi/v1/chat/messages": {
+      "post": {
+        "description": "Deliver a message to a specified Bot using a JWT-authenticated request",
+        "operationId": "deliver_message_openapi_v1_chat_messages_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-avernet-principal",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Avernet-Principal"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            },
+            "description": "Delivery successful"
+          },
+          "400": {
+            "description": "Invalid parameters"
+          },
+          "401": {
+            "description": "Authentication failed"
+          },
+          "403": {
+            "description": "Bot access denied"
+          },
+          "404": {
+            "description": "Bot not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "description": "Internal server error"
+          },
+          "503": {
+            "description": "Bot unavailable"
+          }
+        },
+        "summary": "Gateway message delivery",
+        "tags": [
+          "Chat / Messages"
+        ]
+      }
+    },
+    "/openapi/v1/chat/messages/stream": {
+      "post": {
+        "description": "Deliver a message to a specified Bot using a JWT-authenticated request, returning results as an SSE stream",
+        "operationId": "deliver_message_stream_openapi_v1_chat_messages_stream_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-avernet-principal",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Avernet-Principal"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StreamMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Stream delivery successful"
+          },
+          "400": {
+            "description": "Invalid parameters"
+          },
+          "401": {
+            "description": "Authentication failed"
+          },
+          "403": {
+            "description": "Bot access denied"
+          },
+          "404": {
+            "description": "Bot not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "description": "Too many requests"
+          },
+          "500": {
+            "description": "Internal server error"
+          },
+          "503": {
+            "description": "Bot unavailable"
+          }
+        },
+        "summary": "Gateway streaming message delivery",
+        "tags": [
+          "Chat / Messages"
+        ]
+      }
+    },
+    "/openapi/v1/chat/messages/{message_id}": {
+      "get": {
+        "description": "Query the processing result of a message delivery by message_id (JWT-authenticated)",
+        "operationId": "get_message_result_openapi_v1_chat_messages__message_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-avernet-principal",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Avernet-Principal"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResultResponse"
+                }
+              }
+            },
+            "description": "Query successful"
+          },
+          "401": {
+            "description": "Authentication failed"
+          },
+          "403": {
+            "description": "Bot access denied"
+          },
+          "404": {
+            "description": "Message not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Gateway query message result",
+        "tags": [
+          "Chat / Messages"
+        ]
+      }
+    },
+    "/openapi/v1/chat/sessions/{session_id}": {
+      "get": {
+        "description": "Query a specific session's information using a JWT-authenticated request",
+        "operationId": "get_session_openapi_v1_chat_sessions__session_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Bot ID, format: bot_id:staff_no",
+            "in": "query",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "Bot ID, format: bot_id:staff_no",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Bot lifecycle stage. Options: online, verify, draft, all",
+            "in": "query",
+            "name": "lifecycle_stage",
+            "required": false,
+            "schema": {
+              "default": "online",
+              "description": "Bot lifecycle stage. Options: online, verify, draft, all",
+              "title": "Lifecycle Stage",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-avernet-principal",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Avernet-Principal"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionQueryResponse"
+                }
+              }
+            },
+            "description": "Query successful"
+          },
+          "401": {
+            "description": "Authentication failed"
+          },
+          "403": {
+            "description": "Bot access denied"
+          },
+          "404": {
+            "description": "Session not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "summary": "Gateway query session",
+        "tags": [
+          "Chat / Sessions"
+        ]
+      }
+    },
+    "/openapi/v1/chat/sessions/{session_id}/messages": {
+      "get": {
+        "description": "Query a specific session's message list using a JWT-authenticated request",
+        "operationId": "get_session_messages_openapi_v1_chat_sessions__session_id__messages_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum number of messages to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 1000,
+              "description": "Maximum number of messages to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Bot ID, format: bot_id:staff_no",
+            "in": "query",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "Bot ID, format: bot_id:staff_no",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Bot lifecycle stage. Options: online, verify, draft, all",
+            "in": "query",
+            "name": "lifecycle_stage",
+            "required": false,
+            "schema": {
+              "default": "online",
+              "description": "Bot lifecycle stage. Options: online, verify, draft, all",
+              "title": "Lifecycle Stage",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-avernet-principal",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Avernet-Principal"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionMessagesResponse"
+                }
+              }
+            },
+            "description": "Query successful"
+          },
+          "401": {
+            "description": "Authentication failed"
+          },
+          "403": {
+            "description": "Bot access denied"
+          },
+          "404": {
+            "description": "Session not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "summary": "Gateway query session messages",
+        "tags": [
+          "Chat / Sessions"
+        ]
+      }
+    }
+  }
+}

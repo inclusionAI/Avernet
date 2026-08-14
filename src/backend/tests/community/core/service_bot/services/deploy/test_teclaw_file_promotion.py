@@ -160,6 +160,63 @@ async def test_out_of_namespace_path_skipped():
 
 
 @pytest.mark.asyncio
+async def test_node_modules_files_are_excluded_from_snapshot():
+    # node_modules is regenerable dependency content, not a user file to carry
+    # across stages: it is swept over but never read or staged, at any depth.
+    fs = _FakeDeviceFs(
+        listings={
+            "workspace": [
+                {"path": "/workspace/app.py", "is_dir": False},
+                {"path": "/workspace/node_modules", "is_dir": True},
+                {"path": "/workspace/node_modules/rxjs/dist/esm/index.js", "is_dir": False},
+                {"path": "/workspace/sub/node_modules/pkg/a.js", "is_dir": False},
+            ],
+            "identity": [],
+        },
+        contents={
+            "workspace/app.py": b"code",
+            # node_modules contents present but must not be read/staged
+            "workspace/node_modules/rxjs/dist/esm/index.js": b"js",
+            "workspace/sub/node_modules/pkg/a.js": b"js",
+        },
+    )
+    oss = _oss_ok()
+    refs = await _promo(oss).stage_files(device_fs=fs, **_ARGS)
+    assert [r["name"] for r in refs.resources] == ["app.py"]
+    # node_modules files were never read nor written to OSS (any depth)
+    assert fs.read_calls == ["workspace/app.py"]
+    assert {c.args[0] for c in oss.put_object.call_args_list} == {
+        f"teclaw/pre/bolt_data/{_PREFIX}/workspace/app.py",
+    }
+
+
+@pytest.mark.asyncio
+async def test_unreadable_node_modules_map_does_not_fail_build():
+    # Reproduces the production alert: a source-map under node_modules that
+    # list_dir reports but read_file cannot read (dangling symlink → None). It
+    # must be skipped as excluded content, not turned into a hard build failure.
+    fs = _FakeDeviceFs(
+        listings={
+            "workspace": [
+                {"path": "/workspace/report.csv", "is_dir": False},
+                {
+                    "path": "/workspace/node_modules/rxjs/dist/esm/internal/"
+                    "operators/single.js.map",
+                    "is_dir": False,
+                },
+            ],
+            "identity": [],
+        },
+        contents={"workspace/report.csv": b"csv"},  # the .map has no content
+    )
+    oss = _oss_ok()
+    refs = await _promo(oss).stage_files(device_fs=fs, **_ARGS)
+    assert [r["name"] for r in refs.resources] == ["report.csv"]
+    assert "workspace/node_modules/rxjs/dist/esm/internal/operators/single.js.map" \
+        not in fs.read_calls
+
+
+@pytest.mark.asyncio
 async def test_unreadable_source_file_raises():
     fs = _FakeDeviceFs(
         listings={"workspace": [{"path": "/workspace/x", "is_dir": False}], "identity": []},

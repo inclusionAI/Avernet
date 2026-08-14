@@ -28,6 +28,7 @@ but are surfaced by the engine aggregate for the WS server's HITL dispatch.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import uuid
 from collections.abc import AsyncIterator
@@ -126,10 +127,17 @@ class ClaudeCodeChatAdapter(ChatService):
             if isinstance(raw_attachments, list):
                 attachments = raw_attachments
 
+        # COSEC: hash session and prompt values before logging; the rewritten
+        # prompt can contain sensitive Bot absolute paths.
         log.info(
-            "[stream] key=%s cwd=%s model=%s permission_mode=%s has_token=%s query=%s",
-            session_key, cwd, model, permission_mode,
-            token is not None, request.query[:50],
+            "[stream] key_hash=%s cwd=%s model=%s permission_mode=%s has_token=%s query_len=%s query_hash=%s",
+            hashlib.sha256(session_key.encode("utf-8")).hexdigest()[:16],
+            cwd,
+            model,
+            permission_mode,
+            token is not None,
+            len(request.query),
+            hashlib.sha256(request.query.encode("utf-8")).hexdigest()[:16],
         )
 
         try:

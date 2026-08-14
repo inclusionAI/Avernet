@@ -50,6 +50,7 @@ def factory():
                 StubTeClawBotPlugin()
             ),
         ),
+        callback_handler=MagicMock(handle=AsyncMock(return_value={"status": "ok"})),
     )
 
 

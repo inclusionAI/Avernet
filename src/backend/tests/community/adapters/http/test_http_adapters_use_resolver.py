@@ -89,7 +89,7 @@ def _skills_router_app(mock_ctx, tmp_path):
     from agentclaw.community.adapters.http.skill_center.skills import (
         router as skills_router,
     )
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.core.devices.services.device_context_resolver import (
         DeviceContextResolver,
     )
@@ -170,7 +170,7 @@ def _skillsets_router_app(mock_ctx, tmp_path):
     from agentclaw.community.adapters.http.skill_center.skillsets import (
         router as skillsets_router,
     )
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.core.devices.services.device_context_resolver import (
         DeviceContextResolver,
     )
@@ -329,7 +329,7 @@ def _identity_router_app(mock_ctx, tmp_path, monkeypatch):
     Arca branch in particular).
     """
     from agentclaw.community.adapters.http.identity.router import router as identity_router
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.core.devices.services.device_context_resolver import (
         DeviceContextResolver,
     )
@@ -427,22 +427,17 @@ def _resources_router_app(mock_ctx, tmp_path):
     from agentclaw.community.adapters.http.resources.file_router import (
         router as file_router,
     )
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.core.devices.services.device_context_resolver import (
         DeviceContextResolver,
     )
-    from agentclaw.community.core.resources.repository.protocol import (
-        ResourceRepositoryProtocol,
-    )
+    from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
     from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
     from agentclaw.community.di.modules.skill_center_module import (
         DeviceFilesystemDispatcher,
     )
     from agentclaw.community.api.baas_service import BaasServiceProtocol
-    from agentclaw.community.core.files.factory import BotFileServiceFactory
-    from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-        BotPublishRepositoryProtocol,
-    )
+    from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 
     ctx = _make_ctx()
     resolver = _make_mock_resolver(ctx)
@@ -476,7 +471,6 @@ def _resources_router_app(mock_ctx, tmp_path):
 
     path_factory = _make_mock_path_factory(tmp_path)
     baas_service = MagicMock()
-    bot_file_factory = MagicMock()
     publish_repo = MagicMock()
 
     app = FastAPI()
@@ -496,7 +490,6 @@ def _resources_router_app(mock_ctx, tmp_path):
             binder.bind(
                 BaasServiceProtocol, to=CallableProvider(lambda: baas_service)
             )
-            binder.bind(BotFileServiceFactory, to=bot_file_factory)
             binder.bind(
                 BotPublishRepositoryProtocol,
                 to=CallableProvider(lambda: publish_repo),
@@ -578,7 +571,7 @@ def _file_router_app(mock_ctx, tmp_path):
     from agentclaw.community.adapters.http.resources.file_router import (
         router as file_router,
     )
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.core.devices.services.device_context_resolver import (
         DeviceContextResolver,
     )
@@ -587,10 +580,7 @@ def _file_router_app(mock_ctx, tmp_path):
         DeviceFilesystemDispatcher,
     )
     from agentclaw.community.api.baas_service import BaasServiceProtocol
-    from agentclaw.community.core.files.factory import BotFileServiceFactory
-    from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-        BotPublishRepositoryProtocol,
-    )
+    from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 
     ctx = _make_ctx()
     resolver = _make_mock_resolver(ctx)
@@ -619,7 +609,6 @@ def _file_router_app(mock_ctx, tmp_path):
 
     path_factory = _make_mock_path_factory(tmp_path)
     baas_service = MagicMock()
-    bot_file_factory = MagicMock()
     publish_repo = MagicMock()
 
     app = FastAPI()
@@ -635,7 +624,6 @@ def _file_router_app(mock_ctx, tmp_path):
             binder.bind(
                 BaasServiceProtocol, to=CallableProvider(lambda: baas_service)
             )
-            binder.bind(BotFileServiceFactory, to=bot_file_factory)
             binder.bind(
                 BotPublishRepositoryProtocol,
                 to=CallableProvider(lambda: publish_repo),

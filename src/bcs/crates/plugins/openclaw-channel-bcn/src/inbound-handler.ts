@@ -3,13 +3,15 @@
  *
  * Handles chat.send requests from BCS:
  * 1. Extract text from message content blocks
- * 2. Generate run_id, ACK immediately
+ * 2. Resolve run_id, ACK immediately
  * 3. Dispatch to OpenClaw agent via SDK
  * 4. Stream response back to BCS as event frames
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import * as fs from 'node:fs';
 import { rm } from 'node:fs/promises';
+import * as path from 'node:path';
 import type { BcsWsClient } from './bcs-ws-client.js';
 import { resolveGatewayPort, scopesForGatewayMethod } from './gateway-security.js';
 import { getBcsRuntime } from './runtime.js';
@@ -43,6 +45,12 @@ const MAX_IMAGE_ATTACHMENTS = 5;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const IMAGE_DOWNLOAD_TIMEOUT_MS = 30_000;
 const IMAGE_READ_IDLE_TIMEOUT_MS = 10_000;
+const MAX_FILE_ATTACHMENTS = 5;
+const MAX_FILE_BYTES = 100 * 1024 * 1024;
+const FILE_DOWNLOAD_TIMEOUT_MS = 60_000;
+const FILE_READ_IDLE_TIMEOUT_MS = 15_000;
+const RUN_TERMINAL_TIMEOUT_MS = 15 * 60 * 1000;
+const INJECT_ASSISTANT_ONLY_FIELDS = [ 'api', 'provider', 'model', 'stopReason', 'usage' ];
 
 /** Extract sender name from [from:botName] prefix. Returns stripped text and sender name. */
 function extractFromPrefix(raw: string): { senderName: string; text: string } {
@@ -55,6 +63,133 @@ function extractFromPrefix(raw: string): { senderName: string; text: string } {
   return { senderName: '', text: raw };
 }
 
+function nonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  return value.trim() || undefined;
+}
+
+function isPathInside(baseDir: string, candidate: string): boolean {
+  const relative = path.relative(path.resolve(baseDir), path.resolve(candidate));
+  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
+function resolveTranscriptPathFromSessionEntry(
+  sessionsDir: string,
+  sessionId: string,
+  sessionEntry: Record<string, unknown> | undefined,
+): string {
+  const rawSessionFile = typeof sessionEntry?.sessionFile === 'string'
+    ? sessionEntry.sessionFile.trim()
+    : '';
+  if (rawSessionFile) {
+    const resolved = path.isAbsolute(rawSessionFile)
+      ? path.resolve(rawSessionFile)
+      : path.resolve(sessionsDir, rawSessionFile);
+    if (isPathInside(sessionsDir, resolved)) {
+      return resolved;
+    }
+  }
+  return path.join(sessionsDir, `${sessionId}.jsonl`);
+}
+
+function rewriteInjectedTranscriptMessage(params: {
+  transcriptPath: string;
+  messageId: string;
+  log?: { warn: (...args: unknown[]) => void };
+}): boolean {
+  const { transcriptPath, messageId, log } = params;
+
+  let raw = '';
+  try {
+    raw = fs.readFileSync(transcriptPath, 'utf8');
+  } catch (err) {
+    log?.warn?.(`chat.inject: transcript rewrite skipped, read failed: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+
+  const hadTrailingNewline = raw.endsWith('\n');
+  const lines = raw.split(/\r?\n/);
+  if (lines.at(-1) === '') lines.pop();
+
+  let matched = false;
+  const rewritten = lines.map(line => {
+    if (!line.trim()) return line;
+    let entry: any;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      return line;
+    }
+    if (entry?.type !== 'message' || entry?.id !== messageId || entry?.message?.role !== 'assistant') {
+      return line;
+    }
+    entry.message = { ...entry.message, role: 'user' };
+    for (const field of INJECT_ASSISTANT_ONLY_FIELDS) {
+      delete entry.message[field];
+    }
+    matched = true;
+    return JSON.stringify(entry);
+  });
+
+  if (!matched) {
+    log?.warn?.(`chat.inject: transcript rewrite skipped, messageId not found: ${messageId}`);
+    return false;
+  }
+
+  const tmpPath = path.join(path.dirname(transcriptPath), `.${path.basename(transcriptPath)}.${process.pid}.${Date.now()}.tmp`);
+  const next = `${rewritten.join('\n')}${hadTrailingNewline ? '\n' : ''}`;
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(tmpPath, 'w', 0o600);
+    fs.writeFileSync(fd, next, { encoding: 'utf8' });
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
+    fd = undefined;
+    fs.renameSync(tmpPath, transcriptPath);
+    return true;
+  } catch (err) {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // Best-effort cleanup only.
+      }
+    }
+    try {
+      fs.rmSync(tmpPath, { force: true });
+    } catch {
+      // Best-effort cleanup only.
+    }
+    log?.warn?.(`chat.inject: transcript rewrite skipped, write failed: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+}
+
+export function resolveInboundSender(
+  rawText: string,
+  channel?: ChatSendParams['channel'],
+  sessionContext?: GroupContext,
+): {
+    fromDisplayName: string;
+    senderName: string;
+    senderId: string | undefined;
+    strippedText: string;
+  } {
+  const { senderName: prefixedSenderName, text: strippedText } = extractFromPrefix(rawText);
+  const fromDisplayName = prefixedSenderName
+    || channel?.user_id
+    || sessionContext?.from
+    || 'bcs-bot';
+  const senderName = nonEmptyString(channel?.actor_name)
+    || nonEmptyString(prefixedSenderName)
+    || nonEmptyString(channel?.user_id)
+    || nonEmptyString(sessionContext?.from)
+    || 'bcs-bot';
+  const senderId = nonEmptyString(channel?.actor_id)
+    || nonEmptyString(sessionContext?.from_bot_id);
+  return { fromDisplayName, senderName, senderId, strippedText };
+}
+
 /** Active streams: run_id -> AbortController */
 const activeStreams = new Map<string, AbortController>();
 
@@ -62,11 +197,21 @@ type RunContext = {
   groupId: string;
   client: BcsWsClient;
   sessionKey?: string;
+  agentRunId?: string;
   finalSent?: boolean;
+  sawToolEvent: boolean;
+  preparedAttachments?: PreparedAttachment[];
+  terminalTimer?: ReturnType<typeof setTimeout>;
 };
 
 /** Run context for agent event routing: run_id -> context used for BCS event emission. */
 const runContexts = new Map<string, RunContext>();
+
+/** Actual OpenClaw agent run ID -> BCS-visible run ID. */
+const bcsRunIdByAgentRunId = new Map<string, string>();
+
+/** In-flight prepared-image cleanup keyed by BCS-visible run ID. */
+const cleanupPromiseByRunId = new Map<string, Promise<void>>();
 
 interface VisibleReplyState {
   text: string;
@@ -233,6 +378,10 @@ function extractImageAttachments(attachments: Attachment[] | undefined): Attachm
   return (attachments ?? []).filter(attachment => attachment.type === 'image');
 }
 
+function extractFileAttachments(attachments: Attachment[] | undefined): Attachment[] {
+  return (attachments ?? []).filter(attachment => attachment.type === 'file');
+}
+
 function sanitizeAttachmentDisplay(value: string): string {
   // COSEC: prevent untrusted filenames from breaking structured prompt notes.
   return value
@@ -298,9 +447,10 @@ function sniffSupportedImageMime(buffer: Buffer): string | undefined {
   return undefined;
 }
 
-type PreparedImage = {
+type PreparedAttachment = {
   path: string;
   contentType: string;
+  attachmentId: string;
 };
 
 type InboundImageErrorCode =
@@ -325,10 +475,103 @@ class InboundImageError extends Error {
   }
 }
 
-async function cleanupPreparedImages(images: PreparedImage[]): Promise<void> {
-  await Promise.all(images.map(async image => {
-    await rm(image.path, { force: true }).catch(() => undefined);
+async function cleanupPreparedAttachments(attachments: PreparedAttachment[]): Promise<void> {
+  await Promise.all(attachments.map(async attachment => {
+    await rm(attachment.path, { force: true }).catch(() => undefined);
   }));
+}
+
+function bindAgentRun(
+  runId: string,
+  agentRunId: string,
+  log?: { info: (...args: unknown[]) => void; warn: (...args: unknown[]) => void },
+): boolean {
+  const context = runContexts.get(runId);
+  if (!context) return false;
+
+  const existingRunId = bcsRunIdByAgentRunId.get(agentRunId);
+  if (existingRunId && existingRunId !== runId) {
+    log?.warn?.(`[BCS] Refusing to remap agent run_id=${agentRunId} from BCS run_id=${existingRunId} to run_id=${runId}`);
+    return false;
+  }
+  if (context.agentRunId && context.agentRunId !== agentRunId) {
+    log?.warn?.(`[BCS] Refusing to replace agent run_id=${context.agentRunId} for BCS run_id=${runId} with run_id=${agentRunId}`);
+    return false;
+  }
+
+  context.agentRunId = agentRunId;
+  bcsRunIdByAgentRunId.set(agentRunId, runId);
+  if (context.sessionKey) {
+    activeRunIdForSession.set(context.sessionKey, runId);
+  }
+  if (agentRunId !== runId) {
+    log?.info?.(`[BCS] Bound OpenClaw agent run_id=${agentRunId} to BCS run_id=${runId}`);
+  }
+  return true;
+}
+
+function cleanupRunContext(
+  runId: string,
+  log?: { info: (...args: unknown[]) => void },
+): Promise<void> {
+  const existingCleanup = cleanupPromiseByRunId.get(runId);
+  if (existingCleanup) return existingCleanup;
+
+  const context = runContexts.get(runId);
+  if (!context) return Promise.resolve();
+
+  if (context.terminalTimer) {
+    clearTimeout(context.terminalTimer);
+  }
+  activeStreams.delete(runId);
+  runContexts.delete(runId);
+  visibleReplyByRunId.delete(runId);
+  pendingRouteByRunId.delete(runId);
+
+  if (context.agentRunId && bcsRunIdByAgentRunId.get(context.agentRunId) === runId) {
+    bcsRunIdByAgentRunId.delete(context.agentRunId);
+  }
+  if (context.sessionKey && activeRunIdForSession.get(context.sessionKey) === runId) {
+    activeRunIdForSession.delete(context.sessionKey);
+    pendingRouteBySessionKey.delete(context.sessionKey);
+  }
+
+  const preparedAttachments = context.preparedAttachments ?? [];
+  context.preparedAttachments = [];
+  if (preparedAttachments.length === 0) return Promise.resolve();
+
+  const cleanupPromise = cleanupPreparedAttachments(preparedAttachments)
+    .then(() => {
+      log?.info?.(`[BCS] Cleaned ${preparedAttachments.length} prepared attachment(s) for run_id=${runId}`);
+    })
+    .finally(() => {
+      if (cleanupPromiseByRunId.get(runId) === cleanupPromise) {
+        cleanupPromiseByRunId.delete(runId);
+      }
+    });
+  cleanupPromiseByRunId.set(runId, cleanupPromise);
+  return cleanupPromise;
+}
+
+function armRunTerminalTimeout(
+  runId: string,
+  log?: { info: (...args: unknown[]) => void; warn: (...args: unknown[]) => void },
+): void {
+  const context = runContexts.get(runId);
+  if (!context) return;
+
+  const timer = setTimeout(() => {
+    if (!runContexts.has(runId)) return;
+    sendRunErrorOnce(
+      runId,
+      'Agent response timed out before completion.',
+      log,
+      `terminal lifecycle timeout after ${RUN_TERMINAL_TIMEOUT_MS}ms`,
+    );
+    void cleanupRunContext(runId, log);
+  }, RUN_TERMINAL_TIMEOUT_MS);
+  timer.unref?.();
+  context.terminalTimer = timer;
 }
 
 function validateImageUrl(attachment: Attachment): void {
@@ -355,7 +598,7 @@ async function prepareImageAttachments(params: {
   attachments: Attachment[];
   abortSignal: AbortSignal;
   runtime: ReturnType<typeof getBcsRuntime>;
-}): Promise<PreparedImage[]> {
+}): Promise<PreparedAttachment[]> {
   if (params.attachments.length === 0) return [];
 
   if (params.attachments.length > MAX_IMAGE_ATTACHMENTS) {
@@ -373,7 +616,7 @@ async function prepareImageAttachments(params: {
     );
   }
 
-  const prepared: PreparedImage[] = [];
+  const prepared: PreparedAttachment[] = [];
   try {
     for (const attachment of params.attachments) {
       if (typeof attachment.expires_at === 'number' && attachment.expires_at <= Date.now()) {
@@ -474,31 +717,215 @@ async function prepareImageAttachments(params: {
       prepared.push({
         path: saved.path,
         contentType: savedContentType,
+        attachmentId: attachment.attachment_id,
       });
     }
     return prepared;
   } catch (err) {
-    await cleanupPreparedImages(prepared);
+    await cleanupPreparedAttachments(prepared);
     throw err;
   }
+}
+
+type InboundFileErrorCode =
+  | 'FILE_TOO_MANY'
+  | 'FILE_EXPIRED'
+  | 'FILE_INVALID_URL'
+  | 'FILE_TOO_LARGE'
+  | 'FILE_DOWNLOAD_TIMEOUT'
+  | 'FILE_DOWNLOAD_FAILED'
+  | 'FILE_SIZE_MISMATCH'
+  | 'FILE_HASH_MISMATCH'
+  | 'FILE_STORE_FAILED'
+  | 'FILE_ABORTED';
+
+class InboundFileError extends Error {
+  constructor(
+    readonly code: InboundFileErrorCode,
+    readonly userMessage: string,
+    readonly attachmentId?: string,
+  ) {
+    super(code);
+    this.name = 'InboundFileError';
+  }
+}
+
+function validateFileUrl(attachment: Attachment): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(attachment.url);
+  } catch {
+    throw new InboundFileError('FILE_INVALID_URL', 'The attached file has an invalid download URL.', attachment.attachment_id);
+  }
+  if (
+    parsed.protocol !== 'https:'
+    || parsed.username !== ''
+    || parsed.password !== ''
+  ) {
+    throw new InboundFileError('FILE_INVALID_URL', 'The attached file has an invalid download URL.', attachment.attachment_id);
+  }
+}
+
+async function prepareFileAttachments(params: {
+  attachments: Attachment[];
+  abortSignal: AbortSignal;
+  runtime: ReturnType<typeof getBcsRuntime>;
+}): Promise<PreparedAttachment[]> {
+  if (params.attachments.length === 0) return [];
+  if (params.attachments.length > MAX_FILE_ATTACHMENTS) {
+    throw new InboundFileError('FILE_TOO_MANY', `A message can contain at most ${MAX_FILE_ATTACHMENTS} files.`);
+  }
+  const media = params.runtime.channel?.media;
+  if (!media?.fetchRemoteMedia || !media?.saveMediaBuffer) {
+    throw new InboundFileError('FILE_STORE_FAILED', 'File processing is unavailable in the current OpenClaw runtime.');
+  }
+
+  const prepared: PreparedAttachment[] = [];
+  try {
+    for (const attachment of params.attachments) {
+      if (typeof attachment.expires_at === 'number' && attachment.expires_at <= Date.now()) {
+        throw new InboundFileError('FILE_EXPIRED', 'The attached file download link has expired.', attachment.attachment_id);
+      }
+      if (typeof attachment.size === 'number' && attachment.size > MAX_FILE_BYTES) {
+        throw new InboundFileError('FILE_TOO_LARGE', 'The attached file exceeds the 100 MB limit.', attachment.attachment_id);
+      }
+      validateFileUrl(attachment);
+
+      const timeoutSignal = AbortSignal.timeout(FILE_DOWNLOAD_TIMEOUT_MS);
+      const downloadSignal = AbortSignal.any([ params.abortSignal, timeoutSignal ]);
+      let fetched: { buffer: Buffer; contentType?: string; fileName?: string };
+      try {
+        // OpenClaw owns SSRF validation for the initial URL and every redirect.
+        fetched = await media.fetchRemoteMedia({
+          url: attachment.url,
+          filePathHint: attachment.file_name,
+          maxBytes: MAX_FILE_BYTES,
+          maxRedirects: 3,
+          readIdleTimeoutMs: FILE_READ_IDLE_TIMEOUT_MS,
+          requestInit: { signal: downloadSignal },
+        });
+      } catch (err) {
+        if (params.abortSignal.aborted) {
+          throw new InboundFileError('FILE_ABORTED', 'File processing was aborted.', attachment.attachment_id);
+        }
+        if (timeoutSignal.aborted) {
+          throw new InboundFileError('FILE_DOWNLOAD_TIMEOUT', 'The attached file download timed out.', attachment.attachment_id);
+        }
+        if ((err as { code?: string })?.code === 'max_bytes') {
+          throw new InboundFileError('FILE_TOO_LARGE', 'The attached file exceeds the 100 MB limit.', attachment.attachment_id);
+        }
+        throw new InboundFileError('FILE_DOWNLOAD_FAILED', 'The attached file could not be downloaded. The link may have expired.', attachment.attachment_id);
+      }
+      if (!Buffer.isBuffer(fetched.buffer)) {
+        throw new InboundFileError('FILE_DOWNLOAD_FAILED', 'The attached file could not be downloaded.', attachment.attachment_id);
+      }
+      if (typeof attachment.size === 'number' && fetched.buffer.length !== attachment.size) {
+        throw new InboundFileError('FILE_SIZE_MISMATCH', 'The attached file failed its size check.', attachment.attachment_id);
+      }
+      if (attachment.sha256) {
+        const expectedHash = attachment.sha256.trim().toLowerCase();
+        const actualHash = createHash('sha256').update(fetched.buffer).digest('hex');
+        if (!/^[a-f0-9]{64}$/.test(expectedHash) || actualHash !== expectedHash) {
+          throw new InboundFileError('FILE_HASH_MISMATCH', 'The attached file failed its integrity check.', attachment.attachment_id);
+        }
+      }
+
+      const contentType = normalizeMimeType(fetched.contentType)
+        ?? normalizeMimeType(attachment.mime_type)
+        ?? 'application/octet-stream';
+      let saved: { path: string; size: number; contentType?: string };
+      try {
+        saved = await media.saveMediaBuffer(
+          fetched.buffer,
+          contentType,
+          'inbound',
+          MAX_FILE_BYTES,
+          fetched.fileName ?? attachment.file_name,
+        );
+      } catch {
+        throw new InboundFileError('FILE_STORE_FAILED', 'The attached file could not be prepared for analysis.', attachment.attachment_id);
+      }
+      prepared.push({
+        path: saved.path,
+        contentType: normalizeMimeType(saved.contentType) ?? contentType,
+        attachmentId: attachment.attachment_id,
+      });
+    }
+    return prepared;
+  } catch (err) {
+    await cleanupPreparedAttachments(prepared);
+    throw err;
+  }
+}
+
+type InboundMediaFactBuilder = (items: Array<{
+  path: string;
+  contentType: string;
+  messageId: string;
+}>) => unknown;
+
+let inboundMediaFactBuilderPromise: Promise<InboundMediaFactBuilder | undefined> | undefined;
+
+export function setInboundMediaFactBuilderForTest(
+  builder: InboundMediaFactBuilder | undefined,
+): void {
+  inboundMediaFactBuilderPromise = Promise.resolve(builder);
+}
+
+async function loadInboundMediaFactBuilder(): Promise<InboundMediaFactBuilder | undefined> {
+  if (!inboundMediaFactBuilderPromise) {
+    inboundMediaFactBuilderPromise = (async () => {
+      try {
+        const moduleName = 'openclaw/plugin-sdk/channel-inbound';
+        const sdk = await import(moduleName) as { toInboundMediaFacts?: InboundMediaFactBuilder };
+        return typeof sdk.toInboundMediaFacts === 'function' ? sdk.toInboundMediaFacts : undefined;
+      } catch {
+        return undefined;
+      }
+    })();
+  }
+  return inboundMediaFactBuilderPromise;
+}
+
+async function buildInboundMediaFields(prepared: PreparedAttachment[]): Promise<Record<string, unknown>> {
+  if (prepared.length === 0) return {};
+  const factBuilder = await loadInboundMediaFactBuilder();
+  if (factBuilder) {
+    return {
+      media: factBuilder(prepared.map(attachment => ({
+        path: attachment.path,
+        contentType: attachment.contentType,
+        messageId: attachment.attachmentId,
+      }))),
+    };
+  }
+  return {
+    MediaPath: prepared[0]?.path,
+    MediaType: prepared[0]?.contentType,
+    MediaPaths: prepared.map(attachment => attachment.path),
+    MediaTypes: prepared.map(attachment => attachment.contentType),
+  };
 }
 
 function buildChatEventPayload(
   runId: string,
   bcsGroupId: string,
   state: ChatEventPayload['state'],
-  text: string,
+  text?: string,
   routeIntent?: PendingRouteIntent,
+  errorCode?: string,
 ): ChatEventPayload {
   return {
     run_id: runId,
     bcs_group_id: bcsGroupId,
     state,
-    message: {
-      role: 'assistant',
-      content: [{ type: 'text', text }],
-      timestamp: Date.now(),
-    },
+    ...(text !== undefined ? {
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text }],
+        timestamp: Date.now(),
+      },
+    } : {}),
     ...(routeIntent ? {
       routing: {
         responders: routeIntent.responders,
@@ -508,6 +935,7 @@ function buildChatEventPayload(
         dedupe_key: routeIntent.dedupeKey,
       } satisfies ChatEventRouting,
     } : {}),
+    ...(errorCode ? { errorCode } : {}),
   };
 }
 
@@ -653,6 +1081,7 @@ function sendFinalVisibleReplyOnce(
   options?: {
     source?: string;
     deliveredText?: string;
+    allowDeliveredTextFallback?: boolean;
     finalDeliveredPartsCount?: number;
     noReplyDetail?: string;
   },
@@ -661,10 +1090,19 @@ function sendFinalVisibleReplyOnce(
   if (!context || context.finalSent) return false;
 
   const visibleText = finishVisibleReply(runId, log);
-  const combinedText = visibleText ?? NO_REPLY_TEXT;
+  const deliveredText = options?.allowDeliveredTextFallback
+    ? options.deliveredText?.trim() || undefined
+    : undefined;
+  const assistantText = visibleText ?? deliveredText;
+  const toolOnlyEmpty = assistantText === undefined && context.sawToolEvent;
+  const combinedText = assistantText ?? (toolOnlyEmpty ? undefined : NO_REPLY_TEXT);
 
-  if (!visibleText) {
+  if (toolOnlyEmpty) {
+    log?.info?.(`[BCS] Tool activity completed without assistant text for run_id=${runId}, sending message-less final${options?.noReplyDetail ? ` ${options.noReplyDetail}` : ''}`);
+  } else if (!visibleText && !deliveredText) {
     log?.warn?.(`[BCS] No assistant agent text for run_id=${runId}, sending ${NO_REPLY_TEXT} final${options?.noReplyDetail ? ` ${options.noReplyDetail}` : ''}`);
+  } else if (!visibleText && deliveredText) {
+    log?.info?.(`[BCS] Using dispatcher final for non-agent run_id=${runId}`);
   } else if (options?.deliveredText && options.deliveredText !== visibleText) {
     log?.warn?.(`[BCS] Agent-event final differs from dispatcher deliver buffer for run_id=${runId}; using agent-event text`);
   } else if ((options?.finalDeliveredPartsCount ?? 0) > 1) {
@@ -672,7 +1110,13 @@ function sendFinalVisibleReplyOnce(
   }
 
   const routeIntent = consumeRouteIntent(runId, context.sessionKey);
-  const chatPayload = buildChatEventPayload(runId, context.groupId, 'final', combinedText, routeIntent);
+  const chatPayload = buildChatEventPayload(
+    runId,
+    context.groupId,
+    'final',
+    combinedText,
+    routeIntent,
+  );
   context.client.sendEvent('chat.event', chatPayload as unknown as Record<string, unknown>, nextSeq(context.client));
   context.finalSent = true;
 
@@ -683,6 +1127,27 @@ function sendFinalVisibleReplyOnce(
     log?.info?.(`[BCS] Sent chat.event final for run_id=${runId}${source}`);
   }
 
+  return true;
+}
+
+function sendRunErrorOnce(
+  runId: string,
+  userMessage: string,
+  log?: { warn: (...args: unknown[]) => void },
+  detail?: string,
+  errorCode?: string,
+): boolean {
+  const context = runContexts.get(runId);
+  if (!context || context.finalSent) return false;
+
+  const errorPayload = buildChatEventPayload(runId, context.groupId, 'error', userMessage, undefined, errorCode);
+  context.client.sendEvent(
+    'chat.event',
+    errorPayload as unknown as Record<string, unknown>,
+    nextSeq(context.client),
+  );
+  context.finalSent = true;
+  log?.warn?.(`[BCS] Sent chat.event error for run_id=${runId}${detail ? ` (${detail})` : ''}`);
   return true;
 }
 
@@ -700,6 +1165,13 @@ function extractGroupContext(sessionContext: GroupContext): Record<string, unkno
   };
 }
 
+export function resolveChatRunId(requestId: unknown, idempotencyKey: unknown): string {
+  const upstreamRunId = typeof idempotencyKey === 'string' ? idempotencyKey.trim() : '';
+  if (upstreamRunId) return upstreamRunId;
+  const frameRunId = typeof requestId === 'string' ? requestId.trim() : '';
+  return frameRunId || randomUUID();
+}
+
 /** Handle chat.send request from BCS. */
 export async function handleChatSend(
   request: RequestFrame,
@@ -714,9 +1186,10 @@ export async function handleChatSend(
 
   // Extract text from message content
   const imageAttachments = extractImageAttachments(params.attachments);
+  const fileAttachments = extractFileAttachments(params.attachments);
   const messageText = extractText(params.message?.content ?? []);
   const text = messageText || (imageAttachments.length > 0 ? attachmentFallbackText(imageAttachments) : '');
-  if (!text) {
+  if (!text && fileAttachments.length === 0) {
     client.sendResponse(request.id, false, undefined, {
       code: 'INVALID_REQUEST',
       message: 'Empty message',
@@ -725,34 +1198,51 @@ export async function handleChatSend(
     return;
   }
 
-  // Generate run_id and ACK immediately
-  const runId = randomUUID();
+  // Preserve the BCS correlation id when available. Older callers that do not
+  // provide one still receive a stable request-id or generated run-id fallback.
+  const runId = resolveChatRunId(request.id, params.idempotency_key);
   client.sendResponse(request.id, true, { run_id: runId });
 
-  const { senderName, text: strippedText } = extractFromPrefix(text);
-  const displayName = senderName || channel?.user_id || sessionContext?.from || 'bcs-bot';
+  const { fromDisplayName, senderName, senderId, strippedText } = resolveInboundSender(
+    text,
+    channel,
+    sessionContext,
+  );
 
   const preview = strippedText.length > 100 ? `${strippedText.slice(0, 100)}...` : strippedText;
   const ctxInfo = sessionContext ? extractGroupContext(sessionContext) : {};
-  log?.info?.(`chat.send from ${displayName} in ${bcsGroupId || 'onboarding'}: ${preview}`, ctxInfo);
+  log?.info?.(`chat.send from ${fromDisplayName} in ${bcsGroupId || 'onboarding'}: ${preview}`, ctxInfo);
 
   // Track active stream for abort support
   const abortController = new AbortController();
   activeStreams.set(runId, abortController);
-  let preparedImages: PreparedImage[] = [];
+  let preparedAttachments: PreparedAttachment[] = [];
 
   // Track run context for agent event routing
-  runContexts.set(runId, { groupId: bcsGroupId, client });
+  runContexts.set(runId, { groupId: bcsGroupId, client, sawToolEvent: false });
   ensureVisibleReplyState(runId);
+  armRunTerminalTimeout(runId, log);
 
   try {
     const rt = getBcsRuntime();
     const currentCfg = await rt.config.loadConfig();
-    preparedImages = await prepareImageAttachments({
+    const preparedImages = await prepareImageAttachments({
       attachments: imageAttachments,
       abortSignal: abortController.signal,
       runtime: rt,
     });
+    preparedAttachments = preparedImages;
+    const preparedContext = runContexts.get(runId);
+    if (preparedContext) {
+      preparedContext.preparedAttachments = preparedAttachments;
+    }
+    const preparedFiles = await prepareFileAttachments({
+      attachments: fileAttachments,
+      abortSignal: abortController.signal,
+      runtime: rt,
+    });
+    preparedAttachments = [ ...preparedImages, ...preparedFiles ];
+    if (preparedContext) preparedContext.preparedAttachments = preparedAttachments;
 
     // Resolve agent route to find the correct agent for this session
     const route = rt.channel.routing.resolveAgentRoute({
@@ -785,38 +1275,29 @@ export async function handleChatSend(
       sessionRoutingMode.set(route.sessionKey, sessionContext.routing_mode);
     }
 
-    // 9.4: Map sessionKey → runId so bcs_route tool can find the active run
-    activeRunIdForSession.set(route.sessionKey, runId);
-
     // Build inbound context using SDK's finalizeInboundContext
     // Use bcsGroupId for To/OriginatingTo so agent's outbound messages route correctly
     // BCS v2+ prepends GroupContext header to message content, so pass text as-is
+    const inboundMediaFields = await buildInboundMediaFields(preparedAttachments);
     const msgCtx = rt.channel.reply.finalizeInboundContext({
       Body: text,
       RawBody: text,
       CommandBody: text,
-      From: `bcs:${displayName}`,
+      From: `bcs:${fromDisplayName}`,
       To: bcsGroupId || `bcs:${account.botId}`,
       SessionKey: route.sessionKey,
       AccountId: account.accountId,
       OriginatingChannel: CHANNEL_ID,
       OriginatingTo: bcsGroupId || `bcs:${account.botId}`,
       ChatType: 'group',
-      SenderName: sessionContext.from_bot_owner ?? undefined,
-      SenderId: sessionContext.from_bot_id ?? undefined,
+      SenderName: senderName,
+      SenderId: senderId,
       Provider: CHANNEL_ID,
       Surface: CHANNEL_ID,
       ConversationLabel: bcsGroupId ? `BCS Group ${bcsGroupId}` : 'BCS Onboarding',
       Timestamp: Date.now(),
       CommandAuthorized: true,
-      MediaPath: preparedImages[0]?.path,
-      MediaType: preparedImages[0]?.contentType,
-      MediaPaths: preparedImages.length > 0
-        ? preparedImages.map(image => image.path)
-        : undefined,
-      MediaTypes: preparedImages.length > 0
-        ? preparedImages.map(image => image.contentType)
-        : undefined,
+      ...inboundMediaFields,
     });
 
     // Resolve store path for session storage using the resolved agentId
@@ -890,29 +1371,47 @@ export async function handleChatSend(
         abortSignal: abortController.signal,
         disableBlockStreaming: false,
         sourceReplyDeliveryMode: 'automatic',
+        onAgentRunStart: (agentRunId: string) => {
+          bindAgentRun(runId, agentRunId, log);
+        },
       },
     });
 
-    // After dispatch completes, send one combined final chat.event
-    if (!abortController.signal.aborted) {
-      const combinedFinalText = combineDeliveredReplyParts(finalDeliveredParts);
-      const combinedBlockText = combineDeliveredReplyParts(blockDeliveredParts);
-      const deliveredText = combinedFinalText ?? combinedBlockText;
-      const sent = sendFinalVisibleReplyOnce(runId, log, {
-        source: 'dispatcher',
-        deliveredText,
-        finalDeliveredPartsCount: finalDeliveredParts.length,
-        noReplyDetail: `(block deliver parts=${blockDeliveredParts.length}, final deliver parts=${finalDeliveredParts.length})`,
-      });
-      if (!sent) {
-        log?.info?.(`[BCS] Skipped duplicate chat.event final for run_id=${runId} (source=dispatcher)`);
-      }
+    const settledContext = runContexts.get(runId);
+    if (!settledContext) {
+      await cleanupRunContext(runId, log);
+      log?.info?.(`[BCS] Dispatcher settled after terminal lifecycle for run_id=${runId}`);
+      return;
     }
+    if (abortController.signal.aborted) {
+      await cleanupRunContext(runId, log);
+      return;
+    }
+
+    const combinedFinalText = combineDeliveredReplyParts(finalDeliveredParts);
+    if (!settledContext.agentRunId && combinedFinalText) {
+      sendFinalVisibleReplyOnce(runId, log, {
+        source: 'dispatcher_non_agent',
+        deliveredText: combinedFinalText,
+        allowDeliveredTextFallback: true,
+        finalDeliveredPartsCount: finalDeliveredParts.length,
+      });
+      await cleanupRunContext(runId, log);
+      return;
+    }
+
+    log?.info?.(
+      settledContext.agentRunId
+        ? `[BCS] Dispatcher settled for run_id=${runId}; waiting for terminal lifecycle from agent run_id=${settledContext.agentRunId}`
+        : `[BCS] Dispatcher settled without an agent start for run_id=${runId}; retaining context for a queued agent run (block deliver parts=${blockDeliveredParts.length}, final deliver parts=${finalDeliveredParts.length})`,
+    );
   } catch (err: any) {
     const imageError = err instanceof InboundImageError ? err : undefined;
-    if (imageError) {
+    const fileError = err instanceof InboundFileError ? err : undefined;
+    const attachmentError = imageError ?? fileError;
+    if (attachmentError) {
       log?.error?.(
-        `[BCS] Image preparation failed for run_id=${runId}, attachment_id=${sanitizeAttachmentLogValue(imageError.attachmentId ?? 'unknown')}, code=${imageError.code}`,
+        `[BCS] Attachment preparation failed for run_id=${runId}, attachment_id=${sanitizeAttachmentLogValue(attachmentError.attachmentId ?? 'unknown')}, code=${attachmentError.code}`,
       );
     } else {
       log?.error?.(`Error processing chat.send for run_id=${runId}: ${err?.message ?? err}`);
@@ -924,35 +1423,18 @@ export async function handleChatSend(
       }
     }
 
-    if (runContexts.get(runId)?.finalSent) {
+    if (!runContexts.has(runId) || runContexts.get(runId)?.finalSent) {
       log?.warn?.(`[BCS] Dispatcher failed after final was already sent for run_id=${runId}; suppressing duplicate error event`);
     } else {
-      // Send error event to BCS
-      const errorPayload: ChatEventPayload = {
-        run_id: runId,
-        bcs_group_id: bcsGroupId,
-        state: 'error',
-        message: {
-          role: 'assistant',
-          content: [{
-            type: 'text',
-            text: imageError?.userMessage ?? 'An error occurred while processing your message.',
-          }],
-          timestamp: Date.now(),
-        },
-      };
-      client.sendEvent('chat.event', errorPayload as unknown as Record<string, unknown>, nextSeq(client));
+      sendRunErrorOnce(
+        runId,
+        attachmentError?.userMessage ?? 'An error occurred while processing your message.',
+        log,
+        'dispatcher failure',
+        attachmentError?.code,
+      );
     }
-  } finally {
-    await cleanupPreparedImages(preparedImages);
-    activeStreams.delete(runId);
-    runContexts.delete(runId);
-    visibleReplyByRunId.delete(runId);
-    pendingRouteByRunId.delete(runId);
-    // Clean up sessionKey → runId mapping (find by value)
-    for (const [ sk, rid ] of activeRunIdForSession) {
-      if (rid === runId) { activeRunIdForSession.delete(sk); break; }
-    }
+    await cleanupRunContext(runId, log);
   }
 }
 
@@ -1154,11 +1636,14 @@ export async function handleChatInject(
     return;
   }
 
-  const { senderName, text: strippedText } = extractFromPrefix(text);
-  const displayName = senderName || channel?.user_id || sessionContext?.from || 'bcs-bot';
+  const { fromDisplayName, senderName, senderId, strippedText } = resolveInboundSender(
+    text,
+    channel,
+    sessionContext,
+  );
   const preview = strippedText.length > 100 ? `${strippedText.slice(0, 100)}...` : strippedText;
   const ctxInfo = sessionContext ? extractGroupContext(sessionContext) : {};
-  log?.info?.(`chat.inject from ${displayName} in ${bcsGroupId} (observe only): ${preview}`, ctxInfo);
+  log?.info?.(`chat.inject from ${fromDisplayName} in ${bcsGroupId} (observe only): ${preview}`, ctxInfo);
 
   // ACK immediately - no response needed for inject
   client.sendResponse(request.id, true, {});
@@ -1198,15 +1683,15 @@ export async function handleChatInject(
       Body: text,
       RawBody: text,
       CommandBody: text,
-      From: `bcs:${displayName}`,
+      From: `bcs:${fromDisplayName}`,
       To: bcsGroupId || `bcs:${account.botId}`,
       SessionKey: route.sessionKey,
       AccountId: account.accountId,
       OriginatingChannel: CHANNEL_ID,
       OriginatingTo: bcsGroupId || `bcs:${account.botId}`,
       ChatType: 'group',
-      SenderName: sessionContext.from_bot_owner ?? undefined,
-      SenderId: sessionContext.from_bot_id ?? undefined,
+      SenderName: senderName,
+      SenderId: senderId,
       Provider: CHANNEL_ID,
       Surface: CHANNEL_ID,
       ConversationLabel: bcsGroupId ? `BCS Group ${bcsGroupId}` : 'BCS Onboarding',
@@ -1236,15 +1721,13 @@ export async function handleChatInject(
       },
     });
 
-    // Ensure transcript (.jsonl) file exists - gateway chat.inject requires it
-    const fs = await import('node:fs');
-    const path = await import('node:path');
     const sessionsDir = path.dirname(storePath);
     const sessionsData = JSON.parse(fs.readFileSync(storePath, 'utf8'));
     const sessionEntry = sessionsData[route.sessionKey];
     const sessionId = sessionEntry?.sessionId;
+    let transcriptPath: string | undefined;
     if (sessionId) {
-      const transcriptPath = path.join(sessionsDir, `${sessionId}.jsonl`);
+      transcriptPath = resolveTranscriptPathFromSessionEntry(sessionsDir, sessionId, sessionEntry);
       if (!fs.existsSync(transcriptPath)) {
         const header = JSON.stringify({ type: 'session', version: 3, id: sessionId, timestamp: new Date().toISOString() });
         fs.writeFileSync(transcriptPath, header + '\n');
@@ -1253,13 +1736,20 @@ export async function handleChatInject(
     }
 
     // Call gateway chat.inject to write message to transcript (visible in UI)
-    await callGatewayChatInject({
+    const injected = await callGatewayChatInject({
       cfg: currentCfg,
       sessionKey: route.sessionKey,
       message: text,
       dataDir,
       log,
     });
+    if (transcriptPath && injected.messageId) {
+      rewriteInjectedTranscriptMessage({
+        transcriptPath,
+        messageId: injected.messageId,
+        log,
+      });
+    }
   } catch (err) {
     log?.warn?.(`chat.inject: error: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -1305,7 +1795,7 @@ async function callGatewayChatInject(params: {
   message: string;
   dataDir?: string;
   log?: { info: (...args: unknown[]) => void; warn: (...args: unknown[]) => void };
-}): Promise<void> {
+}): Promise<{ messageId?: string }> {
   const { cfg, sessionKey, message, dataDir, log } = params;
 
   const port = resolveGatewayPort(cfg);
@@ -1313,7 +1803,7 @@ async function callGatewayChatInject(params: {
   const token = (cfg as { gateway?: { auth?: { token?: string } } }).gateway?.auth?.token;
   if (!token) {
     log?.warn?.('chat.inject: no gateway token found, skipping transcript write');
-    return;
+    return {};
   }
 
   const os = await import('node:os');
@@ -1325,7 +1815,7 @@ async function callGatewayChatInject(params: {
   const WebSocket = (await import('ws')).default;
   const ws = new WebSocket(`ws://127.0.0.1:${port}`);
 
-  await new Promise<void>((resolve, reject) => {
+  return await new Promise<{ messageId?: string }>((resolve, reject) => {
     const connectId = `connect-${randomUUID()}`;
     const reqId = `inject-${randomUUID()}`;
     let connected = false;
@@ -1387,7 +1877,10 @@ async function callGatewayChatInject(params: {
           clearTimeout(timeout);
           ws.close();
           if (frame.ok) {
-            resolve();
+            const messageId = typeof frame.payload?.messageId === 'string'
+              ? frame.payload.messageId
+              : undefined;
+            resolve({ messageId });
           } else {
             reject(new Error(`gateway chat.inject failed: ${JSON.stringify(frame.error)}`));
           }
@@ -1581,8 +2074,12 @@ export function abortAllStreams(): void {
   for (const controller of activeStreams.values()) {
     controller.abort();
   }
+  for (const runId of [ ...runContexts.keys() ]) {
+    void cleanupRunContext(runId);
+  }
   activeStreams.clear();
   runContexts.clear();
+  bcsRunIdByAgentRunId.clear();
   visibleReplyByRunId.clear();
   pendingRouteByRunId.clear();
   pendingRouteBySessionKey.clear();
@@ -1926,8 +2423,19 @@ const TERMINAL_LIFECYCLE_VALUES = new Set([
   'succeeded',
 ]);
 
-function isTerminalLifecycleEvent(evt: SdkAgentEventPayload): boolean {
-  if (evt.stream !== 'lifecycle') return false;
+const ERROR_LIFECYCLE_VALUES = new Set([
+  'abort',
+  'aborted',
+  'cancel',
+  'cancelled',
+  'canceled',
+  'error',
+  'fail',
+  'failed',
+]);
+
+function terminalLifecycleOutcome(evt: SdkAgentEventPayload): 'final' | 'error' | undefined {
+  if (evt.stream !== 'lifecycle') return undefined;
 
   const value =
     stringField(evt.data, 'phase') ??
@@ -1935,7 +2443,11 @@ function isTerminalLifecycleEvent(evt: SdkAgentEventPayload): boolean {
     stringField(evt.data, 'state') ??
     stringField(evt.data, 'type');
 
-  return value ? TERMINAL_LIFECYCLE_VALUES.has(value.toLowerCase()) : false;
+  if (!value) return undefined;
+  const normalized = value.toLowerCase();
+  if (TERMINAL_LIFECYCLE_VALUES.has(normalized)) return 'final';
+  if (ERROR_LIFECYCLE_VALUES.has(normalized)) return 'error';
+  return undefined;
 }
 
 /** Unsubscribe function for agent events */
@@ -1956,30 +2468,32 @@ export function initAgentEventsSubscription(log?: {
   agentEventUnsubscribe = rt.events.onAgentEvent((evt: SdkAgentEventPayload) => {
     // log?.debug?.(`[BCS] onAgentEvent RAW: runId=${evt.runId}, stream=${evt.stream}, seq=${evt.seq}`);
 
-    // Find the run context to get the BCS group ID and client
-    let context = runContexts.get(evt.runId);
-    let resolvedRunId = evt.runId;
-
-    // Fallback: SDK followup runs generate new runId; look up via sessionKey
-    // to find the original runId that corresponds to the user's chat.send
-    if (!context && evt.sessionKey) {
-      const ourRunId = activeRunIdForSession.get(evt.sessionKey);
-      if (ourRunId) {
-        context = runContexts.get(ourRunId);
-        if (context) {
-          log?.info?.(`[BCS] onAgentEvent: mapped SDK runId=${evt.runId} → our runId=${ourRunId} via sessionKey=${evt.sessionKey}`);
-          resolvedRunId = ourRunId;
-        }
-      }
+    // onAgentRunStart binds queued OpenClaw run IDs to the BCS-visible run ID.
+    // Direct runs normally keep the requested ID and can be bound lazily here.
+    const resolvedRunId = runContexts.has(evt.runId)
+      ? evt.runId
+      : bcsRunIdByAgentRunId.get(evt.runId);
+    if (resolvedRunId && evt.runId === resolvedRunId) {
+      bindAgentRun(resolvedRunId, evt.runId, log);
     }
+    const context = resolvedRunId ? runContexts.get(resolvedRunId) : undefined;
 
-    if (!context) {
+    if (!resolvedRunId || !context) {
       // This event is not for a BCS-managed run, skip it
       log?.warn?.(`[BCS] No run context for runId=${evt.runId}, skipping`);
       return true; // Indicate event was handled (skipped)
     }
 
+    if (context.sessionKey && evt.sessionKey && context.sessionKey !== evt.sessionKey) {
+      log?.warn?.(`[BCS] Agent event session mismatch for runId=${evt.runId}: expected=${context.sessionKey}, received=${evt.sessionKey}`);
+      return true;
+    }
+
     const { groupId, client } = context;
+    const terminalOutcome = terminalLifecycleOutcome(evt);
+    if (evt.stream === 'tool') {
+      context.sawToolEvent = true;
+    }
 
     if (!context.finalSent) {
       if (evt.stream === 'assistant') {
@@ -1989,8 +2503,15 @@ export function initAgentEventsSubscription(log?: {
         markVisibleReplySegmentBoundary(resolvedRunId);
       }
 
-      if (isTerminalLifecycleEvent(evt)) {
+      if (terminalOutcome === 'final') {
         sendFinalVisibleReplyOnce(resolvedRunId, log, { source: 'agent_lifecycle' });
+      } else if (terminalOutcome === 'error') {
+        sendRunErrorOnce(
+          resolvedRunId,
+          'Agent run failed before completing a reply.',
+          log,
+          `agent lifecycle ${stringField(evt.data, 'phase') ?? 'error'}`,
+        );
       }
     }
 
@@ -2010,6 +2531,9 @@ export function initAgentEventsSubscription(log?: {
     log?.info?.(
       `[BCS] Forwarded agent event: runId=${evt.runId}, stream=${evt.stream}, groupId=${groupId}`,
     );
+    if (terminalOutcome) {
+      void cleanupRunContext(resolvedRunId, log);
+    }
     return true; // Indicate event was handled
   }) as (() => boolean) | null;
 

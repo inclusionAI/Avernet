@@ -23,6 +23,221 @@ confirm_tool_install() {
     [[ "$response" =~ ^[Yy]$ ]]
 }
 
+# ============ System build prerequisites ============
+
+system_package_manager() {
+    case "$(uname -s)" in
+        Darwin)
+            command -v brew >/dev/null 2>&1 && echo "brew" && return 0
+            log_error "Homebrew is required to install missing system dependencies."
+            log_error "Install it from https://brew.sh/ and rerun: ./scripts/singlebox.sh install-tools"
+            return 1
+            ;;
+        Linux)
+            local manager
+            for manager in apt-get dnf yum pacman; do
+                if command -v "$manager" >/dev/null 2>&1; then
+                    echo "$manager"
+                    return 0
+                fi
+            done
+            log_error "No supported Linux package manager found (apt-get, dnf, yum, or pacman)."
+            return 1
+            ;;
+        *)
+            log_error "Unsupported operating system: $(uname -s)"
+            return 1
+            ;;
+    esac
+}
+
+system_install_hint() {
+    local manager="$1"
+    shift
+    case "$manager" in
+        brew) printf 'brew install';;
+        apt-get) printf 'sudo apt-get update && sudo apt-get install -y';;
+        dnf) printf 'sudo dnf install -y';;
+        yum) printf 'sudo yum install -y';;
+        pacman) printf 'sudo pacman -S --needed';;
+    esac
+    printf ' %s' "$@"
+    printf '\n'
+}
+
+run_system_package_install() {
+    local manager="$1"
+    shift
+    local hint
+    hint="$(system_install_hint "$manager" "$@")"
+
+    log_info "Running: ${hint}"
+    case "$manager" in
+        brew)
+            if brew install "$@"; then return 0; fi
+            ;;
+        apt-get|dnf|yum|pacman)
+            if [ "$(id -u)" -eq 0 ]; then
+                case "$manager" in
+                    apt-get) apt-get update && apt-get install -y "$@" && return 0 ;;
+                    dnf) dnf install -y "$@" && return 0 ;;
+                    yum) yum install -y "$@" && return 0 ;;
+                    pacman) pacman -S --needed "$@" && return 0 ;;
+                esac
+            elif ! command -v sudo >/dev/null 2>&1; then
+                log_error "sudo is not available, so system packages cannot be installed automatically."
+            else
+                case "$manager" in
+                    apt-get) sudo apt-get update && sudo apt-get install -y "$@" && return 0 ;;
+                    dnf) sudo dnf install -y "$@" && return 0 ;;
+                    yum) sudo yum install -y "$@" && return 0 ;;
+                    pacman) sudo pacman -S --needed "$@" && return 0 ;;
+                esac
+            fi
+            ;;
+    esac
+
+    log_error "System package installation was rejected or failed. Run it manually, then rerun install-tools:"
+    log_error "  ${hint}"
+    return 1
+}
+
+check_basic_build_environment() {
+    local missing=""
+    local tool
+    for tool in cc c++ make perl; do
+        command -v "$tool" >/dev/null 2>&1 || missing="${missing} ${tool}"
+    done
+    [ -z "$missing" ] && return 0
+
+    log_error "Basic build environment is incomplete; missing:${missing}"
+    case "$(uname -s)" in
+        Darwin)
+            log_error "Install the Xcode Command Line Tools, then rerun install-tools:"
+            log_error "  xcode-select --install"
+            ;;
+        Linux)
+            if command -v apt-get >/dev/null 2>&1; then
+                log_error "Install it manually: sudo apt-get install -y build-essential"
+            elif command -v dnf >/dev/null 2>&1; then
+                log_error "Install it manually: sudo dnf group install -y 'Development Tools'"
+            elif command -v yum >/dev/null 2>&1; then
+                log_error "Install it manually: sudo yum groupinstall -y 'Development Tools'"
+            elif command -v pacman >/dev/null 2>&1; then
+                log_error "Install it manually: sudo pacman -S --needed base-devel"
+            fi
+            ;;
+    esac
+    return 1
+}
+
+system_command_package() {
+    local manager="$1"
+    local command_name="$2"
+    case "${manager}:${command_name}" in
+        brew:*) echo "$command_name" ;;
+        apt-get:pkg-config) echo "pkg-config" ;;
+        apt-get:*) echo "$command_name" ;;
+        dnf:pkg-config|yum:pkg-config) echo "pkgconf-pkg-config" ;;
+        pacman:pkg-config) echo "pkgconf" ;;
+        dnf:*|yum:*|pacman:*) echo "$command_name" ;;
+    esac
+}
+
+system_library_package() {
+    local manager="$1"
+    local library="$2"
+    case "${manager}:${library}" in
+        brew:openssl) echo "openssl@3" ;;
+        brew:sqlite3) echo "sqlite" ;;
+        apt-get:openssl) echo "libssl-dev" ;;
+        apt-get:sqlite3) echo "libsqlite3-dev" ;;
+        dnf:openssl|yum:openssl) echo "openssl-devel" ;;
+        dnf:sqlite3|yum:sqlite3) echo "sqlite-devel" ;;
+        pacman:openssl) echo "openssl" ;;
+        pacman:sqlite3) echo "sqlite" ;;
+    esac
+}
+
+refresh_homebrew_pkg_config_path() {
+    [ "$(uname -s)" = "Darwin" ] || return 0
+    command -v brew >/dev/null 2>&1 || return 0
+
+    local package
+    local prefix
+    for package in openssl@3 sqlite; do
+        prefix="$(brew --prefix "$package" 2>/dev/null || true)"
+        if [ -d "${prefix}/lib/pkgconfig" ]; then
+            case ":${PKG_CONFIG_PATH:-}:" in
+                *":${prefix}/lib/pkgconfig:"*) ;;
+                *) PKG_CONFIG_PATH="${prefix}/lib/pkgconfig${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}" ;;
+            esac
+        fi
+    done
+    export PKG_CONFIG_PATH
+}
+
+setup_system_dependencies() {
+    log_info "Checking system build environment..."
+    check_basic_build_environment || return 1
+
+    local manager=""
+    local missing_commands=()
+    local command_name
+    for command_name in curl jq lsof pkg-config; do
+        command -v "$command_name" >/dev/null 2>&1 || missing_commands+=("$command_name")
+    done
+
+    if [ "${#missing_commands[@]}" -gt 0 ]; then
+        manager="$(system_package_manager)" || return 1
+        local command_packages=()
+        for command_name in "${missing_commands[@]}"; do
+            command_packages+=("$(system_command_package "$manager" "$command_name")")
+        done
+        log_warn "Missing required commands:${missing_commands[*]/#/ }"
+        if ! confirm_tool_install "Install missing system commands now?"; then
+            log_error "Install them manually: $(system_install_hint "$manager" "${command_packages[@]}")"
+            return 1
+        fi
+        run_system_package_install "$manager" "${command_packages[@]}" || return 1
+    fi
+
+    # Library detection deliberately happens after pkg-config installation.
+    if ! command -v pkg-config >/dev/null 2>&1; then
+        log_error "pkg-config is still unavailable after system dependency setup."
+        return 1
+    fi
+
+    refresh_homebrew_pkg_config_path
+    local missing_libraries=()
+    pkg-config --exists openssl >/dev/null 2>&1 || missing_libraries+=("openssl")
+    pkg-config --exists sqlite3 >/dev/null 2>&1 || missing_libraries+=("sqlite3")
+    if [ "${#missing_libraries[@]}" -gt 0 ]; then
+        [ -n "$manager" ] || manager="$(system_package_manager)" || return 1
+        local library_packages=()
+        local library
+        for library in "${missing_libraries[@]}"; do
+            library_packages+=("$(system_library_package "$manager" "$library")")
+        done
+        log_warn "Missing development libraries:${missing_libraries[*]/#/ }"
+        if ! confirm_tool_install "Install missing development libraries now?"; then
+            log_error "Install them manually: $(system_install_hint "$manager" "${library_packages[@]}")"
+            return 1
+        fi
+        run_system_package_install "$manager" "${library_packages[@]}" || return 1
+        refresh_homebrew_pkg_config_path
+        for library in "${missing_libraries[@]}"; do
+            if ! pkg-config --exists "$library" >/dev/null 2>&1; then
+                log_error "${library} is still not visible to pkg-config after installation."
+                log_error "Fix PKG_CONFIG_PATH or install the development package, then rerun install-tools."
+                return 1
+            fi
+        done
+    fi
+
+    log_info "System dependencies are ready."
+}
+
 # 检测 shell profile 文件
 detect_shell_profile() {
     if [ -n "$ZSH_VERSION" ]; then
@@ -513,37 +728,42 @@ toolchain_setup() {
 
     _apply_cargo_mirror_config
 
-    # Step 1: Node.js
-    log_info "[1/6] Setting up Node.js..."
-    setup_node
+    # Step 1: System dependencies
+    log_info "[1/7] Checking system dependencies..."
+    setup_system_dependencies || return 1
     echo ""
 
-    # Step 2: npm
-    log_info "[2/6] Checking npm..."
+    # Step 2: Node.js
+    log_info "[2/7] Setting up Node.js..."
+    setup_node || return 1
+    echo ""
+
+    # Step 3: npm
+    log_info "[3/7] Checking npm..."
     ensure_npm_available || return 1
     echo ""
 
-    # Step 3: uv
-    log_info "[3/6] Setting up uv..."
+    # Step 4: uv
+    log_info "[4/7] Setting up uv..."
     if ! check_uv_installed; then
-        auto_install_uv
+        auto_install_uv || return 1
     else
         log_info "uv already installed"
     fi
     echo ""
 
-    # Step 4: openclaw
-    log_info "[4/6] Setting up openclaw..."
-    setup_openclaw
+    # Step 5: openclaw
+    log_info "[5/7] Setting up openclaw..."
+    setup_openclaw || return 1
     echo ""
 
-    # Step 5: Rust/Cargo
-    log_info "[5/6] Setting up Rust/Cargo..."
+    # Step 6: Rust/Cargo
+    log_info "[6/7] Setting up Rust/Cargo..."
     setup_rust || return 1
     echo ""
 
-    # Step 6: Protobuf
-    log_info "[6/6] Setting up protobuf..."
+    # Step 7: Protobuf
+    log_info "[7/7] Setting up protobuf..."
     setup_protobuf_interactive || return 1
     echo ""
 

@@ -7,11 +7,7 @@ import 'justfiles/ctrl-baas.just'
 
 import 'justfiles/lint.just'
 import 'justfiles/test-common.just'
-import 'justfiles/test-self.just'
-import 'justfiles/test-ut.just'
-import 'justfiles/test-it.just'
-import 'justfiles/test-arch.just'
-import 'justfiles/test-e2e.just'
+import 'justfiles/tests.just'
 
 _default:
     @just --list --list-prefix '==> '
@@ -19,8 +15,8 @@ _default:
 test-e2e-one test:
     source scripts/lib/test-stages.sh && run_one_e2e_test "{{test}}"
 
-test-ci group='ci' mode='bare' overlay='e2e-sqlite':
-    ./scripts/ci_test.sh --group {{group}} {{mode}} {{overlay}}
+test-ci:
+    ./scripts/ci_test.sh
 
 test mode='bare' overlay='e2e-sqlite':
     source scripts/lib/pipeline.sh && run_ci_pipeline {{mode}} {{overlay}}

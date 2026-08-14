@@ -20,6 +20,7 @@
 """
 
 import json
+import os
 import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Any
@@ -54,7 +55,13 @@ from secbaas.community.api.bcn import (
     ChatSendInput,
 )
 from secbaas.community.api.bot_runtime import BotBindingNotFoundError
-from secbaas.community.api.sse import SseConverterFactory, SseEvent, StreamChunk
+from secbaas.community.api.sse import (
+    SseConverterFactory,
+    SseEvent,
+    StreamChunk,
+    convert_chunks_to_sse,
+    with_sse_heartbeat,
+)
 from secbaas.community.bootstrap import ApplicationContainer
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.secret import SecretStorePlugin
@@ -113,9 +120,16 @@ def validate_bcn_token(
     if len(parts) != 2 or parts[0].lower() != "bearer":
         raise BcnUnauthorizedError("Invalid Authorization header format")
 
-    expected_token = secret_plugin.get_secret(
-        "other_manual_secbaas_bcn_to_provider_token"
-    )
+    expected_token = os.getenv("BCS_BAAS_DOWNLINK_TOKEN", "")
+    if not expected_token:
+        try:
+            expected_token = secret_plugin.get_secret(
+                "other_manual_secbaas_bcn_to_provider_token"
+            )
+        except RuntimeError:
+            # The default local stub has no secret. The opt-in bridge supplies
+            # a process-local token; old local behaviour otherwise remains.
+            expected_token = ""
     if not expected_token:
         return parts[1]
 
@@ -264,6 +278,9 @@ async def _dispatch_chat_send_stream(
         message=req.message.to_domain(),
         timeout_ms=req.timeout_ms,
         extensions=req.extensions,
+        attachments=[a.to_domain() for a in req.attachments]
+        if req.attachments
+        else None,
     )
 
     try:
@@ -277,20 +294,14 @@ async def _dispatch_chat_send_stream(
 
     converter = converter_factory.create("default")
 
-    async def _stream() -> AsyncIterator[str]:
-        try:
-            async for chunk in chunk_iter:
-                event = converter.convert(chunk, run_id=req.id)
-                if event is None:
-                    continue
-                sse = event.to_sse()
-                yield sse
-        except Exception as e:
-            logger.exception("[chat.send.stream] Unexpected error: run_id=%s", req.id)
-            yield _build_sse_error(req.id, "INTERNAL_ERROR", str(e), False)
+    def on_error(e: Exception) -> str:
+        logger.exception("[chat.send.stream] Unexpected error: run_id=%s", req.id)
+        return _build_sse_error(req.id, "INTERNAL_ERROR", str(e), False)
 
     return StreamingResponse(
-        _stream(),
+        with_sse_heartbeat(
+            convert_chunks_to_sse(chunk_iter, converter, req.id, on_error=on_error)
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -322,12 +333,17 @@ async def _dispatch_chat_send(
         message=req.message.to_domain(),
         timeout_ms=req.timeout_ms,
         extensions=req.extensions,
+        attachments=[a.to_domain() for a in req.attachments]
+        if req.attachments
+        else None,
     )
 
     try:
         result = await service.handle_chat_send(input_)
     except BotBindingNotFoundError as exc:
         raise BcnBotNotFoundError(provider_bot_ref=exc.bot_id) from exc
+    except ValueError as exc:
+        raise BcnInvalidRequestError(str(exc)) from exc
 
     return ChatSendSuccessResponse(ok=result.ok)
 
@@ -349,6 +365,9 @@ async def _dispatch_chat_inject(
         from_ref=req.from_.to_domain(),
         message=req.message.to_domain(),
         timeout_ms=req.timeout_ms,
+        attachments=[a.to_domain() for a in req.attachments]
+        if req.attachments
+        else None,
     )
 
     try:

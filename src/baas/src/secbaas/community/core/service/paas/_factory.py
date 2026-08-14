@@ -55,6 +55,8 @@ if TYPE_CHECKING:
         DeviceTemplateManageService,
     )
 
+    from ._callback_handler import DeviceCallbackHandler
+
 
 def is_paas_mock_mode() -> bool:
     """Check if PaaS mock mode is enabled via environment variable."""
@@ -95,6 +97,7 @@ class PaasServiceFactory(PaasServiceFactoryProtocol):
         local_user_machine_repository: LocalUserMachineRepository,
         paas_sandbox_plugins: PaasSandboxPlugins,
         secret_plugin: SecretStorePlugin,
+        callback_handler: DeviceCallbackHandler,
         ws_relay_session_repository: WsRelaySessionRepository | None = None,
     ) -> None:
         """Inject all PaasServiceFactory dependencies.
@@ -120,6 +123,7 @@ class PaasServiceFactory(PaasServiceFactoryProtocol):
         self._local_user_machine_repository = local_user_machine_repository
         self._paas_sandbox_plugins = paas_sandbox_plugins
         self._secret_plugin = secret_plugin
+        self._callback_handler = callback_handler
         self._ws_relay_session_repository = ws_relay_session_repository
 
     def create(
@@ -225,12 +229,14 @@ class PaasServiceFactory(PaasServiceFactoryProtocol):
                 connection_manager=self._connection_manager,
                 instance_router=self._instance_router,
                 server_ip=get_instance_id(),
+                desktop_sandbox_plugin=self._paas_sandbox_plugins.desktop_sandbox_plugin,
+                secret_plugin=self._secret_plugin,
+                callback_handler=self._callback_handler,
                 env=get_current_env(),
                 device_template_repository=self._device_template_repository,
                 device_repository=self._device_repository,
                 publish_record_repository=self._publish_record_repository,
                 worker_router=self._worker_router,
-                desktop_sandbox_plugin=self._paas_sandbox_plugins.desktop_sandbox_plugin,
                 relay_repository=self._ws_relay_session_repository,
                 ws_conn_mode=_LOCAL_WS_CONN_MODE,
             )
@@ -639,6 +645,8 @@ class PaasServiceFactory(PaasServiceFactoryProtocol):
             instance_router=self._instance_router,
             server_ip=get_instance_id(),
             desktop_sandbox_plugin=self._paas_sandbox_plugins.desktop_sandbox_plugin,
+            secret_plugin=self._secret_plugin,
+            callback_handler=self._callback_handler,
             env=env or get_current_env(),
             device_template_repository=self._device_template_repository,
             device_repository=self._device_repository,

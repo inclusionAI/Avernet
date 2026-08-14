@@ -508,12 +508,14 @@ class TestTriggerScan:
         assert resp.error_code == "SCAN_ERROR"
 
 
-def _deliver_kwargs(*, admin_svc: FakeAdminService | None = None, scan_svc: FakeScanService | None = None, **overrides: Any) -> dict:
+def _deliver_kwargs(*, delivery_svc: FakeAdminService | None = None, scan_svc: FakeScanService | None = None, **overrides: Any) -> dict:
     """Assemble the full kwargs bag for scan_and_deliver, with sane defaults.
 
     The new scan_and_deliver signature only takes: ctx, override_recipient,
-    dry_run, max_send, skip_scan, scan_dry_run, channel, scan_svc, admin_svc.
-    Delivery logic is delegated to admin_svc.deliver_pending().
+    dry_run, max_send, skip_scan, scan_dry_run, channel, scan_svc, delivery_svc.
+    Delivery logic is delegated to delivery_svc.deliver_pending()
+    (deliver_pending migrated from GovernanceAdminService to
+    GovernanceDeliveryService — admin-split-delivery SDD).
     """
     base = dict(
         ctx=None,
@@ -524,7 +526,7 @@ def _deliver_kwargs(*, admin_svc: FakeAdminService | None = None, scan_svc: Fake
         scan_dry_run=False,
         channel="auto",
         scan_svc=scan_svc or FakeScanService(),
-        admin_svc=admin_svc or FakeAdminService(),
+        delivery_svc=delivery_svc or FakeAdminService(),
     )
     base.update(overrides)
     return base
@@ -534,7 +536,7 @@ class TestScanAndDeliver:
     def test_no_pending_no_scan(self):
         admin = FakeAdminService()
         # deliver_pending returns total=0 by default, skip_scan=True → no scan_summary
-        resp = _run(admin_router.scan_and_deliver(**_deliver_kwargs(admin_svc=admin)))
+        resp = _run(admin_router.scan_and_deliver(**_deliver_kwargs(delivery_svc=admin)))
         assert resp.success is True
         assert resp.message == "No pending notifications to deliver"
         assert resp.data["total"] == 0
@@ -551,7 +553,7 @@ class TestScanAndDeliver:
             "sent_count": 0,
         }
         resp = _run(admin_router.scan_and_deliver(**_deliver_kwargs(
-            admin_svc=admin, dry_run=True, channel="auto", max_send=5,
+            delivery_svc=admin, dry_run=True, channel="auto", max_send=5,
         )))
         assert resp.success is True
         assert resp.data["total"] == 2
@@ -564,7 +566,7 @@ class TestScanAndDeliver:
         admin = FakeAdminService()
         admin._deliver_result = {"total": 1, "dry_run": True, "results": [], "sent_count": 0}
         resp = _run(admin_router.scan_and_deliver(**_deliver_kwargs(
-            skip_scan=False, scan_svc=scan, admin_svc=admin,
+            skip_scan=False, scan_svc=scan, delivery_svc=admin,
         )))
         assert resp.data["scan"]["run_id"] == "run-1"
         assert scan.calls[0]["dry_run"] is False
@@ -575,14 +577,14 @@ class TestScanAndDeliver:
         admin = FakeAdminService()
         admin._deliver_result = {"total": 1, "dry_run": True, "results": [], "sent_count": 0}
         resp = _run(admin_router.scan_and_deliver(**_deliver_kwargs(
-            skip_scan=False, scan_svc=scan, admin_svc=admin,
+            skip_scan=False, scan_svc=scan, delivery_svc=admin,
         )))
         assert resp.data["scan"]["error"].startswith("Cron tick failed")
 
     def test_max_send_passed_through(self):
         admin = FakeAdminService()
         _run(admin_router.scan_and_deliver(**_deliver_kwargs(
-            admin_svc=admin, max_send=2,
+            delivery_svc=admin, max_send=2,
         )))
         assert admin.deliver_calls[0]["max_send"] == 2
 
@@ -591,14 +593,14 @@ class TestScanAndDeliver:
         # (regex normally blocks this at param level; here we call the handler directly.)
         with pytest.raises(HTTPException) as exc:
             _run(admin_router.scan_and_deliver(**_deliver_kwargs(
-                admin_svc=FakeAdminService(), dry_run=False, override_recipient="abc",
+                delivery_svc=FakeAdminService(), dry_run=False, override_recipient="abc",
             )))
         assert exc.value.status_code == 400
 
     def test_channel_passed_through(self):
         admin = FakeAdminService()
         _run(admin_router.scan_and_deliver(**_deliver_kwargs(
-            admin_svc=admin, channel="tc_card",
+            delivery_svc=admin, channel="tc_card",
         )))
         assert admin.deliver_calls[0]["channel"] == "tc_card"
 
@@ -607,7 +609,7 @@ class TestScanAndDeliver:
         admin = FakeAdminService()
         admin._deliver_result = {"total": 1, "dry_run": True, "results": [], "sent_count": 0}
         resp = _run(admin_router.scan_and_deliver(**_deliver_kwargs(
-            skip_scan=False, scan_svc=scan, admin_svc=admin,
+            skip_scan=False, scan_svc=scan, delivery_svc=admin,
         )))
         assert "scan" in resp.data
         assert resp.data["scan"]["run_id"] == "run-1"
@@ -617,7 +619,7 @@ class TestScanAndDeliver:
         # total=0 but scan ran → has scan_summary → no "No pending" message
         scan = FakeScanService()
         resp = _run(admin_router.scan_and_deliver(**_deliver_kwargs(
-            skip_scan=False, scan_svc=scan, admin_svc=admin,
+            skip_scan=False, scan_svc=scan, delivery_svc=admin,
         )))
         assert resp.success is True
         assert resp.message != "No pending notifications to deliver"  # no special message when scan_summary exists

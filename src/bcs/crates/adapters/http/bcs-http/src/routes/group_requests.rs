@@ -118,6 +118,7 @@ fn group_proposal_confirm_to_json(result: GroupProposalConfirmResult) -> Value {
         "driver_bot": result.driver_bot_id,
         "participants": result.participant_bot_ids,
         "chat_url": result.chat_url,
+        "session_id": result.session_id,
         "context_injected": result.context_injected,
     })
 }

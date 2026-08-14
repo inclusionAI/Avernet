@@ -12,24 +12,27 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import json
 import subprocess
 import time
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from injector import inject
 
 from agentclaw.community.api.channel_service import ChannelServiceProtocol
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.device_service import DeviceService
 from agentclaw.community.core.service_bot.services.baas_service import (
     ENGINE_DIR_MOUNT_WHITELIST_BUSINESS_CODE,
     ENGINE_DIR_MOUNT_WHITELIST_PARAM_CODE,
     BaasService,
+    BaasServiceError,
 )
 from agentclaw.community.core.service_bot.services.deploy.engine_ext_stage import (
     DeliveryArtifact,
@@ -40,6 +43,7 @@ from agentclaw.community.core.service_bot.services.deploy.provider_resolver impo
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.core.workspace.engine_sandbox import EngineBuildPlan, EngineSandboxProvider, EngineSandboxRegistry
+from agentclaw.community.core.workspace.engines import parse_build_rsync_excludes_from_ext
 from agentclaw.community.core.workspace.path_factory import (
     WorkspacePathFactory,
     get_bot_dir,
@@ -58,6 +62,20 @@ if TYPE_CHECKING:
     )
 
 logger = get_logger()
+
+# Error codes for which BaaS is telling us an upgrade's target bot is gone, so
+# the deploy atom must self-heal with a fresh first release rather than fail.
+# ``BOT_NOT_FOUND``: the bot record is gone. ``DEVICE_NOT_FOUND``: the
+# underlying device is gone — e.g. a TeClaw bot whose device was physically
+# destroyed by an offline STOP. Kept in sync with ``BOT_GONE_ERROR_CODES`` in
+# ``publish_flow.operation_runner`` (which classifies the returned result);
+# duplicated locally to keep this lower-level service free of a dependency on
+# the publish-flow orchestration package.
+_BOT_GONE_ERROR_CODES = frozenset({"BOT_NOT_FOUND", "DEVICE_NOT_FOUND"})
+
+# Draft restoration copies a potentially large historical workspace. Bound the
+# whole operation, rather than granting each individual command a fresh timeout.
+_DRAFT_RESTORE_TIMEOUT_SECONDS = 30 * 60
 
 
 class BotBuildServiceError(Exception):
@@ -188,7 +206,6 @@ class BotBuildService:
         Args:
             bot: Bot 信息字典，包含: bot_id, entity_id, entity_type, device_id, bot_name, bot_desc
             version: 迁移版本号（整数），默认 1
-
         Returns:
             dict: 构建结果信息
                 - success: 构建是否成功
@@ -209,7 +226,13 @@ class BotBuildService:
         entity_type = bot.get("entity_type", "staff")
         device_id = bot.get("device_id")
         provider = self._resolve_sandbox_provider(bot)
-        build_plan = provider.get_build_plan()
+
+        # 从 bot.ext 解析 build_rsync_excludes 配置
+        ext = bot.get("ext")
+        rsync_append = parse_build_rsync_excludes_from_ext(ext)
+
+        # 传递 Bot 级别追加项（合并模式）
+        build_plan = provider.get_build_plan(build_rsync_excludes_append=rsync_append)
         engine_type = build_plan.engine_type
         logger.info(
             f"[BotBuildService.build] Starting build: "
@@ -236,6 +259,13 @@ class BotBuildService:
                 bot_id=bot_id,
                 entity_type=entity_type,
             ) / version_str / build_plan.migration_subpath
+            migration_path_base = self._get_migration_path_base(
+                owner_id=entity_id,
+                bot_id=bot_id,
+            )
+            runtime_artifact_root = (
+                f"{migration_path_base}/{version_str}/{build_plan.migration_subpath}"
+            )
 
             logger.info(
                 f"[BotBuildService.build] Step 1: "
@@ -256,6 +286,13 @@ class BotBuildService:
                 build_plan=build_plan,
                 provider=provider,
             )
+
+            # The host-side engine-root rsync is the sole writer of the
+            # versioned artifact. It preserves active symlinks and local Skill
+            # payloads while each engine build plan excludes mounted repo
+            # corpora. Do not make the Draft runtime write this target again:
+            # published NFS paths are not writable from every sandbox, and the
+            # Claude Code active root is already covered by extra_sync.
 
             # 2.2 生成 MCP 配置（使用 bot 的 device_id）
             mcp_success = True
@@ -284,17 +321,13 @@ class BotBuildService:
 
             # 构建结果
             success = migration_success and mcp_success and openclaw_configs_success
-            migration_path_base = self._get_migration_path_base(
-                owner_id=entity_id,
-                bot_id=bot_id,
-            )
             result = {
                 "success": success,
                 "bot_id": bot_id,
                 "entity_id": entity_id,
                 "entity_type": entity_type,
                 "version": version_str,
-                "migration_path": f"{migration_path_base}/{version_str}/{build_plan.migration_subpath}",
+                "migration_path": runtime_artifact_root,
                 "build_target_path": str(target_dir),
                 "mcp_success": mcp_success,
                 "openclaw_configs_success": openclaw_configs_success,
@@ -430,6 +463,9 @@ class BotBuildService:
         version: str = "1",
         delivery: DeliveryArtifact = DeliveryArtifact(None),
         ext_info: Optional[Dict[str, Any]] = None,
+        extra_envs: Optional[Dict[str, Any]] = None,
+        docker_image: str | None = None,
+        runtime_kind: str | None = None,
     ) -> Dict[str, Any]:
         """发布 Bot 到 BaaS 层。
 
@@ -481,13 +517,15 @@ class BotBuildService:
             logger.warning(
                 f"[BotBuildService.release] queryToken failed: bot_id={bot_id}, "
                 f"owner_id={owner_id}, error={e}"
-            )
+        )
 
         try:
-            is_teclaw_release = (
-                self._baas_service.resolve_container_provider(bot)
-                == TECLAW_DEVICE_PROVIDER
+            resolved_runtime_kind = (
+                runtime_kind
+                if runtime_kind is not None
+                else self._baas_service.resolve_container_provider(bot)
             )
+            is_teclaw_release = resolved_runtime_kind == TECLAW_DEVICE_PROVIDER
             if is_teclaw_release:
                 # teclaw: non-mount delivery — hand the frozen artifact to BaaS,
                 # which forwards it to the external container. No migration_path.
@@ -517,6 +555,7 @@ class BotBuildService:
                     "stage": publish_stage.value,
                     "version": version,
                     "ext_info": ext_info,
+                    "extra_envs": extra_envs,
                 }
                 template_uuid = self._resolve_baas_template_uuid(
                     bot=bot,
@@ -524,6 +563,8 @@ class BotBuildService:
                 )
                 if template_uuid is not None:
                     create_kwargs["template_uuid"] = template_uuid
+                if docker_image:
+                    create_kwargs["template_config"] = {"image": docker_image}
                 new_bot = self._baas_service.create_bot(**create_kwargs)
 
             bot_uuid = new_bot.get("bot_uuid")
@@ -533,42 +574,6 @@ class BotBuildService:
                 f"[BotBuildService.release] Release completed: "
                 f"target_bot_uuid={bot_uuid}, publish_id={publish_id}"
             )
-
-            # 自动审批发布单，立即启动 Bot 创建
-            if publish_id:
-                try:
-                    self._baas_service.approve_publish(
-                        publish_id=publish_id,
-                        operator=user_id,
-                        request_id=request_id,
-                        comment="自动审批",
-                    )
-                    logger.info(
-                        f"[BotBuildService.release] Approved publish: "
-                        f"publish_id={publish_id}, bot_uuid={bot_uuid}"
-                    )
-                    if is_teclaw_release and bot_uuid:
-                        try:
-                            self._baas_service.update_teclaw_outbound_rule_by_bot_uuid(
-                                bot_uuid,
-                                agent_pass_token=agent_pass_token,
-                            )
-                        except Exception as update_err:
-                            logger.warning(
-                                "[BotBuildService.release] Teclaw outbound rule update failed: "
-                                "bot_id=%s, bot_uuid=%s, error=%s",
-                                bot_id,
-                                bot_uuid,
-                                update_err,
-                            )
-                except Exception as approve_err:
-                    logger.error(
-                        f"[BotBuildService.release] Approve publish failed: "
-                        f"publish_id={publish_id}, bot_uuid={bot_uuid}, error={approve_err}"
-                    )
-                    raise BotBuildServiceError(
-                        f"Bot release approve failed: publish_id={publish_id}, error={approve_err}"
-                    )
 
             return new_bot
 
@@ -586,6 +591,9 @@ class BotBuildService:
         version: str = "1",
         delivery: DeliveryArtifact = DeliveryArtifact(None),
         ext_info: Optional[Dict[str, Any]] = None,
+        extra_envs: Optional[Dict[str, Any]] = None,
+        docker_image: str | None = None,
+        runtime_kind: str | None = None,
     ) -> Dict[str, Any]:
         """异步发布 Bot 到 BaaS 层。
 
@@ -614,65 +622,26 @@ class BotBuildService:
         )
         # 使用 asyncio.to_thread 在线程池中执行同步方法
         return await asyncio.to_thread(
-            self.release, bot, user_id, migration_path, device_count, publish_stage, version,
-            delivery, ext_info,
+            self.release,
+            bot=bot,
+            user_id=user_id,
+            migration_path=migration_path,
+            device_count=device_count,
+            publish_stage=publish_stage,
+            version=version,
+            delivery=delivery,
+            ext_info=ext_info,
+            extra_envs=extra_envs,
+            docker_image=docker_image,
+            runtime_kind=runtime_kind,
         )
-
-    def _sync_skill_links(
-        self,
-        device_id: str,
-        version: str,
-        build_plan: EngineBuildPlan,
-        provider: EngineSandboxProvider,
-    ) -> None:
-        """同步 skill 软链到目标目录。
-
-        Args:
-            device_id: 设备 ID，用于执行远程命令
-            version: 版本号，用于拼接目标路径
-            build_plan: 引擎构建计划
-            provider: 当前引擎 provider
-
-        Raises:
-            BotBuildMigrationError: 同步失败
-        """
-        try:
-            source_base_path = provider.get_base_path().rstrip('/')
-            source_skill_path = f"{source_base_path}/{build_plan.skill_source_relpath.strip('/')}"
-            target_skill_path = (
-                f"/home/admin/nfs/bot-data/{version}/"
-                f"{build_plan.migration_subpath}/{build_plan.skill_target_relpath.strip('/')}"
-            )
-            skill_cmd = (
-                "rsync -av --exclude='skills-repo' --exclude='.skills-repo*' "
-                f"{source_skill_path}/ {target_skill_path}/"
-            )
-
-            logger.info(
-                f"[BotBuildService._sync_skill_links] "
-                f"Running rsync skill command:{skill_cmd}"
-            )
-
-            self._device_service.exec_shell_new(
-                device_id=device_id,
-                shell_cmd=skill_cmd,
-            )
-
-            logger.info(
-                "[BotBuildService._sync_skill_links] "
-                "Skill links synced successfully"
-            )
-        except Exception as e:
-            logger.warning(
-                f"[BotBuildService._sync_skill_links] "
-                f"Failed to synced links: {device_id}, {e}"
-            )
 
     def _run_local_command(
         self,
         cmd: list[str],
         command_name: str,
         error_message: str,
+        timeout_seconds: float | None = None,
     ) -> subprocess.CompletedProcess:
         """执行本地命令并统一处理日志和错误。
 
@@ -693,13 +662,15 @@ class BotBuildService:
         )
 
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
+            run_kwargs = {
+                "capture_output": True,
+                "text": True,
+                "encoding": "utf-8",
+                "errors": "replace",
+            }
+            if timeout_seconds is not None:
+                run_kwargs["timeout"] = timeout_seconds
+            result = subprocess.run(cmd, **run_kwargs)
         except FileNotFoundError:
             logger.error(
                 f"[BotBuildService._run_local_command] "
@@ -708,6 +679,15 @@ class BotBuildService:
             raise BotBuildMigrationError(
                 f"{command_name} command not found"
             )
+        except subprocess.TimeoutExpired as exc:
+            logger.error(
+                f"[BotBuildService._run_local_command] "
+                f"{command_name} timed out after {timeout_seconds} seconds"
+            )
+            raise BotBuildMigrationError(
+                f"{error_message}: command timed out after "
+                f"{timeout_seconds:g} seconds"
+            ) from exc
 
         if result.returncode != 0:
             logger.error(
@@ -796,6 +776,11 @@ class BotBuildService:
                 "rsync",
                 "-av",           # 归档模式 + 详细输出
                 "--delete",       # 删除目标目录中不存在于源目录的文件
+                # The versioned target is reused when the same publish version
+                # retries. Excluded mount/corpus paths must not survive from an
+                # earlier partial artifact, otherwise Pool active roots can
+                # expose the full repository through a stale bridge.
+                "--delete-excluded",
                 *excludes,
                 f"{source_dir}/",
                 f"{target_dir}/",
@@ -826,6 +811,7 @@ class BotBuildService:
                     "rsync",
                     "-av",
                     "--delete",
+                    "--delete-excluded",
                     *excludes,
                     f"{extra_source}/",
                     f"{extra_target}/",
@@ -835,10 +821,6 @@ class BotBuildService:
                     command_name="rsync (extra)",
                     error_message="rsync extra sync failed",
                 )
-
-            # 同步 skill 软链到目标目录
-            if build_plan and provider:
-                self._sync_skill_links(device_id, version_str, build_plan, provider)
 
             logger.info(
                 f"[BotBuildService._migrate_bot_instance] "
@@ -1060,6 +1042,9 @@ class BotBuildService:
             publish_stage: PublishStage = PublishStage.ONLINE,
             version: str = "1",
             delivery: DeliveryArtifact = DeliveryArtifact(None),
+            extra_envs: Optional[Dict[str, Any]] = None,
+            docker_image: str | None = None,
+            runtime_kind: str | None = None,
     ) -> Dict[str, Any]:
         """升级 Bot 到 BaaS 层（复用现有 Bot）。
 
@@ -1093,10 +1078,13 @@ class BotBuildService:
         )
 
         try:
-            if (
-                self._baas_service.resolve_container_provider(bot)
-                == TECLAW_DEVICE_PROVIDER
-            ):
+            resolved_runtime_kind = (
+                runtime_kind
+                if runtime_kind is not None
+                else self._baas_service.resolve_container_provider(bot)
+            )
+            is_teclaw_upgrade = resolved_runtime_kind == TECLAW_DEVICE_PROVIDER
+            if is_teclaw_upgrade:
                 # teclaw re-publish: re-deliver the frozen artifact to the
                 # existing container (non-mount). No migration_path. The artifact
                 # IS the delivery payload, so fail loudly if it is missing rather
@@ -1125,6 +1113,7 @@ class BotBuildService:
                     "device_count": device_count,
                     "stage": publish_stage.value,
                     "version": version,
+                    "extra_envs": extra_envs,
                 }
                 template_uuid = self._resolve_baas_template_uuid(
                     bot=bot,
@@ -1132,6 +1121,8 @@ class BotBuildService:
                 )
                 if template_uuid is not None:
                     upgrade_kwargs["template_uuid"] = template_uuid
+                if docker_image:
+                    upgrade_kwargs["template_config"] = {"image": docker_image}
                 upgrade_result = self._baas_service.upgrade_bot(**upgrade_kwargs)
 
             logger.info(
@@ -1144,9 +1135,15 @@ class BotBuildService:
         except Exception as e:
             error_info = self._extract_baas_error_info(e)
             error_code = error_info.get("error_code")
-            if error_code == "BOT_NOT_FOUND":
+            # BaaS signals a gone upgrade target as either BOT_NOT_FOUND (bot
+            # record gone) or DEVICE_NOT_FOUND (underlying device gone — e.g. a
+            # TeClaw bot whose device was destroyed by an offline STOP). Surface
+            # both as a structured failure so the deploy atom classifies it and
+            # the caller self-heals with a fresh first release, instead of
+            # letting DEVICE_NOT_FOUND raise and fail the publish outright.
+            if error_code in _BOT_GONE_ERROR_CODES:
                 logger.warning(
-                    f"[BotBuildService.upgrade] Upgrade hit BOT_NOT_FOUND: "
+                    f"[BotBuildService.upgrade] Upgrade hit {error_code}: "
                     f"bot_uuid={bot_uuid}, error_info={error_info}"
                 )
                 return {
@@ -1158,6 +1155,306 @@ class BotBuildService:
 
             logger.error(f"[BotBuildService.upgrade] Upgrade failed: {e}")
             raise BotBuildServiceError(f"Bot upgrade failed: {e}")
+
+    def restore_draft(
+        self,
+        *,
+        bot: Dict[str, Any],
+        source_version: int,
+        artifact_ext: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Restore an ARCA/BAAS mounted draft from a historical artifact.
+
+        The historical version is restored host-side with ``rsync --delete``
+        into the draft NAS workspace; runtime/session exclusions are preserved.
+        Only versioned ``migration_path`` artifacts participate in this operation.
+        """
+        provider = self._resolve_sandbox_provider(bot)
+
+        # 从 bot.ext 解析 build_rsync_excludes 配置
+        ext = bot.get("ext")
+        rsync_append = parse_build_rsync_excludes_from_ext(ext)
+
+        # 传递 Bot 级别追加项（合并模式）
+        build_plan = provider.get_build_plan(build_rsync_excludes_append=rsync_append)
+        deadline = time.monotonic() + _DRAFT_RESTORE_TIMEOUT_SECONDS
+
+        def remaining_timeout() -> float:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise BotBuildMigrationError(
+                    "恢复草稿超时（默认限制 30 分钟）"
+                )
+            return remaining
+
+        if not artifact_ext.get("migration_path"):
+            raise BotBuildServiceError("历史版本缺少 migration_path")
+
+        bot_id = bot.get("bot_id")
+        entity_id = bot.get("entity_id", "")
+        entity_type = bot.get("entity_type", "staff")
+        if not bot_id or not entity_id:
+            raise BotBuildServiceError("恢复草稿缺少 bot_id/entity_id")
+
+        # Never trust a DB path as an arbitrary rsync source. Reconstruct the
+        # exact versioned artifact path from the Bot identity and version.
+        artifact_dir = get_bot_dir(entity_id, bot_id, entity_type) / str(source_version) / build_plan.migration_subpath
+        draft_nas_dir = get_bot_nas_dir(
+            entity_id=entity_id,
+            bot_id=bot_id,
+            engine_type=build_plan.engine_type,
+            entity_type=entity_type,
+        )
+        draft_dir = draft_nas_dir / build_plan.source_root_name
+        if not artifact_dir.exists():
+            raise BotBuildMigrationError(f"历史构造物目录不存在: {artifact_dir}")
+
+        self._run_local_command(
+            cmd=["sudo", "chmod", "755", str(draft_nas_dir)],
+            command_name="sudo chmod",
+            error_message="chmod draft NAS directory failed",
+            timeout_seconds=remaining_timeout(),
+        )
+        draft_dir.mkdir(parents=True, exist_ok=True)
+
+        excludes = [f"--exclude={item}" for item in build_plan.rsync_excludes]
+        # Extra snapshots (for example target/claude -> draft/.claude) are not
+        # part of the primary engine root and must not leak into it.
+        if build_plan.extra_sync_target_relpath:
+            excludes.append(f"--exclude={build_plan.extra_sync_target_relpath}")
+        self._run_local_command(
+            cmd=[
+                "sudo",
+                "rsync",
+                "-av",
+                "--delete",
+                "--chown=1000:1000",
+                *excludes,
+                f"{artifact_dir}/",
+                f"{draft_dir}/",
+            ],
+            command_name="rsync draft restore",
+            error_message="restore draft workspace failed",
+            timeout_seconds=remaining_timeout(),
+        )
+
+        if build_plan.extra_sync_source_relpath and build_plan.extra_sync_target_relpath:
+            extra_artifact_dir = artifact_dir / build_plan.extra_sync_target_relpath
+            if not extra_artifact_dir.exists():
+                raise BotBuildMigrationError(f"历史附加构造物目录不存在: {extra_artifact_dir}")
+            extra_draft_dir = draft_dir.parent / build_plan.extra_sync_source_relpath
+            extra_draft_dir.mkdir(parents=True, exist_ok=True)
+            self._run_local_command(
+                cmd=[
+                    "sudo",
+                    "rsync",
+                    "-av",
+                    "--delete",
+                    "--chown=1000:1000",
+                    *excludes,
+                    f"{extra_artifact_dir}/",
+                    f"{extra_draft_dir}/",
+                ],
+                command_name="rsync draft restore (extra)",
+                error_message="restore draft extra workspace failed",
+                timeout_seconds=remaining_timeout(),
+            )
+
+        return {
+            "restore_type": "migration_path",
+            "artifact_path": str(artifact_dir),
+            "draft_path": str(draft_dir),
+        }
+
+    async def restore_draft_async(
+        self,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Run :meth:`restore_draft` outside the event loop."""
+        return await asyncio.to_thread(self.restore_draft, **kwargs)
+
+    async def restore_teclaw_draft_async(
+        self,
+        *,
+        bot_uuid: str,
+        bot: Dict[str, Any],
+        owner_id: str,
+        source_version: int,
+        artifact_ext: Dict[str, Any],
+        baas_publish_id: int | None = None,
+        request_id: str | None = None,
+    ) -> Dict[str, Any]:
+        """Advance one Teclaw draft-restore workflow step.
+
+        The historical artifact is copied and composed for ``DRAFT`` before it
+        crosses the BaaS boundary. Draft delivery intentionally clears historical
+        stage channel overrides; DB-backed draft config remains resolved by the
+        teclaw draft runtime, while the artifact's workspace/identity refs restore
+        the historical file snapshot. The existing ``bot_uuid`` is updated in
+        place, so sessions/container identity are preserved.
+        """
+        config_artifact = copy.deepcopy(artifact_ext.get("config_artifact"))
+        if not isinstance(config_artifact, dict):
+            raise BotBuildServiceError("历史版本缺少 config_artifact")
+        if config_artifact.get("engine_type") != TECLAW_DEVICE_PROVIDER:
+            raise BotBuildServiceError(
+                "历史 config_artifact engine_type 不是 teclaw: "
+                f"{config_artifact.get('engine_type')!r}"
+            )
+
+        delivery = DeliveryArtifact.compose(
+            config_artifact,
+            PublishStage.DRAFT,
+            {},
+        )
+        if not delivery.config_artifact:
+            raise BotBuildServiceError("无法构造 teclaw 草稿恢复 artifact")
+
+        if baas_publish_id is None:
+            effective_request_id = request_id or self.generate_request_id(
+                bot=bot,
+                publish_stage=f"draft_restore_{source_version}_{uuid.uuid4().hex}",
+            )
+            update_result = await asyncio.to_thread(
+                self._baas_service.update_teclaw_bot,
+                bot_uuid=bot_uuid,
+                bot=bot,
+                owner_id=owner_id,
+                request_id=effective_request_id,
+                config_artifact=delivery.config_artifact,
+                template_uuid=self._teclaw_template_uuid,
+                device_count=1,
+            )
+            issued_publish_id = update_result.get("publish_id")
+            if not issued_publish_id:
+                raise BotBuildServiceError("teclaw 草稿热更新未返回 publish_id")
+            return {
+                "restore_type": "config_artifact",
+                "publish_id": int(issued_publish_id),
+                "bot_uuid": bot_uuid,
+                "baas_status": "SUBMITTED",
+                "status": "restoring",
+            }
+
+        try:
+            progress = await asyncio.to_thread(
+                self._baas_service.get_publish_progress,
+                baas_publish_id,
+                True,
+            )
+        except Exception as exc:
+            # The durable task will poll again. Do not turn a temporary query
+            # outage into a terminal restore failure after BaaS already accepted
+            # the hot update and its workflow id is safely recorded.
+            logger.warning(
+                "[BotBuildService.restore_teclaw_draft_async] progress query "
+                "failed, will retry: publish_id=%s error=%s",
+                baas_publish_id,
+                exc,
+            )
+            return {
+                "restore_type": "config_artifact",
+                "baas_publish_id": baas_publish_id,
+                "baas_status": "QUERY_ERROR",
+                "progress_error": str(exc),
+                "status": "restoring",
+            }
+        status = str(progress.get("status") or "").upper()
+        if status == "SUCCESS":
+            return {
+                "restore_type": "config_artifact",
+                "baas_publish_id": baas_publish_id,
+                "baas_status": status,
+                "status": "success",
+            }
+        if status in {"FAILED", "REJECTED", "REVOKED"}:
+            error = (
+                "teclaw 草稿热更新失败: "
+                f"publish_id={baas_publish_id}, status={status}"
+            )
+            return {
+                "restore_type": "config_artifact",
+                "baas_publish_id": baas_publish_id,
+                "baas_status": status,
+                "status": "failed",
+                "error": error,
+            }
+        return {
+            "restore_type": "config_artifact",
+            "baas_publish_id": baas_publish_id,
+            "baas_status": status or "UNKNOWN",
+            "status": "restoring",
+        }
+    def retire_superseded_bot(
+        self, bot_uuid: str, operator: str = "system"
+    ) -> int | None:
+        """Idempotent teardown of a bot that a deploy is superseding.
+
+        Call this ONLY for a bot the caller has already decided is gone or not
+        reusable (e.g. a teclaw ``FAILED``/``STOPPED`` online bot whose container
+        an ``upgrade`` cannot rebuild, or a lingering record surfaced by a
+        ``DEVICE_NOT_FOUND`` fallback). It exists so that when a new online bot is
+        created instead of reusing the old one, the old one is not left behind as
+        an orphan (dirty data + wasted provider compute).
+
+        Returns the BaaS DESTROY workflow id when one was issued, or ``None`` when
+        the bot was already gone (nothing to destroy) — the caller stashes it on
+        the released binding.
+
+        Failures **propagate** (AGENTS.md: never swallow a failed lifecycle write
+        and report success): if the destroy cannot be confirmed, the caller must
+        NOT proceed to create the replacement, or the superseded bot stays live
+        and the at-most-one-live-bot guarantee is broken. The durable deploy then
+        retries — and on retry the decision is re-evaluated. The one exception is
+        an **already-gone** bot: if the candidate was deleted between the
+        decision's status read and this call, BaaS rejects the DESTROY (404, which
+        ``get_bot`` normalizes to ``RELEASED``; or ``DESTROYING`` when a prior
+        destroy is already in flight). That already satisfies the retirement goal,
+        so we re-check and treat an explicitly-gone bot as success — while any
+        other destroy failure (timeout, conflict, 5xx, still-live bot) propagates.
+        The ``request_id`` is derived deterministically from ``bot_uuid`` so a
+        redelivery reuses the same idempotent destroy rather than opening a second
+        one.
+        """
+        request_id = hashlib.md5(f"retire_{bot_uuid}".encode()).hexdigest()
+        try:
+            result = self._baas_service.destroy_bot(
+                bot_uuid=bot_uuid,
+                operator=operator,
+                request_id=request_id,
+            )
+        except BaasServiceError:
+            # The destroy may have been rejected because the bot is ALREADY gone
+            # (deleted after the decision's status read, or a destroy already in
+            # flight). Re-check: only an explicit gone status satisfies the goal;
+            # anything else (still live, or an ambiguous empty response) means the
+            # destroy genuinely failed and must propagate.
+            baas_bot = self._baas_service.get_bot(bot_uuid=bot_uuid)
+            status = (baas_bot or {}).get("status")
+            if status not in ("RELEASED", "DESTROYING"):
+                raise
+            logger.info(
+                f"[BotBuildService.retire_superseded_bot] destroy rejected but bot "
+                f"already gone (status={status}); retirement satisfied: "
+                f"bot_uuid={bot_uuid}"
+            )
+            return None
+        publish_id = result.get("publish_id") if isinstance(result, dict) else None
+        if publish_id is None:
+            # destroy_bot returned a successful-but-empty envelope (no workflow id):
+            # the DESTROY was NOT confirmed initiated. Do NOT report success (that
+            # would let the caller create a replacement while the old bot may still
+            # be live) — propagate so the durable deploy retries. ``None`` is
+            # reserved for the explicit already-gone recheck path above.
+            raise BotBuildServiceError(
+                f"destroy_bot returned no publish_id for bot_uuid={bot_uuid}; "
+                f"destroy not confirmed"
+            )
+        logger.info(
+            f"[BotBuildService.retire_superseded_bot] retired superseded bot: "
+            f"bot_uuid={bot_uuid}, operator={operator}, destroy_publish_id={publish_id}"
+        )
+        return publish_id
 
     def refresh_teclaw_mcp_outbound_rule(
         self,
@@ -1206,10 +1503,21 @@ class BotBuildService:
             return False
 
         try:
-            self._baas_service.update_teclaw_outbound_rule_by_bot_uuid(
+            updated = self._baas_service.update_teclaw_outbound_rule_by_bot_uuid(
                 bot_uuid,
                 agent_pass_token=agent_pass_token,
             )
+            if updated is not None and not updated:
+                # Devices aren't ready (no device / no provider_device_id yet) —
+                # nothing was written, so don't report a delivery that didn't
+                # happen. The caller's next publish-progress SUCCESS re-runs this.
+                logger.warning(
+                    "[BotBuildService.refresh_teclaw_mcp_outbound_rule] no ready "
+                    "device to deliver to: bot_id=%s, bot_uuid=%s",
+                    bot_id,
+                    bot_uuid,
+                )
+                return False
             return True
         except Exception as update_err:
             logger.warning(
@@ -1231,6 +1539,9 @@ class BotBuildService:
         publish_stage: PublishStage = PublishStage.ONLINE,
         version: str = "1",
         delivery: DeliveryArtifact = DeliveryArtifact(None),
+        extra_envs: Optional[Dict[str, Any]] = None,
+        docker_image: str | None = None,
+        runtime_kind: str | None = None,
     ) -> Dict[str, Any]:
         """异步升级 Bot 到 BaaS 层。
 
@@ -1243,6 +1554,16 @@ class BotBuildService:
 
         # 使用 asyncio.to_thread 在线程池中执行同步方法
         return await asyncio.to_thread(
-            self.upgrade, bot_uuid, bot, user_id, migration_path, device_count, publish_stage, version,
-            delivery,
+            self.upgrade,
+            bot_uuid=bot_uuid,
+            bot=bot,
+            user_id=user_id,
+            migration_path=migration_path,
+            device_count=device_count,
+            publish_stage=publish_stage,
+            version=version,
+            delivery=delivery,
+            extra_envs=extra_envs,
+            docker_image=docker_image,
+            runtime_kind=runtime_kind,
         )

@@ -1,19 +1,18 @@
-"""Open API Message 路由
+"""Open API Message Router
 
-提供消息投递的 Open API 端点。
+Provides Open API endpoints for message delivery.
 """
 
 import json
 import time
-from collections.abc import AsyncIterator
 
 from dependency_injector.wiring import Provide, inject
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from secbaas.community.adapters.web.routers.open_api.dependencies import (
-    _normalize_bot_id,
     get_bot_chat_context,
+    normalize_bot_id,
     validate_api_key,
     validate_policy,
 )
@@ -37,28 +36,33 @@ from secbaas.community.api.bot_runtime import (
     TooManyRequestsError,
 )
 from secbaas.community.api.open_api import OpenAPICode, get_code_message
-from secbaas.community.api.sse import SseConverterFactory, SseEvent
+from secbaas.community.api.sse import (
+    SseConverterFactory,
+    SseEvent,
+    convert_chunks_to_sse,
+    with_sse_heartbeat,
+)
 from secbaas.community.bootstrap import ApplicationContainer
 from secbaas.community.logger import get_logger
 
 logger = get_logger("router-open-api")
 
 
-router = APIRouter(prefix="/openapi/v1", tags=["Open API Message"])
+router = APIRouter(prefix="/openapi/v1", tags=["messages"])
 
 
 @router.post(
     "/messages",
     response_model=MessageResponse,
-    summary="消息投递",
-    description="通过 Bearer Token 认证的 API Key 投递消息到指定 Bot",
+    summary="Message delivery",
+    description="Deliver a message to a specified Bot using a Bearer Token-authenticated API Key",
     responses={
-        200: {"description": "投递成功"},
-        400: {"description": "参数错误"},
-        401: {"description": "认证失败"},
-        404: {"description": "Bot 不存在"},
-        503: {"description": "Bot 不可用"},
-        500: {"description": "服务内部错误"},
+        200: {"description": "Delivery successful"},
+        400: {"description": "Invalid parameters"},
+        401: {"description": "Authentication failed"},
+        404: {"description": "Bot not found"},
+        503: {"description": "Bot unavailable"},
+        500: {"description": "Internal server error"},
     },
 )
 @inject
@@ -68,16 +72,16 @@ async def deliver_message(
     context: BotChatContext = Depends(get_bot_chat_context),
     bot_runner: BotRunner = Depends(Provide[ApplicationContainer.services.bot_runner]),
 ) -> MessageResponse:
-    """消息投递端点
+    """Message delivery endpoint
 
     Args:
-        request: 消息投递请求
-        api_key_record: 从 API Key 验证获取的记录
-        context: 请求上下文（身份认证、调用者信息等）
-        bot_runner: BotRunner 实例
+        request: Message delivery request
+        api_key_record: Record obtained from API Key validation
+        context: Request context (identity authentication, caller info, etc.)
+        bot_runner: BotRunner instance
 
     Returns:
-        MessageResponse: 消息投递响应
+        MessageResponse: Message delivery response
     """
     if api_key_record.app_type not in ("system", "app"):
         logger.warning(f"deliver_message forbidden: app_type={api_key_record.app_type}")
@@ -89,7 +93,7 @@ async def deliver_message(
             },
         )
 
-    bot_id = _normalize_bot_id(request.bot_id)
+    bot_id = normalize_bot_id(request.bot_id)
 
     bot_id = validate_policy(api_key_record, bot_id)
 
@@ -112,6 +116,7 @@ async def deliver_message(
             context=context,
             metadata=metadata,
             callback=callback,
+            message_id=request.message_id,
         )
         elapsed_ms = (time.monotonic() - t_start) * 1000
 
@@ -166,24 +171,24 @@ async def deliver_message(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"code": 50001, "message": f"服务内部错误: {str(e)}"},
+            detail={"code": 50001, "message": f"Internal server error: {str(e)}"},
         )
 
 
 @router.post(
     "/messages/stream",
-    summary="流式消息投递",
-    description="通过 Bearer Token 认证的 API Key 投递消息到指定 Bot，以 SSE 流式返回结果",
+    summary="Streaming message delivery",
+    description="Deliver a message to a specified Bot using a Bearer Token-authenticated API Key, returning results as an SSE stream",
     response_model=None,
     responses={
-        200: {"description": "流式投递成功"},
-        400: {"description": "参数错误"},
-        401: {"description": "认证失败"},
-        403: {"description": "无权限"},
-        404: {"description": "Bot 不存在"},
-        429: {"description": "请求过多"},
-        503: {"description": "Bot 不可用"},
-        500: {"description": "服务内部错误"},
+        200: {"description": "Stream delivery successful"},
+        400: {"description": "Invalid parameters"},
+        401: {"description": "Authentication failed"},
+        403: {"description": "Forbidden"},
+        404: {"description": "Bot not found"},
+        429: {"description": "Too many requests"},
+        503: {"description": "Bot unavailable"},
+        500: {"description": "Internal server error"},
     },
 )
 @inject
@@ -196,11 +201,11 @@ async def deliver_message_stream(
         Provide[ApplicationContainer.services.stream_converter_factory]
     ),
 ) -> StreamingResponse:
-    """流式消息投递端点
+    """Streaming message delivery endpoint
 
-    与 deliver_message 使用相同的认证和校验逻辑，
-    但调用 deliver_message_stream 获取 AsyncIterator[StreamChunk]，
-    将每个 chunk 转换为 SSE 事件返回。
+    Uses the same authentication and validation logic as deliver_message,
+    but calls deliver_message_stream to obtain an AsyncIterator[StreamChunk]
+    and converts each chunk into an SSE event for return.
     """
     if api_key_record.app_type not in ("system", "app"):
         logger.warning(
@@ -214,7 +219,7 @@ async def deliver_message_stream(
             },
         )
 
-    bot_id = _normalize_bot_id(request.bot_id)
+    bot_id = normalize_bot_id(request.bot_id)
 
     bot_id = validate_policy(api_key_record, bot_id)
 
@@ -265,40 +270,41 @@ async def deliver_message_stream(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"code": 50001, "message": f"服务内部错误: {str(e)}"},
+            detail={"code": 50001, "message": f"Internal server error: {str(e)}"},
         )
 
     converter = converter_factory.create("default")
 
-    async def _sse_generator() -> AsyncIterator[str]:
-        # 先发送一个 ready 事件，携带 message_id 和 session_id
-        yield SseEvent(
-            event="ready",
+    ready_sse = SseEvent(
+        event="ready",
+        data=json.dumps(
+            {"message_id": message_id, "session_id": session_id},
+            ensure_ascii=False,
+        ),
+    ).to_sse()
+
+    def on_error(e: Exception) -> str:
+        logger.exception(
+            "deliver_message_stream chunk error: message_id=%s", message_id
+        )
+        return SseEvent(
+            event="error",
             data=json.dumps(
-                {"message_id": message_id, "session_id": session_id},
+                {"message_id": message_id, "error": str(e)},
                 ensure_ascii=False,
             ),
         ).to_sse()
 
-        try:
-            async for chunk in chunk_iter:
-                event = converter.convert(chunk, run_id=message_id)
-                if event is not None:
-                    yield event.to_sse()
-        except Exception as e:
-            logger.exception(
-                "deliver_message_stream chunk error: message_id=%s", message_id
-            )
-            yield SseEvent(
-                event="error",
-                data=json.dumps(
-                    {"message_id": message_id, "error": str(e)},
-                    ensure_ascii=False,
-                ),
-            ).to_sse()
-
     return StreamingResponse(
-        _sse_generator(),
+        with_sse_heartbeat(
+            convert_chunks_to_sse(
+                chunk_iter,
+                converter,
+                message_id,
+                prefix=[ready_sse],
+                on_error=on_error,
+            )
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -311,12 +317,12 @@ async def deliver_message_stream(
 @router.get(
     "/messages/{message_id}",
     response_model=MessageResultResponse,
-    summary="查询消息结果",
-    description="根据 message_id 查询消息投递的处理结果",
+    summary="Query message result",
+    description="Query the processing result of a message delivery by message_id",
     responses={
-        200: {"description": "查询成功"},
-        401: {"description": "认证失败"},
-        404: {"description": "消息不存在"},
+        200: {"description": "Query successful"},
+        401: {"description": "Authentication failed"},
+        404: {"description": "Message not found"},
     },
 )
 @inject
@@ -325,15 +331,15 @@ async def get_message_result(
     api_key_record: APIKeyRecord = Depends(validate_api_key),
     bot_runner: BotRunner = Depends(Provide[ApplicationContainer.services.bot_runner]),
 ) -> MessageResultResponse:
-    """查询消息结果端点
+    """Query message result endpoint
 
     Args:
-        message_id: 消息 ID
-        api_key_record: 从 API Key 验证获取的记录
-        bot_runner: BotRunner 实例
+        message_id: Message ID
+        api_key_record: Record obtained from API Key validation
+        bot_runner: BotRunner instance
 
     Returns:
-        MessageResultResponse: 消息结果响应
+        MessageResultResponse: Message result response
     """
     try:
         logger.info(
@@ -356,7 +362,7 @@ async def get_message_result(
 
         validate_policy(api_key_record, message_info.bot_id)
 
-        # 校验 message 归属，防止横向越权
+        # Validate message ownership to prevent horizontal privilege escalation
         if message_info.api_key_prefix != api_key_record.api_key_prefix:
             logger.warning(
                 f"get_message_result api_key mismatch: message_id={message_id}, "
@@ -368,7 +374,7 @@ async def get_message_result(
                 data=None,
             )
 
-        # 构造结果数据
+        # Construct result data
         result_data = None
         if message_info.result_content:
             extra = None

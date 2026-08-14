@@ -11,8 +11,7 @@ Capability matrix:
   ``install_skill``, ``uninstall_skill``, ``update_skill``, ``enable_skill``,
   ``disable_skill``, ``discover_skills``.
 - **Port-backed (bulk / local-fs)**: ``sync_symlinks``, ``sync_bindpaths``,
-  ``clean_symlinks``, ``ensure_center_skills`` (the relay side has dedicated
-  ``skills.sync_symlinks`` et al. RPCs).
+  ``clean_symlinks``, ``ensure_center_skills`` and the Skills Pool lifecycle.
 - **Port-backed (execute)**: ``execute_skill`` delegates to the port, though
   the corp impl returned a fixed "execute via chat" message. The adapter
   forwards to the port so the impl owns that policy decision.
@@ -24,13 +23,14 @@ Capability matrix:
 
 Divergence from OpenClaw's skills adapter
 -----------------------------------------
-OpenClaw only supports the bulk symlink / center-ensure ops on the port and
-raises CapabilityNotSupportedError for all per-skill ops. claude_code exposes
-the full per-skill surface on the relay, so this adapter is the inverse.
+Claude Code also exposes the full per-skill surface on the relay, while
+OpenClaw keeps those operations outside its adapter.
 """
+
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 from engine.community.core.engine.context import AuthContext
@@ -41,12 +41,26 @@ from engine.community.core.skills.models import (
     CenterEnsureResult,
     CleanSymlinksRequest,
     CleanSymlinksResult,
+    PoolLayoutActivateRequest,
+    PoolLayoutActivationResult,
+    PoolLayoutActivationStatus,
+    PoolLayoutProbeRequest,
+    PoolLayoutProbeResult,
+    PoolLayoutProbeStatus,
+    PoolLayoutRollbackRequest,
+    PoolMappingPublishResult,
+    PoolMappingSourceLayout,
+    PoolMappingVerificationResult,
+    PoolQuarantineCleanupRequest,
+    PoolQuarantineCleanupResult,
+    PoolSkillMappingIntent,
     Skill,
     SkillConfig,
     SkillExecutionRequest,
     SkillExecutionResult,
     SkillStatus,
     SkillType,
+    SymlinkItem,
     SyncBindPathsRequest,
     SyncSymlinksRequest,
     SyncSymlinksResult,
@@ -55,6 +69,18 @@ from engine.community.core.skills.protocol import SkillsService
 from engine.community.plugin_api.claude_code.skills import ClaudeCodeSkillsPort
 
 log = logging.getLogger("claude-code-skills-adapter")
+
+
+def _serialize_pool_mapping(
+    item: PoolSkillMappingIntent | SymlinkItem,
+) -> dict[str, str]:
+    if isinstance(item, PoolSkillMappingIntent):
+        return {
+            "corpus": item.corpus,
+            "relative_path": item.relative_path,
+            "link_name": item.link_name,
+        }
+    return {"source": item.source, "target": item.target}
 
 
 # ── Dict → DTO helpers (relocated from engines/claude_code/skills.py) ─────────
@@ -124,14 +150,17 @@ class ClaudeCodeSkillsAdapter(SkillsService):
     # ── Per-skill management ──────────────────────────────────────────────────
 
     async def list_skills(
-        self, auth: AuthContext | None = None,
+        self,
+        auth: AuthContext | None = None,
     ) -> list[Skill]:
         token = auth.token if auth is not None else None
         raw = await self._port.skills_list(token=token)
         return [_skill_from_payload(s) for s in raw if isinstance(s, dict)]
 
     async def get_skill(
-        self, skill_id: str, auth: AuthContext | None = None,
+        self,
+        skill_id: str,
+        auth: AuthContext | None = None,
     ) -> Skill | None:
         token = auth.token if auth is not None else None
         data = await self._port.skills_get(skill_id=skill_id, token=token)
@@ -140,7 +169,9 @@ class ClaudeCodeSkillsAdapter(SkillsService):
         return _skill_from_payload(data)
 
     async def install_skill(
-        self, config: SkillConfig, auth: AuthContext | None = None,
+        self,
+        config: SkillConfig,
+        auth: AuthContext | None = None,
     ) -> Skill:
         token = auth.token if auth is not None else None
         data = await self._port.skills_install(
@@ -149,7 +180,9 @@ class ClaudeCodeSkillsAdapter(SkillsService):
         return _skill_from_payload(data)
 
     async def uninstall_skill(
-        self, skill_id: str, auth: AuthContext | None = None,
+        self,
+        skill_id: str,
+        auth: AuthContext | None = None,
     ) -> bool:
         token = auth.token if auth is not None else None
         return await self._port.skills_uninstall(skill_id=skill_id, token=token)
@@ -169,14 +202,18 @@ class ClaudeCodeSkillsAdapter(SkillsService):
         return _skill_from_payload(data)
 
     async def enable_skill(
-        self, skill_id: str, auth: AuthContext | None = None,
+        self,
+        skill_id: str,
+        auth: AuthContext | None = None,
     ) -> bool:
         """Enable via the relay's ``skills.update`` (corp impl routed there)."""
         token = auth.token if auth is not None else None
         return await self._port.skills_enable(skill_id=skill_id, token=token)
 
     async def disable_skill(
-        self, skill_id: str, auth: AuthContext | None = None,
+        self,
+        skill_id: str,
+        auth: AuthContext | None = None,
     ) -> bool:
         token = auth.token if auth is not None else None
         return await self._port.skills_disable(skill_id=skill_id, token=token)
@@ -203,7 +240,9 @@ class ClaudeCodeSkillsAdapter(SkillsService):
         )
 
     async def validate_skill(
-        self, skill_id: str, auth: AuthContext | None = None,
+        self,
+        skill_id: str,
+        auth: AuthContext | None = None,
     ) -> list[str]:
         """Validate by lookup — mirrors the corp impl's compose-from-get_skill.
 
@@ -220,7 +259,9 @@ class ClaudeCodeSkillsAdapter(SkillsService):
     # ── Skill discovery ───────────────────────────────────────────────────────
 
     async def discover_skills(
-        self, source: str, auth: AuthContext | None = None,
+        self,
+        source: str,
+        auth: AuthContext | None = None,
     ) -> list[Skill]:
         token = auth.token if auth is not None else None
         raw = await self._port.skills_discover(source=source, token=token)
@@ -291,8 +332,11 @@ class ClaudeCodeSkillsAdapter(SkillsService):
         token = auth.token if auth is not None else None
         raw = await self._port.skills_ensure_center(token=token)
         ok = [
-            CenterEnsureItem(skill_uuid=d.get("skill_uuid", ""), version=str(d.get("version", "")))
-            for d in raw.get("ok", []) if isinstance(d, dict)
+            CenterEnsureItem(
+                skill_uuid=d.get("skill_uuid", ""), version=str(d.get("version", ""))
+            )
+            for d in raw.get("ok", [])
+            if isinstance(d, dict)
         ]
         failed = [
             CenterEnsureFailure(
@@ -300,9 +344,160 @@ class ClaudeCodeSkillsAdapter(SkillsService):
                 version=str(d.get("version", "")),
                 reason=d.get("reason", ""),
             )
-            for d in raw.get("failed", []) if isinstance(d, dict)
+            for d in raw.get("failed", [])
+            if isinstance(d, dict)
         ]
         return CenterEnsureResult(ok=ok, failed=failed)
+
+    async def activate_pool_layout(
+        self,
+        request: PoolLayoutActivateRequest,
+        auth: AuthContext | None = None,
+    ) -> PoolLayoutActivationResult:
+        payload: dict[str, object] = {
+            "migration_generation": request.migration_generation,
+            "preparation_id": request.preparation_id,
+            "registered_local_names": request.registered_local_names,
+            "mappings": [_serialize_pool_mapping(item) for item in request.mappings],
+        }
+        if request.mapping_contract_version is not None:
+            payload["mapping_contract_version"] = request.mapping_contract_version
+        raw = await self._port.activate_pool_layout(payload)
+        raw_status = str(raw.get("status", ""))
+        try:
+            status = PoolLayoutActivationStatus(raw_status)
+        except ValueError:
+            status = PoolLayoutActivationStatus.UNKNOWN
+        evidence = dict(raw.get("evidence") or {})
+        if status is PoolLayoutActivationStatus.UNKNOWN:
+            evidence["raw_status"] = raw_status
+        committed = raw.get("committed") is True and status in {
+            PoolLayoutActivationStatus.COMMITTED,
+            PoolLayoutActivationStatus.ALREADY_COMMITTED,
+        }
+        return PoolLayoutActivationResult(
+            committed=committed,
+            status=status,
+            evidence=evidence,
+        )
+
+    async def probe_pool_layout(
+        self,
+        request: PoolLayoutProbeRequest,
+        auth: AuthContext | None = None,
+    ) -> PoolLayoutProbeResult:
+        raw = await self._port.probe_pool_layout(
+            {
+                "engine": request.engine,
+                "layout_contract_version": request.layout_contract_version,
+            }
+        )
+        return PoolLayoutProbeResult(
+            status=PoolLayoutProbeStatus(str(raw["status"])),
+            engine=str(raw["engine"]),
+            layout_contract_version=str(raw["layout_contract_version"]),
+            preparation_id=(
+                str(raw["preparation_id"])
+                if raw.get("preparation_id") is not None
+                else None
+            ),
+            evidence=dict(raw.get("evidence") or {}),
+        )
+
+    async def rollback_pool_layout(
+        self,
+        request: PoolLayoutRollbackRequest,
+        auth: AuthContext | None = None,
+    ) -> PoolLayoutActivationResult:
+        raw = await self._port.rollback_pool_layout(
+            {
+                "rollback_generation": request.rollback_generation,
+                "registered_local_names": request.registered_local_names,
+            }
+        )
+        raw_status = str(raw.get("status", ""))
+        try:
+            status = PoolLayoutActivationStatus(raw_status)
+        except ValueError:
+            status = PoolLayoutActivationStatus.UNKNOWN
+        evidence = dict(raw.get("evidence") or {})
+        if status is PoolLayoutActivationStatus.UNKNOWN:
+            evidence["raw_status"] = raw_status
+        return PoolLayoutActivationResult(
+            committed=(
+                raw.get("committed") is True
+                and status
+                in {
+                    PoolLayoutActivationStatus.COMMITTED,
+                    PoolLayoutActivationStatus.ALREADY_COMMITTED,
+                }
+            ),
+            status=status,
+            evidence=evidence,
+        )
+
+    async def cleanup_pool_quarantine(
+        self,
+        request: PoolQuarantineCleanupRequest,
+        auth: AuthContext | None = None,
+    ) -> PoolQuarantineCleanupResult:
+        raw = await self._port.cleanup_pool_quarantine(
+            {"migration_generation": request.migration_generation}
+        )
+        return PoolQuarantineCleanupResult(
+            status=str(raw.get("status", "TRANSIENT_ERROR")),
+            evidence=dict(raw.get("evidence") or {}),
+        )
+
+    async def publish_pool_mappings(
+        self,
+        mappings: list[PoolSkillMappingIntent | SymlinkItem],
+        *,
+        retired_mappings: Sequence[PoolSkillMappingIntent | SymlinkItem] = (),
+        source_layout: PoolMappingSourceLayout = PoolMappingSourceLayout.POOL,
+        mapping_contract_version: str | None = None,
+        auth: AuthContext | None = None,
+    ) -> PoolMappingPublishResult:
+        payload: dict[str, object] = {
+            "mappings": [_serialize_pool_mapping(item) for item in mappings],
+            "source_layout": source_layout.value,
+        }
+        if retired_mappings:
+            payload["retired_mappings"] = [
+                _serialize_pool_mapping(item) for item in retired_mappings
+            ]
+        if mapping_contract_version is not None:
+            payload["mapping_contract_version"] = mapping_contract_version
+        raw = await self._port.publish_pool_mappings(payload)
+        return PoolMappingPublishResult(
+            published=raw.get("published") is True,
+            evidence=dict(raw.get("evidence") or {}),
+        )
+
+    async def verify_pool_mappings(
+        self,
+        mappings: list[PoolSkillMappingIntent | SymlinkItem],
+        *,
+        retired_mappings: Sequence[PoolSkillMappingIntent | SymlinkItem] = (),
+        source_layout: PoolMappingSourceLayout = PoolMappingSourceLayout.POOL,
+        mapping_contract_version: str | None = None,
+        auth: AuthContext | None = None,
+    ) -> PoolMappingVerificationResult:
+        payload: dict[str, object] = {
+            "mappings": [_serialize_pool_mapping(item) for item in mappings],
+            "source_layout": source_layout.value,
+        }
+        if retired_mappings:
+            payload["retired_mappings"] = [
+                _serialize_pool_mapping(item) for item in retired_mappings
+            ]
+        if mapping_contract_version is not None:
+            payload["mapping_contract_version"] = mapping_contract_version
+        raw = await self._port.verify_pool_mappings(payload)
+        return PoolMappingVerificationResult(
+            valid=raw.get("valid") is True,
+            evidence=dict(raw.get("evidence") or {}),
+        )
 
 
 __all__ = ["ClaudeCodeSkillsAdapter"]

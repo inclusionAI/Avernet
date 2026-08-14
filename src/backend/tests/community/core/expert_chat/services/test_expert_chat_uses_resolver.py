@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 from agentclaw.community.core.expert_chat.services.expert_chat_service import ExpertChatService
 
 
-def _make_service(*, resolver, collaborator_service=None, device_provider=None):
+def _make_service(*, resolver, collaborator_service=None, device_provider=None, instance_service=None):
     return ExpertChatService(
         repository=MagicMock(),
         bot_repo=MagicMock(),
@@ -23,6 +23,7 @@ def _make_service(*, resolver, collaborator_service=None, device_provider=None):
         resolver=resolver,
         collaborator_service=collaborator_service or MagicMock(),
         transport=MagicMock(invoke=AsyncMock()),
+        instance_service=instance_service or MagicMock(),
     )
 
 

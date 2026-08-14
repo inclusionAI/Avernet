@@ -85,6 +85,7 @@ impl GroupProposalService for RecordingGroupProposalService {
             driver_bot_id: "driver-bot".to_string(),
             participant_bot_ids: vec!["target-bot".to_string(), "driver-bot".to_string()],
             chat_url: None,
+            session_id: "created-by-use-case:initial".to_string(),
             context_injected: 7,
         })
     }
@@ -278,6 +279,7 @@ async fn group_request_confirm_delegates_to_use_case_and_preserves_legacy_json()
         serde_json::json!(["target-bot", "driver-bot"])
     );
     assert_eq!(json["chat_url"], Value::Null);
+    assert_eq!(json["session_id"], "created-by-use-case:initial");
     assert_eq!(json["context_injected"], 7);
 
     let calls = fixture.proposals.confirm_calls.lock().await;

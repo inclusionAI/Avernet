@@ -2,8 +2,9 @@
 
 覆盖本分支修复点：applicationCoding / personalCoding + (claude_code | aicoding) 引擎
 门控命中时，``upgrade_bot`` 必须收到带 ``BOT_TYPE`` / ``RELAY_DEFAULT_MODEL`` /
-``RELAY_DEFAULT_RUNTIME`` 的 ``extra_envs``，以及 ``template_config``（含
-template_uid 上下文）；门控不命中时两者保持 None，行为与改动前一致。
+``RELAY_DEFAULT_RUNTIME`` 的 ``extra_envs``；无论该门控是否命中，
+``template_config``（含 template_uid 上下文）都必须透传，确保 envs/image/resource_spec
+沙箱覆写在重启时不丢失。
 
 门控口径与 ``_allocate_device_async``（create / arca-restart）严格对齐：
 - ``active_engine ∈ {claude_code, aicoding}``
@@ -14,7 +15,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from agentclaw.community.core.bot_management.services.bot_service import BotService
+import pytest
+
+from agentclaw.community.core.bot_management.services.bot_service import BotService, BotServiceError
 from agentclaw.community.core.devices.services.baas_publish_task_handlers import (
     BAAS_RESTART_PUBLISH_POLL_TASK,
 )
@@ -56,6 +59,7 @@ def _make_service(
     返回 (svc, baas, device_service) 三个 mock，便于断言 upgrade_bot 入参。
     """
     svc = BotService.__new__(BotService)
+    svc._bot_app_grant_provider = lambda: MagicMock()
     svc._restart_lock_repo = _FakeRestartLockRepo()
     svc._repository = MagicMock()
     svc._repository.get_by_id_and_owner.return_value = {
@@ -64,6 +68,9 @@ def _make_service(
         "status": "ACTIVE",
     }
     svc._bot_publish_provider = lambda: MagicMock()
+    svc._teclaw_provision_provider = lambda: SimpleNamespace(
+        is_teclaw=lambda engine: engine == "teclaw"
+    )
     svc._oss_record_repo = MagicMock()
     svc._skill_set_factory = MagicMock()
     svc._device_binding_repo = MagicMock()
@@ -80,6 +87,7 @@ def _make_service(
     svc._device_service_provider = lambda: device_service
 
     baas = MagicMock()
+    baas.list_bot_publishes.return_value = []
     baas.upgrade_bot.return_value = {"publish_id": 100}
     svc._baas_service_provider = lambda: baas
 
@@ -119,6 +127,182 @@ def _make_bot(
 # ===========================================================================
 
 
+class TestRestartBaasImagePolicy:
+    def test_low_level_restart_uses_explicit_pin_without_mutating_template_snapshot(self):
+        template_config = {"image": "registry/arca:v1", "envs": {"A": "1"}}
+        svc, baas, _ = _make_service(
+            template_config=template_config,
+            bot_type="service",
+            active_engine="openclaw",
+        )
+        bot = {
+            **_make_bot(bot_type="service", active_engine="openclaw"),
+            "ext": {
+                "sbot_pin_image": True,
+                "sbot_docker_image": "registry/arca:v2",
+            },
+        }
+
+        svc._restart_bot_baas(
+            bot_id="bot001", user_id="user001", binding_id=42, bot=bot
+        )
+
+        assert baas.upgrade_bot.call_args.kwargs["template_config"] == {
+            "image": "registry/arca:v2",
+            "envs": {"A": "1"},
+        }
+        assert template_config["image"] == "registry/arca:v1"
+
+    def test_restart_failure_does_not_persist_default_marker(self):
+        svc, baas, _ = _make_service(
+            template_config={},
+            bot_type="service",
+            active_engine="openclaw",
+        )
+        baas.upgrade_bot.side_effect = RuntimeError("baas rejected")
+        bot = {
+            **_make_bot(bot_type="service", active_engine="openclaw"),
+            "ext": {
+                "sbot_pin_image": True,
+                "sbot_docker_image": "registry/arca:v2",
+            },
+        }
+
+        with pytest.raises(RuntimeError, match="baas rejected"):
+            svc._restart_bot_baas(
+                bot_id="bot001", user_id="user001", binding_id=42, bot=bot
+            )
+
+        svc._repository.update_by_owner.assert_called_once_with(
+            "bot001", "user001", {"status": "PENDING"}
+        )
+        svc._task_queue_service.enqueue.assert_called_once()
+        svc._bot_publish_repo.update_status_with_ext.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("bot_type", "active_engine"),
+        [("personal", "openclaw"), ("service", "teclaw")],
+    )
+    def test_default_persistence_skips_non_arca_service_bot(
+        self,
+        bot_type: str,
+        active_engine: str,
+    ):
+        svc, baas, _ = _make_service(
+            template_config={},
+            bot_type=bot_type,
+            active_engine=active_engine,
+        )
+        bot = {
+            **_make_bot(bot_type=bot_type, active_engine=active_engine),
+            "ext": {
+                "sbot_pin_image": True,
+                "sbot_docker_image": "registry/arca:v2",
+            },
+        }
+
+        svc._persist_service_bot_default_image(bot, user_id="user001")
+
+        svc._repository.update_by_owner.assert_not_called()
+        svc._bot_publish_repo.get_draft_by_publish_bot_id.assert_not_called()
+        svc._bot_publish_repo.update_status_with_ext.assert_not_called()
+
+    def test_restart_submit_defers_default_marker_until_poll_success(self):
+        svc, _, _ = _make_service(
+            template_config={},
+            bot_type="service",
+            active_engine="openclaw",
+        )
+        bot = {
+            **_make_bot(bot_type="service", active_engine="openclaw"),
+            "ext": {
+                "service_bot_config": {"device_count": 1},
+                "sbot_use_default_image": True,
+            },
+        }
+
+        svc._restart_bot_baas(
+            bot_id="bot001", user_id="user001", binding_id=42, bot=bot
+        )
+
+        svc._bot_publish_repo.update_status_with_ext.assert_not_called()
+        payload = svc._task_queue_service.enqueue.call_args.args[1]
+        assert payload["image_policy_on_success"] == "default"
+        binding_props = svc._device_binding_repo.update_device_props.call_args_list[0].kwargs["props"]
+        assert binding_props["restart_publish_id"] is None
+        assert binding_props["restart_image_policy_on_success"] == "default"
+        assert binding_props["restart_workflow_baseline"] == 0
+        assert binding_props["restart_request_id"]
+        pending_update = svc._repository.update_by_owner.call_args.args[2]
+        assert "sbot_use_default_image" not in pending_update.get("ext", {})
+
+    def test_enqueue_failure_prevents_external_restart(self):
+        svc, baas, _ = _make_service(
+            template_config={},
+            bot_type="service",
+            active_engine="openclaw",
+        )
+        svc._task_queue_service.enqueue.side_effect = RuntimeError("queue unavailable")
+        bot = {
+            **_make_bot(bot_type="service", active_engine="openclaw"),
+            "ext": {"sbot_use_default_image": True},
+        }
+
+        with pytest.raises(
+            BotServiceError,
+            match="durable task could not be persisted",
+        ):
+            svc._restart_bot_baas(
+                bot_id="bot001", user_id="user001", binding_id=42, bot=bot
+            )
+
+        baas.upgrade_bot.assert_not_called()
+        svc._device_binding_repo.update_device_props.assert_not_called()
+
+    def test_binding_intent_persistence_failure_does_not_call_baas(self):
+        svc, _, _ = _make_service(
+            template_config={},
+            bot_type="service",
+            active_engine="openclaw",
+        )
+        svc._device_binding_repo.update_device_props.side_effect = RuntimeError(
+            "database unavailable"
+        )
+        bot = {
+            **_make_bot(bot_type="service", active_engine="openclaw"),
+            "ext": {"sbot_use_default_image": True},
+        }
+
+        with pytest.raises(
+            BotServiceError,
+            match="Failed to prepare durable BaaS restart",
+        ):
+            svc._restart_bot_baas(
+                bot_id="bot001", user_id="user001", binding_id=42, bot=bot
+            )
+
+        svc._task_queue_service.enqueue.assert_called_once()
+        svc._baas_service_provider().upgrade_bot.assert_not_called()
+
+    def test_pending_transition_failure_does_not_call_baas(self):
+        svc, baas, _ = _make_service(template_config={})
+        svc._device_binding_repo.update_status.side_effect = RuntimeError(
+            "database unavailable"
+        )
+        bot = _make_bot(active_engine="openclaw", template_type=None)
+
+        with pytest.raises(
+            BotServiceError,
+            match="Failed to prepare durable BaaS restart",
+        ):
+            svc._restart_bot_baas(
+                bot_id="bot001", user_id="user001", binding_id=42, bot=bot
+            )
+
+        svc._task_queue_service.enqueue.assert_called_once()
+        baas.upgrade_bot.assert_not_called()
+
+
 class TestRestartBaasEnvInjection:
     def test_restart_records_current_publish_id_and_clears_stale_baas_failure(self):
         """BaaS 原地重启进入新 publish 轮次时，持久化当前 publish_id，
@@ -133,27 +317,21 @@ class TestRestartBaasEnvInjection:
                 "service_bot_config": {"device_count": 1},
             },
         }
+        svc._repository.get_by_id_and_owner.return_value = bot
 
         svc._restart_bot_baas(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
 
-        svc._device_binding_repo.update_device_props.assert_called_once_with(
-            binding_id=42,
-            props={
-                "publish_id": "12372",
-                "restart_publish_id": "12372",
-                "restart_request_id": baas.upgrade_bot.call_args.kwargs["request_id"],
-            },
+        calls = svc._device_binding_repo.update_device_props.call_args_list
+        assert calls[0].kwargs["props"]["restart_request_id"] == (
+            baas.upgrade_bot.call_args.kwargs["request_id"]
         )
-        svc._repository.update_by_owner.assert_called_with(
-            "bot001",
-            "user001",
-            {
-                "status": "PENDING",
-                "ext": {
-                    "service_bot_config": {"device_count": 1},
-                    "restart_publish_id": "12372",
-                },
-            },
+        assert calls[0].kwargs["props"]["restart_workflow_baseline"] == 0
+        assert calls[1].kwargs["props"] == {
+            "publish_id": "12372",
+            "restart_publish_id": "12372",
+        }
+        svc._repository.update_by_owner.assert_called_once_with(
+            "bot001", "user001", {"status": "PENDING"}
         )
         svc._task_queue_service.enqueue.assert_called_once()
         enqueue_args = svc._task_queue_service.enqueue.call_args
@@ -168,14 +346,17 @@ class TestRestartBaasEnvInjection:
         svc._restart_bot_baas(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
 
         request_id = baas.upgrade_bot.call_args.kwargs["request_id"]
-        svc._device_binding_repo.update_device_props.assert_called_once_with(
-            binding_id=42,
-            props={
-                "publish_id": "12372",
-                "restart_publish_id": "12372",
-                "restart_request_id": request_id,
-            },
-        )
+        calls = svc._device_binding_repo.update_device_props.call_args_list
+        assert calls[0].kwargs["props"] == {
+            "restart_request_id": request_id,
+            "restart_workflow_baseline": 0,
+            "restart_publish_id": None,
+            "restart_image_policy_on_success": None,
+        }
+        assert calls[1].kwargs["props"] == {
+            "publish_id": "12372",
+            "restart_publish_id": "12372",
+        }
         started_at_epoch_s = svc._task_queue_service.enqueue.call_args.args[1][
             "started_at_epoch_s"
         ]
@@ -185,25 +366,34 @@ class TestRestartBaasEnvInjection:
                 "binding_id": 42,
                 "bot_id": "bot001",
                 "owner_id": "user001",
-                "publish_id": 12372,
                 "started_at_epoch_s": started_at_epoch_s,
                 "bot_uuid": "BOT-uuid-9",
+                "request_id": request_id,
+                "workflow_baseline": 0,
             },
             deadline_seconds=86400,
+            delay_seconds=2,
         )
 
-    def test_restart_baas_marks_pending_before_enqueue(self):
+    def test_restart_baas_enqueues_recovery_before_pending_and_external_call(self):
         svc, baas, device_service = _make_service(template_config={})
         order: list[str] = []
-        svc._repository.update_by_owner.side_effect = lambda *args, **kwargs: order.append("bot_pending")
+        svc._repository.update_by_owner.side_effect = lambda *args, **kwargs: (
+            order.append("bot_pending") or {"bot_id": "bot001"}
+        )
         svc._device_binding_repo.update_status.side_effect = lambda *args, **kwargs: order.append("binding_pending")
         svc._task_queue_service.enqueue.side_effect = lambda *args, **kwargs: order.append("enqueue")
+        baas.upgrade_bot.side_effect = lambda **kwargs: (
+            order.append("upgrade") or {"publish_id": 100}
+        )
         bot = _make_bot(active_engine="openclaw", template_type=None)
 
         svc._restart_bot_baas(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
 
-        assert order.index("bot_pending") < order.index("enqueue")
-        assert order.index("binding_pending") < order.index("enqueue")
+        assert order.index("enqueue") < order.index("bot_pending")
+        assert order.index("enqueue") < order.index("binding_pending")
+        assert order.index("bot_pending") < order.index("upgrade")
+        assert order.index("binding_pending") < order.index("upgrade")
 
     def test_application_coding_injects_bot_type_model_runtime(self):
         """applicationCoding + aicoding → upgrade_bot 收到 extra_envs 含
@@ -228,11 +418,11 @@ class TestRestartBaasEnvInjection:
         # template_config 透传到 BaaS device 层（供 SandboxOverrides 覆写镜像/规格）
         assert kwargs["template_config"] is not None
 
-    def test_personal_coding_injects_bot_type_personal_no_relay_defaults(self):
-        """personalCoding + claude_code → BOT_TYPE=personal，不写 RELAY_DEFAULT_*。"""
+    def test_personal_coding_injects_bot_type_personal_and_relay_defaults(self):
+        """personalCoding + claude_code → BOT_TYPE=personal，并写 RELAY_DEFAULT_*。"""
         svc, baas, _ = _make_service(
             active_engine="claude_code",
-            template_config={"model": "m1", "runtime": "py"},  # 应被门控忽略
+            template_config={"model": "m1", "runtime": "py"},
         )
         bot = _make_bot(active_engine="claude_code", template_type="personalCoding")
 
@@ -242,8 +432,8 @@ class TestRestartBaasEnvInjection:
         envs = kwargs["extra_envs"]
         assert envs is not None
         assert envs["BOT_TYPE"] == "personal"
-        assert "RELAY_DEFAULT_MODEL" not in envs
-        assert "RELAY_DEFAULT_RUNTIME" not in envs
+        assert envs["RELAY_DEFAULT_MODEL"] == "m1"
+        assert envs["RELAY_DEFAULT_RUNTIME"] == "py"
 
     def test_claude_code_engine_injects_envs(self):
         """claude_code 引擎同样命中门控（与 aicoding 等价）。"""
@@ -260,12 +450,71 @@ class TestRestartBaasEnvInjection:
         assert envs["RELAY_DEFAULT_MODEL"] == "m-claude"
         assert envs["RELAY_DEFAULT_RUNTIME"] == "node"
 
-    def test_non_coding_engine_no_envs(self):
-        """非 claude_code/aicoding 引擎门控不命中 → extra_envs / template_config 为 None，
-        upgrade 行为与改动前完全一致。"""
+
+    def test_claude_code_other_template_type_consumes_template_config(self):
+        """claude_code + 其它 template_type 也要消费 template_config。
+
+        这类模板可能不是 applicationCoding/personalCoding，但必须带
+        template_key/template_uid 模板身份；重启时应把 model/runtime 注入
+        extra_envs，并继续透传 template_config 给 BaaS 沙箱覆写。
+        """
+        template_config = {
+            "template_key": "customCC",
+            "template_uid": "tpl-custom-cc",
+            "model": "  antchat/custom  ",
+            "runtime": "  codefuse-antcc  ",
+            "envs": {"FOO": "bar"},
+            "image": "registry.example.com/custom:latest",
+            "resource_spec": {"cpu": 4, "memory": 8192},
+        }
+        svc, baas, _ = _make_service(
+            active_engine="claude_code",
+            template_config=template_config,
+        )
+        bot = _make_bot(active_engine="claude_code", template_type="customCC")
+
+        svc._restart_bot_baas(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
+
+        kwargs = baas.upgrade_bot.call_args.kwargs
+        envs = kwargs["extra_envs"]
+        assert envs is not None
+        assert envs["BOT_TYPE"] == "customCC"
+        assert envs["RELAY_DEFAULT_MODEL"] == "antchat/custom"
+        assert envs["RELAY_DEFAULT_RUNTIME"] == "codefuse-antcc"
+        assert kwargs["template_config"] == template_config
+
+    def test_claude_code_other_template_type_without_template_identity_does_not_consume_envs(self):
+        """claude_code + 其它 template_type 缺 template_key/template_uid 时不消费 env 策略。"""
+        template_config = {
+            "model": "antchat/custom",
+            "runtime": "codefuse-antcc",
+            "envs": {"FOO": "bar"},
+        }
+        svc, baas, _ = _make_service(
+            active_engine="claude_code",
+            template_config=template_config,
+        )
+        bot = _make_bot(active_engine="claude_code", template_type="customCC")
+
+        svc._restart_bot_baas(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
+
+        kwargs = baas.upgrade_bot.call_args.kwargs
+        assert kwargs["extra_envs"] is None
+        # 沙箱覆写仍按重启链路透传；只是引擎策略不消费 model/runtime/token。
+        assert kwargs["template_config"] == template_config
+
+    def test_non_coding_engine_keeps_template_config_overrides(self):
+        """非 claude_code/aicoding 引擎门控不命中 → extra_envs=None，
+        但 template_config.envs/image/resource_spec 仍要透传给 BaaS /update。"""
+        sandbox_overrides = {
+            "model": "m1",  # 不应被 extra_envs 消费
+            "envs": {"FOO": "bar"},
+            "image": "registry.example.com/custom:latest",
+            "resource_spec": {"cpu": 4, "memory": 8},
+        }
         svc, baas, _ = _make_service(
             active_engine="moltis",
-            template_config={"model": "m1"},  # 不应被消费
+            template_config=sandbox_overrides,
         )
         bot = _make_bot(active_engine="moltis", template_type="applicationCoding")
 
@@ -273,7 +522,27 @@ class TestRestartBaasEnvInjection:
 
         kwargs = baas.upgrade_bot.call_args.kwargs
         assert kwargs["extra_envs"] is None
-        assert kwargs["template_config"] is None
+        assert kwargs["template_config"] == sandbox_overrides
+
+    def test_template_uid_context_failure_keeps_template_config_overrides(self):
+        """template_uid 上下文解析异常不应阻断 BaaS 重启或丢失沙箱覆写。"""
+        sandbox_overrides = {
+            "envs": {"FOO": "bar"},
+            "image": "registry.example.com/custom:latest",
+            "resource_spec": {"cpu": 4, "memory": 8},
+        }
+        svc, baas, _ = _make_service(
+            active_engine="moltis",
+            template_config=sandbox_overrides,
+        )
+        svc._attach_template_uid_context = MagicMock(side_effect=RuntimeError("resolver down"))
+        bot = _make_bot(active_engine="moltis", template_type="applicationCoding")
+
+        svc._restart_bot_baas(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
+
+        kwargs = baas.upgrade_bot.call_args.kwargs
+        assert kwargs["extra_envs"] is None
+        assert kwargs["template_config"] == sandbox_overrides
 
     def test_non_coding_template_type_no_envs(self):
         """非 applicationCoding/personalCoding 的 template_type 门控不命中。"""
@@ -287,6 +556,7 @@ class TestRestartBaasEnvInjection:
 
         kwargs = baas.upgrade_bot.call_args.kwargs
         assert kwargs["extra_envs"] is None
+        assert kwargs["template_config"] == {"model": "m1"}
 
     def test_missing_model_runtime_still_injects_bot_type(self):
         """applicationCoding + 无 model/runtime → 仍注入 BOT_TYPE，不写 RELAY_DEFAULT_*。"""

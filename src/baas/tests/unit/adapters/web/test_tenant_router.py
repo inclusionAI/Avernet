@@ -27,7 +27,7 @@ from secbaas.community.adapters.web.routers.config_management.tenant_router impo
     list_tenants,
     update_tenant,
 )
-from secbaas.community.api import ApiResponse, SuccessResponse
+from secbaas.community.api import ApiResponse, OperationContext, SuccessResponse
 from secbaas.community.api.tenant_manage import (
     TenantConfig,
     TenantCreate,
@@ -37,6 +37,8 @@ from secbaas.community.api.tenant_manage import (
 )
 
 # ==================== Helpers ====================
+
+_OP_CTX = OperationContext(operator="test_user", env="dev")
 
 
 def _make_tenant_response(
@@ -116,7 +118,9 @@ class TestListTenants:
             "secbaas.community.core.service.tenant_manage._tenant_manage_service.get_current_env",
             return_value="dev",
         ):
-            response = await list_tenants(page=1, page_size=10, service=mock_svc)
+            response = await list_tenants(
+                page=1, page_size=10, op_ctx=_OP_CTX, service=mock_svc
+            )
 
         assert isinstance(response, ApiResponse)
         assert response.code == 0
@@ -134,7 +138,7 @@ class TestListTenants:
             "secbaas.community.core.service.tenant_manage._tenant_manage_service.get_current_env",
             return_value="dev",
         ):
-            await list_tenants(page=3, page_size=50, service=mock_svc)
+            await list_tenants(page=3, page_size=50, op_ctx=_OP_CTX, service=mock_svc)
 
         mock_svc.list_tenants.assert_called_once_with(page=3, page_size=50)
 
@@ -147,7 +151,7 @@ class TestListTenants:
             "secbaas.community.core.service.tenant_manage._tenant_manage_service.get_current_env",
             return_value="dev",
         ):
-            await list_tenants(service=mock_svc)
+            await list_tenants(op_ctx=_OP_CTX, service=mock_svc)
 
         mock_svc.list_tenants.assert_called_once_with(page=1, page_size=20)
 
@@ -162,7 +166,7 @@ class TestListTenants:
             "secbaas.community.core.service.tenant_manage._tenant_manage_service.get_current_env",
             return_value="dev",
         ):
-            response = await list_tenants(service=mock_svc)
+            response = await list_tenants(op_ctx=_OP_CTX, service=mock_svc)
 
         assert response.data.items == []
         assert response.data.total == 0
@@ -183,7 +187,9 @@ class TestGetTenant:
             "secbaas.community.core.service.tenant_manage._tenant_manage_service.get_current_env",
             return_value="dev",
         ):
-            response = await get_tenant(name="found_tenant", service=mock_svc)
+            response = await get_tenant(
+                name="found_tenant", op_ctx=_OP_CTX, service=mock_svc
+            )
 
         assert isinstance(response, ApiResponse)
         assert response.data.name == "found_tenant"
@@ -199,7 +205,7 @@ class TestGetTenant:
             return_value="dev",
         ):
             with pytest.raises(HTTPException) as exc_info:
-                await get_tenant(name="missing", service=mock_svc)
+                await get_tenant(name="missing", op_ctx=_OP_CTX, service=mock_svc)
 
         assert exc_info.value.status_code == 404
         assert exc_info.value.detail["error_code"] == "TENANT_NOT_FOUND"
@@ -214,7 +220,7 @@ class TestGetTenant:
             "secbaas.community.core.service.tenant_manage._tenant_manage_service.get_current_env",
             return_value="dev",
         ):
-            await get_tenant(name="xyz", service=mock_svc)
+            await get_tenant(name="xyz", op_ctx=_OP_CTX, service=mock_svc)
 
         mock_svc.get_tenant_by_name.assert_called_once_with("xyz")
 
@@ -234,7 +240,9 @@ class TestGetTenantConfig:
             "secbaas.community.core.service.tenant_manage._tenant_manage_service.get_current_env",
             return_value="dev",
         ):
-            response = await get_tenant_config(name="t1", service=mock_svc)
+            response = await get_tenant_config(
+                name="t1", op_ctx=_OP_CTX, service=mock_svc
+            )
 
         assert isinstance(response, ApiResponse)
         assert response.data.default_template_uuid == "TPL-abc"
@@ -248,7 +256,9 @@ class TestGetTenantConfig:
             "secbaas.community.core.service.tenant_manage._tenant_manage_service.get_current_env",
             return_value="dev",
         ):
-            response = await get_tenant_config(name="t1", service=mock_svc)
+            response = await get_tenant_config(
+                name="t1", op_ctx=_OP_CTX, service=mock_svc
+            )
 
         assert response.data.default_template_uuid is None
 
@@ -262,7 +272,9 @@ class TestGetTenantConfig:
             return_value="dev",
         ):
             with pytest.raises(HTTPException) as exc_info:
-                await get_tenant_config(name="missing", service=mock_svc)
+                await get_tenant_config(
+                    name="missing", op_ctx=_OP_CTX, service=mock_svc
+                )
 
         assert exc_info.value.status_code == 404
         assert exc_info.value.detail["error_code"] == "TENANT_NOT_FOUND"
@@ -276,7 +288,9 @@ class TestGetTenantConfig:
             "secbaas.community.core.service.tenant_manage._tenant_manage_service.get_current_env",
             return_value="dev",
         ):
-            await get_tenant_config(name="target_tenant", service=mock_svc)
+            await get_tenant_config(
+                name="target_tenant", op_ctx=_OP_CTX, service=mock_svc
+            )
 
         mock_svc.get_tenant_config.assert_called_once_with("target_tenant")
 
@@ -295,7 +309,9 @@ class TestCreateTenant:
             "secbaas.community.core.service.tenant_manage._tenant_manage_service.get_current_env",
             return_value="dev",
         ):
-            response = await create_tenant(request=request, service=mock_svc)
+            response = await create_tenant(
+                request=request, op_ctx=_OP_CTX, service=mock_svc
+            )
 
         assert isinstance(response, ApiResponse)
         assert response.data.name == "new_tenant"
@@ -312,7 +328,7 @@ class TestCreateTenant:
             "secbaas.community.core.service.tenant_manage._tenant_manage_service.get_current_env",
             return_value="dev",
         ):
-            await create_tenant(request=request, service=mock_svc)
+            await create_tenant(request=request, op_ctx=_OP_CTX, service=mock_svc)
 
         mock_svc.create_tenant.assert_called_once_with(data=request)
 
@@ -329,7 +345,9 @@ class TestCreateTenant:
             "secbaas.community.core.service.tenant_manage._tenant_manage_service.get_current_env",
             return_value="dev",
         ):
-            response = await create_tenant(request=request, service=mock_svc)
+            response = await create_tenant(
+                request=request, op_ctx=_OP_CTX, service=mock_svc
+            )
 
         assert response.data.extra_config.default_template_uuid == "TPL-xyz"
 
@@ -343,7 +361,9 @@ class TestCreateTenant:
             "secbaas.community.core.service.tenant_manage._tenant_manage_service.get_current_env",
             return_value="dev",
         ):
-            response = await create_tenant(request=request, service=mock_svc)
+            response = await create_tenant(
+                request=request, op_ctx=_OP_CTX, service=mock_svc
+            )
 
         assert response.data.name == "t4"
 
@@ -365,7 +385,7 @@ class TestUpdateTenant:
             return_value="dev",
         ):
             response = await update_tenant(
-                name="updated_tenant", request=request, service=mock_svc
+                op_ctx=_OP_CTX, name="updated_tenant", request=request, service=mock_svc
             )
 
         assert isinstance(response, ApiResponse)
@@ -382,7 +402,9 @@ class TestUpdateTenant:
             return_value="dev",
         ):
             with pytest.raises(HTTPException) as exc_info:
-                await update_tenant(name="missing", request=request, service=mock_svc)
+                await update_tenant(
+                    name="missing", request=request, op_ctx=_OP_CTX, service=mock_svc
+                )
 
         assert exc_info.value.status_code == 404
         assert exc_info.value.detail["error_code"] == "TENANT_NOT_FOUND"
@@ -397,7 +419,9 @@ class TestUpdateTenant:
             "secbaas.community.core.service.tenant_manage._tenant_manage_service.get_current_env",
             return_value="dev",
         ):
-            await update_tenant(name="my_tenant", request=request, service=mock_svc)
+            await update_tenant(
+                name="my_tenant", request=request, op_ctx=_OP_CTX, service=mock_svc
+            )
 
         mock_svc.update_tenant.assert_called_once_with(name="my_tenant", data=request)
 
@@ -413,7 +437,9 @@ class TestUpdateTenant:
             "secbaas.community.core.service.tenant_manage._tenant_manage_service.get_current_env",
             return_value="dev",
         ):
-            response = await update_tenant(name="t", request=request, service=mock_svc)
+            response = await update_tenant(
+                name="t", request=request, op_ctx=_OP_CTX, service=mock_svc
+            )
 
         assert response.data.description == "new desc only"
 
@@ -428,7 +454,9 @@ class TestUpdateTenant:
             "secbaas.community.core.service.tenant_manage._tenant_manage_service.get_current_env",
             return_value="dev",
         ):
-            response = await update_tenant(name="t", request=request, service=mock_svc)
+            response = await update_tenant(
+                name="t", request=request, op_ctx=_OP_CTX, service=mock_svc
+            )
 
         assert response.data.extra_config.default_template_uuid == "TPL-new"
 
@@ -447,7 +475,7 @@ class TestDeleteTenant:
             return_value="dev",
         ):
             response = await delete_tenant(
-                name="to_delete", operator="admin", service=mock_svc
+                name="to_delete", op_ctx=_OP_CTX, service=mock_svc
             )
 
         assert isinstance(response, ApiResponse)
@@ -464,7 +492,7 @@ class TestDeleteTenant:
             return_value="dev",
         ):
             with pytest.raises(HTTPException) as exc_info:
-                await delete_tenant(name="missing", operator="admin", service=mock_svc)
+                await delete_tenant(name="missing", op_ctx=_OP_CTX, service=mock_svc)
 
         assert exc_info.value.status_code == 404
         assert exc_info.value.detail["error_code"] == "TENANT_NOT_FOUND"
@@ -478,12 +506,14 @@ class TestDeleteTenant:
             "secbaas.community.core.service.tenant_manage._tenant_manage_service.get_current_env",
             return_value="dev",
         ):
-            await delete_tenant(name="t1", operator="op123", service=mock_svc)
+            await delete_tenant(name="t1", op_ctx=_OP_CTX, service=mock_svc)
 
-        mock_svc.soft_delete_tenant.assert_called_once_with(name="t1", operator="op123")
+        mock_svc.soft_delete_tenant.assert_called_once_with(
+            name="t1", operator="test_user"
+        )
 
-    async def test_operator_defaults_to_unknown(self):
-        """When operator is not provided, it defaults to 'unknown'."""
+    async def test_operator_comes_from_op_ctx(self):
+        """Operator identity comes from OperationContext, not a query param."""
         mock_svc = MagicMock()
         mock_svc.soft_delete_tenant.return_value = True
 
@@ -491,10 +521,10 @@ class TestDeleteTenant:
             "secbaas.community.core.service.tenant_manage._tenant_manage_service.get_current_env",
             return_value="dev",
         ):
-            await delete_tenant(name="t1", service=mock_svc)
+            await delete_tenant(name="t1", op_ctx=_OP_CTX, service=mock_svc)
 
         mock_svc.soft_delete_tenant.assert_called_once_with(
-            name="t1", operator="unknown"
+            name="t1", operator="test_user"
         )
 
     async def test_delete_response_message(self):
@@ -506,7 +536,7 @@ class TestDeleteTenant:
             "secbaas.community.core.service.tenant_manage._tenant_manage_service.get_current_env",
             return_value="dev",
         ):
-            response = await delete_tenant(name="t", service=mock_svc)
+            response = await delete_tenant(name="t", op_ctx=_OP_CTX, service=mock_svc)
 
         assert response.data.message == "Tenant deleted"
 
@@ -522,28 +552,28 @@ class TestErrorResponses:
         [
             (
                 get_tenant,
-                {"name": "x"},
+                {"name": "x", "op_ctx": _OP_CTX},
                 "get_tenant_by_name",
                 None,
                 "x",
             ),
             (
                 get_tenant_config,
-                {"name": "y"},
+                {"name": "y", "op_ctx": _OP_CTX},
                 "get_tenant_config",
                 None,
                 "y",
             ),
             (
                 update_tenant,
-                {"name": "z", "request": _make_update_request()},
+                {"name": "z", "request": _make_update_request(), "op_ctx": _OP_CTX},
                 "update_tenant",
                 None,
                 "z",
             ),
             (
                 delete_tenant,
-                {"name": "w", "operator": "op"},
+                {"name": "w", "op_ctx": _OP_CTX},
                 "soft_delete_tenant",
                 False,
                 "w",

@@ -13,3 +13,13 @@ class PublishFlowServiceError(Exception):
 
     pass
 
+
+class DraftRestoreRetryableError(PublishFlowServiceError):
+    """Draft restore failed in an in-doubt/transient external-workflow window.
+
+    The operation ledger must remain non-terminal so the durable task retries the
+    same attempt and ``acquire_workflow`` can adopt an already-issued BaaS
+    workflow instead of opening a new attempt and submitting the mutation twice.
+    """
+
+    pass

@@ -1,0 +1,321 @@
+"""Repository contracts owned by the ``devices`` domain.
+
+Moved here by the ``core/repository`` consolidation. Every member is
+``@abstractmethod``: an implementation that omits one fails at construction
+naming the missing member, instead of raising ``AttributeError`` at the call
+site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
+``core/repository/README.md`` for why that direction is load-bearing.
+"""
+from __future__ import annotations
+
+from abc import abstractmethod
+from typing import Any, Protocol, TYPE_CHECKING, runtime_checkable
+
+if TYPE_CHECKING:
+    from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
+
+
+@runtime_checkable
+class DeviceBindingRepository(Protocol):
+    """设备绑定仓库接口 Protocol.
+
+    定义设备绑定记录的 CRUD 操作，支持设备生命周期管理。
+    实现类必须提供完整的方法实现。
+    """
+
+    @abstractmethod
+    def insert_binding(
+        self,
+        *,
+        entity_id: str,
+        entity_type: str,
+        device_id: str,
+        device_provider: str,
+        env: str,
+        device_props: dict[str, Any],
+        status: str,
+        apply_reason: str | None,
+        applied_by: str,
+    ) -> int:
+        """插入新的设备绑定记录.
+
+        Args:
+            entity_id: 实体ID（用户工号或团队ID）
+            entity_type: 实体类型（staff/team/proj）
+            device_id: 设备唯一标识
+            device_provider: 设备提供商（local/daas/arca）
+            env: 环境标识（dev/pre/prod）
+            device_props: 设备属性字典
+            status: 初始状态（PENDING/ACTIVE/FAILED/RELEASED）
+            apply_reason: 申请原因
+            applied_by: 申请人ID
+
+        Returns:
+            新记录的绑定ID
+        """
+        ...
+
+    @abstractmethod
+    def get_by_id(self, binding_id: int) -> DeviceBindingRecord | None:
+        """根据绑定ID获取设备绑定记录."""
+        ...
+
+    @abstractmethod
+    def get_active_by_bot_and_owner(
+        self, bot_id: str, owner_id: str
+    ) -> "DeviceBindingRecord | None":
+        """返回 bot 当前 active binding。
+
+        通过 ac_bots.binding_id 反查 ac_entity_device_binding (JOIN)。
+        bot 不存在 / 无 active binding / owner 不匹配 → 返 None。
+        DeviceContextResolver 入口：一次查询拿到 binding 完整对象
+        （id / device_provider / device_props / status 等），
+        替代旧的 ``get_device_provider_by_bot_id_and_owner``
+        返 dict 缺 ``binding_id`` 的链路。
+        """
+        ...
+
+    @abstractmethod
+    def get_by_device_id(self, device_id: str) -> DeviceBindingRecord | None:
+        """根据设备ID获取最新的设备绑定记录."""
+        ...
+
+    @abstractmethod
+    def release_binding(
+        self,
+        *,
+        binding_id: int,
+        release_reason: str | None,
+        released_by: str,
+    ) -> None:
+        """释放设备，标记绑定记录为 RELEASED 状态."""
+        ...
+
+    @abstractmethod
+    def update_status(self, *, binding_id: int, status: str) -> None:
+        """更新设备绑定状态."""
+        ...
+
+    @abstractmethod
+    def update_status_and_alive_at(self, *, binding_id: int, status: str) -> None:
+        """更新设备状态并刷新 alive 时间戳."""
+        ...
+
+    @abstractmethod
+    def update_device_props(self, *, binding_id: int, props: dict[str, Any]) -> None:
+        """合并 ``props`` 到绑定的 device_props（保留其它键）。
+
+        Caller 可以只传新 key（如 ``{"publish_id": ...}``），其它已有 key
+        会被保留；亦支持 caller 自己做完整合并后整字典传入（幂等）。
+        用于刷新 teclaw 绑定上的 baas ``publish_id`` 状态读取句柄，以及
+        singlebox 回填 adapter_port 等 BaaS 解析到的值。绑定不存在时静默忽略。
+        """
+        ...
+
+    @abstractmethod
+    def transition_teclaw_publish_terminal(
+        self,
+        *,
+        binding_id: int,
+        bot_id: str,
+        owner_id: str,
+        publish_id: int,
+        status: str,
+    ) -> bool:
+        """Atomically persist a guarded Teclaw terminal transition.
+
+        The implementation reloads and locks ``binding_id`` in one
+        transaction. It returns ``False`` without writes unless the binding is
+        still PENDING, owned by Teclaw, and references ``publish_id``. On a
+        match it updates the expected live bot first, then the binding. A bot
+        update that does not match exactly one row raises and rolls back the
+        transaction.
+        """
+        ...
+
+    @abstractmethod
+    def list_bindings(
+        self,
+        *,
+        env: str,
+        entity_id: str | None,
+        entity_type: str | None,
+        status: str | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[int, list[DeviceBindingRecord]]:
+        """查询设备绑定记录列表（分页）.
+
+        ``env`` 必传 —— ac_bots / ac_entity_device_binding 表在 pre / prod
+        共享同一 DB，仅靠 env 字段区分；不传 env 会跨环境串数据。caller
+        通常传 ``get_current_env()``；如需扫全环境（admin / 迁移工具），
+        显式分别传 "pre" / "prod" 两次。
+        """
+        ...
+
+    @abstractmethod
+    def list_active_caller_instance_bindings(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        env: str,
+    ) -> list[DeviceBindingRecord]:
+        """列出服务 Bot 在指定环境中的 ACTIVE caller 实例 binding。
+
+        caller 实例由 ``apply_reason=caller_instance:{bot_id}`` 标识，且
+        binding 的 ``entity_id`` 始终是服务 Bot owner；``applied_by`` 才是
+        caller。这里只返回 BaaS staff binding，并按 ``device_id`` 去重。
+        """
+        ...
+
+    @abstractmethod
+    def count_non_released_bindings(
+        self,
+        *,
+        entity_id: str,
+        entity_type: str,
+        env: str,
+    ) -> int:
+        """统计非释放状态的设备数量（用于配额检查）."""
+        ...
+
+    @abstractmethod
+    def exists_device_id(self, *, device_id: str) -> bool:
+        """检查设备ID是否已存在."""
+        ...
+
+    @abstractmethod
+    def get_released_binding(self, *, device_id: str) -> DeviceBindingRecord | None:
+        """获取已释放状态的设备绑定记录（用于重新申请时复用）."""
+        ...
+
+    @abstractmethod
+    def reuse_binding(
+        self,
+        *,
+        binding_id: int,
+        device_props: dict[str, Any],
+        apply_reason: str | None,
+        applied_by: str,
+        status: str = "PENDING",
+    ) -> None:
+        """重用已释放的设备绑定记录."""
+        ...
+
+    @abstractmethod
+    def get_active_engine_by_device_id(self, *, device_id: str) -> str:
+        """通过设备ID获取Bot的 active_engine."""
+        ...
+
+    @abstractmethod
+    def batch_update_env(self, *, binding_ids: list[int], env: str) -> int:
+        """批量更新环境字段."""
+        ...
+
+    @abstractmethod
+    def get_by_ids(self, binding_ids: list[int]) -> list[DeviceBindingRecord]:
+        """根据ID列表批量获取绑定记录."""
+        ...
+
+    @abstractmethod
+    def update_bot_start_status(self, *, binding_id: int, status: str, message: str | None) -> None:
+        """更新 ac_bots 表 ext 字段中的启动状态."""
+        ...
+
+    @abstractmethod
+    def update_bot_status_on_device_active(self, *, binding_id: int) -> None:
+        """设备变 ACTIVE 时更新关联 Bot 状态为 ACTIVE（仅当 Bot 当前状态为 PENDING 时）."""
+        ...
+
+    @abstractmethod
+    def update_bot_status_on_device_failed(self, *, binding_id: int) -> None:
+        """设备变 FAILED 时更新关联 Bot 状态为 FAILED."""
+        ...
+
+
+@runtime_checkable
+class OssToNasRecordRepository(Protocol):
+    """OSS → NAS 迁移记录仓库接口."""
+
+    @abstractmethod
+    def get_record(
+        self,
+        staff_no: str,
+        bot_id: str,
+        env: str | None = None,
+    ) -> Any | None:
+        """按 staff_no + bot_id 查询单条迁移记录.
+
+        Args:
+            env: 环境标 (pre/prod)，若不传则自动获取当前环境.
+        """
+        ...
+
+    @abstractmethod
+    def query_records_by_batch(
+        self,
+        env: str,
+        batch_no: str,
+        sub_batch_no: str,
+        status_filter: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """按批次查询迁移记录，可按 storage_status 过滤."""
+        ...
+
+    @abstractmethod
+    def update_status(
+        self,
+        staff_no: str,
+        bot_id: str,
+        new_status: str,
+        env: str | None = None,
+    ) -> None:
+        """更新单条记录的 storage_status."""
+        ...
+
+    @abstractmethod
+    def insert_record(
+        self,
+        staff_no: str,
+        bot_id: str,
+        env: str,
+        batch_no: str,
+        sub_batch_no: str,
+        bot_info: dict[str, Any] | None = None,
+        storage_status: str = "oss",
+    ) -> dict[str, Any]:
+        """插入一条迁移记录."""
+        ...
+
+    @abstractmethod
+    def update_record(
+        self,
+        staff_no: str,
+        bot_id: str,
+        updates: dict[str, Any],
+        env: str | None = None,
+    ) -> dict[str, Any]:
+        """更新单条记录的指定字段，返回更新后的记录."""
+        ...
+
+    @abstractmethod
+    def delete_record(
+        self,
+        staff_no: str,
+        bot_id: str,
+        env: str | None = None,
+    ) -> bool:
+        """删除单条迁移记录，返回是否删除成功."""
+        ...
+
+    @abstractmethod
+    def batch_update_status(
+        self,
+        env: str,
+        batch_no: str,
+        sub_batch_no: str,
+        new_status: str,
+    ) -> int:
+        """批量更新批次记录的 storage_status，返回影响行数."""
+        ...

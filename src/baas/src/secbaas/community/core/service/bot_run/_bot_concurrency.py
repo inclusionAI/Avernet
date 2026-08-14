@@ -28,13 +28,19 @@ class ConcurrencyLimiter:
 
     支持 ``ref_count`` 引用计数：调用方 acquire 时 +1，release 时 -1。
     当 ``ref_count == 0`` 且超过空闲 TTL 时可安全淘汰。
+
+    ``min_interval_seconds`` 用于亚单位并发场景：当 QPM 小于机器数时，
+    per_machine 并发不足 1，通过限制两次 acquire 的最小间隔来降低速率，
+    使全局 TPM 可精确控制到 1。
     """
 
-    def __init__(self, capacity: int) -> None:
+    def __init__(self, capacity: int, min_interval_seconds: float = 0.0) -> None:
         self.capacity = capacity
         self._semaphore = threading.Semaphore(capacity)
         self._ref_count = 0
         self.last_used = time.monotonic()
+        self._min_interval = min_interval_seconds
+        self._last_acquire_ts: float = float("-inf")
 
     @property
     def ref_count(self) -> int:
@@ -42,15 +48,23 @@ class ConcurrencyLimiter:
 
     def has_slot(self) -> bool:
         """预检：是否有空闲槽位（不消费）。"""
-        # Semaphore 没有非阻塞的 peek，用 _value 做近似判断
-        return self._semaphore._value > 0
+        if self._semaphore._value <= 0:
+            return False
+        if self._min_interval > 0:
+            elapsed = time.monotonic() - self._last_acquire_ts
+            if elapsed < self._min_interval:
+                return False
+        return True
 
     def try_acquire(self) -> bool:
         """尝试占用一个槽位，成功返回 True。"""
+        if not self.has_slot():
+            return False
         ok = self._semaphore.acquire(blocking=False)
         if ok:
             self._ref_count += 1
             self.last_used = time.monotonic()
+            self._last_acquire_ts = time.monotonic()
         return ok
 
     def release(self) -> None:

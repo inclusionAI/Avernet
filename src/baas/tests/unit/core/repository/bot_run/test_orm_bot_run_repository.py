@@ -188,6 +188,7 @@ class TestUpdateStatus:
 
 class TestUpdateResult:
     def test_sets_completed_with_extra(self, repository, mock_session):
+        mock_session.query.return_value.filter.return_value.update.return_value = 1
         repository.update_result(
             "run-001",
             "Response content here",
@@ -209,6 +210,7 @@ class TestUpdateResult:
         assert "gmt_modified" in update_dict
 
     def test_sets_completed_with_none_extra(self, repository, mock_session):
+        mock_session.query.return_value.filter.return_value.update.return_value = 1
         repository.update_result("run-002", "Done", None)
 
         call_kwargs = (
@@ -218,6 +220,7 @@ class TestUpdateResult:
         assert update_dict["result_extra"] is None
 
     def test_truncates_long_content(self, repository, mock_session):
+        mock_session.query.return_value.filter.return_value.update.return_value = 1
         long_content = "y" * 300
         repository.update_result("run-003", long_content, None)
 
@@ -230,6 +233,7 @@ class TestUpdateResult:
         assert update_dict["result_content_long"] == long_content
 
     def test_empty_content(self, repository, mock_session):
+        mock_session.query.return_value.filter.return_value.update.return_value = 1
         repository.update_result("run-004", "", None)
 
         call_kwargs = (
@@ -239,6 +243,12 @@ class TestUpdateResult:
         assert update_dict["result_content"] == ""
         assert update_dict["result_content_long"] == ""
 
+    def test_skips_when_already_terminal(self, repository, mock_session):
+        mock_session.query.return_value.filter.return_value.update.return_value = 0
+        repository.update_result("run-005", "late result", None)
+
+        mock_session.query.return_value.filter.return_value.update.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # TestUpdateError
@@ -247,6 +257,7 @@ class TestUpdateResult:
 
 class TestUpdateError:
     def test_sets_failed_with_error(self, repository, mock_session):
+        mock_session.query.return_value.filter.return_value.update.return_value = 1
         repository.update_error("run-001", "Connection timeout")
 
         mock_session.query.return_value.filter.return_value.update.assert_called_once()
@@ -260,6 +271,7 @@ class TestUpdateError:
         assert "gmt_modified" in update_dict
 
     def test_sets_failed_with_empty_error(self, repository, mock_session):
+        mock_session.query.return_value.filter.return_value.update.return_value = 1
         repository.update_error("run-002", "")
 
         call_kwargs = (
@@ -268,3 +280,9 @@ class TestUpdateError:
         update_dict = call_kwargs[0][0]
         assert update_dict["status"] == "FAILED"
         assert update_dict["error"] == ""
+
+    def test_skips_when_already_terminal(self, repository, mock_session):
+        mock_session.query.return_value.filter.return_value.update.return_value = 0
+        repository.update_error("run-003", "late error")
+
+        mock_session.query.return_value.filter.return_value.update.assert_called_once()

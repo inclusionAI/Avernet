@@ -1,0 +1,34 @@
+[package]
+name = "bcs-api-http"
+description = "Versioned OpenAPI and Internal API HTTP delivery adapter for BCN"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+axum = { workspace = true }
+bcs-service-api = { workspace = true }
+bcs-storage-api = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+jsonwebtoken = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_path_to_error = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true, features = ["parsing"] }
+tracing = { workspace = true }
+ulid = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+tower = { workspace = true, features = ["util"] }
+tracing-subscriber = { workspace = true }

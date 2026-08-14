@@ -10,12 +10,15 @@ OpenClaw WebSocket 客户端（纯异步版本）
 """
 
 import asyncio
+import dataclasses
+import ipaddress
 import json
 import os
 import ssl
 import uuid
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import urlsplit
 
 import websockets
 from websockets.asyncio.client import ClientConnection
@@ -27,6 +30,44 @@ logger = get_logger("core-bot-run")
 
 # 事件处理器类型：同步或异步均可，不关心返回值
 EventHandler = Callable[..., Any]
+
+
+def _is_loopback_websocket_uri(uri: str) -> bool:
+    """Return whether a WebSocket URI targets a local engine adapter."""
+    hostname = urlsplit(uri).hostname
+    if not hostname:
+        return False
+    if hostname.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False
+
+
+class ChatRequestError(Exception):
+    """chat.send / chat.inject 响应 ok=False 时抛出。
+
+    当服务器返回的响应中 ok 字段为 False 时（例如会话验证失败、服务不可用），
+    BotWebSocketClient.chat_send / chat_inject 会抛出此异常，避免静默失败。
+
+    Attributes:
+        error_code: 服务器返回的错误码（如 "UNAVAILABLE"），可能为 None
+        error_message: 服务器返回的错误信息，可能为 None
+        retryable: 服务器指示是否可重试，可能为 None
+    """
+
+    def __init__(
+        self,
+        message: str,
+        error_code: str | None = None,
+        error_message: str | None = None,
+        retryable: bool | None = None,
+    ):
+        super().__init__(message)
+        self.error_code = error_code
+        self.error_message = error_message
+        self.retryable = retryable
 
 
 class BotWebSocketClient:
@@ -120,14 +161,19 @@ class BotWebSocketClient:
         # 会导致 keepalive ping timeout 断连。
         # 连接存活性由服务端应用层 tick 事件（每 30s）保证。
         additional_headers = websockets.Headers(headers)
+        connect_kwargs: dict[str, Any] = {
+            "additional_headers": additional_headers,
+            "ssl": ssl_context,
+            "open_timeout": open_timeout,
+            "ping_interval": None,
+        }
+        if _is_loopback_websocket_uri(self.uri):
+            # websockets reads proxy settings independently of NO_PROXY.
+            # Adapter endpoints are loopback-only and must connect directly.
+            connect_kwargs["proxy"] = None
+            logger.debug("WebSocket connection uses direct loopback transport")
         self._ws = await asyncio.wait_for(
-            websockets.connect(
-                self.uri,
-                additional_headers=additional_headers,
-                ssl=ssl_context,
-                open_timeout=open_timeout,
-                ping_interval=None,
-            ),
+            websockets.connect(self.uri, **connect_kwargs),
             timeout=timeout,
         )
         self._connected = True
@@ -193,6 +239,7 @@ class BotWebSocketClient:
         auth_token: str | None = None,
         app_id: str | None = None,
         chat_metadata: dict[str, str] | None = None,
+        attachments: list[Any] | None = None,
     ) -> dict[str, Any]:
         """发送聊天消息"""
         params: dict[str, Any] = {
@@ -206,13 +253,29 @@ class BotWebSocketClient:
             params["appId"] = app_id
         if chat_metadata:
             params.update(chat_metadata)
+        if attachments:
+            params["attachments"] = [
+                dataclasses.asdict(a) if dataclasses.is_dataclass(a) else a
+                for a in attachments
+            ]
         params["x-iam-token"] = auth_token or "OPEN_API:NOT_PROVIDED"
 
-        return await self._send_request(
+        result = await self._send_request(
             "chat.send",
             params,
             timeout=min(timeout_ms / 1000, 120) if timeout_ms else 120,
         )
+
+        if not result.get("ok"):
+            error = result.get("error", {})
+            raise ChatRequestError(
+                message=f"chat.send failed: {error.get('code')} - {error.get('message')}",
+                error_code=error.get("code"),
+                error_message=error.get("message"),
+                retryable=error.get("retryable"),
+            )
+
+        return result
 
     async def chat_inject(
         self,
@@ -221,6 +284,7 @@ class BotWebSocketClient:
         timeout_ms: int | None = None,
         auth_token: str | None = None,
         chat_metadata: dict[str, str] | None = None,
+        attachments: list[Any] | None = None,
     ) -> dict[str, Any]:
         """注入聊天消息"""
         params: dict[str, Any] = {
@@ -231,13 +295,29 @@ class BotWebSocketClient:
             params["timeoutMs"] = str(timeout_ms)
         if chat_metadata:
             params.update(chat_metadata)
+        if attachments:
+            params["attachments"] = [
+                dataclasses.asdict(a) if dataclasses.is_dataclass(a) else a
+                for a in attachments
+            ]
         params["x-iam-token"] = auth_token or "OPEN_API:NOT_PROVIDED"
 
-        return await self._send_request(
+        result = await self._send_request(
             "chat.inject",
             params,
             timeout=min(timeout_ms / 1000, 120) if timeout_ms else 120,
         )
+
+        if not result.get("ok"):
+            error = result.get("error", {})
+            raise ChatRequestError(
+                message=f"chat.inject failed: {error.get('code')} - {error.get('message')}",
+                error_code=error.get("code"),
+                error_message=error.get("message"),
+                retryable=error.get("retryable"),
+            )
+
+        return result
 
     async def chat_abort(
         self,

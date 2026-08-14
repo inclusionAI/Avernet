@@ -59,6 +59,7 @@ class CaseInput:
     query_params: Mapping[str, Any] = field(default_factory=dict)
     headers: Mapping[str, str] = field(default_factory=dict)
     json_body: Any = None
+    raw_body: bytes | None = None
     form_data: Mapping[str, Any] | None = None
     files: Any = None
 

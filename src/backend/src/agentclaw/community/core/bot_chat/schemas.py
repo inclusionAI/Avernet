@@ -20,8 +20,23 @@ class ConversationSession(BaseModel):
     biz_scene: str | None = Field(default=None, description="Business scene")
     session_id: str | None = Field(default=None, description="Canonical session ID")
     session_key: str | None = Field(default=None, description="Engine session key")
+    bot_id: str | None = Field(default=None, description="Bot ID")
+    bot_name: str | None = Field(default=None, description="Bot display name")
+    group_id: str | None = Field(default=None, description="BCS group ID")
+    session_kind: str | None = Field(default=None, description="Optional group-session label")
     name: str = Field(default="", description="Session / trace name")
     input: str | None = Field(default=None, description="Last user message extracted from trace input")
+    output_preview: str | None = Field(default=None, description="Short trace output preview")
+    search_output: str | None = Field(
+        default=None,
+        exclude=True,
+        repr=False,
+        description="Full output retained internally for client-side filtering",
+    )
+    match_sources: list[str] = Field(
+        default_factory=list,
+        description="Sources that matched the business task, such as direct or biz_ref",
+    )
     status: str = Field(default="SUCCESS", description="SUCCESS or FAILED")
     timestamp: str = Field(..., description="ISO 8601 timestamp")
     user_id: str | None = Field(default=None, description="Langfuse userId (owner_id)")
@@ -44,6 +59,7 @@ class ConversationObservation(BaseModel):
     total_tokens: int = Field(default=0)
     input: Any = Field(default=None)
     output: Any = Field(default=None)
+    metadata: dict[str, Any] | None = Field(default=None, description="Raw observation metadata")
     model_name: str | None = Field(default=None, description="Model name from metadata.attributes['gen_ai.request.model']")
     parent_observation_id: str | None = Field(default=None)
     children: list["ConversationObservation"] = Field(default_factory=list)
@@ -57,6 +73,10 @@ class ConversationDetail(BaseModel):
     biz_scene: str | None = Field(default=None)
     session_id: str | None = Field(default=None)
     session_key: str | None = Field(default=None)
+    bot_id: str | None = Field(default=None)
+    bot_name: str | None = Field(default=None)
+    group_id: str | None = Field(default=None)
+    session_kind: str | None = Field(default=None)
     name: str = Field(default="")
     input: Any = Field(default=None)
     output: Any = Field(default=None)

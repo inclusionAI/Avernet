@@ -12,6 +12,7 @@ user_config:
     cache: stub
     bot_service: stub
     engine_adapter: stub  # stub | real
+    file_transfer: stub  # stub | real
     sandbox:
       arca: stub
       desktop: stub
@@ -21,4 +22,6 @@ user_config:
       poolab: stub
     database:
       plugin_database: "SQLITE_ORM"
+      create_schema: true
+      seed_data: true
       database_url: "sqlite:///:memory:"

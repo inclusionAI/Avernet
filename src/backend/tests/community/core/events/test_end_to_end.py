@@ -73,6 +73,7 @@ def test_report_device_alive_triggers_full_symlink_sync():
     mock_factory.create.return_value = fake_service
     mock_resolver = MagicMock()
     mock_ctx = MagicMock()
+    mock_ctx.binding_id = 7
     mock_resolver.resolve_for_bot.return_value = mock_ctx
     mock_dispatcher = MagicMock()
     mock_dispatcher.dispatch.return_value = fake_sync_plugin
@@ -153,6 +154,9 @@ def test_report_device_alive_skip_token_check_bypasses_token_validation():
     mock_factory = MagicMock()
     mock_factory.create.return_value = fake_service
     mock_resolver = MagicMock()
+    mock_ctx = MagicMock()
+    mock_ctx.binding_id = 7
+    mock_resolver.resolve_for_bot.return_value = mock_ctx
     mock_dispatcher = MagicMock()
     mock_dispatcher.dispatch.return_value = fake_sync_plugin
 

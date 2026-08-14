@@ -841,7 +841,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum(rate(bcs_http_requests_total{env=\"$env\",route!~\"/chat/runs/[{]run_id[}]|/bots/[{]id[}]/chat|/sessions/[{]sid[}]/chat|/bot/events|/bots/[{]id[}]/chat-async|/ws|/ws/bot\"}[1m])) or vector(0)",
+          "expr": "sum(rate(bcs_http_requests_total{env=\"$env\",route!~\"/chat/runs/[{]run_id[}]|/sessions/[{]sid[}]/chat|/bot/events|/bots/[{]id[}]/chat-async|/ws|/ws/bot\"}[1m])) or vector(0)",
           "instant": false,
           "legendFormat": "ordinary qps",
           "range": true,
@@ -939,7 +939,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum(rate(bcs_http_requests_total{env=\"$env\",route=~\"/bot/events|/bots/[{]id[}]/chat-async|/chat/runs/[{]run_id[}]|/bots/[{]id[}]/chat|/sessions/[{]sid[}]/chat\"}[1m])) or vector(0)",
+          "expr": "sum(rate(bcs_http_requests_total{env=\"$env\",route=~\"/bot/events|/bots/[{]id[}]/chat-async|/chat/runs/[{]run_id[}]|/sessions/[{]sid[}]/chat\"}[1m])) or vector(0)",
           "instant": false,
           "legendFormat": "bot/provider/waiting qps",
           "range": true,
@@ -1268,7 +1268,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by(le) (rate(bcs_http_request_duration_seconds_bucket{env=\"$env\",route!~\"/chat/runs/[{]run_id[}]|/bots/[{]id[}]/chat|/sessions/[{]sid[}]/chat|/bot/events|/bots/[{]id[}]/chat-async|/ws|/ws/bot\"}[1m])))",
+          "expr": "histogram_quantile(0.95, sum by(le) (rate(bcs_http_request_duration_seconds_bucket{env=\"$env\",route!~\"/chat/runs/[{]run_id[}]|/sessions/[{]sid[}]/chat|/bot/events|/bots/[{]id[}]/chat-async|/ws|/ws/bot\"}[1m])))",
           "instant": false,
           "legendFormat": "p95 ordinary",
           "range": true,
@@ -1280,7 +1280,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum by(le) (rate(bcs_http_request_duration_seconds_bucket{env=\"$env\",route!~\"/chat/runs/[{]run_id[}]|/bots/[{]id[}]/chat|/sessions/[{]sid[}]/chat|/bot/events|/bots/[{]id[}]/chat-async|/ws|/ws/bot\"}[1m])))",
+          "expr": "histogram_quantile(0.99, sum by(le) (rate(bcs_http_request_duration_seconds_bucket{env=\"$env\",route!~\"/chat/runs/[{]run_id[}]|/sessions/[{]sid[}]/chat|/bot/events|/bots/[{]id[}]/chat-async|/ws|/ws/bot\"}[1m])))",
           "instant": false,
           "legendFormat": "p99 ordinary",
           "range": true,
@@ -1493,7 +1493,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by(le, route) (rate(bcs_http_request_duration_seconds_bucket{env=\"$env\",route!~\"/chat/runs/[{]run_id[}]|/bots/[{]id[}]/chat|/sessions/[{]sid[}]/chat|/bot/events|/bots/[{]id[}]/chat-async|/ws|/ws/bot\"}[1m])))",
+          "expr": "histogram_quantile(0.95, sum by(le, route) (rate(bcs_http_request_duration_seconds_bucket{env=\"$env\",route!~\"/chat/runs/[{]run_id[}]|/sessions/[{]sid[}]/chat|/bot/events|/bots/[{]id[}]/chat-async|/ws|/ws/bot\"}[1m])))",
           "instant": false,
           "legendFormat": "p95 {{route}}",
           "range": true,
@@ -1505,7 +1505,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum by(le, route) (rate(bcs_http_request_duration_seconds_bucket{env=\"$env\",route!~\"/chat/runs/[{]run_id[}]|/bots/[{]id[}]/chat|/sessions/[{]sid[}]/chat|/bot/events|/bots/[{]id[}]/chat-async|/ws|/ws/bot\"}[1m])))",
+          "expr": "histogram_quantile(0.99, sum by(le, route) (rate(bcs_http_request_duration_seconds_bucket{env=\"$env\",route!~\"/chat/runs/[{]run_id[}]|/sessions/[{]sid[}]/chat|/bot/events|/bots/[{]id[}]/chat-async|/ws|/ws/bot\"}[1m])))",
           "instant": false,
           "legendFormat": "p99 {{route}}",
           "range": true,
@@ -1845,7 +1845,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by(le, route) (rate(bcs_http_request_duration_seconds_bucket{env=\"$env\",route=~\"/chat/runs/[{]run_id[}]|/bots/[{]id[}]/chat|/sessions/[{]sid[}]/chat\"}[1m])))",
+          "expr": "histogram_quantile(0.95, sum by(le, route) (rate(bcs_http_request_duration_seconds_bucket{env=\"$env\",route=~\"/chat/runs/[{]run_id[}]|/sessions/[{]sid[}]/chat\"}[1m])))",
           "instant": false,
           "legendFormat": "p95 {{route}}",
           "range": true,
@@ -1857,7 +1857,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum by(le, route) (rate(bcs_http_request_duration_seconds_bucket{env=\"$env\",route=~\"/chat/runs/[{]run_id[}]|/bots/[{]id[}]/chat|/sessions/[{]sid[}]/chat\"}[1m])))",
+          "expr": "histogram_quantile(0.99, sum by(le, route) (rate(bcs_http_request_duration_seconds_bucket{env=\"$env\",route=~\"/chat/runs/[{]run_id[}]|/sessions/[{]sid[}]/chat\"}[1m])))",
           "instant": false,
           "legendFormat": "p99 {{route}}",
           "range": true,

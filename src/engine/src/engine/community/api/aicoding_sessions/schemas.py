@@ -16,7 +16,7 @@ class FileTreeNodeSchema(BaseModel):
 
 class FileTreeResponse(BaseModel):
     success: bool = True
-    session_id: str
+    session_id: Optional[str] = None
     tree: List[FileTreeNodeSchema] = Field(default_factory=list)
 
 
@@ -214,13 +214,40 @@ class PullRequestOutputInfo(BaseModel):
     url: str = Field(description="PR 链接")
     title: Optional[str] = Field(None, description="PR 标题")
     at: Optional[int] = Field(None, description="生成时间 unix ms")
-    project_dir: Optional[str] = Field(None, alias="projectDir", description="项目目录")
+    project_dir: Optional[str] = Field(
+        None, alias="projectDir", description="项目目录"
+    )
 
 
 class SessionPullRequestsResponse(BaseModel):
     success: bool = True
     session_id: str
     pull_requests: List[PullRequestOutputInfo] = Field(default_factory=list)
+
+
+# ── API: session issue outputs ───────────────────────────────────────
+
+
+class IssueOutputInfo(BaseModel):
+    """aix run output list --kind issue 单条记录（透传 aix 原生字段）。"""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    run_id: Optional[str] = Field(None, alias="runId", description="关联的 Run ID")
+    kind: str = Field(description="output 类型，固定为 'issue'")
+    provider: Optional[str] = Field(None, description="工作项平台，如 'generic'")
+    url: str = Field(description="Issue / 工作项链接")
+    title: Optional[str] = Field(None, description="Issue / 工作项标题")
+    at: Optional[int] = Field(None, description="生成时间 unix ms")
+    project_dir: Optional[str] = Field(
+        None, alias="projectDir", description="项目目录"
+    )
+
+
+class SessionIssuesResponse(BaseModel):
+    success: bool = True
+    session_id: str
+    issues: List[IssueOutputInfo] = Field(default_factory=list)
 
 
 # ── API: worktree status ─────────────────────────────────────────────
@@ -253,5 +280,7 @@ __all__ = [
     "RunPhaseStatusResponse",
     "PullRequestOutputInfo",
     "SessionPullRequestsResponse",
+    "IssueOutputInfo",
+    "SessionIssuesResponse",
     "WorktreeStatusResponse",
 ]

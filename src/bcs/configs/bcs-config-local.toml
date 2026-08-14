@@ -11,16 +11,14 @@ max_history_per_session = 1000
 store_messages = false
 strict_container_validation = false
 
-# Switch for Provider 2.0 SSE gray-list mode. Default is false.
-# When false, Provider 2.0 downlink rolls out over SSE for all providers.
-# When true, only created_by entries in the gray list use SSE.
+# Deprecated compatibility setting. Provider 2.0 chat.send is always SSE-first;
+# this value is retained for config/API compatibility and has no effect.
 provider_stream_gray_enabled = false
 
-# created_by staff IDs whose Provider 2.0 bots receive chat.send with SSE
-# transport when gray-list mode is enabled.
+# Deprecated compatibility setting; retained but no longer consulted.
 provider_stream_gray_created_by = []
 
-max_groups_as_driver = 20
+max_groups_as_driver = 200
 max_group_members = 20
 max_groups_as_member = 20
 max_group_messages = 1000
@@ -36,6 +34,14 @@ onboard_binding_enabled = false
 dingtalk_accounts = []
 api_keys = []
 allowed_switch_provider_ids = []
+
+[gateway_principal]
+issuer = "gateway"
+audience = "bcs"
+key_id = "bare"
+# Local launchers inject an explicit test value; every other deployment must
+# provide real secret material through this lookup.
+signing_key_env = "AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE"
 
 [cors]
 allowed_origins = [
@@ -70,6 +76,12 @@ type = "sqlite"
 [database.sqlite]
 path = "bcs.db"
 
+[secret]
+provider = "env"
+
+[secret.providers.env]
+prefix = "BCS_SECRET_"
+
 [collaboration.templates]
 storage_type = "file"
 base_dir = "seeds/collaboration-templates"
@@ -78,6 +90,15 @@ default_language = "zh-CN"
 [logging]
 default_level = "debug"
 console = true
+
+[[logging.outputs]]
+name = "common-error"
+path = "./logs"
+file = "common-error.log"
+level = "error"
+rotation = "daily"
+targets = ["*"]
+max_keep_days = 7
 
 [[logging.outputs]]
 name = "messages"
@@ -127,10 +148,12 @@ mock_user_name = "guest"
 allow_mock_headers = true
 
 [bcsfuse]
-enabled = false
+enabled = true
 url = "http://127.0.0.1:8765"
 fusion_timeout_ms = 120000
 sync_timeout_ms = 10000
+# Base backoff between worker-sync retry attempts; doubles per attempt.
+sync_retry_base_ms = 1000
 profile_id = "default"
 recommend_top_k = 10
 recommend_min_score = 0.1
@@ -165,6 +188,22 @@ default_ttl_seconds = 86400
 base_url = "http://127.0.0.1:21000"
 group_link_url = "http://localhost:8000/groups/{group_id}"
 session_link_url = "http://localhost:8000/sessions/{session_id}"
+
+[openapi_v1]
+public_collaboration_base_url = "http://127.0.0.1:21000/openapi/v1/collaboration"
+
+[session_files]
+storage_backend = "local"
+multipart_threshold = 104857600
+max_file_size = 5368709120
+
+[session_files.backend]
+data_dir = "./data/session-files"
+
+[session_files.share]
+token_secret = "local-development-only-share-token-secret"
+default_ttl_seconds = 86400
+share_base_url = "http://127.0.0.1:21000"
 
 [manifest]
 schema_version = 1

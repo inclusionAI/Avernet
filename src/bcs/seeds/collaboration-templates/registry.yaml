@@ -15,6 +15,18 @@ templates:
     tags: [parallel]
     priority: 20
 
+  bot-human-bot-review:
+    tags: [judge, serial]
+    priority: 25
+
+  world-cup-preview-content-production:
+    tags: [parallel]
+    priority: 30
+
+  micro-merchant-event-orchestration:
+    tags: [parallel]
+    priority: 31
+
   single-bot-guided-answer:
     tags: [single-step]
-    priority: 30
+    priority: 40

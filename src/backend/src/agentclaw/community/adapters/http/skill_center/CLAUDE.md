@@ -266,3 +266,40 @@ device 层正处于 agentbox/arca 双链路拆分迁移中（背景见 `docs/sup
 **公开 bot 的 owner_id**：前端访问公开 bot 时同时传 `entity_id`（owner）和 `ctx.user_id`（访客）。`bot_type` 属于 owner，查 bot 信息必须用 `entity_id`，不能用 `ctx.user_id`。
 
 **软链路径是 engine 视角的绝对路径**：`get_symlink_mappings` 产出 `/home/admin/.openclaw/...` 开头的路径（engine 容器内）。`LocalDeviceSyncPlugin` 会把它转为 `~/.openclaw/...`（本地开发模式）。
+
+---
+
+## 九、目录语义与路径所有权
+
+### 内容库与激活入口必须分离
+
+`skills-repo` 与 `skills-local` 保存完整内容集合；active Skills 目录是 Agent
+发现当前 Bot 已激活 Skill 的入口。这两类目录不能混为一谈。
+
+新版引擎可能递归扫描受信任目录和软链目标。若 active 目录能够进入完整内容
+集合，未激活的公共或本地 Skill 仍可能被发现；取消激活只移除逐 Skill 入口，并
+不会删除用户上传的内容。因此 Skills Pool 的目标约束是：完整内容放在
+`skills-pool/`，active 目录只保留逐 Skill 的直接入口，不保留
+`active/skills-repo` 或 `active/skills-local` 这类内容库桥接。
+
+### Engine 是物理目录的唯一所有者
+
+Backend 当前仍会生成 `source -> target` 的绝对路径映射，这属于兼容契约；修改
+既有链路时必须保持它，但不得继续在 Backend 新增引擎目录硬编码。
+
+目标态由 Engine Runtime 提供版本化的布局描述与唯一的目录解析器：
+
+```text
+Backend
+  -> 发送 engine_type、layout_state、layout_contract_version
+     以及逻辑 Skill 激活意图（scheme / locator / version / link_name）
+  -> Engine Runtime
+
+Engine Runtime
+  -> 解析 active、legacy、pool、mount 与兼容桥的物理路径
+  -> 准备并校验运行时布局
+  -> 对账逐 Skill 激活入口
+```
+
+Backend、镜像启动脚本和部署工具都应消费同一份 Engine 布局解析结果。未知引擎或
+未知布局契约必须失败关闭，不能回退到某个默认引擎路径。

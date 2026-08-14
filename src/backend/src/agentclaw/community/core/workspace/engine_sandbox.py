@@ -57,7 +57,17 @@ class EngineSandboxProvider(Protocol):
     def get_default_read_only_rules(self) -> list[ReadOnlyRule]:
         ...
 
-    def get_build_plan(self) -> EngineBuildPlan:
+    def get_build_plan(
+        self,
+        build_rsync_excludes_append: list[str] | None = None,
+    ) -> EngineBuildPlan:
+        """Return build plan with optional Bot-level build_rsync_excludes append.
+
+        Args:
+            build_rsync_excludes_append: Bot-level excludes from ac_bots.ext.
+                可选参数，为 None 时使用模块级默认值。
+                **合并语义**：与默认值合并（去重），而非完全覆盖。
+        """
         ...
 
     async def list_directory(

@@ -37,6 +37,7 @@ def _make_storage_path() -> MagicMock:
 
 def _make_service(storage_path=None, bot_repo=None, common_whitelist_service=None) -> BaasService:
     return BaasService(
+        startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base="http://test",
         tenant="test",
         template_uuid="test",
@@ -218,6 +219,7 @@ class TestSetupSessionsDirEngineAware:
         registry.register(custom_provider)
 
         service = BaasService(
+            startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
             baas_api_base="http://test",
             tenant="test",
             template_uuid="test",
@@ -251,6 +253,7 @@ class TestBuildCreateBotPayloadStorageWhitelist:
     def _build_payload(self, service: BaasService):
         return service._build_create_bot_payload(
             bot={
+                "id": 501,
                 "bot_id": "b1",
                 "bot_name": "bot-one",
                 "entity_id": "u1",
@@ -378,6 +381,7 @@ class TestBuildCreateBotPayloadStorageWhitelist:
 
         payload = service._build_create_bot_payload(
             bot={
+                "id": 501,
                 "bot_id": "b1",
                 "bot_name": "bot-one",
                 "entity_id": "u1",
@@ -521,6 +525,7 @@ def test_build_create_bot_payload_rewrites_migration_path_to_opt_when_mount_home
     )
     payload = service._build_create_bot_payload(
         bot={
+            "id": 501,
             "bot_id": "b1",
             "bot_name": "bot-one",
             "entity_id": "u1",
@@ -550,6 +555,7 @@ def test_build_create_bot_payload_rewrites_opt_migration_path_back_to_home_admin
     )
     payload = service._build_create_bot_payload(
         bot={
+            "id": 501,
             "bot_id": "b1",
             "bot_name": "bot-one",
             "entity_id": "u1",

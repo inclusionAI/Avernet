@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "name": "商家经营协作队",
+  "port_start": 30601,
+  "port_step": 10,
+  "scopes": "local,merchant-operations,local-commerce,merchant-platform-coordination",
+  "bcsfuse": {
+    "fusion_enable": true
+  },
+  "bots": [
+    {
+      "source": "merchant-operations",
+      "profile": "merchant-operations-manager",
+      "name": "店长日常运营",
+      "summary": "商家侧 manager，启动 one-shot 前集中补齐人类专属决定，运行中基于授权包络自治修订并将实时差异转为执行门禁，专业检查完成后再请求店主最终验收。",
+      "domains": "merchant-operations,local-commerce,delegated-authority,manager-worker-coordination,negotiation,workflow-orchestration,incident-response,business-review",
+      "skills": "goal-clarification,constraint-ledger,private-boundary-control,shared-brief-redaction,manager-worker-dispatch,unit-economics-check,agent-discovery,human-escalation,contract-drafting,one-shot-collaboration,bounded-feedback-loop,human-input-acceptance,sop-design,daily-review"
+    },
+    {
+      "source": "platform-marketing",
+      "profile": "platform-marketing-planner",
+      "name": "平台营销方案",
+      "summary": "平台侧营销 owner，在当前政策授权包络内直接确认具体营销条款，并把真实上架与预算检查作为执行前置条件。",
+      "domains": "local-commerce,platform-marketing,campaign-design,coupon-strategy,user-acquisition,conversion,promotion-budget,merchant-negotiation",
+      "skills": "campaign-design,coupon-structure,subsidy-allocation,audience-targeting,offer-negotiation,claim-risk-review,contract-commitment,change-request"
+    },
+    {
+      "source": "platform-data",
+      "profile": "platform-data-analyst",
+      "name": "平台数据分析",
+      "summary": "平台侧数据 Worker，以可复算证据、保守上界和容量门禁判断计划可行性，并把运行期指标转为监控项。",
+      "domains": "local-commerce,data-analysis,campaign-measurement,conversion-funnel,forecasting,anomaly-detection,decision-support,data-governance",
+      "skills": "metric-definition,cohort-comparison,campaign-forecast,capacity-check,trend-analysis,anomaly-signal,decision-table,data-lineage"
+    },
+    {
+      "source": "platform-supply-chain",
+      "profile": "platform-supply-chain-planner",
+      "name": "平台供应链",
+      "summary": "平台侧供应 Worker，复核库存、MOQ、品质与完整 Plan A/B，并把到货、批次等执行时事实转为验收门禁。",
+      "domains": "local-commerce,supply-chain,inventory,replenishment,supplier-risk,quality-assurance,contingency-planning,fulfillment",
+      "skills": "demand-gap-check,replenishment-plan,lead-time-check,spec-verification,cost-comparison,supplier-delay-response,plan-b-trigger,fulfillment-checklist"
+    }
+  ]
+}

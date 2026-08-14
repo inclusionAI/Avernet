@@ -5,7 +5,7 @@ Repository Protocols and their concrete implementations.  This is the
 minimum bar: every method on the Protocol must exist on the concrete
 class with a compatible signature.
 
-Additionally, the dataclass I/O types (``EmergencyState``,
+Additionally, the dataclass I/O types (``BrakeState``,
 ``TicketActionOutcome``, ``BulkOperationResult``) are verified to
 serialize via ``to_dict()`` without error, and the ``@runtime_checkable``
 check passes for every pair.
@@ -25,24 +25,14 @@ import inspect
 
 import pytest
 
-from agentclaw.community.core.economy.governance.domain.protocols import (
-    AuditRepositoryProtocol,
-    NotifyLogRepositoryProtocol,
-    TaskRecordRepositoryProtocol,
-    WhitelistRepositoryProtocol,
-)
-from agentclaw.community.core.economy.governance.repositories.audit_repo import (
-    GovernanceAuditRepository,
-)
-from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
-    NotifyLogRepository,
-)
-from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
-    TaskRecordRepository,
-)
-from agentclaw.community.core.economy.governance.repositories.whitelist_repo import (
-    GovernanceWhitelistRepository,
-)
+from agentclaw.community.core.repository.protocols.governance import WhitelistRepositoryProtocol
+from agentclaw.community.core.repository.protocols.governance import TaskRecordRepositoryProtocol
+from agentclaw.community.core.repository.protocols.governance import NotifyLogRepositoryProtocol
+from agentclaw.community.core.repository.protocols.governance import AuditRepositoryProtocol
+from agentclaw.community.core.repository.implementations.governance.audit import GovernanceAuditRepository
+from agentclaw.community.core.repository.implementations.governance.notify_log import NotifyLogRepository
+from agentclaw.community.core.repository.implementations.governance.task_record import TaskRecordRepository
+from agentclaw.community.core.repository.implementations.governance.whitelist import GovernanceWhitelistRepository
 
 
 # ---------------------------------------------------------------------------
@@ -103,13 +93,13 @@ def test_protocol_method_surface(
     )
 
 
-def test_emergency_state_to_dict() -> None:
-    """EmergencyState serialises all fields via to_dict()."""
+def test_brake_state_to_dict() -> None:
+    """BrakeState serialises all fields via to_dict()."""
     from agentclaw.community.core.economy.governance.services.admin_service import (
-        EmergencyState,
+        BrakeState,
     )
 
-    state = EmergencyState(
+    state = BrakeState(
         paused=True,
         reason="test",
         operator="op",
@@ -136,12 +126,12 @@ def test_ticket_action_outcome_to_dict() -> None:
     outcome = TicketActionOutcome(
         ticket_id="t-1",
         status=GovernanceStatus.CLOSED,
-        close_reason="emergency_closed",
+        close_reason="admin_closed",
     )
     d = outcome.to_dict()
     assert d["governance_status"] == "closed"
     assert d["ticket_id"] == "t-1"
-    assert d["close_reason"] == "emergency_closed"
+    assert d["close_reason"] == "admin_closed"
 
 
 def test_ticket_action_outcome_error_path() -> None:
@@ -196,10 +186,8 @@ def test_orm_business_properties() -> None:
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
-    from agentclaw.community.core.economy.governance.repositories.orm import (
-        GovernanceTicketOrm,
-        Base,
-    )
+    from agentclaw.community.core.economy.governance.orm import Base
+    from agentclaw.community.core.economy.governance.orm import GovernanceTicketOrm
     from agentclaw.community.core.economy.governance.domain.enums import (
         GovernanceStatus,
     )

@@ -69,6 +69,12 @@ user_config:
   ecb:
     base_url: ""
 
+  # Public API gateway host, published to tenants by the connection endpoint
+  # (empty = this deployment fronts no gateway, so that endpoint reports so).
+  gateway:
+    base_url: ""
+    base_url_pre: ""
+
   # Dormant-bot recycle: dry-run by default (never mutates without opt-in).
   dormant:
     dry_run: true
@@ -136,11 +142,40 @@ user_config:
   # Secret-registry key NAMES the app resolves via SecretResolver. Left unset:
   # the dormant-token feature uses a local fallback and git-sync degrades to its
   # on-disk source when no repo-URL secret name is configured.
-  # TODO(community): if you provision these secrets, register their names here
-  # (matching the keys your CommunitySecretResolver / env-var scheme expects):
+  # TODO(community): if you provision these secrets, register their names here.
+  # A registered name is the BARE key, with no env prefix: CommunitySecretResolver
+  # uppercases it and prepends `secret.env_prefix` itself, so a name already
+  # spelled "AGENTCLAW_SECRET_..." would be looked up as
+  # AGENTCLAW_SECRET_AGENTCLAW_SECRET_..._VALUE and never resolve.
+  #
   #   secret_names:
-  #     dormant_internal_token: "AGENTCLAW_SECRET_..."   # gates /api/internal/dormant/*
-  #     aiworkbench_repo_url: "AGENTCLAW_SECRET_..."      # skills source repo URL
+  #     dormant_internal_token: "dormant_internal_token"   # gates /api/internal/dormant/*
+  #     aiworkbench_repo_url: "aiworkbench_repo_url"       # skills source repo URL
+  #
+  # ...each read from "{env_prefix}{NAME}_VALUE", so with the prefix above:
+  #     AGENTCLAW_SECRET_DORMANT_INTERNAL_TOKEN_VALUE
+  #     AGENTCLAW_SECRET_AIWORKBENCH_REPO_URL_VALUE
+  #
+  # The gateway principal signing key needs NO entry here — its name already
+  # defaults in SecretNamesConfig, so a community deployment only exports the
+  # value:
+  #     AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE
+  #
+  # That is the HMAC secret the gateway signs the X-Avernet-Principal token
+  # with, so it must match what the gateway resolves for its own
+  # principal_signer.secret_name (since #673 the gateway goes through a
+  # SecretResolver too; its community flavor reads
+  # AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE). The two registries are separate
+  # — only the value has to agree.
+  #
+  # Leaving it unset does NOT fail the same way everywhere:
+  #   SERVER_ENV=pre|prod  -> the process REFUSES TO BOOT. app.py passes
+  #                           strict=True, so init_principal_verifier_config
+  #                           raises and no request is ever served. A missed
+  #                           rollout step fails visibly instead of shipping a
+  #                           surface that 401s while reporting healthy.
+  #   anything else (dev)  -> the process boots and answers 401 on every
+  #                           /openapi/v1 request.
 
   # MCP catalog — consumed by the community CommunityMCPCenter.
   # Optional path to a local MCP-server catalog file (same shape as
@@ -151,8 +186,8 @@ user_config:
 
   # Harness-internal LLM utility. Left unset = disabled (feature-off). The
   # harness is an internal dev/diagnostic tool; a community deployment that wants
-  # it sets its own OpenAI-compatible endpoint + secret name here (or via the
-  # LLM_BASE_URL / LLM_SECRET_NAME / LLM_AUTH_TOKEN env vars).
+  # it sets its own OpenAI-compatible endpoint + secret name here. The token is
+  # resolved from secret_name through the configured SecretResolver.
   # TODO(community):
   #   llm:
   #     base_url: "https://your-openai-compatible-endpoint"

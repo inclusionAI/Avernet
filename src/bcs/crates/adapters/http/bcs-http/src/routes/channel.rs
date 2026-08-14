@@ -1,6 +1,6 @@
 use axum::{
     Json, body::{Body, Bytes},
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, Method, Response, Uri},
 };
 use bcs_channel_api::{
@@ -63,6 +63,20 @@ impl From<ChannelBinding> for BindingResponse {
 #[derive(Debug, Serialize)]
 pub struct BindingListResponse {
     pub items: Vec<BindingResponse>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BindingTargetType {
+    Bot,
+    Group,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListBindingsByTargetQuery {
+    pub target_type: BindingTargetType,
+    pub target_id: String,
+    pub channel_type: Option<ChannelType>,
 }
 
 pub async fn provider_http_ingress(
@@ -140,6 +154,24 @@ pub async fn list_bindings(
         .services
         .channel
         .list_bindings()
+        .await
+        .map_err(channel_error)?;
+    let items = items.into_iter().map(BindingResponse::from).collect();
+    Ok(Json(BindingListResponse { items }))
+}
+
+pub async fn list_bindings_by_target(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+    uri: Uri,
+    Query(query): Query<ListBindingsByTargetQuery>,
+) -> Result<Json<BindingListResponse>, HttpAdapterError> {
+    let _staff_no = require_staff_no(&state, &headers, &uri).await?;
+    let (target, channel_type) = normalize_target_query(query)?;
+    let items = state
+        .services
+        .channel
+        .list_bindings_by_target(target, channel_type)
         .await
         .map_err(channel_error)?;
     let items = items.into_iter().map(BindingResponse::from).collect();
@@ -258,6 +290,30 @@ fn channel_error(error: ChannelUseCaseError) -> HttpAdapterError {
     }
 }
 
+fn normalize_target_query(
+    query: ListBindingsByTargetQuery,
+) -> Result<(BindingTarget, Option<ChannelType>), HttpAdapterError> {
+    let target_id = query.target_id.trim();
+    if target_id.is_empty() {
+        return Err(HttpAdapterError::BadRequest(
+            "target_id is required".to_string(),
+        ));
+    }
+    let channel_type = query
+        .channel_type
+        .map(|channel_type| channel_type.trim().to_string())
+        .filter(|channel_type| !channel_type.is_empty());
+    let target = match query.target_type {
+        BindingTargetType::Bot => BindingTarget::Bot {
+            bot_id: target_id.to_string(),
+        },
+        BindingTargetType::Group => BindingTarget::Group {
+            group_id: target_id.to_string(),
+        },
+    };
+    Ok((target, channel_type))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,5 +368,38 @@ mod tests {
         .expect("create binding request should not require client env");
 
         assert!(request.env.is_none());
+    }
+
+    #[test]
+    fn target_query_builds_trimmed_bot_target_and_channel_filter() {
+        let (target, channel_type) = normalize_target_query(ListBindingsByTargetQuery {
+            target_type: BindingTargetType::Bot,
+            target_id: " bot_1:user_1 ".to_string(),
+            channel_type: Some(" dingtalk ".to_string()),
+        })
+        .expect("valid target query");
+
+        assert_eq!(
+            target,
+            BindingTarget::Bot {
+                bot_id: "bot_1:user_1".to_string()
+            }
+        );
+        assert_eq!(channel_type.as_deref(), Some("dingtalk"));
+    }
+
+    #[test]
+    fn target_query_rejects_blank_target_id() {
+        let error = normalize_target_query(ListBindingsByTargetQuery {
+            target_type: BindingTargetType::Group,
+            target_id: "   ".to_string(),
+            channel_type: None,
+        })
+        .expect_err("blank target id must fail");
+
+        assert!(matches!(
+            error,
+            HttpAdapterError::BadRequest(message) if message == "target_id is required"
+        ));
     }
 }

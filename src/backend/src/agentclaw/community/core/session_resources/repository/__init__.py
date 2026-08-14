@@ -1,0 +1,1 @@
+"""Session resource persistence contracts."""

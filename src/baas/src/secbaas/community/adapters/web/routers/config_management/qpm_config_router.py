@@ -15,9 +15,13 @@ from dependency_injector.wiring import inject
 from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel, Field
 
-from secbaas.community.api import ApiResponse, SuccessResponse
+from secbaas.community.adapters.web.dependencies import get_op_ctx
+from secbaas.community.api import ApiResponse, OperationContext, SuccessResponse
 from secbaas.community.api.bot_qpm import BotQpmManageService
 from secbaas.community.bootstrap import ApplicationContainer, Provide
+from secbaas.community.logger import get_logger
+
+logger = get_logger("router")
 
 router = APIRouter(prefix="/api/v1/bot-qpm", tags=["Bot QPM 配置管理"])
 
@@ -59,11 +63,13 @@ def _to_qpm_response(item) -> BotQpmResponse:
 @router.get("", response_model=ApiResponse[BotQpmListResponse])
 @inject
 async def list_qpm_configs(
+    op_ctx: OperationContext = Depends(get_op_ctx),
     service: BotQpmManageService = Depends(
         Provide[ApplicationContainer.services.bot_qpm_manage_service]
     ),
 ) -> ApiResponse[BotQpmListResponse]:
     """列出当前 env 下所有 bot 的 QPM 配置。"""
+    logger.info("list_qpm_configs: operator=%s", op_ctx.operator)
     result = service.list_configs()
     items = [_to_qpm_response(i) for i in result.items]
     return ApiResponse(data=BotQpmListResponse(items=items, total=result.total))
@@ -73,11 +79,13 @@ async def list_qpm_configs(
 @inject
 async def get_qpm_config(
     bot_id: Annotated[str, Path(description="Bot ID")],
+    op_ctx: OperationContext = Depends(get_op_ctx),
     service: BotQpmManageService = Depends(
         Provide[ApplicationContainer.services.bot_qpm_manage_service]
     ),
 ) -> ApiResponse[BotQpmResponse]:
     """查询单个 bot 的 QPM 配置。"""
+    logger.info("get_qpm_config: operator=%s", op_ctx.operator)
     item = service.get_config(bot_id)
     if item is None:
         raise HTTPException(
@@ -94,11 +102,13 @@ async def get_qpm_config(
 @inject
 async def upsert_qpm_config(
     request: BotQpmUpsertRequest,
+    op_ctx: OperationContext = Depends(get_op_ctx),
     service: BotQpmManageService = Depends(
         Provide[ApplicationContainer.services.bot_qpm_manage_service]
     ),
 ) -> ApiResponse[BotQpmResponse]:
     """创建或更新 bot 的 QPM 配置（upsert 语义）。"""
+    logger.info("upsert_qpm_config: operator=%s", op_ctx.operator)
     item = service.upsert_config(bot_id=request.bot_id, qpm=request.qpm)
     return ApiResponse(data=_to_qpm_response(item))
 
@@ -108,11 +118,13 @@ async def upsert_qpm_config(
 async def update_qpm_config(
     bot_id: Annotated[str, Path(description="Bot ID")],
     request: BotQpmUpdateRequest,
+    op_ctx: OperationContext = Depends(get_op_ctx),
     service: BotQpmManageService = Depends(
         Provide[ApplicationContainer.services.bot_qpm_manage_service]
     ),
 ) -> ApiResponse[BotQpmResponse]:
     """更新 bot 的 QPM 配置。不存在则返回 404。"""
+    logger.info("update_qpm_config: operator=%s", op_ctx.operator)
     item = service.update_config(bot_id=bot_id, qpm=request.qpm)
     if item is None:
         raise HTTPException(
@@ -129,11 +141,13 @@ async def update_qpm_config(
 @inject
 async def delete_qpm_config(
     bot_id: Annotated[str, Path(description="Bot ID")],
+    op_ctx: OperationContext = Depends(get_op_ctx),
     service: BotQpmManageService = Depends(
         Provide[ApplicationContainer.services.bot_qpm_manage_service]
     ),
 ) -> ApiResponse[SuccessResponse]:
     """删除 bot 的 QPM 配置。"""
+    logger.info("delete_qpm_config: operator=%s", op_ctx.operator)
     success = service.delete_config(bot_id)
     if not success:
         raise HTTPException(

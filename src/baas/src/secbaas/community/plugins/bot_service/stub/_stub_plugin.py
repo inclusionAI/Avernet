@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 
+from secbaas.community.api.device_manage import ErrorCode, PaasError
 from secbaas.community.spi.bot_service import (
     BotBindingData,
     BotServicePlugin,
@@ -14,9 +15,11 @@ from secbaas.community.spi.bot_service import (
 class StubBotServicePlugin(BotServicePlugin):
     """Stub BotService plugin.
 
-    All methods are no-ops. Use when the bot metadata service is
-    disabled or in test environments where no HTTP calls should
-    be made.
+    Most methods return deterministic stub values. Env vars enable
+    error simulation for E2E failure-path tests:
+
+    - ``BAAS_STUB_BOT_BINDING_ERROR=1`` — ``get_binding()`` raises ``PaasError``
+    - ``BAAS_STUB_BOT_BINDING_NOT_FOUND=1`` — ``get_binding()`` returns ``None``
     """
 
     async def report(self, payload: LogRelationPayload) -> None:
@@ -28,7 +31,7 @@ class StubBotServicePlugin(BotServicePlugin):
         owner_id: str,
         stage: str,
     ) -> BotBindingData:
-        """Return a deterministic stub BotBindingData.
+        """Return deterministic stub BotBindingData, or simulate failures.
 
         Args:
             bot_id: Bot identifier.
@@ -36,8 +39,19 @@ class StubBotServicePlugin(BotServicePlugin):
             stage: Lifecycle stage.
 
         Returns:
-            BotBindingData with stub values.
+            BotBindingData with stub values, or None when
+            ``BAAS_STUB_BOT_BINDING_NOT_FOUND`` is set.
+
+        Raises:
+            PaasError: When ``BAAS_STUB_BOT_BINDING_ERROR`` is set.
         """
+        if os.getenv("BAAS_STUB_BOT_BINDING_ERROR"):
+            raise PaasError(
+                code=ErrorCode.PAAS_ERROR,
+                message="stub: simulated binding resolution failure",
+            )
+        if os.getenv("BAAS_STUB_BOT_BINDING_NOT_FOUND"):
+            return None
         return BotBindingData(
             bot_id=bot_id,
             owner_id=owner_id,

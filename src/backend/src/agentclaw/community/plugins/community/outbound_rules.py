@@ -7,6 +7,7 @@ outbound-header rules (an empty rule the device runtime treats as a no-op).
 Depends on no corp secret/domain machinery. Not a ``MockSeam`` subclass — this
 is a real impl bound directly by ``CommunityOutboundRulesModule``.
 """
+
 from __future__ import annotations
 
 from typing import Callable
@@ -26,7 +27,8 @@ class CommunityOutboundRuleProvider(OutboundRuleProvider):
         owner_id: str = "",
         agent_pass_token: str = "",
         agent_code: str = "",
-        bot_type_resolver: "Callable[[str, str], str | None] | None" = None,
+        bot_type_resolver: Callable[[str, str], str | None] | None = None,
+        extra_properties: dict[str, object] | None = None,
     ) -> OutBoundOperationRule:
         return OutBoundOperationRule()
 
@@ -34,5 +36,12 @@ class CommunityOutboundRuleProvider(OutboundRuleProvider):
         self,
         *,
         agent_pass_token: str = "",
-    ) -> "OutBoundOperationRule | None":
+    ) -> OutBoundOperationRule | None:
+        return None
+
+    def build_caller_rule(
+        self,
+        *,
+        caller_token: str,
+    ) -> OutBoundOperationRule | None:
         return None

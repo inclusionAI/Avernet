@@ -102,7 +102,7 @@ The value is `not_applicable` until a device-owned protocol in
 `agentclaw.community.plugin_api` is both:
 
 1. semantically part of the device lifecycle user story; and
-2. observed through the existing DI/infrastructure coverage proxy.
+2. observed from executed implementation lines in `backend-coverage.json`.
 
 No Core, Router, or service method may be counted as a Plugin API. Adding a
 real device Plugin API denominator later requires a separate reviewed manifest
@@ -114,7 +114,9 @@ Add a small module reporter used by `singlebox_coverage.sh` after it combines
 Backend coverage:
 
 - read `backend-coverage.json`;
-- read and deduplicate runtime Router/Plugin hit JSONL files;
+- read and deduplicate runtime Router hit JSONL files;
+- derive Plugin API evidence from coverage.py executed lines and checked-in AST
+  symbols;
 - read a checked-in module manifest containing device Core paths and Router
   operation keys;
 - write module metrics into `summary.json` and render the same values in
@@ -129,7 +131,10 @@ target option/environment variable. Reports always record the exact target.
 - Do not import coverage helpers from `core/`, ordinary Router handlers, or
   business services.
 - Router hits continue to come from the FastAPI middleware.
-- Plugin hits continue to come from DI/infrastructure proxies only.
+- Plugin API manifest items identify a real Plugin Protocol method plus an
+  implementation `path` and `Class.method` symbol under
+  `agentclaw/community/plugins/`; the reporter derives hits offline from
+  `backend-coverage.json`.
 - Do not introduce `exclude_paths` or remove difficult APIs from denominators.
 - Do not seed database rows as a substitute for the real BaaS-backed lifecycle
   when the product stack can create the state itself.

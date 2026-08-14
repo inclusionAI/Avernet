@@ -8,11 +8,10 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.chat import ChannelRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.plugin_api.http_client import QUALIFIER_BAAS, HttpClient
 from tests.community.factories.access import make_staff_user
@@ -94,11 +93,9 @@ def _install_baas_for_rollback(
 def _seed_base(world) -> dict:
     """Seed base entities: user, bot, skills, binding. Returns the bot dict."""
     make_staff_user(world, user_id=_OWNER)
-    from agentclaw.community.core.skill_center.services.repositories import (
-        SkillRepository,
-        SkillSetRepository,
-    )
-    from agentclaw.community.core.resources.repository.protocol import ResourceRepositoryProtocol
+    from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+    from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+    from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
     from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
 
     world.get(SkillRepoSyncPlugin).set_override("get_local_skills_root", lambda: None)
@@ -205,6 +202,73 @@ def _seed_v2_success_with_v1(world, *, progress_status: str = "SUCCESS") -> None
             "config_artifact": _ARTIFACT,
         },
     })
+
+
+_ROLLBACK_CID = "cid-rollback"
+_CARD_A = "card-A"  # V1's promoted card template (stored per-stage slot)
+_CARD_B = "card-B"  # the current live channel config — the state rolled away from
+
+_V1_STORED_ONLINE = {
+    "channels": {"dingding": {"enabled": True, "accounts": [
+        {"client_id": _ROLLBACK_CID, "robot_code": _ROLLBACK_CID,
+         "card_template_id": _CARD_A}]}}
+}
+
+
+def _seed_v2_success_with_v1_channel_overrides(world) -> None:
+    """Same shape as ``_seed_v2_success_with_v1``, plus DingTalk channel state:
+    V1's ext stores online engine_overrides with card A (persisted at V1's
+    original online promotion), while the live channel table holds card B (the
+    user's current config, delivered by V2). Rollback must restore card A."""
+    bot = _seed_base(world)
+    _install_baas_for_rollback(world)
+
+    vbid1 = _binding(world, device_id=f"{_VERIFY_UUID}-1", status="ACTIVE")
+    obid1 = _binding(world, device_id=f"{_ONLINE_UUID}-1", status="RELEASED")
+    vbid2 = _binding(world, device_id=f"{_VERIFY_UUID}-2", status="ACTIVE")
+    obid2 = _binding(world, device_id=f"{_ONLINE_UUID}-2", status="ACTIVE")
+
+    repo = world.get(BotPublishRepositoryProtocol)
+
+    # V1: UPGRADED, with an enriched artifact and the stored online overrides slot.
+    v1_artifact = dict(
+        _ARTIFACT, engine_ext={"bot_id": _BOT_ID, "owner_id": _OWNER, "stage": "release"}
+    )
+    repo.insert({
+        "source_bot_pk": bot["id"], "source_bot_id": _BOT_ID, "publish_bot_id": _BOT_ID,
+        "name": "V1 Publish", "owner_id": _OWNER, "permission_owner": _OWNER,
+        "status": PublishStatus.UPGRADED, "version": 1, "env": "dev",
+        "ext": {
+            "binding": {"verify": vbid1, "online": obid1},
+            "publish": {"verify": _BAAS_PUB_ID, "online": _BAAS_PUB_ID},
+            "config_artifact": v1_artifact,
+            "engine_overrides_by_stage": {"online": _V1_STORED_ONLINE},
+        },
+    })
+
+    # V2: SUCCESS (current), linked to V1 via last_pub_id
+    repo.insert({
+        "source_bot_pk": bot["id"], "source_bot_id": _BOT_ID, "publish_bot_id": _BOT_ID,
+        "name": "V2 Publish", "owner_id": _OWNER, "permission_owner": _OWNER,
+        "status": PublishStatus.SUCCESS, "version": 2, "env": "dev",
+        "last_pub_id": _V1,
+        "ext": {
+            "binding": {"verify": vbid2, "online": obid2},
+            "publish": {"verify": _BAAS_PUB_ID, "online": _BAAS_PUB_ID},
+            "config_artifact": _ARTIFACT,
+        },
+    })
+
+    # Live channel table: card B. A (wrong) live re-fetch would deliver this.
+    world.get(ChannelRepository).insert_channel(
+        type="dingding",
+        description=None,
+        identity_id=_OWNER,
+        bind_bot_id=_BOT_ID,
+        config={"client_id": _ROLLBACK_CID, "card_template_id": _CARD_B},
+        status="1",
+        stage="online",
+    )
 
 
 def _seed_v2_success_with_v1_pending(world) -> None:
@@ -314,6 +378,20 @@ def _expect_online_binding_active(pid: int):
     return _check
 
 
+def _expect_update_delivers_stored_card_a(response, world):  # noqa: ARG001
+    """The rollback's BaaS ``/update`` payload must carry V1's STORED online
+    channel overrides (card A), not the live channel table's card B."""
+    update = next(
+        c for c in _baas(world).calls_to("post") if c.args[0].endswith("/update")
+    )
+    delivered = update.kwargs["json"]["config"]["deploy_config"]["teclaw_bot_config"]
+    accounts = delivered["engine_overrides"]["channels"]["dingding"]["accounts"]
+    assert [a.get("card_template_id") for a in accounts] == [_CARD_A], (
+        delivered["engine_overrides"]
+    )
+    assert delivered["engine_ext"]["stage"] == "release"
+
+
 # ── can-rollback tests ─────────────────────────────────────────────────────────
 
 
@@ -390,6 +468,24 @@ def happy_rollback():
 
 
 @endpoint_test(
+    method="POST", path=_ROLLBACK, scenario="rollback_delivers_stored_online_channel_overrides",
+    input=CaseInput(path_params={"publish_id": _V2}, headers=_HEADERS),
+    seed=_seed_v2_success_with_v1_channel_overrides, drain_background=True,
+    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    extra_assertions=(
+        # Regression for #168: the rollback delivery must overlay V1's STORED
+        # online engine_overrides (card A) onto the artifact — not deliver the
+        # raw artifact (no channels) nor re-fetch the live channel table (card B).
+        _expect_update_delivers_stored_card_a,
+        _expect_publish_status(_V1, PublishStatus.SUCCESS),
+    ),
+)
+def rollback_delivers_stored_online_channel_overrides():
+    """Rollback restores the target version's promoted DingTalk channel config
+    (incl. card_template_id) from the stored per-stage slot."""
+
+
+@endpoint_test(
     method="POST", path=_ROLLBACK, scenario="rollback_target_parks_at_online_pub_until_baas_terminal",
     input=CaseInput(path_params={"publish_id": _V2}, headers=_HEADERS),
     seed=_seed_v2_success_with_v1_pending, drain_background=True,
@@ -449,7 +545,7 @@ def _seed_rollback_stored_online_channel(world) -> None:
     bot = _seed_base(world)
     _install_baas_for_rollback(world)
 
-    from agentclaw.community.core.channel.services.repositories import ChannelRepository
+    from agentclaw.community.core.repository.protocols.chat import ChannelRepository
     # Live table now holds card-B — rollback must NOT consult it (compose_stored).
     world.get(ChannelRepository).insert_channel(
         type="dingding", description=None, identity_id=_OWNER, bind_bot_id=_BOT_ID,

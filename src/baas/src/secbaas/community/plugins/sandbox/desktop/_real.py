@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from secbaas.community.plugins.sandbox.utils.arca_utils import ArcaUtils
 from secbaas.community.spi.sandbox.desktop import DesktopSandbox, DesktopSandboxPlugin
 
 if TYPE_CHECKING:
@@ -31,6 +32,7 @@ class RealDesktopSandbox(DesktopSandbox):
         container_id: str,
         machine_id: str,
         user_id: str,
+        arca_utils: ArcaUtils,
         template_id: int = 0,
     ) -> None:
         """Initialize a RealDesktopSandbox wrapper.
@@ -40,6 +42,7 @@ class RealDesktopSandbox(DesktopSandbox):
             container_id: Container ID assigned by the mng daemon.
             machine_id: Machine ID for routing commands.
             user_id: User ID.
+            arca_utils: Shared ArcaUtils instance for proxypass JWT signing.
             template_id: Template ID for target construction (default 0 for backward
                 compatibility with ``connect_device()`` which doesn't pass template_id).
         """
@@ -48,6 +51,7 @@ class RealDesktopSandbox(DesktopSandbox):
         self._machine_id = machine_id
         self._user_id = user_id
         self._template_id = template_id
+        self._arca_utils = arca_utils
 
     @property
     def container_id(self) -> str:
@@ -170,8 +174,10 @@ class RealDesktopSandboxPlugin(DesktopSandboxPlugin):
     def __init__(
         self,
         connection_manager: ConnectionManager,
+        arca_utils: ArcaUtils,
     ) -> None:
         self._cm = connection_manager
+        self._arca_utils = arca_utils
 
     def create_device(
         self,
@@ -210,6 +216,7 @@ class RealDesktopSandboxPlugin(DesktopSandboxPlugin):
             container_id=container_id,
             machine_id=machine_id,
             user_id=user_id,
+            arca_utils=self._arca_utils,
             template_id=template_id,
         )
 
@@ -251,6 +258,7 @@ class RealDesktopSandboxPlugin(DesktopSandboxPlugin):
             container_id=container_id,
             machine_id=machine_id,
             user_id=user_id,
+            arca_utils=self._arca_utils,
         )
 
     def get_machine_info(self, machine_id: str) -> dict[str, Any]:
@@ -310,15 +318,9 @@ class RealDesktopSandboxPlugin(DesktopSandboxPlugin):
         Returns:
             WsConnectionInfo with ws_url, token, target, and 120s expires_at.
         """
-        # Deferred imports: _generate_proxypass_jwt and get_current_env reach
-        # into the DI container at call time. Importing them at module level
-        # would break test environments without a configured container.
         from secbaas.community.api.bot_runtime import WsConnectionInfo
         from secbaas.community.core.utils.env_utils import (
             get_current_env,  # noqa: PLC0415
-        )
-        from secbaas.community.plugins.sandbox.utils.arca_utils import (
-            _generate_proxypass_jwt,  # noqa: PLC0415
         )
 
         # Step 1: Construct target string (D-02, D-07)
@@ -328,7 +330,7 @@ class RealDesktopSandboxPlugin(DesktopSandboxPlugin):
         )
 
         # Step 2: Generate HS256 JWT token (D-07, ttl=120s for WS relay)
-        token = _generate_proxypass_jwt(target, ttl=120)
+        token = self._arca_utils.generate_proxypass_jwt(target, ttl=120)
 
         # Step 3: Construct ws_url with env-based host selection (D-06)
         from secbaas.community.config import ConfigPath, get_config, get_config_by_path

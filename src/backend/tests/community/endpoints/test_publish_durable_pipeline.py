@@ -22,7 +22,7 @@ from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,
 )
 from agentclaw.community.core.task_queue.services.worker import TaskWorker
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from tests.community.endpoints.test_service_bot_publish_flow import (
     _HEADERS,
     _PROCESS,
@@ -42,9 +42,7 @@ from tests.community.endpoints.test_service_bot_rollback import (
     _V2 as _RB_V2,
     _seed_v2_success_with_v1,
 )
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 
 pytestmark = pytest.mark.integration
 

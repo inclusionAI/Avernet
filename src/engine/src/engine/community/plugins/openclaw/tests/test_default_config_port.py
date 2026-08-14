@@ -14,6 +14,7 @@ import pytest
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
 
 _ENV = "OPENCLAW_DEFAULT_CONFIG_PATH"
+_MODEL_SOURCE_ENV = "OPENCLAW_MODEL_CONFIG_SOURCE"
 
 
 async def test_reads_and_returns_path_and_config(tmp_path, monkeypatch):
@@ -23,6 +24,19 @@ async def test_reads_and_returns_path_and_config(tmp_path, monkeypatch):
     out = await OpenClawPluginImpl().get_default_config()
     assert out["path"] == str(cfg)
     assert out["config"] == {"model": "gpt-4", "nested": {"a": 1}}
+
+
+async def test_uses_singlebox_model_config_source_when_default_path_is_unset(
+    tmp_path, monkeypatch
+):
+    cfg = tmp_path / "singlebox-openclaw.json"
+    cfg.write_text(json.dumps({"models": {"mode": "merge"}}), encoding="utf-8")
+    monkeypatch.delenv(_ENV, raising=False)
+    monkeypatch.setenv(_MODEL_SOURCE_ENV, str(cfg))
+
+    out = await OpenClawPluginImpl().get_default_config()
+
+    assert out == {"path": str(cfg), "config": {"models": {"mode": "merge"}}}
 
 
 async def test_missing_file_raises_filenotfound(tmp_path, monkeypatch):

@@ -1384,3 +1384,100 @@ class TestBotManagementServiceIntegration:
             assert "STOPPED" not in str(e), (
                 f"update_bot should not reject STOPPED status, got: {e}"
             )
+
+    @pytest.mark.asyncio
+    async def test_scale_bot_deploy_config_in_publish_record(
+        self,
+        bot_repository,
+        device_repository,
+        created_bot_ids,
+        created_device_ids,
+        created_publish_ids,
+    ):
+        """Scale up with bot_config.deploy_config stores config in publish record."""
+        from secbaas.community.api.publish_manage import PublishConfig
+
+        # Create bot with initial deploy_config
+        bot_uuid = generate_uuid()
+        initial_deploy_config = DeployConfig(envs={"INITIAL": "yes"}, ttl_in_minutes=60)
+        bot_id = bot_repository.insert_bot(
+            bot_uuid=bot_uuid,
+            tenant=FIXED_TENANT_NAME,
+            env=TEST_ENV,
+            domain="test_domain",
+            creator="test_user",
+            modifier="test_user",
+            status=BotStatus.ACTIVE.value,
+            name="Scale DC Bot",
+            description="Bot for scale deploy_config test",
+            template_uuid=None,
+            replica_desired=1,
+            replica_minimum=1,
+            replica_maximum=10,
+            auto_scaling_enabled=0,
+            sla_grade="standard",
+            extra_config=initial_deploy_config.model_dump(),
+        )
+        created_bot_ids.append(bot_id)
+
+        # Create 1 device
+        device_uuid = generate_uuid()
+        device_id = device_repository.insert_device(
+            device_uuid=device_uuid,
+            tenant=FIXED_TENANT_NAME,
+            env=TEST_ENV,
+            domain="test_domain",
+            creator="test_user",
+            modifier="test_user",
+            status=DeviceStatus.ACTIVE.value,
+            provider_type="Sigma",
+            provider_device_id=None,
+            provider_device_props={},
+            extra_config={},
+        )
+        created_device_ids.append(device_id)
+        rel_repo = get_container().repository.bot_device_rel_repository()
+        rel_repo.insert_rel(
+            bot_id=bot_id,
+            device_uuid=device_uuid,
+            tenant=FIXED_TENANT_NAME,
+            env=TEST_ENV,
+            domain="test_domain",
+            creator="test_user",
+            modifier="test_user",
+        )
+
+        # Scale up with different deploy_config
+        scale_deploy_config = DeployConfig(
+            docker_image="scale-img:v2",
+            ttl_in_minutes=120,
+        )
+        bot_config = BotConfig(deploy_config=scale_deploy_config)
+
+        with patch.object(
+            DefaultTenantManageService,
+            "get_tenant_by_name",
+            return_value=create_mock_tenant_response(),
+        ):
+            result = await _bms().scale_bot(
+                tenant=FIXED_TENANT_NAME,
+                bot_uuid=bot_uuid,
+                target_count=3,
+                operator="test_user",
+                request_id=uuid4().hex,
+                bot_config=bot_config,
+            )
+        assert result is not None
+        assert result.publish_id is not None
+        created_publish_ids.append(result.publish_id)
+
+        # Read publish record from DB and verify deploy_config
+        publish_repo = get_container().repository.publish_repository()
+        publish = publish_repo.get_by_id(
+            result.publish_id, tenant=FIXED_TENANT_NAME, env=TEST_ENV
+        )
+        assert publish is not None
+        stored_config = PublishConfig.model_validate(publish.extra_config)
+        assert stored_config.deploy_config is not None
+        assert stored_config.deploy_config.docker_image == "scale-img:v2"
+        assert stored_config.deploy_config.ttl_in_minutes == 120

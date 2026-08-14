@@ -16,8 +16,6 @@ forward → race fallthrough → MACHINE_NOT_CONNECTED), shared with
 ``LocalPaasService._route_command`` to keep the two paths from drifting.
 """
 
-import socket
-
 from dependency_injector.wiring import inject
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -27,18 +25,6 @@ from secbaas.community.bootstrap import ApplicationContainer, Provide
 from secbaas.community.logger import get_logger
 
 logger = get_logger("router")
-
-# Lazy-initialized server IP to avoid blocking DNS lookup at import time
-_SERVER_IP: str | None = None
-
-
-def _get_server_ip() -> str:
-    """Get server IP address, lazily cached to avoid blocking at import."""
-    global _SERVER_IP
-    if _SERVER_IP is None:
-        _SERVER_IP = socket.gethostbyname(socket.gethostname())
-    return _SERVER_IP
-
 
 router = APIRouter(prefix="/internal", tags=["internal"])
 

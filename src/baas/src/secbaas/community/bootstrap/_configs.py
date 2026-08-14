@@ -45,6 +45,13 @@ class ConfigKey(StrEnum):
     # Database
     PLUGIN_DATABASE = "plugins.database.plugin_database"
     DATABASE_URL = "plugins.database.database_url"
+    CREATE_SCHEMA = "plugins.database.create_schema"
+    SEED_DATA = "plugins.database.seed_data"
+    MARIADB_HOST = "plugins.database.mariadb_host"
+    MARIADB_PORT = "plugins.database.mariadb_port"
+    MARIADB_DATABASE = "plugins.database.mariadb_database"
+    MARIADB_USER = "plugins.database.mariadb_user"
+    MARIADB_PASSWORD = "plugins.database.mariadb_password"
 
     # Bot service (ClawBotService + BaasBotService)
     BOT_SERVICE_PROXY_BASE_URL = "bot_service.proxy_base_url"
@@ -85,6 +92,9 @@ class ConfigKey(StrEnum):
     # BCN uplink protocol
     BCN_UPLINK_BASE_URL = "bcn.uplink.base_url"
     BCN_UPLINK_PROVIDER_ID = "bcn.uplink.provider_id"
+
+    # Gateway (JWT-authenticated message delivery)
+    GATEWAY_JWT_SECRET_NAME = "gateway.jwt.secret_name"
 
 
 def _read_config(cfg, key: ConfigKey):
@@ -133,6 +143,11 @@ class EnvVar(StrEnum):
 
     ENV_PLUGIN_DATABASE = "PLUGIN_DATABASE"
     DATABASE_URL = "DATABASE_URL"
+    MARIADB_HOST = "MARIADB_HOST"
+    MARIADB_PORT = "MARIADB_PORT"
+    MARIADB_DATABASE = "MARIADB_DATABASE"
+    MARIADB_USER = "MARIADB_USER"
+    MARIADB_PASSWORD = "MARIADB_PASSWORD"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -177,11 +192,23 @@ class SandboxPluginConfig(BaseSettings):
 
 
 class DatabasePluginConfig(BaseSettings):
-    """Database plugin selection — SQLITE_ORM by default (community-safe)."""
+    """Database plugin selection — SQLITE_ORM by default (community-safe).
+
+    ``MARIADB_ORM`` requires the ``mariadb_*`` connection fields (host, port,
+    database, user, password) or a ``database_url``. Credentials may be
+    supplied via environment variables (see ``EnvVar``).
+    """
 
     model_config = _CFG
     plugin_database: str = Field(default="SQLITE_ORM")
     database_url: str = ""
+    create_schema: bool = Field(default=False)
+    seed_data: bool = Field(default=False)
+    mariadb_host: str = "127.0.0.1"
+    mariadb_port: int = Field(default=3306)
+    mariadb_database: str = ""
+    mariadb_user: str = ""
+    mariadb_password: str = ""
 
 
 class PluginConfig(ConfigSchema):
@@ -189,15 +216,40 @@ class PluginConfig(ConfigSchema):
 
     config_section = "plugins"
     crypto: str = Field(default="stub", pattern=r"^(real|stub)$")
-    secret: str = Field(default="stub", pattern=r"^(real|stub)$")
+    secret: str = Field(default="stub", pattern=r"^(real|stub|aliyun_kms)$")
+    secret_aliyun_kms: dict = Field(default_factory=dict)
     auth: str = Field(default="stub", pattern=r"^(buservice|oauth|stub)$")
     scheduler: str = Field(default="stub", pattern=r"^(real|stub)$")
     cache: str = Field(default="stub", pattern=r"^(real|stub)$")
     bot_service: str = Field(default="stub", pattern=r"^(real|local|stub)$")
 
     engine_adapter: str = Field(default="stub", pattern=r"^(real|stub)$")
+    file_transfer: str = Field(default="stub", pattern=r"^(real|stub)$")
     database: DatabasePluginConfig = Field(default_factory=DatabasePluginConfig)
     sandbox: SandboxPluginConfig = Field(default_factory=SandboxPluginConfig)
+
+
+class FileTransferPollerConfigSchema(ConfigSchema):
+    """File transfer poller configuration."""
+
+    config_section = "file_transfer_poller"
+    enabled: bool = Field(default=False)
+    lock_expire_seconds: int = Field(default=300, ge=1)
+    cron_interval_seconds: int = Field(default=10, ge=1)
+    upload_timeout_seconds: int = Field(default=3600, ge=1)
+    max_concurrent_tickets: int = Field(default=5, ge=1)
+    dry_run: bool = Field(default=False)
+
+
+class FileTransferOssConfigSchema(ConfigSchema):
+    """OSS storage backend configuration for file transfer."""
+
+    config_section = "file_transfer_oss"
+    endpoint: str = Field(default="")
+    external_endpoint: str = Field(default="")
+    bucket_name: str = Field(default="")
+    staging_root_path: str = Field(default="baas-file-transfer")
+    secret_name: str = Field(default="")
 
 
 class BotServiceConfig(ConfigSchema):
@@ -271,6 +323,12 @@ class BotRunnerConfig(ConfigSchema):
         ge=0,
         description="单个任务最大执行秒数，默认 660（10分钟+1分钟缓冲）；0=不限；超时自动取消并释放槽位",
     )
+    default_timeout: float = Field(
+        default=30.0,
+        gt=0,
+        description="请求默认超时秒数，metadata 未指定 timeout 时使用",
+    )
+    origin: str = Field(default="", description="设置请求的origin header")
 
 
 class BcnUplinkConfigSchema(BaseModel):
@@ -301,6 +359,20 @@ class BcnConfig(ConfigSchema):
     config_section = "bcn"
     api_key: _BcnApiKeyConfig = Field(default_factory=_BcnApiKeyConfig)
     uplink: _BcnUplinkConfig = Field(default_factory=_BcnUplinkConfig)
+
+
+class _GatewayJwtConfig(BaseSettings):
+    """Gateway JWT config."""
+
+    model_config = _CFG
+    secret_name: str = "other_manual_secbaas_gateway_jwt_secret"
+
+
+class GatewayConfig(ConfigSchema):
+    """Gateway config — JWT-authenticated message delivery."""
+
+    config_section = "gateway"
+    jwt: _GatewayJwtConfig = Field(default_factory=_GatewayJwtConfig)
 
 
 class BotChatLogRelationConfig(ConfigSchema):
@@ -360,6 +432,13 @@ class DatabaseConfig:
 
     plugin_type: PluginDatabaseType
     db_url: str = ""
+    create_schema: bool = False
+    seed_data: bool = False
+    mariadb_host: str = "127.0.0.1"
+    mariadb_port: int = 3306
+    mariadb_database: str = ""
+    mariadb_user: str = ""
+    mariadb_password: str = ""
 
 
 def init_container_config(container: "ApplicationContainer") -> None:

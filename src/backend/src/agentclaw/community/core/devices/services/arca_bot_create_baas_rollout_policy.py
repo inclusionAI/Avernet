@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-
+from agentclaw.community.core.bot_management.engines.registry import (
+    resolve_baas_engine_bucket,
+)
 from agentclaw.community.core.devices.services.arca_bot_create_baas_rollout_branches import (
     SUPPORTED_ARCA_CREATE_BAAS_ROLLOUT_BRANCHES,
 )
@@ -38,7 +40,6 @@ class ArcaBotCreateBaasRolloutPolicy:
     ``device_provider``，绕过本策略。
     """
 
-    CODING_TEMPLATE_TYPES = {"personalCoding", "applicationCoding"}
     LEGACY_ARCA_CREATE_BRANCHES = SUPPORTED_ARCA_CREATE_BAAS_ROLLOUT_BRANCHES
 
     def __init__(
@@ -55,7 +56,7 @@ class ArcaBotCreateBaasRolloutPolicy:
         user_id: str,
         bot_type: str,
         engine_type: str,
-        template_type: str,
+        template_type: str | None,
     ) -> ArcaBotCreateBaasRolloutDecision:
         engine_bucket = self.normalize_engine_bucket(
             engine_type=engine_type,
@@ -196,12 +197,9 @@ class ArcaBotCreateBaasRolloutPolicy:
         cls,
         *,
         engine_type: str,
-        template_type: str,
+        template_type: str | None,
     ) -> str:
-        normalized_engine = engine_type.strip().lower().replace("-", "_")
-        if (
-            normalized_engine == "claude_code"
-            and template_type in cls.CODING_TEMPLATE_TYPES
-        ):
-            return "aicoding"
-        return normalized_engine
+        return resolve_baas_engine_bucket(
+            engine_type=engine_type,
+            template_type=template_type,
+        )

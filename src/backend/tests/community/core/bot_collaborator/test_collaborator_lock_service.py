@@ -321,7 +321,7 @@ from contextlib import contextmanager
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.plugins.bot_collab_lock_repository import BotCollabLockRepository
+from agentclaw.community.core.repository.implementations.bot.collab_lock import BotCollabLockRepository
 
 
 class _InMemSqliteDB:

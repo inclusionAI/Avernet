@@ -7,6 +7,7 @@ import requests
 
 from agentclaw.community.core.harness.diagnostics.base import Diagnostic, DiagnosticContext
 from agentclaw.community.core.harness.models import Finding
+from agentclaw.community.core.harness.services.llm import DIAGNOSTIC_MAX_TOKENS
 logger = logging.getLogger(__name__)
 
 # ── BCSFuse 配置 ──────────────────────────────────────────────────
@@ -280,5 +281,27 @@ class SoulPersonaDiagnostic(Diagnostic):
                 user_msg += f"\n--- Bot 画像信息 ---\n{profile_summary}\n"
         user_msg += "--- end ---"
 
-        response = await ctx.llm.chat(system=self.system_prompt, user=user_msg)
-        return self._analyze_response(response, ctx.bot_id)
+        response = await ctx.llm.chat(system=self.system_prompt, user=user_msg, max_tokens=DIAGNOSTIC_MAX_TOKENS)
+        findings = self._analyze_response(response, ctx.bot_id)
+
+        # B-mode (should_generate_full_rewrite is False): the profile is missing
+        # or low-quality, so the LLM is told to give advisory suggestions ("improve
+        # the profile / supplement info") rather than a concrete SOUL.md rewrite.
+        # Such suggestions are not an actionable file edit the patch LLM can fill
+        # — feeding them to PatchPlanner only yields `<!-- TODO: ... -->` placeholder
+        # patches. Drop the auto-fix template here; the finding still carries its
+        # score/message, so it counts toward health_score and surfaces in the report.
+        # A-mode (high-quality profile → full rewrite produced) keeps the template.
+        if not should_generate_full_rewrite:
+            for f in findings:
+                f.suggested_template_ids = []
+                # Surface the owner-actionable recovery step so the report — not a
+                # TODO placeholder patch — tells the user how to get a real fix:
+                # enrich the BCSFuse profile, then re-diagnose to enter A-mode.
+                if "BCSFuse" not in (f.message or ""):
+                    f.message = (f.message or "") + (
+                        "\n\n[建议] 前往 BCSFuse 完善 Bot 画像（质量分需 ≥ 0.7）"
+                        "后重新诊断，即可生成专属 SOUL.md 改写建议。"
+                    )
+
+        return findings

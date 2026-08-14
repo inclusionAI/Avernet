@@ -101,15 +101,11 @@ class ConfigComposer:
         # ── resources ───────────────────────────────────────────────────────
         # Collector yields CollectedFile(name, store="bot-data", path=<bolt_data-relative>).
         # e.g. CollectedFile("sales.csv", store="bot-data",
-        #   path="staff_u1/bot7/openclaw/workspace/data/sales.csv"). Embedded verbatim:
-        # ``resources()`` = ac_resource file rows; ``bot_files()`` = teclaw
-        # workspace files (ac_file, empty for non-teclaw). Both are bot-data refs.
+        #   path="staff_u1/bot7/openclaw/workspace/data/sales.csv"). Embedded verbatim
+        # (``resources()`` = ac_resource file rows, all bot-data refs):
         resources = [
             ResourceRef(name=r.name, store=r.store, path=r.path)
             for r in self._collector.resources(req)
-        ] + [
-            ResourceRef(name=r.name, store=r.store, path=r.path)
-            for r in self._collector.bot_files(req)
         ]
 
         # ── identity files ──────────────────────────────────────────────────

@@ -13,6 +13,22 @@ class PublishStage(str, Enum):
     ONLINE = "online"    # 发布上线阶段
 
 
+class OnlineDeployDecision(str, Enum):
+    """How an online deploy should treat the record's current/previous bot.
+
+    Chosen by ``_decide_online_deploy`` from the candidate bot's live BaaS status
+    and the bot's container provider, and used identically by every online deploy
+    seam (release, retry, re-publish, restart).
+    """
+    # Reuse the existing bot in place (BaaS UPDATE / upgrade) — no new bot.
+    UPGRADE = "upgrade"
+    # The existing bot cannot be reused (e.g. a teclaw container the UPDATE cannot
+    # rebuild): retire it, then create a fresh bot — so nothing is orphaned.
+    RETIRE_THEN_FIRST_RELEASE = "retire_then_first_release"
+    # No reusable bot exists (already gone / none bound): just create a new one.
+    FIRST_RELEASE = "first_release"
+
+
 def is_editable_bot(bot_type: str, stage: str) -> bool:
     """Bot 容器内配置是否可编辑。
 

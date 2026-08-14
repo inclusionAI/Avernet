@@ -11,7 +11,9 @@ use bcs_domain::{
 };
 
 use crate::core::ServiceError;
-use crate::port::channel_delivery::{ChannelOutboundEventKind, ChannelRenderHint};
+use crate::port::channel_delivery::{
+    ChannelOutboundEventKind, ChannelOutboundPurpose, ChannelRenderHint,
+};
 
 /// Channel use-case 错误。
 #[derive(Debug, thiserror::Error)]
@@ -107,7 +109,7 @@ pub struct InboundMessage {
     pub im_user_id: String,
     pub im_user_nick: Option<String>,
     pub text: String,
-    /// Channel-normalized temporary attachments. The first rollout accepts images only.
+    /// Channel-normalized temporary attachments. Capability URLs must not be persisted.
     pub attachments: Option<Vec<Attachment>>,
     /// 该消息是否 @ 了本机器人(isInAtList / atUsers 命中)。
     pub is_at_bot: bool,
@@ -140,9 +142,12 @@ pub struct OutboundMessage {
     /// 发送者显示名(用于 "[name]" 前缀)。
     pub sender_label: String,
     pub kind: ChannelOutboundEventKind,
+    pub purpose: ChannelOutboundPurpose,
     pub text: Option<String>,
     pub raw_payload: serde_json::Value,
     pub render_hint: ChannelRenderHint,
+    /// Original IM message id when this run was started by a channel message.
+    pub source_im_message_id: Option<String>,
     /// 该消息是否来自 IM(防回环:来自 IM 的不再转发回去)。
     pub source_is_channel: bool,
 }
@@ -163,6 +168,11 @@ pub trait ChannelService: Send + Sync {
         cmd: CreateBindingCommand,
     ) -> Result<ChannelBinding, ChannelUseCaseError>;
     async fn list_bindings(&self) -> Result<Vec<ChannelBinding>, ChannelUseCaseError>;
+    async fn list_bindings_by_target(
+        &self,
+        target: BindingTarget,
+        channel_type: Option<ChannelType>,
+    ) -> Result<Vec<ChannelBinding>, ChannelUseCaseError>;
     async fn set_binding_status(&self, id: &str, active: bool)
         -> Result<(), ChannelUseCaseError>;
     async fn update_binding_config(

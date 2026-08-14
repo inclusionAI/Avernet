@@ -20,10 +20,11 @@ set -e
 #   all             Full local product stack (BAAS + Backend + BCS + BCSFuse + 5 OpenClaw bots + demo bot + Frontend)
 #   bcs_bots        BCS + 5 local OpenClaw bots
 #   bcs_frontend    BCS + Frontend (E2E)
+#   hybrid          OpenClaw profile stack with optional Claude Code bots
 #
 
 # ============ 常量配置 ============
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 load_repo_env_file() {
@@ -74,8 +75,13 @@ BCSFUSE_PORT="${BCSFUSE_PORT:-${DEFAULT_BCSFUSE_PORT}}"
 FRONTEND_PORT="${FRONTEND_PORT:-${DEFAULT_FRONTEND_PORT}}"
 CHAT_ENGINE="${CHAT_ENGINE:-openclaw}"
 BOTS_PROFILE_DIR="${BOTS_PROFILE_DIR:-}"
+BOTS_EXCLUDED_PROFILE_SOURCE="${BOTS_EXCLUDED_PROFILE_SOURCE:-}"
+CLAUDE_PROFILE_DIR="${CLAUDE_PROFILE_DIR:-}"
 BCN_PLUGIN_SOURCE="${BCN_PLUGIN_SOURCE:-source}"
 BCN_PLUGIN_VERSION="${BCN_PLUGIN_VERSION:-latest}"
+MERCHANT_HYBRID_DEFAULT_PROFILE_DIR="scripts/4bots_merchant_operations_profile"
+MERCHANT_HYBRID_DEFAULT_EXCLUDED_PROFILE_SOURCE="platform-data"
+MERCHANT_HYBRID_DEFAULT_CLAUDE_PROFILE_DIR="scripts/4bots_merchant_operations_profile_for_claude"
 
 # openclaw 配置目录和模板路径
 OPENCLAW_CONFIG_DIR="${HOME}/.openclaw"
@@ -149,11 +155,16 @@ source "${SCRIPT_DIR}/modules/bcs.sh"
 source "${SCRIPT_DIR}/modules/bcsfuse.sh"
 source "${SCRIPT_DIR}/modules/bots.sh"
 source "${SCRIPT_DIR}/modules/demo_bot.sh"
+source "${SCRIPT_DIR}/modules/claude_profile.sh"
+source "${SCRIPT_DIR}/modules/claude_relays.sh"
+source "${SCRIPT_DIR}/modules/claude_bots.sh"
+source "${SCRIPT_DIR}/modules/bcs_baas_provider.sh"
 source "${SCRIPT_DIR}/modules/bcs_bots.sh"
 
 # Group modules (must be after service modules they compose)
 source "${SCRIPT_DIR}/modules/all.sh"
 source "${SCRIPT_DIR}/modules/bcs_frontend.sh"
+source "${SCRIPT_DIR}/modules/hybrid.sh"
 
 # ============ Git hooks ============
 ensure_git_hooks_installed() {
@@ -181,14 +192,14 @@ resolve_services() {
             echo "${START_ORDER[*]}"
             ;;
         bcs_frontend)
-            if [ "$LOCAL_MODE" = true ]; then
-                echo "bcs_bots frontend"
-            else
-                echo "bcs frontend"
-            fi
+            echo "bcs frontend"
             ;;
         bcs_bots)
             echo "bcs bots"
+            ;;
+        hybrid|merchant_hybrid)
+            hybrid_configure_mode
+            echo "${HYBRID_START_ORDER[*]}"
             ;;
         *)
             echo "$target"
@@ -401,7 +412,9 @@ show_help() {
     echo "  --bcn-plugin-source source|npm  BCN plugin source: build from repo (source, default) or install"
     echo "                                  @avernet-plugin/openclaw-channel-bcn (npm). Env: BCN_PLUGIN_SOURCE,"
     echo "                                  BCN_PLUGIN_VERSION (npm mode, default latest)"
-    echo "  --profile-dir DIR            Bot persona source dir for 'bots' target; requires DIR/bots.json"
+    echo "  --profile-dir DIR            Bot persona source dir for bots, hybrid, bcs_frontend, or bcsfuse; requires DIR/bots.json"
+    echo "  --exclusive-profile-dir SOURCE Exclude one OpenClaw profile source; only valid for hybrid with --claude-profile-dir"
+    echo "  --claude-profile-dir DIR     Optional Claude Code profile source dir for hybrid; requires --exclusive-profile-dir"
     echo "  --bcs-auto-onboard            Legacy compatibility flag; use bcs_bots for BCS + bots"
     echo "  --no-bcs-auto-onboard         Legacy compatibility flag; use bcs for BCS-only"
     echo "  --with-bcs-coverage           Build instrumented bcs (target/cov-e2e) for e2e line coverage"
@@ -416,7 +429,7 @@ show_help() {
     done
     echo ""
     echo "Groups:"
-    for grp in all bcs_bots bcs_frontend; do
+    for grp in all bcs_bots bcs_frontend hybrid; do
         if type -t "${grp}_help" &>/dev/null; then
             echo "  $( "${grp}_help" )"
         fi
@@ -430,6 +443,10 @@ show_help() {
     echo "  $0 restart bcs                 Restart only the BCS server"
     echo "  $0 restart bots                Restart only the 5 local bot gateways"
     echo "  $0 start bots --profile-dir scripts/8bots_micro_merchant_profile"
+    echo "  $0 start bcs_frontend --profile-dir scripts/4bots_merchant_operations_profile"
+    echo "  $0 start merchant_hybrid          Start merchant hybrid with its default profiles"
+    echo "  SINGLEBOX_MODEL_CONFIG_MODE=home SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED=1 $0 start hybrid --profile-dir scripts/4bots_merchant_operations_profile"
+    echo "  SINGLEBOX_MODEL_CONFIG_MODE=home SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED=1 $0 start hybrid --profile-dir scripts/4bots_merchant_operations_profile --exclusive-profile-dir platform-data --claude-profile-dir scripts/4bots_merchant_operations_profile_for_claude"
     echo "  $0 restart bcs_bots            Restart BCS + 5 local bot gateways"
     echo "  $0 clean bcs                   Clean only local BCS runtime data"
     echo "  $0 clean bots                  Clean only local bot profiles/workspaces"
@@ -437,6 +454,41 @@ show_help() {
     echo "  $0 check                       Check the isolated standalone local stack"
     echo "  $0 status                      Show service status"
     echo ""
+}
+
+validate_hybrid_profile_options() {
+    if { [ -n "${BOTS_EXCLUDED_PROFILE_SOURCE:-}" ] && [ -z "${CLAUDE_PROFILE_DIR:-}" ]; } || \
+       { [ -z "${BOTS_EXCLUDED_PROFILE_SOURCE:-}" ] && [ -n "${CLAUDE_PROFILE_DIR:-}" ]; }; then
+        log_error "--exclusive-profile-dir and --claude-profile-dir must be provided together"
+        return 1
+    fi
+    if [ -n "${CLAUDE_PROFILE_DIR:-}" ]; then
+        if [ "$#" -ne 1 ] || { [ "$1" != hybrid ] && [ "$1" != merchant_hybrid ]; }; then
+            log_error "--claude-profile-dir and --exclusive-profile-dir only support hybrid"
+            return 1
+        fi
+    fi
+}
+
+apply_merchant_hybrid_profile_defaults() {
+    local target_command="$1"
+    shift
+
+    case "$target_command" in
+        setup|start|restart)
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+    if [ "$#" -ne 1 ] || [ "$1" != "merchant_hybrid" ]; then
+        return 0
+    fi
+
+    BOTS_PROFILE_DIR="${BOTS_PROFILE_DIR:-${MERCHANT_HYBRID_DEFAULT_PROFILE_DIR}}"
+    BOTS_EXCLUDED_PROFILE_SOURCE="${BOTS_EXCLUDED_PROFILE_SOURCE:-${MERCHANT_HYBRID_DEFAULT_EXCLUDED_PROFILE_SOURCE}}"
+    CLAUDE_PROFILE_DIR="${CLAUDE_PROFILE_DIR:-${MERCHANT_HYBRID_DEFAULT_CLAUDE_PROFILE_DIR}}"
+    log_info "merchant_hybrid profile configuration resolved excluded_source=${BOTS_EXCLUDED_PROFILE_SOURCE} claude_profile_enabled=true"
 }
 
 # 编译插编 bcs 到 target/cov-e2e/llvm-cov-target/ 并 export BCS_BIN/LLVM_PROFILE_FILE。
@@ -520,6 +572,8 @@ prepare_bcs_coverage_bin() {
 
 # ============ 当前默认安装流程 (无参数调用) ============
 setup_all_and_start() {
+    local mock_started_by_command=0
+
     # 加载之前保存的引擎类型
     load_engine_type
 
@@ -563,7 +617,12 @@ setup_all_and_start() {
 
     # Start current all group (via group module)
     log_info "Running start current all group..."
+    singlebox_mock_model_start || return 1
+    mock_started_by_command="${SINGLEBOX_MOCK_MODEL_STARTED_BY_COMMAND:-0}"
     if ! all_start; then
+        if [ "$mock_started_by_command" = "1" ]; then
+            singlebox_mock_model_stop || log_warn "Failed to roll back the mock model server."
+        fi
         log_error "Start failed. Fix the errors above, then rerun ./scripts/singlebox.sh $(singlebox_mode_option)."
         return 1
     fi
@@ -664,6 +723,24 @@ main() {
                 BOTS_PROFILE_DIR="$2"
                 shift 2
                 ;;
+            --exclusive-profile-dir)
+                if [ -z "$2" ] || [ "$2" = -* ]; then
+                    log_error "Excluded profile source required for $1"
+                    show_help
+                    exit 1
+                fi
+                BOTS_EXCLUDED_PROFILE_SOURCE="$2"
+                shift 2
+                ;;
+            --claude-profile-dir)
+                if [ -z "$2" ] || [ "$2" = -* ]; then
+                    log_error "Claude profile directory required for $1"
+                    show_help
+                    exit 1
+                fi
+                CLAUDE_PROFILE_DIR="$2"
+                shift 2
+                ;;
             --bcs-auto-onboard)
                 BCS_AUTO_ONBOARD=1
                 shift
@@ -708,7 +785,7 @@ main() {
                 LOCAL_MODE=true
                 shift
                 ;;
-            baas|backend|bcs|bcsfuse|frontend|engine|bots|bcs_bots|bcs_frontend|all)
+            baas|backend|bcs|bcsfuse|frontend|engine|bots|bcs_bots|bcs_frontend|hybrid|merchant_hybrid|all)
                 # Legacy: service name without command defaults to start
                 services+=("$1")
                 if [ -z "$command" ]; then
@@ -754,14 +831,23 @@ main() {
     if [ ${#services[@]} -eq 0 ]; then
         services=(all)
     fi
+    apply_merchant_hybrid_profile_defaults "$command" "${services[@]}"
     if [ -n "${BOTS_PROFILE_DIR:-}" ]; then
         for svc in "${services[@]}"; do
-            if [ "$svc" != "bots" ]; then
-                log_error "--profile-dir only supports the bots target, for example: ./scripts/singlebox.sh $(singlebox_mode_option) start bots --profile-dir <dir>"
-                exit 1
-            fi
+            # --profile-dir / BOTS_PROFILE_DIR is primarily for the bots target,
+            # but bcs_frontend and bcsfuse are allowed because they are started
+            # before bots and need the same profile dir to be wired into BCS.
+            case "$svc" in
+                bots|bcs_frontend|bcsfuse|hybrid|merchant_hybrid)
+                    ;;
+                *)
+                    log_error "--profile-dir only supports the bots target (or bcs_frontend/bcsfuse when the same profile dir is needed), for example: ./scripts/singlebox.sh $(singlebox_mode_option) start bots --profile-dir <dir>"
+                    exit 1
+                    ;;
+            esac
         done
     fi
+    validate_hybrid_profile_options "${services[@]}" || exit 1
     if [ "$STANDALONE_MODE" = true ]; then
         export SINGLEBOX_MODE=standalone
     else
@@ -777,7 +863,9 @@ main() {
 
     case "$command" in
         setup|start|restart|"")
-            singlebox_model_config_prepare || exit 1
+            if singlebox_model_config_required_for_services "${services[@]}"; then
+                singlebox_model_config_prepare || exit 1
+            fi
             ;;
     esac
 
@@ -792,22 +880,56 @@ main() {
             done
             ;;
         start)
+            local mock_started_by_command=0
+            local model_consumer_started=0
             load_engine_type
             if [[ "$with_bcs_coverage" -eq 1 ]]; then
                 prepare_bcs_coverage_bin
             fi
+            if singlebox_model_config_required_for_services "${services[@]}"; then
+                singlebox_mock_model_start || exit 1
+                mock_started_by_command="${SINGLEBOX_MOCK_MODEL_STARTED_BY_COMMAND:-0}"
+            fi
             for svc in "${services[@]}"; do
-                start_service "$svc"
+                if ! start_service "$svc"; then
+                    if [ "$mock_started_by_command" = "1" ] && [ "$model_consumer_started" = "0" ]; then
+                        singlebox_mock_model_stop || log_warn "Failed to roll back the mock model server."
+                    fi
+                    exit 1
+                fi
+                if singlebox_model_config_required_for_services "$svc"; then
+                    model_consumer_started=1
+                fi
             done
             ;;
         stop)
             for svc in "${services[@]}"; do
                 stop_service "$svc"
             done
+            if singlebox_mock_model_stop_required_for_services "${services[@]}"; then
+                singlebox_mock_model_stop
+            fi
             ;;
         restart)
             for svc in "${services[@]}"; do
-                restart_service "$svc"
+                if [ "$svc" = "all" ]; then
+                    stop_service "$svc"
+                    singlebox_mock_model_stop || exit 1
+                    sleep 2
+                    singlebox_mock_model_start || exit 1
+                    local mock_started_by_command="${SINGLEBOX_MOCK_MODEL_STARTED_BY_COMMAND:-0}"
+                    if ! start_service "$svc"; then
+                        if [ "$mock_started_by_command" = "1" ]; then
+                            singlebox_mock_model_stop || log_warn "Failed to roll back the mock model server."
+                        fi
+                        exit 1
+                    fi
+                else
+                    if singlebox_model_config_required_for_services "$svc"; then
+                        singlebox_mock_model_start || exit 1
+                    fi
+                    restart_service "$svc"
+                fi
             done
             ;;
         clean)
@@ -839,4 +961,6 @@ main() {
 }
 
 # 执行主函数
-main "$@"
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    main "$@"
+fi

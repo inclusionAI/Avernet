@@ -1,0 +1,1 @@
+"""Resource reference service tests."""

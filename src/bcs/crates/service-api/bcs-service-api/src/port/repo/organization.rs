@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use bcs_domain::{ActorKind, BotCapabilities, Organization, OrganizationMember};
 
 use crate::ServiceResult;
+use super::ProviderBotDiscoveryRecord;
 
 #[derive(Debug, Clone)]
 pub struct CreateOrganizationRecord {
@@ -66,6 +67,32 @@ pub struct OrganizationMemberPage {
 pub struct OrganizationMemberStatus {
     pub bot_uuid: String,
     pub disabled: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct OrganizationCandidateReadQuery {
+    pub env: String,
+    pub organization_code: String,
+    pub provider_ids: Vec<String>,
+    pub q: Option<String>,
+    pub offset: u64,
+    pub limit: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct OrganizationCandidateReadPage {
+    pub records: Vec<ProviderBotDiscoveryRecord>,
+    pub total: u64,
+}
+
+#[async_trait]
+pub trait OrganizationCandidateReadPort: Send + Sync {
+    async fn list_organization_candidates_page(
+        &self,
+        _query: OrganizationCandidateReadQuery,
+    ) -> ServiceResult<Option<OrganizationCandidateReadPage>> {
+        Ok(None)
+    }
 }
 
 #[derive(Debug, Clone)]

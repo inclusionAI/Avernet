@@ -1,6 +1,7 @@
 use bcs_service_api::{
-    ActorKind, DmActorSpec, Group, GroupCoreService, GroupKind, GroupMessage, GroupStatus,
-    Participant, ParticipantMode, ParticipantRole, ServiceError, Workspace,
+    ActorKind, DmActorSpec, Group, GroupCoreService, GroupKind, GroupMessage,
+    GroupMutableFieldsPatch, GroupStatus, Participant, ParticipantMode, ParticipantRole,
+    ServiceError, Workspace,
 };
 use bcs_test_support::NoopGroupCoreService;
 
@@ -27,6 +28,7 @@ fn sample_message() -> GroupMessage {
         history_meta: None,
         metadata: None,
         run_id: String::new(),
+        attachments: None,
     }
 }
 
@@ -71,6 +73,13 @@ async fn noop_group_mutations_fail_closed_on_missing_groups() {
 
     service.upsert(sample_group()).await.unwrap();
     assert!(service.get("group-1").await.is_none());
+    assert!(matches!(
+        service
+            .patch_mutable_fields(missing, GroupMutableFieldsPatch::default())
+            .await,
+        Err(ServiceError::InvalidOperation { message, .. })
+            if message == "atomic mutable Group patch is not configured"
+    ));
 
     assert!(matches!(
         service.add_message(missing, sample_message()).await,

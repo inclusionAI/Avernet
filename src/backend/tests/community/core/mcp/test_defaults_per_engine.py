@@ -23,6 +23,20 @@ def test_claude_code_has_its_own_list():
     assert isinstance(servers, list)
 
 
+CLAUDE_CODE_REQUIRED_DEFAULT_MCPS = (
+    "mcp.ant.archassistant-mcp.appmcp",
+    "mcp.ant.antcodemcp.code.mcpserver",
+    "mcp.ant.rgmcpserver.rgfastcheckmcpserver",
+    "mcp.ant.faas.skylarkmcpserver.skylarkmcpserver",
+)
+
+
+def test_claude_code_includes_required_coding_mcps_exactly_once():
+    codes = get_default_mcp_server_codes("claude_code")
+    for code in CLAUDE_CODE_REQUIRED_DEFAULT_MCPS:
+        assert codes.count(code) == 1, f"expected exactly one claude_code default MCP: {code}"
+
+
 def test_claude_code_merges_aicoding_research_mcps():
     servers = get_default_mcp_servers("claude_code")
     codes = [s["server_code"] for s in servers]
@@ -35,7 +49,6 @@ def test_claude_code_merges_aicoding_research_mcps():
         "mcp.ant.zlatan.yuntumcpserver",
         "mcp.ant.alipaybase-antlogsmcp.mcp-server",
         "mcp.ant.arkai.assistantmcpserver",
-        "mcp.ant.agentix.112858.aixAicoding",
         "mcp.ant.faas.aixjiter.AixCodingMemoryMCP",
         "mcp.ant.rgmcpserver.rgfastcheckmcpserver",
     )
@@ -43,7 +56,7 @@ def test_claude_code_merges_aicoding_research_mcps():
         assert code in codes, f"missing aicoding-only MCP in claude_code: {code}"
     # 无重复。
     assert len(codes) == len(set(codes))
-    # 12 原有 + 6 新增 + 1 clawmind = 19。
+    # 12 原有 + 5 研发 MCP + 1 应用信息 MCP + 1 clawmind = 19。
     assert len(codes) == 19
 
 
@@ -51,16 +64,18 @@ def test_aicoding_has_its_own_list():
     servers = get_default_mcp_servers("aicoding")
     codes = [s["server_code"] for s in servers]
     assert isinstance(servers, list)
-    assert len(servers) == 10
+    assert len(servers) == 19
     assert "mcp.ant.arkai.assistantmcpserver" in codes
     assert "mcp.ant.arkai.dimamcpserver" in codes
     assert "mcp.ant.faas.aixjiter.AixCodingMemoryMCP" in codes
     assert "mcp.ant.rgmcpserver.rgfastcheckmcpserver" in codes
+    assert "mcp.ant.antcodemcp.code.mcpserver" in codes
+    assert "mcp.ant.antprocessai.anttaskmcp" in codes
     assert BCS_MCP_SERVER_CODE in codes
     assert "hitl" in codes
-    # Trimmed servers must no longer be in the aicoding defaults.
+    assert "clawmind" in codes
+    # Removed legacy server must no longer be in the aicoding defaults.
     assert "mcp.ant.secaibase.secknowledgemcpserver" not in codes
-    assert "mcp.ant.antcodemcp.code.mcpserver" not in codes
     # No duplicate entries (dimamcpserver was previously listed twice).
     assert len(codes) == len(set(codes))
     # Different list object from openclaw — no accidental sharing.
@@ -75,11 +90,11 @@ def test_hitl_is_default_for_mcp_enabled_engines():
     assert "hitl" not in get_default_mcp_server_codes("moltis")
 
 
-def test_clawmind_is_default_for_claude_code_only():
+def test_clawmind_is_default_for_coding_engines():
     assert "clawmind" in get_default_mcp_server_codes("claude_code")
+    assert "clawmind" in get_default_mcp_server_codes("aicoding")
     assert "clawmind" not in get_default_mcp_server_codes("openclaw")
     assert "clawmind" not in get_default_mcp_server_codes("hermes")
-    assert "clawmind" not in get_default_mcp_server_codes("aicoding")
 
 
 def test_bcs_mcp_is_default_for_mcp_enabled_engines():
@@ -174,6 +189,7 @@ from agentclaw.community.core.mcp.services._defaults import (
 _EXPECTED_CLI_CODES = (
     "adev-cli", "acli", "antcode-cli", "linke-cli",
     "linkw-cli", "qmx-invoke-cli", "serverless", "derisk-cli",
+    "yuque-cli",
 )
 
 
@@ -204,12 +220,17 @@ def test_claude_code_application_coding_uses_aicoding_link():
     _assert_default_clis(items)
 
 
-def test_claude_code_without_template_or_unknown_template_returns_empty():
+def test_claude_code_non_normal_template_uses_aicoding_link():
+    for template_type in ("personalCoding", "applicationCoding", "generalCC", "service", "other"):
+        items = get_default_cli_items("claude_code", template_type)
+        _assert_default_clis(items)
+
+
+def test_claude_code_without_template_or_normal_template_returns_empty():
     # claude_code 不带 template_type → 不走 aicoding 链路（返回空）
     assert get_default_cli_items("claude_code") == []
-    # 非 personalCoding/applicationCoding 的 template_type → 空（fail-closed）
-    assert get_default_cli_items("claude_code", "service") == []
-    assert get_default_cli_items("claude_code", "other") == []
+    # 与 BaaS 分桶规则一致：normalCC 不走 aicoding 默认能力桶。
+    assert get_default_cli_items("claude_code", "normalCC") == []
     # 非字符串且不可哈希的 template_type（来自用户 JSON）→ 不抛 TypeError，空（fail-closed）
     assert get_default_cli_items("claude_code", []) == []
     assert get_default_cli_items("claude_code", {}) == []
@@ -230,6 +251,27 @@ def test_default_cli_items_none_engine_returns_empty():
     assert get_default_cli_items("") == []
 
 
+def test_yuque_cli_is_default_entry():
+    """yuque-cli is the newest default entry: full shape, last position, no dupes."""
+    items = get_default_cli_items("aicoding")
+    yuque = [it for it in items if it["cli_code"] == "yuque-cli"]
+    assert len(yuque) == 1
+    assert yuque[0] == {
+        "cli_code": "yuque-cli",
+        "cli_name": "yuque-cli",
+        "cli_desc": "yuque cli",
+    }
+    codes = [it["cli_code"] for it in items]
+    # appended last (stable ordering matters for downstream passport merge).
+    assert codes[-1] == "yuque-cli"
+    assert len(codes) == len(set(codes))
+    # the claude_code coding templates share the same aicoding link, so the
+    # new entry flows through that path too.
+    codes_cc = [it["cli_code"] for it in get_default_cli_items("claude_code", "applicationCoding")]
+    assert "yuque-cli" in codes_cc
+    assert codes_cc[-1] == "yuque-cli"
+
+
 def test_default_cli_items_returns_copy():
     items = get_default_cli_items("aicoding")
     items[0]["cli_code"] = "mutated"
@@ -239,3 +281,190 @@ def test_default_cli_items_returns_copy():
     items2 = get_default_cli_items("claude_code", "personalCoding")
     items2[0]["cli_code"] = "mutated"
     assert get_default_cli_items("claude_code", "personalCoding")[0]["cli_code"] == "adev-cli"
+
+
+def test_template_config_mcps_append_and_override_defaults():
+    template_config = {
+        "bot_template_config": {
+            "preset_capabilities": {
+                "mcp": [
+                    {
+                        "server_code": "mcp.ant.arkai.dimamcpserver",
+                        "name": "Template Dima",
+                        "description": "template override",
+                    },
+                    {
+                        "server_code": "mcp.ant.custom.template.server",
+                        "name": "Template Custom",
+                        "description": "template appended",
+                    },
+                ]
+            }
+        }
+    }
+
+    ext_info = {"aicoding": {"template_config": template_config}}
+    servers = get_default_mcp_servers("aicoding", ext_info=ext_info)
+    codes = [s["server_code"] for s in servers]
+
+    assert codes.count("mcp.ant.arkai.dimamcpserver") == 1
+    assert "mcp.ant.custom.template.server" in codes
+    overridden = next(s for s in servers if s["server_code"] == "mcp.ant.arkai.dimamcpserver")
+    assert overridden["name"] == "Template Dima"
+    assert overridden["description"] == "template override"
+    appended = next(s for s in servers if s["server_code"] == "mcp.ant.custom.template.server")
+    assert appended["name"] == "Template Custom"
+
+
+def test_resolved_template_config_mcps_append_defaults():
+    template_config = {
+        "template_key": "mcptest",
+        "bot_template_config": {
+            "preset_capabilities": {
+                "mcp": [
+                    {
+                        "server_code": "mcp.ant.agentix.112858.baishitong",
+                        "name": "Aix 安全百事通",
+                        "description": "Aix 安全百事通",
+                    },
+                    {
+                        "server_code": "mcp.ant.productai.product-query-tool",
+                        "name": "找产品、找人、找服务、找文档",
+                        "description": "产品星球提供的：找产品、找人、找服务、找文档(语雀)、语雀文档URL解析等。",
+                    },
+                ]
+            }
+        },
+    }
+
+    codes = get_default_mcp_server_codes(
+        "aicoding",
+        ext_info={"aicoding": {"template_config": template_config}},
+    )
+
+    assert "mcp.ant.agentix.112858.baishitong" in codes
+    assert "mcp.ant.productai.product-query-tool" in codes
+
+
+def test_template_config_top_level_mcp_presets_are_ignored():
+    template_config = {
+        "preset_capabilities": {
+            "mcp": [
+                {
+                    "server_code": "mcp.ant.custom.template.server",
+                    "name": "Template Custom",
+                }
+            ]
+        }
+    }
+
+    assert "mcp.ant.custom.template.server" not in get_default_mcp_server_codes(
+        "aicoding", ext_info={"aicoding": {"template_config": template_config}}
+    )
+
+
+def test_legacy_wrapped_template_config_mcp_presets_are_ignored():
+    template_config = {
+        "template_config": {
+            "preset_capabilities": {
+                "mcp": [
+                    {
+                        "server_code": "mcp.ant.custom.template.server",
+                        "name": "Template Custom",
+                    }
+                ]
+            }
+        }
+    }
+
+    assert "mcp.ant.custom.template.server" not in get_default_mcp_server_codes(
+        "aicoding", ext_info={"aicoding": {"template_config": template_config}}
+    )
+
+
+def test_template_config_mcp_presets_are_aicoding_specific():
+    template_config = {
+        "bot_template_config": {
+            "preset_capabilities": {
+                "mcp": [
+                    {
+                        "server_code": "mcp.ant.custom.template.server",
+                        "name": "Template Custom",
+                        "description": "template appended",
+                    }
+                ]
+            }
+        }
+    }
+
+    assert "mcp.ant.custom.template.server" in get_default_mcp_server_codes(
+        "aicoding", ext_info={"aicoding": {"template_config": template_config}}
+    )
+    assert "mcp.ant.custom.template.server" not in get_default_mcp_server_codes(
+        "claude_code", ext_info={"aicoding": {"template_config": template_config}}
+    )
+    assert "mcp.ant.custom.template.server" not in get_default_mcp_server_codes(
+        "openclaw", ext_info={"aicoding": {"template_config": template_config}}
+    )
+
+
+def test_claude_code_coding_template_uses_aicoding_mcp_bucket():
+    template_config = {
+        "bot_template_config": {
+            "preset_capabilities": {
+                "mcp": [
+                    {
+                        "server_code": "mcp.ant.custom.template.server",
+                        "name": "Template Custom",
+                    }
+                ]
+            }
+        }
+    }
+    ext_info = {"aicoding": {"template_config": template_config}}
+
+    codes = get_default_mcp_server_codes(
+        "claude_code",
+        "personalCoding",
+        ext_info=ext_info,
+    )
+
+    assert "mcp.ant.antcodemcp.code.mcpserver" in codes
+    assert "mcp.ant.custom.template.server" in codes
+    assert "clawmind" in codes
+
+
+def test_claude_code_template_factory_non_normal_uses_aicoding_mcp_bucket():
+    template_config = {
+        "bot_template_config": {
+            "preset_capabilities": {
+                "mcp": [
+                    {
+                        "server_code": "mcp.ant.custom.template.server",
+                        "name": "Template Custom",
+                    }
+                ]
+            }
+        }
+    }
+    ext_info = {"aicoding": {"template_config": template_config}}
+
+    codes = get_default_mcp_server_codes(
+        "claude_code",
+        "generalCC",
+        ext_info=ext_info,
+    )
+
+    assert "mcp.ant.antcodemcp.code.mcpserver" in codes
+    assert "mcp.ant.custom.template.server" in codes
+    assert "clawmind" in codes
+
+
+def test_claude_code_normal_template_keeps_claude_mcp_bucket():
+    codes = get_default_mcp_server_codes(
+        "claude_code",
+        template_type="normalCC",
+    )
+
+    assert "clawmind" in codes
+    assert "mcp.ant.agentix.112858.aixAicoding" not in codes

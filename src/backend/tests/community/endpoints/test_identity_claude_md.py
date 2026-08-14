@@ -16,7 +16,7 @@ Covers:
 """
 from __future__ import annotations
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.services.identity import (
     CLAUDE_CODE_IDENTITY_FILES,
     REFERENCE_FILES,
@@ -52,7 +52,7 @@ def _seed_local_binding(world, *, bot_id: str) -> int:
     """Insert an ACTIVE ``local`` binding with no ``adapter_port`` → the bot
     resolves to a device context that routes through LocalDeviceFileSystem's
     pathlib mode onto tmp_path (the identity flow has no local-OSS fallback)."""
-    from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+    from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
     return world.get(DeviceBindingRepository).insert_binding(
         entity_id=_OWNER, entity_type="staff", device_id=f"dev_{bot_id}",
         device_provider="local", env="dev", device_props={}, status="ACTIVE",

@@ -7,8 +7,10 @@ pub mod db;
 pub mod memory;
 
 pub use db::{
-    ChannelSqlFlavor, DbChannelBindingStore, DbConversationSessionStore, DbImParticipantStore,
+    ChannelSqlFlavor, DbChannelBindingStore, DbConversationSessionStore,
+    DbHumanInputRequestStore, DbImParticipantStore,
 };
 pub use memory::{
-    MemoryChannelBindingRepo, MemoryConversationSessionRepo, MemoryImParticipantRepo,
+    MemoryChannelBindingRepo, MemoryConversationSessionRepo, MemoryHumanInputRequestRepo,
+    MemoryImParticipantRepo,
 };

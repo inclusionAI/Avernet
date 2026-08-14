@@ -163,7 +163,7 @@ pub struct DiscoverBotsResponse {
 }
 
 /// Extended response from bot discovery with visibility and friendship info.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct DiscoverBotsExtendedResponse {
     pub bots: Vec<DiscoverBotEntry>,
     pub count: usize,

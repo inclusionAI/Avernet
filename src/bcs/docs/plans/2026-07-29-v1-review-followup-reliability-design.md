@@ -1,0 +1,156 @@
+# BCN OpenAPI V1 Review Follow-up Reliability Design
+
+## Goal
+
+Resolve the five actionable review findings added after commit `591810e7`
+without changing Legacy API behavior or mounting the V1 production router
+before a signed Gateway Principal verifier exists.
+
+## Scope
+
+This follow-up covers:
+
+1. Propagating session-membership query failures to V1 callers.
+2. Propagating friendship query failures during V1 eligibility checks.
+3. Propagating persistent session deletion failures during runtime cleanup.
+4. Rejecting duplicate participant Actor IDs before group canonicalization.
+5. Declaring the existing `non_public_participant` create conflict in OpenAPI.
+
+Production router mounting remains deferred. The existing unresolved thread
+stays open until bootstrap can inject the real signed Principal verifier.
+
+### Runtime linkage and coverage boundary
+
+The V1 Group facade lives in the dedicated `bcs-group-v1` service crate.
+Workspace unit and contract tests compile that crate, but the production
+`bcs` composition root does not depend on it while the V1 router is unmounted.
+This keeps runtime E2E coverage scoped to code that the deployed binary can
+actually execute. When the signed Principal verifier is available, the
+production mounting change must add both `bcs-group-v1` and `bcs-api-http` to
+the composition root and add live V1 Singlebox stories in the same change.
+
+## Architecture
+
+### Backward-compatible fallible companions
+
+Legacy core and repository methods currently return `bool` or `Vec<T>` and
+convert storage failures into negative or empty results. Changing those
+signatures would affect existing callers and violate the compatibility goal.
+
+Instead, the relevant Service API contracts gain fallible companion methods:
+
+- `FriendCoreService::try_are_friends(...) -> ServiceResult<bool>`
+- `SessionRepoPort::try_list_group_ids_by_session_participant(...)`
+  `-> ServiceResult<Vec<String>>`
+
+Default implementations delegate to the existing infallible methods so test
+doubles and Legacy implementations keep compiling. The database-backed
+implementations override the companions and propagate query and row-decoding
+failures. V1 application paths use only the fallible companions.
+
+### Session deletion
+
+`MySqlSessionStore::delete` must return a `ServiceError` when either the
+participant-side-table delete or the session-row delete fails. Successful
+deletion remains idempotent and returns whether the session row existed.
+Runtime cleanup already propagates `SessionManagementService::delete` errors,
+so fixing the repository result prevents Group/runtime state from reporting
+successful deletion after a persistence failure.
+
+### Participant uniqueness
+
+V1 collaboration creation validates the supplied `participants` list before
+the driver is added implicitly and before values are converted into the Legacy
+management command. Any repeated `actor_id`, regardless of role equality,
+returns `invalid_participant`. This removes order-dependent role selection
+from downstream `HashSet` deduplication.
+
+### Contract alignment
+
+The POST `/openapi/v1/groups` 409 response declares both `conflict` and
+`non_public_participant`, matching the existing V1 error mapping. Contract
+tests pin this stable code.
+
+### Second review hardening
+
+The later review pass extends the same compatibility approach:
+
+- Bot registry reads gain a fallible companion used by V1 authorization and
+  validation, while Legacy `get` continues returning `Option`.
+- Only the V1 creation policy propagates protected-participant friendship
+  lookup failures; Legacy reachability keeps its previous behavior.
+- First-time Human Principals are materialized with the existing
+  `ensure_human_actor` path only when their canonical Actor ID participates in
+  a normal Group.
+- Participant row decoding and SQLite DM pair-key races fail or retry
+  explicitly instead of returning partial Groups or a spurious 500.
+- PATCH rejects explicit JSON nulls and delivery-policy updates for non-Chat
+  strategies.
+- Path extraction failures use the common error envelope, and GET/PATCH
+  conflict/error-code declarations cover every stable application error.
+
+### Final review hardening
+
+The final review passes keep the same V1-only compatibility boundary:
+
+- Runtime cleanup uses a SQLite-representable upper bound and enumerates every
+  run for each Group session before deleting runtime state.
+- HTTP deserialization enforces the OpenAPI `actor_ids.minItems = 1`
+  constraint, and V1 quota checks propagate persistent Group lookup failures.
+- Runtime configuration reports whether a definition requires a Human input
+  ChannelBinding. V1 creation defers the initial run for those definitions,
+  because the generated Group ID must exist before a ChannelBinding can be
+  provisioned; other StateMachine definitions retain immediate start.
+- StateMachine run cancellation happens only after Group deletion and channel
+  cleanup can no longer roll the Group back. An idempotent delete retry also
+  retries runtime cancellation and state cleanup for an already-missing Group.
+- Visibility-guarded participant insertion increments the persisted Group
+  version only when the actor is not already a participant, matching the
+  in-memory idempotency behavior.
+- V1 creation uses fallible registry reads for every requested participant,
+  while the Legacy creation policy retains its existing missing-on-error
+  compatibility behavior.
+- Persistent Group deletion acquires a fallible rollback snapshot before
+  issuing DELETE statements, so a snapshot failure cannot be mistaken for a
+  successful idempotent no-op or skip committed-delete cleanup.
+- PATCH explicitly declares `bot_not_found` when a persisted participant has
+  since been soft-deleted from the registry.
+- V1 DM delegation preserves fallible caller/target registry reads and
+  friendship checks through the Legacy-compatible management layer; the
+  Legacy policy keeps its existing missing-or-unreachable fallback behavior.
+
+### Follow-up decision: no V1 Group optimistic lock
+
+The V1 Group update path does not introduce a new version-based optimistic
+locking contract. It continues to use the existing field-scoped
+`patch_mutable_fields` operation, then reloads the persisted Group for the
+response. Storage failures and missing Groups remain distinguishable.
+
+Accordingly:
+
+- V1 update does not capture or pass an `expected_version`.
+- Group persistence does not add a version-checked patch operation.
+- V1 field patches and visibility-guarded participant insertion do not
+  increment `bcs_groups.version`.
+- The existing `Group.version` field and pre-existing collaboration/runtime
+  concurrency controls remain unchanged.
+
+## Error behavior
+
+- Storage query failures become V1 `internal_error` responses.
+- Storage delete failures abort runtime cleanup and become V1
+  `internal_error` responses.
+- Duplicate participants become `invalid_participant`.
+- Protected participants in public group creation continue returning
+  `non_public_participant`, now explicitly documented.
+
+## Verification
+
+Each behavior follows a red-green TDD cycle:
+
+- Inject a failing DB plugin for session membership and deletion.
+- Inject a failing friendship repository through the real `FriendCore`.
+- Exercise duplicate participant creation through `GroupService`.
+- Validate the OpenAPI response code set through the contract test.
+- Run the affected Session Store, Session, Friend, Group, Runtime, and OpenAPI
+  test suites, then the PR CI gates.

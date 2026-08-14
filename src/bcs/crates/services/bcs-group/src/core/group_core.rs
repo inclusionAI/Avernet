@@ -4,9 +4,9 @@ use async_trait::async_trait;
 use bcs_group_store::MemoryGroupRepo;
 use bcs_service_api::port::repo::GroupRepoPort;
 use bcs_service_api::{
-    ActorKind, DmActorSpec, Group, GroupCoreService, GroupKind, GroupMessage, GroupStatus,
-    Participant, ParticipantMode, ParticipantRole, ServiceError, ServiceResult, ServiceSpec,
-    Workspace,
+    ActorKind, DmActorSpec, Group, GroupCoreService, GroupKind, GroupMessage,
+    GroupMutableFieldsPatch, GroupStatus, Participant, ParticipantMode, ParticipantRole,
+    ServiceError, ServiceResult, ServiceSpec, Workspace,
 };
 
 /// Core group service implementation.
@@ -43,8 +43,20 @@ impl GroupCoreService for GroupCore {
         self.repo.upsert(group).await
     }
 
+    async fn patch_mutable_fields(
+        &self,
+        id: &str,
+        patch: GroupMutableFieldsPatch,
+    ) -> ServiceResult<()> {
+        self.repo.patch_mutable_fields(id, patch).await
+    }
+
     async fn get(&self, id: &str) -> Option<Group> {
         self.repo.get(id).await
+    }
+
+    async fn try_get(&self, id: &str) -> ServiceResult<Option<Group>> {
+        self.repo.try_get(id).await
     }
 
     async fn add_message(&self, id: &str, message: GroupMessage) -> ServiceResult<()> {
@@ -53,6 +65,17 @@ impl GroupCoreService for GroupCore {
 
     async fn add_participant(&self, id: &str, participant: Participant) -> ServiceResult<()> {
         self.repo.add_participant(id, participant).await
+    }
+
+    async fn add_participant_with_visibility_guard(
+        &self,
+        id: &str,
+        participant: Participant,
+        actor_is_public: bool,
+    ) -> ServiceResult<()> {
+        self.repo
+            .add_participant_with_visibility_guard(id, participant, actor_is_public)
+            .await
     }
 
     async fn remove_participant(&self, group_id: &str, bot_uuid: &str) -> ServiceResult<()> {
@@ -127,6 +150,10 @@ impl GroupCoreService for GroupCore {
 
     async fn find_by_participant(&self, bot_uuid: &str) -> Vec<Group> {
         self.repo.find_by_participant(bot_uuid).await
+    }
+
+    async fn try_find_by_participant(&self, bot_uuid: &str) -> ServiceResult<Vec<Group>> {
+        self.repo.try_find_by_participant(bot_uuid).await
     }
 
     async fn find_by_participant_filtered(

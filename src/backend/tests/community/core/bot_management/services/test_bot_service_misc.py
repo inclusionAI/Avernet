@@ -6,16 +6,19 @@ check_bot_name_exists, generate_bot_id.
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call as mock_call, patch
 
 import pytest
 
+from agentclaw.community.core.bot_management.services import bot_service as bot_service_module
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
+    DefaultBotTeclawNotAllowedError,
     BotService,
     BotServiceError,
     generate_bot_id,
 )
+from agentclaw.community.core.devices.models import DeviceBindingStatus
 
 
 # ---------------------------------------------------------------------------
@@ -37,6 +40,10 @@ def _make_bot(
     template_type: str | None = None,
 ) -> dict:
     result = {
+        # ac_bots' primary key, distinct from the logical bot_id. Neither
+        # purge reads it — both key on (entity_id, bot_id) — but a real row
+        # always carries it, so the fixture does too.
+        "id": 4242,
         "bot_id": bot_id,
         "owner_id": owner_id,
         "status": status,
@@ -56,7 +63,14 @@ def _make_bot(
 
 def _make_service() -> BotService:
     svc = BotService.__new__(BotService)
+    svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = MagicMock()
+    # Default: target bot (bot001) is NOT the owner's earliest (deletion allowed).
+    # Earliest-bot protection tests MUST override list_by_owner to make the target earliest.
+    # A forgotten override here silently passes — see TestDeleteBotProtection.
+    _target = {"bot_id": "bot001", "gmt_create": "2026-12-31 23:59:59"}
+    _earliest = {"bot_id": "20260101_earliest", "gmt_create": "2026-01-01 00:00:00"}
+    svc._repository.list_by_owner.return_value = (2, [_target, _earliest])
     svc._passport_plugin = MagicMock()
     svc._bot_publish_provider = lambda: MagicMock()
     svc._device_service_provider = lambda: MagicMock()
@@ -73,6 +87,11 @@ def _make_service() -> BotService:
     svc._skill_set_factory = MagicMock()
     svc._bot_publish_repo = MagicMock()
     svc._oss_record_repo = MagicMock()
+    teclaw_provision = MagicMock()
+    teclaw_provision.is_teclaw.side_effect = lambda engine: (
+        (engine or "").strip().lower() == "teclaw"
+    )
+    svc._teclaw_provision_provider = lambda: teclaw_provision
     return svc
 
 
@@ -82,28 +101,34 @@ def _make_service() -> BotService:
 
 
 class TestGenerateBotId:
+    """generate_bot_id now always returns a globally-unique id (never 'default')."""
 
-    def test_first_bot_returns_default(self):
+    def test_never_returns_default(self):
         repo = MagicMock()
+        # Regression pin: scenario that used to yield 'default'; new impl must still not.
         repo.exists_by_owner_and_bot_id.return_value = False
-        assert generate_bot_id("user001", repo) == "default"
-
-    def test_second_bot_returns_date_based_id(self):
-        repo = MagicMock()
-        repo.exists_by_owner_and_bot_id.return_value = True
         bot_id = generate_bot_id("user001", repo)
         assert bot_id != "default"
-        assert len(bot_id) == 17  # yyyymmdd + _ + 8 chars
 
-    def test_generated_id_format(self):
+    def test_format_is_date_underscore_random8(self):
         repo = MagicMock()
-        repo.exists_by_owner_and_bot_id.return_value = True
         bot_id = generate_bot_id("user001", repo)
         parts = bot_id.split("_")
         assert len(parts) == 2
-        assert len(parts[0]) == 8  # date part
-        assert len(parts[1]) == 8  # random part
-        assert parts[0].isdigit()
+        assert len(parts[0]) == 8 and parts[0].isdigit()  # yyyymmdd
+        assert len(parts[1]) == 8  # 8 lowercase/digit chars
+
+    def test_successive_calls_are_unique(self):
+        repo = MagicMock()
+        ids = {generate_bot_id("user001", repo) for _ in range(50)}
+        assert len(ids) == 50  # 36^8 space → collision-improbable
+
+    def test_ignores_owner_default_history(self):
+        # Id allocation no longer consults owner history at all.
+        repo = MagicMock()
+        bot_id = generate_bot_id("user001", repo)
+        assert bot_id != "default"
+        repo.exists_by_owner_and_bot_id.assert_not_called()
 
 
 # ===========================================================================
@@ -317,6 +342,39 @@ class TestSwitchEngine:
             with pytest.raises(BotServiceError, match="not enabled"):
                 svc.switch_engine("bot001", "user001", "openclaw")
 
+    def test_rejects_switching_default_bot_to_teclaw(self):
+        svc = _make_service()
+        bot = _make_bot(
+            bot_id="default",
+            engine_types=["moltis", "openclaw", "teclaw"],
+        )
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        with patch(
+            "agentclaw.community.core.bot_management.services.bot_service._get_engine_types",
+            return_value=["moltis", "openclaw", "teclaw"],
+        ):
+            with pytest.raises(DefaultBotTeclawNotAllowedError):
+                svc.switch_engine("default", "user001", "teclaw")
+
+        svc._repository.update_by_owner.assert_not_called()
+
+    def test_allows_switching_non_default_bot_to_teclaw(self):
+        svc = _make_service()
+        bot = _make_bot(engine_types=["moltis", "openclaw", "teclaw"])
+        updated_bot = {**bot, "active_engine": "teclaw", "binding_id": None}
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._repository.update_by_owner.return_value = updated_bot
+
+        with patch(
+            "agentclaw.community.core.bot_management.services.bot_service._get_engine_types",
+            return_value=["moltis", "openclaw", "teclaw"],
+        ):
+            result = svc.switch_engine("bot001", "user001", "teclaw")
+
+        assert result["active_engine"] == "teclaw"
+        svc._repository.update_by_owner.assert_called_once()
+
     def test_switches_engine_successfully(self):
         svc = _make_service()
         bot = _make_bot(engine_types=["moltis", "openclaw"])
@@ -366,6 +424,123 @@ class TestDeleteBot:
         svc._repository.get_by_id_and_owner.return_value = None
         with pytest.raises(BotNotFoundError):
             svc.delete_bot("bot001", "user001")
+
+    def test_withdraws_app_authorizations_before_deleting(self):
+        """Deleting a bot means no application can reach it afterwards.
+
+        The gap this closes: grants outlived their bot, so an authorization
+        stayed live against something that no longer existed — and the
+        machine-caller path would have found it.
+        """
+        svc = _make_service()
+        grants = MagicMock()
+        grants.revoke_all_for_bot.return_value = 2
+        svc._bot_app_grant_provider = lambda: grants
+        svc._repository.get_by_id_and_owner.return_value = _make_bot(binding_id=None)
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        assert svc.delete_bot("bot001", "user001") is True
+
+        # Twice, and both for the same bot: once before anything destructive,
+        # once after the soft delete to catch the window between them.
+        assert grants.revoke_all_for_bot.call_count == 2
+        for call in grants.revoke_all_for_bot.call_args_list:
+            assert call == mock_call(bot_id="bot001", owner_id="user001")
+
+    def test_a_grant_that_races_the_deletion_is_swept_afterwards(self):
+        """The window between the first sweep and the soft delete.
+
+        The first sweep commits, then the deletion spends time in the device
+        release and the Passport destruction. A collaborator granting in there
+        inserts a row after the sweep read, and it would outlive the bot.
+
+        The second sweep catches what landed in that window. It does **not**
+        close the race — an earlier version of this docstring claimed it did,
+        on the grounds that no grant can be created once the soft delete
+        commits. That is wrong: the ``is_delete == 0`` filters guard the
+        delegation gate's *resolution*, early in the request, while the row is
+        written later, so a request that already resolved can still insert
+        behind this sweep. The grant path's own liveness recheck bounds the
+        remainder; see ``GrantBotNotLiveError``.
+        """
+        svc = _make_service()
+        grants = MagicMock()
+        swept: list[int] = []
+
+        def _sweep(*, bot_id, owner_id):
+            # First call: nothing yet. Second: the row that raced in.
+            swept.append(len(swept))
+            return 0 if len(swept) == 1 else 1
+
+        grants.revoke_all_for_bot.side_effect = _sweep
+        svc._bot_app_grant_provider = lambda: grants
+        svc._repository.get_by_id_and_owner.return_value = _make_bot(binding_id=None)
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        assert svc.delete_bot("bot001", "user001") is True
+
+        assert grants.revoke_all_for_bot.call_count == 2, "the second sweep ran"
+
+    def test_a_failed_post_deletion_sweep_is_surfaced_not_swallowed(self):
+        """A sweep that could not commit is a failed write, and says so.
+
+        An earlier revision made this best-effort, reasoning that the bot is
+        already deleted so raising reports failure for something that
+        succeeded. That reasoning is real but it loses: `AGENTS.md` requires
+        persistence write failures to propagate rather than be swallowed into a
+        success, and reporting success while the authorization table still
+        holds rows for this bot makes the two disagree with no signal that they
+        do.
+
+        The confusing retry — "no such bot", because the deletion really did
+        happen — is the accepted cost of not returning a wrong answer that
+        nobody can discover later.
+        """
+        svc = _make_service()
+        grants = MagicMock()
+        grants.revoke_all_for_bot.side_effect = [0, RuntimeError("grant store down")]
+        svc._bot_app_grant_provider = lambda: grants
+        svc._repository.get_by_id_and_owner.return_value = _make_bot(binding_id=None)
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        with pytest.raises(BotServiceError):
+            svc.delete_bot("bot001", "user001")
+
+        # The deletion itself did happen — that is precisely why the sequence
+        # is awkward, and why it is worth pinning rather than glossing.
+        svc._repository.soft_delete_by_owner.assert_called_once()
+
+    def test_a_failed_withdrawal_aborts_the_deletion(self):
+        """Never a deleted bot with live authorizations against it.
+
+        Swallowing this would reintroduce the gap quietly, which is worse than
+        the gap: the sweep would look like it ran. It runs before the device
+        release and the passport destruction too, so a failure leaves the bot
+        intact rather than unusable-but-still-reachable.
+        """
+        svc = _make_service()
+        grants = MagicMock()
+        grants.revoke_all_for_bot.side_effect = RuntimeError("grant store down")
+        svc._bot_app_grant_provider = lambda: grants
+        svc._repository.get_by_id_and_owner.return_value = _make_bot(binding_id=None)
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        with pytest.raises(BotServiceError):
+            svc.delete_bot("bot001", "user001")
+
+        svc._repository.soft_delete_by_owner.assert_not_called()
+        svc._passport_plugin.destroy_passport.assert_not_called()
+
+    def test_deleting_an_unauthorized_bot_is_ordinary(self):
+        """No grants is not an error — it is the common case."""
+        svc = _make_service()
+        grants = MagicMock()
+        grants.revoke_all_for_bot.return_value = 0
+        svc._bot_app_grant_provider = lambda: grants
+        svc._repository.get_by_id_and_owner.return_value = _make_bot(binding_id=None)
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        assert svc.delete_bot("bot001", "user001") is True
 
     def test_deletes_bot_without_binding(self):
         svc = _make_service()
@@ -440,6 +615,42 @@ class TestDeleteBot:
         assert result is True
         mock_device_service.release_device.assert_called_once()
 
+    def test_releases_stopped_device_before_deleting(self):
+        svc = _make_service()
+        bot = _make_bot(binding_id=42)
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        mock_binding = MagicMock()
+        mock_binding.status = DeviceBindingStatus.STOPPED.value
+        mock_device_service = MagicMock()
+        mock_device_service.get_device.return_value = mock_binding
+        svc._device_service_provider = lambda: mock_device_service
+        svc._passport_plugin.destroy_passport.return_value = None
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        result = svc.delete_bot("bot001", "user001")
+
+        assert result is True
+        mock_device_service.release_device.assert_called_once()
+
+    def test_releases_failed_device_before_deleting(self):
+        svc = _make_service()
+        bot = _make_bot(binding_id=42)
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        mock_binding = MagicMock()
+        mock_binding.status = DeviceBindingStatus.FAILED.value
+        mock_device_service = MagicMock()
+        mock_device_service.get_device.return_value = mock_binding
+        svc._device_service_provider = lambda: mock_device_service
+        svc._passport_plugin.destroy_passport.return_value = None
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        result = svc.delete_bot("bot001", "user001")
+
+        assert result is True
+        mock_device_service.release_device.assert_called_once()
+
     def test_device_release_failure_blocks_deletion(self):
         svc = _make_service()
         bot = _make_bot(binding_id=42)
@@ -468,8 +679,8 @@ class TestDeleteBot:
             svc.delete_bot("bot001", "user001")
         svc._repository.soft_delete_by_owner.assert_not_called()
 
-    def test_default_bot_delete_is_forbidden(self):
-        """default bot 是用户的常驻默认 Bot,不允许删除(重启请走 restart_bot)。
+    def test_last_bot_delete_is_forbidden(self):
+        """删除 owner 最后一只 Bot 被拒(保留≥1),不再按 bot_id=='default' 拦截。
 
         拦截必须发生在 release_device / destroy_passport / soft_delete 之前,
         否则会误销毁 agent 许可证 (Passport) 并重置引擎配置 (openclaw.json)。
@@ -477,8 +688,12 @@ class TestDeleteBot:
         svc = _make_service()
         bot = _make_bot(bot_id="default", binding_id=42)
         svc._repository.get_by_id_and_owner.return_value = bot
+        # target bot 是 owner 唯一/最早创建 → earliest 保护命中
+        svc._repository.list_by_owner.return_value = (1, [{
+            "bot_id": "default", "gmt_create": "2026-07-01 00:00:00",
+        }])
 
-        with pytest.raises(BotServiceError, match="default bot 不允许删除"):
+        with pytest.raises(BotServiceError, match="首个创建"):
             svc.delete_bot("default", "user001")
 
         # 许可证未销毁、设备未释放、bot 记录未删、脏数据未清理
@@ -498,7 +713,125 @@ class TestDeleteBot:
 
         result = svc.delete_bot("mybot", "user001")
         assert result is True
-        svc._cleanup_service.cleanup_single_bot_data.assert_called_once_with("mybot", "user001")
+        svc._cleanup_service.cleanup_single_bot_data.assert_called_once_with(
+            "mybot", "user001"
+        )
+
+    def test_the_startup_script_is_purged_keyed_by_entity_not_owner(self):
+        """The script is stored under ``entity_id``, which is only *usually* the
+        owner id — under a team entity they differ. Passing ``user_id`` in its
+        place would look right in every single-owner test and silently miss the
+        row for every team-owned bot.
+        """
+        svc = _make_service()
+        bot = _make_bot(bot_id="mybot", binding_id=None, entity_id="team_42")
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._passport_plugin.destroy_passport.return_value = None
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        assert svc.delete_bot("mybot", "user001") is True
+        assert svc._cleanup_service.purge_startup_script.call_args_list[0].kwargs == {
+            "entity_id": "team_42",
+            "bot_id": "mybot",
+        }
+
+    def test_a_failed_script_purge_aborts_the_delete_with_the_bot_intact(self):
+        """Unlike the skill sweeps, this one is not allowed to fail quietly: the
+        leftover is executable content that would run on the next owner of the
+        same bot id. It runs before the destructive steps, so a failure leaves
+        the bot whole and the caller sees the error.
+        """
+        svc = _make_service()
+        bot = _make_bot(bot_id="mybot", binding_id=None)
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._cleanup_service.purge_startup_script.side_effect = RuntimeError("db down")
+
+        with pytest.raises(BotServiceError):
+            svc.delete_bot("mybot", "user001")
+
+        svc._repository.soft_delete_by_owner.assert_not_called()
+        svc._passport_plugin.destroy_passport.assert_not_called()
+
+    def test_a_write_landing_inside_the_purge_to_soft_delete_gap_is_swept(self):
+        """The first purge and the post-write re-check together still miss one
+        ordering, which is why there is a second sweep.
+
+        ``release_device`` and ``destroy_passport`` — the latter unconditional
+        and a blocking external call — sit between the first purge and
+        ``soft_delete_by_owner``. A PUT whose check, write and re-check all fall
+        inside that gap sees a live bot every time and leaves its row behind.
+        Only a purge on the far side of the soft delete catches it.
+        """
+        svc = _make_service()
+        bot = _make_bot(bot_id="mybot", binding_id=None, entity_id="team_42")
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._passport_plugin.destroy_passport.return_value = None
+        svc._repository.soft_delete_by_owner.return_value = True
+        # Nothing there when the deletion began; the racing PUT's row appears
+        # in the gap and is found by the second sweep.
+        svc._cleanup_service.purge_startup_script.side_effect = [False, True]
+
+        with patch.object(bot_service_module, "logger") as mock_logger:
+            assert svc.delete_bot("mybot", "user001") is True
+
+        assert svc._cleanup_service.purge_startup_script.call_count == 2
+        assert any(
+            "while it was being deleted" in str(c.args[0])
+            for c in mock_logger.warning.call_args_list
+        )
+
+    def test_the_script_is_purged_once_before_the_destructive_steps(self):
+        """One purge, unconditional, while the bot is still intact.
+
+        No second sweep after the soft delete: ``ac_bots`` constrains
+        ``uk_bot_id_entity_id_env`` and the delete is a soft update, so the
+        deleted row keeps occupying the tuple and no later bot can be created
+        onto it. A row that somehow survived is unreachable rather than
+        inherited, so the purge is hygiene and one pass is enough.
+        """
+        svc = _make_service()
+        bot = _make_bot(bot_id="mybot", binding_id=None, entity_id="team_42")
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._passport_plugin.destroy_passport.return_value = None
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        assert svc.delete_bot("mybot", "user001") is True
+
+        # Keyed by entity_id, not the owner id: the two differ under a team
+        # entity, and using the owner would miss the row for every team bot.
+        # Both passes use that key — the second is the sweep after the soft
+        # delete, covered by its own test above.
+        assert svc._cleanup_service.purge_startup_script.call_args_list == [
+            mock_call(entity_id="team_42", bot_id="mybot"),
+            mock_call(entity_id="team_42", bot_id="mybot"),
+        ]
+
+    def test_the_default_bot_is_exempt_from_both_purges(self):
+        """That delete is a restart; the script survives it as the skills and
+        config already do. Neither pass may touch it.
+        """
+        svc = _make_service()
+        bot = _make_bot(bot_id="default", binding_id=None)
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._passport_plugin.destroy_passport.return_value = None
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        svc.delete_bot("default", "user001")
+
+        svc._cleanup_service.purge_startup_script.assert_not_called()
+
+    def test_a_bot_with_no_entity_has_no_script_to_purge(self):
+        """The write path requires both halves of the key, so a bot with no
+        entity id never had a script — nothing to delete, no id to invent.
+        """
+        svc = _make_service()
+        bot = _make_bot(bot_id="mybot", binding_id=None, entity_id="")
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._passport_plugin.destroy_passport.return_value = None
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        assert svc.delete_bot("mybot", "user001") is True
+        svc._cleanup_service.purge_startup_script.assert_not_called()
 
     def test_cleanup_failure_does_not_block_delete(self):
         svc = _make_service()
@@ -510,6 +843,54 @@ class TestDeleteBot:
 
         result = svc.delete_bot("mybot", "user001")
         assert result is True
+
+
+# ===========================================================================
+# delete_bot — earliest-bot protection (cannot delete the owner's first created bot)
+# ===========================================================================
+
+
+class TestDeleteBotProtection:
+    """delete_bot 拒绝删除 owner 名下最早创建的 bot (首 bot 受保护),
+    不再按 bot_id=='default'。含 owner 仅一只的情形（earliest 即该只 → 拒）。"""
+
+    def _svc(self, bots: list, bot: dict | None):
+        svc = _make_service()
+        svc._repository.list_by_owner.return_value = (len(bots), bots)
+        svc._repository.get_by_id_and_owner.return_value = bot or _make_bot()
+        return svc
+
+    def test_earliest_bot_rejected_when_two_bots(self):
+        """两个 bot 时,删最早的（不是 default）会被拒。"""
+        earliest = {"bot_id": "20260701_aaaaaaaa", "gmt_create": "2026-07-01 00:00:00"}
+        later = {"bot_id": "20260731_bbbbbbbb", "gmt_create": "2026-07-31 00:00:00"}
+        svc = self._svc([earliest, later], _make_bot(bot_id="20260701_aaaaaaaa"))
+        with pytest.raises(BotServiceError, match="首个创建"):
+            svc.delete_bot(bot_id="20260701_aaaaaaaa", user_id="user001")
+
+    def test_non_earliest_allowed(self):
+        """两个 bot 时,删较新的那只允许。"""
+        earliest = {"bot_id": "20260701_aaaaaaaa", "gmt_create": "2026-07-01 00:00:00"}
+        later = {"bot_id": "20260731_bbbbbbbb", "gmt_create": "2026-07-31 00:00:00"}
+        svc = self._svc([earliest, later], _make_bot(bot_id="20260731_bbbbbbbb", binding_id=None))
+        svc.delete_bot(bot_id="20260731_bbbbbbbb", user_id="user001")  # 不抛
+        svc._repository.soft_delete_by_owner.assert_called_once()
+
+    def test_default_bot_deletable_when_not_earliest(self):
+        """行为变化:default 字面值不再受特殊保护;只要不是 earliest 即可删。"""
+        earliest = {"bot_id": "20260630_otherxxx", "gmt_create": "2026-06-30 00:00:00"}
+        default_bot = {"bot_id": "default", "gmt_create": "2026-07-15 00:00:00"}
+        svc = self._svc([earliest, default_bot], _make_bot(bot_id="default", binding_id=None))
+        svc.delete_bot(bot_id="default", user_id="user001")
+        svc._repository.soft_delete_by_owner.assert_called_once()
+
+    def test_default_bot_rejected_when_earliest(self):
+        """存量 default bot 作为 earliest 时仍受保护。"""
+        default_bot = {"bot_id": "default", "gmt_create": "2026-07-01 00:00:00"}
+        later = {"bot_id": "20260731_newerbot", "gmt_create": "2026-07-31 00:00:00"}
+        svc = self._svc([default_bot, later], _make_bot(bot_id="default", binding_id=None))
+        with pytest.raises(BotServiceError, match="首个创建"):
+            svc.delete_bot(bot_id="default", user_id="user001")
 
 
 # ===========================================================================
@@ -637,3 +1018,84 @@ class TestListBots:
         svc._repository.list_by_entity.assert_called_once_with(
             entity_id=None, entity_type=None, page=1, page_size=20,
         )
+
+
+class TestTemplateFactoryBranchCoverage:
+
+    def test_memory_initialization_update_compares_old_and_new_sources(self):
+        assert BotService._should_trigger_memory_initialization(
+            active_engine="claude_code",
+            template_type="normalCC",
+            template_config={
+                "template_key": "normalCC",
+                "business_wiki_spaces": [{"url": "https://yuque/new"}],
+            },
+            old_template_config={
+                "template_key": "normalCC",
+                "business_wiki_spaces": [{"url": "https://yuque/old"}],
+            },
+            on_create=False,
+        ) is True
+
+    def test_memory_initialization_detection_error_keeps_legacy_create_fallback(self):
+        with patch(
+            "agentclaw.community.core.bot_management.utils.memory_sources_changed",
+            side_effect=RuntimeError("boom"),
+        ):
+            assert BotService._should_trigger_memory_initialization(
+                active_engine="claude_code",
+                template_type="applicationCoding",
+                template_config={"yuque_kb_repos": [{"url": "https://yuque/a"}]},
+                on_create=True,
+            ) is True
+            assert BotService._should_trigger_memory_initialization(
+                active_engine="claude_code",
+                template_type="normalCC",
+                template_config={"template_key": "normalCC"},
+                on_create=True,
+            ) is False
+
+    def test_attach_template_configs_to_bots_attaches_ext_and_skips_missing_bot_id(self):
+        svc = _make_service()
+        items = [
+            {"bot_id": "b1", "template_type": "normalCC"},
+            {"bot_id": None, "template_type": "normalCC"},
+        ]
+        svc._template_service.list_templates_by_bot_ids.return_value = [
+            {"bot_id": "b1", "ext": {"template_key": "normalCC"}},
+        ]
+
+        svc._attach_template_configs_to_bots(items)
+
+        svc._template_service.list_templates_by_bot_ids.assert_called_once_with(["b1"])
+        assert items[0]["template_config"] == {"template_key": "normalCC"}
+        assert "template_config" not in items[1]
+
+    def test_attach_template_configs_to_bots_swallows_template_service_failure(self):
+        svc = _make_service()
+        items = [{"bot_id": "b1", "template_type": "normalCC"}]
+        svc._template_service.list_templates_by_bot_ids.side_effect = RuntimeError("boom")
+
+        svc._attach_template_configs_to_bots(items)
+
+        assert items == [{"bot_id": "b1", "template_type": "normalCC"}]
+
+    def test_list_bots_by_conditions_returns_items_after_template_enrichment(self):
+        svc = _make_service()
+        items = [{"bot_id": "b1", "template_type": "normalCC"}]
+        svc._repository.list_by_conditions.return_value = (1, items)
+        svc._template_service.list_templates_by_bot_ids.return_value = [
+            {"bot_id": "b1", "ext": {"template_key": "normalCC"}},
+        ]
+
+        result = svc.list_bots_by_conditions(page=1, page_size=10)
+
+        assert result == {"total": 1, "items": items}
+        assert result["items"][0]["template_config"] == {"template_key": "normalCC"}
+
+    def test_aicoding_personal_coding_uses_legacy_bcn_provider_fallback(self):
+        assert BotService._should_register_bcn_provider(
+            active_engine="aicoding",
+            bot_type="personal",
+            template_type="personalCoding",
+        ) is True

@@ -316,3 +316,70 @@ jobs:
           name: baas-testresult
           path: src/baas/pytest_report/
           if-no-files-found: ignore
+
+  gateway:
+    name: Gateway unit tests
+    runs-on: ubuntu-latest
+    env:
+      # PR: compare against the checked-out merge commit's exact base tree.
+      # push/dispatch: compare against dev (repo default branch) instead.
+      GATEWAY_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/dev' }}
+    defaults:
+      run:
+        working-directory: src/gateway
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect gateway changes vs base
+        id: changes
+        # Run from the repo root so the "-- src/gateway" pathspec resolves; the job
+        # default working-directory is src/gateway, so override to the workspace root.
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: |
+          # Make sure the base ref is present locally (shallow clones may not have it).
+          git fetch --no-tags --depth=1 origin "${GATEWAY_BASE_REF#origin/}" 2>/dev/null || true
+          # Diff the base ref against the working tree. PR runs check out a merge commit,
+          # for which "<base>...HEAD" collapses to nothing; diffing base against the tree
+          # sees all PR-introduced changes regardless of the merge-commit checkout.
+          mapfile -t files < <(git diff --name-only "${GATEWAY_BASE_REF}" -- src/gateway || true)
+          n=${#files[@]}
+          if [ "$n" -eq 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "No changes under src/gateway vs ${GATEWAY_BASE_REF}; skipping gateway tests."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Detected ${n} changed file(s) under src/gateway vs ${GATEWAY_BASE_REF}."
+            printf '%s\n' "${files[@]}" | sed 's/^/  - /'
+          fi
+
+      - name: Set up Python
+        if: steps.changes.outputs.skip != 'true'
+        uses: actions/setup-python@v5
+        with:
+          # Gateway targets Python >=3.12 (see src/gateway/pyproject.toml).
+          python-version: '3.12'
+
+      - name: Install uv
+        if: steps.changes.outputs.skip != 'true'
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: src/gateway/uv.lock
+
+      - name: Run unit tests with coverage
+        if: steps.changes.outputs.skip != 'true'
+        # ci_test.sh runs ruff lint + pytest with coverage and produces JUnit XML
+        # and HTML reports under pytest_report/.
+        run: bash scripts/ci_test.sh --base "${GATEWAY_BASE_REF}"
+
+      - name: Upload gateway test results
+        if: always() && steps.changes.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-testresult
+          path: src/gateway/pytest_report/
+          if-no-files-found: ignore

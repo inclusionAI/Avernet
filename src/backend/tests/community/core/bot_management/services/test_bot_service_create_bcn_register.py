@@ -23,6 +23,7 @@ from agentclaw.community.core.devices.repository.record import DeviceBindingReco
 def _make_service(*, current_bots: int = 0) -> BotService:
     """构造用于 create_bot BCN 注册测试的最小 BotService。"""
     svc = BotService.__new__(BotService)
+    svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = MagicMock()
     svc._repository.count_by_owner.return_value = current_bots
     svc._repository.get_by_id_and_owner.return_value = None
@@ -57,6 +58,7 @@ def _make_service(*, current_bots: int = 0) -> BotService:
     teclaw_provision = MagicMock()
     teclaw_provision.is_teclaw.return_value = False
     svc._teclaw_provision_provider = lambda: teclaw_provision
+    svc._common_config_service = None
     svc._policy_service = None
     # DRM reader: default unset (None) ⇒ _is_new_bot_use_nas() is False (OSS).
     # BCN-register tests patch BotService._is_claude_code_bcn_register_enabled.
@@ -152,6 +154,76 @@ class TestCreateBotBcnRegister:
             name="cc-svc-bot",
             summary="service desc",
         )
+
+    def test_service_bot_create_uses_default_image_and_persists_marker(self):
+        svc = _make_service()
+        device_service = _attach_device_service(svc)
+        common_config = MagicMock()
+        common_config.get_value.return_value = {"image": "registry/arca:v2"}
+        svc._common_config_service = common_config
+        template_config = {
+            "image": "registry/arca:v1",
+            "envs": {"A": "1"},
+        }
+
+        svc.create_bot(
+            user_id="u1",
+            nick_name="nick",
+            bot_name="pinned-service-bot",
+            bot_id="service-pin-1",
+            engine_type="openclaw",
+            bot_type="service",
+            template_type="service",
+            template_config=template_config,
+            ext={"service_bot_config": {"device_count": 3}},
+        )
+
+        inserted_ext = svc._repository.insert.call_args.args[0]["ext"]
+        assert inserted_ext == {
+            "service_bot_config": {"device_count": 3},
+            "sbot_use_default_image": True,
+        }
+        apply_kwargs = device_service.apply_device.call_args.kwargs
+        assert apply_kwargs["template_config"] == {
+            "image": "registry/arca:v1",
+            "envs": {"A": "1"},
+        }
+        assert template_config["image"] == "registry/arca:v1"
+        common_config.get_value.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "config_value",
+        [None, {}, {"image": ""}],
+        ids=["missing-or-disabled", "missing-image", "empty-image"],
+    )
+    def test_service_bot_create_without_active_image_policy_has_no_markers(
+        self, config_value
+    ):
+        svc = _make_service()
+        _attach_device_service(svc)
+        common_config = MagicMock()
+        common_config.get_value.return_value = config_value
+        svc._common_config_service = common_config
+
+        svc.create_bot(
+            user_id="u1",
+            nick_name="nick",
+            bot_name="legacy-service-bot",
+            bot_id="service-legacy-1",
+            engine_type="openclaw",
+            bot_type="service",
+            template_type="service",
+            ext={
+                "service_bot_config": {"device_count": 3},
+                "sbot_use_default_image": True,
+                "sbot_pin_image": True,
+                "sbot_docker_image": "stale:v1",
+            },
+        )
+
+        inserted_ext = svc._repository.insert.call_args.args[0]["ext"]
+        assert inserted_ext == {"service_bot_config": {"device_count": 3}}
+        common_config.get_value.assert_called_once()
 
     def test_claude_code_application_coding_does_not_trigger_bcn_register(self):
         """claude_code + applicationCoding 创建时不应触发 BCN 注册。"""

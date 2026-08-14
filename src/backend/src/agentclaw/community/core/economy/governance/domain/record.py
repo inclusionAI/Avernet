@@ -37,12 +37,14 @@ class GovernanceRecord:
     # 身份补充(可选)
     worker_id: str | None = None        # 缺则由 owner_id:bot_id 合成
     bot_name: str | None = None
+    owner_name: str | None = None       # 负责人显示名(展示用,可空)
     # 数据字段(可选,缺则默认,传给 refresh_snapshot/add_ticket)
     hit_dimensions: str | None = None
     hit_dimensions_count: int | None = None
     governance_max_priority: str | None = None
     expected_token_saving: int | None = None
     saving_ratio: float | None = None
+    token_baseline: int | None = None  # Token 消耗基线(展示用,refresh 走 guard)
     task_summary: str | None = None
     notification_structured: str | None = None
     analysis_status: str | None = None

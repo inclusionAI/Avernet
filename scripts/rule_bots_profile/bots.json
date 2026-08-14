@@ -1,0 +1,112 @@
+{
+  "version": 2,
+  "name": "BCS Rule Bot 示例组",
+  "scopes": "local,utility",
+  "bots": [
+    {
+      "profile": "friendly",
+      "name": "友善助手",
+      "summary": "依次使用预设内容回复",
+      "domains": "utility",
+      "skills": "preset-reply",
+      "runtime": {
+        "type": "rule",
+        "behavior": {
+          "type": "fixed",
+          "replies": ["你好", "是的", "没错", "好的"],
+          "scope": "session"
+        }
+      }
+    },
+    {
+      "profile": "random-greeter",
+      "name": "随机问候",
+      "summary": "从预设列表随机回复",
+      "domains": "utility",
+      "skills": "random-reply",
+      "runtime": {
+        "type": "rule",
+        "behavior": {
+          "type": "random_reply",
+          "replies": ["你好", "是的", "没错", "好的"],
+          "seed": 42,
+          "scope": "session"
+        }
+      }
+    },
+    {
+      "profile": "repeater",
+      "name": "复读机",
+      "summary": "重复并拼接输入消息",
+      "domains": "utility",
+      "skills": "echo",
+      "runtime": {
+        "type": "rule",
+        "response_delay_ms": 1500,
+        "behavior": {
+          "type": "echo",
+          "repeat": 3,
+          "separator": "、",
+          "prefix": "复读：",
+          "suffix": "。"
+        }
+      }
+    },
+    {
+      "profile": "random-number",
+      "name": "随机数字",
+      "summary": "返回指定范围内的随机整数",
+      "domains": "utility",
+      "skills": "random-number",
+      "runtime": {
+        "type": "rule",
+        "behavior": {
+          "type": "random_number",
+          "min": 1,
+          "max": 100,
+          "seed": 42,
+          "scope": "session"
+        }
+      }
+    },
+    {
+      "profile": "task-worker",
+      "name": "任务执行员",
+      "summary": "按规则完成任务协调者分配的任务",
+      "domains": "utility",
+      "skills": "task-worker",
+      "runtime": {
+        "type": "rule",
+        "behavior": {
+          "type": "task_worker",
+          "result": {
+            "type": "echo",
+            "prefix": "已完成："
+          }
+        }
+      }
+    },
+    {
+      "profile": "supervisor",
+      "name": "任务协调者",
+      "summary": "协调群成员任务并汇总结果",
+      "domains": "coordination",
+      "skills": "supervision",
+      "runtime": {
+        "type": "rule",
+        "behavior": {
+          "type": "supervisor",
+          "assignment": {
+            "mode": "each_member",
+            "task_template": "请处理以下任务：{input}"
+          },
+          "completion": {
+            "timeout_ms": 30000,
+            "max_retries": 0
+          },
+          "summary_template": "任务完成：成功 {success_count}，未完成 {failed_count}。\n{results}"
+        }
+      }
+    }
+  ]
+}

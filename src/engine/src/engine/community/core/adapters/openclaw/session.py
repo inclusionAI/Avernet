@@ -199,8 +199,9 @@ class OpenClawSessionAdapter(SessionService):
         """List sessions matching the request filter.
 
         The port handles the complete legacy ordering: sessions.list RPC →
-        bcs:group filter → agent_id/session_key filters → paginate →
-        chat.history (page only) → Bot 初始化配置 filter → model normalisation.
+        internal BCS and bcs:group filters (keeping namespaced bcs_grp DM/bcs-cli) →
+        agent_id/session_key filters → paginate → chat.history (page only) →
+        Bot 初始化配置 filter → model normalisation.
         The adapter receives the already-filtered, already-paginated page and
         only builds DTOs.
         """

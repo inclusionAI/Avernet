@@ -12,7 +12,7 @@
 """
 
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 
 __all__ = [
     "DeviceBindingRecord",

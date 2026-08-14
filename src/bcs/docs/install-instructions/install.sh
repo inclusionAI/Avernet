@@ -14,7 +14,7 @@ BCS_ENDPOINT="${BCS_ENDPOINT:-http://127.0.0.1:21000}"
 BCN_PLUGIN_PACKAGE="${BCN_PLUGIN_PACKAGE:-@avernet-plugin/openclaw-channel-bcn}"
 BCN_PLUGIN_VERSION="${BCN_PLUGIN_VERSION:-latest}"
 BCN_PLUGIN="${BCN_PLUGIN_PACKAGE}@${BCN_PLUGIN_VERSION}"
-BCN_PLUGIN_NAME="${BCN_PLUGIN_PACKAGE##*/}"
+BCN_PLUGIN_NAME="openclaw-channel-bcn"
 RETRY_COUNT=3
 RETRY_DELAY=2
 GATEWAY_RESTART_TIMEOUT=30
@@ -43,6 +43,19 @@ log_warn() {
 
 log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# ============================================================================
+# Plugin detection
+# ============================================================================
+
+# `openclaw plugins list` renders a narrow table that wraps long plugin IDs
+# across multiple lines, so a plain grep for the full ID never matches. Use
+# the machine-readable --json output and match the plugin by its id field.
+bcn_plugin_is_listed() {
+    openclaw plugins list --json 2>/dev/null \
+        | grep '"id"' \
+        | grep -Fq "$BCN_PLUGIN_NAME"
 }
 
 # ============================================================================
@@ -360,21 +373,13 @@ EOF
 fi
 
 # ============================================================================
-# Configure OpenClaw BCS channel
-# ============================================================================
-
-log_info "Writing OpenClaw BCS channel config..."
-write_openclaw_bcs_config
-echo ""
-
-# ============================================================================
 # Install BCN plugin
 # ============================================================================
 
 log_info "Installing BCN plugin: ${BCN_PLUGIN}..."
 
 # Check if the plugin is already installed
-if openclaw plugins list 2>/dev/null | grep -Fq "$BCN_PLUGIN_NAME"; then
+if bcn_plugin_is_listed; then
     log_warn "BCN plugin already installed, uninstalling the old version first"
     openclaw plugins uninstall "$BCN_PLUGIN_PACKAGE" || true
 fi
@@ -405,17 +410,25 @@ wait "$spin_pid" 2>/dev/null || true
 printf "\r                    \r"
 
 # Verify the installation result
-if openclaw plugins list 2>/dev/null | grep -Fq "$BCN_PLUGIN_NAME"; then
+if bcn_plugin_is_listed; then
     log_success "BCN plugin installed successfully"
 else
     log_error "BCN plugin installation failed, installation log:"
     cat "$INSTALL_LOG"
     echo ""
     log_info "Check your network connection and npm configuration, or run manually:"
-    log_info "  openclaw plugins install ${BCN_PLUGIN} --dangerously-force-unsafe-install"
+    log_info "  openclaw plugins install ${BCN_PLUGIN}"
     exit 1
 fi
 
+echo ""
+
+# ============================================================================
+# Configure OpenClaw BCS channel
+# ============================================================================
+
+log_info "Writing OpenClaw BCS channel config..."
+write_openclaw_bcs_config
 echo ""
 
 # ============================================================================

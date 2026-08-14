@@ -92,7 +92,14 @@ session_bot_uuid_for() {
     [ -f "$session_file" ] || return 0
     command -v jq >/dev/null 2>&1 || return 0
 
-    jq -r 'if (.bot_uuid | type) == "string" then .bot_uuid else empty end' "$session_file" 2>/dev/null | head -n 1
+    jq -r --arg bcs_url "$BCS_URL" '
+      if ((.bot_uuid | type) == "string")
+        and ((.bot_uuid | length) > 0)
+        and ((.token | type) == "string")
+        and ((.token | length) > 0)
+        and (.bcs_url == $bcs_url)
+      then .bot_uuid else empty end
+    ' "$session_file" 2>/dev/null | head -n 1
 }
 
 workspace_dir_for() {
@@ -1028,6 +1035,10 @@ start_bcs() {
     export SERVER_ENV="${SERVER_ENV:-local}"
     export RUST_LOG="${RUST_LOG:-info}"
     export BCS_DATA_DIR="${BCS_DATA_DIR:-$BOTS_BASE_DIR/data}"
+    if [ "$SERVER_ENV" = "local" ]; then
+        export AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"
+        export BCS_SECRET_BCN_GROUP_SESSION_WS_JWT="${BCS_SECRET_BCN_GROUP_SESSION_WS_JWT:-local-only-bcn-group-session-ws-jwt-signing-key}"
+    fi
     mkdir -p "$BCS_DATA_DIR"
     info "SERVER_ENV=$SERVER_ENV" >&2
     info "BCS_CONFIG_DIR=$BCS_CONFIG_DIR" >&2

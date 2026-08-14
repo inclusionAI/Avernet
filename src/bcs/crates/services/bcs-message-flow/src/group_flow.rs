@@ -10,6 +10,7 @@ use bcs_protocol::{
 use bcs_service_api::{
     ActorKind, ActorStatus, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
     BotDeliveryResult, BotDeliveryTarget, BotEventCommand, BotEventOutcome, BotRunContext, BotRunContextPort,
+    DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
     BotTerminalObserverPort, NoopBotTerminalObserver,
     BotRegistryCoreService, CallerContext, ChatAbortCommand, ChatAbortOutcome,
     DeliveryBlockContext, DeliveryBlockReason,
@@ -21,7 +22,7 @@ use bcs_service_api::{
     MessageLogContent, MessageLogEventType, MessageLogMode, MessageLogStatus,
     MessageLogTargetSummary, MESSAGE_LOG_SCHEMA_VERSION, message_log_json,
     MessageFlowService, MessageRole, Participant, ParticipantMode, ParticipantRole, PersistentGroupSendCommand,
-    PersistentGroupSendOutcome, ProviderStreamGrayList, ProviderTransportPreference,
+    PersistentGroupSendOutcome, ProviderStreamGrayList,
     RouteParticipantOverlay, RoutingDecision, RoutingCoreService, RoutingTarget, ServiceError, ServiceResult,
     SessionManagementService, ChannelService,
     SystemMessageEvent, SystemMessageService,
@@ -40,8 +41,6 @@ use crate::protocol_context::{group_context_input, group_type_wire};
 use crate::task_store::TaskStore;
 use crate::MSG_LOG_TARGET;
 
-const DEFAULT_GROUP_BOT_CALLBACK_TIMEOUT_MS: u64 = 60 * 60 * 1_000;
-
 pub struct BcsMessageFlow {
     pub group: Arc<dyn GroupCoreService>,
     pub routing: Arc<dyn RoutingCoreService>,
@@ -56,6 +55,8 @@ pub struct BcsMessageFlow {
     pub system_message: Option<Arc<dyn SystemMessageService>>,
     pub message_repo: Option<Arc<dyn MessageRepoPort>>,
     pub message_tracker: Arc<crate::message_tracker::MessageTracker>,
+    /// Deprecated compatibility setting. Transport selection is owned by the
+    /// HTTP Provider adapter and this value is no longer consulted.
     pub provider_stream_gray_list: Option<Arc<ProviderStreamGrayList>>,
     pub channel: Arc<OnceLock<Arc<dyn ChannelService>>>,
     pub bot_terminal_observer: Arc<dyn BotTerminalObserverPort>,
@@ -142,42 +143,6 @@ impl BcsMessageFlow {
         self
     }
 
-    pub(crate) async fn provider_transport_preference(
-        &self,
-        target_bot_id: &str,
-        delivery_kind: &BotDeliveryKind,
-        delivery_target: &BotDeliveryTarget,
-    ) -> ProviderTransportPreference {
-        if !matches!(
-            delivery_kind,
-            BotDeliveryKind::Send
-                | BotDeliveryKind::TaskDispatch
-                | BotDeliveryKind::TaskMessage
-                | BotDeliveryKind::TaskResult
-        ) {
-            return ProviderTransportPreference::Callback;
-        }
-        if !matches!(
-            delivery_target,
-            BotDeliveryTarget::HttpProvider { protocol_version, .. } if protocol_version == "2.0"
-        ) {
-            return ProviderTransportPreference::Callback;
-        }
-        let Some(gray_list) = &self.provider_stream_gray_list else {
-            return ProviderTransportPreference::Callback;
-        };
-        let created_by = self
-            .registry
-            .get(target_bot_id)
-            .await
-            .and_then(|bot| bot.created_by);
-        if gray_list.contains(created_by.as_deref()) {
-            ProviderTransportPreference::CallbackSse
-        } else {
-            ProviderTransportPreference::Callback
-        }
-    }
-
     pub fn with_interceptor<I>(mut self, interceptor: I) -> Self
     where
         I: MessageInterceptor + 'static,
@@ -212,7 +177,8 @@ impl BcsMessageFlow {
                     bot_id: bot_id.to_string(),
                     group_id: group_id.to_string(),
                     bcs_session_id: bcs_session_id.map(str::to_string),
-                    deadline_ms: now_ms().saturating_add(DEFAULT_GROUP_BOT_CALLBACK_TIMEOUT_MS),
+                    deadline_ms: now_ms()
+                        .saturating_add(DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS),
                     terminal: false,
                 })
                 .await;
@@ -250,6 +216,17 @@ impl MessageFlowService for BcsMessageFlow {
 
     async fn handle_chat_abort(&self, cmd: ChatAbortCommand) -> ServiceResult<ChatAbortOutcome> {
         handle_chat_abort(self, cmd).await
+    }
+
+    async fn rebind_channel_source_message(
+        &self,
+        source_run_id: &str,
+        accepted_run_id: &str,
+    ) -> ServiceResult<bool> {
+        Ok(self
+            .message_tracker
+            .rebind_channel_source_message_id(source_run_id, accepted_run_id)
+            .await)
     }
 
     async fn register_task_run_alias(
@@ -334,17 +311,35 @@ pub(crate) async fn try_persist_group_message(
     }
 }
 
-fn persisted_inbound_content(content: &str, attachments: Option<&[Attachment]>) -> Value {
-    let Some(attachments) = attachments.filter(|items| !items.is_empty()) else {
+/// Persist the sender's original text verbatim so human-facing history keeps
+/// `@mention` markers visible (mention tokens are only stripped from bot-bound
+/// deliveries, via `RoutingDecision::cleaned_message`). Non-empty `mentions`
+/// ride along so frontends can render mention chips after a history reload.
+fn persisted_inbound_content(
+    content: &str,
+    attachments: Option<&[Attachment]>,
+    mentions: &[String],
+) -> Value {
+    let attachments = attachments.filter(|items| !items.is_empty());
+    if attachments.is_none() && mentions.is_empty() {
         return Value::String(content.to_string());
-    };
-    serde_json::json!({
-        "text": content,
-        "attachments": attachments
+    }
+    let mut stored = serde_json::json!({ "text": content });
+    if let Some(attachments) = attachments {
+        stored["attachments"] = attachments
             .iter()
             .map(Attachment::stable_metadata)
-            .collect::<Vec<_>>(),
-    })
+            .collect::<Vec<_>>()
+            .into();
+    }
+    if !mentions.is_empty() {
+        stored["mentions"] = mentions
+            .iter()
+            .map(|mention| Value::String(mention.clone()))
+            .collect::<Vec<_>>()
+            .into();
+    }
+    stored
 }
 
 #[cfg(test)]
@@ -366,12 +361,32 @@ mod attachment_persistence_tests {
             expires_at: None,
         };
 
-        let persisted = persisted_inbound_content("look", Some(&[attachment]));
+        let persisted = persisted_inbound_content("look", Some(&[attachment]), &[]);
 
         assert_eq!(persisted["text"], "look");
         assert_eq!(persisted["attachments"][0]["attachment_id"], "att-1");
         assert!(persisted["attachments"][0].get("url").is_none());
         assert!(!persisted.to_string().contains("token=temporary"));
+    }
+
+    #[test]
+    fn mention_text_is_persisted_verbatim_with_structured_mentions() {
+        let persisted = persisted_inbound_content(
+            "@Driver please review",
+            None,
+            &["bot-driver".to_string()],
+        );
+
+        assert_eq!(persisted["text"], "@Driver please review");
+        assert_eq!(persisted["mentions"][0], "bot-driver");
+        assert!(persisted.get("attachments").is_none());
+    }
+
+    #[test]
+    fn plain_text_without_attachments_or_mentions_stays_a_string() {
+        let persisted = persisted_inbound_content("plain chat", None, &[]);
+
+        assert_eq!(persisted, serde_json::Value::String("plain chat".to_string()));
     }
 }
 
@@ -409,6 +424,39 @@ pub(crate) async fn manager_worker_self_owner(
     None
 }
 
+async fn apply_session_participant_scope(
+    flow: &BcsMessageFlow,
+    group: &mut Group,
+    session_id: Option<&str>,
+) -> ServiceResult<()> {
+    let (Some(session_id), Some(session_mgmt)) = (session_id, flow.session_management.as_ref())
+    else {
+        return Ok(());
+    };
+    let session = session_mgmt
+        .get(session_id)
+        .await
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        .ok_or_else(|| ServiceError::SessionNotFound(session_id.to_string()))?;
+    if session.group_id != group.id {
+        return Err(ServiceError::InvalidOperation {
+            message: format!(
+                "session '{}' does not belong to group '{}'",
+                session_id, group.id
+            ),
+            request_id: None,
+        });
+    }
+    if session.participants.is_empty() {
+        return Err(ServiceError::InvalidOperation {
+            message: format!("session '{}' has no participants", session_id),
+            request_id: None,
+        });
+    }
+    group.participants = session.participants;
+    Ok(())
+}
+
 pub async fn handle_web_send(
     flow: &BcsMessageFlow,
     cmd: WebSendCommand,
@@ -440,38 +488,8 @@ pub async fn handle_web_send(
     }
 
     flow.group.reset_message_count(&cmd.group_id).await?;
+    apply_session_participant_scope(flow, &mut group, cmd.session_id.as_deref()).await?;
     backfill_bot_names(flow.registry.as_ref(), &mut group).await;
-    if let Some(ref bcs_session_id) = cmd.session_id {
-        if let Some(ref session_mgmt) = flow.session_management {
-            match session_mgmt.get(bcs_session_id).await {
-                Ok(Some(sess)) => {
-                    if sess.group_id != cmd.group_id {
-                        return Err(ServiceError::InvalidOperation {
-                            message: format!(
-                                "session '{}' does not belong to group '{}'",
-                                bcs_session_id, cmd.group_id
-                            ),
-                            request_id: None,
-                        });
-                    }
-                    if sess.participants.is_empty() {
-                        return Err(ServiceError::InvalidOperation {
-                            message: format!("session '{}' has no participants", bcs_session_id),
-                            request_id: None,
-                        });
-                    }
-                    group.participants = sess.participants;
-                    backfill_bot_names(flow.registry.as_ref(), &mut group).await;
-                }
-                Ok(None) => {
-                    return Err(ServiceError::SessionNotFound(bcs_session_id.clone()));
-                }
-                Err(error) => {
-                    return Err(ServiceError::InternalError(error.to_string()));
-                }
-            }
-        }
-    }
 
     let overlay = build_route_overlay(flow, &group).await;
     let decision = if group.group_kind == GroupKind::Dm {
@@ -502,7 +520,7 @@ pub async fn handle_web_send(
         &cmd.from_actor_id,
         sender_type,
         "chat",
-        persisted_inbound_content(&decision.cleaned_message, cmd.attachments.as_deref()),
+        persisted_inbound_content(&cmd.message, cmd.attachments.as_deref(), &cmd.mentions),
         cmd.idempotency_key.as_deref(),
         None,
         "", // run_id: user messages don't associate with bot runs
@@ -527,6 +545,7 @@ pub async fn handle_web_send(
             run_id: String::new(),
             history_meta: None,
             metadata: None,
+            attachments: None,
         };
         let outbound_message = match apply_outbound_interceptors(
             flow,
@@ -609,9 +628,19 @@ pub async fn handle_web_send(
         // in the Phase-5 follow-up list (Modify semantics completeness).
 
         let delivery_kind = bot_delivery_kind(delivery_type);
-        let provider_transport = flow
-            .provider_transport_preference(&target_bot_id, &delivery_kind, &delivery_target)
-            .await;
+        let source_im_message_id = cmd
+            .source_im_message_id
+            .as_deref()
+            .filter(|message_id| {
+                delivery_type == DeliveryType::Send && !message_id.trim().is_empty()
+            });
+        if let Some(message_id) = source_im_message_id {
+            // Cache before delivery: a fast bot may emit its first response
+            // before the delivery call itself has returned.
+            flow.message_tracker
+                .cache_channel_source_message_id(&run_id, message_id)
+                .await;
+        }
         let delivery = flow
             .bot_delivery
             .deliver(BotDeliveryCommand {
@@ -619,7 +648,7 @@ pub async fn handle_web_send(
                 run_id: run_id.clone(),
                 frame,
                 delivery_kind,
-                provider_transport,
+                provider_bypass_headers: cmd.provider_bypass_headers.clone(),
             })
             .await;
 
@@ -646,6 +675,10 @@ pub async fn handle_web_send(
                         cmd.session_id.as_deref(),
                     )
                     .await;
+                } else if source_im_message_id.is_some() {
+                    flow.message_tracker
+                        .remove_channel_source_message_id(&run_id)
+                        .await;
                 }
                 delivery_results.push(delivery_result_summary(
                     &target_bot_id,
@@ -656,6 +689,11 @@ pub async fn handle_web_send(
                 bot_deliveries.push(result);
             }
             Err(error) => {
+                if source_im_message_id.is_some() {
+                    flow.message_tracker
+                        .remove_channel_source_message_id(&run_id)
+                        .await;
+                }
                 let error_text = error.to_string();
                 log_bot_deliver_result(
                     &cmd.group_id,
@@ -864,12 +902,13 @@ pub async fn handle_group_chat(
     flow: &BcsMessageFlow,
     cmd: GroupChatCommand,
 ) -> ServiceResult<GroupChatOutcome> {
-    let group = flow
+    let mut group = flow
         .group
         .get(&cmd.group_id)
         .await
         .ok_or_else(|| ServiceError::GroupNotFound(cmd.group_id.clone()))?;
 
+    apply_session_participant_scope(flow, &mut group, cmd.session_id.as_deref()).await?;
     verify_group_chat_caller_access(flow, &group, &cmd.caller).await?;
     let sender_id = resolve_group_chat_sender(&cmd)?;
     verify_group_chat_sender(flow, &group, &sender_id, &cmd.caller).await?;
@@ -888,7 +927,9 @@ pub async fn handle_group_chat(
             attachments: None,
             thinking: None,
             idempotency_key: None,
+            source_im_message_id: None,
             sender_conn_id: None,
+            provider_bypass_headers: cmd.provider_bypass_headers,
         },
     )
     .await?;
@@ -962,6 +1003,7 @@ pub async fn handle_persistent_group_send(
         run_id: String::new(),
         history_meta: None,
         metadata: None,
+        attachments: None,
     };
 
     let sender_type = if cmd.sender.starts_with("human_") {
@@ -1008,7 +1050,9 @@ pub async fn handle_persistent_group_send(
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     };
     for target in &decision.targets {
         let outbound = match apply_outbound_interceptors(flow, &cmd.group_id, &message, target).await
@@ -1054,9 +1098,6 @@ pub async fn handle_persistent_group_send(
         )
         .await;
         let delivery_kind = bot_delivery_kind(target.delivery_type);
-        let provider_transport = flow
-            .provider_transport_preference(&target.bot_uuid, &delivery_kind, &delivery_target)
-            .await;
         let result = flow
             .bot_delivery
             .deliver(BotDeliveryCommand {
@@ -1064,7 +1105,7 @@ pub async fn handle_persistent_group_send(
                 run_id: run_id.clone(),
                 frame,
                 delivery_kind,
-                provider_transport,
+                provider_bypass_headers: Vec::new(),
             })
             .await;
         match result {
@@ -1283,6 +1324,7 @@ async fn apply_chain_for_bot_pair(
         run_id: String::new(),
         history_meta: None,
         metadata: None,
+        attachments: None,
     };
     let mut outbound = OutboundMessage {
         group_id: context_tag.to_string(),
@@ -1341,6 +1383,7 @@ pub async fn handle_group_callback(
             run_id: String::new(),
             history_meta: None,
             metadata: cmd.metadata.clone(),
+            attachments: None,
         };
         try_persist_group_message(
             flow,
@@ -1378,7 +1421,9 @@ pub async fn handle_group_callback(
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     };
 
     for target in &decision.targets {
@@ -1401,6 +1446,7 @@ pub async fn handle_group_callback(
             run_id: String::new(),
             history_meta: None,
             metadata: cmd.metadata.clone(),
+            attachments: None,
         };
         let outbound_message =
             match apply_outbound_interceptors(flow, &cmd.group_id, &synthetic_message, target).await
@@ -1461,9 +1507,6 @@ pub async fn handle_group_callback(
         .await;
 
         let delivery_kind = bot_delivery_kind(delivery_type);
-        let provider_transport = flow
-            .provider_transport_preference(&target_bot_id, &delivery_kind, &delivery_target)
-            .await;
         let delivery = flow
             .bot_delivery
             .deliver(BotDeliveryCommand {
@@ -1471,7 +1514,7 @@ pub async fn handle_group_callback(
                 run_id: run_id.clone(),
                 frame,
                 delivery_kind,
-                provider_transport,
+                provider_bypass_headers: Vec::new(),
             })
             .await;
 
@@ -1532,6 +1575,19 @@ pub async fn handle_chat_abort(
     flow: &BcsMessageFlow,
     cmd: ChatAbortCommand,
 ) -> ServiceResult<ChatAbortOutcome> {
+    if !abort_run_matches_session_scope(flow, &cmd).await {
+        warn!(
+            group_id = %cmd.group_id,
+            "chat.abort run does not belong to the bound session"
+        );
+        return Ok(ChatAbortOutcome {
+            aborted: false,
+            aborted_run_ids: Vec::new(),
+            bot_deliveries: Vec::new(),
+            frontend_deliveries: Vec::new(),
+        });
+    }
+
     let Some(group) = flow.group.get(&cmd.group_id).await else {
         warn!(
             group_id = %cmd.group_id,
@@ -1545,7 +1601,10 @@ pub async fn handle_chat_abort(
         });
     };
 
-    let session_key = build_session_key(&cmd.group_id);
+    let session_key = cmd
+        .session_id
+        .clone()
+        .unwrap_or_else(|| build_session_key(&cmd.group_id));
     let participant_ids: Vec<String> = group
         .bot_participant_ids()
         .into_iter()
@@ -1582,7 +1641,7 @@ pub async fn handle_chat_abort(
                 run_id: delivery_run_id,
                 frame: build_chat_abort_frame(&session_key, cmd.run_id.as_deref()),
                 delivery_kind: BotDeliveryKind::Abort,
-                provider_transport: Default::default(),
+                provider_bypass_headers: Vec::new(),
             })
             .await;
 
@@ -1605,7 +1664,13 @@ pub async fn handle_chat_abort(
     }
 
     let aborted_run_ids = cmd.run_id.into_iter().collect::<Vec<_>>();
-    let frontend_deliveries = publish_chat_abort_event(flow, &cmd.group_id, &aborted_run_ids).await;
+    let frontend_deliveries = publish_chat_abort_event(
+        flow,
+        &cmd.group_id,
+        cmd.session_id.as_deref(),
+        &aborted_run_ids,
+    )
+    .await;
 
     Ok(ChatAbortOutcome {
         aborted: !aborted_run_ids.is_empty() || !has_participants,
@@ -1613,6 +1678,22 @@ pub async fn handle_chat_abort(
         bot_deliveries,
         frontend_deliveries,
     })
+}
+
+async fn abort_run_matches_session_scope(flow: &BcsMessageFlow, cmd: &ChatAbortCommand) -> bool {
+    let Some(session_id) = cmd.session_id.as_deref() else {
+        return true;
+    };
+    let Some(run_id) = cmd.run_id.as_deref() else {
+        return true;
+    };
+    let Some(run_context) = flow.bot_run_context.as_ref() else {
+        return false;
+    };
+    let Some(context) = run_context.get_context(run_id).await else {
+        return false;
+    };
+    context.group_id == cmd.group_id && context.bcs_session_id.as_deref() == Some(session_id)
 }
 
 fn resolve_group_chat_sender(cmd: &GroupChatCommand) -> ServiceResult<String> {
@@ -2134,12 +2215,17 @@ async fn frame_for_target(
     );
     let context_projection =
         context_projection_for_delivery(flow, group, cmd.session_id.as_deref()).await;
-    let wire_attachments = cmd.attachments.as_ref().map(|attachments| {
-        attachments
+    let wire_attachments = cmd.attachments.as_ref().and_then(|attachments| {
+        let attachments = attachments
             .iter()
+            .filter(|attachment| {
+                target.delivery_type == DeliveryType::Send
+                    || attachment.attachment_type != bcs_domain::AttachmentType::File
+            })
             .cloned()
             .map(WireAttachment::from)
-            .collect()
+            .collect::<Vec<_>>();
+        (!attachments.is_empty()).then_some(attachments)
     });
     match target.delivery_type {
         DeliveryType::Send => {
@@ -2378,15 +2464,22 @@ async fn publish_group_callback_event(
 async fn publish_chat_abort_event(
     flow: &BcsMessageFlow,
     group_id: &str,
+    session_id: Option<&str>,
     aborted_run_ids: &[String],
 ) -> Vec<FrontendDeliveryResult> {
     let event_json = build_chat_abort_event(group_id, aborted_run_ids);
+    let target = match session_id {
+        Some(session_id) => FrontendDeliveryTarget::Session {
+            session_id: session_id.to_string(),
+        },
+        None => FrontendDeliveryTarget::Group {
+            group_id: group_id.to_string(),
+        },
+    };
     let delivery = flow
         .frontend_delivery
         .publish(FrontendDeliveryCommand {
-            target: FrontendDeliveryTarget::Group {
-                group_id: group_id.to_string(),
-            },
+            target,
             event_json,
             delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
             run_fallback: None,
@@ -2428,7 +2521,7 @@ async fn build_workbench_user_event(flow: &BcsMessageFlow, cmd: &WebSendCommand)
         _ => "assistant",
     };
     let from_name = preferred_sender_display_name(flow, cmd).await;
-    let event = serde_json::json!({
+    let mut event = serde_json::json!({
         "run_id": run_id,
         "session_key": session_key,
         "bcs_session_id": cmd.session_id.as_deref(),
@@ -2442,6 +2535,9 @@ async fn build_workbench_user_event(flow: &BcsMessageFlow, cmd: &WebSendCommand)
             "mentions": cmd.mentions,
         },
     });
+    if let Some(attachments) = echo_event_attachments(cmd.attachments.as_deref()) {
+        event["message"]["attachments"] = attachments;
+    }
     let frame = serde_json::json!({
         "type": "event",
         "event": "chat",
@@ -2451,6 +2547,21 @@ async fn build_workbench_user_event(flow: &BcsMessageFlow, cmd: &WebSendCommand)
         "bot_name": from_name,
     });
     serde_json::to_string(&frame).unwrap_or_default()
+}
+
+/// Echo image capabilities so frontends can render them immediately, while
+/// exposing only stable metadata for files whose URL is target-bot-only.
+fn echo_event_attachments(attachments: Option<&[Attachment]>) -> Option<Value> {
+    let attachments = attachments.filter(|items| !items.is_empty())?;
+    let sanitized = attachments
+        .iter()
+        .map(|attachment| match attachment.attachment_type {
+            bcs_domain::AttachmentType::Image => serde_json::to_value(attachment).ok(),
+            // COSEC: file URLs are bearer capabilities scoped to active chat.send.
+            bcs_domain::AttachmentType::File => Some(attachment.stable_metadata()),
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(Value::Array(sanitized))
 }
 
 fn effective_message_log_session_id<'a>(group_id: &'a str, session_id: Option<&'a str>) -> &'a str {
@@ -2502,7 +2613,9 @@ fn log_routing_digest(
     mode: MessageLogMode,
     route_source: &'static str,
 ) {
-    let content = MessageLogContent::from_text(&decision.cleaned_message);
+    // Log the sender's original text so the digest joins with `message_received`;
+    // the @-stripped `cleaned_message` only applies to bot-bound deliveries.
+    let content = MessageLogContent::from_text(&cmd.message);
     let targets_summary: Vec<MessageLogTargetSummary> = decision
         .targets
         .iter()

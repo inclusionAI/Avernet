@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from agentclaw.community.core.economy.governance.domain.enums import (
+        AdminCloseConclusion,
         GovernanceStatus,
     )
     from agentclaw.community.core.economy.governance.domain.notification import (
@@ -34,13 +35,17 @@ if TYPE_CHECKING:
         GovernanceTicket,
     )
     from agentclaw.community.core.economy.governance.services.admin_service import (
+        BulkOperationResult,
         TicketActionOutcome,
+    )
+    from agentclaw.community.core.economy.governance.services.delivery_service import (
+        SendResult,
     )
 
 
 @runtime_checkable
 class GovernanceAdminServiceProtocol(Protocol):
-    """Protocol for governance admin operations (emergency brake + review)."""
+    """Protocol for governance admin operations (brake + review)."""
 
     def is_paused(self) -> bool:
         ...
@@ -54,26 +59,7 @@ class GovernanceAdminServiceProtocol(Protocol):
     def resume(self, reason: str, operator: str) -> None:
         ...
 
-    def bulk_whitelist(
-        self,
-        bot_ids: list[str],
-        reason: str,
-        operator: str,
-    ) -> dict:
-        ...
-
-    def cancel_pending(self, reason: str, operator: str) -> dict:
-        ...
-
-    def close_all_open(self, reason: str, operator: str) -> dict:
-        ...
-
     def pause_ticket(
-        self, ticket_id: str, admin_id: str, reason: str = "",
-    ) -> TicketActionOutcome:
-        ...
-
-    def emergency_close(
         self, ticket_id: str, admin_id: str, reason: str = "",
     ) -> TicketActionOutcome:
         ...
@@ -85,15 +71,38 @@ class GovernanceAdminServiceProtocol(Protocol):
     ) -> dict:
         ...
 
-    def delete_whitelist_entry(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        reason: str,
-        operator: str,
+    def force_renew_with_record(
+        self, record: Any, operator: str,
     ) -> dict:
+        """强制换新:用 record 关老(stale_replaced)+ 建新 first_send。
+
+        无视 gmt_create 7天 + dt_version guard。Returns {ticket_id, notification_id}。
+        """
         ...
+
+    def write_brake_skip_audit(self, *, run_id: str, reason: str) -> None:
+        """记录"自动定时 tick 因制动被跳过"的 best-effort 审计。
+
+        Args:
+            run_id: 调度层当次 run 标识。
+            reason: 跳过原因(制动生效)。
+        """
+        ...
+
+
+@runtime_checkable
+class GovernanceDeliveryServiceProtocol(Protocol):
+    """Protocol for governance delivery orchestration — 投递编排域。
+
+    从 :class:`GovernanceAdminServiceProtocol` 按职责边界抽出的投递域:
+    把 pending/scheduled 通知按 channel 规则实际投递 + 回写投递状态 + 写审计。
+    admin_router 的 deliver/remind/scan-and-deliver 端点注入本 protocol
+    (对齐 Rule 14:DI 绑 Protocol → Concrete,router import Protocol only)。
+
+    deliver_pending / deliver_by_worker / create_and_send_reminder 由
+    :class:`GovernanceDeliveryService` 实现(Task 2/3 从 admin_service 迁入,
+    签名/行为零变化)。
+    """
 
     def deliver_pending(
         self,
@@ -119,12 +128,29 @@ class GovernanceAdminServiceProtocol(Protocol):
         """按 worker_id 精准投递该工单 pending 通知(不重跑状态机)。"""
         ...
 
-    def write_brake_skip_audit(self, *, run_id: str, reason: str) -> None:
-        """记录"自动定时 tick 因制动被跳过"的 best-effort 审计。
+    def create_and_send_reminder(
+        self, worker_id: str, operator: str,
+    ) -> dict:
+        """手动补发 reminder:按 worker_id 找 active 工单 → 创建+发送 reminder 通知。
 
-        Args:
-            run_id: 调度层当次 run 标识。
-            reason: 跳过原因(制动生效)。
+        跳过 remind_at 等待(立即 create+send)。
+        Returns {notification_id, sent}。无 active → raise ValueError。
+        """
+        ...
+
+    def send_notification(
+        self,
+        notify: GovernanceNotification,
+        *,
+        override_recipient: str | None = None,
+    ) -> SendResult:
+        """投递域唯一单条发送出口:按 ``notify.channel`` 选 tc_card/markdown
+        渲染并实际发送,tc_card 构建失败降级 markdown,title 按 notify_type
+        区分。返回 :class:`SendResult`。
+
+        三条投递路径(create_and_send_reminder / _run_delivery / scan cron)
+        共用本出口,保证手动补发与首发/cron reminder 字段口径一致
+        (tickets-remind-content-divergence SDD)。
         """
         ...
 
@@ -189,6 +215,66 @@ class GovernanceWhitelistServiceProtocol(Protocol):
     def count_by_type(self, *, whitelist_type: str = "governance") -> int:
         ...
 
+    def list_all(
+        self,
+        *,
+        whitelist_type: str = "governance",
+        owner_id: str | None = None,
+        bot_id: str | None = None,
+        include_expired: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[Any], int]:
+        """全量分页查询白名单(可选 owner/bot 筛选 + 过期开关 + total)。"""
+        ...
+
+    def list_all_with_ticket_meta(
+        self,
+        *,
+        whitelist_type: str = "governance",
+        owner_id: str | None = None,
+        bot_id: str | None = None,
+        include_expired: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """白单 + 最近工单维度字段叠加(bot_name/owner_name/token_baseline 等)。
+
+        白单为主表,工单维度取每 worker 最近一条工单快照(见
+        :meth:`TaskRecordRepositoryProtocol.find_latest_tickets_by_worker_keys`);
+        无对应工单的白单叠加字段为 None,条目保留。
+        """
+        ...
+
+
+@runtime_checkable
+class GovernanceAuditReadServiceProtocol(Protocol):
+    """Protocol for governance audit read-side (worker-scoped history query).
+
+    治理审计表 ``ac_governance_audit`` 无 ``worker_id`` 列;"worker" 在治理领域
+    = ``owner_id:bot_id`` 复合标识(同 ``ac_governance_notify_log.worker_id``)。
+    本协议把"按 worker 查全部审计"翻译为按 ``owner_id``/``bot_id`` 定位审计行。
+    只读、无副作用、不写审计。
+    """
+
+    def list_audit_by_worker(
+        self,
+        *,
+        worker_id: str | None = None,
+        owner_id: str | None = None,
+        bot_id: str | None = None,
+        action: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """按 worker 维度查治理审计,返回 ``(审计条目 dict 列表, total)``。
+
+        ``worker_id``(冒号分隔 ``owner:bot``)优先解析并覆盖独立 ``owner_id``/
+        ``bot_id``;``action`` 可选按 ``action_taken`` 过滤。解析后 owner/bot/action
+        皆空抛 ``ValueError``,路由侧 400。条目按 ``gmt_create`` 倒序。
+        """
+        ...
+
 
 @runtime_checkable
 class GovernanceLifecycleServiceProtocol(Protocol):
@@ -230,6 +316,18 @@ class GovernanceLifecycleServiceProtocol(Protocol):
         """
         ...
 
+    def open_observed_ticket(self, *, ticket: GovernanceTicket) -> str:
+        """New ticket → OBSERVED(白名单观察):建观察单瘦路径。
+
+        白名单 bot offline-batch 命中、无活跃单无现存观察单时新建 OBSERVED 工单
+        承载持续刷新画像。不发通知(不建 notify_log、不设 delivery_status)、
+        不占治理人力(assignee=None)。审计由调用方持有。
+
+        Returns:
+            持久化的 ``ticket_id``。
+        """
+        ...
+
     def refresh_snapshot(self, ticket_id: str, **snapshot_fields: Any) -> bool:
         """Refresh an active ticket's mutable snapshot (non-state-transition).
 
@@ -239,10 +337,29 @@ class GovernanceLifecycleServiceProtocol(Protocol):
         """
         ...
 
-    def close_for_whitelist_hit(
+    def observe_for_whitelist(
+        self, ticket_id: str, *, close_reason: str, now: datetime,
+    ) -> bool:
+        """加白→转 OBSERVED 单条语义方法(四条加白入口统一收口)。
+
+        Returns True if the ticket was found and observed, False if not found.
+        """
+        ...
+
+    def close_observed_for_removal(
         self, ticket_id: str, *, now: datetime,
     ) -> bool:
-        """Whitelist hit → CLOSED(whitelist_filtered) + cancel pending + audit.
+        """删白收尾:OBSERVED → CLOSED(whitelist_approved)终态 + cancel pending(best-effort)。
+
+        不设 cooldown(等 off-batch 正常重建)。非 OBSERVED 态返 False(幂等 no-op)。
+        审计由调用方(whitelist_service)持有。
+        """
+        ...
+
+    def close_for_stale_replace(
+        self, ticket_id: str, *, now: datetime,
+    ) -> bool:
+        """未回复换新 → CLOSED(stale_replaced) + cancel pending(不设 cooldown_until)。
 
         Returns True if the ticket was found and closed, False if not found.
         """
@@ -331,14 +448,19 @@ class GovernanceLifecycleServiceProtocol(Protocol):
         """
         ...
 
-    def emergency_close(
+    def admin_close(
         self, ticket_id: str, *, now: datetime,
+        close_conclusion: str | None = None,
+        close_payload: str | None = None,
     ) -> bool:
-        """Any non-CLOSED → CLOSED(emergency_closed) + cancel pending.
+        """Any non-CLOSED → CLOSED(admin_closed) + cancel pending.
 
-        The caller (admin_service) owns the audit row (carries the reason +
+        The caller (admin_service) owns the audit row (carries the conclusion +
         actor_id=admin_id) — the driver does not write a duplicate audit,
         matching the audit-ownership convention of its siblings.
+
+        ``close_conclusion`` / ``close_payload`` 透传领域 close() 落盘(管理员
+        裁定结论 + 明细 JSON),自动关单路径不传(留 None)。
 
         Returns True if the ticket was found and closed, False if not found
         (or already closed — idempotent no-op).
@@ -347,23 +469,42 @@ class GovernanceLifecycleServiceProtocol(Protocol):
 
     def bulk_close_open(
         self, *, close_reason: str, now: datetime,
+        close_conclusion: str | None = None,
     ) -> int:
-        """Bulk emergency-close all open/scheduled tickets — joint orchestration:
+        """Bulk admin-close all open/scheduled tickets — joint orchestration:
         land ``task_record`` subject CLOSED (ticket machine) + cancel pending
         notifications (notify-delivery machine, one-way side effect). Ticket is
-        cause, notify is effect. Returns the number of tickets closed.
+        cause, notify is effect. ``close_conclusion`` 透传批量落关单结论
+        (统一 ``BULK_CLOSED``)。Returns the number of tickets closed.
         """
         ...
 
     def bulk_close_by_ticket_ids(
         self, ticket_ids: list[str], *, now: datetime,
+        close_conclusion: str | None = None,
     ) -> int:
-        """Per-ticket emergency-close by ``ticket_id`` set — Task 8 uses this
+        """Per-ticket admin-close by ``ticket_id`` set — Task 8 uses this
         after cancel_pending / bulk_whitelist cancel notify delivery, to close
         the matching ``task_record`` subjects (口径对齐通知侧). Per-ticket
         find→guard→save→cancel chain (domain guard active); does NOT bare-use
         the full bulk_close_open (would over-close responded scheduled tickets).
+        ``close_conclusion`` 透传逐条落盘(批量统一 ``BULK_CLOSED``)。
         Idempotent. Returns the number of tickets actually closed.
+        """
+        ...
+
+    def bulk_observe_by_ticket_ids(
+        self,
+        ticket_ids: list[str],
+        *,
+        now: datetime,
+        close_reason: str = ...,
+    ) -> int:
+        """Per-ticket observe (→OBSERVED) by ``ticket_id`` set — 批量加白收口。
+
+        批量加白把对应工单转 OBSERVED(加白语义),逐条走 observe_for_whitelist
+        守卫激活,幂等。close_reason 默认 WHITELIST_APPROVED。Returns 实际转
+        OBSERVED 的工单数。
         """
         ...
 
@@ -426,18 +567,115 @@ class GovernanceWorkflowServiceProtocol(Protocol):
         *,
         offset: int = 0,
         limit: int = 50,
+        delivery_statuses: list[str] | None = None,
     ) -> tuple[list[GovernanceTicket], int]:
-        """评审工单列表(跨 owner, 按治理状态过滤, 分页)。返回领域模型 + 总数。"""
+        """评审工单列表(跨 owner, 按治理状态过滤, 分页)。返回领域模型 + 总数。
+
+        ``delivery_statuses`` 可选按投递状态(pending/sent/failed/cancelled)过滤;
+        None 不过滤,空列表短路返回空。
+        """
+        ...
+
+    def list_whitelist_observed_tickets(
+        self, *, offset: int = 0, limit: int = 50,
+    ) -> tuple[list[GovernanceTicket], int]:
+        """白单观察工单视图:当前 OBSERVED 态工单(加白中 bot 最新治理画像)。
+
+        薄包装,转调 list_review_tickets([observed])。语义入口。
+        """
         ...
 
     def get_review_ticket_detail(
         self, ticket_id: str,
     ) -> GovernanceTicket | None:
-        """评审工单详情(单工单领域模型)。"""
+        """评审工单详情(单工单领域模型,纯本体,不含跨聚合派生)。"""
+        ...
+
+    def build_review_ticket_detail(
+        self, ticket_id: str,
+    ) -> tuple[GovernanceTicket, bool] | None:
+        """组装工单详情视图:工单本体 + 是否在治理白名单中(跨聚合派生位)。
+
+        Returns ``(ticket, in_whitelist)``;工单不存在返回 None;
+        工单缺 bot_id/owner_id 时 in_whitelist=False。
+        """
+        ...
+
+    def get_pending_notification(self, ticket_id: str) -> dict | None:
+        """查工单待回复通知(notification_id + 元信息)。"""
+        ...
+
+    def list_ticket_history_by_worker(
+        self,
+        *,
+        worker_id: str | None = None,
+        owner_id: str | None = None,
+        bot_id: str | None = None,
+        limit: int = 5,
+    ) -> tuple[list[GovernanceTicket], str | None, str | None, str | None]:
+        """按 worker 取最近 N 条工单历史(全状态,gmt_create 倒序),辅助关单-重开决策。
+
+        管理员处理新开/重开工单时,借此横向看该 worker 的工单生命周期(关单原因/
+        裁定结论/用户反馈/审批记录)。只读、无副作用、不写审计。``worker_id``
+        (``owner:bot``)优先解析并覆盖独立 ``owner_id``/``bot_id``;解析后三者皆空
+        抛 :class:`ValueError`(路由侧 400,防全表扫)。Returns
+        ``(tickets, resolved_owner_id, resolved_bot_id, worker_id_echo)``。
+        """
+        ...
+
+    def delete_ticket_cascade(
+        self,
+        *,
+        ticket_id: str,
+        dry_run: bool,
+        reason: str,
+        operator: str,
+    ) -> dict:
+        """按 ticket_id 精确级联删单工单 + 归属通知(best-effort)。
+
+        单向(ticket→notify)、单工单防写放大、dry-run 预览。工单不存在
+        返回 ticket_found=False 且不写审计。best-effort:通知清理失败不阻断
+        工单删除,失败计数计入审计+响应。2026-07-17 从 admin_service 迁入。
+        """
         ...
 
     def review_ticket(
         self, ticket_id: str, action: str, admin_id: str, remark: str = "",
     ) -> TicketActionOutcome:
         """审批:approve_close / approve_whitelist / reject_for_reopen(§7.5.2)。"""
+        ...
+
+    def admin_close(
+        self, ticket_id: str, admin_id: str, *,
+        conclusion: AdminCloseConclusion,
+        close_payload: str | None = None,
+    ) -> TicketActionOutcome:
+        """立即关单(无 cooldown),从 admin_service 迁入(工单运营归属)。
+
+        ``conclusion`` 必传(管理员裁定枚举),``close_payload`` 为明细 JSON 字符串
+        (router 从 ``CloseDetailPayload`` 序列化灌入, None = 无手写说明)。
+        """
+        ...
+
+    def set_override_owner(
+        self, ticket_id: str, override_owner: str | None, *, operator: str,
+    ) -> TicketActionOutcome:
+        """设/清工单通知收件人覆盖 (bot 转交/机器人 owner 代联, D1/D4)。
+
+        只改 ``override_owner`` 字段,不碰状态机/owner_id/cooldown。
+        ``override_owner`` 非空 → 设;None/空串 → 清(恢复发原 owner)。
+        reminder 建通知时 ``override or owner`` 写进 notify_log.owner_id。
+        """
+        ...
+
+    def cancel_pending(
+        self, reason: str, operator: str,
+    ) -> BulkOperationResult:
+        """取消全部未响应待通知 + 关对应工单(从 admin_service 迁入)。"""
+        ...
+
+    def close_all_open(
+        self, reason: str, operator: str,
+    ) -> BulkOperationResult:
+        """关闭全部 open/muted(含已响应)+ 关全部 open/scheduled 工单(迁入)。"""
         ...

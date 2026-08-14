@@ -26,7 +26,7 @@ async fn metrics_http_middleware_uses_safe_route_labels() {
     let bots_dir = helpers::create_temp_bots_dir();
     let mut config = helpers::create_test_config(&bots_dir.path().to_path_buf());
     config.metrics.enabled = true;
-    let server = BcsServer::new(config);
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
     let (addr, handle) = server.run_on_random_port().await.expect("start server");
 
     let raw_bot_id = "raw-sensitive-bot-id-123";

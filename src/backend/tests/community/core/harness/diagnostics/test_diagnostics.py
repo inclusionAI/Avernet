@@ -8,7 +8,15 @@ from agentclaw.community.core.harness.diagnostics.agents.safety_rules import Age
 from agentclaw.community.core.harness.diagnostics.agents.fail_first import AgentsFailFirstDiagnostic
 from agentclaw.community.core.harness.diagnostics.agents.behavior_boundaries import AgentsBehaviorBoundariesDiagnostic
 from agentclaw.community.core.harness.diagnostics.tools.declaration import ToolsDeclarationDiagnostic
-from agentclaw.community.core.harness.diagnostics.tools.mcp_format import ToolsMcpFormatDiagnostic
+from agentclaw.community.core.harness.diagnostics.tools.mcp_format import (
+    ToolsMcpFormatDiagnostic,
+    _BATCH_CHAR_BUDGET,
+    _BATCH_MAX_MCPS,
+    _compact_tool_for_prompt,
+    _MAX_TOOLS_PER_MCP_IN_PROMPT,
+    _pack_mcp_batches,
+    _synthesize_batch_responses,
+)
 from agentclaw.community.core.harness.diagnostics.config.soul import SoulPersonaDiagnostic
 from agentclaw.community.core.harness.models import Severity
 
@@ -223,7 +231,7 @@ class TestToolsDeclarationDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -273,7 +281,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -284,12 +292,13 @@ class TestToolsMcpFormatDiagnostic:
         assert "TOOLS.md MCP 调用规范诊断" in captured_user
         assert "语雀MCP" in captured_user
         assert "语雀知识库文档管理" in captured_user
-        # Unverified MCPs: tools list is stripped, only server_code/name/description are sent
+        # Unreachable MCPs (no verified_guide, no inputSchema): tools list is
+        # stripped; only server_code/name/description are sent.
         assert "skylark_doc_create" not in captured_user
         assert "DataPhin MCP" in captured_user
         assert "query_asset" not in captured_user
-        # Section header should indicate unverified MCPs
-        assert "未验证 MCP" in captured_user
+        # Section header should indicate the unreachable (no-schema) bucket.
+        assert "无 schema MCP" in captured_user
 
     @pytest.mark.asyncio
     async def test_verified_guide_attached_for_known_mcp(self, monkeypatch):
@@ -308,7 +317,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -321,7 +330,9 @@ class TestToolsMcpFormatDiagnostic:
 
     @pytest.mark.asyncio
     async def test_no_verified_guide_for_unknown_mcp(self, monkeypatch):
-        """MCPs NOT in _VERIFIED_MCP_GUIDES should have verified_guide as null."""
+        """MCPs NOT in _VERIFIED_MCP_GUIDES (and without inputSchema) land in the
+        unreachable bucket: rendered as a mapping-table-only text block carrying
+        the 平台补全中 note, with no verified_guide content."""
         diag = ToolsMcpFormatDiagnostic()
         mcps = [{"server_code": "some-unknown-mcp", "name": "Unknown"}]
         ctx = _make_ctx({"TOOLS.md": "# Tools\n\n- some tools"}, activated_mcps=mcps)
@@ -336,7 +347,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -344,7 +355,12 @@ class TestToolsMcpFormatDiagnostic:
         ctx.llm.chat = capture_chat
         await diag.analyze(ctx)
 
-        assert '"verified_guide": null' in captured_user
+        # No verified_guide anywhere (the MCP is unknown), and it lands in the
+        # unreachable (no-schema) bucket as a text block, not a JSON dump.
+        assert "verified_guide:" not in captured_user
+        assert "无 schema MCP" in captured_user
+        assert "some-unknown-mcp" in captured_user
+        assert "平台补全中" in captured_user
 
     @pytest.mark.asyncio
     async def test_no_activated_mcps_still_works(self):
@@ -353,7 +369,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -387,12 +403,19 @@ class TestToolsMcpFormatDiagnostic:
         }
         ctx.mcp_center = mock_center
 
-        ctx.llm.chat = AsyncMock(return_value="MCP规范缺失\n缺少语雀MCP的调用规范和场景映射")
+        ctx.llm.chat = AsyncMock(return_value="MCP规范缺失\n缺少语雀MCP的调用规范和场景映射 [SCORE:40]")
         findings = await diag.analyze(ctx)
         assert len(findings) == 1
         assert findings[0].rule_id == "D-TOOLS-002"
         assert findings[0].rule_name == "各项 MCP 调用规范诊断"
-        assert findings[0].severity == Severity.WARNING
+        # No verified_guide and no inputSchema ⇒ advisory (platform must author):
+        # template dropped (no TODO placeholder patch), bumped to pass/info so
+        # health_score isn't stuck, message annotated with the recovery note.
+        assert findings[0].suggested_template_ids == []
+        assert findings[0].severity == Severity.INFO
+        assert findings[0].score >= 80
+        assert findings[0].result == "pass"
+        assert "平台补全中" in findings[0].message
         assert findings[0].file_type == "TOOLS.md"
 
     @pytest.mark.asyncio
@@ -408,7 +431,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -435,7 +458,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -459,7 +482,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -487,7 +510,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -529,7 +552,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -567,7 +590,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -606,7 +629,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -640,7 +663,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -658,6 +681,248 @@ class TestToolsMcpFormatDiagnostic:
         assert findings == []
         assert "**CCT**: 大安全CCT平台" in captured_user
         assert "Unrelated" not in captured_user
+
+    @pytest.mark.asyncio
+    async def test_input_schema_keeps_template_and_forwards_schema(self):
+        """A tool exposing inputSchema is schema-derivable: keep the auto-fix
+        template (so Phase 3 emits a real, schema-transcribed call-spec patch
+        instead of a TODO) and forward a *compact* param table (flattened from
+        inputSchema — not the full nested JSON, which would bloat the prompt
+        past antchat's ~90s gateway window) to the diagnostic LLM.
+        The finding is NOT bumped (it is recoverable)."""
+        diag = ToolsMcpFormatDiagnostic()
+        mcps = [{"server_code": "mcp.ant.arkai.dimamcpserver", "name": "Dima"}]
+        ctx = _make_ctx({"TOOLS.md": "# Tools\n\n- some"}, activated_mcps=mcps)
+        mock_center = MagicMock()
+        mock_center.get_mcp_detail.return_value = {
+            "name": "Dima MCP",
+            "description": "Dima assistant",
+            "tools": [{
+                "name": "generateWorkSummary",
+                "description": "Generate a work summary",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "startDate": {"type": "string", "description": "yyyyMMdd"},
+                        "endDate": {"type": "string", "description": "yyyyMMdd"},
+                    },
+                    "required": ["startDate", "endDate"],
+                },
+            }],
+        }
+        ctx.mcp_center = mock_center
+
+        captured_user = None
+
+        async def capture_chat(system, user, **kwargs):
+            nonlocal captured_user
+            captured_user = user
+            return "MCP规范不全\n建议据 schema 补全 [SCORE:55]"
+
+        ctx.llm.chat = capture_chat
+        findings = await diag.analyze(ctx)
+
+        assert len(findings) == 1
+        # Recoverable ⇒ template kept, finding NOT bumped to pass.
+        assert findings[0].suggested_template_ids == [2]
+        assert findings[0].severity == Severity.WARNING
+        assert findings[0].score == 55
+        assert findings[0].result != "pass"
+        # inputSchema is rendered as a compact one-line tool signature for
+        # transcription; the full nested JSON is NOT forwarded (that's what used
+        # to bloat the prompt past antchat's ~90s gateway window). The one-liner
+        # keeps param name/type/required (star) so the LLM can transcribe it.
+        assert "inputSchema" not in captured_user
+        assert "generateWorkSummary(startDate:string*, endDate:string*)" in captured_user
+        assert "可据参数表转录" in captured_user
+
+    @pytest.mark.asyncio
+    async def test_all_unreachable_clears_template_and_bumps(self):
+        """MCPs with neither verified_guide nor inputSchema are advisory
+        (platform must author specs): drop the template and bump to pass so
+        health_score isn't stuck low; message carries the 平台补全中 note."""
+        diag = ToolsMcpFormatDiagnostic()
+        mcps = [{"server_code": "mcp.ant.arkai.dimamcpserver", "name": "Dima"}]
+        ctx = _make_ctx({"TOOLS.md": "# Tools"}, activated_mcps=mcps)
+        mock_center = MagicMock()
+        mock_center.get_mcp_detail.return_value = {
+            "name": "Dima MCP",
+            "description": "Dima assistant",
+            "tools": [{"name": "generateWorkSummary", "description": "..."}],  # no inputSchema
+        }
+        ctx.mcp_center = mock_center
+        ctx.llm.chat = AsyncMock(return_value="MCP规范缺失\n建议后续补充调用规范 [SCORE:45]")
+        findings = await diag.analyze(ctx)
+
+        assert len(findings) == 1
+        assert findings[0].suggested_template_ids == []
+        assert findings[0].severity == Severity.INFO
+        assert findings[0].score >= 80
+        assert findings[0].result == "pass"
+        assert "平台补全中" in findings[0].message
+
+    @pytest.mark.asyncio
+    async def test_mixed_verified_and_unreachable_keeps_template(self):
+        """A verified MCP makes the run recoverable: keep the template (real
+        patch for the verified spec) even though unreachable MCPs are also
+        present; the finding keeps its honest score (not bumped)."""
+        diag = ToolsMcpFormatDiagnostic()
+        verified_code = "mcp.ant.faas.skylarkmcpserver.skylarkmcpserver"
+        mcps = [
+            {"server_code": verified_code, "name": "skylark"},
+            {"server_code": "mcp.ant.arkai.dimamcpserver", "name": "Dima"},
+        ]
+        ctx = _make_ctx({"TOOLS.md": "# Tools"}, activated_mcps=mcps)
+        mock_center = MagicMock()
+
+        def detail(code):
+            if code == verified_code:
+                return {"name": "语雀MCP", "description": "语雀", "tools": [{"name": "skylark_search"}]}
+            return {"name": "Dima MCP", "description": "Dima", "tools": [{"name": "generateWorkSummary"}]}
+
+        mock_center.get_mcp_detail.side_effect = detail
+        ctx.mcp_center = mock_center
+        ctx.llm.chat = AsyncMock(return_value="MCP规范不全\n部分MCP缺规范 [SCORE:60]")
+        findings = await diag.analyze(ctx)
+
+        assert len(findings) == 1
+        # Recoverable (verified_guide present) ⇒ template kept, score honest.
+        assert findings[0].suggested_template_ids == [2]
+        assert findings[0].score == 60
+        assert findings[0].severity == Severity.WARNING
+
+    def test_compact_tool_flattens_input_schema(self):
+        """_compact_tool_for_prompt flattens a nested inputSchema into a single
+        prompt line (name + param:type*=required sig + one-line desc) and drops
+        the nested JSON — the slimmed payload that goes into the diagnostic
+        prompt."""
+        tool = {
+            "name": "create_doc",
+            "description": "创建语雀文档\n第二行不该进入 prompt",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "文档标题"},
+                    "tags": {"type": "array", "description": "标签列表"},
+                    "private": {"type": "boolean", "description": "是否私有"},
+                },
+                "required": ["title"],
+            },
+        }
+        compact = _compact_tool_for_prompt(tool)
+        assert compact == "create_doc(title:string*, tags:array, private:boolean) — 创建语雀文档"
+
+    def test_compact_tool_without_schema_returns_empty_params(self):
+        """A tool with no inputSchema renders as `name — desc` (no param sig) so
+        the LLM can still list it in the mapping table."""
+        compact = _compact_tool_for_prompt({"name": "bare_tool", "description": "no schema"})
+        assert compact == "bare_tool — no schema"
+
+    def test_compact_tool_skips_malformed_param_defs(self):
+        """A schema property whose value is not a dict is skipped (the
+        `not isinstance(pdef, dict)` guard) rather than crashing the prompt
+        build; well-formed siblings still come through."""
+        tool = {
+            "name": "weird",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "good": {"type": "string", "description": "ok"},
+                    "bad": "not-a-dict",
+                    "also_bad": None,
+                },
+                "required": ["good"],
+            },
+        }
+        compact = _compact_tool_for_prompt(tool)
+        assert compact == "weird(good:string*)"
+
+    def test_compact_mcp_tools_non_list_returns_empty(self):
+        """A non-list `tools` value (None, a string, a dict) hits the early
+        return and yields no tools and no omitted count."""
+        from agentclaw.community.core.harness.diagnostics.tools.mcp_format import (
+            _compact_mcp_tools_for_prompt,
+        )
+        assert _compact_mcp_tools_for_prompt({"tools": None}) == ([], 0)
+        assert _compact_mcp_tools_for_prompt({"tools": "not-a-list"}) == ([], 0)
+        assert _compact_mcp_tools_for_prompt({}) == ([], 0)
+
+    @pytest.mark.asyncio
+    async def test_verified_guide_tools_also_capped_with_omitted(self):
+        """The verified bucket also caps tools and surfaces the `…另N个未列出`
+        note (the verified-guide path shares _compact_mcp_tools_for_prompt);
+        this covers the `if omitted` branch of the verified block."""
+        diag = ToolsMcpFormatDiagnostic()
+        code = "mcp.ant.faas.skylarkmcpserver.skylarkmcpserver"
+        mcps = [{"server_code": code, "name": "skylark"}]
+        ctx = _make_ctx({"TOOLS.md": "# Tools\n\n- some"}, activated_mcps=mcps)
+        total = _MAX_TOOLS_PER_MCP_IN_PROMPT + 3
+        mock_center = MagicMock()
+        mock_center.get_mcp_detail.return_value = {
+            "name": "语雀MCP",
+            "description": "语雀",
+            "tools": [
+                {"name": f"t{i}", "description": "d", "inputSchema": {"type": "object"}}
+                for i in range(total)
+            ],
+        }
+        ctx.mcp_center = mock_center
+
+        captured_user = None
+
+        async def capture_chat(system, user, **kwargs):
+            nonlocal captured_user
+            captured_user = user
+            return "无问题"
+
+        ctx.llm.chat = capture_chat
+        await diag.analyze(ctx)
+
+        assert "另3个未列出" in captured_user
+        assert "t0" in captured_user
+        assert f"t{total - 1}" not in captured_user
+
+    @pytest.mark.asyncio
+    async def test_tools_capped_per_mcp_with_omitted(self):
+        """An MCP exposing more tools than the per-MCP cap only forwards the
+        first N (compacted one-liners); the remainder is summarised as
+        ``…另N个未列出`` so a 27-tool MCP doesn't dominate the prompt and blow
+        the gateway window."""
+        diag = ToolsMcpFormatDiagnostic()
+        mcps = [{"server_code": "big", "name": "big"}]
+        ctx = _make_ctx({"TOOLS.md": "# Tools\n\n- some"}, activated_mcps=mcps)
+        total = _MAX_TOOLS_PER_MCP_IN_PROMPT + 5
+        tools = [{
+            "name": f"tool_{i}",
+            "description": f"desc {i}",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"p": {"type": "string", "description": "p"}},
+                "required": ["p"],
+            },
+        } for i in range(total)]
+        mock_center = MagicMock()
+        mock_center.get_mcp_detail.return_value = {
+            "name": "big", "description": "big mcp", "tools": tools,
+        }
+        ctx.mcp_center = mock_center
+
+        captured_user = None
+
+        async def capture_chat(system, user, **kwargs):
+            nonlocal captured_user
+            captured_user = user
+            return "无问题"
+
+        ctx.llm.chat = capture_chat
+        await diag.analyze(ctx)
+
+        assert "另5个未列出" in captured_user
+        # First capped tool and the boundary tool are present …
+        assert "tool_0" in captured_user
+        assert f"tool_{_MAX_TOOLS_PER_MCP_IN_PROMPT - 1}" in captured_user
+        # … the truncated tail is not.
+        assert f"tool_{_MAX_TOOLS_PER_MCP_IN_PROMPT + 4}" not in captured_user
 
 
 class TestSoulPersonaDiagnostic:
@@ -704,7 +969,7 @@ class TestSoulPersonaDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -731,7 +996,7 @@ class TestSoulPersonaDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -809,7 +1074,7 @@ class TestSoulPersonaDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -821,6 +1086,79 @@ class TestSoulPersonaDiagnostic:
         assert "Active Bot" in captured_user
         assert "This is the active profile" in captured_user
         assert "Draft Bot" not in captured_user
+
+    @pytest.mark.asyncio
+    async def test_low_quality_profile_clears_template(self, monkeypatch):
+        """B-mode: profile quality < 0.7 → suggestions are advisory (improve
+        profile / supplement info), not a SOUL.md edit the patch LLM can fill.
+        The auto-fix template must be dropped so Phase 3 doesn't emit
+        TODO-placeholder patches. The finding still carries its score/message
+        (counts toward health_score, surfaces in the report)."""
+        diag = SoulPersonaDiagnostic()
+        ctx = _make_ctx({"SOUL.md": "## Persona\n\n通用助手"})
+        mock_profiles_resp = {
+            "items": [{
+                "profile_id": "default", "display_name": "Bot",
+                "contents": {"profile": "研发助手", "capabilities": ["代码开发"]},
+                "quality_score": 0.3, "quality_issues": [],
+            }],
+            "total": 1, "active_profile_id": "default",
+        }
+        monkeypatch.setattr(
+            "agentclaw.community.core.harness.diagnostics.config.soul._fetch_profiles",
+            lambda worker_id, base_url: mock_profiles_resp,
+        )
+        ctx.llm.chat = AsyncMock(
+            return_value="通用模板问题\n缺少专属定制，建议完善画像\n[SCORE:50]"
+        )
+        findings = await diag.analyze(ctx)
+        assert len(findings) == 1
+        assert findings[0].score == 50
+        assert findings[0].suggested_template_ids == []
+
+    @pytest.mark.asyncio
+    async def test_no_profile_clears_template(self, monkeypatch):
+        """When BCSFuse is unavailable / returns nothing, the diagnostic can't
+        generate a full SOUL.md rewrite — its suggestions are advisory, so the
+        template is dropped (same as B-mode)."""
+        diag = SoulPersonaDiagnostic()
+        ctx = _make_ctx({"SOUL.md": "## Persona\n\n通用助手"})
+        monkeypatch.setattr(
+            "agentclaw.community.core.harness.diagnostics.config.soul._fetch_profiles",
+            lambda worker_id, base_url: None,
+        )
+        ctx.llm.chat = AsyncMock(
+            return_value="缺少专属定制\n建议补充 Bot 专属职责\n[SCORE:55]"
+        )
+        findings = await diag.analyze(ctx)
+        assert len(findings) == 1
+        assert findings[0].suggested_template_ids == []
+
+    @pytest.mark.asyncio
+    async def test_high_quality_profile_keeps_template(self, monkeypatch):
+        """A-mode: profile quality >= 0.7 → the LLM produces a full suggested
+        SOUL.md rewrite, a concrete file edit. Keep the auto-fix template so
+        Phase 3 can generate a real patch."""
+        diag = SoulPersonaDiagnostic()
+        ctx = _make_ctx({"SOUL.md": "## Persona\n\n通用助手"})
+        mock_profiles_resp = {
+            "items": [{
+                "profile_id": "default", "display_name": "Bot",
+                "contents": {"profile": "研发助手", "capabilities": ["代码开发", "问题排查"]},
+                "quality_score": 0.8, "quality_issues": [],
+            }],
+            "total": 1, "active_profile_id": "default",
+        }
+        monkeypatch.setattr(
+            "agentclaw.community.core.harness.diagnostics.config.soul._fetch_profiles",
+            lambda worker_id, base_url: mock_profiles_resp,
+        )
+        ctx.llm.chat = AsyncMock(
+            return_value="缺少专属定制\n建议版 SOUL.md\n\n我是研发助手\n[SCORE:50]"
+        )
+        findings = await diag.analyze(ctx)
+        assert len(findings) == 1
+        assert findings[0].suggested_template_ids == [3]
 
 
 class TestDiagnosticContextNoCache:
@@ -852,3 +1190,142 @@ class TestDiagnosticContextNoCache:
 
         result = await ctx.read_file("NONEXISTENT.md")
         assert result == ""
+
+
+class TestToolsMcpFormatBatching:
+    """D-TOOLS-002 batched prompt mode: prompt size decoupled from MCP count."""
+
+    def test_pack_splits_on_count(self):
+        items = [("schema", f"block-{i}", {"server_code": f"mcp.{i}"}) for i in range(7)]
+        batches = _pack_mcp_batches(items)
+        assert [len(b) for b in batches] == [_BATCH_MAX_MCPS, 2]
+
+    def test_pack_splits_on_chars(self):
+        big = "x" * (_BATCH_CHAR_BUDGET - 100)
+        items = [
+            ("schema", big, {"server_code": "mcp.a"}),
+            ("schema", big, {"server_code": "mcp.b"}),
+        ]
+        batches = _pack_mcp_batches(items)
+        assert [[d["server_code"] for _, _, d in b] for b in batches] == [["mcp.a"], ["mcp.b"]]
+
+    def test_pack_single_when_small(self):
+        items = [("schema", "tiny", {"server_code": "mcp.a"})]
+        assert len(_pack_mcp_batches(items)) == 1
+
+    def test_pack_oversized_block_gets_own_batch(self):
+        huge = "y" * (_BATCH_CHAR_BUDGET * 2)
+        items = [
+            ("schema", "a", {"server_code": "mcp.a"}),
+            ("schema", huge, {"server_code": "mcp.b"}),
+            ("schema", "c", {"server_code": "mcp.c"}),
+        ]
+        batches = _pack_mcp_batches(items)
+        assert [[d["server_code"] for _, _, d in b] for b in batches] == [["mcp.a"], ["mcp.b"], ["mcp.c"]]
+
+    def test_pack_large_mcp_alone(self):
+        # A many-tool MCP (tools > _LARGE_MCP_TOOL_THRESHOLD) gets its own
+        # batch so that batch's output is one spec draft, not several —
+        # keeps the call inside the 90s window for big MCPs.
+        big = {"server_code": "mcp.big", "tools": [{} for _ in range(25)]}
+        small_a = {"server_code": "mcp.a", "tools": [{} for _ in range(3)]}
+        small_b = {"server_code": "mcp.b", "tools": [{} for _ in range(3)]}
+        items = [
+            ("schema", "a", small_a),
+            ("schema", "y", big),
+            ("schema", "b", small_b),
+        ]
+        batches = _pack_mcp_batches(items)
+        codes = [[d["server_code"] for _, _, d in b] for b in batches]
+        assert ["mcp.big"] in codes  # big sits in its own batch
+        big_batch = [b for b in batches if any(d["server_code"] == "mcp.big" for _, _, d in b)][0]
+        assert len(big_batch) == 1
+
+    def test_synthesize_all_no_issue(self):
+        out = _synthesize_batch_responses([("无问题", ["mcp.a"]), ("无问题", ["mcp.b"])])
+        assert out == "无问题"
+
+    def test_synthesize_all_failed_returns_sentinel(self):
+        out = _synthesize_batch_responses([(None, ["mcp.a"]), ("[llm disabled]", ["mcp.b"])])
+        assert out == "[llm disabled]"
+
+    def test_synthesize_aggregates_scores_and_summaries(self):
+        out = _synthesize_batch_responses([
+            ("映射表缺失\n缺 a 的映射\n[SCORE:70]", ["mcp.a"]),
+            ("规范不全\n缺 b 的规范\n[SCORE:80]", ["mcp.b"]),
+        ])
+        assert out.startswith("映射表缺失；规范不全")
+        assert "缺 a 的映射" in out and "缺 b 的规范" in out
+        assert "[SCORE:50]" in out  # 100 - (30 + 20)
+
+    def test_synthesize_partial_failure_noted(self):
+        out = _synthesize_batch_responses([
+            ("映射表缺失\n缺 a\n[SCORE:70]", ["mcp.a"]),
+            (None, ["mcp.b"]),
+        ])
+        assert "未完成诊断" in out and "mcp.b" in out
+        assert "[SCORE:70]" in out
+
+    def test_synthesize_only_failures_is_check_failed_not_pass(self):
+        out = _synthesize_batch_responses([
+            ("无问题", ["mcp.a"]),
+            (None, ["mcp.b"]),
+        ])
+        assert "部分 MCP 诊断失败" in out
+        assert "[SCORE:0]" in out
+
+    @pytest.mark.asyncio
+    async def test_analyze_splits_into_batches_and_aggregates(self):
+        diag = ToolsMcpFormatDiagnostic()
+        mcps = [{"server_code": f"mcp.{c}", "name": c} for c in "abcdefg"]
+        ctx = _make_ctx({"TOOLS.md": "# Tools\n\n- some tools"}, activated_mcps=mcps)
+        ctx.mcp_center = _MockMCPCenter({
+            f"mcp.{c}": {
+                "name": c,
+                "description": f"desc {c}",
+                "tools": [{
+                    "name": "t1",
+                    "inputSchema": {"type": "object", "properties": {"p": {"type": "string"}}},
+                }],
+            }
+            for c in "abcdefg"
+        })
+
+        captured: list[str] = []
+
+        async def fake_chat(system, user, **kwargs):
+            captured.append(user)
+            if "mcp.a" in user:
+                return "规范缺失\n缺 a 规范\n[SCORE:70]"
+            return "无问题"
+
+        ctx.llm.chat = fake_chat
+        findings = await diag.analyze(ctx)
+
+        # 7 MCPs / _BATCH_MAX_MCPS(5) -> 2 batches [a-e],[f-g]
+        assert len(captured) == 2
+        assert "第 1/2 批" in captured[0] and "第 2/2 批" in captured[1]
+        assert "mcp.a" in captured[0] and "mcp.f" not in captured[0]
+        assert "mcp.g" in captured[1] and "mcp.a" not in captured[1]
+        assert len(findings) == 1
+        assert findings[0].score == 70
+        assert findings[0].short_summary == "规范缺失"
+
+    @pytest.mark.asyncio
+    async def test_analyze_all_batches_failed_yields_llm01(self):
+        diag = ToolsMcpFormatDiagnostic()
+        mcps = [{"server_code": f"mcp.{c}", "name": c} for c in "abcde"]
+        ctx = _make_ctx({"TOOLS.md": "# Tools\n\n- some tools"}, activated_mcps=mcps)
+        ctx.mcp_center = _MockMCPCenter({
+            f"mcp.{c}": {"name": c, "description": f"desc {c}", "tools": []}
+            for c in "abcde"
+        })
+
+        async def dead_chat(system, user, **kwargs):
+            return "[llm disabled]"
+
+        ctx.llm.chat = dead_chat
+        findings = await diag.analyze(ctx)
+
+        assert len(findings) == 1
+        assert findings[0].rule_id == "LLM01"

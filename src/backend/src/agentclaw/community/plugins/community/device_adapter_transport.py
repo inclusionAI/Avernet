@@ -9,10 +9,14 @@ returns a uniform failure envelope. Real impl (not a ``MockSeam``); imports only
 """
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Any, Optional
 
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterTransport
+from agentclaw.community.plugin_api.device_adapter_transport import (
+    DeviceAdapterStreamResponse,
+    DeviceAdapterTransport,
+)
 
 logger = get_logger()
 
@@ -40,3 +44,32 @@ class CommunityDeviceAdapterTransport(DeviceAdapterTransport):
             "success": False,
             "message": "community mode — no device adapter (no container runtime)",
         }
+
+    async def stream(
+        self,
+        conn_info: dict[str, Any],
+        method: str,
+        path: str,
+        body: Optional[dict[str, Any]] = None,
+        params: Optional[dict[str, Any]] = None,
+        *,
+        timeout: float | None = None,
+    ) -> DeviceAdapterStreamResponse:
+        logger.warning(
+            "[CommunityDeviceAdapterTransport] stream unavailable: %s %s",
+            method,
+            path,
+        )
+
+        async def error_body() -> AsyncIterator[bytes]:
+            yield b'{"detail":"device adapter stream unavailable"}'
+
+        async def close() -> None:
+            return None
+
+        return DeviceAdapterStreamResponse(
+            status_code=503,
+            headers={"content-type": "application/json"},
+            body=error_body(),
+            close=close,
+        )

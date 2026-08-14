@@ -4,7 +4,7 @@ PUT /api/bots/{bot_id}/admin
 """
 from __future__ import annotations
 
-from agentclaw.community.core.bot_management.repository.template_repository_protocol import TemplateRepository
+from agentclaw.community.core.repository.protocols.bot import TemplateRepository
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.bot_collaborator import make_bot
 from tests.community.framework import (

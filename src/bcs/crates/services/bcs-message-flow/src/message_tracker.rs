@@ -1,11 +1,17 @@
 use std::collections::{HashMap, HashSet};
+use bcs_domain::CoordinationSurface;
 use serde_json::Value;
 use tokio::sync::Mutex;
 
+const TOOL_CALL_START_TTL_MS: u64 = 6 * 60 * 60 * 1000;
+
+#[derive(Clone)]
 pub struct ToolCallStartInfo {
     pub run_id: String,
     pub session_id: String,
+    pub name: String,
     pub args: Value,
+    pub created_at_ms: u64,
 }
 
 /// In-memory tracker coordinating tool call lifecycle and streaming chat
@@ -16,10 +22,17 @@ pub struct ToolCallStartInfo {
 /// flushed as a single INSERT — drastically reducing DB write pressure for
 /// high-frequency per-token delta streams.
 pub struct MessageTracker {
-    /// tool_call_id → ToolCallStartInfo (cached on ToolCallStart, consumed on ToolCallEnd)
+    /// tool_call_id → ToolCallStartInfo (cached on ToolCallStart, cleared when
+    /// the owning run completes or the start event expires)
     tool_call_starts: Mutex<HashMap<String, ToolCallStartInfo>>,
     /// run_id:tool_call_id → first-seen timestamp for coordination echoes.
     coordination_echoes: Mutex<HashMap<String, u64>>,
+    /// run_id → coordination surface resolved from the run's bot Provider.
+    ///
+    /// `None` is a cached resolution failure. Keeping that negative snapshot
+    /// prevents malformed/repeated echoes from turning into repeated storage
+    /// lookups during one run.
+    coordination_surfaces: Mutex<HashMap<String, (String, Option<CoordinationSurface>)>>,
     /// run_id → text buffered for the CURRENT open chat segment.
     ///
     /// Two producers write here, depending on what the upstream frame carries:
@@ -51,6 +64,12 @@ pub struct MessageTracker {
     /// Cache sender metadata for the run instead of reading the group and bot
     /// registry on every streaming delta.
     channel_sender_info: Mutex<HashMap<String, (bcs_domain::ParticipantRole, String)>>,
+    /// run_id → source IM message id.
+    ///
+    /// Channel ingress attaches the IM message id to the web-send command.
+    /// Cache it before bot delivery so the first response event can target
+    /// the exact source message even when requests share one conversation.
+    channel_source_message_ids: Mutex<HashMap<String, String>>,
 }
 
 impl MessageTracker {
@@ -58,10 +77,12 @@ impl MessageTracker {
         Self {
             tool_call_starts: Mutex::new(HashMap::new()),
             coordination_echoes: Mutex::new(HashMap::new()),
+            coordination_surfaces: Mutex::new(HashMap::new()),
             streaming_chat_buf: Mutex::new(HashMap::new()),
             chat_delta_mode: Mutex::new(HashSet::new()),
             streaming_thinking_buf: Mutex::new(HashMap::new()),
             channel_sender_info: Mutex::new(HashMap::new()),
+            channel_source_message_ids: Mutex::new(HashMap::new()),
         }
     }
 
@@ -69,12 +90,14 @@ impl MessageTracker {
 
     pub async fn cache_tool_call_start(&self, tool_call_id: String, info: ToolCallStartInfo) {
         let mut pending = self.tool_call_starts.lock().await;
+        cleanup_expired_tool_starts(&mut pending, bcs_protocol::now_ms());
         pending.insert(tool_call_id, info);
     }
 
-    pub async fn take_tool_call_start(&self, tool_call_id: &str) -> Option<ToolCallStartInfo> {
+    pub async fn get_tool_call_start(&self, tool_call_id: &str) -> Option<ToolCallStartInfo> {
         let mut pending = self.tool_call_starts.lock().await;
-        pending.remove(tool_call_id)
+        cleanup_expired_tool_starts(&mut pending, bcs_protocol::now_ms());
+        pending.get(tool_call_id).cloned()
     }
 
     pub async fn mark_coordination_echo_seen(&self, key: String, now_ms: u64, ttl_ms: u64) -> bool {
@@ -85,6 +108,31 @@ impl MessageTracker {
         }
         seen.insert(key, now_ms);
         true
+    }
+
+    pub async fn coordination_surface(
+        &self,
+        run_id: &str,
+        bot_id: &str,
+    ) -> Option<Option<CoordinationSurface>> {
+        self.coordination_surfaces
+            .lock()
+            .await
+            .get(run_id)
+            .filter(|(cached_bot_id, _)| cached_bot_id == bot_id)
+            .map(|(_, surface)| surface.clone())
+    }
+
+    pub async fn cache_coordination_surface(
+        &self,
+        run_id: &str,
+        bot_id: &str,
+        surface: Option<CoordinationSurface>,
+    ) {
+        self.coordination_surfaces.lock().await.insert(
+            run_id.to_string(),
+            (bot_id.to_string(), surface),
+        );
     }
 
     // -- Streaming chat segmentation (memory buffer, flush-at-boundary) --
@@ -147,6 +195,45 @@ impl MessageTracker {
             .insert(run_id.to_string(), info);
     }
 
+    pub async fn channel_source_message_id(&self, run_id: &str) -> Option<String> {
+        self.channel_source_message_ids
+            .lock()
+            .await
+            .get(run_id)
+            .cloned()
+    }
+
+    pub async fn cache_channel_source_message_id(&self, run_id: &str, message_id: &str) {
+        self.channel_source_message_ids
+            .lock()
+            .await
+            .insert(run_id.to_string(), message_id.to_string());
+    }
+
+    pub async fn rebind_channel_source_message_id(
+        &self,
+        source_run_id: &str,
+        accepted_run_id: &str,
+    ) -> bool {
+        if source_run_id == accepted_run_id {
+            return self
+                .channel_source_message_ids
+                .lock()
+                .await
+                .contains_key(source_run_id);
+        }
+        let mut message_ids = self.channel_source_message_ids.lock().await;
+        let Some(message_id) = message_ids.remove(source_run_id) else {
+            return false;
+        };
+        message_ids.insert(accepted_run_id.to_string(), message_id);
+        true
+    }
+
+    pub async fn remove_channel_source_message_id(&self, run_id: &str) {
+        self.channel_source_message_ids.lock().await.remove(run_id);
+    }
+
     /// Whether the run has received any `delta_text` frame (SSE self-accumulate
     /// mode). At `final`, delta-mode runs flush their accumulated buffer instead
     /// of overriding with the final frame's cumulative full text.
@@ -181,9 +268,118 @@ impl MessageTracker {
     /// Clean up all per-run tracking when a run reaches a terminal state.
     /// Returns any pending chat buffer that was not yet flushed.
     pub async fn cleanup_run(&self, run_id: &str) -> Option<String> {
+        let now_ms = bcs_protocol::now_ms();
+        self.tool_call_starts
+            .lock()
+            .await
+            .retain(|_, info| {
+                info.run_id != run_id
+                    && !tool_start_expired(info, now_ms)
+            });
         self.chat_delta_mode.lock().await.remove(run_id);
         self.streaming_thinking_buf.lock().await.remove(run_id);
         self.channel_sender_info.lock().await.remove(run_id);
+        self.channel_source_message_ids.lock().await.remove(run_id);
+        self.coordination_surfaces.lock().await.remove(run_id);
         self.streaming_chat_buf.lock().await.remove(run_id)
+    }
+}
+
+fn cleanup_expired_tool_starts(
+    pending: &mut HashMap<String, ToolCallStartInfo>,
+    now_ms: u64,
+) {
+    pending.retain(|_, info| !tool_start_expired(info, now_ms));
+}
+
+fn tool_start_expired(info: &ToolCallStartInfo, now_ms: u64) -> bool {
+    now_ms.saturating_sub(info.created_at_ms) > TOOL_CALL_START_TTL_MS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MessageTracker, ToolCallStartInfo};
+    use serde_json::Value;
+
+    #[tokio::test]
+    async fn channel_source_message_ids_are_scoped_to_run_and_cleaned_up() {
+        let tracker = MessageTracker::new();
+        tracker
+            .cache_channel_source_message_id("run-1", "message-1")
+            .await;
+        tracker
+            .cache_channel_source_message_id("run-2", "message-2")
+            .await;
+
+        assert_eq!(
+            tracker.channel_source_message_id("run-1").await.as_deref(),
+            Some("message-1")
+        );
+        assert_eq!(
+            tracker.channel_source_message_id("run-2").await.as_deref(),
+            Some("message-2")
+        );
+
+        tracker.cleanup_run("run-1").await;
+
+        assert!(tracker.channel_source_message_id("run-1").await.is_none());
+        assert_eq!(
+            tracker.channel_source_message_id("run-2").await.as_deref(),
+            Some("message-2")
+        );
+    }
+
+    #[tokio::test]
+    async fn expired_tool_call_start_is_not_returned() {
+        let tracker = MessageTracker::new();
+        tracker
+            .cache_tool_call_start(
+                "tool-1".to_string(),
+                ToolCallStartInfo {
+                    run_id: "run-1".to_string(),
+                    session_id: "session-1".to_string(),
+                    name: "Bash".to_string(),
+                    args: Value::Null,
+                    created_at_ms: 0,
+                },
+            )
+            .await;
+
+        assert!(tracker.get_tool_call_start("tool-1").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn channel_source_message_id_follows_accepted_run_id() {
+        let tracker = MessageTracker::new();
+        tracker
+            .cache_channel_source_message_id("source-run", "message-1")
+            .await;
+
+        assert!(
+            tracker
+                .rebind_channel_source_message_id("source-run", "accepted-run")
+                .await
+        );
+        assert!(
+            tracker
+                .channel_source_message_id("source-run")
+                .await
+                .is_none()
+        );
+        assert_eq!(
+            tracker
+                .channel_source_message_id("accepted-run")
+                .await
+                .as_deref(),
+            Some("message-1")
+        );
+
+        tracker.cleanup_run("accepted-run").await;
+        assert!(
+            tracker
+                .channel_source_message_id("accepted-run")
+                .await
+                .is_none()
+        );
     }
 }

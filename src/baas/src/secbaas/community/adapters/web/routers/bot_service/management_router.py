@@ -45,7 +45,11 @@ from secbaas.community.api.bot_manage import (
 )
 from secbaas.community.api.bot_runtime import BotNotFoundError
 from secbaas.community.api.device_manage import DeviceListResponse
-from secbaas.community.api.publish_manage import RestartScope
+from secbaas.community.api.publish_manage import (
+    BotPublishSummary,
+    PublishService,
+    RestartScope,
+)
 from secbaas.community.bootstrap import ApplicationContainer, Provide
 from secbaas.community.logger import get_logger
 
@@ -72,6 +76,12 @@ class UpdateBotRequest(BaseModel):
 
     name: str | None = Field(default=None, max_length=128)
     description: str | None = Field(default=None, max_length=512)
+    template_uuid: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        description="Optional device template UUID for the UPDATE publish",
+    )
     operator: str = Field(default="", max_length=64)
     request_id: str | None = Field(
         default=None,
@@ -91,6 +101,10 @@ class ScaleBotRequest(BaseRequest):
     auto_approve_publish: bool = Field(
         default=False,
         description="When True, auto-approve all publish stage gates without manual intervention",
+    )
+    config: BotConfig | None = Field(
+        default=None,
+        description="Bot configuration for the scale publish workflow (merged with existing config; not persisted to DB)",
     )
 
 
@@ -175,6 +189,40 @@ async def list_bots(
         status=status,
     )
     return ApiResponse(data=result)
+
+
+@router.get(
+    "/{bot_uuid}/publishes",
+    response_model=ApiResponse[list[BotPublishSummary]],
+    summary="List all publish workflows for a bot",
+    description=(
+        "Return every publish workflow tied to a bot_uuid (across all its bot "
+        "records and statuses), newest first. Read-only. Backs client-side "
+        "idempotency recovery: differencing the returned workflow ids against a "
+        "local ledger identifies an in-doubt workflow to adopt. 404 when the "
+        "bot_uuid is unknown."
+    ),
+)
+@inject
+async def list_bot_publishes(
+    bot_uuid: Annotated[str, Path(description="Bot UUID")],
+    tenant: Annotated[str, Query(description="Tenant name")] = ...,  # type: ignore[assignment]
+    service: PublishService = Depends(
+        Provide[ApplicationContainer.services.publish_service]
+    ),
+) -> ApiResponse[list[BotPublishSummary]]:
+    summaries = await service.list_publishes_by_bot_uuid(
+        tenant=tenant, bot_uuid=bot_uuid
+    )
+    if not summaries:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_code": "BOT_NOT_FOUND",
+                "message": f"Bot not found or has no publishes: {bot_uuid}",
+            },
+        )
+    return ApiResponse(data=summaries)
 
 
 @router.get("/{bot_uuid}/detail-by-uuid", response_model=ApiResponse[BotListResponse])
@@ -362,6 +410,7 @@ async def update_bot(
         bot_desc=request.description,
         bot_config=request.config,
         request_id=request.request_id,
+        template_uuid=request.template_uuid,
     )
     return ApiResponse(data=bot)
 
@@ -388,6 +437,7 @@ async def scale_bot(
         operator=request.operator,
         request_id=request.request_id,
         auto_approve_publish=request.auto_approve_publish,
+        bot_config=request.config,
     )
     return ApiResponse(data=result)
 

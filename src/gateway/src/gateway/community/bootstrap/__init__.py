@@ -1,0 +1,149 @@
+"""Bootstrap — dependency injection and application lifecycle.
+
+The composition root: wires concrete plugins and services into the app. Adapters
+import the built objects from here (e.g. the ``Authenticator``) rather than
+constructing plugins themselves.
+
+``bootstrap_app()`` is the single entry point: it initialises the container,
+resolves all plugins, builds the auth + forwarding subsystems, and returns
+everything the adapter needs — no individual plugin resolution in app.py.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from dependency_injector.wiring import Provide
+
+from gateway.community.core.access_key import AccessKeyIssuer
+from gateway.community.core.app import AppRegistrar
+from gateway.community.core.authn import Authenticator
+from gateway.community.core.forwarding import Forwarding
+from gateway.community.spi.principal_signer import PrincipalSigner
+
+from ._authn import build_authenticator
+from ._configs import DatabaseConfig, init_container_config, load_container_config
+from ._container import (
+    ApplicationContainer,
+    initialize_services,
+    shutdown_services,
+)
+from ._credential_issuance import build_access_key_issuer, build_app_registrar
+from ._database import initialize_database
+from ._forwarding import build_forwarding
+from ._principal_signer import build_principal_signer
+
+_container: ApplicationContainer | None = None
+
+
+@dataclass(frozen=True)
+class BootstrapResult:
+    authenticator: Authenticator
+    forwarding: Forwarding
+    principal_signer: PrincipalSigner
+    access_key_issuer: AccessKeyIssuer
+    app_registrar: AppRegistrar
+
+    _container: ApplicationContainer = field(repr=False)
+
+    def served_openapi(
+        self,
+        *,
+        title: str,
+        version: str,
+        description: str = "",
+    ) -> dict[str, object]:
+        """Return the served OpenAPI document across all configured domains."""
+        return self.forwarding.served_openapi(
+            self.authenticator.route_security,
+            title=title,
+            version=version,
+            description=description,
+        )
+
+    def shutdown(self) -> None:
+        import asyncio
+
+        plugins = self._container.plugins()
+        db = plugins.database()
+        if hasattr(db, "close"):
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(db.close())
+                else:
+                    loop.run_until_complete(db.close())
+            except RuntimeError:
+                pass
+        shutdown_services(self._container)
+
+
+def bootstrap_app() -> BootstrapResult:
+    """Initialise the DI container, resolve plugins, build auth + forwarding.
+
+    This is the single entry point for the adapter layer. ``app.py`` calls
+    this once and receives ready-made objects — no individual plugin
+    resolution, no builder function calls, no container internals exposed.
+    """
+    container = get_container()
+    init_container_config(container)
+    initialize_services(container)
+
+    authenticator = container.authenticator()
+    forwarding = container.forwarding()
+    principal_signer = build_principal_signer(
+        user_config=container.user_config(),
+        secret_resolver=container.plugins().secret_resolver(),
+    )
+    db = container.plugins().database()
+    access_key_issuer = build_access_key_issuer(db, principal_signer)
+    app_registrar = build_app_registrar(db, principal_signer)
+    return BootstrapResult(
+        authenticator=authenticator,
+        forwarding=forwarding,
+        principal_signer=principal_signer,
+        access_key_issuer=access_key_issuer,
+        app_registrar=app_registrar,
+        _container=container,
+    )
+
+
+def get_container() -> ApplicationContainer:
+    global _container
+    if _container is None:
+        _container = ApplicationContainer()
+        from ._container import _inject_enterprise_plugins
+
+        _inject_enterprise_plugins(_container)
+    return _container
+
+
+def set_container(container: ApplicationContainer) -> None:
+    global _container
+    from ._container import _inject_enterprise_plugins
+
+    _inject_enterprise_plugins(container)
+    _container = container
+
+
+__all__ = [
+    "ApplicationContainer",
+    "Authenticator",
+    "BootstrapResult",
+    "DatabaseConfig",
+    "Forwarding",
+    "Provide",
+    "bootstrap_app",
+    "build_access_key_issuer",
+    "build_app_registrar",
+    "build_authenticator",
+    "build_forwarding",
+    "build_principal_signer",
+    "initialize_database",
+    "get_container",
+    "init_container_config",
+    "initialize_services",
+    "load_container_config",
+    "set_container",
+    "shutdown_services",
+]

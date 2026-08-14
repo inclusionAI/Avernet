@@ -213,7 +213,7 @@ async def test_get_ws_info_no_devices_found_404(mock_dispatcher):
 
 
 @pytest.mark.asyncio
-async def test_get_ws_info_no_active_devices_503(mock_dispatcher):
+async def test_get_ws_info_no_active_devices_404(mock_dispatcher):
     mock_dispatcher.dispatch_bot_ws_conn_info.side_effect = NoActiveDevicesError(
         "No active devices available"
     )
@@ -225,7 +225,7 @@ async def test_get_ws_info_no_active_devices_503(mock_dispatcher):
             "?port=8080&path=/api/ws&tenant=test_tenant",
         )
 
-    assert resp.status_code == 503
+    assert resp.status_code == 404
     detail = resp.json()["detail"]
     assert detail["error"] == "NO_ACTIVE_DEVICES"
     assert detail["bot_uuid"] == "bot-uuid-001"

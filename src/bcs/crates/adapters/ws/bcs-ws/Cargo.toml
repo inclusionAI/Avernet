@@ -15,6 +15,8 @@ axum        = { workspace = true }
 tokio       = { workspace = true }
 tokio-util  = { workspace = true }
 tracing     = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+opentelemetry = { workspace = true }
 async-trait = { workspace = true }
 serde       = { workspace = true }
 serde_json  = { workspace = true }
@@ -23,10 +25,12 @@ thiserror   = { workspace = true }
 futures     = { workspace = true }
 uuid        = { workspace = true }
 chrono      = { workspace = true }
+form_urlencoded = "1"
 
 bcs-domain      = { workspace = true }
 bcs-service-api = { workspace = true }
 bcs-protocol    = { workspace = true }
+bcs-telemetry   = { workspace = true }
 bcs-callback    = { workspace = true }
 bcs-route-security = { workspace = true }
 
@@ -35,3 +39,6 @@ tokio-test  = "0.4"
 tokio-tungstenite = "0.26"
 bcs-session = { workspace = true }
 bcs-test-support = { workspace = true }
+bcs-services-container = { workspace = true, features = ["test-support"] }
+tracing-subscriber = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["testing"] }

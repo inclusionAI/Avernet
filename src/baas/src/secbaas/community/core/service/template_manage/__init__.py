@@ -2,12 +2,8 @@
 
 from ._device_template_service import (
     DefaultDeviceTemplateService,
-    _ensure_api_key_encrypted,
-    _record_to_response,
 )
 
 __all__ = [
     "DefaultDeviceTemplateService",
-    "_ensure_api_key_encrypted",
-    "_record_to_response",
 ]

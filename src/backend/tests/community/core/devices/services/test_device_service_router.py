@@ -10,6 +10,7 @@ import pytest
 
 from agentclaw.community.core.devices.errors import DeviceServiceError
 from agentclaw.community.core.devices.models import (
+    AllocatedDevice,
     DeviceBindingInfo,
     DeviceBindingStatus,
     DeviceConnectionInfo,
@@ -311,6 +312,31 @@ class TestGetProviderForDeviceId:
         assert provider is router._default_service
 
 
+class TestUpdateDeviceHeadersRouting:
+    def test_forwards_active_only_to_provider(self):
+        router, _, _, _ = _make_router(is_local=False)
+        provider = router._providers[BAAS_DEVICE_PROVIDER]
+        device = AllocatedDevice(
+            device_id="BOT-caller",
+            device_provider=BAAS_DEVICE_PROVIDER,
+            device_props={},
+        )
+
+        router.update_device_headers(
+            device=device,
+            agent_pass_token="fake-passport-token",
+            agent_code="agent-code",
+            active_only=True,
+        )
+
+        provider.update_device_headers.assert_called_once_with(
+            device=device,
+            agent_pass_token="fake-passport-token",
+            agent_code="agent-code",
+            active_only=True,
+        )
+
+
 # ---------------------------------------------------------------------------
 # _get_provider_for_new_device
 # ---------------------------------------------------------------------------
@@ -401,9 +427,13 @@ class TestApplyDeviceRouting:
             entity_type="staff",
             operator=_make_operator(),
             bot_id="bot1",
+            device_props_extra={"image_policy_on_active": "default"},
         )
 
         mock_service.apply_device.assert_called_once()
+        assert mock_service.apply_device.call_args.kwargs["device_props_extra"] == {
+            "image_policy_on_active": "default"
+        }
         assert result is record
 
     def test_apply_forwards_template_type_and_bot_type_to_routing(self):

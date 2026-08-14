@@ -19,8 +19,8 @@ from agentclaw.community.core.devices.repository.record import DeviceBindingReco
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.types import Complete, Fail, Reschedule, Retry
 from agentclaw.community.plugin_api.models import BotModel
-from agentclaw.community.plugins.device_repository import DeviceRepository
-from agentclaw.community.plugins.local.sqlite_models import EntityDeviceBinding
+from agentclaw.community.core.repository.implementations.devices.device import DeviceRepository
+from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 
 
 class _FileSqliteDB:
@@ -99,6 +99,7 @@ def _binding(
     provider: str = "teclaw",
     publish_id: int | str = 9,
 ) -> DeviceBindingRecord:
+    props: dict = {"publish_id": publish_id}
     return DeviceBindingRecord(
         id=77,
         entity_id="staff-1",
@@ -106,7 +107,7 @@ def _binding(
         device_id="BOT-x",
         device_provider=provider,
         env="dev",
-        device_props={"publish_id": publish_id},
+        device_props=props,
         status=status,
         apply_reason=None,
         applied_by="u1",
@@ -136,13 +137,21 @@ def _handler(*, clock=lambda: 200.0):
     binding_repo = MagicMock()
     binding_repo.get_by_id.return_value = _binding()
     binding_repo.transition_teclaw_publish_terminal.return_value = True
+    passport = MagicMock()
+    passport.query_token.return_value = "passport-token"
+    # Updater tri-state: non-empty == delivered to every device of the bot.
+    baas.update_teclaw_outbound_rule_by_bot_uuid.return_value = [
+        {"device_uuid": "DEVICE-1", "paas_device_id": "TECLAW_1@4"}
+    ]
     handler = TeclawPublishTaskHandler(
         baas_service=baas,
         device_binding_repo=binding_repo,
+        passport_plugin=passport,
+        credentials_admins_writer=MagicMock(),
         poll_delay_seconds=10.0,
         clock=clock,
     )
-    return handler, baas, binding_repo
+    return handler, baas, binding_repo, passport
 
 
 def test_build_publish_poll_payload_and_deadline():
@@ -178,7 +187,7 @@ def test_map_publish_status(publish_status, expected):
 
 
 def test_pending_publish_reschedules_before_timeout():
-    handler, baas, binding_repo = _handler(clock=lambda: 699.0)
+    handler, baas, binding_repo, passport = _handler(clock=lambda: 699.0)
     baas.get_publish_progress.return_value = {"status": "PENDING"}
 
     assert handler.handle(_payload()) == Reschedule(10.0)
@@ -186,7 +195,7 @@ def test_pending_publish_reschedules_before_timeout():
 
 
 def test_missing_binding_completes_stale_task():
-    handler, baas, binding_repo = _handler()
+    handler, baas, binding_repo, passport = _handler()
     binding_repo.get_by_id.return_value = None
 
     assert handler.handle(_payload(binding_id=77)) == Complete()
@@ -194,7 +203,7 @@ def test_missing_binding_completes_stale_task():
 
 
 def test_timeout_polls_once_then_preserves_pending():
-    handler, baas, binding_repo = _handler(clock=lambda: 700.0)
+    handler, baas, binding_repo, passport = _handler(clock=lambda: 700.0)
     baas.get_publish_progress.return_value = {"status": "PENDING"}
 
     assert handler.handle(_payload()) == Complete()
@@ -212,7 +221,7 @@ def test_timeout_polls_once_then_preserves_pending():
     ],
 )
 def test_terminal_publish_uses_guarded_atomic_transition(publish_status, stored_status):
-    handler, baas, binding_repo = _handler()
+    handler, baas, binding_repo, passport = _handler()
     baas.get_publish_progress.return_value = {"status": publish_status}
 
     assert handler.handle(_payload()) == Complete()
@@ -225,8 +234,158 @@ def test_terminal_publish_uses_guarded_atomic_transition(publish_status, stored_
     )
 
 
+def test_success_pushes_passport_outbound_rule_to_started_container():
+    # The container's PaaS device only exists once BaaS executed the create
+    # publish, so the passport token is delivered here — not at provision time.
+    handler, baas, binding_repo, passport = _handler()
+    baas.get_publish_progress.return_value = {"status": "SUCCESS"}
+
+    assert handler.handle(_payload()) == Complete()
+
+    passport.query_token.assert_called_once_with("b1", "staff-1")
+    baas.update_teclaw_outbound_rule_by_bot_uuid.assert_called_once_with(
+        "BOT-x",
+        agent_pass_token="passport-token",
+    )
+    # No delivery bookkeeping to race with concurrent device_props writers —
+    # a replay just pushes the same rule again.
+    binding_repo.update_device_props.assert_not_called()
+
+
+def test_active_binding_replays_delivery_after_a_crash_between_the_two_writes():
+    # Status persisted, worker died before/while delivering: the reclaimed task
+    # must deliver rather than complete on the persisted status alone.
+    handler, baas, binding_repo, passport = _handler()
+    binding_repo.get_by_id.return_value = _binding(status="ACTIVE")
+
+    assert handler.handle(_payload()) == Complete()
+
+    baas.get_publish_progress.assert_not_called()
+    binding_repo.transition_teclaw_publish_terminal.assert_not_called()
+    baas.update_teclaw_outbound_rule_by_bot_uuid.assert_called_once_with(
+        "BOT-x",
+        agent_pass_token="passport-token",
+    )
+
+
+def test_devices_not_ready_reschedules_instead_of_recording_a_delivery():
+    # `[]` means the rule exists but BaaS has no device with a
+    # provider_device_id yet — the exact shape the original regression
+    # mistook for success.
+    handler, baas, binding_repo, passport = _handler(clock=lambda: 200.0)
+    baas.get_publish_progress.return_value = {"status": "SUCCESS"}
+    baas.update_teclaw_outbound_rule_by_bot_uuid.return_value = []
+
+    assert handler.handle(_payload()) == Reschedule(10.0)
+
+
+def test_devices_not_ready_past_the_window_retries_with_the_reason_recorded():
+    # The bot is already ACTIVE, so giving up would strand it: stay recoverable
+    # up to the task deadline, but record why on the task.
+    handler, baas, binding_repo, passport = _handler(clock=lambda: 1400.0)
+    binding_repo.get_by_id.return_value = _binding(status="ACTIVE")
+    baas.update_teclaw_outbound_rule_by_bot_uuid.return_value = []
+
+    outcome = handler.handle(_payload())
+
+    assert isinstance(outcome, Retry)
+    assert "no ready device" in outcome.error
+
+
+def test_provider_without_egress_mutation_completes_without_a_push():
+    # `None` == this provider writes no outbound rules at all (community/local).
+    handler, baas, binding_repo, passport = _handler()
+    baas.get_publish_progress.return_value = {"status": "SUCCESS"}
+    baas.update_teclaw_outbound_rule_by_bot_uuid.return_value = None
+
+    assert handler.handle(_payload()) == Complete()
+
+
+def test_malformed_binding_fails_delivery_instead_of_retrying_forever():
+    handler, baas, binding_repo, passport = _handler()
+    binding = _binding(status="ACTIVE")
+    binding.device_id = ""
+    binding_repo.get_by_id.return_value = binding
+
+    outcome = handler.handle(_payload())
+
+    assert isinstance(outcome, Fail)
+    baas.update_teclaw_outbound_rule_by_bot_uuid.assert_not_called()
+
+
+@pytest.mark.parametrize("publish_status", ["FAILED", "REJECTED", "REVOKED"])
+def test_failed_publish_does_not_push_outbound_rule(publish_status):
+    handler, baas, binding_repo, passport = _handler()
+    baas.get_publish_progress.return_value = {"status": publish_status}
+
+    assert handler.handle(_payload()) == Complete()
+    baas.update_teclaw_outbound_rule_by_bot_uuid.assert_not_called()
+
+
+def test_stale_guard_mismatch_does_not_push_outbound_rule():
+    # The binding was released / re-published under a newer publish_id while we
+    # polled — the status write was rejected, so the token must not be pushed.
+    handler, baas, binding_repo, passport = _handler()
+    baas.get_publish_progress.return_value = {"status": "SUCCESS"}
+    binding_repo.transition_teclaw_publish_terminal.return_value = False
+
+    assert handler.handle(_payload()) == Complete()
+    baas.update_teclaw_outbound_rule_by_bot_uuid.assert_not_called()
+    passport.query_token.assert_not_called()
+
+
+def test_empty_passport_token_retries_instead_of_stranding_the_container():
+    handler, baas, binding_repo, passport = _handler()
+    baas.get_publish_progress.return_value = {"status": "SUCCESS"}
+    passport.query_token.return_value = None
+
+    outcome = handler.handle(_payload())
+
+    assert isinstance(outcome, Retry)
+    baas.update_teclaw_outbound_rule_by_bot_uuid.assert_not_called()
+
+
+@pytest.mark.parametrize("failure", ["token", "rule"])
+def test_delivery_failure_retries_so_the_queue_re_drives_it(failure):
+    # The status write already committed, so the delivery carries its own
+    # durability: retry (bounded by the task deadline) rather than complete.
+    handler, baas, binding_repo, passport = _handler()
+    baas.get_publish_progress.return_value = {"status": "SUCCESS"}
+    if failure == "token":
+        passport.query_token.side_effect = RuntimeError("passport down")
+    else:
+        baas.update_teclaw_outbound_rule_by_bot_uuid.side_effect = RuntimeError(
+            "rule down"
+        )
+
+    outcome = handler.handle(_payload())
+
+    assert isinstance(outcome, Retry)
+    binding_repo.transition_teclaw_publish_terminal.assert_called_once()
+
+
+def test_delivery_retry_after_status_persisted_does_not_rewrite_status():
+    # Second attempt: the binding is ACTIVE now, so the retry goes straight to
+    # delivery — it must not re-drive the guarded terminal transition.
+    handler, baas, binding_repo, passport = _handler()
+    baas.get_publish_progress.return_value = {"status": "SUCCESS"}
+    baas.update_teclaw_outbound_rule_by_bot_uuid.side_effect = [
+        RuntimeError("rule down"),
+        [{"device_uuid": "DEVICE-1"}],
+    ]
+
+    first = handler.handle(_payload())
+    binding_repo.get_by_id.return_value = _binding(status="ACTIVE")
+    second = handler.handle(_payload())
+
+    assert isinstance(first, Retry)
+    assert second == Complete()
+    binding_repo.transition_teclaw_publish_terminal.assert_called_once()
+    assert baas.update_teclaw_outbound_rule_by_bot_uuid.call_count == 2
+
+
 def test_terminal_publish_still_converges_after_business_timeout():
-    handler, baas, binding_repo = _handler(clock=lambda: 900.0)
+    handler, baas, binding_repo, passport = _handler(clock=lambda: 900.0)
     baas.get_publish_progress.return_value = {"status": "SUCCESS"}
 
     assert handler.handle(_payload()) == Complete()
@@ -255,6 +414,8 @@ def test_terminal_publish_does_not_overwrite_binding_released_during_poll(sqlite
     handler = TeclawPublishTaskHandler(
         baas_service=baas,
         device_binding_repo=binding_repo,
+        passport_plugin=MagicMock(),
+        credentials_admins_writer=MagicMock(),
     )
 
     assert handler.handle(_payload(binding_id=binding_id)) == Complete()
@@ -278,6 +439,8 @@ def test_terminal_publish_does_not_overwrite_new_publish_id_during_poll(sqlite_d
     handler = TeclawPublishTaskHandler(
         baas_service=baas,
         device_binding_repo=binding_repo,
+        passport_plugin=MagicMock(),
+        credentials_admins_writer=MagicMock(),
     )
 
     assert handler.handle(_payload(binding_id=binding_id)) == Complete()
@@ -288,7 +451,7 @@ def test_terminal_publish_does_not_overwrite_new_publish_id_during_poll(sqlite_d
 
 
 def test_atomic_terminal_write_failure_returns_retry():
-    handler, baas, binding_repo = _handler()
+    handler, baas, binding_repo, passport = _handler()
     baas.get_publish_progress.return_value = {"status": "SUCCESS"}
     binding_repo.transition_teclaw_publish_terminal.side_effect = RuntimeError(
         "database down"
@@ -301,7 +464,7 @@ def test_atomic_terminal_write_failure_returns_retry():
 
 
 def test_guard_mismatch_after_poll_completes_as_stale():
-    handler, baas, binding_repo = _handler()
+    handler, baas, binding_repo, passport = _handler()
     baas.get_publish_progress.return_value = {"status": "SUCCESS"}
     binding_repo.transition_teclaw_publish_terminal.return_value = False
 
@@ -311,7 +474,7 @@ def test_guard_mismatch_after_poll_completes_as_stale():
 
 
 def test_atomic_terminal_write_retries_until_transaction_succeeds():
-    handler, baas, binding_repo = _handler()
+    handler, baas, binding_repo, passport = _handler()
     baas.get_publish_progress.return_value = {"status": "SUCCESS"}
     binding_repo.transition_teclaw_publish_terminal.side_effect = [
         RuntimeError("db down"),
@@ -327,7 +490,7 @@ def test_atomic_terminal_write_retries_until_transaction_succeeds():
 
 
 def test_transient_publish_query_returns_retry():
-    handler, baas, binding_repo = _handler()
+    handler, baas, binding_repo, passport = _handler()
     baas.get_publish_progress.side_effect = RuntimeError("baas down")
 
     outcome = handler.handle(_payload())
@@ -342,6 +505,8 @@ def test_lifecycle_registers_handler():
         registry=registry,
         baas_service=MagicMock(),
         device_binding_repo=MagicMock(),
+        passport_plugin=MagicMock(),
+        credentials_admins_writer=MagicMock(),
     )
 
     asyncio.run(lifecycle.bootstrap())
@@ -356,20 +521,21 @@ def test_lifecycle_registers_handler():
     "binding",
     [
         None,
-        _binding(status="ACTIVE"),
         _binding(status="FAILED"),
         _binding(status="RELEASED"),
+        _binding(status="STOPPED"),
         _binding(provider="baas"),
         _binding(publish_id=10),
     ],
 )
 def test_stale_or_terminal_binding_completes_without_polling(binding):
-    handler, baas, binding_repo = _handler()
+    handler, baas, binding_repo, passport = _handler()
     binding_repo.get_by_id.return_value = binding
 
     assert handler.handle(_payload()) == Complete()
     baas.get_publish_progress.assert_not_called()
     binding_repo.transition_teclaw_publish_terminal.assert_not_called()
+    baas.update_teclaw_outbound_rule_by_bot_uuid.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -385,7 +551,7 @@ def test_stale_or_terminal_binding_completes_without_polling(binding):
     ],
 )
 def test_invalid_payload_fails_before_repository_access(payload):
-    handler, baas, binding_repo = _handler()
+    handler, baas, binding_repo, passport = _handler()
 
     outcome = handler.handle(payload)
 
@@ -396,7 +562,7 @@ def test_invalid_payload_fails_before_repository_access(payload):
 
 
 def test_binding_read_failure_returns_retry():
-    handler, baas, binding_repo = _handler()
+    handler, baas, binding_repo, passport = _handler()
     binding_repo.get_by_id.side_effect = RuntimeError("binding db down")
 
     outcome = handler.handle(_payload())
@@ -404,3 +570,94 @@ def test_binding_read_failure_returns_retry():
     assert isinstance(outcome, Retry)
     assert "binding db down" in outcome.error
     baas.get_publish_progress.assert_not_called()
+
+
+# ── post-publish admins seed into the online container's .credentials ────────
+
+
+class _RecordingCredsWriter:
+    """Records seed_for_publish calls; optionally raises to test Retry."""
+
+    def __init__(self, *, raise_on_seed: BaseException | None = None) -> None:
+        self.seed_calls: list[tuple[int, str, str]] = []
+        self._raise = raise_on_seed
+
+    def seed_for_publish(self, binding_id: int, bot_id: str, owner_id: str) -> None:
+        self.seed_calls.append((binding_id, bot_id, owner_id))
+        if self._raise is not None:
+            raise self._raise
+
+
+def _handler_with_writer(writer, *, clock=lambda: 200.0):
+    baas = MagicMock()
+    binding_repo = MagicMock()
+    binding_repo.get_by_id.return_value = _binding()
+    binding_repo.transition_teclaw_publish_terminal.return_value = True
+    passport = MagicMock()
+    passport.query_token.return_value = "passport-token"
+    baas.update_teclaw_outbound_rule_by_bot_uuid.return_value = [
+        {"device_uuid": "DEVICE-1", "paas_device_id": "TECLAW_1@4"}
+    ]
+    handler = TeclawPublishTaskHandler(
+        baas_service=baas,
+        device_binding_repo=binding_repo,
+        passport_plugin=passport,
+        credentials_admins_writer=writer,
+        poll_delay_seconds=10.0,
+        clock=clock,
+    )
+    return handler, baas, binding_repo, passport, writer
+
+
+def test_success_seeds_admins_into_the_started_container():
+    writer = _RecordingCredsWriter()
+    handler, baas, binding_repo, passport, writer = _handler_with_writer(writer)
+    baas.get_publish_progress.return_value = {"status": "SUCCESS"}
+
+    assert handler.handle(_payload()) == Complete()
+
+    # token delivered, then admins seeded into the ONLINE binding (id=77, owner staff-1)
+    baas.update_teclaw_outbound_rule_by_bot_uuid.assert_called_once_with(
+        "BOT-x", agent_pass_token="passport-token"
+    )
+    assert writer.seed_calls == [(77, "b1", "staff-1")]
+
+
+def test_active_binding_replays_admins_seed_after_crash():
+    writer = _RecordingCredsWriter()
+    handler, baas, binding_repo, passport, writer = _handler_with_writer(writer)
+    binding_repo.get_by_id.return_value = _binding(status="ACTIVE")
+
+    assert handler.handle(_payload()) == Complete()
+
+    # crash-resume replays both token delivery and admins seed (both idempotent)
+    baas.update_teclaw_outbound_rule_by_bot_uuid.assert_called_once_with(
+        "BOT-x", agent_pass_token="passport-token"
+    )
+    assert writer.seed_calls == [(77, "b1", "staff-1")]
+
+
+def test_admins_seed_failure_retries_without_losing_token_delivery():
+    writer = _RecordingCredsWriter(raise_on_seed=RuntimeError("credentials write down"))
+    handler, baas, binding_repo, passport, writer = _handler_with_writer(writer)
+    baas.get_publish_progress.return_value = {"status": "SUCCESS"}
+
+    outcome = handler.handle(_payload())
+
+    assert isinstance(outcome, Retry)
+    assert "seed admins" in outcome.error
+    # token was still delivered (its own durability); seed failure does not roll it back
+    baas.update_teclaw_outbound_rule_by_bot_uuid.assert_called_once_with(
+        "BOT-x", agent_pass_token="passport-token"
+    )
+
+
+def test_admins_seed_not_run_when_devices_not_ready():
+    writer = _RecordingCredsWriter()
+    handler, baas, binding_repo, passport, writer = _handler_with_writer(writer)
+    baas.get_publish_progress.return_value = {"status": "SUCCESS"}
+    baas.update_teclaw_outbound_rule_by_bot_uuid.return_value = []  # devices not ready
+
+    assert handler.handle(_payload()) == Reschedule(10.0)
+    # never seed before the device is ready
+    assert writer.seed_calls == []

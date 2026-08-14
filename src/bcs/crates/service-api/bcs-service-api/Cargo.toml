@@ -17,9 +17,11 @@ serde       = { workspace = true }
 serde_json  = { workspace = true }
 thiserror   = { workspace = true }
 strum       = { workspace = true }
+time        = { workspace = true, features = ["parsing"] }
 tokio       = { workspace = true }
 bcs-domain   = { workspace = true }
 bcs-protocol = { workspace = true }
+bcs-storage-api = { workspace = true }
 
 [dev-dependencies]
 bcs-test-support = { workspace = true }

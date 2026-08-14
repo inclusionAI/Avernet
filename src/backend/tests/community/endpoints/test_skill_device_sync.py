@@ -27,11 +27,9 @@ from __future__ import annotations
 
 import shutil
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.skill_center.services.repositories import (
-    SkillRepository,
-    SkillSetRepository,
-)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.di.modules.skill_center_module import DeviceFilesystemDispatcher
 from agentclaw.community.core.devices.services.local_device_filesystem import LocalDeviceFileSystem
@@ -306,24 +304,42 @@ def deactivate_repushes_remaining_symlinks():
     """Deactivate removes the on-disk link, re-pushes the merged set."""
 
 
-# ---- deactivate: error (no on-disk entry → 400) ----
+# ---- deactivate: missing on-disk entry is idempotent ----
 def _seed_deactivate_missing(world) -> None:
     _seed_bot_with_active_git_skill(world, bot_id="bot_skill_deact_err", engine="openclaw")
     _clean_workspace_skills_dir(world, bot_id="bot_skill_deact_err", engine="openclaw")
+    _record_for_bot(world)
     # Deliberately do NOT create the on-disk 'foo' link.
 
 
 @endpoint_test(
     method="POST",
     path="/api/skills/{skill_id}/deactivate",
-    scenario="error_deactivate_missing_entry_400",
+    scenario="deactivate_missing_entry_is_idempotent",
     input=CaseInput(
         path_params={"skill_id": "foo"},
         query_params={"bot_id": "bot_skill_deact_err", "entity_id": _OWNER},
         headers={"x-user-id": _OWNER},
     ),
     seed=_seed_deactivate_missing,
+    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+)
+def deactivate_missing_entry_is_idempotent():
+    """A missing on-disk entry is already deactivated and still converges runtime state."""
+
+
+# ---- deactivate: reserved entry ----
+@endpoint_test(
+    method="POST",
+    path="/api/skills/{skill_id}/deactivate",
+    scenario="deactivate_reserved_entry_returns_error",
+    input=CaseInput(
+        path_params={"skill_id": "skills-local"},
+        query_params={"bot_id": "bot_skill_deact_err", "entity_id": _OWNER},
+        headers={"x-user-id": _OWNER},
+    ),
+    seed=_seed_deactivate_missing,
     expect=ExpectError(status=400),
 )
-def deactivate_missing_entry_returns_400():
-    """Deactivate with no on-disk entry → 400, no push."""
+def deactivate_reserved_entry_returns_error():
+    """Deactivate must not remove the protected local-package directory."""

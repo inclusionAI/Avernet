@@ -9,7 +9,7 @@ import asyncio
 
 from injector import inject
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.cron.services.aicoding.cron_auto_setup import CronAutoSetupService
 from agentclaw.community.core.events.types import DeviceActivatedEvent
 from agentclaw.community.kernel.lifecycle import LifecycleBase

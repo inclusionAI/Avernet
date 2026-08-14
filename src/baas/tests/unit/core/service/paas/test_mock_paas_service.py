@@ -348,6 +348,54 @@ class TestMockPaasService:
         result = await service.restart_device("sandbox-123")
         assert result is True
 
+    # --- pull_file_from_url / push_file_to_url ---
+
+    @pytest.mark.asyncio
+    async def test_pull_file_from_url_default_success(self):
+        """pull_file_from_url returns None by default (no exception)."""
+        service = MockPaasService()
+        result = await service.pull_file_from_url(
+            "mock-device-1", "http://example.com/file", "/tmp/test"
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_push_file_to_url_default_success(self):
+        """push_file_to_url returns None by default (no exception)."""
+        service = MockPaasService()
+        result = await service.push_file_to_url(
+            "mock-device-1", "/tmp/upload", "http://example.com/upload"
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_pull_file_from_url_configured_failure(self):
+        """pull_file_from_url raises PaasError when _pull_should_fail is True."""
+        service = MockPaasService()
+        service._pull_should_fail = True
+
+        with pytest.raises(PaasError) as exc_info:
+            await service.pull_file_from_url(
+                "mock-device-1", "http://example.com/file", "/tmp/test"
+            )
+
+        assert exc_info.value.code == ErrorCode.FILE_TRANSFER_FAILED
+        assert "mock file pull failure" in exc_info.value.message
+
+    @pytest.mark.asyncio
+    async def test_push_file_to_url_configured_failure(self):
+        """push_file_to_url raises PaasError when _push_should_fail is True."""
+        service = MockPaasService()
+        service._push_should_fail = True
+
+        with pytest.raises(PaasError) as exc_info:
+            await service.push_file_to_url(
+                "mock-device-1", "/tmp/upload", "http://example.com/upload"
+            )
+
+        assert exc_info.value.code == ErrorCode.FILE_TRANSFER_FAILED
+        assert "mock file push failure" in exc_info.value.message
+
 
 class TestMockPaasServiceEnvVarVariants:
     """Test that env var checking is case-insensitive for truthy values."""

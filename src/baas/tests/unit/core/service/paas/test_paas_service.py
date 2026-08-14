@@ -57,6 +57,24 @@ class TestFetchStartProgressNotImplemented:
             async def update_device_ttl(self, paas_device_id):
                 pass
 
+            async def pull_file_from_url(
+                self,
+                paas_device_id,
+                source_url,
+                device_path,
+                timeout_seconds=300,
+            ):
+                pass
+
+            async def push_file_to_url(
+                self,
+                paas_device_id,
+                device_path,
+                target_url,
+                timeout_seconds=300,
+            ):
+                pass
+
             def get_platform_type(self):
                 pass
 

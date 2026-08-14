@@ -455,7 +455,7 @@ test_ensure_skips_connect_when_already_visible() {
   demo_bot_ensure_bcn "default"
 }
 
-test_ensure_onboards_minimal_runtime_entry() {
+test_ensure_reports_missing_bot_without_auto_onboard() {
   setup_env
   # shellcheck source=/dev/null
   source "$MODULE"
@@ -463,53 +463,18 @@ test_ensure_onboards_minimal_runtime_entry() {
   : > "${DEMO_BOT_LOG}"
 
   sequence_file="$(mktemp)"
-  verify_count=0
   demo_bot_verify_bcn() {
-    verify_count=$((verify_count + 1))
     printf '%s\n' "verify" >> "$sequence_file"
-    if [ "$verify_count" -eq 1 ]; then
-      return 1
-    fi
-    return 0
-  }
-  demo_bot_connect_bcs() {
-    printf '%s\n' "connect:$1" >> "$sequence_file"
-  }
-  demo_bot_admin_onboard_bcs() {
-    printf '%s\n' "onboard:$1" >> "$sequence_file"
-  }
-
-  demo_bot_ensure_bcn "default"
-  assert_eq $'verify\nonboard:default\nverify' "$(cat "$sequence_file")" "minimal runtime entry should still onboard"
-}
-
-test_ensure_onboards_without_connect_when_bcs_entry_missing() {
-  setup_env
-  # shellcheck source=/dev/null
-  source "$MODULE"
-  demo_bot_defaults
-  : > "${DEMO_BOT_LOG}"
-
-  sequence_file="$(mktemp)"
-  verify_count=0
-  demo_bot_verify_bcn() {
-    verify_count=$((verify_count + 1))
-    printf '%s\n' "verify" >> "$sequence_file"
-    if [ "$verify_count" -eq 1 ]; then
-      return 1
-    fi
-    return 0
-  }
-  demo_bot_connect_bcs() {
-    printf '%s\n' "connect:$1" >> "$sequence_file"
     return 1
   }
-  demo_bot_admin_onboard_bcs() {
-    printf '%s\n' "onboard:$1" >> "$sequence_file"
-  }
 
-  demo_bot_ensure_bcn "default"
-  assert_eq $'verify\nonboard:default\nverify' "$(cat "$sequence_file")" "missing BCS entry should onboard without pre-connect"
+  if demo_bot_ensure_bcn "default"; then
+    fail "missing bot must remain pending for product-side onboarding"
+  else
+    rc=$?
+  fi
+  assert_eq "1" "$rc" "missing bot return code"
+  assert_eq "verify" "$(cat "$sequence_file")" "missing bot must not auto-onboard"
 }
 
 test_ensure_does_not_onboard_after_fatal_verification_error() {
@@ -536,31 +501,7 @@ test_ensure_does_not_onboard_after_fatal_verification_error() {
   assert_eq "verify" "$(cat "$sequence_file")" "fatal verification should not mutate BCS"
 }
 
-test_ensure_fails_when_metadata_is_still_wrong_after_onboard() {
-  setup_env
-  # shellcheck source=/dev/null
-  source "$MODULE"
-  demo_bot_defaults
-
-  sequence_file="$(mktemp)"
-  demo_bot_verify_bcn() {
-    printf '%s\n' "verify" >> "$sequence_file"
-    return 1
-  }
-  demo_bot_admin_onboard_bcs() {
-    printf '%s\n' "onboard:$1" >> "$sequence_file"
-  }
-
-  if demo_bot_ensure_bcn "default"; then
-    fail "ensure should fail when post-onboard metadata still mismatches"
-  else
-    rc=$?
-  fi
-  assert_eq "1" "$rc" "persistent metadata mismatch return code"
-  assert_eq $'verify\nonboard:default\nverify' "$(cat "$sequence_file")" "post-onboard verification sequence"
-}
-
-test_start_waits_for_backend_ready_before_bcn_onboard() {
+test_start_waits_for_backend_ready_without_auto_onboard() {
   setup_env
   # shellcheck source=/dev/null
   source "$MODULE"
@@ -574,20 +515,18 @@ test_start_waits_for_backend_ready_before_bcn_onboard() {
   demo_bot_wait_ready() {
     printf '%s\n' "wait:$1" >> "$sequence_file"
   }
-  demo_bot_ensure_bcn() {
-    printf '%s\n' "ensure:$1" >> "$sequence_file"
-  }
+  demo_bot_ensure_bcn() { fail "demo bot startup must not auto-onboard"; }
 
   demo_bot_start
-  assert_eq $'create\nwait:default\nensure:default' "$(cat "$sequence_file")" "demo bot start order"
+  assert_eq $'create\nwait:default' "$(cat "$sequence_file")" "demo bot start order"
 }
 
 test_all_order_includes_bots_and_demo_before_frontend() {
   setup_env
   # shellcheck source=/dev/null
   source "${ROOT}/scripts/modules/all.sh"
-  assert_eq "baas backend bcs bots demo_bot frontend" "${START_ORDER[*]}" "all start order"
-  assert_eq "frontend demo_bot bots bcs backend baas" "${STOP_ORDER[*]}" "all stop order"
+  assert_eq "baas backend bcs bcsfuse bots demo_bot frontend" "${START_ORDER[*]}" "all start order"
+  assert_eq "frontend demo_bot bots bcsfuse bcs backend baas" "${STOP_ORDER[*]}" "all stop order"
 }
 
 test_backend_ready_function_exists() {
@@ -618,11 +557,9 @@ test_verify_reports_missing_bot_as_repairable
 test_connect_posts_fixed_bcs_bot_id
 test_admin_onboard_posts_demo_metadata
 test_ensure_skips_connect_when_already_visible
-test_ensure_onboards_minimal_runtime_entry
-test_ensure_onboards_without_connect_when_bcs_entry_missing
+test_ensure_reports_missing_bot_without_auto_onboard
 test_ensure_does_not_onboard_after_fatal_verification_error
-test_ensure_fails_when_metadata_is_still_wrong_after_onboard
-test_start_waits_for_backend_ready_before_bcn_onboard
+test_start_waits_for_backend_ready_without_auto_onboard
 test_all_order_includes_bots_and_demo_before_frontend
 test_backend_ready_function_exists
 

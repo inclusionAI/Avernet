@@ -209,6 +209,12 @@
               },
               "template_type": {
                 "type": "string"
+              },
+              "call_type": {
+                "type": "string"
+              },
+              "caller_config_revision": {
+                "type": "integer"
               }
             },
             "required": [
@@ -235,7 +241,9 @@
               "public",
               "share_policy",
               "status",
-              "template_type"
+              "template_type",
+              "call_type",
+              "caller_config_revision"
             ],
             "additionalProperties": false
           }

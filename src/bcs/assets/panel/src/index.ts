@@ -7,6 +7,7 @@ export type {
   StateMachineNodeDetailNode,
   StateMachineNodeDetailResponse,
   StateMachineNodeStatus,
+  StateMachineNodeSubStatus,
   StateMachineRun,
   StateMachineRunGraph,
   StateMachineRunStatus,

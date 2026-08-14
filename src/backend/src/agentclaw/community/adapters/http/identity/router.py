@@ -118,7 +118,9 @@ async def get_entity_identity_file(
     identity_service: IdentityService = Injected(IdentityService),
 ) -> IdentityFileResponse:
     """Get entity-level identity file content."""
-    operator_id = user_id or ctx.user_id
+    if user_id and user_id != ctx.user_id:
+        raise HTTPException(status_code=403, detail="Operator identity does not match authenticated user")
+    operator_id = ctx.user_id
     logger.info(f"[identity.get_entity_identity_file] operator={operator_id}, entity={entity_type}/{entity_id}, file={file_type}")
     try:
         return await identity_service.get_entity_file(entity_type, entity_id, file_type, operator_id)

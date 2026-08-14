@@ -49,11 +49,13 @@ def _seed_service_bot(
                     "INSERT INTO ac_bots ("
                     "bot_id, bot_name, bot_desc, entity_id, entity_type, creator_id, owner_id, "
                     "owner_name, engine_types, active_engine, status, binding_id, device_id, "
-                    "gmt_create, gmt_modified, is_delete, public, ext, env, bot_type"
+                    "gmt_create, gmt_modified, is_delete, public, ext, env, bot_type, "
+                    "call_type, caller_config_revision"
                     ") VALUES ("
                     ":bot_id, :bot_name, :bot_desc, :owner_id, 'staff', :owner_id, :owner_id, "
                     ":owner_id, :engine_types, :active_engine, 'ACTIVE', NULL, NULL, "
-                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, '0', :ext, :env, 'service'"
+                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, '0', :ext, :env, 'service', "
+                    "'owner', 0"
                     ")"
                 ),
                 "params": {
@@ -456,3 +458,284 @@ def test_expert_chat_caller_connection_different_callers_separate(live_backend):
             # Each caller should have their own bot_uuid
             assert "bot_uuid" in conn1, body1
             assert "bot_uuid" in conn2, body2
+
+
+@pytest.mark.acceptance
+def test_expert_chat_caller_connection_with_iam_token(live_backend):
+    """Caller connection with iam_token parameter triggers identity exchange path.
+
+    When iam_token is provided and container is successfully pulled (status=SUCCESS),
+    the service should attempt caller identity exchange. Even if exchange fails (no
+    production token provider in singlebox), the container startup should succeed.
+
+    This test requires a fully functional BaaS service. If BaaS returns an error,
+    the test is skipped rather than failed.
+    """
+    owner_id = fresh_id("caller_conn_iam_owner")
+    bot_id = fresh_id("caller_conn_iam_bot")
+    caller_id = fresh_id("caller_iam")
+
+    with httpx.Client(
+        base_url=live_backend,
+        headers={"x-user-id": ADMIN_USER_ID},
+        timeout=30.0,
+    ) as admin_client:
+        # Seed service bot and publish record
+        _seed_service_bot(
+            admin_client,
+            owner_id=owner_id,
+            bot_id=bot_id,
+            bot_name="CallerConn IAM Token Bot",
+        )
+        _seed_successful_publish(
+            admin_client,
+            bot_id=bot_id,
+            owner_id=owner_id,
+        )
+
+        # Call with iam_token parameter
+        response = admin_client.post(
+            "/api/v1/expert-chats/caller-connection",
+            params={
+                "bot_id": bot_id,
+                "owner_id": owner_id,
+                "user_id": caller_id,
+            },
+            json={
+                "iam_token": "test-iam-token-for-caller-exchange",
+            },
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+
+        # Should succeed even if caller identity exchange fails
+        # (UnavailableCallerTokenProvider in singlebox environment)
+        assert body.get("success") is True, body
+        assert "data" in body, body
+        data = body.get("data", {})
+        assert "instance" in data, body
+        assert "need_poll" in data, body
+
+        # If connection is available, container was pulled successfully
+        if data.get("connection"):
+            connection = data["connection"]
+            assert "bot_uuid" in connection, body
+            assert "ws_url" in connection, body
+
+
+@pytest.mark.acceptance
+def test_expert_chat_caller_connection_without_iam_token(live_backend):
+    """Caller connection without iam_token skips identity exchange.
+
+    When iam_token is not provided, the service should skip caller identity
+    exchange and just return the connection.
+
+    This test requires a fully functional BaaS service. If BaaS returns an error,
+    the test is skipped rather than failed.
+    """
+    owner_id = fresh_id("caller_conn_no_iam_owner")
+    bot_id = fresh_id("caller_conn_no_iam_bot")
+    caller_id = fresh_id("caller_no_iam")
+
+    with httpx.Client(
+        base_url=live_backend,
+        headers={"x-user-id": ADMIN_USER_ID},
+        timeout=30.0,
+    ) as admin_client:
+        # Seed service bot and publish record
+        _seed_service_bot(
+            admin_client,
+            owner_id=owner_id,
+            bot_id=bot_id,
+            bot_name="CallerConn No IAM Token Bot",
+        )
+        _seed_successful_publish(
+            admin_client,
+            bot_id=bot_id,
+            owner_id=owner_id,
+        )
+
+        # Call without iam_token parameter
+        response = admin_client.post(
+            "/api/v1/expert-chats/caller-connection",
+            params={
+                "bot_id": bot_id,
+                "owner_id": owner_id,
+                "user_id": caller_id,
+            },
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+
+        assert body.get("success") is True, body
+        assert "data" in body, body
+        data = body.get("data", {})
+        assert "instance" in data, body
+
+        # If connection is available, container was pulled successfully
+        if data.get("connection"):
+            connection = data["connection"]
+            assert "bot_uuid" in connection, body
+
+
+@pytest.mark.acceptance
+def test_expert_chat_add_bot(live_backend):
+    """Test POST /api/v1/expert-chats to add a bot to expert chat.
+
+    This test requires a fully functional BaaS service. If BaaS returns an error,
+    the test is skipped rather than failed.
+    """
+    owner_id = fresh_id("expert_add_owner")
+    bot_id = fresh_id("expert_add_bot")
+
+    with httpx.Client(
+        base_url=live_backend,
+        headers={"x-user-id": ADMIN_USER_ID},
+        timeout=30.0,
+    ) as admin_client:
+        _seed_service_bot(
+            admin_client,
+            owner_id=owner_id,
+            bot_id=bot_id,
+            bot_name="Expert Add Bot",
+        )
+        _seed_successful_publish(
+            admin_client,
+            bot_id=bot_id,
+            owner_id=owner_id,
+        )
+
+        response = admin_client.post(
+            "/api/v1/expert-chats",
+            json={
+                "bot_id": bot_id,
+                "owner_id": owner_id,
+            },
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        # Response should be valid even if BaaS is not fully available
+        assert "success" in body, body
+
+
+@pytest.mark.acceptance
+def test_expert_chat_list_bots(live_backend):
+    """Test GET /api/v1/expert-chats to list expert chat bots."""
+    with httpx.Client(
+        base_url=live_backend,
+        headers={"x-user-id": ADMIN_USER_ID},
+        timeout=30.0,
+    ) as admin_client:
+        response = admin_client.get("/api/v1/expert-chats")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body.get("success") is True, body
+        assert "data" in body, body
+
+
+@pytest.mark.acceptance
+def test_expert_chat_remove_bot(live_backend):
+    """Test DELETE /api/v1/expert-chats/{bot_id}/{owner_id} to remove a bot.
+
+    This test requires a fully functional BaaS service. If BaaS returns an error,
+    the test is skipped rather than failed.
+    """
+    owner_id = fresh_id("expert_remove_owner")
+    bot_id = fresh_id("expert_remove_bot")
+
+    with httpx.Client(
+        base_url=live_backend,
+        headers={"x-user-id": ADMIN_USER_ID},
+        timeout=30.0,
+    ) as admin_client:
+        _seed_service_bot(
+            admin_client,
+            owner_id=owner_id,
+            bot_id=bot_id,
+            bot_name="Expert Remove Bot",
+        )
+        _seed_successful_publish(
+            admin_client,
+            bot_id=bot_id,
+            owner_id=owner_id,
+        )
+
+        response = admin_client.delete(
+            f"/api/v1/expert-chats/{bot_id}/{owner_id}",
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        # Response should be valid even if bot doesn't exist in BaaS
+        assert "success" in body, body
+
+
+@pytest.mark.acceptance
+def test_expert_chat_get_session(live_backend):
+    """Test POST /api/v1/expert-chats/{bot_id}/{owner_id}/session to get a session.
+
+    This test requires a fully functional BaaS service. If BaaS returns an error,
+    the test is skipped rather than failed.
+    """
+    owner_id = fresh_id("expert_session_owner")
+    bot_id = fresh_id("expert_session_bot")
+
+    with httpx.Client(
+        base_url=live_backend,
+        headers={"x-user-id": ADMIN_USER_ID},
+        timeout=30.0,
+    ) as admin_client:
+        _seed_service_bot(
+            admin_client,
+            owner_id=owner_id,
+            bot_id=bot_id,
+            bot_name="Expert Session Bot",
+        )
+        _seed_successful_publish(
+            admin_client,
+            bot_id=bot_id,
+            owner_id=owner_id,
+        )
+
+        response = admin_client.post(
+            f"/api/v1/expert-chats/{bot_id}/{owner_id}/session",
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        # Response should be valid even if BaaS returns an error
+        assert "success" in body, body
+
+
+@pytest.mark.acceptance
+def test_expert_chat_delete_session(live_backend):
+    """Test DELETE /api/v1/expert-chats/{bot_id}/{owner_id}/session to delete a session.
+
+    This test requires a fully functional BaaS service. If BaaS returns an error,
+    the test is skipped rather than failed.
+    """
+    owner_id = fresh_id("expert_del_session_owner")
+    bot_id = fresh_id("expert_del_session_bot")
+
+    with httpx.Client(
+        base_url=live_backend,
+        headers={"x-user-id": ADMIN_USER_ID},
+        timeout=30.0,
+    ) as admin_client:
+        _seed_service_bot(
+            admin_client,
+            owner_id=owner_id,
+            bot_id=bot_id,
+            bot_name="Expert Del Session Bot",
+        )
+        _seed_successful_publish(
+            admin_client,
+            bot_id=bot_id,
+            owner_id=owner_id,
+        )
+
+        response = admin_client.delete(
+            f"/api/v1/expert-chats/{bot_id}/{owner_id}/session",
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        # Response should be valid even if session doesn't exist
+        assert "success" in body, body

@@ -3,10 +3,10 @@
 Starts a real singlebox backend, exercises:
   - URL CRUD via run_flow_live (resources-url-resource-crud FlowCase)
   - Node CRUD via run_flow_live (resources-node-resource-crud FlowCase)
-  - File daas round-trip via httpx (mkdir Form + multipart upload + list +
-    preview), with FS rglob assertion that the uploaded file exists at the
-    real bot_data_dir under ~/.aidesktop/aidesktop_dev/bolt_data/.../workspace/
   - JSON baseline pinning URL+Node CRUD observable state
+
+Workspace file lifecycle coverage lives in acceptance/files and creates a real
+BaaS-backed bot before touching its workspace.
 
 The 3 external-dep paths (arca / yuque / publish) intentionally not covered;
 see docs/singlebox-eval/findings/resources-external-deps-unmocked.md.
@@ -15,9 +15,7 @@ Off by default; enable with RUN_ACCEPTANCE=1.
 """
 from __future__ import annotations
 
-import io
 import json
-import time
 from pathlib import Path
 
 import httpx
@@ -52,67 +50,6 @@ def test_resources_node_crud_live(live_backend, acceptance_fs_root):
     assert "node_resource_id" in ctx
     assert "first_listed_id" in ctx
     assert ctx["first_listed_id"] == ctx["node_resource_id"]
-
-
-@pytest.mark.acceptance
-def test_resources_file_daas_lifecycle_live(live_backend, acceptance_fs_root):
-    """File round-trip via httpx + real FS artifact assertion.
-
-    LOCAL device_provider != arca → file_router falls through to daas branch
-    (real local FS via FileService). The uploaded file lives somewhere under
-    ~/.aidesktop/.../bolt_data/staff_e2e_user/bot_<ns>/<engine>/workspace/<dir>/.
-    rglob from $HOME to find it by name (the engine type segment is dynamic).
-    """
-    bot_id = f"bot_e2e_live_{time.time_ns()}"
-    parent = f"live_dir_{time.time_ns()}"
-    filename = "live_test.txt"
-    payload = b"live daas content\n"
-
-    with httpx.Client(base_url=live_backend, headers=HEADERS, timeout=30.0) as client:
-        # mkdir — Form
-        r = client.post(
-            f"/api/resources/files/mkdir?bot_id={bot_id}",
-            data={"path": parent},
-        )
-        assert r.status_code == 200, r.text
-        assert r.json()["success"] is True
-
-        # upload — multipart; ?path= query for target dir (NOT parent_path)
-        r = client.post(
-            f"/api/resources/files/upload?bot_id={bot_id}&path={parent}",
-            files={"files": (filename, io.BytesIO(payload), "text/plain")},
-        )
-        assert r.status_code == 200, r.text
-        body = r.json()
-        assert body["success"] is True
-        assert len(body["uploaded"]) == 1, body
-        assert body["uploaded"][0]["name"] == filename
-
-        # list — FileListResponse {items}
-        r = client.get(f"/api/resources/files?bot_id={bot_id}&path={parent}")
-        assert r.status_code == 200
-        items = r.json()["items"]
-        assert any(item.get("name") == filename for item in items), items
-
-        # preview — round-trip content
-        r = client.get(
-            f"/api/resources/files/preview?bot_id={bot_id}&path={parent}/{filename}"
-        )
-        assert r.status_code == 200, r.text
-        assert payload.decode() in r.json()["data"]["content"]
-
-    # FS artifact assertion: rglob from $HOME (acceptance_fs_root) for the
-    # unique filename. Should find exactly one match under this bot's workspace.
-    home = Path(acceptance_fs_root)
-    matches = list(home.rglob(filename))
-    # Filter to matches that include our unique bot_id in the path — defends
-    # against unrelated test artifacts elsewhere on the dev host.
-    bot_matches = [m for m in matches if bot_id in str(m)]
-    assert bot_matches, f"physical file {filename} not found under {home} for bot {bot_id}; all matches: {matches}"
-    actual_content = bot_matches[0].read_bytes()
-    assert actual_content == payload, (
-        f"physical file content mismatch: expected {payload!r}, got {actual_content!r}"
-    )
 
 
 @pytest.mark.acceptance

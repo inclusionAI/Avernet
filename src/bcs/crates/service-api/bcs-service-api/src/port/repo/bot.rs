@@ -34,6 +34,15 @@ pub trait BotRepoPort: Send + Sync {
     async fn update_status(&self, bot_id: &str, status: BotDynamicStatus) -> bool;
     async fn get(&self, bot_id: &str) -> Option<RegisteredBot>;
 
+    /// Read a Bot without hiding persistence failures.
+    ///
+    /// The compatibility default preserves existing repositories. Persistent
+    /// repositories should override this method so application paths that
+    /// distinguish "missing" from "store unavailable" can do so.
+    async fn try_get(&self, bot_id: &str) -> ServiceResult<Option<RegisteredBot>> {
+        Ok(self.get(bot_id).await)
+    }
+
     /// Like [`get`](Self::get) but also returns soft-deleted bots.
     ///
     /// Default implementation delegates to `get` (which excludes deleted bots),
@@ -75,6 +84,19 @@ pub trait BotRepoPort: Send + Sync {
 
     async fn list_active(&self) -> Vec<RegisteredBot>;
     async fn list_bots_by_creator(&self, created_by: &str) -> Vec<RegisteredBot>;
+
+    /// List Bots by creator without hiding persistence failures.
+    ///
+    /// The compatibility default preserves existing repositories. Persistent
+    /// repositories should override this method for authorization paths that
+    /// must distinguish "no owned Bots" from "ownership lookup unavailable".
+    async fn try_list_bots_by_creator(
+        &self,
+        created_by: &str,
+    ) -> ServiceResult<Vec<RegisteredBot>> {
+        Ok(self.list_bots_by_creator(created_by).await)
+    }
+
     async fn discover(&self, query: &str) -> Vec<RegisteredBot>;
     async fn find_by_skills(&self, skills: &[&str]) -> Vec<RegisteredBot>;
     async fn find_by_domains(&self, domains: &[&str]) -> Vec<RegisteredBot>;

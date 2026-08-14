@@ -37,6 +37,7 @@ router = APIRouter(prefix="/api/v1/system-configs", tags=["系统配置管理"])
 async def list_configs(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    op_ctx: OperationContext = Depends(get_op_ctx),
     service: SystemConfigManageService = Depends(
         Provide[ApplicationContainer.services.system_config_service]
     ),
@@ -44,9 +45,10 @@ async def list_configs(
     """List system configs with optional env filter."""
 
     logger.info(
-        "Listing system configs: page=%s, page_size=%s",
+        "Listing system configs: page=%s, page_size=%s, operator=%s",
         page,
         page_size,
+        op_ctx.operator,
     )
     result = service.list_configs(page=page, page_size=page_size)
     return ApiResponse(data=result)
@@ -56,13 +58,16 @@ async def list_configs(
 @inject
 async def get_config(
     conf_key: Annotated[str, Path(description="配置键")],
+    op_ctx: OperationContext = Depends(get_op_ctx),
     service: SystemConfigManageService = Depends(
         Provide[ApplicationContainer.services.system_config_service]
     ),
 ) -> ApiResponse[SystemConfigResponse]:
     """Get system config by key with optional env."""
 
-    logger.info("Getting system config: conf_key=%s", conf_key)
+    logger.info(
+        "Getting system config: conf_key=%s, operator=%s", conf_key, op_ctx.operator
+    )
 
     config = service.get_config(conf_key=conf_key)
     if not config:

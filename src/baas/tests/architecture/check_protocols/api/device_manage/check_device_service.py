@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from secbaas.community.api.device_manage import (
     DeviceService as DeviceServiceProtocol,
@@ -17,4 +17,7 @@ _device_service: DeviceServiceProtocol = DefaultDeviceService(
     repository=MagicMock(spec=DeviceRepository),
     device_template_service=MagicMock(spec=DeviceTemplateManageService),
     secret_plugin=MagicMock(spec=SecretStorePlugin),
+    callback_handler=MagicMock(
+        handle=AsyncMock(return_value={"status": "ok"}),
+    ),
 )

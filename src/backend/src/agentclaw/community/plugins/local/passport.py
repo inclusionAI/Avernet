@@ -7,6 +7,7 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.impl_registry import Flavor, Mode, plugin_impl
 from agentclaw.community.plugin_api.passport import (
     CliItem,
+    McpScopeItem,
     PassportPlugin,
     PassportResourceScope,
     SubResourceItem,
@@ -56,6 +57,27 @@ class LocalPassportPlugin(MockSeam, PassportPlugin):
             engine_type,
             access_mode,
             admins,
+        )
+
+    def update_mcp_identity_to_agent_principal(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        mcp_items: list[McpScopeItem],
+    ) -> None:
+        if any(
+            not item.get("mcp_code")
+            or item.get("identity_mode") not in {"owner", "caller"}
+            for item in mcp_items
+        ):
+            raise ValueError("invalid MCP identity scope")
+        logger.info(
+            "[LocalPassportUpdate] update_mcp_identity_to_agent_principal: "
+            "bot_id=%s, user_id=%s, mcp_count=%s",
+            bot_id,
+            user_id,
+            len(mcp_items),
         )
 
     def apply_first_agent_passport(

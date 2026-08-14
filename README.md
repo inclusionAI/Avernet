@@ -2,205 +2,158 @@
   <img src="./docs/images/avernet-readme-header.png" alt="Avernet" width="70%" />
 </h1>
 
-> Where agents live, connect, coordinate, execute, and evolve together.
+<p align="center"><strong>Avernet is an open-source infrastructure layer for building and operating persistent, coordinated, multi-agent systems at organizational scale.</strong></p>
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE) [![README](https://img.shields.io/badge/README-zh--CN-green.svg)](README.zh-CN.md)
-
-[Overview](#what-is-avernet) | [Quick Start](#quick-start) | [Docker](#3-docker-source-build) | [Open Integration](#open-integration-connecting-a-heterogeneous-agent-ecosystem) | [Architecture](#architecture-at-a-glance) | [Docs](#documentation)
-
-> Status: Avernet is in community V0.1. This README will be updated as public capabilities evolve.
-
-## What is Avernet?
-
-Avernet is the open infrastructure for agent organizations and open agent ecosystems.
-
-It provides the core systems that let humans and heterogeneous agents **live, connect, coordinate, execute, and evolve together** — across applications, runtimes, and collaborative workflows.
-
-Avernet starts with a simple idea:
-
-> The challenge is not just making agents smarter, but enabling humans and agents to work coherently at organizational scale.
-
-Avernet is designed as that operating environment: a trusted, modular foundation for persistent agents, coordinated execution, and continuously evolving organizational intelligence. 
-
-Avernet is in production at Ant Group, where it powers over 10,000 agents/bots as of early July 2026.
+<p align="center">Where agents live, connect, coordinate, execute, and evolve together.</p>
 
 <p align="center">
-  <img src="./docs/images/group.jpg" alt="Group coordination" width="80%" />
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License" /></a>
+  <a href="README.zh-CN.md"><img src="https://img.shields.io/badge/README-zh--CN-green.svg" alt="README zh-CN" /></a>
 </p>
-
-## Why Avernet exists
-
-Avernet starts with four organizational coordination problems that become more severe as teams, systems, and agents scale:
-
-- **Cannot find** — existing capabilities are hard to discover
-- **Cannot align** — apparent consensus hides real misalignment
-- **Cannot run fast** — execution depends on human relay
-- **Cannot retain** — knowledge does not accumulate as organizational capability
-
-Avernet is designed to solve these problems with the infrastructure needed for persistent agents, structured coordination, governed execution, and compounding organizational memory.
 
 <p align="center">
-  <img src="./docs/images/organizational-problems.jpg" alt="Organizational alignment problems" width="80%" />
+  <a href="#quick-start">Quick Start</a> |
+  <a href="#capabilities--status">Capabilities & Status</a> |
+  <a href="#demo">Demo</a> |
+  <a href="#why-avernet">Why Avernet</a> |
+  <a href="#architecture">Architecture</a> |
+  <a href="#integration">Integration</a> |
+  <a href="#documentation">Docs</a>
 </p>
 
-## Key capabilities
+## Overview
 
-> **Note**: We are in the active process of open-sourcing more components; some capabilities will be integrated later into this repository.
+Avernet provides the infrastructure needed to run **persistent, coordinated, and heterogeneous agent systems** across applications, runtimes, and human-agent workflows.
+
+It is built for teams that need to:
+
+- run **multiple agents together**, not just isolated single-agent demos
+- connect **heterogeneous runtimes, plugins, and bot platforms**
+- support **shared context, governed execution, and long-lived collaboration**
+- operate **human-agent collaboration** in real environments
+
+> **Production-tested at Ant Group** — As of early July 2026, Avernet supports multi-agent deployments across **12 business groups (BGs)**, with a **90%+ task completion rate in measured multi-agent workflows**.
+
+## Capabilities & Status
+
+> **Status note:** All core capability areas are deployed internally in production environments. Public open-source coverage varies by component and is being released incrementally.
+>
+> **Legend:** Available = usable in the public repo now · Partial = partially public · In progress = being opened or integrated · Planned = intended but not yet public
 
 - **Trusted core**  
+  ![Identity](https://img.shields.io/badge/Identity-Available-brightgreen)
+  ![Auth](https://img.shields.io/badge/Auth-Available-brightgreen)
+  ![Permissions](https://img.shields.io/badge/Permissions-Partial-yellow)
+  ![Security](https://img.shields.io/badge/Security-Planned-lightgrey)
+  ![Audit](https://img.shields.io/badge/Audit-In%20progress-orange)
+  ![Lifecycle](https://img.shields.io/badge/Lifecycle-In%20progress-orange)  
   Identity, auth, permissions, security, audit, and lifecycle management for agents and participants.
 
 - **Execution infrastructure**  
-  Support for heterogeneous agent engines, services, containers, clusters, and operational runtimes.
+  ![Heterogeneous runtimes](https://img.shields.io/badge/Heterogeneous%20runtimes-Available-brightgreen)
+  ![Bot services](https://img.shields.io/badge/Bot%20services-Available-brightgreen)
+  ![Containers](https://img.shields.io/badge/Containers-Partial-yellow)
+  ![Clusters](https://img.shields.io/badge/Clusters-Planned-lightgrey)
+  ![Operations](https://img.shields.io/badge/Operations-In%20progress-orange)  
+  Support for heterogeneous agent engines, bot-as-a-service runtimes, containers, clusters, and operational runtimes.
 
 - **Agent coordination network**  
-  Multi-agent discovery, team formation, coordination, and governance through Avernet’s coordination model.
+  ![Discovery](https://img.shields.io/badge/Discovery-Available-brightgreen)
+  ![Relationships](https://img.shields.io/badge/Relationships-Available-brightgreen)
+  ![Team formation](https://img.shields.io/badge/Team%20formation-Available-brightgreen)
+  ![Routing](https://img.shields.io/badge/Routing-Available-brightgreen)
+  ![Collaboration](https://img.shields.io/badge/Collaboration-Available-brightgreen)
+  ![Governance](https://img.shields.io/badge/Governance-Planned-lightgrey)  
+  Discovery, relationship building, team formation, routing, collaboration, and governance across multiple agents.
 
-- **Intelligence and evolution**  
-  Shared context, memory, orchestration, evaluation, and continuous improvement over time.
+- **Shared intelligence and evolution**  
+  ![Context](https://img.shields.io/badge/Context-Planned-lightgrey)
+  ![Memory](https://img.shields.io/badge/Memory-Planned-lightgrey)
+  ![Orchestration](https://img.shields.io/badge/Orchestration-Planned-lightgrey)
+  ![Evaluation](https://img.shields.io/badge/Evaluation-Planned-lightgrey)
+  ![Evolution](https://img.shields.io/badge/Evolution-Planned-lightgrey)  
+  Context, memory, orchestration, evaluation, and continuous improvement over time.
 
-- **Application ecosystem**  
-  Agent apps, canvas apps, workflows, and domain-specific extensions built on top of the platform.
+- **Application building blocks**  
+  ![Apps](https://img.shields.io/badge/Apps-Planned-lightgrey)
+  ![Canvas](https://img.shields.io/badge/Canvas-Available-brightgreen)
+  ![Workflow](https://img.shields.io/badge/Workflow-Available-brightgreen)
+  ![Extensions](https://img.shields.io/badge/Extensions-Planned-lightgrey)  
+  Agent apps, canvas apps, workflows, and domain-specific extensions built on top of Avernet.
 
 ## Quick Start
 
-Avernet provides three local trial paths. All paths start with cloning the repository:
+Clone the repository:
 
 ```bash
 git clone https://github.com/inclusionAI/Avernet.git
 cd Avernet
 ```
 
-### 1. Native local setup (recommended)
-
-Use this path if you want the fastest native local development stack and accept an interactive script that may install or upgrade toolchain dependencies.
-
-#### Start
+### Recommended local setup
 
 ```bash
-# Check and install or upgrade the toolchain, and install the pre-push hook.
-# This may change your host environment.
 ./scripts/singlebox.sh install-tools
-
-# Build and start the local stack: Avernet process + 5 local test bots + frontend
 ./scripts/singlebox.sh
 ```
 
-> **Note**:
-> 1. `install-tools` is an interactive install wizard and may install OpenClaw and related tools. If you only want to preflight dependencies, run `./scripts/singlebox.sh check`.
-> 2. Running `singlebox.sh` also installs the repo-local pre-push hook by setting `core.hooksPath=.githooks`. To skip this, set `OCB_SKIP_GIT_HOOKS=1`.
-> 3. If you see duplicate demo bots in the frontend, it means the demo bot tokens are incorrect and the corresponding data no longer exists in the local SQLite database.
+This starts a local Avernet stack with:
 
-##### Optional: edit local configuration
+- Avernet process
+- frontend workbench
+- 5 local test bots
 
-Create `.env.local` when you need to change ports, model settings, or local personalization:
-
-```bash
-test -f .env.local || cp .env.example .env.local
-# Edit .env.local
-```
-
-To clean up duplicate demo bots, run the following commands to clear the local database and all local test bot profile directories, then restart BCS:
-
-```bash
-./scripts/singlebox.sh clean bcs    # delete bcs.db + rm -rf every bot profile directory
-./scripts/singlebox.sh              # start a fresh Avernet session
-```
-
-### 2. Manual dependency and environment setup (advanced)
-
-Use this path if your host toolchain is already ready and you want to start the full local stack without running the interactive installer.
-
-```bash
-# Dependency check; this does not automatically install or upgrade global tools.
-./scripts/singlebox.sh check
-
-# Build and start. --standalone is accepted as an explicit alias for the default mode.
-./scripts/singlebox.sh
-```
-
-> **Note**: `check` only validates required dependencies. If it fails, install the missing tools listed in [Dependencies](docs/dependencies.md). See [Quick Start](docs/quick-start.md) for details.
-
-##### Optional: edit model configuration
-
-Basic Avernet capabilities do not require a model API key.
-To make demo bots reply for real, configure the complete model environment variables in `.env.local`:
-
-```bash
-OPENCLAW_OPENAI_BASE_URL=...
-OPENCLAW_OPENAI_API_KEY=...
-OPENCLAW_OPENAI_MODEL_ID=...
-```
-
-### 3. Docker source build
-
-Use this path if you want a container-isolated local run. The current Docker path builds the image from source, so the first build can take a while; prebuilt images will be published later to reduce local build time.
-
-#### Build and start
-
-```bash
-docker compose up --build
-```
-
-#### If the port is already in use
-
-```bash
-test -f .env.local || cp .env.example .env.local
-# Set these values in .env.local:
-# BCS_PORT=<available-bcs-port>
-# FRONTEND_PORT=<available-frontend-port>
-docker compose --env-file .env.local up --build
-```
-
-See the [Docker Guide](docs/docker.md) for details.
-
-### What you should see
-
-Start from the frontend entry, then confirm health status and bot connectivity.
-
-#### 1. Open the frontend workbench
-
-The default URL is:
+Open the frontend at:
 
 ```text
 http://127.0.0.1:8000/
 ```
 
-If `.env.local` changes `FRONTEND_PORT`, use the updated port.
+For Docker and advanced setup options, see:
 
-#### 2. Stop services
+- [Quick Start](docs/quick-start.md)
+- [Docker Guide](docs/docker.md)
+- [Dependencies](docs/dependencies.md)
 
-Stop services with the command for the path you used:
+## Demo
 
-```bash
-# Docker path
-docker compose down
+The current public demo is intended to show:
 
-# singlebox path
-./scripts/singlebox.sh stop
-```
+- local onboarding and coordination flow
+- workbench interaction
+- integration of local test bots
+- a reproducible starting point for public evaluation
 
-#### 3. Other notes
+It is **not** intended to fully demonstrate all production-scale properties of Avernet, such as large-scale connection envelopes, permission isolation, audit depth, failure recovery, or long-horizon organizational collaboration.
 
-- `singlebox.sh` uses isolated repository-local Avernet and OpenClaw runtime paths by default.
-- `--standalone` remains accepted as a compatibility alias for that default mode.
+<p align="center">
+  <video src="https://github.com/user-attachments/assets/f3fc4b52-4d23-4a73-b618-fe0110e2f2fb" width="80%" controls></video>
+</p>
 
-## Open Integration: Connecting a Heterogeneous Agent Ecosystem
+<p align="center">
+  <img src="./docs/images/group.jpg" alt="Group coordination" width="80%" />
+</p>
 
-Avernet does not bind you to one Agent engine. It provides two integration paths to connect Agents, bot runtimes, and existing bot platforms from different sources into the same collaboration network. Plugin integration is for Agents that actively join the network; gateway integration is for existing platforms that are scheduled by Avernet.
+## Why Avernet
 
-| Integration path | Best for | Current capability | Docs |
-| --- | --- | --- | --- |
-| Plugin integration | OpenClaw, local Agent runtimes, custom bot processes | The Agent side actively connects to Avernet through a plugin or runtime, then handles registration, onboard, message receiving, and result reporting. | [Bot Integration Guide](docs/bot-integration.md), [Local OpenClaw from source](docs/openclaw-bcn-local.md) |
-| Gateway integration | Existing bot platforms, multi-instance Agent services, external scheduling systems | Avernet sends tasks to an external platform through the downlink gateway. The external platform schedules Agents and reports results when the task completes. | [Bot Platform Integration](docs/bot-provider-integration.md) |
+As agent systems scale, teams often hit the same four bottlenecks:
 
-Through these two paths, Avernet can connect both single Agent runtimes and existing Agent / Bot platforms, letting heterogeneous Agents be discovered, invited, participate in collaboration, and return results in one network.
+- **Cannot find** — capabilities are hard to discover
+- **Cannot align** — apparent consensus hides real misalignment
+- **Cannot run fast** — execution depends on human relay
+- **Cannot retain** — knowledge does not accumulate as organizational capability
 
-## Architecture at a glance
+Avernet is built to address these problems with infrastructure for **persistent agents, structured coordination, governed execution, and compounding organizational memory**.
+
+<p align="center">
+  <img src="./docs/images/organizational-problems.jpg" alt="Organizational alignment problems" width="80%" />
+</p>
+
+## Architecture
 
 ```text
    +----------------------------+  +----------------------------+  +----------------------------+
-   | Local OpenClaw             |  | Agent Runtime              |  | Existing Bot Platform      |
+   | Local Agents               |  | Agent Runtime              |  | Existing Bot Platform      |
    | Plugin mode                |  | /ws/bot runtime            |  | Downlink gateway           |
    +-------------+--------------+  +-------------+--------------+  +-------------+--------------+
                  |                               |                               ^
@@ -216,45 +169,50 @@ Through these two paths, Avernet can connect both single Agent runtimes and exis
 +----------------------------------------------------------------------------+     +-------------------+
 ```
 
+## Integration
+
+Avernet does not lock you into a single agent engine. It supports two integration paths for connecting agents, runtimes, and existing bot platforms into one collaboration network.
+
+| Integration path | Best for | Current capability | Docs |
+| --- | --- | --- | --- |
+| Plugin integration | OpenClaw, local agent runtimes, custom bot processes | Agents actively connect to Avernet through a plugin or runtime for registration, onboarding, message receiving, and result reporting. | [Bot Integration Guide](docs/bot-integration.md), [Local OpenClaw from source](docs/openclaw-bcn-local.md) |
+| Gateway integration | Existing bot platforms, multi-instance agent services, external scheduling systems | Avernet dispatches tasks to an external platform, which schedules agents and reports results back when work completes. | [Bot Platform Integration](docs/bot-provider-integration.md) |
+
 ## Repository layout
 
 ```text
 ocb/
-├── .env.example              # singlebox local configuration template
-├── Dockerfile.ocb            # Docker local image definition
-├── docker-compose.yml        # Docker local startup entry
+├── .env.example
+├── Dockerfile.ocb
+├── docker-compose.yml
 ├── docs/
-│   └── arch/                 # Architecture constraints, CI gates, and contract test rules
 ├── scripts/
-│   ├── standalone.sh         # Standalone compatibility wrapper; singlebox.sh remains the main entry
-│   ├── singlebox.sh          # Local development orchestration entry
-│   └── modules/              # Modular scripts for BCS, frontend, OpenClaw, and more
 ├── src/
-│   ├── frontend/             # Web workbench
-│   ├── bcs/                  # Rust Bot Coordination Service
-│   └── plugin/               # OpenClaw TypeScript plugin workspace
-├── tests/                    # Cross-module tests
-├── AGENTS.md                 # Contributor and AI coding agent rules
-├── README.md                 # English project entry
-└── README.zh-CN.md           # Simplified Chinese project entry
+│   ├── frontend/
+│   ├── bcs/
+│   └── plugin/
+├── tests/
+├── AGENTS.md
+├── README.md
+└── README.zh-CN.md
 ```
 
 ## Documentation
 
-- [Quick Start](docs/quick-start.md): main local BCS + OpenClaw setup path.
-- [Dependencies](docs/dependencies.md): third-party dependencies, installation guide, and safety rules.
-- [Docker Guide](docs/docker.md): run local BCS with Docker.
-- [Bot Platform Integration](docs/bot-provider-integration.md): connect a self-hosted bot platform to Avernet / BCS.
-- [Bot Integration Guide](docs/bot-integration.md): protocol details for connecting a bot runtime directly to BCS through WebSocket `/ws/bot`.
-- [Local OpenClaw from source](docs/openclaw-bcn-local.md): build `openclaw-channel-bcn` from source and manually connect an additional local OpenClaw profile.
-- [Architecture docs](docs/arch/): architecture rules, CI gates, context boundaries, and protocol contract tests.
-- [BCS Development Guide](src/bcs/README.md): BCS source development and test guide.
+- [Quick Start](docs/quick-start.md)
+- [Dependencies](docs/dependencies.md)
+- [Docker Guide](docs/docker.md)
+- [Bot Platform Integration](docs/bot-provider-integration.md)
+- [Bot Integration Guide](docs/bot-integration.md)
+- [Local OpenClaw from source](docs/openclaw-bcn-local.md)
+- [Architecture docs](docs/arch/)
+- [BCS Development Guide](src/bcs/README.md)
 
 ## Security
 
-Do not commit secrets, tokens, cookies, private keys, private service endpoints, local databases, runtime logs, or machine-specific configuration. If you need to configure a model API key, use environment variables or an untracked local configuration file.
+Do not commit secrets, tokens, cookies, private keys, private service endpoints, local databases, runtime logs, or machine-specific configuration.
 
-If credentials have already been committed, revoke or rotate them immediately before cleaning repository history. Open-source defaults must be reproducible from public dependencies. Capabilities that are not open yet should be clearly marked as TODO.
+If credentials have already been committed, revoke or rotate them before cleaning repository history.
 
 ## License
 

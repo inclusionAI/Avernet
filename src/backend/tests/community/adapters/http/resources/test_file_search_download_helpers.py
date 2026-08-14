@@ -19,7 +19,9 @@ from agentclaw.community.adapters.http.resources.file_search_download_router imp
     _device_fs_for_bot,
     _download_arcname,
     _download_logical,
+    _passes_search_filter,
     _resolve_walk_device_fs,
+    _search_should_descend,
     _walk_device_fs,
     _zip_dir_entry,
     _zip_file_entry,
@@ -121,6 +123,24 @@ class TestResolveWalkDeviceFs:
             )
         assert fs is None
 
+    def test_teclaw_draft_requires_endpoint_opt_in(self):
+        resolver = MagicMock()
+        dispatcher = MagicMock()
+        dispatcher.dispatch_addressed.return_value = "teclaw-fs"
+        with patch(
+            "agentclaw.community.core.devices.services.device_info.get_device_info",
+            return_value=("teclaw", "teclaw-device"),
+        ):
+            common_args = dict(
+                publish_id=None, bot_id="b1", owner_id="o1", operator_id="u1",
+                engine_type="teclaw", publish_repo=MagicMock(), bot_repo=MagicMock(),
+                resolver=resolver, dispatcher=dispatcher,
+            )
+            assert _resolve_walk_device_fs(**common_args) is None
+            assert _resolve_walk_device_fs(**common_args, include_teclaw=True) == "teclaw-fs"
+
+        resolver.resolve_for_bot.assert_called_once_with("b1", "o1", device_uuid=None)
+
 
 # ── _abs_path ─────────────────────────────────────────────────────────────────
 
@@ -202,6 +222,13 @@ class TestWalkDeviceFs:
         rels = {e["rel"] for e in out}
         assert "skills/skills-local/a.md" in rels
         assert "skills/other/b.md" not in rels  # pruned before listing
+
+    def test_pool_local_subtree_is_visible_but_pool_repo_is_hidden(self):
+        assert _search_should_descend("skills-pool")
+        assert _search_should_descend("skills-pool/skills-local")
+        assert _passes_search_filter("skills-pool/skills-local/a/SKILL.md")
+        assert not _search_should_descend("skills-pool/skills-repo")
+        assert not _passes_search_filter("skills-pool/skills-repo/a/SKILL.md")
 
     @pytest.mark.asyncio
     async def test_root_list_failure_returns_none(self):
@@ -358,7 +385,8 @@ class TestDownloadDirectoryDeviceFsDoubleJoin:
     """
 
     @pytest.mark.asyncio
-    async def test_subdir_read_path_is_flat_join_no_double(self, tmp_path):
+    @pytest.mark.parametrize("provider", ["arca", "teclaw"])
+    async def test_subdir_read_path_is_flat_join_no_double(self, tmp_path, provider):
         list_tree = {
             "": [_entry("memory", is_dir=True)],
             "memory": [_entry("foo.txt", size=3), _entry("bar.txt", size=3)],
@@ -369,14 +397,14 @@ class TestDownloadDirectoryDeviceFsDoubleJoin:
         }
         fs = _RecordingDeviceFs(list_tree, read_payload)
         resolver = MagicMock()
-        resolver.resolve_for_bot.return_value = SimpleNamespace(provider="arca")
+        resolver.resolve_for_bot.return_value = SimpleNamespace(provider=provider)
 
         with patch(
             "agentclaw.community.adapters.http.resources.file_router.resolve_engine_for_bot",
             return_value="openclaw",
         ), patch(
             "agentclaw.community.core.devices.services.device_info.get_device_info",
-            return_value=("arca", "sbx"),
+            return_value=(provider, "sbx"),
         ), patch(
             "agentclaw.community.adapters.http.resources.file_search_download_router.get_bot_workspace_dir",
             return_value=tmp_path,
@@ -511,4 +539,3 @@ class TestDownloadDirectoryZipMetadata:
             assert file_attr & 0o170000 == stat.S_IFREG, oct(file_attr)
             assert zf.read("memory/foo.txt") == b"FOO"
         os.unlink(resp.path)
-

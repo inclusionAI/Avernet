@@ -93,12 +93,86 @@ Changes should preserve or improve the gates described in
 Do not weaken these checks to make a change pass. If a check is wrong, fix the
 check and document why.
 
+## Pull Request Conventions
+
+A pull request is read by external contributors and reviewers who do not share
+your context, and its title becomes the commit message when the PR is squash
+merged. Both must carry meaning on their own.
+
+### Title
+
+Use `<type>(<scope>): <concise outcome>`:
+
+```text
+feat(backend): add whitelist observed state
+fix(bcs): reject routing updates for unknown bot ids
+docs(arch): document plugin protocol conformance shape
+```
+
+| Type | Use for |
+| --- | --- |
+| `feat` | New functionality |
+| `fix` | Bug fix |
+| `refactor` | Restructuring with no external behavior change |
+| `docs` | Documentation |
+| `test` | Tests |
+| `ci` | CI/CD |
+| `build` | Build system or dependencies |
+| `chore` | Other maintenance |
+
+The scope is the module or area you touched, such as `backend`, `baas`,
+`engine`, `bcs`, `frontend`, `gateway`, `arch`, or `ci`. The outcome describes
+what the change accomplishes, not which files moved.
+
+Do not use vague or context-free titles such as `fix bug`, `update code`,
+`sync`, a bare branch name, or an issue number with no summary.
+
+### Description
+
+Use these sections, in this order:
+
+```markdown
+## Problem
+## Solution
+## Validation
+## Compatibility and risk (optional)
+## Spec (optional)
+## Related issues (optional)
+```
+
+- **Problem** — the observed defect, gap, or requirement, and why it matters.
+- **Solution** — the approach taken, and the alternatives rejected when the
+  choice is not obvious.
+- **Validation** — the tests, gates, and manual checks you actually ran, with
+  their results. State explicitly what you could not run and why.
+- **Compatibility and risk** — contract, schema, config, or migration impact,
+  and the rollback path.
+- **Spec** — the contract or design document this change implements.
+- **Related issues** — issues this closes or relates to.
+
+`.github/pull_request_template.md` holds this skeleton. Fill in every required
+section; delete the optional sections that do not apply rather than leaving
+them empty.
+
 ## Pre-push Module Selection
 
 Install the repository hooks separately in every Git worktree:
 
 ```bash
 scripts/install_git_hooks.sh
+```
+
+By default the pre-push hook runs in **lint-only** mode: for changed Python
+modules it runs the fast `python_sast_local.sh` SAST/lint gate, but skips the
+heavier unit tests, changed-line coverage, and Singlebox E2E. Set
+`OCB_PRE_PUSH_RUN_CI=1` to run the full gates for a push, or run
+`scripts/ci/pre_push.sh` manually. The module-gate table below describes the
+full behavior; in lint-only mode only the SAST/lint step of each Python module
+runs, and modules without a standalone lint step (`src/gateway`, `src/frontend`,
+`src/bcs`, and the singlebox coverage paths) run nothing.
+
+```bash
+OCB_PRE_PUSH_RUN_CI=1 git push
 ```
 
 The pre-push hook models the change set of a pull request. Its merge target
@@ -135,12 +209,48 @@ Module gates are selected from the committed files in the resulting diff:
 | `src/backend/` | Backend SAST, unit tests, changed-line coverage, and singlebox coverage |
 | `src/baas/` | BaaS SAST, unit tests, changed-line coverage, and singlebox coverage |
 | `src/engine/` | Engine SAST, unit tests, and changed-line coverage |
-| `src/bcs/` | BCS/BCN unit tests in fast-fail mode |
+| `src/bcs/` | BCS/BCN unit tests in fast-fail mode, then unified singlebox coverage with BCS user-story E2E |
 | `src/frontend/` | Frontend CI |
 | singlebox scripts and Backend/BaaS acceptance or E2E paths | singlebox coverage |
 
 The hook only checks committed changes in the pushed ref. Uncommitted working
 tree changes are outside the natural boundary of a pre-push hook.
+
+The unified `scripts/ci/singlebox_coverage.sh` starts one standalone product
+stack and reuses it for Backend acceptance and BCS user-story E2E. BCS runs as
+an LLVM-instrumented server; the gate requires all BCS E2E stories to pass,
+runtime line coverage of at least 40%, method coverage of at least 36%, and
+100% HTTP endpoint and bcs-cli leaf-command coverage. Its canonical artifacts
+are copied to `scripts/.dependencies/coverage/singlebox/reports/bcs/` and are
+included in `summary.json`, `summary.md`, and `dashboard.html`. Keep pre-push
+and `.github/workflows/singlebox-coverage.yml` pointed at this same entrypoint,
+then run `verify_singlebox_coverage_artifacts.py` against the generated report
+directory so local pushes and GitHub PRs enforce the same artifact baseline.
+
+### Singlebox Coverage Details
+
+`scripts/ci/singlebox_coverage.sh` reads
+`scripts/ci/singlebox_coverage_modules.yaml`. With no `--module` arguments it
+runs every registered module; focused diagnosis can select one or more modules
+with repeated `--module <name>` arguments. The runner starts one standalone
+product stack, shares it across Backend acceptance stories and BCS user-story
+E2E, then calculates the Core, Router API, and Plugin API denominators declared
+by each module.
+
+The per-module non-regression results and the shared-stack evidence are written
+to `scripts/.dependencies/coverage/singlebox/reports/`: `summary.json`,
+`summary.md`, `dashboard.html`, acceptance JUnit/logs, Backend and BaaS
+coverage reports, plus the copied BCS reports under `bcs/`. GitHub's
+`singlebox-coverage-artifacts` artifact uploads that same directory. The
+artifact verifier must run against this report directory after the coverage
+runner, so local pre-push and PR CI enforce the same result.
+
+When adding a module, add meaningful live acceptance stories, declare the
+complete Core/Router/Plugin denominators in
+`scripts/ci/singlebox_coverage_modules.yaml`, establish thresholds from a
+fresh focused run, then run the default all-module gate to catch shared-stack
+interference. Do not inflate a result by excluding production Core paths or by
+adding test-only calls to domain logic.
 
 ## Development Guidelines
 
@@ -209,3 +319,26 @@ Do not commit:
 
 Open-source defaults must be reproducible from public dependencies or clearly
 marked as TODO.
+
+## Skills Architecture
+
+Before changing Skills management, publication, mounting, or runtime
+activation, read
+`src/backend/src/agentclaw/community/adapters/http/skill_center/CLAUDE.md`.
+
+- `skills-repo` and `skills-local` are complete content stores. An active
+  Skills directory must expose only the Skills explicitly activated for the
+  current Bot; do not add bridges from the active directory to a full content
+  store.
+- Do not add new engine-specific filesystem paths to Backend code. Physical
+  layout ownership belongs to Engine Runtime and its versioned layout contract.
+- Treat a `center://` source as a governed, versioned content source. A source
+  prefix alone is not evidence that publication, distribution, and activation
+  have completed.
+
+# Code Review
+
+1. **Code Review Standards Integration**:
+   - You MUST read and follow all rules, scope restrictions, and guidelines defined in the global code review configuration file located at `/tmp/CODE_REVIEW.md`.
+   - If `/tmp/CODE_REVIEW.md` exists, strictly apply its guidelines to this PR review.
+   - If `/tmp/CODE_REVIEW.md` does not exist, perform normal processing.

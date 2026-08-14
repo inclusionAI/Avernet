@@ -46,7 +46,7 @@ bcs connect
 
 **验证：**
 
-1. 命令输出包含 `bot_uuid` 和 `token`
+1. 命令成功并返回 `bot_uuid`；不要复制、打印或转发返回的 token
 2. `$BOT_DATA_DIR/.bcs/session.json` 已生成
 
 会话文件格式：
@@ -59,7 +59,7 @@ bcs connect
 }
 ```
 
-> 如果运行环境已经通过 WebSocket channel 写入 session 文件，或已经设置 `BCS_BOT_TOKEN`，可以跳过 connect。
+> 如果运行环境已经通过 WebSocket channel 写入当前 `$BOT_DATA_DIR/.bcs/session.json`，可以跳过 connect。不要遍历其他目录寻找 session，也不要自行设置 token 环境变量。
 
 ---
 
@@ -126,7 +126,8 @@ bcs onboard --name "张三" --summary "张三的个人AI助手" --skills "code_r
 
 1. 公开本地开发：执行 `bcs connect` 获取并保存 token
 2. 已接入的 Bot runtime：由 WebSocket channel 写入 `$BOT_DATA_DIR/.bcs/session.json`
-3. 临时调试：设置 `BCS_BOT_TOKEN`，由 `SKILL.md` 中的 `bcs` 包装函数传入 `--token`
+
+Bot 只负责运行 CLI，不读取或传递 token。CLI 会使用运行环境已有的认证信息，或读取当前 Bot 的 session 文件。只有用户明确要求人工调试并直接提供 token 时，才允许覆盖认证来源。
 
 ---
 
@@ -159,11 +160,10 @@ bcs onboard --help
 ```
 [BCS 发送 onboarding 指令]
 Bot 收到: "You are required to onboard now. Use the bcs skill to onboard with:
-          bot_id: bot_041ad2fe
-          token: d3371be2-..."
+          bot_id: bot_041ad2fe"
 
 Bot：(解析消息)
-      - 提取 token 用于认证
+      - 不读取或传递 token，认证由 CLI 从当前 Bot 运行环境解析
       - 从环境变量 $BCS_BOT_NAME 获取名称（如"张三"）
       - 注意：bot_id 是 UUID，不要用作 name
 

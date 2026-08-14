@@ -35,9 +35,7 @@ if TYPE_CHECKING:
         DeviceContextResolver,
     )
     from agentclaw.community.core.devices.services.device_service import DeviceService
-    from agentclaw.community.core.resources.repository.protocol import (
-        ResourceRepositoryProtocol,
-    )
+    from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
     from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
     from agentclaw.community.core.skill_center.services.skill_set_service import (
         SkillSetActivatorFactory,

@@ -26,7 +26,9 @@ from secbaas.community.plugins.bot_service import (
     StubBotServicePlugin,
 )
 from secbaas.community.plugins.cache.stub import StubCachePlugin
-from secbaas.community.plugins.database.stub.sqlite_orm import SqliteOrmPlugin
+from secbaas.community.plugins.database.mariadb.mariadb_orm import MariaDbOrmPlugin
+from secbaas.community.plugins.database.sqlite.sqlite_orm import SqliteOrmPlugin
+from secbaas.community.plugins.file_transfer import NoopFileTransferBackend
 from secbaas.community.plugins.sandbox.arca import StubArcaSandboxPlugin
 from secbaas.community.plugins.sandbox.arca.local_proc import (
     LocalProcessArcaSandboxPlugin,
@@ -46,6 +48,8 @@ from secbaas.community.plugins.sandbox.k8s import (
 from secbaas.community.plugins.sandbox.k8s.real import K8sClientManager
 from secbaas.community.plugins.sandbox.poolab import StubPoolabSandboxPlugin
 from secbaas.community.plugins.sandbox.teclaw import StubTeClawBotPlugin
+from secbaas.community.plugins.sandbox.utils.arca_utils import ArcaUtils
+from secbaas.community.plugins.secret import AliyunKmsSecretStorePlugin
 from secbaas.community.plugins.secret.stub import StubSecretStorePlugin
 
 
@@ -62,11 +66,21 @@ class PluginContainer(containers.DeclarativeContainer):
     plugin_database = providers.Selector(
         config.plugins.database.plugin_database,
         SQLITE_ORM=providers.Singleton(SqliteOrmPlugin),
+        MARIADB_ORM=providers.Singleton(MariaDbOrmPlugin),
     )
 
     secret_plugin = providers.Selector(
         config.plugins.secret,
+        aliyun_kms=providers.Singleton(
+            AliyunKmsSecretStorePlugin,
+            config=config.plugins.secret_aliyun_kms,
+        ),
         stub=providers.Singleton(StubSecretStorePlugin),
+    )
+
+    arca_utils = providers.Singleton(
+        ArcaUtils,
+        secret_plugin=secret_plugin,
     )
 
     auth_plugin = providers.Selector(
@@ -86,6 +100,7 @@ class PluginContainer(containers.DeclarativeContainer):
         real=providers.Singleton(
             RealDesktopSandboxPlugin,
             connection_manager=connection_management,
+            arca_utils=arca_utils,
         ),
         stub=providers.Singleton(StubDesktopSandboxPlugin),
     )
@@ -123,6 +138,11 @@ class PluginContainer(containers.DeclarativeContainer):
         real=providers.Singleton(AiohttpBotServicePlugin),
         local=providers.Singleton(LocalBotServicePlugin),
         stub=providers.Singleton(StubBotServicePlugin),
+    )
+
+    file_transfer_backend = providers.Selector(
+        config.plugins.file_transfer,
+        stub=providers.Singleton(NoopFileTransferBackend),
     )
 
 

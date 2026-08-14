@@ -30,26 +30,22 @@ from agentclaw.community.api.mcp_auth_service import MCPAuthServiceProtocol
 from agentclaw.community.api.mcp_config_service import MCPConfigServiceProtocol
 from agentclaw.community.api.mcp_market_service import MCPMarketServiceProtocol
 from agentclaw.community.api.mcp_sync_service import MCPSyncServiceProtocol
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
 from agentclaw.community.core.mcp.services.auth_service import MCPAuthService
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
 from agentclaw.community.core.mcp.services.market_service import MCPMarketService
-from agentclaw.community.core.mcp.services.repositories import (
-    BotMCPProvider,
-    UserMCPConfigRepository,
-)
+from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
+from agentclaw.community.core.repository.protocols.bot import UserMCPConfigRepository
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
-from agentclaw.community.plugins.user_mcp_config_repository import (
-    UserMCPConfigRepository as UnifiedUserMCPConfigRepository,
-)
+from agentclaw.community.core.repository.implementations.bot.user_mcp_config import UserMCPConfigRepository as UnifiedUserMCPConfigRepository
 
 
 logger = get_logger()

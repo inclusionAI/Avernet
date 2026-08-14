@@ -266,7 +266,18 @@ class RunStatusService:
         - JSON 解析失败 → 抛 500。
         """
         workspace_root = WorkspaceService.resolve_workspace(session_id, cwd)
-        return await self._aix_run_output_list(workspace_root)
+        return await self._aix_run_output_list(workspace_root, kind="pull-request")
+
+    async def get_session_issues(
+        self, session_id: str, cwd: str | None = None
+    ) -> list[dict]:
+        """返回 session 工作空间下所有 run 产出的 issue outputs，按 at 倒序。
+
+        与 :meth:`get_session_pull_requests` 保持同样的错误语义，只是执行
+        ``aix run output list --kind issue --json --filter <workspace_root>``。
+        """
+        workspace_root = WorkspaceService.resolve_workspace(session_id, cwd)
+        return await self._aix_run_output_list(workspace_root, kind="issue")
 
     # ── internal ──────────────────────────────────────────────────────────────
 
@@ -373,8 +384,10 @@ class RunStatusService:
         except json.JSONDecodeError:
             return None
 
-    async def _aix_run_output_list(self, workspace_root: str) -> list[dict]:
-        """单次 ``aix run output list --kind pull-request --json --filter <workspace_root>``。
+    async def _aix_run_output_list(
+        self, workspace_root: str, kind: str = "pull-request"
+    ) -> list[dict]:
+        """单次 ``aix run output list --kind <kind> --json --filter <workspace_root>``。
 
         ``--filter`` 让 aix 自己向下递归找 ``.aix/``，service 不再需要预先 find +
         多目录串行调用 + 合并步骤。失败时抛 HTTPException。
@@ -385,7 +398,7 @@ class RunStatusService:
         - JSON 解析失败 → 500。
         """
         cmd = (
-            f"aix run output list --kind pull-request --json"
+            f"aix run output list --kind {shlex.quote(kind)} --json"
             f" --filter {shlex.quote(workspace_root)}"
         )
         res = await self._safe_exec(cmd, workspace_root, OUTPUT_LIST_TIMEOUT)

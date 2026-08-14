@@ -35,6 +35,7 @@ def test_deploy_config_to_dict_includes_docker_image():
 def _make_service():
     from agentclaw.community.core.service_bot.services.baas_service import BaasService
     return BaasService(
+        startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base="http://test",
         tenant="test",
         template_uuid="legacy-uuid",
@@ -114,6 +115,7 @@ def test_build_create_bot_payload_supports_auto_approve_and_extra_envs():
 
     payload = svc._build_create_bot_payload(
         bot={
+            "id": 501,
             "bot_id": "B1",
             "bot_name": "personal-bot",
             "entity_id": "E1",
@@ -147,6 +149,7 @@ def test_build_create_bot_payload_auto_approves_by_default():
 
     payload = svc._build_create_bot_payload(
         bot={
+            "id": 501,
             "bot_id": "B1",
             "bot_name": "service-bot",
             "entity_id": "E1",
@@ -173,6 +176,7 @@ def test_payload_includes_resource_spec_from_ext():
     svc._should_mount_home_dir_storage = MagicMock(return_value=False)
 
     bot = {
+        "id": 501,
         "bot_id": "B1",
         "bot_name": "svc-bot",
         "entity_id": "E1",
@@ -205,6 +209,7 @@ def test_payload_omits_resource_spec_when_ext_absent():
     svc._should_mount_home_dir_storage = MagicMock(return_value=False)
 
     bot = {
+        "id": 501,
         "bot_id": "B1",
         "bot_name": "svc-bot",
         "entity_id": "E1",
@@ -233,6 +238,7 @@ def test_payload_maps_template_config_overrides_to_deploy_config():
 
     payload = svc._build_create_bot_payload(
         bot={
+            "id": 501,
             "bot_id": "B1",
             "bot_name": "personal-bot",
             "entity_id": "E1",
@@ -251,6 +257,13 @@ def test_payload_maps_template_config_overrides_to_deploy_config():
             "resource_spec": {"cpu": 4, "memory": 8192, "disk": 100},
             "envs": {"AGENTCLAW_ENGINE": "custom", "USER_ENV": "yes"},
         },
+    )
+
+    svc._build_outbound_operation_rule.assert_called_once_with(
+        "B1",
+        "U1",
+        "",
+        extra_properties=None,
     )
 
     deploy_config = payload["config"]["deploy_config"]
@@ -274,6 +287,7 @@ def test_payload_ignores_template_config_command_until_baas_has_field():
 
     payload = svc._build_create_bot_payload(
         bot={
+            "id": 501,
             "bot_id": "B1",
             "bot_name": "personal-bot",
             "entity_id": "E1",

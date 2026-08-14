@@ -40,6 +40,7 @@ Running → Completed
 > - 创建 Session 的前提是 Group 已存在，Group 的创建和管理详见 [group.md](group.md)
 > - 如果只需要 1:1 对话，优先使用 `chat` 而非创建 Session，详见 [bot.md](bot.md)
 > - 对外服务化调用（ServiceInvocation）使用独立的 `service` 命令组，详见 [service.md](service.md)
+> - 会话内共享文件（上传/下载/分享）详见 [session-file.md](session-file.md)
 
 ---
 
@@ -248,6 +249,11 @@ bcs session chat --session "<session_id>" --message "<消息内容>"
 ```
 
 与 Group 级 chat（`/groups/{id}/chat`）的区别：Session chat 将 session_id 锁定在路径上，消息只在该 Session 的参与者间路由。
+
+认证 Human 尚未加入目标 Session 时，服务端会先以
+`Observer + Present` 加入，再以该 Human 的 `actor_id` 发送消息。
+请求体中的 `from` 不会覆盖 Human 身份；Bot 调用者仍必须已经是
+Session 参与者。
 
 **示例：**
 

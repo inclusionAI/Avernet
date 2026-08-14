@@ -31,16 +31,45 @@ bcsfuse_load_env() {
     # Without this, BCSFUSE_AUTH_TOKEN is never set → 401 on all protected routes.
     load_repo_env_file "${BCSFUSE_ENV_FILE}"
 
+    # Hybrid Claude mode has one model policy for OpenClaw, Claude Code, and SOP.
+    # Its generated BCSFuse env file may predate that policy, so restore the
+    # five SOP model selectors only after that file has been loaded.
+    if [ "${HYBRID_CLAUDE_ACTIVE:-${MERCHANT_HYBRID_ACTIVE:-0}}" = "1" ]; then
+        local hybrid_model="${HYBRID_MODEL_ID:-Kimi-K2.6}"
+        export LLM_FAST_MODEL="$hybrid_model"
+        export LLM_BALANCED_MODEL="$hybrid_model"
+        export LLM_REASONING_MODEL="$hybrid_model"
+        export LLM_LONG_CONTEXT_MODEL="$hybrid_model"
+        export LLM_EXTRACTION_MODEL="$hybrid_model"
+        log_info "Hybrid model policy: reapplied ${hybrid_model} for BCSFuse SOP"
+    fi
+
     # Ensure provider mode defaults to dev
     export BCSFUSE_PROVIDER_MODE="${BCSFUSE_PROVIDER_MODE:-dev}"
     export BCSFUSE_SERVER_PORT="${BCSFUSE_PORT:-8765}"
 
-    # Compat mapping: reuse OPENCLAW_OPENAI_* if bcsfuse vars not set
-    # This lets users configure one set of API keys for both bots and bcsfuse
-    [ -z "${LLM_BASE_URL:-}" ] && [ -n "${OPENCLAW_OPENAI_BASE_URL:-}" ] && export LLM_BASE_URL="${OPENCLAW_OPENAI_BASE_URL}" || true
-    [ -z "${LLM_AUTH_TOKEN:-}" ] && [ -n "${OPENCLAW_OPENAI_API_KEY:-}" ] && export LLM_AUTH_TOKEN="${OPENCLAW_OPENAI_API_KEY}" || true
-    [ -z "${EMBEDDING_BASE_URL:-}" ] && [ -n "${OPENCLAW_OPENAI_BASE_URL:-}" ] && export EMBEDDING_BASE_URL="${OPENCLAW_OPENAI_BASE_URL}" || true
-    [ -z "${EMBEDDING_AUTH_TOKEN:-}" ] && [ -n "${OPENCLAW_OPENAI_API_KEY:-}" ] && export EMBEDDING_AUTH_TOKEN="${OPENCLAW_OPENAI_API_KEY}" || true
+    # Compat mapping: reuse OPENCLAW_OPENAI_* if bcsfuse vars are unset or still
+    # hold the template placeholder "change_me". This lets users configure one
+    # set of API keys for both bots and bcsfuse without manually editing the
+    # generated .runtime/env/.env.local after setup.
+    { [ -z "${LLM_BASE_URL:-}" ] || [ "${LLM_BASE_URL}" = "change_me" ]; } && [ -n "${OPENCLAW_OPENAI_BASE_URL:-}" ] && export LLM_BASE_URL="${OPENCLAW_OPENAI_BASE_URL}" || true
+    { [ -z "${LLM_AUTH_TOKEN:-}" ] || [ "${LLM_AUTH_TOKEN}" = "change_me" ]; } && [ -n "${OPENCLAW_OPENAI_API_KEY:-}" ] && export LLM_AUTH_TOKEN="${OPENCLAW_OPENAI_API_KEY}" || true
+    { [ -z "${EMBEDDING_BASE_URL:-}" ] || [ "${EMBEDDING_BASE_URL}" = "change_me" ]; } && [ -n "${OPENCLAW_OPENAI_BASE_URL:-}" ] && export EMBEDDING_BASE_URL="${OPENCLAW_OPENAI_BASE_URL}" || true
+    { [ -z "${EMBEDDING_AUTH_TOKEN:-}" ] || [ "${EMBEDDING_AUTH_TOKEN}" = "change_me" ]; } && [ -n "${OPENCLAW_OPENAI_API_KEY:-}" ] && export EMBEDDING_AUTH_TOKEN="${OPENCLAW_OPENAI_API_KEY}" || true
+
+    # Default LLM feature flags to enabled when an LLM endpoint is configured.
+    # The fusion parity layer gates real-LLM routing on LLM_ENABLED/ENABLE_REAL_LLM,
+    # and .env.local does not always include these flags (e.g. standalone mode).
+    if [ -n "${LLM_BASE_URL:-}" ] && [ "${LLM_BASE_URL}" != "change_me" ]; then
+        if [ -z "${LLM_ENABLED:-}" ]; then
+            export LLM_ENABLED="true"
+            log_info "Defaulted LLM_ENABLED=true because LLM_BASE_URL is configured"
+        fi
+        if [ -z "${ENABLE_REAL_LLM:-}" ]; then
+            export ENABLE_REAL_LLM="true"
+            log_info "Defaulted ENABLE_REAL_LLM=true because LLM_BASE_URL is configured"
+        fi
+    fi
 }
 
 # ============ MySQL (runtime mode only) ============
@@ -124,7 +153,12 @@ bcsfuse_setup() {
     check_uv_installed || { log_error "uv not found. Run: singlebox.sh install-tools"; return 1; }
 
     log_info "Syncing Python dependencies for bcsfuse..."
-    if ! uv sync --index-url "${PYPI_INDEX_URL}"; then
+    # Exclude Python 3.13: faiss-cpu==1.8.0 and numpy==1.26.4 ship no cp313
+    # wheels, so a 3.13 venv (e.g. selected via .python-version=3.13) cannot
+    # resolve. Use a "<3.13" constraint instead of a hard 3.12 so 3.10/3.11
+    # still work (e.g. offline where uv cannot auto-download 3.12), mirroring
+    # requires-python in pyproject.toml.
+    if ! uv sync --python "<3.13" --index-url "${PYPI_INDEX_URL}"; then
         log_error "Failed to sync Python dependencies for bcsfuse"
         return 1
     fi
@@ -167,6 +201,14 @@ EOF
 # ============ Start ============
 
 bcsfuse_start() {
+    # In home mode, reuse the openclaw.json LLM config for bcsfuse so users
+    # don't have to duplicate base_url/api_key/model in .env.local.
+    # Must be done BEFORE bcsfuse_load_env() so the loader can see LLM_BASE_URL
+    # and default LLM_ENABLED/ENABLE_REAL_LLM when those flags are absent.
+    if type -t singlebox_model_config_export_llm_env >/dev/null 2>&1; then
+        singlebox_model_config_export_llm_env || true
+    fi
+
     bcsfuse_load_env
 
     local mode="${BCSFUSE_PROVIDER_MODE:-dev}"
@@ -208,13 +250,38 @@ bcsfuse_start() {
     export QDRANT_LOCAL_PATH="${BCSFUSE_RUNTIME_DIR}/data/qdrant"
     export BCSFUSE_OBJECT_STORAGE_DIR="${BCSFUSE_RUNTIME_DIR}/data/object_storage"
 
+    # WorkerRegistrySettings reads WORKER_REGISTRY_SQLITE_DB_PATH (default:
+    # data/worker_registry.db). Align it with the SQLite store path used by
+    # opensource.py so that singleton helper functions in fusion_dependencies
+    # access the same database as the provider registry.
+    export WORKER_REGISTRY_SQLITE_DB_PATH="${BCSFUSE_DATABASE_SQLITE_PATH}"
+
+    # Use streaming OpenAI chat completions to fit within the antchat 90s gateway
+    # window (each token gap must be <90s, instead of the whole response <90s).
+    # Callers can override streaming via LLM_STREAM.
+    export LLM_STREAM="${LLM_STREAM:-true}"
+
+    # Point bcsfuse's group-context service at the local BCS HTTP API so G1/G9
+    # fusion can read group chat history. BCS exposes /groups/{id}/messages on
+    # the same port as its WebSocket endpoint.
+    export BCN_BASE_URL="http://127.0.0.1:${BCS_PORT:-21000}"
+
+    # Allow longer G9 fusion answers for demo scenarios where the SOP review
+    # response tends to hit the default 4096-token ceiling.
+    export FUSION_CHAT_MAX_TOKENS="${FUSION_CHAT_MAX_TOKENS:-8192}"
+
+    # Manager-worker collaboration groups store chat history under a session,
+    # and SOP messages can be long. Keep more content per message when building
+    # the fuse context summary.
+    export FUSION_CONTEXT_MAX_MESSAGE_LENGTH="${FUSION_CONTEXT_MAX_MESSAGE_LENGTH:-1200}"
+
     # Clear old log
     : > "${BCSFUSE_LOG}"
 
     # Start runtime
     cd "${BCSFUSE_DIR}"
     log_info "Starting bcsfuse (${mode}) on port ${BCSFUSE_PORT}..."
-    nohup uv run python main.py >> "${BCSFUSE_LOG}" 2>&1 &
+    start_in_detached_session uv run python main.py >> "${BCSFUSE_LOG}" 2>&1 &
     local pid=$!
     echo "$pid" > "${BCSFUSE_PID_FILE}"
 
@@ -244,7 +311,15 @@ bcsfuse_start() {
     done
 
     if [ "$passed" = true ]; then
-        log_info "bcsfuse started successfully on port ${BCSFUSE_PORT} (${mode} mode)"
+        # The detached-session wrapper execs through uv before Python owns the
+        # listening socket. Record the actual listener so status/stop do not
+        # retain the short-lived wrapper PID.
+        local listener_pid
+        listener_pid="$(lsof -tiTCP:"${BCSFUSE_PORT}" -sTCP:LISTEN 2>/dev/null | head -1)"
+        if [ -n "$listener_pid" ]; then
+            printf '%s\n' "$listener_pid" > "${BCSFUSE_PID_FILE}"
+        fi
+        log_info "bcsfuse started successfully on port ${BCSFUSE_PORT} (${mode} mode; listener PID: ${listener_pid:-unknown})"
     else
         log_error "bcsfuse: Health check failed after startup"
         log_error "Check log: ${BCSFUSE_LOG}"
@@ -360,6 +435,8 @@ bcsfuse_clean() {
 # ============ Status ============
 
 bcsfuse_status() {
+    bcsfuse_load_env
+
     local pid=""
     if [ -f "${BCSFUSE_PID_FILE}" ]; then
         pid=$(cat "${BCSFUSE_PID_FILE}" 2>/dev/null || echo "")

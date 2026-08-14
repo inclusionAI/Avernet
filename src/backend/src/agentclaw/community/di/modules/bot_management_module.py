@@ -30,6 +30,9 @@ from injector import (
 )
 
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.create_bot_for_others_service import (
+    CreateBotForOthersServiceProtocol,
+)
 from agentclaw.community.api.data_init_service import DataInitServiceProtocol
 from agentclaw.community.api.default_bot_passport_repair_service import (
     DefaultBotPassportRepairServiceProtocol,
@@ -39,19 +42,39 @@ from agentclaw.community.api.render_screen_service import RenderScreenServicePro
 from agentclaw.community.core.bot_collaborator.protocols import (
     BotServiceProtocol as CoreBotServiceProtocol,
 )
-from agentclaw.community.core.bot_collaborator.repository.protocol import CollaboratorRepositoryProtocol
-from agentclaw.community.core.bot_management.render_screen.repositories import RenderScreenRepository
+from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import RenderScreenRepository
+from agentclaw.community.core.bot_collaborator.services.credentials_admins_writer import (
+    DeviceCredentialsAdminsWriter,
+)
 from agentclaw.community.core.bot_management.render_screen.services.render_screen_service import (
     RenderScreenService,
 )
-from agentclaw.community.core.bot_management.repository.protocol import (
-    BotRepository,
+from agentclaw.community.core.repository.protocols.bot import (
     BotRestartLockRepositoryProtocol,
+    BotStartupScriptRepositoryProtocol,
 )
-from agentclaw.community.core.bot_management.repository.template_repository_protocol import TemplateRepository
+from agentclaw.community.api.bot_startup_script_service import (
+    BotStartupScriptServiceProtocol,
+)
+from agentclaw.community.core.bot_startup_script.protocols import (
+    StartupScriptPurgeProtocol,
+    TeclawEngineTestProtocol,
+)
+from agentclaw.community.core.bot_startup_script.services.startup_script_service import (
+    BotStartupScriptService,
+)
+from agentclaw.community.core.bot_app_grant.services import (
+    BotAppGrantService,
+)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.bot import TemplateRepository
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.bot_management.services.cleanup_service import BotCleanupService
+from agentclaw.community.core.bot_management.services.create_bot_for_others_service import (
+    CreateBotForOthersService,
+)
 from agentclaw.community.core.bot_management.services.data_init_service import DataInitService
 from agentclaw.community.core.bot_management.services.default_bot_passport_repair_service import (
     DefaultBotPassportRepairService,
@@ -65,11 +88,10 @@ from agentclaw.community.core.bot_management.services.teclaw_publish_task_handle
 )
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
 from agentclaw.community.core.cron.services.aicoding.cron_auto_setup import CronAutoSetupService
+from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.desktop_bot.device_status_client import DeviceStatusClient
-from agentclaw.community.core.devices.repository.protocol import (
-    DeviceBindingRepository,
-    OssToNasRecordRepository,
-)
+from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
@@ -77,8 +99,8 @@ from agentclaw.community.core.devices.services.baas_template_resolver import (
     SystemConfigBaasTemplateResolver,
 )
 from agentclaw.community.core.devices.services.device_service import DeviceService
-from agentclaw.community.core.resources.repository.protocol import ResourceRepositoryProtocol
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import BotPublishRepositoryProtocol
+from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.service_bot.services.bot_publish_service import BotPublishService
 from agentclaw.community.core.service_bot.services.deploy.producer import (
@@ -101,17 +123,11 @@ from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlu
 from agentclaw.community.plugin_api.http_client import QUALIFIER_BCN, HttpClient
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
-from agentclaw.community.plugins.bot_repository import (
-    BotRepository as UnifiedBotRepository,
-)
-from agentclaw.community.plugins.bot_restart_lock_repository import BotRestartLockRepository
-from agentclaw.community.plugins.render_screen_repository import (
-    RenderScreenRepository as UnifiedRenderScreenRepository,
-)
-from agentclaw.community.plugins.template_repository import (
-    TemplateRepository as UnifiedTemplateRepository,
-)
-from agentclaw.community.utils.singlebox_coverage_proxy import wrap_for_singlebox_coverage
+from agentclaw.community.core.repository.implementations.bot.bot import BotRepository as UnifiedBotRepository
+from agentclaw.community.core.repository.implementations.bot.restart_lock import BotRestartLockRepository
+from agentclaw.community.core.repository.implementations.bot.startup_script import BotStartupScriptRepository
+from agentclaw.community.core.repository.implementations.bot.render_screen import RenderScreenRepository as UnifiedRenderScreenRepository
+from agentclaw.community.core.repository.implementations.bot.template import TemplateRepository as UnifiedTemplateRepository
 
 
 logger = get_logger()
@@ -176,6 +192,32 @@ class BotManagementModule(Module):
             to=BotRestartLockRepository,
             scope=singleton,
         )
+        # BotStartupScriptRepository: single unified ORM impl, same shape as the
+        # restart lock above — UNIQUE(env, entity_id, bot_id) on
+        # ac_bot_startup_script, one script per bot at most.
+        binder.bind(
+            BotStartupScriptRepositoryProtocol,
+            to=BotStartupScriptRepository,
+            scope=singleton,
+        )
+        # The Service API Protocol resolves to the same singleton as the concrete
+        # class, so routers can Inject the Protocol per the http-adapter rule.
+        binder.bind(
+            BotStartupScriptService, to=BotStartupScriptService, scope=singleton
+        )
+        binder.bind(
+            BotStartupScriptServiceProtocol,
+            to=BotStartupScriptService,
+            scope=singleton,
+        )
+        # The delete side, handed to ``BotCleanupService`` so a deleted bot takes
+        # its stored script with it. Narrow on purpose: the deletion path removes
+        # scripts, it never reads or writes one.
+        binder.bind(
+            StartupScriptPurgeProtocol,
+            to=BotStartupScriptService,
+            scope=singleton,
+        )
         # TemplateService: constructed with injected TemplateRepository.
         binder.bind(TemplateService, to=TemplateService, scope=singleton)
         # CronAutoSetupService: constructed with injected dependencies.
@@ -189,32 +231,7 @@ class BotManagementModule(Module):
     @provider
     @inject
     def bot_repository(self, db: DatabasePlugin) -> BotRepository:
-        return wrap_for_singlebox_coverage(
-            UnifiedBotRepository(db),
-            {
-                "insert": "BotRepository create/read/search/update/delete",
-                "get_by_id_and_owner": "BotRepository create/read/search/update/delete",
-                "get_live_by_id_owner_and_env": "BotRepository explicit-env passport repair",
-                "update_ext_by_id_owner_and_env": "BotRepository explicit-env passport repair",
-                "get_by_id": "BotRepository create/read/search/update/delete",
-                "list_by_owner": "BotRepository create/read/search/update/delete",
-                "list_by_owner_or_collaborator": "BotRepository create/read/search/update/delete",
-                "list_by_entity": "BotRepository create/read/search/update/delete",
-                "list_by_conditions": "BotRepository create/read/search/update/delete",
-                "list_by_search": "BotRepository create/read/search/update/delete",
-                "list_domain_bots": "BotRepository create/read/search/update/delete",
-                "update_by_owner": "BotRepository create/read/search/update/delete",
-                "soft_delete_by_owner": "BotRepository create/read/search/update/delete",
-                "count_by_owner": "BotRepository create/read/search/update/delete",
-                "exists_by_owner_and_bot_id": "BotRepository create/read/search/update/delete",
-                "exists_by_bot_name": "BotRepository create/read/search/update/delete",
-                "get_by_bot_name": "BotRepository create/read/search/update/delete",
-                "get_by_binding_id": "BotRepository create/read/search/update/delete",
-                "get_device_provider_by_bot_id_and_owner": "BotRepository create/read/search/update/delete",
-                "get_device_provider_by_bot_id": "BotRepository create/read/search/update/delete",
-                "search_bots": "BotRepository create/read/search/update/delete",
-            },
-        )
+        return UnifiedBotRepository(db)
 
     @singleton
     @provider
@@ -228,6 +245,25 @@ class BotManagementModule(Module):
     ) -> DefaultBotPassportRepairServiceProtocol:
         return DefaultBotPassportRepairService(
             repository=repository,
+            passport_plugin=passport_plugin,
+            auth_relationship_plugin=auth_relationship_plugin,
+            skill_set_factory=skill_set_factory,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def create_bot_for_others_service(
+        self,
+        repository: BotRepository,
+        bot_service: BotService,
+        passport_plugin: PassportPlugin,
+        auth_relationship_plugin: AuthRelationshipPlugin,
+        skill_set_factory: SkillSetServiceFactory,
+    ) -> CreateBotForOthersServiceProtocol:
+        return CreateBotForOthersService(
+            repository=repository,
+            bot_service=bot_service,
             passport_plugin=passport_plugin,
             auth_relationship_plugin=auth_relationship_plugin,
             skill_set_factory=skill_set_factory,
@@ -271,6 +307,7 @@ class BotManagementModule(Module):
         system_config_service: SystemConfigService,
         drm_reader: DRMReaderPlugin,
         task_queue_service: TaskQueueService,
+        common_config_service: CommonConfigService,
         injector: Injector,
     ) -> BotService:
         # Explicit provider: ``BotService.__init__`` types several
@@ -290,6 +327,10 @@ class BotManagementModule(Module):
             oss_record_repo=oss_record_repo,
             bot_publish_service_provider=bot_publish_service_provider,
             device_service_provider=device_service_provider,
+            # Lazy for symmetry with the providers above, not for a cycle:
+            # BotAppGrantService reaches only repositories. Resolved on demand
+            # so bot deletion is the only thing that pays for it.
+            bot_app_grant_service_provider=lambda: injector.get(BotAppGrantService),
             path_factory=path_factory,
             template_service=template_service,
             # DIMA hosting is corp-only — resolve optionally (None in community).
@@ -308,6 +349,7 @@ class BotManagementModule(Module):
             # Lazy (cycle-safe): baas bot 原地重启走 BaaSService.restart_bot。
             baas_service_provider=lambda: injector.get(BaasService),
             task_queue_service=task_queue_service,
+            common_config_service=common_config_service,
         )
 
     @singleton
@@ -389,11 +431,15 @@ class BotManagementModule(Module):
         registry: HandlerRegistry,
         baas_service: BaasService,
         device_binding_repo: DeviceBindingRepository,
+        passport_plugin: PassportPlugin,
+        credentials_admins_writer: DeviceCredentialsAdminsWriter,
     ) -> TeclawPublishTaskLifecycle:
         return TeclawPublishTaskLifecycle(
             registry=registry,
             baas_service=baas_service,
             device_binding_repo=device_binding_repo,
+            passport_plugin=passport_plugin,
+            credentials_admins_writer=credentials_admins_writer,
         )
 
     @singleton
@@ -420,6 +466,21 @@ class BotManagementModule(Module):
             bot_repository=bot_repository,
             teclaw_template_uuid=baas_config.teclaw_template_uuid,
         )
+
+    @singleton
+    @provider
+    @inject
+    def teclaw_engine_test_factory(
+        self, injector: Injector
+    ) -> Callable[[], TeclawEngineTestProtocol]:
+        """The narrow engine test BotStartupScriptService depends on.
+
+        Same lazy shape as the factory below, and deliberately a *separate*
+        binding: that service cannot name ``TeclawProvisionService`` in its
+        annotations without closing an import cycle, so the composition root is
+        where the concrete class and the narrow contract meet.
+        """
+        return lambda: injector.get(TeclawProvisionService)
 
     @singleton
     @provider

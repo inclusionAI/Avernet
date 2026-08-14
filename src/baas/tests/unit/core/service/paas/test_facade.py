@@ -1274,7 +1274,7 @@ class TestUpdateOutboundOperationRule:
             template_id=42
         )
         mock_service.update_outbound_operation_rule.assert_called_once_with(
-            "sandbox-abc123", rule
+            "sandbox-abc123", rule, mode=None
         )
 
     @pytest.mark.asyncio
@@ -2051,3 +2051,218 @@ class TestFetchStartProgress:
 
         assert exc_info.value.operation == "fetch_start_progress"
         assert "Arca" in str(exc_info.value)
+
+
+@pytest.mark.unit
+class TestFileTransferFacade:
+    """Test PaasServiceFacade.pull_file and push_file routing via _parse_device_id + _factory.create."""
+
+    # ------------------------------------------------------------------
+    # pull_file tests
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_pull_file_success(self, facade, mock_service):
+        """pull_file parses device ID, resolves template, delegates to service."""
+        facade._device_template_service.get_by_template_id.return_value = (
+            make_mock_template()
+        )
+        facade._factory.create.return_value = mock_service
+        mock_service.pull_file_from_url = AsyncMock()
+
+        await facade.pull_file(
+            "sandbox-123@42", "https://oss.example.com/file", "/tmp/test"
+        )
+
+        facade._device_template_service.get_by_template_id.assert_called_once_with(
+            template_id=42
+        )
+        facade._factory.create.assert_called_once()
+        mock_service.pull_file_from_url.assert_called_once_with(
+            "sandbox-123", "https://oss.example.com/file", "/tmp/test", 300
+        )
+
+    @pytest.mark.asyncio
+    async def test_push_file_success(self, facade, mock_service):
+        """push_file parses device ID, resolves template, delegates to service."""
+        facade._device_template_service.get_by_template_id.return_value = (
+            make_mock_template()
+        )
+        facade._factory.create.return_value = mock_service
+        mock_service.push_file_to_url = AsyncMock()
+
+        await facade.push_file(
+            "sandbox-123@42", "/tmp/upload", "https://oss.example.com/upload"
+        )
+
+        facade._device_template_service.get_by_template_id.assert_called_once_with(
+            template_id=42
+        )
+        facade._factory.create.assert_called_once()
+        mock_service.push_file_to_url.assert_called_once_with(
+            "sandbox-123", "/tmp/upload", "https://oss.example.com/upload", 300
+        )
+
+    @pytest.mark.asyncio
+    async def test_pull_file_template_not_found(self, facade):
+        """pull_file raises DeviceFacadeException when template is None."""
+        facade._device_template_service.get_by_template_id.return_value = None
+
+        with pytest.raises(DeviceFacadeException) as exc_info:
+            await facade.pull_file(
+                "sandbox-123@42", "https://oss.example.com/file", "/tmp/test"
+            )
+
+        exc = exc_info.value
+        assert exc.operation == "pull_file"
+        assert exc.platform_type == "UNKNOWN"
+        assert exc.original_error.code == ErrorCode.TEMPLATE_NOT_FOUND
+
+    @pytest.mark.asyncio
+    async def test_pull_file_not_implemented(self, facade, mock_service):
+        """pull_file wraps NotImplementedError as DeviceFacadeException(PLATFORM_ERROR)."""
+        facade._device_template_service.get_by_template_id.return_value = (
+            make_mock_template()
+        )
+        facade._factory.create.return_value = mock_service
+        mock_service.pull_file_from_url = AsyncMock(
+            side_effect=NotImplementedError(
+                "File transfer not supported on K8s platform"
+            )
+        )
+
+        with pytest.raises(DeviceFacadeException) as exc_info:
+            await facade.pull_file(
+                "sandbox-123@42", "https://oss.example.com/file", "/tmp/test"
+            )
+
+        exc = exc_info.value
+        assert exc.operation == "pull_file"
+        assert exc.original_error.code == ErrorCode.PLATFORM_ERROR
+        assert "File transfer not supported" in exc.original_error.message
+
+    @pytest.mark.asyncio
+    async def test_pull_file_paas_error(self, facade, mock_service):
+        """pull_file wraps PaasError as DeviceFacadeException preserving original error."""
+        facade._device_template_service.get_by_template_id.return_value = (
+            make_mock_template()
+        )
+        facade._factory.create.return_value = mock_service
+        paas_error = PaasError(ErrorCode.FILE_TRANSFER_FAILED, "curl failed")
+        mock_service.pull_file_from_url = AsyncMock(side_effect=paas_error)
+
+        with pytest.raises(DeviceFacadeException) as exc_info:
+            await facade.pull_file(
+                "sandbox-123@42", "https://oss.example.com/file", "/tmp/test"
+            )
+
+        exc = exc_info.value
+        assert exc.operation == "pull_file"
+        assert exc.original_error == paas_error
+        assert exc.original_error.code == ErrorCode.FILE_TRANSFER_FAILED
+        assert exc.original_error.message == "curl failed"
+
+    # ------------------------------------------------------------------
+    # push_file tests
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_push_file_not_implemented(self, facade, mock_service):
+        """push_file wraps NotImplementedError as DeviceFacadeException(PLATFORM_ERROR)."""
+        facade._device_template_service.get_by_template_id.return_value = (
+            make_mock_template()
+        )
+        facade._factory.create.return_value = mock_service
+        mock_service.push_file_to_url = AsyncMock(
+            side_effect=NotImplementedError(
+                "File transfer not supported on Sigma platform"
+            )
+        )
+
+        with pytest.raises(DeviceFacadeException) as exc_info:
+            await facade.push_file(
+                "sandbox-123@42", "/tmp/upload", "https://oss.example.com/put"
+            )
+
+        exc = exc_info.value
+        assert exc.operation == "push_file"
+        assert exc.original_error.code == ErrorCode.PLATFORM_ERROR
+        assert "File transfer not supported" in exc.original_error.message
+
+    @pytest.mark.asyncio
+    async def test_push_file_paas_error(self, facade, mock_service):
+        """push_file wraps PaasError as DeviceFacadeException preserving original error."""
+        facade._device_template_service.get_by_template_id.return_value = (
+            make_mock_template()
+        )
+        facade._factory.create.return_value = mock_service
+        paas_error = PaasError(ErrorCode.FILE_TRANSFER_FAILED, "upload timeout")
+        mock_service.push_file_to_url = AsyncMock(side_effect=paas_error)
+
+        with pytest.raises(DeviceFacadeException) as exc_info:
+            await facade.push_file(
+                "sandbox-123@42", "/tmp/upload", "https://oss.example.com/put"
+            )
+
+        exc = exc_info.value
+        assert exc.operation == "push_file"
+        assert exc.original_error == paas_error
+        assert exc.original_error.code == ErrorCode.FILE_TRANSFER_FAILED
+        assert exc.original_error.message == "upload timeout"
+
+    @pytest.mark.asyncio
+    async def test_push_file_template_not_found(self, facade):
+        """push_file raises DeviceFacadeException when template is None."""
+        facade._device_template_service.get_by_template_id.return_value = None
+
+        with pytest.raises(DeviceFacadeException) as exc_info:
+            await facade.push_file(
+                "sandbox-123@42", "/tmp/upload", "https://oss.example.com/put"
+            )
+
+        exc = exc_info.value
+        assert exc.operation == "push_file"
+        assert exc.platform_type == "UNKNOWN"
+        assert exc.original_error.code == ErrorCode.TEMPLATE_NOT_FOUND
+
+    @pytest.mark.asyncio
+    async def test_push_file_generic_exception(self, facade, mock_service):
+        """push_file wraps generic Exception as DeviceFacadeException(PLATFORM_ERROR)."""
+        facade._device_template_service.get_by_template_id.return_value = (
+            make_mock_template()
+        )
+        facade._factory.create.return_value = mock_service
+        mock_service.push_file_to_url = AsyncMock(
+            side_effect=RuntimeError("unexpected failure")
+        )
+
+        with pytest.raises(DeviceFacadeException) as exc_info:
+            await facade.push_file(
+                "sandbox-123@42", "/tmp/upload", "https://oss.example.com/put"
+            )
+
+        exc = exc_info.value
+        assert exc.operation == "push_file"
+        assert exc.original_error.code == ErrorCode.PLATFORM_ERROR
+        assert "unexpected failure" in exc.original_error.message
+
+    @pytest.mark.asyncio
+    async def test_pull_file_generic_exception(self, facade, mock_service):
+        """pull_file wraps generic Exception as DeviceFacadeException(PLATFORM_ERROR)."""
+        facade._device_template_service.get_by_template_id.return_value = (
+            make_mock_template()
+        )
+        facade._factory.create.return_value = mock_service
+        mock_service.pull_file_from_url = AsyncMock(
+            side_effect=RuntimeError("network timeout")
+        )
+
+        with pytest.raises(DeviceFacadeException) as exc_info:
+            await facade.pull_file(
+                "sandbox-123@42", "https://oss.example.com/file", "/tmp/test"
+            )
+
+        exc = exc_info.value
+        assert exc.operation == "pull_file"
+        assert exc.original_error.code == ErrorCode.PLATFORM_ERROR
+        assert "network timeout" in exc.original_error.message

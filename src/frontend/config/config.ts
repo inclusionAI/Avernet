@@ -9,9 +9,7 @@ const isWebview = process.env.BUILD_TARGET === 'webview';
 //   （正式迁移时由 config.internal.ts 经 UMI_ENV=internal 注入，tern 块见 git 历史 ac641f263:config/config.ts）
 // - 开发代理沿用 config.local.ts（PRESET 机制不变）
 export default defineConfig({
-  favicons: [
-    'https://mdn.alipayobjects.com/huamei_eqz4tv/afts/img/A*X-ZDRpkwqcMAAAAAQCAAAAgAeh2TAQ/original',
-  ],
+  favicons: ['/Avernet-logo.png?v=20260716'],
   outputPath: isWebview ? 'dist-webview' : process.env.OUTPUT_PATH || 'dist',
   publicPath: isWebview ? './' : process.env.PUBLIC_PATH || '/',
   // webview 环境使用 hash 路由，避免 vscode-webview:// 协议下 BrowserRouter 不工作

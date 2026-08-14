@@ -297,6 +297,9 @@ mod tests {
                 "write-and-review",
                 "parallel-expert-review",
                 "solution-and-risk-review",
+                "bot-human-bot-review",
+                "world-cup-preview-content-production",
+                "micro-merchant-event-orchestration",
                 "single-bot-guided-answer",
             ]
         );
@@ -323,6 +326,49 @@ mod tests {
         assert!(zh_cn.participant_summary_json.get("writer").is_some());
         assert!(zh_cn.definition_json.get("id").is_none());
         assert!(zh_cn.definition_json.get("version").is_none());
+
+        let bot_human_bot = catalog
+            .templates
+            .iter()
+            .find(|template| template.id == "bot-human-bot-review")
+            .with_context(|| "missing bot-human-bot-review")?;
+        assert_eq!(bot_human_bot.priority, 25);
+        assert_eq!(bot_human_bot.contents.len(), 2);
+        assert!(bot_human_bot.tags.contains(&"judge".to_string()));
+        assert!(bot_human_bot.tags.contains(&"serial".to_string()));
+
+        let human_review = bot_human_bot
+            .contents
+            .iter()
+            .find(|content| content.lang == "zh-CN")
+            .with_context(|| "missing bot-human-bot-review zh-CN content")?;
+        assert_eq!(human_review.name, "Bot-Human-Bot 三节点协作");
+        assert!(
+            human_review
+                .participant_summary_json
+                .get("worker")
+                .is_some()
+        );
+        assert_eq!(
+            human_review.definition_json["runtime"]["state_machine"]["nodes"]["human_review"]
+                ["kind"],
+            "human_input"
+        );
+        assert!(
+            human_review.definition_json["runtime"]["state_machine"]
+                .get("human_input_channel")
+                .is_none()
+        );
+        assert!(
+            human_review.definition_json["runtime"]["state_machine"]["nodes"]["human_review"]
+                .get("assignee")
+                .is_none()
+        );
+        assert!(
+            human_review.definition_json["runtime"]["state_machine"]["nodes"]["human_review"]
+                .get("notification")
+                .is_none()
+        );
 
         Ok(())
     }

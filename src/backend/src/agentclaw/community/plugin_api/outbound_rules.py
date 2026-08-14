@@ -36,12 +36,15 @@ class OutboundRuleProvider(Plugin, Protocol):
         agent_pass_token: str = "",
         agent_code: str = "",
         bot_type_resolver: "Callable[[str, str], str | None] | None" = None,
+        extra_properties: dict[str, object] | None = None,
     ) -> OutBoundOperationRule:
         """The full outbound-header rule set for a bot.
 
         ``bot_type_resolver(bolt_id, owner_id) -> bot_type | None`` lets the impl
         pick a bot-type-specific policy; impls that need no such split ignore it.
-        Returns an empty rule where the runtime applies no egress mutation.
+        ``extra_properties`` is a transient, generic envelope resolved by the
+        engine strategy. Returns an empty rule where the runtime applies no
+        egress mutation.
         """
         ...
 
@@ -52,4 +55,16 @@ class OutboundRuleProvider(Plugin, Protocol):
     ) -> "OutBoundOperationRule | None":
         """An identity-authorization-only outbound rule (the teclaw path), or
         ``None`` when no token / no egress mutation applies."""
+        ...
+
+    def build_caller_rule(
+        self,
+        *,
+        caller_token: str,
+    ) -> "OutBoundOperationRule | None":
+        """Build the environment-authoritative Caller-token overlay.
+
+        The provider owns the fixed managed gateway scope. IAM callers supply
+        only the opaque token and never resolve per-MCP endpoints.
+        """
         ...

@@ -63,10 +63,13 @@ class CommonWhiteListService:
         whitelist = value.get("whitelist", [])
         if not isinstance(whitelist, list):
             return default
-        return self._match_bot_whitelist(
-            whitelist,
-            owner_id=owner_id,
-            bot_id=bot_id,
+        return (
+            self.find_bot_whitelist_entry(
+                whitelist,
+                owner_id=owner_id,
+                bot_id=bot_id,
+            )
+            is not None
         )
 
     def get_owner_ids(
@@ -132,17 +135,37 @@ class CommonWhiteListService:
         return frozenset(owner_ids)
 
     @staticmethod
-    def _match_bot_whitelist(
+    def find_bot_whitelist_entry(
         whitelist: list[Any],
         *,
         owner_id: str,
         bot_id: str,
-    ) -> bool:
+    ) -> dict[str, Any] | None:
+        """返回精确命中的 Bot 白名单条目，供窄职责业务门禁复用。"""
+
         for item in whitelist:
             if not isinstance(item, dict):
                 continue
             if str(item.get("owner_id")) == str(owner_id) and str(
                 item.get("bot_id")
             ) == str(bot_id):
-                return True
-        return False
+                return item
+        return None
+
+    @staticmethod
+    def _match_bot_whitelist(
+        whitelist: list[Any],
+        *,
+        owner_id: str,
+        bot_id: str,
+    ) -> bool:
+        """兼容既有私有 helper；新代码使用 ``find_bot_whitelist_entry``。"""
+
+        return (
+            CommonWhiteListService.find_bot_whitelist_entry(
+                whitelist,
+                owner_id=owner_id,
+                bot_id=bot_id,
+            )
+            is not None
+        )

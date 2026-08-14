@@ -8,10 +8,8 @@ from injector import inject
 
 from typing import Any
 
-from agentclaw.community.core.quality.repositories import (
-    QualityTaskRepository,
-    QualityTaskRecord,
-)
+from agentclaw.community.core.repository.protocols.platform import QualityTaskRepository
+from agentclaw.community.core.quality.models import QualityTaskRecord
 from agentclaw.community.log import get_logger
 
 

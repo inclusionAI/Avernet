@@ -20,8 +20,10 @@ internal_dependencies:
 ### Change impact
 
 Imports only `engine.community.kernel` (+ stdlib/typing) — never `core`, `plugins`, or
-`api`. A change to a port method signature ripples to exactly two places: the
-prod impl that satisfies it and the adapter that calls it. The port grows one
+`api`. A change to a port method signature ripples to the plugin implementation,
+the adapter that calls it, and the shared skills delivery contract.
+`rollback_pool_layout` is additive and is invoked only by explicit
+Pool-to-Legacy recovery; old images remain valid for ordinary operation. The port grows one
 per-domain Protocol per vertical slice; see
 `specs/2026-07-01-engine-claude-code-acl-opensource/` for the full method
 catalog and the native-shape / token conventions.

@@ -99,6 +99,17 @@ class RemoveCollaboratorResponse(BaseModel):
     deleted: bool = Field(..., description="是否成功删除")
 
 
+class LeaveCollaborationRequest(BaseModel):
+    """退出协作请求。"""
+    bot_id: str = Field(..., description="Bot ID")
+    owner_id: str = Field(..., description="Bot 拥有者工号")
+
+
+class LeaveCollaborationResponse(BaseModel):
+    """退出协作响应。"""
+    deleted: bool = Field(..., description="是否成功退出协作")
+
+
 class CheckPermissionRequest(BaseModel):
     """检查权限请求。"""
     bot_id: str = Field(..., description="Bot ID")

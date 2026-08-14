@@ -92,6 +92,31 @@ class TestSkillSetServiceEngineTypeThreading:
         call_kwargs = mock_skill_set_repo.get_all_active_skill_sets.call_args.kwargs
         assert call_kwargs.get("engine_type") == "claude-code"
 
+    async def test_get_symlink_mappings_keeps_known_legacy_moltis_paths(
+        self, skill_set_service
+    ):
+        skill_set_service.engine_type = "moltis"
+        skill_set_service.is_desktop = True
+        skill_set_service.get_active_skills = MagicMock(
+            return_value=[
+                {"name": "reviewer", "git_path": "git://business/reviewer"}
+            ]
+        )
+
+        mappings = skill_set_service.get_symlink_mappings()
+
+        assert [mapping.to_dict() for mapping in mappings] == [
+            {
+                "source": (
+                    "/home/admin/.moltis/skills/"
+                    "skills-repo/business/reviewer"
+                ),
+                "target": "/home/admin/.moltis/skills/reviewer",
+                "skill_uuid": None,
+                "version": None,
+            }
+        ]
+
     def test_get_all_skill_sets_with_skills_passes_engine_type(self, skill_set_service, mock_skill_set_repo):
         """get_all_skill_sets_with_skills should pass engine_type to repo.list_all."""
         mock_skill_set_repo.list_all.return_value = []

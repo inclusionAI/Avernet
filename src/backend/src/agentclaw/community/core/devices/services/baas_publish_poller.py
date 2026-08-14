@@ -14,6 +14,7 @@ import time
 from typing import TYPE_CHECKING, Callable
 
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 
 if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_service import DeviceService
@@ -53,7 +54,7 @@ class BaasPublishPoller:
     def start(self, *, publish_id: str, device_id: str, binding_id: int) -> None:
         """启动后台 thread 轮询，daemon=True 不阻塞进程退出。"""
         thread = threading.Thread(
-            target=self._poll,
+            target=bind_current_avernet_tenant(self._poll),
             args=(publish_id, device_id, binding_id),
             daemon=True,
             name=f"baas-poll-{publish_id}",

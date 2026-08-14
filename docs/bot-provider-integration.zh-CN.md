@@ -24,9 +24,9 @@ BCN 不接管 Provider 的运行实例，也不会把完整历史消息自动推
 | 1. 准备 Provider webhook | 提供一个 BCS 可访问的 HTTP endpoint，用来接收下行请求。 |
 | 2. 注册 Provider | 记录 Provider ID，并安全保存注册返回的 Provider 管理 token 和 BCS 到 Provider 的下行 token。 |
 | 3. 注册 Bot | 为 Provider 下的每个 bot 注册展示名、简介、owner 和 `provider_bot_ref`，并保存 Bot runtime token。 |
-| 4. 实现 `chat.send` | 收到需要 bot 回复的消息后快速返回 `200 OK`，异步让 bot runtime 处理任务。 |
+| 4. 实现 `chat.send` | 1.0 先 ack 再回调；2.0 在同一次响应上协商 SSE 或 JSON callback fallback。 |
 | 5. 实现 `chat.inject` | 把上下文写入 `(provider_bot_ref, session_id)` 的会话状态，但不触发推理。 |
-| 6. 回调 `/bot/events` | Bot 完成后，用下行请求里的 `id` 作为 `run_id`，回传一次 `state = "final"` 的最终结果。 |
+| 6. 返回事件 | 2.0 在已接受的 SSE 响应中流式返回事件，或仅在返回 JSON ack 后回调 `/bot/events`；`run_id` 使用下行 `id`。 |
 
 建议在跑通 `chat.send -> final` 后，再补齐 `chat.abort`、`chat.history`、`bot.ping`、限流、重试和监控。
 
@@ -87,11 +87,40 @@ X-BCN-Timestamp: <unix-ms>
 | `to_bot.provider_bot_ref` | 同上 | Provider 内部 bot 标识，用于路由到自己的 bot runtime。 |
 | `session_id` | `chat.send` / `chat.inject` / `chat.history` / `chat.abort` | 会话标识，Provider 按它维护上下文。 |
 | `message` | `chat.send` / `chat.inject` | 当前下发消息。 |
-| `timeout_ms` | `chat.send` / `chat.inject` / `chat.history` | BCS 等待 Provider 确认或回调的超时时间。 |
+| `timeout_ms` | `chat.send` / `chat.inject` / `chat.history` | 下游操作超时。对于 `bcs-cli chat` 发起的 A2A 直聊 `chat.send`，BCS 固定下发 2 小时执行预算（`7200000` 毫秒），与 CLI 的轮询超时相互独立。 |
+
+## 2.0 `chat.send` 传输协商
+
+Provider 注册为 `protocol_version = "2.0"` 后，所有需要响应的
+`chat.send`（普通群聊、任务协同、状态机投递、A2A 直聊和
+`bcs-cli chat`）都会携带：
+
+```http
+Accept: text/event-stream, application/json
+X-BCN-Protocol-Version: 2.0
+```
+
+同一次 POST 的响应决定整个 run 的唯一事件来源：
+
+- `Content-Type: text/event-stream` 将 run 绑定到 SSE。Provider 应保持响应
+  打开并在其中发送事件；此 run 后续调用 `/bot/events` 会收到 HTTP
+  `409 transport_conflict`。
+- 合法 JSON ack（例如 `{ "ok": true }`）将 run 绑定到 `/bot/events`
+  callback。Provider 必须先返回 JSON ack，再发送 callback；协商尚未完成时
+  到达的 callback 会被 HTTP 409 拒绝。
+- 网络错误、超时、非 2xx 或非法 ack 会直接使投递失败，BCS 不会再用另一种
+  传输发起第二次 POST。
+
+一个 run 不能混用 SSE 与 callback。SSE ping 只表示连接存活，不表示执行已
+开始，也不能作为 CLI detach ack；首个非 ping 事件才可以。final 可以没有
+文本，它仍是合法 terminal marker，此前 delta 累积的文本会被保留。delta
+文本优先放在 `delta_text`，BCS 兼容读取 `message.content[].text`。带文本的
+final 按完整快照处理，不会作为新 delta 重复追加。
 
 ## 回调 BCS
 
-`chat.send` 是异步模型。Provider 不应该在 webhook 请求里长时间等待 bot 完成，而是先返回：
+1.0 和 2.0 的 JSON fallback 使用 `/bot/events`。对于 JSON ack 模式，Provider
+不应该在 webhook 请求里长时间等待 bot 完成，而是先返回：
 
 ```json
 { "ok": true }
@@ -127,6 +156,7 @@ X-BCN-Event-Id: <uuid>
 - `state` 固定为 `final`。
 - 同一个 `run_id` 只发送一次成功的 final。
 - Provider 重试同一个回调事件时，应保持同一个 `X-BCN-Event-Id`。
+- 事件通过同步请求校验、鉴权和运行关联校验后，BCS 返回 HTTP `200`。如果该事件属于状态机运行，包括 Judge 判定在内的后续处理会在当前 BCS 进程中异步继续；该响应不表示节点或状态机已经完成，且 BCS 进程退出后不会恢复尚未完成的处理。
 
 ## 错误响应
 

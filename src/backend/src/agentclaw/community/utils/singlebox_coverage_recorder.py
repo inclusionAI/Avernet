@@ -1,8 +1,7 @@
-"""Runtime hit recorder for singlebox coverage mode.
+"""HTTP route-hit recorder for singlebox coverage mode.
 
-The manifest defines denominators. This module writes what the live singlebox
-process actually exercised, so reports can compute covered items from runtime
-evidence instead of manual checkboxes.
+Plugin evidence is derived offline from coverage.py artifacts; runtime business
+objects do not emit coverage events.
 """
 from __future__ import annotations
 
@@ -57,7 +56,3 @@ def record_router_hit(*, method: str, route_path: str, path: str, status_code: i
             "status_code": status_code,
         },
     )
-
-
-def record_plugin_hit(key: str, **attrs: Any) -> None:
-    _append_jsonl("plugin_hits.jsonl", {"key": key, **attrs})

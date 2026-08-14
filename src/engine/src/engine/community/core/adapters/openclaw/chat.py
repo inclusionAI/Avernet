@@ -13,6 +13,7 @@ Implements the core `ChatService` by delegating to an injected
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from collections.abc import AsyncIterator
 from typing import Any
@@ -32,6 +33,32 @@ class OpenClawChatAdapter(ChatService):
 
     def __init__(self, port: OpenClawChatPort) -> None:
         self._port = port
+
+    async def inject(
+        self,
+        session_key: str,
+        message: str,
+        label: str | None = None,
+        auth: AuthContext | None = None,
+    ) -> dict[str, Any]:
+        """Inject a message and repair OpenClaw's transcript-only assistant role."""
+        token = auth.token if auth is not None else None
+        raw = await self._port.chat_inject(
+            session_key=session_key,
+            message=message,
+            label=label,
+            token=token,
+        )
+
+        if not raw.get("success"):
+            return {
+                "ok": False,
+                "error": raw.get("error")
+                or {"code": "UNKNOWN", "message": "chat.inject failed"},
+            }
+
+        payload = raw.get("payload") if isinstance(raw.get("payload"), dict) else {}
+        return {"ok": True, "payload": payload}
 
     async def stream(
         self,
@@ -53,7 +80,15 @@ class OpenClawChatAdapter(ChatService):
                 "ChatRequest.sessionId is required (pre-composed OpenClaw session key)"
             )
 
-        log.info("[stream] session_key=%s, query=%s", session_key, request.query[:50])
+        # COSEC: hash session and prompt values before logging; the rewritten
+        # prompt can contain sensitive Bot absolute paths.
+        session_key_hash = hashlib.sha256(session_key.encode("utf-8")).hexdigest()[:16]
+        log.info(
+            "[stream] session_key_hash=%s query_len=%s query_hash=%s",
+            session_key_hash,
+            len(request.query),
+            hashlib.sha256(request.query.encode("utf-8")).hexdigest()[:16],
+        )
 
         # Extract idempotency_key and attachments from extraParams (adapter-side).
         idempotency_key: str | None = None
@@ -67,8 +102,8 @@ class OpenClawChatAdapter(ChatService):
                 attachments = raw_attachments
             elif raw_attachments is not None:
                 log.warning(
-                    "[attachments][adapter_extra_invalid] sessionKey=%s type=%s",
-                    session_key,
+                    "[attachments][adapter_extra_invalid] session_key_hash=%s type=%s",
+                    session_key_hash,
                     type(raw_attachments).__name__,
                 )
 

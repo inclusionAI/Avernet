@@ -16,11 +16,11 @@ from injector import Binder, Module, inject, provider, singleton
 
 from agentclaw.community.api.policy_service import PolicyServiceProtocol
 from agentclaw.community.api.user_service import UserServiceProtocol
-from agentclaw.community.core.access.repository import PolicyRepository
+from agentclaw.community.core.repository.protocols.identity import PolicyRepository
 from agentclaw.community.core.access.services.policy_service import PolicyService
 from agentclaw.community.core.access.services.user_service import UserService
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugins.policy_repository import PolicyRepository as UnifiedPolicyRepository
+from agentclaw.community.core.repository.implementations.identity.policy import PolicyRepository as UnifiedPolicyRepository
 
 
 logger = get_logger()

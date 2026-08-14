@@ -19,6 +19,8 @@ htmlcov/
 # Node.js
 node_modules/
 .npm/
+.tshy/
+.tshy-build/
 .umi/
 .umi-production/
 dist-webview/
@@ -76,6 +78,7 @@ src/bcs/.agent
 *.claude
 *.codex
 CLAUDE.local.md
+CODE_REVIEW.md
 .planning
 .dev
 .private_docs/
@@ -91,3 +94,6 @@ src/bcs/submodules/
 src/bcs/testresult/
 **/pytest_report/
 src/bcs/target
+
+.idea
+.codefuse

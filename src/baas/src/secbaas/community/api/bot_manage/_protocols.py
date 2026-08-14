@@ -149,6 +149,7 @@ class BotManageService(Protocol):
         operator: str,
         request_id: str,
         auto_approve_publish: bool = False,
+        bot_config: BotConfig | None = None,
     ) -> ScaleBotResponse:
         """Scale Bot to target device count (SCALE_UP or SCALE_DOWN)."""
         ...
@@ -162,6 +163,7 @@ class BotManageService(Protocol):
         bot_desc: str | None = None,
         bot_config: BotConfig | None = None,
         request_id: str | None = None,
+        template_uuid: str | None = None,
     ) -> UpdateBotResponse:
         """Update Bot metadata and config."""
         ...

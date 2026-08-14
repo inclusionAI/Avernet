@@ -13,15 +13,15 @@ that the requesting user has access to the bot_id/owner_id pair.
 """
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.bot_collaborator import make_bot
 from tests.community.framework import (
     CaseInput,
     ExpectError,
     ExpectSuccess,
+    bind_overrides,
     endpoint_test,
+    json_response,
 )
 
 
@@ -93,52 +93,68 @@ def _seed_tasks_for_list(world):
     )
 
 
-def _seed_init_task(world):
-    """Seed a task in init status for process tests."""
-    from unittest.mock import AsyncMock, MagicMock
-    from typing import Annotated
+def _stand_in_for_eval_publish(world):
+    """Stand in for the publish steps an eval kicks off.
 
+    ``eval_publish`` drives a BaaS publish of the bot under evaluation — a
+    multi-minute, multi-service operation, and not what these routes are about.
+    The stand-in is bound through the injector as a subclass of the wired flow
+    service, so the route resolves it the production way and the substitution
+    dies with this test's injector.
+    """
     from injector import SingletonScope
 
-    from agentclaw.community.core.service_bot.services.publish_flow_service import PublishFlowService
+    from agentclaw.community.core.service_bot.services.publish_flow_service import (
+        PublishFlowService,
+    )
+
+    async def _eval_publish(_self, *_args, **_kwargs):
+        return {
+            "bot_uuid": "test-bot-uuid",
+            "baas_publish_id": "test-baas-publish-id",
+        }
+
+    def _progress(_self, *_args, **_kwargs):
+        return {"status": "SUCCESS"}
+
+    bind_overrides(
+        world,
+        PublishFlowService,
+        {"eval_publish": _eval_publish, "get_baas_publish_progress": _progress},
+    )
+    # The graph resolves PublishFlowService as a singleton, so the instance
+    # cached before the rebind has to be dropped for the new binding to win.
+    scope_binding, _ = world.injector.binder.get_binding(SingletonScope)
+    scope_instance = scope_binding.provider.get(world.injector)
+    scope_instance._context.pop(PublishFlowService, None)
+
+
+def _seed_init_task(world):
+    """Seed a task in init status for process tests."""
+    from typing import Annotated
+
     from agentclaw.community.plugin_api.http_client import HttpClient, QUALIFIER_MASA_AGENT_EVAL
     from tests.community.factories.quality import make_quality_task
 
     _seed_operator(world)
 
-    # Mock PublishFlowService.eval_publish via DI binding (not instance mutation)
-    mock_publish_service = MagicMock()
-    mock_publish_service.eval_publish = AsyncMock(return_value={
-        "bot_uuid": "test-bot-uuid",
-        "baas_publish_id": "test-baas-publish-id",
-    })
-    mock_publish_service.get_baas_publish_progress = MagicMock(return_value={
-        "status": "SUCCESS",
-    })
-    world.injector.binder.bind(PublishFlowService, to=mock_publish_service, scope=None)
-    # Clear singleton cache so the mock is returned on next get()
-    scope_binding, _ = world.injector.binder.get_binding(SingletonScope)
-    scope_instance = scope_binding.provider.get(world.injector)
-    scope_instance._context.pop(PublishFlowService, None)
+    _stand_in_for_eval_publish(world)
 
-    # Mock masa_eval_http response for /eval/start API
-    masa_eval_http = world.injector.get(Annotated[HttpClient, QUALIFIER_MASA_AGENT_EVAL])
-    mock_post_response = MagicMock()
-    mock_post_response.raise_for_status.return_value = None
-    mock_post_response.json.return_value = {
-        "success": True,
-        "data": {"set_task_uuid": "test-set-task-uuid"},
-    }
-    masa_eval_http.set_response("post", mock_post_response)
-
-    # Mock masa_eval_http response for /eval/progress API
-    mock_get_response = MagicMock()
-    mock_get_response.raise_for_status.return_value = None
-    mock_get_response.json.return_value = {
-        "success": True,
-        "data": {"status": "completed"},
-    }
-    masa_eval_http.set_response("get", mock_get_response)
+    # The MASA eval upstream is a real HTTP service; its two replies come
+    # through the qualified ``HttpClient`` seam, which is the injected boundary
+    # for exactly this.
+    masa_eval_http = world.get(Annotated[HttpClient, QUALIFIER_MASA_AGENT_EVAL])
+    masa_eval_http.set_response(
+        "post",
+        json_response({
+            "success": True,
+            "data": {"set_task_uuid": "test-set-task-uuid"},
+        }),
+    )
+    masa_eval_http.set_response(
+        "get",
+        json_response({"success": True, "data": {"status": "completed"}}),
+    )
 
     task = make_quality_task(
         world,
@@ -719,50 +735,30 @@ def update_task_status_for_others_missing_status():
 
 def _seed_admin_and_init_task(world):
     """Seed admin user and a task in init status for process_for_others tests."""
-    from unittest.mock import AsyncMock, MagicMock
     from typing import Annotated
 
-    from injector import SingletonScope
-
-    from agentclaw.community.core.service_bot.services.publish_flow_service import PublishFlowService
     from agentclaw.community.plugin_api.http_client import HttpClient, QUALIFIER_MASA_AGENT_EVAL
     from tests.community.factories.quality import make_quality_task
 
     _seed_super_admin(world)
 
-    # Mock PublishFlowService.eval_publish via DI binding (not instance mutation)
-    mock_publish_service = MagicMock()
-    mock_publish_service.eval_publish = AsyncMock(return_value={
-        "bot_uuid": "test-bot-uuid",
-        "baas_publish_id": "test-baas-publish-id",
-    })
-    mock_publish_service.get_baas_publish_progress = MagicMock(return_value={
-        "status": "SUCCESS",
-    })
-    world.injector.binder.bind(PublishFlowService, to=mock_publish_service, scope=None)
-    # Clear singleton cache so the mock is returned on next get()
-    scope_binding, _ = world.injector.binder.get_binding(SingletonScope)
-    scope_instance = scope_binding.provider.get(world.injector)
-    scope_instance._context.pop(PublishFlowService, None)
+    _stand_in_for_eval_publish(world)
 
-    # Mock masa_eval_http response for /eval/start API
-    masa_eval_http = world.injector.get(Annotated[HttpClient, QUALIFIER_MASA_AGENT_EVAL])
-    mock_post_response = MagicMock()
-    mock_post_response.raise_for_status.return_value = None
-    mock_post_response.json.return_value = {
-        "success": True,
-        "data": {"set_task_uuid": "test-set-task-uuid"},
-    }
-    masa_eval_http.set_response("post", mock_post_response)
-
-    # Mock masa_eval_http response for /eval/progress API
-    mock_get_response = MagicMock()
-    mock_get_response.raise_for_status.return_value = None
-    mock_get_response.json.return_value = {
-        "success": True,
-        "data": {"status": "completed"},
-    }
-    masa_eval_http.set_response("get", mock_get_response)
+    # The MASA eval upstream is a real HTTP service; its two replies come
+    # through the qualified ``HttpClient`` seam, which is the injected boundary
+    # for exactly this.
+    masa_eval_http = world.get(Annotated[HttpClient, QUALIFIER_MASA_AGENT_EVAL])
+    masa_eval_http.set_response(
+        "post",
+        json_response({
+            "success": True,
+            "data": {"set_task_uuid": "test-set-task-uuid"},
+        }),
+    )
+    masa_eval_http.set_response(
+        "get",
+        json_response({"success": True, "data": {"status": "completed"}}),
+    )
 
     task = make_quality_task(
         world,

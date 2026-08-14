@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from agentclaw.community.core.economy.governance.services.service_protocols import (
     GovernanceAdminServiceProtocol,
+    GovernanceAuditReadServiceProtocol,
+    GovernanceDeliveryServiceProtocol,
     GovernanceLifecycleServiceProtocol,
     GovernanceWhitelistServiceProtocol,
     GovernanceWorkflowServiceProtocol,

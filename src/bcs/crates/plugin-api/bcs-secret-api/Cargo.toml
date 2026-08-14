@@ -1,0 +1,18 @@
+[package]
+name = "bcs-secret-api"
+description = "Secret backend plugin API for BCS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bcs-config-api = { workspace = true }
+bcs-service-api = { workspace = true }
+futures = { workspace = true }
+inventory = { workspace = true }
+thiserror = { workspace = true }

@@ -98,6 +98,7 @@ class HeaderOperationRule:
     header_name: str
     value: str
     placeholder: str | None = None
+    separator: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -106,6 +107,7 @@ class HeaderOperationRule:
             "header_name": self.header_name,
             "value": self.value,
             "placeholder": self.placeholder,
+            "separator": self.separator,
         }
 
 

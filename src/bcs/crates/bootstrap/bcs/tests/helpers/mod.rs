@@ -23,7 +23,7 @@ pub fn create_temp_bots_dir() -> tempfile::TempDir {
     tempfile::TempDir::new().expect("Failed to create temp dir")
 }
 
-use bcs::{BcsConfig, LoggingConfig, MessageHistoryConfig, MistConfig};
+use bcs::{BcsConfig, LoggingConfig, MessageHistoryConfig};
 
 pub fn create_test_config(bots_dir: &PathBuf) -> BcsConfig {
     BcsConfig {
@@ -38,7 +38,7 @@ pub fn create_test_config(bots_dir: &PathBuf) -> BcsConfig {
         leader_election: None,
         cache: Default::default(),
         database: Default::default(),
-        mist: MistConfig::default(),
+        secret: Default::default(),
         channels: Default::default(),
         collaboration: Default::default(),
         store_messages: true,
@@ -81,6 +81,7 @@ pub fn create_test_config(bots_dir: &PathBuf) -> BcsConfig {
             group_link_url: None,
             session_link_url: None,
         },
+        ..BcsConfig::default()
     }
 }
 
@@ -91,11 +92,16 @@ static INIT_AUTH_MOCK: std::sync::Once = std::sync::Once::new();
 pub async fn start_test_server(
     bots_dir: &PathBuf,
 ) -> (SocketAddr, tokio::task::JoinHandle<Result<(), bcs::BcsError>>) {
+    start_test_server_with_config(create_test_config(bots_dir)).await
+}
+
+pub async fn start_test_server_with_config(
+    config: BcsConfig,
+) -> (SocketAddr, tokio::task::JoinHandle<Result<(), bcs::BcsError>>) {
     INIT_AUTH_MOCK.call_once(|| {
         // SAFETY: runs exactly once before any server starts handling requests.
         unsafe { std::env::set_var("BCS_AUTH_MOCK", "1") };
     });
-    let config = create_test_config(bots_dir);
     let server = BcsServer::new_allowing_private_outbound_for_tests(config);
     server
         .run_on_random_port()

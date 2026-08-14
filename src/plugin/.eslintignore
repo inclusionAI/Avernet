@@ -1,8 +1,0 @@
-test/fixtures
-dist
-es
-lib
-config/wrapper.js
-.docz
-merge-coverages.js
-report.js

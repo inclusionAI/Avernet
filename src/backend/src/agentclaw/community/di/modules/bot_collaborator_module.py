@@ -22,20 +22,31 @@ from agentclaw.community.core.bot_collaborator.protocols import (
     BotServiceProtocol,
     CollaboratorServiceProtocol as CoreCollaboratorServiceProtocol,
 )
-from agentclaw.community.core.bot_collaborator.repository.protocol import (
-    CollaboratorRepositoryProtocol,
-    BotCollabLogRepositoryProtocol,
-    BotCollabLockRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import BotCollabLogRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import BotCollabLockRepositoryProtocol
 from agentclaw.community.core.bot_collaborator.services.collaborator_service import CollaboratorService
+from agentclaw.community.core.bot_collaborator.services.credentials_admins_writer import (
+    DeviceCredentialsAdminsWriter,
+)
+from agentclaw.community.core.repository.protocols.publishing import (
+    BotPublishRepositoryProtocol,
+)
+from agentclaw.community.core.bot_collaborator.services.aicoding.member_management_capability import (
+    AICodingMemberManagementCapability,
+)
+from agentclaw.community.core.bot_collaborator.services.member_management_capability import (
+    MemberManagementCapabilityService,
+)
 from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import CollaboratorLockService
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.bot_management.services.template_service import TemplateService
 from agentclaw.community.core.devices.services.device_context_resolver import DeviceContextResolver
 from agentclaw.community.di.modules.skill_center_module import DeviceFilesystemDispatcher
 from agentclaw.community.plugin_api.passport import PassportPlugin
-from agentclaw.community.plugins.bot_collaborator_repository import CollaboratorRepository
-from agentclaw.community.plugins.bot_collab_log_repository import BotCollabLogRepository
-from agentclaw.community.plugins.bot_collab_lock_repository import BotCollabLockRepository
+from agentclaw.community.core.repository.implementations.bot.collaborator import CollaboratorRepository
+from agentclaw.community.core.repository.implementations.bot.collab_log import BotCollabLogRepository
+from agentclaw.community.core.repository.implementations.bot.collab_lock import BotCollabLockRepository
 
 
 class BotCollaboratorModule(Module):
@@ -78,25 +89,61 @@ class BotCollaboratorModule(Module):
     @singleton
     @provider
     @inject
+    def member_management_capability_service(
+        self,
+        template_service: TemplateService,
+    ) -> MemberManagementCapabilityService:
+        """Construct engine-agnostic member-management capability coordinator."""
+        return MemberManagementCapabilityService(
+            engine_capabilities=(AICodingMemberManagementCapability(template_service),),
+        )
+
+    @singleton
+    @provider
+    @inject
+    def credentials_admins_writer(
+        self,
+        collaborator_repo: CollaboratorRepositoryProtocol,
+        bot_publish_repo: BotPublishRepositoryProtocol,
+        injector: Injector,
+    ) -> DeviceCredentialsAdminsWriter:
+        """Construct ``DeviceCredentialsAdminsWriter``.
+
+        ``resolver`` / ``device_fs_dispatcher`` 走 lazy ``Callable`` thunk 注入,打断
+        构造期 DI 循环(device 图反向依赖 ``BotService``);collaborator_repo /
+        bot_publish_repo 直接注入(均为 singleton repository)。被 ``CollaboratorService``
+        (运行时协作者变更同步) 和 ``TeclawPublishTaskHandler`` (发布后 seed) 共用。
+        """
+        return DeviceCredentialsAdminsWriter(
+            collaborator_repo=collaborator_repo,
+            bot_publish_repo=bot_publish_repo,
+            resolver_provider=lambda: injector.get(DeviceContextResolver),
+            device_fs_dispatcher_provider=lambda: injector.get(DeviceFilesystemDispatcher),
+        )
+
+    @singleton
+    @provider
+    @inject
     def collaborator_service(
         self,
         collaborator_repo: CollaboratorRepositoryProtocol,
         bot_repo: BotRepository,
         passport_plugin: PassportPlugin,
-        injector: Injector,
+        credentials_admins_writer: DeviceCredentialsAdminsWriter,
+        member_management_capability_service: MemberManagementCapabilityService,
     ) -> CollaboratorService:
         """Construct ``CollaboratorService``.
 
-        ``resolver`` / ``device_fs_dispatcher`` 走 lazy ``Callable`` thunk 注入，
-        打断构造期 DI 循环(device 图反向依赖 ``BotService``)。同手法见
-        ``di/modules/mcp_module.py`` 的 ``mcp_sync_service``。
+        ``.credentials`` 的 ADMINS= 同步委托给 ``DeviceCredentialsAdminsWriter`` (对
+        service bot 解析在线 binding、对其它 bot 回退 resolve_for_bot)。设备解析/读写
+        的 DI 循环由 writer 内部的 lazy thunk 打断。
         """
         return CollaboratorService(
             collaborator_repo=collaborator_repo,
             bot_repo=bot_repo,
             passport_plugin=passport_plugin,
-            resolver_provider=lambda: injector.get(DeviceContextResolver),
-            device_fs_dispatcher_provider=lambda: injector.get(DeviceFilesystemDispatcher),
+            credentials_admins_writer=credentials_admins_writer,
+            member_management_capability_service=member_management_capability_service,
         )
 
     # ── Core Protocol aliases (for core layer internal use) ───────────────

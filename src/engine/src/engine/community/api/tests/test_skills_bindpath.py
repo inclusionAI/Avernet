@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from engine.community.api.skills import router
@@ -130,6 +129,40 @@ class TestBindPathSymlink:
 
         assert resp.status_code == 200
         assert extra_link.is_symlink()  # 仍然存在
+
+    def test_clean_target_dir_preserves_layout_bridges(
+        self, client: TestClient, tmp_path: Path
+    ):
+        """全量 mapping 清理不能删除 skills-local / skills-repo 结构桥。"""
+        source = tmp_path / "pool" / "skill-a"
+        source.mkdir(parents=True)
+        link_dir = tmp_path / "skills"
+        pool_local = tmp_path / "pool" / "skills-local"
+        pool_repo = tmp_path / "pool" / "skills-repo"
+        pool_local.mkdir()
+        pool_repo.mkdir()
+        link_dir.mkdir()
+        local_bridge = link_dir / "skills-local"
+        repo_bridge = link_dir / "skills-repo"
+        local_bridge.symlink_to(pool_local, target_is_directory=True)
+        repo_bridge.symlink_to(pool_repo, target_is_directory=True)
+
+        response = client.post(
+            "/api/skills/symlink/bindpath",
+            json={
+                "symlinks": [
+                    {
+                        "source": str(source),
+                        "target": str(link_dir / "skill-a"),
+                    }
+                ],
+                "clean_target_dir": True,
+            },
+        )
+
+        assert response.status_code == 200
+        assert local_bridge.is_symlink()
+        assert repo_bridge.is_symlink()
 
     def test_target_occupied_by_real_file(self, client: TestClient, tmp_path: Path):
         """target 被真实文件占用时应返回 409"""

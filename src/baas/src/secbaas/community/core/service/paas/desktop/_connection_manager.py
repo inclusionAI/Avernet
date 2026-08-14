@@ -13,7 +13,6 @@ Per D-CPL01~05: Connection pool limits with hard rejection at 10,000.
 from __future__ import annotations
 
 import asyncio
-import socket
 import time
 import uuid
 from datetime import datetime
@@ -27,9 +26,6 @@ from secbaas.community.logger import get_logger
 
 from ._utils import get_instance_id
 from .worker_router import UDSConfig
-
-# WR-01 Fix: Cache server IP at module level to avoid blocking DNS lookup
-_SERVER_IP = socket.gethostbyname(socket.gethostname())
 
 logger = get_logger("core-service")
 

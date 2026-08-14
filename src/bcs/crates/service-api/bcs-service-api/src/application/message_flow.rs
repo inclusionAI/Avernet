@@ -34,7 +34,10 @@ pub struct WebSendCommand {
     pub attachments: Option<Vec<Attachment>>,
     pub thinking: Option<String>,
     pub idempotency_key: Option<String>,
+    /// Original IM message id when this command came from a channel ingress.
+    pub source_im_message_id: Option<String>,
     pub sender_conn_id: Option<u64>,
+    pub provider_bypass_headers: Vec<(String, String)>,
 }
 
 #[derive(Debug)]
@@ -58,6 +61,7 @@ pub struct GroupChatCommand {
     pub requested_sender_id: Option<String>,
     pub message: String,
     pub session_id: Option<String>,
+    pub provider_bypass_headers: Vec<(String, String)>,
 }
 
 #[derive(Debug)]
@@ -111,6 +115,18 @@ pub struct BotEventCommand {
     pub bcs_session_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderEventSource {
+    Sse,
+    Callback,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProviderEventIngestCommand {
+    pub source: ProviderEventSource,
+    pub event: BotEventCommand,
+}
+
 #[derive(Debug)]
 pub struct BotEventOutcome {
     pub bot_deliveries: Vec<BotDeliveryResult>,
@@ -145,6 +161,7 @@ pub struct GroupCallbackOutcome {
 pub struct ChatAbortCommand {
     pub caller: CallerContext,
     pub group_id: String,
+    pub session_id: Option<String>,
     pub run_id: Option<String>,
 }
 
@@ -294,11 +311,24 @@ pub trait MessageFlowService: Send + Sync {
     }
 
     async fn handle_bot_event(&self, cmd: BotEventCommand) -> ServiceResult<BotEventOutcome>;
+    async fn ingest_provider_event(
+        &self,
+        cmd: ProviderEventIngestCommand,
+    ) -> ServiceResult<BotEventOutcome> {
+        self.handle_bot_event(cmd.event).await
+    }
     async fn handle_group_callback(
         &self,
         cmd: GroupCallbackCommand,
     ) -> ServiceResult<GroupCallbackOutcome>;
     async fn handle_chat_abort(&self, cmd: ChatAbortCommand) -> ServiceResult<ChatAbortOutcome>;
+    async fn rebind_channel_source_message(
+        &self,
+        _source_run_id: &str,
+        _accepted_run_id: &str,
+    ) -> ServiceResult<bool> {
+        Ok(false)
+    }
     async fn register_task_run_alias(
         &self,
         task_id: &str,

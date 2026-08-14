@@ -41,18 +41,22 @@ from agentclaw.community.api.device_service import DeviceServiceProtocol
 from agentclaw.community.api.oss_to_nas_migration_service import OssToNasMigrationServiceProtocol
 from agentclaw.community.api.oss_to_nas_switch_service import OssToNasSwitchServiceProtocol
 from agentclaw.community.core.bot_management.token_vault import TokenVault
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.common_config.service import CommonConfigService
+from agentclaw.community.core.bot_management.services.default_image_policy_listener import (
+    DefaultImagePolicyActivationListener,
+)
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
+from agentclaw.community.di import config as cfg
+from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.core.devices.protocols import (
     BotQueryProtocol,
     BotSyncProtocol,
     McpSyncProtocol,
 )
-from agentclaw.community.core.devices.repository.protocol import (
-    DeviceBindingRepository,
-    OssToNasRecordRepository,
-)
+from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.arca_bot_create_baas_rollout_config import (
     ArcaBotCreateBaasRolloutConfigProvider,
 )
@@ -91,6 +95,8 @@ from agentclaw.community.core.devices.services.oss_to_nas_switch_service import 
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
 from agentclaw.community.core.notify.bot_lister import RepositoryNotifyBotLister
 from agentclaw.community.core.notify.protocol import NotifyBotLister
+from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.system_config import (
     SystemConfigService,
@@ -101,9 +107,7 @@ from agentclaw.community.di import config as cfg
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.drm import DRMReaderPlugin
 from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
-from agentclaw.community.plugins.device_repository import (
-    DeviceRepository as UnifiedDeviceRepository,
-)
+from agentclaw.community.core.repository.implementations.devices.device import DeviceRepository as UnifiedDeviceRepository
 from agentclaw.community.plugins.local.process_manager import LocalProcessManager
 
 
@@ -114,9 +118,7 @@ class DevicesModule(Module):
     """Neutral, profile-independent bindings for the devices module."""
 
     def configure(self, binder) -> None:
-        from agentclaw.community.plugins.oss_to_nas_record_repository import (
-            OssToNasRecordRepository as UnifiedOssToNasRecordRepository,
-        )
+        from agentclaw.community.core.repository.implementations.devices.oss_to_nas_record import OssToNasRecordRepository as UnifiedOssToNasRecordRepository
 
         # Unified ORM repo (one body, ZDAS + SQLite). @inject ctor takes
         # the bound DatabasePlugin; prod vs test differ only by which
@@ -152,6 +154,11 @@ class DevicesModule(Module):
             to=DefaultDeviceFileSystemResolver,
             scope=singleton,
         )
+        binder.bind(
+            DefaultImagePolicyActivationListener,
+            to=DefaultImagePolicyActivationListener,
+            scope=singleton,
+        )
         # NOTE: the ``DeviceSyncDispatcher`` seam is a Protocol bound per-profile
         # by the device column (corp/test → prod impl, community → no-op) — not
         # here; there is no neutral base binding (no logic to hold).
@@ -168,12 +175,30 @@ class DevicesModule(Module):
         self,
         binding_repo: DeviceBindingRepository,
         bot_repo: BotRepository,
+        collaborator_repo: CollaboratorRepositoryProtocol,
     ) -> NotifyBotLister:
         # Neutral default: resolve notify targets from active device bindings.
         # Works for corp (ARCA/BaaS bindings) and community (BaaS bindings)
         # alike. The test/singlebox column overrides this with the bots-table
         # LocalNotifyBotLister (last-installed-wins).
-        return RepositoryNotifyBotLister(binding_repo=binding_repo, bot_repo=bot_repo)
+        # Collaborator bots are folded in via the collaborator repo so that
+        # the notify endpoint covers bots the user collaboratively manages,
+        # mirroring /api/bots/by-owner-or-collaborator.
+        #
+        # collaborator_repo is intentionally a hard (non-optional) dependency:
+        # injector 0.24 does NOT honor `= None` defaults on @inject params
+        # (it always resolves the annotated type), so making it optional-by-
+        # default would not change resolution. It is safe because
+        # BotCollaboratorModule is base-installed for EVERY profile
+        # (di/container.py), so CollaboratorRepositoryProtocol is always
+        # bound whenever this provider is the winning binding. The
+        # singlebox/test columns override notify_bot_lister with
+        # LocalNotifyBotLister (no collaborator dep) instead.
+        return RepositoryNotifyBotLister(
+            binding_repo=binding_repo,
+            bot_repo=bot_repo,
+            collaborator_repo=collaborator_repo,
+        )
 
     @singleton
     @provider
@@ -207,6 +232,9 @@ class DevicesModule(Module):
         mcp_sync_service: MCPSyncService,
         token_vault: TokenVault,
         task_queue_service: TaskQueueService,
+        template_service: TemplateService,
+        secret_resolver: SecretResolver,
+        secret_names: cfg.SecretNamesConfig,
     ) -> BaasDeviceService:
         # Explicit provider: BaasDeviceService takes ``bot_query`` /
         # ``bot_sync`` / ``mcp_sync`` typed as Protocols, which
@@ -224,6 +252,9 @@ class DevicesModule(Module):
             template_resolver=SystemConfigBaasTemplateResolver(system_config_service),
             vault=token_vault,
             task_queue_service=task_queue_service,
+            template_service=template_service,
+            secret_resolver=secret_resolver,
+            theta_master_key_secret=secret_names.aicoding_theta_master_key,
         )
 
     @singleton
@@ -237,6 +268,8 @@ class DevicesModule(Module):
         task_queue_service: TaskQueueService,
         baas_device_service: BaasDeviceService,
         bot_repository: BotRepository,
+        publish_repository: BotPublishRepositoryProtocol,
+        common_config_service: CommonConfigService,
         template_service: TemplateService,
     ) -> BaasPublishTaskLifecycle:
         return BaasPublishTaskLifecycle(
@@ -246,6 +279,8 @@ class DevicesModule(Module):
             task_queue_service=task_queue_service,
             baas_device_service=baas_device_service,
             bot_repository=bot_repository,
+            publish_repository=publish_repository,
+            common_config_service=common_config_service,
             template_service=template_service,
         )
 

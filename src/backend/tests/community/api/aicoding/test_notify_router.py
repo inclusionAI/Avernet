@@ -15,7 +15,17 @@ from agentclaw.community.adapters.http.aicoding.notify_router import (
     NotifySummaryResponse,
 )
 from agentclaw.community.core.auth.models import AuthenticatedIdentity
-from agentclaw.community.core.notify.protocol import NotifyBotLister
+from agentclaw.community.core.notify.protocol import NotifyBotLister, NotifyTarget
+from agentclaw.community.core.devices.services.device_context import (
+    ConnInfoBuildError,
+    DeviceNotBoundError,
+    UnknownProviderError,
+)
+from agentclaw.community.plugin_api.device_adapter_transport import (
+    DeviceAdapterEndpointNotFoundError,
+    DeviceAdapterHTTPStatusError,
+    DeviceAdapterTimeoutError,
+)
 
 
 def _create_notify_client(test_injector, mock_user, mock_bot_lister):
@@ -49,6 +59,45 @@ def mock_user():
     user.operatorName = "Test User"
     user.nickName = "Test User"
     return user
+
+
+
+def _make_ctx(provider="arca", bot_type="personal", conn_info=None):
+    """A fake DeviceContext returned by resolver.resolve_for_bot."""
+    ctx = MagicMock()
+    ctx.provider = provider
+    ctx.bot_type = bot_type
+    ctx.conn_info = conn_info if conn_info is not None else {
+        "url": "http://engine/proxypass/target",
+        "headers": {"x-proxypass-token": "t"},
+    }
+    return ctx
+
+
+def _make_resolver(ctx=None, exc=None):
+    resolver = MagicMock()
+    if exc is not None:
+        resolver.resolve_for_bot.side_effect = exc
+    else:
+        resolver.resolve_for_bot.return_value = ctx if ctx is not None else _make_ctx()
+    return resolver
+
+
+def _make_transport(response=None, exc=None):
+    transport = MagicMock()
+    if exc is not None:
+        transport.invoke = AsyncMock(side_effect=exc)
+    else:
+        transport.invoke = AsyncMock(
+            return_value=response if response is not None else {"success": True, "data": []}
+        )
+    return transport
+
+
+def _target(bot_id="bot_001", bot_name="Bot One", owner_id="owner1", sandbox_id="sb1"):
+    return NotifyTarget(
+        bot_id=bot_id, bot_name=bot_name, owner_id=owner_id, sandbox_id=sandbox_id,
+    )
 
 
 class TestNotifyModels:
@@ -105,187 +154,242 @@ class TestNotifyModels:
 
 
 class TestProbeBotNotify:
-    """Test the _probe_bot_notify function."""
+    """Test _probe_bot_notify — provider-routed via resolver + transport."""
 
     @pytest.mark.asyncio
-    async def test_probe_bot_notify_success_with_notifications(self):
-        """Test successful probe with notifications."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "success": True,
-            "data": [
-                {
-                    "interactionId": "123",
-                    "sessionKey": "session_001",
-                    "runId": "run_001",
-                    "kind": "confirm",
-                    "prompt": "Confirm action?",
-                    "status": "pending",
-                    "createdAtMs": 1234567890,
-                }
-            ],
-        }
-
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.get = AsyncMock(return_value=mock_response)
-
-        with patch(
-            "httpx.AsyncClient",
-            return_value=mock_client,
-        ):
-            result = await _probe_bot_notify("bot_001", "Bot One", "sandbox_001", MagicMock())
+    async def test_probe_success_with_notifications(self):
+        data = [
+            {
+                "interactionId": "123",
+                "sessionKey": "session_001",
+                "runId": "run_001",
+                "kind": "confirm",
+                "prompt": "Confirm action?",
+                "status": "pending",
+                "createdAtMs": 1234567890,
+            }
+        ]
+        result = await _probe_bot_notify(
+            _target("bot_001", "Bot One"),
+            _make_resolver(),
+            _make_transport({"success": True, "data": data}),
+        )
 
         assert result is not None
         assert result.bot_id == "bot_001"
-        assert result.bot_name == "Bot One"
-        assert result.sandbox_id == "sandbox_001"
+        assert result.sandbox_id == "sb1"
         assert len(result.notifications) == 1
         assert result.notifications[0].interactionId == "123"
         assert result.notifications[0].kind == "confirm"
 
     @pytest.mark.asyncio
-    async def test_probe_bot_notify_success_empty_notifications(self):
-        """Test successful probe with empty notifications."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "success": True,
-            "data": [],
-        }
-
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.get = AsyncMock(return_value=mock_response)
-
-        with patch(
-            "httpx.AsyncClient",
-            return_value=mock_client,
-        ):
-            result = await _probe_bot_notify("bot_002", "Bot Two", "sandbox_002", MagicMock())
+    async def test_probe_success_empty_notifications(self):
+        result = await _probe_bot_notify(
+            _target("bot_002", "Bot Two", sandbox_id="sandbox_002"),
+            _make_resolver(),
+            _make_transport({"success": True, "data": []}),
+        )
 
         assert result is not None
         assert result.bot_id == "bot_002"
         assert result.notifications == []
 
     @pytest.mark.asyncio
-    async def test_probe_bot_notify_data_is_list(self):
-        """Test probe with data as list."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "success": True,
-            "data": [],
-        }
+    async def test_probe_desktop_routes_through_transport(self):
+        """A desktop (BaaS) bot must probe via the transport's invoke-http path,
+        not the legacy Arca proxypass — this is the regression the fix targets.
+        Before the fix every BaaS bot produced ENGINE_HTTP_500."""
+        resolver = _make_resolver(_make_ctx(
+            provider="baas",
+            bot_type="desktop",
+            conn_info={
+                "url": "ignored-by-desktop-branch",
+                "type": "desktop",
+                "binding_id": 7,
+                "bot_uuid": "BOT-xyz",
+                "tenant": "t",
+                "baas_base_url": "http://baas",
+                "engine_port": 20003,
+                "headers": {},
+            },
+        ))
+        transport = _make_transport({"success": True, "data": []})
 
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.get = AsyncMock(return_value=mock_response)
+        result = await _probe_bot_notify(
+            _target("bot_desk", "Desktop Bot"), resolver, transport
+        )
 
-        with patch(
-            "httpx.AsyncClient",
-            return_value=mock_client,
-        ):
-            result = await _probe_bot_notify("bot_003", "Bot Three", "sandbox_003", MagicMock())
+        assert result is not None
+        assert result.bot_id == "bot_desk"
+        assert result.notifications == []
+        transport.invoke.assert_awaited_once()
+        args, _kwargs = transport.invoke.call_args
+        # (conn_info, method, path, ...) — method/path must target /api/notify
+        assert args[1] == "GET"
+        assert args[2] == "/api/notify"
+        # conn_info flows through so the transport can pick the desktop branch
+        assert args[0]["type"] == "desktop"
+
+    @pytest.mark.asyncio
+    async def test_probe_not_ok(self):
+        result = await _probe_bot_notify(
+            _target("bot_004", "Bot Four"),
+            _make_resolver(),
+            _make_transport({"success": False, "error": "Connection failed"}),
+        )
 
         assert result is not None
         assert result.notifications == []
+        assert result.status == "error"
+        assert result.error_code == "ENGINE_NOTIFY_ERROR"
+        assert result.error_message == "Connection failed"
 
     @pytest.mark.asyncio
-    async def test_probe_bot_notify_not_ok(self):
-        """Test probe returns not success."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "success": False,
-            "error": "Connection failed",
-        }
-
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.get = AsyncMock(return_value=mock_response)
-
-        with patch(
-            "httpx.AsyncClient",
-            return_value=mock_client,
-        ):
-            result = await _probe_bot_notify("bot_004", "Bot Four", "sandbox_004", MagicMock())
+    async def test_probe_preserves_engine_error_code(self):
+        result = await _probe_bot_notify(
+            _target("bot_relay", "Relay Bot", sandbox_id="sb_relay"),
+            _make_resolver(),
+            _make_transport({"success": False, "data": [], "message": "RELAY_UNAVAILABLE: relay down"}),
+        )
 
         assert result is not None
+        assert result.status == "error"
+        assert result.error_code == "RELAY_UNAVAILABLE"
+        assert result.error_message == "relay down"
         assert result.notifications == []
 
     @pytest.mark.asyncio
-    async def test_probe_bot_notify_exception(self):
-        """Test probe raises exception."""
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.get = AsyncMock(side_effect=Exception("Network error"))
-
-        with patch(
-            "httpx.AsyncClient",
-            return_value=mock_client,
-        ):
-            result = await _probe_bot_notify("bot_005", "Bot Five", "sandbox_005", MagicMock())
+    async def test_probe_transport_exception(self):
+        result = await _probe_bot_notify(
+            _target("bot_005", "Bot Five"),
+            _make_resolver(),
+            _make_transport(exc=Exception("Network error")),
+        )
 
         assert result is not None
         assert result.bot_id == "bot_005"
         assert result.notifications == []
+        assert result.status == "error"
+        assert result.error_code == "NOTIFY_PROBE_ERROR"
+        assert result.error_message == "Network error"
 
     @pytest.mark.asyncio
-    async def test_probe_bot_notify_local_mode(self):
-        """Test probe in local mode (sandbox_id is 'local')."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "success": True,
-            "data": [],
-        }
-
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.get = AsyncMock(return_value=mock_response)
-
-        with patch(
-            "httpx.AsyncClient",
-            return_value=mock_client,
-        ):
-            result = await _probe_bot_notify("bot_006", "Bot Six", "local", MagicMock())
-
-        assert result is not None
-        assert result.bot_id == "bot_006"
-        assert result.sandbox_id == "local"
-        # Verify it called the local URL
-        mock_client.get.assert_called_once()
-        call_args = mock_client.get.call_args
-        assert "127.0.0.1:20003" in str(call_args)
-
-    @pytest.mark.asyncio
-    async def test_probe_bot_notify_non_200_status(self):
-        """Test probe returns non-200 status."""
-        mock_response = MagicMock()
-        mock_response.status_code = 500
-
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.get = AsyncMock(return_value=mock_response)
-
-        with patch(
-            "httpx.AsyncClient",
-            return_value=mock_client,
-        ):
-            result = await _probe_bot_notify("bot_007", "Bot Seven", "local", MagicMock())
+    async def test_probe_http_500(self):
+        result = await _probe_bot_notify(
+            _target("bot_007", "Bot Seven"),
+            _make_resolver(),
+            _make_transport(exc=DeviceAdapterHTTPStatusError(500, "boom")),
+        )
 
         assert result is not None
         assert result.bot_id == "bot_007"
         assert result.notifications == []
+        assert result.status == "error"
+        assert result.error_code == "ENGINE_HTTP_500"
+
+    @pytest.mark.asyncio
+    async def test_probe_http_404(self):
+        result = await _probe_bot_notify(
+            _target("bot_404", "Bot 404"),
+            _make_resolver(),
+            _make_transport(exc=DeviceAdapterEndpointNotFoundError("no endpoint")),
+        )
+
+        assert result is not None
+        assert result.error_code == "ENGINE_HTTP_404"
+
+    @pytest.mark.asyncio
+    async def test_probe_timeout(self):
+        result = await _probe_bot_notify(
+            _target("bot_to", "Bot TO"),
+            _make_resolver(),
+            _make_transport(exc=DeviceAdapterTimeoutError("timed out")),
+        )
+
+        assert result is not None
+        assert result.error_code == "ENGINE_TIMEOUT"
+
+    @pytest.mark.asyncio
+    async def test_probe_device_not_bound_returns_empty(self):
+        result = await _probe_bot_notify(
+            _target("bot_nb", "Bot NB"),
+            _make_resolver(exc=DeviceNotBoundError("no binding")),
+            _make_transport(),
+        )
+
+        assert result is not None
+        assert result.bot_id == "bot_nb"
+        assert result.notifications == []
+        # bot exists but (transiently) has no active binding → benign empty
+        assert result.status == "ok"
+
+    @pytest.mark.asyncio
+    async def test_probe_resolve_error(self):
+        result = await _probe_bot_notify(
+            _target("bot_re", "Bot RE"),
+            _make_resolver(exc=ConnInfoBuildError("build failed")),
+            _make_transport(),
+        )
+
+        assert result is not None
+        assert result.status == "error"
+        assert result.error_code == "NOTIFY_RESOLVE_ERROR"
+
+    @pytest.mark.asyncio
+    async def test_probe_unknown_provider(self):
+        result = await _probe_bot_notify(
+            _target("bot_up", "Bot UP"),
+            _make_resolver(exc=UnknownProviderError("weird provider")),
+            _make_transport(),
+        )
+
+        assert result is not None
+        assert result.error_code == "NOTIFY_RESOLVE_ERROR"
+
+    @pytest.mark.asyncio
+    async def test_probe_local_mode(self):
+        """provider=local → direct httpx to 127.0.0.1:20003 (legacy local dev)."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"success": True, "data": []}
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            result = await _probe_bot_notify(
+                _target("bot_006", "Bot Six", sandbox_id="local"),
+                _make_resolver(_make_ctx(provider="local")),
+                _make_transport(),
+            )
+
+        assert result is not None
+        assert result.bot_id == "bot_006"
+        assert result.sandbox_id == "local"
+        mock_client.get.assert_called_once()
+        assert "127.0.0.1:20003" in str(mock_client.get.call_args)
+
+    @pytest.mark.asyncio
+    async def test_probe_local_non_200(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 503
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            result = await _probe_bot_notify(
+                _target("bot_l", "Bot L", sandbox_id="local"),
+                _make_resolver(_make_ctx(provider="local")),
+                _make_transport(),
+            )
+
+        assert result is not None
+        assert result.error_code == "ENGINE_HTTP_503"
 
 
 class TestGetNotifySummaryNoBots:
@@ -309,7 +413,7 @@ class TestGetNotifySummaryWithBots:
 
     def test_single_bot(self, test_injector, mock_user, mock_bot_lister):
         mock_bot_lister.list_bot_mappings.return_value = [
-            ("bot_001", "Test Bot", "sandbox_001"),
+            NotifyTarget("bot_001", "Test Bot", "testuser", "sandbox_001"),
         ]
         mock_summary = BotNotifySummary(
             bot_id="bot_001",
@@ -331,25 +435,25 @@ class TestGetNotifySummaryWithBots:
 
     def test_multiple_bots(self, test_injector, mock_user, mock_bot_lister):
         mock_bot_lister.list_bot_mappings.return_value = [
-            ("bot_001", "Bot One", "sandbox_001"),
-            ("bot_002", "Bot Two", "sandbox_002"),
+            NotifyTarget("bot_001", "Bot One", "testuser", "sandbox_001"),
+            NotifyTarget("bot_002", "Bot Two", "testuser", "sandbox_002"),
         ]
         call_count = 0
 
-        async def mock_probe(bot_id, bot_name, sandbox_id, sandbox_client=None):
+        async def mock_probe(target, resolver, transport):
             nonlocal call_count
             call_count += 1
             return BotNotifySummary(
-                bot_id=bot_id,
-                bot_name=bot_name,
-                sandbox_id=sandbox_id,
+                bot_id=target.bot_id,
+                bot_name=target.bot_name,
+                sandbox_id=target.sandbox_id,
                 notifications=[
                     NotifyEntry(
-                        interactionId=f"int_{bot_id}",
-                        sessionKey=f"session_{bot_id}",
-                        runId=f"run_{bot_id}",
+                        interactionId=f"int_{target.bot_id}",
+                        sessionKey=f"session_{target.bot_id}",
+                        runId=f"run_{target.bot_id}",
                         kind="confirm",
-                        prompt=f"Prompt for {bot_id}",
+                        prompt=f"Prompt for {target.bot_id}",
                         status="pending",
                         createdAtMs=1234567890,
                     )
@@ -387,7 +491,7 @@ class TestGetNotifySummaryWithBots:
 
     def test_with_notifications_in_response(self, test_injector, mock_user, mock_bot_lister):
         mock_bot_lister.list_bot_mappings.return_value = [
-            ("bot_full", "Full Bot", "sb_full"),
+            NotifyTarget("bot_full", "Full Bot", "testuser", "sb_full"),
         ]
         notification = NotifyEntry(
             interactionId="int_full",
@@ -400,10 +504,10 @@ class TestGetNotifySummaryWithBots:
             expiresAtMs=19999999,
         )
 
-        async def mock_probe(bot_id, bot_name, sandbox_id, sandbox_client=None):
+        async def mock_probe(target, resolver, transport):
             return BotNotifySummary(
-                bot_id=bot_id, bot_name=bot_name,
-                sandbox_id=sandbox_id, notifications=[notification],
+                bot_id=target.bot_id, bot_name=target.bot_name,
+                sandbox_id=target.sandbox_id, notifications=[notification],
             )
 
         client = _create_notify_client(test_injector, mock_user, mock_bot_lister)
@@ -425,17 +529,17 @@ class TestGetNotifySummaryWithBots:
     def test_mixed_probe_results(self, test_injector, mock_user, mock_bot_lister):
         """One probe succeeds, one returns None — only successful one in output."""
         mock_bot_lister.list_bot_mappings.return_value = [
-            ("bot_ok", "OK Bot", "sb_ok"),
-            ("bot_fail", "Fail Bot", "sb_fail"),
+            NotifyTarget("bot_ok", "OK Bot", "testuser", "sb_ok"),
+            NotifyTarget("bot_fail", "Fail Bot", "testuser", "sb_fail"),
         ]
 
-        async def mock_probe(bot_id, bot_name, sandbox_id, sandbox_client=None):
-            if bot_id == "bot_fail":
+        async def mock_probe(target, resolver, transport):
+            if target.bot_id == "bot_fail":
                 return None
             return BotNotifySummary(
-                bot_id=bot_id,
-                bot_name=bot_name,
-                sandbox_id=sandbox_id,
+                bot_id=target.bot_id,
+                bot_name=target.bot_name,
+                sandbox_id=target.sandbox_id,
                 notifications=[],
             )
 
@@ -561,98 +665,38 @@ class TestProbeBotNotifyEdgeCases:
 
     @pytest.mark.asyncio
     async def test_probe_data_not_list_returns_empty(self):
-        """Test when data is a dict instead of list - should return empty notifications."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "success": True,
-            "data": {"status": "ok", "count": 0},
-        }
-
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.get = AsyncMock(return_value=mock_response)
-
-        with patch(
-            "httpx.AsyncClient",
-            return_value=mock_client,
-        ):
-            result = await _probe_bot_notify("bot_e1", "Bot E1", "sandbox_e1", MagicMock())
+        result = await _probe_bot_notify(
+            _target("bot_e1", "Bot E1"),
+            _make_resolver(),
+            _make_transport({"success": True, "data": {"status": "ok", "count": 0}}),
+        )
 
         assert result is not None
         assert result.notifications == []
 
     @pytest.mark.asyncio
     async def test_probe_data_is_none(self):
-        """Test when data field is None - should return empty notifications."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {"success": True, "data": None}
-
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.get = AsyncMock(return_value=mock_response)
-
-        with patch(
-            "httpx.AsyncClient",
-            return_value=mock_client,
-        ):
-            result = await _probe_bot_notify("bot_none", "Bot None", "sb_none", MagicMock())
+        result = await _probe_bot_notify(
+            _target("bot_none", "Bot None"),
+            _make_resolver(),
+            _make_transport({"success": True, "data": None}),
+        )
 
         assert result is not None
         assert result.notifications == []
 
     @pytest.mark.asyncio
     async def test_probe_multiple_notifications(self):
-        """Test with multiple notifications in response."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "success": True,
-            "data": [
-                {
-                    "interactionId": "n1",
-                    "sessionKey": "s1",
-                    "runId": "r1",
-                    "kind": "confirm",
-                    "prompt": "Confirm?",
-                    "status": "pending",
-                    "createdAtMs": 1000,
-                },
-                {
-                    "interactionId": "n2",
-                    "sessionKey": "s2",
-                    "runId": "r2",
-                    "kind": "input",
-                    "prompt": "Enter value:",
-                    "status": "active",
-                    "createdAtMs": 2000,
-                    "expiresAtMs": 9000,
-                },
-                {
-                    "interactionId": "n3",
-                    "sessionKey": "s3",
-                    "runId": "r3",
-                    "kind": "select",
-                    "options": [{"value": "a"}, {"value": "b"}],
-                    "status": "pending",
-                    "createdAtMs": 3000,
-                },
-            ],
-        }
-
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.get = AsyncMock(return_value=mock_response)
-
-        with patch(
-            "httpx.AsyncClient",
-            return_value=mock_client,
-        ):
-            result = await _probe_bot_notify("bot_m", "Multi Bot", "sandbox_m", MagicMock())
+        data = [
+            {"interactionId": "n1", "sessionKey": "s1", "runId": "r1", "kind": "confirm", "prompt": "Confirm?", "status": "pending", "createdAtMs": 1000},
+            {"interactionId": "n2", "sessionKey": "s2", "runId": "r2", "kind": "input", "prompt": "Enter value:", "status": "active", "createdAtMs": 2000, "expiresAtMs": 9000},
+            {"interactionId": "n3", "sessionKey": "s3", "runId": "r3", "kind": "select", "options": [{"value": "a"}, {"value": "b"}], "status": "pending", "createdAtMs": 3000},
+        ]
+        result = await _probe_bot_notify(
+            _target("bot_m", "Multi Bot"),
+            _make_resolver(),
+            _make_transport({"success": True, "data": data}),
+        )
 
         assert result is not None
         assert len(result.notifications) == 3
@@ -663,109 +707,27 @@ class TestProbeBotNotifyEdgeCases:
         assert len(result.notifications[2].options) == 2
 
     @pytest.mark.asyncio
-    async def test_probe_exception_building_proxy_request(self):
-        """Exception building the proxy request → empty summary (swallowed)."""
-        client = MagicMock()
-        client.build_proxy_request.side_effect = Exception("proxy build failed")
-        result = await _probe_bot_notify("bot_ex1", "Bot EX1", "sandbox_ex1", client)
-
-        assert result is not None
-        assert result.bot_id == "bot_ex1"
-        assert result.notifications == []
-
-    @pytest.mark.asyncio
-    async def test_probe_exception_building_proxy_request_headers(self):
-        """A second proxy-build failure path → empty summary (swallowed)."""
-        client = MagicMock()
-        client.build_proxy_request.side_effect = RuntimeError("no token")
-        result = await _probe_bot_notify("bot_ex2", "Bot EX2", "sandbox_ex2", client)
-
-        assert result is not None
-        assert result.bot_id == "bot_ex2"
-        assert result.notifications == []
-
-    @pytest.mark.asyncio
     async def test_probe_response_missing_success_key(self):
-        """Test response missing success key - should return empty notifications."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {"data": []}
-
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.get = AsyncMock(return_value=mock_response)
-
-        with patch(
-            "httpx.AsyncClient",
-            return_value=mock_client,
-        ):
-            result = await _probe_bot_notify("bot_no_ok", "Bot NoOK", "sb_no_ok", MagicMock())
+        result = await _probe_bot_notify(
+            _target("bot_no_ok", "Bot NoOK"),
+            _make_resolver(),
+            _make_transport({"data": []}),
+        )
 
         assert result is not None
         assert result.notifications == []
+        assert result.status == "error"
 
     @pytest.mark.asyncio
-    async def test_probe_invalid_notification_data_raises_exception(self):
-        """Test invalid notification data - exception should be caught and return empty."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "success": True,
-            "data": [
-                {"invalid_key": "no required fields"},
-            ]
-        }
-
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.get = AsyncMock(return_value=mock_response)
-
-        with patch(
-            "httpx.AsyncClient",
-            return_value=mock_client,
-        ):
-            result = await _probe_bot_notify("bot_bad", "Bot Bad", "sb_bad", MagicMock())
+    async def test_probe_invalid_notification_data_returns_probe_error(self):
+        """Malformed notification payload → caught and surfaced as NOTIFY_PROBE_ERROR."""
+        result = await _probe_bot_notify(
+            _target("bot_bad", "Bot Bad"),
+            _make_resolver(),
+            _make_transport({"success": True, "data": [{"invalid_key": "no required fields"}]}),
+        )
 
         assert result is not None
-        # Invalid notification data causes exception which returns empty list
         assert result.notifications == []
+        assert result.error_code == "NOTIFY_PROBE_ERROR"
 
-    @pytest.mark.asyncio
-    async def test_probe_uses_client_proxy_request_url(self):
-        """The probe GETs the URL the SandboxRuntimeClient builds for /api/notify."""
-        from agentclaw.community.kernel.device_dto import ProxyRequest
-
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {"success": True, "data": []}
-        captured_url = None
-
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-
-        async def capture_get(url, headers=None):
-            nonlocal captured_url
-            captured_url = url
-            return mock_response
-
-        mock_client.get = AsyncMock(side_effect=capture_get)
-
-        sandbox_client = MagicMock()
-        sandbox_client.build_proxy_request.return_value = ProxyRequest(
-            url="http://base.local:8080/proxypass/my-target/api/notify",
-            headers={"x-proxypass-token": "t"},
-        )
-
-        with patch(
-            "httpx.AsyncClient",
-            return_value=mock_client,
-        ):
-            await _probe_bot_notify("bot_url", "Bot URL", "sb_url", sandbox_client)
-
-        sandbox_client.build_proxy_request.assert_called_once_with(
-            sandbox_id="sb_url", api_path="/api/notify"
-        )
-        assert captured_url == "http://base.local:8080/proxypass/my-target/api/notify"

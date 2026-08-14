@@ -31,7 +31,7 @@ from agentclaw.community.core.system_config import (
     SystemConfigService,
 )
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugins.config_repository import ConfigRepository
+from agentclaw.community.core.repository.implementations.config.config import ConfigRepository
 
 
 logger = get_logger()

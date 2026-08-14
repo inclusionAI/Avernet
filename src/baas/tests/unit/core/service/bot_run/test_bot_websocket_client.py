@@ -20,6 +20,8 @@ import pytest
 
 from secbaas.community.core.service.bot_run._bot_websocket_client import (
     BotWebSocketClient,
+    ChatRequestError,
+    _is_loopback_websocket_uri,
 )
 
 # ==================== Fixtures ====================
@@ -134,6 +136,17 @@ class TestInit:
         assert client.uri == "wss://test.example.com/ws"
 
 
+@pytest.mark.parametrize(
+    ("uri", "expected"),
+    [
+        ("/relative/path", False),
+        ("ws://localhost:18900/ws", True),
+    ],
+)
+def test_is_loopback_websocket_uri_handles_hostname_edges(uri, expected):
+    assert _is_loopback_websocket_uri(uri) is expected
+
+
 # ==================== Tests: _next_request_id ====================
 
 
@@ -177,7 +190,9 @@ class TestConnect:
     # [单测用例]测试场景：连接成功并完成握手
     async def test_connect_handshake_success(self, client):
         """Successfully completes handshake with response."""
+        client.uri = "ws://127.0.0.1:18900/ws"
         mock_ws = AsyncMock()
+        connect_kwargs = {}
 
         async def mock_send(data):
             sent = json.loads(data)
@@ -202,6 +217,7 @@ class TestConnect:
         mock_ws.__aiter__ = AsyncMock(return_value=iter([]))
 
         async def mock_connect(*args, **kwargs):
+            connect_kwargs.update(kwargs)
             return mock_ws
 
         with (
@@ -222,6 +238,7 @@ class TestConnect:
         assert client.connected is True
         assert client.server_info == {"version": "2.5"}
         assert client.features == {"chat": True}
+        assert connect_kwargs["proxy"] is None
 
         await client.close()
 
@@ -746,6 +763,139 @@ class TestConvenienceMethods:
         assert sent["params"] == {"sessionKey": "sk-reset"}
 
 
+# ==================== Tests: ChatRequestError ====================
+
+
+class TestChatRequestError:
+    """Tests for ChatRequestError ok=False handling in chat_send/chat_inject."""
+
+    async def _setup_mock_ws_ok_false(self, client, error_payload):
+        """Helper: set up a mock ws that responds with ok=False."""
+        mock_ws = AsyncMock()
+        client._ws = mock_ws
+        client._connected = True
+
+        async def mock_send(data):
+            sent = json.loads(data)
+            req_id = sent["id"]
+            entry = client._pending_requests.get(req_id)
+            if entry:
+                if not entry.done():
+                    entry.set_result(
+                        {
+                            "type": "res",
+                            "id": req_id,
+                            "ok": False,
+                            "error": error_payload,
+                        }
+                    )
+
+        mock_ws.send = mock_send
+
+    # [单测用例]测试场景：chat_send ok=False 抛出 ChatRequestError
+    async def test_chat_send_ok_false_raises_error(self, client):
+        """chat_send raises ChatRequestError when response ok=False."""
+        error_payload = {
+            "code": "UNAVAILABLE",
+            "message": "Session validation failed",
+            "retryable": True,
+        }
+        await self._setup_mock_ws_ok_false(client, error_payload)
+
+        with pytest.raises(ChatRequestError, match="chat.send failed"):
+            await client.chat_send(session_key="sk-err", message="hello")
+
+    # [单测用例]测试场景：chat_send ChatRequestError 包含 error 详情
+    async def test_chat_send_error_details(self, client):
+        """ChatRequestError from chat_send includes error_code, error_message, retryable."""
+        error_payload = {
+            "code": "UNAVAILABLE",
+            "message": "Session validation failed",
+            "retryable": True,
+        }
+        await self._setup_mock_ws_ok_false(client, error_payload)
+
+        with pytest.raises(ChatRequestError) as exc_info:
+            await client.chat_send(session_key="sk-err", message="hello")
+
+        err = exc_info.value
+        assert err.error_code == "UNAVAILABLE"
+        assert err.error_message == "Session validation failed"
+        assert err.retryable is True
+
+    # [单测用例]测试场景：chat_send ok=False 缺少 error 字段时安全处理
+    async def test_chat_send_ok_false_missing_error_fields(self, client):
+        """ChatRequestError handles missing error fields gracefully."""
+        await self._setup_mock_ws_ok_false(client, {})
+
+        with pytest.raises(ChatRequestError) as exc_info:
+            await client.chat_send(session_key="sk-err", message="hello")
+
+        err = exc_info.value
+        assert err.error_code is None
+        assert err.error_message is None
+        assert err.retryable is None
+
+    # [单测用例]测试场景：chat_inject ok=False 抛出 ChatRequestError
+    async def test_chat_inject_ok_false_raises_error(self, client):
+        """chat_inject raises ChatRequestError when response ok=False."""
+        error_payload = {
+            "code": "FORBIDDEN",
+            "message": "Permission denied",
+            "retryable": False,
+        }
+        await self._setup_mock_ws_ok_false(client, error_payload)
+
+        with pytest.raises(ChatRequestError, match="chat.inject failed"):
+            await client.chat_inject(session_key="sk-err", message="inject")
+
+    # [单测用例]测试场景：chat_inject ChatRequestError 包含 error 详情
+    async def test_chat_inject_error_details(self, client):
+        """ChatRequestError from chat_inject includes error_code, error_message, retryable."""
+        error_payload = {
+            "code": "FORBIDDEN",
+            "message": "Permission denied",
+            "retryable": False,
+        }
+        await self._setup_mock_ws_ok_false(client, error_payload)
+
+        with pytest.raises(ChatRequestError) as exc_info:
+            await client.chat_inject(session_key="sk-err", message="inject")
+
+        err = exc_info.value
+        assert err.error_code == "FORBIDDEN"
+        assert err.error_message == "Permission denied"
+        assert err.retryable is False
+
+    # [单测用例]测试场景：chat_send ok=True 正常返回
+    async def test_chat_send_ok_true_returns_result(self, client):
+        """chat_send returns result when ok=True."""
+        mock_ws = AsyncMock()
+        client._ws = mock_ws
+        client._connected = True
+
+        async def mock_send(data):
+            sent = json.loads(data)
+            req_id = sent["id"]
+            entry = client._pending_requests.get(req_id)
+            if entry:
+                if not entry.done():
+                    entry.set_result(
+                        {
+                            "type": "res",
+                            "id": req_id,
+                            "ok": True,
+                            "payload": {"accepted": True},
+                        }
+                    )
+
+        mock_ws.send = mock_send
+
+        result = await client.chat_send(session_key="sk-ok", message="hello")
+        assert result["ok"] is True
+        assert result["payload"]["accepted"] is True
+
+
 # ==================== Tests: on_event ====================
 
 
@@ -767,6 +917,120 @@ class TestOnEvent:
         client.on_event("my.event", h1)
         client.on_event("my.event", h2)
         assert client._event_handlers["my.event"] is h2
+
+
+# ==================== Tests: chat_send / chat_inject with attachments ====================
+
+
+class TestAttachmentsInChatSendAndInject:
+    """Tests for attachments passthrough in chat_send and chat_inject."""
+
+    async def _setup_mock_ws(self, client):
+        """Helper: set up a mock ws that auto-responds to requests."""
+        mock_ws = AsyncMock()
+        client._ws = mock_ws
+        client._connected = True
+        sent_frames = []
+
+        async def mock_send(data):
+            sent = json.loads(data)
+            sent_frames.append(sent)
+            req_id = sent["id"]
+            entry = client._pending_requests.get(req_id)
+            if entry:
+                if not entry.done():
+                    entry.set_result(
+                        {
+                            "type": "res",
+                            "id": req_id,
+                            "ok": True,
+                            "payload": {},
+                        }
+                    )
+
+        mock_ws.send = mock_send
+        return sent_frames
+
+    # [单测用例]测试场景：chat_send 带 attachments 时 params 包含 attachments 键
+    @pytest.mark.asyncio
+    async def test_chat_send_with_attachments(self, client):
+        """chat_send with attachments includes 'attachments' key in params dict."""
+        sent_frames = await self._setup_mock_ws(client)
+        attachments = [
+            {
+                "attachment_id": "att_1",
+                "type": "image",
+                "file_name": "f1.png",
+                "url": "https://cdn.example.com/f1",
+            }
+        ]
+
+        await client.chat_send(
+            session_key="agent:main:xxx",
+            message="hello",
+            attachments=attachments,
+        )
+
+        params = sent_frames[0]["params"]
+        assert "attachments" in params
+        assert params["attachments"] == attachments
+        assert params["attachments"][0]["attachment_id"] == "att_1"
+        # Verify required fields still present
+        assert params["sessionKey"] == "agent:main:xxx"
+        assert params["message"] == "hello"
+        assert "permissionMode" in params
+
+    # [单测用例]测试场景：chat_send 不带 attachments 时 params 不含 attachments 键
+    @pytest.mark.asyncio
+    async def test_chat_send_without_attachments(self, client):
+        """chat_send without attachments does not include 'attachments' key."""
+        sent_frames = await self._setup_mock_ws(client)
+
+        await client.chat_send(session_key="agent:main:xxx", message="hello")
+
+        params = sent_frames[0]["params"]
+        assert "attachments" not in params
+        # Verify backward compatibility
+        assert params["sessionKey"] == "agent:main:xxx"
+        assert params["message"] == "hello"
+
+    # [单测用例]测试场景：chat_inject 带 attachments 时 params 包含 attachments 键
+    @pytest.mark.asyncio
+    async def test_chat_inject_with_attachments(self, client):
+        """chat_inject with attachments includes 'attachments' key in params dict."""
+        sent_frames = await self._setup_mock_ws(client)
+        attachments = [
+            {
+                "attachment_id": "att_2",
+                "type": "document",
+                "file_name": "report.pdf",
+                "url": "https://cdn.example.com/report",
+            }
+        ]
+
+        await client.chat_inject(
+            session_key="agent:main:yyy",
+            message="inject with attachment",
+            attachments=attachments,
+        )
+
+        params = sent_frames[0]["params"]
+        assert "attachments" in params
+        assert params["attachments"] == attachments
+        assert params["attachments"][0]["attachment_id"] == "att_2"
+        assert params["sessionKey"] == "agent:main:yyy"
+
+    # [单测用例]测试场景：chat_inject 不带 attachments 时 params 不含 attachments 键
+    @pytest.mark.asyncio
+    async def test_chat_inject_without_attachments(self, client):
+        """chat_inject without attachments does not include 'attachments' key."""
+        sent_frames = await self._setup_mock_ws(client)
+
+        await client.chat_inject(session_key="agent:main:yyy", message="hello inject")
+
+        params = sent_frames[0]["params"]
+        assert "attachments" not in params
+        assert params["sessionKey"] == "agent:main:yyy"
 
 
 # ==================== Tests: _get_default_headers ====================

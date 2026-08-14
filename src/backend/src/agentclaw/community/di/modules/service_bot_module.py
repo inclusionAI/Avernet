@@ -32,14 +32,18 @@ from injector import Binder, Injector, Module, inject, provider, singleton
 
 from agentclaw.community.api.baas_service import BaasServiceProtocol
 from agentclaw.community.api.bot_build_service import BotBuildServiceProtocol
+from agentclaw.community.api.bot_startup_script_service import (
+    BotStartupScriptServiceProtocol,
+)
 from agentclaw.community.api.bot_publish_service import BotPublishServiceProtocol
 from agentclaw.community.api.channel_service import ChannelServiceProtocol
 from agentclaw.community.api.publish_flow_service import PublishFlowServiceProtocol
 from agentclaw.community.api.publish_approval import PublishApprovalServiceProtocol
 from agentclaw.community.api.quality_service import QualityTaskServiceProtocol
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.bot_management.services.template_service import TemplateService
 from agentclaw.community.core.channel.services.engine_overrides_reader import (
     ChannelEngineOverridesReader,
 )
@@ -49,7 +53,7 @@ from agentclaw.community.core.config_compose.services.collector import (
 )
 from agentclaw.community.core.config_compose.services.config_composer import ConfigComposer
 from agentclaw.community.core.config_compose.services.mcporter_composer import McporterComposer
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.baas_template_resolver import (
     SystemConfigBaasTemplateResolver,
 )
@@ -62,15 +66,23 @@ from agentclaw.community.core.service_bot.services.deploy.teclaw_file_promotion 
 )
 from agentclaw.community.di.modules.skill_center_module import DeviceFilesystemDispatcher
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
+from agentclaw.community.core.repository.protocols.publishing import PublishOperationRepository
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
+from agentclaw.community.core.service_bot.services.bot_process import (
+    BotProcessRegistry,
+    EmptyBotProcess,
+    PersonalBotProcess,
+)
 from agentclaw.community.core.service_bot.services.bot_publish_service import BotPublishService
 from agentclaw.community.core.service_bot.services.deploy.arca_snapshot_producer import (
     ArcaSnapshotProducer,
 )
+from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
+    ServiceSkillsManifestBuilder,
+)
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolLayoutRepositoryProtocol
 from agentclaw.community.core.service_bot.services.deploy.external_compose_producer import (
     ExternalComposeProducer,
 )
@@ -107,9 +119,8 @@ from agentclaw.community.plugin_api.approval_workflow import ApprovalWorkflowPlu
 from agentclaw.community.core.service_bot.repository.config_artifact_offload import (
     ConfigArtifactOffloader,
 )
-from agentclaw.community.plugins.bot_publish_repository import (
-    BotPublishRepository as UnifiedBotPublishRepository,
-)
+from agentclaw.community.core.repository.implementations.publishing.bot_publish import BotPublishRepository as UnifiedBotPublishRepository
+from agentclaw.community.core.repository.implementations.publishing.publish_operation import OrmPublishOperationRepository
 from agentclaw.community.utils import env_utils
 
 logger = get_logger()
@@ -132,6 +143,13 @@ class ServiceBotModule(Module):
         binder.bind(
             BotPublishRepositoryProtocol,
             to=UnifiedBotPublishRepository,
+            scope=singleton,
+        )
+        # Publish operation ledger repository — same unified-ORM pattern; the
+        # crash-safe operation ledger (ac_publish_operation).
+        binder.bind(
+            PublishOperationRepository,
+            to=OrmPublishOperationRepository,
             scope=singleton,
         )
 
@@ -163,8 +181,10 @@ class ServiceBotModule(Module):
         baas_http: Annotated[HttpClient, QUALIFIER_BAAS],
         general_http: Annotated[HttpClient, QUALIFIER_GENERAL],
         secret_resolver: SecretResolver,
+        secret_names: cfg.SecretNamesConfig,
         common_whitelist_service: CommonWhiteListService,
         outbound_rule_provider: OutboundRuleProvider,
+        startup_script_service: BotStartupScriptServiceProtocol,
     ) -> BaasService:
         """Construct ``BaasService`` from typed bindings.
 
@@ -198,6 +218,8 @@ class ServiceBotModule(Module):
             personal_bot_template_uuid=baas.personal_bot_template_uuid,
             common_whitelist_service=common_whitelist_service,
             outbound_rule_provider=outbound_rule_provider,
+            theta_master_key_secret=secret_names.aicoding_theta_master_key,
+            startup_script_reader=startup_script_service,
         )
         logger.info(
             "[NEW-ARCH] BaasService initialized: api_base=%s, tenant=%s, template_uuid=%s, "
@@ -244,6 +266,18 @@ class ServiceBotModule(Module):
     @singleton
     @provider
     @inject
+    def bot_process_registry(
+        self, template_service: TemplateService
+    ) -> BotProcessRegistry:
+        """Construct bot-type-specific binding response processors."""
+        return BotProcessRegistry(
+            personal_bot_process=PersonalBotProcess(template_service),
+            default_bot_process=EmptyBotProcess(),
+        )
+
+    @singleton
+    @provider
+    @inject
     def bot_publish_service(
         self,
         injector: Injector,
@@ -253,6 +287,10 @@ class ServiceBotModule(Module):
         device_binding_repo: DeviceBindingRepository,
         bcn_service: BcnService,
         quality_task_service: QualityTaskServiceProtocol,
+        publish_operation_repo: PublishOperationRepository,
+        task_queue_service: TaskQueueService,
+        bot_process_registry: BotProcessRegistry,
+        common_config_service: CommonConfigService,
     ) -> BotPublishService:
         """Construct ``BotPublishService``.
 
@@ -269,16 +307,25 @@ class ServiceBotModule(Module):
             device_binding_repo=device_binding_repo,
             bcn_service=bcn_service,
             quality_task_service=quality_task_service,
+            publish_operation_repo=publish_operation_repo,
+            task_queue_service=task_queue_service,
+            bot_process_registry=bot_process_registry,
+            common_config_service=common_config_service,
             publish_flow_service_provider=lambda: injector.get(PublishFlowService),
         )
 
     @provider
     @singleton
     def arca_snapshot_producer(
-        self, bot_build_service: BotBuildService
+        self,
+        bot_build_service: BotBuildService,
+        layout_repository: SkillsPoolLayoutRepositoryProtocol,
     ) -> ArcaSnapshotProducer:
-        """ARCA build-snapshot producer — wraps the existing ``build()``."""
-        return ArcaSnapshotProducer(bot_build_service)
+        """ARCA snapshot plus the service draft's frozen Skills layout."""
+        return ArcaSnapshotProducer(
+            bot_build_service,
+            ServiceSkillsManifestBuilder(layout_repository),
+        )
 
     @singleton
     @provider
@@ -297,9 +344,7 @@ class ServiceBotModule(Module):
         from agentclaw.community.core.services.identity import IdentityService
         from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
         from agentclaw.community.core.mcp.services.config_service import MCPConfigService
-        from agentclaw.community.core.resources.repository.protocol import (
-            ResourceRepositoryProtocol,
-        )
+        from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
 
         return ConfigComposerInputCollector(
             skill_set_service_factory=injector.get(SkillSetServiceFactory),
@@ -411,6 +456,7 @@ class ServiceBotModule(Module):
         oss_storage: ObjectStoragePlugin,
         channel_overrides_reader: ChannelEngineOverridesReader,
         task_queue_service: TaskQueueService,
+        publish_operation_repo: PublishOperationRepository,
     ) -> PublishFlowService:
         """Construct ``PublishFlowService``.
 
@@ -434,6 +480,7 @@ class ServiceBotModule(Module):
             teclaw_file_promotion=TeclawFilePromotion(oss_storage=oss_storage),
             channel_overrides_reader=channel_overrides_reader,
             task_queue_service=task_queue_service,
+            publish_operation_repo=publish_operation_repo,
         )
 
     @singleton
@@ -441,6 +488,7 @@ class ServiceBotModule(Module):
     @inject
     def publish_task_lifecycle(
         self,
+        injector: Injector,
         registry: HandlerRegistry,
         flow: PublishFlowService,
         task_queue_service: TaskQueueService,
@@ -449,11 +497,15 @@ class ServiceBotModule(Module):
         ``HandlerRegistry``. A singleton ``Lifecycle`` so discovery runs its
         ``bootstrap()`` before ``TaskWorker.startup()`` claims (mirrors
         ``baas_publish_task_lifecycle`` in ``DevicesModule``).
+
+        The approval trigger handler resolves ``PublishApprovalService`` lazily to
+        break its DI cycle with ``PublishFlowService``.
         """
         return PublishTaskLifecycle(
             registry=registry,
             flow=flow,
             task_queue_service=task_queue_service,
+            approval_service_provider=lambda: injector.get(PublishApprovalService),
         )
 
     @singleton
@@ -501,6 +553,7 @@ class ServiceBotModule(Module):
         publish_service: BotPublishService,
         process_service: ApprovalWorkflowPlugin,
         bot_service: BotService,
+        task_queue_service: TaskQueueService,
     ) -> PublishApprovalService:
         """Construct ``PublishApprovalService`` with lazy publish flow service provider.
 
@@ -513,6 +566,7 @@ class ServiceBotModule(Module):
             publish_flow_service_provider=lambda: injector.get(PublishFlowService),
             process_service=process_service,
             bot_service=bot_service,
+            task_queue_service=task_queue_service,
         )
 
     @singleton

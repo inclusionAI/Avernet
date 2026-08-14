@@ -431,7 +431,7 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
                 profile_data = {
                     "worker_id": worker_id,  # CRITICAL: Include worker_id for ProfileResponse
                     "profile_id": profile_id,  # CRITICAL: Include profile_id for ProfileResponse
-                    "content": req.profile.soul_md or "",  # soul_md is the main content
+                    "soul_md": req.profile.soul_md or "",  # SOUL.md content
                     "display_name": req.profile.display_name,
                     "contents": merged_contents,
                     "skill_sets": req.profile.skill_sets,
@@ -1207,7 +1207,7 @@ async def get_worker_config(worker_id: str, request: Request):
         )
 
 
-@admin_router.put(
+@mgmt_router.put(
     "/workers/{worker_id}/config",
     summary="Update worker config",
     description="Update worker configuration.",

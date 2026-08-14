@@ -179,8 +179,8 @@ class TestDeviceCreationErrorMapping:
                 f"{error_code} maps to {status}, expected 4xx/5xx"
             )
 
-    def test_mapping_has_all_30_entries(self):
-        assert len(DEVICE_CREATION_ERROR_TO_HTTP_STATUS) == 30
+    def test_mapping_has_all_entries(self):
+        assert len(DEVICE_CREATION_ERROR_TO_HTTP_STATUS) == 33
 
     def test_unknown_code_get_default(self):
         """Handler uses .get() with default 500 for unmapped codes."""

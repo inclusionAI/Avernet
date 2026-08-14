@@ -860,6 +860,47 @@ class TestCreateDeviceRecordsForPublish:
         assert svc._device_service.create_device.call_count == 2
         assert svc._rel_repo.insert_rel.call_count == 2
 
+    def test_scale_up_uses_publish_config_deploy_config(self):
+        svc = _make_service()
+        bot = _make_bot_record()
+        bot.config = MagicMock()
+        bot.config.deploy_config = MagicMock()
+        template = MagicMock()
+        svc._template_service.get_online_template_by_uuid.return_value = template
+
+        new_device = _make_device(id=100, device_uuid="new-dev-1", status="PENDING")
+        svc._device_service.create_device.return_value = new_device
+
+        from secbaas.community.api.device_manage import DeployConfig
+
+        publish_deploy_config = DeployConfig(docker_image="v2")
+        publish_config = PublishConfig(
+            replica_desired=5,
+            deploy_config=publish_deploy_config,
+        )
+        batch = _make_batch_record(batch_capacity=1)
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            svc._create_device_records_for_publish(
+                tenant="t",
+                env="test",
+                publish_id=1,
+                publish_type=PublishType.SCALE_UP,
+                bot_record=bot,
+                batch_records=[batch],
+                operator="op",
+                publish_config=publish_config,
+            )
+
+        call_args = svc._device_service.create_device.call_args
+        kwargs = call_args.kwargs
+        device_create_data = kwargs["data"]
+
+        assert device_create_data.extra_config.deploy_config == publish_deploy_config
+
     def test_scale_down_selects_active_devices(self):
         svc = _make_service()
         bot = _make_bot_record()
@@ -981,6 +1022,100 @@ class TestCreateDeviceRecordsForPublish:
                     batch_records=[batch],
                     operator="op",
                 )
+
+    def test_insert_record_includes_provider_device_id_in_extra_config(self):
+        """Verify extra_config captures device_uuid + provider_device_id on insert."""
+        import dataclasses
+
+        from secbaas.community.core.repository.publish_record import (
+            PublishRecordExtraConfig,
+        )
+
+        svc = _make_service()
+        bot = _make_bot_record()
+        svc._device_repo.list_by_bot_id.return_value = [
+            _make_device(
+                id=1, device_uuid="uuid-abc", provider_device_id="provider-xyz"
+            ),
+        ]
+        batch = _make_batch_record(batch_capacity=1)
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            svc._create_device_records_for_publish(
+                tenant="t",
+                env="test",
+                publish_id=1,
+                publish_type=PublishType.CREATE,
+                bot_record=bot,
+                batch_records=[batch],
+                operator="op",
+            )
+
+        svc._publish_record_repo.insert_record.assert_called_once()
+        call_kwargs = svc._publish_record_repo.insert_record.call_args.kwargs
+        assert "extra_config" in call_kwargs
+        assert call_kwargs["extra_config"] == {
+            "device_uuid": "uuid-abc",
+            "provider_device_id": "provider-xyz",
+        }
+
+    def test_insert_record_extra_config_with_provider_none(self):
+        """Verify extra_config still captures device_uuid when provider_device_id is None."""
+        svc = _make_service()
+        bot = _make_bot_record()
+        svc._device_repo.list_by_bot_id.return_value = [
+            _make_device(id=1, device_uuid="uuid-abc", provider_device_id=None),
+        ]
+        batch = _make_batch_record(batch_capacity=1)
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            svc._create_device_records_for_publish(
+                tenant="t",
+                env="test",
+                publish_id=1,
+                publish_type=PublishType.CREATE,
+                bot_record=bot,
+                batch_records=[batch],
+                operator="op",
+            )
+
+        call_kwargs = svc._publish_record_repo.insert_record.call_args.kwargs
+        assert call_kwargs["extra_config"] == {
+            "device_uuid": "uuid-abc",
+            "provider_device_id": None,
+        }
+
+    def test_insert_record_extra_config_both_none_is_omitted(self):
+        """Verify extra_config is None when both fields are None."""
+        svc = _make_service()
+        bot = _make_bot_record()
+        svc._device_repo.list_by_bot_id.return_value = [
+            _make_device(id=1, device_uuid=None, provider_device_id=None),
+        ]
+        batch = _make_batch_record(batch_capacity=1)
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            svc._create_device_records_for_publish(
+                tenant="t",
+                env="test",
+                publish_id=1,
+                publish_type=PublishType.CREATE,
+                bot_record=bot,
+                batch_records=[batch],
+                operator="op",
+            )
+
+        call_kwargs = svc._publish_record_repo.insert_record.call_args.kwargs
+        assert call_kwargs["extra_config"] is None
 
 
 # ====================================================================
@@ -1566,6 +1701,119 @@ class TestExecuteStageEdgeCases:
             result = await svc.execute_stage("t", 1, "op")
             assert isinstance(result, DrainResult)
             assert result.success is True
+
+
+# ====================================================================
+# execute_stage — callback race condition fix (lines 1890-1907)
+# ====================================================================
+
+
+class TestExecuteStageCallbackRacefix:
+    """When the callback handler (running in a background thread) completes
+    before execute_stage checks batch completion, the callback may have
+    already set the batch to a terminal status (FAILED/COMPLETED).
+    execute_stage must preserve that terminal status instead of
+    overwriting it.
+    """
+
+    @pytest.mark.asyncio
+    async def test_callback_already_set_batch_failed_preserves_status(self):
+        """Callback set batch=FAILED → preserve it and count failures.
+
+        Covers lines 1893, 1894, 1895.
+        """
+        svc = _make_service()
+        pub = _make_publish_record(status="ACTIVE")
+        bot = _make_bot_record()
+        batch = _make_batch_record(status="PENDING")
+        failed_batch = _make_batch_record(status=BatchStatus.FAILED.value)
+
+        svc._publish_repo.get_by_id.return_value = pub
+        svc._bot_repo.get_by_id_including_deleted.return_value = bot
+        svc._bot_repo.get_by_id.return_value = bot
+
+        # list_by_publish_id: return FAILED batch — no RUNNING batches remain
+        svc._publish_batch_repo.list_by_publish_id.return_value = [failed_batch]
+        # get_by_id: re-read returns FAILED (callback already set it)
+        svc._publish_batch_repo.get_by_id.return_value = failed_batch
+
+        # count_records_by_batch_id: no PROCESSING records (inline path),
+        # some FAILED records reported by the callback
+        svc._publish_record_repo.count_records_by_batch_id.return_value = {
+            "PROCESSING": 0,
+            "FAILED": 2,
+        }
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            with patch.object(svc, "_get_pending_batches") as mock_gpb:
+                mock_gpb.side_effect = [
+                    ("PROD_FIRST_BATCH", [batch]),
+                    ("PROD_FIRST_BATCH", []),
+                ]
+                with patch.object(
+                    svc, "_execute_batch", new_callable=AsyncMock
+                ) as mock_exec:
+                    mock_exec.return_value = BatchResult(
+                        success=True, processed_count=2, failed_count=0
+                    )
+
+                    result = await svc.execute_stage("t", 1, "op")
+
+                    # Callback already set batch to FAILED — total_failed was
+                    # incremented by the FAILED count from the callback, so
+                    # all_success = False and the publish is marked FAILED.
+                    assert result.success is False
+
+    @pytest.mark.asyncio
+    async def test_callback_already_set_batch_completed_preserves_status(self):
+        """Callback set batch=COMPLETED → preserve it without overwriting.
+
+        Covers line 1904.
+        """
+        svc = _make_service()
+        pub = _make_publish_record(status="ACTIVE")
+        bot = _make_bot_record()
+        batch = _make_batch_record(status="PENDING")
+        completed_batch = _make_batch_record(status=BatchStatus.COMPLETED.value)
+
+        svc._publish_repo.get_by_id.return_value = pub
+        svc._bot_repo.get_by_id_including_deleted.return_value = bot
+        svc._bot_repo.get_by_id.return_value = bot
+
+        # list_by_publish_id: return COMPLETED batch — no RUNNING batches remain
+        svc._publish_batch_repo.list_by_publish_id.return_value = [completed_batch]
+        # get_by_id: re-read returns COMPLETED (callback already set it)
+        svc._publish_batch_repo.get_by_id.return_value = completed_batch
+
+        # count_records_by_batch_id: no PROCESSING records (inline path)
+        svc._publish_record_repo.count_records_by_batch_id.return_value = {
+            "PROCESSING": 0,
+        }
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            with patch.object(svc, "_get_pending_batches") as mock_gpb:
+                mock_gpb.side_effect = [
+                    ("PROD_FIRST_BATCH", [batch]),
+                    ("PROD_FIRST_BATCH", []),
+                ]
+                with patch.object(
+                    svc, "_execute_batch", new_callable=AsyncMock
+                ) as mock_exec:
+                    mock_exec.return_value = BatchResult(
+                        success=True, processed_count=2, failed_count=0
+                    )
+
+                    result = await svc.execute_stage("t", 1, "op")
+
+                    # Callback already set batch to COMPLETED — nothing
+                    # overwritten, total_failed stays 0, all_success = True.
+                    assert result.success is True
 
 
 # ====================================================================

@@ -1,103 +1,57 @@
 # plugins/
 
-Concrete implementations of the capability protocols defined in
-`agentclaw/plugin_api/`. Selected at bootstrap based on runtime mode.
+Concrete implementations of the capability Protocols declared in
+`agentclaw/community/plugin_api/`. The composition root selects a flavor at
+bootstrap based on the deploy profile.
 
-## Migration source map
+```text
+plugins/
+├── local/       singlebox / dev  (SQLite, in-memory cache, noop transports)
+├── community/   the community distribution
+└── http_client.py
+```
 
-| Plugin    | local impl source                                            | prod impl source                                       |
-|-----------|--------------------------------------------------------------|--------------------------------------------------------|
-| auth      | (anonymous / cookie — no current implementation)             | `agentclaw/infrastructure/auth.py`                     |
-| cache     | (TODO — currently uses ZCache via MOSN even in local mode)   | `agentclaw/infrastructure/cache.py`                    |
-| database  | `agentclaw/services/openclawserver/server/db.py` (SQLite)    | `agentclaw/infrastructure/database/connection.py`      |
-| storage   | `agentclaw/infrastructure/local_fs_storage.py`               | `agentclaw/infrastructure/oss_storage.py`              |
-| device    | `agentclaw/services/device/service_local.py`                 | `agentclaw/services/device/service_arca.py` + `agentclaw/infrastructure/arca_*.py` |
+## What belongs here
 
-> Skeleton only — none of these have been moved yet. Files here contain
-> empty class stubs that intentionally do **not** import the existing
-> infrastructure modules, so importing this package never breaks the
-> currently-running backend.
+A component belongs in the plugin layer when **different runtime profiles need
+different implementations**. Rule 20 makes that concrete: every plugin contract
+carries paired local and prod implementations, and `test_plugin_pairing` enforces
+it.
 
-## Out of scope (handled elsewhere)
+`http_client.py` is the one implementation at this level rather than inside a
+profile package: `HttpxClient` is the shared default, paired with
+`local/http_client.py` and overridden again by
+`di/modules/infrastructure/test/http_client.py`.
 
-The following capabilities are intentionally **not** mirrored under
-`plugins/` here, because they live in their own top-level modules:
+## What does not belong here — repositories
 
-| Capability | Where it lives                              |
-|------------|---------------------------------------------|
-| engine     | `ocb/src/engine/` (Adapter module)          |
-| bcs        | `ocb/src/bcs/`   (Rust coordination service)|
-| bcn        | engine-side BCN plugin (proposal §5.3)      |
+Repositories used to live here, and no longer do. They failed the test above on
+both counts: each had exactly one implementation, and the only per-profile
+difference was the `DatabasePlugin` injected into the constructor — one layer
+below, where the swap actually belongs.
 
-The backend will only ever have *client-side* contracts for these in
-`agentclaw/plugin_api/{engine,bcs,bcn}.py`; their concrete servers are
-owned by the corresponding modules.
+They now live in `core/repository/`, grouped by domain:
 
----
+```text
+core/repository/
+├── protocols/        the contracts, @abstractmethod throughout
+└── implementations/  the ORM bodies, each declaring its Protocol as a base
+```
 
-## TODO — incremental migration checklist
+Do not add a repository here. If you are adding a component and are unsure which
+layer it belongs to, ask whether a *second* implementation would ever be selected
+by profile. If the answer is no, it is not a plugin.
 
-Each row below is a self-contained migration unit. Pick one, open a PR
-that (a) moves the code, (b) updates importers, (c) deletes the old
-file, (d) adds/updates tests, (e) ticks the box here.
+See `specs/2026-08-05-core-repository-consolidation/` for the move, and its
+`path-map.md` for old → new module paths.
 
-**Convention:** when claiming a row, append your name + date in the
-"Owner" column so others don't pick it up. Mark `[x]` only when the old
-path has been deleted and CI is green.
+## Out of scope (owned by other modules)
 
-### Phase A — leaf plugin_api (no cross-dependency)
+| Capability | Where it lives |
+| --- | --- |
+| engine | `ocb/src/engine/` (Adapter module) |
+| bcs | `ocb/src/bcs/` (Rust coordination service) |
+| bcn | engine-side BCN plugin |
 
-- [ ] **storage / local** — move `infrastructure/local_fs_storage.py`
-      → `plugins/local/storage.py`. Owner:
-- [ ] **storage / prod** — move `infrastructure/oss_storage.py`
-      → `plugins/prod/storage.py`. Owner:
-- [x] **cache / prod** — move `infrastructure/cache.py`
-      → `plugins/prod/cache.py` as `ZCachePlugin`.
-- [x] **cache / local** — implement `MemoryCachePlugin` (in-process dict
-      with TTL, removes the MOSN dependency in `--local` mode).
-- [x] **auth / prod** — move `infrastructure/auth.py`
-      → `plugins/prod/auth.py` as `BuserviceAuth`.
-- [x] **auth / local** — implement `LocalAuth` (cookie-based identity).
-
-### Phase B — database & device (touches many call sites)
-
-- [ ] **database / prod** — move `infrastructure/database/connection.py`
-      → `plugins/prod/database.py`, define a real `DatabasePlugin`
-      protocol first. Owner:
-- [ ] **database / local** — wrap `services/openclawserver/server/db.py`
-      (SQLite init) into `plugins/local/database.py`. Owner:
-- [ ] **device / local** — move `services/device/service_local.py`
-      + `services/device/sqlite_*.py`
-      → `plugins/local/device.py`. Owner:
-- [ ] **device / prod** — move `services/device/service_arca.py`
-      + `infrastructure/arca_client.py`
-      + `infrastructure/arca_factory.py`
-      → `plugins/prod/device.py`. Owner:
-- [ ] **device / daas** — decide whether `services/device/service_daas.py`
-      becomes a third impl or is folded into `prod/device.py`. Owner:
-
-### Phase C — wiring & cleanup
-
-- [ ] Add a plugin factory (e.g. `agentclaw/core/dependencies/plugin_api.py`)
-      that picks `local` vs `prod` from `RUNTIME_MODE` /
-      `LOCAL_DEV_MODE` and exposes them via FastAPI `Depends`. Owner:
-- [ ] Switch `servers/web/dependencies/auth.py` to consume `AuthPlugin`
-      via the factory; delete the old direct import. Owner:
-- [ ] Delete `agentclaw/local/` once `NoAuth` + `MemoryCache` cover its
-      responsibilities. Owner:
-- [ ] Delete the now-empty `agentclaw/infrastructure/` once all six
-      Phase A/B rows are checked. Owner:
-
-### Phase D — protocol hardening (can run in parallel with A–C)
-
-- [ ] Flesh out each `plugin_api/<name>.py` Protocol with real method
-      signatures + Pydantic types. One PR per plugin so reviews stay
-      small. Owner per plugin:
-  - [x] auth
-  - [x] cache
-  - [ ] storage
-  - [ ] database
-  - [ ] devices
-  - [ ] engine (client side only)
-  - [ ] bcs (client side only)
-  - [ ] bcn (client side only)
+The backend only ever holds *client-side* contracts for these in
+`agentclaw/community/plugin_api/`; their servers are owned by those modules.

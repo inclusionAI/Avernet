@@ -62,7 +62,7 @@ class TestPublishConfig:
         assert cfg.batch_capacity_default == 5
         assert cfg.auto_complete is True
         assert cfg.auto_execute_max_iterations == 20
-        assert cfg.callback_timeout_seconds == 900
+        assert cfg.callback_timeout_seconds == 1800
 
     def test_custom_values(self):
         cfg = PublishConfig(

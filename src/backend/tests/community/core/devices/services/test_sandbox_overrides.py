@@ -333,3 +333,26 @@ class TestToCreateKwargs:
         """envs are handled via merged_envs(), not to_create_kwargs()."""
         so = SandboxOverrides(envs={"KEY": "VAL"})
         assert so.to_create_kwargs() == {}
+
+
+class TestTemplateFactoryImageConfig:
+    def test_image_config_name_and_tag_fallback(self):
+        so = SandboxOverrides.from_template_config(
+            {"image_config": {"name": "registry.example.com/architect", "tag": "v1"}}
+        )
+        assert so.image == "registry.example.com/architect:v1"
+
+    def test_top_level_image_wins_over_image_config(self):
+        so = SandboxOverrides.from_template_config(
+            {
+                "image": "registry.example.com/top:v2",
+                "image_config": {"name": "registry.example.com/nested", "tag": "v1"},
+            }
+        )
+        assert so.image == "registry.example.com/top:v2"
+
+    def test_startup_config_command_fallback(self):
+        so = SandboxOverrides.from_template_config(
+            {"startup_config": {"command": ["/bin/sh", "start.sh"]}}
+        )
+        assert so.command == "/bin/sh start.sh"

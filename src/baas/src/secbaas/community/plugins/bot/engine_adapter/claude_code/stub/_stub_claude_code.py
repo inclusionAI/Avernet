@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
 from typing import Any
 
 
 class NoopClaudeCodeAdapter:
-    """No-op Claude Code adapter:返回安全零值、不做任何 I/O。"""
+    """No-op Claude Code adapter:返回安全零值、不做任何 I/O。
+
+    Env vars for E2E failure-path tests:
+    - ``BAAS_STUB_ENGINE_SESSION_ERROR=1`` — ``create_adapter_session()`` raises ``RuntimeError``
+    - ``BAAS_STUB_ENGINE_SESSION_SLOW=1`` — adds a 2s delay to ``create_adapter_session()``
+    """
 
     engine_type = "claude_code"
 
@@ -33,6 +40,10 @@ class NoopClaudeCodeAdapter:
         bot_id: str,
         run_id: str | None,
     ) -> tuple[str, bool]:
+        if os.getenv("BAAS_STUB_ENGINE_SESSION_ERROR"):
+            raise RuntimeError("stub claude_code: simulated session creation failure")
+        if os.getenv("BAAS_STUB_ENGINE_SESSION_SLOW"):
+            await asyncio.sleep(2)
         return ("", True)
 
 

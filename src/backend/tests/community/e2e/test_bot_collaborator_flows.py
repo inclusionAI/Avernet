@@ -43,11 +43,13 @@ def _seed_service_bot(world, *, bot_id: str, owner_id: str) -> None:
             INSERT INTO ac_bots
               (bot_id, bot_name, bot_desc, entity_id, entity_type, creator_id,
                owner_id, engine_types, active_engine, status, gmt_create,
-               gmt_modified, is_delete, public, env, bot_type)
+               gmt_modified, is_delete, public, env, bot_type, call_type,
+               caller_config_revision)
             VALUES (:bot_id, :bot_name, :bot_desc, :entity_id, :entity_type,
                     :creator_id, :owner_id, :engine_types, :active_engine,
                     :status, :gmt_create, :gmt_modified, :is_delete,
-                    :public, :env, :bot_type)
+                    :public, :env, :bot_type, :call_type,
+                    :caller_config_revision)
         """), {
             "bot_id": bot_id,
             "bot_name": f"E2E Collab Bot {bot_id}",
@@ -65,6 +67,8 @@ def _seed_service_bot(world, *, bot_id: str, owner_id: str) -> None:
             "public": "0",
             "env": "dev",
             "bot_type": "service",
+            "call_type": "owner",
+            "caller_config_revision": 0,
         })
         s.commit()
 

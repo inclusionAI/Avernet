@@ -33,6 +33,11 @@ dependencies = [
   "aiofiles>=25.1.0",
   "fastapi>=0.115.0",
   "pycryptodome>=3.23.0",
+  # PyJWT verifies the gateway's signed X-Avernet-Principal token (auth design
+  # §7.1). Same library the gateway signs with, so both halves of the contract
+  # agree on claim handling; pinning `algorithms=` at the call site is what makes
+  # the verification safe, not the library choice.
+  "pyjwt>=2.8.0",
   "redis==7.4.0",
   "sqlalchemy>=2.0.48",
   "tomlkit>=0.14.0",
@@ -64,6 +69,11 @@ dev = [
   "ruff>=0.14.13",
   "pytest>=8.0.0",
   "pytest-asyncio>=0.23.0",
+  # pytest-xdist: the suite is ~10.6k tests and runs ~10min serially. Workers are
+  # separate processes, so the in-memory SQLite engine and every module-level
+  # singleton are already isolated per worker; `--dist loadfile` additionally
+  # keeps a file's tests together. See scripts/ci_test.sh.
+  "pytest-xdist>=3.6",
   "fakeredis>=2.20",
   "moto[s3]>=5.0",
   "socksio>=1.0.0",

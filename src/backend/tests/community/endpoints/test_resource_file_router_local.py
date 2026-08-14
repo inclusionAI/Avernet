@@ -13,7 +13,7 @@ workspace dir on disk.
 """
 from __future__ import annotations
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.devices import make_active_arca_device

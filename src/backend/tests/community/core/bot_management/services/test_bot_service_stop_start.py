@@ -50,6 +50,7 @@ def _make_binding(status: str = "ACTIVE"):
 def _make_service() -> BotService:
     """构造带 mock repository 的 BotService。"""
     svc = BotService.__new__(BotService)
+    svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = MagicMock()
     svc._passport_plugin = MagicMock()
     # Cycle-breaker providers installed by __init__; tests using __new__
@@ -57,6 +58,9 @@ def _make_service() -> BotService:
     # the resolved DeviceService.
     svc._bot_publish_provider = lambda: MagicMock()
     svc._device_service_provider = lambda: MagicMock()
+    teclaw_provision = MagicMock()
+    teclaw_provision.is_teclaw.side_effect = lambda engine: engine == "teclaw"
+    svc._teclaw_provision_provider = lambda: teclaw_provision
     # Restart idempotency lock repo. Default: acquire() returns a truthy mock
     # so restart_bot treats the lock as acquired and proceeds to stop+start.
     svc._restart_lock_repo = MagicMock()
@@ -110,6 +114,27 @@ class TestStopBot:
         svc._repository.update_by_owner.assert_called_once_with(
             "bot001", "user001",
             {"status": "PENDING", "binding_id": None, "device_id": None}
+        )
+        assert result is True
+
+    def test_releases_stopped_device_and_resets_status(self):
+        """STOPPED binding is finalized before restart allocates a replacement."""
+        svc = _make_service()
+        bot = _make_bot()
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        mock_device_service = MagicMock()
+        mock_device_service.get_device.return_value = _make_binding(
+            status=DeviceBindingStatus.STOPPED.value,
+        )
+        svc._device_service_provider = lambda: mock_device_service
+
+        result = svc.stop_bot(bot_id="bot001", user_id="user001")
+
+        mock_device_service.release_device.assert_called_once()
+        svc._repository.update_by_owner.assert_called_once_with(
+            "bot001", "user001",
+            {"status": "PENDING", "binding_id": None, "device_id": None},
         )
         assert result is True
 

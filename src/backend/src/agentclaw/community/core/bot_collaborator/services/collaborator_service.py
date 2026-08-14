@@ -4,88 +4,33 @@
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable, List, Optional, Dict, Any
+from typing import TYPE_CHECKING, List, Optional, Dict, Any
 
 from agentclaw.community.core.bot_collaborator.models import (
     CollaboratorRecord,
     CollaboratorRole,
     PermissionLevel,
 )
-from agentclaw.community.core.bot_collaborator.repository.protocol import CollaboratorRepositoryProtocol
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
+from agentclaw.community.core.bot_collaborator.services.member_management_capability import (
+    MemberManagementCapabilityService,
+)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
     from agentclaw.community.plugins.passport import PassportPlugin
-    from agentclaw.community.core.devices.services.device_context_resolver import DeviceContextResolver
-    from agentclaw.community.di.modules.skill_center_module import DeviceFilesystemDispatcher
-    from agentclaw.community.core.devices.services.device_filesystem import DeviceFileSystem
+    from agentclaw.community.core.bot_collaborator.services.credentials_admins_writer import (
+        DeviceCredentialsAdminsWriter,
+    )
 
 logger = get_logger()
 
-# 运行设备上 .credentials 的固定路径(prod 容器内 start_service.sh 写入处,
-# 与 engine ``CredentialsService.DEFAULT_CREDENTIALS_PATH`` 一致)。
-_DEVICE_CREDENTIALS_PATH = "/home/admin/.credentials"
-
-
-def _run_coro_blocking(coro: Any) -> Any:
-    """在独立线程里跑协程并阻塞等待结果。
-
-    ``on_collaboration_changed`` 是同步方法，但被 ``async def`` 路由**直接同步调用**，
-    运行在事件循环线程上。此处：
-      - 不能用 ``asyncio.run``(当前线程已有 running loop → 抛错);
-      - 不能用 ``run_coroutine_threadsafe(coro, 当前loop)``(当前线程被阻塞 → 死锁)。
-    所以起一个新线程、用全新的 ``asyncio.run`` 跑，再 ``join`` 取结果/异常。
-    协作者变更频率低，每次起线程的开销可接受。
-    """
-    import asyncio
-    import threading
-
-    box: Dict[str, Any] = {}
-
-    def _runner() -> None:
-        try:
-            box["result"] = asyncio.run(coro)
-        except BaseException as e:  # noqa: BLE001 - 透传给调用线程统一处理
-            box["error"] = e
-
-    thread = threading.Thread(target=_runner, daemon=True)
-    thread.start()
-    thread.join()
-
-    if "error" in box:
-        raise box["error"]
-    return box.get("result")
-
-
-def _replace_admins_line(content: str, admins: List[str]) -> str:
-    """逐行替换/追加 ``ADMINS=`` 行，其它行原样保留。
-
-    镜像 engine ``CredentialsService.update_fields`` 的逐行替换思路(不引入 engine 依赖)。
-    ``admins`` 为空 → 写 ``ADMINS=``(空值)以清空，而非删除行——保证设备端能读到“无 admin”。
-    """
-    admins_value = ",".join(admins)
-    new_line = f"ADMINS={admins_value}"
-
-    lines = content.splitlines()
-    replaced = False
-    out: List[str] = []
-    for line in lines:
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#") and "=" in stripped:
-            key = stripped.partition("=")[0].strip().upper()
-            if key == "ADMINS":
-                out.append(new_line)
-                replaced = True
-                continue
-        out.append(line)
-
-    if not replaced:
-        out.append(new_line)
-
-    # 保持末尾换行(与 ``_write_credentials`` 写出的文件一致)。
-    return "\n".join(out) + "\n"
+# 运行设备 .credentials 的 ADMINS= 同步由 ``DeviceCredentialsAdminsWriter`` 负责
+# (``core/bot_collaborator/services/credentials_admins_writer.py``):对 service bot 解析
+# 在线 binding (ext.binding.online)、对其它 bot 回退 resolve_for_bot,read-modify-write
+# 既有文件。本模块不再直接解析设备 / 读写 .credentials。
 
 
 # ============================================================================
@@ -140,8 +85,8 @@ class CollaboratorService:
         collaborator_repo: CollaboratorRepositoryProtocol,
         bot_repo: BotRepository,
         passport_plugin: PassportPlugin,
-        resolver_provider: "Callable[[], DeviceContextResolver]",
-        device_fs_dispatcher_provider: "Callable[[], DeviceFilesystemDispatcher]",
+        credentials_admins_writer: "DeviceCredentialsAdminsWriter",
+        member_management_capability_service: MemberManagementCapabilityService | None = None,
     ) -> None:
         """初始化服务。
 
@@ -149,17 +94,18 @@ class CollaboratorService:
             collaborator_repo: 协作者数据访问接口
             bot_repo: Bot 数据访问接口
             passport_plugin: Passport 插件，用于协作者变更时同步 admins 到 Passport 服务
-            resolver_provider: 惰性 thunk，返回 ``DeviceContextResolver``（按 bot 解析
-                运行设备）。lazy 是为了打断构造期 DI 循环
-                （device 图反向依赖 ``BotService``）。
-            device_fs_dispatcher_provider: 惰性 thunk，返回 ``DeviceFilesystemDispatcher``
-                （按 ``DeviceContext`` 派发 per-bot 文件读写插件）。
+            credentials_admins_writer: 把 admin 工号同步到运行设备 ``.credentials`` 的
+                写入器（对 service bot 解析在线 binding、对其它 bot 回退
+                ``resolve_for_bot``）。read-modify-write 既有文件，失败只 warning。
+            member_management_capability_service: 成员管理能力服务，用于协调通用能力与各引擎定制逻辑。
         """
         self._collaborator_repo = collaborator_repo
         self._bot_repo = bot_repo
         self._passport_plugin = passport_plugin
-        self._resolver_provider = resolver_provider
-        self._device_fs_dispatcher_provider = device_fs_dispatcher_provider
+        self._creds_writer = credentials_admins_writer
+        self._member_management_capability_service = (
+            member_management_capability_service or MemberManagementCapabilityService()
+        )
 
     # ========================================================================
     # 权限检查
@@ -268,16 +214,15 @@ class CollaboratorService:
         if not bot:
             raise BotNotFoundError(f"Bot 不存在: bot_id={bot_id}, owner_id={owner_id}")
 
-        # 2. 检查 Bot 类型
-        #    - service：Service Bot 协作者，走原逻辑。
-        #    - coding 应用（active_engine == "claude_code" 且 template_type ==
-        #      "applicationCoding"）：作为"应用成员"复用同一套协作者流程，放行。
-        is_coding_app = (
-            bot.get("active_engine") == "claude_code"
-            and bot.get("template_type") == "applicationCoding"
-        )
-        if bot.get("bot_type") != "service" and not is_coding_app:
-            raise BotNotServiceTypeError(f"Bot 不是服务型且非 coding 应用: bot_id={bot_id}")
+        # 2. 检查 Bot 类型 / 成员管理能力
+        #    CollaboratorService 是 engine-agnostic 服务：
+        #    - service：Service Bot 协作者，走原逻辑；
+        #    - 非 service：通过 MemberManagementCapabilityService 协调模板开关和
+        #      各引擎自己的能力实现，避免在这里直接依赖某个 engine 的定制逻辑。
+        if not self._member_management_capability_service.can_manage_collaborators(bot, bot_id):
+            raise BotNotServiceTypeError(
+                f"Bot 不是服务型且未开启成员管理: bot_id={bot_id}"
+            )
 
         bot_pk = bot["id"]
         owner_id_from_bot = bot["owner_id"]
@@ -528,6 +473,68 @@ class CollaboratorService:
 
         return success
 
+    def leave_collaboration(
+        self,
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+        env: Optional[str] = None,
+    ) -> bool:
+        """当前成员主动退出 Bot 协作。
+
+        与 ``remove_collaborator`` 不同，退出协作只允许删除当前登录用户
+        自己的协作者记录，不需要 ADMIN 权限，也不允许用它删除其他成员。
+
+        Args:
+            bot_id: Bot ID
+            owner_id: Bot 拥有者工号
+            user_id: 当前登录用户工号
+            env: 环境标识
+
+        Returns:
+            是否成功退出
+
+        Raises:
+            BotNotFoundError: Bot 不存在
+            CollaboratorNotFoundError: 当前用户不是该 Bot 协作者
+        """
+        if env is None:
+            env = get_current_env()
+
+        # 1. 查询 Bot 信息，避免仅凭 owner_id/bot_id 删除跨 Bot 记录。
+        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        if not bot:
+            raise BotNotFoundError(f"Bot 不存在: bot_id={bot_id}, owner_id={owner_id}")
+
+        bot_pk = bot["id"]
+        owner_id_from_bot = bot["owner_id"]
+
+        # Owner 不是协作者记录，不能通过“退出协作”退出自己的 Bot。
+        if user_id == owner_id_from_bot:
+            raise CollaboratorNotFoundError(
+                f"当前用户不是该 Bot 协作者: bot_id={bot_id}, user_id={user_id}"
+            )
+
+        # 2. 只查当前用户自己的协作者记录。
+        collaborator = self._collaborator_repo.get_by_bot_and_user(bot_pk, user_id, env)
+        if not collaborator:
+            raise CollaboratorNotFoundError(
+                f"当前用户不是该 Bot 协作者: bot_id={bot_id}, user_id={user_id}"
+            )
+
+        # 3. 删除自己的协作者记录。
+        success = self._collaborator_repo.delete(collaborator.id)
+
+        logger.info(
+            "[leave_collaboration] Left: bot_id=%s, user_id=%s",
+            bot_id, user_id
+        )
+
+        # 4. 触发协作关系变更回调。
+        self.on_collaboration_changed(bot_id, owner_id_from_bot, env)
+
+        return success
+
     # ========================================================================
     # 用户参与的 Bot 列表
     # ========================================================================
@@ -691,80 +698,9 @@ class CollaboratorService:
             )
 
         # 5. 同步 admin 工号到运行设备的 .credentials 文件（ADMINS= 行）。
-        # 失败只 warning，不影响协作者变更主流程，也不回滚已完成的 Passport 服务同步。
-        self._sync_admins_to_credentials(bot_id, owner_id_from_bot, admins)
+        # 委托给 DeviceCredentialsAdminsWriter:对 service bot 解析在线 binding
+        # (ext.binding.online)、对其它 bot 回退 resolve_for_bot;失败只 warning，
+        # 不影响协作者变更主流程，也不回滚已完成的 Passport 服务同步。
+        self._creds_writer.sync_on_change(bot_id, owner_id_from_bot, admins)
 
         return results
-
-    # ========================================================================
-    # 同步 admins 到运行设备 .credentials
-    # ========================================================================
-
-    def _sync_admins_to_credentials(
-        self,
-        bot_id: str,
-        owner_id: str,
-        admins: List[str],
-    ) -> None:
-        """把最新的 ADMIN 工号写回运行设备的 ``/home/admin/.credentials``。
-
-        走 ``DeviceContextResolver`` 解析 bot 的运行设备，再用
-        ``DeviceFilesystemDispatcher`` 派发 per-bot 文件读写插件做 read-modify-write，
-        只改 ``ADMINS=`` 一行，保留 TOKEN/CLIENT_ID 等其它字段。
-
-        注意：``admins`` 为空列表（最后一个 admin 被移除）时仍要写 ``ADMINS=``（空值）
-        以清空设备端旧值——不能因 falsy 短路跳过。
-
-        bot 无运行设备 / 文件不存在 / 任何异常 → 跳过并记日志，
-        绝不抛出影响主流程。
-        """
-        try:
-            from agentclaw.community.core.devices.services.device_context import (
-                DeviceNotBoundError,
-                UnknownProviderError,
-            )
-
-            try:
-                ctx = self._resolver_provider().resolve_for_bot(bot_id, owner_id)
-            except (DeviceNotBoundError, UnknownProviderError) as e:
-                logger.info(
-                    "[_sync_admins_to_credentials] bot 无运行设备，跳过 credentials 同步: "
-                    "bot_id=%s, reason=%s",
-                    bot_id, e,
-                )
-                return
-
-            fs = self._device_fs_dispatcher_provider().dispatch(ctx)
-            _run_coro_blocking(self._rewrite_credentials_admins(fs, admins))
-            logger.info(
-                "[_sync_admins_to_credentials] Synced admins to .credentials: "
-                "bot_id=%s, admins=%s",
-                bot_id, admins,
-            )
-        except Exception as e:
-            logger.warning(
-                "[_sync_admins_to_credentials] Failed to sync admins to .credentials: "
-                "bot_id=%s, error=%s",
-                bot_id, e,
-            )
-
-    @staticmethod
-    async def _rewrite_credentials_admins(
-        fs: "DeviceFileSystem",
-        admins: List[str],
-    ) -> None:
-        """read-modify-write 设备 .credentials，只替换/追加 ``ADMINS=`` 行。
-
-        文件不存在（``read_file`` 返回 ``None``）→ 跳过：不凭空造文件，否则会丢失
-        TOKEN 等启动时写入的字段。
-        """
-        raw = await fs.read_file(_DEVICE_CREDENTIALS_PATH)
-        if raw is None:
-            logger.info(
-                "[_rewrite_credentials_admins] %s 不存在，跳过",
-                _DEVICE_CREDENTIALS_PATH,
-            )
-            return
-
-        new_content = _replace_admins_line(raw.decode("utf-8"), admins)
-        await fs.write_file(_DEVICE_CREDENTIALS_PATH, new_content.encode("utf-8"))

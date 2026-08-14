@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from agentclaw.community.plugin_api.passport import PassportPlugin
     from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.devices.errors import (
     DeviceNotFoundError,
     DeviceServiceError,
@@ -27,9 +27,7 @@ from agentclaw.community.core.devices.models import (
 from agentclaw.community.core.devices.protocols import (
     BotQueryProtocol,
 )
-from agentclaw.community.core.devices.repository.protocol import (
-    DeviceBindingRepository,
-)
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.arca_bot_create_baas_rollout_policy import (
     ArcaBotCreateBaasRolloutDecision,
     ArcaBotCreateBaasRolloutPolicy,
@@ -44,9 +42,7 @@ from agentclaw.community.core.devices.services.device_service import (
     BAAS_DEVICE_PROVIDER,
     DeviceService,
 )
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.log import get_logger
 
 
@@ -307,6 +303,7 @@ class DeviceServiceRouter(DeviceService):
         admins: list[str] | None = None,
         template_type: str | None = None,
         template_config: dict | None = None,
+        device_props_extra: dict[str, Any] | None = None,
     ):
         """申请新设备 - 根据员工工号 + bot 属性路由到对应 Provider.
 
@@ -378,6 +375,7 @@ class DeviceServiceRouter(DeviceService):
             admins=admins,
             template_type=template_type,
             template_config=template_config,
+            device_props_extra=device_props_extra,
         )
 
     @override
@@ -666,16 +664,20 @@ class DeviceServiceRouter(DeviceService):
         ttl: int | None = None,
         device_uuid: str | None = None,
         ws_conn_mode: str | None = None,
+        path: str | None = None,
     ):
         """获取设备连接信息 - 根据 binding_id 路由.
 
         ``device_uuid`` 透传给 provider,BaaS provider 用它锁定多实例中的特定实例;
         不传则由 BaaS 自动选活跃实例(本地/非 BaaS provider 忽略)。
+
+        ``path`` 透传给 provider,仅对"由服务端拼出完整 URL"的链路(BaaS relay)
+        有意义;其余 provider 忽略。
         """
         service = self._get_provider_for_binding(binding_id)
         return service.get_device_connection(
             binding_id=binding_id, operator=operator, port=port, ttl=ttl,
-            device_uuid=device_uuid, ws_conn_mode=ws_conn_mode,
+            device_uuid=device_uuid, ws_conn_mode=ws_conn_mode, path=path,
         )
 
     @override
@@ -685,6 +687,7 @@ class DeviceServiceRouter(DeviceService):
         device: Any,
         agent_pass_token: str = "",
         agent_code: str = "",
+        active_only: bool = False,
     ) -> bool | list[dict]:
         """热更新设备出站 header 规则 - 根据 device_provider 路由.
 
@@ -692,6 +695,7 @@ class DeviceServiceRouter(DeviceService):
             device: 已分配设备信息（AllocatedDevice）
             agent_pass_token: Agent Passport token
             agent_code: Agent Passport agent_code
+            active_only: 是否只更新 ACTIVE 物理设备
 
         Returns:
             bool | list[dict]: 更新是否成功，或 BaaS 模式下返回更新的设备列表
@@ -701,18 +705,19 @@ class DeviceServiceRouter(DeviceService):
         """
         provider = getattr(device, "device_provider", "")
         device_id = getattr(device, "device_id", "")
-        token_prefix = agent_pass_token[:6] if agent_pass_token else "(empty)"
 
         if provider in self._providers:
             logger.info(
                 f"[update_device_headers] Routing: device_id={device_id}, "
                 f"provider={provider}, agent_code={agent_code or '(empty)'}, "
-                f"token_prefix={token_prefix}..."
+                f"has_token={'yes' if agent_pass_token else 'no'}, "
+                f"active_only={active_only}"
             )
             return self._providers[provider].update_device_headers(
                 device=device,
                 agent_pass_token=agent_pass_token,
                 agent_code=agent_code,
+                active_only=active_only,
             )
         logger.warning(
             f"[update_device_headers] Unknown provider: device_id={device_id}, "
@@ -722,6 +727,7 @@ class DeviceServiceRouter(DeviceService):
             device=device,
             agent_pass_token=agent_pass_token,
             agent_code=agent_code,
+            active_only=active_only,
         )
 
     def bootstrap_device_auth(

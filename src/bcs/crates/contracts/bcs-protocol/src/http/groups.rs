@@ -38,6 +38,9 @@ pub struct ConfirmProposalResponse {
     /// Chat page URL (present when botchat_url is configured on server).
     #[serde(default)]
     pub chat_url: Option<String>,
+    /// Initial BCS session created for the group.
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 /// Participant info for group creation.
@@ -110,6 +113,12 @@ pub struct CreateGroupRequest {
     /// binding when `collaboration_definition_yaml` is provided.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_start_on_service_invocation: Option<bool>,
+    /// Whether group creation should immediately start the initial
+    /// service-invocation run. Defaults to true for backward compatibility.
+    /// Clients that must provision group-scoped runtime resources first can
+    /// set this to false and explicitly start the returned `session_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_initial_run: Option<bool>,
     /// Group visibility: "public" or "private" (default). Public groups allow
     /// any actor to create sessions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -130,6 +139,10 @@ pub struct CreateGroupResponse {
     /// Chat URL for the group (if botchat_url is configured on server)
     #[serde(default)]
     pub chat_url: Option<String>,
+    /// Initial BCS session created for the group. The alias preserves
+    /// compatibility with servers that expose the detail field name.
+    #[serde(default, alias = "latest_running_session_id")]
+    pub session_id: Option<String>,
     /// Group kind returned by the server ("normal" or "dm").
     #[serde(default)]
     pub group_kind: Option<String>,
@@ -171,6 +184,29 @@ mod tests {
 
         assert_eq!(res.created, None);
         assert_eq!(res.group_kind, None);
+        assert_eq!(res.session_id, None);
+    }
+
+    #[test]
+    fn group_creation_responses_expose_initial_session_id() {
+        let created: CreateGroupResponse = serde_json::from_value(serde_json::json!({
+            "id": "group_1",
+            "driver_bot": "bot_a",
+            "participants": ["bot_a", "bot_b"],
+            "latest_running_session_id": "group_1:initial"
+        }))
+        .expect("create response session alias should deserialize");
+        assert_eq!(created.session_id.as_deref(), Some("group_1:initial"));
+
+        let confirmed: ConfirmProposalResponse = serde_json::from_value(serde_json::json!({
+            "created": true,
+            "group_id": "group_2",
+            "driver_bot": "bot_a",
+            "participants": ["bot_a", "bot_b"],
+            "session_id": "group_2:initial"
+        }))
+        .expect("confirm response session id should deserialize");
+        assert_eq!(confirmed.session_id.as_deref(), Some("group_2:initial"));
     }
 
     #[test]

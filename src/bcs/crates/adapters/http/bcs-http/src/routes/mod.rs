@@ -5,6 +5,7 @@ pub mod bot_chat;
 pub mod bot_events;
 pub mod bots;
 pub mod channel;
+pub mod collaboration_definitions;
 pub mod collaboration_runs;
 mod caller;
 pub mod discover;
@@ -23,6 +24,7 @@ pub mod providers;
 pub mod register;
 pub mod secret;
 pub mod services;
+pub mod session_files;
 pub mod sessions;
 pub mod templates;
 
@@ -33,7 +35,7 @@ use crate::state::HttpAppState;
 
 use caller::{
     authenticated_bot_from_headers, bot_id_from_headers, bot_token_from_headers,
-    caller_actor_id_from_headers, container_header_matches, require_bot_id_from_headers,
+    caller_actor_id_from_headers, require_bot_id_from_headers,
     require_caller_actor_id_from_headers, validate_container_header,
 };
 

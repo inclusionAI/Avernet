@@ -30,9 +30,9 @@ from agentclaw.community.core.bot_collaborator.interceptor import (
     with_interceptors,
 )
 
-from agentclaw.community.core.skill_center.services.repositories import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
 from agentclaw.community.core.mcp.services.passport_scope import filter_passport_mcp_codes
 from agentclaw.community.di import Injected
@@ -701,6 +701,9 @@ async def init_and_sync_default_skills(
         active_dir=skills_dir,
         repo_dir=repo_dir,
         local_dir=local_dir,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     # Step 1: Ensure default skill set exists
@@ -833,6 +836,9 @@ async def set_default_skills(
         active_dir=skills_dir,
         repo_dir=repo_dir,
         local_dir=local_dir,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     # Step 1: Ensure default skill set exists
@@ -1053,6 +1059,9 @@ async def set_default_skills_fast(
         active_dir=skills_dir,
         repo_dir=repo_dir,
         local_dir=local_dir,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     # Step 1: Ensure default skill set exists
@@ -1145,7 +1154,10 @@ async def set_default_skills_fast(
 
     # Step 5: 文件同步已移除
     # 软链通过 get_symlink_mappings() 从 DB 动态生成，不再需要复制文件到 skills-default 目录
-    logger.info(f"[set_default_skills_fast] DB update completed, skipping file sync (symlinks generated dynamically)")
+    logger.info(
+        "[set_default_skills_fast] DB update completed, skipping file sync "
+        "(symlinks generated dynamically)"
+    )
 
     return SetDefaultSkillsFastResponse(
         success=True,

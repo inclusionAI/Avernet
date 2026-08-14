@@ -21,6 +21,7 @@ import type {
 } from './claude-cli-bridge.js';
 import { createLogger } from './debug.js';
 import { EXEC_APPROVAL_TIMEOUT_MS } from './interaction/builders.js';
+import { loadRelayModelProviderEnv } from './model-provider-settings.js';
 
 // ---- HITL Suspend/Resume Types ----
 
@@ -181,6 +182,10 @@ const GATED_TOOLS = new Set([
  */
 export function shouldGateTool(toolName: string): boolean {
   return GATED_TOOLS.has(toolName);
+}
+
+export function shouldInstallInteractiveToolGate(permissionMode: string | undefined, hasInteractionCallback: boolean): boolean {
+  return hasInteractionCallback && permissionMode !== 'bypassPermissions';
 }
 
 /**
@@ -541,10 +546,12 @@ export function startClaudePromptSdk(
 
     const claudeHomeOverride = process.env.RELAY_CLAUDE_HOME?.trim();
     const claudeConfigDirOverride = process.env.RELAY_CLAUDE_CONFIG_DIR?.trim();
+    const modelProviderEnv = loadRelayModelProviderEnv();
     const options: Record<string, unknown> = {
       cwd: params.cwd,
       env: {
         ...process.env,
+        ...modelProviderEnv,
         ...(claudeHomeOverride ? { HOME: claudeHomeOverride } : {}),
         ...(claudeConfigDirOverride ? { CLAUDE_CONFIG_DIR: claudeConfigDirOverride } : {}),
         ...(params.env ?? {}),
@@ -567,7 +574,7 @@ export function startClaudePromptSdk(
     });
 
     // Inject canUseTool hook for HITL suspend/resume
-    if (params.onInteractionRequested) {
+    if (shouldInstallInteractiveToolGate(params.permissionMode, Boolean(params.onInteractionRequested))) {
       // EXEC_APPROVAL_TIMEOUT_MS 统一从 interaction/builders 导出（可通过
       // RELAY_INTERACTION_TIMEOUT_MS 配置，默认 5min），避免多处硬编码。
       // 排查日志：确认 canUseTool 生效的审批超时值
@@ -678,6 +685,8 @@ export function startClaudePromptSdk(
           throw err;
         }
       };
+    } else if (params.onInteractionRequested && params.permissionMode === 'bypassPermissions') {
+      log.debug('canUseTool: skipped HITL gate for bypassPermissions', { runId, sessionKey });
     }
 
     // Use explicit CLI path if provided (useful when SDK's bundled binary is unavailable)

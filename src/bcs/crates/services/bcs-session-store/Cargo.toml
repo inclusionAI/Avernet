@@ -21,6 +21,10 @@ tracing = { workspace = true }
 bcs-db-local = { workspace = true }
 bcs-test-support = { workspace = true }
 tokio-test = "0.4"
+# migrations.rs is pulled into integration tests via #[path]; it needs sha2/hex
+# to compile (checksum computation for bcs_schema_migrations).
+sha2 = { workspace = true }
+hex = { workspace = true }
 
 [lints]
 workspace = true

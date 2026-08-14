@@ -36,7 +36,7 @@ import secbaas.community.core.repository.publish_record._orm_model  # noqa: F401
 import secbaas.community.core.repository.system_config._orm_model  # noqa: F401
 import secbaas.community.core.repository.tenant._orm_model  # noqa: F401
 from secbaas.community.core.database import db_manager as _global_db_manager
-from secbaas.community.plugins.database.stub.sqlite_orm import SqliteOrmPlugin
+from secbaas.community.plugins.database.sqlite.sqlite_orm import SqliteOrmPlugin
 
 
 @pytest.fixture(autouse=True)
