@@ -238,7 +238,7 @@ with open(path, 'w', encoding='utf-8') as stream:
     json.dump(profile, stream)
 PY
 
-test_provider_bot_registration_keeps_profile_display_name() (
+test_provider_bot_registration_persists_bcs_assigned_uuid() (
     export CLAUDE_BOTS_STATE_FILE="$TMP/claude-bots-state.json"
     export BCS_BAAS_PROVIDER_STATE_FILE="$TMP/provider-state.json"
     export BCS_BAAS_PROVIDER_TOKEN_FILE="$TMP/provider-tokens.json"
@@ -277,9 +277,9 @@ test_provider_bot_registration_keeps_profile_display_name() (
                 ;;
             */providers/provider-test/bots)
                 printf '%s' "$data" > "$captured_provider_bot_payload"
-                printf '%s\n' '{"bot_runtime_token":"bot-runtime-test","bot_uuid":"平台数据分析"}'
+                printf '%s\n' '{"bot_runtime_token":"bot-runtime-test","bot_uuid":"provider-bot-opaque-42"}'
                 ;;
-            */bots/平台数据分析/visibility)
+            */bots/provider-bot-opaque-42/visibility)
                 printf '%s\n' '{"success":true,"data":{"visibility":"public"}}'
                 ;;
             *)
@@ -292,9 +292,61 @@ test_provider_bot_registration_keeps_profile_display_name() (
     [ "$(jq -r '.name' "$captured_provider_bot_payload")" = '平台数据分析' ]
     ! jq -e '.name | contains("（当前）")' "$captured_provider_bot_payload" >/dev/null
     [ "$(jq -r '.provider_bot_ref' "$captured_provider_bot_payload")" = 'merchant-platform-data:mock-user' ]
+    [ "$(jq -r '.bots[0].bot_uuid' "$BCS_BAAS_PROVIDER_STATE_FILE")" = 'provider-bot-opaque-42' ]
 )
 
-test_provider_bot_registration_keeps_profile_display_name
+test_provider_bot_registration_persists_bcs_assigned_uuid
+
+test_provider_reuses_opaque_bcs_bot_uuid() (
+    export CLAUDE_BOTS_STATE_FILE="$TMP/opaque-claude-bots-state.json"
+    export BCS_BAAS_PROVIDER_STATE_FILE="$TMP/opaque-provider-state.json"
+    export BCS_BAAS_PROVIDER_TOKEN_FILE="$TMP/opaque-provider-tokens.json"
+    export BCS_PORT=21000
+
+    printf '%s\n' '{"entity_id":"mock-user","bots":[{"role":"platform-data","bot_id":"bot-data","name":"平台数据分析"}]}' \
+        > "$CLAUDE_BOTS_STATE_FILE"
+    printf '%s\n' '{"provider_id":"provider-existing","bcs_owner_id":"001","bots":[{"role":"platform-data","provider_bot_ref":"merchant-platform-data:mock-user","bot_uuid":"provider-bot-opaque-42"}]}' \
+        > "$BCS_BAAS_PROVIDER_STATE_FILE"
+    printf '%s\n' '{"baas_token":"baas","provider_id":"provider-existing","provider_admin_token":"provider-admin","bcs_to_provider_token":"bcs-token","provider_bots":{"platform-data":{"provider_bot_ref":"merchant-platform-data:mock-user","bot_runtime_token":"runtime"}}}' \
+        > "$BCS_BAAS_PROVIDER_TOKEN_FILE"
+
+    bcs_baas_provider_bcs_owner_id() { printf '%s\n' '001'; }
+    bcs_baas_provider_register() {
+        echo 'unexpected Provider Bot re-registration' >&2
+        return 1
+    }
+    log_info() { :; }
+    curl() {
+        local url=''
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                http://*|https://*)
+                    url="$1"
+                    shift
+                    ;;
+                *)
+                    shift
+                    ;;
+            esac
+        done
+        case "$url" in
+            "http://127.0.0.1:21000/providers/provider-existing")
+                printf '%s\n' '{"provider_id":"provider-existing","name":"singlebox-merchant-claude","disabled":false}'
+                ;;
+            "http://127.0.0.1:21000/providers/provider-existing/bots")
+                printf '%s\n' '{"items":[{"provider_bot_ref":"merchant-platform-data:mock-user","bot_uuid":"provider-bot-opaque-42","disabled":false}]}'
+                ;;
+            *)
+                return 1
+                ;;
+        esac
+    }
+
+    bcs_baas_provider_registration_is_reusable
+    bcs_baas_provider_ensure_registration
+)
+
+test_provider_reuses_opaque_bcs_bot_uuid
 
 test_provider_lifecycle_reuses_healthy_registration() (
     export BCS_BAAS_PROVIDER_STATE_FILE="$TMP/provider-state-reuse.json"
@@ -368,9 +420,9 @@ test_provider_registration_is_reused_across_restarts() (
                 printf '%s\n' '{"provider_id":"provider-existing"}'
                 ;;
             "POST http://127.0.0.1:21000/providers/provider-existing/bots")
-                printf '%s\n' '{"bot_runtime_token":"bot-runtime","bot_uuid":"平台数据分析"}'
+                printf '%s\n' '{"bot_runtime_token":"bot-runtime","bot_uuid":"provider-bot-opaque-42"}'
                 ;;
-            "PUT http://127.0.0.1:21000/bots/平台数据分析/visibility")
+            "PUT http://127.0.0.1:21000/bots/provider-bot-opaque-42/visibility")
                 printf '%s\n' '{"success":true,"data":{"visibility":"public"}}'
                 ;;
             *)
@@ -384,6 +436,7 @@ test_provider_registration_is_reused_across_restarts() (
     grep -Fxq 'POST http://127.0.0.1:21000/providers/provider-existing/bots' "$calls"
     ! grep -Fxq 'POST http://127.0.0.1:21000/providers' "$calls"
     [ "$(jq -r '.provider_id' "$BCS_BAAS_PROVIDER_STATE_FILE")" = provider-existing ]
+    [ "$(jq -r '.bots[0].bot_uuid' "$BCS_BAAS_PROVIDER_STATE_FILE")" = provider-bot-opaque-42 ]
 )
 
 test_provider_registration_is_reused_across_restarts

@@ -107,14 +107,6 @@ bcs_baas_provider_bot_ref() {
     esac
 }
 
-bcs_baas_provider_expected_bot_uuid() {
-    local role="$1" name="$2"
-    case "$role" in
-        platform-data) printf '%s\n' "$name" ;;
-        *) return 1 ;;
-    esac
-}
-
 bcs_baas_provider_healthy() {
     node - "$BCS_BAAS_PROVIDER_PORT" <<'NODE' >/dev/null 2>&1
 const http2 = require('node:http2');
@@ -144,28 +136,28 @@ bcs_baas_provider_wait_ready() {
     return 1
 }
 
-bcs_baas_provider_state_matches_expected_identity() {
+bcs_baas_provider_state_matches_current_identity() {
     [ -f "$BCS_BAAS_PROVIDER_STATE_FILE" ] || return 1
     [ -f "$CLAUDE_BOTS_STATE_FILE" ] || return 1
-    local entity_id owner role bot_id name provider_bot_ref bot_uuid expected_bots='[]'
+    local entity_id owner role bot_id name provider_bot_ref expected_bindings='[]'
     entity_id="$(jq -r '.entity_id // empty' "$CLAUDE_BOTS_STATE_FILE")"
     owner="$(bcs_baas_provider_bcs_owner_id)"
     [ -n "$entity_id" ] && [ -n "$owner" ] || return 1
     while IFS=$'\t' read -r role bot_id name; do
         provider_bot_ref="$(bcs_baas_provider_bot_ref "$role" "$bot_id" "$entity_id")"
-        bot_uuid="$(bcs_baas_provider_expected_bot_uuid "$role" "$name")" || return 1
-        expected_bots="$(jq -c --arg role "$role" --arg ref "$provider_bot_ref" --arg uuid "$bot_uuid" \
-            '. + [{role: $role, provider_bot_ref: $ref, bot_uuid: $uuid}]' <<< "$expected_bots")" || return 1
+        expected_bindings="$(jq -c --arg role "$role" --arg ref "$provider_bot_ref" \
+            '. + [{role: $role, provider_bot_ref: $ref}]' <<< "$expected_bindings")" || return 1
     done < <(jq -r '.bots[] | [.role, .bot_id, .name] | @tsv' "$CLAUDE_BOTS_STATE_FILE")
-    jq -e --arg owner "$owner" --argjson expected_bots "$expected_bots" '
+    jq -e --arg owner "$owner" --argjson expected_bindings "$expected_bindings" '
         (.provider_id | type == "string" and length > 0)
         and .bcs_owner_id == $owner
-        and .bots == $expected_bots
+        and ([.bots[] | {role, provider_bot_ref}] == $expected_bindings)
+        and all(.bots[]; (.bot_uuid | type == "string" and length > 0))
     ' "$BCS_BAAS_PROVIDER_STATE_FILE" >/dev/null
 }
 
 bcs_baas_provider_registration_is_reusable() {
-    bcs_baas_provider_state_matches_expected_identity || return 1
+    bcs_baas_provider_state_matches_current_identity || return 1
     [ -f "$BCS_BAAS_PROVIDER_TOKEN_FILE" ] || return 1
     local provider_id provider_admin_token provider_response bindings_response role provider_bot_ref bot_uuid runtime_token
     provider_id="$(jq -r '.provider_id // empty' "$BCS_BAAS_PROVIDER_STATE_FILE")"
@@ -211,7 +203,7 @@ bcs_baas_provider_retire_legacy_registration() {
     [ -f "$BCS_BAAS_PROVIDER_STATE_FILE" ] || return 0
     if bcs_baas_provider_registration_valid; then
         bcs_baas_provider_cleanup_registration || return 1
-        log_info "Retired legacy merchant Claude Provider registration; re-add 平台数据分析 to existing groups once"
+        log_info "Retired incompatible merchant Claude Provider registration; re-add the replacement Bot to existing groups once"
         return
     fi
     bcs_baas_provider_clear_registration || return 1
@@ -231,12 +223,12 @@ bcs_baas_provider_ensure_registration() {
         log_info "Reusing merchant Claude Provider registration provider_id=${provider_id} bot_uuid=${bot_uuid}"
         return
     fi
-    if bcs_baas_provider_state_matches_expected_identity; then
+    if bcs_baas_provider_state_matches_current_identity; then
         bcs_baas_provider_clear_bot_tokens || return 1
         rm -f "$BCS_BAAS_PROVIDER_STATE_FILE"
         log_warn "Merchant Claude Provider registration is missing from BCS; creating a replacement"
     else
-        log_info "Migrating legacy merchant Claude Provider registration to stable Bot ID 平台数据分析"
+        log_info "Replacing merchant Claude Provider registration after its local identity changed"
         bcs_baas_provider_retire_legacy_registration || return 1
     fi
     bcs_baas_provider_register
@@ -268,21 +260,19 @@ bcs_baas_provider_register() {
         bcs_baas_provider_update_tokens "$provider_id" "$provider_admin_token" "$bcs_token" || return 1
     fi
 
-    local role bot_id name provider_ref expected_bot_uuid payload bot_response runtime_token bot_uuid visibility state_bots='[]'
+    local role bot_id name provider_ref payload bot_response runtime_token bot_uuid visibility state_bots='[]'
     while IFS=$'\t' read -r role bot_id name; do
         provider_ref="$(bcs_baas_provider_bot_ref "$role" "$bot_id" "$entity_id")"
-        expected_bot_uuid="$(bcs_baas_provider_expected_bot_uuid "$role" "$name")" || { log_error "No stable BCS Bot ID is configured for Claude role=${role}"; return 1; }
         payload="$(jq -n --arg name "$name" --arg ref "$provider_ref" --arg owner "$owner" '{name: $name, provider_bot_ref: $ref, owners: [$owner], summary: "Local Claude Code platform data bot", domains: ["claude_code", "local-commerce"], skills: ["chat", "data-analysis"], scopes: ["local"]}')"
         bot_response="$(curl --noproxy '*' --connect-timeout 2 --max-time 20 -fsS -X POST "http://127.0.0.1:${BCS_PORT}/providers/${provider_id}/bots" -H "Authorization: Bearer ${provider_admin_token}" -H 'Content-Type: application/json' -d "$payload")" || return 1
         runtime_token="$(jq -r '.bot_runtime_token // empty' <<< "$bot_response")"
         bot_uuid="$(jq -r '.bot_uuid // empty' <<< "$bot_response")"
         [ -n "$runtime_token" ] && [ -n "$bot_uuid" ] || { log_error "BCS Provider bot registration failed for ${role}"; return 1; }
-        [ "$bot_uuid" = "$expected_bot_uuid" ] || { log_error "BCS Provider bot ID mismatch for ${role}; expected=${expected_bot_uuid} got=${bot_uuid}"; return 1; }
         visibility="$(curl --noproxy '*' --connect-timeout 2 --max-time 20 -fsS -X PUT "http://127.0.0.1:${BCS_PORT}/bots/${bot_uuid}/visibility" -H "Authorization: Bearer ${runtime_token}" -H 'Content-Type: application/json' -d '{"visibility":"public"}')" || return 1
         jq -e '.success == true and .data.visibility == "public"' <<< "$visibility" >/dev/null || { log_error "BCS Provider bot is not discoverable"; return 1; }
         bcs_baas_provider_add_bot_token "$role" "$provider_ref" "$runtime_token" || return 1
         state_bots="$(jq -c --arg role "$role" --arg ref "$provider_ref" --arg uuid "$bot_uuid" '. + [{role: $role, provider_bot_ref: $ref, bot_uuid: $uuid}]' <<< "$state_bots")"
-        log_info "Registered local Claude Provider bot role=${role} bot_uuid=${bot_uuid} visibility=public"
+        log_info "Persisted local Claude Provider Bot binding role=${role} provider_bot_ref=${provider_ref} bot_uuid=${bot_uuid} visibility=public"
     done < <(jq -r '.bots[] | [.role, .bot_id, .name] | @tsv' "$CLAUDE_BOTS_STATE_FILE")
     umask 077
     jq -n --arg provider_id "$provider_id" --arg owner "$owner" --argjson bots "$state_bots" '{provider_id: $provider_id, bcs_owner_id: $owner, bots: $bots}' > "$BCS_BAAS_PROVIDER_STATE_FILE"

@@ -35,15 +35,6 @@ dingtalk_accounts = []
 api_keys = []
 allowed_switch_provider_ids = []
 
-# The local merchant Claude Provider has a stable user-facing BCS Bot ID while
-# retaining its own technical provider_bot_ref. All three identity attributes
-# are checked by the HTTP route before this override is applied.
-[[trusted_provider_bot_id_overrides]]
-provider_name = "singlebox-merchant-claude"
-created_by = "001"
-provider_bot_ref = "merchant-platform-data:mock-user"
-bot_uuid = "平台数据分析"
-
 [gateway_principal]
 issuer = "gateway"
 audience = "bcs"
