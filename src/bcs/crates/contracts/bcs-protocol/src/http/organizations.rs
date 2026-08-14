@@ -106,6 +106,7 @@ pub struct OrganizationMemberListResponse {
 pub struct OrganizationCandidateBotResponse {
     pub bot_uuid: String,
     pub provider_id: String,
+    pub agent_code: Option<String>,
     pub name: Option<String>,
 }
 

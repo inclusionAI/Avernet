@@ -15,6 +15,11 @@ pub struct AuthorizedOrganizationPair {
 pub struct OrganizationCandidateBot {
     pub bot_uuid: String,
     pub provider_id: String,
+    /// Routing identifier sourced from the bot's security-gateway credentials,
+    /// mirroring [`OrganizationMemberBotDetail::agent_code`]. Deliberately read
+    /// through the dedicated `get_agent_credentials` accessor rather than from
+    /// `capabilities` so the sensitive `agent_token` is never exposed.
+    pub agent_code: Option<String>,
     pub capabilities: BotCapabilities,
 }
 
