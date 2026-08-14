@@ -19,11 +19,17 @@ two paths are chosen by *format*, not by fallback — `APIKeyGenerator.validate_
 one path, and the hot path stays clean. Every legacy resolution logs at WARNING
 with the app's identity, which is what tells us when the path is safe to delete.
 
-Verbatim means byte-for-byte: same base62 alphabet, `pbkdf2_hmac("sha256", key,
+Verbatim means the code, not the prose: same base62 alphabet, `pbkdf2_hmac("sha256", key,
 salt, 100_000)`, stored as `base64(salt):base64(dk)`, `hmac.compare_digest`
 verify, `key[:8]` prefix, 3-attempt prefix-collision retry at creation, and the
 `len < 8` cheap reject before any DB touch (mirroring
 `DefaultAPIKeyValidator.verify`, `src/baas/src/secbaas/community/core/service/api_gateway/_key_validator.py:32`).
+The copy's comments and docstrings are translated to English — every other
+gateway source file is English, and this one was the module's sole exception —
+so parity is enforced on the syntax tree with docstrings stripped rather than on
+the bytes. That is the same guarantee for the scheme, since every ingredient of
+the stored hash is a literal or a call in that tree, and it leaves the executable
+statements byte-identical to upstream's anyway.
 
 ## Affected Components
 
@@ -120,13 +126,14 @@ for either credential form.
 
 ## Key Files & Functions
 
-New module — byte-for-byte copy of
-`src/baas/src/secbaas/community/core/service/api_gateway/_key_gen.py` (the
-gateway does not depend on the baas package, so the class is copied, not
-imported; a parity fixture test keeps the copy honest):
+New module — copy of
+`src/baas/src/secbaas/community/core/service/api_gateway/_key_gen.py`, identical
+in code and translated in prose (the gateway does not depend on the baas
+package, so the class is copied, not imported; a parity fixture test keeps the
+copy honest):
 
 ```python
-# src/gateway/src/gateway/community/core/app/_key_gen.py (new, copied verbatim)
+# src/gateway/src/gateway/community/core/app/_key_gen.py (new, copied)
 class APIKeyGenerator:
     BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
     @classmethod
@@ -361,7 +368,8 @@ def test_verify_rejects_wrong_key(): ...
 def test_verify_rejects_unusable_stored_hash(): ...
 def test_validate_format(): ...
 def test_round_trip_against_secbaas_implementation(): ...  # both directions
-def test_copy_is_byte_identical_to_secbaas_source(): ...
+def test_copy_is_semantically_identical_to_secbaas_source(): ...  # AST, docstrings stripped
+def test_copy_carries_no_cjk_prose(): ...  # the translation survives a re-copy
 ```
 
 The write-side pin is not redundant with the read-side one: the latter asserts
@@ -424,10 +432,12 @@ test suite; run the full module gate via `OCB_PRE_PUSH_RUN_CI=1` before push.
 
 ## Notes on upstream follow-ups
 
-Two defects live in the copied scheme. Neither can be fixed here: byte-identity
-with secbaas is the migration guarantee, so a one-sided edit is worse than the
-defect. Both need a secbaas change plus a re-copy, and neither is triggered by
-anything the gateway does today.
+Two behavioural defects live in the copied scheme. Neither can be fixed here:
+code parity with secbaas is the migration guarantee, so a one-sided edit is worse
+than the defect. Both need a secbaas change plus a re-copy, and neither is
+triggered by anything the gateway does today. (Prose is not held to parity, so
+they are described in this copy's English comments where relevant — describing a
+defect is not fixing it.)
 
 1. **`validate_format` accepts a trailing newline.** `re.match(r"^…{32}$", s)`
    also matches immediately before a trailing `\n`, so a 33-character value
@@ -440,11 +450,18 @@ anything the gateway does today.
    by inserted punctuation decodes to the original bytes and still verifies —
    a fail-open on data corruption. `validate=True` fixes it.
 
+One documentation defect, carried across rather than silently corrected:
+the class docstring states a 32-character format and then illustrates it with a
+23-character example. The example is kept as upstream wrote it, with the
+discrepancy called out beside it, so a reader is not misled and a future
+re-copy has nothing to reconcile.
+
 Two further structural gaps, both outside this change's blast radius:
 
-3. **The byte-identity guard is one-directional.** The gateway CI job is
+3. **The parity guard is one-directional.** The gateway CI job is
    selected by changed paths under `src/gateway`, so a commit touching only
-   secbaas's copy never runs `test_copy_is_byte_identical_to_secbaas_source`.
+   secbaas's copy never runs
+   `test_copy_is_semantically_identical_to_secbaas_source`.
    The clean fix is a mirror assertion in
    `src/baas/tests/unit/core/service/api_gateway/test_key_gen.py`, which runs on
    exactly the commits the gateway job skips — a baas-module change, hence not

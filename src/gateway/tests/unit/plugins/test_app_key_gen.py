@@ -1,9 +1,12 @@
 """Unit tests for ``APIKeyGenerator`` — the app credential scheme.
 
-This module is a verbatim copy of the secbaas API-gateway key generator, because
+The module under test copies the secbaas API-gateway key generator, because
 secbaas's existing ``baas_api_key`` records are migrated into
 ``avernet_application`` and must keep verifying with their original plaintext
-keys. The tests here pin that compatibility from both ends:
+keys. Its code is byte-identical to upstream's; only its comments and docstrings
+differ, being in English per the convention the rest of the gateway follows.
+:func:`test_copy_is_semantically_identical_to_secbaas_source` is what allows that
+gap and nothing wider. The tests here pin the compatibility from both ends:
 
 * :func:`test_secbaas_produced_hash_verifies` proves we can *read* what secbaas
   wrote — it asserts against a ``(key, hash)`` pair produced by running the real
@@ -33,9 +36,11 @@ in ``plan.md`` under "Notes on upstream follow-ups":
 
 from __future__ import annotations
 
+import ast
 import base64
 import hashlib
 import importlib.util
+import inspect
 import re
 import secrets
 from pathlib import Path
@@ -119,6 +124,39 @@ def _load_secbaas_generator(source: Path) -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+_DEFINITION = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+
+
+def _code_fingerprint(source: Path) -> str:
+    """A source file reduced to what it *does*, ignoring comments and prose.
+
+    Comments never reach the syntax tree, and the docstring of every definition
+    is dropped here, so the result changes only when an executable construct
+    does. ``ast.dump`` defaults to omitting line and column attributes, which is
+    what makes reformatting invisible too.
+
+    Not a checksum of the text: ``0x64`` and ``100`` would fingerprint alike, as
+    would a renamed local. Neither weakens the guarantee this backs, since the
+    scheme's ingredients are compared as the literals they are written as.
+    """
+    tree = ast.parse(source.read_bytes())
+    for node in ast.walk(tree):
+        if not isinstance(node, _DEFINITION):
+            continue
+        body = node.body
+        first = body[0] if body else None
+        if (
+            isinstance(first, ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)
+        ):
+            # ``or [ast.Pass()]`` because a body that was *only* a docstring is
+            # not a legal empty body, and dumping it would raise rather than
+            # report the mismatch this function exists to report.
+            node.body = body[1:] or [ast.Pass()]
+    return ast.dump(tree)
 
 
 def _split_stored_hash(stored: str) -> tuple[bytes, bytes]:
@@ -289,19 +327,26 @@ def test_round_trip_against_secbaas_implementation() -> None:
     assert APIKeyGenerator.verify_key(theirs, secbaas.hash_key(theirs)) is True
 
 
-def test_copy_is_byte_identical_to_secbaas_source() -> None:
+def test_copy_is_semantically_identical_to_secbaas_source() -> None:
     """The copy must not drift; edit the scheme in both places or neither.
 
     Two things must hold. The class must be *defined in the gateway package* —
     checked via ``__module__``, which is immune to install layout, where a path
     comparison would miss a re-export from an installed secbaas elsewhere on
-    ``sys.path``. And the file a contributor edits must match secbaas's byte for
-    byte.
+    ``sys.path``. And what the two files *do* must be identical.
+
+    Compared as syntax trees with docstrings stripped rather than byte for byte,
+    so that the two files may carry different prose: this copy's comments are in
+    English, per the convention every other gateway source file follows, while
+    upstream's are in Chinese. Every ingredient of the stored hash — the base62
+    alphabet, the digest, the iteration count, the salt width, the encoding, the
+    ``salt:dk`` join — is a literal or a call in that tree, so a one-sided change
+    to any of them still fails here.
     """
     assert APIKeyGenerator.__module__ == "gateway.community.core.app._key_gen", (
         f"APIKeyGenerator is defined in {APIKeyGenerator.__module__}, not the "
         "gateway's own copy — the plan rejects importing secbaas's class, and "
-        "a byte-identity check against a re-export would pass vacuously."
+        "a parity check against a re-export would pass vacuously."
     )
 
     root = _require_monorepo_root()
@@ -311,4 +356,38 @@ def test_copy_is_byte_identical_to_secbaas_source() -> None:
             f"gateway key generator not found at {tree_copy}; if it moved, "
             "update _OURS_RELPATH rather than letting this check lapse."
         )
-    assert tree_copy.read_bytes() == _secbaas_source(root).read_bytes()
+    assert _code_fingerprint(tree_copy) == _code_fingerprint(_secbaas_source(root)), (
+        "the gateway's key generator no longer matches secbaas's. Migrated "
+        "records verify only while both derive the same digest, so port the "
+        "change to the other file rather than relaxing this test."
+    )
+
+
+def test_copy_carries_no_cjk_prose() -> None:
+    """The convention the parity test deliberately stops enforcing.
+
+    Dropping byte-identity is what lets this copy be translated, and re-copying
+    upstream wholesale is the natural way to keep the scheme in sync — which
+    would silently restore the Chinese comments. This is the guard that makes
+    the translation survive that.
+
+    Scoped to this one file: Chinese is the established convention in
+    ``migrations/mysql``, whose comments ship to the database as column
+    ``COMMENT``s, and is untouched there. Read from the imported module rather
+    than from the tree, so it holds wherever the package is installed from and
+    needs no ``src/baas`` to run.
+
+    The bound is ``U+2FFF`` — above every CJK ideograph, CJK punctuation and
+    fullwidth form, below the punctuation English prose here actually uses (em
+    dashes at ``U+2014``, curly quotes at ``U+2018``).
+    """
+    source = Path(inspect.getsourcefile(APIKeyGenerator) or "").read_text(
+        encoding="utf-8"
+    )
+    offenders = sorted({ch for ch in source if ord(ch) > 0x2FFF})
+    assert not offenders, (
+        f"CJK characters in the gateway's key generator: {''.join(offenders)!r}. "
+        "Comments and docstrings in this copy are translated; re-copying upstream "
+        "verbatim reintroduces them. Port the code change by hand, keeping the "
+        "English prose."
+    )

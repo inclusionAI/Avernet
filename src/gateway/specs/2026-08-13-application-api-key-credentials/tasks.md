@@ -3,10 +3,11 @@
 > Status legend: `[ ]` todo · `[~]` in-progress · `[x]` done · `[!]` blocked
 
 ## Task 1 `[x]`: Copy the secbaas key generator into the gateway app domain
-- **Goal:** Land a byte-for-byte copy of `APIKeyGenerator` in the gateway with a
-  parity test pinning migration compatibility against a secbaas-produced fixture.
+- **Goal:** Land a copy of `APIKeyGenerator` in the gateway — identical in code,
+  translated in prose — with a parity test pinning migration compatibility
+  against a secbaas-produced fixture.
 - **Files:** `src/gateway/src/gateway/community/core/app/_key_gen.py` (new, copied
-  verbatim from `src/baas/src/secbaas/community/core/service/api_gateway/_key_gen.py`),
+  from `src/baas/src/secbaas/community/core/service/api_gateway/_key_gen.py`),
   `src/gateway/src/gateway/community/core/app/__init__.py` (export),
   `src/gateway/tests/unit/plugins/test_app_key_gen.py` (new)
 - **Done when:**
@@ -15,7 +16,11 @@
   - [x] Generate → hash → verify round-trip passes; two hashes of one key differ
         (salt uniqueness); wrong key and garbage stored-hash are rejected.
   - [x] `generate()` output is 32-char base62 and passes `validate_format`.
-  - [x] Copied module is diff-identical to the secbaas source.
+  - [x] Copied module matches the secbaas source as a syntax tree with
+        docstrings stripped, leaving comments and docstrings free to be in
+        English; its executable statements are byte-identical besides.
+  - [x] *(added)* The translation is guarded against a wholesale re-copy of
+        upstream, which would silently restore the Chinese prose.
   - [x] *(added)* PBKDF2 parameters pinned explicitly by recomputing the derived
         key from the stored salt — the digest and iteration count are not
         recorded in the stored string, so nothing else would catch their drift.

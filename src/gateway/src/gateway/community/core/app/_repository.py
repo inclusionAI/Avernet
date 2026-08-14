@@ -171,7 +171,7 @@ class AppRepository(AppRegistry):
             # shape is checked first to tell corruption apart from a bad
             # credential. Deeper corruption (valid shape, unusable base64) still
             # reads as a plain rejection — that branch is inside the copied
-            # generator, which cannot be edited without breaking parity.
+            # generator, whose code cannot be edited without breaking parity.
             self._report_corrupt(record, "api_key_hash is not 'salt:digest'")
             return None
 

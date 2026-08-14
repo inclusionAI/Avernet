@@ -36,7 +36,7 @@ from gateway.community.spi.database import Base
 
 # How many leading characters of an API key form its lookup prefix. A property
 # of the credential scheme, not of storage — but it cannot live in ``_key_gen``,
-# which must stay byte-identical to secbaas's copy, so it is defined here (the
+# whose code must stay identical to secbaas's copy, so it is defined here (the
 # module with no intra-package imports) and used by the ORM column width, the
 # repository's lookups, and the registrar's slicing.
 #
