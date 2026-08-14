@@ -1660,6 +1660,48 @@
         "title": "Envelope[EngineStatus]",
         "type": "object"
       },
+      "Envelope_FileEntry_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FileEntry"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[FileEntry]",
+        "type": "object"
+      },
       "Envelope_HelloWorld_": {
         "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
         "properties": {
@@ -2206,6 +2248,48 @@
         "title": "Envelope[Page[Bot]]",
         "type": "object"
       },
+      "Envelope_Page_FileEntry__": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Page_FileEntry_"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Page[FileEntry]]",
+        "type": "object"
+      },
       "Envelope_Page_McpServer__": {
         "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
         "properties": {
@@ -2288,48 +2372,6 @@
           "request_id"
         ],
         "title": "Envelope[Page[Model]]",
-        "type": "object"
-      },
-      "Envelope_Page_Resource__": {
-        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
-        "properties": {
-          "code": {
-            "description": "6-digit code: HTTP status (3) + business subcode (3).",
-            "example": 200000,
-            "title": "Code",
-            "type": "integer"
-          },
-          "data": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Page_Resource_"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Response payload; present but null on errors or empty results."
-          },
-          "message": {
-            "description": "Human-readable status; always English (e.g. \"OK\").",
-            "example": "OK",
-            "title": "Message",
-            "type": "string"
-          },
-          "request_id": {
-            "description": "Trace id; mirrors the X-Trace-Id response header.",
-            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
-            "title": "Request Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "code",
-          "message",
-          "data",
-          "request_id"
-        ],
-        "title": "Envelope[Page[Resource]]",
         "type": "object"
       },
       "Envelope_Page_RoutineRun__": {
@@ -2540,48 +2582,6 @@
           "request_id"
         ],
         "title": "Envelope[Preview]",
-        "type": "object"
-      },
-      "Envelope_Resource_": {
-        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
-        "properties": {
-          "code": {
-            "description": "6-digit code: HTTP status (3) + business subcode (3).",
-            "example": 200000,
-            "title": "Code",
-            "type": "integer"
-          },
-          "data": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Resource"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Response payload; present but null on errors or empty results."
-          },
-          "message": {
-            "description": "Human-readable status; always English (e.g. \"OK\").",
-            "example": "OK",
-            "title": "Message",
-            "type": "string"
-          },
-          "request_id": {
-            "description": "Trace id; mirrors the X-Trace-Id response header.",
-            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
-            "title": "Request Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "code",
-          "message",
-          "data",
-          "request_id"
-        ],
-        "title": "Envelope[Resource]",
         "type": "object"
       },
       "Envelope_RoutineRun_": {
@@ -3177,6 +3177,50 @@
           "request_id"
         ],
         "title": "ErrorEnvelope",
+        "type": "object"
+      },
+      "FileEntry": {
+        "description": "A file or folder in the bot's workspace.\n\nThe container's own storage layout is never exposed — `path` is relative to\nthe workspace root, not to any real filesystem the bot runs on.",
+        "example": {
+          "name": "spec.md",
+          "path": "docs/spec.md",
+          "size": 2048,
+          "type": "file"
+        },
+        "properties": {
+          "name": {
+            "description": "Display name — the last segment of `path`.",
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "description": "Workspace-relative path, e.g. 'docs/spec/a.txt' — the whole path, not the directory. This is the addressing key: pass it as `path` on stat, download, preview, upload, mkdir and delete, exactly as listed.",
+            "title": "Path",
+            "type": "string"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Size in bytes. Null for folders, and for files whose listing carries no size — not every engine reports one.",
+            "title": "Size"
+          },
+          "type": {
+            "$ref": "#/components/schemas/ResourceType",
+            "description": "What kind of entry this is."
+          }
+        },
+        "required": [
+          "path",
+          "name",
+          "type"
+        ],
+        "title": "FileEntry",
         "type": "object"
       },
       "HelloWorld": {
@@ -4041,6 +4085,31 @@
         "title": "Page[Bot]",
         "type": "object"
       },
+      "Page_FileEntry_": {
+        "description": "One page of a list result: `total` counts every match, `items` holds the current page.",
+        "properties": {
+          "items": {
+            "description": "Items on the current page (present, possibly empty).",
+            "items": {
+              "$ref": "#/components/schemas/FileEntry"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "description": "Total number of items matching the query.",
+            "example": 1,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "Page[FileEntry]",
+        "type": "object"
+      },
       "Page_McpServer_": {
         "description": "One page of a list result: `total` counts every match, `items` holds the current page.",
         "properties": {
@@ -4089,31 +4158,6 @@
           "items"
         ],
         "title": "Page[Model]",
-        "type": "object"
-      },
-      "Page_Resource_": {
-        "description": "One page of a list result: `total` counts every match, `items` holds the current page.",
-        "properties": {
-          "items": {
-            "description": "Items on the current page (present, possibly empty).",
-            "items": {
-              "$ref": "#/components/schemas/Resource"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "total": {
-            "description": "Total number of items matching the query.",
-            "example": 1,
-            "title": "Total",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "total",
-          "items"
-        ],
-        "title": "Page[Resource]",
         "type": "object"
       },
       "Page_RoutineRun_": {
@@ -4217,11 +4261,11 @@
         "type": "object"
       },
       "Preview": {
-        "description": "A file's preview content.",
+        "description": "A file's content, decoded as text.",
         "example": {
           "content": "# Spec\nThe gateway forwards…",
           "content_type": "application/octet-stream",
-          "resource_id": ""
+          "path": "docs/spec.md"
         },
         "properties": {
           "content": {
@@ -4241,243 +4285,39 @@
             "title": "Content Type",
             "type": "string"
           },
-          "preview_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Reserved for a URL-based preview; currently always null — the content is returned inline instead.",
-            "title": "Preview Url"
-          },
-          "resource_id": {
-            "description": "Always empty — previews address files by their `path`.",
-            "title": "Resource Id",
+          "path": {
+            "description": "Workspace-relative path of the previewed file, as given.",
+            "title": "Path",
             "type": "string"
           }
         },
         "required": [
-          "resource_id",
+          "path",
           "content_type"
         ],
         "title": "Preview",
         "type": "object"
       },
-      "Resource": {
-        "description": "A resource: a file or folder in the bot's workspace, or an external link.\n\nThe container's own storage layout is never exposed — `path` is relative to\nthe workspace root, not to any real filesystem the bot runs on.",
-        "example": {
-          "name": "spec.md",
-          "path": "docs/spec.md",
-          "resource_id": "",
-          "size": 2048,
-          "type": "file"
-        },
-        "properties": {
-          "gmt_create": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "When the record was created (ISO 8601, no timezone designator). Null for files and folders read straight from the workspace — their listing carries no timestamps.",
-            "title": "Gmt Create"
-          },
-          "gmt_modified": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "When the record last changed (ISO 8601, no timezone designator); null for files and folders read straight from the workspace.",
-            "title": "Gmt Modified"
-          },
-          "name": {
-            "description": "Display name. For a file or folder this is the last segment of `path`; a link has only a name.",
-            "title": "Name",
-            "type": "string"
-          },
-          "path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Workspace-relative path of a file or folder, e.g. 'docs/spec/a.txt' — the whole path, not the directory; `name` is its last segment. This is the addressing key: pass it as `path` on download, preview, upload and delete exactly as listed. Null for links.",
-            "title": "Path"
-          },
-          "resource_id": {
-            "description": "Identifier of the resource's stored record — decimal digits for a link, e.g. '42'. Empty for files and folders, which have no record: address those by `path` instead.",
-            "title": "Resource Id",
-            "type": "string"
-          },
-          "size": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Size in bytes; null when not reported (links, and entries whose listing carries no size).",
-            "title": "Size"
-          },
-          "source": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "How the resource record came to exist — e.g. 'manual' for a link created through this API, 'upload' for an uploaded file's record. Null for files and folders read straight from the workspace, which have no record.",
-            "title": "Source"
-          },
-          "type": {
-            "$ref": "#/components/schemas/ResourceType",
-            "description": "What kind of resource this is."
-          },
-          "url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The link's URL; null for files and folders.",
-            "title": "Url"
-          }
-        },
-        "required": [
-          "resource_id",
-          "name",
-          "type"
-        ],
-        "title": "Resource",
-        "type": "object"
-      },
-      "ResourceCreate": {
-        "description": "Create a link resource.\n\nOnly links are created here: files are created through the upload\nendpoint (a file request answers 400 pointing there), and folders through\nthe mkdir endpoint (a folder request answers 501).",
-        "example": {
-          "name": "Team wiki",
-          "type": "link",
-          "url": "https://wiki.example.com/team"
-        },
-        "properties": {
-          "name": {
-            "description": "Display name for the link; a duplicate of an existing link answers 409.",
-            "title": "Name",
-            "type": "string"
-          },
-          "parent_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Accepted for compatibility and currently ignored — links are not placed in folders.",
-            "title": "Parent Id"
-          },
-          "type": {
-            "$ref": "#/components/schemas/ResourceType",
-            "description": "What to create. Only 'link' is accepted here — see the model description for where files and folders are created."
-          },
-          "url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The URL the link points to. Required when type is 'link' (400 when missing).",
-            "title": "Url"
-          }
-        },
-        "required": [
-          "name",
-          "type"
-        ],
-        "title": "ResourceCreate",
-        "type": "object"
-      },
       "ResourceType": {
-        "description": "A resource is a file, an external link, or a folder.",
+        "description": "A resource is a file or a folder in the bot's workspace.",
         "enum": [
           "file",
-          "link",
           "folder"
         ],
         "title": "ResourceType",
         "type": "string",
         "x-enum-descriptions": [
-          "A file in the bot's workspace, addressed by its workspace-relative path.",
-          "An external URL saved for the bot, addressed by its resource id.",
-          "A directory in the bot's workspace, addressed by its workspace-relative path."
+          "A file in the bot's workspace.",
+          "A directory in the bot's workspace."
         ],
         "x-enum-varnames": [
           "FILE",
-          "LINK",
           "FOLDER"
         ],
         "x-enumNames": [
           "FILE",
-          "LINK",
           "FOLDER"
         ]
-      },
-      "ResourceUpdate": {
-        "description": "Partial update of a link resource. Omitted fields are left unchanged.",
-        "example": {
-          "name": "Team wiki (new)"
-        },
-        "properties": {
-          "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "New display name; omit to keep.",
-            "title": "Name"
-          },
-          "url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "New URL; omit to keep.",
-            "title": "Url"
-          }
-        },
-        "title": "ResourceUpdate",
-        "type": "object"
       },
       "Routine": {
         "description": "A scheduled task run by a bot.",
@@ -10933,7 +10773,7 @@
         ]
       },
       "get": {
-        "description": "List a directory of the bot's workspace, plus the bot's link resources.\n\nFiles and folders come from the **workspace**, never from records. That is\nwhat makes a file the bot produced itself a first-class resource: it has no\nrecord and never will, and a record-backed listing simply could not see it.\nIt also removes the divergence the other direction — a record whose bytes are\nnot where it claims can no longer be reported as a file that exists.\n\nLinks are the exception, and not an inconsistency: a link has no file and no\npresence on any device, so the record *is* the resource. They are read from\nthe repo and appended.\n\nThe path parameter selects the directory (empty = workspace root).\nListing is non-recursive, which bounds the device round trip this\nendpoint makes.",
+        "description": "List a directory of the bot's workspace.\n\nEntries come from the **workspace**, never from records. That is what makes\na file the bot produced itself a first-class resource: it has no record and\nnever will, and a record-backed listing simply could not see it. It also\nremoves the divergence the other direction — a record whose bytes are not\nwhere it claims can no longer be reported as a file that exists.\n\nThe path parameter selects the directory (empty = workspace root). Listing\nis non-recursive, which bounds the device round trip this endpoint makes.\n\nPaging is applied by this server over the whole directory, because the\nengine's listing API takes no page, limit or cursor: `page_size` bounds the\nresponse, not the work. Requesting a later page costs exactly what the\nfirst one costs.",
         "operationId": "list_resources_openapi_v1_bots_resources_get",
         "parameters": [
           {
@@ -10960,7 +10800,7 @@
             }
           },
           {
-            "description": "Filter: 'file' or 'folder' lists only workspace entries of that kind; 'link' returns only the bot's links (path is then ignored). Omit for everything.",
+            "description": "Filter: 'file' lists only files, 'folder' only directories. Omit for both.",
             "in": "query",
             "name": "type",
             "required": false,
@@ -10973,7 +10813,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter: 'file' or 'folder' lists only workspace entries of that kind; 'link' returns only the bot's links (path is then ignored). Omit for everything.",
+              "description": "Filter: 'file' lists only files, 'folder' only directories. Omit for both.",
               "title": "Type"
             }
           },
@@ -11022,7 +10862,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope_Page_Resource__"
+                  "$ref": "#/components/schemas/Envelope_Page_FileEntry__"
                 }
               }
             },
@@ -11150,390 +10990,6 @@
           }
         },
         "summary": "List Resources",
-        "tags": [
-          "resources"
-        ]
-      },
-      "post": {
-        "description": "Create a resource (file placeholder, link, or folder).\n\nPhase 1: only LINK supported. FILE → use POST /upload (Phase 3);\nFOLDER → create_directory (Phase 3, device_fs branch). Duplicate name\nsurfaces as ValueError from the service → 409 Conflict (legacy parity).",
-        "operationId": "create_resource_openapi_v1_bots_resources_post",
-        "parameters": [
-          {
-            "description": "Bot ID this resource belongs to.",
-            "in": "query",
-            "name": "bot_id",
-            "required": true,
-            "schema": {
-              "description": "Bot ID this resource belongs to.",
-              "title": "Bot Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-              "minLength": 1,
-              "title": "User Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ResourceCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Envelope_Resource_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 400000,
-                  "message": "Bad Request",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Invalid request"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 401000,
-                  "message": "Unauthorized",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Missing or invalid credentials"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 403000,
-                  "message": "Forbidden",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "The user_id names a user the authenticated caller may not act for"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 404000,
-                  "message": "Not found",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Not found — also returned when the resource exists but does not belong to the caller"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 409000,
-                  "message": "Conflict",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Conflicts with current state"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 422000,
-                  "message": "Invalid request",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Request failed validation"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 500000,
-                  "message": "Internal Server Error",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Internal error"
-          },
-          "502": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 502000,
-                  "message": "Bad Gateway",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Upstream service error"
-          }
-        },
-        "summary": "Create Resource",
-        "tags": [
-          "resources"
-        ]
-      }
-    },
-    "/openapi/v1/bots/resources/check-name": {
-      "get": {
-        "description": "Whether a resource already exists.\n\nTwo parameters because there are two kinds of resource, addressed\ndifferently. A file or folder is checked against the workspace by path —\nthe same question the upload asks before writing, answered by the same\nauthority, so the two can never disagree. A link is checked by name\nagainst the records, because a link has no file. Supplying path gets the\nfile check; otherwise it is the link check.",
-        "operationId": "check_resource_name_openapi_v1_bots_resources_check_name_get",
-        "parameters": [
-          {
-            "description": "Link name to check against the bot's link records (exact, case-sensitive match). Supply this or path.",
-            "in": "query",
-            "name": "name",
-            "required": false,
-            "schema": {
-              "default": "",
-              "description": "Link name to check against the bot's link records (exact, case-sensitive match). Supply this or path.",
-              "title": "Name",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Workspace-relative path to check for a file or folder, e.g. 'docs/spec.md'. When given, the file check runs and name is ignored.",
-            "in": "query",
-            "name": "path",
-            "required": false,
-            "schema": {
-              "default": "",
-              "description": "Workspace-relative path to check for a file or folder, e.g. 'docs/spec.md'. When given, the file check runs and name is ignored.",
-              "title": "Path",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Addressing hint: 'file' or 'folder' forces the workspace check; otherwise a supplied path decides.",
-            "in": "query",
-            "name": "type",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "$ref": "#/components/schemas/ResourceType"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Addressing hint: 'file' or 'folder' forces the workspace check; otherwise a supplied path decides.",
-              "title": "Type"
-            }
-          },
-          {
-            "description": "Bot ID this resource belongs to.",
-            "in": "query",
-            "name": "bot_id",
-            "required": true,
-            "schema": {
-              "description": "Bot ID this resource belongs to.",
-              "title": "Bot Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-              "minLength": 1,
-              "title": "User Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Envelope_NameCheck_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 400000,
-                  "message": "Bad Request",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Invalid request"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 401000,
-                  "message": "Unauthorized",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Missing or invalid credentials"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 403000,
-                  "message": "Forbidden",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "The user_id names a user the authenticated caller may not act for"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 404000,
-                  "message": "Not found",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Not found — also returned when the resource exists but does not belong to the caller"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 409000,
-                  "message": "Conflict",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Conflicts with current state"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 422000,
-                  "message": "Invalid request",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Request failed validation"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 500000,
-                  "message": "Internal Server Error",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Internal error"
-          },
-          "502": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 502000,
-                  "message": "Bad Gateway",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Upstream service error"
-          }
-        },
-        "summary": "Check Resource Name",
         "tags": [
           "resources"
         ]
@@ -11733,7 +11189,7 @@
     },
     "/openapi/v1/bots/resources/mkdir": {
       "post": {
-        "description": "Create a directory in the bot's workspace, addressed by path.\n\nIntermediate directories are created as needed. Directories exist on the\nworkspace filesystem only and are reported by listing it — they have no\nrecord and no resource id.",
+        "description": "Create a directory in the bot's workspace, addressed by path.\n\nIntermediate directories are created as needed. Directories exist on the\nworkspace filesystem only and are reported by listing it — they have no\nrecord.",
         "operationId": "create_directory_openapi_v1_bots_resources_mkdir_post",
         "parameters": [
           {
@@ -11776,7 +11232,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope_Resource_"
+                  "$ref": "#/components/schemas/Envelope_FileEntry_"
                 }
               }
             },
@@ -12102,10 +11558,10 @@
         ]
       }
     },
-    "/openapi/v1/bots/resources/upload": {
-      "post": {
-        "description": "Upload a file's raw bytes into the bot's workspace.\n\nThe body is the file's raw bytes (content type application/octet-stream),\nnot a multipart form. The path is workspace-relative and carries its own\ndirectories ('docs/spec/a.txt'); intermediate ones are created as needed\n— there is no separate name or parent-directory parameter. An occupied\npath answers 409; the size limit is 500 MB, and only common document,\ncode, image and archive extensions are accepted (400 otherwise).",
-        "operationId": "upload_resource_openapi_v1_bots_resources_upload_post",
+    "/openapi/v1/bots/resources/stat": {
+      "get": {
+        "description": "One file or folder's metadata, addressed by path.\n\nAnswers the questions a listing answers, for a single entry: whether it is\nthere at all (404 if not), whether it is a file or a folder, and how big it\nis. The workspace root has no entry of its own, so `path` is required here\neven though the listing accepts an empty one.\n\nEntries the listing hides — dotfiles, and the workspace-root identity files\n— are 404 here too, so the two surfaces agree on what exists.",
+        "operationId": "stat_resource_openapi_v1_bots_resources_stat_get",
         "parameters": [
           {
             "description": "Workspace-relative path of the file or folder, e.g. 'docs/spec/a.txt' — exactly as returned in a listing entry's `path`. A leading slash is tolerated; '..' segments are refused (400).",
@@ -12142,6 +11598,196 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_FileEntry_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Stat Resource",
+        "tags": [
+          "resources"
+        ]
+      }
+    },
+    "/openapi/v1/bots/resources/upload": {
+      "post": {
+        "description": "Upload a file's raw bytes into the bot's workspace.\n\nThe body is the file's raw bytes (content type application/octet-stream),\nnot a multipart form. The path is workspace-relative and carries its own\ndirectories ('docs/spec/a.txt'); intermediate ones are created as needed\n— there is no separate name or parent-directory parameter. An occupied\npath answers 409 unless `overwrite` is set; the size limit is 500 MB, and\nonly common document, code, image and archive extensions are accepted\n(400 otherwise).",
+        "operationId": "upload_resource_openapi_v1_bots_resources_upload_post",
+        "parameters": [
+          {
+            "description": "Workspace-relative path of the file or folder, e.g. 'docs/spec/a.txt' — exactly as returned in a listing entry's `path`. A leading slash is tolerated; '..' segments are refused (400).",
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "description": "Workspace-relative path of the file or folder, e.g. 'docs/spec/a.txt' — exactly as returned in a listing entry's `path`. A leading slash is tolerated; '..' segments are refused (400).",
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Bot ID this resource belongs to.",
+            "in": "query",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "Bot ID this resource belongs to.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Replace the file if the path is already occupied. Defaults to false, which answers 409 instead. Has no effect on a free path.",
+            "in": "query",
+            "name": "overwrite",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Replace the file if the path is already occupied. Defaults to false, which answers 409 instead. Has no effect on a free path.",
+              "title": "Overwrite",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/octet-stream": {
@@ -12159,7 +11805,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope_Resource_"
+                  "$ref": "#/components/schemas/Envelope_FileEntry_"
                 }
               }
             },
@@ -12287,546 +11933,6 @@
           }
         },
         "summary": "Upload Resource",
-        "tags": [
-          "resources"
-        ]
-      }
-    },
-    "/openapi/v1/bots/resources/{resource_id}": {
-      "delete": {
-        "description": "Delete a link resource by id.\n\nOnly links are deleted by id — files and folders are deleted through the\npath-addressed delete. A file's id answers 404. Works whether or not the\nbot currently has a live device.",
-        "operationId": "delete_resource_openapi_v1_bots_resources__resource_id__delete",
-        "parameters": [
-          {
-            "description": "The link resource's id, as returned by the listing or create response (decimal digits, e.g. '42'). Files and folders have no id — address them by `path` on the path-based endpoints.",
-            "in": "path",
-            "name": "resource_id",
-            "required": true,
-            "schema": {
-              "description": "The link resource's id, as returned by the listing or create response (decimal digits, e.g. '42'). Files and folders have no id — address them by `path` on the path-based endpoints.",
-              "title": "Resource Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Bot ID this resource belongs to.",
-            "in": "query",
-            "name": "bot_id",
-            "required": true,
-            "schema": {
-              "description": "Bot ID this resource belongs to.",
-              "title": "Bot Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-              "minLength": 1,
-              "title": "User Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Envelope_Deleted_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 400000,
-                  "message": "Bad Request",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Invalid request"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 401000,
-                  "message": "Unauthorized",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Missing or invalid credentials"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 403000,
-                  "message": "Forbidden",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "The user_id names a user the authenticated caller may not act for"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 404000,
-                  "message": "Not found",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Not found — also returned when the resource exists but does not belong to the caller"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 409000,
-                  "message": "Conflict",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Conflicts with current state"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 422000,
-                  "message": "Invalid request",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Request failed validation"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 500000,
-                  "message": "Internal Server Error",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Internal error"
-          },
-          "502": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 502000,
-                  "message": "Bad Gateway",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Upstream service error"
-          }
-        },
-        "summary": "Delete Resource",
-        "tags": [
-          "resources"
-        ]
-      },
-      "get": {
-        "description": "Get a link resource by id.\n\nOnly links are served by id — a file's id answers 404 here. A file's\naddress is its path: the listing shows it, and download/preview serve it.",
-        "operationId": "get_resource_openapi_v1_bots_resources__resource_id__get",
-        "parameters": [
-          {
-            "description": "The link resource's id, as returned by the listing or create response (decimal digits, e.g. '42'). Files and folders have no id — address them by `path` on the path-based endpoints.",
-            "in": "path",
-            "name": "resource_id",
-            "required": true,
-            "schema": {
-              "description": "The link resource's id, as returned by the listing or create response (decimal digits, e.g. '42'). Files and folders have no id — address them by `path` on the path-based endpoints.",
-              "title": "Resource Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Bot ID this resource belongs to.",
-            "in": "query",
-            "name": "bot_id",
-            "required": true,
-            "schema": {
-              "description": "Bot ID this resource belongs to.",
-              "title": "Bot Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-              "minLength": 1,
-              "title": "User Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Envelope_Resource_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 400000,
-                  "message": "Bad Request",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Invalid request"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 401000,
-                  "message": "Unauthorized",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Missing or invalid credentials"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 403000,
-                  "message": "Forbidden",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "The user_id names a user the authenticated caller may not act for"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 404000,
-                  "message": "Not found",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Not found — also returned when the resource exists but does not belong to the caller"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 409000,
-                  "message": "Conflict",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Conflicts with current state"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 422000,
-                  "message": "Invalid request",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Request failed validation"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 500000,
-                  "message": "Internal Server Error",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Internal error"
-          },
-          "502": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 502000,
-                  "message": "Bad Gateway",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Upstream service error"
-          }
-        },
-        "summary": "Get Resource",
-        "tags": [
-          "resources"
-        ]
-      },
-      "put": {
-        "description": "Rename a link resource and/or change its URL, by id.\n\nOnly links are updatable by id — a file's id answers 404. A name or URL\nclash with an existing link answers 409.",
-        "operationId": "update_resource_openapi_v1_bots_resources__resource_id__put",
-        "parameters": [
-          {
-            "description": "The link resource's id, as returned by the listing or create response (decimal digits, e.g. '42'). Files and folders have no id — address them by `path` on the path-based endpoints.",
-            "in": "path",
-            "name": "resource_id",
-            "required": true,
-            "schema": {
-              "description": "The link resource's id, as returned by the listing or create response (decimal digits, e.g. '42'). Files and folders have no id — address them by `path` on the path-based endpoints.",
-              "title": "Resource Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Bot ID this resource belongs to.",
-            "in": "query",
-            "name": "bot_id",
-            "required": true,
-            "schema": {
-              "description": "Bot ID this resource belongs to.",
-              "title": "Bot Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-              "minLength": 1,
-              "title": "User Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ResourceUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Envelope_Resource_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 400000,
-                  "message": "Bad Request",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Invalid request"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 401000,
-                  "message": "Unauthorized",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Missing or invalid credentials"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 403000,
-                  "message": "Forbidden",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "The user_id names a user the authenticated caller may not act for"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 404000,
-                  "message": "Not found",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Not found — also returned when the resource exists but does not belong to the caller"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 409000,
-                  "message": "Conflict",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Conflicts with current state"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 422000,
-                  "message": "Invalid request",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Request failed validation"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 500000,
-                  "message": "Internal Server Error",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Internal error"
-          },
-          "502": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 502000,
-                  "message": "Bad Gateway",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Upstream service error"
-          }
-        },
-        "summary": "Update Resource",
         "tags": [
           "resources"
         ]

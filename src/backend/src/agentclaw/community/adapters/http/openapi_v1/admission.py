@@ -136,22 +136,18 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/identity/{bot_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("GET", "/openapi/v1/bots/identity/{bot_id}/{file_type}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("PUT", "/openapi/v1/bots/identity/{bot_id}/{file_type}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    # resources — ``bot_id`` is a required query parameter on all eleven.
-    # The file operations are addressed by workspace path rather than by record
-    # id: a record id cannot address a file the bot created itself. Every one of
-    # them still resolves its workspace from the caller-supplied ``bot_id``, so
-    # they carry the same own-bot grant check as the record-addressed routes.
+    # resources — ``bot_id`` is a required query parameter on all seven, and
+    # every one of them is addressed by workspace path. There are no record-id
+    # routes left: a record id cannot address a file the bot created itself, and
+    # links are no longer part of this group. Each resolves its workspace from
+    # the caller-supplied ``bot_id``, so each carries the own-bot grant check.
     ("GET", "/openapi/v1/bots/resources"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("POST", "/openapi/v1/bots/resources"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("DELETE", "/openapi/v1/bots/resources"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("GET", "/openapi/v1/bots/resources/check-name"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("GET", "/openapi/v1/bots/resources/stat"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("POST", "/openapi/v1/bots/resources/upload"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("GET", "/openapi/v1/bots/resources/download"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("GET", "/openapi/v1/bots/resources/preview"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("POST", "/openapi/v1/bots/resources/mkdir"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("GET", "/openapi/v1/bots/resources/{resource_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("PUT", "/openapi/v1/bots/resources/{resource_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("DELETE", "/openapi/v1/bots/resources/{resource_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     # routines — query ``bot_id``, except the create, which carries it in the
     # body and is checked in the handler (see ``BODY_BOT_ID_OPERATIONS``).
     ("GET", "/openapi/v1/bots/routines"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
