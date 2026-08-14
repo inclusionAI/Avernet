@@ -5,9 +5,12 @@
 """
 from __future__ import annotations
 
+from typing import Any
+
 from agentclaw.community.core.task.domain.models import (
     AcceptanceResult,
     AcceptanceVerdict,
+    Status,
     TaskCallbackData,
     TaskNodePatch,
 )
@@ -33,12 +36,27 @@ class CallbackAdapter:
                 verdict=AcceptanceVerdict.FAIL,
                 gaps=[fail_detail] if fail_detail else ["unknown_gap"],
             )
+        ext = data.result.get("_ext_info") or {}
+        ep_patch: dict[str, Any] = dict(ext)
+        if fail_detail:
+            ep_patch["fail_detail"] = fail_detail
         return TaskNodePatch(
             task_id=task_id,
             node_id=node_id,
             output_patch={"data": out} if out is not None else None,
             acceptance_result=acceptance,
-            extend_props_patch={"fail_detail": fail_detail} if fail_detail else None,
+            extend_props_patch=ep_patch if ep_patch else None,
+        )
+
+    def adapt_start(self, data: TaskCallbackData) -> TaskNodePatch:
+        """start 回调:loop_task_id split + status=RUNNING(无 acceptance);折 _ext_info→extend_props。"""
+        task_id, node_id = data.loop_task_id.split("::", 1)
+        ext = data.result.get("_ext_info") or {}
+        return TaskNodePatch(
+            task_id=task_id,
+            node_id=node_id,
+            status=Status.RUNNING,
+            extend_props_patch=dict(ext) if ext else None,
         )
 
 
@@ -55,8 +73,10 @@ class TaskLoopCallback:
         self._engine = engine
 
     async def start_run(self, data: TaskCallbackData) -> None:
-        """任务开始执行(可选进度信号,Avernet stub:记录不驱动)。协程化:与 report_result 链路一致。"""
-        return None
+        """任务开始执行:适配层 adapt_start → 编排核 on_start(await)→ PENDING→RUNNING(幂等)。
+        协程化:on_start async,await 不阻塞回投调用方。"""
+        patch = self._adapter.adapt_start(data)
+        await self._engine.on_start(patch)
 
     async def report_result(self, data: TaskCallbackData) -> None:
         """任务完成或失败:适配层组装 TaskNodePatch → 编排核 on_report(await) → graph.update_task_node_info → 翻态/传播/补救。

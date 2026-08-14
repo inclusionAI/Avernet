@@ -39,13 +39,18 @@ def _run(coro):
 
 
 class RecordingEngine:
-    """记录 on_report 入参的编排核 stub(on_report async,匹配协程化签名)。"""
+    """记录 on_report / on_start 入参的编排核 stub(async,匹配协程化签名)。"""
 
     def __init__(self):
         self.reports: list[TaskNodePatch] = []
+        self.starts: list[TaskNodePatch] = []
 
     async def on_report(self, patch: TaskNodePatch):
         self.reports.append(patch)
+        return patch
+
+    async def on_start(self, patch: TaskNodePatch):
+        self.starts.append(patch)
         return patch
 
 
@@ -95,6 +100,39 @@ class TestAdapt:
         assert patch.task_id == "t3"
         assert patch.node_id == "grp::sub"
 
+    def test_adapt_folds_ext_info_into_extend_props(self):
+        adapter = CallbackAdapter()
+        d = _data(success=True, data="ok")
+        d.result["_ext_info"] = {"k": "v"}
+        patch = adapter.adapt(d)
+        assert patch.extend_props_patch == {"k": "v"}
+
+    def test_adapt_merges_ext_info_and_fail_detail(self):
+        adapter = CallbackAdapter()
+        d = _data(success=False, fail_detail="gap1")
+        d.result["_ext_info"] = {"k": "v"}
+        patch = adapter.adapt(d)
+        assert patch.extend_props_patch == {"k": "v", "fail_detail": "gap1"}
+
+
+# ===== adapt_start =====
+class TestAdaptStart:
+    def test_adapt_start_builds_running_patch_with_ext_info(self):
+        from agentclaw.community.core.task.domain.models import Status
+        adapter = CallbackAdapter()
+        d = _data(loop_task_id="t1::c1")
+        d.result["_ext_info"] = {"k": "v"}
+        patch = adapter.adapt_start(d)
+        assert (patch.task_id, patch.node_id) == ("t1", "c1")
+        assert patch.status == Status.RUNNING
+        assert patch.acceptance_result is None
+        assert patch.extend_props_patch == {"k": "v"}
+
+    def test_adapt_start_without_ext_info_has_no_extend_props(self):
+        adapter = CallbackAdapter()
+        patch = adapter.adapt_start(_data(loop_task_id="t1::c1"))
+        assert patch.extend_props_patch is None
+
 
 # ===== TaskLoopCallback =====
 class TestTaskLoopCallback:
@@ -114,11 +152,17 @@ class TestTaskLoopCallback:
         _run(cb.report_result(_data(loop_task_id="t1::c1", success=False, fail_detail="缺证据")))
         assert engine.reports[0].acceptance_result.gaps == ["缺证据"]
 
-    def test_start_run_is_noop(self):
+    def test_start_run_routes_to_on_start(self):
+        from agentclaw.community.core.task.domain.models import Status
         engine = RecordingEngine()
         cb = TaskLoopCallback(CallbackAdapter(), engine)
-        assert _run(cb.start_run(_data(loop_task_id="t1::c1"))) is None
-        assert engine.reports == []  # 进度信号不驱动 on_report
+        _run(cb.start_run(_data(loop_task_id="t1::c1")))
+        assert engine.reports == []          # start 不走 on_report
+        assert len(engine.starts) == 1
+        p = engine.starts[0]
+        assert (p.task_id, p.node_id) == ("t1", "c1")
+        assert p.status == Status.RUNNING
+        assert p.acceptance_result is None   # start 不带 acceptance
 
 
 class TestZeroCase:
