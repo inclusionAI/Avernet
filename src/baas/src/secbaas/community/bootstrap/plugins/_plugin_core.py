@@ -29,7 +29,14 @@ from secbaas.community.plugins.cache.stub import StubCachePlugin
 from secbaas.community.plugins.database.mariadb.mariadb_orm import MariaDbOrmPlugin
 from secbaas.community.plugins.database.sqlite.sqlite_orm import SqliteOrmPlugin
 from secbaas.community.plugins.file_transfer import NoopFileTransferBackend
-from secbaas.community.plugins.sandbox.arca import StubArcaSandboxPlugin
+from secbaas.community.plugins.sandbox.arca import (
+    AliyunAckSandboxPlugin,
+    StubArcaSandboxPlugin,
+)
+from secbaas.community.plugins.sandbox.arca.aliyun_ack import (
+    AliyunAckTemplateConfig,
+    build_aliyun_ack_template,
+)
 from secbaas.community.plugins.sandbox.arca.local_proc import (
     LocalProcessArcaSandboxPlugin,
 )
@@ -51,6 +58,17 @@ from secbaas.community.plugins.sandbox.teclaw import StubTeClawBotPlugin
 from secbaas.community.plugins.sandbox.utils.arca_utils import ArcaUtils
 from secbaas.community.plugins.secret import AliyunKmsSecretStorePlugin
 from secbaas.community.plugins.secret.stub import StubSecretStorePlugin
+
+
+def _build_aliyun_ack_templates(
+    raw_templates: dict | None,
+) -> dict[str, AliyunAckTemplateConfig]:
+    """Build the typed AliyunAckTemplateConfig map from the DI config dict."""
+    out = {}
+    for ack_id, raw in (raw_templates or {}).items():
+        if isinstance(raw, dict):
+            out[ack_id] = build_aliyun_ack_template(ack_id, raw)
+    return out
 
 
 class PluginContainer(containers.DeclarativeContainer):
@@ -89,10 +107,20 @@ class PluginContainer(containers.DeclarativeContainer):
         stub=providers.Singleton(StubAuthPlugin),
     )
 
+    arca_ack_templates_map = providers.Callable(
+        _build_aliyun_ack_templates,
+        raw_templates=config.aliyun_ack_template,
+    )
+
     arca_sandbox_plugin_factory = providers.Selector(
         config.plugins.sandbox.arca,
         stub=providers.Object(StubArcaSandboxPlugin),
         local_proc=providers.Object(LocalProcessArcaSandboxPlugin),
+        aliyun_ack=providers.Factory(
+            AliyunAckSandboxPlugin,
+            ack_templates=arca_ack_templates_map,
+            arca_utils=arca_utils,
+        ),
     )
 
     desktop_sandbox_plugin = providers.Selector(
