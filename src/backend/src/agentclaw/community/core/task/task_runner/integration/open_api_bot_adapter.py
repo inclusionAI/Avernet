@@ -18,7 +18,7 @@ from agentclaw.community.core.task.task_runner.integration.ports import ApiKeyPr
 # api_key_prefix 未设置时,回落取 api_key 前多少位作 URL 路径段。
 # 取 10:与 IntegrationDouble/_Key 约定一致(api_key="ak1234567890" → prefix="ak12345678")。
 # 不同环境可在 ApiKeyProvider.api_key_prefix 显式提供真实前缀(优先),此处仅兜底。
-_DEFAULT_KEY_PREFIX_LEN = 10
+_DEFAULT_KEY_PREFIX_LEN = 8
 
 
 class OpenApiError(Exception):
