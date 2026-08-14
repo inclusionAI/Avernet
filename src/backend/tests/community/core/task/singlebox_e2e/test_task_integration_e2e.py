@@ -37,7 +37,7 @@ _TIMEOUT = float(os.environ.get("SINGLEBOX_TASK_E2E_TIMEOUT", "1500"))
 
 SKILLS_DIR = Path(__file__).parent / "skills"
 # 每次进程随机:避免后端 in-mem TaskGraphService 跨次重跑时 task_id 重复 → GraphAlreadyInitializedError。
-TASK_ID = f"t_case"
+TASK_ID = f"t_case_{uuid.uuid4().hex[:6]}"
 
 # search skill 剧本角色名(HIT_SINGLE 真实叶节点)→ bot_name;协作群 bot 走 BCS double 不建。
 ROLE_BOTS = {

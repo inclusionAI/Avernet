@@ -35,9 +35,16 @@ async def execute_task(
     body: TaskInfoDTO,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
 ) -> ApiResponse[TaskOpResultDTO]:
-    """提交执行任务。initialize_graph(根 PENDING) → 编排核 on_execute 首帧推进。"""
+    """提交执行任务。initialize_graph(根 PENDING) → 编排核 on_execute 首帧推进。
+
+    幂等:同 task_id 已建图(GraphAlreadyInitializedError)→ 409 Conflict(显式可读,非 500)。"""
+    from fastapi import HTTPException
     task_info = task_info_from_dto(body)
-    result = await service.execute(task_info)
+    try:
+        result = await service.execute(task_info)
+    except GraphAlreadyInitializedError:
+        raise HTTPException(status_code=409, detail=f"task_id={task_info.task_spec.metadata.task_id} 图已存在,请用 dashboard 查看"
+                                  ) from None
     return ApiResponse(success=True, message="OK", error_code=200, data=op_result_to_dto(result))
 
 
@@ -47,8 +54,14 @@ async def get_task_dashboard(
     node_id: str | None = None,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
 ) -> ApiResponse[TaskExecutionGraphDTO]:
-    """任务执行详情可视化(整图或按 node_id 子树投影),只读。"""
-    graph = service.get_task_dashboard(task_id, node_id)
+    """任务执行详情可视化(整图或按 node_id 子树投影),只读。
+
+    任务不存在 → 404(显式可读,非 500)。"""
+    from fastapi import HTTPException
+    try:
+        graph = service.get_task_dashboard(task_id, node_id)
+    except (TaskNotFoundError, NodeNotFoundError):
+        raise HTTPException(status_code=404, detail=f"task_id={task_id} 不存在") from None
     return ApiResponse(success=True, message="OK", error_code=200, data=graph_to_dto(graph))
 
 
@@ -79,7 +92,7 @@ from agentclaw.community.core.errors import (
     CallbackAuthError, CallbackCorrelationError,
 )
 from agentclaw.community.core.task.domain.errors import (
-    NodeNotFoundError, TaskNotFoundError, TaskStateError,
+    GraphAlreadyInitializedError, NodeNotFoundError, TaskNotFoundError, TaskStateError,
 )
 from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.core.task.task_runner.callback_correlation import (
