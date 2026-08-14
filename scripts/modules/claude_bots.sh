@@ -106,10 +106,14 @@ claude_bots_start() {
 }
 
 # Resolve BCSFUSE_AUTH_TOKEN from the bcsfuse env file or current environment.
+# Tolerates both `BCSFUSE_AUTH_TOKEN=...` and `export BCSFUSE_AUTH_TOKEN=...`.
 _claude_bots_bcsfuse_auth_token() {
     local token="${BCSFUSE_AUTH_TOKEN:-}"
-    if [ -z "$token" ] && [ -n "${BCSFUSE_ENV_FILE:-}" ] && [ -f "$BCSFUSE_ENV_FILE" ]; then
-        token="$(grep '^export BCSFUSE_AUTH_TOKEN=' "$BCSFUSE_ENV_FILE" 2>/dev/null | head -1 | sed -E 's/^export BCSFUSE_AUTH_TOKEN="?([^"]*)"?$/\1/')"
+    if [ -z "$token" ]; then
+        local env_file="${BCSFUSE_ENV_FILE:-${BCSFUSE_DIR:-${PROJECT_ROOT}/src/bcsfuse}/.runtime/env/.env.local}"
+        if [ -f "$env_file" ]; then
+            token="$(grep -E '^(export )?BCSFUSE_AUTH_TOKEN=' "$env_file" 2>/dev/null | head -1 | sed -E 's/^(export )?BCSFUSE_AUTH_TOKEN="?([^"]*)"?$/\2/')"
+        fi
     fi
     printf '%s\n' "$token"
 }
