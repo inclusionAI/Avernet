@@ -7,7 +7,7 @@ from ._orm_model import DeviceTemplateModel
 from ._protocol import DeviceTemplateRepository
 from ._record import DeviceTemplateRecord
 
-log = get_logger("orm-repository")
+log = get_logger("orm")
 
 
 class OrmDeviceTemplateRepository(OrmConnectionMixin, DeviceTemplateRepository):

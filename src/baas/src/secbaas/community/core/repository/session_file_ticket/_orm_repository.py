@@ -12,7 +12,7 @@ from ._protocol import (
 )
 from ._record import SessionTicketRecord
 
-log = get_logger("orm-repository")
+log = get_logger("orm")
 
 # Upload path:  CREATED -> UPLOADING -> DONE  (fast: CREATED -> DONE)
 # Cancel path:  CREATED/UPLOADING -> CANCELLED

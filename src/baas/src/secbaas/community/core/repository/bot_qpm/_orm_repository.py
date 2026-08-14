@@ -10,7 +10,7 @@ from ._orm_model import BotQpmConfigModel
 from ._protocol import BotQpmRepository
 from ._record import BotQpmRecord
 
-log = get_logger("orm-repository")
+log = get_logger("orm")
 
 
 class OrmBotQpmRepository(BotQpmRepository, OrmConnectionMixin):

@@ -12,7 +12,7 @@ from secbaas.community.logger import get_logger
 
 from ._configs import DatabaseConfig
 
-logger = get_logger("bootstrap-lifecycle")
+logger = get_logger("bootstrap")
 
 
 @runtime_checkable

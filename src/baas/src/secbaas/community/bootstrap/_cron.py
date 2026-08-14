@@ -12,7 +12,7 @@ from __future__ import annotations
 from secbaas.community.core.service.scheduler import AppScheduler, ScheduledTask
 from secbaas.community.logger import get_logger
 
-log = get_logger("bootstrap-cron")
+log = get_logger("bootstrap")
 
 
 class CronLifecycle:

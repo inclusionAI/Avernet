@@ -6,7 +6,7 @@ from secbaas.community.logger import get_logger
 from ._orm_model import BotRunQueueChunkModel
 from ._record import BotRunQueueChunkRecord
 
-log = get_logger("orm-repository")
+log = get_logger("orm")
 
 
 class OrmBotRunQueueChunkRepository(OrmConnectionMixin):

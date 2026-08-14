@@ -79,7 +79,7 @@ class StandalonePaasService(PaasService):
         self._credentials = credentials
         self._health_endpoint = health_endpoint
         self._health_timeout_seconds = health_timeout_seconds
-        self._logger = get_logger("standalone_paas_service")
+        self._logger = get_logger("core-service")
 
     # ------------------------------------------------------------------
     # ABC methods: credential / platform identity
