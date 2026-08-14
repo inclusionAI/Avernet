@@ -5,8 +5,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
 use bcs_service_api::application::v1::{
-    AddSessionParticipant, AuthenticatedCaller, DeleteSession,
-    DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions,
+    AddSessionParticipant, AuthenticatedCaller, CollectSession, DeleteSession,
+    DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions, UncollectSession,
     UpdateSessionParticipant,
 };
 
@@ -14,8 +14,9 @@ use crate::v1::common::{
     ApiState, Envelope, ErrorResponse, RequestId, application_error_response, invalid_request,
 };
 use crate::v1::openapi::dto::session::{
-    AddSessionParticipantRequest, CreateSessionRequest, DeleteSessionQuery, ListSessionMessagesQuery,
-    ListSessionsQuery, UpdateSessionRequest, UpdateSessionParticipantRequest,
+    AddSessionParticipantRequest, CollectSessionRequest, CreateSessionRequest, DeleteSessionQuery,
+    ListSessionMessagesQuery, ListSessionsQuery, UncollectSessionQuery, UpdateSessionRequest,
+    UpdateSessionParticipantRequest,
 };
 
 pub fn router() -> Router<ApiState> {
@@ -33,6 +34,10 @@ pub fn router() -> Router<ApiState> {
         .route(
             "/sessions/{session_id}/messages",
             get(list_session_messages),
+        )
+        .route(
+            "/sessions/{session_id}/collect",
+            post(collect_session).delete(uncollect_session),
         )
         .route(
             "/sessions/{session_id}/participants",
@@ -183,6 +188,68 @@ async fn list_session_messages(
             before: query.before,
             limit: query.limit,
             view_bot_id: query.view_bot_id,
+        })
+        .await
+        .map_err(|error| application_error_response(&request_id, error))?;
+    Ok((
+        StatusCode::OK,
+        Json(Envelope::success(20_000, "OK", result, request_id.0)),
+    )
+        .into_response())
+}
+
+async fn collect_session(
+    State(state): State<ApiState>,
+    Extension(caller): Extension<AuthenticatedCaller>,
+    Extension(request_id): Extension<RequestId>,
+    path: Result<Path<String>, PathRejection>,
+    body: Result<Json<CollectSessionRequest>, JsonRejection>,
+) -> Result<Response, ErrorResponse> {
+    let Path(session_id) = path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    if body.participant.trim().is_empty() {
+        return Err(invalid_request(
+            &request_id,
+            "participant must not be empty",
+        ));
+    }
+    let result = state
+        .session_service
+        .collect(CollectSession {
+            caller,
+            session_id,
+            participant: body.participant,
+        })
+        .await
+        .map_err(|error| application_error_response(&request_id, error))?;
+    Ok((
+        StatusCode::OK,
+        Json(Envelope::success(20_000, "OK", result, request_id.0)),
+    )
+        .into_response())
+}
+
+async fn uncollect_session(
+    State(state): State<ApiState>,
+    Extension(caller): Extension<AuthenticatedCaller>,
+    Extension(request_id): Extension<RequestId>,
+    path: Result<Path<String>, PathRejection>,
+    query: Result<Query<UncollectSessionQuery>, QueryRejection>,
+) -> Result<Response, ErrorResponse> {
+    let Path(session_id) = path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    let Query(query) = query.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    if query.participant.trim().is_empty() {
+        return Err(invalid_request(
+            &request_id,
+            "participant must not be empty",
+        ));
+    }
+    let result = state
+        .session_service
+        .uncollect(UncollectSession {
+            caller,
+            session_id,
+            participant: query.participant,
         })
         .await
         .map_err(|error| application_error_response(&request_id, error))?;

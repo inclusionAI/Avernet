@@ -6,11 +6,13 @@ use bcs_service_api::application::v1::{
     ActorKind, AddSessionParticipant, ApplicationError, AuthenticatedAccessKeyIdentity,
     AuthenticatedAppIdentity, AuthenticatedBotIdentity, AuthenticatedCaller,
     AuthenticatedUserIdentity, AuthorizeGroupSessionConnection, CompleteSession, CreateSession,
-    CreateSessionOutcome, DeleteResult, DeleteSession, DeleteSessionParticipant, GetSession,
+    CollectSession, CreateSessionOutcome, DeleteResult, DeleteSession, DeleteSessionParticipant,
+    GetSession,
     GroupSessionConnectionBinding, GroupSessionConnectionError, GroupSessionConnectionService,
     IssueGroupSessionConnectionToken, IssuedGroupSessionConnectionToken, ListSessions, Page,
-    ParticipantMode, ParticipantRole, SessionCompletionResult, SessionDetail, SessionParticipant,
-    SessionService, SessionStatus, SessionSummary, UpdateSession, UpdateSessionParticipant,
+    ParticipantMode, ParticipantRole, SessionCollectionResult, SessionCompletionResult,
+    SessionDetail, SessionParticipant, SessionService, SessionStatus, SessionSummary,
+    UncollectSession, UpdateSession, UpdateSessionParticipant,
     VerifyGroupSessionConnectionToken, GROUP_SESSION_WS_TOKEN_TTL_SECONDS,
 };
 use bcs_service_api::port::{
@@ -116,6 +118,20 @@ impl SessionService for FakeSessionService {
         _command: CompleteSession,
     ) -> Result<SessionCompletionResult, ApplicationError> {
         panic!("complete is not used by connection-token tests")
+    }
+
+    async fn collect(
+        &self,
+        _command: CollectSession,
+    ) -> Result<SessionCollectionResult, ApplicationError> {
+        panic!("collect is not used by connection-token tests")
+    }
+
+    async fn uncollect(
+        &self,
+        _command: UncollectSession,
+    ) -> Result<SessionCollectionResult, ApplicationError> {
+        panic!("uncollect is not used by connection-token tests")
     }
 
     async fn add_participant(

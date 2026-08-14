@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use bcs_domain::CoordinationSurface;
 use serde_json::Value;
 use tokio::sync::Mutex;
 
@@ -26,6 +27,12 @@ pub struct MessageTracker {
     tool_call_starts: Mutex<HashMap<String, ToolCallStartInfo>>,
     /// run_id:tool_call_id → first-seen timestamp for coordination echoes.
     coordination_echoes: Mutex<HashMap<String, u64>>,
+    /// run_id → coordination surface resolved from the run's bot Provider.
+    ///
+    /// `None` is a cached resolution failure. Keeping that negative snapshot
+    /// prevents malformed/repeated echoes from turning into repeated storage
+    /// lookups during one run.
+    coordination_surfaces: Mutex<HashMap<String, (String, Option<CoordinationSurface>)>>,
     /// run_id → text buffered for the CURRENT open chat segment.
     ///
     /// Two producers write here, depending on what the upstream frame carries:
@@ -70,6 +77,7 @@ impl MessageTracker {
         Self {
             tool_call_starts: Mutex::new(HashMap::new()),
             coordination_echoes: Mutex::new(HashMap::new()),
+            coordination_surfaces: Mutex::new(HashMap::new()),
             streaming_chat_buf: Mutex::new(HashMap::new()),
             chat_delta_mode: Mutex::new(HashSet::new()),
             streaming_thinking_buf: Mutex::new(HashMap::new()),
@@ -100,6 +108,31 @@ impl MessageTracker {
         }
         seen.insert(key, now_ms);
         true
+    }
+
+    pub async fn coordination_surface(
+        &self,
+        run_id: &str,
+        bot_id: &str,
+    ) -> Option<Option<CoordinationSurface>> {
+        self.coordination_surfaces
+            .lock()
+            .await
+            .get(run_id)
+            .filter(|(cached_bot_id, _)| cached_bot_id == bot_id)
+            .map(|(_, surface)| surface.clone())
+    }
+
+    pub async fn cache_coordination_surface(
+        &self,
+        run_id: &str,
+        bot_id: &str,
+        surface: Option<CoordinationSurface>,
+    ) {
+        self.coordination_surfaces.lock().await.insert(
+            run_id.to_string(),
+            (bot_id.to_string(), surface),
+        );
     }
 
     // -- Streaming chat segmentation (memory buffer, flush-at-boundary) --
@@ -247,6 +280,7 @@ impl MessageTracker {
         self.streaming_thinking_buf.lock().await.remove(run_id);
         self.channel_sender_info.lock().await.remove(run_id);
         self.channel_source_message_ids.lock().await.remove(run_id);
+        self.coordination_surfaces.lock().await.remove(run_id);
         self.streaming_chat_buf.lock().await.remove(run_id)
     }
 }

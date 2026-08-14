@@ -21,6 +21,7 @@ from engine.community.core.skills.layout_planner import (
 from engine.community.plugins.claude_code.layout_pool import (
     MappingSourceLayout,
     activate_claude_code_pool,
+    claude_code_retirement_active_roots,
     inspect_claude_code_runtime_layout,
     publish_claude_code_pool_mappings,
     rollback_claude_code_pool,
@@ -59,12 +60,16 @@ class _SkillsPortMixin:
         *,
         source_layout: MappingSourceLayout,
         key: str = "mappings",
+        retired: bool = False,
     ) -> ResolvedMappingPayload:
         return resolve_mapping_payload(
             engine="claude_code",
             source_layout=source_layout,
             payload=params.get(key, []),
             mapping_contract_version=params.get("mapping_contract_version"),
+            additional_retirement_roots=(
+                claude_code_retirement_active_roots() if retired else ()
+            ),
         )
 
     async def activate_pool_layout(
@@ -138,6 +143,7 @@ class _SkillsPortMixin:
                 params.get("source_layout", MappingSourceLayout.POOL.value)
             ),
             key="retired_mappings",
+            retired=True,
         )
         publish_kwargs: dict[str, Any] = {
             "mappings": list(resolved.mappings),
@@ -175,6 +181,7 @@ class _SkillsPortMixin:
                 params.get("source_layout", MappingSourceLayout.POOL.value)
             ),
             key="retired_mappings",
+            retired=True,
         )
         verify_kwargs: dict[str, Any] = {
             "mappings": list(resolved.mappings),

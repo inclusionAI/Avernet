@@ -175,6 +175,23 @@ impl Fixture {
         self.groups.upsert(group).await.expect("store group");
     }
 
+    async fn store_legacy_group(
+        &self,
+        group_id: &str,
+        driver_bot: &str,
+        originator_actor: &str,
+    ) {
+        let mut group = Group::new(
+            group_id,
+            driver_bot,
+            vec![Participant::bot(driver_bot, ParticipantRole::Driver)],
+        );
+        group.originator = Some(originator_actor.to_string());
+        group.label = Some(group_id.to_string());
+        group.group_strategy = GroupStrategy::Chat;
+        self.groups.upsert(group).await.expect("store legacy group");
+    }
+
     /// Helper for Vcj6P: store a group whose `status` is set to a non-active
     /// value so the V1 mint paths reject with `conflict`.
     async fn store_group_with_status(
@@ -407,6 +424,28 @@ async fn create_group_invitation_manager_ok() {
 }
 
 #[tokio::test]
+async fn human_owner_of_legacy_group_originator_bot_can_create_group_invitation() {
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-a").await;
+    fx.add_bot("bot-b").await;
+    fx.store_legacy_group("grp-1", "bot-b", "bot-a")
+        .await;
+
+    let invitation = fx
+        .service
+        .create_group_invitation(CreateGroupInvitation {
+            caller: Fixture::human_principal("staff-1"),
+            group_id: "grp-1".to_string(),
+            expires_in_seconds: None,
+        })
+        .await
+        .expect("Human owner may act for the group originator Bot");
+
+    assert_eq!(invitation.target_type, InvitationTargetType::Group);
+    assert_eq!(invitation.target_id, "grp-1");
+}
+
+#[tokio::test]
 async fn create_group_invitation_non_manager_forbidden() {
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
@@ -492,6 +531,28 @@ async fn create_session_invitation_manager_ok() {
         .expect("token decodes");
     assert_eq!(payload.id, session_id);
     assert_eq!(payload.target_type, Some(InviteTargetType::Session));
+}
+
+#[tokio::test]
+async fn human_owner_of_legacy_group_driver_bot_can_create_session_invitation() {
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-a").await;
+    fx.store_legacy_group("grp-1", "bot-a", "human_other")
+        .await;
+    let session_id = fx.create_session("grp-1", "bot-a").await;
+
+    let invitation = fx
+        .service
+        .create_session_invitation(CreateSessionInvitation {
+            caller: Fixture::human_principal("staff-1"),
+            session_id: session_id.clone(),
+            expires_in_seconds: None,
+        })
+        .await
+        .expect("Human owner may act for the session's group driver Bot");
+
+    assert_eq!(invitation.target_type, InvitationTargetType::Session);
+    assert_eq!(invitation.target_id, session_id);
 }
 
 #[tokio::test]

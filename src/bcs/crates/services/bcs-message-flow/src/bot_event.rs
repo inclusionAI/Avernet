@@ -1,4 +1,4 @@
-use bcs_domain::SenderType;
+use bcs_domain::{CoordinationMode, CoordinationSurface, SenderType};
 use bcs_protocol::{
     BcsFrame, CoordinationCall, DirectiveAction, EventFrame, GroupContext, RequestFrame,
     RequestSource, ResponseDirective, ResponseMode as WireResponseMode, TOOL_ASSIGN_TASK,
@@ -1334,7 +1334,7 @@ async fn maybe_handle_coordination_echo(
     let Some(call) = CoordinationCall::from_stdout(&result_text) else {
         return Ok(None);
     };
-    if !coordination_tool_name_allowed(data) {
+    if !coordination_tool_name_allowed(flow, cmd, data, &call).await {
         warn!(
             bot_id = %cmd.bot_id,
             group_id = %cmd.group_id,
@@ -1555,7 +1555,80 @@ async fn dispatch_coordination_call(
     }
 }
 
-fn coordination_tool_name_allowed(data: &Value) -> bool {
+async fn coordination_tool_name_allowed(
+    flow: &BcsMessageFlow,
+    cmd: &BotEventCommand,
+    data: &Value,
+    call: &CoordinationCall,
+) -> bool {
+    let surface = coordination_surface_for_run(flow, cmd).await;
+    if let Some(surface) = surface {
+        if surface.mode == CoordinationMode::NativeMcp {
+            return native_mcp_tool_name_allowed(&surface, data, call);
+        }
+    } else {
+        return false;
+    }
+
+    legacy_coordination_tool_name_allowed(data)
+}
+
+async fn coordination_surface_for_run(
+    flow: &BcsMessageFlow,
+    cmd: &BotEventCommand,
+) -> Option<CoordinationSurface> {
+    if let Some(cached) = flow
+        .message_tracker
+        .coordination_surface(&cmd.run_id, &cmd.bot_id)
+        .await
+    {
+        return cached;
+    }
+
+    let resolved = match flow.registry.resolve_coordination_surface(&cmd.bot_id).await {
+        Ok(surface) => Some(surface),
+        Err(error) => {
+            warn!(
+                bot_id = %cmd.bot_id,
+                group_id = %cmd.group_id,
+                run_id = %cmd.run_id,
+                error = %error,
+                "Ignoring coordination echo because the coordination surface could not be resolved"
+            );
+            None
+        }
+    };
+    flow.message_tracker
+        .cache_coordination_surface(&cmd.run_id, &cmd.bot_id, resolved.clone())
+        .await;
+    resolved
+}
+
+fn native_mcp_tool_name_allowed(
+    surface: &CoordinationSurface,
+    data: &Value,
+    call: &CoordinationCall,
+) -> bool {
+    let Some(tool_name) = data
+        .get("name")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return false;
+    };
+    // COSEC: Provider tool names are untrusted event input. Exact lookup binds
+    // the result to the configured native MCP surface; aliases and prefixes
+    // must not gain coordination side effects.
+    let Some(canonical_tool) = surface.tool_name_mapping.get(tool_name) else {
+        return false;
+    };
+    // COSEC: The signed/mapped source name and the echoed envelope must agree,
+    // otherwise one mapped tool could smuggle another coordination operation.
+    canonical_tool == &call.tool
+}
+
+fn legacy_coordination_tool_name_allowed(data: &Value) -> bool {
     let Some(name) = data.get("name").and_then(|value| value.as_str()) else {
         // Claude Code command_output callbacks do not always carry the source
         // tool name; authenticated event intake plus task-flow role checks

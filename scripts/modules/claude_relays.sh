@@ -72,6 +72,10 @@ claude_relays_start() {
     claude_relays_setup || return 1
     local role name summary port config_dir workspace model prompt_file permission pid_file cli model_source
     IFS=$'\x1f' read -r role name summary port config_dir workspace model prompt_file permission < <(claude_profile_entries)
+    [ -n "$model" ] || {
+        log_error "Claude relay model was not resolved from the selected Singlebox configuration"
+        return 1
+    }
     cli="$(claude_relay_cli)" || return 1
     mkdir -p "$config_dir" "$workspace" "$(claude_relay_data_dir "$role")" "$(claude_relay_log_dir "$role")" "$CLAUDE_RELAY_STATE_DIR" "$LOG_DIR"
     pid_file="$(claude_relay_pid_file "$role")"

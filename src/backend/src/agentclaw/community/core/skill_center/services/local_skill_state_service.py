@@ -20,13 +20,32 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillStorageError,
 )
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
-from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillSetRepository,
+)
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.repository.protocols.skills_pool import (
+    SkillsPoolLayoutRepositoryProtocol,
+    SkillsPoolSkillRepositoryProtocol,
+)
 from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditGuard,
     SkillsPoolEditPausedError,
 )
-from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
+from agentclaw.community.core.skills_pool.mapping_intent import (
+    build_logical_skill_mappings,
+    local_skill_name,
+)
+from agentclaw.community.core.skills_pool.models import (
+    PoolSkillMapping,
+    RegisteredSkillAsset,
+    SkillMappingSourceLayout,
+)
+from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
+from agentclaw.community.core.skills_pool.types import (
+    BotSkillLayoutScope,
+    runtime_uses_pool_paths,
+)
 
 
 class LocalSkillStateService:
@@ -41,6 +60,9 @@ class LocalSkillStateService:
         collaborator_service: CollaboratorServiceProtocol,
         skill_set_service_factory: SkillSetServiceFactory,
         edit_guard: SkillsPoolEditGuard,
+        pool_runtime: SkillsPoolRuntimeProtocol,
+        pool_skills: SkillsPoolSkillRepositoryProtocol,
+        pool_layouts: SkillsPoolLayoutRepositoryProtocol,
     ) -> None:
         self._skill_repo = skill_repo
         self._skill_set_repo = skill_set_repo
@@ -48,6 +70,9 @@ class LocalSkillStateService:
         self._collaborators = collaborator_service
         self._skill_set_service_factory = skill_set_service_factory
         self._edit_guard = edit_guard
+        self._pool_runtime = pool_runtime
+        self._pool_skills = pool_skills
+        self._pool_layouts = pool_layouts
 
     async def set_local_skill_active(
         self, *, skill_id: str, actor_id: str, active: bool
@@ -85,30 +110,6 @@ class LocalSkillStateService:
                     skill_set_id=int(default_set["id"]),
                     skill_id=int(skill_id),
                 )
-                if not active:
-                    try:
-                        await self._cleanup_runtime_link(
-                            bot=bot,
-                            owner_id=owner_id,
-                            bot_id=bot_id,
-                            skill_name=str(skill["name"]),
-                        )
-                    except LocalSkillStorageError:
-                        try:
-                            self._write_desired_state(
-                                active=True,
-                                owner_id=owner_id,
-                                bot_id=bot_id,
-                                skill_set_id=int(default_set["id"]),
-                                skill_id=int(skill_id),
-                            )
-                        except Exception as exc:
-                            raise LocalSkillStorageError() from exc
-                        if not self._sync_runtime(
-                            bot=bot, owner_id=owner_id, bot_id=bot_id
-                        ):
-                            raise LocalSkillRuntimeSyncError()
-                        raise
             elif not active:
                 # ``get_bot_local_skill`` treats an exclusion from any former
                 # default set as inactive, while runtime mapping filters the
@@ -121,7 +122,18 @@ class LocalSkillStateService:
                     skill_set_id=int(default_set["id"]),
                     skill_id=int(skill_id),
                 )
-            if not self._sync_runtime(bot=bot, owner_id=owner_id, bot_id=bot_id):
+
+            if active:
+                synced = self._sync_runtime(bot=bot, owner_id=owner_id, bot_id=bot_id)
+            else:
+                synced = await self._reconcile_deactivation(
+                    scope=scope,
+                    bot=bot,
+                    skill=skill,
+                    owner_id=owner_id,
+                    bot_id=bot_id,
+                )
+            if not synced:
                 if changed:
                     try:
                         self._write_desired_state(
@@ -133,9 +145,13 @@ class LocalSkillStateService:
                         )
                     except Exception as exc:
                         raise LocalSkillStorageError() from exc
-                    if not self._sync_runtime(
+                    # Restore through the established runtime synchronizer.
+                    # It owns each engine's actual active-root compatibility,
+                    # including Claude Code's historical workspace root.
+                    restored = self._sync_runtime(
                         bot=bot, owner_id=owner_id, bot_id=bot_id
-                    ):
+                    )
+                    if not restored:
                         raise LocalSkillRuntimeSyncError()
                 raise LocalSkillRuntimeSyncError()
             return {**skill, "active": active, "changed": changed}
@@ -249,21 +265,74 @@ class LocalSkillStateService:
         except Exception:
             return False
 
-    async def _cleanup_runtime_link(
-        self, *, bot: dict[str, Any], owner_id: str, bot_id: str, skill_name: str
-    ) -> None:
+    async def _reconcile_deactivation(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        bot: dict[str, Any],
+        skill: dict[str, Any],
+        owner_id: str,
+        bot_id: str,
+    ) -> bool:
         try:
-            service = self._skill_set_service_factory.create(
-                user_id=owner_id,
-                entity_id=str(bot["entity_id"]),
+            retired = RegisteredSkillAsset(
+                skill_id=int(skill["id"]),
+                name=str(skill["name"]),
+                git_path=str(skill["git_path"]),
+            )
+            retired_mapping = PoolSkillMapping(
+                corpus="local",
+                relative_path=local_skill_name(retired),
+                link_name=local_skill_name(retired),
+            )
+        except (KeyError, TypeError, ValueError):
+            return False
+        return await self._publish_current_mappings(
+            scope=scope,
+            bot=bot,
+            owner_id=owner_id,
+            bot_id=bot_id,
+            retired_mappings=[retired_mapping],
+        )
+
+    async def _publish_current_mappings(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        bot: dict[str, Any],
+        owner_id: str,
+        bot_id: str,
+        retired_mappings: list[PoolSkillMapping] | None = None,
+    ) -> bool:
+        try:
+            mappings = build_logical_skill_mappings(
+                self._pool_skills.list_bot_active_assets(
+                    env=scope.env,
+                    bot_id=bot_id,
+                    user_id=owner_id,
+                    engine=str(bot["active_engine"]),
+                )
+            )
+            source_layout = (
+                SkillMappingSourceLayout.POOL
+                if runtime_uses_pool_paths(self._pool_layouts.get(scope))
+                else SkillMappingSourceLayout.LEGACY
+            )
+            retired = retired_mappings or []
+            if not await self._pool_runtime.publish_mappings(
                 bot_id=bot_id,
-                engine_type=bot.get("active_engine"),
-                entity_type=bot.get("entity_type"),
+                user_id=owner_id,
+                mappings=mappings,
+                retired_mappings=retired,
+                source_layout=source_layout,
+            ):
+                return False
+            return await self._pool_runtime.verify_mappings(
+                bot_id=bot_id,
+                user_id=owner_id,
+                mappings=mappings,
+                retired_mappings=retired,
+                source_layout=source_layout,
             )
-            cleaned = await service.skill_service.deactivate_skill(
-                skill_name, bolt_id=bot_id, user_id=owner_id
-            )
-            if not cleaned:
-                raise LocalSkillStorageError()
-        except Exception as exc:
-            raise LocalSkillStorageError() from exc
+        except Exception:
+            return False

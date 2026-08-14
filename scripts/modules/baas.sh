@@ -229,7 +229,7 @@ baas_start() {
             BCS_BAAS_DOWNLINK_TOKEN="${baas_downlink_token}"
         )
         unset baas_downlink_token
-        log_info "BAAS merchant_hybrid mode: real Claude adapter and local Backend binding lookup enabled"
+        log_info "BAAS hybrid mode: real Claude adapter and local Backend binding lookup enabled"
     fi
     log_info "BAAS env: DATABASE_URL=${DATABASE_URL}, CHAT_ENGINE=${CHAT_ENGINE}, LOCAL_AIDESKTOP_ROOT=${LOCAL_AIDESKTOP_DIR}, BCS_PORT=${BCS_PORT}, BCN_PLUGIN_PATH=${bcn_plugin_path}"
 

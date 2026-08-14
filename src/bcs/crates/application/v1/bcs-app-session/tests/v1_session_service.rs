@@ -22,11 +22,12 @@ use bcs_friend::FriendCore;
 use bcs_group::{GroupCore, MemoryGroupRepo};
 use bcs_relation::RelationCore;
 use bcs_service_api::application::v1::{
-    AddSessionParticipant, AuthenticatedBotIdentity, AuthenticatedCaller,
-    AuthenticatedUserIdentity, BotParticipantMode, CompleteSession, CreateSession, DeleteSession,
-    DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions, SessionInput,
-    SessionMessageService, SessionParticipantInput, SessionService,
-    SessionStatus as V1SessionStatus, UpdateSession, UpdateSessionParticipant,
+    AddSessionParticipant, AuthenticatedAppIdentity, AuthenticatedBotIdentity,
+    AuthenticatedCaller, AuthenticatedUserIdentity, BotParticipantMode, CollectSession,
+    CompleteSession, CreateSession, DeleteSession, DeleteSessionParticipant, GetSession,
+    ListSessionMessages, ListSessions, SessionInput, SessionMessageService,
+    SessionParticipantInput, SessionService, SessionStatus as V1SessionStatus, UncollectSession,
+    UpdateSession, UpdateSessionParticipant,
 };
 use bcs_service_api::port::repo::{NewSessionParams, SessionRepoPort};
 use bcs_service_api::{
@@ -372,6 +373,21 @@ fn bot_only_caller(bot_uuid: &str) -> AuthenticatedCaller {
             agent_code: "test".into(),
         }),
         app: None,
+        access_key: None,
+    }
+}
+
+fn app_only_caller() -> AuthenticatedCaller {
+    AuthenticatedCaller {
+        tenant: Some("tenant-a".into()),
+        user: None,
+        bot: None,
+        app: Some(AuthenticatedAppIdentity {
+            app_id: 1,
+            app_name: "test-app".into(),
+            owners: "owner-1".into(),
+            app_type: "service".into(),
+        }),
         access_key: None,
     }
 }
@@ -971,6 +987,193 @@ async fn complete_is_idempotent() {
     assert_eq!(second.status, V1SessionStatus::Completed);
     // Idempotent: same completed_at as the first completion.
     assert_eq!(second.completed_at, first.completed_at);
+}
+
+#[tokio::test]
+async fn human_collects_and_uncollects_for_owned_participant_bot_idempotently() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("bot-1").await;
+    fixture
+        .bots
+        .save_created_by("bot-1", "owner-1", true)
+        .await
+        .expect("assign Bot ownership");
+    fixture
+        .store_group_with_originator("g1", "bot-1", "human_owner-1", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![Participant::bot(
+                    "bot-1",
+                    ParticipantRole::Driver,
+                )],
+                group_version: Some(group.version),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed Session");
+
+    for _ in 0..2 {
+        let result = fixture
+            .service
+            .collect(CollectSession {
+                caller: human_principal("owner-1"),
+                session_id: session.id.clone(),
+                participant: "bot-1".into(),
+            })
+            .await
+            .expect("owned participant Bot can collect");
+        assert_eq!(result.session_id, session.id);
+        assert_eq!(result.participant, "bot-1");
+        assert!(result.collected);
+    }
+    let collected = fixture
+        .session_repo
+        .collected_at_map(&[session.id.as_str()], "bot-1")
+        .await;
+    assert_eq!(collected.len(), 1);
+    assert_eq!(collected[0].0, session.id);
+
+    for _ in 0..2 {
+        let result = fixture
+            .service
+            .uncollect(UncollectSession {
+                caller: human_principal("owner-1"),
+                session_id: session.id.clone(),
+                participant: "bot-1".into(),
+            })
+            .await
+            .expect("owned participant Bot can uncollect idempotently");
+        assert_eq!(result.participant, "bot-1");
+        assert!(!result.collected);
+    }
+    assert!(
+        fixture
+            .session_repo
+            .collected_at_map(&[session.id.as_str()], "bot-1")
+            .await
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn session_collection_rejects_an_unowned_bot() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("bot-1").await;
+    fixture
+        .bots
+        .save_created_by("bot-1", "owner-1", true)
+        .await
+        .expect("assign Bot ownership");
+
+    let error = fixture
+        .service
+        .collect(CollectSession {
+            caller: human_principal("owner-2"),
+            session_id: "session-1".into(),
+            participant: "bot-1".into(),
+        })
+        .await
+        .expect_err("another Human cannot collect for this Bot");
+    assert!(matches!(
+        error,
+        bcs_service_api::application::v1::ApplicationError::Forbidden(_)
+    ));
+}
+
+#[tokio::test]
+async fn session_collection_hides_an_owned_bot_membership_miss() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "bot-1"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture
+        .bots
+        .save_created_by("bot-1", "owner-1", true)
+        .await
+        .expect("assign Bot ownership");
+    fixture.store_group("g1", "driver", None).await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![Participant::bot(
+                    "driver",
+                    ParticipantRole::Driver,
+                )],
+                group_version: Some(group.version),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed Session");
+
+    let error = fixture
+        .service
+        .collect(CollectSession {
+            caller: human_principal("owner-1"),
+            session_id: session.id,
+            participant: "bot-1".into(),
+        })
+        .await
+        .expect_err("a non-participant is hidden as a missing Session");
+    assert_eq!(error.code(), "session_not_found");
+}
+
+#[tokio::test]
+async fn session_collection_returns_not_found_for_a_missing_session() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("bot-1").await;
+    fixture
+        .bots
+        .save_created_by("bot-1", "owner-1", true)
+        .await
+        .expect("assign Bot ownership");
+
+    let error = fixture
+        .service
+        .collect(CollectSession {
+            caller: human_principal("owner-1"),
+            session_id: "missing".into(),
+            participant: "bot-1".into(),
+        })
+        .await
+        .expect_err("missing Session is rejected");
+    assert_eq!(error.code(), "session_not_found");
+}
+
+#[tokio::test]
+async fn session_collection_accepts_only_a_human_identity() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("bot-1").await;
+    fixture
+        .bots
+        .save_created_by("bot-1", "owner-1", true)
+        .await
+        .expect("assign Bot ownership");
+
+    for caller in [bot_only_caller("bot-1"), app_only_caller()] {
+        let error = fixture
+            .service
+            .collect(CollectSession {
+                caller,
+                session_id: "session-1".into(),
+                participant: "bot-1".into(),
+            })
+            .await
+            .expect_err("Bot-only and App-only callers are rejected");
+        assert!(matches!(
+            error,
+            bcs_service_api::application::v1::ApplicationError::Forbidden(_)
+        ));
+    }
 }
 
 #[tokio::test]

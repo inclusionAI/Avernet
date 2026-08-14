@@ -4,16 +4,17 @@
 models and resource path items live in separate YAML fragments so a domain can
 evolve without creating one monolithic file.
 
-The current contract contains 41 approved operations across Bot, Group,
+The current contract contains 44 approved operations across Bot, Group,
 GroupParticipant, Session, SessionParticipant, Invitation, Friendship,
 FriendRequest, SessionFile, and session-bound WebSocket resources. Every operation is published below the single BCN
 ownership prefix `/openapi/v1/collaboration/**`. These are the exact endpoints
 served by BCN and intended for future Gateway aggregation; no path rewrite is
 required.
 
-The Human control-plane Bot batch contains exactly five operations:
+The Human control-plane Bot batch contains exactly six operations:
 
 - `GET /openapi/v1/collaboration/bots/{bot_id}/candidates`
+- `GET /openapi/v1/collaboration/bots/{bot_id}/candidates/search`
 - `POST /openapi/v1/collaboration/bots/query`
 - `GET /openapi/v1/collaboration/bots/{bot_id}`
 - `PATCH /openapi/v1/collaboration/bots/{bot_id}`
@@ -23,6 +24,18 @@ The candidates operation accepts either a physical Bot managed by the current
 Human or that Human's own `human_{subject.id}` record (including Human Actor).
 Both perspectives use the same discovery and collaboration filters, and the
 response still contains physical Bot candidates only.
+
+The candidate-search operation is the versioned projection of legacy
+`/actors/search`: it uses semantic worker recommendation first, preserves its
+score/profile/tag enrichment, then falls back to a Bot-name substring search
+when no usable recommendation is available. An omitted `q`, `q=`, and a
+whitespace-only `q` are equivalent: each returns `items: []` with
+`search_mode: empty_query` without invoking downstream search. Semantic and
+fallback results use `search_mode: semantic` and `search_mode: name_fallback`;
+fallback items omit `score`. Raw BCSFuse recommendation context is never part
+of the V1 response. The path `bot_id` replaces legacy `current_bot_uuid`;
+`purpose` replaces `cooperatable_only`; Gateway `ctoken` is not part of the
+BCN contract.
 
 These operations deliberately do not add generic `GET /bots`, legacy
 `/actors/**` aliases, runtime discovery, or a separate descriptor patch route.
@@ -36,6 +49,13 @@ Group's Sessions remains nested at
 `/openapi/v1/collaboration/groups/{group_id}/sessions`. The shared ownership
 prefix separates both resources from Backend and BaaS paths while preserving
 their natural names.
+
+Session collection adds two idempotent Human control-plane operations at
+`/openapi/v1/collaboration/sessions/{session_id}/collect`. `POST` collects and
+`DELETE` uncollects on behalf of the required `participant` Bot. BCN verifies
+that the authenticated Human owns that Bot and that the Bot participates in
+the Session; collection state remains attributed to the Bot rather than the
+Human caller.
 
 Session-bound WebSocket access adds two operations to that HTTP surface:
 

@@ -174,6 +174,36 @@ async fn mounted_session_token_route_authenticates_before_reaching_the_applicati
 }
 
 #[tokio::test]
+async fn mounted_session_collection_routes_require_a_gateway_principal() {
+    let bots_dir = helpers::create_temp_bots_dir();
+    let mut config = helpers::create_test_config(&bots_dir.path().to_path_buf());
+    config.metrics.enabled = false;
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
+    let (addr, handle) = server.run_on_random_port().await.expect("start server");
+    let client = reqwest::Client::new();
+    let url = format!(
+        "http://{addr}/openapi/v1/collaboration/sessions/missing-session/collect"
+    );
+
+    let collect = client
+        .post(&url)
+        .json(&json!({"participant": "bot-1"}))
+        .send()
+        .await
+        .expect("missing-principal collect request");
+    assert_eq!(collect.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    let uncollect = client
+        .delete(format!("{url}?participant=bot-1"))
+        .send()
+        .await
+        .expect("missing-principal uncollect request");
+    assert_eq!(uncollect.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    handle.abort();
+}
+
+#[tokio::test]
 async fn mounted_message_websocket_route_verifies_token_and_preserves_legacy_websocket() {
     let bots_dir = helpers::create_temp_bots_dir();
     let mut config = helpers::create_test_config(&bots_dir.path().to_path_buf());
