@@ -15,6 +15,16 @@ assert_eq() {
   [ "$expected" = "$actual" ] || fail "${label}: expected '${expected}', got '${actual}'"
 }
 
+assert_contains() {
+  local expected="$1"
+  local actual="$2"
+  local label="$3"
+  case "$actual" in
+    *"$expected"*) ;;
+    *) fail "${label}: expected output to contain '${expected}'" ;;
+  esac
+}
+
 YELLOW=""
 NC=""
 log_info() { :; }
@@ -147,6 +157,34 @@ test_load_rust_environment() (
   esac
 )
 
+test_detect_shell_profile_uses_login_shell() (
+  local temp_home
+  temp_home="$(mktemp -d)"
+  HOME="$temp_home"
+
+  SHELL="/bin/zsh"
+  assert_eq "${temp_home}/.zshrc" "$(detect_shell_profile)" "zsh profile"
+
+  SHELL="/bin/bash"
+  : > "${temp_home}/.bashrc"
+  assert_eq "${temp_home}/.bashrc" "$(detect_shell_profile)" "bash profile"
+)
+
+test_shell_reload_hint_uses_detected_profile() (
+  local temp_home output
+  temp_home="$(mktemp -d)"
+  HOME="$temp_home"
+  SHELL="/bin/zsh"
+  : > "${temp_home}/.zshrc"
+  log_warn() { printf '[WARN] %s\n' "$*"; }
+
+  _toolchain_require_shell_reload
+  output="$(_toolchain_print_shell_reload_hint)"
+
+  assert_contains "cannot reload its parent shell" "$output" "parent shell explanation"
+  assert_contains "source \"${temp_home}/.zshrc\"" "$output" "shell reload command"
+)
+
 test_command_package_mapping
 test_library_package_mapping
 test_manual_install_hints
@@ -156,5 +194,7 @@ test_claude_code_existing_cli_skips_install
 test_claude_code_installs_missing_cli
 test_claude_code_install_fails_without_resolved_cli
 test_load_rust_environment
+test_detect_shell_profile_uses_login_shell
+test_shell_reload_hint_uses_detected_profile
 
 printf 'PASS: singlebox toolchain tests\n'

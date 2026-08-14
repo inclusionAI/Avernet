@@ -13,7 +13,7 @@ _TOOLCHAIN_SH_LOADED=1
 
 # Node.js 版本要求
 REQUIRED_NODE_MAJOR="22"
-REQUIRED_RUST_TOOLCHAIN="${REQUIRED_RUST_TOOLCHAIN:-1.91.0}"
+REQUIRED_RUST_TOOLCHAIN="${REQUIRED_RUST_TOOLCHAIN:-1.96.0}"
 
 # uv 版本要求：需要支持 uv-managed Python 安装和 `uv sync --python`
 REQUIRED_UV_VERSION="0.4.0"
@@ -22,6 +22,12 @@ REQUIRED_UV_VERSION="0.4.0"
 REQUIRED_PYTHON_VERSION="3.12"
 CLAUDE_CODE_NPM_PACKAGE="@anthropic-ai/claude-code"
 CLAUDE_CODE_NPM_REGISTRY="https://registry.npmmirror.com"
+
+# install-tools runs in a child process, so PATH changes made by installers do
+# not reach the invoking shell. Track profile updates and print one actionable
+# reload command after a successful setup.
+_TOOLCHAIN_SHELL_RELOAD_REQUIRED=0
+_TOOLCHAIN_SHELL_RELOAD_PROFILE=""
 
 confirm_tool_install() {
     local prompt="$1"
@@ -248,17 +254,50 @@ setup_system_dependencies() {
 
 # 检测 shell profile 文件
 detect_shell_profile() {
-    if [ -n "$ZSH_VERSION" ]; then
-        echo "$HOME/.zshrc"
-    elif [ -n "$BASH_VERSION" ]; then
-        if [ -f "$HOME/.bashrc" ]; then
-            echo "$HOME/.bashrc"
-        else
-            echo "$HOME/.bash_profile"
-        fi
-    else
-        echo "$HOME/.profile"
+    local shell_path="${SHELL:-}"
+    local shell_name="${shell_path##*/}"
+
+    case "$shell_name" in
+        zsh)
+            echo "$HOME/.zshrc"
+            ;;
+        bash)
+            if [ -f "$HOME/.bashrc" ]; then
+                echo "$HOME/.bashrc"
+            else
+                echo "$HOME/.bash_profile"
+            fi
+            ;;
+        *)
+            if [ -n "${ZSH_VERSION:-}" ]; then
+                echo "$HOME/.zshrc"
+            elif [ -n "${BASH_VERSION:-}" ]; then
+                if [ -f "$HOME/.bashrc" ]; then
+                    echo "$HOME/.bashrc"
+                else
+                    echo "$HOME/.bash_profile"
+                fi
+            else
+                echo "$HOME/.profile"
+            fi
+            ;;
+    esac
+}
+
+_toolchain_require_shell_reload() {
+    _TOOLCHAIN_SHELL_RELOAD_REQUIRED=1
+    if [ -z "$_TOOLCHAIN_SHELL_RELOAD_PROFILE" ]; then
+        _TOOLCHAIN_SHELL_RELOAD_PROFILE="$(detect_shell_profile)"
     fi
+}
+
+_toolchain_print_shell_reload_hint() {
+    [ "$_TOOLCHAIN_SHELL_RELOAD_REQUIRED" -eq 1 ] || return 0
+
+    local profile="${_TOOLCHAIN_SHELL_RELOAD_PROFILE:-$(detect_shell_profile)}"
+    log_warn "The installers updated your shell startup environment, but install-tools cannot reload its parent shell."
+    log_warn "Before running ./scripts/singlebox.sh start in this terminal, run once:"
+    log_warn "  source \"${profile}\""
 }
 
 # 将 nvm 配置追加到 shell profile
@@ -272,6 +311,7 @@ export NVM_DIR="$HOME/.nvm"
     if [ -f "$profile" ] && ! grep -q 'NVM_DIR' "$profile"; then
         log_info "Adding nvm to $profile..."
         echo "$nvm_snippet" >> "$profile"
+        _toolchain_require_shell_reload
     fi
 }
 
@@ -329,6 +369,7 @@ install_node_via_nvm() {
             log_error "nvm installation failed (nvm.sh not found at $NVM_DIR/nvm.sh)"
             return 1
         fi
+        _toolchain_require_shell_reload
     else
         log_info "nvm already installed at $NVM_DIR"
     fi
@@ -474,6 +515,9 @@ upgrade_uv() {
 ensure_uv() {
     if ! check_uv_installed; then
         auto_install_uv || return 1
+        if [ -f "$HOME/.local/bin/env" ]; then
+            _toolchain_require_shell_reload
+        fi
     fi
 
     local rv
@@ -779,6 +823,7 @@ load_existing_rust_from_home() {
         load_rust_environment
         if check_rust_installed; then
             log_info "Loaded Rust/Cargo from ${cargo_home}/bin for this shell."
+            _toolchain_require_shell_reload
             return 0
         fi
     fi
@@ -837,6 +882,7 @@ install_rust_via_rustup() {
 
     if check_rust_installed; then
         log_info "Rust/Cargo installed: $(rustc --version 2>&1 | head -1)"
+        _toolchain_require_shell_reload
         return 0
     fi
 
@@ -988,9 +1034,7 @@ toolchain_setup() {
     echo ""
 
     log_info "Toolchain setup complete!"
-    if [ -f "${CARGO_HOME:-$HOME/.cargo}/env" ]; then
-        log_info "To use Cargo directly in the invoking shell, run: source \"${CARGO_HOME:-$HOME/.cargo}/env\""
-    fi
+    _toolchain_print_shell_reload_hint
     echo ""
 }
 

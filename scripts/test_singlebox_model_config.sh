@@ -121,6 +121,25 @@ test_manual_rejects_unresolved_openai_key_reference() {
   fi
 }
 
+test_manual_injects_glm_thinking_override_for_compatible_gateway() {
+  setup_env
+  export SINGLEBOX_MODEL_CONFIG_MODE="manual"
+  export OPENCLAW_OPENAI_PROVIDER_ID="openai-compatible"
+  export OPENCLAW_OPENAI_BASE_URL="https://proxy.example.test/v1"
+  export OPENCLAW_OPENAI_API_KEY="sk-test"
+  export OPENCLAW_OPENAI_MODEL_ID="glm-5.2"
+
+  # shellcheck source=/dev/null
+  source "$MODULE"
+  singlebox_model_config_prepare
+
+  jq -e '
+    .agents.defaults.thinkingDefault == "off"
+    and .agents.defaults.models["openai-compatible/glm-5.2"].params.extra_body.enable_thinking == false
+  ' "$SINGLEBOX_MODEL_CONFIG_FILE" >/dev/null \
+    || fail "OpenAI-compatible GLM should receive an explicit non-thinking request override"
+}
+
 test_manual_requires_complete_env() {
   setup_env
   export SINGLEBOX_MODEL_CONFIG_MODE="manual"
@@ -191,7 +210,7 @@ JSON
   ' "$SINGLEBOX_MODEL_CONFIG_FILE" >/dev/null || fail "home runtime config mismatch"
 }
 
-test_home_injects_bailian_glm_thinking_override() {
+test_home_injects_glm_thinking_override_for_compatible_gateway() {
   setup_env
   export SINGLEBOX_MODEL_CONFIG_MODE="home"
   export SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED=1
@@ -202,7 +221,7 @@ test_home_injects_bailian_glm_thinking_override() {
     "mode": "merge",
     "providers": {
       "openai-compatible": {
-        "baseUrl": "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+        "baseUrl": "https://proxy.example.test/v1",
         "apiKey": "home-key",
         "api": "openai-completions",
         "models": [{"id": "glm-5.2", "name": "glm-5.2", "reasoning": false}]
@@ -229,7 +248,7 @@ JSON
     and .agents.defaults.models["openai-compatible/glm-5.2"].alias == "glm-5.2"
     and .agents.defaults.models["openai-compatible/glm-5.2"].params.extra_body.enable_thinking == false
   ' "$SINGLEBOX_MODEL_CONFIG_FILE" >/dev/null \
-    || fail "Bailian GLM should receive an explicit non-thinking request override"
+    || fail "OpenAI-compatible GLM should receive an explicit non-thinking request override"
 }
 
 test_thinking_can_be_enabled_from_env() {
@@ -669,9 +688,10 @@ test_mock_health_requires_exact_response() (
 test_manual_generates_runtime_config_from_env
 test_manual_resolves_openai_key_reference_without_serializing_secret
 test_manual_rejects_unresolved_openai_key_reference
+test_manual_injects_glm_thinking_override_for_compatible_gateway
 test_manual_requires_complete_env
 test_home_copies_only_model_fields
-test_home_injects_bailian_glm_thinking_override
+test_home_injects_glm_thinking_override_for_compatible_gateway
 test_thinking_can_be_enabled_from_env
 test_invalid_thinking_env_is_rejected
 test_home_ignores_non_object_agents_when_models_exist
