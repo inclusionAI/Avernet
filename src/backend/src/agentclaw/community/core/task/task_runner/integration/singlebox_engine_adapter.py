@@ -31,6 +31,7 @@ import httpx
 import websockets
 
 from agentclaw.community.core.task.task_runner.integration.ports import OpenApiBotPort
+from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 
 _WS_PATH = "/api/openclaw/ws"
 _CONNECT_PARAMS = {
@@ -435,6 +436,58 @@ class SingleboxBotProvisioner:
         )
         r.raise_for_status()
         return r.json()
+
+
+
+
+class SingleboxKeywordBotDiscover:
+    """singlebox 关键字搜推适配:实现 ``BotDiscoverServiceProtocol.search_by_keyword``,
+    底层走 ``BotPublicService.search_public_bots_by_keyword``(DB LIKE bot_name/owner_name)。
+
+    singlebox 无 BCSFuse 索引服务,本地新建 bot 不会被 BCSFuse recommend 检索到(``recommend_response: null``);
+    本类把本地关键字搜索适配成与 BCSFuse discover 同形 ``{total, items[]}``,供
+    ``SearchBasedDispatchStrategy._prefetch_candidates`` 复用(**策略零改动**,只换端口实现)。
+
+    - 关键词为空 → 返空(对齐 BCSFuse 空关键词行为);
+    - 无语义 score → 合成 ``recommend.score``(命中次序降权),保 stable 排序供策略排序;
+    - ``filters``(runtime_state 等)单 box 忽略(本地无在线态维度);
+    - 端口异常 → 返空,不阻断该字段预查(对齐 BCSFuse 异常收口)。
+    """
+
+    def __init__(self, bot_public_service: "BotPublicServiceProtocol") -> None:
+        self._bps = bot_public_service
+
+    def search_by_keyword(
+        self,
+        *,
+        keyword: str,
+        user_id: str,
+        top_k: int = 10,
+        min_score: float = 0.01,
+        filters: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if not keyword:
+            return {"total": 0, "items": [], "context": {"mode": "singlebox_keyword"}}
+        try:
+            res = self._bps.search_public_bots_by_keyword(
+                user_id=user_id, search=keyword, page=1, page_size=top_k,
+            )
+        except Exception:  # noqa: BLE001  端口异常→空候选,不阻断其它字段
+            return {"total": 0, "items": [], "context": {"mode": "singlebox_keyword", "error": True}}
+        items = res.get("items") or []
+        # 合成 recommend.score(命中次序降权),对齐 BCSFuse items 形态供策略排序
+        for i, it in enumerate(items):
+            rec = it.get("recommend")
+            if not isinstance(rec, dict):
+                rec = {}
+            if "score" not in rec:
+                rec["score"] = max(min_score, 1.0 - i * 0.05)
+            it["recommend"] = rec
+        return {
+            "total": res.get("total", len(items)),
+            "items": items,
+            "context": {"mode": "singlebox_keyword"},
+        }
 
 
 

@@ -16,6 +16,7 @@ from agentclaw.community.adapters.http.task.auth import (
     CallbackAuthenticator, NoopCallbackAuthenticator,
 )
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
+from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.task_center.task_service import TaskService
@@ -49,6 +50,7 @@ class TaskModule(Module):
         self,
         graph: TaskGraphService,
         discover: BotDiscoverServiceProtocol,
+        bot_public: BotPublicServiceProtocol,
     ) -> TaskService:
         """构造 TaskService facade(引擎自当 ResultSink/TaskContextBuilder;构造期收端口)。
 
@@ -59,7 +61,8 @@ class TaskModule(Module):
           SearchBasedDispatchStrategy 在端口齐全时才调,否则 stub MISS。
         """
         bot, bcs = self._resolve_ports()
-        return TaskService(graph, bot=bot, bcs=bcs, discover=discover)
+        discover_port = self._resolve_discover(default=discover, bot_public=bot_public)
+        return TaskService(graph, bot=bot, bcs=bcs, discover=discover_port)
 
     @singleton
     @provider
@@ -116,3 +119,25 @@ class TaskModule(Module):
         # corp 接真实 OpenApiBotAdapter/BcsHttpAdapter 时,在 corp overlay 覆写本 provider 或经 env_url。
         # community 默认:即便 TASK_ENGINE 开,也无端口实现 → 退化 stub(可被测试用 double 覆盖)。
         return None, None
+
+    @staticmethod
+    def _resolve_discover(
+        *,
+        default: BotDiscoverServiceProtocol,
+        bot_public: BotPublicServiceProtocol,
+    ) -> BotDiscoverServiceProtocol:
+        """选 bot 搜推端口(组合根选实现,不在策略内 if)。
+
+        - ``OPENAPI_BOT_MODE=singlebox`` + ``TASK_ENGINE=skill`` → ``SingleboxKeywordBotDiscover``:
+          本地关键字搜索(DB LIKE bot_name/owner_name,``/api/v1/bot-public/search``),
+          因 singlebox 无 BCSFuse 索引服务,本地新建 bot 上不了 BCSFuse recommend 检索。
+        - 其它(corp/prod)→ 注入的 BCSFuse ``BotDiscoverService``(语义 recommend)。
+        """
+        if not _task_engine_active():
+            return default
+        if os.environ.get("OPENAPI_BOT_MODE", "").strip().lower() == "singlebox":
+            from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adapter import (
+                SingleboxKeywordBotDiscover,
+            )
+            return SingleboxKeywordBotDiscover(bot_public)  # type: ignore[arg-type]
+        return default
