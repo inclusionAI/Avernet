@@ -30,6 +30,31 @@ def test_parse_bot_id():
     assert parse_bot_id("bot9:ent1") == ("bot9", "ent1")
 
 
+class _KeyNoPrefix:
+    api_key = "ak1234567890"
+    api_key_prefix = ""    # 未设置 → 回落取 api_key 前 10 位
+    base_url = "http://b:8890"
+    cookie = "sess=1"
+    referer = "http://b/"
+
+
+def test_ensure_grant_falls_back_to_api_key_prefix_when_unset():
+    # api_key_prefix 为空时,URL 用 api_key 前 N 位(默认 10,与 _Key.ak12345678 约定一致)作 prefix
+    seen: dict = {}
+
+    def h(req):
+        if req.method == "GET" and req.url.path.endswith("/allowed-bots"):
+            seen["get_path"] = req.url.path
+            return httpx.Response(200, json={"data": {"allowed_bots": ["bot9:ent1"]}})
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(h)
+    client = httpx.AsyncClient(transport=transport, base_url="http://b:8890")
+    a = OpenApiBotAdapter(_KeyNoPrefix(), http_client=client)
+    _run(a.ensure_grant("bot9:ent1"))  # 已 allowed → 不走 grant
+    assert seen["get_path"] == "/api/v1/api-keys/ak12345678/allowed-bots"
+
+
 def test_ensure_grant_already_allowed():
     allowed = {"data": {"allowed_bots": ["bot9:ent1"]}}
 

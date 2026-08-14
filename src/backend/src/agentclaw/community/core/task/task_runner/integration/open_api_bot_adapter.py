@@ -15,6 +15,12 @@ import httpx
 from agentclaw.community.core.task.task_runner.integration.ports import ApiKeyProvider, OpenApiBotPort
 
 
+# api_key_prefix 未设置时,回落取 api_key 前多少位作 URL 路径段。
+# 取 10:与 IntegrationDouble/_Key 约定一致(api_key="ak1234567890" → prefix="ak12345678")。
+# 不同环境可在 ApiKeyProvider.api_key_prefix 显式提供真实前缀(优先),此处仅兜底。
+_DEFAULT_KEY_PREFIX_LEN = 10
+
+
 class OpenApiError(Exception):
     ...
 
@@ -64,7 +70,7 @@ class OpenApiBotAdapter(OpenApiBotPort):
         await self._client.aclose()
 
     async def ensure_grant(self, bot_id: str) -> None:
-        prefix = self._k.api_key_prefix
+        prefix = self._k.api_key_prefix or self._k.api_key[:_DEFAULT_KEY_PREFIX_LEN]
         r = await self._client.get(f"/api/v1/api-keys/{prefix}/allowed-bots",
                                    headers={"Authorization": f"Bearer {self._k.api_key}"})
         _map_status(r)
