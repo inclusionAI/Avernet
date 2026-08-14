@@ -52,7 +52,7 @@ claude_relays_setup() {
     [ -f "${CLAUDE_RELAY_GATEWAY_DIR}/package.json" ] || { log_error "Vendored Claude gateway missing"; return 1; }
     if [ ! -f "${CLAUDE_RELAY_GATEWAY_DIR}/dist/esm/server.js" ] || find "${CLAUDE_RELAY_GATEWAY_DIR}/src" -type f -newer "${CLAUDE_RELAY_GATEWAY_DIR}/dist/esm/server.js" -print -quit | grep -q .; then
         log_info "Building vendored Claude Code gateway..."
-        (cd "$CLAUDE_RELAY_GATEWAY_DIR" && npm install --include=dev --ignore-scripts --no-audit --no-fund && npm run prepublishOnly) >> "$CLAUDE_RELAY_LOG" 2>&1 || {
+        (cd "$CLAUDE_RELAY_GATEWAY_DIR" && npm install --include=dev --ignore-scripts --no-audit --no-fund --registry="${NPM_REGISTRY_URL}" && npm run prepublishOnly) >> "$CLAUDE_RELAY_LOG" 2>&1 || {
             log_error "Claude gateway build failed; check ${CLAUDE_RELAY_LOG}"
             return 1
         }
@@ -133,6 +133,20 @@ claude_relays_stop() {
     pid_file="$(claude_relay_pid_file "$role")"
     [ -f "$pid_file" ] && stop_process_if_owned "$(cat "$pid_file" 2>/dev/null || true)" "$PROJECT_ROOT" "Claude ${role} relay" || true
     rm -f "$pid_file"
+}
+
+claude_relays_clean() {
+    local pid_file pid
+    if [ -d "$CLAUDE_RELAY_STATE_DIR" ]; then
+        for pid_file in "$CLAUDE_RELAY_STATE_DIR"/*.pid; do
+            [ -f "$pid_file" ] || continue
+            pid="$(cat "$pid_file" 2>/dev/null || true)"
+            stop_process_if_owned "$pid" "$PROJECT_ROOT" "Claude relay" || return 1
+            rm -f "$pid_file"
+        done
+        rm -rf "$CLAUDE_RELAY_STATE_DIR"
+    fi
+    rm -f "$CLAUDE_RELAY_LOG"
 }
 
 claude_relays_ready() {

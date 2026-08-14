@@ -325,6 +325,55 @@ hybrid_status() {
     for service in "${HYBRID_START_ORDER[@]}"; do type -t "${service}_status" >/dev/null && "${service}_status"; done
 }
 
+hybrid_claude_runtime_matches_bot_profile() {
+    [ -n "${BOTS_PROFILE_DIR:-}" ] || return 1
+    local state_profile=""
+    if [ -f "$CLAUDE_BOTS_STATE_FILE" ]; then
+        state_profile="$(jq -r '.bots_profile_dir // empty' "$CLAUDE_BOTS_STATE_FILE" 2>/dev/null || true)"
+    fi
+    if [ -z "$state_profile" ] && [ -f "$HYBRID_STATE_FILE" ] && \
+       [ "$(jq -r '.mode // empty' "$HYBRID_STATE_FILE" 2>/dev/null || true)" = claude ]; then
+        state_profile="$(jq -r '.bots_profile_dir // empty' "$HYBRID_STATE_FILE" 2>/dev/null || true)"
+    fi
+    if [ -n "$state_profile" ]; then
+        hybrid_profile_paths_match "$BOTS_PROFILE_DIR" "$state_profile"
+        return
+    fi
+
+    # Compatibility for runtime state written before profile association was
+    # recorded. The legacy mixed demo was the only Claude hybrid profile.
+    [ -f "$CLAUDE_BOTS_STATE_FILE" ] && \
+        hybrid_profile_paths_match "$BOTS_PROFILE_DIR" "$HYBRID_DEFAULT_PROFILE_DIR"
+}
+
+hybrid_clean_attached_claude_runtime() (
+    hybrid_claude_runtime_matches_bot_profile || return 0
+
+    if [ -f "$CLAUDE_BOTS_STATE_FILE" ]; then
+        local state_claude_profile
+        state_claude_profile="$(jq -r '.claude_profile_dir // empty' "$CLAUDE_BOTS_STATE_FILE" 2>/dev/null || true)"
+        [ -n "$state_claude_profile" ] && export CLAUDE_PROFILE_DIR="$state_claude_profile"
+    fi
+    if [ -z "${CLAUDE_PROFILE_DIR:-}" ] && [ -f "$HYBRID_STATE_FILE" ] && \
+       [ "$(jq -r '.mode // empty' "$HYBRID_STATE_FILE" 2>/dev/null || true)" = claude ]; then
+        export CLAUDE_PROFILE_DIR="$(jq -r '.claude_profile_dir // empty' "$HYBRID_STATE_FILE")"
+    fi
+    if [ -z "${CLAUDE_PROFILE_DIR:-}" ] && \
+       hybrid_profile_paths_match "$BOTS_PROFILE_DIR" "$HYBRID_DEFAULT_PROFILE_DIR"; then
+        export CLAUDE_PROFILE_DIR="$MERCHANT_HYBRID_DEFAULT_CLAUDE_PROFILE_DIR"
+    fi
+
+    log_info "Cleaning Claude runtime attached to bot profile ${BOTS_PROFILE_DIR}..."
+    bcs_baas_provider_clean || return 1
+    claude_relays_clean || return 1
+    claude_bots_clean || return 1
+    if [ -f "$HYBRID_STATE_FILE" ] && \
+       [ "$(jq -r '.mode // empty' "$HYBRID_STATE_FILE" 2>/dev/null || true)" = claude ]; then
+        hybrid_clear_runtime_state
+    fi
+    log_info "Claude runtime data cleaned"
+)
+
 hybrid_help() {
     echo "hybrid - OpenClaw profile stack with optional Claude Code replacement profiles"
 }

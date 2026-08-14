@@ -144,6 +144,11 @@ mkdir -p "${RUNTIME_DATA_DIR}"
 source "${SCRIPT_DIR}/utils.sh"
 apply_cn_mirror_overrides
 source "${SCRIPT_DIR}/toolchain.sh"
+# rustup updates shell profiles for future terminals, but a prior
+# `singlebox.sh install-tools` process cannot mutate its parent shell. Load the
+# user-local Rust environment for every Singlebox invocation so a subsequent
+# setup/start command can use Cargo immediately.
+load_rust_environment
 source "${SCRIPT_DIR}/modules/model_config.sh"
 
 # Service modules

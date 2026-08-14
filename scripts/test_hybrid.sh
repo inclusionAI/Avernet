@@ -100,6 +100,27 @@ export SINGLEBOX_MODEL_CONFIG_MODE="home"
 claude_relays_manual_model_env "$model"
 [[ "${#CLAUDE_RELAY_MANUAL_MODEL_ENV[@]}" == "0" ]]
 
+test_claude_relay_build_uses_configured_registry() (
+    local gateway="$TMP/claude-relay-gateway"
+    local npm_calls="$TMP/claude-relay-npm-calls"
+    mkdir -p "$gateway/src"
+    printf '%s\n' '{}' > "$gateway/package.json"
+    printf '%s\n' 'source' > "$gateway/src/server.ts"
+
+    CLAUDE_RELAY_GATEWAY_DIR="$gateway"
+    CLAUDE_RELAY_LOG="$TMP/claude-relay.log"
+    NPM_REGISTRY_URL="https://registry.example.test"
+    claude_relays_enabled() { return 0; }
+    claude_profile_validate_config() { return 0; }
+    npm() { printf '%s\n' "$*" >> "$npm_calls"; }
+
+    claude_relays_setup
+    grep -Fxq 'install --include=dev --ignore-scripts --no-audit --no-fund --registry=https://registry.example.test' "$npm_calls"
+    grep -Fxq 'run prepublishOnly' "$npm_calls"
+)
+
+test_claude_relay_build_uses_configured_registry
+
 export BCSFUSE_RUNTIME_DIR="$TMP/bcsfuse-runtime"
 mkdir -p "$BCSFUSE_RUNTIME_DIR/env"
 cat > "$BCSFUSE_RUNTIME_DIR/env/.env.local" <<'ENV'
@@ -243,6 +264,152 @@ test_provider_bot_registration_keeps_profile_display_name() (
 )
 
 test_provider_bot_registration_keeps_profile_display_name
+
+test_provider_registration_is_reused_across_restarts() (
+    export CLAUDE_BOTS_STATE_FILE="$TMP/reuse-claude-bots-state.json"
+    export BCS_BAAS_PROVIDER_STATE_FILE="$TMP/reuse-provider-state.json"
+    export BCS_BAAS_PROVIDER_TOKEN_FILE="$TMP/reuse-provider-tokens.json"
+    export BCS_PORT=21000
+    local calls="$TMP/reuse-provider-calls"
+
+    printf '%s\n' '{"entity_id":"mock-user","bots":[{"role":"platform-data","bot_id":"bot-data","name":"平台数据分析"}]}' \
+        > "$CLAUDE_BOTS_STATE_FILE"
+    printf '%s\n' '{"baas_token":"baas","provider_id":"provider-existing","provider_admin_token":"provider-admin","bcs_to_provider_token":"bcs-token","provider_bots":{}}' \
+        > "$BCS_BAAS_PROVIDER_TOKEN_FILE"
+
+    bcs_baas_provider_bcs_owner_id() { printf '%s\n' '001'; }
+    bcs_baas_provider_add_bot_token() { :; }
+    log_info() { :; }
+    curl() {
+        local method=GET url=''
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                -X)
+                    method="$2"
+                    shift 2
+                    ;;
+                -d)
+                    shift 2
+                    ;;
+                http://*|https://*)
+                    url="$1"
+                    shift
+                    ;;
+                *)
+                    shift
+                    ;;
+            esac
+        done
+        printf '%s %s\n' "$method" "$url" >> "$calls"
+        case "$method $url" in
+            "GET http://127.0.0.1:21000/providers/provider-existing")
+                printf '%s\n' '{"provider_id":"provider-existing"}'
+                ;;
+            "POST http://127.0.0.1:21000/providers/provider-existing/bots")
+                printf '%s\n' '{"bot_runtime_token":"bot-runtime","bot_uuid":"bot-provider"}'
+                ;;
+            "PUT http://127.0.0.1:21000/bots/bot-provider/visibility")
+                printf '%s\n' '{"success":true,"data":{"visibility":"public"}}'
+                ;;
+            *)
+                return 1
+                ;;
+        esac
+    }
+
+    bcs_baas_provider_register
+    grep -Fxq 'GET http://127.0.0.1:21000/providers/provider-existing' "$calls"
+    grep -Fxq 'POST http://127.0.0.1:21000/providers/provider-existing/bots' "$calls"
+    ! grep -Fxq 'POST http://127.0.0.1:21000/providers' "$calls"
+    [ "$(jq -r '.provider_id' "$BCS_BAAS_PROVIDER_STATE_FILE")" = provider-existing ]
+)
+
+test_provider_registration_is_reused_across_restarts
+
+test_provider_bot_cleanup_preserves_provider_credentials() (
+    export BCS_BAAS_PROVIDER_STATE_FILE="$TMP/cleanup-provider-state.json"
+    export BCS_BAAS_PROVIDER_TOKEN_FILE="$TMP/cleanup-provider-tokens.json"
+    export BCS_PORT=21000
+    local calls="$TMP/cleanup-provider-calls"
+
+    printf '%s\n' '{"provider_id":"provider-existing","bots":[{"provider_bot_ref":"bot-data:mock-user"}]}' \
+        > "$BCS_BAAS_PROVIDER_STATE_FILE"
+    printf '%s\n' '{"baas_token":"baas","provider_id":"provider-existing","provider_admin_token":"provider-admin","bcs_to_provider_token":"bcs-token","provider_bots":{"platform-data":{"provider_bot_ref":"bot-data:mock-user","bot_runtime_token":"runtime"}}}' \
+        > "$BCS_BAAS_PROVIDER_TOKEN_FILE"
+
+    log_info() { :; }
+    curl() {
+        printf '%s\n' "$*" >> "$calls"
+        printf '%s\n' '{}'
+    }
+
+    bcs_baas_provider_cleanup_registration
+    [ ! -f "$BCS_BAAS_PROVIDER_STATE_FILE" ]
+    jq -e '
+      .provider_id == "provider-existing"
+      and .provider_admin_token == "provider-admin"
+      and .bcs_to_provider_token == "bcs-token"
+      and (.provider_bots | length) == 0
+    ' "$BCS_BAAS_PROVIDER_TOKEN_FILE" >/dev/null
+    grep -Fq '/providers/provider-existing/bots/bot-data%3Amock-user' "$calls"
+)
+
+test_provider_bot_cleanup_preserves_provider_credentials
+
+test_clean_bots_removes_attached_claude_runtime() (
+    export BOTS_PROFILE_DIR="$ROOT/scripts/4bots_merchant_operations_profile"
+    export CLAUDE_BOTS_STATE_FILE="$TMP/clean-claude-bots-state.json"
+    export HYBRID_STATE_FILE="$TMP/clean-hybrid-state.json"
+    local config_dir="$TMP/clean-claude-config"
+    local workspace="$TMP/clean-claude-workspace"
+    local events="$TMP/clean-claude-events"
+    mkdir -p "$config_dir" "$workspace"
+    printf '%s\n' '{"setting":true}' > "$config_dir/settings.json"
+    printf '%s\n' 'work' > "$workspace/work.txt"
+    jq -n \
+        --arg profile "$BOTS_PROFILE_DIR" \
+        --arg claude_profile "$CLAUDE_PROFILE" \
+        --arg config "$config_dir" \
+        --arg workspace "$workspace" \
+        '{bots_profile_dir: $profile, claude_profile_dir: $claude_profile,
+          claude_config_dir: $config, workspace: $workspace, bots: []}' \
+        > "$CLAUDE_BOTS_STATE_FILE"
+    jq -n \
+        --arg profile "$BOTS_PROFILE_DIR" \
+        --arg claude_profile "$CLAUDE_PROFILE" \
+        '{mode: "claude", bots_profile_dir: $profile, excluded_profile_source: "platform-data",
+          claude_profile_dir: $claude_profile}' \
+        > "$HYBRID_STATE_FILE"
+
+    bcs_baas_provider_clean() { printf '%s\n' provider >> "$events"; }
+    claude_relays_clean() { printf '%s\n' relay >> "$events"; }
+    log_info() { :; }
+
+    hybrid_clean_attached_claude_runtime
+    [ "$(cat "$events")" = $'provider\nrelay' ]
+    [ ! -e "$config_dir" ]
+    [ ! -e "$workspace" ]
+    [ ! -f "$CLAUDE_BOTS_STATE_FILE" ]
+    [ ! -f "$HYBRID_STATE_FILE" ]
+)
+
+test_clean_bots_removes_attached_claude_runtime
+
+test_claude_clean_rejects_broad_paths() (
+    export CLAUDE_BOTS_STATE_FILE="$TMP/unsafe-clean-claude-bots-state.json"
+    jq -n --arg home "$HOME" \
+        '{claude_config_dir: $home, workspace: "/", bots: []}' \
+        > "$CLAUDE_BOTS_STATE_FILE"
+    log_error() { :; }
+
+    if claude_bots_clean; then
+        echo 'Claude cleanup unexpectedly accepted a broad runtime path' >&2
+        exit 1
+    fi
+    [ -f "$CLAUDE_BOTS_STATE_FILE" ]
+)
+
+test_claude_clean_rejects_broad_paths
 
 test_hybrid_profile_defaults() (
     log_info() { :; }

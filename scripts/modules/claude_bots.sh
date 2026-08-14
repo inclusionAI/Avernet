@@ -79,8 +79,8 @@ claude_bots_start() {
     baas_ready || { log_error "BAAS is not ready; cannot create Claude bot"; return 1; }
     mkdir -p "$LOG_DIR"
     : > "$CLAUDE_BOTS_LOG"
-    local role name summary port rest entity_id bot_id
-    IFS=$'\x1f' read -r role name summary port rest < <(claude_profile_entries)
+    local role name summary port config_dir workspace model prompt_file permission entity_id bot_id
+    IFS=$'\x1f' read -r role name summary port config_dir workspace model prompt_file permission < <(claude_profile_entries)
     entity_id="$(claude_profile_entity_id)"
     bot_id="$(claude_bots_find_existing "$name" "$entity_id")"
     if [ -z "$bot_id" ]; then
@@ -90,8 +90,14 @@ claude_bots_start() {
     [ -n "$bot_id" ] || { log_error "Failed to create Claude bot; check ${CLAUDE_BOTS_LOG}"; return 1; }
     claude_bots_wait_ready "$bot_id" "$entity_id" || return 1
     umask 077
-    jq -n --arg entity_id "$entity_id" --arg entity_type "$(claude_profile_entity_type)" --arg role "$role" --arg bot_id "$bot_id" --arg name "$name" --argjson relay_port "$port" \
-        '{entity_id: $entity_id, entity_type: $entity_type, bots: [{role: $role, bot_id: $bot_id, name: $name, relay_port: $relay_port}]}' > "$CLAUDE_BOTS_STATE_FILE"
+    jq -n --arg entity_id "$entity_id" --arg entity_type "$(claude_profile_entity_type)" \
+        --arg bots_profile_dir "${BOTS_PROFILE_DIR:-}" --arg claude_profile_dir "${CLAUDE_PROFILE_DIR:-}" \
+        --arg claude_config_dir "$config_dir" --arg workspace "$workspace" \
+        --arg role "$role" --arg bot_id "$bot_id" --arg name "$name" --argjson relay_port "$port" \
+        '{entity_id: $entity_id, entity_type: $entity_type, bots_profile_dir: $bots_profile_dir,
+          claude_profile_dir: $claude_profile_dir, claude_config_dir: $claude_config_dir,
+          workspace: $workspace,
+          bots: [{role: $role, bot_id: $bot_id, name: $name, relay_port: $relay_port}]}' > "$CLAUDE_BOTS_STATE_FILE"
     chmod 600 "$CLAUDE_BOTS_STATE_FILE"
     log_info "Started one Claude Code normalCC bot on relay ${port}"
 }
@@ -99,6 +105,42 @@ claude_bots_start() {
 claude_bots_stop() {
     claude_bots_enabled || return 0
     log_info "Claude adapter remains managed by BAAS until BAAS stops"
+}
+
+claude_bots_runtime_path_safe_to_clean() {
+    local runtime_path="$1"
+    case "$runtime_path" in
+        /*) ;;
+        *) return 1 ;;
+    esac
+    case "${runtime_path%/}" in
+        ""|/|"${HOME%/}"|"${HOME%/}/.claude"|"${PROJECT_ROOT%/}"|"${SCRIPT_DIR%/}"|"${DEP_DIR%/}")
+            return 1
+            ;;
+    esac
+}
+
+claude_bots_clean() {
+    [ -f "$CLAUDE_BOTS_STATE_FILE" ] || return 0
+    local config_dir workspace runtime_path label
+    config_dir="$(jq -r '.claude_config_dir // empty' "$CLAUDE_BOTS_STATE_FILE")"
+    workspace="$(jq -r '.workspace // empty' "$CLAUDE_BOTS_STATE_FILE")"
+    if { [ -z "$config_dir" ] || [ -z "$workspace" ]; } && claude_profile_enabled; then
+        local role name summary port model prompt_file permission
+        IFS=$'\x1f' read -r role name summary port config_dir workspace model prompt_file permission < <(claude_profile_entries)
+    fi
+
+    for label in config workspace; do
+        if [ "$label" = config ]; then runtime_path="$config_dir"; else runtime_path="$workspace"; fi
+        [ -n "$runtime_path" ] || continue
+        if ! claude_bots_runtime_path_safe_to_clean "$runtime_path"; then
+            log_error "Refusing to clean unsafe Claude ${label} path: ${runtime_path}"
+            return 1
+        fi
+        rm -rf "$runtime_path"
+        log_info "Cleaned Claude ${label} path: ${runtime_path}"
+    done
+    rm -f "$CLAUDE_BOTS_STATE_FILE"
 }
 
 claude_bots_ready() {
