@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -185,3 +185,37 @@ def graph_to_dto(graph) -> TaskExecutionGraphDTO:
 def op_result_to_dto(result) -> TaskOpResultDTO:
     return TaskOpResultDTO(task_id=result.task_id, success=result.success, run_id=result.run_id,
                            message=getattr(result, "message", None))
+
+
+# ===== task_loop inbound callback schemas(PUSH 回调,对齐羽雀 TaskCallbackData/TaskNodeCallbackData)=====
+# SSOT TaskCallbackData 保持精简(不扩);羽雀丰富字段在 translator 边缘折叠进 SSOT。
+# 必填非可选(AGENTS.md):task_id/workflow_source/workflow_id/workflow_instance_id/status/is_success。
+# None 仅契约态:goal/output/failed_info/ext_info/loop_task_id(回声字段,缺失走 registry)。
+
+
+class TaskCallbackRequest(BaseModel):
+    """task 级(workflow)回调载荷。"""
+
+    task_id: str
+    workflow_source: Literal["claw_mind", "bcn"]
+    workflow_id: str
+    workflow_instance_id: str
+    goal: str | None = None
+    status: str
+    is_success: bool
+    output: dict[str, Any] | None = None
+    failed_info: str | None = None
+    ext_info: dict[str, Any] | None = None
+    loop_task_id: str | None = None    # 回声字段:派发期透传,引擎原样回带(可选)
+
+
+class TaskNodeCallbackRequest(TaskCallbackRequest):
+    """node 级回调载荷(node_id 即 Avernet 子节点 id,统一领域对象 1:1 映射)。"""
+
+    node_id: str
+
+
+class CallbackResponse(BaseModel):
+    success: bool
+    code: int = 200
+    message: str = "OK"
