@@ -69,12 +69,12 @@ class ChatAttachmentMaterializationRequest(BaseModel):
     def validate_temporary_url(cls, value: str) -> str:
         parsed = urlsplit(value)
         if (
-            parsed.scheme != "https"
+            parsed.scheme not in {"http", "https"}
             or not parsed.hostname
             or parsed.username is not None
             or parsed.password is not None
         ):
-            raise ValueError("temporary_url must be an HTTPS URL without userinfo")
+            raise ValueError("temporary_url must be an HTTP or HTTPS URL without userinfo")
         return value
 
 

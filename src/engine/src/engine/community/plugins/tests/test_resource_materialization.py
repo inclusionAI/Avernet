@@ -185,6 +185,39 @@ async def test_temporary_url_pull_accepts_any_public_https_host(tmp_path: Path):
     assert (tmp_path / "file.part").read_bytes() == b"file"
 
 
+@pytest.mark.asyncio
+async def test_temporary_url_pull_accepts_public_http_host_on_port_80(tmp_path: Path):
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, content=b"file")
+
+    client = HttpTemporaryUrlPullClient(
+        transport=httpx.MockTransport(handler),
+    )
+    request = ChatAttachmentMaterializationRequest(
+        attachment_id="att-1",
+        session_key="session-1",
+        filename="file.txt",
+        temporary_url="http://files.example/object?token=secret",
+        scope_key_hash="a" * 64,
+    )
+
+    with patch(
+        "engine.community.plugins.resource_materialization.socket.getaddrinfo",
+        return_value=[(2, 1, 6, "", ("93.184.216.34", 80))],
+    ) as resolve:
+        await client.pull(request, tmp_path / "file.part")
+
+    resolve.assert_called_once_with("files.example", 80, type=1)
+    assert len(requests) == 1
+    assert requests[0].url.scheme == "http"
+    assert requests[0].url.host == "93.184.216.34"
+    assert requests[0].headers["host"] == "files.example"
+    assert (tmp_path / "file.part").read_bytes() == b"file"
+
+
 @pytest.mark.parametrize(
     "kwargs, message",
     [
@@ -210,6 +243,27 @@ def _chat_request() -> ChatAttachmentMaterializationRequest:
         temporary_url="https://files.example/object?token=secret",
         scope_key_hash="a" * 64,
     )
+
+
+@pytest.mark.parametrize(
+    "temporary_url",
+    [
+        "ftp://files.example/object",
+        "http://user@files.example/object",
+        "https://user:password@files.example/object",
+    ],
+)
+def test_chat_attachment_rejects_unsupported_or_userinfo_url(
+    temporary_url: str,
+) -> None:
+    with pytest.raises(ValueError, match="HTTP or HTTPS URL without userinfo"):
+        ChatAttachmentMaterializationRequest(
+            attachment_id="att-1",
+            session_key="session-1",
+            filename="file.txt",
+            temporary_url=temporary_url,
+            scope_key_hash="a" * 64,
+        )
 
 
 @pytest.mark.asyncio
