@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/toolchain.sh — Development toolchain management
 # Handles installation and verification of dev tools:
-# node, npm, uv, protoc, openclaw, rust/cargo
+# node, npm, uv, python, protoc, openclaw, rust/cargo
 #
 # toolchain_setup()  → Check and install all tools (idempotent, skip-if-present)
 # toolchain_check()  → Check only, return 1 if missing (dry-run, no install)
@@ -14,6 +14,12 @@ _TOOLCHAIN_SH_LOADED=1
 # Node.js 版本要求
 REQUIRED_NODE_MAJOR="22"
 REQUIRED_RUST_TOOLCHAIN="${REQUIRED_RUST_TOOLCHAIN:-1.91.0}"
+
+# uv 版本要求：需要支持 uv-managed Python 安装和 `uv sync --python`
+REQUIRED_UV_VERSION="0.4.0"
+
+# 服务子项目共同满足的 Python 版本（bcsfuse >=3.10,<3.13；backend/baas >=3.12,<3.13）
+REQUIRED_PYTHON_VERSION="3.12"
 
 confirm_tool_install() {
     local prompt="$1"
@@ -418,6 +424,129 @@ check_node_available() {
     return 1
 }
 
+# ============ uv 相关 ============
+
+get_uv_version() {
+    uv --version 2>&1 | head -1 | awk '{print $2}'
+}
+
+# 检查 uv 版本是否满足最低要求
+# 返回 0 满足, 1 不满足, 2 无法解析
+_check_uv_version_meets_requirement() {
+    local current_version
+    current_version="$(get_uv_version)"
+    if [ -z "$current_version" ]; then
+        return 2
+    fi
+    version_at_least "$current_version" "$REQUIRED_UV_VERSION"
+}
+
+# 尝试升级 uv 到满足最低要求的版本
+upgrade_uv() {
+    log_info "Upgrading uv to ${REQUIRED_UV_VERSION}+..."
+
+    if command -v pip3 &> /dev/null; then
+        if pip3 install --upgrade "uv>=${REQUIRED_UV_VERSION}" -i "${PYPI_INDEX_URL}"; then
+            log_info "uv upgraded via pip3"
+            return 0
+        fi
+    elif command -v pip &> /dev/null; then
+        if pip install --upgrade "uv>=${REQUIRED_UV_VERSION}" -i "${PYPI_INDEX_URL}"; then
+            log_info "uv upgraded via pip"
+            return 0
+        fi
+    fi
+
+    # Fallback: uv's self-update (may fail in restricted networks)
+    if uv self update; then
+        log_info "uv upgraded via self update"
+        return 0
+    fi
+
+    log_error "Failed to upgrade uv to ${REQUIRED_UV_VERSION}+. Please upgrade manually:"
+    log_error "  pip3 install --upgrade 'uv>=${REQUIRED_UV_VERSION}'"
+    return 1
+}
+
+# 确保 uv 已安装且版本满足要求
+ensure_uv() {
+    if ! check_uv_installed; then
+        auto_install_uv || return 1
+    fi
+
+    local rv
+    _check_uv_version_meets_requirement; rv=$?
+    if [ "$rv" -eq 0 ]; then
+        log_info "uv $(get_uv_version) satisfies required >= ${REQUIRED_UV_VERSION}"
+        return 0
+    fi
+
+    log_warn "uv $(get_uv_version 2>/dev/null || echo 'unknown') is below required ${REQUIRED_UV_VERSION}"
+    upgrade_uv || return 1
+
+    _check_uv_version_meets_requirement; rv=$?
+    if [ "$rv" -ne 0 ]; then
+        log_error "uv is still below ${REQUIRED_UV_VERSION} after upgrade attempt"
+        return 1
+    fi
+
+    log_info "uv $(get_uv_version) satisfies required >= ${REQUIRED_UV_VERSION}"
+}
+
+# 检查 uv-managed Python 指定版本是否已安装
+_check_uv_managed_python_installed() {
+    local version="$1"
+    uv python list --only-installed 2>/dev/null | grep -qE "cpython-${version//./\\.}[.0-9]+"
+}
+
+# 确保服务子项目所需的 Python 版本已安装
+# 使用 uv python list / install，不依赖当前项目的 requires-python
+ensure_uv_managed_python() {
+    log_info "Checking uv-managed Python ${REQUIRED_PYTHON_VERSION}..."
+
+    if _check_uv_managed_python_installed "${REQUIRED_PYTHON_VERSION}"; then
+        log_info "Python ${REQUIRED_PYTHON_VERSION} is available via uv"
+        return 0
+    fi
+
+    log_warn "Python ${REQUIRED_PYTHON_VERSION} not found. Installing with uv..."
+    if uv python install "${REQUIRED_PYTHON_VERSION}"; then
+        log_info "Python ${REQUIRED_PYTHON_VERSION} installed successfully"
+        return 0
+    fi
+
+    log_error "Failed to install Python ${REQUIRED_PYTHON_VERSION} with uv."
+    log_error "Install it manually, then rerun install-tools."
+    return 1
+}
+
+# 检查项目根 .python-version 是否与服务子项目冲突
+# 服务子项目（bcsfuse/backend/baas）都要求 Python <3.13
+check_python_version_file() {
+    local version_file="${PROJECT_ROOT}/.python-version"
+    [ -f "$version_file" ] || return 0
+
+    local version
+    version="$(head -n 1 "$version_file" | tr -d '[:space:]')"
+    if [ -z "$version" ]; then
+        return 0
+    fi
+
+    local major minor
+    major="$(echo "$version" | cut -d'.' -f1)"
+    minor="$(echo "$version" | cut -d'.' -f2)"
+
+    # 空值保护
+    if [ -z "$major" ] || [ -z "$minor" ]; then
+        return 0
+    fi
+
+    if [ "$major" -ge 3 ] && [ "$minor" -ge 13 ]; then
+        log_warn "${version_file} specifies Python ${version}, which conflicts with service subprojects (requires <3.13)"
+        log_warn "Run: echo '${REQUIRED_PYTHON_VERSION}' > ${version_file}"
+    fi
+}
+
 # ============ npm 相关 ============
 
 # 检查 npm 是否存在 (静默检查，不打印日志)
@@ -729,41 +858,43 @@ toolchain_setup() {
     _apply_cargo_mirror_config
 
     # Step 1: System dependencies
-    log_info "[1/7] Checking system dependencies..."
+    log_info "[1/8] Checking system dependencies..."
     setup_system_dependencies || return 1
     echo ""
 
     # Step 2: Node.js
-    log_info "[2/7] Setting up Node.js..."
+    log_info "[2/8] Setting up Node.js..."
     setup_node || return 1
     echo ""
 
     # Step 3: npm
-    log_info "[3/7] Checking npm..."
+    log_info "[3/8] Checking npm..."
     ensure_npm_available || return 1
     echo ""
 
     # Step 4: uv
-    log_info "[4/7] Setting up uv..."
-    if ! check_uv_installed; then
-        auto_install_uv || return 1
-    else
-        log_info "uv already installed"
-    fi
+    log_info "[4/8] Setting up uv..."
+    ensure_uv || return 1
     echo ""
 
-    # Step 5: openclaw
-    log_info "[5/7] Setting up openclaw..."
+    # Step 5: Python (must satisfy all service subprojects)
+    log_info "[5/8] Checking Python compatibility..."
+    ensure_uv_managed_python || return 1
+    check_python_version_file
+    echo ""
+
+    # Step 6: openclaw
+    log_info "[6/8] Setting up openclaw..."
     setup_openclaw || return 1
     echo ""
 
-    # Step 6: Rust/Cargo
-    log_info "[6/7] Setting up Rust/Cargo..."
+    # Step 7: Rust/Cargo
+    log_info "[7/8] Setting up Rust/Cargo..."
     setup_rust || return 1
     echo ""
 
-    # Step 7: Protobuf
-    log_info "[7/7] Setting up protobuf..."
+    # Step 8: Protobuf
+    log_info "[8/8] Setting up protobuf..."
     setup_protobuf_interactive || return 1
     echo ""
 
@@ -773,5 +904,5 @@ toolchain_setup() {
 
 # 工具链帮助
 toolchain_help() {
-    echo "toolchain - Development tools (node, npm, uv, protoc, openclaw, rust)"
+    echo "toolchain - Development tools (node, npm, uv, python, protoc, openclaw, rust)"
 }

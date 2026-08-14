@@ -605,29 +605,9 @@ singlebox_model_config_export_llm_env() {
             ;;
     esac
 
-    # Pick a fallback reasoning model: prefer a faster non-primary model from the
-    # same provider (e.g. GLM-5.1 for antchat) so local fusion answers finish
-    # before the antchat 90s gateway window. Respect explicit LLM_*_MODEL env vars.
+    # Respect explicit LLM_*_MODEL env vars; otherwise use the primary model
+    # from the openclaw config so that endpoint, token, and model stay consistent.
     local preferred_model="$model_name"
-    if [ -z "${LLM_REASONING_MODEL:-}" ]; then
-        local models fast_candidate
-        models="$(jq -r --arg p "$provider_id" --arg primary "$model_name" '
-            .models.providers[$p].models[]? | select(.id != $primary) | .id
-        ' "$source_file" 2>/dev/null || true)"
-        fast_candidate="$(printf '%s\n' $models | awk '$0=="GLM-5.1"{print; exit}')"
-        if [ -z "$fast_candidate" ]; then
-            fast_candidate="$(printf '%s\n' $models | awk '$0=="Qwen3.5-397B-A17B"{print; exit}')"
-        fi
-        if [ -z "$fast_candidate" ]; then
-            fast_candidate="$(printf '%s\n' $models | awk '$0=="claude-3-5-sonnet"{print; exit}')"
-        fi
-        if [ -z "$fast_candidate" ]; then
-            fast_candidate="$(printf '%s\n' $models | head -1 || true)"
-        fi
-        if [ -n "$fast_candidate" ]; then
-            preferred_model="$fast_candidate"
-        fi
-    fi
 
     export LLM_BASE_URL="${LLM_BASE_URL:-$base_url}"
     export LLM_AUTH_TOKEN="${LLM_AUTH_TOKEN:-$api_key}"
@@ -641,6 +621,45 @@ singlebox_model_config_export_llm_env() {
     export LLM_REASONING_TIMEOUT_MS="${LLM_REASONING_TIMEOUT_MS:-600000}"
 
     log_info "Exported bcsfuse LLM config from ${source_file} (provider=${provider_id}, api_type=${api_type}, model=${model_name})"
+}
+
+singlebox_model_config_export_manual_llm_env() {
+    # When singlebox uses manual mode for the OpenClaw bot config, derive bcsfuse
+    # LLM settings from the same OPENCLAW_OPENAI_* env vars. This mirrors the
+    # home-mode export: base URL, token, and all model selectors are reused so
+    # users do not have to duplicate them in .env.local.
+    if [ "${SINGLEBOX_MODEL_CONFIG_MODE:-}" != "manual" ]; then
+        return 0
+    fi
+
+    local base_url="${OPENCLAW_OPENAI_BASE_URL:-}"
+    local api_key="${OPENCLAW_OPENAI_API_KEY:-}"
+    local model_id="${OPENCLAW_OPENAI_MODEL_ID:-}"
+
+    if [ -z "$base_url" ] || [ -z "$api_key" ] || [ -z "$model_id" ]; then
+        return 0
+    fi
+
+    if { [ -z "${LLM_BASE_URL:-}" ] || [ "${LLM_BASE_URL}" = "change_me" ]; }; then
+        export LLM_BASE_URL="$base_url"
+    fi
+    if { [ -z "${LLM_AUTH_TOKEN:-}" ] || [ "${LLM_AUTH_TOKEN}" = "change_me" ]; }; then
+        export LLM_AUTH_TOKEN="$api_key"
+    fi
+    if { [ -z "${LLM_API_TYPE:-}" ] || [ "${LLM_API_TYPE}" = "change_me" ]; }; then
+        export LLM_API_TYPE="openai"
+    fi
+
+    local preferred_model="$model_id"
+    export LLM_FAST_MODEL="${LLM_FAST_MODEL:-$preferred_model}"
+    export LLM_BALANCED_MODEL="${LLM_BALANCED_MODEL:-$preferred_model}"
+    export LLM_REASONING_MODEL="${LLM_REASONING_MODEL:-$preferred_model}"
+    export LLM_LONG_CONTEXT_MODEL="${LLM_LONG_CONTEXT_MODEL:-$preferred_model}"
+    export LLM_EXTRACTION_MODEL="${LLM_EXTRACTION_MODEL:-$preferred_model}"
+    export LLM_DEFAULT_TIMEOUT_MS="${LLM_DEFAULT_TIMEOUT_MS:-120000}"
+    export LLM_REASONING_TIMEOUT_MS="${LLM_REASONING_TIMEOUT_MS:-600000}"
+
+    log_info "Exported bcsfuse LLM config from manual env (api_type=openai, model=${model_id})"
 }
 
 singlebox_model_config_prepare() {
@@ -658,6 +677,7 @@ singlebox_model_config_prepare() {
         manual)
             singlebox_model_config_require_manual_env || return 1
             singlebox_model_config_write_manual "$output_file" || return 1
+            singlebox_model_config_export_manual_llm_env || true
             ;;
         home)
             singlebox_model_config_write_home "$output_file" || return 1
