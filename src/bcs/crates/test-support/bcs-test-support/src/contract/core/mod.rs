@@ -1,11 +1,125 @@
 //! Core service contract harnesses.
 
-use bcs_service_api::{
-    BotRegistryCoreService, FriendCoreService, FriendRequestCoreService, FriendRequestDirection,
-    FusionCoreService, GroupCoreService, OrganizationCoreService, ProposalCoreService,
-    RelationCoreService, RoutingCoreService, ServiceError, SystemMessageDispatcherService,
-    SystemMessageProducerService,
+use std::collections::BTreeMap;
+
+use bcs_service_api::core::{
+    WorkerProfile, WorkerProfileCoreService, WorkerRecommendCommand, WorkerRecommendResult,
 };
+use bcs_service_api::{
+    BotCandidateSearchCoreService, BotCandidateSearchMode, BotCandidateSearchQuery,
+    BotCandidateVisibility, BotRegistryCoreService, FriendCoreService, FriendRequestCoreService,
+    FriendRequestDirection, FusionCoreService, GroupCoreService, OrganizationCoreService,
+    ProposalCoreService, RelationCoreService, RoutingCoreService, ServiceError,
+    SystemMessageDispatcherService, SystemMessageProducerService,
+};
+
+pub struct BotCandidateSearchHitExpectation {
+    pub bot_id: String,
+    pub is_friend: bool,
+    pub tags: BTreeMap<String, serde_json::Value>,
+    pub score: Option<f64>,
+    pub short_profile: Option<String>,
+}
+
+pub struct BotCandidateSearchContractScenario {
+    pub query: BotCandidateSearchQuery,
+    pub expected_mode: BotCandidateSearchMode,
+    pub expected_hits: Vec<BotCandidateSearchHitExpectation>,
+    pub expected_legacy_recommend_response: Option<serde_json::Value>,
+}
+
+pub async fn bot_candidate_search_core_service_contract_tests<
+    T: BotCandidateSearchCoreService + ?Sized,
+>(
+    svc: &T,
+    semantic: BotCandidateSearchContractScenario,
+    fallback: BotCandidateSearchContractScenario,
+) {
+    let empty_query = BotCandidateSearchQuery {
+        query: "   ".to_string(),
+        acting_actor_id: "contract-actor".to_string(),
+        visibility: BotCandidateVisibility::Discovery,
+        limit: 20,
+    };
+
+    let result = svc.search_candidates(empty_query.clone()).await;
+    assert_eq!(result.mode, BotCandidateSearchMode::EmptyQuery);
+    assert!(result.hits.is_empty());
+
+    let legacy = svc.search_candidates_for_legacy(empty_query).await;
+    assert_eq!(legacy.result.mode, BotCandidateSearchMode::EmptyQuery);
+    assert!(legacy.result.hits.is_empty());
+    assert!(legacy.recommend_response.is_none());
+
+    assert_candidate_search_scenario(svc, semantic).await;
+    assert_candidate_search_scenario(svc, fallback).await;
+}
+
+async fn assert_candidate_search_scenario<T: BotCandidateSearchCoreService + ?Sized>(
+    svc: &T,
+    scenario: BotCandidateSearchContractScenario,
+) {
+    let normal = svc.search_candidates(scenario.query.clone()).await;
+    assert_candidate_search_result(&normal, &scenario);
+
+    let legacy = svc
+        .search_candidates_for_legacy(scenario.query.clone())
+        .await;
+    assert_candidate_search_result(&legacy.result, &scenario);
+    assert_eq!(
+        legacy.recommend_response,
+        scenario.expected_legacy_recommend_response
+    );
+}
+
+fn assert_candidate_search_result(
+    actual: &bcs_service_api::BotCandidateSearchCoreResult,
+    scenario: &BotCandidateSearchContractScenario,
+) {
+    assert_eq!(actual.mode, scenario.expected_mode);
+    assert_eq!(actual.hits.len(), scenario.expected_hits.len());
+    for (actual, expected) in actual.hits.iter().zip(&scenario.expected_hits) {
+        assert_eq!(actual.bot.bot_uuid, expected.bot_id);
+        assert_eq!(actual.is_friend, expected.is_friend);
+        assert_eq!(actual.tags, expected.tags);
+        assert_eq!(actual.score, expected.score);
+        assert_eq!(actual.short_profile, expected.short_profile);
+    }
+}
+
+pub async fn worker_profile_core_service_contract_tests<T: WorkerProfileCoreService + ?Sized>(
+    svc: &T,
+    command: WorkerRecommendCommand,
+    expected_recommendations: &[(&str, f64, Option<&str>)],
+    expected_raw_response: &serde_json::Value,
+    profile_worker_ids: &[String],
+    expected_profiles: &[WorkerProfile],
+) -> WorkerRecommendResult {
+    let result = svc
+        .recommend_workers(command)
+        .await
+        .expect("worker recommendation succeeds through the Core contract");
+
+    assert_eq!(result.recommendations.len(), expected_recommendations.len());
+    for (actual, expected) in result.recommendations.iter().zip(expected_recommendations) {
+        assert_eq!(actual.worker_id, expected.0);
+        assert_eq!(actual.score, expected.1);
+        assert_eq!(actual.short_profile.as_deref(), expected.2);
+    }
+    assert_eq!(&result.raw_response, expected_raw_response);
+
+    let profiles = svc
+        .batch_query_worker_profiles(profile_worker_ids)
+        .await
+        .expect("worker profile batch query succeeds through the Core contract");
+    assert_eq!(profiles.len(), expected_profiles.len());
+    for (actual, expected) in profiles.iter().zip(expected_profiles) {
+        assert_eq!(actual.worker_id, expected.worker_id);
+        assert_eq!(actual.tags, expected.tags);
+    }
+
+    result
+}
 
 pub async fn bot_registry_core_service_contract_tests<T: BotRegistryCoreService + ?Sized>(
     _svc: &T,

@@ -4,12 +4,13 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_fuse_client::{FuseClient, RecommendWorkersRequest};
-use bcs_service_api::{
-    ServiceError, ServiceResult, WorkerProfile, WorkerProfileService, WorkerRecommendCommand,
-    WorkerRecommendResult, WorkerRecommendation,
+use bcs_service_api::core::{
+    WorkerProfile, WorkerProfileCoreService, WorkerRecommendCommand, WorkerRecommendResult,
+    WorkerRecommendation,
 };
+use bcs_service_api::{ServiceError, ServiceResult};
 
-/// `WorkerProfileService` implementation backed by the bcsfuse HTTP client.
+/// `WorkerProfileCoreService` implementation backed by the bcsfuse HTTP client.
 pub struct FuseWorkerProfileService {
     client: Arc<FuseClient>,
 }
@@ -21,7 +22,7 @@ impl FuseWorkerProfileService {
 }
 
 #[async_trait]
-impl WorkerProfileService for FuseWorkerProfileService {
+impl WorkerProfileCoreService for FuseWorkerProfileService {
     async fn recommend_workers(
         &self,
         command: WorkerRecommendCommand,

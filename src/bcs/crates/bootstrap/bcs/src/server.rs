@@ -46,7 +46,10 @@ use bcs_app_session::{
 };
 use bcs_api_http::{ApiState, PrincipalVerifier};
 use bcs_api_http::v1::openapi::SessionFileUrlProjector;
-use bcs_bot::{Bot, BotControlPlaneCore, BotCore, ProviderBotEvents, ProviderCore, ProviderManagement};
+use bcs_bot::{
+    Bot, BotCandidateSearchCore, BotControlPlaneCore, BotCore, EmptyWorkerProfileCoreService,
+    ProviderBotEvents, ProviderCore, ProviderManagement,
+};
 use bcs_api_http::v1::gateway_principal::{
     GatewayPrincipalTokenVerifier, GatewayPrincipalTrust,
 };
@@ -100,12 +103,13 @@ use bcs_security_gateway_api::SecurityGatewayPort;
 use bcs_security_gateway_local::NoopSecurityGateway;
 use bcs_secret_local::InMemorySecretAccess;
 use bcs_service_api::application::v1::GroupSessionConnectionService;
+use bcs_service_api::core::WorkerProfileCoreService;
 use bcs_service_api::interceptor::InterceptorChain;
 use bcs_service_api::lifecycle::ServiceLifecycle;
 use bcs_service_api::port::{GroupSessionTokenPort, SecretAccessPort};
 use bcs_service_api::{
-    A2aChatRunService, A2aChatService, BotActor, BotDeliveryPort, BotDeliveryTarget,
-    BotControlPlaneRepoPort, BotRegistryCoreService, CallerContext,
+    A2aChatRunService, A2aChatService, BotActor, BotCandidateSearchCoreService, BotDeliveryPort,
+    BotDeliveryTarget, BotControlPlaneRepoPort, BotRegistryCoreService, CallerContext,
     BotMetricsSnapshotPort, BotRunContextPort, BotTerminalEvent, BotTerminalObserverPort,
     BotTerminalState, ChannelBindingCleanupPort,
     ChannelService, CollaborationRuntimeService, CollaborationTemplateService,
@@ -1341,6 +1345,37 @@ fn resolve_invite_token_secret(config: &BcsConfig) -> Vec<u8> {
         })
 }
 
+struct CandidateSearchBindings {
+    worker_profiles: Arc<dyn WorkerProfileCoreService>,
+    legacy: Arc<dyn BotCandidateSearchCoreService>,
+    openapi_v1: Arc<dyn BotCandidateSearchCoreService>,
+}
+
+fn build_candidate_search_bindings(
+    config: &BcsConfig,
+    registry: Arc<dyn BotRegistryCoreService>,
+    friends: Arc<dyn FriendCoreService>,
+    fuse_client: Option<Arc<FuseClient>>,
+) -> CandidateSearchBindings {
+    let worker_profiles: Arc<dyn WorkerProfileCoreService> = match fuse_client {
+        Some(client) => Arc::new(FuseWorkerProfileService::new(client)),
+        None => Arc::new(EmptyWorkerProfileCoreService),
+    };
+    let candidate_search: Arc<dyn BotCandidateSearchCoreService> =
+        Arc::new(BotCandidateSearchCore::new(
+            registry,
+            friends,
+            worker_profiles.clone(),
+            config.bcsfuse.recommend_min_score,
+        ));
+
+    CandidateSearchBindings {
+        worker_profiles,
+        legacy: candidate_search.clone(),
+        openapi_v1: candidate_search,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_openapi_v1_state(
     config: &BcsConfig,
@@ -1350,6 +1385,7 @@ fn build_openapi_v1_state(
     registry: Arc<dyn BotRegistryCoreService>,
     groups: Arc<dyn GroupCoreService>,
     friends: Arc<dyn FriendCoreService>,
+    candidate_search: Arc<dyn BotCandidateSearchCoreService>,
     friend_requests: Arc<dyn FriendRequestCoreService>,
     relation: Arc<dyn RelationCoreService>,
     sessions: Arc<dyn SessionManagementService>,
@@ -1371,6 +1407,7 @@ fn build_openapi_v1_state(
         control_plane,
         registry.clone(),
         friends.clone(),
+        candidate_search,
         BotServiceConfig {
             env: relation_env.clone(),
         },
@@ -1592,6 +1629,24 @@ mod gateway_principal_tests {
             assert!(!message.contains(secret_material));
             panic!("explicit group-session WebSocket key must be accepted: {message}");
         }
+    }
+}
+
+#[cfg(test)]
+mod candidate_search_wiring_tests {
+    use super::*;
+    use bcs_test_support::{NoopBotRegistryCoreService, NoopFriendCoreService};
+
+    #[test]
+    fn bindings_share_one_core_between_legacy_and_v1() {
+        let bindings = build_candidate_search_bindings(
+            &BcsConfig::default(),
+            Arc::new(NoopBotRegistryCoreService),
+            Arc::new(NoopFriendCoreService),
+            None,
+        );
+
+        assert!(Arc::ptr_eq(&bindings.legacy, &bindings.openapi_v1));
     }
 }
 
@@ -1878,6 +1933,21 @@ impl Default for BcsServerState {
                 collaboration_runtime.clone(),
             )),
         );
+        let candidate_search = build_candidate_search_bindings(
+            &config,
+            bot_registry.clone(),
+            friend_store.clone(),
+            None,
+        );
+        let actor_directory: Arc<dyn bcs_service_api::ActorDirectoryService> = Arc::new(
+            bcs_bot::ActorDirectory::new(
+                bot_registry.clone(),
+                friend_store.clone(),
+                relation_store.clone(),
+                candidate_search.worker_profiles,
+                candidate_search.legacy,
+            ),
+        );
         let openapi_v1 = build_openapi_v1_state(
             &config,
             invite_token_secret.clone(),
@@ -1886,6 +1956,7 @@ impl Default for BcsServerState {
             bot_registry.clone(),
             sessions.clone(),
             friend_store.clone(),
+            candidate_search.openapi_v1,
             friend_request_store,
             relation_store.clone(),
             session_management.clone(),
@@ -1941,6 +2012,7 @@ impl Default for BcsServerState {
             .a2a_chat_runs(a2a_chat_runs)
             .collaboration_runtime(collaboration_runtime)
             .collaboration_templates(build_standalone_collaboration_template_service(&config))
+            .actor_directory(actor_directory)
             .bot_query(bot_use_cases.clone())
             .bot_management(bot_use_cases.clone())
             .bot_runtime(bot_use_cases.clone())
@@ -2202,6 +2274,7 @@ fn register_channel_lifecycles(
 
 struct UseCaseBundle {
     actor_directory: Arc<dyn bcs_service_api::ActorDirectoryService>,
+    candidate_search: Arc<dyn BotCandidateSearchCoreService>,
     friend_use_cases: Arc<dyn bcs_service_api::FriendService>,
     human_actors: Arc<dyn bcs_service_api::HumanActorService>,
     bot_onboarding: Arc<dyn bcs_service_api::BotOnboardingService>,
@@ -2241,13 +2314,19 @@ fn build_use_case_bundle(
     callback_url_guard: OutboundUrlGuard,
     provider_stream_gray_list: Arc<ProviderStreamGrayList>,
 ) -> UseCaseBundle {
-    let mut actor_directory =
-        bcs_bot::ActorDirectory::new(bot_registry.clone(), friend.clone(), relation.clone())
-            .with_recommend_min_score(config.bcsfuse.recommend_min_score);
-    if let Some(client) = fuse_client {
-        actor_directory =
-            actor_directory.with_worker_profiles(Arc::new(FuseWorkerProfileService::new(client)));
-    }
+    let candidate_search = build_candidate_search_bindings(
+        config,
+        bot_registry.clone(),
+        friend.clone(),
+        fuse_client,
+    );
+    let actor_directory = bcs_bot::ActorDirectory::new(
+        bot_registry.clone(),
+        friend.clone(),
+        relation.clone(),
+        candidate_search.worker_profiles,
+        candidate_search.legacy,
+    );
 
     let mut bot_use_cases = Bot::new_with_friend(bot_registry.clone(), friend.clone())
         .with_bot_core(bot_core.clone())
@@ -2322,6 +2401,7 @@ fn build_use_case_bundle(
 
     UseCaseBundle {
         actor_directory: Arc::new(actor_directory),
+        candidate_search: candidate_search.openapi_v1,
         friend_use_cases: Arc::new(bcs_friend::Friend::new(
             bot_registry.clone(),
             friend,
@@ -3235,6 +3315,7 @@ impl BcsServer {
             bot_registry.clone(),
             sessions.clone(),
             friend_store.clone(),
+            use_cases.candidate_search.clone(),
             friend_request_store,
             relation_store.clone(),
             session_management.clone(),
@@ -3835,6 +3916,7 @@ impl BcsServer {
             bot_registry.clone(),
             sessions.clone(),
             friend_svc.clone(),
+            use_cases.candidate_search.clone(),
             friend_request_svc,
             relation_svc.clone(),
             session_management.clone(),

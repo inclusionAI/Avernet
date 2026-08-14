@@ -7,6 +7,7 @@ use bcs_domain::{
 };
 use bcs_service_api::core::{
     SystemMessageDispatchOutcome, SystemMessageDispatcherService, SystemMessageProducerService,
+    WorkerProfile, WorkerProfileCoreService, WorkerRecommendCommand, WorkerRecommendResult,
 };
 use bcs_service_api::*;
 
@@ -1506,7 +1507,7 @@ impl HumanActorService for NoopHumanActorService {
 pub struct NoopWorkerProfileService;
 
 #[async_trait]
-impl WorkerProfileService for NoopWorkerProfileService {
+impl WorkerProfileCoreService for NoopWorkerProfileService {
     async fn recommend_workers(
         &self,
         _command: WorkerRecommendCommand,

@@ -19,6 +19,7 @@ HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options", "tra
 
 EXPECTED_OPERATIONS = {
     ("get", "/openapi/v1/collaboration/bots/{bot_id}/candidates"),
+    ("get", "/openapi/v1/collaboration/bots/{bot_id}/candidates/search"),
     ("post", "/openapi/v1/collaboration/bots/query"),
     ("get", "/openapi/v1/collaboration/bots/{bot_id}"),
     ("patch", "/openapi/v1/collaboration/bots/{bot_id}"),
@@ -74,7 +75,7 @@ def _actual_operations():
     }
 
 
-def test_contract_contains_exactly_the_43_approved_operations() -> None:
+def test_contract_contains_exactly_the_44_approved_operations() -> None:
     assert _actual_operations() == EXPECTED_OPERATIONS
 
 
