@@ -31,6 +31,7 @@ from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditLockUnavailableError,
     SkillsPoolEditRollbackError,
 )
+from agentclaw.community.core.skills_pool.participation import SkillLayoutParticipation
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutState,
     SkillLayout,
@@ -1384,14 +1385,17 @@ class _YieldingFilesystem(_Filesystem):
 async def test_concurrent_same_name_uploads_serialize_then_converge_on_one_skill():
     repo = _ConcurrentRepo()
     filesystem = _YieldingFilesystem()
-    class _Bots:
-        def get_by_id_and_entity(self, _bot_id, _entity_id):
-            return {"env": "pre", "active_engine": "openclaw"}
+    class _Participation:
+        def resolve(self, *, scope):
+            return SkillLayoutParticipation(
+                participates_in_pool_layout=True,
+                label="test_pool_layout",
+            )
 
     guard = SkillsPoolEditGuard(
         cache=_LockingCache(),
         layout_repository=_PoolLayouts(),
-        bot_repository=_Bots(),
+        participation_resolver=_Participation(),
     )
     package = _zip({"SKILL.md": b"name: upload-skill\ndescription: concurrent\n"})
     first, second = await asyncio.gather(
