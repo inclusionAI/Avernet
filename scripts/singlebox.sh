@@ -79,6 +79,9 @@ BOTS_EXCLUDED_PROFILE_SOURCE="${BOTS_EXCLUDED_PROFILE_SOURCE:-}"
 CLAUDE_PROFILE_DIR="${CLAUDE_PROFILE_DIR:-}"
 BCN_PLUGIN_SOURCE="${BCN_PLUGIN_SOURCE:-source}"
 BCN_PLUGIN_VERSION="${BCN_PLUGIN_VERSION:-latest}"
+MERCHANT_HYBRID_DEFAULT_PROFILE_DIR="scripts/4bots_merchant_operations_profile"
+MERCHANT_HYBRID_DEFAULT_EXCLUDED_PROFILE_SOURCE="platform-data"
+MERCHANT_HYBRID_DEFAULT_CLAUDE_PROFILE_DIR="scripts/4bots_merchant_operations_profile_for_claude"
 
 # openclaw 配置目录和模板路径
 OPENCLAW_CONFIG_DIR="${HOME}/.openclaw"
@@ -441,6 +444,7 @@ show_help() {
     echo "  $0 restart bots                Restart only the 5 local bot gateways"
     echo "  $0 start bots --profile-dir scripts/8bots_micro_merchant_profile"
     echo "  $0 start bcs_frontend --profile-dir scripts/4bots_merchant_operations_profile"
+    echo "  $0 start merchant_hybrid          Start merchant hybrid with its default profiles"
     echo "  SINGLEBOX_MODEL_CONFIG_MODE=home SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED=1 $0 start hybrid --profile-dir scripts/4bots_merchant_operations_profile"
     echo "  SINGLEBOX_MODEL_CONFIG_MODE=home SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED=1 $0 start hybrid --profile-dir scripts/4bots_merchant_operations_profile --exclusive-profile-dir platform-data --claude-profile-dir scripts/4bots_merchant_operations_profile_for_claude"
     echo "  $0 restart bcs_bots            Restart BCS + 5 local bot gateways"
@@ -464,6 +468,27 @@ validate_hybrid_profile_options() {
             return 1
         fi
     fi
+}
+
+apply_merchant_hybrid_profile_defaults() {
+    local target_command="$1"
+    shift
+
+    case "$target_command" in
+        setup|start|restart)
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+    if [ "$#" -ne 1 ] || [ "$1" != "merchant_hybrid" ]; then
+        return 0
+    fi
+
+    BOTS_PROFILE_DIR="${BOTS_PROFILE_DIR:-${MERCHANT_HYBRID_DEFAULT_PROFILE_DIR}}"
+    BOTS_EXCLUDED_PROFILE_SOURCE="${BOTS_EXCLUDED_PROFILE_SOURCE:-${MERCHANT_HYBRID_DEFAULT_EXCLUDED_PROFILE_SOURCE}}"
+    CLAUDE_PROFILE_DIR="${CLAUDE_PROFILE_DIR:-${MERCHANT_HYBRID_DEFAULT_CLAUDE_PROFILE_DIR}}"
+    log_info "merchant_hybrid profile configuration resolved excluded_source=${BOTS_EXCLUDED_PROFILE_SOURCE} claude_profile_enabled=true"
 }
 
 # 编译插编 bcs 到 target/cov-e2e/llvm-cov-target/ 并 export BCS_BIN/LLVM_PROFILE_FILE。
@@ -806,6 +831,7 @@ main() {
     if [ ${#services[@]} -eq 0 ]; then
         services=(all)
     fi
+    apply_merchant_hybrid_profile_defaults "$command" "${services[@]}"
     if [ -n "${BOTS_PROFILE_DIR:-}" ]; then
         for svc in "${services[@]}"; do
             # --profile-dir / BOTS_PROFILE_DIR is primarily for the bots target,
