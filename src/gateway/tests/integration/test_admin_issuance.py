@@ -9,13 +9,14 @@ from httpx import ASGITransport, AsyncClient
 from gateway.community.adapters.web.app import create_app
 from gateway.community.bootstrap import get_container
 from gateway.community.core.access_key import AccessKeyRepository
-from gateway.community.core.app import AppRepository
+from gateway.community.core.app import APIKeyGenerator, AppRepository, AppRow
 
-# Issued credentials are signed with the gateway's principal signing key, so
-# these tests provision one the way a deployment does. They previously decoded
-# with the plugin's committed dev fallback; that fallback is gone, because
-# minting access-key and app tokens under a key published in the source tree
-# means anyone holding the source can mint them too.
+# Access keys are signed with the gateway's principal signing key, so these
+# tests provision one the way a deployment does. They previously decoded with
+# the plugin's committed dev fallback; that fallback is gone, because minting
+# access-key tokens under a key published in the source tree means anyone
+# holding the source can mint them too. (App registration no longer signs
+# anything — it mints a random API key and stores only its hash.)
 _TEST_KEY = "integration-test-shared-secret-32b!!"
 
 
@@ -76,16 +77,22 @@ async def test_register_app_via_http() -> None:
     assert body["app_name"] == "Http App"
     assert body["tenant"] == "t"
     assert body["status"] == "ACTIVE"
-    token = body["token"]
 
-    decoded = jwt.decode(token, _TEST_KEY, algorithms=["HS256"])
-    assert decoded["typ"] == "app"
-    assert decoded["sub"] == "Http App"
-    assert "exp" not in decoded
+    # An API key, not a JWT — and the plaintext appears only in this response.
+    assert "token" not in body
+    api_key = body["api_key"]
+    assert APIKeyGenerator.validate_format(api_key) is True
 
-    rec = await AppRepository(get_container().plugins().database()).find_app_by_token(
-        token
-    )
+    db = get_container().plugins().database()
+    with db.orm_session() as session:
+        row = session.get(AppRow, body["id"])
+        assert row is not None
+        assert row.token is None
+        assert row.api_key_prefix == api_key[:8]
+        assert api_key not in (row.api_key_hash or "")
+
+    # Register → use closed loop: the returned key authenticates immediately.
+    rec = await AppRepository(db).find_app_by_credential(api_key)
     assert rec is not None
     assert rec.app_name == "Http App"
     assert rec.id == body["id"]
@@ -137,3 +144,48 @@ async def test_issuance_failure_returns_500() -> None:
             },
         )
     assert resp.status_code == 500
+
+
+@pytest.mark.parametrize("status", ["ACTIVE", "INACTIVE"])
+async def test_register_app_accepts_initial_statuses(status: str) -> None:
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/admin/apps",
+            json={
+                "app_name": "Status App",
+                "owners": "org-1",
+                "app_type": "assistant",
+                "tenant": "t",
+                "creator": "admin",
+                "status": status,
+            },
+        )
+    assert resp.status_code == 201
+    assert resp.json()["status"] == status
+
+
+@pytest.mark.parametrize("status", ["REVOKED", "active", "Active", "ENABLED", ""])
+async def test_register_app_rejects_unusable_statuses(status: str) -> None:
+    """A status the lookup will not match must not mint a dead credential.
+
+    Authentication compares against "ACTIVE" exactly, so a casing typo would
+    otherwise return 201 with a key that can never authenticate. REVOKED is
+    refused for the same reason — it is a transition, not an initial state.
+    """
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/admin/apps",
+            json={
+                "app_name": "Bad Status App",
+                "owners": "org-1",
+                "app_type": "assistant",
+                "tenant": "t",
+                "creator": "admin",
+                "status": status,
+            },
+        )
+    assert resp.status_code == 422

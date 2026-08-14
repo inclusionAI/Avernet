@@ -97,7 +97,7 @@ def bootstrap_app() -> BootstrapResult:
     )
     db = container.plugins().database()
     access_key_issuer = build_access_key_issuer(db, principal_signer)
-    app_registrar = build_app_registrar(db, principal_signer)
+    app_registrar = build_app_registrar(db)
     return BootstrapResult(
         authenticator=authenticator,
         forwarding=forwarding,
