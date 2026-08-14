@@ -20,7 +20,11 @@ from secbaas.community.api.device_manage import (
     Storage,
 )
 from secbaas.community.logger import get_logger
-from secbaas.community.spi.sandbox.arca import ArcaSandbox, ArcaSandboxPlugin
+from secbaas.community.spi.sandbox.arca import (
+    ArcaSandbox,
+    ArcaSandboxInfo,
+    ArcaSandboxPlugin,
+)
 
 if TYPE_CHECKING:
     from secbaas.community.api.device_manage import ArcaCredentials
@@ -28,20 +32,26 @@ if TYPE_CHECKING:
 logger = get_logger("plugin-sandbox")
 
 
-class StubSandboxInfo:
-    """Mimics the Arca SDK SandboxInfo object returned by SyncSandbox.get_info()."""
+class StubSandboxInfo(ArcaSandboxInfo):
+    """Backward-compatible alias of :class:`~secbaas.community.spi.sandbox.arca.ArcaSandboxInfo`.
+
+    Retained so existing imports and ``isinstance`` checks keep working. Offers the same
+    attribute surface as the unified model.
+    """
 
     def __init__(self, sandbox_id: str, template_id: str) -> None:
-        self.sandbox_id = sandbox_id
-        self.status = "RUNNING"
-        self.template_id = template_id
-        self.resources = None
-        self.ttl_in_minutes = None
-        self.ttl_timestamp = None
-        self.envs = None
-        self.snapshot_id = None
-        self.metadata = None
-        self.outbound_operation_rule = None
+        super().__init__(
+            sandbox_id=sandbox_id,
+            status="RUNNING",
+            template_id=template_id,
+            resources=None,
+            ttl_in_minutes=None,
+            ttl_timestamp=None,
+            envs=None,
+            snapshot_id=None,
+            metadata=None,
+            outbound_operation_rule=None,
+        )
 
 
 class StubArcaSandbox(ArcaSandbox):
@@ -59,7 +69,7 @@ class StubArcaSandbox(ArcaSandbox):
     def sandbox_id(self) -> str:
         return self._sandbox_id
 
-    def get_info(self) -> Any:
+    def get_info(self) -> ArcaSandboxInfo:
         return StubSandboxInfo(self._sandbox_id, self._template_id)
 
     def destroy(self) -> Any:

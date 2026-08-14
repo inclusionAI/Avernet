@@ -9,7 +9,7 @@ from secbaas.community.api.device_manage import (
     OutBoundOperationRuleUpdatedMode,
 )
 from secbaas.community.logger import get_logger
-from secbaas.community.spi.sandbox.arca import ArcaSandbox
+from secbaas.community.spi.sandbox.arca import ArcaSandbox, ArcaSandboxInfo
 
 logger = get_logger("plugin-sandbox")
 
@@ -47,20 +47,20 @@ class LocalDockerArcaSandbox(ArcaSandbox):
         """沙箱唯一标识符。"""
         return self._sandbox_id
 
-    def get_info(self) -> Any:
+    def get_info(self) -> ArcaSandboxInfo:
         """获取沙箱信息。
 
         Returns:
-            包含沙箱信息的字典，包括 sandbox_id, status, template_id 等。
+            返回统一 :class:`ArcaSandboxInfo`，包含 sandbox_id, status, template_id；
+            local-docker 专属字段（container_id, is_ready）附加为额外属性。
         """
-        # TODO: 从 Docker 容器获取实际状态
-        return {
-            "sandbox_id": self._sandbox_id,
-            "status": self._status,
-            "template_id": self._template_id,
-            "container_id": self._container_id,
-            "is_ready": self._is_ready,
-        }
+        return ArcaSandboxInfo(
+            sandbox_id=self._sandbox_id,
+            status=self._status,
+            template_id=self._template_id,
+            container_id=self._container_id,
+            is_ready=self._is_ready,
+        )
 
     def destroy(self) -> Any:
         """销毁沙箱（停止并删除 Docker 容器）。
