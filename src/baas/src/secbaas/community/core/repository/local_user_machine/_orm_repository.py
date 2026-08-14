@@ -11,7 +11,7 @@ from ._protocol import (
 )
 from ._record import LocalUserMachineRecord
 
-log = get_logger("orm-repository")
+log = get_logger("orm")
 
 
 class OrmLocalUserMachineRepository(OrmConnectionMixin, LocalUserMachineRepository):

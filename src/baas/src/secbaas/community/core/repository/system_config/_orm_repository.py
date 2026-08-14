@@ -5,7 +5,7 @@ from ._orm_model import SystemConfigModel
 from ._protocol import SystemConfigRepository
 from ._record import SystemConfigRecord
 
-log = get_logger("orm-repository")
+log = get_logger("orm")
 
 
 class OrmSystemConfigRepository(OrmConnectionMixin, SystemConfigRepository):

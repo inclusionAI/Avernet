@@ -8,7 +8,7 @@ from ._orm_model import BotRunModel
 from ._protocol import BotRunRepository
 from ._record import BotRunRecord
 
-log = get_logger("orm-repository")
+log = get_logger("orm")
 
 
 class OrmBotRunRepository(OrmConnectionMixin, BotRunRepository):

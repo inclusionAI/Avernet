@@ -11,7 +11,7 @@ from ._orm_model import BotModel
 from ._protocol import BotRepository
 from ._record import BotRecord
 
-log = get_logger("orm-repository")
+log = get_logger("orm")
 
 
 class OrmBotRepository(OrmConnectionMixin, BotRepository):

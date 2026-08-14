@@ -8,7 +8,7 @@ convenience). A production deployment must gate them behind an admin credential
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -34,7 +34,14 @@ class AppRequest(BaseModel):
     app_type: str = "UNKNOWN"
     tenant: str
     creator: str = Field(min_length=1)
-    status: str = "ACTIVE"
+    # Constrained, not free text: authentication compares this to "ACTIVE"
+    # exactly, so accepting "active" would mint a key that can never
+    # authenticate while returning 201 as though registration had worked.
+    # REVOKED is excluded deliberately — it is a transition applied to an
+    # existing app, and registering straight into it would mint a credential
+    # that is dead on arrival. Migrated rows may still carry it; those are
+    # refused at lookup, which is the intended handling.
+    status: Literal["ACTIVE", "INACTIVE"] = "ACTIVE"
     env: str = ""
     config: dict[str, Any] = Field(default_factory=dict)
 
@@ -87,6 +94,8 @@ async def register_app(payload: AppRequest, request: Request) -> JSONResponse:
     except Exception:
         logger.exception("app registration failed")
         return _error(500, 1, "app registration failed")
+    # ``api_key`` is returned here and nowhere else, ever: the registry keeps
+    # only its hash, so a caller who loses it must be issued a new one.
     return JSONResponse(
         status_code=201,
         content={
@@ -97,6 +106,6 @@ async def register_app(payload: AppRequest, request: Request) -> JSONResponse:
             "tenant": issued.tenant,
             "status": payload.status,
             "env": payload.env,
-            "token": issued.token,
+            "api_key": issued.api_key,
         },
     )

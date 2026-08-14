@@ -11,7 +11,7 @@ from ._orm_model import DeviceModel
 from ._protocol import DeviceRepository
 from ._record import DeviceRecord
 
-log = get_logger("orm-repository")
+log = get_logger("orm")
 
 
 class OrmDeviceRepository(OrmConnectionMixin, DeviceRepository):
