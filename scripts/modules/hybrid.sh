@@ -133,31 +133,80 @@ hybrid_restore_runtime_state() {
 }
 
 hybrid_apply_model_policy() {
-    hybrid_claude_enabled || return 0
-    local config_file primary provider primary_model
+    local config_file primary provider primary_model temporary_file is_glm_model
     config_file="${SINGLEBOX_MODEL_CONFIG_FILE:-}"
     [ -n "$config_file" ] && [ -f "$config_file" ] || {
-        log_error "hybrid Claude model policy requires the prepared runtime model config"
+        log_error "hybrid model policy requires the prepared runtime model config"
         return 1
     }
     primary="$(jq -r '.agents.defaults.model.primary // empty' "$config_file")"
     case "$primary" in
         */*) ;;
         *)
-            log_error "hybrid Claude model policy requires a configured OpenClaw primary model"
+            log_error "hybrid model policy requires a configured OpenClaw primary model"
             return 1
             ;;
     esac
     provider="${primary%%/*}"
     primary_model="${primary#*/}"
     if ! jq -e --arg provider "$provider" '.models.providers[$provider] | type == "object"' "$config_file" >/dev/null; then
-        log_error "hybrid Claude model policy cannot find the configured model provider"
+        log_error "hybrid model policy cannot find the configured model provider"
         return 1
     fi
     if ! jq -e --arg provider "$provider" --arg model "$primary_model" '
         any(.models.providers[$provider].models[]?; .id == $model)
     ' "$config_file" >/dev/null; then
-        log_error "hybrid Claude model policy cannot find the configured primary model"
+        log_error "hybrid model policy cannot find the configured primary model"
+        return 1
+    fi
+
+    is_glm_model=false
+    if [ "$(printf '%s' "$primary_model" | tr '[:upper:]' '[:lower:]')" = "glm-5.1" ]; then
+        is_glm_model=true
+    fi
+    temporary_file="${config_file}.hybrid-model-policy.$$"
+    if ! (
+        umask 077
+        jq \
+            --arg provider "$provider" \
+            --arg primary "$primary" \
+            --arg primary_model "$primary_model" \
+            --argjson is_glm_model "$is_glm_model" '
+              .models.providers[$provider].timeoutSeconds = 600
+              | .agents = (if (.agents? | type) == "object" then .agents else {} end)
+              | .agents.defaults = (
+                  if (.agents.defaults? | type) == "object" then .agents.defaults else {} end
+                )
+              | .agents.defaults.timeoutSeconds = 600
+              | if $is_glm_model then
+                  .models.providers[$provider].models |= map(
+                    if .id == $primary_model then
+                      .reasoning = true
+                      | .compat = (
+                          (if (.compat? | type) == "object" then .compat else {} end)
+                          + {thinkingFormat: "zai"}
+                        )
+                    else . end
+                  )
+                  | .agents.defaults.models = (
+                      if (.agents.defaults.models? | type) == "object" then .agents.defaults.models else {} end
+                    )
+                  | .agents.defaults.models[$primary] = (
+                      (.agents.defaults.models[$primary] // {})
+                      | if type == "object" then . else {} end
+                      | .params = (if (.params? | type) == "object" then .params else {} end)
+                      | .params.reasoning_effort = "none"
+                    )
+                else . end
+            ' "$config_file" > "$temporary_file"
+    ); then
+        rm -f "$temporary_file"
+        log_error "hybrid model policy failed to write runtime model config"
+        return 1
+    fi
+    if ! chmod 600 "$temporary_file" || ! mv "$temporary_file" "$config_file"; then
+        rm -f "$temporary_file"
+        log_error "hybrid model policy failed to install runtime model config"
         return 1
     fi
 
@@ -169,7 +218,7 @@ hybrid_apply_model_policy() {
     export LLM_REASONING_MODEL="$primary_model"
     export LLM_LONG_CONTEXT_MODEL="$primary_model"
     export LLM_EXTRACTION_MODEL="$primary_model"
-    log_info "Hybrid model policy: OpenClaw, Claude Code, and SOP use configured primary ${primary}"
+    log_info "Hybrid model policy: primary=${primary}, provider_timeout=600s, agent_timeout=600s, glm_thinking_disabled=${is_glm_model}"
 }
 
 hybrid_validate_profiles() {

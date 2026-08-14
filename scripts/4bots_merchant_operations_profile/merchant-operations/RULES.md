@@ -101,7 +101,7 @@ Worker 首轮“需修订”可以作为 initial issue 进入 one-shot，但未�
 - YAML 顶层、participants、nodes、transitions、judge、human_input 和 final output 的准确结构以当次 schema 为准。
 - schema 与图结构只认 `collaboration validate` 的结构化结果；profile 附加检查必须解析 YAML 后按准确字段路径判断，禁止全文搜索、字符串切片或用节点名第一次出现位置代替节点定义。
 - 任一附加检查为 FAIL 时禁止宣称全部通过或启动 run；定义错误就修定义，检查器误报就修正检查器并重跑，不能用一句“误报”直接放行。
-- 全局和所有 bot_task 有效超时不得低于 300000ms；最终 HumanInput 不得低于 600000ms。
+- 全局和所有 bot_task 有效超时不得低于 600000ms；最终 HumanInput 不得低于 600000ms。
 - run 中不读取本地私有账本、不调用 assign-task、不发普通群消息、不调用 group/session 生命周期工具。
 - 包含最终 HumanInput 的 run 只在当前 session 已有 Present Human 后启动。无人时保留已验证 YAML/input，只发一次加入提示并等待；不得把 HumanInput 改成 bot_task、删除该节点、直接连 accepted marker 或让 manager 代答。
 - 若 run 返回“requires a Present Human”，说明预检失效或发生竞态。原样保留错误并等待人类加入，不修改图后重试；这不是允许降级验收的 schema 错误。

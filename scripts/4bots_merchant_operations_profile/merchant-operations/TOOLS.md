@@ -151,7 +151,7 @@ HumanInput 不用于补数；专业检查未通过时直接 BLOCKED。它是 dem
 
 - 顶层仅使用 schema 允许字段；节点均在 state machine graph 内；
 - 图无环，恰有一个入口和一个 `final_output: true` 的 sink；
-- 所有 bot_task 有效超时不低于 300000ms，HumanInput 不低于 600000ms；
+- 所有 bot_task 有效超时不低于 600000ms，HumanInput 不低于 600000ms；
 - 无未定义节点、占位文本、多个 final output、额外 finalizer 或 Human Bot binding；
 - 每版三名 required Worker 都真实复核；
 - 只有通过最终就绪检查才能进入 HumanInput；

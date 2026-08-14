@@ -211,6 +211,18 @@ singlebox_model_config_select_mode() {
 }
 
 singlebox_model_config_require_manual_env() {
+    # 以下为安全注释COSEC：仅解析明确的环境变量引用，避免将占位符当作可用凭据。
+    if [ "${OPENCLAW_OPENAI_API_KEY:-}" = "OPENAI_API_KEY" ]; then
+        if [ -z "${OPENAI_API_KEY:-}" ]; then
+            log_error "OPENCLAW_OPENAI_API_KEY references OPENAI_API_KEY, but OPENAI_API_KEY is not set."
+            log_error "Set OPENAI_API_KEY in the launch environment, or set OPENCLAW_OPENAI_API_KEY to a real key in ${PROJECT_ROOT}/.env.local."
+            return 1
+        fi
+        OPENCLAW_OPENAI_API_KEY="$OPENAI_API_KEY"
+        export OPENCLAW_OPENAI_API_KEY
+        log_info "Resolved OpenClaw manual model credential from OPENAI_API_KEY."
+    fi
+
     local missing=()
     [ -n "${OPENCLAW_OPENAI_BASE_URL:-}" ] || missing+=("OPENCLAW_OPENAI_BASE_URL")
     [ -n "${OPENCLAW_OPENAI_API_KEY:-}" ] || missing+=("OPENCLAW_OPENAI_API_KEY")
@@ -371,7 +383,6 @@ singlebox_model_config_write_manual() {
         jq -n \
             --arg provider_id "$provider_id" \
             --arg base_url "$OPENCLAW_OPENAI_BASE_URL" \
-            --arg api_key "$OPENCLAW_OPENAI_API_KEY" \
             --arg model_id "$model_id" \
             --arg model_name "$model_name" \
             --arg model_api "$model_api" \
@@ -381,7 +392,11 @@ singlebox_model_config_write_manual() {
             providers: {
               ($provider_id): {
                 baseUrl: $base_url,
-                apiKey: $api_key,
+                apiKey: {
+                  source: "env",
+                  provider: "default",
+                  id: "OPENCLAW_OPENAI_API_KEY"
+                },
                 api: $model_api,
                 models: [
                   {

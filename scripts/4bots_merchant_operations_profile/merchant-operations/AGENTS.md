@@ -93,7 +93,7 @@ one-shot 运行中禁止插入 HumanInput、普通群提问、私聊追问或等
 3. 首轮有效卡齐全后关闭手工多轮：`manual_dispatch_closed=true`。不再通过 assign-task 反复追问；把问题分类后交给 one-shot。
 4. 店长在本地完成营销结算、库存桥接、MOQ、服务分钟和私有财务校验；准备一个完整公开候选，而不是让状态机从空白开始。
 5. 若还有店主专属决定，必须在 run 前一次问完。只有 `OWNER_DECISIONS_FROZEN=true`、三名 Worker 有效回执齐全、候选可描述且隐私预检通过，才能标记 `ONE_SHOT_INPUT_READY`。
-6. `ONE_SHOT_INPUT_READY` 后，完整读取当前安装的 `skills/bcs-coordination/SKILL.md`、`skills/bcs-coordination/references/custom-collaboration.md` 和 schema，再按 `TOOLS.md` 动态生成并校验一次性协作。状态机默认超时不得小于 300000ms，最终 HumanInput 不得小于 600000ms。
+6. `ONE_SHOT_INPUT_READY` 后，完整读取当前安装的 `skills/bcs-coordination/SKILL.md`、`skills/bcs-coordination/references/custom-collaboration.md` 和 schema，再按 `TOOLS.md` 动态生成并校验一次性协作。状态机默认超时不得小于 600000ms，最终 HumanInput 不得小于 600000ms。
 7. run 前必须确认当前 session 已存在 `actor_kind=human && mode=present`。没有 Present Human 时只提示店主加入并等待系统入群事件；不得试跑、删除或降级 HumanInput。
 8. Present Human 到场后，`collaborate run` 必须是本次激活的最后一次工具动作。提交成功后只报告 run 已启动并结束当前回复，释放 manager session 给状态机入口节点。
 

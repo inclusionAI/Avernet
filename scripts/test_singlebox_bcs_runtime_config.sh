@@ -58,7 +58,7 @@ reset_case() {
     export BCS_CONFIG_DIR="${TEST_ROOT}/${name}"
     export BCS_SERVER_ENV="local"
     unset BCS_E2E_MOCK_BASE_URL BCS_E2E_JUDGE_API_KEY
-    unset OPENCLAW_OPENAI_BASE_URL OPENCLAW_OPENAI_API_KEY OPENCLAW_OPENAI_MODEL_ID
+    unset OPENCLAW_OPENAI_BASE_URL OPENCLAW_OPENAI_API_KEY OPENCLAW_OPENAI_MODEL_ID OPENAI_API_KEY
 }
 
 assert_contains() {
@@ -107,6 +107,38 @@ test_complete_env_config_enables_local_llm() {
     done
 }
 
+test_local_llm_resolves_openai_api_key_reference() {
+    reset_case "key-reference"
+    export OPENCLAW_OPENAI_BASE_URL='https://llm.example.test/v1'
+    export OPENCLAW_OPENAI_API_KEY='OPENAI_API_KEY'
+    export OPENAI_API_KEY='resolved-judge-key-that-must-not-be-serialized'
+    export OPENCLAW_OPENAI_MODEL_ID='judge-model'
+
+    prepare_bcs_runtime_config
+
+    [ "$OPENCLAW_OPENAI_API_KEY" = "$OPENAI_API_KEY" ] \
+        || fail "BCS Judge key reference was not resolved for the process environment"
+
+    local config_file
+    for config_file in \
+        "${BCS_CONFIG_DIR}/bcs-config.toml" \
+        "${BCS_CONFIG_DIR}/bcs-config-local.toml"; do
+        assert_contains "$config_file" 'api_key_env = "OPENCLAW_OPENAI_API_KEY"'
+        assert_not_contains "$config_file" "$OPENAI_API_KEY"
+    done
+}
+
+test_local_llm_rejects_unresolved_openai_api_key_reference() {
+    reset_case "unresolved-key-reference"
+    export OPENCLAW_OPENAI_BASE_URL='https://llm.example.test/v1'
+    export OPENCLAW_OPENAI_API_KEY='OPENAI_API_KEY'
+    export OPENCLAW_OPENAI_MODEL_ID='judge-model'
+
+    if prepare_bcs_runtime_config; then
+        fail "BCS runtime config accepted an unresolved OPENAI_API_KEY reference"
+    fi
+}
+
 test_partial_env_config_does_not_enable_local_llm() {
     reset_case "partial"
     export OPENCLAW_OPENAI_BASE_URL='https://llm.example.test/v1'
@@ -134,6 +166,8 @@ test_e2e_mock_takes_precedence_over_env_config() {
 
 test_local_llm_stays_disabled_without_env_config
 test_complete_env_config_enables_local_llm
+test_local_llm_resolves_openai_api_key_reference
+test_local_llm_rejects_unresolved_openai_api_key_reference
 test_partial_env_config_does_not_enable_local_llm
 test_e2e_mock_takes_precedence_over_env_config
 

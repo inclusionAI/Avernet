@@ -53,6 +53,23 @@ toml_sed_replacement() {
     printf '%s' "$value"
 }
 
+resolve_bcs_local_llm_api_key_reference() {
+    # 以下为安全注释COSEC：仅解析明确的环境变量引用，避免将占位符传给 BCS Judge。
+    if [ "${OPENCLAW_OPENAI_API_KEY:-}" != "OPENAI_API_KEY" ]; then
+        return 0
+    fi
+
+    if [ -z "${OPENAI_API_KEY:-}" ]; then
+        log_error "OPENCLAW_OPENAI_API_KEY references OPENAI_API_KEY, but OPENAI_API_KEY is not set."
+        log_error "Set OPENAI_API_KEY in the launch environment, or set OPENCLAW_OPENAI_API_KEY to a real key in ${PROJECT_ROOT}/.env.local."
+        return 1
+    fi
+
+    OPENCLAW_OPENAI_API_KEY="$OPENAI_API_KEY"
+    export OPENCLAW_OPENAI_API_KEY
+    log_info "Resolved BCS Judge credential reference from OPENAI_API_KEY."
+}
+
 prepare_bcs_runtime_config_resources() {
     local config_dir="$1"
     local seeds_src="${BCS_DIR}/seeds"
@@ -92,6 +109,9 @@ prepare_bcs_runtime_config() {
     local bcs_bind="${BCS_BIND:-}"
     local bcs_mock_user_id="${BCS_MOCK_USER_ID:-}"
     local bcs_mock_user_name="${BCS_MOCK_USER_NICK_NAME:-}"
+    if [ "${BCS_SERVER_ENV:-}" = "local" ] && [ -z "${BCS_E2E_MOCK_BASE_URL:-}" ]; then
+        resolve_bcs_local_llm_api_key_reference || return 1
+    fi
     # BCS_BOT_PROFILE_DIR is the explicit override. If the caller used the
     # dynamic --profile-dir form (BOTS_PROFILE_DIR), wire the same source
     # directory into BCS so bot context files can be found by bcs-fusion.

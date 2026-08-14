@@ -427,6 +427,7 @@ test_dynamic_config_copies_thinking_default() {
   local model_source="${tmp}/model-source.json"
   local matching_config="${tmp}/matching-config.json"
   local stale_config="${tmp}/stale-config.json"
+  local timeout_stale_config="${tmp}/timeout-stale-config.json"
   cat > "$model_source" <<'JSON'
 {
   "models": {"mode": "merge", "providers": {}},
@@ -434,12 +435,27 @@ test_dynamic_config_copies_thinking_default() {
     "defaults": {
       "model": {"primary": "test/model"},
       "models": {"test/model": {"alias": "Test Model"}},
-      "thinkingDefault": "off"
+      "thinkingDefault": "off",
+      "timeoutSeconds": 600
     }
   }
 }
 JSON
   cat > "$matching_config" <<'JSON'
+{
+  "models": {"mode": "merge", "providers": {}},
+  "agents": {
+    "defaults": {
+      "model": {"primary": "test/model"},
+      "models": {"test/model": {"alias": "Test Model"}},
+      "thinkingDefault": "off",
+      "timeoutSeconds": 600,
+      "workspace": "/runtime/workspace"
+    }
+  }
+}
+JSON
+  cat > "$timeout_stale_config" <<'JSON'
 {
   "models": {"mode": "merge", "providers": {}},
   "agents": {
@@ -480,6 +496,7 @@ JSON
     .model.primary == "test/model"
     and .models["test/model"].alias == "Test Model"
     and .thinkingDefault == "off"
+    and .timeoutSeconds == 600
   ' >/dev/null || fail "dynamic profile should copy the model thinking default"
 
   (
@@ -503,6 +520,18 @@ JSON
     bots_dynamic_config_matches_model_source "$stale_config"
   ); then
     fail "stale dynamic model config should be refreshed"
+  fi
+  if (
+    PROJECT_ROOT="${PROJECT_ROOT}"
+    BCS_DIR="${PROJECT_ROOT}/src/bcs"
+    OPENCLAW_MODEL_CONFIG_SOURCE="$model_source"
+    LOG_DIR="${tmp}/logs"
+    DEP_DIR="${tmp}/dep"
+    BCS_PORT=21000
+    . "${SCRIPT_DIR}/modules/bots.sh"
+    bots_dynamic_config_matches_model_source "$timeout_stale_config"
+  ); then
+    fail "dynamic model config without timeoutSeconds should be refreshed"
   fi
 
   rm -rf "$tmp"
