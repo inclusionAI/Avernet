@@ -67,6 +67,27 @@ claude_relays_prereqs() {
     claude_relay_cli >/dev/null || return 1
 }
 
+claude_relays_manual_model_env() {
+    CLAUDE_RELAY_MANUAL_MODEL_ENV=()
+    [ "${SINGLEBOX_MODEL_CONFIG_MODE:-}" = "manual" ] || return 0
+
+    local base_url="${OPENCLAW_OPENAI_BASE_URL:-}"
+    local api_key="${OPENCLAW_OPENAI_API_KEY:-}"
+    local model="$1"
+    if [ -z "$base_url" ] || [ -z "$api_key" ] || [ -z "$model" ]; then
+        log_error "Claude relay manual model configuration is incomplete"
+        return 1
+    fi
+
+    CLAUDE_RELAY_MANUAL_MODEL_ENV=(
+        "ANTHROPIC_BASE_URL=${base_url}"
+        "ANTHROPIC_AUTH_TOKEN=${api_key}"
+        "ANTHROPIC_MODEL=${model}"
+        "ANTHROPIC_SMALL_FAST_MODEL=${model}"
+    )
+    log_info "Claude relay model provider resolved from manual configuration (model=${model})"
+}
+
 claude_relays_start() {
     claude_relays_enabled || return 0
     claude_relays_setup || return 1
@@ -86,7 +107,8 @@ claude_relays_start() {
     stop_port_processes_if_owned "$port" "$PROJECT_ROOT" "Claude ${role} relay" || true
     require_port_available_after_owned_stop "$port" "Claude ${role} relay" || return 1
     model_source=""
-    if [ ! -f "${config_dir}/settings.json" ] && [ -f "$HOME/.claude/settings.json" ]; then
+    claude_relays_manual_model_env "$model" || return 1
+    if [ "${SINGLEBOX_MODEL_CONFIG_MODE:-}" != "manual" ] && [ ! -f "${config_dir}/settings.json" ] && [ -f "$HOME/.claude/settings.json" ]; then
         model_source="$HOME/.claude/settings.json"
     fi
     log_info "Starting Claude relay role=${role} port=${port}"
@@ -97,6 +119,7 @@ claude_relays_start() {
             RELAY_DATA_DIR="$(claude_relay_data_dir "$role")" RELAY_LOG_DIR="$(claude_relay_log_dir "$role")" \
             RELAY_SYSTEM_PROMPT_FILE="$prompt_file" RELAY_SYSTEM_PROMPT_ROOT="$(dirname "$prompt_file")" \
             CLAUDE_CODE_PATH="$cli" \
+            "${CLAUDE_RELAY_MANUAL_MODEL_ENV[@]}" \
             perl -MPOSIX=setsid -e 'setsid() or die "setsid failed: $!\\n"; exec @ARGV' node dist/esm/server.js
     ) </dev/null >> "$CLAUDE_RELAY_LOG" 2>&1 &
     printf '%s\n' "$!" > "$pid_file"

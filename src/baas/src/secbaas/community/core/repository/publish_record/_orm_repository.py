@@ -7,7 +7,7 @@ from ._orm_model import PublishRecordModel
 from ._protocol import PublishRecordRepository
 from ._record import PublishRecordRecord
 
-log = get_logger("orm-repository")
+log = get_logger("orm")
 
 
 class OrmPublishRecordRepository(OrmConnectionMixin, PublishRecordRepository):

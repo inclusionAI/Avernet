@@ -276,7 +276,9 @@ class TestSessionRoutingAffinityPrefix:
         for sid in ("bcs-sess-123", "agent:main:bcs-sess-123"):
             await service._resolve_ws_connection_for_binding(binding, session_id=sid)
             affinities.append(
-                wss_resolver.dispatch_bot_ws_conn_info.call_args.kwargs["device_affinity"]
+                wss_resolver.dispatch_bot_ws_conn_info.call_args.kwargs[
+                    "device_affinity"
+                ]
             )
         assert affinities == ["bcs-sess-123", "bcs-sess-123"]
 

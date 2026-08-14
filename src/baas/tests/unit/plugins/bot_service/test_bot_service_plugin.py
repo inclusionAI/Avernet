@@ -22,6 +22,10 @@ from secbaas.community.plugins.bot_service import (
     LocalBotServicePlugin,
     StubBotServicePlugin,
 )
+from secbaas.community.plugins.bot_service.real._plugin import (
+    _CLAUDE_CODE_NORMAL_TEMPLATE,
+    resolve_claude_code_engine,
+)
 from secbaas.community.spi.bot_service import BotBindingData, LogRelationPayload
 
 # ==================== Tests: AiohttpBotServicePlugin construction ==============
@@ -945,7 +949,7 @@ class TestAiohttpBotServicePluginRuntimeEngineSelection:
             "owner_id": "20881234",
             "bot_type": "personal",
             "engine_type": "claude_code",
-            "template_type": "generCC",
+            "template_type": "normalCC",
             "binding_id": 101,
             "device_provider": "arca",
             "device_id": "ARCA-SANDBOX-001",
@@ -1019,3 +1023,61 @@ class TestAiohttpBotServicePluginRuntimeEngineSelection:
 
         assert result.engine_type == "claude_code"
         mock_logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("template_type", ["generCC", "  aicoding-default  "])
+    async def test_claude_code_with_non_normal_template_routes_to_aicoding(
+        self, template_type
+    ):
+        plugin = AiohttpBotServicePlugin(base_url="https://agentclaw.example.com")
+        plugin._get_binding_raw = AsyncMock(
+            return_value=self._binding_inner(template_type=template_type)
+        )
+
+        result = await plugin.get_binding("bot_personal_001", "20881234", "online")
+
+        assert result.engine_type == "aicoding"
+
+    @pytest.mark.asyncio
+    async def test_claude_code_original_with_normal_template_stays_claude_code(self):
+        plugin = AiohttpBotServicePlugin(base_url="https://agentclaw.example.com")
+        plugin._get_binding_raw = AsyncMock(
+            return_value=self._binding_inner(template_type="normalCC")
+        )
+
+        result = await plugin.get_binding("bot_personal_001", "20881234", "online")
+
+        assert result.engine_type == "claude_code"
+
+
+class TestResolveClaudeCodeEngine:
+    """Routing of a claude_code active engine by template_type."""
+
+    def test_claude_code_with_non_normal_template_routes_to_aicoding(self):
+        for template_type in ("generCC", "  aicoding-default  ", "other"):
+            assert (
+                resolve_claude_code_engine("claude_code", template_type) == "aicoding"
+            )
+
+    @pytest.mark.parametrize(
+        "template_type", [None, "", "   ", _CLAUDE_CODE_NORMAL_TEMPLATE]
+    )
+    def test_claude_code_with_empty_or_normal_template_stays_claude_code(
+        self, template_type
+    ):
+        assert resolve_claude_code_engine("claude_code", template_type) == "claude_code"
+
+    def test_claude_code_normal_template_is_whitespace_insensitive(self):
+        assert resolve_claude_code_engine("claude_code", " normalCC ") == "claude_code"
+
+    @pytest.mark.parametrize(
+        "active_engine", ["openclaw", "teclaw", "aicoding", "hermes"]
+    )
+    def test_non_claude_code_engine_unchanged_regardless_of_template(
+        self, active_engine
+    ):
+        for template_type in (None, "", "normalCC", "generCC", "  x  ", 123):
+            assert (
+                resolve_claude_code_engine(active_engine, template_type)
+                == active_engine
+            )

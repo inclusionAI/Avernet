@@ -9,7 +9,7 @@ from ._orm_model import APIKeyModel
 from ._protocol import APIKeyRepository
 from ._record import APIKeyRecord
 
-log = get_logger("orm-repository")
+log = get_logger("orm")
 
 
 class OrmAPIKeyRepository(OrmConnectionMixin, APIKeyRepository):

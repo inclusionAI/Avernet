@@ -1,12 +1,19 @@
 """App-identity strategy — ``Authorization: Bearer`` (or ``x-avernet-app-token``) → ``AppPrincipal``.
 
-An ``Authorization: Bearer <app_token>`` is the default source; if absent, the
+An ``Authorization: Bearer <credential>`` is the default source; if absent, the
 dedicated ``x-avernet-app-token`` header is used as a fallback (so a caller may
-present the app token either way). The strategy resolves the app — and its
-tenant — in one registry lookup: ``find_app_by_token(token) → RegisteredApp | None``.
-The app record's ``tenant`` is the authoritative tenant for the principal.
+present the credential either way). The strategy resolves the app — and its
+tenant — in one registry lookup:
+``find_app_by_credential(credential) → RegisteredApp | None``. The app record's
+``tenant`` is the authoritative tenant for the principal.
 
-A token that the registry does not recognise is treated as absent (returns
+The credential is opaque here. Apps present an API key; apps registered before
+that scheme present the JWT they were issued, which the registry still accepts
+through a deprecated path for the duration of the transition window. Which form
+arrived, and how it is verified, are the registry's business — this strategy
+only asks whether some app owns it.
+
+A credential the registry does not recognise is treated as absent (returns
 ``None``), so other Bearer-based chains (e.g. bot_token) may resolve the same
 credential (US27 — each chain adjudicates independently).
 """
@@ -60,12 +67,14 @@ class AppTokenStrategy:
         app_token = extract_app_token(creds, self._token_header)
         if not app_token:
             return None  # no app token → strategy not applicable
-        record = await self._registry.find_app_by_token(app_token)
+        record = await self._registry.find_app_by_credential(app_token)
         if record is None:
-            logger.debug("app token not found in registry")
+            logger.debug("app credential not resolved by the registry")
             return None  # not one of mine → absent; another chain may resolve this Bearer (US27)
         logger.debug(
-            "app token resolved: app_name=%s tenant=%s", record.app_name, record.tenant
+            "app credential resolved: app_name=%s tenant=%s",
+            record.app_name,
+            record.tenant,
         )
         return AppPrincipal(
             tenant=record.tenant,

@@ -18,7 +18,7 @@ from secbaas.community.logger import get_logger
 if TYPE_CHECKING:
     from kubernetes.client import ApiClient
 
-logger = get_logger("paas-k8s-client")
+logger = get_logger("core-service")
 
 RETRYABLE_K8S_STATUSES: frozenset[int] = frozenset({409, 429, 503})
 _DEFAULT_RETRY_MAX_ATTEMPTS = 3

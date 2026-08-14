@@ -21,7 +21,7 @@ from secbaas.community.spi.bot.teclaw import (
     TeClawBotPlugin,
 )
 
-logger = get_logger("plugin-bot-teclaw")
+logger = get_logger("plugin-sandbox")
 
 
 class StubTeClawBotPlugin(TeClawBotPlugin):

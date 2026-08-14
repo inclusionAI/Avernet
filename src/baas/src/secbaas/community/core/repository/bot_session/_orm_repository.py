@@ -10,7 +10,7 @@ from ._orm_model import BotSessionModel
 from ._protocol import BotSessionRepository
 from ._record import BotSessionRecord
 
-log = get_logger("orm-repository")
+log = get_logger("orm")
 
 
 class OrmBotSessionRepository(OrmConnectionMixin, BotSessionRepository):

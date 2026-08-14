@@ -11,7 +11,7 @@ from ._orm_model import AcBotModel
 from ._protocol import AcBotRepository
 from ._record import AcBotRecord
 
-log = get_logger("orm-repository")
+log = get_logger("orm")
 
 
 class OrmAcBotRepository(OrmConnectionMixin, AcBotRepository):

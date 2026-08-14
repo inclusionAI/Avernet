@@ -11,7 +11,7 @@ from ._orm_model import BotRunQueueModel
 from ._protocol import BotRunQueueRepository
 from ._record import BotRunQueueRecord
 
-log = get_logger("orm-repository")
+log = get_logger("orm")
 
 
 class OrmBotRunQueueRepository(OrmConnectionMixin, BotRunQueueRepository):

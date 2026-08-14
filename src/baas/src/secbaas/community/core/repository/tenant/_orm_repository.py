@@ -4,7 +4,7 @@ from secbaas.community.logger import get_logger
 from ._orm_model import TenantModel
 from ._protocol import TenantRepository
 
-log = get_logger("orm-repository")
+log = get_logger("orm")
 
 
 class OrmTenantRepository(OrmConnectionMixin, TenantRepository):

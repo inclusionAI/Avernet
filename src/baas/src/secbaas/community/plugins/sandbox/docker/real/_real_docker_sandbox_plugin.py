@@ -28,7 +28,7 @@ from secbaas.community.api.device_manage import ErrorCode, PaasError
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.sandbox.docker import DockerSandbox, DockerSandboxPlugin
 
-logger = get_logger("plugin-sandbox-docker-real")
+logger = get_logger("plugin-sandbox")
 
 
 def _import_docker() -> None:
@@ -72,7 +72,7 @@ class RealDockerSandbox(DockerSandbox):
         self._sandbox_id = sandbox_id
         self._container = container
         self._host_port = host_port
-        self._logger = get_logger("plugin-sandbox-docker-real")
+        self._logger = get_logger("plugin-sandbox")
 
     @property
     def is_ready(self) -> bool:
@@ -304,7 +304,7 @@ class RealDockerSandboxPlugin(DockerSandboxPlugin):
 
     def __init__(self) -> None:
         self._client: Any = None
-        self._logger = get_logger("plugin-sandbox-docker-real")
+        self._logger = get_logger("plugin-sandbox")
 
     # ------------------------------------------------------------------
     # Lazy client initialization (per D-09, D-13)

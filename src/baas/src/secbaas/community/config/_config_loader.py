@@ -7,7 +7,7 @@ from secbaas.community.logger import get_logger
 
 from ._models import Config
 
-logger = get_logger("config_loader")
+logger = get_logger("config")
 
 
 class ConfigLoader:
