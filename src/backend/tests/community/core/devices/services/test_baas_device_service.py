@@ -1554,6 +1554,7 @@ class TestInitStepEdgeCases:
         """Lines 511,513,515,519: optional cmd args are appended."""
         baas = MagicMock()
         baas._baas_api_base = "http://baas.local"
+        baas.exec_command_on_bot.return_value = {"exit_code": 0}
         svc = _make_service(baas_service=baas)
 
         svc._start_baas_sandbox_service(

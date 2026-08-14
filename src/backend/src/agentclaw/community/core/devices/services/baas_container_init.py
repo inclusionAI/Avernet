@@ -29,7 +29,7 @@ class BaasContainerInitializer:
         admins: list[str] | None,
         codefuse_token: str | None = None,
     ) -> None:
-        """Execute the 6-step init sequence inside the BaaS container."""
+        """Execute the ordered init sequence inside the BaaS container."""
         entity_id = device.device_props.get("entity_id")
         entity_type = device.device_props.get("entity_type")
         client_id = device.device_props.get("client_id", "")
@@ -41,6 +41,7 @@ class BaasContainerInitializer:
         self._ensure_baas_engine_dirs(bot_uuid, engine)
         self._create_baas_skill_symlink_conf(bot_uuid, symbol)
         self._write_codefuse_token(bot_uuid, codefuse_token)
+        self._wait_for_baas_supervisor(bot_uuid)
         self._start_baas_sandbox_service(
             bot_uuid=bot_uuid,
             client_id=client_id,
@@ -63,51 +64,128 @@ class BaasContainerInitializer:
 
         write_codefuse_token_baas(self._baas_service, bot_uuid, codefuse_token)
 
-    def _run_baas_bootstrap(self, bot_uuid: str) -> None:
-        self._baas_service.exec_command_on_bot(
+    def _exec_checked(
+        self,
+        *,
+        bot_uuid: str,
+        cmd: str,
+        timeout_seconds: int,
+        step: str,
+    ) -> dict:
+        """Execute one required initialization step and fail on non-zero exit."""
+        result = self._baas_service.exec_command_on_bot(
             bot_uuid=bot_uuid,
-            cmd="bash /home/admin/bin/bootstrap_minimal.sh",
-            timeout_seconds=60,
+            cmd=cmd,
+            timeout_seconds=timeout_seconds,
         )
-        logger.info("[_run_baas_bootstrap] done: bot_uuid=%s", bot_uuid)
+        exit_code = result.get("exit_code", -1) if isinstance(result, dict) else -1
+        if exit_code != 0:
+            stderr = result.get("stderr", "") if isinstance(result, dict) else ""
+            stderr_tail = str(stderr or "")[-1000:]
+            raise RuntimeError(
+                f"BaaS container init step failed: step={step} "
+                f"bot_uuid={bot_uuid} exit_code={exit_code} stderr={stderr_tail}"
+            )
+        logger.info(
+            "[BaasContainerInitializer] step completed: step=%s bot_uuid=%s",
+            step,
+            bot_uuid,
+        )
+        return result
+
+    def _run_baas_bootstrap(self, bot_uuid: str) -> None:
+        # The image root_init process can bootstrap the same checkout. Wait for
+        # image initialization before running the Backend compensation step so
+        # install_engine never observes a checkout being replaced concurrently.
+        cmd = (
+            "_agentclaw_image_ready=0; "
+            "for _agentclaw_wait in $(seq 1 120); do "
+            "if [ -f /var/run/agentclaw/.install_dependency_file ] || "
+            '[ "$(cat /proc/1/comm 2>/dev/null)" = "supervisord" ]; then '
+            "_agentclaw_image_ready=1; break; "
+            "fi; "
+            "sleep 1; "
+            "done; "
+            'if [ "$_agentclaw_image_ready" != "1" ]; then '
+            "echo '[bootstrap] container image initialization timed out' >&2; "
+            "exit 1; "
+            "fi; "
+            "bash /home/admin/bin/bootstrap_minimal.sh"
+        )
+        self._exec_checked(
+            bot_uuid=bot_uuid,
+            cmd=cmd,
+            timeout_seconds=300,
+            step="bootstrap",
+        )
 
     def _run_baas_install_engine(self, bot_uuid: str) -> None:
-        self._baas_service.exec_command_on_bot(
-            bot_uuid=bot_uuid,
-            cmd="nohup bash /home/admin/bin/install_engine.sh >> /home/admin/logs/install_engine.log 2>&1 &",
-            timeout_seconds=30,
+        cmd = (
+            "mkdir -p /home/admin/logs && "
+            "if [ -f /home/admin/bin/install_engine.sh ]; then "
+            "bash /home/admin/bin/install_engine.sh "
+            ">> /home/admin/logs/install_engine.log 2>&1; "
+            "else echo '[install_engine] script not found, skip'; fi"
         )
-        logger.info("[_run_baas_install_engine] dispatched: bot_uuid=%s", bot_uuid)
+        self._exec_checked(
+            bot_uuid=bot_uuid,
+            cmd=cmd,
+            timeout_seconds=300,
+            step="install_engine",
+        )
 
     def _run_baas_setup_sync_service(self, bot_uuid: str, engine: str) -> None:
         cmd = (
-            f"nohup bash /home/admin/bin/setup_supervisor_sync_service.sh {engine} "
-            f">> /home/admin/logs/setup_supervisor_sync_service.log 2>&1 &"
+            "mkdir -p /home/admin/logs && "
+            f"bash /home/admin/bin/setup_supervisor_sync_service.sh {engine} "
+            f">> /home/admin/logs/setup_supervisor_sync_service.log 2>&1"
         )
-        self._baas_service.exec_command_on_bot(
+        self._exec_checked(
             bot_uuid=bot_uuid,
             cmd=cmd,
-            timeout_seconds=30,
+            timeout_seconds=120,
+            step="setup_supervisor_sync_service",
         )
-        logger.info("[_run_baas_setup_sync_service] dispatched: bot_uuid=%s", bot_uuid)
 
     def _ensure_baas_engine_dirs(self, bot_uuid: str, engine: str) -> None:
         cmd = (
-            "mkdir -p $(dirname /home/admin/logs/engine_dirs_setup.log) && "
-            f"nohup bash /home/admin/bin/setup_engine_dirs.sh {engine} "
-            f">> /home/admin/logs/engine_dirs_setup.log 2>&1 &"
+            "mkdir -p /home/admin/logs && "
+            f"bash /home/admin/bin/setup_engine_dirs.sh {engine} "
+            f">> /home/admin/logs/engine_dirs_setup.log 2>&1"
         )
         try:
-            self._baas_service.exec_command_on_bot(
+            self._exec_checked(
                 bot_uuid=bot_uuid,
                 cmd=cmd,
-                timeout_seconds=30,
+                timeout_seconds=120,
+                step="setup_engine_dirs",
             )
-            logger.info("[_ensure_baas_engine_dirs] dispatched: bot_uuid=%s", bot_uuid)
-        except Exception as e:
-            logger.warning("[_ensure_baas_engine_dirs] failed (non-fatal): %s", e)
+        except Exception as exc:
+            logger.warning(
+                "[_ensure_baas_engine_dirs] failed (non-fatal): bot_uuid=%s error=%s",
+                bot_uuid,
+                exc,
+            )
 
-    def _create_baas_skill_symlink_conf(self, bot_uuid: str, symbol: str | None) -> None:
+    def _wait_for_baas_supervisor(self, bot_uuid: str) -> None:
+        cmd = (
+            "for _agentclaw_wait in $(seq 1 60); do "
+            "if supervisorctl pid >/dev/null 2>&1; then exit 0; fi; "
+            "sleep 1; "
+            "done; "
+            "echo '[supervisor] readiness timed out' >&2; "
+            "exit 1"
+        )
+        self._exec_checked(
+            bot_uuid=bot_uuid,
+            cmd=cmd,
+            timeout_seconds=70,
+            step="wait_supervisor_ready",
+        )
+
+    def _create_baas_skill_symlink_conf(
+        self, bot_uuid: str, symbol: str | None
+    ) -> None:
         mappings = _deserialize_symbol(symbol)
         if not mappings:
             return
@@ -157,23 +235,23 @@ class BaasContainerInitializer:
             cmd += f" --admins {admins}"
 
         start_cmd = f"nohup {cmd} >> /home/admin/start.log 2>&1 &"
-        self._baas_service.exec_command_on_bot(
+        self._exec_checked(
             bot_uuid=bot_uuid,
             cmd=start_cmd,
             timeout_seconds=30,
+            step="start_service",
         )
-        logger.info("[_start_baas_sandbox_service] dispatched: bot_uuid=%s", bot_uuid)
 
         watchdog_cmd = (
             f"nohup /home/admin/bin/starting_watchdog.sh --token {token} --client_id {client_id} "
             ">> /home/admin/logs/starting_watchdog.log 2>&1 &"
         )
-        self._baas_service.exec_command_on_bot(
+        self._exec_checked(
             bot_uuid=bot_uuid,
             cmd=watchdog_cmd,
             timeout_seconds=30,
+            step="starting_watchdog",
         )
-        logger.info("[_start_baas_sandbox_service] watchdog dispatched: bot_uuid=%s", bot_uuid)
 
 
 def _deserialize_symbol(symbol: str | None) -> list[SynlinkMappingInfo]:
