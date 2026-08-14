@@ -1,8 +1,23 @@
+mod routes;
+
 use axum::Router;
 
 use super::common::ApiState;
 
-/// No Internal API business routes are included in the first batch.
+pub fn protected_router() -> Router<ApiState> {
+    Router::new().nest(
+        "/api/v1/collaboration",
+        routes::bot::router().merge(routes::session_file::protected_router()),
+    )
+}
+
+pub fn public_router() -> Router<ApiState> {
+    Router::new().nest(
+        "/api/v1/collaboration",
+        routes::session_file::public_router(),
+    )
+}
+
 pub fn router() -> Router<ApiState> {
-    Router::new()
+    protected_router().merge(public_router())
 }

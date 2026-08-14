@@ -77,6 +77,49 @@ def build_served_openapi(
     return served
 
 
+def build_combined_openapi(
+    domains: Iterable[str],
+    describe: Callable[[str], dict[str, Any]],
+    *,
+    title: str,
+    version: str,
+    description: str = "",
+) -> dict[str, Any]:
+    """Merge already-scoped OpenAPI descriptions into one served document.
+
+    Unlike :func:`build_served_openapi`, this does not apply the public
+    ``/openapi/v1`` namespace filter. It is used for documentation surfaces such
+    as internal APIs where each configured schema is already scoped to the
+    address space it documents.
+    """
+    paths: dict[str, Any] = {}
+    components: dict[str, Any] = {}
+    tags: list[dict[str, Any]] = []
+    tag_names: set[str] = set()
+    for domain in domains:
+        doc = describe(domain)
+        paths.update(copy.deepcopy(doc.get("paths", {})))
+        for section, items in doc.get("components", {}).items():
+            components.setdefault(section, {}).update(copy.deepcopy(items))
+        for tag in doc.get("tags", []):
+            if not isinstance(tag, dict):
+                continue
+            name = tag.get("name")
+            if not isinstance(name, str) or name in tag_names:
+                continue
+            tag_names.add(name)
+            tags.append(copy.deepcopy(tag))
+    info: dict[str, Any] = {"title": title, "version": version}
+    if description:
+        info["description"] = description
+    served: dict[str, Any] = {"openapi": "3.1.0", "info": info, "paths": paths}
+    if components:
+        served["components"] = components
+    if tags:
+        served["tags"] = tags
+    return served
+
+
 def generate_openapi(
     description: dict[str, Any],
     rules: RouteSecurity,

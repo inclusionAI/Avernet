@@ -61,7 +61,7 @@ class DumpOpenApiTests(unittest.TestCase):
             for method in path_item
             if method.lower() in HTTP_METHODS
         ]
-        self.assertEqual(len(operations), 44)
+        self.assertEqual(len(operations), 33)
         collection = contract["paths"][
             "/openapi/v1/collaboration/sessions/{session_id}/collect"
         ]
@@ -85,4 +85,39 @@ class DumpOpenApiTests(unittest.TestCase):
         self.assertEqual(
             {tags[0] for tags in operation_tags},
             set(COLLABORATION_TAGS),
+        )
+
+    def test_dump_internal_contract_writes_only_internal_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "internal.json"
+
+            self.assertEqual(
+                dump_contract(
+                    CONTRACT_ROOT,
+                    output,
+                    entrypoint="internal.yaml",
+                    path_prefix="/api/v1/collaboration/",
+                    forbidden_prefixes=("/openapi/v1/",),
+                ),
+                output,
+            )
+            contract = json.loads(output.read_text(encoding="utf-8"))
+
+        operations = [
+            (method, path)
+            for path, path_item in contract["paths"].items()
+            for method in path_item
+            if method.lower() in HTTP_METHODS
+        ]
+        self.assertEqual(len(operations), 11)
+        self.assertTrue(
+            all(path.startswith("/api/v1/collaboration/") for _, path in operations)
+        )
+        self.assertIn(
+            "/api/v1/collaboration/sessions/{session_id}/files",
+            contract["paths"],
+        )
+        self.assertIn(
+            "/api/v1/collaboration/bots/{bot_id}/candidates",
+            contract["paths"],
         )

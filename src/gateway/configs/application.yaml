@@ -315,6 +315,13 @@ user_config:
   # "object_store" is vendor-neutral (S3 / MinIO / GCS / OSS / …); the reader is
   # a pluggable flavor of the SchemaCatalog SPI. The schema is a DOC-ONLY input —
   # routing/auth/forwarding never read it.
+  internal_api_docs:
+    schemas:
+      bcn-internal:
+        source: file
+        path: schemas/bcn.internal.openapi.json
+        refresh_seconds: 300
+
   upstreams:
     base_path: /openapi/v1
 

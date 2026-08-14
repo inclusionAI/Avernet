@@ -651,7 +651,7 @@ async fn get_session_file_uses_the_v1_envelope() {
     let response = app
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/collaboration/sessions/session-1/files/file-1",
+            "/api/v1/collaboration/sessions/session-1/files/file-1",
             json!(null),
         ))
         .await
@@ -674,7 +674,7 @@ async fn prepare_session_file_projects_the_proxy_upload_url() {
     let response = app
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/collaboration/sessions/session-1/files",
+            "/api/v1/collaboration/sessions/session-1/files",
             json!({
                 "file_name": "report.txt",
                 "size": 42,
@@ -690,7 +690,7 @@ async fn prepare_session_file_projects_the_proxy_upload_url() {
     assert_eq!(body["data"]["file_id"], "file-1");
     assert_eq!(
         body["data"]["upload_url"],
-        "https://gateway.example.com/openapi/v1/collaboration/sessions/session-1/files/file-1/content"
+        "https://gateway.example.com/api/v1/collaboration/sessions/session-1/files/file-1/content"
     );
 }
 
@@ -703,7 +703,7 @@ async fn protected_session_file_mutations_and_download_follow_v1_statuses() {
 
     let upload = Request::builder()
         .method("PUT")
-        .uri("/openapi/v1/collaboration/sessions/session-1/files/file-1/content?part=1")
+        .uri("/api/v1/collaboration/sessions/session-1/files/file-1/content?part=1")
         .header("x-test-auth", "yes")
         .header("x-request-id", "request-upload")
         .body(Body::from("abc"))
@@ -714,17 +714,17 @@ async fn protected_session_file_mutations_and_download_follow_v1_statuses() {
     for (method, path, expected) in [
         (
             "POST",
-            "/openapi/v1/collaboration/sessions/session-1/files/file-1/complete",
+            "/api/v1/collaboration/sessions/session-1/files/file-1/complete",
             StatusCode::OK,
         ),
         (
             "DELETE",
-            "/openapi/v1/collaboration/sessions/session-1/files/file-1",
+            "/api/v1/collaboration/sessions/session-1/files/file-1",
             StatusCode::OK,
         ),
         (
             "GET",
-            "/openapi/v1/collaboration/sessions/session-1/files",
+            "/api/v1/collaboration/sessions/session-1/files",
             StatusCode::OK,
         ),
     ] {
@@ -740,7 +740,7 @@ async fn protected_session_file_mutations_and_download_follow_v1_statuses() {
         .clone()
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/collaboration/sessions/session-1/files/file-1/share",
+            "/api/v1/collaboration/sessions/session-1/files/file-1/share",
             json!({}),
         ))
         .await
@@ -749,13 +749,13 @@ async fn protected_session_file_mutations_and_download_follow_v1_statuses() {
     let share_body = response_json(share).await;
     assert_eq!(
         share_body["data"]["share_url"],
-        "https://gateway.example.com/openapi/v1/collaboration/sessions/shared-file/content?token=share-token"
+        "https://gateway.example.com/api/v1/collaboration/sessions/shared-file/content?token=share-token"
     );
 
     let download = app
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/collaboration/sessions/session-1/files/file-1/content",
+            "/api/v1/collaboration/sessions/session-1/files/file-1/content",
             json!(null),
         ))
         .await
@@ -775,8 +775,8 @@ async fn shared_file_content_is_public_and_token_failures_are_uniform_not_found(
     );
 
     for uri in [
-        "/openapi/v1/collaboration/sessions/shared-file/content",
-        "/openapi/v1/collaboration/sessions/shared-file/content?token=bad-token",
+        "/api/v1/collaboration/sessions/shared-file/content",
+        "/api/v1/collaboration/sessions/shared-file/content?token=bad-token",
     ] {
         let response = app
             .clone()
@@ -798,7 +798,7 @@ async fn shared_file_content_is_public_and_token_failures_are_uniform_not_found(
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/openapi/v1/collaboration/sessions/shared-file/content?token=good-token&show=true")
+                .uri("/api/v1/collaboration/sessions/shared-file/content?token=good-token&show=true")
                 .body(Body::empty())
                 .expect("public success request"),
         )
@@ -817,7 +817,7 @@ async fn shared_file_content_is_public_and_token_failures_are_uniform_not_found(
     let protected = app
         .oneshot(
             Request::builder()
-                .uri("/openapi/v1/collaboration/sessions/session-1/files")
+                .uri("/api/v1/collaboration/sessions/session-1/files")
                 .body(Body::empty())
                 .expect("protected request"),
         )
@@ -842,7 +842,7 @@ async fn shared_file_content_preserves_infrastructure_failures() {
             .oneshot(
                 Request::builder()
                     .uri(format!(
-                        "/openapi/v1/collaboration/sessions/shared-file/content?token={token}"
+                        "/api/v1/collaboration/sessions/shared-file/content?token={token}"
                     ))
                     .body(Body::empty())
                     .expect("public request"),
@@ -878,7 +878,7 @@ async fn session_file_routes_admit_bot_and_reject_mismatched_or_app_only_callers
     let response = bot_only
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/collaboration/sessions/session-1/files",
+            "/api/v1/collaboration/sessions/session-1/files",
             Value::Null,
         ))
         .await
@@ -902,7 +902,7 @@ async fn session_file_routes_admit_bot_and_reject_mismatched_or_app_only_callers
     let response = mismatched
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/collaboration/sessions/session-1/files",
+            "/api/v1/collaboration/sessions/session-1/files",
             Value::Null,
         ))
         .await
@@ -928,7 +928,7 @@ async fn session_file_routes_admit_bot_and_reject_mismatched_or_app_only_callers
     let response = app_only
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/collaboration/sessions/session-1/files",
+            "/api/v1/collaboration/sessions/session-1/files",
             Value::Null,
         ))
         .await

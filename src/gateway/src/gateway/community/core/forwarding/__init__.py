@@ -16,7 +16,7 @@ from ._domains import (
     SchemaSource,
     Server,
 )
-from ._openapi import build_served_openapi, generate_openapi
+from ._openapi import build_combined_openapi, build_served_openapi, generate_openapi
 from ._orchestration import Forwarding
 
 __all__ = [
@@ -29,6 +29,7 @@ __all__ = [
     "PathRewrite",
     "SchemaSource",
     "Server",
+    "build_combined_openapi",
     "build_served_openapi",
     "check_compatible",
     "generate_openapi",
