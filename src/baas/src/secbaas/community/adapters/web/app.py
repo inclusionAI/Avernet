@@ -67,6 +67,9 @@ from secbaas.community.adapters.web.routers.relay_session_router import (
 from secbaas.community.adapters.web.routers.session_file_sharing import (
     session_file_sharing_router,
 )
+from secbaas.community.adapters.web.routers.teamclaw import (
+    teamclaw_token_router,
+)
 from secbaas.community.adapters.web.websocket import local_management_router
 from secbaas.community.api import DomainError
 from secbaas.community.api.bcn import BcnError
@@ -272,6 +275,7 @@ def create_app() -> FastAPI:
     app.include_router(tenant_router)
     app.include_router(paas_facade_router)
     app.include_router(relay_session_router)
+    app.include_router(teamclaw_token_router)
     app.include_router(local_paas_router)
     app.include_router(publish_router)
     app.include_router(callback_router)
