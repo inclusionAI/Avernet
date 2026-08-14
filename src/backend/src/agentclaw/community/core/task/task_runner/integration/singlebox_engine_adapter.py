@@ -466,17 +466,18 @@ class SingleboxKeywordBotDiscover:
         min_score: float = 0.01,
         filters: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        if not keyword:
-            return {"total": 0, "items": [], "context": {"mode": "singlebox_keyword"}}
-        try:
-            res = self._bps.search_public_bots_by_keyword(
-                user_id=user_id, search=keyword, page=1, page_size=top_k,
-            )
-        except Exception:  # noqa: BLE001  端口异常→空候选,不阻断其它字段
-            return {"total": 0, "items": [], "context": {"mode": "singlebox_keyword", "error": True}}
-        items = res.get("items") or []
+        """singlebox 候选预查:**决策非查找**——关键字命中返命中;命中 0 回落到全部公开 bot,
+        不让"bot 名字与需求关键字对不上"把唯一候选 filter 掉(本地 bot 不按能力命名、目录极小)。
+        真正谁执行由 ``SearchBasedDispatchStrategy`` 投 search skill 在候选里决,本层只供候选。"""
+        # 1) 关键字 LIKE 命中(bot 按能力命名时能命中)
+        hits = self._query(user_id=user_id, search=keyword or None, top_k=top_k)
+        used_fallback = False
+        if not hits:
+            # 2) 回落:全部公开 bot(候选不误杀空)
+            hits = self._query(user_id=user_id, search=None, top_k=top_k)
+            used_fallback = bool(hits)
         # 合成 recommend.score(命中次序降权),对齐 BCSFuse items 形态供策略排序
-        for i, it in enumerate(items):
+        for i, it in enumerate(hits):
             rec = it.get("recommend")
             if not isinstance(rec, dict):
                 rec = {}
@@ -484,10 +485,20 @@ class SingleboxKeywordBotDiscover:
                 rec["score"] = max(min_score, 1.0 - i * 0.05)
             it["recommend"] = rec
         return {
-            "total": res.get("total", len(items)),
-            "items": items,
-            "context": {"mode": "singlebox_keyword"},
+            "total": len(hits),
+            "items": hits,
+            "context": {"mode": "singlebox_keyword", "fallback_to_all": used_fallback},
         }
+
+    def _query(self, *, user_id: str, search: str | None, top_k: int) -> list[dict[str, Any]]:
+        """调 ``search_public_bots_by_keyword`` 并收口异常→空列表(不阻断其它字段预查)。"""
+        try:
+            res = self._bps.search_public_bots_by_keyword(
+                user_id=user_id, search=search, page=1, page_size=top_k,
+            )
+        except Exception:  # noqa: BLE001  端口异常→空候选
+            return []
+        return res.get("items") or []
 
 
 
