@@ -185,7 +185,7 @@ _claude_bots_register_bcsfuse_fusion() {
         --argjson domains "$domains_json" \
         '{worker_id: $worker_id, name: $name, description: $description, skills: $skills, domains: $domains, is_public: true}')"
 
-    response="$(curl -s -w '\n%{http_code}' -X POST "${bcsfuse_url}/api/v1/workers" \
+    response="$(curl -s -w '\n%{http_code}' -X POST "${bcsfuse_url}/v1/admin/workers" \
         -H 'Content-Type: application/json' \
         -H "Authorization: Bearer ${auth_token}" \
         -d "$payload" 2>/dev/null || true)"
@@ -198,7 +198,7 @@ _claude_bots_register_bcsfuse_fusion() {
     fi
     log_info "Registered Claude bot as bcsfuse worker: ${bot_id} (${name})"
 
-    response="$(curl -s -w '\n%{http_code}' -X PUT "${bcsfuse_url}/api/v1/workers/${bot_id}/config" \
+    response="$(curl -s -w '\n%{http_code}' -X PUT "${bcsfuse_url}/v1/workers/${bot_id}/config" \
         -H 'Content-Type: application/json' \
         -H "Authorization: Bearer ${auth_token}" \
         -d '{"fusion_enable": true}' 2>/dev/null || true)"

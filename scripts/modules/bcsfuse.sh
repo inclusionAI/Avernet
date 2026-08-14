@@ -51,6 +51,9 @@ bcsfuse_load_env() {
     # Ensure provider mode defaults to dev
     export BCSFUSE_PROVIDER_MODE="${BCSFUSE_PROVIDER_MODE:-dev}"
     export BCSFUSE_SERVER_PORT="${BCSFUSE_PORT:-8765}"
+    # Singlebox needs admin worker-management endpoints (e.g. create worker) to
+    # register Claude Code bots in bcsfuse for fusion.
+    export BCSFUSE_EXPOSE_ADMIN="${BCSFUSE_EXPOSE_ADMIN:-true}"
 
     # Compat mapping: reuse OPENCLAW_OPENAI_* if bcsfuse vars are unset or still
     # hold the template placeholder "change_me". This lets users configure one
