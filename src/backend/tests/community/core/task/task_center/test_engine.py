@@ -19,6 +19,7 @@ from agentclaw.community.core.task.domain.models import (
     Context,
     Goal,
     Metadata,
+    PlanResult,
     RuntimeInfo,
     Status,
     TaskInfo,
@@ -63,13 +64,16 @@ def _run(coro):
 
 # ===== stubs =====
 class StubPlanner:
-    def __init__(self, factory: Callable[[object], list[TaskNode]] | None = None):
+    def __init__(self, factory: Callable[[object], list[TaskNode]] | None = None,
+                 has_gap_when_empty: bool = True):
         self._factory = factory or (lambda g: [])
+        self._has_gap_when_empty = has_gap_when_empty
         self.plan_calls = 0
 
-    async def plan(self, graph) -> list[TaskNode]:
+    async def plan(self, graph, target_node_id: str | None = None) -> PlanResult:
         self.plan_calls += 1
-        return self._factory(graph)
+        kids = self._factory(graph)
+        return PlanResult(children=kids, has_gap=bool(kids) or self._has_gap_when_empty)
 
 
 class StubDispatcher:
@@ -154,16 +158,18 @@ class TestOnExecute:
         runner = StubRunner()
         eng = _engine(svc, planner=planner, runner=runner)
         _run(eng.on_execute("t1"))
-        assert svc._get_node(graph, "t1").status == Status.PLANNING
+        assert svc._get_node(graph, "t1").status == Status.RUNNING  # Step2:委托执行态
         assert svc._get_node(graph, "c1").status == Status.RUNNING
         assert svc._get_node(graph, "c2").status == Status.RUNNING
         assert len(runner.run_calls) == 1
         assert {n.node_id for n in runner.run_calls[0]} == {"c1", "c2"}
 
-    def test_no_plan_no_op(self, svc, graph):
-        eng = _engine(svc, planner=StubPlanner(lambda g: []))
+    def test_no_plan_gap_closed_finishes(self, svc, graph):
+        # Step2:plan 返 []+has_gap=F = 根 gap 闭(终验通过)→ 翻根 DONE + 图 DONE
+        eng = _engine(svc, planner=StubPlanner(lambda g: [], has_gap_when_empty=False))
         _run(eng.on_execute("t1"))
-        assert svc._get_node(graph, "t1").status == Status.PENDING
+        assert svc._get_node(graph, "t1").status == Status.DONE
+        assert graph.status == Status.DONE
 
     def test_not_pending_root_no_op(self, svc, graph):
         svc.update_task_node_info(_patch("t1", "t1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
@@ -199,7 +205,7 @@ class TestOnReportPass:
     def test_pass_all_siblings_gap_closed_root_done(self, svc, graph):
         # 语义A:plan 返 []=gap 闭=终验通过 → 翻根 DONE + 图 DONE(无需 owner bot 单独回投)
         self._setup_running_children(svc, graph, 2)
-        eng = _engine(svc, planner=StubPlanner(lambda g: []))
+        eng = _engine(svc, planner=StubPlanner(lambda g: [], has_gap_when_empty=False))
         _run(eng.on_report(_patch("t1", "c0", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))))
         _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))))
         assert svc._get_node(graph, "t1").status == Status.DONE  # gap 闭=终验通过→翻根 DONE
@@ -208,7 +214,7 @@ class TestOnReportPass:
     def test_root_gap_closed_finish_graph(self, svc, graph):
         # 语义A:c0 PASS → plan[]→ gap 闭=终验通过 → 翻根 DONE + graph DONE(一步到位,不再等回投)
         self._setup_running_children(svc, graph, 1)
-        eng = _engine(svc, planner=StubPlanner(lambda g: []))
+        eng = _engine(svc, planner=StubPlanner(lambda g: [], has_gap_when_empty=False))
         _run(eng.on_report(_patch("t1", "c0", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))))
         assert svc._get_node(graph, "t1").status == Status.DONE  # 不再等回投
         assert graph.status == Status.DONE
@@ -222,7 +228,7 @@ class TestOnReportFail:
         runner = StubRunner()
         eng = _engine(svc, planner=StubPlanner(lambda g: [_child("c1_remedy")]), runner=runner)
         _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAIL, gaps=["缺x"]))))
-        assert svc._get_node(graph, "c1").status == Status.PLANNING
+        assert svc._get_node(graph, "c1").status == Status.RUNNING  # Step2:补救 add 翻 FAILED→RUNNING
         assert svc._get_node(graph, "c1_remedy").status == Status.RUNNING
         assert len(runner.run_calls) == 1
 

@@ -99,23 +99,23 @@ def _graph() -> TaskExecutionGraph:
 
 class TestPlanParserWiring:
     def test_parses_prose_fence_into_n_overview(self):
-        from agentclaw.community.core.task.task_plan.strategies import _parse_children
+        from agentclaw.community.core.task.task_plan.strategies import _parse_plan_result
         g = _graph()
         run = {"status": "COMPLETED",
                "result": {"content": "根据剧本,返回 N_overview。\n```json\n[{\"metadata\": {\"task_id\": \"N_overview\", \"title\": \"存储行业概览\", \"instruction\": \"撰写概览\"}, \"context\": {\"background\": \"bg\", \"extend_props\": {}}, \"goal\": {\"objective\": \"o\", \"acceptances\": [{\"id\": \"ac_overview\", \"description\": \"d\"}]}}]\n```"}}
-        kids = _parse_children(run, g.tasks[0], g)
-        assert [k.node_id for k in kids] == ["N_overview"]
-        assert kids[0].task_spec.metadata.title == "存储行业概览"
+        pr = _parse_plan_result(run, g.tasks[0], g)
+        assert [k.node_id for k in pr.children] == ["N_overview"]
+        assert pr.children[0].task_spec.metadata.title == "存储行业概览"
 
     def test_clean_empty_array_backward_compat(self):
-        from agentclaw.community.core.task.task_plan.strategies import _parse_children
+        from agentclaw.community.core.task.task_plan.strategies import _parse_plan_result
         g = _graph()
-        assert _parse_children({"status": "COMPLETED", "result": {"content": "[]"}}, g.tasks[0], g) == []
+        assert _parse_plan_result({"status": "COMPLETED", "result": {"content": "[]"}}, g.tasks[0], g).children == []
 
     def test_unparseable_returns_empty(self):
-        from agentclaw.community.core.task.task_plan.strategies import _parse_children
+        from agentclaw.community.core.task.task_plan.strategies import _parse_plan_result
         g = _graph()
-        assert _parse_children({"status": "COMPLETED", "result": {"content": "纯散文无 json"}}, g.tasks[0], g) == []
+        assert _parse_plan_result({"status": "COMPLETED", "result": {"content": "纯散文无 json"}}, g.tasks[0], g).children == []
 
 
 class TestDispatchParserWiring:

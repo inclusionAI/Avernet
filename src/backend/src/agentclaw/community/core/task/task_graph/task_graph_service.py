@@ -30,20 +30,22 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodeQueryCriteria,
 )
 
-# 合法状态转换
-# acceptance 驱动(skill 回投):RUNNING->DONE(PASS)/FAILED(FAIL+gaps)
+# 合法状态转换(PLANNING/RUNNING 解耦:PLANNING=规划中(显式委托态),RUNNING=执行中(子执行/自身执行))
+# acceptance 驱动(skill 验收回投):仅 RUNNING->DONE(PASS)/FAILED(FAIL+gaps);FAILED 不再经 acceptance 翻
 _ACCEPTANCE_TRANSITIONS: dict[Status, set[Status]] = {
     Status.RUNNING: {Status.DONE, Status.FAILED},
-    Status.PLANNING: {Status.DONE, Status.FAILED},  # 根终验 PASS/FAIL 从 PLANNING 委托态回投
 }
-# status 直驱(框架内部:派发/复位/传播)
-#   PENDING->RUNNING(派发) / RUNNING->PENDING(Harness 复位) / PLANNING->DONE(传播)
+# status 直驱(框架内部:派发/委托/复位/传播/补救)
+#   PENDING->RUNNING(派发/初始 add 委托) / PLANNING->RUNNING(add 产子委托)/PLANNING->DONE(gap 闭传播)
+#   RUNNING->PLANNING(本批兄弟全 DONE 重规划)/RUNNING->DONE(gap 闭终态)/RUNNING->PENDING(harness 复位重投)
+#   FAILED->RUNNING(补救 add 产子重新委托)
 _DIRECT_TRANSITIONS: dict[Status, set[Status]] = {
-    Status.PENDING: {Status.RUNNING},
-    Status.RUNNING: {Status.PENDING},
-    Status.PLANNING: {Status.DONE},
+    Status.PENDING: {Status.RUNNING, Status.HUNG, Status.DONE},
+    Status.PLANNING: {Status.RUNNING, Status.DONE, Status.HUNG},
+    Status.RUNNING: {Status.PENDING, Status.PLANNING, Status.DONE, Status.HUNG},
+    Status.FAILED: {Status.RUNNING, Status.HUNG},
 }
-# 可被委托(进 PLANNING)的父节点状态(add_task_nodes 用)
+# 可委托(add_task_nodes 时 parent 允许的态):PENDING(初始/根)/FAILED(补救)/PLANNING(前向重规划)
 _DELEGATABLE_PARENT: set[Status] = {Status.PENDING, Status.FAILED, Status.PLANNING}
 
 _DEFAULT_MAX_DEPTH = 3
@@ -176,9 +178,9 @@ class TaskGraphService:
                 graph.relations.append(
                     Relation(src_id=parent_node_id, dst_id=t.node_id, type=RelationType.DEPENDENCY)
                 )
-            # 父进 PLANNING(委托态;已 PLANNING 维持)
-            if parent.status != Status.PLANNING:
-                parent.status = Status.PLANNING
+            # 父进 RUNNING(委托态:子执行/自身执行;PLANNING/RUNNING 维持);PLANNING=规划中已解耦
+            if parent.status != Status.RUNNING:
+                parent.status = Status.RUNNING
             return graph
 
     def _assert_add_trigger(self, graph: TaskExecutionGraph) -> None:
@@ -194,10 +196,16 @@ class TaskGraphService:
             and not self._has_child(graph, n.node_id)
             for n in graph.tasks
         )
-        has_running = any(n.status == Status.RUNNING for n in graph.tasks)
-        cond_c = any(n.status == Status.PLANNING for n in graph.tasks) and not has_running
-        if not (cond_a or cond_b or cond_c):
-            raise GraphIntegrityError("add_task_nodes: 触发条件 a/b/c 均不满足")
+        # 前向重规划:on_pass 翻父 RUNNING->PLANNING 后 add(节点显式委托态)
+        cond_c = any(n.status == Status.PLANNING for n in graph.tasks)
+        # miss 补救 / 派发前分解:节点 PENDING(+miss_events MISS 补救,或纯 PENDING 叶结构构造)
+        cond_d = any(
+            n.status == Status.PENDING
+            and not self._has_child(graph, n.node_id)
+            for n in graph.tasks
+        )
+        if not (cond_a or cond_b or cond_c or cond_d):
+            raise GraphIntegrityError("add_task_nodes: 触发条件 a/b/c/d 均不满足")
 
     def update_task_node_info(self, patch: TaskNodePatch) -> NodeOpResult:
         """节点级原子状态流转网关。双模式:
@@ -225,6 +233,15 @@ class TaskGraphService:
                         f"acceptance 翻态非法: {node.status}+{verdict} → {new_status}"
                     )
                 node.run_info.acceptance_result = patch.acceptance_result
+            elif patch.exec_error is not None:
+                # 执行报错(非验收):不翻终态,仅 fold extend_props(供 on_harness 读 harness_retries);
+                # 翻态/复位由编排核 on_harness 直驱 patch.status 处理。
+                if patch.extend_props_patch is not None:
+                    node.run_info.extend_props.update(patch.extend_props_patch)
+                return NodeOpResult(
+                    task_id=patch.task_id, node_id=patch.node_id, success=True,
+                    prev_status=prev_status, new_status=node.status,
+                )
             elif patch.status is not None:
                 # 模式② status 直驱
                 new_status = patch.status

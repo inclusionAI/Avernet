@@ -10,6 +10,11 @@ tags: [task, planning, decompose]
 
 任务目标驱动的**任务规划** skill,运行在 **owner bot**(source_channel_id)。框架投递 planning prompt(prompt 含 `{goal, context, target_node, graph_snapshot, gaps}` + 返回格式约定;详见框架 `GapBasedPlanningStrategy._compose_planning_prompt`),本 skill 读 prompt 中的目标节点 `node_id`,按案例剧本确定式产出下一批子任务。
 
+## 环境约束(必须遵守)
+
+> **禁止联网搜索**。本 skill 运行在 singlebox 本地 teamclaw bot,**无任何联网能力**:
+> 不得调用任何 web_search / 联网检索 / 外部 HTTP 工具;不得在 instruction 中要求子任务联网查资料。
+> 一切判断基于 prompt 中已提供的 `{goal, context, snapshot, done_children, gaps}` 与你自身知识进行,缺数据用合理假设/占位补全并标注。
 ## 触发条件
 
 收到 prompt 头部 `[planning]` 标记的指令,且 prompt 含 `目标节点 node_id=...` 与 `任务态快照{...}`。
@@ -26,16 +31,20 @@ tags: [task, planning, decompose]
 
 ## 输出(返回格式约定)
 
-返回 **`List[TaskSpec]` 的 JSON 字符串**(对齐领域模型 `Metadata/Context/Goal/AcceptanceCriteria`):
+返回 JSON 字符串,结构为对象 `{"tasks": List[TaskSpec], "has_gap": bool, "gap_detail": str}`:
 
 ```json
-[{"metadata": {"task_id": "<子节点node_id>", "title": "<标题>", "instruction": "<指令>"},
-  "context": {"background": "<背景>", "extend_props": {}},
-  "goal": {"objective": "<目标>", "acceptances": [{"id": "<ac_id>", "description": "<描述>"}]}}]
+{"tasks": [{"metadata": {"task_id": "<子节点node_id>", "title": "<标题>", "instruction": "<指令>"},
+             "context": {"background": "<背景>", "extend_props": {}},
+             "goal": {"objective": "<目标>", "acceptances": [{"id": "<ac_id>", "description": "<描述>"}]}}],
+ "has_gap": true,
+ "gap_detail": ""}
 ```
 
-- `metadata.task_id` 即子节点 `node_id`(须唯一,不与已存重复);
-- gap 已闭(验收通过)→ 返回 `[]`;
+- `tasks` = 下一批可执行子任务;`metadata.task_id` 即子节点 `node_id`(须唯一,不与已存重复);
+- gap 已闭(验收通过)→ `{"tasks": [], "has_gap": false, "gap_detail": "done"}`;
+- 有 gap 但无规划能力拆不出子 → `{"tasks": [], "has_gap": true, "gap_detail": "<原因>"}`;
+- `has_gap` = 目标 - 已完成产出 是否仍有差距;`done_children` 已列出已 DONE 子节点及产出,据此产**尚未完成**的下一批(不重复产已 DONE 的);
 - 子任务 `goal.acceptances` 为该子任务自身的验收标准;无独立标准可继承父 goal。
 
 ## 确定式分解剧本(案例 gwqie46v7hzr1w6h)

@@ -103,8 +103,8 @@ class TestAddTaskNodes:
         assert len(children.relations) == 2
         assert all(r.src_id == "t1" for r in children.relations)
         assert {r.dst_id for r in children.relations} == {"c1", "c2"}
-        # 父进 PLANNING
-        assert svc._get_node(graph, "t1").status == Status.PLANNING
+        # 父进 RUNNING(委托执行态;Step2 PLANNING/RUNNING 解耦)
+        assert svc._get_node(graph, "t1").status == Status.RUNNING
         # 子回填 node_run_graph
         assert svc._get_node(graph, "c1").node_run_graph is graph
 
@@ -118,19 +118,21 @@ class TestAddTaskNodes:
         assert svc._get_node(graph, "leaf").status == Status.FAILED
         # 条件 b 成立:补救子挂 FAILED 叶子下
         svc.add_task_nodes([_node("remedy")], parent_node_id="leaf")
-        assert svc._get_node(graph, "leaf").status == Status.PLANNING
+        assert svc._get_node(graph, "leaf").status == Status.RUNNING
         assert svc.get_parent_task("t1", "remedy").node_id == "leaf"
 
     def test_trigger_c_next_layer(self, svc: TaskGraphService, graph):
-        # 条件 a add 一层 → 父 PLANNING(无 RUNNING)→ 条件 c add 下一层
-        svc.add_task_nodes([_node("c1")], parent_node_id="t1")
-        # c1 已 PENDING(未 dispatch),t1 PLANNING,无 RUNNING → 条件 c
-        svc.add_task_nodes([_node("c1a")], parent_node_id="c1")
-        assert svc.get_parent_task("t1", "c1a").node_id == "c1"
+        # Step2:前向重规划 = 父 RUNNING(委托)→ 翻 PLANNING(显式委托态)→ add(cond_c)
+        svc.add_task_nodes([_node("c1")], parent_node_id="t1")  # t1 PENDING→RUNNING
+        assert svc._get_node(graph, "t1").status == Status.RUNNING
+        # 模拟 on_pass:本批兄弟全 DONE → 翻父 RUNNING→PLANNING(直驱)→ 再 add(cond_c:存在 PLANNING 节点)
+        svc.update_task_node_info(_patch("t1", "t1", status=Status.PLANNING))
+        svc.add_task_nodes([_node("c2")], parent_node_id="t1")  # PLANNING→RUNNING(cond_c 命中)
+        assert svc.get_parent_task("t1", "c2").node_id == "t1"
+        assert svc._get_node(graph, "t1").status == Status.RUNNING
 
     def test_no_trigger_raises(self, svc: TaskGraphService, graph):
-        # 无 PENDING 根(根已 PLANNING 后无 FAILED/PLANNING 触发)→ 这里根仍 PENDING,先不 add
-        # 构造:根 dispatch RUNNING 后,无 a/b/c
+        # 根 RUNNING(委托执行)后,a/b/c/d 均不满足(无 PENDING 根/无 FAILED 叶/无 PLANNING/无 miss 叶)→ raise
         svc.update_task_node_info(_patch("t1", "t1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         with pytest.raises(GraphIntegrityError):
             svc.add_task_nodes([_node("c1")], parent_node_id="t1")
@@ -140,9 +142,10 @@ class TestAddTaskNodes:
             svc.add_task_nodes([_node("c1"), _node("c1")], parent_node_id="t1")
 
     def test_existing_id_raises(self, svc: TaskGraphService, graph):
-        svc.add_task_nodes([_node("c1")], parent_node_id="t1")
+        # 首批 add 后根 t1 已 RUNNING(不可委托);在可委托 PENDING 叶 c2 下测重复 id
+        svc.add_task_nodes([_node("c1"), _node("c2")], parent_node_id="t1")
         with pytest.raises(GraphIntegrityError, match="已存在"):
-            svc.add_task_nodes([_node("c1")], parent_node_id="t1")
+            svc.add_task_nodes([_node("c1")], parent_node_id="c2")
 
     def test_parent_not_delegatable(self, svc: TaskGraphService, graph):
         # 触发 b(FAILED+gaps 叶),但传 RUNNING 父 → 不可委托
@@ -208,10 +211,11 @@ class TestUpdateTaskNodeInfo:
         assert svc._get_node(graph, "c1").status == Status.PENDING
 
     def test_status_direct_propagate_done(self, svc: TaskGraphService, graph):
-        # 建 PLANNING 父,模拟传播 PLANNING→DONE
+        # Step2:add 后父 RUNNING;前向 gap 闭时翻 RUNNING→PLANNING→DONE(传播)
         svc.add_task_nodes([_node("c1")], parent_node_id="t1")
-        assert svc._get_node(graph, "t1").status == Status.PLANNING
-        r = svc.update_task_node_info(_patch("t1", "t1", status=Status.DONE))
+        assert svc._get_node(graph, "t1").status == Status.RUNNING
+        svc.update_task_node_info(_patch("t1", "t1", status=Status.PLANNING))  # 委托→规划态
+        r = svc.update_task_node_info(_patch("t1", "t1", status=Status.DONE))  # gap 闭传播
         assert r.new_status == Status.DONE
         assert svc._get_node(graph, "t1").status == Status.DONE
 
@@ -258,7 +262,7 @@ class TestDerivedQueries:
     def test_query_task_nodes_status(self, svc: TaskGraphService, graph):
         svc.add_task_nodes([_node("c1"), _node("c2")], parent_node_id="t1")
         pending = svc.query_task_nodes("t1", TaskNodeQueryCriteria(status=Status.PENDING))
-        # 根 t1 已 PLANNING,c1/c2 PENDING → 2 个
+        # 根 t1 已 RUNNING(委托),c1/c2 PENDING → 2 个
         assert {n.node_id for n in pending} == {"c1", "c2"}
 
     def test_query_task_nodes_has_child(self, svc: TaskGraphService, graph):

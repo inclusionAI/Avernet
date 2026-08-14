@@ -12,6 +12,11 @@ tags: [task, acceptance, verify]
 
 > 聚合节点 / 根节点的"验收"≠独立步骤,而是 **planning 的 gap 计算**(返回 `[]` = gap 闭 = 验收通过),由 owner bot 上的 `task-planning` skill 承担,本 skill 不参与聚合/根验收。
 
+## 环境约束(必须遵守)
+
+> **禁止联网搜索**。本 skill 运行在 singlebox 本地 teamclaw bot,**无任何联网能力**:
+> 不得调用任何 web_search / 联网检索 / 外部 HTTP 工具。
+> 验收判定仅基于 worker 本次 execute 已产出的 `execute_output`、`goal.acceptances` 与上游 `sibling_outputs`,结合自身知识判定;不得因"无法联网核实"而判 FAIL。
 ## 触发条件
 
 worker bot 收到 execute 指令(框架 `format_execute` 组装的 prompt:目标 `goal` + 指令 `instruction` + 上游产出 `sibling_outputs`),执行完子任务后**自调**本 skill 判定是否达到该叶节点的 `goal.acceptances`。

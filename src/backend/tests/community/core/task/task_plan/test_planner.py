@@ -18,6 +18,7 @@ from agentclaw.community.core.task.domain.models import (
     Context,
     Goal,
     Metadata,
+    PlanResult,
     RuntimeInfo,
     Status,
     TaskInfo,
@@ -70,9 +71,10 @@ class _StubPlanningStrategy:
     async def matches(self, graph) -> bool:
         return True  # 兜底(高于内置 gap/workflow)
 
-    async def apply(self, graph) -> list[TaskNode]:
+    async def apply(self, graph, target) -> PlanResult:
         self.decompose_calls += 1
-        return self._factory(graph)
+        kids = self._factory(graph)
+        return PlanResult(children=kids, has_gap=bool(kids))
 
 
 def _planner(svc, factory=None) -> TaskPlanner:
@@ -95,21 +97,21 @@ class TestPlanTrigger:
     def test_root_pending_initial_target(self, svc, graph):
         planner = _planner(svc, lambda g: [_child("c1"), _child("c2")])
         result = _run(planner.plan(svc.query_task_dashboard("t1")))
-        assert {n.node_id for n in result} == {"c1", "c2"}
+        assert {n.node_id for n in result.children} == {"c1", "c2"}
 
     def test_planning_parent_target(self, svc, graph):
         svc.add_task_nodes([_child("c1")], parent_node_id="t1")
         planner = _planner(svc, lambda g: [_child("c1a")])
-        result = _run(planner.plan(svc.query_task_dashboard("t1")))
-        assert [n.node_id for n in result] == ["c1a"]
+        result = _run(planner.plan(svc.query_task_dashboard("t1"), target_node_id="t1"))
+        assert [n.node_id for n in result.children] == ["c1a"]
 
     def test_failed_gaps_leaf_target(self, svc, graph):
         svc.add_task_nodes([_child("c1")], parent_node_id="t1")
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         svc.update_task_node_info(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAIL, gaps=["缺x"])))
         planner = _planner(svc, lambda g: [_child("c1_remedy")])
-        result = _run(planner.plan(svc.query_task_dashboard("t1")))
-        assert [n.node_id for n in result] == ["c1_remedy"]
+        result = _run(planner.plan(svc.query_task_dashboard("t1"), target_node_id="c1"))
+        assert [n.node_id for n in result.children] == ["c1_remedy"]
 
     def test_no_target_when_root_running(self, svc):
         svc.initialize_graph(_task_info("tX"))
@@ -118,7 +120,7 @@ class TestPlanTrigger:
         planner = TaskPlanner(svc)
         planner.set_strategies([stub])
         result = _run(planner.plan(svc.query_task_dashboard("tX")))
-        assert result == []
+        assert result.children == []
         assert stub.decompose_calls == 0
 
 
@@ -126,15 +128,15 @@ class TestPlanDedup:
     def test_dedup_existing(self, svc, graph):
         svc.add_task_nodes([_child("c1")], parent_node_id="t1")
         planner = _planner(svc, lambda g: [_child("c1"), _child("c2")])
-        result = _run(planner.plan(svc.query_task_dashboard("t1")))
-        assert [n.node_id for n in result] == ["c2"]
+        result = _run(planner.plan(svc.query_task_dashboard("t1"), target_node_id="t1"))
+        assert [n.node_id for n in result.children] == ["c2"]
 
 
 class TestDecomposeEmpty:
     def test_decompose_empty_returns_empty(self, svc, graph):
         planner = _planner(svc, lambda g: [])
         result = _run(planner.plan(svc.query_task_dashboard("t1")))
-        assert result == []
+        assert result.children == []
 
 
 class TestSwapStub:
@@ -143,8 +145,8 @@ class TestSwapStub:
         p2 = _planner(svc, lambda g: [_child("dim_b"), _child("dim_c")])
         r1 = _run(p1.plan(svc.query_task_dashboard("t1")))
         r2 = _run(p2.plan(svc.query_task_dashboard("t1")))
-        assert {n.node_id for n in r1} == {"dim_a"}
-        assert {n.node_id for n in r2} == {"dim_b", "dim_c"}
+        assert {n.node_id for n in r1.children} == {"dim_a"}
+        assert {n.node_id for n in r2.children} == {"dim_b", "dim_c"}
 
 
 class TestZeroCase:

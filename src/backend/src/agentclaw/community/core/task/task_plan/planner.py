@@ -2,11 +2,13 @@
 
 对齐 plan.md §3.2 + §3.4。构造期注入策略池(``pool=``),内置默认 [WorkflowPlanningStrategy, GapBasedPlanningStrategy];
 ``set_strategies`` 仅供测试覆写,不对外暴露自定义。
-触发条件:有可规划目标(根 PENDING / FAILED+gaps 叶 / PLANNING 父)即 first-match 选策略产子。
+Step2 改造:plan 接**显式 target_node_id**(on_fail/on_miss→失败/miss 叶,on_pass→父,on_execute 传 None→自发现根)。
+返 ``PlanResult(children, has_gap, gap_detail)`` 四象限驱动编排。
 """
 from __future__ import annotations
 
 from agentclaw.community.core.task.domain.models import (
+    PlanResult,
     RelationType,
     Status,
     TaskExecutionGraph,
@@ -20,13 +22,13 @@ from agentclaw.community.core.task.task_plan.strategies import (
 
 
 class TaskPlanner:
-    """规划编排壳:判有无规划目标 → 对图级 execution_config first-match-wins 选策略 → apply 产子 → 去重。
+    """规划编排壳:解析 target → first-match-wins 选策略(graph 级 config 匹配)→ apply(graph,target) 产 PlanResult → 去重。
 
     分层:TaskPlanner(编排壳,框架固定,零 case 知识)↔ PlanningStrategy(引擎内置策略,
     Avernet 默认实现 gap/workflow)。策略池构造期注入(``pool=``);``set_strategies`` 仅供测试覆写。"""
 
     def __init__(self, graph, *, pool: list[PlanningStrategy] | None = None) -> None:
-        """graph: TaskGraphService(派生查询用;策略 apply 自发现 target 经 graph 快照);
+        """graph: TaskGraphService(派生查询用;策略 apply 收显式 target 经 graph 快照);
         pool: 策略池(构造期注入;省略=内置默认 [WorkflowPlanning, GapBased])。"""
         self._graph = graph
         self._strategies: list[PlanningStrategy] = list(pool) if pool is not None else [
@@ -38,41 +40,39 @@ class TaskPlanner:
         """(测试覆写用)替换策略池。prod 经构造器 ``pool=`` 注入。"""
         self._strategies = list(strategies)
 
-    async def plan(self, graph: TaskExecutionGraph) -> list[TaskNode]:
-        """读图判有无可规划目标 → first-match-wins 选策略(graph 级 config 匹配)→ await apply 产子 → 去重。
+    async def plan(self, graph: TaskExecutionGraph, target_node_id: str | None = None) -> PlanResult:
+        """解析 target → first-match-wins 选策略 → await apply(graph,target) 产 PlanResult → 去重(children)。
 
-        可规划目标:① 根 PENDING(无父,初始规划);② FAILED+gaps 叶(无结构子,补救);
-        ③ PLANNING 父(委托前向)。无目标 → 返回 []。plan 不接收外部 gaps,不判 RUNNING(时序由编排核管)。
-        协程化:策略 apply 在 corp 是 LLM 耗时 IO,await 不阻塞编排核(锁内 await,同 task 串行是设计意图)。
+        target 解析:
+        - ``target_node_id`` 非空 → 取该节点(由调用方保证可规划:on_fail=FAILED 叶/on_miss=PENDING miss 叶/on_pass=RUNNING 父);
+        - ``target_node_id``=None → 自发现根 PENDING(初始规划;on_execute 唯一 None 调用方)。
+        零 case 知识:不依赖节点名。协程化:策略 apply 在 corp 是 LLM 耗时 IO,await 不阻塞(锁内 await,同 task 串行是设计意图)。
         """
-        if not self._has_planning_target(graph):
-            return []
+        target = self._resolve_target(graph, target_node_id)
+        if target is None:
+            return PlanResult(children=[], has_gap=False, gap_detail="no_target")
         for strategy in sorted(self._strategies, key=lambda r: r.priority):
             if await strategy.matches(graph):
-                nodes = await strategy.apply(graph)
+                pr = await strategy.apply(graph, target)
                 existing_ids = {n.node_id for n in graph.tasks}
-                return [n for n in nodes if n.node_id not in existing_ids]
-        return []  # 无策略命中(不应发生:GapBased 兜底)
+                pr.children = [n for n in pr.children if n.node_id not in existing_ids]
+                if not pr.children:
+                    pr.has_gap = False  # 去重后无可新增子=无 actionable gap→gap 闭(不误升 BBS)
+                return pr
+        return PlanResult(children=[], has_gap=False, gap_detail="no_strategy_hit")  # 兜底(不应发生:GapBased 兜底)
 
-    def _has_planning_target(self, graph: TaskExecutionGraph) -> bool:
-        """读图自发现有无可规划目标。零 case 知识:不依赖节点名。"""
+    def _resolve_target(self, graph: TaskExecutionGraph, target_node_id: str | None) -> TaskNode | None:
+        """解析显式 target_node_id → 节点;None → 自发现根 PENDING(无父,初始规划目标)。零 case 知识。"""
+        if target_node_id is not None:
+            for n in graph.tasks:
+                if n.node_id == target_node_id:
+                    return n
+            return None
+        # None(on_execute):根 PENDING(无结构父)
         for n in graph.tasks:
-            if n.status == Status.PLANNING:
-                return True
-            if (
-                n.status == Status.FAILED
-                and n.run_info.acceptance_result is not None
-                and bool(n.run_info.acceptance_result.gaps)
-                and not self._has_child(graph, n.node_id)
-            ):
-                return True
-            if (
-                n.status == Status.PENDING
-                and not self._has_child(graph, n.node_id)
-                and self._get_parent_id(graph, n.node_id) is None
-            ):
-                return True  # 根 PENDING(初始规划目标)
-        return False
+            if n.status == Status.PENDING and not self._has_child(graph, n.node_id) and self._get_parent_id(graph, n.node_id) is None:
+                return n
+        return None
 
     def _has_child(self, graph: TaskExecutionGraph, node_id: str) -> bool:
         return any(

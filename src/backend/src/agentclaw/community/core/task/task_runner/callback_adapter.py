@@ -25,10 +25,28 @@ class CallbackAdapter:
     """
 
     def adapt(self, data: TaskCallbackData) -> TaskNodePatch:
+        """组装 TaskNodePatch。三路互斥(对齐 on_report 分流):
+        ① result["exec_error"] 非空 → 执行报错(bot 没跑通)→ patch.exec_error(无 acceptance,→ on_harness 重投);
+        ② success=True → 验收 PASS → acceptance_result=PASS;
+        ③ success=False → 验收不过 → acceptance_result=FAIL + gaps=[fail_detail](→ on_fail 补救)。"""
         task_id, node_id = data.loop_task_id.split("::", 1)
-        success = bool(data.result.get("success", False))
         out = data.result.get("data")
         fail_detail = data.result.get("fail_detail")
+        exec_error = data.result.get("exec_error")
+        ext = data.result.get("_ext_info") or {}
+        ep_patch: dict[str, Any] = dict(ext)
+        if fail_detail:
+            ep_patch["fail_detail"] = fail_detail
+        if exec_error:
+            # 执行报错:不设 acceptance(与验收不过区分);on_report 据 exec_error 走 harness
+            return TaskNodePatch(
+                task_id=task_id,
+                node_id=node_id,
+                exec_error=str(exec_error),
+                output_patch={"data": out} if out is not None else None,
+                extend_props_patch=ep_patch if ep_patch else None,
+            )
+        success = bool(data.result.get("success", False))
         if success:
             acceptance = AcceptanceResult(verdict=AcceptanceVerdict.PASS, acceptances_metric=["exec_ok"])
         else:
@@ -36,10 +54,6 @@ class CallbackAdapter:
                 verdict=AcceptanceVerdict.FAIL,
                 gaps=[fail_detail] if fail_detail else ["unknown_gap"],
             )
-        ext = data.result.get("_ext_info") or {}
-        ep_patch: dict[str, Any] = dict(ext)
-        if fail_detail:
-            ep_patch["fail_detail"] = fail_detail
         return TaskNodePatch(
             task_id=task_id,
             node_id=node_id,

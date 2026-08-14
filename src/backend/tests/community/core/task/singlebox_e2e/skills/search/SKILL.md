@@ -10,6 +10,11 @@ tags: [task, search, dispatch]
 
 任务目标驱动的**任务派发搜推决策** skill,运行在 **owner bot**(source_channel_id)。框架语义预查候选 bot 集(分字段 title/objective/background 调 BCSFuse recommend),把候选集喂入 prompt;本 skill 在候选里决出**谁执行 + 怎么执行(多 bot 拉哪种协作群)**,不自取 BCSFuse。
 
+## 环境约束(必须遵守)
+
+> **禁止联网搜索**。本 skill 运行在 singlebox 本地 teamclaw bot,**无任何联网能力**:
+> 不得调用任何 web_search / 联网检索 / 外部 HTTP 工具。
+> 搜推判定仅基于 prompt 中的子任务需求与你自身的 bot 候选清单知识进行;候选清单已在 prompt 给出,直接挑选,无需联网。
 ## 触发条件
 
 收到 prompt 头部 `[search]` 标记的指令,且 prompt 含 `子任务需求+候选集{demand, catalog}` + 返回格式约定(详见框架 `SearchBasedDispatchStrategy._compose_search_prompt`)。

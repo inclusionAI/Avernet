@@ -15,6 +15,7 @@ from agentclaw.community.core.task.domain.models import (
     Context,
     Goal,
     Metadata,
+    PlanResult,
     RuntimeInfo,
     Status,
     TaskCallbackData,
@@ -58,14 +59,17 @@ class _StubPlanningStrategy:
     rule_id = "stub"
     priority = 5
 
-    def __init__(self, factory: Callable[[object], list[TaskNode]] | None = None):
+    def __init__(self, factory: Callable[[object], list[TaskNode]] | None = None,
+                 has_gap_when_empty: bool = False):
         self._factory = factory or (lambda g: [])
+        self._has_gap_when_empty = has_gap_when_empty
 
     async def matches(self, graph) -> bool:
         return True
 
-    async def apply(self, graph) -> list[TaskNode]:
-        return self._factory(graph)
+    async def apply(self, graph, target) -> PlanResult:
+        kids = self._factory(graph)
+        return PlanResult(children=kids, has_gap=bool(kids) or self._has_gap_when_empty)
 
 
 class _StubDispatchStrategy:
@@ -153,14 +157,11 @@ def _build_facade(svc=None, *, decomposer=None, discover=None, runner=None,
     svc = svc or TaskGraphService()
     factory = None
     if decomposer is not None:
-        # decomposer 可能是 _StubPlanningStrategy(有 _factory)或旧 lambda
-        f = getattr(decomposer, "_factory", None) or getattr(decomposer, "apply", None)
-        if callable(f) and not isinstance(f, type):
-            # _StubPlanningStrategy:直接复用其 apply
-            def factory(g, _d=decomposer):
-                return _d.apply(g)
-        elif callable(decomposer):
+        # decomposer 为 lambda g: [...] 时直接当 factory(_StubPlanningStrategy 内部包成 PlanResult)
+        if callable(decomposer) and not hasattr(decomposer, "apply"):
             factory = decomposer
+        elif hasattr(decomposer, "_factory"):
+            factory = decomposer._factory
     facade = _CaseTaskService(
         svc, planner_factory=factory,
         discover_bot=getattr(discover, "bot_id", "bot1") if discover else "bot1",
@@ -189,18 +190,20 @@ class TestExecute:
         assert result.success is True
         assert result.run_id is not None
         graph = svc.query_task_dashboard("t1")
-        assert svc._get_node(graph, "t1").status == Status.PLANNING
+        assert svc._get_node(graph, "t1").status == Status.RUNNING  # Step2:委托执行态
         assert svc._get_node(graph, "c1").status == Status.RUNNING
         assert svc._get_node(graph, "c2").status == Status.RUNNING
         assert len(runner.run_calls) == 1
         assert {n.node_id for n in runner.run_calls[0]} == {"c1", "c2"}
 
-    def test_execute_no_plan_still_returns_result(self):
+    def test_execute_no_plan_gap_closed_finishes(self):
+        # Step2:plan[]+has_gap=F = 根 gap 闭(终验通过)→ 翻根 DONE + 图 DONE
         facade, svc, *_ = _build_facade(decomposer=lambda g: [])
         result = _run(facade.execute(_task_info()))
         assert result.success is True
         graph = svc.query_task_dashboard("t1")
-        assert svc._get_node(graph, "t1").status == Status.PENDING
+        assert svc._get_node(graph, "t1").status == Status.DONE
+        assert graph.status == Status.DONE
 
 
 # ===== get_task_dashboard =====

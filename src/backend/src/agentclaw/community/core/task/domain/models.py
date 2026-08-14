@@ -144,7 +144,15 @@ class TaskExecutionGraph:
 # ===== 中间类型(patch/criteria/op_result/callback)=====
 @dataclass
 class TaskNodePatch:
-    """节点级原子写(``update_task_node_info`` 入参)。"""
+    """节点级原子写(``update_task_node_info`` 入参)。
+
+    终态翻转三选一(互斥):　
+    ① ``acceptance_result`` 非空 → 验收驱动(RUNNING→DONE/FAILED):PASS→DONE / FAIL+gaps→FAILED;　
+    ② ``exec_error`` 非空 → 执行报错(bot 压根没跑通:run FAILED / SLA 超时 / poll 耗尽),
+       不翻终态,由编排核 on_harness 复位重投(计数,达上限→HUNG);　
+    ③ ``status`` 非空(无前两者)→ 框架直驱(PENDING→RUNNING 派发 / RUNNING→PENDING harness 复位 等)。　
+    三者全空 → 仅 fold 非状态字段(output/run_mode/assignee/extend_props)。
+    """
 
     task_id: str
     node_id: str
@@ -152,8 +160,9 @@ class TaskNodePatch:
     run_mode: str | None = None
     assignee: str | None = None
     output_patch: dict[str, Any] | None = None               # fold 到 run_info.output
-    acceptance_result: AcceptanceResult | None = None        # 唯一终态翻转依据
-    extend_props_patch: dict[str, Any] | None = None         # miss_events / hung_reason(stuck) / 崩溃栈
+    acceptance_result: AcceptanceResult | None = None        # 验收驱动终态翻转(PASS→DONE/FAIL+gaps→FAILED)
+    exec_error: str | None = None                            # 执行报错信号(非验收;→ on_harness 重投,)
+    extend_props_patch: dict[str, Any] | None = None         # miss_events / hung_reason(stuck) / harness_retries / 崩溃栈
 
 
 @dataclass
@@ -211,3 +220,17 @@ class TaskCallbackData:
     workflow_id: int
     instance_id: int              # workflow 运行实例 id
     result: dict[str, Any]        # {"success": bool, "data": "..."} / {"fail_detail": "..."}
+
+
+@dataclass
+class PlanResult:
+    """规划产物(对齐 plan 返回契约)。四象限驱动编排:　
+
+    - ``children`` 非空 → gap 未闭,有可执行子任务:add_task_nodes + dispatch;　
+    - ``children`` 空 ∧ ``has_gap``=False → gap 已闭(验收通过):节点 DONE 上行 / 根 gap 闭→图终态;　
+    - ``children`` 空 ∧ ``has_gap``=True → 有 gap 但拆不出子(无规划能力):深度闸门判断(<MAX 升 BBS / ≥MAX HUNG)。
+    """
+
+    children: list["TaskNode"] = field(default_factory=list)
+    has_gap: bool = False
+    gap_detail: str = ""                # gap 描述(空+has_gap=True 时说明为何拆不出;has_gap=False 时可为 "done")

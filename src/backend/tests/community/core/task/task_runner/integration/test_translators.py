@@ -12,9 +12,10 @@ def test_single_bot_completed():
 
 
 def test_single_bot_failed_with_error():
+    # run FAILED = 执行报错(非验收)→ exec_error(→ harness 重投)
     d = SingleBotRunTranslator.adapt({"status": "FAILED", "error": "boom"}, "t1::c1")
     assert d.result["success"] is False
-    assert d.result["fail_detail"] == "boom"
+    assert d.result["exec_error"] == "boom"
 
 
 def test_single_bot_status_case_insensitive():
@@ -24,7 +25,7 @@ def test_single_bot_status_case_insensitive():
 
 def test_single_bot_timeout_mapped():
     d = SingleBotRunTranslator.adapt({"status": "FAILED", "error": "TIME_OUT"}, "t1::c1")
-    assert d.result["fail_detail"] == "timeout"
+    assert d.result["exec_error"] == "timeout"
 
 
 def test_bcs_session_completed():
@@ -38,7 +39,7 @@ def test_bcs_session_failed():
     group = {"session": {"status": "failed", "output": None, "error_message": "err"}}
     d = BcsSessionTranslator.adapt(group, [], "t1::g1")
     assert d.result["success"] is False
-    assert d.result["fail_detail"] == "err"
+    assert d.result["exec_error"] == "err"
 
 
 def test_bcs_session_output_fallback_to_last_assistant_msg():
@@ -57,10 +58,10 @@ def test_state_machine_completed():
 def test_state_machine_aborted():
     d = BcsStateMachineRunTranslator.adapt({"status": "aborted"}, "t1::g1")
     assert d.result["success"] is False
-    assert d.result["fail_detail"] == "aborted"
+    assert d.result["exec_error"] == "aborted"
 
 
 def test_state_machine_failed_with_error():
     d = BcsStateMachineRunTranslator.adapt({"status": "failed", "error": "boom"}, "t1::g1")
     assert d.result["success"] is False
-    assert d.result["fail_detail"] == "boom"
+    assert d.result["exec_error"] == "boom"
