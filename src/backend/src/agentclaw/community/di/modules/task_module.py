@@ -96,10 +96,23 @@ class TaskModule(Module):
     def _resolve_ports():
         """构造传输端口(community:默认 None=纯内核;corp 经 overlay 覆写本方法注真实 conn)。
 
-        community 不内联 BaaS/BCS 密钥(Rule:环境访问在 DI),真实端口由 corp adapter 层覆写。
+        环境路由(组合根选实现,不在 adapter 内 if):
+        - ``OPENAPI_BOT_MODE=singlebox`` + ``TASK_ENGINE=skill`` → ``SingleboxEngineAdapter``(直连 per-bot
+          引擎 WebSocket,绕开 BaaS;coop_group bcs 用 ``_DoubleBcsClient`` 占位,本轮 singlebox 走 single_bot)。
+        - 否则 community 不内联 BaaS/BCS 密钥(Rule:环境访问在 DI),真实端口由 corp adapter 层覆写。
         """
         if not _task_engine_active():
             return None, None
+        if os.environ.get("OPENAPI_BOT_MODE", "").strip().lower() == "singlebox":
+            from agentclaw.community.core.task.task_runner.integration.double.double_bcs_client import (
+                _DoubleBcsClient,
+            )
+            from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adapter import (
+                SingleboxEngineAdapter,
+            )
+            backend = os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
+            user_id = os.environ.get("SINGLEBOX_USER_ID", "000001")
+            return SingleboxEngineAdapter(backend_base_url=backend, user_id=user_id), _DoubleBcsClient()
         # corp 接真实 OpenApiBotAdapter/BcsHttpAdapter 时,在 corp overlay 覆写本 provider 或经 env_url。
         # community 默认:即便 TASK_ENGINE 开,也无端口实现 → 退化 stub(可被测试用 double 覆盖)。
         return None, None

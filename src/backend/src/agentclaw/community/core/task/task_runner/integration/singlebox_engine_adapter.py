@@ -1,0 +1,225 @@
+"""SingleboxEngineAdapter: singlebox 本地链路直连 bot 引擎(WebSocket),实现 OpenApiBotPort。
+
+替代 OpenApiBotAdapter(BaaS OpenApi)在 singlebox 的角色。BaaS OpenApi 在 singlebox 走不通:
+``bot_service: local`` → ``get_binding`` raise PLATFORM_UNAVAILABLE(本地无远程 bot 元数据服务),
+且 BaaS ``baas_service`` 用固定 adapter_port 跟 singlebox per-bot 动态端口对不上。本类复刻产品界面对话链路:
+
+  backend(LocalAuth ``x-user-id``):``GET /api/bots/{bot_id}``→binding_id →
+  ``GET /api/v1/devices/{binding_id}/connection``→ per-bot 引擎 ``localhost:port``(无鉴权)→
+  ``POST /api/sessions`` 建 session → ``ws://localhost:port/api/openclaw/ws``:
+  ``connect``(proto 3)→ ``chat.send{sessionKey,message}`` → 收 ``agent`` 流 + ``chat`` final(content[0].text)。
+
+run dict 形状对齐 BaaS ``get_run`` data:``{status: COMPLETED|FAILED, result{content}, error}``,供
+``SingleBotRunTranslator`` / ``_parse_children`` / ``_parse_search_result`` 复用(契约一致,零额外适配)。
+
+- ``send_and_wait_async``(plan/dispatch,owner bot):await WS chat round-trip,同步返终态 run。
+- ``send_message``+``get_run``(executor single_bot worker bot):fire ``chat.send``,后台 loop 收帧存 ``_runs``,
+  poller 轮询 ``get_run``(同 BaaS 火-轮询模型;流式经后台桥接为轮询)。
+
+env 选实现落在组合根(``TaskModule._resolve_ports``),本类不读 env、不含 case 知识。
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import threading
+import time
+import uuid
+from typing import Any
+
+import httpx
+import websockets
+
+from agentclaw.community.core.task.task_runner.integration.ports import OpenApiBotPort
+
+_WS_PATH = "/api/openclaw/ws"
+_CONNECT_PARAMS = {
+    "minProtocol": 3,
+    "maxProtocol": 3,
+    "client": {"id": "singlebox-task-engine", "version": "1.0.0", "platform": "linux", "mode": "operator"},
+    "role": "operator",
+}
+
+
+class SingleboxEngineAdapter(OpenApiBotPort):
+    """singlebox 直连 per-bot 引擎的 OpenApiBotPort 实现(WebSocket)。
+
+    构造期收 backend(LocalAuth)地址 + user_id;per-bot 引擎 target 经 backend 解析并缓存。
+    WS chat round-trip 可同步(``send_and_wait_async``)或火-后台收(``send_message``+poller ``get_run``)。
+    """
+
+    def __init__(
+        self,
+        *,
+        backend_base_url: str,
+        user_id: str,
+        http_client: httpx.AsyncClient | None = None,
+        collect_timeout: float = 120.0,
+    ) -> None:
+        self._backend = backend_base_url.rstrip("/")
+        self._user_id = user_id
+        self._http = http_client or httpx.AsyncClient()
+        self._collect_timeout = collect_timeout
+        self._lock = threading.Lock()
+        self._targets: dict[str, str] = {}  # bot_id → "localhost:20014"
+        self._runs: dict[str, dict[str, Any]] = {}  # run_id → {status, result{content}, error}
+        # 后台 loop:send_message 的 WS 收集器(poller 跨 loop 轮询 get_run,桥接流式→轮询)
+        self._bg_loop = asyncio.new_event_loop()
+        self._bg_thread = threading.Thread(
+            target=self._bg_loop.run_forever, daemon=True, name="singlebox-ws-collector"
+        )
+        self._bg_thread.start()
+
+    async def _aclose(self) -> None:
+        self._bg_loop.call_soon_threadsafe(self._bg_loop.stop)
+        self._bg_thread.join(timeout=2.0)
+        await self._http.aclose()
+
+    # ===== OpenApiBotPort =====
+
+    async def ensure_grant(self, bot_id: str) -> None:
+        """singlebox 无 api-key grant:仅预解析并缓存 bot → 引擎 target(等同"确保可达")。"""
+        await self._resolve_target(bot_id)
+
+    async def send_message(self, *, bot_id: str, message: str, metadata: dict[str, Any]) -> str:
+        """fire ``chat.send``:解析 target+建 session → 后台 WS 收帧存 ``_runs`` → 立即返 run_id。
+
+        解析/建会话失败不抛(避免打断 executor gather):落 FAILED 进 ``_runs``,poller 收口。
+        """
+        run_id = f"ws_{uuid.uuid4().hex[:8]}"
+        resolved = await self._resolve_roundtrip_inputs(bot_id)
+        if isinstance(resolved, str):  # 错误信息
+            with self._lock:
+                self._runs[run_id] = {"status": "FAILED", "error": resolved}
+            return run_id
+        target, session_key = resolved
+        with self._lock:
+            self._runs[run_id] = {"status": "RUNNING"}
+        asyncio.run_coroutine_threadsafe(
+            self._collect(run_id, target, session_key, message), self._bg_loop
+        )
+        return run_id
+
+    async def get_run(self, run_id: str) -> dict[str, Any]:
+        """轮询 run 状态:未终态返 RUNNING;终态返 {status, result{content}, error}(对齐 BaaS)。"""
+        with self._lock:
+            return self._runs.get(run_id, {"status": "RUNNING"})
+
+    async def send_and_wait_async(
+        self,
+        *,
+        bot_id: str,
+        message: str,
+        metadata: dict[str, Any] | None = None,
+        timeout: float = 180.0,
+        poll_interval: float = 2.0,
+    ) -> dict[str, Any]:
+        """sync WS chat round-trip(plan/dispatch owner bot):await 到 chat final,直返终态 run。"""
+        resolved = await self._resolve_roundtrip_inputs(bot_id)
+        if isinstance(resolved, str):
+            return {"status": "FAILED", "error": resolved}
+        target, session_key = resolved
+        return await self._ws_chat_roundtrip(target, session_key, message, timeout)
+
+    # ===== internals =====
+
+    async def _collect(self, run_id: str, target: str, session_key: str, message: str) -> None:
+        run = await self._ws_chat_roundtrip(target, session_key, message, self._collect_timeout)
+        with self._lock:
+            self._runs[run_id] = run
+
+    async def _resolve_roundtrip_inputs(self, bot_id: str) -> tuple[str, str] | str:
+        """解析 target + 建 session,返 (target, session_key);失败返错误串。"""
+        try:
+            target = await self._resolve_target(bot_id)
+            session_key = await self._create_session(target)
+            if not session_key:
+                return f"no_session_key: target={target}"
+            return target, session_key
+        except Exception as e:  # noqa: BLE001 本地链路异常收口成 FAILED
+            return f"{type(e).__name__}: {e}"
+
+    async def _resolve_target(self, bot_id: str) -> str:
+        with self._lock:
+            cached = self._targets.get(bot_id)
+        if cached:
+            return cached
+        headers = {"x-user-id": self._user_id}
+        r = await self._http.get(f"{self._backend}/api/bots/{bot_id}", headers=headers)
+        r.raise_for_status()
+        binding_id = (r.json().get("data") or {}).get("binding_id")
+        if binding_id is None:
+            raise RuntimeError(f"bot not found / no binding_id: {bot_id}")
+        c = await self._http.get(
+            f"{self._backend}/api/v1/devices/{binding_id}/connection", headers=headers
+        )
+        c.raise_for_status()
+        target = (c.json().get("data") or {}).get("target")
+        if not target:
+            raise RuntimeError(f"no connection target: bot={bot_id} binding={binding_id}")
+        with self._lock:
+            self._targets[bot_id] = target
+        return target
+
+    async def _create_session(self, target: str) -> str:
+        r = await self._http.post(
+            f"http://{target}/api/sessions",
+            json={"title": "task", "user_id": self._user_id},
+            headers={"x-user-id": self._user_id},
+        )
+        r.raise_for_status()
+        return (r.json().get("data") or {}).get("id") or ""
+
+    async def _ws_chat_roundtrip(
+        self, target: str, session_key: str, message: str, timeout: float
+    ) -> dict[str, Any]:
+        """开 WS:connect(proto3)→ chat.send → 收到 chat final/error/超时 → 返终态 run dict(不抛)。"""
+        uri = f"ws://{target}{_WS_PATH}"
+        deadline = time.monotonic() + timeout
+        try:
+            async with websockets.connect(uri, open_timeout=10) as ws:
+                # 1) 握手
+                await ws.send(json.dumps({"type": "req", "id": "1", "method": "connect",
+                                          "params": _CONNECT_PARAMS}))
+                hs = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+                if not hs.get("ok"):
+                    return {"status": "FAILED", "error": f"handshake_failed: {json.dumps(hs)[:200]}"}
+                # 2) 发消息
+                await ws.send(json.dumps({"type": "req", "id": "2", "method": "chat.send",
+                                          "params": {"sessionKey": session_key, "message": message}}))
+                ack = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+                if not ack.get("ok"):
+                    return {"status": "FAILED", "error": f"chat_send_rejected: {json.dumps(ack)[:200]}"}
+                # 3) 读事件到 final
+                remaining = max(2.0, deadline - time.monotonic())
+                while time.monotonic() < deadline:
+                    try:
+                        raw = await asyncio.wait_for(ws.recv(), timeout=remaining)
+                    except asyncio.TimeoutError:
+                        return {"status": "FAILED", "error": "timeout"}
+                    data = json.loads(raw)
+                    if data.get("type") != "event":
+                        continue
+                    if data.get("event") != "chat":
+                        continue
+                    payload = data.get("payload") or {}
+                    state = payload.get("state")
+                    if state == "final":
+                        return {"status": "COMPLETED", "result": {"content": _extract_final_text(payload)}}
+                    if state == "error":
+                        return {"status": "FAILED", "error": payload.get("errorMessage") or "chat_error"}
+                    remaining = max(2.0, deadline - time.monotonic())
+                return {"status": "FAILED", "error": "timeout"}
+        except Exception as e:  # noqa: BLE001 本地链路异常收口成 FAILED(不抛)
+            return {"status": "FAILED", "error": f"{type(e).__name__}: {e}"}
+
+
+def _extract_final_text(payload: dict[str, Any]) -> str:
+    """从 chat final 事件取完整文本(message.content[0].text),缺失返空串。"""
+    msg = payload.get("message") or {}
+    contents = msg.get("content") or []
+    if isinstance(contents, list) and contents:
+        first = contents[0] or {}
+        if isinstance(first, dict):
+            return first.get("text") or ""
+    return ""
