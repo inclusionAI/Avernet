@@ -161,15 +161,20 @@ hybrid_apply_model_policy() {
         return 1
     fi
 
-    HYBRID_MODEL_ID="$primary_model"
-    export HYBRID_MODEL_ID
     export SINGLEBOX_REQUIRED_OPENCLAW_MODEL="$primary"
     export LLM_FAST_MODEL="$primary_model"
     export LLM_BALANCED_MODEL="$primary_model"
     export LLM_REASONING_MODEL="$primary_model"
     export LLM_LONG_CONTEXT_MODEL="$primary_model"
     export LLM_EXTRACTION_MODEL="$primary_model"
-    log_info "Hybrid model policy: OpenClaw, Claude Code, and SOP use configured primary ${primary}"
+    if [ "${HYBRID_CLAUDE_CONFIG_MODE:-}" = "user" ]; then
+        unset HYBRID_MODEL_ID
+        log_info "Hybrid model policy: OpenClaw and SOP use configured primary ${primary}; Claude Code keeps the user's configuration"
+    else
+        HYBRID_MODEL_ID="$primary_model"
+        export HYBRID_MODEL_ID
+        log_info "Hybrid model policy: OpenClaw, Claude Code, and SOP use configured primary ${primary}"
+    fi
 }
 
 hybrid_validate_profiles() {
@@ -295,7 +300,37 @@ hybrid_stop() {
 }
 
 hybrid_restart() {
-    hybrid_stop && sleep 2 && hybrid_start
+    if [ "${HYBRID_RUNTIME_SELECTION_EXPLICIT:-0}" != "1" ]; then
+        hybrid_stop && sleep 2 && hybrid_start
+        return
+    fi
+
+    local requested_bots_profile="${BOTS_PROFILE_DIR:-}"
+    local requested_excluded_profile="${BOTS_EXCLUDED_PROFILE_SOURCE:-}"
+    local requested_claude_profile="${CLAUDE_PROFILE_DIR:-}"
+    local requested_claude_config_mode="${HYBRID_CLAUDE_CONFIG_MODE:-}"
+
+    hybrid_stop || return 1
+    sleep 2
+
+    BOTS_PROFILE_DIR="$requested_bots_profile"
+    if [ -n "$requested_excluded_profile" ]; then
+        BOTS_EXCLUDED_PROFILE_SOURCE="$requested_excluded_profile"
+    else
+        unset BOTS_EXCLUDED_PROFILE_SOURCE
+    fi
+    if [ -n "$requested_claude_profile" ]; then
+        CLAUDE_PROFILE_DIR="$requested_claude_profile"
+    else
+        unset CLAUDE_PROFILE_DIR
+    fi
+    if [ -n "$requested_claude_config_mode" ]; then
+        HYBRID_CLAUDE_CONFIG_MODE="$requested_claude_config_mode"
+    else
+        unset HYBRID_CLAUDE_CONFIG_MODE
+    fi
+
+    hybrid_start
 }
 
 hybrid_setup() {

@@ -81,6 +81,14 @@ jq -e '
 [[ "$LLM_LONG_CONTEXT_MODEL" == "glm-local" ]]
 [[ "$LLM_EXTRACTION_MODEL" == "glm-local" ]]
 
+export HYBRID_CLAUDE_CONFIG_MODE="user"
+hybrid_apply_model_policy
+[[ -z "${HYBRID_MODEL_ID:-}" ]]
+[[ "$SINGLEBOX_REQUIRED_OPENCLAW_MODEL" == "openai-compatible/glm-local" ]]
+[[ "$LLM_FAST_MODEL" == "glm-local" ]]
+unset HYBRID_CLAUDE_CONFIG_MODE
+hybrid_apply_model_policy
+
 IFS=$'\x1f' read -r role _ _ port config_dir workspace model prompt permission < <(claude_profile_entries)
 [[ "$role" == "platform-data" ]]
 [[ "$port" == "18900" ]]
@@ -91,11 +99,18 @@ IFS=$'\x1f' read -r role _ _ port config_dir workspace model prompt permission <
 [[ "$prompt" == "$CLAUDE_PROFILE/platform-data/CLAUDE.md" ]]
 
 export SINGLEBOX_MODEL_CONFIG_MODE="manual"
+unset HYBRID_CLAUDE_CONFIG_MODE
 claude_relays_manual_model_env "$model"
 [[ "${CLAUDE_RELAY_MANUAL_MODEL_ENV[*]}" == *"ANTHROPIC_BASE_URL=https://model.example.test/v1"* ]]
 [[ "${CLAUDE_RELAY_MANUAL_MODEL_ENV[*]}" == *"ANTHROPIC_AUTH_TOKEN=test-token"* ]]
 [[ "${CLAUDE_RELAY_MANUAL_MODEL_ENV[*]}" == *"ANTHROPIC_MODEL=glm-local"* ]]
 [[ "${CLAUDE_RELAY_MANUAL_MODEL_ENV[*]}" == *"ANTHROPIC_SMALL_FAST_MODEL=glm-local"* ]]
+export HYBRID_CLAUDE_CONFIG_MODE="user"
+claude_relays_manual_model_env "$model"
+[[ "${#CLAUDE_RELAY_MANUAL_MODEL_ENV[@]}" == "0" ]]
+IFS=$'\x1f' read -r _ _ _ _ _ _ user_model _ _ < <(claude_profile_entries)
+[[ -z "$user_model" ]]
+unset HYBRID_CLAUDE_CONFIG_MODE
 export SINGLEBOX_MODEL_CONFIG_MODE="home"
 claude_relays_manual_model_env "$model"
 [[ "${#CLAUDE_RELAY_MANUAL_MODEL_ENV[@]}" == "0" ]]
@@ -180,6 +195,13 @@ if validate_hybrid_profile_options hybrid; then
 fi
 export CLAUDE_PROFILE_DIR="$CLAUDE_PROFILE"
 validate_hybrid_profile_options hybrid
+
+unset BOTS_PROFILE_DIR
+if validate_hybrid_profile_options hybrid; then
+    echo 'Claude replacement options without an OpenClaw profile unexpectedly accepted' >&2
+    exit 1
+fi
+export BOTS_PROFILE_DIR="$ROOT/scripts/4bots_merchant_operations_profile"
 
 python3 - "$CLAUDE_PROFILE/bots.json" <<'PY'
 import json
@@ -414,6 +436,14 @@ test_claude_clean_rejects_broad_paths
 test_hybrid_profile_defaults() (
     log_info() { :; }
 
+    export HYBRID_USE_CLAUDE_CODE=yes
+    unset BOTS_PROFILE_DIR BOTS_EXCLUDED_PROFILE_SOURCE CLAUDE_PROFILE_DIR
+    apply_hybrid_profile_defaults start hybrid
+    [ "$BOTS_PROFILE_DIR" = "scripts/4bots_merchant_operations_profile" ]
+    [ "$BOTS_EXCLUDED_PROFILE_SOURCE" = "platform-data" ]
+    [ "$CLAUDE_PROFILE_DIR" = "scripts/4bots_merchant_operations_profile_for_claude" ]
+
+    export HYBRID_USE_CLAUDE_CODE=no
     unset BOTS_PROFILE_DIR BOTS_EXCLUDED_PROFILE_SOURCE CLAUDE_PROFILE_DIR
     apply_hybrid_profile_defaults start hybrid
     [ "$BOTS_PROFILE_DIR" = "scripts/4bots_merchant_operations_profile" ]
@@ -427,6 +457,7 @@ test_hybrid_profile_defaults() (
     [ -z "${BOTS_EXCLUDED_PROFILE_SOURCE:-}" ]
     [ -z "${CLAUDE_PROFILE_DIR:-}" ]
 
+    export HYBRID_USE_CLAUDE_CODE=yes
     unset BOTS_PROFILE_DIR BOTS_EXCLUDED_PROFILE_SOURCE CLAUDE_PROFILE_DIR
     apply_hybrid_profile_defaults start merchant_hybrid
     [ "$BOTS_PROFILE_DIR" = "scripts/4bots_merchant_operations_profile" ]
@@ -437,12 +468,18 @@ test_hybrid_profile_defaults() (
     BOTS_PROFILE_DIR="scripts/custom_profile"
     apply_hybrid_profile_defaults start merchant_hybrid
     [ "$BOTS_PROFILE_DIR" = "scripts/custom_profile" ]
-    [ "$BOTS_EXCLUDED_PROFILE_SOURCE" = "platform-data" ]
-    [ "$CLAUDE_PROFILE_DIR" = "scripts/4bots_merchant_operations_profile_for_claude" ]
+    [ -z "${BOTS_EXCLUDED_PROFILE_SOURCE:-}" ]
+    [ -z "${CLAUDE_PROFILE_DIR:-}" ]
 
     BOTS_PROFILE_DIR="scripts/custom_profile"
     BOTS_EXCLUDED_PROFILE_SOURCE="custom-platform-data"
     CLAUDE_PROFILE_DIR="scripts/custom_claude_profile"
+    HYBRID_USE_CLAUDE_CODE="invalid-but-unused-for-explicit-claude"
+    apply_hybrid_profile_defaults start hybrid
+    [ "$BOTS_PROFILE_DIR" = "scripts/custom_profile" ]
+    [ "$BOTS_EXCLUDED_PROFILE_SOURCE" = "custom-platform-data" ]
+    [ "$CLAUDE_PROFILE_DIR" = "scripts/custom_claude_profile" ]
+
     apply_hybrid_profile_defaults start merchant_hybrid
     [ "$BOTS_PROFILE_DIR" = "scripts/custom_profile" ]
     [ "$BOTS_EXCLUDED_PROFILE_SOURCE" = "custom-platform-data" ]
@@ -461,6 +498,68 @@ test_hybrid_profile_defaults() (
 )
 
 test_hybrid_profile_defaults
+
+test_hybrid_claude_runtime_choice() (
+    log_info() { :; }
+    export BOTS_PROFILE_DIR="$ROOT/scripts/4bots_merchant_operations_profile"
+    export BOTS_EXCLUDED_PROFILE_SOURCE="platform-data"
+    export CLAUDE_PROFILE_DIR="$CLAUDE_PROFILE"
+    claude_relay_find_cli() { printf '%s\n' "$TMP/fake-claude"; }
+
+    export SINGLEBOX_MODEL_CONFIG_MODE="home"
+    export HYBRID_CLAUDE_CONFIG_MODE="user"
+    prepare_hybrid_claude_runtime_choice start hybrid
+    [ "$SINGLEBOX_MODEL_CONFIG_MODE" = "home" ]
+    [ "$HYBRID_CLAUDE_CONFIG_MODE" = "user" ]
+
+    export SINGLEBOX_MODEL_CONFIG_MODE="home"
+    export HYBRID_CLAUDE_CONFIG_MODE="env-local"
+    prepare_hybrid_claude_runtime_choice start merchant_hybrid
+    [ "$SINGLEBOX_MODEL_CONFIG_MODE" = "manual" ]
+    [ "$HYBRID_CLAUDE_CONFIG_MODE" = "env-local" ]
+)
+
+test_hybrid_claude_runtime_choice
+
+test_hybrid_missing_claude_cancels_when_install_declined() (
+    log_info() { :; }
+    log_error() { :; }
+    export BOTS_PROFILE_DIR="$ROOT/scripts/4bots_merchant_operations_profile"
+    export BOTS_EXCLUDED_PROFILE_SOURCE="platform-data"
+    export CLAUDE_PROFILE_DIR="$CLAUDE_PROFILE"
+    export HYBRID_INSTALL_CLAUDE_CODE=no
+    export HYBRID_CLAUDE_CONFIG_MODE=user
+    claude_relay_find_cli() { return 1; }
+
+    if prepare_hybrid_claude_runtime_choice start hybrid; then
+        echo 'missing Claude Code unexpectedly allowed after installation was declined' >&2
+        exit 1
+    fi
+)
+
+test_hybrid_missing_claude_cancels_when_install_declined
+
+test_hybrid_missing_claude_installs_when_accepted() (
+    log_info() { :; }
+    export BOTS_PROFILE_DIR="$ROOT/scripts/4bots_merchant_operations_profile"
+    export BOTS_EXCLUDED_PROFILE_SOURCE="platform-data"
+    export CLAUDE_PROFILE_DIR="$CLAUDE_PROFILE"
+    export HYBRID_INSTALL_CLAUDE_CODE=yes
+    export HYBRID_CLAUDE_CONFIG_MODE=user
+    local fake_cli="$TMP/installed-claude"
+    claude_relay_find_cli() {
+        [ -x "$fake_cli" ] && printf '%s\n' "$fake_cli"
+    }
+    claude_relay_install_cli() {
+        printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$fake_cli"
+        chmod +x "$fake_cli"
+    }
+
+    prepare_hybrid_claude_runtime_choice start hybrid
+    [ -x "$fake_cli" ]
+)
+
+test_hybrid_missing_claude_installs_when_accepted
 
 events="$TMP/events"
 hybrid_port_preflight() { return 0; }

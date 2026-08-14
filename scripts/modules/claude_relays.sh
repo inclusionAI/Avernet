@@ -37,13 +37,38 @@ claude_relay_wait_ready() {
     return 1
 }
 
-claude_relay_cli() {
+claude_relay_find_cli() {
     local candidate
     for candidate in "${CLAUDE_CODE_PATH:-}" "$(command -v claude 2>/dev/null || true)"; do
         [ -n "$candidate" ] && [ -x "$candidate" ] && { printf '%s\n' "$candidate"; return 0; }
     done
+    return 1
+}
+
+claude_relay_cli() {
+    claude_relay_find_cli && return 0
     log_error "No usable Claude CLI found; set CLAUDE_CODE_PATH or install claude"
     return 1
+}
+
+claude_relay_install_cli() {
+    if ! command -v npm >/dev/null 2>&1; then
+        log_error "npm is required to install Claude Code. Run: ./scripts/singlebox.sh install-tools"
+        return 1
+    fi
+
+    log_info "Installing Claude Code with npm..."
+    if ! npm install -g @anthropic-ai/claude-code --registry="${NPM_REGISTRY_URL}"; then
+        log_error "Claude Code installation failed. Install it manually with:"
+        log_error "  npm install -g @anthropic-ai/claude-code"
+        return 1
+    fi
+    hash -r 2>/dev/null || true
+    if ! claude_relay_find_cli >/dev/null; then
+        log_error "Claude Code was installed but the claude executable is not in PATH."
+        return 1
+    fi
+    log_info "Claude Code installed successfully."
 }
 
 claude_relays_setup() {
@@ -69,6 +94,7 @@ claude_relays_prereqs() {
 
 claude_relays_manual_model_env() {
     CLAUDE_RELAY_MANUAL_MODEL_ENV=()
+    [ "${HYBRID_CLAUDE_CONFIG_MODE:-}" != "user" ] || return 0
     [ "${SINGLEBOX_MODEL_CONFIG_MODE:-}" = "manual" ] || return 0
 
     local base_url="${OPENCLAW_OPENAI_BASE_URL:-}"
@@ -93,10 +119,10 @@ claude_relays_start() {
     claude_relays_setup || return 1
     local role name summary port config_dir workspace model prompt_file permission pid_file cli model_source
     IFS=$'\x1f' read -r role name summary port config_dir workspace model prompt_file permission < <(claude_profile_entries)
-    [ -n "$model" ] || {
+    if [ "${HYBRID_CLAUDE_CONFIG_MODE:-}" != "user" ] && [ -z "$model" ]; then
         log_error "Claude relay model was not resolved from the selected Singlebox configuration"
         return 1
-    }
+    fi
     cli="$(claude_relay_cli)" || return 1
     mkdir -p "$config_dir" "$workspace" "$(claude_relay_data_dir "$role")" "$(claude_relay_log_dir "$role")" "$CLAUDE_RELAY_STATE_DIR" "$LOG_DIR"
     pid_file="$(claude_relay_pid_file "$role")"
@@ -108,14 +134,19 @@ claude_relays_start() {
     require_port_available_after_owned_stop "$port" "Claude ${role} relay" || return 1
     model_source=""
     claude_relays_manual_model_env "$model" || return 1
-    if [ "${SINGLEBOX_MODEL_CONFIG_MODE:-}" != "manual" ] && [ ! -f "${config_dir}/settings.json" ] && [ -f "$HOME/.claude/settings.json" ]; then
+    if [ "${HYBRID_CLAUDE_CONFIG_MODE:-}" = "user" ] && [ -f "$HOME/.claude/settings.json" ]; then
+        model_source="$HOME/.claude/settings.json"
+    elif [ "${SINGLEBOX_MODEL_CONFIG_MODE:-}" != "manual" ] && [ ! -f "${config_dir}/settings.json" ] && [ -f "$HOME/.claude/settings.json" ]; then
         model_source="$HOME/.claude/settings.json"
     fi
+    local relay_default_model_env=()
+    [ -n "$model" ] && relay_default_model_env=("RELAY_DEFAULT_MODEL=${model}")
     log_info "Starting Claude relay role=${role} port=${port}"
     (
         cd "$CLAUDE_RELAY_GATEWAY_DIR"
         exec env PORT="$port" RELAY_CLAUDE_CONFIG_DIR="$config_dir" RELAY_MODEL_SETTINGS_SOURCE="$model_source" \
-            RELAY_DEFAULT_MODEL="$model" RELAY_DEFAULT_PERMISSION_MODE="$permission" RELAY_DEFAULT_CWD="$workspace" \
+            "${relay_default_model_env[@]}" \
+            RELAY_DEFAULT_PERMISSION_MODE="$permission" RELAY_DEFAULT_CWD="$workspace" \
             RELAY_DATA_DIR="$(claude_relay_data_dir "$role")" RELAY_LOG_DIR="$(claude_relay_log_dir "$role")" \
             RELAY_SYSTEM_PROMPT_FILE="$prompt_file" RELAY_SYSTEM_PROMPT_ROOT="$(dirname "$prompt_file")" \
             CLAUDE_CODE_PATH="$cli" \

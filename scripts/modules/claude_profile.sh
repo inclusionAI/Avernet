@@ -110,7 +110,11 @@ PY
 claude_profile_entries() {
     local manifest runtime_model
     manifest="$(claude_profile_manifest)" || return 1
-    runtime_model="${HYBRID_MODEL_ID:-${OPENCLAW_OPENAI_MODEL_ID:-}}"
+    if [ "${HYBRID_CLAUDE_CONFIG_MODE:-}" = "user" ]; then
+        runtime_model=""
+    else
+        runtime_model="${HYBRID_MODEL_ID:-${OPENCLAW_OPENAI_MODEL_ID:-}}"
+    fi
     python3 - "$manifest" "$runtime_model" <<'PY'
 import json
 import os
