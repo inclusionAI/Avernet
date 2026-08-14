@@ -14,7 +14,6 @@ HYBRID_CLAUDE_STOP_ORDER=(frontend bcs_baas_provider claude_bots bots bcsfuse bc
 HYBRID_SETUP_ORDER=()
 HYBRID_START_ORDER=()
 HYBRID_STOP_ORDER=()
-HYBRID_MODEL_ID="Kimi-K2.6"
 HYBRID_STATE_FILE="${HYBRID_STATE_FILE:-${DEP_DIR}/hybrid.state.json}"
 
 hybrid_claude_enabled() {
@@ -135,7 +134,7 @@ hybrid_restore_runtime_state() {
 
 hybrid_apply_model_policy() {
     hybrid_claude_enabled || return 0
-    local config_file primary provider primary_model tmp_file
+    local config_file primary provider primary_model
     config_file="${SINGLEBOX_MODEL_CONFIG_FILE:-}"
     [ -n "$config_file" ] && [ -f "$config_file" ] || {
         log_error "hybrid Claude model policy requires the prepared runtime model config"
@@ -155,36 +154,22 @@ hybrid_apply_model_policy() {
         log_error "hybrid Claude model policy cannot find the configured model provider"
         return 1
     fi
-
-    tmp_file="${config_file}.hybrid.$$.tmp"
-    umask 077
-    if ! jq --arg provider "$provider" --arg primary_model "$primary_model" --arg model "$HYBRID_MODEL_ID" '
-        .models.providers[$provider].models |= (
-          . as $models
-          | if any(.[]?; .id == $model) then .
-            else (($models | map(select(.id == $primary_model))[0]) // {}) as $template
-              | . + [($template + {id: $model, name: $model})]
-            end
-        )
-        | .agents.defaults.model.primary = ($provider + "/" + $model)
-        | .agents.defaults.models = ((.agents.defaults.models // {}) + {
-            ($provider + "/" + $model): {alias: $model}
-          })
-    ' "$config_file" > "$tmp_file"; then
-        rm -f "$tmp_file"
-        log_error "hybrid Claude model policy failed to update the runtime model config"
+    if ! jq -e --arg provider "$provider" --arg model "$primary_model" '
+        any(.models.providers[$provider].models[]?; .id == $model)
+    ' "$config_file" >/dev/null; then
+        log_error "hybrid Claude model policy cannot find the configured primary model"
         return 1
     fi
-    chmod 600 "$tmp_file"
-    mv "$tmp_file" "$config_file"
 
-    export SINGLEBOX_REQUIRED_OPENCLAW_MODEL="${provider}/${HYBRID_MODEL_ID}"
-    export LLM_FAST_MODEL="$HYBRID_MODEL_ID"
-    export LLM_BALANCED_MODEL="$HYBRID_MODEL_ID"
-    export LLM_REASONING_MODEL="$HYBRID_MODEL_ID"
-    export LLM_LONG_CONTEXT_MODEL="$HYBRID_MODEL_ID"
-    export LLM_EXTRACTION_MODEL="$HYBRID_MODEL_ID"
-    log_info "Hybrid Claude model policy: OpenClaw, Claude Code, and SOP use ${HYBRID_MODEL_ID} (provider=${provider})"
+    HYBRID_MODEL_ID="$primary_model"
+    export HYBRID_MODEL_ID
+    export SINGLEBOX_REQUIRED_OPENCLAW_MODEL="$primary"
+    export LLM_FAST_MODEL="$primary_model"
+    export LLM_BALANCED_MODEL="$primary_model"
+    export LLM_REASONING_MODEL="$primary_model"
+    export LLM_LONG_CONTEXT_MODEL="$primary_model"
+    export LLM_EXTRACTION_MODEL="$primary_model"
+    log_info "Hybrid model policy: OpenClaw, Claude Code, and SOP use configured primary ${primary}"
 }
 
 hybrid_validate_profiles() {

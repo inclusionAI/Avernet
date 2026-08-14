@@ -53,49 +53,42 @@ done
 grep -Fq 'skills/bcs-coordination/references/custom-collaboration.md' "$MANAGER_WORKSPACE/AGENTS.md"
 grep -Fq 'skills/bcs-coordination/references/custom-collaboration-schema.md' "$MANAGER_WORKSPACE/TOOLS.md"
 
+grep -Fq 'AskUserQuestion' "$CLAUDE_PROFILE/platform-data/CLAUDE.md"
+jq -e '.bots[0].runtime | has("model") | not' "$CLAUDE_PROFILE/bots.json" >/dev/null
+
+MODEL_CONFIG="$TMP/model-config.json"
+export OPENCLAW_OPENAI_PROVIDER_ID="openai-compatible"
+export OPENCLAW_OPENAI_BASE_URL="https://model.example.test/v1"
+export OPENCLAW_OPENAI_API_KEY="test-token"
+export OPENCLAW_OPENAI_MODEL_ID="glm-local"
+export OPENCLAW_OPENAI_MODEL_NAME="GLM Local"
+singlebox_model_config_write_manual "$MODEL_CONFIG"
+export SINGLEBOX_MODEL_CONFIG_FILE="$MODEL_CONFIG"
+model_config_before="$(shasum -a 256 "$MODEL_CONFIG" | awk '{print $1}')"
+hybrid_apply_model_policy
+model_config_after="$(shasum -a 256 "$MODEL_CONFIG" | awk '{print $1}')"
+[[ "$model_config_after" == "$model_config_before" ]]
+jq -e '
+  .agents.defaults.model.primary == "openai-compatible/glm-local"
+  and .agents.defaults.models["openai-compatible/glm-local"].alias == "GLM Local"
+  and ([.models.providers["openai-compatible"].models[].id] == ["glm-local"])
+' "$MODEL_CONFIG" >/dev/null
+[[ "$HYBRID_MODEL_ID" == "glm-local" ]]
+[[ "$SINGLEBOX_REQUIRED_OPENCLAW_MODEL" == "openai-compatible/glm-local" ]]
+[[ "$LLM_FAST_MODEL" == "glm-local" ]]
+[[ "$LLM_BALANCED_MODEL" == "glm-local" ]]
+[[ "$LLM_REASONING_MODEL" == "glm-local" ]]
+[[ "$LLM_LONG_CONTEXT_MODEL" == "glm-local" ]]
+[[ "$LLM_EXTRACTION_MODEL" == "glm-local" ]]
+
 IFS=$'\x1f' read -r role _ _ port config_dir workspace model prompt permission < <(claude_profile_entries)
 [[ "$role" == "platform-data" ]]
 [[ "$port" == "18900" ]]
-[[ "$model" == "Kimi-K2.6" ]]
+[[ "$model" == "glm-local" ]]
 [[ "$permission" == "bypassPermissions" ]]
 [[ "$config_dir" == "$TMP/claude-config" ]]
 [[ "$workspace" == "$TMP/claude-workspace" ]]
 [[ "$prompt" == "$CLAUDE_PROFILE/platform-data/CLAUDE.md" ]]
-grep -Fq 'AskUserQuestion' "$CLAUDE_PROFILE/platform-data/CLAUDE.md"
-
-MODEL_CONFIG="$TMP/model-config.json"
-cat > "$MODEL_CONFIG" <<'JSON'
-{
-  "models": {
-    "providers": {
-      "antchat": {
-        "models": [
-          {"id": "Kimi-K2.5", "name": "Kimi-K2.5", "input": ["text"]}
-        ]
-      }
-    }
-  },
-  "agents": {
-    "defaults": {
-      "model": {"primary": "antchat/Kimi-K2.5"},
-      "models": {"antchat/Kimi-K2.5": {"alias": "Kimi-K2.5"}}
-    }
-  }
-}
-JSON
-export SINGLEBOX_MODEL_CONFIG_FILE="$MODEL_CONFIG"
-hybrid_apply_model_policy
-jq -e '
-  .agents.defaults.model.primary == "antchat/Kimi-K2.6"
-  and .agents.defaults.models["antchat/Kimi-K2.6"].alias == "Kimi-K2.6"
-  and ([.models.providers.antchat.models[].id] | index("Kimi-K2.6")) != null
-' "$MODEL_CONFIG" >/dev/null
-[[ "$SINGLEBOX_REQUIRED_OPENCLAW_MODEL" == "antchat/Kimi-K2.6" ]]
-[[ "$LLM_FAST_MODEL" == "Kimi-K2.6" ]]
-[[ "$LLM_BALANCED_MODEL" == "Kimi-K2.6" ]]
-[[ "$LLM_REASONING_MODEL" == "Kimi-K2.6" ]]
-[[ "$LLM_LONG_CONTEXT_MODEL" == "Kimi-K2.6" ]]
-[[ "$LLM_EXTRACTION_MODEL" == "Kimi-K2.6" ]]
 
 export BCSFUSE_RUNTIME_DIR="$TMP/bcsfuse-runtime"
 mkdir -p "$BCSFUSE_RUNTIME_DIR/env"
@@ -116,11 +109,11 @@ bcsfuse_load_env
 
 export HYBRID_CLAUDE_ACTIVE=1
 bcsfuse_load_env
-[[ "$LLM_FAST_MODEL" == "Kimi-K2.6" ]]
-[[ "$LLM_BALANCED_MODEL" == "Kimi-K2.6" ]]
-[[ "$LLM_REASONING_MODEL" == "Kimi-K2.6" ]]
-[[ "$LLM_LONG_CONTEXT_MODEL" == "Kimi-K2.6" ]]
-[[ "$LLM_EXTRACTION_MODEL" == "Kimi-K2.6" ]]
+[[ "$LLM_FAST_MODEL" == "glm-local" ]]
+[[ "$LLM_BALANCED_MODEL" == "glm-local" ]]
+[[ "$LLM_REASONING_MODEL" == "glm-local" ]]
+[[ "$LLM_LONG_CONTEXT_MODEL" == "glm-local" ]]
+[[ "$LLM_EXTRACTION_MODEL" == "glm-local" ]]
 
 unset BOTS_EXCLUDED_PROFILE_SOURCE
 [[ "$(bots_dynamic_count)" == "4" ]]
@@ -241,18 +234,31 @@ test_provider_bot_registration_keeps_profile_display_name() (
 
 test_provider_bot_registration_keeps_profile_display_name
 
-test_merchant_hybrid_profile_defaults() (
+test_hybrid_profile_defaults() (
     log_info() { :; }
 
     unset BOTS_PROFILE_DIR BOTS_EXCLUDED_PROFILE_SOURCE CLAUDE_PROFILE_DIR
-    apply_merchant_hybrid_profile_defaults start merchant_hybrid
+    apply_hybrid_profile_defaults start hybrid
+    [ "$BOTS_PROFILE_DIR" = "scripts/4bots_merchant_operations_profile" ]
+    [ -z "${BOTS_EXCLUDED_PROFILE_SOURCE:-}" ]
+    [ -z "${CLAUDE_PROFILE_DIR:-}" ]
+
+    unset BOTS_EXCLUDED_PROFILE_SOURCE CLAUDE_PROFILE_DIR
+    BOTS_PROFILE_DIR="scripts/custom_profile"
+    apply_hybrid_profile_defaults start hybrid
+    [ "$BOTS_PROFILE_DIR" = "scripts/custom_profile" ]
+    [ -z "${BOTS_EXCLUDED_PROFILE_SOURCE:-}" ]
+    [ -z "${CLAUDE_PROFILE_DIR:-}" ]
+
+    unset BOTS_PROFILE_DIR BOTS_EXCLUDED_PROFILE_SOURCE CLAUDE_PROFILE_DIR
+    apply_hybrid_profile_defaults start merchant_hybrid
     [ "$BOTS_PROFILE_DIR" = "scripts/4bots_merchant_operations_profile" ]
     [ "$BOTS_EXCLUDED_PROFILE_SOURCE" = "platform-data" ]
     [ "$CLAUDE_PROFILE_DIR" = "scripts/4bots_merchant_operations_profile_for_claude" ]
 
     unset BOTS_EXCLUDED_PROFILE_SOURCE CLAUDE_PROFILE_DIR
     BOTS_PROFILE_DIR="scripts/custom_profile"
-    apply_merchant_hybrid_profile_defaults start merchant_hybrid
+    apply_hybrid_profile_defaults start merchant_hybrid
     [ "$BOTS_PROFILE_DIR" = "scripts/custom_profile" ]
     [ "$BOTS_EXCLUDED_PROFILE_SOURCE" = "platform-data" ]
     [ "$CLAUDE_PROFILE_DIR" = "scripts/4bots_merchant_operations_profile_for_claude" ]
@@ -260,19 +266,24 @@ test_merchant_hybrid_profile_defaults() (
     BOTS_PROFILE_DIR="scripts/custom_profile"
     BOTS_EXCLUDED_PROFILE_SOURCE="custom-platform-data"
     CLAUDE_PROFILE_DIR="scripts/custom_claude_profile"
-    apply_merchant_hybrid_profile_defaults start merchant_hybrid
+    apply_hybrid_profile_defaults start merchant_hybrid
     [ "$BOTS_PROFILE_DIR" = "scripts/custom_profile" ]
     [ "$BOTS_EXCLUDED_PROFILE_SOURCE" = "custom-platform-data" ]
     [ "$CLAUDE_PROFILE_DIR" = "scripts/custom_claude_profile" ]
 
     unset BOTS_PROFILE_DIR BOTS_EXCLUDED_PROFILE_SOURCE CLAUDE_PROFILE_DIR
-    apply_merchant_hybrid_profile_defaults status merchant_hybrid
+    apply_hybrid_profile_defaults status hybrid
+    [ -z "${BOTS_PROFILE_DIR:-}" ]
+    [ -z "${BOTS_EXCLUDED_PROFILE_SOURCE:-}" ]
+    [ -z "${CLAUDE_PROFILE_DIR:-}" ]
+
+    apply_hybrid_profile_defaults status merchant_hybrid
     [ -z "${BOTS_PROFILE_DIR:-}" ]
     [ -z "${BOTS_EXCLUDED_PROFILE_SOURCE:-}" ]
     [ -z "${CLAUDE_PROFILE_DIR:-}" ]
 )
 
-test_merchant_hybrid_profile_defaults
+test_hybrid_profile_defaults
 
 events="$TMP/events"
 hybrid_port_preflight() { return 0; }
