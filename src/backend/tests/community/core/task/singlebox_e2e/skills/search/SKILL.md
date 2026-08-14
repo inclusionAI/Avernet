@@ -37,6 +37,8 @@ tags: [task, search, dispatch]
   ```
 - **MISS**:`{"outcome":"MISS","miss_reason":"<原因>"}`
 
+> **bot_id / bot_ids 必须填 `catalog` 里的真实 `bot_id`**(剧本角色名 → 在 catalog 里按 `bot_name` 匹配,取该 bot 的 `bot_id`);catalog 中无对应角色名的 bot → 该候选不可用,所有候选都不匹配时返回 MISS。`start_run` 用此 bot_id 真实投递,**角色名不是 bot_id**。
+
 ## 确定式决策剧本(案例 gwqie46v7hzr1w6h)
 
 按 `demand.node_id` 返回(knowledge 只在本 skill):

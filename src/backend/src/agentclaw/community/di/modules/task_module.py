@@ -26,11 +26,6 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
 )
 
 
-def _task_engine_active() -> bool:
-    """TASK_ENGINE=skill(或 truthy)激活真实端口接线;缺省 = 纯内核 stub 路径。"""
-    return bool(os.environ.get("TASK_ENGINE", "").strip().lower() in {"skill", "true", "1"})
-
-
 class TaskModule(Module):
     """Production bindings for the task module(社区核心,所有 profile 装配)。"""
 
@@ -54,11 +49,12 @@ class TaskModule(Module):
     ) -> TaskService:
         """构造 TaskService facade(引擎自当 ResultSink/TaskContextBuilder;构造期收端口)。
 
-        端口接线策略:
-        - TASK_ENGINE 激活且 corp 配置存在 → 构造 OpenApiBotAdapter/BcsHttpAdapter 注入(connector 层);
-          community 无 corp 密钥时不接端口(留 None),引擎仍可用内核纯规划/派发 stub 路径。
-        - discover(BotDiscoverServiceProtocol,来自 BotPublicModule)始终传入:
-          SearchBasedDispatchStrategy 在端口齐全时才调,否则 stub MISS。
+        端口接线策略(组合根按 ``DEPLOY_PROFILE`` 选实现,不在 adapter 内 if):
+        - ``DEPLOY_PROFILE=singlebox`` → singlebox 真实链路(``SingleboxEngineAdapter`` 直连 per-bot 引擎 +
+          ``_DoubleBcsClient`` 本地 BCS 占位);本地集成即真实执行。
+        - 其它(corp/prod 由 overlay 覆写)→ community 不内联 BaaS/BCS 密钥,留 None,真实端口由 corp adapter 覆写。
+        - discover(``BotDiscoverServiceProtocol``,来自 BotPublicModule)始终传入:
+          singlebox profile 换 ``SingleboxKeywordBotDiscover``(本地关键字搜索),其余用注入的 BCSFuse。
         """
         bot, bcs = self._resolve_ports()
         discover_port = self._resolve_discover(default=discover, bot_public=bot_public)
@@ -97,28 +93,24 @@ class TaskModule(Module):
 
     @staticmethod
     def _resolve_ports():
-        """构造传输端口(community:默认 None=纯内核;corp 经 overlay 覆写本方法注真实 conn)。
+        """构造传输端口(组合根按 ``DEPLOY_PROFILE`` 选实现,不在 adapter 内 if)。
 
-        环境路由(组合根选实现,不在 adapter 内 if):
-        - ``OPENAPI_BOT_MODE=singlebox`` + ``TASK_ENGINE=skill`` → ``SingleboxEngineAdapter``(直连 per-bot
-          引擎 WebSocket,绕开 BaaS;coop_group bcs 用 ``_DoubleBcsClient`` 占位,本轮 singlebox 走 single_bot)。
-        - 否则 community 不内联 BaaS/BCS 密钥(Rule:环境访问在 DI),真实端口由 corp adapter 层覆写。
+        - ``DEPLOY_PROFILE=singlebox`` → ``SingleboxEngineAdapter``(直连 per-bot 引擎 WebSocket,绕开 BaaS)
+          + ``_DoubleBcsClient``(本地 BCS 占位;singlebox 这一轮走 single_bot 真实执行,coop_group 走模拟)。
+        - 其它(corp/prod 由 overlay 覆写)→ 不内联 BaaS/BCS(社区不发 corp 密钥),真实端口由 corp adapter
+          覆写本 provider。
         """
-        if not _task_engine_active():
+        if os.environ.get("DEPLOY_PROFILE", "").strip().lower() != "singlebox":
             return None, None
-        if os.environ.get("OPENAPI_BOT_MODE", "").strip().lower() == "singlebox":
-            from agentclaw.community.core.task.task_runner.integration.double.double_bcs_client import (
-                _DoubleBcsClient,
-            )
-            from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adapter import (
-                SingleboxEngineAdapter,
-            )
-            backend = os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
-            user_id = os.environ.get("SINGLEBOX_USER_ID", "146836")
-            return SingleboxEngineAdapter(backend_base_url=backend, user_id=user_id), _DoubleBcsClient()
-        # corp 接真实 OpenApiBotAdapter/BcsHttpAdapter 时,在 corp overlay 覆写本 provider 或经 env_url。
-        # community 默认:即便 TASK_ENGINE 开,也无端口实现 → 退化 stub(可被测试用 double 覆盖)。
-        return None, None
+        from agentclaw.community.core.task.task_runner.integration.double.double_bcs_client import (
+            _DoubleBcsClient,
+        )
+        from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adapter import (
+            SingleboxEngineAdapter,
+        )
+        backend = os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
+        user_id = os.environ.get("SINGLEBOX_USER_ID", "146836")
+        return SingleboxEngineAdapter(backend_base_url=backend, user_id=user_id), _DoubleBcsClient()
 
     @staticmethod
     def _resolve_discover(
@@ -126,18 +118,15 @@ class TaskModule(Module):
         default: BotDiscoverServiceProtocol,
         bot_public: BotPublicServiceProtocol,
     ) -> BotDiscoverServiceProtocol:
-        """选 bot 搜推端口(组合根选实现,不在策略内 if)。
+        """选 bot 搜推端口(组合根按 ``DEPLOY_PROFILE`` 选实现)。
 
-        - ``OPENAPI_BOT_MODE=singlebox`` + ``TASK_ENGINE=skill`` → ``SingleboxKeywordBotDiscover``:
-          本地关键字搜索(DB LIKE bot_name/owner_name,``/api/v1/bot-public/search``),
-          因 singlebox 无 BCSFuse 索引服务,本地新建 bot 上不了 BCSFuse recommend 检索。
+        - ``DEPLOY_PROFILE=singlebox`` → ``SingleboxKeywordBotDiscover``:本地关键字搜索(DB LIKE bot_name/
+          owner_name,``/api/v1/bot-public/search``);singlebox 无 BCSFuse 索引服务,本地新建 bot 上不了 recommend。
         - 其它(corp/prod)→ 注入的 BCSFuse ``BotDiscoverService``(语义 recommend)。
         """
-        if not _task_engine_active():
+        if os.environ.get("DEPLOY_PROFILE", "").strip().lower() != "singlebox":
             return default
-        if os.environ.get("OPENAPI_BOT_MODE", "").strip().lower() == "singlebox":
-            from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adapter import (
-                SingleboxKeywordBotDiscover,
-            )
-            return SingleboxKeywordBotDiscover(bot_public)  # type: ignore[arg-type]
-        return default
+        from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adapter import (
+            SingleboxKeywordBotDiscover,
+        )
+        return SingleboxKeywordBotDiscover(bot_public)  # type: ignore[arg-type]

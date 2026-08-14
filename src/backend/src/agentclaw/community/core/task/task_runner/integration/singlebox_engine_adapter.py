@@ -250,6 +250,29 @@ class SingleboxBotProvisioner:
         return {"x-user-id": self._user_id, "accept": "application/json"}
 
     # ===== create bot =====
+    async def _list_my_bots(self) -> list[dict[str, Any]]:
+        """``GET /api/bots/by-owner-or-collaborator`` 取本 user 的 bot 列表(LocalAuth ``x-user-id``)。"""
+        r = await self._http.get(
+            f"{self._backend}/api/bots/by-owner-or-collaborator",
+            params={"user_id": self._user_id}, headers=self._hdrs(),
+        )
+        if r.status_code != 200:
+            return []
+        return (r.json().get("data") or {}).get("items") or []
+
+    async def _find_existing_bot(self, bot_name: str | None) -> dict[str, Any] | None:
+        """按 bot_name 在本 user bot 列表里查已存在的 ACTIVE bot(幂等:已建则复用,不重复建)。
+
+        反复跑集成用例时复用上次 provisioned 的 bot(同进程 session 内 bot 仍在内存);singlebox 重启清空后判定为空→正常新建。
+        """
+        if not bot_name:
+            return None
+        return next(
+            (it for it in await self._list_my_bots()
+             if it.get("bot_name") == bot_name and str(it.get("status") or "").upper() == "ACTIVE"),
+            None,
+        )
+
     async def create_bot(
         self,
         *,
@@ -264,7 +287,19 @@ class SingleboxBotProvisioner:
 
         singlebox 本地走 LocalAuth(``x-user-id`` 无 ctoken);engine 默认 openclaw(对齐 singlebox 主链路)。
         public=1 仅为 BCSFuse discover 可见,设置失败不阻断(本地直连 WS 不经 discover)。
+
+        幂等:按 ``bot_name`` 先查已存在的 ACTIVE bot,复用其 id(确保 public),不重复建。
         """
+        if bot_name:
+            existing = await self._find_existing_bot(bot_name)
+            if existing:
+                bot_id = existing.get("bot_id")
+                if set_public:
+                    try:
+                        await self.set_public(bot_id, True)
+                    except Exception:  # noqa: BLE001  public 设置失败不阻断
+                        pass
+                return bot_id  # 复用已建 bot,跳过 wait_active(已 ACTIVE)
         body: dict[str, Any] = {
             "bot_name": bot_name,
             "bot_desc": bot_desc,
@@ -334,15 +369,20 @@ class SingleboxBotProvisioner:
     ) -> str:
         """装 skill:逐目录(含 ``SKILL.md``)upload → 建 skill set → 加技能(自动激活)→ 落 activate。返 ``skill_set_id``。
 
-        每个 ``skill_dir`` 形如 ``…/skills/planning/(SKILL.md)``;``SKILL.md`` frontmatter.name 即 skill 名,
-        同名重传走 upgrade(``upload_mode`` 控制)。加技能触发的自动激活 + 显式 ``activate`` 调用均幂等。
+        **幂等**:先查该 bot 已装 skill 的 name 集合(``GET /api/skills?bot_id=...``),frontmatter.name 命中已装 →
+        跳过 upload(不重复建同名 skill);skill set 同名复用(``_ensure_skill_set``);add/activate 均幂等。
+        每个 ``skill_dir`` 形如 ``…/skills/planning/(SKILL.md)``;``SKILL.md`` frontmatter.name 即 skill 名。
         """
         import os as _os
 
-        # 1) upload each skill dir (multipart: SKILL.md, file_paths=["SKILL.md"])
+        # 1) upload each skill dir (幂等:跳过已装同名 skill)
+        installed = await self._installed_skill_names(bot_id)
         skill_ids: list[str] = []
         for sd in skill_dirs:
             skill_md_path = _os.path.join(sd, "SKILL.md")
+            sname = self._read_skill_name(skill_md_path)
+            if sname and sname in installed:
+                continue  # 已装同名 skill,跳过 upload
             with open(skill_md_path, "rb") as fh:
                 content = fh.read()
             files = {"files": ("SKILL.md", content, "text/markdown")}
@@ -399,8 +439,45 @@ class SingleboxBotProvisioner:
         r.raise_for_status()
         return r.json().get("data") or []
 
+    async def _installed_skill_names(self, bot_id: str) -> set[str]:
+        """``GET /api/skills?bot_id=...&user_id=...`` 取该 bot 已装 skill 的 name 集合(幂等跳过判定依据)。
+
+        singlebox community 模式 active/list 扫 symlink 可能为空;DB 查询 ``/api/skills`` 更可靠(查 skill 表该 bot 名下记录)。
+        """
+        names: set[str] = set()
+        r = await self._http.get(
+            f"{self._backend}/api/skills",
+            params={"user_id": self._user_id, "bot_id": bot_id, "page": 1, "page_size": 200},
+            headers=self._hdrs(),
+        )
+        if r.status_code == 200:
+            for sk in r.json().get("data") or []:
+                n = sk.get("name")
+                if n:
+                    names.add(str(n))
+        return names
+
+    @staticmethod
+    def _read_skill_name(skill_md_path: str) -> str | None:
+        """从 ``SKILL.md`` frontmatter 解析 ``name:`` 字段(幂等跳过判定依据);无 frontmatter 返 None。"""
+        import os as _os
+        if not _os.path.exists(skill_md_path):
+            return None
+        with open(skill_md_path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        if not text.startswith("---"):
+            return None
+        end = text.find("---", 3)
+        if end < 0:
+            return None
+        for line in text[3:end].splitlines():
+            ls = line.strip()
+            if ls.startswith("name:"):
+                return ls[len("name:"):].strip().strip('"').strip("'")
+        return None
+
     async def _ensure_skill_set(self, bot_id: str, name: str, desc: str | None) -> str:
-        """建 skill set;同名已存则复用其 id。"""
+        """建 skill set;同名已存则复用其 id(幂等)。"""
         r = await self._http.get(
             f"{self._backend}/api/skillsets",
             params={"user_id": self._user_id, "bot_id": bot_id},

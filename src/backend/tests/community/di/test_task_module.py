@@ -4,6 +4,7 @@ from agentclaw.community.adapters.http.task.auth import (
     CallbackAuthenticator, NoopCallbackAuthenticator,
 )
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
+from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry, InMemoryCallbackCorrelationRegistry,
@@ -21,6 +22,15 @@ class _StubDiscoverModule(Module):
             def search_by_keyword(self, **kw):
                 return {"total": 0, "items": []}
         return _D()  # type: ignore[return-value]
+
+    @singleton
+    @provider
+    def bot_public(self) -> BotPublicServiceProtocol:
+        """TaskService provider 还 inject BotPublicServiceProtocol(_resolve_discover 单 box 时不用);stub 占位。"""
+        class _BP:
+            def search_public_bots_by_keyword(self, **kw):
+                return {"total": 0, "items": []}
+        return _BP()  # type: ignore[return-value]
 
 
 def test_task_module_binds_callback_singletons():
