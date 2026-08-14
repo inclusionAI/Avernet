@@ -268,8 +268,7 @@ class SingleboxBotProvisioner:
         if not bot_name:
             return None
         return next(
-            (it for it in await self._list_my_bots()
-             if it.get("bot_name") == bot_name and str(it.get("status") or "").upper() == "ACTIVE"),
+            (it for it in await self._list_my_bots() if it.get("bot_name") == bot_name),
             None,
         )
 
@@ -294,12 +293,17 @@ class SingleboxBotProvisioner:
             existing = await self._find_existing_bot(bot_name)
             if existing:
                 bot_id = existing.get("bot_id")
+                if str(existing.get("status") or "").upper() != "ACTIVE" and wait_active:
+                    try:
+                        await self.wait_active(bot_id)  # 残留/并发 PENDING bot 等就绪
+                    except Exception:  # noqa: BLE001  等不到 ACTIVE 仍返回(下游 WS 自愈)
+                        pass
                 if set_public:
                     try:
                         await self.set_public(bot_id, True)
                     except Exception:  # noqa: BLE001  public 设置失败不阻断
                         pass
-                return bot_id  # 复用已建 bot,跳过 wait_active(已 ACTIVE)
+                return bot_id  # 复用已建 bot(任意状态)
         body: dict[str, Any] = {
             "bot_name": bot_name,
             "bot_desc": bot_desc,
@@ -312,7 +316,24 @@ class SingleboxBotProvisioner:
         r.raise_for_status()
         data = r.json()
         if not data.get("success"):
-            raise RuntimeError(f"create_bot failed: {data.get('message') or data}")
+            msg = str(data.get("message") or data)
+            if "already exists" in msg.lower() and bot_name:
+                # 竞态/残留同名 bot(PENDING):按名取回,等 ACTIVE 复用,不报错
+                existing = await self._find_existing_bot(bot_name)
+                if existing:
+                    bot_id = existing.get("bot_id")
+                    if wait_active:
+                        try:
+                            await self.wait_active(bot_id)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    if set_public:
+                        try:
+                            await self.set_public(bot_id, True)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    return bot_id
+            raise RuntimeError(f"create_bot failed: {msg}")
         bot = (data.get("data") or {}).get("bot") or {}
         bot_id = bot.get("bot_id")
         if not bot_id:
