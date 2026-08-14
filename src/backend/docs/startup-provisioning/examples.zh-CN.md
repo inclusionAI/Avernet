@@ -226,8 +226,12 @@ engine_config:
 一概不碰）→ 经 `EngineConfigServiceProtocol.write_bot_config` 写回。
 键的语义归引擎所有，平台只做形状校验，与现有 PUT 一致。
 
-**交付**：ARCA 系即上述 provider-blind 写；teclaw 的编译目标为
-`BotConfigArtifact.engine_overrides`（待确认项 T3，见
+**交付**：两个家族走同一条 provider-blind 写路径——分派器把 teclaw 的
+engine-config 落点解析为逻辑路径 `config/teclaw.json`，经
+`TeclawDeviceFileSystem` 转发到引擎的 `/api/v1/file/upload`，由引擎落到
+自己的挂载上（`DeviceFilesystemDispatcher.engine_config_path` 现状）。
+artifact **不为此类目新增或启用任何字段**（`engine_overrides` 保持不用）；
+唯一待确认的是新建 bot 场景下该文件到达首个实例的时序（待确认项 T3，见
 `engine-requirements.zh-CN.md`）。
 
 **注意**：`engine_ext` 与此类目无关且永不可经 manifest 触碰——那是引擎
@@ -305,12 +309,12 @@ script:
 
 ## 7. 案例对照总表
 
-| 类目 | 场景一句话 | 等价的人工调用 | apply 动作 | teclaw artifact 落点 |
+| 类目 | 场景一句话 | 等价的人工调用 | apply 动作 | teclaw 落点 |
 | --- | --- | --- | --- | --- |
 | mcp | 全量实例带会议 MCP | mcp servers/config API | 权限校验 + 入 bot MCP 集合 | `mcp.servers[]` |
 | resources | FAQ 表每周更新自动同步 | resources 上传 API | fetch → digest 比对 → 资源写路径 | `resources[]` |
 | skills | 质检 skill 锁版全量生效 | skills upload + activate | fetch → upload(created/updated) → activate | `skills[]`（scope=user） |
-| engine_config | 语言/风格统一且不可漏配 | engine-config PUT | 声明键逐键覆盖 → provider-blind 写 | `engine_overrides`（T3） |
+| engine_config | 语言/风格统一且不可漏配 | engine-config PUT | 声明键逐键覆盖 → provider-blind 写 | 既有 `config/teclaw.json` 文件通道（非 artifact 字段，T3） |
 | identity | 人设集中运营、红线内联 | identity PUT × N | fetch/内联 → IdentityService 写 | `identity_files[]` |
 | script | 沙箱内网取当日白名单 | ssh/手工（无 API） | #935 启动链现状 | ——（不支持） |
 

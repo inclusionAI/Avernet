@@ -111,7 +111,7 @@ reconcile / quarantine 机制不认识它们，**可能把它们当作 drift 清
 | 重建式 restart（destroy-and-create） | ✅ | 与 #935 script 的重跑边界一致 |
 | scale-out | ❌ | 复用上次 compose 的结果。实例间天然一致：所有实例共享同一份平台状态 |
 | manifest PUT | ❌ | **惰性生效**，与 #935「PUT script 不影响活容器」口径一致 |
-| `POST …/provisioning/apply`（显式） | ✅ | 用户要「立即生效」时用。对 teclaw = 重组一份新版本 artifact、推**一次**——单位仍是整份文档，不退化为调用风暴 |
+| `POST …/provisioning/apply`（显式） | ✅ | 用户要「立即生效」时用。落成实体后经各 provider 的**既有**通道生效——对活的 teclaw bot 即其既有逐文件通道（与今天手工调 open API 的生效方式一致；`TeclawDeviceFileSystem` 现状即「活容器是文件真相源，编辑不整包重投」），artifact 重组仍只发生在既有晋升点 |
 
 ### 3.2 GitOps 语义：声明获胜、漂移纠正
 

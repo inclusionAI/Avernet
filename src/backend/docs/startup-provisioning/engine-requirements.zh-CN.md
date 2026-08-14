@@ -53,11 +53,17 @@ manifest 结果（apply 先于组装），不存在「起来之后逐个补打�
   到同一状态、无副作用累积；条目内容变化时（同 name 的 skill 指到新的
   store 对象）旧内容被替换而非并存。我们理解现有整包重投模型已隐含此语义，
   请确认为显式契约。
-- **T3（engine_config 槽位）**：manifest 的 `engine_config` 类别对 teclaw
-  的编译目标——`BotConfigArtifact.engine_overrides` 是否是正确的槽位？
-  该字段现状为空对象，需确认贵侧消费语义（逐键覆盖引擎默认配置）与我们的
-  合并语义（design/manifest-schema §3.4）一致。若贵侧认为应走其他通道，
-  由 teclaw 与 backend 共同定。
+- **T3（engine config 的创建时序）**：`engine_config` 类别**不落 artifact
+  字段**——它走既有通道：provider-blind 的 engine-config 服务把逻辑路径
+  `config/teclaw.json` 的 JSON 文档经贵侧引擎的 `/api/v1/file/upload`
+  逐文件写入（`DeviceFilesystemDispatcher.engine_config_path` +
+  `TeclawDeviceFileSystem` 现状——今天的
+  `PUT /openapi/v1/bots/{bot_id}/engine-config` 已经这样工作）。
+  `engine_overrides` 保持不用。需确认的是**新建 bot 场景的时序**：
+  ① 创建时容器尚未就绪，apply 产出的 `config/teclaw.json` 如何到达首个
+  实例——初始文件集是否会包含它，还是 apply 需在 ACTIVE 后经逐文件通道
+  补写；② 引擎何时读取该文件（仅启动读一次，还是会重读）——这决定
+  ACTIVE 后补写是否需要重启才生效。
 
 v2 才可能涉及的唯一契约增量：**条目级应用结果上报**（哪个 skill 装成功了）。
 v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化环节的
@@ -83,7 +89,7 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
 
 | # | 问题 | 倾向 | 决策人 |
 | --- | --- | --- | --- |
-| O1 | `engine_config` 对 teclaw 的槽位（=T3） | `engine_overrides` | teclaw + backend |
+| O1 | teclaw engine config 的创建时序（=T3：首实例如何拿到 `config/teclaw.json`、引擎读取时机） | 走既有 `config/teclaw.json` 文件通道；`engine_overrides` 不启用 | teclaw + backend |
 | O2 | desktop 是否纳入 v1 的 manifest 支持面 | 纳入（平台侧 apply 无额外成本），交付路径由 desktop owner 确认 | desktop owner |
 | O3 | 显式 `POST …/apply` 是否进 v1 | 进（业务「立即生效」诉求大概率存在；teclaw 侧 = 一次 artifact 重组下发，无新机制） | backend + 业务 |
 | O4 | 限额数值（manifest-schema §5） | 按建议值起步 | backend |

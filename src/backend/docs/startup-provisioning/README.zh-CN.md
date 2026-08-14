@@ -43,8 +43,10 @@ skills、engine config、identity 文件，以及（在支持的引擎上）一�
 - **manifest apply 落成真实平台实体**（路线 B），而不是 compose 时虚拟合并：
   平台视图 = 容器实况，skills-pool reconcile 天然认识这些实体，UI 可见。
 - **teclaw 的 artifact 契约零改动**：manifest 编译产物落在
-  `BotConfigArtifact` 现有词汇表内（`SkillRef` / `FileRef` / `McpServerRef` /
-  `engine_overrides`），URL 源由平台在组装时物化进 OSS store。
+  `BotConfigArtifact` 现有词汇表内（`SkillRef` / `FileRef` /
+  `McpServerRef`；engine config 走既有的 `config/teclaw.json` 文件通道，
+  不新增、不启用任何 artifact 字段），URL 源由平台在组装时物化进 OSS
+  store。
 - **GitOps 语义**：manifest 管辖的实体每个 apply 点重新收敛，声明状态获胜，
   手工漂移被纠正；未声明的实体完全不碰。
 - **私有源鉴权走租户级凭证引用**：secret 不入 manifest / script / URL，

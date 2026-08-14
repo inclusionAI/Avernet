@@ -88,12 +88,12 @@ v1 仅支持请求头注入；query 参数型、mTLS 见开放问题 O8。
 
 各类别的映射一览（详见各小节）：
 
-| 类别 | 平台实体（apply 落点） | ARCA 系交付 | teclaw 交付（artifact 字段） |
+| 类别 | 平台实体（apply 落点） | ARCA 系交付 | teclaw 交付 |
 | --- | --- | --- | --- |
 | mcp | MCP 启用配置（现 `openapi_v1/mcp` 同源服务） | 现有 per-MCP push（`/api/mcp`） | `mcp.servers[]`（`McpServerRef`，凭证 compose 时内联，现状机制） |
 | resources | resource 记录（现 `openapi_v1/resources` 同源服务） | 现有 resource 交付 | `resources[]`（`ResourceRef {store,path}`） |
 | skills | 本地 skill 记录（现 skills upload 同源服务） | 现有 skill 交付 / NAS | `skills[]`（`SkillRef, scope=user`） |
-| engine_config | engine config（`EngineConfigServiceProtocol.write_bot_config`） | 现有 provider-blind 写 | `engine_overrides`（**待确认项 T3**） |
+| engine_config | engine config（`EngineConfigServiceProtocol.write_bot_config`） | 现有 provider-blind 写 | 同一条 provider-blind 写（既有 `config/teclaw.json` 文件通道，**非 artifact 字段**；创建时序确认 T3） |
 | identity | identity 文件记录（现 `openapi_v1/identity` 同源服务） | 现有 identity 交付 | `identity_files[]`（`FileRef`） |
 | script | script 存储（#935 现状） | `after_create_cmd_hook` 启动链 | **不支持，写入时拒绝** |
 
