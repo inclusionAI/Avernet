@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+from gateway.community.config import Config, UserConfig
 from gateway.community.core.authn import RouteSecurity
 from gateway.community.core.forwarding import DomainMap, Forwarding
 from gateway.community.plugins.schema_catalog.file import FileSchemaCatalog
@@ -392,3 +393,53 @@ class TestBuildForwardingWithMixedSources:
         assert http_cat._sources["chat"] == "https://example.com/openapi.json"
         assert isinstance(result, Forwarding)
         assert result.schema_catalogs is not None
+
+    def test_routes_internal_http_schema_to_http_catalog(self, tmp_path: Path) -> None:
+        from gateway.community.bootstrap._forwarding import build_forwarding
+
+        config = Config(
+            config_dir=tmp_path,
+            user_config=UserConfig(
+                upstreams={
+                    "base_path": "/openapi/v1",
+                    "domains": {
+                        "bots": {
+                            "server": "backend",
+                            "schema": {
+                                "source": "file",
+                                "path": "bots.openapi.json",
+                                "refresh_seconds": 30,
+                            },
+                        }
+                    },
+                    "servers": {"backend": {"base_url": "http://backend:8080"}},
+                },
+                internal_api_docs={
+                    "schemas": {
+                        "bcn-internal": {
+                            "source": "http",
+                            "url": "https://example.com/internal-openapi.json",
+                            "refresh_seconds": 45,
+                        }
+                    }
+                },
+            ),
+        )
+
+        with patch("gateway.community.config.ConfigLoader.load", return_value=config):
+            http_cat = HttpSchemaCatalog()
+            file_cat = FileSchemaCatalog()
+
+            result = build_forwarding(
+                schema_catalogs={"file": file_cat, "http": http_cat},
+                forwarder=MagicMock(spec=Forwarder),
+                ws_forwarder=MagicMock(spec=WebSocketForwarder),
+            )
+
+        assert file_cat._sources["bots"] == tmp_path / "bots.openapi.json"
+        assert (
+            http_cat._sources["bcn-internal"]
+            == "https://example.com/internal-openapi.json"
+        )
+        assert result.refresh_seconds == 45
+        assert result.internal_openapi_domains == ("bcn-internal",)
