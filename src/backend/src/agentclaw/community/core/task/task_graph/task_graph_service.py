@@ -28,6 +28,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskNode,
     TaskNodePatch,
     TaskNodeQueryCriteria,
+    TaskSummary,
 )
 
 # 合法状态转换(PLANNING/RUNNING 解耦:PLANNING=规划中(显式委托态),RUNNING=执行中(子执行/自身执行))
@@ -359,6 +360,24 @@ class TaskGraphService:
 
     # v4:remove_subtree 已删——升 BBS 不再删子树,HUNG 节点保留在图里,靠终态传播(子含 HUNG→父 HUNG)
     # 冒泡驱动收敛。dashboard 子树投影仍用 _collect_subtree。
+
+
+    def list_task_summaries(self, status: "Status | None" = None) -> list[TaskSummary]:
+        """列出全部任务摘要(轻量投影),按 run_id 降序(最新在前)。可选按图级 status 过滤。
+
+        visualization / dashboard 列表视图用;不返回完整图对象。跨 task 读经 registry_lock 串行快照。"""
+        with self._registry_lock:
+            summaries: list[TaskSummary] = []
+            for tid, graph in self._graphs.items():
+                if status is not None and graph.status != status:
+                    continue
+                root = next((n for n in graph.tasks if n.node_id == tid), None)
+                title = root.task_spec.metadata.title if root else ""
+                summaries.append(TaskSummary(
+                    task_id=tid, run_id=graph.run_id, status=graph.status,
+                    title=title, node_count=len(graph.tasks), loop_round=graph.loop_round))
+            summaries.sort(key=lambda s: s.run_id, reverse=True)
+            return summaries
 
     def _node_depth(self, task_id: str, node_id: str) -> int:
         """从 relations 分解树递归自算深度(派生不持久)。根=0。"""

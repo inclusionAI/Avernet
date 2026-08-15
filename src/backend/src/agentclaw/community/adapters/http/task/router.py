@@ -18,9 +18,11 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskExecutionGraphDTO,
     TaskInfoDTO,
     TaskOpResultDTO,
+    TaskSummaryDTO,
     callback_from_dto,
     graph_to_dto,
     op_result_to_dto,
+    summary_to_dto,
     task_info_from_dto,
 )
 from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
@@ -63,6 +65,18 @@ async def get_task_dashboard(
     except (TaskNotFoundError, NodeNotFoundError):
         raise HTTPException(status_code=404, detail=f"task_id={task_id} 不存在") from None
     return ApiResponse(success=True, message="OK", error_code=200, data=graph_to_dto(graph))
+
+
+@router.get("/list", response_model=ApiResponse[list[TaskSummaryDTO]])
+async def list_tasks(
+    status: str | None = None,
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
+) -> ApiResponse[list[TaskSummaryDTO]]:
+    """列任务摘要(轻量投影),按 run_id 降序(最新在前)。可选 ``status`` 过滤图级状态。
+
+    visualization/看板列表视图用;不返回完整图对象。"""
+    items = service.list_tasks(status)
+    return ApiResponse(success=True, message="OK", error_code=200, data=[summary_to_dto(s) for s in items])
 
 
 @router.post("/callback/report", response_model=ApiResponse[dict[str, Any]])

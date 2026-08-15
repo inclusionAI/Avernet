@@ -7,6 +7,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskExecutionGraph,
     TaskInfo,
     TaskOpResult,
+    TaskSummary,
 )
 
 
@@ -24,4 +25,10 @@ class TaskServiceProtocol(Protocol):
         self, task_id: str, node_id: str | None = None
     ) -> TaskExecutionGraph:
         """任务执行详情可视化(整图或按 node_id 子树投影),只读。"""
+        ...
+
+    def list_tasks(self, status: "str | None" = None) -> list[TaskSummary]:
+        """列出任务摘要(轻量投影),按 run_id 降序(最新在前);可选按图级 status 过滤。
+
+        visualization/看板列表视图用;不返回完整图对象。"""
         ...

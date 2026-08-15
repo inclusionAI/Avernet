@@ -55,9 +55,12 @@ class TaskPlanner:
             if await strategy.matches(graph):
                 pr = await strategy.apply(graph, target)
                 existing_ids = {n.node_id for n in graph.tasks}
+                strategy_had_children = len(pr.children) > 0
                 pr.children = [n for n in pr.children if n.node_id not in existing_ids]
-                if not pr.children:
-                    pr.has_gap = False  # 去重后无可新增子=无 actionable gap→gap 闭(不误升 BBS)
+                # 仅「策略产了子但全被去重掉(=已存在)」才视 gap 闭(无新增 actionable);
+                # 策略本身返空 + has_gap=True(有 gap 拆不出 / 无规划端口)→ 保留,编排核走深度闸门 HUNG(不假 done)。
+                if not pr.children and strategy_had_children:
+                    pr.has_gap = False
                 return pr
         return PlanResult(children=[], has_gap=False, gap_detail="no_strategy_hit")  # 兜底(不应发生:GapBased 兜底)
 

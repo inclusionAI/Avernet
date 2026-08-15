@@ -17,15 +17,19 @@ from fastapi.testclient import TestClient
 from injector import Injector, Module, provider, singleton
 
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
+from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.adapters.http.task.router import router as task_router
 from agentclaw.community.core.task.domain.models import (
-    AcceptanceCriteria, Context, Goal, Metadata, Status, TaskSpec,
+    AcceptanceCriteria, Context, Goal, Metadata, Status, TaskInfo, TaskSpec,
 )
 from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
 
 
 class _StubDiscoverModule(Module):
-    """BotDiscoverServiceProtocol stub:search_by_keyword 返空(端口未激活,不阻断装配)。"""
+    """BotDiscover/BotPublic 服务端口 stub:search 返空(端口未激活,不阻断装配)。
+
+    TaskModule.task_service 依赖 BotDiscoverServiceProtocol + BotPublicServiceProtocol(非 singlebox
+    走 ``default`` 分支,bot_public 未实际使用但 DI 仍需绑定,否则 injector 直实例化 Protocol 抛 TypeError)。"""
 
     @singleton
     @provider
@@ -34,6 +38,14 @@ class _StubDiscoverModule(Module):
             def search_by_keyword(self, **kw):
                 return {"total": 0, "items": []}
         return _D()  # type: ignore[return-value]
+
+    @singleton
+    @provider
+    def bot_public(self) -> BotPublicServiceProtocol:
+        class _B:
+            def search_public_bots_by_keyword(self, **kw):
+                return {"total": 0, "items": []}
+        return _B()  # type: ignore[return-value]
 
 
 @pytest.fixture
@@ -80,7 +92,8 @@ class TestTaskDashboard:
         r = c.get("/api/task/dashboard", params={"task_id": "t_http"})
         assert r.status_code == 200, r.text
         body = r.json()["data"]
-        assert body["status"] in (Status.RUNNING.value, Status.PLANNING.value)
+        # stub 路径无 owner bot → 无法规划 → 根 gap 拆不出 → 图 HUNG(语义正确:无规划端口不假 done)
+        assert body["status"] == Status.HUNG.value
         assert any(n["node_id"] == "t_http" for n in body["tasks"])
         # 根节点 task_spec 字段透传
         root = next(n for n in body["tasks"] if n["node_id"] == "t_http")
@@ -90,12 +103,16 @@ class TestTaskDashboard:
 
 class TestTaskCallbackReport:
     def test_callback_report_flips_state(self, client):
-        """回投 protocol:先 execute(纯内核 stub 路径无端口 → 根 PENDING 不推进),
-        再手动 add 一个 RUNNING 子节点 + 回投 PASS → 翻 DONE,验证回投入口可达。"""
+        """回投 protocol:经 graph_svc 建图(根 PENDING)→ 手动 add 一个 RUNNING 子节点(
+        模拟引擎已派发)→ POST /callback/report 回投 PASS → 翻 DONE,验证回投 HTTP 端点可达。"""
         c, inj = client
-        # execute 建图(根 PENDING)
-        c.post("/api/task/execute", json=_task_info_dict())
         graph_svc = inj.get(TaskGraphService)
+        # 经 graph_svc 建图(根 PENDING),不走 execute(execute 会驱动引擎在 stub 路径把图推到 DONE,
+        # 致 add_task_nodes 触发条件 a 失效)。本测聚焦 HTTP 回投端点,非引擎规划逻辑。
+        graph_svc.initialize_graph(TaskInfo(
+            task_spec=TaskSpec(Metadata("t_http", "T", "i"), Context("bg"),
+                               Goal("o", [AcceptanceCriteria("a1", "d1")])),
+            source_channel_type="bot", source_channel_id="owner_bot", execution_config={}))
         # 手动建一个 RUNNING 子节点(backdoor:直接调 graph_svc),模拟引擎已派发
         from agentclaw.community.core.task.domain.models import TaskNode, RuntimeInfo
         child = TaskNode(

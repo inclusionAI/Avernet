@@ -13,8 +13,9 @@ from typing import Callable
 
 from agentclaw.community.core.task.domain.models import Status, TaskNodePatch, TaskNodeQueryCriteria
 
-_DEFAULT_SLA_TIMEOUT = 30.0
-_DEFAULT_INTERVAL = 1.0
+_DEFAULT_SLA_TIMEOUT = 600.0   # RUNNING 卡死 backstop(>poller execute SLA 300s,poller 先判 FAIL 走正常重试;此仅兜底 poller 漏判)
+_DEFAULT_PENDING_TIMEOUT = 180.0  # PENDING 派发异常/未派发→重搜推(短阈值尽快重试)
+_DEFAULT_INTERVAL = 120.0        # 巡检间隔 2min(RUNNING/PENDING/FAILED 三扫一次)
 
 
 class TaskHarness:
@@ -33,17 +34,21 @@ class TaskHarness:
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
         default_sla_timeout: float = _DEFAULT_SLA_TIMEOUT,
+        default_pending_timeout: float = _DEFAULT_PENDING_TIMEOUT,
         interval: float = _DEFAULT_INTERVAL,
     ) -> None:
-        """graph: TaskGraphService(只读查询 RUNNING + execution_config);on_harness_fn: 编排核复位入口。"""
+        """graph: TaskGraphService(只读查询 RUNNING + execution_config);on_harness_fn: 编排核复位入口。
+        sla_timeout:RUNNING 卡死 backstop(>poller execute SLA);pending_timeout:PENDING 派发异常重搜推。"""
         self._graph = graph
         self._on_harness_fn = on_harness_fn
         self._clock = clock
         self._sleep = sleep
         self._default_sla = default_sla_timeout
+        self._default_pending = default_pending_timeout
         self._interval = interval
         self._registered: set[str] = set()
         self._dispatched_at: dict[tuple[str, str], float] = {}  # (task_id,node_id) -> 首见 RUNNING 时钟
+        self._pending_seen_at: dict[tuple[str, str], float] = {}  # (task_id,node_id) -> 首见 PENDING(未派发)时钟
         self._lock = threading.RLock()
 
     def register(self, task_id: str) -> None:
@@ -56,13 +61,22 @@ class TaskHarness:
         self._on_harness_fn = fn
 
     def _sla_timeout(self, task_id: str) -> float:
-        """读 SLA_TIMEOUT(优先 execution_config,缺省 default)。"""
+        """读 SLA_TIMEOUT(RUNNING 卡死 backstop;优先 execution_config,缺省 default)。"""
         try:
             cfg = self._graph._execution_config(task_id)
         except Exception:  # noqa: BLE001 - 图不存在/已删 → 退保守默认
             return self._default_sla
         t = cfg.get("SLA_TIMEOUT")
         return float(t) if t is not None else self._default_sla
+
+    def _pending_timeout(self, task_id: str) -> float:
+        """读 PENDING_TIMEOUT(派发异常/未派发→重搜推;优先 execution_config,缺省 default)。"""
+        try:
+            cfg = self._graph._execution_config(task_id)
+        except Exception:  # noqa: BLE001
+            return self._default_pending
+        t = cfg.get("PENDING_TIMEOUT")
+        return float(t) if t is not None else self._default_pending
 
     def _poll_once(self) -> list[TaskNodePatch]:
         """巡检一轮:遍历已登记 task 的 RUNNING 节点,首见记时,超时复位。
@@ -123,11 +137,47 @@ class TaskHarness:
                     continue
                 failed_resets.append(TaskNodePatch(
                     task_id=task_id, node_id=n.node_id, exec_error="acceptance_fail_retry"))
+        # v4:扫描 PENDING(搜推无响应/推理失败/派发失败)未派发节点,按 SLA 超时触发 harness 重试搜推。
+        # 只盯「未派发」PENDING(无 run_mode+assignee);已派发待 start_run 翻转的不纳入(避免误重投)。
+        # backoff:首见记时,等满 SLA 才触发;触发后重置计时(下次仍需等满 SLA)。MISS→on_miss 自闭环,不在此。
+        pending_resets: list[TaskNodePatch] = []
+        pending_seen: set[tuple[str, str]] = set()
+        for task_id in task_ids:
+            try:
+                pnodes = self._graph.query_task_nodes(
+                    task_id, TaskNodeQueryCriteria(status=Status.PENDING)
+                )
+            except Exception:  # noqa: BLE001
+                continue
+            # 只盯「未派发」PENDING:无 run_mode+assignee(未决出执行者);排除 dispatching 飞行态
+            # (已交付 _drain 待 start_run/拉群翻 RUNNING,慢 IO 不应误判超时)与已有 assignee 的 reset 节点(reset 由 RUNNING/FAILED 巡检 inline 处理)
+            pnodes = [n for n in pnodes
+                      if not (n.run_info.run_mode and n.run_info.assignee)
+                      and not n.run_info.extend_props.get("dispatching")]
+            pto = self._pending_timeout(task_id)  # PENDING 派发超时(独立于 RUNNING SLA)
+            now = self._clock()
+            for n in pnodes:
+                key = (task_id, n.node_id)
+                pending_seen.add(key)
+                t0 = self._pending_seen_at.get(key)
+                if t0 is None:
+                    self._pending_seen_at[key] = now  # 首见:记时,本轮不判
+                    continue
+                if now - t0 > pto:
+                    pending_resets.append(TaskNodePatch(
+                        task_id=task_id, node_id=n.node_id, exec_error="pending_dispatch_stuck"))
+                    self._pending_seen_at[key] = now  # 重启 backoff:下次仍需等满 PENDING_TIMEOUT 才再重试
+        with self._lock:
+            self._pending_seen_at = {k: v for k, v in self._pending_seen_at.items() if k in pending_seen}
         for p in resets:
             res = self._on_harness_fn(p)
             if asyncio.iscoroutine(res):
                 asyncio.run(res)
         for p in failed_resets:
+            res = self._on_harness_fn(p)
+            if asyncio.iscoroutine(res):
+                asyncio.run(res)
+        for p in pending_resets:
             res = self._on_harness_fn(p)
             if asyncio.iscoroutine(res):
                 asyncio.run(res)

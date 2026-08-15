@@ -104,6 +104,16 @@ class TaskNodeDTO(BaseModel):
     run_info: RuntimeInfoDTO = Field(default_factory=RuntimeInfoDTO)
 
 
+class TaskSummaryDTO(BaseModel):
+    """GET /api/task/list 返回项(轻量投影)。"""
+    task_id: str
+    run_id: int
+    status: str
+    title: str = ""
+    node_count: int = 0
+    loop_round: int = 0
+
+
 class TaskExecutionGraphDTO(BaseModel):
     run_id: int
     loop_round: int
@@ -181,6 +191,12 @@ def graph_to_dto(graph) -> TaskExecutionGraphDTO:
         output=dict(graph.output), tasks=nodes, extend_props=dict(graph.extend_props),
     )
 
+
+
+def summary_to_dto(s) -> TaskSummaryDTO:
+    """TaskSummary -> TaskSummaryDTO(Rule 22)。"""
+    return TaskSummaryDTO(task_id=s.task_id, run_id=s.run_id, status=s.status.value,
+                          title=s.title, node_count=s.node_count, loop_round=s.loop_round)
 
 def op_result_to_dto(result) -> TaskOpResultDTO:
     return TaskOpResultDTO(task_id=result.task_id, success=result.success, run_id=result.run_id,

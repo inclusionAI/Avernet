@@ -354,10 +354,15 @@ class ExecutionEngine:
             logger.warning("[on_harness] task=%s node=%s 达 MAX_HARNESS(%d)→HUNG", task_id, node_id, max_harness)
             self._hung_and_escalate(task_id, node_id, "exec_stuck")
             return
-        # 复位到 PENDING(重新派发执行:FAILED→PENDING / RUNNING→PENDING),re-prepare 重搜推+派发
+        # 复位到 PENDING 重新派发执行:FAILED/RUNNING→PENDING;PENDING 派发卡住(搜推无响应/派发失败)清
+        # dispatch_error 让 _prepare_into 重新搜推(harness owns 重试计数+HUNG 上限,正常 cycle 跳过 dispatch_error 节点)
         if node.status in {Status.FAILED, Status.RUNNING}:
             self._graph.update_task_node_info(
                 TaskNodePatch(task_id=task_id, node_id=node_id, status=Status.PENDING)
+            )
+        elif node.status == Status.PENDING and node.run_info.extend_props.get("dispatch_error"):
+            self._graph.update_task_node_info(
+                TaskNodePatch(task_id=task_id, node_id=node_id, extend_props_patch={"dispatch_error": None})
             )
         await self._prepare_into(task_id, side)
 
@@ -455,12 +460,20 @@ class ExecutionEngine:
 
     # ===== 派发+执行(通用)=====
     async def _prepare_into(self, task_id: str, side: list[tuple]) -> None:
-        """查 PENDING 可派发节点 → await dispatcher.dispatch 返填执行者 → 叶子落 RUNNING(side 'run');
-        HIT_MULTI_BOTS 标 pending_group_formation(side 'group' 待锁外拉群);MISS(side 'miss')。
-        v4:派发命中叶子置 RUNNING(真执行);父节点是 PLANNING(add_task_nodes 已置),不在此改。"""
-        pending = self._graph.query_task_nodes(
+        """查「未派发」PENDING 节点 → await dispatcher.dispatch 返填执行者 → HIT 先落 run_mode/assignee
+        + 飞行标记 ``dispatching``(保持 PENDING),start_run/form_coop_group 成功后由 _drain 翻 RUNNING(side 'run'/'group')
+        并清 dispatching;MISS(side 'miss');派发异常(side 'dispatch_fail',留 PENDING 交 harness 按超时重试搜推)。
+
+        状态机:RUNNING=真执行;派发命中只填执行者+置 dispatching,PENDING 维持到 start_run 成功后才翻。
+        跳过:① dispatching=True 节点(已交付 _drain 待翻 RUNNING 的飞行态,防双派发);② dispatch_error 节点
+        (搜推异常/派发失败,harness owns 重试+HUNG 上限,正常 cycle 不重复搜推防 bot 调用风暴)。
+        reset 节点(FAILED/RUNNING→PENDING 复位,无 dispatching)不在跳过之列→重新派发执行。"""
+        all_pending = self._graph.query_task_nodes(
             task_id, TaskNodeQueryCriteria(status=Status.PENDING)
         )
+        pending = [n for n in all_pending
+                   if not n.run_info.extend_props.get("dispatching")
+                   and not n.run_info.extend_props.get("dispatch_error")]
         if not pending:
             return
         logger.info("[prepare] task=%s 待派发节点=%s", task_id, [n.node_id for n in pending])
@@ -472,53 +485,99 @@ class ExecutionEngine:
             if gf is not None:
                 logger.info("[prepare] task=%s node=%s → group(HIT_MULTI_BOTS collab=%s bot_ids=%s)",
                             task_id, node.node_id, gf.collab_mode, gf.bot_ids)
+                # 飞行标记:group 交付 _drain 拉群前置,防并发 cycle 双搜推双拉群
+                self._graph.update_task_node_info(
+                    TaskNodePatch(task_id=task_id, node_id=node.node_id, run_mode="coop_group",
+                                  extend_props_patch={"dispatching": True}))
                 side.append(("group", node, gf))
                 continue
             if node.run_info.run_mode and node.run_info.assignee:
                 logger.info("[prepare] task=%s node=%s → run(mode=%s assignee=%s)",
                             task_id, node.node_id, node.run_info.run_mode, node.run_info.assignee)
+                # HIT:落执行者+飞行标记 dispatching(保持 PENDING);start_run 成功后 _drain 翻 RUNNING+清 dispatching
                 self._graph.update_task_node_info(
-                    TaskNodePatch(task_id=task_id, node_id=node.node_id, status=Status.RUNNING,
-                                  run_mode=node.run_info.run_mode, assignee=node.run_info.assignee)
-                )
+                    TaskNodePatch(task_id=task_id, node_id=node.node_id,
+                                  run_mode=node.run_info.run_mode, assignee=node.run_info.assignee,
+                                  extend_props_patch={"dispatching": True}))
                 to_run.append(node)
             elif miss:
                 logger.info("[prepare] task=%s node=%s → miss(%s)", task_id, node.node_id, miss)
                 side.append(("miss", TaskNodePatch(task_id=task_id, node_id=node.node_id,
                             extend_props_patch={"miss_events": miss})))
+            else:
+                # 派发未产出执行者也非 MISS(dispatcher 已容错吞异常):标 dispatch_error 留 PENDING,harness 按超时重试搜推
+                derr = node.run_info.extend_props.get("dispatch_error") or "no_result"
+                logger.warning("[prepare] task=%s node=%s 派发未产出(%s)→留 PENDING 待 harness", task_id, node.node_id, derr)
+                side.append(("dispatch_fail", TaskNodePatch(task_id=task_id, node_id=node.node_id,
+                            extend_props_patch={"dispatch_error": derr})))
         if to_run:
             side.append(("run", to_run))
 
     async def _drain(self, task_id: str, side: list[tuple]) -> None:
-        """锁外统一执行 side effects。v4:run 投递 fire-and-forget(asyncio.create_task,不 await 阻塞),
-        miss 推进与 run 投递并行,绝不让 miss 递归 await 堵住真正命中 bot 的 start_run(消除"假 RUNNING")。
-        保证锁内永不 await。"""
+        """锁外统一执行 side effects。投递/拉群 IO 锁外 await;翻态(side effect)收口锁内。
+        v4 状态机:run 经 start_run 投递,成功后才翻 RUNNING+清 dispatching(对齐"调执行方法后置 RUNNING");
+        失败→清执行者+清 dispatching+标 dispatch_error 留 PENDING 交 harness 重试搜推。group 经 form_coop_group
+        拉群后翻 RUNNING+清 dispatching。miss 递归推进与 run 投递不互相阻塞。"""
         run_nodes: list[TaskNode] = []
         miss_tasks: list[TaskNodePatch] = []
+        dispatch_fail_patches: list[TaskNodePatch] = []
         for kind, *payload in side:
             if kind == "run":
                 run_nodes.extend(payload[0])
             elif kind == "group":
                 node, gf = payload
                 logger.info("[drain] task=%s node=%s 拉群(collab=%s)", task_id, node.node_id, gf.collab_mode)
-                gid = await self._runner.form_coop_group(gf)
+                try:
+                    gid = await self._runner.form_coop_group(gf)
+                except Exception as ex:  # noqa: BLE001  拉群异常→清 dispatching 留 PENDING 交 harness
+                    logger.warning("[drain] task=%s node=%s 拉群异常:%s→留 PENDING 待 harness", task_id, node.node_id, ex)
+                    with self._lock_for(task_id):
+                        self._graph.update_task_node_info(
+                            TaskNodePatch(task_id=task_id, node_id=node.node_id, run_mode="", assignee="",
+                                          extend_props_patch={"dispatching": None, "dispatch_error": "form_group_failed"}))
+                    continue
                 node.run_info.assignee = gid
                 with self._lock_for(task_id):
                     self._graph.update_task_node_info(
                         TaskNodePatch(task_id=task_id, node_id=node.node_id, status=Status.RUNNING,
-                                      run_mode=node.run_info.run_mode, assignee=gid)
-                    )
+                                      run_mode=node.run_info.run_mode, assignee=gid,
+                                      extend_props_patch={"dispatching": None}))
                 run_nodes.append(node)
             elif kind == "miss":
                 miss_tasks.append(payload[0])
+            elif kind == "dispatch_fail":
+                dispatch_fail_patches.append(payload[0])
             elif kind == "finish":
                 logger.info("[drain] task=%s finish(根 gap 闭→图 DONE)", task_id)
                 self._maybe_finish_graph(payload[0])
-        # ① run 立即投递(fire-and-forget):不被 miss 递归阻塞
+        # ① run:start_run 投递,成功后翻 RUNNING+清 dispatching;失败清执行者+清 dispatching+标 dispatch_error 留 PENDING
         if run_nodes:
             logger.info("[drain] task=%s start_run %d 节点:%s", task_id, len(run_nodes), [n.node_id for n in run_nodes])
-            await self._runner.start_run(run_nodes)
-        # ② miss 推进(递归 collect+drain)
+            try:
+                results = await self._runner.start_run(run_nodes)
+            except Exception as ex:  # noqa: BLE001  start_run 异常→全部当失败,清 dispatching 留 PENDING 交 harness
+                logger.warning("[drain] task=%s start_run 异常:%s→全部留 PENDING 待 harness", task_id, ex)
+                results = [False] * len(run_nodes)
+            with self._lock_for(task_id):
+                cur_map = {x.node_id: x for x in self._graph.query_task_nodes(
+                    task_id, TaskNodeQueryCriteria(node_ids=[n.node_id for n in run_nodes]))}
+                for node, ok in zip(run_nodes, results):
+                    if not ok:
+                        logger.warning("[drain] task=%s node=%s start_run 失败→清执行者留 PENDING 待 harness", task_id, node.node_id)
+                        # 清 run_mode/assignee(置空串)+清 dispatching 使其重新可搜推;标 dispatch_error
+                        self._graph.update_task_node_info(
+                            TaskNodePatch(task_id=task_id, node_id=node.node_id, run_mode="", assignee="",
+                                          extend_props_patch={"dispatching": None, "dispatch_error": "start_run_failed"}))
+                        continue
+                    cur = cur_map.get(node.node_id)
+                    if cur is not None and cur.status == Status.PENDING:
+                        self._graph.update_task_node_info(
+                            TaskNodePatch(task_id=task_id, node_id=node.node_id, status=Status.RUNNING,
+                                          extend_props_patch={"dispatching": None}))
+        # ② dispatch_fail:落 dispatch_error(留 PENDING,harness 按超时重试搜推)
+        for patch in dispatch_fail_patches:
+            self._graph.update_task_node_info(patch)
+        # ③ miss 推进(递归 collect+drain)
         for m in miss_tasks:
             await self.on_miss(m)
 

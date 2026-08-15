@@ -20,6 +20,7 @@ from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.task_center.task_service import TaskService
+from agentclaw.community.core.task.task_harness.harness import TaskHarness
 from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry, InMemoryCallbackCorrelationRegistry,
@@ -58,7 +59,10 @@ class TaskModule(Module):
         """
         bot, bcs = self._resolve_ports()
         discover_port = self._resolve_discover(default=discover, bot_public=bot_public)
-        return TaskService(graph, bot=bot, bcs=bcs, discover=discover_port)
+        # harness 旁路常驻巡检(SLA 超时复位 / FAILED 重派重试 / PENDING 派发超时重搜推);
+        # facade 内部 set_on_harness 回填编排核入口并启动 daemon 巡检线程。
+        harness = TaskHarness(graph)
+        return TaskService(graph, harness=harness, bot=bot, bcs=bcs, discover=discover_port)
 
     @singleton
     @provider

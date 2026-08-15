@@ -39,6 +39,106 @@ core/task/
 └── task_mining/                   # 占位(另一位同学的任务挖掘模块,本框架不实现)
 ```
 
+## 节点状态机流转(6 节点态 + 图态;双机实现于 TaskGraphService)
+
+节点态:`PENDING` / `PLANNING` / `RUNNING` / `DONE` / `FAILED` / `HUNG`;图态:`RUNNING` / `DONE` / `HUNG`。
+
+- `_ACCEPTANCE_TRANSITIONS`(唯一终态翻转依据 = `TaskNodePatch.acceptance_result`,skill 回投):`RUNNING→{DONE,FAILED}`。
+- `_DIRECT_TRANSITIONS`(框架内部 status 直驱:派发/复位/传播/HUNG):见下图合法边。
+- `_DELEGATABLE_PARENT={PENDING,FAILED,PLANNING}`:`add_task_nodes` 侧向改结构时,父可被委托进 `PLANNING`。
+- **语义解耦**:`PLANNING`=规划中(显式委托态,等子完成/gap 重算);`RUNNING`=真执行叶子(`single_bot`/`coop_group`/`bbs`)。规划出子的父永不为 `RUNNING`,始终 `PLANNING`。
+
+```mermaid
+stateDiagram-v2
+    direction TB
+
+    [*] --> PENDING : initialize_graph(根 PENDING;图=RUNNING)
+
+    PENDING --> RUNNING : 派发命中 + start_run 成功
+    note on transition
+      派发命中先填 run_mode/assignee + 置 dispatching 飞行态,
+      _drain 等 start_run 成功才翻 RUNNING 并清 dispatching
+    end note
+    PENDING --> PLANNING : add_task_nodes 委托为结构父(父→PLANNING) / on_miss(depth<MAX → plan 拆细)
+    PENDING --> HUNG : on_miss(depth>=MAX 拆不动,连续 MISS)
+
+    PLANNING --> DONE : 子全 DONE + plan 返 [](gap 闭)→ 传播治愈(非根) / 根 gap 闭 → 图 DONE
+    PLANNING --> HUNG : on_miss(depth>=MAX 拆不出子) / gap_no_progress(有 gap 拆不出)
+    PLANNING --> PLANNING : 新子 add_task_nodes(父维持委托态)
+
+    RUNNING --> DONE : 回投 verdict=PASS(_on_pass_collect)
+    RUNNING --> FAILED : 回投 verdict=FAIL+gaps(_on_fail_collect)
+    RUNNING --> PENDING : Harness 复位(超时/崩溃/exec_error _on_harness_collect)
+    RUNNING --> HUNG : Harness 重试达 MAX_HARNESS
+
+    FAILED --> PENDING : Harness 重新派发执行(re-dispatch 不拆; <MAX_HARNESS)
+    FAILED --> HUNG : Harness 重试达 MAX_HARNESS(→ 升 BBS:loop_round++ + bbs_mode)
+    FAILED --> PLANNING : 条件 b 补救(经 add_task_nodes 委托;_DELEGATABLE_PARENT 含 FAILED)
+
+    DONE --> [*] : 终态(成功)
+    HUNG --> [*] : 终态(STUCK:人介入)
+
+    note right of PENDING
+        派发四态(dispatch 返回):
+          HIT_SINGLE → 单 bot
+          HIT_MULTI_BOTS → 拉协作群 LOOP
+          MISS → on_miss 拆子(深度闸门)
+          dispatch_fail → 标 dispatch_error 留 PENDING 待 harness
+        PENDING 超时(派发无响应/推理失败/派发失败)
+          → harness 按 PENDING_TIMEOUT(180s) 重试搜推
+    end note
+
+    note right of PLANNING
+        委托态:子执行中 / gap 重算中
+        等本批兄弟全 DONE 才触发父 plan(决策C)
+        父恒 PLANNING,无需翻态(add 不走 RUNNING)
+    end note
+
+    note right of RUNNING
+        只给真正派发执行的叶子:
+          single_bot / coop_group / bbs
+        on_start: PENDING→RUNNING(幂等纯翻态)
+        执行报错(exec_error) ≠ 验收不过(FAIL+gaps):
+          报错 → harness 复位重投(计数)
+          验收不过 → FAILED → harness 重派重试
+    end note
+
+    note right of HUNG
+        终态传播冒泡:_maybe_propagate_hung
+        父的子全终态且含 HUNG → 父 HUNG → 上行
+        到根 → 图 HUNG(root_stuck)
+        升 BBS = loop_round++ + bbs_mode(节点保留不 remove)
+    end note
+```
+
+**图态流转:**
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> Graph_RUNNING : initialize_graph
+    Graph_RUNNING --> Graph_DONE : 根 gap 闭(终验 PASS,全非根 DONE) → update_task_graph_info(status=DONE, output_patch)
+    Graph_RUNNING --> Graph_HUNG : STUCK:loop_round>=MAX_LOOP → hung_reason=loop_exhausted / root_stuck / child_hung 冒泡到根
+    Graph_DONE --> [*]
+    Graph_HUNG --> [*]
+    note right of Graph_RUNNING
+        图无 FAILED:terminal FAIL 由节点 STUCK→HUNG 表达
+        loop_round 仅升 BBS 时 ++(根 gap 复发盘口子 A / HUNG 升 BBS)
+    end note
+```
+
+**驱动源 → 状态推进映射:**
+
+| 驱动源 | 入口 | 触发条件 | 状态推进 |
+|---|---|---|---|
+| `TaskService.execute` | `on_execute` | 条件 a:根 PENDING | 根→plan→add 子(父→PLANNING)→dispatch→start_run |
+| skill 回投 PASS | `on_report`(→`_on_pass_collect`) | 子 DONE | 父 plan:有子→add+dispatch;gap 闭→传播 DONE 上行/根→图 DONE |
+| skill 回投 FAIL+gaps | `on_report`(→`_on_fail_collect`) | 叶验收不过 | 叶→FAILED,等 harness 重派重试(不立即拆) |
+| skill 回投 exec_error | `on_report`(→`_on_harness_collect`) | bot 没跑通 | RUNNING/FAILED→PENDING 复位重投;达 MAX_HARNESS→HUNG 升 BBS |
+| dispatcher MISS | `on_miss` | 搜推未匹配执行者 | depth<MAX→plan 拆子;depth>=MAX→HUNG 升 BBS |
+| `on_start` 回调 | `on_start` | 投递开始 | PENDING→RUNNING(幂等纯翻态,不触发传播) |
+| TaskHarness 巡检 | `on_harness` | 超时/崩溃/FAILED | 复位重投;达 MAX_HARNESS→HUNG 升 BBS;PENDING 派发卡 180s→重搜推 |
+
 ## 协程化约束(任务执行是耗时任务;对齐 backend lifecycle async 模式)
 
 任务执行(投递单 bot workflow / BCS 拉群 / BBS 广场)是网络 IO 耗时操作,编排核全链路 **`async def`**,耗时 IO 不阻塞事件循环、不阻塞编排核。

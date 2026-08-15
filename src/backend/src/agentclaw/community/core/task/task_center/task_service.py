@@ -12,9 +12,7 @@ import logging
 
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.domain.models import (
-    TaskExecutionGraph,
-    TaskInfo,
-    TaskOpResult,
+    Status, TaskExecutionGraph, TaskInfo, TaskOpResult, TaskSummary,
 )
 from agentclaw.community.core.task.task_center.engine import ExecutionEngine
 from agentclaw.community.core.task.task_runner.callback_adapter import (
@@ -39,9 +37,12 @@ class TaskService(TaskServiceProtocol):
         self._engine = self._build_engine(bot=bot, bcs=bcs, discover=discover)
         # 回投适配层:执行实体 PUSH → 适配 → 编排核 on_report
         self._callback = TaskLoopCallback(CallbackAdapter(), self._engine)
-        # harness 复位重投入口回填(编排核已建,harness 才能拿到 on_harness)
+        # harness 复位重投入口回填(编排核已建,harness 才能拿到 on_harness)+ 启动旁路巡检 daemon 线程
         if self._harness is not None:
             self._harness.set_on_harness(self._engine.on_harness)
+            import threading as _t
+            _t.Thread(target=self._harness.run_poll_loop, daemon=True, name="task-harness").start()
+            logger.info("[task-service] harness 旁路巡检线程已启动(SLA 超时/FAILED 重派/PENDING 派发超时重搜推)")
 
     def _build_engine(self, *, bot=None, bcs=None, discover=None) -> ExecutionEngine:
         """构造编排核:ExecutionEngine(graph, bot=, bcs=, discover=)。引擎内部 ``_build_*`` new 自带策略 +
@@ -73,6 +74,11 @@ class TaskService(TaskServiceProtocol):
     ) -> TaskExecutionGraph:
         """任务执行详情可视化(整图或按 node_id 子树投影),只读。"""
         return self._graph.query_task_dashboard(task_id, node_id)
+
+    def list_tasks(self, status: str | None = None) -> list[TaskSummary]:
+        """列任务摘要(轻量投影),按 run_id 降序;status 非 None 时按图级状态过滤。"""
+        st = Status(status) if status else None
+        return self._graph.list_task_summaries(st)
 
 
 def run_execute(facade: TaskService, task_info: TaskInfo) -> TaskOpResult:

@@ -141,6 +141,18 @@ class TaskExecutionGraph:
     # 派生不持久: depth / child_tasks / parent_task(均从 relations 分解树派生)
 
 
+
+@dataclass
+class TaskSummary:
+    """任务摘要(列表视图轻量投影;非完整图)。``list_task_summaries`` 返回项。"""
+
+    task_id: str
+    run_id: int
+    status: Status
+    title: str = ""              # 根节点 task_spec.metadata.title
+    node_count: int = 0          # 图中节点总数
+    loop_round: int = 0          # 图级轮次
+
 # ===== 中间类型(patch/criteria/op_result/callback)=====
 @dataclass
 class TaskNodePatch:

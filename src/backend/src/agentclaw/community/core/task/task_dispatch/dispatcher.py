@@ -48,21 +48,27 @@ class TaskDispatcher:
         import asyncio as _aio
         # v4:并发搜推(gather,无并发限流;catalog IO 耗时,串行是瓶颈)。BBS 节点跳过策略直接维持。
         async def _one(node: "TaskNode"):
-            if node.run_info.run_mode == "bbs":
-                return node  # BBS 节点退化维持
-            result = await self._select_and_apply(node, graph)
-            if result.outcome == SearchOutcome.HIT_SINGLE:
-                node.run_info.run_mode = "single_bot"
-                node.run_info.assignee = result.bot_id
-            elif result.outcome == SearchOutcome.HIT_GROUP:
-                node.run_info.run_mode = "coop_group"
-                node.run_info.assignee = result.group_id
-            elif result.outcome == SearchOutcome.HIT_MULTI_BOTS:
-                node.run_info.run_mode = "coop_group"
-                node.run_info.extend_props["pending_group_formation"] = result.group_formation
-            else:  # MISS
-                node.run_info.extend_props["miss_events"] = [result.miss_reason or "no_bot"]
-            return node
+            # 容错:搜推异常(无响应/推理失败/端口错)不崩整批,留 PENDING 标 dispatch_error 交 harness 重试搜推
+            try:
+                if node.run_info.run_mode == "bbs":
+                    return node  # BBS 节点退化维持
+                result = await self._select_and_apply(node, graph)
+                if result.outcome == SearchOutcome.HIT_SINGLE:
+                    node.run_info.run_mode = "single_bot"
+                    node.run_info.assignee = result.bot_id
+                elif result.outcome == SearchOutcome.HIT_GROUP:
+                    node.run_info.run_mode = "coop_group"
+                    node.run_info.assignee = result.group_id
+                elif result.outcome == SearchOutcome.HIT_MULTI_BOTS:
+                    node.run_info.run_mode = "coop_group"
+                    node.run_info.extend_props["pending_group_formation"] = result.group_formation
+                else:  # MISS
+                    node.run_info.extend_props["miss_events"] = [result.miss_reason or "no_bot"]
+                return node
+            except Exception as ex:  # noqa: BLE001  搜推异常→吞掉,留 PENDING 交 harness 按超时重试
+                logger.warning("[dispatch] node=%s 搜推异常→留 PENDING 交 harness: %s", node.node_id, ex)
+                node.run_info.extend_props["dispatch_error"] = f"dispatch_exception:{type(ex).__name__}"
+                return node
         out = list(await _aio.gather(*[_one(n) for n in toDoTaskList]))
         return out
 

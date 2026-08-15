@@ -81,7 +81,8 @@ class WorkflowPlanningStrategy:
 
 class GapBasedPlanningStrategy:
     """默认兜底:基于 gap 的任务规划。组 planning prompt 投 owner bot → 同步收 → 解析 PlanResult。
-    端口(bot: OpenApiBotPort)由 DI 注入;省略端口= stub 路径(纯内核单测)返空 PlanResult。
+    端口(bot: OpenApiBotPort)由 DI 注入;省略端口/无 owner = 无法规划 → 返「有 gap 拆不出」
+    (has_gap=True,children=[]),编排核走深度闸门 HUNG(不能假 done:没规划过不可能闭 gap)。
 
     gap 计算与验收同构:apply 返 children=gap 未闭(继续拆/+派发);返 []+has_gap=F=gap 闭=验收通过(节点 DONE 上行)。
     owner bot = ``graph.extend_props["source_channel_id"]``(框架派生取,零 case 知识)。
@@ -91,7 +92,7 @@ class GapBasedPlanningStrategy:
     priority = 99
 
     def __init__(self, bot=None) -> None:
-        """bot: OpenApiBotPort(真实 round-trip);None=stub 路径(返 gap 闭空结果)。"""
+        """bot: OpenApiBotPort(真实 round-trip);None= stub 路径(无规划端口,返有 gap 拆不出→HUNG)。"""
         self._bot = bot
 
     async def matches(self, graph: TaskExecutionGraph) -> bool:
@@ -99,10 +100,12 @@ class GapBasedPlanningStrategy:
 
     async def apply(self, graph: TaskExecutionGraph, target: TaskNode) -> PlanResult:
         if self._bot is None:
-            return PlanResult(children=[], has_gap=False, gap_detail="done")  # stub 路径(无端口)= gap 闭
+            # 无规划端口:无法计算 gap / 产子 → 有 gap 拆不出(编排核走深度闸门 HUNG,不假 done)
+            return PlanResult(children=[], has_gap=True, gap_detail="no_planning_port")
         owner = str(graph.extend_props.get("source_channel_id") or "")
         if not owner:
-            return PlanResult(children=[], has_gap=False, gap_detail="done")
+            # 有端口但无 owner bot(source_channel_id 缺失):无人可投规划 prompt → 有 gap 拆不出(→ HUNG)
+            return PlanResult(children=[], has_gap=True, gap_detail="no_owner_bot")
         prompt = _compose_planning_prompt(graph, target)
         run = await self._bot.send_and_wait_async(
             bot_id=owner, message=prompt, metadata={"phase": "planning"},
