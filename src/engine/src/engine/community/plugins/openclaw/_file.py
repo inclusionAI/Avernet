@@ -3,6 +3,33 @@
 Also contains the module-level _convert_path helper and the
 _PATH_PREFIX_PATTERN/_PATH_PREFIX_NEW constants (relocated from
 engines/openclaw/file.py).
+
+Addressing (#1000)
+------------------
+``/api/file/*`` accepts two address formats, and this module is where they are
+told apart:
+
+* **namespace-relative** — ``workspace/<rel>`` · ``identity/<rel>`` ·
+  ``config`` (a leading slash is tolerated). The backend names a logical
+  location and *this engine* decides where it lands, so no caller has to know
+  the container layout. Resolution is bounded: the relative part may not carry
+  ``..``, and the result is asserted to sit under the namespace root.
+  ``workspace`` and ``identity`` are trees; ``config`` is the single
+  engine-owned config file, which is why it takes no caller-chosen leaf.
+* **absolute** — the OSS-view ``/aidesktop/...`` prefix (rewritten to the
+  engine-view root) and already-engine-view paths (passed through). This is the
+  format every current caller sends, and it keeps working byte-for-byte.
+
+The discriminator is *first path segment ∈ the namespace set*, never the
+inverse ("not ``/aidesktop`` ⇒ relative"): callers pass hardcoded
+container-absolute paths such as ``/home/admin/.openclaw/workspace/skills``, and
+an inverted rule would swallow them.
+
+A **bare relative path** — one with no namespace prefix — is refused rather than
+passed through. That is the one deliberate break with the old behavior: such a
+path used to resolve against the engine process's CWD, so an upload reported 201
+and landed outside the workspace, where neither the agent nor the NFS sync could
+see it (#1000).
 """
 from __future__ import annotations
 
@@ -13,7 +40,10 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from engine.community.plugin_api.workspace_root import workspace_root_strict
+from engine.community.plugin_api.workspace_root import (
+    workspace_root,
+    workspace_root_strict,
+)
 
 log = logging.getLogger("openclaw-port")
 
@@ -31,19 +61,169 @@ _SINGLEBOX_PATH_PATTERN = re.compile(
 )
 
 
-def _convert_path(target: str) -> Path:
-    """Rewrite OSS-view path prefix to engine-view per-bot path.
+# ── namespace-relative addressing (#1000) ────────────────────────────────────
 
-    Three branches (in order):
+# The engine namespaces the backend addresses files by. Mirrors the backend's
+# ``core/config_compose/teclaw_paths.py`` constants — the two sides of one wire
+# contract — and matches what teclaw's engine already accepts.
+_WORKSPACE_NS = "workspace"
+_IDENTITY_NS = "identity"
+_CONFIG_NS = "config"
+_ENGINE_NAMESPACES = (_WORKSPACE_NS, _IDENTITY_NS, _CONFIG_NS)
+
+# The single file the ``config`` namespace addresses on this engine. The backend
+# composes the same name today (``build_arca_config_mapper`` →
+# ``{bot_engine_dir}/openclaw.json``, matching ``get_engine_config_path``); owning
+# it here is what lets that mapper stop composing engine paths at all.
+_CONFIG_FILENAME = "openclaw.json"
+
+
+def _split_namespace(target: str) -> tuple[str, list[str]] | None:
+    """Split a namespace-relative address, or return ``None`` if it is not one.
+
+    ``"workspace/a/b.txt"`` and ``"/workspace/a/b.txt"`` both yield
+    ``("workspace", ["a", "b.txt"])``; the bare namespace yields an empty
+    segment list (it addresses the namespace root, which ``list_dir`` needs).
+    Empty and ``"."`` segments are dropped as the noise they are — a leading
+    slash or a doubled separator is not an attempt to leave the namespace.
+    ``".."`` segments are kept here and refused in :func:`_resolve_namespace`,
+    so the rejection names the offending input instead of silently rewriting the
+    address to a different valid one.
+    """
+    segments = [s for s in target.split("/") if s and s != "."]
+    if not segments or segments[0] not in _ENGINE_NAMESPACES:
+        return None
+    return segments[0], segments[1:]
+
+
+def _namespace_root(namespace: str) -> Path:
+    """The engine-view directory a namespace resolves against.
+
+    openclaw's per-bot layout, as composed today by the backend's
+    ``build_workspace_mapper`` / ``build_arca_identity_mapper`` /
+    ``build_arca_config_mapper`` and then folded to the engine view by branches 1
+    and 2 of :func:`_convert_path`:
+
+    * ``workspace`` → ``{engine_dir}/workspace``
+    * ``identity``  → ``{engine_dir}/workspace`` — openclaw keeps its identity
+      files (AGENTS.md, IDENTITY.md, …) in the workspace root, not in a separate
+      directory, so the two namespaces share a root on this engine.
+    * ``config``    → ``{engine_dir}`` — the engine config lives beside the
+      workspace as ``openclaw.json``. The namespace holds that one file; see
+      :func:`_resolve_namespace`.
+
+    The workspace root comes from :func:`workspace_root` — the engine's own
+    answer to "where is my workspace", the same one ``skills``,
+    ``session_files`` and ``resource_materialization`` resolve against. Deriving
+    it from anything else would let a file uploaded as ``workspace/x`` land
+    somewhere those services cannot see, which is the failure #1000 is about.
+
+    Raises:
+        RuntimeError: ``OPENCLAW_WORKSPACE_DIR`` is set to a relative path —
+            a baas spawn-time configuration error, failed explicitly rather
+            than resolved against the process CWD (same guard as branch 2).
+    """
+    root = workspace_root()
+    if not root.is_absolute():
+        raise RuntimeError(
+            f"OPENCLAW_WORKSPACE_DIR must be an absolute path, got {str(root)!r}. "
+            f"baas spawn-time should inject the resolved host absolute path."
+        )
+    if namespace == _CONFIG_NS:
+        return root.parent
+    return root
+
+
+def _resolve_namespace(namespace: str, segments: list[str]) -> Path:
+    """Join ``segments`` onto the namespace root, refusing anything that escapes.
+
+    Containment is **lexical**: ``".."`` is refused outright and the remaining
+    segments are joined onto the root, so no input can address outside it. The
+    result is deliberately *not* ``resolve()``-d against the filesystem — the
+    workspace legitimately contains symlinks that point outside it (the skills
+    bindpaths link ``workspace/skills/skills-local`` and ``…/skills-repo`` into
+    the skills pool), and following them would turn every skill file into an
+    apparent escape.
+
+    This bounds the *address*, not the process: the agent shares this
+    filesystem and can reach any of it directly. The guarantee is that a path
+    the backend names as ``<namespace>/…`` cannot resolve outside that
+    namespace — which is what makes the engine, rather than the caller, the one
+    place that decides where a logical path lands.
+
+    ``config`` is the exception, and deliberately so: it is not a tree the
+    caller populates but the one engine-owned config file, so it accepts exactly
+    two spellings — the bare namespace ``config`` and the explicit
+    ``config/openclaw.json`` — and refuses every other leaf. Both resolve to the
+    same file. Refusing rather than resolving matters because the backend
+    currently addresses this namespace with one canonical leaf for every
+    provider (``config/teclaw.json``, whose real filename its arca/baas mapper
+    then derives from ``engine_type`` and discards the leaf). Accepting that leaf
+    verbatim here would write a stray ``teclaw.json`` beside the real config and
+    report success — the config would simply never take effect, which is the same
+    silent-write failure #1000 is about.
+
+    Raises:
+        ValueError: a ``".."`` segment, a ``config`` address naming anything but
+            this engine's config file, or (defensively) a join that lands
+            outside the root. The router maps it to 400.
+    """
+    if any(s == ".." for s in segments):
+        raise ValueError(
+            f"path escapes the {namespace!r} namespace: "
+            f"{'/'.join([namespace, *segments])!r}"
+        )
+    if namespace == _CONFIG_NS:
+        if segments not in ([], [_CONFIG_FILENAME]):
+            raise ValueError(
+                f"the {_CONFIG_NS!r} namespace holds this engine's config file "
+                f"({_CONFIG_FILENAME!r}); address it as {_CONFIG_NS!r} or "
+                f"{f'{_CONFIG_NS}/{_CONFIG_FILENAME}'!r}, got "
+                f"{'/'.join([namespace, *segments])!r}"
+            )
+        return _namespace_root(namespace) / _CONFIG_FILENAME
+    root = _namespace_root(namespace)
+    resolved = root.joinpath(*segments) if segments else root
+    # Invariant, not input validation: with no ".." left this cannot fail. It is
+    # asserted so a future edit to the segment filter cannot quietly widen the
+    # namespace.
+    if resolved != root and not resolved.is_relative_to(root):
+        raise ValueError(
+            f"path escapes the {namespace!r} namespace: "
+            f"{'/'.join([namespace, *segments])!r}"
+        )
+    return resolved
+
+
+def _convert_path(target: str) -> Path:
+    """Resolve a wire address (OSS-view or namespace-relative) to an engine path.
+
+    Five branches (in order):
     1. 线上 ARCA pre/prod (原 regex): 折叠到 hardcode /home/admin/.openclaw/
        — 跟改造前完全一致,线上行为字节级不变。
     2. singlebox 多 bot: 折叠到 OPENCLAW_WORKSPACE_DIR 的父目录。
        env 必须由 baas spawn 时注入; regex 匹配但 env 未设 → RuntimeError
        (配置错误,显式失败而非隐式降级)。
-    3. 其他: passthrough(engine-view 直接路径或 desktop bot 路径)。
+    3. namespace-relative (#1000): ``workspace/`` · ``identity/`` · ``config/``
+       (前导 ``/`` 可选) → 由本 engine 决定落点, 并断言未越出 namespace root。
+    4. 其他绝对路径: passthrough(engine-view 直接路径或 desktop bot 路径)。
+    5. 其他相对路径: ValueError — 旧行为会 resolve 到进程 CWD, 静默落在
+       workspace 之外 (#1000)。
 
-    Relocated intact from ``engines/openclaw/file.py:_convert_path``,本次
-    扩展加入 singlebox 副分支以支持多 bot 共宿主下的 per-bot 隔离。
+    The namespace branch sits **after** the two OSS-view regexes and is keyed on
+    the first path segment, so every address that resolves today still resolves
+    to the same place: no OSS-view or engine-view absolute path starts with a
+    ``workspace`` / ``identity`` / ``config`` segment.
+
+    Relocated from ``engines/openclaw/file.py:_convert_path``, since extended
+    with the singlebox sub-branch (per-bot isolation on a shared host) and the
+    namespace-relative branch (#1000).
+
+    Raises:
+        ValueError: the address is namespace-relative and escapes its namespace,
+            or it is relative with no namespace prefix.
+        RuntimeError: a singlebox OSS-view path with no (or a relative)
+            ``OPENCLAW_WORKSPACE_DIR``.
     """
     original = target
     target = target.strip()
@@ -93,13 +273,41 @@ def _convert_path(target: str) -> Path:
         )
         return result
 
-    # Branch 3: passthrough
+    # Branch 3: namespace-relative (#1000)
+    parsed = _split_namespace(target)
+    if parsed is not None:
+        namespace, segments = parsed
+        result = _resolve_namespace(namespace, segments)
+        log.info(
+            "[_convert_path] branch=NAMESPACE ns=%s input=%r → %s",
+            namespace, original, result,
+        )
+        return result
+
+    # Branch 4: passthrough — an engine-view absolute path the caller resolved
+    # itself (desktop bot paths, hardcoded container paths).
     result = Path(target)
-    log.info(
-        "[_convert_path] branch=PASSTHROUGH input=%r → %s",
-        original, result,
+    if result.is_absolute():
+        log.info(
+            "[_convert_path] branch=PASSTHROUGH input=%r → %s",
+            original, result,
+        )
+        return result
+
+    # Branch 5: relative with no namespace — refused. Passing it through would
+    # resolve it against the engine process's CWD, which is outside the
+    # workspace and outside the NFS sync pair: the write reports success and the
+    # bytes are invisible to the agent and lost on container recycle (#1000).
+    log.error(
+        "[_convert_path] branch=RELATIVE_REJECTED input=%r → ValueError",
+        original,
     )
-    return result
+    namespaces = ", ".join(f"{ns}/" for ns in _ENGINE_NAMESPACES)
+    raise ValueError(
+        f"relative path without an engine namespace: {original!r}. "
+        f"Address it under one of {namespaces} — or pass an absolute "
+        f"engine path."
+    )
 
 
 class _FilePortMixin:

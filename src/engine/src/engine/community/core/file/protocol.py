@@ -4,8 +4,24 @@ FileService Protocol — engine-managed filesystem operations.
 Engines that own a workspace (OpenClaw under
 ``/home/admin/.openclaw/...``) implement this Protocol. The router
 collects HTTP form data / multipart uploads and hands paths +
-``bytes`` to the plugin; the plugin owns path translation
-(legacy ``/aidesktop/...`` → workspace) and the actual FS calls.
+``bytes`` to the plugin; the plugin owns path translation and the
+actual FS calls.
+
+Two address formats are accepted on every path argument (#1000):
+
+* **namespace-relative** — ``workspace/<rel>`` · ``identity/<rel>`` ·
+  ``config/<rel>``, a leading slash optional. The caller names a logical
+  location; the engine resolves it against its own layout and refuses
+  anything that escapes the namespace. This is the format new callers
+  should use, and the only one that does not require the caller to know
+  the container layout.
+* **absolute** — an OSS-view ``/aidesktop/...`` path the engine remaps, or
+  an already-engine-view path it uses as-is. Fully supported; this is what
+  today's callers send.
+
+A relative path with no namespace prefix is a :class:`ValueError`. It used
+to resolve against the engine process's working directory, which silently
+put the bytes outside the workspace (#1000).
 
 Errors are raised as standard exceptions; the router maps them to
 HTTP codes:

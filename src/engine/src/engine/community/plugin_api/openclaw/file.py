@@ -5,6 +5,13 @@ File operations are local-infra: they work directly on the pod filesystem
 ``_convert_path`` path-rewrite logic lives in the port impl (it is
 a transport concern); the adapter builds core DTOs from the primitive
 dicts/bytes returned here.
+
+Every path argument below accepts either an absolute address (OSS-view
+``/aidesktop/...``, remapped; or an engine-view path, used as-is) or a
+namespace-relative one (``workspace/<rel>`` · ``identity/<rel>`` ·
+``config/<rel>``), which the port resolves against this engine's own layout
+and bounds to the namespace root. A relative path with no namespace prefix
+raises ``ValueError`` — see ``plugins/openclaw/_file.py`` for the contract.
 """
 from __future__ import annotations
 
