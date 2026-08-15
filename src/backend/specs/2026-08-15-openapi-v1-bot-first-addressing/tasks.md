@@ -181,14 +181,14 @@ parameter. Verify each with the dump.
       re-registered route as trivially equal, since `admission.py` and the
       mount-level dependencies differ between the two.
 
-- [ ] **31. Update the affected suites.** `test_explicit_user_id.py`,
+- [x] **31. Update the affected suites.** `test_explicit_user_id.py`,
       `test_admission_inventory.py`, `test_principal_seam.py`,
       `test_schema_docs.py`, `test_openapi_error_schema.py`,
       `test_skills_contract.py`, `test_skills_endpoints.py`,
       `test_bots_endpoints.py`, and the `engine_runtime/`, `resources/`,
       `routines/`, `identity/` sub-suites. Addresses and counts, not behaviour.
 
-- [ ] **32. Docs.** `docs/openapi-v1/README.md` and `.zh-CN.md`: the addressing
+- [x] **32. Docs.** `docs/openapi-v1/README.md` and `.zh-CN.md`: the addressing
       rule, both fenced name lists, and ~88 path references each.
       `engine-surface.md` and `.zh-CN.md`: 16 each. Rewrite the mount-order
       paragraph in `openapi_v1/__init__.py` — `resources` and `routines` no

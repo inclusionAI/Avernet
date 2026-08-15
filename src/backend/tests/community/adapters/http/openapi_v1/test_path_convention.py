@@ -1,16 +1,18 @@
 """The addressing rule for the whole ``/openapi/v1/bots`` surface.
 
-Every operation is addressed ``/openapi/v1/bots/<component>/…``: the
-component's **literal** name first, and a bot-scoped operation takes
-``{bot_id}`` as the first segment after it. The ``bots`` component is the one
-exception — it *is* the component the base names, so it owns
-``/openapi/v1/bots`` and ``/openapi/v1/bots/{bot_id}``, with its own
-sub-resources beneath the bot.
+Every bot-scoped operation is addressed ``/openapi/v1/bots/{bot_id}/<component>/…``:
+the bot first, the component's literal name after it. The operations that
+address no single bot — creating a bot, listing them, the tenant-wide reads —
+keep a literal in the segment a bot id is otherwise read from, and they are the
+only things that do.
 
 These assertions run against the **generated document** rather than a
 hand-maintained list of addresses, so a route added later that breaks the rule
-fails here instead of in review. See ``openapi_v1/__init__.py`` for why the rule
-exists.
+fails here instead of in review. They are asserted over the *current* contract
+only: the retiring addresses are component-first by definition, and a rule
+asserted over the addresses this API used to have could only be satisfied by
+never having changed them. See ``openapi_v1/__init__.py`` for why the rule
+exists and ``openapi_v1/deprecated/`` for what still answers at the old shape.
 """
 
 from __future__ import annotations

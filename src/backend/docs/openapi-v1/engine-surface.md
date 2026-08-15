@@ -66,7 +66,7 @@ frontend rewrites to the engine.
 
 ## The public surface — 16 endpoints
 
-All bot-scoped under `/openapi/v1/bots/<component>/{bot_id}/…`, all returning
+All bot-scoped under `/openapi/v1/bots/{bot_id}/<component>/…`, all returning
 the `Envelope[T]` / `Page[T]` shapes from `openapi_v1/contracts.py`.
 
 > **Every path begins with the literal `/openapi/v1/bots/` prefix.** The tables
@@ -75,10 +75,12 @@ the `Envelope[T]` / `Page[T]` shapes from `openapi_v1/contracts.py`.
 > gateway forwards to agentclaw on that prefix**, so a route mounted anywhere
 > else is unreachable in production. A test asserts it.
 >
-> **The component's name comes before `{bot_id}`.** These five shipped as
-> `/openapi/v1/bots/{bot_id}/<component>/…` and were normalized on 2026-08-03 —
+> **`{bot_id}` comes before the component's name.** These five shipped that
+> way, were normalized to component-first on 2026-08-03, and were returned to
+> bot-first on 2026-08-15 when that rule was reversed for the whole surface —
 > see the **Addressing rule** in [`README.md`](README.md). The tables below use
-> the current addresses.
+> the current addresses; the component-first ones still answer, marked
+> `deprecated`, until the sunset (see **Retiring addresses** in `README.md`).
 
 ### sessions (7) — engine `/api/sessions`
 
@@ -102,13 +104,13 @@ the `Envelope[T]` / `Page[T]` shapes from `openapi_v1/contracts.py`.
 
 | Method | Public path | Engine route | Notes |
 |---|---|---|---|
-| GET | `…/sessions/{bot_id}` | `GET /api/sessions` | `agent_id`, `session_key`, paged → `Envelope[SessionPage]` |
-| POST | `…/sessions/{bot_id}` | `POST /api/sessions` | `201 Envelope[Session]` |
-| GET | `…/sessions/{bot_id}/{session_id}` | `GET /api/sessions/{session_id}` | `Envelope[Session]` |
-| DELETE | `…/sessions/{bot_id}/{session_id}` | `DELETE /api/sessions/{session_id}` | `Envelope[Deleted]` |
-| GET | `…/sessions/{bot_id}/{session_id}/messages` | `GET …/messages` | paged → `Envelope[MessagePage]` |
-| DELETE | `…/sessions/{bot_id}/{session_id}/messages` | `DELETE …/messages` | clear history → `Envelope[Deleted]` |
-| PATCH | `…/sessions/{bot_id}/{session_id}` | `POST …/{session_id}/update` | **divergence:** partial update is `PATCH` on the resource publicly, not a `/update` sub-path. Body is `title`/`model` only — see below |
+| GET | `…/{bot_id}/sessions` | `GET /api/sessions` | `agent_id`, `session_key`, paged → `Envelope[SessionPage]` |
+| POST | `…/{bot_id}/sessions` | `POST /api/sessions` | `201 Envelope[Session]` |
+| GET | `…/{bot_id}/sessions/{session_id}` | `GET /api/sessions/{session_id}` | `Envelope[Session]` |
+| DELETE | `…/{bot_id}/sessions/{session_id}` | `DELETE /api/sessions/{session_id}` | `Envelope[Deleted]` |
+| GET | `…/{bot_id}/sessions/{session_id}/messages` | `GET …/messages` | paged → `Envelope[MessagePage]` |
+| DELETE | `…/{bot_id}/sessions/{session_id}/messages` | `DELETE …/messages` | clear history → `Envelope[Deleted]` |
+| PATCH | `…/{bot_id}/sessions/{session_id}` | `POST …/{session_id}/update` | **divergence:** partial update is `PATCH` on the resource publicly, not a `/update` sub-path. Body is `title`/`model` only — see below |
 
 Two things about this group are not the shape a reader would assume:
 
@@ -148,9 +150,9 @@ Two things about this group are not the shape a reader would assume:
 
 | Method | Public path | Engine route | Notes |
 |---|---|---|---|
-| GET | `…/engine/{bot_id}/status` | `GET /api/engine/status` | process / transition phase / connection count |
-| GET | `…/engine/{bot_id}/capabilities` | `GET /api/engine/capabilities` | **the most important endpoint in Track C** — see *Capabilities* below |
-| GET | `…/engine/{bot_id}/available` | `GET /api/engine/list` | **divergence:** `list` is a verb path; public uses a noun. Registered engines + active flag + version |
+| GET | `…/{bot_id}/engine/status` | `GET /api/engine/status` | process / transition phase / connection count |
+| GET | `…/{bot_id}/engine/capabilities` | `GET /api/engine/capabilities` | **the most important endpoint in Track C** — see *Capabilities* below |
+| GET | `…/{bot_id}/engine/available` | `GET /api/engine/list` | **divergence:** `list` is a verb path; public uses a noun. Registered engines + active flag + version |
 
 > **`POST /api/engine/switch` and `POST /api/engine/restart` are deliberately
 > NOT wrapped.** PR #494 made `engine` immutable on `PUT /openapi/v1/bots/{bot_id}`
@@ -163,20 +165,20 @@ Two things about this group are not the shape a reader would assume:
 
 | Method | Public path | Engine route | Notes |
 |---|---|---|---|
-| GET | `…/models/{bot_id}` | `GET /api/models` | `Envelope[Page[Model]]` |
-| GET | `…/models/{bot_id}/{model_id}` | `GET /api/models/{model_id:path}` | **model ids contain slashes** (`openai/gpt-5.3`). The engine uses a `:path` converter; the public route must settle URL-encoding vs. a `:path` converter and document it |
+| GET | `…/{bot_id}/models` | `GET /api/models` | `Envelope[Page[Model]]` |
+| GET | `…/{bot_id}/models/{model_id}` | `GET /api/models/{model_id:path}` | **model ids contain slashes** (`openai/gpt-5.3`). The engine uses a `:path` converter; the public route must settle URL-encoding vs. a `:path` converter and document it |
 
 ### approvals (3) — engine `/api/approvals`
 
 | Method | Public path | Engine route | Notes |
 |---|---|---|---|
-| GET | `…/approvals/{bot_id}/mode` | `POST /api/approvals/mode/get` | **divergence:** a read is `GET` with `session_key` as a query param, not a `POST` |
-| PUT | `…/approvals/{bot_id}/mode` | `POST /api/approvals/mode/set` | body `{session_key, mode}`; a refusal (`data.ok=false` under an outer success) is a 502, not a 200 — see below |
-| GET | `…/approvals/{bot_id}/modes` | `GET /api/approvals/modes` | static enum; note this is the one engine route with **no** capability gate |
+| GET | `…/{bot_id}/approvals/mode` | `POST /api/approvals/mode/get` | **divergence:** a read is `GET` with `session_key` as a query param, not a `POST` |
+| PUT | `…/{bot_id}/approvals/mode` | `POST /api/approvals/mode/set` | body `{session_key, mode}`; a refusal (`data.ok=false` under an outer success) is a 502, not a 200 — see below |
+| GET | `…/{bot_id}/approvals/modes` | `GET /api/approvals/modes` | static enum; note this is the one engine route with **no** capability gate |
 
 ### connection (1) — NEW, no engine counterpart
 
-`GET /openapi/v1/bots/connection/{bot_id}` → `Envelope[Connection]`
+`GET /openapi/v1/bots/{bot_id}/connection` → `Envelope[Connection]`
 
 The public replacement for `get_device_connection`. Returns ready-to-use
 sockets, never proxypass topology:
@@ -267,7 +269,7 @@ Rules this endpoint must hold:
   and every reader does `ws_token or token` — which is also what makes the
   expiry above describe the credential actually handed out. _Added 2026-07-30._
 - The socket set is **capability-derived**, so this endpoint and
-  `…/engine/{bot_id}/capabilities` must never disagree.
+  `…/{bot_id}/engine/capabilities` must never disagree.
 
 ---
 
@@ -292,11 +294,11 @@ Rules this endpoint must hold:
 | `api/routers/openclaw_http` | `/api/openclaw` | 3 | — | 🟡 **deferred** | `test-connection` / `disconnect` / `config`. Listed in the proxypass array as `'api/openclaw'` — **no leading slash**, so `url.startsWith()` never matches `/api/openclaw/...` and the entry is dead as written (`requestConfig.ts:191`). Also openclaw-specific gateway debug tooling. _Decided 2026-07-30._ |
 | `api/default_config` | `/api/openclaw` | 1 | — | 🟡 **deferred** | same dead prefix entry |
 | `api/zero_check` | `/api/openclaw/zero-check` | 2 | — | 🟡 **deferred** | same dead prefix entry |
-| `api/web_shell` | — | 2 | 1 | ⛔ **C3 / not v1** | `GET /terminal`, `/terminal/health`, `WS /ws/terminal`. Not reachable through `…/connection/{bot_id}` either — the terminal socket was implemented and then removed (see the connection entry above); the two HTTP routes are the shell's own bootstrap |
+| `api/web_shell` | — | 2 | 1 | ⛔ **C3 / not v1** | `GET /terminal`, `/terminal/health`, `WS /ws/terminal`. Not reachable through `…/{bot_id}/connection` either — the terminal socket was implemented and then removed (see the connection entry above); the two HTTP routes are the shell's own bootstrap |
 | `api/routers/ws` | — | — | 1 | 🔌 **C3 — connection info** | `/api/openclaw/ws` |
 | `api/routers/claude_code_ws` | `/api/claude_code` | — | 1 | 🔌 **C3 — connection info** | `/api/claude_code/ws` |
 | `openclaw/router` | `/api/openclaw` | — | 1 | 🔌 **C3** | `/client` — gateway-side socket, not a tenant socket |
-| `api/app` (module-level) | — | 6 | 2 | ⛔ / 🔌 | `/health`, `/readiness`, `/config`, `/test-connection`, `/disconnect`, `/api/evaluation/report` are ops surface. `WS /ws` and `WS /api/{engine}/ws` are the generic chat sockets → `…/connection/{bot_id}` |
+| `api/app` (module-level) | — | 6 | 2 | ⛔ / 🔌 | `/health`, `/readiness`, `/config`, `/test-connection`, `/disconnect`, `/api/evaluation/report` are ops surface. `WS /ws` and `WS /api/{engine}/ws` are the generic chat sockets → `…/{bot_id}/connection` |
 | `api/aicoding_sessions` | `/api/aicoding/sessions` | 10 | — | ⛔ **C4** | aicoding-only |
 | `api/aicoding/skill_router` | `/api/aicoding` | 1 | — | ⛔ **C4** | aicoding-only |
 | `api/aicoding/data_proxy_router` | `/data` | 1 | — | ⛔ **C4** | harness-data reverse proxy |
@@ -331,7 +333,7 @@ The engine returns `ApiResponse{success, data, message, warning, total}`
   this surface — only `SESSION_CREATE` on `claude_code` can reach it, and that
   caveat describes how the session key is established rather than a degraded
   result. It is **logged server-side** and goes no further. `Envelope` is
-  unchanged; `…/engine/{bot_id}/capabilities` is where a caller discovers limitations.
+  unchanged; `…/{bot_id}/engine/capabilities` is where a caller discovers limitations.
   _Decided 2026-07-30._
 
 ### 2. Capabilities are the public contract's escape hatch
@@ -344,8 +346,8 @@ answers differently for two of a tenant's own bots.**
 
 - `CapabilityNotSupportedError` / the transport's 501 need an `ENVELOPE_ERRORS`
   entry with a fixed public message pointing the caller at
-  `…/engine/{bot_id}/capabilities`.
-- That is why `…/engine/{bot_id}/capabilities` is in the v1 surface and not deferred: it
+  `…/{bot_id}/engine/capabilities`.
+- That is why `…/{bot_id}/engine/capabilities` is in the v1 surface and not deferred: it
   is how a caller discovers, ahead of time, which of the other 16 endpoints its
   bot will actually answer.
 
@@ -434,7 +436,7 @@ the caveat is logged rather than carried in the response.
 One deliberate divergence: `GET /api/approvals/modes` is the only engine route
 with **no** capability gate (`approvals/router.py:104`), so on a `claude_code`
 bot it advertises three modes while get and set both 501. The public
-`…/approvals/{bot_id}/modes` gates on `APPROVAL_SET`, so every mode it lists is one the
+`…/{bot_id}/approvals/modes` gates on `APPROVAL_SET`, so every mode it lists is one the
 write endpoint accepts. The write capability rather than the read: the engine
 defines `APPROVAL_GET` and `APPROVAL_SET` independently and gates one route on
 each, so on an engine declaring only the read, keying this route off the read
@@ -482,19 +484,21 @@ _Added 2026-07-30._
 
 ## Routing note
 
-The groups sit at `/openapi/v1/bots/{sessions,engine,models,approvals,connection}/{bot_id}`
-— each behind its **own literal** segment, so none of them can shadow another
-and their order relative to each other is free. They must still be registered
-before the bots group so that the components serving a single-segment collection
-root (`resources`, `routines`) keep resolving ahead of
-`/openapi/v1/bots/{bot_id}`.
+The groups sit at `/openapi/v1/bots/{bot_id}/{sessions,engine,models,approvals,connection}`
+— each behind the bot, diverging at the segment after it, so none of them can
+shadow another and their order relative to each other is free. They must still
+be registered before the bots group, together with the retiring
+component-first addresses and the account-level literals (`check-name`,
+`ceiling`, `authorized`, `mcp`, `logs`, `loadtest`), which are the ones that
+actually depend on resolving ahead of `/openapi/v1/bots/{bot_id}`.
 
-_Superseded note (pre-2026-08-03): these groups used to sit one segment below
-the `{bot_id}` wildcard, which is what made their mount order free. It is free
-for a different reason now — they are literal-prefixed — and the near-collision
-this section used to warn about is gone with it: bot-scoped MCP is now
-`/openapi/v1/bots/mcp/{bot_id}/...`, which nests **under** the marketplace
-group's own literal rather than competing with it from the other side. Track C
+_History: these groups shipped one segment below the `{bot_id}` wildcard, were
+moved above it on 2026-08-03, and were moved back on 2026-08-15 — the whole
+surface is bot-first now, so their mount order is free for the reason it was
+originally. The near-collision this section used to warn about stays gone
+either way: bot-scoped MCP is `/openapi/v1/bots/mcp/{bot_id}/...`, under the
+marketplace group's own literal rather than competing with it from the other
+side, because `mcp` is one of the groups that addresses no single bot. Track C
 does not add it (rule C2)._
 
 ---

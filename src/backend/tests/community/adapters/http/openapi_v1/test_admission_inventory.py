@@ -14,8 +14,10 @@ Three properties, and each fails for a different mistake:
 2. Every operation whose mode says "grant-checked" actually performs the check —
    verified against the built router's *effective* dependencies, not against
    what a handler declares.
-3. The seven operations that check inside their handlers are named, and named
-   only there. Catches the exception list growing by accident.
+3. No operation on the *current* contract checks its grant inside its handler.
+   Seven used to; bot-first addressing removed the reason, and this is what
+   keeps ``TODO(#960)`` closed. The retiring addresses are the named exception,
+   and they go with the deprecated package.
 
 These are checked against the router the application really builds, so a change
 that satisfies the table but not the wiring still fails.

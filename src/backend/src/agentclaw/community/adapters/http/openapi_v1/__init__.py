@@ -8,26 +8,37 @@ and does not reuse — the legacy ``/api/...`` routers.
 Addressing rule
 ---------------
 
-Every operation is addressed ``/openapi/v1/bots/<component>/…``: the component's
-**literal** name comes first, and a bot-scoped operation takes ``{bot_id}`` as
-the first segment *after* it — never before it, and never with a ``/bot/``
-segment in between. The ``bots`` component is the one exception and only
-because it *is* the component the base names: it owns ``/openapi/v1/bots`` and
-``/openapi/v1/bots/{bot_id}``, and its own sub-resources (``/status``,
-``/passport``, ``/restart``, ``/auth-status``, ``/engine-config``) hang off the
-bot record beneath it.
+Every bot-scoped operation is addressed
+``/openapi/v1/bots/{bot_id}/<component>/…``: the bot comes first, and the
+component's literal name hangs off it. A bot is the noun this API is about, so
+the address names the bot before it names what about the bot, and every
+operation on one bot shares one prefix.
 
-The rule exists so a router file states its own address. Under the old shape a
-reader of ``engine_runtime/sessions/router.py`` could not tell whether
-``/openapi/v1/bots/{bot_id}/sessions`` was served there or by a
-``{bot_id}``-shaped route in the bots component, and a second owner under the
-same base could not be added at all — the reason BCS moved its own control
-plane to ``/openapi/v1/bots/collaboration/{bot_id}``.
+The bot is therefore always a **path** parameter — never a query parameter,
+never a body field. Which bot an operation acts on is the address, not an
+argument to the call, and a client that must be told to put the same id in two
+places has been told the address twice.
 
-Because the bots component keeps the bare ``/openapi/v1/bots/{bot_id}``, a bot
-whose id equals a component name is unreachable at that address. The reserved
-names are fixed and documented in ``docs/openapi-v1/README.md``; a test asserts
-the doc's list still equals the routes'.
+That is also what makes authorization mechanical rather than per-operation.
+``require_granted_bot`` reads the addressed bot off the path, the same way, for
+every operation on the surface; there is no list of operations that carry their
+bot somewhere the shared dependency cannot see it and must check for themselves.
+Closing that split is ``TODO(#960)``, and this rule is what closed it — see
+``principal.py``.
+
+The account-level operations are the ones with no single bot to name: creating
+a bot, listing them, checking a name, the ``authorized`` groups, the tenant-wide
+MCP catalogue, the trace query (which reads *across* bots), and the load-test
+endpoints. They keep a literal where a bot id would otherwise be read, and they
+are the only things that do.
+
+Because ``{bot_id}`` is a single wildcard segment, a bot whose id equals a
+literal served in that position is unreachable at that address. Bot-first
+addressing is what keeps that list short: every bot-scoped component name moved
+one segment deeper, where it collides with nothing, leaving only the
+account-level literals above. The names are documented in
+``docs/openapi-v1/README.md``; a test asserts the doc's list still equals the
+routes'.
 
 Naming the end user
 -------------------
@@ -112,16 +123,37 @@ parameter on them. ``test_explicit_user_id.py`` is what makes a new route
 impossible to forget — the same trade ``test_path_convention.py`` makes for the
 addressing rule above.
 
+Retiring addresses
+------------------
+
+Nothing was removed. Every address this surface answered before bot-first
+addressing still answers, at the same shape, with the same parameters in the
+same places — including the ones this rule exists to remove, a ``bot_id`` in
+the query string and one in a request body. They live in ``deprecated/``,
+publish ``deprecated: true`` in the document, and answer with ``Deprecation``
+and ``Sunset`` headers (``deprecation.py``).
+
+The window runs from **2026-08-15** to **2027-08-15**. Removal is driven by
+traffic rather than by the date — the access log says when an address has no
+callers left, and that is when it goes — so the sunset is the outer bound a
+client can plan against, not a countdown. ``test_legacy_parity.py`` asserts
+each retiring address and its replacement reach the same decision, which is the
+whole of the compatibility promise.
+
 Mount order
 -----------
 
-The sub-resource groups are mounted **before** the bots group. The wildcard
-``/openapi/v1/bots/{bot_id}`` matches any single segment, so the groups that
-publish a single-segment literal — ``resources`` and ``routines``, which serve
-their own collection roots — would otherwise resolve as "the bot named
-``resources``". Every other component is only reachable at two segments or
-more, so ordering no longer decides its fate; keeping one rule for all of them
-is cheaper than a per-group exception a later edit would get wrong.
+The sub-resource groups are mounted **before** the bots group, and the retiring
+addresses before both. The wildcard ``/openapi/v1/bots/{bot_id}`` matches any
+single segment, so a group publishing a literal there resolves as "the bot
+named ``resources``" if the bots router is reached first.
+
+Under bot-first addressing that hazard is confined to the groups above that
+genuinely keep a literal in the ``{bot_id}`` segment — the account-level ones,
+and the retiring addresses, which are literal-first by definition. The current
+bot-scoped groups are all ``{bot_id}``-first and could be mounted in any order.
+One rule for all of them is still cheaper than a per-group exception a later
+edit would get wrong.
 """
 
 from __future__ import annotations
@@ -189,11 +221,13 @@ _MIXED_GROUPS = [
     mcp_router,
 ]
 
-# Order matters: every literal sub-group — these three lists — is registered
-# before the `{bot_id}` wildcard group, which `build_public_router` mounts last.
-# See "Mount order" above for which literals actually depend on it. Splitting the
-# literals across three lists is about which *response table* each gets; it does
-# not change that they all precede `bots`.
+# Order matters: every group in these lists is registered before the `{bot_id}`
+# wildcard group, which `build_public_router` mounts last. Under bot-first
+# addressing most of them no longer depend on it — they open with `{bot_id}`
+# themselves — but the account-level literals below still do, and so do the
+# retiring addresses. See "Mount order" above. Splitting them across lists is
+# about which *response table* each gets; it does not change that they all
+# precede `bots`.
 _SUBGROUPS = [
     # Both authorization groups precede `bots` below. `authorized_apps_router`
     # sits *under* `{bot_id}` so path shape already keeps it distinct, but
@@ -235,10 +269,11 @@ _GRANT_CHECKED_SUBGROUPS = [
 # return; attaching those surface-wide would make every already-shipped category
 # advertise failures it cannot produce.
 #
-# Each is now literal-prefixed (`/openapi/v1/bots/sessions/{bot_id}` …), so they
-# cannot shadow one another and their order relative to each other and to
-# `_SUBGROUPS` is free. They are still mounted before the bots router for the
-# one rule stated above, not because any of them needs it.
+# Each is `{bot_id}`-first (`/openapi/v1/bots/{bot_id}/sessions` …) and their
+# paths diverge at the segment after it, so they cannot shadow one another and
+# their order relative to each other and to `_SUBGROUPS` is free. They are still
+# mounted before the bots router for the one rule stated above, not because any
+# of them needs it.
 _ENGINE_RUNTIME_GROUPS = [
     engine_sessions_router,
     engine_engine_router,

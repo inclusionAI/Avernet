@@ -1,4 +1,4 @@
-"""Routines group — ``/openapi/v1/routines`` (definition only).
+"""Routines group — ``/openapi/v1/bots/{bot_id}/routines`` (definition only).
 
 Scheduled/triggered agent tasks (the former "cron"), with a stable
 gateway-owned schema and a nested trigger. Handlers are stubs; every route
