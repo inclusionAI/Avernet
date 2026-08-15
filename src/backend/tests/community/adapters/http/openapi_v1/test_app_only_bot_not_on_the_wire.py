@@ -295,15 +295,13 @@ def test_creating_a_routine_on_the_granted_bot_works(client, cron):
 
 
 def test_listing_skills_on_an_ungranted_bot_is_refused(client, skills):
-    """``owner_entity_id`` names whose bot this reads, and the grant must match.
+    """``owner_id`` names whose bot this reads, and the grant must match.
 
     Classifying these as plainly owner-scoped was wrong in both directions: a
     grant on the caller's own same-named bot would authorize a read of someone
     else's, and a legitimate grant on a shared bot would be refused.
     """
-    response = client.get(
-        "/openapi/v1/bots/{bot}/skills", params={"bot_id": OTHER_BOT}
-    )
+    response = client.get(f"/openapi/v1/bots/{OTHER_BOT}/skills")
 
     assert response.status_code == 404, response.json()
     assert skills.listed == [], "refused before the read"
@@ -326,8 +324,8 @@ def test_listing_another_owners_bot_is_refused_even_with_a_same_named_grant(
     it.
     """
     response = client.get(
-        "/openapi/v1/bots/{bot}/skills",
-        params={"bot_id": GRANTED_BOT, "owner_entity_id": "someone-else"},
+        f"/openapi/v1/bots/{GRANTED_BOT}/skills",
+        params={"owner_id": "someone-else"},
     )
 
     assert response.status_code == 404, response.json()
@@ -337,8 +335,7 @@ def test_listing_another_owners_bot_is_refused_even_with_a_same_named_grant(
 def test_uploading_a_skill_to_an_ungranted_bot_is_refused(client, skills):
     """A write makes the mis-binding worse — it would create a skill there."""
     response = client.post(
-        "/openapi/v1/bots/{bot}/skills",
-        params={"bot_id": OTHER_BOT},
+        f"/openapi/v1/bots/{OTHER_BOT}/skills",
         content=b"PK\x03\x04",
         headers={"content-type": "application/zip"},
     )

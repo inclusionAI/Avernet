@@ -12584,7 +12584,7 @@
       },
       "get": {
         "deprecated": true,
-        "description": "Get a routine.\n\nThe bot is named by the path — a routine id alone does not identify the\nbot that holds it. Note the returned bot_id may be empty on this read;\nkeep the one you addressed with.\n\nDeprecated: use GET /openapi/v1/bots/{bot_id}/routines/{routine_id} instead.",
+        "description": "Get a routine.\n\nThe bot is named by the bot_id query parameter — a routine id alone does not identify the\nbot that holds it. Note the returned bot_id may be empty on this read;\nkeep the one you addressed with.\n\nDeprecated: use GET /openapi/v1/bots/{bot_id}/routines/{routine_id} instead.",
         "operationId": "get_routine_openapi_v1_bots_routines__routine_id__get",
         "parameters": [
           {

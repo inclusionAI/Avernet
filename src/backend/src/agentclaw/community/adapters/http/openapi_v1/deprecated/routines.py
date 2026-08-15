@@ -72,12 +72,35 @@ class RoutineCreate(RoutineSpec):
     bot_id: str = Field(description="The bot that will run the routine.")
 
 
+#: ``get_routine``'s description says where the bot is, and here it is somewhere
+#: else. Reworded for this address rather than made vague on both: the two
+#: genuinely differ in a client-visible way, and the parameter's location is
+#: worth stating.
+#:
+#: Keyed by endpoint **name**, not by sniffing the docstring for the sentence. A
+#: sniff would silently skip the rewording the moment somebody rephrased the
+#: handler — which is precisely the drift this exists to catch, and it is how the
+#: first version of this got it wrong. Naming the endpoint means a rephrase
+#: reaches ``deprecated_doc``, finds its stale text missing, and raises at
+#: import.
+_REWORDED = {
+    "get_routine": (
+        "The bot is named by the path — a routine id alone does not",
+        "The bot is named by the bot_id query parameter — a routine id alone does not",
+    ),
+}
+
+
 def _bot_to_query(endpoint, method, new_path):
     return with_query_parameter(
         endpoint,
         "bot_id",
         LegacyBotIdQuery,
-        doc=deprecated_doc(endpoint, f"{method} {new_path}"),
+        doc=deprecated_doc(
+            endpoint,
+            f"{method} {new_path}",
+            reword=_REWORDED.get(endpoint.__name__),
+        ),
     )
 
 

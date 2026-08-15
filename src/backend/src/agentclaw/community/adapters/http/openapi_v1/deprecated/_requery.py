@@ -86,11 +86,31 @@ def with_query_parameter(
     return shim
 
 
-def deprecated_doc(handler: Callable[..., Any], replacement: str) -> str:
+def deprecated_doc(
+    handler: Callable[..., Any],
+    replacement: str,
+    *,
+    reword: tuple[str, str] | None = None,
+) -> str:
     """The handler's own description, with a line saying where to go instead.
 
     The published description is what an integrator reads, and the schema's
     ``deprecated`` flag alone does not say what to move to.
+
+    **A handler docstring that says where a parameter lives cannot be shared.**
+    It is written for the current address; this function republishes it on the
+    retiring one, where the same sentence may be false. That is not
+    hypothetical — correcting ``get_routine`` to say the bot is on the path made
+    its legacy address, which still takes the bot in the query, publish the
+    opposite of its own parameter table. Pass *reword* as ``(stale, correct)``
+    to fix such a sentence for the retiring address. The stale text is matched
+    literally and its absence raises at import, so editing the handler's
+    docstring without revisiting this fails loudly instead of shipping a
+    contradiction.
+
+    Prefer not needing it: a description that says *what* a parameter is and
+    lets the parameter table say *where* is correct on both addresses and needs
+    no override.
 
     Plain prose, with no markup: this string ships to clients, and
     ``test_schema_docs`` refuses RST in the published document for exactly that
@@ -98,4 +118,14 @@ def deprecated_doc(handler: Callable[..., Any], replacement: str) -> str:
     rendered API reference.
     """
     body = inspect.getdoc(handler) or ""
+    if reword is not None:
+        stale, correct = reword
+        if stale not in body:
+            raise ValueError(
+                f"{handler.__name__}: the legacy address reworded a sentence "
+                f"that is no longer in the handler's docstring: {stale!r}. "
+                "Update the reword, or drop it if the sentence no longer says "
+                "where a parameter lives."
+            )
+        body = body.replace(stale, correct)
     return f"{body}\n\nDeprecated: use {replacement} instead."
