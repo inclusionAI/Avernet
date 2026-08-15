@@ -76,6 +76,47 @@ async def test_read_file_returns_none_on_404():
 
 
 @pytest.mark.asyncio
+async def test_read_file_raises_on_proxy_routing_404():
+    """A proxy 404 means the bot/device is gone — unavailability, not an absent file.
+
+    ``DesktopBaasInvokeTransport`` reaches the device through secbaas'
+    ``invoke-http`` router, which answers 404 with its own error body when it cannot
+    route to a device — before the request reaches the device at all. Mapping that to
+    ``None`` would report a gone bot as "engine config is {}", the exact
+    absence/unavailability conflation the surrounding guard exists to prevent.
+    """
+    from agentclaw.community.core.devices.services.baas_device_filesystem import BaasDeviceFileSystem
+    for marker in ("BOT_NOT_FOUND", "NO_DEVICES_FOUND"):
+        err_resp = httpx.Response(
+            status_code=404,
+            json={"detail": {"error": marker, "message": "gone", "bot_uuid": "b1"}},
+            request=httpx.Request("POST", "http://fake/"),
+        )
+        transport = _make_transport(response=err_resp)
+        fs = BaasDeviceFileSystem(transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p)
+        with pytest.raises(httpx.HTTPStatusError):
+            await fs.read_file("/some/file")
+
+
+@pytest.mark.asyncio
+async def test_read_file_returns_none_on_json_404_that_is_not_a_proxy_error():
+    """Only the proxy's own markers re-raise; a device 404 with a JSON body is absence.
+
+    The proxy emits exactly two 404s of its own, so any other 404 — whatever its body
+    looks like — travelled through it from the device.
+    """
+    from agentclaw.community.core.devices.services.baas_device_filesystem import BaasDeviceFileSystem
+    err_resp = httpx.Response(
+        status_code=404,
+        json={"detail": "file not found"},
+        request=httpx.Request("POST", "http://fake/"),
+    )
+    transport = _make_transport(response=err_resp)
+    fs = BaasDeviceFileSystem(transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p)
+    assert await fs.read_file("/missing") is None
+
+
+@pytest.mark.asyncio
 async def test_read_file_raises_on_5xx():
     """A server failure is unavailability, not absence — it must not read as None.
 

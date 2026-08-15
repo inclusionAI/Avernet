@@ -23,6 +23,45 @@ from agentclaw.community.core.devices.services.baas_invoke_transport import Baas
 logger = get_logger()
 
 
+# The transparent-proxy router answers 404 for its OWN routing failures, using these
+# markers in the error body. They mean "this bot/device is gone" — unavailability —
+# never "that file does not exist".
+_PROXY_ROUTING_ERRORS = frozenset({"BOT_NOT_FOUND", "NO_DEVICES_FOUND"})
+
+
+def _is_proxy_routing_failure(response: httpx.Response) -> bool:
+    """True when a 404 came from the transparent proxy rather than from the device.
+
+    ``DesktopBaasInvokeTransport`` reaches the device through secbaas'
+    ``/api/v1/bots/{tenant}/{bot_uuid}/invoke-http/{port}{path}`` router, which raises
+    ``HTTPException(404, detail={"error": "BOT_NOT_FOUND" | "NO_DEVICES_FOUND", ...})``
+    when it cannot route to a device — *before* the request reaches the device at all
+    (``invoke_http_in_bot``). A device that simply lacks the file also answers 404, and
+    the proxy passes that status straight through, so the status code alone cannot tell
+    "no such file" from "no such bot"; only the body can.
+
+    Anything that is not one of the proxy's own markers is read as the device's own
+    answer, because the proxy emits only these two 404s itself — every other 404
+    travelled through it from the device. (Its "no active devices" case is a 503, so it
+    never reaches this branch.)
+
+    The cloud ``BaasInvokeTransport`` does not use this router — it resolves the device
+    via ``get_http_info`` first and raises ``BaasServiceError`` when there is none — so
+    this only ever fires on the desktop path. Checking it unconditionally is still safe:
+    a device would not answer in the proxy's error shape.
+    """
+    try:
+        payload = response.json()
+    except ValueError:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    # FastAPI nests ``HTTPException(detail=...)`` under "detail"; tolerate a bare body.
+    detail = payload.get("detail")
+    candidates = (detail, payload) if isinstance(detail, dict) else (payload,)
+    return any(c.get("error") in _PROXY_ROUTING_ERRORS for c in candidates)
+
+
 class BaasDeviceFileSystem(DeviceFileSystem):
     """DeviceFileSystem — 业务逻辑层,transport 由 dispatcher 注入。
 
@@ -66,20 +105,27 @@ class BaasDeviceFileSystem(DeviceFileSystem):
             resp.raise_for_status()
             return resp.content
         except httpx.HTTPStatusError as e:
-            # An explicit 404 is the container answering "no such file", which the
+            # A 404 *from the device* is it answering "no such file", which the
             # ``DeviceFileSystem.read_file`` contract represents as ``None`` — the
             # same mapping ``TeclawDeviceFileSystem.read_file`` and
             # ``LocalDeviceFileSystem._baas_read_file`` (same ``/api/file/read``
             # endpoint) already apply. Keeping it here means core callers never have
             # to know this provider speaks HTTP.
             #
-            # Every other status still propagates, which is the point of the guard
-            # this replaces: a swallowed 401 (missing x-proxypass-token) used to
-            # return empty content that callers treated as "file gone", silently
-            # dropping promoted files at draft→verify. Translating *only* a verified
-            # 404 keeps that failure impossible while honouring the contract —
-            # absence and unavailability stay distinguishable.
-            if e.response.status_code == 404:
+            # Not every 404 is the device's, though: on the desktop path the
+            # transparent proxy answers 404 for its own routing failures, which mean
+            # the bot/device is gone. Those must keep raising — see
+            # ``_is_proxy_routing_failure``.
+            #
+            # Every other status propagates too, which is the point of the guard this
+            # replaces: a swallowed 401 (missing x-proxypass-token) used to return
+            # empty content that callers treated as "file gone", silently dropping
+            # promoted files at draft→verify. Translating *only* a verified
+            # device-level 404 keeps that failure impossible while honouring the
+            # contract — absence and unavailability stay distinguishable.
+            if e.response.status_code == 404 and not _is_proxy_routing_failure(
+                e.response
+            ):
                 logger.debug(
                     "[%s.read_file] not found: %s", type(self).__name__, file_path
                 )
