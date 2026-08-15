@@ -138,6 +138,17 @@ _claude_bots_bcsfuse_auth_token() {
         printf '%s\n' "$token"
         return 0
     fi
+
+    # Singlebox bcsfuse defaults to this token when no explicit token is
+    # configured. Use it as a last-resort fallback so Claude bot registration
+    # does not silently skip because the env var/file is empty.
+    local default_token="dev-opencore-token"
+    if [ -n "$default_token" ]; then
+        log_warn "BCSFUSE_AUTH_TOKEN not found in env var or ${env_file}; falling back to the singlebox default token"
+        printf '%s\n' "$default_token"
+        return 0
+    fi
+
     log_warn "BCSFUSE_AUTH_TOKEN not found in env var or ${env_file} (file exists: $([ -f "$env_file" ] && echo yes || echo no))"
     return 0
 }
