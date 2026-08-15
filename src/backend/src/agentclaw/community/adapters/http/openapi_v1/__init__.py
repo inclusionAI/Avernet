@@ -19,12 +19,23 @@ never a body field. Which bot an operation acts on is the address, not an
 argument to the call, and a client that must be told to put the same id in two
 places has been told the address twice.
 
-That is also what makes authorization mechanical rather than per-operation.
-``require_granted_bot`` reads the addressed bot off the path, the same way, for
-every operation on the surface; there is no list of operations that carry their
-bot somewhere the shared dependency cannot see it and must check for themselves.
-Closing that split is ``TODO(#960)``, and this rule is what closed it — see
-``principal.py``.
+That is also what makes authorization mostly mechanical rather than
+per-operation. ``require_granted_bot`` reads the addressed bot off the path, the
+same way, for all but four operations on the surface.
+
+**The four are not an oversight, and their handler-side checks are
+load-bearing.** The ``{skill_id}`` skills operations resolve by
+``(skill, actor)``, so the addressed bot's *owner* arrives on the record rather
+than on the wire — a collaborator reaches a skill on someone else's bot
+routinely — and there is nothing for the shared dependency to look a grant up
+against until that read has happened. They are named in
+``admission.SKILL_SCOPED_OPERATIONS``, mounted without the group-level
+dependency rather than exempted from one, and they check the grant themselves.
+**Deleting those checks as obsolete would leave the four unauthorized; the
+dependency does not cover them.**
+
+So ``TODO(#960)`` is *narrowed* by this rule, from seven operations to four, and
+stays open — see ``principal.py`` and ``admission.SKILL_SCOPED_OPERATIONS``.
 
 The account-level operations are the ones with no single bot to name: creating
 a bot, listing them, checking a name, the ``authorized`` groups, the tenant-wide

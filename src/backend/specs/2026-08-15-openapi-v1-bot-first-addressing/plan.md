@@ -63,7 +63,7 @@ package**, where it is deleted along with the package. `principal.py` and
 | `openapi_v1/routines/schemas.py` | `RoutineCreate` drops `bot_id` |
 | `openapi_v1/engine_runtime/approvals/schemas.py` | the mode-write body drops `session_key` |
 | `openapi_v1/admission.py` | entries for 39 new addresses; `BODY_BOT_ID_OPERATIONS`, `SKILL_SCOPED_OPERATIONS`, `OWNER_ADDRESSED_OPERATIONS` deleted; the two skills reads move to `GRANT_CHECKED_ADDRESSED_BOT` |
-| `openapi_v1/principal.py` | `_defers_to_its_handler` deleted, `TODO(#960)` resolved; the refuse-when-no-bot branch kept |
+| `openapi_v1/principal.py` | `_defers_to_its_handler` deleted, `TODO(#960)` narrowed from seven operations to four (the `{skill_id}` skills ones keep their handler-side checks); the refuse-when-no-bot branch kept |
 | `openapi_v1/__init__.py` | mount the deprecated router; rewrite the mount-order and addressing docstrings |
 | `adapters/http/app.py` | register the deprecation middleware |
 | `tests/…/openapi_v1/test_path_convention.py` | the new rule and both name lists |
@@ -160,7 +160,7 @@ volume is where a typo hides; the test is what catches a list that fell behind.
 
 **Scope creep from the three contract fixes.** Each is independently revertible
 by design. If review wants them out, `owner_entity_id` → `owner_id` is the one
-that cannot simply be dropped — it is load-bearing for closing #960 — so it
+that cannot simply be dropped — it is load-bearing for narrowing #960 — so it
 would have to be kept and the other two deferred.
 
 **The published artifact is a release gate.** `bots.openapi.json` currently

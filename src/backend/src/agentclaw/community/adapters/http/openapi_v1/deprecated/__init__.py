@@ -20,10 +20,12 @@ Two things are deliberately *not* shared with the current surface:
   what a generated client is written against — live here, not in the schemas
   modules they came from, so deleting this package deletes them.
 - **The handler-side grant check.** ``TODO(#960)`` recorded it as two mechanisms
-  doing one job, and the new surface has one. The legacy skills item operations
-  and the legacy routines create genuinely cannot be checked by the shared
-  dependency — their bot is in the body or nowhere — so the second mechanism
-  survives here, scoped to the addresses that need it, and dies with them.
+  doing one job. The current surface has fewer of them, not one: four
+  ``{skill_id}`` operations still check in their handlers because their bot's
+  owner is only known after the skill is read (``admission.SKILL_SCOPED_OPERATIONS``).
+  What is scoped to *this* package is the rest — the legacy skills collection
+  and item operations and the legacy routines create, whose bot is in the body
+  or nowhere at all — and that part dies with these addresses.
 """
 
 from __future__ import annotations

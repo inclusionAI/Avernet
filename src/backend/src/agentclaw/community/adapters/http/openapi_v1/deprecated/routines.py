@@ -8,8 +8,11 @@ authorization mechanism of its own. It took the bot in the request body, which
 ``require_granted_bot`` cannot see — the body is not parsed when dependencies
 resolve — so the check has to run inside the shim, first, before anything
 touches the bot. That is exactly the arrangement ``TODO(#960)`` recorded as a
-defect and the new surface no longer has. It survives here because the *old
-contract* survives here, and it is deleted when these addresses are.
+defect, and the *routines* create no longer has it on the current surface — its
+bot is on the path. It survives here because the *old contract* survives here,
+and it is deleted when these addresses are. (The four ``{skill_id}`` skills
+operations still check in their handlers on the current surface, for a different
+reason — see ``admission.SKILL_SCOPED_OPERATIONS``.)
 """
 
 from __future__ import annotations

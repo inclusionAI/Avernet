@@ -152,7 +152,7 @@ parameter. Verify each with the dump.
       operation carries both headers and is `deprecated: true` in the document,
       and that no new operation is.
 
-## Closing `TODO(#960)`
+## Narrowing `TODO(#960)` (seven operations to four)
 
 - [x] **27. `admission.py`.** Add entries for the 39 new addresses, keeping every
       legacy entry at its current mode. Move the two skills reads to
@@ -214,8 +214,9 @@ parameter. Verify each with the dump.
 
 - [ ] **36. PR.** Title `refactor(openapi-v1): address bot-scoped operations
       bot-first`. Body per `.github/pull_request_template.md` — Problem /
-      Solution / Validation. Note that it closes `#960`, that nothing is
-      removed, and that the artifact diff is large by design.
+      Solution / Validation. Note that it *narrows* `#960` from seven
+      operations to four rather than closing it, that nothing is removed, and
+      that the artifact diff is large by design.
 
 ## Groups
 
@@ -228,7 +229,7 @@ Execution units. Groups run in order; tasks inside a group run in order.
 | **C. New addresses — bot out of the query** | 10–14 | yes |
 | **D. Contract fixes** | 15–16 | yes |
 | **E. The deprecated package** | 17–26 | yes |
-| **F. Closing `TODO(#960)`** | 27–28 | yes |
+| **F. Narrowing `TODO(#960)`** | 27–28 | yes |
 | **G. Tests and docs** | 29–32 | yes |
 | **H. Artifact and gates** | 33–36 | no (generated + docs) |
 
