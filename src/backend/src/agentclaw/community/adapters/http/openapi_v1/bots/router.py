@@ -826,7 +826,12 @@ async def get_bot_engine_config(
         EngineConfigServiceProtocol
     ),
 ) -> Envelope[dict[str, Any]]:
-    """Read a bot's engine configuration (free-form JSON)."""
+    """Read a bot's engine configuration (free-form JSON).
+
+    A bot whose engine configuration has never been written reads as an empty
+    object — every engine keeps this configuration in a file its runtime creates
+    on first use, so "not configured yet" is an ordinary state, not an error.
+    """
     bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
     entity_id, entity_type, engine = _engine_config_target(bot)
     data = await engine_config_service.read_bot_config(

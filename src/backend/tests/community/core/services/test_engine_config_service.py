@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 
 from agentclaw.community.core.devices.services.device_context import DeviceNotBoundError
@@ -28,6 +29,20 @@ def _record(*, status: str = "success", binding: dict | None = None,
     return rec
 
 
+def _http_status_error(status_code: int) -> httpx.HTTPStatusError:
+    """The error arca/baas ``read_file`` raises — it re-raises every failing status.
+
+    Built from real httpx objects rather than a mock so the ``exc.response.status_code``
+    the service reads is the genuine attribute path, not one a MagicMock would answer
+    for regardless of what the service asked.
+    """
+    request = httpx.Request("POST", "https://device.invalid/api/file/read")
+    response = httpx.Response(status_code, request=request)
+    return httpx.HTTPStatusError(
+        f"HTTP {status_code}", request=request, response=response
+    )
+
+
 def _service(*, read_return=b'{"a": 1}', resolve_raises=None, provider="arca"):
     bot_repo = MagicMock()
     bot_repo.get_by_id_and_owner.return_value = {"entity_id": "100018", "entity_type": "staff"}
@@ -41,7 +56,10 @@ def _service(*, read_return=b'{"a": 1}', resolve_raises=None, provider="arca"):
         resolver.resolve_for_binding.return_value = ctx
 
     device_fs = MagicMock()
-    device_fs.read_file = AsyncMock(return_value=read_return)
+    if isinstance(read_return, Exception):
+        device_fs.read_file = AsyncMock(side_effect=read_return)
+    else:
+        device_fs.read_file = AsyncMock(return_value=read_return)
     dispatcher = MagicMock()
     dispatcher.dispatch_addressed.return_value = device_fs
 
@@ -142,7 +160,10 @@ def _bot_service(*, read_return=b'{"a": 1}', resolve_raises=None, provider="arca
         resolver.resolve_for_bot.return_value = ctx
 
     device_fs = MagicMock()
-    device_fs.read_file = AsyncMock(return_value=read_return)
+    if isinstance(read_return, Exception):
+        device_fs.read_file = AsyncMock(side_effect=read_return)
+    else:
+        device_fs.read_file = AsyncMock(return_value=read_return)
     device_fs.write_file = AsyncMock()
     dispatcher = MagicMock()
     dispatcher.dispatch_addressed.return_value = device_fs
@@ -208,3 +229,56 @@ async def test_bot_config_resolve_failure_propagates():
     with pytest.raises(DeviceNotBoundError):
         await svc.read_bot_config(**_BOT_COORDS)
     dispatcher.dispatch_addressed.assert_not_called()
+
+
+# ── an absent config file, however the provider says so ──────────────────────
+#
+# Regression: a bot whose engine config had never been written answered 500 on
+# GET /openapi/v1/bots/{bot_id}/engine-config. arca/baas report an absent file as
+# HTTP 404 and their read_file re-raises it (deliberately — a swallowed 401 once
+# read as "file gone"), nothing between there and the router caught it, and
+# httpx.HTTPStatusError is not in ENVELOPE_ERRORS, so it escaped as an unhandled
+# 500. The domain contract is "absent means empty" for every provider.
+
+
+@pytest.mark.asyncio
+async def test_read_bot_config_absent_file_404_returns_empty_dict():
+    svc, _, _, device_fs = _bot_service(read_return=_http_status_error(404))
+
+    assert await svc.read_bot_config(**_BOT_COORDS) == {}
+    device_fs.read_file.assert_awaited_once_with("config/teclaw.json")
+
+
+@pytest.mark.asyncio
+async def test_read_publish_config_absent_file_404_returns_empty_dict():
+    svc, _, _, _ = _service(read_return=_http_status_error(404))
+
+    data = await svc.read_publish_config(
+        _record(status="success", binding={"online": 7}), "openclaw"
+    )
+
+    assert data == {}
+
+
+@pytest.mark.asyncio
+async def test_read_bot_config_non_404_device_status_propagates():
+    """A proxy 401 / sandbox 5xx is a real failure and must not read as "no config".
+
+    Reporting one as an empty config would invite the caller to overwrite a config
+    they never managed to read — the same swallowed-401 failure mode that made
+    read_file re-raise every status in the first place.
+    """
+    for status in (401, 403, 500, 502):
+        svc, _, _, _ = _bot_service(read_return=_http_status_error(status))
+        with pytest.raises(httpx.HTTPStatusError):
+            await svc.read_bot_config(**_BOT_COORDS)
+
+
+@pytest.mark.asyncio
+async def test_read_publish_config_non_404_device_status_propagates():
+    for status in (401, 500):
+        svc, _, _, _ = _service(read_return=_http_status_error(status))
+        with pytest.raises(httpx.HTTPStatusError):
+            await svc.read_publish_config(
+                _record(status="success", binding={"online": 7}), "openclaw"
+            )

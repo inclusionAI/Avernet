@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 
+import httpx
 from injector import inject
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
@@ -50,6 +51,33 @@ logger = get_logger()
 # — a smell. Cleaner: make `config` a leaf-less namespace where each provider's mapper
 # owns the full filename, so callers pass no provider-specific name. Solve separately.
 _CONFIG_LOGICAL_PATH = f"{CONFIG_NS}/{TECLAW_ENGINE_CONFIG_FILE}"
+
+
+async def _read_config_bytes(device_fs) -> bytes | None:
+    """The engine config file's bytes, or ``None`` when the device has no such file.
+
+    A bot whose engine config has never been written has no file to read, and the
+    providers disagree about how they say so: teclaw/local answer ``None``, while
+    arca/baas surface the container's HTTP 404 as ``httpx.HTTPStatusError`` — their
+    ``read_file`` re-raises *every* status on purpose, because a swallowed 401 once
+    read as "file gone" and silently dropped promoted files at draft→verify.
+
+    This domain's contract is "absent means empty" (see the ``{}`` promise on both
+    read methods), so the 404 is reconciled here, once, for every caller and every
+    provider — the same seam ``IdentityService._device_read`` closes for identity
+    files, and for the same reason: without it a bot that simply has no config yet
+    answers 500, because ``httpx.HTTPStatusError`` is not in ``ENVELOPE_ERRORS``.
+
+    Every other status still propagates. A proxy 401, a sandbox 5xx, or a device
+    that is not reachable is a real failure, and reporting it as an unconfigured
+    bot would invite the caller to overwrite a config they never managed to read.
+    """
+    try:
+        return await device_fs.read_file(_CONFIG_LOGICAL_PATH)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            return None
+        raise
 
 
 def _decode_config(content_bytes: bytes | None) -> dict:
@@ -89,8 +117,10 @@ class EngineConfigService:
 
         Returns:
             The parsed config dict on success; ``{}`` **only** when the config file is
-            missing or empty on the device. Every other failure is surfaced (raised),
-            never collapsed into an empty result.
+            missing or empty on the device — including the provider 404 arca/baas
+            raise for an absent file, which :func:`_read_config_bytes` reconciles.
+            Every other failure is surfaced (raised), never collapsed into an empty
+            result.
 
         Raises:
             DeviceNotBoundError: there is no resolvable active-stage device binding —
@@ -100,6 +130,8 @@ class EngineConfigService:
                 error (not masked as an empty config).
             json.JSONDecodeError: the config file exists but is not valid JSON
                 (the caller maps this to a malformed-config error response).
+            httpx.HTTPStatusError: the device answered with a failing status other
+                than 404 — a proxy 401, a sandbox 5xx. Only 404 means "no config".
         """
         owner_id = record.owner_id
         bot_id = record.source_bot_id
@@ -130,7 +162,7 @@ class EngineConfigService:
             ctx, namespace=CONFIG_NS, entity_type=entity_type, entity_id=entity_id,
             bot_id=bot_id, engine_type=engine_type,
         )
-        content_bytes = await device_fs.read_file(_CONFIG_LOGICAL_PATH)
+        content_bytes = await _read_config_bytes(device_fs)
         return _decode_config(content_bytes)
 
     # ── bot-level (draft/current binding) read + write ───────────────────────
@@ -165,14 +197,16 @@ class EngineConfigService:
     ) -> dict:
         """Read a bot's engine config from its own device, provider-blind.
 
-        Returns the parsed dict; ``{}`` only when the file is missing/empty. Resolve
-        errors and ``json.JSONDecodeError`` propagate (the caller surfaces them).
+        Returns the parsed dict; ``{}`` only when the file is missing/empty — a bot
+        that has never had a config written reads as empty on every provider, not as
+        an error (see :func:`_read_config_bytes`). Resolve errors, a non-404 device
+        status, and ``json.JSONDecodeError`` propagate (the caller surfaces them).
         """
         device_fs = self._bot_config_device_fs(
             bot_id=bot_id, owner_id=owner_id, entity_id=entity_id,
             entity_type=entity_type, engine_type=engine_type,
         )
-        content_bytes = await device_fs.read_file(_CONFIG_LOGICAL_PATH)
+        content_bytes = await _read_config_bytes(device_fs)
         return _decode_config(content_bytes)
 
     async def write_bot_config(
