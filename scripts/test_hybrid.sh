@@ -66,8 +66,8 @@ MODEL_CONFIG="$TMP/model-config.json"
 export OPENCLAW_OPENAI_PROVIDER_ID="openai-compatible"
 export OPENCLAW_OPENAI_BASE_URL="https://model.example.test/v1"
 export OPENCLAW_OPENAI_API_KEY="test-token"
-export OPENCLAW_OPENAI_MODEL_ID="glm-local"
-export OPENCLAW_OPENAI_MODEL_NAME="GLM Local"
+export OPENCLAW_OPENAI_MODEL_ID="GLM-5.1"
+export OPENCLAW_OPENAI_MODEL_NAME="GLM-5.1"
 export ANTHROPIC_BASE_URL="https://anthropic-gateway.example.test"
 export ANTHROPIC_AUTH_TOKEN="anthropic-test-token"
 export ANTHROPIC_MODEL="glm-claude"
@@ -76,25 +76,30 @@ export SINGLEBOX_MODEL_CONFIG_FILE="$MODEL_CONFIG"
 model_config_before="$(shasum -a 256 "$MODEL_CONFIG" | awk '{print $1}')"
 hybrid_apply_model_policy
 model_config_after="$(shasum -a 256 "$MODEL_CONFIG" | awk '{print $1}')"
-[[ "$model_config_after" == "$model_config_before" ]]
+[[ "$model_config_after" != "$model_config_before" ]]
 jq -e '
-  .agents.defaults.model.primary == "openai-compatible/glm-local"
-  and .agents.defaults.models["openai-compatible/glm-local"].alias == "GLM Local"
-  and ([.models.providers["openai-compatible"].models[].id] == ["glm-local"])
+  .models.providers["openai-compatible"].timeoutSeconds == 600
+  and .models.providers["openai-compatible"].models[0].id == "GLM-5.1"
+  and .models.providers["openai-compatible"].models[0].reasoning == true
+  and .models.providers["openai-compatible"].models[0].compat.thinkingFormat == "zai"
+  and .agents.defaults.model.primary == "openai-compatible/GLM-5.1"
+  and .agents.defaults.models["openai-compatible/GLM-5.1"].alias == "GLM-5.1"
+  and .agents.defaults.models["openai-compatible/GLM-5.1"].params.reasoning_effort == "none"
+  and .agents.defaults.timeoutSeconds == 600
 ' "$MODEL_CONFIG" >/dev/null
-[[ "$HYBRID_MODEL_ID" == "glm-local" ]]
-[[ "$SINGLEBOX_REQUIRED_OPENCLAW_MODEL" == "openai-compatible/glm-local" ]]
-[[ "$LLM_FAST_MODEL" == "glm-local" ]]
-[[ "$LLM_BALANCED_MODEL" == "glm-local" ]]
-[[ "$LLM_REASONING_MODEL" == "glm-local" ]]
-[[ "$LLM_LONG_CONTEXT_MODEL" == "glm-local" ]]
-[[ "$LLM_EXTRACTION_MODEL" == "glm-local" ]]
+[[ "$HYBRID_MODEL_ID" == "GLM-5.1" ]]
+[[ "$SINGLEBOX_REQUIRED_OPENCLAW_MODEL" == "openai-compatible/GLM-5.1" ]]
+[[ "$LLM_FAST_MODEL" == "GLM-5.1" ]]
+[[ "$LLM_BALANCED_MODEL" == "GLM-5.1" ]]
+[[ "$LLM_REASONING_MODEL" == "GLM-5.1" ]]
+[[ "$LLM_LONG_CONTEXT_MODEL" == "GLM-5.1" ]]
+[[ "$LLM_EXTRACTION_MODEL" == "GLM-5.1" ]]
 
 export HYBRID_CLAUDE_CONFIG_MODE="user"
 hybrid_apply_model_policy
 [[ -z "${HYBRID_MODEL_ID:-}" ]]
-[[ "$SINGLEBOX_REQUIRED_OPENCLAW_MODEL" == "openai-compatible/glm-local" ]]
-[[ "$LLM_FAST_MODEL" == "glm-local" ]]
+[[ "$SINGLEBOX_REQUIRED_OPENCLAW_MODEL" == "openai-compatible/GLM-5.1" ]]
+[[ "$LLM_FAST_MODEL" == "GLM-5.1" ]]
 unset HYBRID_CLAUDE_CONFIG_MODE
 hybrid_apply_model_policy
 

@@ -575,6 +575,40 @@ test_backend_separates_profile_env_and_workspace_folder() {
   fi
 }
 
+test_dynamic_bot_gateway_receives_manual_model_credential() (
+  setup_env
+  export BCS_PORT="21000"
+  export SINGLEBOX_MODEL_CONFIG_MODE="manual"
+  OPENCLAW_OPENAI_API_KEY="test-model-key"
+  export -n OPENCLAW_OPENAI_API_KEY
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/bots.sh"
+
+  local attempt
+  export TEST_DYNAMIC_PROFILE_DIR="$(mktemp -d)"
+  export TEST_DYNAMIC_WORKSPACE_DIR="$(mktemp -d)"
+  export TEST_DYNAMIC_CAPTURED_ENV="$(mktemp)"
+
+  bcs_bot_profile_dir() { printf '%s\n' "$TEST_DYNAMIC_PROFILE_DIR"; }
+  bots_dynamic_workspace_dir() { printf '%s\n' "$TEST_DYNAMIC_WORKSPACE_DIR"; }
+  bcs_cli_path() { printf '%s\n' /usr/bin/true; }
+  lsof() { return 1; }
+  port_is_listening() { return 0; }
+  start_in_detached_session() {
+    env | awk -F= '$1 == "OPENCLAW_OPENAI_API_KEY" { print $0 }' > "$TEST_DYNAMIC_CAPTURED_ENV"
+  }
+
+  bots_dynamic_start_openclaw "test-bot" "test-profile" "30999" \
+    "${LOG_DIR}/test-bot.log" "test-source"
+
+  for attempt in $(seq 1 20); do
+    [ -s "$TEST_DYNAMIC_CAPTURED_ENV" ] && break
+    sleep 0.05
+  done
+  assert_eq "OPENCLAW_OPENAI_API_KEY=test-model-key" "$(cat "$TEST_DYNAMIC_CAPTURED_ENV")" \
+    "dynamic gateway manual model credential"
+)
+
 test_all_start_rolls_back_started_services_on_failure
 test_backend_health_failure_stops_backend
 test_backend_wait_fails_when_started_process_exits
@@ -599,5 +633,6 @@ test_5bot_openclaw_config_is_written_private
 test_local_bcs_launchers_supply_required_signing_keys
 test_ready_banner_describes_full_stack
 test_backend_separates_profile_env_and_workspace_folder
+test_dynamic_bot_gateway_receives_manual_model_credential
 
 printf 'PASS: singlebox service guard tests\n'
