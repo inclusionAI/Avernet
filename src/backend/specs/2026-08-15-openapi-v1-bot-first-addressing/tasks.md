@@ -10,7 +10,7 @@ cd src/backend && DEPLOY_PROFILE=test uv run python scripts/dump_openapi.py /tmp
 
 ## Ground truth — write these first
 
-- [ ] **1. The invariant guard.** New
+- [x] **1. The invariant guard.** New
       `tests/…/openapi_v1/test_no_duplicate_request_fields.py`: over the
       generated public document, assert no operation publishes one field name in
       two of {path, query, header, cookie, body}, resolving `$ref` for request
@@ -215,3 +215,22 @@ parameter. Verify each with the dump.
       bot-first`. Body per `.github/pull_request_template.md` — Problem /
       Solution / Validation. Note that it closes `#960`, that nothing is
       removed, and that the artifact diff is large by design.
+
+## Groups
+
+Execution units. Groups run in order; tasks inside a group run in order.
+
+| Group | Tasks | Code review |
+| --- | --- | --- |
+| **A. Ground truth** | 1–3 | yes |
+| **B. New addresses — already bot-scoped** | 4–9 | yes |
+| **C. New addresses — bot out of the query** | 10–14 | yes |
+| **D. Contract fixes** | 15–16 | yes |
+| **E. The deprecated package** | 17–26 | yes |
+| **F. Closing `TODO(#960)`** | 27–28 | yes |
+| **G. Tests and docs** | 29–32 | yes |
+| **H. Artifact and gates** | 33–36 | no (generated + docs) |
+
+Decisions taken at the review gate: the `Sunset` date is **2027-08-15**, twelve
+months from the date this specification was approved; the three contract fixes
+(tasks 14–16) ship in this feature rather than after it.
