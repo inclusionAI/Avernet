@@ -630,7 +630,7 @@ fn test_session_router_for_caller(
     .with_session_file_service(
         Arc::new(FakeSessionFileService),
         SessionFileUrlProjector::new(
-            "https://gateway.example.com/openapi/v1/collaboration".into(),
+            "https://gateway.example.com/api/v1/collaboration".into(),
         )
         .expect("valid base"),
         ),
