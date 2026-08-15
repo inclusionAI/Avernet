@@ -173,7 +173,7 @@ Two things about this group are not the shape a reader would assume:
 | Method | Public path | Engine route | Notes |
 |---|---|---|---|
 | GET | `…/{bot_id}/approvals/mode` | `POST /api/approvals/mode/get` | **divergence:** a read is `GET` with `session_key` as a query param, not a `POST` |
-| PUT | `…/{bot_id}/approvals/mode` | `POST /api/approvals/mode/set` | body `{session_key, mode}`; a refusal (`data.ok=false` under an outer success) is a 502, not a 200 — see below |
+| PUT | `…/{bot_id}/approvals/mode` | `POST /api/approvals/mode/set` | `?session_key=` with a body of `{mode}` alone, matching the read at this address; the retiring `…/approvals/{bot_id}/mode` keeps the old `{session_key, mode}` body. A refusal (`data.ok=false` under an outer success) is a 502, not a 200 — see below |
 | GET | `…/{bot_id}/approvals/modes` | `GET /api/approvals/modes` | static enum; note this is the one engine route with **no** capability gate |
 
 ### connection (1) — NEW, no engine counterpart

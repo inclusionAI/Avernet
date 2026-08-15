@@ -142,7 +142,7 @@ C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypa
 | 方法 | 公共路径 | engine 路由 | 说明 |
 |---|---|---|---|
 | GET | `…/{bot_id}/approvals/mode` | `POST /api/approvals/mode/get` | **差异：** 读操作用 `GET` + `session_key` query，不用 `POST` |
-| PUT | `…/{bot_id}/approvals/mode` | `POST /api/approvals/mode/set` | body `{session_key, mode}` |
+| PUT | `…/{bot_id}/approvals/mode` | `POST /api/approvals/mode/set` | `?session_key=` 加上只含 `{mode}` 的 body，与该地址上的读取一致；待退役的 `…/approvals/{bot_id}/mode` 仍保留旧的 `{session_key, mode}` body |
 | GET | `…/{bot_id}/approvals/modes` | `GET /api/approvals/modes` | 静态枚举；注意这是 engine 侧唯一**没有**能力门禁的路由 |
 
 ### connection（1）—— 新增，engine 无对应物

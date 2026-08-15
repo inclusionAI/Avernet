@@ -831,7 +831,14 @@ bot off the path, the same way, for every operation on the surface. Under the
 old shape seven operations carried their bot somewhere that dependency could not
 see it and checked the grant inside their handlers instead — two mechanisms
 doing one job, which had already cost one real defect. That was `TODO(#960)`;
-bot-first addressing closed it.
+bot-first addressing narrowed it from seven operations to four. The four that
+remain are the `{skill_id}` skills operations: they resolve by `(skill, actor)`,
+so the addressed bot's *owner* arrives on the record rather than on the wire —
+a collaborator reaches a skill on someone else's bot routinely — and there is
+nothing for the shared dependency to look a grant up against until that read has
+happened. They are named in `admission.SKILL_SCOPED_OPERATIONS` and check the
+grant in their handlers. **Do not remove those checks believing the dependency
+covers them; it does not.**
 
 *The reserved-name list shrinks to the operations that earn it.* Because
 `{bot_id}` is a single wildcard segment, any literal served in that position is
@@ -923,7 +930,7 @@ How a caller finds out:
 | Channel | What it carries |
 |---|---|
 | The published document | `deprecated: true` on every retiring operation, so a generated client can annotate it |
-| Response headers | `Deprecation: Sat, 15 Aug 2026 00:00:00 GMT` and `Sunset: Sun, 15 Aug 2027 00:00:00 GMT` (RFC 9745 / RFC 8594), on **every** response from the address, failures included |
+| Response headers | `Deprecation: @1786752000` and `Sunset: Sun, 15 Aug 2027 00:00:00 GMT`, on **every** response from the address, failures included. The two are spelled differently on purpose: `Deprecation` is an RFC 9745 structured-field date (`@` and seconds since the epoch), `Sunset` an RFC 8594 HTTP-date. |
 
 **The window runs 2026-08-15 → 2027-08-15.** Removal is driven by traffic, not
 by the date: the public access log says when an address has no callers left, and
@@ -1434,8 +1441,11 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   asked to fill twice is gone. Two contract fixes ride along: `skills` spells
   its owner locator `owner_id` like the rest of the surface, and
   `PUT …/approvals/mode` no longer takes the `session_key` it never read.
-  `TODO(#960)` is closed: with every bot on the path, `require_granted_bot`
-  checks the grant for every operation and no handler checks its own. Bot-scoped
+  `TODO(#960)` is narrowed from seven operations to four, not closed: with the
+  bot on the path, `require_granted_bot` checks the grant for every operation
+  except the four `{skill_id}` skills ones, whose bot owner is only known after
+  the skill is read and which therefore still check in their handlers
+  (`admission.SKILL_SCOPED_OPERATIONS`). Bot-scoped
   component names left the `{bot_id}` segment, so the reserved-name list falls
   from fifteen to six once the old addresses go. **Nothing was removed** — all
   forty-one prior addresses still answer, at the same shape, marked
