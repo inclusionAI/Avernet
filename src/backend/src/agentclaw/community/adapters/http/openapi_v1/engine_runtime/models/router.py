@@ -1,4 +1,4 @@
-"""Models group — ``/openapi/v1/bots/models/{bot_id}``.
+"""Models group — ``/openapi/v1/bots/{bot_id}/models``.
 
 An **operator console**: served to the addressed bot's owner and its
 member-level collaborators, for the stage the request names (``?stage=``,
@@ -41,7 +41,7 @@ from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayPro
 from agentclaw.community.core.engine_runtime.errors import EngineResourceNotFoundError
 from agentclaw.community.di import Injected
 
-router = APIRouter(prefix="/openapi/v1/bots/models", tags=["models"])
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/models", tags=["models"])
 
 #: The path parameter naming the model an operation addresses.
 ModelIdPath = Annotated[
@@ -61,7 +61,7 @@ def _map_model(data: dict[str, Any]) -> Model:
     )
 
 
-@router.get("/{bot_id}", response_model=Envelope[Page[Model]])
+@router.get("", response_model=Envelope[Page[Model]])
 @envelope_errors
 async def list_models(
     bot_id: BotIdPath,
@@ -99,7 +99,7 @@ async def list_models(
     return page_envelope(total, mapped[start : start + page.page_size], request)
 
 
-@router.get("/{bot_id}/{model_id:path}", response_model=Envelope[Model])
+@router.get("/{model_id:path}", response_model=Envelope[Model])
 @envelope_errors
 async def get_model(
     bot_id: BotIdPath,

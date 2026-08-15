@@ -54,22 +54,22 @@ SESSION_ID = "session:abc:user:1"
 #: so a generic body would 422 in validation — before the handler runs — and the
 #: sweep would prove nothing about ownership.
 ROUTES = [
-    ("get", "/sessions/{bot}", None),
-    ("post", "/sessions/{bot}", {"title": "T"}),
-    ("get", f"/sessions/{{bot}}/{SESSION_ID}", None),
-    ("patch", f"/sessions/{{bot}}/{SESSION_ID}", {"title": "T"}),
-    ("delete", f"/sessions/{{bot}}/{SESSION_ID}", None),
-    ("get", f"/sessions/{{bot}}/{SESSION_ID}/messages", None),
-    ("delete", f"/sessions/{{bot}}/{SESSION_ID}/messages", None),
-    ("get", "/engine/{bot}/status", None),
-    ("get", "/engine/{bot}/capabilities", None),
-    ("get", "/engine/{bot}/available", None),
-    ("get", "/models/{bot}", None),
-    ("get", "/models/{bot}/openai/gpt-5.3", None),
-    ("get", "/approvals/{bot}/mode?session_key=k", None),
-    ("put", "/approvals/{bot}/mode", {"session_key": "k", "mode": "never"}),
-    ("get", "/approvals/{bot}/modes", None),
-    ("get", "/connection/{bot}", None),
+    ("get", "/{bot}/sessions", None),
+    ("post", "/{bot}/sessions", {"title": "T"}),
+    ("get", f"/{{bot}}/sessions/{SESSION_ID}", None),
+    ("patch", f"/{{bot}}/sessions/{SESSION_ID}", {"title": "T"}),
+    ("delete", f"/{{bot}}/sessions/{SESSION_ID}", None),
+    ("get", f"/{{bot}}/sessions/{SESSION_ID}/messages", None),
+    ("delete", f"/{{bot}}/sessions/{SESSION_ID}/messages", None),
+    ("get", "/{bot}/engine/status", None),
+    ("get", "/{bot}/engine/capabilities", None),
+    ("get", "/{bot}/engine/available", None),
+    ("get", "/{bot}/models", None),
+    ("get", "/{bot}/models/openai/gpt-5.3", None),
+    ("get", "/{bot}/approvals/mode?session_key=k", None),
+    ("put", "/{bot}/approvals/mode", {"session_key": "k", "mode": "never"}),
+    ("get", "/{bot}/approvals/modes", None),
+    ("get", "/{bot}/connection", None),
 ]
 
 

@@ -28,13 +28,25 @@ from agentclaw.community.core.engine_runtime.models import EngineResult
 
 from .conftest import BOT, OWNER, fails, ok
 
-_ENGINE_RUNTIME_PREFIXES = (
-    "/openapi/v1/bots/sessions",
-    "/openapi/v1/bots/engine",
-    "/openapi/v1/bots/models",
-    "/openapi/v1/bots/approvals",
-    "/openapi/v1/bots/connection",
+_ENGINE_RUNTIME_COMPONENTS = frozenset(
+    {"sessions", "engine", "models", "approvals", "connection"}
 )
+
+
+def _is_engine_runtime(path: str) -> bool:
+    """Whether *path* addresses one of the engine-runtime groups.
+
+    Bot-first addressing puts the component name *after* ``{bot_id}``, so this
+    is a segment test rather than the prefix test it replaced. A prefix test
+    would now match nothing and quietly assert over an empty set — which is why
+    the loops below also assert they found something.
+    """
+    parts = path.split("/")
+    return (
+        len(parts) > 5
+        and parts[4] == "{bot_id}"
+        and parts[5] in _ENGINE_RUNTIME_COMPONENTS
+    )
 
 #: The other operations that address a bot by ``(owner, bot_id)``.
 #:
@@ -55,7 +67,7 @@ def client(make_client):
 
 
 def _base(bot: str = BOT) -> str:
-    return f"/openapi/v1/bots/sessions/{bot}"
+    return f"/openapi/v1/bots/{bot}/sessions"
 
 
 # ── behaviour ────────────────────────────────────────────────────────────────
@@ -73,10 +85,10 @@ def test_the_default_is_the_draft_byte_for_byte(client, relay):
 #: gated on the requested stage but forwarded a pasted literal would slip a
 #: sessions-only pin.
 _GROUP_ROUTES = [
-    ("sessions", f"/openapi/v1/bots/sessions/{BOT}"),
-    ("engine", f"/openapi/v1/bots/engine/{BOT}/capabilities"),
-    ("models", f"/openapi/v1/bots/models/{BOT}"),
-    ("approvals", f"/openapi/v1/bots/approvals/{BOT}/mode?session_key=k"),
+    ("sessions", f"/openapi/v1/bots/{BOT}/sessions"),
+    ("engine", f"/openapi/v1/bots/{BOT}/engine/capabilities"),
+    ("models", f"/openapi/v1/bots/{BOT}/models"),
+    ("approvals", f"/openapi/v1/bots/{BOT}/approvals/mode?session_key=k"),
 ]
 
 
@@ -141,7 +153,7 @@ def test_the_connection_build_receives_the_named_stage(relay):
     client = user_scoped_client(app, OWNER)
 
     resp = client.get(
-        f"/openapi/v1/bots/connection/{BOT}", params={"stage": "online"}
+        f"/openapi/v1/bots/{BOT}/connection", params={"stage": "online"}
     )
     assert resp.status_code == 200, resp.json()
     assert [b["stage"] for b in connections.builds] == ["online"]
@@ -211,7 +223,7 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
     engine_runtime, carrying_stage, carrying_owner = [], [], []
     for path, method, operation in _operations(schema):
         params = _query_params(operation)
-        if path.startswith(_ENGINE_RUNTIME_PREFIXES):
+        if _is_engine_runtime(path):
             engine_runtime.append((method, path))
             assert "owner_id" in params, f"{method.upper()} {path} lacks owner_id"
             assert "stage" in params, f"{method.upper()} {path} lacks stage"
@@ -250,7 +262,7 @@ def test_neither_parameter_is_ever_a_body_field_or_a_path_segment():
     schema = _schema()
     components = schema.get("components", {}).get("schemas", {})
     for path, method, operation in _operations(schema):
-        if not path.startswith(_ENGINE_RUNTIME_PREFIXES):
+        if not _is_engine_runtime(path):
             continue
         body = operation.get("requestBody", {})
         ref = (
@@ -275,7 +287,7 @@ def test_the_409_is_documented_on_every_engine_runtime_operation():
     it."""
     schema = _schema()
     for path, method, operation in _operations(schema):
-        if path.startswith(_ENGINE_RUNTIME_PREFIXES):
+        if _is_engine_runtime(path):
             assert "409" in operation.get("responses", {}), (
                 f"{method.upper()} {path} does not document 409"
             )

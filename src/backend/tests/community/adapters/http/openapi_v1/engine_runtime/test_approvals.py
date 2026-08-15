@@ -10,7 +10,7 @@ from agentclaw.community.core.engine_runtime.models import EngineResult
 from .conftest import BOT, OWNER, fails, ok
 
 SESSION = "session:2d20edc1:user:165137"
-BASE = f"/openapi/v1/bots/approvals/{BOT}"
+BASE = f"/openapi/v1/bots/{BOT}/approvals"
 
 
 @pytest.fixture
@@ -145,7 +145,7 @@ def test_modes_serves_a_write_only_engine(client, relay):
 
 
 def test_foreign_bot_is_masked_404_without_a_device_call(client, relay):
-    assert fails(client.get("/openapi/v1/bots/approvals/other/modes"), 404)
+    assert fails(client.get("/openapi/v1/bots/other/approvals/modes"), 404)
     assert relay.calls == []
 
 
@@ -159,7 +159,7 @@ def test_a_service_bot_is_served_at_its_draft_device(client, relay):
     relay.set_bot_type("service")
     relay.results = [EngineResult(data={"sessionKey": "sk", "mode": "approve"})]
     resp = client.get(
-        f"/openapi/v1/bots/approvals/{BOT}/mode", params={"session_key": "sk"}
+        f"/openapi/v1/bots/{BOT}/approvals/mode", params={"session_key": "sk"}
     )
     assert resp.status_code == 200, resp.json()
     assert relay.calls and all(c["stage"] == "draft" for c in relay.calls)
@@ -175,14 +175,14 @@ def test_a_collaborator_is_served_and_a_stranger_is_the_masked_404(
     collaborator = make_client(router, caller="u2")
     ok(
         collaborator.get(
-            f"/openapi/v1/bots/approvals/{BOT}/mode",
+            f"/openapi/v1/bots/{BOT}/approvals/mode",
             params={"session_key": "sk", "owner_id": OWNER},
         )
     )
     stranger = make_client(router, caller="u9")
     refused = fails(
         stranger.get(
-            f"/openapi/v1/bots/approvals/{BOT}/mode",
+            f"/openapi/v1/bots/{BOT}/approvals/mode",
             params={"session_key": "sk", "owner_id": OWNER},
         ),
         404,

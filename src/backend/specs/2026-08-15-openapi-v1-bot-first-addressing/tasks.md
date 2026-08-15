@@ -37,20 +37,20 @@ parameter. Verify each with the dump.
 - [x] **4. `identity`.** Prefix → `/openapi/v1/bots/{bot_id}/identity`;
       decorators `/{bot_id}` → `""`, `/{bot_id}/{file_type}` → `/{file_type}`.
 
-- [ ] **5. `connection`.** Prefix → `/openapi/v1/bots/{bot_id}/connection`;
+- [x] **5. `connection`.** Prefix → `/openapi/v1/bots/{bot_id}/connection`;
       decorator `/{bot_id}` → `""`.
 
-- [ ] **6. `engine`.** Prefix → `/openapi/v1/bots/{bot_id}/engine`; decorators
+- [x] **6. `engine`.** Prefix → `/openapi/v1/bots/{bot_id}/engine`; decorators
       `/{bot_id}/available|capabilities|status` → `/available|/capabilities|/status`.
 
-- [ ] **7. `models`.** Prefix → `/openapi/v1/bots/{bot_id}/models`; decorators
+- [x] **7. `models`.** Prefix → `/openapi/v1/bots/{bot_id}/models`; decorators
       `/{bot_id}` → `""`, `/{bot_id}/{model_id}` → `/{model_id}`.
 
-- [ ] **8. `sessions`.** Prefix → `/openapi/v1/bots/{bot_id}/sessions`;
+- [x] **8. `sessions`.** Prefix → `/openapi/v1/bots/{bot_id}/sessions`;
       decorators `/{bot_id}` → `""`, `/{bot_id}/{session_id}` → `/{session_id}`,
       `/{bot_id}/{session_id}/messages` → `/{session_id}/messages`.
 
-- [ ] **9. `approvals`.** Prefix → `/openapi/v1/bots/{bot_id}/approvals`;
+- [x] **9. `approvals`.** Prefix → `/openapi/v1/bots/{bot_id}/approvals`;
       decorators `/{bot_id}/mode` → `/mode`, `/{bot_id}/modes` → `/modes`.
 
 ## New addresses — bot moves out of the query
