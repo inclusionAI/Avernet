@@ -109,14 +109,30 @@ claude_bots_start() {
 # Tolerates both `BCSFUSE_AUTH_TOKEN=...` and `export BCSFUSE_AUTH_TOKEN=...`.
 _claude_bots_bcsfuse_auth_token() {
     local token="${BCSFUSE_AUTH_TOKEN:-}"
+    local env_file="${BCSFUSE_ENV_FILE:-${BCSFUSE_DIR:-${PROJECT_ROOT}/src/bcsfuse}/.runtime/env/.env.local}"
+
     if [ -n "$token" ]; then
+        # Env files may be checked out/edited with CRLF line endings; a trailing
+        # carriage return in the token ends up in the Authorization header and
+        # makes uvicorn reject the request with "Invalid HTTP request received."
+        token="$(printf '%s' "$token" | tr -d '\r' | sed 's/[[:space:]]*$//')"
         printf '%s\n' "$token"
         return 0
     fi
-    local env_file="${BCSFUSE_ENV_FILE:-${BCSFUSE_DIR:-${PROJECT_ROOT}/src/bcsfuse}/.runtime/env/.env.local}"
+
     if [ -f "$env_file" ]; then
-        token="$(grep -E '^(export )?BCSFUSE_AUTH_TOKEN=' "$env_file" 2>/dev/null | head -1 | sed -E 's/^(export )?BCSFUSE_AUTH_TOKEN="?([^"]*)"?$/\2/')"
+        # Extract the value after the first '='. Strip optional surrounding
+        # quotes, carriage returns, and trailing whitespace so curl receives a
+        # clean Authorization header.
+        token="$(grep -E '^(export )?BCSFUSE_AUTH_TOKEN=' "$env_file" 2>/dev/null | head -1 \
+            | cut -d '=' -f 2- \
+            | tr -d '\r' \
+            | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+                  -e 's/^"//' -e 's/"$//' \
+                  -e "s/^'//" -e "s/'$//" \
+            | sed 's/[[:space:]]*$//')"
     fi
+
     if [ -n "$token" ]; then
         log_info "Resolved BCSFUSE_AUTH_TOKEN from ${env_file}"
         printf '%s\n' "$token"
