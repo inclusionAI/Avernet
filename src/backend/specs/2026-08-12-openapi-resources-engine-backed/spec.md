@@ -2,6 +2,16 @@
 
 Tracking issue: [inclusionAI/Avernet#1000](https://github.com/inclusionAI/Avernet/issues/1000)
 
+> **⚠️ Partially superseded by
+> [#1043](https://github.com/inclusionAI/Avernet/pull/1043) (2026-08-14).**
+> Two of this spec's decisions were reversed when the resources group became
+> files-only: **G7** (links unaffected, record-addressed) and the deferral of
+> **`GET /stat?path=`**. Both are annotated in place below rather than rewritten,
+> so this stays an accurate record of what #1001 shipped. Everything else —
+> G1–G6, G8, and every file behavior in the table — still holds and was carried
+> forward unchanged. Read the annotations before treating any statement here as
+> the current contract.
+
 ## Problem
 
 Files uploaded through the public resources API never reach the bot's workspace.
@@ -75,6 +85,17 @@ duplicate check would answer 409.
 **G7. Link resources are unaffected.** A link has no file; it remains
 record-backed and record-addressed.
 
+> **Superseded by [#1043](https://github.com/inclusionAI/Avernet/pull/1043).**
+> Links left the OpenAPI resources group entirely, so nothing on that surface is
+> record-addressed any more: `POST ""`, `GET`/`PUT`/`DELETE /{resource_id}` and
+> `check-name` were removed with them, and `resource_id` left the response
+> contract rather than staying present-but-empty. G7 held for exactly as long as
+> the group served two kinds of resource. The *reasoning* survives the reversal —
+> a link genuinely has no file, so a record id genuinely is its only possible
+> address; what changed is that this API no longer serves links at all. The
+> console's `/api/resources` surface still does, through its own router and the
+> same link service methods, unchanged.
+
 **G8. The endpoint is covered by tests** for both success and failure, replacing
 its coverage-baseline entry.
 
@@ -90,7 +111,11 @@ its coverage-baseline entry.
 | Listing | records only | workspace contents, enriched from records where one exists |
 | Bot-created files | invisible to the API | fully usable |
 | File addressing | by record id | **by path** |
-| Link addressing | by record id | unchanged |
+| Link addressing | by record id | unchanged ¹ |
+
+¹ *Superseded by [#1043](https://github.com/inclusionAI/Avernet/pull/1043): links
+are no longer served by this API, so it has no link addressing to speak of. See
+the G7 annotation.*
 
 ### Contract change
 
@@ -101,6 +126,11 @@ operations are already path-addressed.
 Record ids remain the addressing scheme for links. Record ids that previously
 referred to files stop resolving — on `GET`, `PUT` and `DELETE /{resource_id}`
 alike, so that no record-addressed operation still accepts a file.
+
+> **Superseded by [#1043](https://github.com/inclusionAI/Avernet/pull/1043):**
+> those three operations no longer exist here. Making file ids stop resolving
+> while the routes stayed was the halfway state this spec could reach without
+> touching links; removing links removed the routes.
 
 **Single-file lookup is dropped rather than re-addressed.** *(Corrected during
 review — this section originally claimed four operations changed shape, which
@@ -116,6 +146,15 @@ Adding `GET /stat?path=` would close it and is cheap. It is left out because it
 would widen a public contract beyond what the issue asked for, on a surface still
 gated as not-public-ready; the call belongs to the issue owner rather than to
 this change.
+
+> **The issue owner made that call: `GET /stat?path=` shipped in
+> [#1043](https://github.com/inclusionAI/Avernet/pull/1043).** It also absorbed
+> `check-name`, which had been asking the same existence question through a
+> second addressing mode. It is resolved by listing the parent directory and
+> selecting the entry, so `stat` and the listing read one seam and cannot report
+> different types or sizes for the same file — and no provider gains a method
+> (`DeviceFileSystem` has no stat). The "extra call and client-side filtering"
+> cost described just above is therefore gone.
 
 This is a breaking change to a surface that is **not yet exposed to external
 callers** — the router carries a standing "NOT PUBLIC-READY" gate pending the

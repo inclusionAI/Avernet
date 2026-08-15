@@ -1938,7 +1938,7 @@ class TestCreateOpenclawSession:
             "POST",
             "/api/sessions",
             body={
-                "title": "Chat with Bot",
+                "title": "新会话",
                 "user_id": "user1",
                 "agent_id": "bot1",
                 "engine": "openclaw",

@@ -93,6 +93,10 @@ ALLOWED_LOGGER_NAMES = frozenset(
         "bootstrap",
         "config",
         "webserver",
+        # Digest stream deliberately kept out of the shared application logs:
+        # monitoring collects ``arca-renew-digest.log`` as a standalone,
+        # comma-separated feed of TTL renewal outcomes.
+        "arca-renew-digest",
     }
 )
 

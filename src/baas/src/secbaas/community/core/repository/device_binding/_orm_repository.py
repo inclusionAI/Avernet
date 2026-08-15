@@ -6,6 +6,7 @@ to preserve readability while staying on the ORM session connection.
 """
 
 import json
+from datetime import datetime, timedelta
 from typing import Any
 
 from secbaas.community.core.repository import OrmConnectionMixin, with_orm_session
@@ -389,32 +390,44 @@ class OrmDeviceBindingRepository(OrmConnectionMixin, DeviceBindingRepository):
         return result
 
     @with_orm_session
-    def list_bindings_by_ttl_asc(
+    def list_bindings_by_id_asc(
         self,
         *,
+        last_id: int = 0,
         limit: int = 100,
     ) -> list[DeviceBindingRecord]:
         """查询 ac_entity_device_binding 中 ACTIVE 且有 sandbox_id 的记录，
-        按 TTL 过期时间 ASC 排序，取前 limit 条。
+        按 id ASC 排序，取前 limit 条。
 
-        用于 DeviceTtlTimer 定时任务：优先处理即将过期的个人 bot 设备。
+        用于 DeviceTtlTimer 定时任务：仅处理 TTL 在 24 小时内（已到期或即将
+        到期）的个人 bot 设备；超过 24 小时的设备会被 Arca 续期逻辑跳过，
+        无需入选。
+
+        支持 keyset 游标分页：仅以 id 排序，``id > last_id`` 保证游标逐页推进，
+        不会因 TTL 续期失败/相同而困在队列头部。
         """
+        from sqlalchemy import func
+
+        due_ttl = (datetime.now() + timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
 
         rows = (
             self._session.query(DeviceBindingModel)
             .filter(
                 DeviceBindingModel.status == "ACTIVE",
                 DeviceBindingModel.device_props.op("->>")("$.sandbox_id").isnot(None),
+                func.coalesce(
+                    DeviceBindingModel.device_props.op("->>")("$.ttl_expiration_time"),
+                    "",
+                ).op("<=")(due_ttl),
+                DeviceBindingModel.id > last_id,
             )
-            .order_by(
-                DeviceBindingModel.device_props.op("->>")("$.ttl_expiration_time").asc()
-            )
+            .order_by(DeviceBindingModel.id.asc())
             .limit(limit)
             .all()
         )
         items = [self._model_to_record(r) for r in rows if r is not None]
         log.info(
-            "[device-binding:list_bindings_by_ttl_asc] result: %s rows",
+            "[device-binding:list_bindings_by_id_asc] result: %s rows",
             len(items),
         )
         return items
@@ -1448,31 +1461,42 @@ class OrmDeviceBindingRepository(OrmConnectionMixin, DeviceBindingRepository):
         return total, result
 
     @with_orm_session
-    def list_baas_devices_by_ttl_asc(
+    def list_baas_devices_by_id_asc(
         self,
         *,
+        last_id: int = 0,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         """查询 baas_device 中 ACTIVE 且有 sandbox_id 的 ARCA 记录，
-        按 TTL 过期时间 ASC 排序，取前 limit 条。
+        按 id ASC 排序，取前 limit 条。
 
-        用于 DeviceTtlTimer 定时任务：优先处理即将过期的服务 bot 设备。
+        用于 DeviceTtlTimer 定时任务：仅处理 TTL 在 24 小时内（已到期或即将
+        到期）的服务 bot 设备；超过 24 小时的设备会被 Arca 续期逻辑跳过。
         限 provider_type='ARCA'（对齐 list_baas_devices_active_paginated）——
         teclaw 的 update_device_ttl 是 NotImplementedError，k8s/docker 等沙箱
         生命周期不由本任务续期，混入会触发无效续期 + 探活噪声。
+
+        支持 keyset 游标分页：仅以 id 排序，``id > last_id`` 保证游标逐页推进。
         """
+        from sqlalchemy import func
+
+        due_ttl = (datetime.now() + timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+
         rows = (
             self._session.query(DeviceModel)
             .filter(
                 DeviceModel.status == "ACTIVE",
                 DeviceModel.provider_type == "ARCA",
                 DeviceModel.provider_device_props.op("->>")("$.sandbox_id").isnot(None),
+                func.coalesce(
+                    DeviceModel.provider_device_props.op("->>")(
+                        "$.ttl_expiration_time"
+                    ),
+                    "",
+                ).op("<=")(due_ttl),
+                DeviceModel.id > last_id,
             )
-            .order_by(
-                DeviceModel.provider_device_props.op("->>")(
-                    "$.ttl_expiration_time"
-                ).asc()
-            )
+            .order_by(DeviceModel.id.asc())
             .limit(limit)
             .all()
         )
@@ -1492,7 +1516,7 @@ class OrmDeviceBindingRepository(OrmConnectionMixin, DeviceBindingRepository):
                 }
             )
         log.info(
-            "[device-binding:list_baas_devices_by_ttl_asc] result: %s rows",
+            "[device-binding:list_baas_devices_by_id_asc] result: %s rows",
             len(result),
         )
         return result

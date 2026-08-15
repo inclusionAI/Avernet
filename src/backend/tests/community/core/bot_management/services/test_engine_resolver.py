@@ -67,6 +67,24 @@ class TestOwnerExactMatch:
         assert result == DEFAULT_ENGINE_TYPE
 
 
+
+
+class TestClaudeCodeTemplateRouting:
+    def test_claude_code_non_normalcc_routes_to_aicoding(self):
+        bot = {"active_engine": "claude_code", "template_type": "generalCC"}
+        repo = _make_repo(owner_bot=bot)
+        result = resolve_engine_for_bot(
+            bot_id="bot_x", owner_id="owner_1", bot_repo=repo
+        )
+        assert result == "aicoding"
+
+    def test_claude_code_normalcc_stays_claude_code(self):
+        bot = {"active_engine": "claude_code", "template_type": "normalCC"}
+        repo = _make_repo(owner_bot=bot)
+        result = resolve_engine_for_bot(
+            bot_id="bot_x", owner_id="owner_1", bot_repo=repo
+        )
+        assert result == "claude_code"
 class TestCollaboratorFallback:
     def test_collaborator_falls_back_to_get_by_id(self):
         """Collaborator's owner_id doesn't match → Step 1 returns None → fallback to get_by_id."""

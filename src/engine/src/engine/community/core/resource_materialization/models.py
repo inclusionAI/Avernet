@@ -63,18 +63,20 @@ class ChatAttachmentMaterializationRequest(BaseModel):
     expires_at_ms: int | None = Field(default=None, ge=0)
     size_bytes: int | None = Field(default=None, ge=0)
     content_hash: str | None = Field(default=None, pattern=r"^[a-fA-F0-9]{64}$")
+    media_type: str | None = Field(default=None, min_length=1, max_length=255)
+    download_max_bytes: int | None = Field(default=None, gt=0)
 
     @field_validator("temporary_url")
     @classmethod
     def validate_temporary_url(cls, value: str) -> str:
         parsed = urlsplit(value)
         if (
-            parsed.scheme != "https"
+            parsed.scheme not in {"http", "https"}
             or not parsed.hostname
             or parsed.username is not None
             or parsed.password is not None
         ):
-            raise ValueError("temporary_url must be an HTTPS URL without userinfo")
+            raise ValueError("temporary_url must be an HTTP or HTTPS URL without userinfo")
         return value
 
 
@@ -112,6 +114,16 @@ class ManifestEntry(BaseModel):
     source_kind: Literal["baas_session_file", "temporary_url"] = "baas_session_file"
     source_attachment_id: str | None = None
     source_url_hash: str | None = None
+
+
+@dataclass(frozen=True)
+class PreparedChatAttachment:
+    """Validated in-memory attachment ready for an Engine adapter."""
+
+    attachment_id: str
+    filename: str
+    media_type: str
+    content: bytes
 
 
 @dataclass(frozen=True)

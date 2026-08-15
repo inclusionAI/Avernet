@@ -1056,7 +1056,11 @@ def test_the_write_contract_does_not_promise_starts_that_never_recompose(
 
     put_doc = ops["put"]["description"]
     assert "composes" in put_doc
-    assert "scale-out" in put_doc and "devices/{binding_id}/restart" in put_doc
+    # The caveat is stated in caller terms; the engine's private restart route
+    # must NOT be named — published text carries no internal paths (see
+    # test_schema_docs.py).
+    assert "scale-out" in put_doc
+    assert "/api/" not in put_doc
     assert "next start." not in put_doc
 
     delete_doc = ops["delete"]["description"]

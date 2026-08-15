@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -206,3 +207,154 @@ class TestBotBuildServiceRsyncExcludesConfig:
         mock_provider.get_build_plan.assert_called_once()
         call_kwargs = mock_provider.get_build_plan.call_args[1]
         assert call_kwargs["build_rsync_excludes_append"] is None
+
+    def test_build_resolve_sandbox_provider_uses_resolver_for_template_routing(self):
+        bot = {
+            "bot_id": "test-bot-id",
+            "entity_id": "test-entity-id",
+            "entity_type": "staff",
+            "device_id": "test-device-id",
+            "active_engine": "claude_code",
+            "template_type": "generalCC",
+        }
+
+        mock_provider = MagicMock()
+        mock_build_plan = EngineBuildPlan(
+            engine_type="aicoding",
+            source_root_name=".aicoding",
+            migration_subpath="aicoding",
+            workspace_subdir="workspace",
+            mcp_config_relpath="workspace/config/mcporter.json",
+            skill_source_relpath="workspace/skills",
+            skill_target_relpath="workspace/skills",
+            rsync_excludes=["workspace/memory/", "logs/"],
+        )
+        mock_provider.get_build_plan.return_value = mock_build_plan
+
+        service = _make_service()
+        service._sandbox_registry = MagicMock()
+        service._sandbox_registry.resolve.return_value = mock_provider
+        service._bot_repository = MagicMock()
+        service._bot_repository.get_by_id_and_owner.return_value = bot
+        service._bot_repository.get_by_id.return_value = bot
+        service._migrate_bot_instance = MagicMock(return_value=True)
+        service._generate_mcp_config = MagicMock(return_value=True)
+        service._generate_openclaw_stage_configs = MagicMock(return_value=True)
+        service._get_migration_path_base = MagicMock(return_value="/fake/path")
+
+        try:
+            service.build(bot, version=1)
+        except Exception:
+            pass
+
+        service._sandbox_registry.resolve.assert_any_call("aicoding")
+
+
+def test_resolve_sandbox_provider_retries_repo_resolved_engine_before_default():
+    service = BotBuildService.__new__(BotBuildService)
+    service._bot_repository = MagicMock()
+    service._bot_repository.get_by_id_and_owner.return_value = {
+        "bot_id": "bot-1",
+        "owner_id": "owner-1",
+        "active_engine": "claude_code",
+        "template_type": "normalCC",
+    }
+    service._bot_repository.get_by_id.return_value = service._bot_repository.get_by_id_and_owner.return_value
+
+    default_provider = MagicMock(name="default_provider")
+    repo_provider = MagicMock(name="repo_provider")
+    service._sandbox_registry = MagicMock()
+    service._sandbox_registry.resolve.side_effect = [RuntimeError("missing routed provider"), repo_provider]
+
+    provider = service._resolve_sandbox_provider({
+        "bot_id": "bot-1",
+        "owner_id": "owner-1",
+        "active_engine": "unknown_engine",
+    })
+
+    assert provider is repo_provider
+    assert service._sandbox_registry.resolve.call_args_list == [
+        (("unknown_engine",),),
+        (("claude_code",),),
+    ]
+    default_provider.assert_not_called()
+
+
+def test_resolve_sandbox_provider_falls_back_to_default_when_retry_fails():
+    service = BotBuildService.__new__(BotBuildService)
+    service._bot_repository = MagicMock()
+    service._bot_repository.get_by_id_and_owner.side_effect = RuntimeError("repo unavailable")
+    service._bot_repository.get_by_id.side_effect = RuntimeError("repo unavailable")
+
+    default_provider = MagicMock(name="default_provider")
+    service._sandbox_registry = MagicMock()
+    service._sandbox_registry.resolve.side_effect = [
+        RuntimeError("missing first provider"),
+        default_provider,
+    ]
+
+    provider = service._resolve_sandbox_provider({
+        "bot_id": "bot-1",
+        "entity_id": "owner-1",
+        "active_engine": "unknown_engine",
+    })
+
+    assert provider is default_provider
+    assert service._sandbox_registry.resolve.call_args_list == [
+        (("unknown_engine",),),
+        (("openclaw",),),
+    ]
+
+
+def test_build_uses_original_active_engine_for_nas_source_bucket_when_routed_to_aicoding():
+    bot = {
+        "bot_id": "20260811_lklnq6d0",
+        "entity_id": "382716",
+        "entity_type": "staff",
+        "device_id": "device-1",
+        "active_engine": "claude_code",
+        "template_type": "generalCC",
+    }
+
+    mock_provider = MagicMock()
+    mock_provider.get_build_plan.return_value = EngineBuildPlan(
+        engine_type="aicoding",
+        source_root_name=".aicoding",
+        migration_subpath="aicoding",
+        workspace_subdir="workspace",
+        mcp_config_relpath="workspace/config/mcporter.json",
+        skill_source_relpath="workspace/skills",
+        skill_target_relpath="workspace/skills",
+        rsync_excludes=[],
+    )
+
+    service = _make_service()
+    service._resolve_sandbox_provider = MagicMock(return_value=mock_provider)
+    service._migrate_bot_instance = MagicMock(return_value=True)
+    service._generate_mcp_config = MagicMock(return_value=True)
+    service._generate_openclaw_stage_configs = MagicMock(return_value=True)
+    service._get_migration_path_base = MagicMock(return_value="/fake/path")
+
+    with patch(
+        "agentclaw.community.core.service_bot.services.bot_build_service.get_bot_nas_dir",
+        return_value=Path("/home/admin/.merge_nas/pre_staff_382716_claude_code_20260811_lklnq6d0"),
+    ) as mock_get_bot_nas_dir:
+        result = service.build(bot, version=2)
+
+    assert result["success"] is True
+    mock_get_bot_nas_dir.assert_called_once_with(
+        entity_id="382716",
+        bot_id="20260811_lklnq6d0",
+        engine_type="claude_code",
+        entity_type="staff",
+    )
+    service._migrate_bot_instance.assert_called_once()
+    migrate_kwargs = service._migrate_bot_instance.call_args.kwargs
+    assert migrate_kwargs["source_dir"] == Path(
+        "/home/admin/.merge_nas/pre_staff_382716_claude_code_20260811_lklnq6d0/.aicoding"
+    )
+    assert migrate_kwargs["target_dir"].parts[-3:] == (
+        "20260811_lklnq6d0",
+        "2",
+        "aicoding",
+    )

@@ -25,6 +25,8 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
 
 logger = get_logger()
 
+DEFAULT_EXPERT_CHAT_SESSION_TITLE = "新会话"
+
 
 class ExpertChatSessionRuntimeMixin:
     """Connection authorization and Adapter session lifecycle operations."""
@@ -247,7 +249,8 @@ class ExpertChatSessionRuntimeMixin:
     ) -> str:
         """Create a session through the active Adapter and return its full ID."""
         payload = {
-            "title": f"Chat with {bot.get('bot_name', bot['bot_id'])}",
+            # Keep empty sessions consistent with the list placeholder across refreshes.
+            "title": DEFAULT_EXPERT_CHAT_SESSION_TITLE,
             "user_id": user_id,
             "agent_id": bot["bot_id"],
             "engine": conn.get("engine_type", "openclaw"),

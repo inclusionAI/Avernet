@@ -42,6 +42,7 @@ from agentclaw.community.core.expert_chat.services.expert_chat_instance_service 
     ExpertChatInstanceService,
 )
 from agentclaw.community.core.expert_chat.services.expert_chat_session_runtime import (
+    DEFAULT_EXPERT_CHAT_SESSION_TITLE,
     ExpertChatSessionRuntimeMixin,
 )
 from agentclaw.community.log import get_logger
@@ -860,7 +861,7 @@ class ExpertChatService(ExpertChatSessionRuntimeMixin):
         """Build the complete list shape for an empty or unavailable session."""
         return {
             "id": row["session_key"],
-            "title": "新会话",
+            "title": DEFAULT_EXPERT_CHAT_SESSION_TITLE,
             "user_id": row["user_id"],
             "agent_id": row["bot_id"],
             "model": None,

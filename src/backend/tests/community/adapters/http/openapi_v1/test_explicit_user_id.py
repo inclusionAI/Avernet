@@ -300,9 +300,15 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: them, all four taking ``bot_id`` as a query parameter — which is what it is
 #: there, since the address is the file's path and not the bot's.
 #:
+#: ``query`` then moved 20 → 16 when the resources group became files-only: the
+#: five record-addressed operations went with the links they served (``POST ""``,
+#: ``GET``/``PUT``/``DELETE /{resource_id}``, ``check-name``) and ``GET /stat``
+#: replaced them, all query-addressed like the rest of the group. ``path`` is
+#: untouched by that: those five carried ``{resource_id}``, never a ``{bot_id}``.
+#:
 #: ``path`` moved 31 → 34 with the startup-script operations (GET/PUT/DELETE on
 #: ``/bots/{bot_id}/startup-script``) — all three address a bot, none moved.
-_BOT_ID_PLACEMENT = {"path": 34, "query": 20, "none": 21}
+_BOT_ID_PLACEMENT = {"path": 34, "query": 16, "none": 21}
 
 
 def _schema() -> dict:
@@ -350,15 +356,22 @@ def test_the_pinned_number_of_operations_take_it():
     (#1000): four new operations (``DELETE ""``, ``/download``, ``/preview``,
     ``/mkdir``) replaced two id-addressed ones, and every one of them takes the
     caller's ``user_id`` like the rest of the user-scoped surface.
+
+    65 → 61 when the resources group became files-only: five record-addressed
+    operations were removed and ``GET /stat`` added. A *drop* is the direction
+    this pin exists to catch, so it is worth saying plainly that this one is
+    intended — the five went away with the link resources they served, not by
+    losing the dependency.
     """
     taking = [
         1
         for path, method, operation in _operations(_schema())
         if _user_scoped(path, method) and _param(operation, USER_ID_QUERY)
     ]
-    # 60 on the merge base, +3 for the startup-script operations and +2 for the
-    # resources file endpoints re-addressed by workspace path (#1000).
-    assert len(taking) == 65
+    # 60 on the merge base, +3 for the startup-script operations, +2 for the
+    # resources file endpoints re-addressed by workspace path (#1000), then -4
+    # for the files-only resources group.
+    assert len(taking) == 61
 
 
 def test_the_exempt_operations_take_none():

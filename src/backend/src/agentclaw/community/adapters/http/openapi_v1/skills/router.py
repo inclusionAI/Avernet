@@ -8,11 +8,12 @@ non-public surfaces.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, Query, Request, Response
+from fastapi import APIRouter, Body, Path, Query, Request, Response
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
+    EXAMPLE_TRACE_ID,
     Deleted,
     Envelope,
     ErrorEnvelope,
@@ -47,6 +48,17 @@ from agentclaw.community.di import Injected
 from .schemas import Skill, SkillState, SkillUpload
 
 router = APIRouter(prefix="/openapi/v1/bots/skills", tags=["skills"])
+
+#: The path parameter naming the skill an operation addresses. The id alone
+#: resolves the bot and owner, so the per-skill operations take no bot_id.
+SkillIdPath = Annotated[
+    str,
+    Path(
+        description="The skill's id, as returned by the listing or upload "
+        "(decimal digits, e.g. '42'). The id alone identifies the skill and "
+        "its bot."
+    ),
+]
 
 
 def _tags(value: Any) -> list[str]:
@@ -126,23 +138,35 @@ async def list_skills(
     request: Request,
     bot_id: str = Query(..., description="Bot ID whose Local Skills are listed."),
     owner_entity_id: str | None = Query(
-        default=None, description="Verified Bot owner locator."
+        default=None,
+        description="Owner of the bot; defaults to the caller. Name it only "
+        "to list skills of a bot shared with you.",
     ),
-    active: bool | None = Query(default=None),
-    keyword: str | None = Query(default=None),
+    active: bool | None = Query(
+        default=None,
+        description="Filter: true for only active skills, false for only "
+        "inactive ones; omit for both.",
+    ),
+    keyword: str | None = Query(
+        default=None,
+        description="Filter: case-insensitive substring match against the "
+        "skill's name and description.",
+    ),
     query_service: LocalSkillQueryServiceProtocol = Injected(
         LocalSkillQueryServiceProtocol
     ),
 ) -> Envelope[Page[Skill]]:
-    """List exact Bot-owned Local Skills from database desired state.
+    """List a bot's skills from stored desired state (paginated).
 
-    Grant-checked **here** rather than by the shared dependency, because only
-    this handler knows whose bot it is about to read: ``owner_entity_id`` names
-    an owner and defaults to the caller. Checking against the caller instead
-    would be wrong in both directions — it would let a grant on the caller's own
-    same-named bot authorize a read of someone else's, and refuse a legitimate
-    grant on a bot shared with them.
+    Answers even while the bot is offline: active reflects the desired
+    state, not the live runtime.
     """
+    # Grant-checked here rather than by the shared dependency, because only
+    # this handler knows whose bot it is about to read: owner_entity_id names
+    # an owner and defaults to the caller. Checking against the caller instead
+    # would be wrong in both directions — it would let a grant on the caller's
+    # own same-named bot authorize a read of someone else's, and refuse a
+    # legitimate grant on a bot shared with them.
     caller.require_bot(bot_id, owner_id=owner_entity_id or actor_id)
     total, records = query_service.list_local_skills(
         bot_id=bot_id,
@@ -159,7 +183,7 @@ async def list_skills(
 @router.get("/{skill_id}", response_model=Envelope[Skill])
 @envelope_errors
 async def get_skill(
-    skill_id: str,
+    skill_id: SkillIdPath,
     actor_id: UserIdDep,
     caller: ActingCallerDep,
     request: Request,
@@ -195,7 +219,7 @@ async def get_skill(
                         "code": 413101,
                         "message": "Skill package is too large",
                         "data": None,
-                        "request_id": "",
+                        "request_id": EXAMPLE_TRACE_ID,
                     }
                 }
             },
@@ -217,13 +241,19 @@ async def upload_skill(
         LocalSkillUploadServiceProtocol
     ),
 ) -> Envelope[SkillUpload]:
-    """Create one inactive Local Skill from a complete raw ZIP package.
+    """Upload a skill package (raw ZIP) to create or replace a bot's skill.
 
-    Grant-checked here for the same reason as the listing above: the owner this
-    writes under is ``owner_entity_id or actor_id``, which only the handler
-    knows. A write makes the mis-binding worse — it would create a skill on a
-    bot the application was never granted.
+    The body is the ZIP's raw bytes with content type application/zip — not a
+    multipart form. The archive must contain exactly one SKILL.md manifest,
+    whose front matter names the skill. When the bot already has a skill of
+    that name, its package is replaced in place (200, operation 'updated');
+    otherwise a new, inactive skill is created (201, operation 'created').
+    Limits: 10 MB compressed, 50 MB uncompressed, 500 files (413 beyond).
     """
+    # Grant-checked here for the same reason as the listing above: the owner
+    # this writes under is `owner_entity_id or actor_id`, which only the
+    # handler knows. A write makes the mis-binding worse — it would create a
+    # skill on a bot the application was never granted.
     caller.require_bot(bot_id, owner_id=owner_entity_id or actor_id)
     if (
         request.headers.get("content-type", "").split(";", 1)[0].lower()
@@ -253,7 +283,7 @@ async def upload_skill(
 )
 @envelope_errors
 async def activate_skill(
-    skill_id: str,
+    skill_id: SkillIdPath,
     actor_id: UserIdDep,
     caller: ActingCallerDep,
     request: Request,
@@ -264,7 +294,11 @@ async def activate_skill(
         LocalSkillStateServiceProtocol
     ),
 ) -> Envelope[SkillState]:
-    """Activate one Bot-owned Local Skill and synchronously reconcile runtime."""
+    """Activate a skill so its bot can use it.
+
+    Idempotent — activating an already-active skill succeeds with changed
+    false. The bot's runtime is reconciled synchronously either way.
+    """
     _authorize_skills_bot(
         caller, query_service, skill_id=skill_id, actor_id=actor_id
     )
@@ -283,7 +317,7 @@ async def activate_skill(
 )
 @envelope_errors
 async def deactivate_skill(
-    skill_id: str,
+    skill_id: SkillIdPath,
     actor_id: UserIdDep,
     caller: ActingCallerDep,
     request: Request,
@@ -294,7 +328,11 @@ async def deactivate_skill(
         LocalSkillStateServiceProtocol
     ),
 ) -> Envelope[SkillState]:
-    """Deactivate one Bot-owned Local Skill and synchronously reconcile runtime."""
+    """Deactivate a skill so its bot stops using it.
+
+    Idempotent — deactivating an already-inactive skill succeeds with changed
+    false. The bot's runtime is reconciled synchronously either way.
+    """
     _authorize_skills_bot(
         caller, query_service, skill_id=skill_id, actor_id=actor_id
     )
@@ -310,7 +348,7 @@ async def deactivate_skill(
 @router.delete("/{skill_id}", response_model=Envelope[Deleted])
 @envelope_errors
 async def delete_skill(
-    skill_id: str,
+    skill_id: SkillIdPath,
     actor_id: UserIdDep,
     caller: ActingCallerDep,
     request: Request,
@@ -321,7 +359,11 @@ async def delete_skill(
         LocalSkillQueryServiceProtocol
     ),
 ) -> Envelope[Deleted]:
-    """Delete one inactive Bot-owned Local Skill by deployment-wide ID."""
+    """Delete a skill by id.
+
+    Only an inactive skill can be deleted — deactivate it first; deleting an
+    active one answers 409.
+    """
     _authorize_skills_bot(
         caller, query_service, skill_id=skill_id, actor_id=actor_id
     )

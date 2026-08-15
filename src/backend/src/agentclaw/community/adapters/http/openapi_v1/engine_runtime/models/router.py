@@ -8,11 +8,12 @@ draft by default), and device-wide — see ``engine_runtime/gating.py`` and
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Path, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
+    BotIdPath,
     Envelope,
     Page,
     PageParamsDep,
@@ -42,6 +43,15 @@ from agentclaw.community.di import Injected
 
 router = APIRouter(prefix="/openapi/v1/bots/models", tags=["models"])
 
+#: The path parameter naming the model an operation addresses.
+ModelIdPath = Annotated[
+    str,
+    Path(
+        description="The model's id, exactly as returned by the model "
+        "listing for this bot."
+    ),
+]
+
 
 def _map_model(data: dict[str, Any]) -> Model:
     return Model(
@@ -54,7 +64,7 @@ def _map_model(data: dict[str, Any]) -> Model:
 @router.get("/{bot_id}", response_model=Envelope[Page[Model]])
 @envelope_errors
 async def list_models(
-    bot_id: str,
+    bot_id: BotIdPath,
     page: PageParamsDep,
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
@@ -92,8 +102,8 @@ async def list_models(
 @router.get("/{bot_id}/{model_id:path}", response_model=Envelope[Model])
 @envelope_errors
 async def get_model(
-    bot_id: str,
-    model_id: str,
+    bot_id: BotIdPath,
+    model_id: ModelIdPath,
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,

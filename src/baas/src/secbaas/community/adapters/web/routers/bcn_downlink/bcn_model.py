@@ -115,7 +115,7 @@ class Attachment(BaseModel):
     """BCN 下行附件 — 与 BCS domain 对齐"""
 
     attachment_id: str = Field(..., description="附件唯一 ID")
-    type: Literal["image"] = Field(..., description="附件类型")
+    type: Literal["image", "file"] = Field(..., description="附件类型")
     file_name: str = Field(..., description="文件名")
     mime_type: str | None = Field(default=None)
     size: int | None = Field(default=None)

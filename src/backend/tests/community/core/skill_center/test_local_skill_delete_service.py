@@ -9,6 +9,9 @@ import pytest
 from agentclaw.community.core.skill_center.factories import LocalSkillPackageStorage
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillActiveError,
+    LocalSkillEditBusyError,
+    LocalSkillEditLockUnavailableError,
+    LocalSkillLayoutRollbackError,
     LocalSkillNotReadyError,
     LocalSkillStorageError,
 )
@@ -16,6 +19,11 @@ from agentclaw.community.core.skill_center.services.local_skill_delete_service i
     LocalSkillDeleteService,
 )
 from agentclaw.community.core.skill_center.errors import ActiveSkillSetReferenceError
+from agentclaw.community.core.skills_pool.edit_guard import (
+    SkillsPoolEditBusyError,
+    SkillsPoolEditLockUnavailableError,
+    SkillsPoolEditRollbackError,
+)
 
 
 class _Files:
@@ -238,7 +246,7 @@ class _Cleanup:
 
 def _service(
     *, active=False, fail_delete=False, active_during_delete=False,
-    on_acquire=None, status="ACTIVE", provider="local",
+    on_acquire=None, status="ACTIVE", provider="local", guard_error=None,
 ):
     files = _Files()
     skills = _Skills(
@@ -246,6 +254,10 @@ def _service(
         active_during_delete=active_during_delete,
     )
     guard = _Guard(on_acquire)
+    if guard_error is not None:
+        async def fail_acquire(*, scope):
+            raise guard_error
+        guard.acquire_for_edit_wait = fail_acquire
     cleanup = _Cleanup()
     service = LocalSkillDeleteService(
         skills,
@@ -272,6 +284,29 @@ async def test_inactive_delete_quarantines_then_removes_database_state_and_packa
     assert files.files == {}
     assert cleanup.work == []
     assert guard.events == [("dev", "owner", "bot"), "release"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("guard_error", "expected_error"),
+    [
+        (SkillsPoolEditBusyError("busy"), LocalSkillEditBusyError),
+        (SkillsPoolEditRollbackError("rollback"), LocalSkillLayoutRollbackError),
+        (
+            SkillsPoolEditLockUnavailableError("cache"),
+            LocalSkillEditLockUnavailableError,
+        ),
+    ],
+)
+async def test_delete_maps_guard_failures_to_public_domain_errors(
+    guard_error, expected_error
+):
+    service, _files, _skills, _guard, _cleanup = _service(
+        guard_error=guard_error
+    )
+
+    with pytest.raises(expected_error):
+        await service.delete_local_skill(skill_id="9", actor_id="owner")
 
 
 @pytest.mark.asyncio

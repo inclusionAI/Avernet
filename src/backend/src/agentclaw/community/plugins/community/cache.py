@@ -23,7 +23,10 @@ import uuid
 from typing import Any, Dict, Optional
 
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.cache import CachePlugin
+from agentclaw.community.plugin_api.cache import (
+    CacheLockInfrastructureError,
+    CachePlugin,
+)
 
 
 logger = get_logger()
@@ -87,24 +90,32 @@ class _RedisBackend:
             )
             return False
 
-    def acquire_lock(self, lock_key: str, ttl: int = 30) -> Optional[str]:
+    def acquire_lock_strict(self, lock_key: str, ttl: int = 30) -> Optional[str]:
+        """Acquire a Redis lock without flattening an outage into ``None``."""
         try:
             token = _new_lock_token()
             ok = self._redis.set(f"lock:{lock_key}", token, nx=True, ex=ttl)
             if ok:
                 return token
-            # Healthy "lock busy": the key already exists, SET NX returned falsy.
             logger.debug(
                 "Cache acquire_lock: lock held by others, key=%s", lock_key
             )
             return None
-        except Exception as e:
+        except Exception as exc:
+            raise CacheLockInfrastructureError(
+                "cache lock backend is unavailable"
+            ) from exc
+
+    def acquire_lock(self, lock_key: str, ttl: int = 30) -> Optional[str]:
+        try:
+            return self.acquire_lock_strict(lock_key, ttl)
+        except CacheLockInfrastructureError as exc:
             # Infrastructure failure (Redis unreachable) — NOT lock contention.
             # Logged distinctly so it is not misread as "lock held".
             logger.error(
                 "[CACHE-INFRA-FAILURE] acquire_lock could not reach cache "
                 "backend (key=%s): %s — NOT a lock contention",
-                lock_key, e, exc_info=True,
+                lock_key, exc, exc_info=True,
             )
             return None
 
@@ -186,6 +197,9 @@ class _InProcessBackend:
             self._store[storage_key] = (token, time.time() + ttl)
         return token
 
+    def acquire_lock_strict(self, lock_key: str, ttl: int = 30) -> Optional[str]:
+        return self.acquire_lock(lock_key, ttl)
+
     def release_lock(self, lock_key: str, lock_value: str) -> bool:
         storage_key = f"lock:{lock_key}"
         with self._guard:
@@ -223,6 +237,9 @@ class CommunityCache(CachePlugin):
 
     def acquire_lock(self, lock_key: str, ttl: int = 30) -> Optional[str]:
         return self._backend.acquire_lock(lock_key, ttl)
+
+    def acquire_lock_strict(self, lock_key: str, ttl: int = 30) -> Optional[str]:
+        return self._backend.acquire_lock_strict(lock_key, ttl)
 
     def release_lock(self, lock_key: str, lock_value: str) -> bool:
         return self._backend.release_lock(lock_key, lock_value)

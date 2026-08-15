@@ -1,17 +1,24 @@
 """Resources group — ``/openapi/v1/bots/resources``.
 
-A unified abstraction over files and links (a Yuque doc is a ``link`` resource);
-the storage location is never exposed. All 9 handlers are wired to the slim
-``core/resources/service.py`` ``ResourceService`` via ``ResourceServiceFactory``;
-no legacy router private helper is imported (arch Rule 7 — thin adapter).
+The bot's workspace files and folders. The engine is the source of truth: every
+handler resolves against the workspace, and every entry is addressed by its
+workspace-relative ``path``. The storage location is never exposed.
 
-⚠️ STATUS: definition-only / NOT PUBLIC-READY. The handlers are wired to the
-slim ``ResourceService`` and exercise the real service at the integration level,
-but this surface is gated on the auth workstream before it is exposed to any
-external tenant: ``require_principal`` is still a ``None`` stub, so the gateway's
-signed-Principal seam is not in place yet. Do NOT expose to external callers
-until that lands (see ``openapi_v1/dependencies.py`` and the cross-team tenant
-isolation track in ``src/backend/docs/openapi-v1/README.zh-CN.md``).
+**There are no record ids on this surface.** ``#1001`` made the filesystem
+authoritative for files, which left ``resource_id`` present but permanently
+empty on every file response, and three id-addressed routes that only ever
+resolved link records. Links are no longer part of this group, so the id is gone
+from the contract rather than reported as ``""`` — an empty string standing in
+for "no id" is a sentinel pretending to be an address, and a caller cannot tell
+it from a real one until it fails.
+
+⚠️ STATUS: definition-only / NOT PUBLIC-READY. The handlers exercise the real
+services at the integration level, but this surface is gated on the auth
+workstream before it is exposed to any external tenant: ``require_principal`` is
+still a ``None`` stub, so the gateway's signed-Principal seam is not in place
+yet. Do NOT expose to external callers until that lands (see
+``openapi_v1/dependencies.py`` and the cross-team tenant isolation track in
+``src/backend/docs/openapi-v1/README.zh-CN.md``).
 
 Gates / follow-ups (block public-readiness, NOT a silent deployment):
 - Owner/identity comes from ``UserIdDep`` — the request's own ``user_id``
@@ -23,11 +30,17 @@ Gates / follow-ups (block public-readiness, NOT a silent deployment):
   Phase 0 plan) — code first / DDL later breaks bot reads with a missing column.
 - device_fs resolution lives in the adapter (Rule 7 transport concern); a
   service owns the read/write via the opaque ``device_fs`` argument.
+
+Records are still written on upload, and that is not a contradiction of the
+above: the publish pipeline builds a released bot's manifest from them, so bytes
+with no row publish as a bot silently missing that file. The row is that
+pipeline's input, never a source this API reads back. "Files have no id in the
+API" is not "files have no record".
 """
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
 import httpx
 from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
@@ -37,9 +50,9 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Deleted,
     Envelope,
     ErrorEnvelope,
-    NameCheck,
     Page,
     PageParamsDep,
+    error_example,
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
@@ -68,69 +81,9 @@ from agentclaw.community.core.services.resource_file_service import (
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 
-from .schemas import Preview, Resource, ResourceCreate, ResourceType, ResourceUpdate
-
-# ── openapi_v1 envelope + field-mapping helpers (Phase 1) ───────────
-from agentclaw.community.core.resources.models import Resource as _LegacyResource
-from agentclaw.community.core.resources.models import ResourceType as _LegacyType
+from .schemas import FileEntry, Preview, ResourceType
 
 logger = get_logger()
-
-
-# legacy ResourceType → openapi ResourceType. R1a: legacy URL 归并进 openapi LINK.
-# NODE/DATABASE/API 不在 openapi 契约 —— 读路径若出现,退回 LINK(读 list 不该报错);
-# create 路径本期只接 LINK,不会经过这里。(legacy 无 FOLDER 枚举值,故无 mapping。)
-_TYPE_MAP: dict[_LegacyType, ResourceType] = {
-    _LegacyType.FILE: ResourceType.FILE,
-    _LegacyType.LINK: ResourceType.LINK,
-    _LegacyType.URL: ResourceType.LINK,
-}
-
-# openapi ResourceType → legacy ResourceType. R1a: openapi LINK 归并 legacy URL +
-# LINK —— filter 侧本期只匹配 LINK(URL fan-out is a follow-up, see
-# `_legacy_type_for` callers). openapi FOLDER has no legacy equivalent (no row
-# in the legacy enum), so it's intentionally absent: list filters to empty and
-# create raises 501 — they never reach the service with FOLDER.
-_OPENAPI_TO_LEGACY_TYPE: dict[ResourceType, _LegacyType] = {
-    ResourceType.FILE: _LegacyType.FILE,
-    ResourceType.LINK: _LegacyType.LINK,
-}
-
-
-def _legacy_type_for(openapi_type: ResourceType | None) -> _LegacyType | None:
-    """Map an openapi ResourceType to the legacy ResourceType the slim service expects.
-
-    Returns None when:
-    - ``openapi_type`` is None (no filter — caller passes None through), or
-    - ``openapi_type`` is FOLDER: there is no legacy equivalent (FOLDER is an
-      openapi-only type with no backing enum value). Callers that must NOT
-      fall through to "no filter" (list_resources) distinguish these two None
-      cases via the ``type`` argument directly — see list_resources handler.
-    """
-    if openapi_type is None:
-        return None
-    return _OPENAPI_TO_LEGACY_TYPE.get(openapi_type)
-
-
-def _to_openapi_resource(legacy: _LegacyResource) -> Resource:
-    """Map a legacy domain Resource → public openapi Resource schema.
-
-    Flattens type-specific attributes (url/size) to top-level fields and never
-    exposes the storage location. Per arch Rule 7 (mapping = protocol concern).
-    """
-    return Resource(
-        resource_id=str(legacy.id) if legacy.id is not None else "",
-        name=legacy.name or "",
-        type=_TYPE_MAP.get(legacy.resource_type, ResourceType.LINK),
-        source=legacy.source,
-        url=legacy.url,
-        size=legacy.size if legacy.resource_type == _LegacyType.FILE else None,
-        # ``None``, not ``""``: the field is nullable now, and an empty string is
-        # a sentinel pretending to be a timestamp. Absent means absent.
-        gmt_create=legacy.gmt_created.isoformat() if legacy.gmt_created else None,
-        gmt_modified=legacy.gmt_modified.isoformat() if legacy.gmt_modified else None,
-    )
-
 
 #: Preview cap, legacy parity with the former service-level default.
 _PREVIEW_MAX_BYTES = 1_048_576
@@ -146,6 +99,7 @@ _TOO_LARGE_RESPONSE: dict[int | str, dict[str, object]] = {
         "model": ErrorEnvelope,
         "description": "File exceeds the size the provider will serve, or the "
         "1 MB preview cap.",
+        **error_example(413, "File too large for preview"),
     },
 }
 # The group is already user-scoped, so it carries ``USER_SCOPED_403`` from
@@ -159,6 +113,7 @@ _READ_ONLY_RESPONSE: dict[int | str, dict[str, object]] = {
         "description": "The path is read-only — a dotfile, or a workspace-root "
         "identity file — or the user_id names a user the authenticated caller "
         "may not act for.",
+        **error_example(403, "Forbidden"),
     },
 }
 
@@ -186,6 +141,18 @@ def _safe_path(path: str) -> str:
     if any(s == ".." for s in segments):
         raise InvalidResourcePathError(f"path escapes the workspace: {path!r}")
     return "/".join(segments)
+
+
+def _require_path(path: str) -> str:
+    """``_safe_path``, refusing the empty result.
+
+    Every endpoint but the listing addresses one entry, and the workspace root
+    is not one: there is nothing to download, delete or stat about it.
+    """
+    safe = _safe_path(path)
+    if not safe:
+        raise InvalidResourcePathError("path is required")
+    return safe
 
 
 def _reject_read_only(safe: str) -> None:
@@ -233,10 +200,73 @@ def _file_coords(
     return ("staff", owner_id, engine_type)
 
 
+def _to_file_entry(entry: dict[str, Any]) -> FileEntry:
+    """Map a ``ResourceFileService.list_dir`` entry to the public schema.
+
+    ``list_dir`` already returns a workspace-relative ``path`` (it applies
+    ``_rel_path`` itself) and keeps the engine-view container path under a
+    separate ``absolute_path``. Recomputing the former here would discard the
+    correct value in favour of a reconstruction; reporting the latter would leak
+    the container's storage layout.
+    """
+    is_dir = bool(entry.get("is_dir"))
+    return FileEntry(
+        path=entry.get("path", ""),
+        name=entry.get("name", ""),
+        type=ResourceType.FOLDER if is_dir else ResourceType.FILE,
+        size=entry.get("size") if not is_dir else None,
+    )
+
+
+async def _list_dir_or_empty(
+    file_svc: ResourceFileService,
+    *,
+    bot_id: str,
+    owner_id: str,
+    bot_repo: BotRepository,
+    path: str,
+) -> list[dict[str, Any]]:
+    """One directory's entries, treating an absent directory as empty.
+
+    The baas providers re-raise an upstream 404 rather than answering "nothing
+    there", and that loudness is load-bearing at the device
+    (``baas_device_filesystem.py:68``). It is only here that a 404 stops being a
+    failure: the providers that return ``None`` already produce an empty listing
+    for an absent directory, so without this the same request is a 500 on baas
+    and an empty page everywhere else. Every other status still propagates.
+    """
+    entity_type, entity_id, engine_type = _file_coords(bot_id, owner_id, bot_repo)
+    try:
+        listed = await file_svc.list_dir(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            bot_id=bot_id,
+            engine_type=engine_type,
+            path=path,
+        )
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code != 404:
+            raise
+        return []
+    return listed or []
+
+
 router = APIRouter(prefix="/openapi/v1/bots/resources", tags=["resources"])
 
+#: The query parameter addressing a file or folder, documented once. Kept as an
+#: Annotated default so handlers stay directly callable in tests.
+FilePathQuery = Annotated[
+    str,
+    Query(
+        description="Workspace-relative path of the file or folder, e.g. "
+        "'docs/spec/a.txt' — exactly as returned in a listing entry's "
+        "`path`. A leading slash is tolerated; '..' segments are refused "
+        "(400)."
+    ),
+]
 
-@router.get("", response_model=Envelope[Page[Resource]])
+
+@router.get("", response_model=Envelope[Page[FileEntry]])
 @envelope_errors
 async def list_resources(
     page: PageParamsDep,
@@ -246,234 +276,129 @@ async def list_resources(
     path: str = Query(
         "", description="Directory to list, relative to the workspace root."
     ),
-    type: ResourceType | None = None,
-    factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
+    type: Annotated[
+        ResourceType | None,
+        Query(
+            description="Filter: 'file' lists only files, 'folder' only "
+            "directories. Omit for both."
+        ),
+    ] = None,
     bot_repo: BotRepository = Injected(BotRepository),
     file_svc: ResourceFileService = Injected(ResourceFileService),
-) -> Envelope[Page[Resource]]:
-    """List a directory of the bot's workspace, plus the bot's link resources.
+) -> Envelope[Page[FileEntry]]:
+    """List a directory of the bot's workspace.
 
-    Files and folders come from the **workspace**, never from records. That is
-    what makes a file the bot produced itself a first-class resource: it has no
-    record and never will, and a record-backed listing simply could not see it.
-    It also removes the divergence the other direction — a record whose bytes are
-    not where it claims can no longer be reported as a file that exists.
+    Entries come from the **workspace**, never from records. That is what makes
+    a file the bot produced itself a first-class resource: it has no record and
+    never will, and a record-backed listing simply could not see it. It also
+    removes the divergence the other direction — a record whose bytes are not
+    where it claims can no longer be reported as a file that exists.
 
-    Links are the exception, and not an inconsistency: a link has no file and no
-    presence on any device, so the record *is* the resource. They are read from
-    the repo and appended.
+    The path parameter selects the directory (empty = workspace root). Listing
+    is non-recursive, which bounds the device round trip this endpoint makes.
 
-    ``path`` selects the directory (empty = workspace root). Listing is
-    non-recursive, which bounds the device round trip this endpoint now makes.
+    Paging is applied by this server over the whole directory, because the
+    engine's listing API takes no page, limit or cursor: `page_size` bounds the
+    response, not the work. Requesting a later page costs exactly what the
+    first one costs.
     """
     safe = _safe_path(path)
-    entries: list[Resource] = []
-    if type is None or type in (ResourceType.FILE, ResourceType.FOLDER):
-        entity_type, entity_id, engine_type = _file_coords(bot_id, owner_id, bot_repo)
-        try:
-            listed = await file_svc.list_dir(
-                entity_type=entity_type,
-                entity_id=entity_id,
-                bot_id=bot_id,
-                engine_type=engine_type,
-                path=safe,
-            )
-        except httpx.HTTPStatusError as exc:
-            # Same normalization the read path does, for the same reason: the
-            # baas providers re-raise an upstream 404 rather than answering
-            # "nothing there", and that loudness is load-bearing at the device.
-            # An absent directory is an ordinary answer here, and the providers
-            # that return ``None`` already produce an empty page for it — so
-            # without this the same request is a 500 on baas and an empty page
-            # everywhere else. Every other status still propagates.
-            if exc.response.status_code != 404:
-                raise
-            listed = []
-        for entry in listed or []:
-            is_dir = bool(entry.get("is_dir"))
-            entry_type = ResourceType.FOLDER if is_dir else ResourceType.FILE
-            if type is not None and entry_type != type:
-                continue
-            entries.append(
-                Resource(
-                    # No record backs a workspace entry, so there is no id to
-                    # report and no source or timestamps to report either — the
-                    # device's listing carries none.
-                    resource_id="",
-                    name=entry.get("name", ""),
-                    type=entry_type,
-                    size=entry.get("size") if not is_dir else None,
-                    # ``ResourceFileService.list_dir`` already returns a
-                    # workspace-relative ``path`` (it applies ``_rel_path``
-                    # itself) and keeps the engine-view container path under a
-                    # separate ``absolute_path``. Recomputing it here would
-                    # discard the correct value in favour of a reconstruction.
-                    path=entry.get("path", ""),
-                )
-            )
+    listed = await _list_dir_or_empty(
+        file_svc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo, path=safe
+    )
+    entries = [_to_file_entry(entry) for entry in listed]
+    if type is not None:
+        entries = [entry for entry in entries if entry.type == type]
 
-    if type is None or type == ResourceType.LINK:
-        service = factory.create(bot_id=bot_id)
-        # Unfiltered on the repo side, then narrowed by the *mapped* type. Two
-        # legacy types collapse into openapi LINK — ``LINK`` and the older
-        # ``URL`` — so filtering the query on either one alone silently drops
-        # the other. FILE rows are excluded here rather than merged: for files
-        # the workspace is authoritative, and a row whose bytes are not where it
-        # claims must not be reported as a file that exists.
-        entries.extend(
-            _to_openapi_resource(r)
-            for r in service.list_resources()
-            if _TYPE_MAP.get(r.resource_type) == ResourceType.LINK
-        )
-
-    # Paginated here rather than pushed down: the page spans two sources, one of
-    # which is a directory listing with no offset to push a bound into.
+    # Sliced here rather than pushed down, and that is only sound because the
+    # listing is non-recursive: one directory is a bounded fetch, so holding it
+    # whole to serve a page of it is proportionate. A ``recursive=true`` option
+    # would break that assumption — it would pull an entire workspace into
+    # memory per request — so adding one means revisiting this, not just adding
+    # a parameter. See the engine's ``ListDirRequest``, which has no paging
+    # fields to push a bound into.
     start = (page.page - 1) * page.page_size
     return page_envelope(
         len(entries), entries[start : start + page.page_size], request
     )
 
 
-@router.get("/check-name", response_model=Envelope[NameCheck])
+@router.get("/stat", response_model=Envelope[FileEntry])
 @envelope_errors
-async def check_resource_name(
+async def stat_resource(
     owner_id: UserIdDep,
+    path: FilePathQuery,
     request: Request,
-    # Plain defaults rather than ``Query(...)``: FastAPI still treats them as
-    # query parameters, and the handler stays directly callable in tests without
-    # a ``Query`` sentinel standing in for a string.
-    name: str = "",
-    path: str = "",
-    type: ResourceType | None = None,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
-    factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
     file_svc: ResourceFileService = Injected(ResourceFileService),
-) -> Envelope[NameCheck]:
-    """Whether a resource already exists.
+) -> Envelope[FileEntry]:
+    """One file or folder's metadata, addressed by path.
 
-    Two parameters because there are two kinds of resource, addressed
-    differently. A **file** is checked against the workspace by ``path`` — the
-    same question the upload asks before writing, answered by the same authority,
-    so the two can never disagree. A **link** is checked by ``name`` against the
-    records, because a link has no file.
+    Answers the questions a listing answers, for a single entry: whether it is
+    there at all (404 if not), whether it is a file or a folder, and how big it
+    is. The workspace root has no entry of its own, so `path` is required here
+    even though the listing accepts an empty one.
 
-    A caller supplying ``path`` gets the file check; otherwise it is the link
-    check. Splitting the two surfaces entirely would be cleaner than one endpoint
-    with two addressing modes, but that is a larger contract change than this one.
+    Entries the listing hides — dotfiles, and the workspace-root identity files
+    — are 404 here too, so the two surfaces agree on what exists.
     """
-    # Neither addressing mode supplied. Both parameters carry plain defaults so
-    # that one may be omitted, which costs FastAPI's required-parameter check —
-    # so the "at least one" rule is enforced here instead. Without it the link
-    # branch asks the repository about the empty name and answers a cheerful
-    # ``exists=false`` to a request that named no resource at all.
-    if not name and not path:
-        raise InvalidResourcePathError("name or path is required")
-    if path or type == ResourceType.FILE or type == ResourceType.FOLDER:
-        safe = _safe_path(path or name)
-        if not safe:
-            raise InvalidResourcePathError("path is required")
-        entity_type, entity_id, engine_type = _file_coords(bot_id, owner_id, bot_repo)
-        exists = await file_svc.exists(
-            entity_type=entity_type,
-            entity_id=entity_id,
-            bot_id=bot_id,
-            engine_type=engine_type,
-            path=safe,
-        )
-        return envelope(NameCheck(name=safe, exists=exists), request)
-
-    service = factory.create(bot_id=bot_id)
-    # owner_id is the request's own ``user_id`` — fail-closed, since neither a
-    # missing parameter nor one naming another user reaches this line.
-    exists = await service.check_name_exists(
-        name=name,
-        resource_type=_LegacyType.LINK,
-        parent_path=None,
-        user_id=owner_id,
+    # Resolved by listing the parent and picking the entry out, rather than by a
+    # dedicated device call: it is the same seam the listing reads, so stat and
+    # list cannot report different types or sizes for the same file. It also
+    # needs no new provider method — ``DeviceFileSystem`` has no stat, and
+    # adding one to three providers to save a filter would be the larger change.
+    safe = _require_path(path)
+    parent = safe.rsplit("/", 1)[0] if "/" in safe else ""
+    listed = await _list_dir_or_empty(
+        file_svc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo, path=parent
     )
-    return envelope(NameCheck(name=name, exists=exists), request)
-
-
-@router.post("", status_code=201, response_model=Envelope[Resource])
-@envelope_errors
-async def create_resource(
-    body: ResourceCreate,
-    user_id: UserIdDep,
-    request: Request,
-    bot_id: str = Query(..., description="Bot ID this resource belongs to."),
-    factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
-) -> Envelope[Resource]:
-    """Create a resource (file placeholder, link, or folder).
-
-    Phase 1: only LINK supported. FILE → use POST /upload (Phase 3);
-    FOLDER → create_directory (Phase 3, device_fs branch). Duplicate name
-    surfaces as ValueError from the service → 409 Conflict (legacy parity).
-    """
-    del user_id  # not-yet-enforced ownership — see list_resources
-    if body.type == ResourceType.FILE:
-        raise HTTPException(
-            status_code=400,
-            detail="Use POST /openapi/v1/bots/resources/upload for file resources",
-        )
-    if body.type == ResourceType.FOLDER:
-        raise HTTPException(
-            status_code=501,
-            detail="Create folder not supported yet (Phase 3)",
-        )
-    if not body.url:
-        raise HTTPException(
-            status_code=400, detail="url is required for link resources"
-        )
-
-    effective_bot_id = bot_id
-    service = factory.create(bot_id=effective_bot_id)
-    # DuplicateResourceError propagates to @envelope_errors → 409 fixed message
-    # (no str(exc) leakage, unlike the prior hand-translation).
-    r = await service.create_url_resource(
-        name=body.name,
-        url=body.url,
-        # parent_path intentionally NOT forwarded: the openapi ResourceCreate
-        # schema carries `parent_id` (a pending follow-up — its ID-vs-path
-        # semantics aren't settled). Passing a half-defined value would risk
-        # a wrong-attribute write; link scoping by bot_id is sufficient now.
-        parent_path=None,
-    )
-    return created(_to_openapi_resource(r), request)
+    for entry in listed:
+        if entry.get("path") == safe:
+            return envelope(_to_file_entry(entry), request)
+    raise HTTPException(status_code=404, detail="Resource not found")
 
 
 @router.post(
     "/upload",
     status_code=201,
-    response_model=Envelope[Resource],
+    response_model=Envelope[FileEntry],
     responses=_READ_ONLY_RESPONSE,
 )
 @envelope_errors
 async def upload_resource(
     owner_id: UserIdDep,
-    path: str,
+    path: FilePathQuery,
     content: Annotated[bytes, Body(media_type="application/octet-stream")],
     request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
+    overwrite: Annotated[
+        bool,
+        Query(
+            description="Replace the file if the path is already occupied. "
+            "Defaults to false, which answers 409 instead. Has no effect on a "
+            "free path."
+        ),
+    ] = False,
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
     file_svc: ResourceFileService = Injected(ResourceFileService),
-) -> Envelope[Resource]:
+) -> Envelope[FileEntry]:
     """Upload a file's raw bytes into the bot's workspace.
 
-    ``path`` is workspace-relative and carries its own directories
-    (``docs/spec/a.txt``); intermediate ones are created by the engine. There is
-    no separate name or parent-directory parameter — the directory is part of the
-    path, and ``path`` is the same spelling every other file endpoint uses.
-
-    The write goes through ``ResourceFileService``, the same service the console
-    uses, so both surfaces compose the workspace address identically and cannot
-    drift. ``owner_id`` comes from the request's ``user_id`` (``UserIdDep``),
-    fail-closed — mirroring the bots router.
+    The body is the file's raw bytes (content type application/octet-stream),
+    not a multipart form. The path is workspace-relative and carries its own
+    directories ('docs/spec/a.txt'); intermediate ones are created as needed
+    — there is no separate name or parent-directory parameter. An occupied
+    path answers 409 unless `overwrite` is set; the size limit is 500 MB, and
+    only common document, code, image and archive extensions are accepted
+    (400 otherwise).
     """
-    safe = _safe_path(path)
-    if not safe:
-        raise InvalidResourcePathError("path is required")
+    # The write goes through ResourceFileService, the same service the console
+    # uses, so both surfaces compose the workspace address identically and
+    # cannot drift. owner_id comes from the request's user_id (UserIdDep),
+    # fail-closed — mirroring the bots router.
+    safe = _require_path(path)
     _reject_read_only(safe)
     entity_type, entity_id, engine_type = _file_coords(bot_id, owner_id, bot_repo)
     # Duplicate detection against the workspace, not the record table. Uploading
@@ -489,13 +414,14 @@ async def upload_resource(
     # changed. Closing it needs an exclusive-create on the engine's write API,
     # since ``DeviceFileSystem`` has no conditional-create to make the check and
     # the write one operation; see the spec's known-limitation section.
-    if await file_svc.exists(
+    occupied = await file_svc.exists(
         entity_type=entity_type,
         entity_id=entity_id,
         bot_id=bot_id,
         engine_type=engine_type,
         path=safe,
-    ):
+    )
+    if occupied and not overwrite:
         raise DuplicateResourceError(f"Resource already exists: {safe}")
     try:
         info = await file_svc.upload_file(
@@ -527,11 +453,35 @@ async def upload_resource(
 
     # The record is not decoration: the publish pipeline builds a released bot's
     # manifest from it, so bytes without a row publish as a bot silently missing
-    # that file. Reporting 201 and moving on would leave exactly that, and the
-    # obvious repair — upload it again — cannot work, because the file is now on
-    # disk and the duplicate check answers 409. So the write is rolled back and
-    # the request fails: a retry then finds a clean slate and succeeds.
+    # that file.
     try:
+        if occupied:
+            # Replacing, so the prior row for this path goes first:
+            # ``record_uploaded_file`` always inserts, and a second row for one
+            # path would publish the file twice in the manifest. Dropping it is
+            # safe to do unconditionally on this branch — ``delete_file_record``
+            # reports "nothing matched" with a ``False`` rather than raising, and
+            # a bot-created file being overwritten never had a row to begin with.
+            #
+            # This is a *reduction*, not a guarantee, and the difference matters.
+            # The drop and the insert are two statements with no lock between
+            # them, so two overwrites racing on one path can both drop, then both
+            # insert, and leave two live rows — the publish pipeline would list
+            # the file twice. Without the drop the same race leaves three, so
+            # this strictly improves it, but it does not close it.
+            #
+            # It is the same race the duplicate check above already documents,
+            # one table down: concurrent *fresh* uploads to an absent path both
+            # pass ``exists``, both write, and both insert, which is the
+            # pre-existing behaviour this branch inherits rather than introduces.
+            # Closing it properly needs a uniqueness constraint on
+            # ``(bolt_id, path)`` plus an upsert in the repository — a DDL on
+            # ``ac_resource``, a table the console and the publish pipeline share.
+            # That has to be deployed before code that depends on it (see the
+            # module docstring's Phase 0 note on ``avernet_tenant``: code first /
+            # DDL later breaks bot reads), so it is not an adapter-level fix and
+            # is deliberately not attempted here.
+            await factory.create(bot_id=bot_id).delete_file_record(path=safe)
         await factory.create(bot_id=bot_id).record_uploaded_file(
             path=info["path"],
             size=info.get("size", len(content)),
@@ -540,9 +490,26 @@ async def upload_resource(
         )
     except Exception:
         logger.exception(
-            "[upload_resource] record failed; rolling back the file at %s",
-            info["path"],
+            "[upload_resource] record failed for %s", info["path"]
         )
+        if occupied:
+            # No rollback when replacing, deliberately. The prior bytes are
+            # already gone — that is what the caller asked for — so deleting the
+            # file now would destroy content instead of restoring it. The retry
+            # is the repair here and it is not blocked: an overwrite does not
+            # 409, so calling it again rewrites the bytes and writes the row.
+            logger.error(
+                "[upload_resource] %s was replaced but has no record; "
+                "retry the overwrite to restore it",
+                info["path"],
+            )
+            raise HTTPException(status_code=502, detail="Upload storage failed")
+        # A fresh upload rolls back instead, because its retry *is* blocked:
+        # reporting 201 would leave bytes with no row, and the obvious repair —
+        # upload it again — cannot work, since the file is now on disk and the
+        # duplicate check answers 409. Rolling the write back gives the retry a
+        # clean slate.
+        #
         # A refused rollback is reported by a ``False`` return, not by raising,
         # so catching only exceptions would miss half of it. Both arms land in
         # the same state and get the same log line: the file is on disk with no
@@ -572,31 +539,16 @@ async def upload_resource(
         raise HTTPException(status_code=502, detail="Upload storage failed")
 
     # Built from the workspace, not from the row that was just written — the row
-    # is the publish pipeline's input, not a source this API reads back. Reading
-    # it would make the upload the one file response shaped differently from
-    # every other: a listing of this same file reports an empty ``resource_id``
-    # and no source or timestamps, and the id echoed here could not address
-    # anything anyway, since every file operation is path-addressed and
-    # ``GET /{resource_id}`` 404s a file row. ``path`` is the usable handle.
+    # is the publish pipeline's input, not a source this API reads back.
     return created(
-        Resource(
-            resource_id="",
+        FileEntry(
+            path=info["path"],
             name=info["name"],
             type=ResourceType.FILE,
             size=info.get("size", len(content)),
-            path=info["path"],
         ),
         request,
     )
-
-
-# ── file operations, addressed by workspace-relative path ────────────
-#
-# These are declared before ``/{resource_id}`` so their literal segments win the
-# match, exactly as ``/check-name`` and ``/upload`` already do. A file has no
-# record id to address it by — the workspace is the source of truth, and a file
-# the bot created itself never had a record at all — so ``?path=`` is the
-# address, matching the console's own file surface.
 
 
 async def _read_file_or_404(
@@ -608,9 +560,7 @@ async def _read_file_or_404(
     path: str,
 ) -> bytes:
     """Bytes at ``path``, or 404. Shared by download and preview."""
-    safe = _safe_path(path)
-    if not safe:
-        raise InvalidResourcePathError("path is required")
+    safe = _require_path(path)
     entity_type, entity_id, engine_type = _file_coords(bot_id, owner_id, bot_repo)
     try:
         content = await file_svc.read_file(
@@ -662,7 +612,7 @@ async def _read_file_or_404(
 @envelope_errors
 async def download_file(
     owner_id: UserIdDep,
-    path: str,
+    path: FilePathQuery,
     # Required by ``@envelope_errors`` to locate the request: without it the
     # decorator cannot build an error envelope and re-raises instead, so a
     # rejected path would surface as a 500 rather than a 400. The success path
@@ -674,9 +624,7 @@ async def download_file(
 ) -> Response:
     """Stream a file's bytes from the bot's workspace, addressed by path.
 
-    Raw bytes, not an envelope — the body is the file. Replaces the former
-    ``/{resource_id}/download``: a record id cannot address a file the bot
-    created itself, and the record is no longer what decides existence.
+    Raw bytes, not an envelope — the body is the file.
     """
     content = await _read_file_or_404(
         file_svc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo, path=path
@@ -692,7 +640,7 @@ async def download_file(
 @envelope_errors
 async def preview_file(
     owner_id: UserIdDep,
-    path: str,
+    path: FilePathQuery,
     request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     bot_repo: BotRepository = Injected(BotRepository),
@@ -712,11 +660,54 @@ async def preview_file(
         )
     return envelope(
         Preview(
-            resource_id="",
+            path=_safe_path(path),
             content_type="application/octet-stream",
             # ``replace`` rather than raising: a preview of a mostly-text file
             # with a stray byte is useful; a 500 is not.
             content=content.decode("utf-8", errors="replace"),
+        ),
+        request,
+    )
+
+
+@router.post(
+    "/mkdir",
+    status_code=201,
+    response_model=Envelope[FileEntry],
+    responses=_READ_ONLY_RESPONSE,
+)
+@envelope_errors
+async def create_directory(
+    owner_id: UserIdDep,
+    path: FilePathQuery,
+    request: Request,
+    bot_id: str = Query(..., description="Bot ID this resource belongs to."),
+    bot_repo: BotRepository = Injected(BotRepository),
+    file_svc: ResourceFileService = Injected(ResourceFileService),
+) -> Envelope[FileEntry]:
+    """Create a directory in the bot's workspace, addressed by path.
+
+    Intermediate directories are created as needed. Directories exist on the
+    workspace filesystem only and are reported by listing it — they have no
+    record.
+    """
+    # No FOLDER record is written: giving directories records would reintroduce
+    # exactly the record-vs-filesystem divergence this change removed.
+    safe = _require_path(path)
+    _reject_read_only(safe)
+    entity_type, entity_id, engine_type = _file_coords(bot_id, owner_id, bot_repo)
+    await file_svc.create_directory(
+        entity_type=entity_type,
+        entity_id=entity_id,
+        bot_id=bot_id,
+        engine_type=engine_type,
+        path=safe,
+    )
+    return created(
+        FileEntry(
+            path=safe,
+            name=safe.rsplit("/", 1)[-1],
+            type=ResourceType.FOLDER,
         ),
         request,
     )
@@ -730,7 +721,7 @@ async def preview_file(
 @envelope_errors
 async def delete_file(
     owner_id: UserIdDep,
-    path: str,
+    path: FilePathQuery,
     request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
@@ -743,9 +734,7 @@ async def delete_file(
     record that is not there is not an error — a file the bot created never had
     one.
     """
-    safe = _safe_path(path)
-    if not safe:
-        raise InvalidResourcePathError("path is required")
+    safe = _require_path(path)
     # Same read-only policy the console's delete enforces
     # (``adapters/http/resources/file_router.py:381``) — dotfiles and the
     # workspace-root identity files. Addressing by path is what makes these
@@ -784,154 +773,4 @@ async def delete_file(
         path=safe,
     ):
         raise HTTPException(status_code=502, detail="Delete storage failed")
-    return deleted_envelope(request)
-
-
-@router.post(
-    "/mkdir",
-    status_code=201,
-    response_model=Envelope[Resource],
-    responses=_READ_ONLY_RESPONSE,
-)
-@envelope_errors
-async def create_directory(
-    owner_id: UserIdDep,
-    path: str,
-    request: Request,
-    bot_id: str = Query(..., description="Bot ID this resource belongs to."),
-    bot_repo: BotRepository = Injected(BotRepository),
-    file_svc: ResourceFileService = Injected(ResourceFileService),
-) -> Envelope[Resource]:
-    """Create a directory in the bot's workspace.
-
-    Physical only — no FOLDER record is written, and ``POST ""`` with
-    ``type=FOLDER`` still returns 501. Directories exist on the filesystem and
-    are reported by listing it; giving them records would reintroduce exactly
-    the record-vs-filesystem divergence this change removes.
-    """
-    safe = _safe_path(path)
-    if not safe:
-        raise InvalidResourcePathError("path is required")
-    _reject_read_only(safe)
-    entity_type, entity_id, engine_type = _file_coords(bot_id, owner_id, bot_repo)
-    await file_svc.create_directory(
-        entity_type=entity_type,
-        entity_id=entity_id,
-        bot_id=bot_id,
-        engine_type=engine_type,
-        path=safe,
-    )
-    return created(
-        Resource(
-            resource_id="",
-            name=safe.rsplit("/", 1)[-1],
-            type=ResourceType.FOLDER,
-            path=safe,
-        ),
-        request,
-    )
-
-
-@router.get("/{resource_id}", response_model=Envelope[Resource])
-@envelope_errors
-async def get_resource(
-    resource_id: str,
-    user_id: UserIdDep,
-    request: Request,
-    bot_id: str = Query(..., description="Bot ID this resource belongs to."),
-    factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
-) -> Envelope[Resource]:
-    """Get a **link** resource by record id.
-
-    A file id 404s here, mirroring ``DELETE /{resource_id}``: serving a file
-    from its record would report size and name from a row that nothing keeps in
-    step with the workspace, which is the divergence this change removes. A
-    file's address is its path — ``GET ""?path=`` lists it, ``GET /download``
-    and ``GET /preview`` serve it.
-    """
-    del user_id  # not-yet-enforced ownership — see list_resources
-    effective_bot_id = bot_id
-    service = factory.create(bot_id=effective_bot_id)
-    # NOTE: ``get_resource`` on the concrete service is SYNC (unlike
-    # ``check_name_exists`` which is async) — do NOT `await` it.
-    r = service.get_resource(resource_id)
-    if r is None or r.resource_type == _LegacyType.FILE:
-        raise HTTPException(status_code=404, detail="Resource not found")
-    return envelope(_to_openapi_resource(r), request)
-
-
-@router.put("/{resource_id}", response_model=Envelope[Resource])
-@envelope_errors
-async def update_resource(
-    resource_id: str,
-    body: ResourceUpdate,
-    user_id: UserIdDep,
-    request: Request,
-    bot_id: str = Query(..., description="Bot ID this resource belongs to."),
-    factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
-) -> Envelope[Resource]:
-    """Update a **link** resource by record id (rename / url change).
-
-    ``link_type`` is intentionally not exposed on the openapi contract.
-    ValueError from the service (not found / url clash) → 409 Conflict, per
-    legacy + create parity.
-
-    A file id 404s, completing what ``GET`` and ``DELETE /{resource_id}``
-    already do. ``update_link_resource`` checks no type, so a stale file id
-    would otherwise rename a FILE row that nothing reads — the response would
-    even show the new name, while the workspace, which is what every file
-    response is actually built from, is untouched.
-    """
-    del user_id  # not-yet-enforced ownership — see list_resources
-    effective_bot_id = bot_id
-    service = factory.create(bot_id=effective_bot_id)
-    existing = service.get_resource(resource_id)
-    if existing is not None and existing.resource_type == _LegacyType.FILE:
-        raise HTTPException(status_code=404, detail="Resource not found")
-    # ResourceNotFoundError (404) / DuplicateResourceError (409) propagate to
-    # @envelope_errors with fixed messages — no str(exc) leakage. The prior
-    # hand-translation also wrongly mapped not-found → 409; this fixes that.
-    r = await service.update_link_resource(
-        resource_id=resource_id,
-        name=body.name,
-        url=body.url,
-    )
-    return envelope(_to_openapi_resource(r), request)
-
-@router.delete("/{resource_id}", response_model=Envelope[Deleted])
-@envelope_errors
-async def delete_resource(
-    resource_id: str,
-    owner_id: UserIdDep,
-    request: Request,
-    bot_id: str = Query(..., description="Bot ID this resource belongs to."),
-    factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
-) -> Envelope[Deleted]:
-    """Delete a **link** resource by record id.
-
-    Files are no longer addressed this way — they live in the workspace and are
-    deleted through ``DELETE ""?path=``. A link has no file, so the record is
-    the resource and the record id is the only address it can have. A file id
-    sent here resolves to nothing and 404s, which is also the right answer for
-    a stale id from before the change.
-
-    No device is touched, so this must not require a bound one: the former
-    unconditional ``resolve_for_bot`` raised DeviceNotBoundError (409) on an
-    unbound bot even for a link, which is the follow-up that removing the file
-    branch resolves.
-    """
-    service = factory.create(bot_id=bot_id)
-    # Refuse a FILE row explicitly. ``delete_resource`` would otherwise accept
-    # one, skip the device because ``device_fs`` is None, soft-delete the row and
-    # report success — so a stale file id would still "work" while leaving the
-    # workspace file in place, which is precisely the record-says-one-thing,
-    # workspace-says-another divergence this change exists to remove. 404 rather
-    # than a distinct status: to this route a file id is simply not a resource it
-    # addresses, and the file's own address is ``DELETE ""?path=``.
-    existing = service.get_resource(resource_id)
-    if existing is not None and existing.resource_type == _LegacyType.FILE:
-        raise HTTPException(status_code=404, detail="Resource not found")
-    ok = await service.delete_resource(resource_id, device_fs=None)
-    if not ok:
-        raise HTTPException(status_code=404, detail="Resource not found")
     return deleted_envelope(request)
