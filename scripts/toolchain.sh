@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/toolchain.sh — Development toolchain management
 # Handles installation and verification of dev tools:
-# node, npm, uv, python, protoc, openclaw, claude code, rust/cargo
+# node, npm, uv, python, protoc, openclaw, optional claude code, rust/cargo
 #
 # toolchain_setup()  → Check and install all tools (idempotent, skip-if-present)
 # toolchain_check()  → Check only, return 1 if missing (dry-run, no install)
@@ -35,6 +35,13 @@ confirm_tool_install() {
     echo -e "${YELLOW}${prompt} [y/N]${NC}"
     read -r response || response=""
     [[ "$response" =~ ^[Yy]$ ]]
+}
+
+confirm_claude_code_install() {
+    local response
+    echo -e "${YELLOW}Install Claude Code now? [Y/n]${NC}"
+    read -r response || response=""
+    [[ ! "$response" =~ ^[Nn]$ ]]
 }
 
 # ============ System build prerequisites ============
@@ -680,10 +687,9 @@ setup_claude_code() {
     fi
 
     log_warn "Claude Code CLI not found."
-    if ! confirm_tool_install "Install Claude Code now?"; then
-        log_error "Claude Code is required for hybrid Claude relay. Install it manually:"
-        log_error "  npm install -g @anthropic-ai/claude-code --registry=https://registry.npmmirror.com"
-        return 1
+    if ! confirm_claude_code_install; then
+        log_warn "Skipping optional Claude Code installation."
+        return 0
     fi
 
     install_claude_code || return 1
@@ -1040,5 +1046,5 @@ toolchain_setup() {
 
 # 工具链帮助
 toolchain_help() {
-    echo "toolchain - Development tools (node, npm, uv, python, protoc, openclaw, claude code, rust)"
+    echo "toolchain - Development tools (node, npm, uv, python, protoc, openclaw, optional claude code, rust)"
 }
