@@ -66,10 +66,24 @@ class BaasDeviceFileSystem(DeviceFileSystem):
             resp.raise_for_status()
             return resp.content
         except httpx.HTTPStatusError as e:
-            # Never swallow — a swallowed 401 (missing x-proxypass-token) used to
+            # An explicit 404 is the container answering "no such file", which the
+            # ``DeviceFileSystem.read_file`` contract represents as ``None`` — the
+            # same mapping ``TeclawDeviceFileSystem.read_file`` and
+            # ``LocalDeviceFileSystem._baas_read_file`` (same ``/api/file/read``
+            # endpoint) already apply. Keeping it here means core callers never have
+            # to know this provider speaks HTTP.
+            #
+            # Every other status still propagates, which is the point of the guard
+            # this replaces: a swallowed 401 (missing x-proxypass-token) used to
             # return empty content that callers treated as "file gone", silently
-            # dropping promoted files at draft→verify. Surface every failure (404
-            # included) so the caller fails loudly; ``exists`` catches 404 itself.
+            # dropping promoted files at draft→verify. Translating *only* a verified
+            # 404 keeps that failure impossible while honouring the contract —
+            # absence and unavailability stay distinguishable.
+            if e.response.status_code == 404:
+                logger.debug(
+                    "[%s.read_file] not found: %s", type(self).__name__, file_path
+                )
+                return None
             logger.error(
                 "[%s.read_file] HTTP %d: %s",
                 type(self).__name__, e.response.status_code, file_path,
@@ -176,12 +190,10 @@ class BaasDeviceFileSystem(DeviceFileSystem):
     async def exists(self, path: str) -> bool:
         # ``exists`` is a boolean probe, so a genuine 404 is the answer (False), not
         # an error — but auth/server failures must still surface (don't swallow).
-        try:
-            if await self.read_file(path) is not None:
-                return True
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code != 404:
-                raise
+        # ``read_file`` already maps 404 → ``None``; anything it still raises is a
+        # non-404 failure that must propagate, so it is deliberately not caught here.
+        if await self.read_file(path) is not None:
+            return True
         try:
             files = await self.list_dir(path)
         except httpx.HTTPStatusError as e:

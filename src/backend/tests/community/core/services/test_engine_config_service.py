@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, MagicMock
 
-import httpx
 import pytest
 
 from agentclaw.community.core.devices.services.device_context import DeviceNotBoundError
@@ -27,20 +26,6 @@ def _record(*, status: str = "success", binding: dict | None = None,
     rec.status = status
     rec.ext = {"binding": binding} if binding is not None else {}
     return rec
-
-
-def _http_status_error(status_code: int) -> httpx.HTTPStatusError:
-    """The error arca/baas ``read_file`` raises — it re-raises every failing status.
-
-    Built from real httpx objects rather than a mock so the ``exc.response.status_code``
-    the service reads is the genuine attribute path, not one a MagicMock would answer
-    for regardless of what the service asked.
-    """
-    request = httpx.Request("POST", "https://device.invalid/api/file/read")
-    response = httpx.Response(status_code, request=request)
-    return httpx.HTTPStatusError(
-        f"HTTP {status_code}", request=request, response=response
-    )
 
 
 def _service(*, read_return=b'{"a": 1}', resolve_raises=None, provider="arca"):
@@ -231,54 +216,31 @@ async def test_bot_config_resolve_failure_propagates():
     dispatcher.dispatch_addressed.assert_not_called()
 
 
-# ── an absent config file, however the provider says so ──────────────────────
+# ── a device failure is not an absent config ─────────────────────────────────
 #
-# Regression: a bot whose engine config had never been written answered 500 on
-# GET /openapi/v1/bots/{bot_id}/engine-config. arca/baas report an absent file as
-# HTTP 404 and their read_file re-raises it (deliberately — a swallowed 401 once
-# read as "file gone"), nothing between there and the router caught it, and
-# httpx.HTTPStatusError is not in ENVELOPE_ERRORS, so it escaped as an unhandled
-# 500. The domain contract is "absent means empty" for every provider.
+# Regression guard for the fix's shape. An unwritten config now reads as {} because
+# BaasDeviceFileSystem maps a verified 404 to None at the boundary (see
+# tests/community/plugins/prod/test_baas_device_filesystem.py), NOT because this
+# service catches transport errors — core stays transport-agnostic per AGENTS.md.
+# So anything read_file still raises must travel straight through: absence and
+# unavailability have to stay distinguishable, or a caller would overwrite a config
+# it never managed to read. These use a plain exception on purpose; a core test that
+# named an HTTP error would re-import the coupling the fix removed.
 
 
 @pytest.mark.asyncio
-async def test_read_bot_config_absent_file_404_returns_empty_dict():
-    svc, _, _, device_fs = _bot_service(read_return=_http_status_error(404))
+async def test_read_bot_config_device_read_failure_propagates():
+    svc, _, _, _ = _bot_service(read_return=RuntimeError("device unreachable"))
 
-    assert await svc.read_bot_config(**_BOT_COORDS) == {}
-    device_fs.read_file.assert_awaited_once_with("config/teclaw.json")
-
-
-@pytest.mark.asyncio
-async def test_read_publish_config_absent_file_404_returns_empty_dict():
-    svc, _, _, _ = _service(read_return=_http_status_error(404))
-
-    data = await svc.read_publish_config(
-        _record(status="success", binding={"online": 7}), "openclaw"
-    )
-
-    assert data == {}
+    with pytest.raises(RuntimeError, match="device unreachable"):
+        await svc.read_bot_config(**_BOT_COORDS)
 
 
 @pytest.mark.asyncio
-async def test_read_bot_config_non_404_device_status_propagates():
-    """A proxy 401 / sandbox 5xx is a real failure and must not read as "no config".
+async def test_read_publish_config_device_read_failure_propagates():
+    svc, _, _, _ = _service(read_return=RuntimeError("device unreachable"))
 
-    Reporting one as an empty config would invite the caller to overwrite a config
-    they never managed to read — the same swallowed-401 failure mode that made
-    read_file re-raise every status in the first place.
-    """
-    for status in (401, 403, 500, 502):
-        svc, _, _, _ = _bot_service(read_return=_http_status_error(status))
-        with pytest.raises(httpx.HTTPStatusError):
-            await svc.read_bot_config(**_BOT_COORDS)
-
-
-@pytest.mark.asyncio
-async def test_read_publish_config_non_404_device_status_propagates():
-    for status in (401, 500):
-        svc, _, _, _ = _service(read_return=_http_status_error(status))
-        with pytest.raises(httpx.HTTPStatusError):
-            await svc.read_publish_config(
-                _record(status="success", binding={"online": 7}), "openclaw"
-            )
+    with pytest.raises(RuntimeError, match="device unreachable"):
+        await svc.read_publish_config(
+            _record(status="success", binding={"online": 7}), "openclaw"
+        )
