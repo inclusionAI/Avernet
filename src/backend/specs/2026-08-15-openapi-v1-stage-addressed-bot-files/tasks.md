@@ -1,0 +1,314 @@
+# Tasks: Public API — Stage-Addressed Per-Bot Files
+
+> Status legend: `[ ]` todo · `[~]` in-progress · `[x]` done · `[!]` blocked
+>
+> Base: `dev`. PR #1073 is open against the same two read methods in
+> `core/services/engine_config.py` that Task B1 edits — see the plan's
+> **Dependencies**; rebase onto its head before starting B1 if it is still open.
+>
+> Groups run in order. Within a group the tasks may be done together.
+
+---
+
+## Group A — Core: the stage seam and the refusal
+
+### Task A1: A core error for a write addressed to a published runtime  `[ ]`
+
+- **Goal:** One named domain state for "that runtime does not take writes",
+  distinct from "that runtime is not up".
+- **Files:** `src/backend/src/agentclaw/community/core/engine_runtime/errors.py`
+- **Done when:**
+  - [ ] `EngineStageReadOnlyError(EngineRuntimeError)` exists, docstring says
+        why a published runtime is replaced rather than edited, and states
+        explicitly that it is **not** `EngineStageNotLiveError` — it does not
+        depend on liveness, so publishing a runtime would not make the write
+        land.
+  - [ ] Listed in `__all__`, placed above the `EngineRuntimeError` base's own
+        entry in nothing (this file has no ordering rule; `responses.py` does).
+- **Depends on:** —
+
+### Task A2: `StageAddress`, `require_stage_writable`, `resolve_stage_device_context`  `[ ]`
+
+- **Goal:** Stage → `DeviceContext`, in one place, for the surfaces that read a
+  bot's files — so they cannot drift from the surfaces that forward to it.
+- **Files:** `src/backend/src/agentclaw/community/core/engine_runtime/stage.py`
+- **Done when:**
+  - [ ] `StageAddress` frozen dataclass (`stage`, `bot_pk`, `bot_type`) with a
+        docstring stating that `bot_pk`/`bot_type` must come from the read that
+        proved ownership, and that neither is read on the draft.
+  - [ ] `DRAFT_ADDRESS` module constant.
+  - [ ] `require_stage_writable(stage)` raises `EngineStageReadOnlyError` for
+        anything but the draft; docstring says why it is not conditional on bot
+        type or liveness.
+  - [ ] `resolve_stage_device_context(resolver, publish_repo, binding_repo, *,
+        address, bot_id, owner_id)`: `require_stage_addressable` first, then
+        draft → `resolve_for_bot(bot_id, owner_id)`, published →
+        `resolve_stage_bind_id(...)` → `resolve_for_binding(bind_id, owner_id,
+        bot_id=bot_id)`. Docstring says why `resolve_for_binding` and not the
+        relay's `…_invoke` (a filesystem needs the full conn info).
+  - [ ] Module docstring gains the *other question* paragraph: stage-keyed
+        comes here, record-keyed goes to `select_stage_bind_id`, and why
+        routing a `publish_id` through this rule would answer about the wrong
+        release.
+  - [ ] `__all__` updated. `ruff check` clean.
+- **Depends on:** A1
+
+### Task A3: Map the refusal to 409  `[ ]`
+
+- **Goal:** The new error leaves the envelope as a fixed-message 409, not a 500.
+- **Files:** `src/backend/src/agentclaw/community/adapters/http/openapi_v1/responses.py`
+- **Done when:**
+  - [ ] `EngineStageReadOnlyError: (409, "The requested stage is read-only")`,
+        placed inside the engine-runtime block **above** the
+        `EngineRuntimeError` base (the block's stated ordering rule).
+  - [ ] Comment says why it is a separate answer from
+        `EngineStageNotLiveError` and from a `200` with a no-op flag.
+- **Depends on:** A1
+
+---
+
+## Group B — Core services
+
+### Task B1: `EngineConfigService` reads a stage, writes only the draft  `[ ]`
+
+- **Goal:** The engine-config read reaches all three runtimes; the write reaches
+  one and refuses the rest before touching a device.
+- **Files:**
+  `src/backend/src/agentclaw/community/core/services/engine_config.py`,
+  `src/backend/src/agentclaw/community/api/engine_config_service.py`
+- **Done when:**
+  - [ ] Constructor takes `publish_repo: BotPublishRepositoryProtocol` and
+        `binding_repo: DeviceBindingRepository`, with a comment that both exist
+        only for the stage-addressed read.
+  - [ ] `_bot_config_device_fs(..., address)` calls
+        `resolve_stage_device_context`.
+  - [ ] `read_bot_config(..., address: StageAddress)` — required, not defaulted.
+  - [ ] `write_bot_config(..., stage: str)` calls `require_stage_writable(stage)`
+        as its **first** statement, then resolves `DRAFT_ADDRESS`.
+  - [ ] `read_publish_config` unchanged in behaviour, with a comment at the
+        `select_stage_bind_id` call saying why it is deliberately not the stage
+        rule (spec D3).
+  - [ ] `EngineConfigServiceProtocol` mirrors both signatures exactly; its
+        class docstring records why the two parameters are required rather than
+        defaulted (the conformance test compares defaults by value, and a
+        runtime `api → core.engine_runtime` import hits a partially-initialised
+        `bot_service`).
+  - [ ] Module and class docstrings updated to describe three addresses, two of
+        them read-only.
+  - [ ] `tests/community/architecture/test_service_api_conformance.py` passes.
+- **Depends on:** A2
+
+### Task B2: `IdentityService` reads a stage, writes only the draft  `[ ]`
+
+- **Goal:** Same contract for the identity files, threaded through the layers
+  that actually reach the device.
+- **Files:** `src/backend/src/agentclaw/community/core/services/identity.py`
+- **Done when:**
+  - [ ] Constructor takes `binding_repo: DeviceBindingRepository`.
+  - [ ] `_identity_device_fs`, `_device_read`, `read_identity_file` take
+        `address: StageAddress = DRAFT_ADDRESS`; `_identity_device_fs` resolves
+        through `resolve_stage_device_context`.
+  - [ ] `get_bot_file` and `list_bot_files` take keyword-only
+        `address: StageAddress = DRAFT_ADDRESS` and pass it down;
+        `list_bot_files` probes all 16 files against the **one** addressed
+        runtime.
+  - [ ] `get_bot_file`'s docstring states the precedence: `publish_id` (a
+        record) wins over `address` (a stage), because it names one exact
+        release, and because it is the older internal contract.
+  - [ ] `update_bot_file` takes keyword-only `stage: str = STAGE_DRAFT` and
+        calls `require_stage_writable(stage)` first; the write path below it is
+        unchanged and needs no address.
+  - [ ] `_read_from_publish_device` unchanged in behaviour, with the same
+        record-keyed-vs-stage-keyed comment as B1.
+  - [ ] `write_identity_file` / `sync_agents_md` untouched — draft-only by
+        construction.
+- **Depends on:** A2
+
+### Task B3: Fix up direct service construction in tests  `[ ]`
+
+- **Goal:** The new constructor dependencies do not silently break unrelated
+  suites.
+- **Files:**
+  `tests/community/unit/harness/test_patch_engine.py`,
+  `tests/community/unit/harness/test_bot_profile.py`,
+  `tests/community/core/services/test_identity_provider_blind.py` (×2),
+  `tests/community/core/services/test_identity_service_coverage.py`,
+  `tests/community/core/services/test_identity_uses_resolver.py`,
+  `tests/community/adapters/http/test_http_adapters_use_resolver.py`,
+  `tests/community/adapters/http/test_identity_tenant_indirect_isolation.py`,
+  `tests/community/core/services/test_engine_config_service.py` (×2)
+- **Done when:**
+  - [ ] Every direct `IdentityService(...)` passes `binding_repo`; every direct
+        `EngineConfigService(...)` passes `publish_repo` and `binding_repo`.
+  - [ ] `read_bot_config` / `write_bot_config` call sites in
+        `test_engine_config_service.py` pass `address=DRAFT_ADDRESS` /
+        `stage=STAGE_DRAFT`.
+  - [ ] Those suites pass unchanged otherwise.
+- **Depends on:** B1, B2
+
+---
+
+## Group C — Adapters
+
+### Task C1: The write-side parameter  `[ ]`
+
+- **Goal:** One parameter, two published descriptions — the write's must not
+  advertise verify/online as addressable.
+- **Files:** `src/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/params.py`
+- **Done when:**
+  - [ ] `WRITE_STAGE_DESCRIPTION` states that only the draft accepts writes,
+        that a published runtime is replaced by publishing again, and that
+        naming one is a 409 with nothing written.
+  - [ ] `WriteStageQuery` alongside `StageQuery`; both exported.
+  - [ ] Module docstring records that `stage` is now imported outside this
+        group (the per-bot file operations) and why it still lives here.
+- **Depends on:** —
+
+### Task C2: `stage` on the two engine-config operations  `[ ]`
+
+- **Goal:** `GET` serves three runtimes; `PUT` refuses two.
+- **Files:** `src/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/router.py`
+- **Done when:**
+  - [ ] `_stage_address(bot, stage)` helper builds the `StageAddress` from the
+        record `bot_service.get_bot(bot_id, owner_id)` already returned —
+        docstring says why a second lookup by `bot_id` would be wrong.
+  - [ ] `get_bot_engine_config(..., stage: StageQuery = RuntimeStage.DRAFT)`
+        passes `address=_stage_address(bot, stage)`.
+  - [ ] `update_bot_engine_config(..., stage: WriteStageQuery =
+        RuntimeStage.DRAFT)` passes `stage=stage.value`.
+  - [ ] Both docstrings are caller-facing prose only (they are published
+        verbatim); rationale stays in `#` comments.
+- **Depends on:** B1, C1
+
+### Task C3: `stage` on the three identity operations  `[ ]`
+
+- **Goal:** Same contract on identity, without changing the draft path.
+- **Files:** `src/backend/src/agentclaw/community/adapters/http/openapi_v1/identity/router.py`
+- **Done when:**
+  - [ ] A module-level `_stage_address(bot_id, owner_id, stage, bot_repo)`
+        returns `DRAFT_ADDRESS` **without any query** for the draft, and
+        otherwise resolves `bot_repo.get_by_id_and_owner(bot_id, owner_id)`,
+        raising `BotNotFoundError` on a miss. Comment says why the lookup is
+        conditional (an unconditional one would turn today's 409 into a 404 on
+        the default path).
+  - [ ] `list_bot_identity_files` and `get_bot_identity_file` take
+        `stage: StageQuery = RuntimeStage.DRAFT` and `bot_repo:
+        BotRepository = Injected(BotRepository)`; both pass `address=`.
+  - [ ] `update_bot_identity_file` takes `stage: WriteStageQuery =
+        RuntimeStage.DRAFT`, passes `stage=stage.value`, and adds **no** lookup.
+  - [ ] The stale "Reads address the bot's draft runtime." line in
+        `get_bot_identity_file`'s published docstring is corrected.
+  - [ ] The direct-invocation tests in
+        `tests/…/openapi_v1/identity/test_identity_handlers.py` are updated for
+        the new handler parameters (their stub gains `address`/`stage`).
+- **Depends on:** B2, C1
+
+### Task C4: The internal routes say `draft` out loud  `[ ]`
+
+- **Goal:** The two now-required arguments are supplied, and the internal
+  console's draft-only scope is stated rather than inherited.
+- **Files:** `src/backend/src/agentclaw/community/adapters/http/bot_management/router.py`
+- **Done when:**
+  - [ ] `read_bot_config(..., address=DRAFT_ADDRESS)` and
+        `write_bot_config(..., stage=STAGE_DRAFT)`, with a comment that naming a
+        runtime is the public surface's parameter, not this route's.
+  - [ ] `tests/community/api/bot_management/test_router.py` passes.
+- **Depends on:** B1
+
+---
+
+## Group D — Tests
+
+### Task D1: Core stage seam  `[ ]`
+
+- **Files:** `tests/community/core/engine_runtime/test_stage.py`
+- **Done when:**
+  - [ ] `require_stage_writable`: draft passes; verify and online raise
+        `EngineStageReadOnlyError`.
+  - [ ] `resolve_stage_device_context`: draft calls `resolve_for_bot(bot_id,
+        owner_id)` and never `resolve_for_binding`; verify/online resolve the
+        publish record's binding and call `resolve_for_binding`; a published
+        stage on a `personal` bot raises `EngineStageNotLiveError` **before**
+        any resolver call.
+- **Depends on:** A2
+
+### Task D2: Service-level behaviour  `[ ]`
+
+- **Files:**
+  `tests/community/core/services/test_engine_config_service.py`,
+  new `tests/community/core/services/test_identity_stage_addressing.py`
+- **Done when:**
+  - [ ] Engine-config: a verify/online read resolves through the publish
+        record's binding and reads the same canonical `config/teclaw.json`
+        path.
+  - [ ] Engine-config: a verify/online write raises
+        `EngineStageReadOnlyError` and the dispatcher is **never** called —
+        the "nothing is written" claim, asserted rather than described.
+  - [ ] Identity: the same two pins for `get_bot_file`, plus `list_bot_files`
+        probing the addressed runtime, plus the write refusal.
+  - [ ] Identity: `get_bot_file` with both `publish_id` and a published
+        `address` takes the record-keyed branch (the documented precedence).
+- **Depends on:** B1, B2
+
+### Task D3: HTTP behaviour  `[ ]`
+
+- **Files:** new `tests/community/adapters/http/openapi_v1/test_stage_addressed_bot_files.py`
+- **Done when:**
+  - [ ] Each of the three reads with `stage=draft|verify|online` hands the
+        service the matching `StageAddress`.
+  - [ ] No parameter → `DRAFT_ADDRESS`, and on identity **no bot lookup at
+        all** (the byte-for-byte pin).
+  - [ ] Both writes with `stage=verify|online` → `409` and the body message
+        `"The requested stage is read-only"`; with no parameter → unchanged
+        `200`.
+  - [ ] A published stage on a personal bot read → `409 "No live runtime at the
+        requested stage"`.
+  - [ ] `stage=eval` → `422`, no handler reached.
+- **Depends on:** C2, C3
+
+### Task D4: The published document  `[ ]`
+
+- **Files:** `tests/community/adapters/http/openapi_v1/engine_runtime/test_stage_addressing.py`
+- **Done when:**
+  - [ ] A `_STAGE_ADDRESSED_ELSEWHERE` set names the five operations, mirroring
+        the existing `_OWNER_ADDRESSED_ELSEWHERE`, so
+        `test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations`
+        stays an **exact** assertion (16 + 5) rather than being loosened.
+  - [ ] `stage` is still optional on every operation carrying it, and still
+        never a body field or a path segment.
+  - [ ] The module docstring is updated: "sixteen … and nowhere else" is no
+        longer true.
+- **Depends on:** C2, C3
+
+---
+
+## Group E — Documentation
+
+### Task E1: `docs/openapi-v1/README.md`  `[ ]`
+
+- **Goal:** The operator-facing description matches the surface.
+- **Files:** `src/backend/docs/openapi-v1/README.md`
+- **Done when:**
+  - [ ] The `?owner_id=`/`?stage=` section says `stage` reaches the five
+        per-bot file operations too, and that on the two writes only the draft
+        is writable.
+  - [ ] The startup-script finding is recorded where a reader looking for it
+        would land: those operations are storage-keyed, not runtime-keyed, and
+        deliberately take no stage.
+  - [ ] Resources / skills / routines are named as the remaining draft-only
+        device surfaces, with the reason each is deferred (spec Out of Scope).
+- **Depends on:** C2, C3
+
+---
+
+## Verification
+
+- [ ] `ruff check` clean on every changed file.
+- [ ] `tests/community/architecture` — passes (conformance + boundary gates).
+- [ ] `tests/community/core/engine_runtime`, `tests/community/core/services`,
+      `tests/community/adapters/http/openapi_v1`,
+      `tests/community/api/bot_management` — pass.
+- [ ] `scripts/ci/pre_push.sh` per the AGENTS.md contract (lint-only by
+      default; `OCB_PRE_PUSH_RUN_CI=1` for the full module gates).
+- [ ] PR titled `feat(backend): address published runtimes on the per-bot file
+      endpoints`, body using the Problem / Solution / Validation template.
