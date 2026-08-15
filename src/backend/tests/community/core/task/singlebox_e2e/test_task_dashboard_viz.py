@@ -4,7 +4,10 @@
     python3 src/backend/tests/community/core/task/singlebox_e2e/test_task_dashboard_viz.py
     浏览器打开 http://localhost:8899/  (默认展示最新 task;可下拉按标题切换)
 """
-import http.server, urllib.request, urllib.parse, json
+import http.server
+import urllib.request
+import urllib.parse
+import json
 
 BACKEND = "http://localhost:8888"
 USER_ID = "146836"
@@ -275,35 +278,55 @@ setInterval(tick,1000);reload();window.addEventListener('resize',()=>reload());
 
 class H(http.server.BaseHTTPRequestHandler):
     def log_message(self,*a):pass
+    def _send_json(self, code: int, payload: dict) -> None:
+        self.send_response(code)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.end_headers()
+        self.wfile.write(json.dumps(payload).encode())
+
+    def _send_html(self) -> None:
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.end_headers()
+        self.wfile.write(HTML.encode())
+
     def do_GET(self):
         if self.path.startswith('/proxy-list'):
-            qs=urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
-            st=qs.get('status')
+            qs = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            st = qs.get('status')
             try:
-                url=f"{BACKEND}/api/task/list"
-                if st:url+=urllib.parse.urlencode({'status':st[0]})
-                req=urllib.request.Request(url, headers={'x-user-id':USER_ID})
-                with urllib.request.urlopen(req,timeout=15) as r: body=r.read()
-                self.send_response(200);self.send_header('Content-Type','application/json; charset=utf-8');self.end_headers();self.wfile.write(body)
+                url = f"{BACKEND}/api/task/list"
+                if st:
+                    url += urllib.parse.urlencode({'status': st[0]})
+                req = urllib.request.Request(url, headers={'x-user-id': USER_ID})
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    body = r.read()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(body)
             except Exception as ex:
-                self.send_response(502);self.send_header('Content-Type','application/json');self.end_headers()
-                self.wfile.write(json.dumps({'success':False,'message':str(ex)}).encode())
+                self._send_json(502, {'success': False, 'message': str(ex)})
             return
         if self.path.startswith('/proxy'):
-            qs=urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
-            tid=(qs.get('task_id') or ['t_case'])[0]
+            qs = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            tid = (qs.get('task_id') or ['t_case'])[0]
             try:
-                req=urllib.request.Request(f"{BACKEND}/api/task/dashboard?task_id={urllib.parse.quote(tid)}",
-                                           headers={'x-user-id':USER_ID})
-                with urllib.request.urlopen(req,timeout=15) as r: body=r.read()
-                self.send_response(200);self.send_header('Content-Type','application/json; charset=utf-8');self.end_headers();self.wfile.write(body)
+                req = urllib.request.Request(
+                    f"{BACKEND}/api/task/dashboard?task_id={urllib.parse.quote(tid)}",
+                    headers={'x-user-id': USER_ID})
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    body = r.read()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(body)
             except Exception as ex:
-                self.send_response(502);self.send_header('Content-Type','application/json');self.end_headers()
-                self.wfile.write(json.dumps({'success':False,'message':str(ex)}).encode())
+                self._send_json(502, {'success': False, 'message': str(ex)})
         else:
-            self.send_response(200);self.send_header('Content-Type','text/html; charset=utf-8');self.end_headers();self.wfile.write(HTML.encode())
+            self._send_html()
 
-if __name__=='__main__':
+if __name__ == '__main__':
     print(f"◈ 可视化: http://localhost:{PORT}/  (默认最新 task;下拉按标题切换)")
     print(f"◈ 代理 → {BACKEND}  (user {USER_ID})  GET /api/task/list + /api/task/dashboard")
     http.server.HTTPServer(('127.0.0.1',PORT),H).serve_forever()
