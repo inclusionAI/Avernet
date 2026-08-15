@@ -154,14 +154,14 @@ parameter. Verify each with the dump.
 
 ## Closing `TODO(#960)`
 
-- [ ] **27. `admission.py`.** Add entries for the 39 new addresses, keeping every
+- [x] **27. `admission.py`.** Add entries for the 39 new addresses, keeping every
       legacy entry at its current mode. Move the two skills reads to
       `GRANT_CHECKED_ADDRESSED_BOT`. Delete `BODY_BOT_ID_OPERATIONS`,
       `SKILL_SCOPED_OPERATIONS` and `OWNER_ADDRESSED_OPERATIONS` — anything the
       deprecated package still needs moves into `deprecated/_shim.py`. Verify:
       `test_admission_inventory.py` green.
 
-- [ ] **28. `principal.py`.** Delete `_defers_to_its_handler` and the
+- [x] **28. `principal.py`.** Delete `_defers_to_its_handler` and the
       `TODO(#960)` paragraph; rewrite the `require_granted_bot` docstring to say
       that every operation now carries its bot where the dependency can see it,
       and that the refuse-when-absent branch is the backstop for one added

@@ -32,9 +32,6 @@ from agentclaw.community.adapters.http.openapi_v1.deprecated import (
 from agentclaw.community.adapters.http.openapi_v1.admission import (
     ADMISSION,
     ADMITTING_MODES,
-    BODY_BOT_ID_OPERATIONS,
-    OWNER_ADDRESSED_OPERATIONS,
-    SKILL_SCOPED_OPERATIONS,
     AdmissionMode,
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
@@ -195,39 +192,49 @@ def test_every_grant_checked_operation_actually_checks():
     )
 
 
-def test_the_deferring_operations_are_grant_checked_and_named_once():
-    """The remaining exceptions are exceptions to *where*, never to *whether*.
+def test_no_current_operation_defers_its_grant_check():
+    """``TODO(#960)`` is closed, and this is what keeps it closed.
 
-    There were seven. Bot-first addressing is retiring them: routines create no
-    longer carries its bot in the body, so it is checked by the shared
-    dependency like everything else. The six left are the skills group, and they
-    go when it moves — at which point this set is empty on the new surface and
-    survives only for the legacy addresses, which check in their own shims.
+    Seven operations used to have their bot somewhere ``require_granted_bot``
+    could not see it — one in a request body, four behind a skill id, two under
+    an owner parameter the dependency did not know — so the check ran in their
+    handlers instead. Two mechanisms doing one job, and it had already cost one
+    real defect, because a handler-side check is a place the check and the
+    resolution can drift apart.
+
+    Bot-first addressing removed the reason for all seven. What is asserted here
+    is that none has come back: every grant-checked operation on the current
+    contract is checked by the shared dependency, and the only self-checking
+    routes left are the retiring addresses, which genuinely cannot be checked
+    any other way and are deleted with the deprecated package.
     """
-    deferring = (
-        BODY_BOT_ID_OPERATIONS | SKILL_SCOPED_OPERATIONS | OWNER_ADDRESSED_OPERATIONS
+    from agentclaw.community.adapters.http.openapi_v1.deprecated import LEGACY_ROUTES
+
+    self_checked = {
+        key for key in SELF_CHECKED_ROUTES if key in set(ADMISSION)
+    }
+    current = {key for key in self_checked if key not in LEGACY_ROUTES}
+    assert not current, (
+        "these current operations check the grant in their handler rather than "
+        "through the shared dependency, which is the arrangement #960 removed: "
+        f"{sorted(current)}"
     )
 
-    assert len(deferring) == 6, (
-        "the deferring set changed size. Every entry is an operation the shared "
-        "dependency waves through, so each one added is a promise that a "
-        "handler checks instead — make that deliberate."
+    not_in_table = sorted(
+        f"{m} {p}" for m, p in SELF_CHECKED_ROUTES if (m, p) not in ADMISSION
     )
-
-    not_in_table = sorted(f"{m} {p}" for m, p in deferring - set(ADMISSION))
-    assert not not_in_table, f"deferring operations absent from ADMISSION: {not_in_table}"
+    assert not not_in_table, (
+        f"self-checking legacy operations absent from ADMISSION: {not_in_table}"
+    )
 
     wrong_mode = sorted(
-        f"{m} {p}" for m, p in deferring if ADMISSION[(m, p)] not in _GRANT_CHECKED_MODES
+        f"{m} {p}"
+        for m, p in self_checked
+        if ADMISSION[(m, p)] not in _GRANT_CHECKED_MODES
     )
     assert not wrong_mode, (
-        "deferring operations must still be grant-checked modes — deferring is "
-        f"about where the check runs, not whether: {wrong_mode}"
-    )
-
-    sets = (BODY_BOT_ID_OPERATIONS, SKILL_SCOPED_OPERATIONS, OWNER_ADDRESSED_OPERATIONS)
-    assert sum(len(part) for part in sets) == len(deferring), (
-        "an operation cannot defer for two different reasons — the sets overlap"
+        "a self-checking operation must still be in a grant-checked mode — "
+        f"self-checking is about where the check runs, not whether: {wrong_mode}"
     )
 
 

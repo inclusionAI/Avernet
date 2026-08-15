@@ -158,7 +158,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("POST", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/run"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/runs"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     # skills — the first two carry ``bot_id``; the four ``{skill_id}`` routes
-    # carry none and must resolve it from the skill (``SKILL_SCOPED_OPERATIONS``).
+    # are addressed by (bot, skill) like everything else in the group.
     ("GET", "/openapi/v1/bots/{bot_id}/skills"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("POST", "/openapi/v1/bots/{bot_id}/skills"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
@@ -240,48 +240,6 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/loadtest/hello"): AdmissionMode.REFUSED,
     ("WEBSOCKET", "/openapi/v1/bots/loadtest/ws/echo"): AdmissionMode.REFUSED,
 }
-
-#: Own-bot operations whose ``bot_id`` is in the request **body**, so the grant
-#: can only be checked once the body is parsed — inside the handler, immediately,
-#: before any service call.
-#:
-#: Empty on this surface since routines became bot-addressed: every operation
-#: now carries its bot where ``require_granted_bot`` can see it. The name
-#: survives because the *legacy* addresses still take the bot in the body, and
-#: they are checked in their own shims; it is deleted with them. Emptying it is
-#: not cosmetic — an entry here tells the shared dependency to skip the check,
-#: so a stale one leaves the route with no authorization at all.
-BODY_BOT_ID_OPERATIONS: frozenset[tuple[str, str]] = frozenset()
-
-#: Own-bot operations that name a *skill* and no bot. The bot **and its owner** are
-#: resolved from the skill through the existing user-scoped read — so another
-#: user's skill is refused before the grant is even consulted — and the grant
-#: checked against that pair.
-SKILL_SCOPED_OPERATIONS = frozenset(
-    {
-        ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"),
-        ("DELETE", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"),
-        ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate"),
-        ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate"),
-    }
-)
-
-#: Operations that name a bot **and their own owner parameter**, under a name
-#: the shared dependency does not know: ``skills`` takes ``owner_entity_id`` and
-#: resolves ``owner_entity_id or actor_id``.
-#:
-#: They are grant-checked like any other bot-scoped operation, but only the
-#: handler knows which owner it is about to address — so the shared dependency
-#: defers and the handler binds the grant to the pair it actually acts on.
-#: Classifying them as plain owner-scoped was wrong in **both** directions: it
-#: let a grant on the delegator's own ``default`` authorize work on another
-#: owner's ``default``, and it refused a legitimate grant on a shared bot.
-OWNER_ADDRESSED_OPERATIONS = frozenset(
-    {
-        ("GET", "/openapi/v1/bots/{bot_id}/skills"),
-        ("POST", "/openapi/v1/bots/{bot_id}/skills"),
-    }
-)
 
 #: The modes that admit a caller naming no end user. Everything else refuses at
 #: ``require_principal``, which is what a route inherits by saying nothing.
@@ -436,8 +394,6 @@ class ActingCaller:
 __all__ = [
     "ADMISSION",
     "ADMITTING_MODES",
-    "BODY_BOT_ID_OPERATIONS",
-    "SKILL_SCOPED_OPERATIONS",
     "ActingCaller",
     "AdmissionMode",
 ]
