@@ -196,12 +196,13 @@ parameter. Verify each with the dump.
       wildcard-shadowing hazard it describes is gone. Add the deprecation
       window and the sunset date.
 
-- [ ] **33. Regenerate the published artifact.** Run `scripts/dump_openapi.py`
+- [x] **33. Regenerate the published artifact.** Run `scripts/dump_openapi.py`
       into `src/gateway/configs/schemas/bots.openapi.json`. Verify: it matches
       the backend's generated document exactly, and the operation count is 71
-      new + 39 legacy = 110.
+      new + 41 legacy = 112 (the count in this task predated the two
+      engine-config addresses added in task 15).
 
-- [ ] **34. Gateway agreement.** Run
+- [x] **34. Gateway agreement.** Run
       `src/gateway/tests/unit/core/authn/test_route_security.py`. No `REFUSED`
       operation is re-addressed, so it should be green with no config change;
       confirm rather than assume, and say so in the PR.
