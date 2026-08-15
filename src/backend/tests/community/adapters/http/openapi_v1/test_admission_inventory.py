@@ -181,12 +181,19 @@ def test_every_grant_checked_operation_actually_checks():
 
 
 def test_the_deferring_operations_are_grant_checked_and_named_once():
-    """The seven exceptions are exceptions to *where*, never to *whether*."""
+    """The remaining exceptions are exceptions to *where*, never to *whether*.
+
+    There were seven. Bot-first addressing is retiring them: routines create no
+    longer carries its bot in the body, so it is checked by the shared
+    dependency like everything else. The six left are the skills group, and they
+    go when it moves — at which point this set is empty on the new surface and
+    survives only for the legacy addresses, which check in their own shims.
+    """
     deferring = (
         BODY_BOT_ID_OPERATIONS | SKILL_SCOPED_OPERATIONS | OWNER_ADDRESSED_OPERATIONS
     )
 
-    assert len(deferring) == 7, (
+    assert len(deferring) == 6, (
         "the deferring set changed size. Every entry is an operation the shared "
         "dependency waves through, so each one added is a promise that a "
         "handler checks instead — make that deliberate."

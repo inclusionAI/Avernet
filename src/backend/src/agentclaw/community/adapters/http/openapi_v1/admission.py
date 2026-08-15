@@ -149,14 +149,14 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/{bot_id}/resources/preview"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("POST", "/openapi/v1/bots/{bot_id}/resources/mkdir"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     # routines — query ``bot_id``, except the create, which carries it in the
-    # body and is checked in the handler (see ``BODY_BOT_ID_OPERATIONS``).
-    ("GET", "/openapi/v1/bots/routines"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("POST", "/openapi/v1/bots/routines"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("GET", "/openapi/v1/bots/routines/{routine_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("PATCH", "/openapi/v1/bots/routines/{routine_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("DELETE", "/openapi/v1/bots/routines/{routine_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("POST", "/openapi/v1/bots/routines/{routine_id}/run"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("GET", "/openapi/v1/bots/routines/{routine_id}/runs"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    # path, so the shared dependency checks it like every other operation.
+    ("GET", "/openapi/v1/bots/{bot_id}/routines"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/routines"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/routines/{routine_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("PATCH", "/openapi/v1/bots/{bot_id}/routines/{routine_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("DELETE", "/openapi/v1/bots/{bot_id}/routines/{routine_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/run"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/runs"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     # skills — the first two carry ``bot_id``; the four ``{skill_id}`` routes
     # carry none and must resolve it from the skill (``SKILL_SCOPED_OPERATIONS``).
     ("GET", "/openapi/v1/bots/skills"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
@@ -241,10 +241,17 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("WEBSOCKET", "/openapi/v1/bots/loadtest/ws/echo"): AdmissionMode.REFUSED,
 }
 
-#: Own-bot operations whose ``bot_id`` is in the request **body**, so the grant can
-#: only be checked once the body is parsed — inside the handler, immediately,
+#: Own-bot operations whose ``bot_id`` is in the request **body**, so the grant
+#: can only be checked once the body is parsed — inside the handler, immediately,
 #: before any service call.
-BODY_BOT_ID_OPERATIONS = frozenset({("POST", "/openapi/v1/bots/routines")})
+#:
+#: Empty on this surface since routines became bot-addressed: every operation
+#: now carries its bot where ``require_granted_bot`` can see it. The name
+#: survives because the *legacy* addresses still take the bot in the body, and
+#: they are checked in their own shims; it is deleted with them. Emptying it is
+#: not cosmetic — an entry here tells the shared dependency to skip the check,
+#: so a stale one leaves the route with no authorization at all.
+BODY_BOT_ID_OPERATIONS: frozenset[tuple[str, str]] = frozenset()
 
 #: Own-bot operations that name a *skill* and no bot. The bot **and its owner** are
 #: resolved from the skill through the existing user-scoped read — so another

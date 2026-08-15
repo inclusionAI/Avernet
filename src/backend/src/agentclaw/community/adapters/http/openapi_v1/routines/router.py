@@ -12,11 +12,9 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 
-from agentclaw.community.adapters.http.openapi_v1.principal import (
-    ActingCallerDep,
-    UserIdDep,
-)
+from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
+    BotIdPath,
     Deleted,
     Envelope,
     Page,
@@ -37,7 +35,7 @@ from agentclaw.community.di import Injected
 
 from .schemas import Routine, RoutineCreate, RoutineRun, RoutineUpdate, ScheduleTrigger
 
-router = APIRouter(prefix="/openapi/v1/bots/routines", tags=["routines"])
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/routines", tags=["routines"])
 
 #: The path parameter naming the routine an operation addresses.
 RoutineIdPath = Annotated[
@@ -48,16 +46,11 @@ RoutineIdPath = Annotated[
     ),
 ]
 
-#: Routines are addressed (routine_id, bot_id) together: the id alone does not
-#: say which bot's engine holds it, so every per-routine operation requires the
-#: bot in the query string.
-RoutineBotIdQuery = Annotated[
-    str,
-    Query(
-        description="The bot the routine belongs to — required, because a "
-        "routine id alone does not identify the bot that holds it."
-    ),
-]
+#: Routines are addressed (bot_id, routine_id) together: the routine id alone
+#: does not say which bot's engine holds it. Both are path segments, so the
+#: address names the pair rather than half of it — which is also what lets the
+#: grant check run as a dependency for every operation in the group, create
+#: included.
 
 
 def _ms_to_iso(ms: Any) -> str:
@@ -122,9 +115,7 @@ def _map_run(data: dict, routine_id: str) -> RoutineRun:
 async def list_routines(
     page: PageParamsDep,
     owner_id: UserIdDep,
-    bot_id: Annotated[
-        str, Query(description="The bot whose routines to list.")
-    ],
+    bot_id: BotIdPath,
     request: Request,
     status: Annotated[
         str | None,
@@ -167,9 +158,9 @@ async def list_routines(
 @router.post("", status_code=201, response_model=Envelope[Routine])
 @envelope_errors
 async def create_routine(
+    bot_id: BotIdPath,
     body: RoutineCreate,
     owner_id: UserIdDep,
-    caller: ActingCallerDep,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
 ) -> Envelope[Routine]:
@@ -179,20 +170,10 @@ async def create_routine(
     Asia/Shanghai when omitted. Each firing starts a fresh session and hands
     the bot the command as its user message.
     """
-    # The only operation in this group whose bot is in the body, so the grant
-    # check cannot run as a dependency — the body is not parsed yet when those
-    # resolve. It runs here instead, immediately after parsing and before any
-    # service call, which is the same guarantee in a different place. The
-    # shared dependency defers for exactly this operation (it is named in
-    # admission.py), so nothing checks it twice and nothing skips it.
-    #
     # Translation to the engine adapter cron body shape: schedule is the raw
     # cron expression STRING (not the nested {kind,expr,tz} dict — the adapter
     # wraps it on read in device_adapter_transport._build_item), and timezone
     # defaults to Asia/Shanghai to match legacy cron/router.py's create path.
-    bot_id = body.bot_id
-    # Before anything else touches the bot.
-    caller.require_bot(bot_id, owner_id=owner_id)
     user_id = owner_id
     nick_name = owner_id
     adapter_body = {
@@ -220,7 +201,7 @@ async def create_routine(
 async def get_routine(
     routine_id: RoutineIdPath,
     owner_id: UserIdDep,
-    bot_id: RoutineBotIdQuery,
+    bot_id: BotIdPath,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
 ) -> Envelope[Routine]:
@@ -251,7 +232,7 @@ async def update_routine(
     routine_id: RoutineIdPath,
     body: RoutineUpdate,
     owner_id: UserIdDep,
-    bot_id: RoutineBotIdQuery,
+    bot_id: BotIdPath,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
 ) -> Envelope[Routine]:
@@ -295,7 +276,7 @@ async def update_routine(
 async def delete_routine(
     routine_id: RoutineIdPath,
     owner_id: UserIdDep,
-    bot_id: RoutineBotIdQuery,
+    bot_id: BotIdPath,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
 ) -> Envelope[Deleted]:
@@ -338,7 +319,7 @@ async def delete_routine(
 async def run_routine(
     routine_id: RoutineIdPath,
     owner_id: UserIdDep,
-    bot_id: RoutineBotIdQuery,
+    bot_id: BotIdPath,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
 ) -> Envelope[RoutineRun]:
@@ -390,7 +371,7 @@ async def list_routine_runs(
     routine_id: RoutineIdPath,
     page: PageParamsDep,
     owner_id: UserIdDep,
-    bot_id: RoutineBotIdQuery,
+    bot_id: BotIdPath,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
 ) -> Envelope[Page[RoutineRun]]:

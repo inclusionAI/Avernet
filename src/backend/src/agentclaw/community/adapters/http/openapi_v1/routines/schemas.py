@@ -56,7 +56,6 @@ class Routine(BaseModel):
         json_schema_extra={
             "example": {
                 "routine_id": "5f0f2c9a-b1c3-4f6e-9a0d-2e7c8b1d4a55",
-                "bot_id": "20260813_a7k2m9p1",
                 "name": "morning-brief",
                 "trigger": {"type": "schedule", "cron": "0 9 * * 1-5"},
                 "command": "Summarize yesterday's tickets and post the brief.",
@@ -110,7 +109,6 @@ class RoutineCreate(BaseModel):
         }
     )
 
-    bot_id: str = Field(description="The bot that will run the routine.")
     name: str = Field(description="Human-readable routine name.")
     trigger: ScheduleTrigger = Field(description="When the routine fires.")
     command: str = Field(description=_COMMAND_DESC)

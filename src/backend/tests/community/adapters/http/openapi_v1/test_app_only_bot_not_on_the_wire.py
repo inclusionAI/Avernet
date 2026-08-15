@@ -19,11 +19,12 @@ from __future__ import annotations
 from datetime import datetime
 
 import pytest
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
+from agentclaw.community.adapters.http.openapi_v1.principal import require_granted_bot
 from agentclaw.community.adapters.http.openapi_v1.routines import (
     router as routines_router,
 )
@@ -183,9 +184,16 @@ def client(skills, cron):
             binder.bind(LocalSkillUploadServiceProtocol, to=skills)
             binder.bind(CronRelayServiceProtocol, to=cron)
 
+    # Both groups are mounted with the shared grant check in build_public_router,
+    # and this file is about what an application caller may reach — so the
+    # fixture mounts them the same way. Mounting them bare used to pass because
+    # routines checked the grant inside its handler; now that the check is the
+    # dependency's for every route, a bare mount would assert against an
+    # assembly production does not have.
+    grant_checked = [Depends(require_granted_bot)]
     app = FastAPI()
-    app.include_router(skills_router)
-    app.include_router(routines_router)
+    app.include_router(skills_router, dependencies=grant_checked)
+    app.include_router(routines_router, dependencies=grant_checked)
     app.dependency_overrides[require_principal] = _app_caller
     attach_injector(app, Injector([_M()]))
     mount_public_error_handlers(app)
@@ -247,9 +255,8 @@ def test_the_refusal_happens_before_the_skill_is_touched(client, skills):
 # ── the body-carried bot id ──────────────────────────────────────────────────
 
 
-def _routine(bot_id: str) -> dict:
+def _routine() -> dict:
     return {
-        "bot_id": bot_id,
         "name": "nightly",
         "trigger": {"cron": "0 9 * * *"},
         "command": "echo hi",
@@ -257,19 +264,23 @@ def _routine(bot_id: str) -> dict:
 
 
 def test_creating_a_routine_on_an_ungranted_bot_is_refused(client, cron):
-    """The bot arrives in the body, after every dependency has run.
+    """The bot is the address, so the shared dependency refuses before the
+    handler runs at all.
 
-    So the check is in the handler — and it must be the *first* thing, or the
-    refusal arrives after the routine exists.
+    This used to be the one operation whose bot arrived in the body, after
+    every dependency had already resolved — so its grant check lived in the
+    handler and had to be the *first* statement there, or the refusal would
+    arrive after the routine existed. Bot-first addressing removed the
+    exception rather than the guarantee; what is asserted is unchanged.
     """
-    response = client.post("/openapi/v1/bots/routines", json=_routine(OTHER_BOT))
+    response = client.post(f"/openapi/v1/bots/{OTHER_BOT}/routines", json=_routine())
 
     assert response.status_code == 404, response.json()
     assert cron.created == [], "refused before the routine was created"
 
 
 def test_creating_a_routine_on_the_granted_bot_works(client, cron):
-    response = client.post("/openapi/v1/bots/routines", json=_routine(GRANTED_BOT))
+    response = client.post(f"/openapi/v1/bots/{GRANTED_BOT}/routines", json=_routine())
 
     assert response.status_code == 201, response.json()
     assert cron.created == [GRANTED_BOT]

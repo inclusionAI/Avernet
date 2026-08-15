@@ -63,12 +63,12 @@ parameter. Verify each with the dump.
       Verify: dump shows seven `…/{bot_id}/resources…` addresses and none of
       them publishes a `bot_id` query parameter.
 
-- [ ] **11. `routines` — addresses.** Prefix →
+- [x] **11. `routines` — addresses.** Prefix →
       `/openapi/v1/bots/{bot_id}/routines`; decorators `""`, `/{routine_id}`,
       `/{routine_id}/run`, `/{routine_id}/runs`. On all seven handlers change
       `bot_id` to `BotIdPath`.
 
-- [ ] **12. `routines` — the body field.** Remove `bot_id` from `RoutineCreate`
+- [x] **12. `routines` — the body field.** Remove `bot_id` from `RoutineCreate`
       in `openapi_v1/routines/schemas.py`, and remove the `bot_id = body.bot_id`
       line and the inline `caller.require_bot(...)` from `create_routine`,
       together with the comment explaining why the check ran there. Verify: the

@@ -103,15 +103,20 @@ def test_groups_are_mounted_and_reachable_in_the_public_router():
 def test_literal_groups_are_registered_before_the_bot_id_wildcard():
     """A single-segment literal must not be swallowed by ``{bot_id}``.
 
-    A pre-existing Track B invariant, re-asserted because Track C inserts five
-    routers into the same assembly. Registration order is what decides it, and
-    the document preserves it. ``resources`` and ``routines`` are the cases that
-    still depend on it — they serve their own collection roots one segment under
-    ``/openapi/v1/bots``, exactly where the bots wildcard also matches.
+    Bot-first addressing shrank this invariant rather than removing it.
+    ``resources`` and ``routines`` used to be the cases that depended on it —
+    they served their own collection roots one segment under
+    ``/openapi/v1/bots``, exactly where the bots wildcard also matches. Both now
+    sit beneath ``{bot_id}``, so ordering no longer decides their fate.
+
+    What still occupies that segment is the set of operations with no single
+    bot to address: the account-level reads and the two groups that are not
+    bot-scoped. They are the reason the rule survives, and the reason the
+    reserved-name list is not empty.
     """
     order = list(_document()["paths"])
     wildcard = order.index(f"{_BOTS_PREFIX}{{bot_id}}")
-    for literal in ("resources", "routines", "mcp/servers"):
+    for literal in ("check-name", "ceiling", "authorized", "mcp/servers", "logs/traces"):
         assert order.index(f"{_BOTS_PREFIX}{literal}") < wildcard, literal
 
 
