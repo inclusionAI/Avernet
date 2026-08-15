@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, Path, Query, Request, Response
+from fastapi import APIRouter, Body, Depends, Path, Query, Request, Response
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     EXAMPLE_TRACE_ID,
@@ -25,6 +25,7 @@ from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     ActingCallerDep,
     UserIdDep,
+    require_granted_bot,
 )
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
@@ -52,6 +53,20 @@ from agentclaw.community.di import Injected
 from .schemas import Skill, SkillState, SkillUpload
 
 router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/skills", tags=["skills"])
+
+#: The bot authorization for an application caller, on the two operations the
+#: shared dependency can decide.
+#:
+#: Declared per route rather than at ``include_router``, because this group is
+#: mixed in the one way that matters to this check: the collection operations
+#: name their bot's owner in the query, so the dependency can look the grant up
+#: against the pair the handler will act on — while the four ``{skill_id}``
+#: operations learn that owner only by reading the skill. Mounting the whole
+#: group under it refused an application holding a valid grant on a *shared*
+#: bot, because the dependency fell back to the delegating user. ``admission.py``
+#: is the authority on which route is which; ``test_admission_inventory.py``
+#: fails if a declaration and a mode disagree.
+_GRANT_CHECKED = [Depends(require_granted_bot)]
 
 #: The path parameter naming the skill an operation addresses. The id alone
 #: still resolves the skill's bot and owner; the address names the bot as well
@@ -165,12 +180,11 @@ def _to_skill(record: dict[str, Any]) -> Skill:
     )
 
 
-@router.get("", response_model=Envelope[Page[Skill]])
+@router.get("", response_model=Envelope[Page[Skill]], dependencies=_GRANT_CHECKED)
 @envelope_errors
 async def list_skills(
     page: PageParamsDep,
     actor_id: UserIdDep,
-    caller: ActingCallerDep,
     request: Request,
     bot_id: BotIdPath,
     owner_id: str | None = Query(
@@ -197,13 +211,6 @@ async def list_skills(
     Answers even while the bot is offline: active reflects the desired
     state, not the live runtime.
     """
-    # Grant-checked here rather than by the shared dependency, because only
-    # this handler knows whose bot it is about to read: owner_id names
-    # an owner and defaults to the caller. Checking against the caller instead
-    # would be wrong in both directions — it would let a grant on the caller's
-    # own same-named bot authorize a read of someone else's, and refuse a
-    # legitimate grant on a bot shared with them.
-    caller.require_bot(bot_id, owner_id=owner_id or actor_id)
     total, records = query_service.list_local_skills(
         bot_id=bot_id,
         owner_id=owner_id or actor_id,
@@ -242,6 +249,7 @@ async def get_skill(
 @router.post(
     "",
     status_code=201,
+    dependencies=_GRANT_CHECKED,
     response_model=Envelope[SkillUpload],
     responses={
         200: {
@@ -268,7 +276,6 @@ async def get_skill(
 async def upload_skill(
     bot_id: BotIdPath,
     actor_id: UserIdDep,
-    caller: ActingCallerDep,
     request: Request,
     response: Response,
     package: bytes = Body(..., media_type="application/zip"),
@@ -288,11 +295,6 @@ async def upload_skill(
     otherwise a new, inactive skill is created (201, operation 'created').
     Limits: 10 MB compressed, 50 MB uncompressed, 500 files (413 beyond).
     """
-    # Grant-checked here for the same reason as the listing above: the owner
-    # this writes under is `owner_id or actor_id`, which only the
-    # handler knows. A write makes the mis-binding worse — it would create a
-    # skill on a bot the application was never granted.
-    caller.require_bot(bot_id, owner_id=owner_id or actor_id)
     if (
         request.headers.get("content-type", "").split(";", 1)[0].lower()
         != "application/zip"

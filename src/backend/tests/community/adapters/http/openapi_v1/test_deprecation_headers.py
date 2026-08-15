@@ -27,6 +27,7 @@ from agentclaw.community.adapters.http.openapi_v1.middleware import (
     DEPRECATION,
     SUNSET,
     DeprecationHeaderMiddleware,
+    sf_date,
 )
 
 
@@ -99,8 +100,16 @@ def test_every_legacy_address_answers_with_both_headers() -> None:
     assert not missing, f"legacy addresses answering without the headers: {missing}"
 
 
-def test_the_headers_are_http_dates() -> None:
-    """RFC 8594 and RFC 9745 both want an HTTP date, not an ISO one."""
+def test_the_two_headers_use_their_own_spellings() -> None:
+    """They are not the same format, and assuming they are is the trap here.
+
+    ``Sunset`` (RFC 8594) is an IMF-fixdate HTTP-date. ``Deprecation`` (RFC 9745)
+    is a Structured Fields ``sf-date`` — ``@`` and whole seconds since the epoch.
+    The superseded ``draft-dalal-deprecation-header`` *did* use an HTTP-date, so
+    an implementation written from memory of the draft emits a value RFC 9745
+    parsers reject. This asserts the distinction on the wire, in both directions,
+    so neither can drift into the other's format.
+    """
     app = FastAPI()
     app.include_router(build_public_router())
     app.add_middleware(DeprecationHeaderMiddleware)
@@ -108,8 +117,14 @@ def test_the_headers_are_http_dates() -> None:
     method, path = sorted(LEGACY_ROUTES)[0]
     response = TestClient(app).request(method, _concrete(path))
 
-    assert parsedate_to_datetime(response.headers["deprecation"]) == DEPRECATION
+    deprecation = response.headers["deprecation"]
+    assert deprecation == sf_date(DEPRECATION)
+    assert deprecation.startswith("@"), deprecation
+    assert int(deprecation[1:]) == int(DEPRECATION.timestamp())
+
     assert parsedate_to_datetime(response.headers["sunset"]) == SUNSET
+    # …and specifically *not* the other one's format.
+    assert not response.headers["sunset"].startswith("@")
 
 
 def test_the_sunset_is_after_the_deprecation() -> None:

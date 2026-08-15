@@ -236,6 +236,13 @@ _SUBGROUPS = [
     # claiming it.
     authorized_apps_router,
     authorized_bots_router,
+    # Mixed, like `bots`: its two collection operations declare the grant check
+    # per route, and its four `{skill_id}` operations resolve the bot's owner
+    # from the skill record and check it themselves. A group-level dependency
+    # here would refuse an application holding a valid grant on a *shared* bot,
+    # because it would look the grant up against the delegating user rather than
+    # the owner. See `skills/router.py` and `admission.SKILL_SCOPED_OPERATIONS`.
+    skills_router,
 ]
 
 # The groups where **every** route is GRANT_CHECKED_OWN_BOT — it names a bot and resolves it
@@ -261,7 +268,6 @@ _GRANT_CHECKED_SUBGROUPS = [
     identity_router,
     resources_router,
     routines_router,
-    skills_router,
 ]
 
 # Track C — the engine-runtime groups. Mounted separately because they document

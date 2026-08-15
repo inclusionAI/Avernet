@@ -157,15 +157,30 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("DELETE", "/openapi/v1/bots/{bot_id}/routines/{routine_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("POST", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/run"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/runs"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    # skills — the first two carry ``bot_id``; the four ``{skill_id}`` routes
-    # are addressed by (bot, skill) like everything else in the group.
-    ("GET", "/openapi/v1/bots/{bot_id}/skills"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("POST", "/openapi/v1/bots/{bot_id}/skills"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    # skills — the group serves **shared** bots, and the six split on where the
+    # owner of the addressed bot comes from.
+    #
+    # The two collection operations take it from the request: they publish an
+    # ``owner_id`` query parameter defaulting to the caller, which is the
+    # definition of ``GRANT_CHECKED_ADDRESSED_BOT``, and the shared dependency
+    # reads the same value the handler acts on. Calling them own-bot was wrong
+    # in the direction that matters — the dependency looked the grant up against
+    # the *delegating user* while the handler acted on ``owner_id``, so an
+    # application holding a valid grant on a shared bot was refused a 404 before
+    # its handler ever ran.
+    #
+    # The four ``{skill_id}`` operations cannot: the owner is not an input to
+    # anything they do. ``get_local_skill(skill_id, actor_id)`` resolves by
+    # skill and actor, so the owner is an *output* — it arrives on the record —
+    # and a client naming it up front would be predicting an answer rather than
+    # addressing a resource. They are checked in their handlers against the pair
+    # the record actually carries; see ``SKILL_SCOPED_OPERATIONS`` below.
+    ("GET", "/openapi/v1/bots/{bot_id}/skills"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/skills"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("DELETE", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    # ── addressed bot: names a bot *and* an owner, adjudicated by the gate ───
     ("GET", "/openapi/v1/bots/{bot_id}/sessions"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("POST", "/openapi/v1/bots/{bot_id}/sessions"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
@@ -240,6 +255,36 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/loadtest/hello"): AdmissionMode.REFUSED,
     ("WEBSOCKET", "/openapi/v1/bots/loadtest/ws/echo"): AdmissionMode.REFUSED,
 }
+
+#: The operations whose grant check runs in their **handler**, and the only ones.
+#:
+#: All four name a *skill* and resolve everything else from its record. The
+#: shared dependency looks the grant up from ``(bot on the address, owner on the
+#: wire)``; here the owner is on neither — ``get_local_skill(skill_id,
+#: actor_id)`` is keyed by skill and actor, and the owner comes back *with* the
+#: record. A collaborator reads a skill on someone else's bot routinely, so the
+#: owner is usually not the caller and cannot be defaulted to them either.
+#:
+#: This is what remains of ``TODO(#960)``. Bot-first addressing removed the
+#: reason for three of the original seven — routines' create takes its bot on
+#: the path, and the two skills collection reads name their owner in the query
+#: where ``_addressed_owner`` can see it. These four are not an oversight left
+#: behind: an operation addressed by skill has no owner to check *until it has
+#: read the skill*, so the check belongs after that read or nowhere.
+#:
+#: **Naming them is what keeps the exception closed.** Deferring is about where
+#: the check runs, never whether: all four stay in a grant-checked mode, they
+#: are mounted without the group-level dependency rather than exempted from it,
+#: and ``test_admission_inventory.py`` asserts both. Any *other* operation that
+#: reached ``require_granted_bot`` without a bot id is refused, not waved past.
+SKILL_SCOPED_OPERATIONS = frozenset(
+    {
+        ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"),
+        ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate"),
+        ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate"),
+    }
+)
 
 #: The modes that admit a caller naming no end user. Everything else refuses at
 #: ``require_principal``, which is what a route inherits by saying nothing.
@@ -394,6 +439,7 @@ class ActingCaller:
 __all__ = [
     "ADMISSION",
     "ADMITTING_MODES",
+    "SKILL_SCOPED_OPERATIONS",
     "ActingCaller",
     "AdmissionMode",
 ]

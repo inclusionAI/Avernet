@@ -14,10 +14,10 @@ Three properties, and each fails for a different mistake:
 2. Every operation whose mode says "grant-checked" actually performs the check —
    verified against the built router's *effective* dependencies, not against
    what a handler declares.
-3. No operation on the *current* contract checks its grant inside its handler.
-   Seven used to; bot-first addressing removed the reason, and this is what
-   keeps ``TODO(#960)`` closed. The retiring addresses are the named exception,
-   and they go with the deprecated package.
+3. The operations that check their grant inside a handler are named, and named
+   only there. Seven used to; bot-first addressing removed the reason for three,
+   and the remaining four are the skill-addressed ones, whose owner arrives on
+   the record rather than on the wire.
 
 These are checked against the router the application really builds, so a change
 that satisfies the table but not the wiring still fails.
@@ -29,11 +29,13 @@ import pytest
 
 from agentclaw.community.adapters.http.openapi_v1 import build_public_router
 from agentclaw.community.adapters.http.openapi_v1.deprecated import (
+    LEGACY_ROUTES,
     SELF_CHECKED_ROUTES,
 )
 from agentclaw.community.adapters.http.openapi_v1.admission import (
     ADMISSION,
     ADMITTING_MODES,
+    SKILL_SCOPED_OPERATIONS,
     AdmissionMode,
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
@@ -159,18 +161,24 @@ def test_every_grant_checked_operation_actually_checks():
     transitively through ``OwnerIdDep`` on the engine-runtime groups. A test
     that looked for one spelling would pass while the other two rotted.
 
-    The retiring addresses in ``SELF_CHECKED_ROUTES`` are the exception, and a
-    named one: their bot is in the request body or resolved from a skill, so the
-    shared dependency cannot see it — mounting them with it would refuse an
-    application caller outright rather than defer, turning a working legacy call
-    into a 404. They check it themselves, first, before acting. This is the
-    second mechanism ``TODO(#960)`` recorded, alive only where the old contract
-    keeps it alive, and the set is empty the day the deprecated package goes.
+    Two named sets are excluded, for the same underlying reason and with
+    different lifetimes. ``SKILL_SCOPED_OPERATIONS`` — the four current
+    ``{skill_id}`` operations — resolve the bot's owner from the skill record,
+    so there is nothing for the dependency to look a grant up against until the
+    handler has read it. The retiring addresses in ``SELF_CHECKED_ROUTES`` are
+    the same problem in the old contract's shape: their bot is in a request body
+    or behind a skill id, and mounting them under the dependency would refuse an
+    application outright rather than defer, turning a working legacy call into a
+    404. Both check it themselves, first, before acting; the second set is empty
+    the day the deprecated package goes. ``test_only_the_named_operations_
+    check_their_own_grant`` is what stops either from growing quietly.
     """
     expected = {
         key
         for key, mode in ADMISSION.items()
-        if mode in _GRANT_CHECKED_MODES and key not in SELF_CHECKED_ROUTES
+        if mode in _GRANT_CHECKED_MODES
+        and key not in SELF_CHECKED_ROUTES
+        and key not in SKILL_SCOPED_OPERATIONS
     }
     actual = {
         key
@@ -194,49 +202,60 @@ def test_every_grant_checked_operation_actually_checks():
     )
 
 
-def test_no_current_operation_defers_its_grant_check():
-    """``TODO(#960)`` is closed, and this is what keeps it closed.
+def test_only_the_named_operations_check_their_own_grant():
+    """``TODO(#960)`` shrank from seven to four, and this is what holds the line.
 
     Seven operations used to have their bot somewhere ``require_granted_bot``
     could not see it — one in a request body, four behind a skill id, two under
-    an owner parameter the dependency did not know — so the check ran in their
-    handlers instead. Two mechanisms doing one job, and it had already cost one
-    real defect, because a handler-side check is a place the check and the
-    resolution can drift apart.
+    an owner parameter the dependency did not know. Two mechanisms doing one
+    job, and it had already cost one real defect.
 
-    Bot-first addressing removed the reason for all seven. What is asserted here
-    is that none has come back: every grant-checked operation on the current
-    contract is checked by the shared dependency, and the only self-checking
-    routes left are the retiring addresses, which genuinely cannot be checked
-    any other way and are deleted with the deprecated package.
+    Bot-first addressing removed the reason for three: routines' create takes
+    its bot on the path, and the two skills collection operations name their
+    owner in the query, where ``_addressed_owner`` reads it.
+
+    The four ``{skill_id}`` operations are not a leftover. They resolve by
+    ``(skill, actor)``, so the bot's owner is an *output* of the read — a
+    collaborator routinely reaches a skill on someone else's bot — and there is
+    nothing for the dependency to look a grant up against until the record is in
+    hand. Mounting them under it refused a valid grant on a shared bot with a
+    404, which is the failure ``test_skills_shared_bot_grant.py`` now pins.
+
+    What is asserted here is that the set is exactly those four: still in a
+    grant-checked mode, still absent from the shared dependency, and not grown
+    by one more operation that merely found the check inconvenient.
     """
-    from agentclaw.community.adapters.http.openapi_v1.deprecated import LEGACY_ROUTES
-
-    self_checked = {
-        key for key in SELF_CHECKED_ROUTES if key in set(ADMISSION)
+    self_checking = {
+        key
+        for key, ctx in _operations()
+        if ADMISSION.get(key) in _GRANT_CHECKED_MODES
+        and not _depends_on(_dependant_of(ctx), require_granted_bot)
+        and key not in LEGACY_ROUTES
     }
-    current = {key for key in self_checked if key not in LEGACY_ROUTES}
-    assert not current, (
-        "these current operations check the grant in their handler rather than "
-        "through the shared dependency, which is the arrangement #960 removed: "
-        f"{sorted(current)}"
+    assert self_checking == SKILL_SCOPED_OPERATIONS, (
+        "the set of operations checking their grant in a handler has changed. "
+        "Adding one is an edit to admission.SKILL_SCOPED_OPERATIONS and needs "
+        "the same justification the four there have — that the addressed bot's "
+        "owner cannot be known before the handler runs.\n"
+        f"  unexpected: {sorted(self_checking - SKILL_SCOPED_OPERATIONS)}\n"
+        f"  no longer:  {sorted(SKILL_SCOPED_OPERATIONS - self_checking)}"
     )
+
+
+def test_the_self_checking_operations_are_still_grant_checked():
+    """Self-checking is about *where* the check runs, never *whether*."""
+    wrong_mode = sorted(
+        f"{m} {p}"
+        for m, p in SKILL_SCOPED_OPERATIONS
+        if ADMISSION.get((m, p)) not in _GRANT_CHECKED_MODES
+    )
+    assert not wrong_mode, wrong_mode
 
     not_in_table = sorted(
         f"{m} {p}" for m, p in SELF_CHECKED_ROUTES if (m, p) not in ADMISSION
     )
     assert not not_in_table, (
         f"self-checking legacy operations absent from ADMISSION: {not_in_table}"
-    )
-
-    wrong_mode = sorted(
-        f"{m} {p}"
-        for m, p in self_checked
-        if ADMISSION[(m, p)] not in _GRANT_CHECKED_MODES
-    )
-    assert not wrong_mode, (
-        "a self-checking operation must still be in a grant-checked mode — "
-        f"self-checking is about where the check runs, not whether: {wrong_mode}"
     )
 
 

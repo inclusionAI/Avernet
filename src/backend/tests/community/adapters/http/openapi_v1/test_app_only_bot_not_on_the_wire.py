@@ -1,17 +1,18 @@
-"""The seven operations the shared grant check cannot bind, for an app caller.
+"""The operations whose bot an application could otherwise reach unchecked.
 
-Four name a skill, one carries its bot in the body, and two name a bot but
-address an owner under their own parameter (``owner_entity_id``). The shared
-dependency **defers** for exactly these seven — they are named in
-``admission.py``, not detected by their shape — and each handler binds the grant
-to the ``(bot, owner)`` it actually acts on before acting.
+Four name a **skill** and no owner: the services beneath them scope by *user*
+alone, so an application holding a grant on one of a user's bots would reach
+that user's skills on **every** bot they own unless the handler binds the grant
+to the ``(bot, owner)`` on the record. Those four are named in
+``admission.SKILL_SCOPED_OPERATIONS`` and are the whole of what ``TODO(#960)``
+has left; the routines create and the two skills collection reads moved to the
+shared dependency when bot-first addressing gave them somewhere to put the bot
+and the owner.
 
 This file exists because these are the operations most likely to be quietly
-wrong. The services beneath the skill routes scope by *user* alone, so an
-application holding a grant on one of a user's bots would otherwise reach that
-user's skills on **every** bot they own; and a body-carried bot id arrives after
-every dependency has already run. Both failures are silent — a `200` with data
-the caller should not have — which is exactly the kind a test has to catch.
+wrong, and the failure is silent — a `200` with data the caller should not have
+— which is exactly the kind a test has to catch. The mirror case, a valid grant
+wrongly *refused*, is ``test_skills_shared_bot_grant.py``.
 """
 
 from __future__ import annotations

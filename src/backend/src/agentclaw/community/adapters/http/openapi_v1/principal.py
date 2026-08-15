@@ -382,25 +382,32 @@ async def require_granted_bot(
     ``(app, bot, delegating user)`` raises :class:`GrantNotResolvableError`,
     which the app maps to a ``404`` byte-identical to a nonexistent bot.
 
-    **Every operation on this surface carries its bot where this can see it.**
-    Seven did not, and the check ran in their handlers instead — one carried its
-    bot in the request body, four named only a skill, and two named a bot but
-    addressed an owner under a parameter this dependency did not know. That was
-    ``TODO(#960)``: two mechanisms doing one job, and it had already cost one
-    real defect, because a handler-side check is a place the check and the
-    resolution can drift apart.
+    **What this needs is a bot *and an owner*, because ``bot_id`` alone does not
+    identify a bot.** Seven operations could not supply both, so the check ran
+    in their handlers instead — one carried its bot in the request body, four
+    named only a skill, and two named a bot but addressed an owner under a
+    parameter this dependency did not know. That was ``TODO(#960)``: two
+    mechanisms doing one job, and it had already cost one real defect, because a
+    handler-side check is a place the check and the resolution can drift apart.
 
-    Bot-first addressing closed it. The routines create takes its bot on the
-    path, the skills group is addressed by ``(bot, skill)`` like everything
-    else, and its owner parameter is spelled ``owner_id`` — so there is nothing
-    left to defer for and no table to consult.
+    Bot-first addressing removed the reason for **three of the seven**. The
+    routines create takes its bot on the path; the two skills collection
+    operations spell their owner locator ``owner_id``, so
+    :func:`_addressed_owner` reads the same value the handler acts on.
+
+    The four ``{skill_id}`` operations remain, and not by omission. They resolve
+    by ``(skill, actor)``, so the bot's owner arrives *on the record* — a
+    collaborator reaches a skill on someone else's bot routinely — and there is
+    nothing here to look a grant up against until that read has happened. They
+    are named in ``admission.SKILL_SCOPED_OPERATIONS``, mounted without this
+    dependency rather than exempted from it, and check the pair the record
+    carries before acting.
 
     The refusal below is what stays. An operation that reaches here without a
-    bot id is refused rather than waved through, and it is now a backstop for a
-    route added later rather than a live path. The *legacy* addresses still
-    cannot be checked here — their bot really is in a body or behind a skill id
-    — so they check themselves, inside ``openapi_v1/deprecated``, and the
-    mechanism is deleted when they are.
+    bot id is refused rather than waved through. The *legacy* addresses cannot
+    be checked here either — their bot really is in a body or behind a skill id
+    — so they check themselves, inside ``openapi_v1/deprecated``, and that half
+    of the mechanism is deleted when they are.
     """
     addressed_owner = _addressed_owner(request, caller.user_id)
     bot_id = request.path_params.get(_BOT_ID_KEY) or request.query_params.get(

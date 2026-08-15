@@ -5,7 +5,15 @@ The published document already says it — every retiring operation carries
 the start, and then generates a client from. These headers reach the client
 that is running now, which is the one that has to change.
 
-RFC 9745 for ``Deprecation`` and RFC 8594 for ``Sunset``, both as HTTP dates.
+RFC 9745 for ``Deprecation`` and RFC 8594 for ``Sunset``. The two are **not**
+spelled the same way, which is the easy thing to get wrong here:
+
+- ``Deprecation`` is a Structured Fields ``sf-date`` — an ``@`` followed by
+  seconds since the Unix epoch (``Deprecation: @1786838400``). The superseded
+  ``draft-dalal-deprecation-header`` used an HTTP-date, so an implementation
+  written from memory of the draft emits something RFC 9745 parsers reject.
+- ``Sunset`` predates that and stays an IMF-fixdate HTTP-date
+  (``Sunset: Sun, 15 Aug 2027 00:00:00 GMT``).
 
 Middleware rather than a per-route dependency for one reason: a dependency is
 something a new legacy route can be added without. The set is built from the
@@ -36,12 +44,22 @@ from agentclaw.community.adapters.http.openapi_v1.deprecated import LEGACY_ROUTE
 #: the outer bound a client can plan against, not a countdown.
 SUNSET = datetime(2027, 8, 15, tzinfo=timezone.utc)
 
-#: RFC 8594 wants an HTTP date, and RFC 9745 wants ``Deprecation`` to carry one
-#: too — the moment the deprecation took effect, which is when this shipped.
+#: The moment the deprecation took effect, which is when this shipped. Carried
+#: as an ``sf-date`` — see the note above on why it is not an HTTP-date.
 DEPRECATION = datetime(2026, 8, 15, tzinfo=timezone.utc)
 
 _DEPRECATION_HEADER = b"deprecation"
 _SUNSET_HEADER = b"sunset"
+
+
+def sf_date(moment: datetime) -> str:
+    """*moment* as an RFC 9651 ``sf-date``: ``@`` then whole seconds since the epoch.
+
+    Exported so a test can assert the serialization against the same function
+    the middleware uses without re-deriving the format, and so a second caller
+    that needs one does not invent a different spelling.
+    """
+    return f"@{int(moment.timestamp())}"
 
 
 class DeprecationHeaderMiddleware:
@@ -49,7 +67,7 @@ class DeprecationHeaderMiddleware:
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
-        self._deprecation = format_datetime(DEPRECATION, usegmt=True).encode()
+        self._deprecation = sf_date(DEPRECATION).encode()
         self._sunset = format_datetime(SUNSET, usegmt=True).encode()
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
