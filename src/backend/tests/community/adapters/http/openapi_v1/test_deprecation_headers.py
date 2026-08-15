@@ -16,7 +16,6 @@ from __future__ import annotations
 import re
 from email.utils import parsedate_to_datetime
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 

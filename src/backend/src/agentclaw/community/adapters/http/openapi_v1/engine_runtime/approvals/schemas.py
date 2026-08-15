@@ -62,4 +62,4 @@ class ApprovalModeChoice(BaseModel):
     mode: ApprovalMode = Field(description="The mode to set.")
 
 
-__all__ = ["ApprovalModeInfo", "ApprovalModeSet", "ApprovalState"]
+__all__ = ["ApprovalModeChoice", "ApprovalModeInfo", "ApprovalState"]

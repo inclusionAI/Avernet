@@ -28,7 +28,6 @@ Two things are deliberately *not* shared with the current surface:
 
 from __future__ import annotations
 
-from fastapi import APIRouter
 
 from agentclaw.community.adapters.http.openapi_v1.admission import ADMISSION
 

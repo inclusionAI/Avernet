@@ -124,10 +124,17 @@ def test_a_retiring_body_keeps_the_component_name_it_published() -> None:
     the type they still construct stripped of the field they still send, which
     is a break inside the window that exists to prevent exactly that.
 
-    Asserted structurally rather than by naming the two: any retiring operation
-    whose body schema is named ``Legacy…`` has made the same mistake, and any
-    that shares a component with its replacement has a *different* one — the
-    two shapes would have been silently merged.
+    Asserted structurally rather than by naming the two, so the next body to
+    change shape is covered without anyone remembering: a retiring operation
+    whose body schema is named ``Legacy…`` has given the original name away.
+
+    What this deliberately does *not* try to assert is that a retiring body and
+    its replacement never share one component. Sharing is correct whenever the
+    body did not change — most of them — and a component that is shared has one
+    shape by definition, so the document alone cannot say whether the two ought
+    to have differed. Comparing against the previously published document is
+    what would answer that, and that lives in the release compat gate rather
+    than here.
     """
     document = _client().app.openapi()
 
@@ -142,20 +149,11 @@ def test_a_retiring_body_keeps_the_component_name_it_published() -> None:
                 return ref.rsplit("/", 1)[-1]
         return None
 
-    prefixed, shared = [], []
-    for (method, legacy), replacement in LEGACY_ROUTES.items():
+    prefixed = []
+    for (method, legacy), _replacement in LEGACY_ROUTES.items():
         old = body_schema(method, legacy.replace(":path", ""))
-        if old is None:
-            continue
-        if old.startswith("Legacy"):
+        if old is not None and old.startswith("Legacy"):
             prefixed.append(f"{method} {legacy} -> {old}")
-        new = body_schema(method, replacement.replace(":path", ""))
-        if new is not None and new == old:
-            # Sharing is right when the body did not change, and wrong only if
-            # the shapes differ — which cannot happen through one component.
-            continue
-        if new is not None and old.startswith("Legacy"):
-            shared.append(f"{method} {legacy}: {old} vs {new}")
 
     assert not prefixed, (
         "these retiring bodies publish a renamed component, so a client that "

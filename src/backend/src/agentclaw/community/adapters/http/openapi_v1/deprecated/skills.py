@@ -61,9 +61,6 @@ from agentclaw.community.api.local_skill_query_service import (
 from agentclaw.community.api.local_skill_state_service import (
     LocalSkillStateServiceProtocol,
 )
-from agentclaw.community.api.local_skill_upload_service import (
-    LocalSkillUploadServiceProtocol,
-)
 from agentclaw.community.di import Injected
 
 from ._requery import LegacyBotIdQuery, deprecated_doc, with_query_parameter
