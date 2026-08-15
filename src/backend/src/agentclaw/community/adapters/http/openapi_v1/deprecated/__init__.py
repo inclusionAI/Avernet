@@ -15,9 +15,10 @@ and the address is gone along with the old contract it carried.
 
 Two things are deliberately *not* shared with the current surface:
 
-- **The old request models.** ``LegacyRoutineCreate`` and
-  ``LegacyApprovalModeSet`` live here, not in the schemas modules they came
-  from, so deleting this package deletes them.
+- **The old request models.** ``RoutineCreate`` and ``ApprovalModeSet`` — the
+  names those bodies published, kept here because a component name is part of
+  what a generated client is written against — live here, not in the schemas
+  modules they came from, so deleting this package deletes them.
 - **The handler-side grant check.** ``TODO(#960)`` recorded it as two mechanisms
   doing one job, and the new surface has one. The legacy skills item operations
   and the legacy routines create genuinely cannot be checked by the shared

@@ -93,7 +93,17 @@ class Routine(BaseModel):
     )
 
 
-class RoutineCreate(BaseModel):
+# Named `RoutineSpec` rather than `RoutineCreate` because the retiring address
+# still publishes a `RoutineCreate` — the shape it always had, with `bot_id` in
+# the body. A component name is part of what a generated client is written
+# against: had the two swapped, a caller who regenerated an SDK while staying on
+# the old address would find `RoutineCreate` still present but missing the field
+# they set. The retiring contract keeps the retiring name, and this one is
+# chosen to still read well once that name is gone.
+#
+# A model docstring is published verbatim as the schema's description, so the
+# reasoning lives here rather than there.
+class RoutineSpec(BaseModel):
     """Create-a-routine request body."""
 
     model_config = ConfigDict(

@@ -4,7 +4,7 @@ PUT /openapi/v1/bots/approvals/{bot_id}/mode took ``session_key`` in the
 request body. The replacement takes it in the query, beside the read that
 always did. So this is the one operation in the swap-places set whose *contract*
 moved as well as its address, and it cannot be a re-registration: the current
-handler would reject the old body outright, since ``ApprovalModeSet`` forbids
+handler would reject the old body outright, since ``ApprovalModeChoice`` forbids
 extra fields.
 
 The old body model is declared here rather than left behind in the current
@@ -26,7 +26,7 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.approvals.route
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.approvals.schemas import (
     ApprovalMode,
-    ApprovalModeSet,
+    ApprovalModeChoice,
     ApprovalState,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
@@ -43,7 +43,13 @@ from agentclaw.community.di import Injected
 from ._shim import legacy_route, legacy_router
 
 
-class LegacyApprovalModeSet(BaseModel):
+# It keeps the name, and the replacement took `ApprovalModeChoice`. A component
+# name is part of what a generated client is written against, so leaving this
+# one on the new mode-only shape would strip `session_key` from the type a
+# caller on this address still constructs. The name goes when this address does.
+#
+# The docstring stays plain: it is published as the schema's description.
+class ApprovalModeSet(BaseModel):
     """The set-the-mode body as it was: the session named inside it."""
 
     model_config = ConfigDict(extra="forbid")
@@ -57,7 +63,7 @@ router = legacy_router("/openapi/v1/bots/approvals", "approvals")
 
 async def set_approval_mode_legacy(
     bot_id: BotIdPath,
-    body: LegacyApprovalModeSet,
+    body: ApprovalModeSet,
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,
@@ -71,7 +77,7 @@ async def set_approval_mode_legacy(
     """
     return await set_approval_mode(
         bot_id=bot_id,
-        body=ApprovalModeSet(mode=body.mode),
+        body=ApprovalModeChoice(mode=body.mode),
         user_id=user_id,
         owner_id=owner_id,
         request=request,

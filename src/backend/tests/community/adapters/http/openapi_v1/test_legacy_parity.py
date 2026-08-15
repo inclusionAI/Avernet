@@ -112,3 +112,53 @@ def test_the_expected_number_of_addresses_are_retiring() -> None:
     has to look at rather than a silent change to what this API still answers.
     """
     assert len(LEGACY_ROUTES) == 41
+
+
+def test_a_retiring_body_keeps_the_component_name_it_published() -> None:
+    """A schema name is part of what a generated client is written against.
+
+    Two request bodies changed shape in this feature — routines' create lost
+    ``bot_id`` and the approvals write lost ``session_key``. Whichever model
+    keeps the original *name* is the one an unmigrated client's regenerated SDK
+    resolves to, so the retiring shape must keep it: otherwise the caller finds
+    the type they still construct stripped of the field they still send, which
+    is a break inside the window that exists to prevent exactly that.
+
+    Asserted structurally rather than by naming the two: any retiring operation
+    whose body schema is named ``Legacy…`` has made the same mistake, and any
+    that shares a component with its replacement has a *different* one — the
+    two shapes would have been silently merged.
+    """
+    document = _client().app.openapi()
+
+    def body_schema(method: str, path: str) -> str | None:
+        operation = document["paths"].get(path, {}).get(method.lower())
+        if not isinstance(operation, dict):
+            return None
+        content = (operation.get("requestBody") or {}).get("content") or {}
+        for spec in content.values():
+            ref = (spec.get("schema") or {}).get("$ref")
+            if ref:
+                return ref.rsplit("/", 1)[-1]
+        return None
+
+    prefixed, shared = [], []
+    for (method, legacy), replacement in LEGACY_ROUTES.items():
+        old = body_schema(method, legacy.replace(":path", ""))
+        if old is None:
+            continue
+        if old.startswith("Legacy"):
+            prefixed.append(f"{method} {legacy} -> {old}")
+        new = body_schema(method, replacement.replace(":path", ""))
+        if new is not None and new == old:
+            # Sharing is right when the body did not change, and wrong only if
+            # the shapes differ — which cannot happen through one component.
+            continue
+        if new is not None and old.startswith("Legacy"):
+            shared.append(f"{method} {legacy}: {old} vs {new}")
+
+    assert not prefixed, (
+        "these retiring bodies publish a renamed component, so a client that "
+        "regenerates without migrating loses the type it constructs: "
+        f"{prefixed}"
+    )

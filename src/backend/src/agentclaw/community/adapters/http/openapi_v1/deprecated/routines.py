@@ -28,7 +28,7 @@ from agentclaw.community.adapters.http.openapi_v1.routines import (
 from agentclaw.community.adapters.http.openapi_v1.routines.router import create_routine
 from agentclaw.community.adapters.http.openapi_v1.routines.schemas import (
     Routine,
-    RoutineCreate,
+    RoutineSpec,
 )
 from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
 from agentclaw.community.di import Injected
@@ -40,11 +40,19 @@ from ._shim import legacy_route, legacy_router
 _CREATE = "/openapi/v1/bots/{bot_id}/routines"
 
 
-class LegacyRoutineCreate(RoutineCreate):
+# It keeps the name, and the replacement took a new one. A component name is
+# part of the contract a generated client is written against: leaving
+# `RoutineCreate` on the *new* shape would mean a caller who regenerated an SDK
+# while still on this address found the type they construct stripped of the
+# field they set — a break inside the window that exists to prevent exactly
+# that. The name goes when this address does.
+#
+# The docstring stays plain: it is published as the schema's description.
+class RoutineCreate(RoutineSpec):
     """The create body as it was, with the bot named inside it."""
 
     # Its own example, because ``model_config`` is inherited: with the bot
-    # dropped from ``RoutineCreate``'s, this model would publish an example
+    # dropped from ``RoutineSpec``'s, this model would publish an example
     # missing the one field it *requires*. The current model has the opposite
     # problem for the opposite reason, which is why neither can borrow the
     # other's.
@@ -84,7 +92,7 @@ router = relocate(
 
 
 async def create_routine_legacy(
-    body: LegacyRoutineCreate,
+    body: RoutineCreate,
     owner_id: UserIdDep,
     caller: ActingCallerDep,
     request: Request,
@@ -102,7 +110,7 @@ async def create_routine_legacy(
     caller.require_bot(body.bot_id, owner_id=owner_id)
     return await create_routine(
         bot_id=body.bot_id,
-        body=RoutineCreate(**body.model_dump(exclude={"bot_id"})),
+        body=RoutineSpec(**body.model_dump(exclude={"bot_id"})),
         owner_id=owner_id,
         request=request,
         factory=factory,

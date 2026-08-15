@@ -18,7 +18,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.approvals.schemas import (
     ApprovalModeInfo,
-    ApprovalModeSet,
+    ApprovalModeChoice,
     ApprovalState,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
@@ -125,7 +125,7 @@ async def get_approval_mode(
 @envelope_errors
 async def set_approval_mode(
     bot_id: BotIdPath,
-    body: ApprovalModeSet,
+    body: ApprovalModeChoice,
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,

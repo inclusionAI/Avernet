@@ -26,6 +26,21 @@
           "NEVER"
         ]
       },
+      "ApprovalModeChoice": {
+        "additionalProperties": false,
+        "description": "Set-the-mode request body: the mode, and nothing else.\n\nThe session is named by the session_key query parameter, the same way the\nread at this address names it. It selects which session the mode applies to\nrather than forming part of the value being written, and taking it in the\nbody here meant a client filled one field in two different places depending\non the verb.",
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/ApprovalMode",
+            "description": "The mode to set."
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "ApprovalModeChoice",
+        "type": "object"
+      },
       "ApprovalModeInfo": {
         "description": "One selectable approval mode, with its meaning.",
         "example": {
@@ -52,14 +67,20 @@
       },
       "ApprovalModeSet": {
         "additionalProperties": false,
-        "description": "Set-the-mode request body: the mode, and nothing else.\n\nThe session is named by the session_key query parameter, the same way the\nread at this address names it. It selects which session the mode applies to\nrather than forming part of the value being written, and taking it in the\nbody here meant a client filled one field in two different places depending\non the verb.",
+        "description": "The set-the-mode body as it was: the session named inside it.",
         "properties": {
           "mode": {
             "$ref": "#/components/schemas/ApprovalMode",
             "description": "The mode to set."
+          },
+          "session_key": {
+            "description": "Session to change the mode for.",
+            "title": "Session Key",
+            "type": "string"
           }
         },
         "required": [
+          "session_key",
           "mode"
         ],
         "title": "ApprovalModeSet",
@@ -3466,88 +3487,6 @@
         "title": "IdentityFileWrite",
         "type": "object"
       },
-      "LegacyApprovalModeSet": {
-        "additionalProperties": false,
-        "description": "The set-the-mode body as it was: the session named inside it.",
-        "properties": {
-          "mode": {
-            "$ref": "#/components/schemas/ApprovalMode",
-            "description": "The mode to set."
-          },
-          "session_key": {
-            "description": "Session to change the mode for.",
-            "title": "Session Key",
-            "type": "string"
-          }
-        },
-        "required": [
-          "session_key",
-          "mode"
-        ],
-        "title": "LegacyApprovalModeSet",
-        "type": "object"
-      },
-      "LegacyRoutineCreate": {
-        "description": "The create body as it was, with the bot named inside it.",
-        "example": {
-          "bot_id": "20260813_a7k2m9p1",
-          "command": "Summarize yesterday's tickets and post the brief.",
-          "enabled": true,
-          "name": "morning-brief",
-          "timezone": "Asia/Shanghai",
-          "trigger": {
-            "cron": "0 9 * * 1-5",
-            "type": "schedule"
-          }
-        },
-        "properties": {
-          "bot_id": {
-            "description": "The bot that will run the routine.",
-            "title": "Bot Id",
-            "type": "string"
-          },
-          "command": {
-            "description": "The instruction the bot receives when the routine fires — free-form natural language, delivered as the user message of a fresh session per run. Not a shell command.",
-            "title": "Command",
-            "type": "string"
-          },
-          "enabled": {
-            "default": true,
-            "description": "Whether the schedule starts armed; defaults to true.",
-            "title": "Enabled",
-            "type": "boolean"
-          },
-          "name": {
-            "description": "Human-readable routine name.",
-            "title": "Name",
-            "type": "string"
-          },
-          "timezone": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "IANA time-zone name the schedule is evaluated in, e.g. 'Asia/Shanghai' (the default when omitted on create). When updating the trigger, send the timezone alongside it — a trigger update without one resets the schedule to its default zone.",
-            "title": "Timezone"
-          },
-          "trigger": {
-            "$ref": "#/components/schemas/ScheduleTrigger",
-            "description": "When the routine fires."
-          }
-        },
-        "required": [
-          "name",
-          "trigger",
-          "command",
-          "bot_id"
-        ],
-        "title": "LegacyRoutineCreate",
-        "type": "object"
-      },
       "McpConfig": {
         "description": "The caller's unified config for an MCP server.\n\nThe api_key is always returned masked (first/last four characters for a\nlong key, fully masked otherwise), never in full.",
         "example": {
@@ -4477,8 +4416,9 @@
         "type": "object"
       },
       "RoutineCreate": {
-        "description": "Create-a-routine request body.",
+        "description": "The create body as it was, with the bot named inside it.",
         "example": {
+          "bot_id": "20260813_a7k2m9p1",
           "command": "Summarize yesterday's tickets and post the brief.",
           "enabled": true,
           "name": "morning-brief",
@@ -4489,6 +4429,11 @@
           }
         },
         "properties": {
+          "bot_id": {
+            "description": "The bot that will run the routine.",
+            "title": "Bot Id",
+            "type": "string"
+          },
           "command": {
             "description": "The instruction the bot receives when the routine fires — free-form natural language, delivered as the user message of a fresh session per run. Not a shell command.",
             "title": "Command",
@@ -4525,7 +4470,8 @@
         "required": [
           "name",
           "trigger",
-          "command"
+          "command",
+          "bot_id"
         ],
         "title": "RoutineCreate",
         "type": "object"
@@ -4586,6 +4532,60 @@
           "status"
         ],
         "title": "RoutineRun",
+        "type": "object"
+      },
+      "RoutineSpec": {
+        "description": "Create-a-routine request body.",
+        "example": {
+          "command": "Summarize yesterday's tickets and post the brief.",
+          "enabled": true,
+          "name": "morning-brief",
+          "timezone": "Asia/Shanghai",
+          "trigger": {
+            "cron": "0 9 * * 1-5",
+            "type": "schedule"
+          }
+        },
+        "properties": {
+          "command": {
+            "description": "The instruction the bot receives when the routine fires — free-form natural language, delivered as the user message of a fresh session per run. Not a shell command.",
+            "title": "Command",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "description": "Whether the schedule starts armed; defaults to true.",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "Human-readable routine name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "IANA time-zone name the schedule is evaluated in, e.g. 'Asia/Shanghai' (the default when omitted on create). When updating the trigger, send the timezone alongside it — a trigger update without one resets the schedule to its default zone.",
+            "title": "Timezone"
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/ScheduleTrigger",
+            "description": "When the routine fires."
+          }
+        },
+        "required": [
+          "name",
+          "trigger",
+          "command"
+        ],
+        "title": "RoutineSpec",
         "type": "object"
       },
       "RoutineUpdate": {
@@ -5962,7 +5962,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/LegacyApprovalModeSet"
+                "$ref": "#/components/schemas/ApprovalModeSet"
               }
             }
           },
@@ -12259,7 +12259,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/LegacyRoutineCreate"
+                "$ref": "#/components/schemas/RoutineCreate"
               }
             }
           },
@@ -17043,7 +17043,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ApprovalModeSet"
+                "$ref": "#/components/schemas/ApprovalModeChoice"
               }
             }
           },
@@ -22825,7 +22825,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RoutineCreate"
+                "$ref": "#/components/schemas/RoutineSpec"
               }
             }
           },

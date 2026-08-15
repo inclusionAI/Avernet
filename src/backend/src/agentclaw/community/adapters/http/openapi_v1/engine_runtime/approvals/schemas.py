@@ -47,7 +47,7 @@ class ApprovalModeInfo(BaseModel):
     description: str = Field(description="What this mode does.")
 
 
-class ApprovalModeSet(BaseModel):
+class ApprovalModeChoice(BaseModel):
     """Set-the-mode request body: the mode, and nothing else.
 
     The session is named by the session_key query parameter, the same way the

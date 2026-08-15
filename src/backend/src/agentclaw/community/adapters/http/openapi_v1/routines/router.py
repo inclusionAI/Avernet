@@ -33,7 +33,7 @@ from agentclaw.community.core.cron.services.cron_runtime_targets import (
 )
 from agentclaw.community.di import Injected
 
-from .schemas import Routine, RoutineCreate, RoutineRun, RoutineUpdate, ScheduleTrigger
+from .schemas import Routine, RoutineSpec, RoutineRun, RoutineUpdate, ScheduleTrigger
 
 router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/routines", tags=["routines"])
 
@@ -159,7 +159,7 @@ async def list_routines(
 @envelope_errors
 async def create_routine(
     bot_id: BotIdPath,
-    body: RoutineCreate,
+    body: RoutineSpec,
     owner_id: UserIdDep,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
