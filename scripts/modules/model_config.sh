@@ -275,15 +275,13 @@ singlebox_model_config_apply_thinking_policy() {
             $model_ref | split("/")[0];
           def model_id($model_ref):
             $model_ref | split("/")[1:] | join("/");
-          def needs_bailian_glm_thinking_override($config; $model_ref):
+          def needs_glm_thinking_override($config; $model_ref):
             ($config.models.providers[model_provider_id($model_ref)] // {}) as $provider
             | (($provider.api // "") == "openai-completions"
                or ($provider.api // "") == "openai")
-              and (($provider.baseUrl // "" | ascii_downcase)
-                   | contains("aliyuncs.com/compatible-mode/"))
               and ((model_id($model_ref) | ascii_downcase)
                    | test("(^|/)glm-(4\\.(5|6|7)|5([.-]|$))"));
-          def set_bailian_glm_thinking_override:
+          def set_glm_thinking_override:
             if type != "object" then {} else . end
             | .params = (if (.params? | type) == "object" then .params else {} end)
             | .params.extra_body = (
@@ -341,7 +339,7 @@ singlebox_model_config_apply_thinking_policy() {
               )
             else . end
           | if ($primary_model | type) == "string"
-               and needs_bailian_glm_thinking_override($source_config; $primary_model) then
+               and needs_glm_thinking_override($source_config; $primary_model) then
               .agents.defaults.models = (
                 if (.agents.defaults.models? | type) == "object" then
                   .agents.defaults.models
@@ -351,14 +349,14 @@ singlebox_model_config_apply_thinking_policy() {
               )
               | .agents.defaults.models[$primary_model] = (
                   (.agents.defaults.models[$primary_model] // {})
-                  | set_bailian_glm_thinking_override
+                  | set_glm_thinking_override
                 )
             else . end
           | if (.agents.defaults.models? | type) == "object" then
               .agents.defaults.models |= with_entries(
                 .key as $model_ref
-                | if needs_bailian_glm_thinking_override($source_config; $model_ref) then
-                    .value |= set_bailian_glm_thinking_override
+                | if needs_glm_thinking_override($source_config; $model_ref) then
+                    .value |= set_glm_thinking_override
                   else . end
               )
             else . end
