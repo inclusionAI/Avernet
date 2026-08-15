@@ -582,6 +582,10 @@ def include_oss_business_routes(app) -> None:
             from src.domain.models.worker_runtime_state import WorkerRuntimeState
             from src.domain.models.worker import Availability, TrustLevel
 
+            # Map the OSS is_public flag to bcsfuse availability so the
+            # registered Claude bot is discoverable by fusion/recommend filters.
+            availability = Availability.PUBLIC if create_req.is_public else Availability.PRIVATE
+
             # Create minimal worker object for test mode
             worker = Worker(
                 id=create_req.worker_id,
@@ -599,7 +603,7 @@ def include_oss_business_routes(app) -> None:
                 resources=[],
                 memory_refs=[],
                 state=WorkerState(
-                    availability=Availability.PRIVATE,
+                    availability=availability,
                     trust_level=TrustLevel.UNVERIFIED,
                 ),
                 lifecycle_state=WorkerLifecycleState.INACTIVE,
