@@ -410,6 +410,7 @@ class BotRunner(Protocol):
         bot_id: str,
         context: "BotChatContext",
         metadata: dict[str, Any],
+        user_id: str | None = None,
         limit: int = 20,
         offset: int = 0,
     ) -> list["SessionInfo"]:
@@ -419,6 +420,7 @@ class BotRunner(Protocol):
             bot_id: Bot 唯一标识，格式为 <real_bot_id>:<entity_id>
             context: 请求上下文
             metadata: 元数据，支持 bot_options.lifecycle_stage 指定生命周期阶段
+            user_id: Optional user ID to filter sessions
             limit: Maximum number of sessions to return
             offset: Number of sessions to skip
 

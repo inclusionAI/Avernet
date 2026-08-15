@@ -63,6 +63,8 @@ def _make_session_info(**overrides):
         "session_id": SESSION_ID,
         "bot_id": BOT_UUID,
         "status": "active",
+        "title": None,
+        "message_count": None,
         "created_at": datetime.now(tz=UTC),
         "metadata": {"tenant": TENANT, "invoker": INVOKER},
     }
@@ -2447,6 +2449,7 @@ class TestListSessions:
             )
 
         session_client.list_sessions.assert_awaited_once_with(
+            user_id=None,
             agent_id=BOT_UUID,
             limit=5,
             offset=2,
@@ -2535,6 +2538,57 @@ class TestListSessions:
                     binding_info=binding,
                     context=context,
                 )
+
+    @pytest.mark.asyncio
+    async def test_user_id_passed_to_client(self, service):
+        """user_id parameter is forwarded to AsyncSessionClient."""
+        from secbaas.community.core.service.bot_run._async_session_client import (
+            SessionInfo as AdapterSessionInfo,
+        )
+
+        adapter_session = AdapterSessionInfo(
+            id="sess-001",
+            title="test",
+            user_id="user-1",
+            agent_id=BOT_UUID,
+            created_at="2025-01-01T00:00:00Z",
+            updated_at="2025-01-01T01:00:00Z",
+        )
+
+        session_client = AsyncMock()
+        session_client.__aenter__ = AsyncMock(return_value=session_client)
+        session_client.__aexit__ = AsyncMock(return_value=False)
+        session_client.list_sessions = AsyncMock(return_value=[adapter_session])
+
+        binding = _make_binding_info()
+        context = MagicMock()
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                new_callable=AsyncMock,
+                return_value=_make_conn_info(),
+            ),
+            patch.object(
+                service, "_create_session_client", return_value=session_client
+            ),
+        ):
+            await service.list_sessions(
+                binding_info=binding,
+                context=context,
+                user_id="user-xyz",
+                limit=10,
+                offset=0,
+            )
+
+        session_client.list_sessions.assert_awaited_once_with(
+            user_id="user-xyz",
+            agent_id=BOT_UUID,
+            limit=10,
+            offset=0,
+            engine=binding.engine_type,
+        )
 
 
 # ==================== ANY matcher for mock assertions ====================

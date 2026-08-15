@@ -452,6 +452,7 @@ class BotRunner:
         bot_id: str,
         context: BotChatContext,
         metadata: dict[str, Any],
+        user_id: str | None = None,
         limit: int = 20,
         offset: int = 0,
     ) -> list[SessionInfo]:
@@ -460,6 +461,7 @@ class BotRunner:
         return await route.bot_service.list_sessions(
             binding_info=route.binding_info,
             context=context,
+            user_id=user_id,
             limit=limit,
             offset=offset,
         )

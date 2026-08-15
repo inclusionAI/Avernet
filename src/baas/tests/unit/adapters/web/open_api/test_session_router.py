@@ -86,6 +86,8 @@ def _make_session_info(**overrides):
         "session_id": SESSION_ID,
         "bot_id": BOT_ID,
         "status": "active",
+        "title": None,
+        "message_count": None,
         "created_at": datetime(2025, 1, 15, 10, 30, 0),
         "updated_at": datetime(2025, 1, 15, 11, 0, 0),
     }
@@ -1280,3 +1282,70 @@ class TestListSessions:
         assert exc.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
         assert exc.value.detail["code"] == 50001
         assert "Internal server error" in exc.value.detail["message"]
+
+    @pytest.mark.asyncio
+    async def test_user_id_passed_to_runner(self):
+        """user_id 参数传递给 BotRunner。"""
+        mock_runner = AsyncMock(spec=BotRunner)
+        mock_runner.list_sessions = AsyncMock(return_value=[])
+
+        with patch(POLICY_PATH, return_value=BOT_ID):
+            await list_sessions(
+                bot_id=BOT_ID,
+                user_id="user-123",
+                lifecycle_stage=DEFAULT_LIFECYCLE_STAGE,
+                limit=20,
+                offset=0,
+                api_key_record=_make_api_key_record(),
+                context=_make_context(),
+                bot_runner=mock_runner,
+            )
+
+        assert mock_runner.list_sessions.call_args[1]["user_id"] == "user-123"
+
+    @pytest.mark.asyncio
+    async def test_user_id_none_by_default(self):
+        """user_id 默认为 None。"""
+        mock_runner = AsyncMock(spec=BotRunner)
+        mock_runner.list_sessions = AsyncMock(return_value=[])
+
+        with patch(POLICY_PATH, return_value=BOT_ID):
+            await list_sessions(
+                bot_id=BOT_ID,
+                user_id=None,
+                lifecycle_stage=DEFAULT_LIFECYCLE_STAGE,
+                limit=20,
+                offset=0,
+                api_key_record=_make_api_key_record(),
+                context=_make_context(),
+                bot_runner=mock_runner,
+            )
+
+        assert mock_runner.list_sessions.call_args[1]["user_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_title_and_message_count_in_response(self):
+        """title 和 message_count 字段出现在响应中。"""
+        sessions = [
+            _make_session_info(
+                session_id="sess-001",
+                title="My Session",
+                message_count=5,
+            ),
+        ]
+        mock_runner = AsyncMock(spec=BotRunner)
+        mock_runner.list_sessions = AsyncMock(return_value=sessions)
+
+        with patch(POLICY_PATH, return_value=BOT_ID):
+            result = await list_sessions(
+                bot_id=BOT_ID,
+                lifecycle_stage=DEFAULT_LIFECYCLE_STAGE,
+                limit=20,
+                offset=0,
+                api_key_record=_make_api_key_record(),
+                context=_make_context(),
+                bot_runner=mock_runner,
+            )
+
+        assert result.data.items[0].title == "My Session"
+        assert result.data.items[0].message_count == 5

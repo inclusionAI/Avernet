@@ -191,6 +191,7 @@ class BotService(Protocol):
         *,
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
+        user_id: str | None = None,
         limit: int = 20,
         offset: int = 0,
     ) -> list[SessionInfo]:
@@ -199,6 +200,7 @@ class BotService(Protocol):
         Args:
             binding_info: 已解析的 binding 信息（用于创建底层连接）
             context: 可选的请求上下文
+            user_id: Optional user ID to filter sessions
             limit: Maximum number of sessions to return
             offset: Number of sessions to skip
 

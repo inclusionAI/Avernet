@@ -90,6 +90,8 @@ class SessionInfo:
     session_id: str
     bot_id: str
     status: str = "active"  # "active", "closed"
+    title: str | None = None
+    message_count: int | None = None
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime | None = None
     expires_at: datetime | None = None

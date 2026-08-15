@@ -628,6 +628,7 @@ class TestListSessions:
         )
 
         session_client.list_sessions.assert_awaited_once_with(
+            user_id=None,
             agent_id=BOT_ID,
             limit=5,
             offset=2,

@@ -2091,6 +2091,7 @@ class TestListSessions:
                 bot_id=BOT_ID,
                 context=context,
                 metadata={"source": "openapi"},
+                user_id=None,
                 limit=5,
                 offset=2,
             )
@@ -2099,6 +2100,7 @@ class TestListSessions:
         mock_bot_service.list_sessions.assert_awaited_once_with(
             binding_info=binding,
             context=context,
+            user_id=None,
             limit=5,
             offset=2,
         )

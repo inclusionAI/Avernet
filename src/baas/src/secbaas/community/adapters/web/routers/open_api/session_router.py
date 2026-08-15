@@ -74,6 +74,10 @@ async def list_sessions(
         default=None,
         description="Bot ID, format: bot_id or default:staff_no. If omitted, resolved from the API Key.",
     ),
+    user_id: str | None = Query(
+        default=None,
+        description="Optional user ID to filter sessions by a specific user",
+    ),
     lifecycle_stage: str = Query(
         default="online",
         description="Bot lifecycle stage. Options: online, verify, draft, all",
@@ -90,6 +94,7 @@ async def list_sessions(
 
     Args:
         bot_id: Bot ID, format: bot_id or default:staff_no. If omitted, resolved from the API Key.
+        user_id: Optional user ID to filter sessions by a specific user.
         lifecycle_stage: Bot lifecycle stage. Options: online, verify, draft, all. Default: online
         limit: Maximum number of sessions to return. Default 20, range 1-100
         offset: Number of sessions to skip. Default 0
@@ -120,7 +125,8 @@ async def list_sessions(
 
     logger.info(
         f"list_sessions: bot_id={resolved_bot_id}, "
-        f"lifecycle_stage={lifecycle_stage}, limit={limit}, offset={offset}, "
+        f"user_id={user_id}, lifecycle_stage={lifecycle_stage}, "
+        f"limit={limit}, offset={offset}, "
         f"api_key_prefix={api_key_record.api_key_prefix}"
     )
 
@@ -130,6 +136,7 @@ async def list_sessions(
             bot_id=resolved_bot_id,
             context=context,
             metadata={"bot_options": {"lifecycle_stage": lifecycle_stage}},
+            user_id=user_id,
             limit=limit + 1,
             offset=offset,
         )
@@ -142,7 +149,9 @@ async def list_sessions(
             SessionListItem(
                 session_id=s.session_id,
                 bot_id=s.bot_id,
+                title=s.title,
                 status=s.status,
+                message_count=s.message_count,
                 created_at=s.created_at,
                 updated_at=s.updated_at,
             )

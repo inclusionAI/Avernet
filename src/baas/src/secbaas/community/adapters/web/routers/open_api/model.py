@@ -216,7 +216,11 @@ class SessionListItem(BaseModel):
 
     session_id: str = Field(..., description="Session ID")
     bot_id: str = Field(..., description="Bot ID")
+    title: str | None = Field(default=None, description="Session title")
     status: str = Field(..., description="Session status")
+    message_count: int | None = Field(
+        default=None, description="Number of messages in the session"
+    )
     created_at: datetime | None = Field(default=None, description="Creation time")
     updated_at: datetime | None = Field(default=None, description="Update time")
 

@@ -441,6 +441,140 @@
         "title": "SessionMessagesResponseData",
         "type": "object"
       },
+      "SessionListItem": {
+        "description": "Single session item in list response",
+        "properties": {
+          "session_id": {
+            "description": "Session ID",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "bot_id": {
+            "description": "Bot ID",
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Session title",
+            "title": "Title"
+          },
+          "status": {
+            "description": "Session status",
+            "title": "Status",
+            "type": "string"
+          },
+          "message_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Number of messages in the session",
+            "title": "Message Count"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Creation time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Update time",
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "session_id",
+          "bot_id",
+          "status"
+        ],
+        "title": "SessionListItem",
+        "type": "object"
+      },
+      "SessionListResponseData": {
+        "description": "Session list response data",
+        "properties": {
+          "items": {
+            "description": "Session list",
+            "items": {
+              "$ref": "#/components/schemas/SessionListItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "default": 0,
+            "description": "Total sessions",
+            "title": "Total",
+            "type": "integer"
+          },
+          "has_more": {
+            "default": false,
+            "description": "Whether there are more sessions",
+            "title": "Has More",
+            "type": "boolean"
+          }
+        },
+        "title": "SessionListResponseData",
+        "type": "object"
+      },
+      "SessionListResponse": {
+        "description": "Session list standard response",
+        "properties": {
+          "code": {
+            "default": 0,
+            "description": "响应码，0 表示成功",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionListResponseData"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response data"
+          },
+          "message": {
+            "default": "success",
+            "description": "响应消息",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "SessionListResponse",
+        "type": "object"
+      },
       "SessionQueryResponse": {
         "description": "Session query standard response",
         "properties": {
@@ -831,6 +965,136 @@
         "summary": "Gateway query message result",
         "tags": [
           "Chat / Messages"
+        ]
+      }
+    },
+    "/openapi/v1/chat/sessions": {
+      "get": {
+        "description": "List sessions for a specified Bot using a JWT-authenticated request",
+        "operationId": "list_sessions_openapi_v1_chat_sessions_get",
+        "parameters": [
+          {
+            "description": "Bot ID, format: bot_id:staff_no",
+            "in": "query",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "Bot ID, format: bot_id:staff_no",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional user ID to filter sessions by a specific user",
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional user ID to filter sessions by a specific user",
+              "title": "User Id"
+            }
+          },
+          {
+            "description": "Bot lifecycle stage. Options: online, verify, draft, all",
+            "in": "query",
+            "name": "lifecycle_stage",
+            "required": false,
+            "schema": {
+              "default": "online",
+              "description": "Bot lifecycle stage. Options: online, verify, draft, all",
+              "title": "Lifecycle Stage",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum number of sessions to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Maximum number of sessions to return",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Number of sessions to skip",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of sessions to skip",
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-avernet-principal",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Avernet-Principal"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionListResponse"
+                }
+              }
+            },
+            "description": "Query successful"
+          },
+          "401": {
+            "description": "Authentication failed"
+          },
+          "403": {
+            "description": "Bot access denied"
+          },
+          "404": {
+            "description": "Bot not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "summary": "Gateway list sessions",
+        "tags": [
+          "Chat / Sessions"
         ]
       }
     },

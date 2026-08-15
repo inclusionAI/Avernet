@@ -444,6 +444,7 @@ class ClawBotService(BotService):
         *,
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
+        user_id: str | None = None,
         limit: int = 20,
         offset: int = 0,
     ) -> list[SessionInfo]:
@@ -454,6 +455,7 @@ class ClawBotService(BotService):
         Args:
             binding_info: Binding info for HTTP connection.
             context: Optional request context (unused in ClawBotService).
+            user_id: Optional user ID to filter sessions.
             limit: Maximum number of sessions to return.
             offset: Number of sessions to skip.
 
@@ -471,6 +473,7 @@ class ClawBotService(BotService):
         try:
             async with session_client:
                 adapter_sessions = await session_client.list_sessions(
+                    user_id=user_id,
                     agent_id=binding_info.bot_id,
                     limit=limit,
                     offset=offset,
@@ -640,6 +643,10 @@ def _map_adapter_session_info(
         session_id=adapter_session.id,
         bot_id=bot_id,
         status="active",
+        title=adapter_session.title or None,
+        message_count=adapter_session.message_count
+        if adapter_session.message_count is not None
+        else None,
         created_at=_parse_datetime(adapter_session.created_at) or datetime.now(),
         updated_at=_parse_datetime(adapter_session.updated_at),
     )
