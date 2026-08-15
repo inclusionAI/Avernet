@@ -229,10 +229,10 @@ def _seed_inactive_skill_in_active_custom_set(world) -> None:
 
 @endpoint_test(
     method="DELETE",
-    path="/openapi/v1/bots/skills/{skill_id}",
+    path="/openapi/v1/bots/{bot_id}/skills/{skill_id}",
     scenario="deletes_exact_inactive_local_skill",
     input=CaseInput(
-        path_params={"skill_id": "1"},
+        path_params={"bot_id": _BOT_ID, "skill_id": "1"},
         query_params={"user_id": _OWNER},
         headers=_HEADERS,
     ),
@@ -245,10 +245,10 @@ def delete_inactive_local_skill():
 
 @endpoint_test(
     method="DELETE",
-    path="/openapi/v1/bots/skills/{skill_id}",
+    path="/openapi/v1/bots/{bot_id}/skills/{skill_id}",
     scenario="rejects_active_local_skill",
     input=CaseInput(
-        path_params={"skill_id": "1"},
+        path_params={"bot_id": _BOT_ID, "skill_id": "1"},
         query_params={"user_id": _OWNER},
         headers=_HEADERS,
     ),
@@ -264,10 +264,10 @@ def delete_active_local_skill_is_rejected():
 
 @endpoint_test(
     method="DELETE",
-    path="/openapi/v1/bots/skills/{skill_id}",
+    path="/openapi/v1/bots/{bot_id}/skills/{skill_id}",
     scenario="rejects_inactive_default_skill_referenced_by_active_custom_set",
     input=CaseInput(
-        path_params={"skill_id": "1"},
+        path_params={"bot_id": _BOT_ID, "skill_id": "1"},
         query_params={"user_id": _OWNER},
         headers=_HEADERS,
     ),

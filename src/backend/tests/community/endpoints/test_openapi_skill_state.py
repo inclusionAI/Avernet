@@ -197,10 +197,10 @@ def _assert_skill_remains_inactive(_response, world) -> None:
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/bots/skills/{skill_id}/activate",
+    path="/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate",
     scenario="activates_exact_tenant_local_skill",
     input=CaseInput(
-        path_params={"skill_id": "1"},
+        path_params={"bot_id": _BOT_ID, "skill_id": "1"},
         query_params={"user_id": _OWNER},
         headers=_HEADERS,
     ),
@@ -219,10 +219,10 @@ def activate_local_skill_reconciles_runtime():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/bots/skills/{skill_id}/activate",
+    path="/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate",
     scenario="runtime_failure_returns_fixed_error",
     input=CaseInput(
-        path_params={"skill_id": "1"},
+        path_params={"bot_id": _BOT_ID, "skill_id": "1"},
         query_params={"user_id": _OWNER},
         headers=_HEADERS,
     ),
@@ -242,10 +242,10 @@ def activate_local_skill_runtime_failure_is_publicly_safe():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/bots/skills/{skill_id}/deactivate",
+    path="/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate",
     scenario="idempotent_inactive_skill_still_reconciles",
     input=CaseInput(
-        path_params={"skill_id": "1"},
+        path_params={"bot_id": _BOT_ID, "skill_id": "1"},
         query_params={"user_id": _OWNER},
         headers=_HEADERS,
     ),
@@ -264,10 +264,10 @@ def deactivate_inactive_local_skill_is_an_idempotent_happy_path():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/bots/skills/{skill_id}/deactivate",
+    path="/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate",
     scenario="runtime_failure_compensates_with_fixed_error",
     input=CaseInput(
-        path_params={"skill_id": "1"},
+        path_params={"bot_id": _BOT_ID, "skill_id": "1"},
         query_params={"user_id": _OWNER},
         headers=_HEADERS,
     ),
