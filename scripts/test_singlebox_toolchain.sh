@@ -94,6 +94,81 @@ test_claude_code_existing_cli_skips_install() (
     assert_eq "$cli_path" "$CLAUDE_CODE_PATH" "existing Claude Code path"
 )
 
+test_claude_code_default_response_installs_missing_cli() (
+    local temp_dir bin_dir args_path
+    temp_dir="$(mktemp -d)"
+    bin_dir="${temp_dir}/bin"
+    TEST_CLAUDE_CLI_PATH="${bin_dir}/claude"
+    args_path="${temp_dir}/npm-args"
+    mkdir -p "$bin_dir"
+
+    export PATH="${bin_dir}:/usr/bin:/bin"
+    export TEST_CLAUDE_CLI_PATH
+    unset CLAUDE_CODE_PATH
+    npm() {
+        if [ "$1" = "prefix" ] && [ "$2" = "-g" ]; then
+            printf '%s\n' "$temp_dir"
+            return 0
+        fi
+        assert_eq "install -g @anthropic-ai/claude-code --registry=https://registry.npmmirror.com" "$*" "Claude Code npm install arguments"
+        printf '%s\n' "$*" > "$args_path"
+        printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$TEST_CLAUDE_CLI_PATH"
+        chmod +x "$TEST_CLAUDE_CLI_PATH"
+    }
+
+    setup_claude_code < <(printf '\n') || fail "empty response should install missing Claude Code"
+    assert_eq "install -g @anthropic-ai/claude-code --registry=https://registry.npmmirror.com" "$(<"$args_path")" "recorded Claude Code npm install arguments"
+)
+
+test_claude_code_decline_skips_install() (
+    local temp_dir
+    temp_dir="$(mktemp -d)"
+
+    export PATH="/usr/bin:/bin"
+    unset CLAUDE_CODE_PATH
+    npm() {
+        if [ "$1" = "prefix" ] && [ "$2" = "-g" ]; then
+            printf '%s\n' "$temp_dir"
+            return 0
+        fi
+        fail "npm install should not run when Claude Code installation is declined"
+    }
+
+    setup_claude_code < <(printf 'n\n') || fail "declining Claude Code should allow the toolchain to continue"
+    [ -z "${CLAUDE_CODE_PATH:-}" ] || fail "Claude Code path should remain unset when installation is declined"
+)
+
+test_toolchain_setup_continues_after_claude_code_skip() (
+    local temp_dir completed_steps=""
+    temp_dir="$(mktemp -d)"
+
+    record_step() {
+        completed_steps+="${completed_steps:+,}$1"
+    }
+    _apply_cargo_mirror_config() { :; }
+    setup_system_dependencies() { record_step system; }
+    setup_node() { record_step node; }
+    ensure_npm_available() { record_step npm; }
+    ensure_uv() { record_step uv; }
+    ensure_uv_managed_python() { record_step python; }
+    check_python_version_file() { :; }
+    setup_openclaw() { record_step openclaw; }
+    setup_rust() { record_step rust; }
+    setup_protobuf_interactive() { record_step protobuf; }
+    export PATH="/usr/bin:/bin"
+    unset CLAUDE_CODE_PATH
+    npm() {
+        if [ "$1" = "prefix" ] && [ "$2" = "-g" ]; then
+            printf '%s\n' "$temp_dir"
+            return 0
+        fi
+        fail "npm install should not run when Claude Code installation is declined"
+    }
+
+    toolchain_setup < <(printf 'n\n') || fail "declining Claude Code should not stop toolchain setup"
+    assert_eq "system,node,npm,uv,python,openclaw,rust,protobuf" "$completed_steps" "steps after declining Claude Code"
+)
+
 test_claude_code_installs_missing_cli() (
     local temp_dir bin_dir args_path
     temp_dir="$(mktemp -d)"
@@ -197,6 +272,9 @@ test_manual_install_hints
 test_basic_build_environment_on_current_host
 test_failed_install_prints_manual_command
 test_claude_code_existing_cli_skips_install
+test_claude_code_default_response_installs_missing_cli
+test_claude_code_decline_skips_install
+test_toolchain_setup_continues_after_claude_code_skip
 test_claude_code_installs_missing_cli
 test_claude_code_install_fails_without_resolved_cli
 test_load_rust_environment

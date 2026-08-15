@@ -5,7 +5,7 @@ set -e
 #
 # Usage:
 #   ./scripts/singlebox.sh                              # Default standalone local stack (setup current all group + start current all group)
-#   ./scripts/singlebox.sh install-tools                # Install/upgrade dev tools (including Claude Code)
+#   ./scripts/singlebox.sh install-tools                # Install/upgrade dev tools (Claude Code is optional)
 #   ./scripts/singlebox.sh setup [service|group|all]    # Prepare artifacts/config/links; rebuild stale binaries
 #   ./scripts/singlebox.sh start [service|group|all]    # Start target (default: current all group)
 #   ./scripts/singlebox.sh stop [service|group|all]     # Stop target (default: current all group)
@@ -405,7 +405,7 @@ show_help() {
     echo "  --standalone, -s Compatibility alias for the default mode"
     echo ""
     echo "Commands:"
-    echo "  install-tools                  Install/upgrade dev tools (node, npm, uv, openclaw, Claude Code, ...)"
+    echo "  install-tools                  Install/upgrade dev tools (node, npm, uv, openclaw, optional Claude Code, ...)"
     echo "  setup [service|group|all]      Prepare artifacts/config/links; rebuild stale binaries"
     echo "  start [service|group|all]      Start target (default: current all group)"
     echo "  stop [service|group|all]       Stop target (default: current all group)"
