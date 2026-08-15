@@ -56,6 +56,10 @@ class Routine(BaseModel):
         json_schema_extra={
             "example": {
                 "routine_id": "5f0f2c9a-b1c3-4f6e-9a0d-2e7c8b1d4a55",
+                # The *response* still carries the bot — it is a property of the
+                # routine, not a way of addressing it, and the model requires
+                # it. Only the create *body* lost it, to the path.
+                "bot_id": "20260813_a7k2m9p1",
                 "name": "morning-brief",
                 "trigger": {"type": "schedule", "cron": "0 9 * * 1-5"},
                 "command": "Summarize yesterday's tickets and post the brief.",

@@ -4337,6 +4337,7 @@
       "Routine": {
         "description": "A scheduled task run by a bot.",
         "example": {
+          "bot_id": "20260813_a7k2m9p1",
           "command": "Summarize yesterday's tickets and post the brief.",
           "enabled": true,
           "gmt_create": "2026-08-01T02:00:00+00:00",
@@ -12583,7 +12584,7 @@
       },
       "get": {
         "deprecated": true,
-        "description": "Get a routine.\n\nThe bot_id query parameter is required — a routine id alone does not\nidentify the bot that holds it. Note the returned bot_id may be empty on\nthis read; keep the one you queried with.\n\nDeprecated: use GET /openapi/v1/bots/{bot_id}/routines/{routine_id} instead.",
+        "description": "Get a routine.\n\nThe bot is named by the path — a routine id alone does not identify the\nbot that holds it. Note the returned bot_id may be empty on this read;\nkeep the one you addressed with.\n\nDeprecated: use GET /openapi/v1/bots/{bot_id}/routines/{routine_id} instead.",
         "operationId": "get_routine_openapi_v1_bots_routines__routine_id__get",
         "parameters": [
           {
@@ -23147,7 +23148,7 @@
         ]
       },
       "get": {
-        "description": "Get a routine.\n\nThe bot_id query parameter is required — a routine id alone does not\nidentify the bot that holds it. Note the returned bot_id may be empty on\nthis read; keep the one you queried with.",
+        "description": "Get a routine.\n\nThe bot is named by the path — a routine id alone does not identify the\nbot that holds it. Note the returned bot_id may be empty on this read;\nkeep the one you addressed with.",
         "operationId": "get_routine_openapi_v1_bots__bot_id__routines__routine_id__get",
         "parameters": [
           {

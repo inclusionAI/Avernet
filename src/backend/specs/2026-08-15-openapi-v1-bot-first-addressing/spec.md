@@ -63,9 +63,9 @@ dependency does not know — so for those the grant check moves into the handler
 > make the address uniform on the skills group, move the body-carried `bot_id`,
 > or resolve the skill before the check.
 
-This feature does the first two and makes the third unnecessary, so all seven
-deferrals collapse and the second mechanism is deleted. **This is the reason to
-do the work now rather than later**: the addressing change is what makes the
+This feature does the first two. It does **not** do the third, so three of the
+seven deferrals collapse and four remain — see the section below for which and
+why. **This is still the reason to do the work now rather than later**: the addressing change is what makes the
 authorization seam uniform, and every release the two mechanisms coexist is
 another release in which they can drift.
 
@@ -267,23 +267,49 @@ spell it differently. This one is **not** optional in the way the other two are:
 it is what lets `_addressed_owner` read the owner those operations act on, which
 is the last of the seven handler-side grant checks (below).
 
-### One authorization seam — closing `TODO(#960)`
+### One authorization seam — narrowing `TODO(#960)` from seven to four
 
-With the addressing change in place, every grant-checked operation carries its
-bot where `require_granted_bot` can read it, and every one that names an owner
-spells it `owner_id`. So:
+> **Amended during implementation.** This section originally said all seven
+> deferrals collapse and `SKILL_SCOPED_OPERATIONS` is deleted. That was wrong,
+> and shipping it as written would have been a security regression: the first
+> attempt mounted all six skills operations under the shared dependency and
+> refused an application holding a *valid* grant on a shared bot. Four
+> operations genuinely cannot be checked by the shared dependency, and this
+> section now says which and why — so that a later change does not delete their
+> handler-side checks believing the dependency covers them. **It does not.**
+
+With the addressing change in place, most grant-checked operations carry their
+bot where `require_granted_bot` can read it, and those that name an owner spell
+it `owner_id`. So:
 
 - `_defers_to_its_handler` is deleted, along with `BODY_BOT_ID_OPERATIONS` and
-  `SKILL_SCOPED_OPERATIONS` in `admission.py`.
-- `OWNER_ADDRESSED_OPERATIONS` is deleted; the two skills operations move to
-  `GRANT_CHECKED_ADDRESSED_BOT`, which is what they have always meant.
-- The handler-side `caller.require_bot(...)` calls in the routines and skills
-  handlers are removed — the shared dependency does it, once, for every route.
+  `OWNER_ADDRESSED_OPERATIONS` in `admission.py`.
+- The two skills *collection* operations move to `GRANT_CHECKED_ADDRESSED_BOT`,
+  which is what they have always meant, and their handler-side
+  `caller.require_bot(...)` is removed — the dependency now binds the same
+  `(bot, owner)` they act on.
+- The routines create takes its bot on the path, so its handler-side check goes
+  too.
 
-The property the deferral list existed to preserve must survive verbatim: an
-operation whose bot cannot be seen is **refused**, not waved through. After this
-change no operation is in that position, and the refusal branch in
-`require_granted_bot` stays as the backstop for one added later.
+**`SKILL_SCOPED_OPERATIONS` stays, holding the four `{skill_id}` operations.**
+They resolve by `(skill, actor)`, so the addressed bot's *owner* arrives on the
+record rather than on the wire — a collaborator reaches a skill on someone
+else's bot routinely, and the owner cannot be defaulted to the caller. There is
+nothing for the shared dependency to look a grant up against until the record
+has been read, so the check belongs after that read or nowhere. They are mounted
+without the group-level dependency rather than exempted from one, and
+`test_admission_inventory.py` asserts the set is exactly those four.
+
+Closing the remaining four needs a different change — either a skills read keyed
+by `(bot, owner, skill)` rather than `(skill, actor)`, or a way for the
+dependency to defer to a *record read* rather than to a handler. Neither belongs
+in an addressing refactor.
+
+The property the deferral list existed to preserve survives verbatim: an
+operation whose bot cannot be seen is **refused**, not waved through. The
+refusal branch in `require_granted_bot` stays as the backstop, and
+`test_self_checked_routes_refuse.py` drives every self-checking operation with
+an ungranted application to prove the handler-side check is really there.
 
 ## Non-Goals
 
@@ -333,10 +359,14 @@ None blocking. Two recorded for the reviewer:
 - The reserved-name list in `docs/openapi-v1/README.md` is six routed names, and
   the convention test still derives it from the routes.
 - `admission.py` has an entry for every new address, and
-  `BODY_BOT_ID_OPERATIONS`, `SKILL_SCOPED_OPERATIONS` and
-  `OWNER_ADDRESSED_OPERATIONS` are gone.
-- No operation defers its grant check to its handler: `_defers_to_its_handler`
-  is deleted, `TODO(#960)` is closed, and `test_principal_seam.py` asserts that
-  every grant-checked route is checked by the shared dependency.
+  `BODY_BOT_ID_OPERATIONS` and `OWNER_ADDRESSED_OPERATIONS` are gone.
+  `SKILL_SCOPED_OPERATIONS` remains, holding exactly the four `{skill_id}`
+  operations and no more.
+- `_defers_to_its_handler` is deleted and `TODO(#960)` is narrowed from seven
+  operations to four. `test_admission_inventory.py` asserts that the set of
+  self-checking operations is exactly those four, and
+  `test_self_checked_routes_refuse.py` asserts each of them actually refuses an
+  ungranted application — the structural check cannot see inside a handler, so
+  something has to.
 - `src/gateway/configs/schemas/bots.openapi.json` is regenerated and matches what
   the backend publishes.

@@ -143,3 +143,36 @@ def test_the_published_document_contains_nothing_internal():
     assert not problems, "internal detail in the published document:\n  " + "\n  ".join(
         problems
     )
+
+
+def test_every_published_example_satisfies_its_own_schema():
+    """An example missing a required field is worse than no example.
+
+    It is the first thing an integrator copies, and copying it produces a
+    payload the schema rejects — or, on a response, a shape the client's
+    generated type cannot hold. Either way the document contradicts itself and
+    the reader trusts the wrong half.
+
+    This is not hypothetical here: removing ``bot_id`` from the routines
+    *create* body, correct because the bot moved to the path, also took it out
+    of the ``Routine`` *response* example, where the field is still required and
+    still sent. That went unnoticed for the whole feature and was found in
+    review, not by the suite — so the invariant is asserted rather than
+    remembered.
+
+    Only required fields are checked. An example may legitimately omit an
+    optional one, and often should, to show the minimal shape.
+    """
+    schemas = (_document().get("components") or {}).get("schemas") or {}
+    problems: list[str] = []
+    for name, schema in sorted(schemas.items()):
+        example = schema.get("example")
+        if not isinstance(example, dict):
+            continue
+        missing = sorted(set(schema.get("required") or []) - set(example))
+        if missing:
+            problems.append(f"{name}: example omits required {missing}")
+    assert not problems, (
+        "published examples that do not satisfy their own schema:\n  "
+        + "\n  ".join(problems)
+    )
