@@ -800,69 +800,6 @@ async def get_bot_passport(
     return envelope(Passport(bot_id=bot_id, passport_id=passport_id), request)
 
 
-def _engine_config_target(bot: dict[str, Any]) -> tuple[str, str, str]:
-    """Resolve (entity_id, entity_type, engine) for an engine-config call."""
-    entity_id = bot.get("entity_id")
-    if not entity_id:
-        raise BotNotFoundError("bot has no associated entity")
-    entity_type = bot.get("entity_type") or "staff"
-    engine = bot.get("active_engine") or DEFAULT_ENGINE_TYPE
-    return entity_id, entity_type, engine
-
-
-@router.get(
-    "/{bot_id}/engine-config",
-    response_model=Envelope[dict[str, Any]],
-    responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
-)
-@envelope_errors
-async def get_bot_engine_config(
-    bot_id: BotIdPath,
-    request: Request,
-    owner_id: UserIdDep,
-    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    engine_config_service: EngineConfigServiceProtocol = Injected(
-        EngineConfigServiceProtocol
-    ),
-) -> Envelope[dict[str, Any]]:
-    """Read a bot's engine configuration (free-form JSON)."""
-    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
-    entity_id, entity_type, engine = _engine_config_target(bot)
-    data = await engine_config_service.read_bot_config(
-        bot_id=bot_id, owner_id=owner_id, entity_id=entity_id,
-        entity_type=entity_type, engine_type=engine,
-    )
-    return envelope(data, request)
-
-
-@router.put(
-    "/{bot_id}/engine-config",
-    response_model=Envelope[dict[str, Any]],
-    responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
-)
-@envelope_errors
-async def update_bot_engine_config(
-    bot_id: BotIdPath,
-    body: dict[str, Any],
-    request: Request,
-    owner_id: UserIdDep,
-    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    engine_config_service: EngineConfigServiceProtocol = Injected(
-        EngineConfigServiceProtocol
-    ),
-) -> Envelope[dict[str, Any]]:
-    """Write a bot's engine configuration (free-form JSON)."""
-    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
-    entity_id, entity_type, engine = _engine_config_target(bot)
-    await engine_config_service.write_bot_config(
-        bot_id=bot_id, owner_id=owner_id, entity_id=entity_id,
-        entity_type=entity_type, engine_type=engine, config=body,
-    )
-    return envelope(body, request)
-
-
 def _audit_actor(caller: ActingCaller, owner_id: str) -> str:
     """Who to record as having changed the script.
 

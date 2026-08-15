@@ -16,6 +16,7 @@ from functools import lru_cache
 
 import pytest
 from fastapi import FastAPI
+from fastapi.routing import APIRoute
 
 from agentclaw.community.adapters.http.openapi_v1 import build_public_router
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
@@ -28,32 +29,34 @@ from agentclaw.community.core.engine_runtime.models import EngineResult
 
 from .conftest import BOT, OWNER, fails, ok
 
-_ENGINE_RUNTIME_COMPONENTS = frozenset(
-    {"sessions", "engine", "models", "approvals", "connection"}
-)
+#: The engine-runtime paths, taken from the routers themselves rather than
+#: guessed from a segment. Segment-matching was wrong the moment engine config
+#: moved to ``/{bot_id}/engine/config``: it sits under the ``engine`` literal by
+#: address but is not an engine-runtime operation, takes neither ``owner_id``
+#: nor ``stage``, and documents no 501 — so a name test would sweep it in and
+#: assert it carries parameters it has no business carrying.
+def _engine_runtime_paths() -> frozenset[str]:
+    from agentclaw.community.adapters.http.openapi_v1 import _ENGINE_RUNTIME_GROUPS
+
+    return frozenset(
+        route.path.replace(":path", "")
+        for group in _ENGINE_RUNTIME_GROUPS
+        for route in group.routes
+        if isinstance(route, APIRoute)
+    )
 
 
 def _is_engine_runtime(path: str) -> bool:
-    """Whether *path* addresses one of the engine-runtime groups.
+    """Whether *path* is served by one of the engine-runtime groups."""
+    return path in _engine_runtime_paths()
 
-    Bot-first addressing puts the component name *after* ``{bot_id}``, so this
-    is a segment test rather than the prefix test it replaced. A prefix test
-    would now match nothing and quietly assert over an empty set — which is why
-    the loops below also assert they found something.
-    """
-    parts = path.split("/")
-    return (
-        len(parts) > 5
-        and parts[4] == "{bot_id}"
-        and parts[5] in _ENGINE_RUNTIME_COMPONENTS
-    )
 
 #: The other operations that address a bot by ``(owner, bot_id)``.
 #:
 #: They take ``owner_id`` for the same reason and with the same default — the
 #: caller's own bot — because ``bot_id`` alone does not identify one. They do
 #: **not** take ``stage``: there is no runtime in question when you are
-#: recording who may reach a bot.
+#: recording who may reach a bot, or listing a bot's stored skills.
 _OWNER_ADDRESSED_ELSEWHERE = {
     ("get", "/openapi/v1/bots/{bot_id}/authorized-apps"),
     ("post", "/openapi/v1/bots/{bot_id}/authorized-apps"),

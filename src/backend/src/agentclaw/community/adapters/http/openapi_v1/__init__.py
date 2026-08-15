@@ -131,6 +131,7 @@ from fastapi import APIRouter, Depends
 from .authorized_apps import app_view_router as authorized_bots_router
 from .authorized_apps import router as authorized_apps_router
 from .bots import router as bots_router
+from .bots.engine_config import router as engine_config_router
 from .contracts import (
     ENGINE_RUNTIME_ERROR_RESPONSES,
     ERROR_RESPONSES,
@@ -213,6 +214,11 @@ _SUBGROUPS = [
 # depends on the same check, because it is where the addressed owner comes from
 # for an application caller.
 _GRANT_CHECKED_SUBGROUPS = [
+    # Engine config is bots-component work at an engine-component address: it
+    # reads and writes a stored blob, so it takes the ordinary error table
+    # rather than the engine-runtime one, and mounting it here is what gives it
+    # both. See ``bots/engine_config.py``.
+    engine_config_router,
     identity_router,
     resources_router,
     routines_router,

@@ -89,7 +89,7 @@ parameter. Verify each with the dump.
 
 ## Contract fixes
 
-- [ ] **15. `engine-config` → `/{bot_id}/engine/config`.** Move the two
+- [x] **15. `engine-config` → `/{bot_id}/engine/config`.** Move the two
       handlers out of `openapi_v1/bots/router.py` onto their own router mounted
       at `/openapi/v1/bots/{bot_id}/engine` with the **ordinary** error table —
       not `ENGINE_RUNTIME_ERROR_RESPONSES`, which documents a 501 and 504 an
