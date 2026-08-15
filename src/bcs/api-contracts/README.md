@@ -113,8 +113,7 @@ Export the internal contract for Gateway `/internal-docs` consumption:
 uv run --with pyyaml python src/bcs/scripts/dump_openapi.py \
   /tmp/bcn.internal.openapi.json \
   --entrypoint internal.yaml \
-  --path-prefix /api/v1/collaboration/ \
-  --forbid-prefix /openapi/v1/
+  --path-prefix /api/v1/collaboration/
 ```
 
 Pass `--root src/bcs/api-contracts/v1` to export a different checked-out

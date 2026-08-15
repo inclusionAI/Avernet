@@ -151,8 +151,7 @@ main() {
     _dump_upstream bcn
     _dump_upstream bcn-internal \
         --entrypoint internal.yaml \
-        --path-prefix /api/v1/collaboration/ \
-        --forbid-prefix /openapi/v1/
+        --path-prefix /api/v1/collaboration/
     if ! $DRY_RUN; then
         _gate_and_publish \
             bcn \

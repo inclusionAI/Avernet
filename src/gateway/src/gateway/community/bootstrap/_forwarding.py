@@ -113,6 +113,23 @@ def _internal_openapi_domains(config: Config) -> dict[str, dict[str, object]]:
         return {}
     result: dict[str, dict[str, object]] = {}
     for name, schema in schemas.items():
-        if isinstance(schema, dict):
-            result[str(name)] = schema
+        if not isinstance(schema, dict):
+            continue
+        domain_name = str(name)
+        source = str(schema.get("source", "file"))
+        if source == "file":
+            if not str(schema.get("path", "")).strip():
+                raise ValueError(
+                    f"internal_api_docs.schemas.{domain_name}: file source requires path"
+                )
+        elif source == "http":
+            if not str(schema.get("url", "")).strip():
+                raise ValueError(
+                    f"internal_api_docs.schemas.{domain_name}: http source requires url"
+                )
+        else:
+            raise ValueError(
+                f"internal_api_docs.schemas.{domain_name}: unsupported source {source!r}"
+            )
+        result[domain_name] = schema
     return result

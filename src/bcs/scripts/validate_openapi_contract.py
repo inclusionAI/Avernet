@@ -24,6 +24,8 @@ HTTP_METHODS = {
 }
 ROUTING_ONLY_OPERATION_ID_PARTS = {"collaboration", "bcn", "openapi"}
 ENVELOPE_FIELDS = {"code", "message", "data", "request_id"}
+PUBLIC_COLLABORATION_PREFIX = "/openapi/v1/collaboration/"
+INTERNAL_COLLABORATION_PREFIX = "/api/v1/collaboration/"
 
 
 def _json_pointer(document: Any, pointer: str) -> Any:
@@ -130,8 +132,7 @@ def _response_schema(response: dict[str, Any]) -> dict[str, Any] | None:
 def validate_contract(
     contract: dict[str, Any],
     *,
-    path_prefix: str = "/openapi/v1/",
-    forbidden_prefixes: tuple[str, ...] = ("/openapi/v1/internal/",),
+    path_prefix: str = PUBLIC_COLLABORATION_PREFIX,
 ) -> list[str]:
     errors: list[str] = []
     operation_ids: set[str] = set()
@@ -140,9 +141,6 @@ def validate_contract(
         location = f"{method.upper()} {path}"
         if not path.startswith(path_prefix):
             errors.append(f"{location}: path is outside {path_prefix}**")
-        for forbidden_prefix in forbidden_prefixes:
-            if forbidden_prefix and path.startswith(forbidden_prefix):
-                errors.append(f"{location}: path uses forbidden prefix {forbidden_prefix}")
 
         operation_id = operation.get("operationId")
         if not operation_id:
@@ -198,8 +196,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--entrypoint", default="openapi.yaml")
-    parser.add_argument("--path-prefix", default="/openapi/v1/")
-    parser.add_argument("--forbid-prefix", action="append", default=[])
+    parser.add_argument("--path-prefix", default=PUBLIC_COLLABORATION_PREFIX)
     args = parser.parse_args()
 
     try:
@@ -211,7 +208,6 @@ def main() -> int:
     errors = validate_contract(
         contract,
         path_prefix=args.path_prefix,
-        forbidden_prefixes=tuple(args.forbid_prefix),
     )
     if errors:
         for error in errors:

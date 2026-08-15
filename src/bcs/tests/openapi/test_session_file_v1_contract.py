@@ -78,8 +78,7 @@ def test_raw_content_successes_are_explicit_and_contract_is_valid() -> None:
 
     assert validate_contract(
         contract,
-        path_prefix="/api/v1/",
-        forbidden_prefixes=("/openapi/v1/",),
+        path_prefix="/api/v1/collaboration/",
     ) == []
 
 

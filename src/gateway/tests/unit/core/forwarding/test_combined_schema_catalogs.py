@@ -443,3 +443,117 @@ class TestBuildForwardingWithMixedSources:
         )
         assert result.refresh_seconds == 45
         assert result.internal_openapi_domains == ("bcn-internal",)
+
+    def test_rejects_internal_schema_with_unknown_source(self, tmp_path: Path) -> None:
+        from gateway.community.bootstrap._forwarding import build_forwarding
+
+        config = Config(
+            config_dir=tmp_path,
+            user_config=UserConfig(
+                upstreams={
+                    "base_path": "/openapi/v1",
+                    "domains": {
+                        "bots": {
+                            "server": "backend",
+                            "schema": {"source": "file", "path": "bots.openapi.json"},
+                        }
+                    },
+                    "servers": {"backend": {"base_url": "http://backend:8080"}},
+                },
+                internal_api_docs={
+                    "schemas": {"bcn-internal": {"source": "object_store"}}
+                },
+            ),
+        )
+
+        with patch("gateway.community.config.ConfigLoader.load", return_value=config):
+            try:
+                build_forwarding(
+                    schema_catalogs={
+                        "file": FileSchemaCatalog(),
+                        "http": HttpSchemaCatalog(),
+                    },
+                    forwarder=MagicMock(spec=Forwarder),
+                    ws_forwarder=MagicMock(spec=WebSocketForwarder),
+                )
+            except ValueError as error:
+                assert "internal_api_docs.schemas.bcn-internal" in str(error)
+                assert "unsupported source" in str(error)
+            else:
+                raise AssertionError("invalid internal schema source was accepted")
+
+    def test_rejects_internal_file_schema_without_path(self, tmp_path: Path) -> None:
+        from gateway.community.bootstrap._forwarding import build_forwarding
+
+        config = Config(
+            config_dir=tmp_path,
+            user_config=UserConfig(
+                upstreams={
+                    "base_path": "/openapi/v1",
+                    "domains": {
+                        "bots": {
+                            "server": "backend",
+                            "schema": {"source": "file", "path": "bots.openapi.json"},
+                        }
+                    },
+                    "servers": {"backend": {"base_url": "http://backend:8080"}},
+                },
+                internal_api_docs={
+                    "schemas": {"bcn-internal": {"source": "file"}}
+                },
+            ),
+        )
+
+        with patch("gateway.community.config.ConfigLoader.load", return_value=config):
+            try:
+                build_forwarding(
+                    schema_catalogs={
+                        "file": FileSchemaCatalog(),
+                        "http": HttpSchemaCatalog(),
+                    },
+                    forwarder=MagicMock(spec=Forwarder),
+                    ws_forwarder=MagicMock(spec=WebSocketForwarder),
+                )
+            except ValueError as error:
+                assert "internal_api_docs.schemas.bcn-internal" in str(error)
+                assert "file source requires path" in str(error)
+            else:
+                raise AssertionError("internal file schema without path was accepted")
+
+    def test_rejects_internal_http_schema_without_url(self, tmp_path: Path) -> None:
+        from gateway.community.bootstrap._forwarding import build_forwarding
+
+        config = Config(
+            config_dir=tmp_path,
+            user_config=UserConfig(
+                upstreams={
+                    "base_path": "/openapi/v1",
+                    "domains": {
+                        "bots": {
+                            "server": "backend",
+                            "schema": {"source": "file", "path": "bots.openapi.json"},
+                        }
+                    },
+                    "servers": {"backend": {"base_url": "http://backend:8080"}},
+                },
+                internal_api_docs={
+                    "schemas": {"bcn-internal": {"source": "http"}}
+                },
+            ),
+        )
+
+        with patch("gateway.community.config.ConfigLoader.load", return_value=config):
+            try:
+                build_forwarding(
+                    schema_catalogs={
+                        "file": FileSchemaCatalog(),
+                        "http": HttpSchemaCatalog(),
+                    },
+                    forwarder=MagicMock(spec=Forwarder),
+                    ws_forwarder=MagicMock(spec=WebSocketForwarder),
+                )
+            except ValueError as error:
+                assert "internal_api_docs.schemas.bcn-internal" in str(error)
+                assert "http source requires url" in str(error)
+            else:
+                raise AssertionError("internal http schema without url was accepted")

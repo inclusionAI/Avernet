@@ -97,7 +97,6 @@ class DumpOpenApiTests(unittest.TestCase):
                     output,
                     entrypoint="internal.yaml",
                     path_prefix="/api/v1/collaboration/",
-                    forbidden_prefixes=("/openapi/v1/",),
                 ),
                 output,
             )
