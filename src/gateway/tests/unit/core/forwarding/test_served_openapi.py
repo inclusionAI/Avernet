@@ -26,6 +26,12 @@ _BAAS_ARTIFACT = (
 _BCN_ARTIFACT = (
     Path(__file__).resolve().parents[4] / "configs" / "schemas" / "bcn.openapi.json"
 )
+_BCN_INTERNAL_ARTIFACT = (
+    Path(__file__).resolve().parents[4]
+    / "configs"
+    / "schemas"
+    / "bcn.internal.openapi.json"
+)
 _SHIPPED_CONFIG = Path(__file__).resolve().parents[4] / "configs" / "application.yaml"
 _METHODS = {"get", "post", "put", "delete", "patch"}
 _RULES = RouteSecurity.from_table({"/**": {"user": "required"}})
@@ -126,6 +132,9 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
     # the shipped baas artifact now serves the sessions path under chat.
     assert "/openapi/v1/chat/sessions/{session_id}" in paths
     assert "/openapi/v1/collaboration/bots/mine" in paths
+    assert not any(
+        path.startswith("/api/v1/collaboration") for path in paths
+    )
     assert "post" in paths["/openapi/v1/collaboration/sessions/{session_id}/token"]
     collection = paths[
         "/openapi/v1/collaboration/sessions/{session_id}/collect"
@@ -175,6 +184,28 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
         "Collaboration / Sessions",
         "Collaboration / Invitations",
     ]
+
+
+def test_shipped_internal_openapi_serves_bcn_internal_paths_only() -> None:
+    internal = json.loads(_BCN_INTERNAL_ARTIFACT.read_text())
+    public = json.loads(_BCN_ARTIFACT.read_text())
+
+    document = build_combined_openapi(
+        ["bcn-internal"],
+        {"bcn-internal": internal, "collaboration": public}.__getitem__,
+        title="gateway internal",
+        version="0.1.0",
+        description="Internal APIs",
+    )
+
+    paths = document["paths"]
+    assert "/api/v1/collaboration/sessions/{session_id}/files" in paths
+    assert (
+        "/api/v1/collaboration/bots/{bot_id}/candidates/search" in paths
+    )
+    assert not any(
+        path.startswith("/openapi/v1/collaboration") for path in paths
+    )
 
 
 def test_served_internal_openapi_combines_only_internal_schema_paths() -> None:

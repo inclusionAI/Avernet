@@ -113,9 +113,11 @@ def _internal_openapi_domains(config: Config) -> dict[str, dict[str, object]]:
         return {}
     result: dict[str, dict[str, object]] = {}
     for name, schema in schemas.items():
-        if not isinstance(schema, dict):
-            continue
         domain_name = str(name)
+        if not isinstance(schema, dict):
+            raise ValueError(
+                f"internal_api_docs.schemas.{domain_name}: must be a mapping"
+            )
         source = str(schema.get("source", "file"))
         if source == "file":
             if not str(schema.get("path", "")).strip():

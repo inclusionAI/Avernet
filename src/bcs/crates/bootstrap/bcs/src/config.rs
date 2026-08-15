@@ -325,7 +325,7 @@ impl OpenApiV1Config {
 }
 
 fn default_openapi_v1_public_collaboration_base_url() -> String {
-    "http://127.0.0.1:21000/openapi/v1/collaboration".to_string()
+    "http://127.0.0.1:21000/api/v1/collaboration".to_string()
 }
 
 impl Default for CollaborationConfig {
@@ -2239,15 +2239,25 @@ tenant = "teamclaw"
     }
 
     #[test]
+    fn default_openapi_public_collaboration_base_url_uses_internal_path() {
+        assert_eq!(
+            OpenApiV1Config::default()
+                .validated_public_collaboration_base_url()
+                .unwrap(),
+            "http://127.0.0.1:21000/api/v1/collaboration"
+        );
+    }
+
+    #[test]
     fn openapi_v1_public_base_url_is_validated_and_normalized() {
         let cfg: OpenApiV1Config = toml::from_str(
-            r#"public_collaboration_base_url = "https://gateway.example.com/openapi/v1/collaboration/""#,
+            r#"public_collaboration_base_url = "https://gateway.example.com/api/v1/collaboration/""#,
         )
         .unwrap();
 
         assert_eq!(
             cfg.validated_public_collaboration_base_url().unwrap(),
-            "https://gateway.example.com/openapi/v1/collaboration"
+            "https://gateway.example.com/api/v1/collaboration"
         );
     }
 
@@ -2255,11 +2265,11 @@ tenant = "teamclaw"
     fn openapi_v1_public_base_url_rejects_unsafe_or_non_absolute_values() {
         for value in [
             "",
-            "/openapi/v1/collaboration",
-            "ftp://gateway.example.com/openapi/v1/collaboration",
-            "https://user@gateway.example.com/openapi/v1/collaboration",
-            "https://gateway.example.com/openapi/v1/collaboration?tenant=x",
-            "https://gateway.example.com/openapi/v1/collaboration#fragment",
+            "/api/v1/collaboration",
+            "ftp://gateway.example.com/api/v1/collaboration",
+            "https://user@gateway.example.com/api/v1/collaboration",
+            "https://gateway.example.com/api/v1/collaboration?tenant=x",
+            "https://gateway.example.com/api/v1/collaboration#fragment",
         ] {
             let cfg = OpenApiV1Config {
                 public_collaboration_base_url: value.to_string(),

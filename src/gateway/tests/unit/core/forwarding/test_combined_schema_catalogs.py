@@ -444,6 +444,44 @@ class TestBuildForwardingWithMixedSources:
         assert result.refresh_seconds == 45
         assert result.internal_openapi_domains == ("bcn-internal",)
 
+    def test_rejects_non_mapping_internal_schema_entry(self, tmp_path: Path) -> None:
+        from gateway.community.bootstrap._forwarding import build_forwarding
+
+        config = Config(
+            config_dir=tmp_path,
+            user_config=UserConfig(
+                upstreams={
+                    "base_path": "/openapi/v1",
+                    "domains": {
+                        "bots": {
+                            "server": "backend",
+                            "schema": {"source": "file", "path": "bots.openapi.json"},
+                        }
+                    },
+                    "servers": {"backend": {"base_url": "http://backend:8080"}},
+                },
+                internal_api_docs={
+                    "schemas": {"bcn-internal": "schemas/bcn.internal.openapi.json"}
+                },
+            ),
+        )
+
+        with patch("gateway.community.config.ConfigLoader.load", return_value=config):
+            try:
+                build_forwarding(
+                    schema_catalogs={
+                        "file": FileSchemaCatalog(),
+                        "http": HttpSchemaCatalog(),
+                    },
+                    forwarder=MagicMock(spec=Forwarder),
+                    ws_forwarder=MagicMock(spec=WebSocketForwarder),
+                )
+            except ValueError as error:
+                assert "internal_api_docs.schemas.bcn-internal" in str(error)
+                assert "must be a mapping" in str(error)
+            else:
+                raise AssertionError("non-mapping internal schema entry was accepted")
+
     def test_rejects_internal_schema_with_unknown_source(self, tmp_path: Path) -> None:
         from gateway.community.bootstrap._forwarding import build_forwarding
 
