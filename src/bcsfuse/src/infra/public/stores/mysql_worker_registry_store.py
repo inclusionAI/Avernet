@@ -1645,13 +1645,6 @@ class MySQLWorkerRegistryStore:
             description=row.get("identity_description")
         )
 
-        # Parse worker config (e.g., fusion_enable). The config column was
-        # introduced in R15-PATCH-A but was accidentally dropped when building
-        # the Worker model, causing GET /v1/workers/{id}/config to always
-        # return fusion_enable=false in runtime/MySQL mode.
-        from src.domain.models.worker_config import WorkerConfig
-        worker_config = WorkerConfig(**config_data)
-
         # Build Worker
         return Worker(
             id=row["worker_id"],
@@ -1671,7 +1664,6 @@ class MySQLWorkerRegistryStore:
             source_ref=row.get("source_ref"),
             external_id=row.get("external_id"),
             active_profile_key=row.get("active_profile_key"),
-            config=worker_config,
             version=row.get("version", 1),
             created_at=row.get("created_at"),
             updated_at=row.get("updated_at"),
