@@ -324,7 +324,7 @@ def install_middleware(
     # the access log because both read the *matched route* off the scope on the
     # way out, and both are about the public surface only. Lazily imported for
     # the same reason.
-    from agentclaw.community.adapters.http.openapi_v1.deprecation import (
+    from agentclaw.community.adapters.http.openapi_v1.middleware import (
         DeprecationHeaderMiddleware,
     )
 

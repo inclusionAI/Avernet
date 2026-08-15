@@ -23,7 +23,7 @@ from agentclaw.community.adapters.http.openapi_v1 import build_public_router
 
 from .conftest import mount_public_error_handlers
 from agentclaw.community.adapters.http.openapi_v1.deprecated import LEGACY_ROUTES
-from agentclaw.community.adapters.http.openapi_v1.deprecation import (
+from agentclaw.community.adapters.http.openapi_v1.middleware import (
     DEPRECATION,
     SUNSET,
     DeprecationHeaderMiddleware,

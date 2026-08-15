@@ -284,3 +284,101 @@ def deactivate_inactive_local_skill_is_an_idempotent_happy_path():
 )
 def deactivate_local_skill_runtime_failure_is_publicly_safe():
     """The public fixed runtime failure never exposes transport details."""
+
+
+# The retiring addresses. `POST /openapi/v1/bots/skills/{skill_id}/activate`
+# names no bot at all, so the shim in `openapi_v1/deprecated/skills.py` reads
+# the skill record, resolves the bot behind it, and re-checks the grant against
+# that pair before delegating. Nothing about that is exercised by driving the
+# current address, so both verbs are driven here on their own.
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/skills/{skill_id}/activate",
+    scenario="legacy_address_activates_the_same_skill",
+    input=CaseInput(
+        path_params={"skill_id": "1"},
+        query_params={"user_id": _OWNER},
+        headers=_HEADERS,
+    ),
+    seed=_seed_activate,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {"changed": True, "skill": {"active": True}},
+        },
+    ),
+)
+def legacy_activate_resolves_the_bot_from_the_skill():
+    """The bot the address does not name is found behind the skill id."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/skills/{skill_id}/activate",
+    scenario="legacy_address_maps_runtime_failure_identically",
+    input=CaseInput(
+        path_params={"skill_id": "1"},
+        query_params={"user_id": _OWNER},
+        headers=_HEADERS,
+    ),
+    seed=_seed_runtime_failure,
+    expect=ExpectError(
+        status=502,
+        json_contains={
+            "code": 502102,
+            "message": "Skill runtime synchronization failed",
+            "data": None,
+        },
+    ),
+)
+def legacy_activate_runtime_failure_is_publicly_safe():
+    """The shim adds no new failure shape of its own."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/skills/{skill_id}/deactivate",
+    scenario="legacy_address_is_idempotent_too",
+    input=CaseInput(
+        path_params={"skill_id": "1"},
+        query_params={"user_id": _OWNER},
+        headers=_HEADERS,
+    ),
+    seed=_seed_activate,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {"changed": False, "skill": {"active": False}},
+        },
+    ),
+)
+def legacy_deactivate_inactive_local_skill_is_an_idempotent_happy_path():
+    """A repeated desired state is still a successful reconciliation here."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/skills/{skill_id}/deactivate",
+    scenario="legacy_address_compensates_identically",
+    input=CaseInput(
+        path_params={"skill_id": "1"},
+        query_params={"user_id": _OWNER},
+        headers=_HEADERS,
+    ),
+    seed=_seed_runtime_failure,
+    extra_assertions=(_assert_skill_remains_inactive,),
+    expect=ExpectError(
+        status=502,
+        json_contains={
+            "code": 502102,
+            "message": "Skill runtime synchronization failed",
+            "data": None,
+        },
+    ),
+)
+def legacy_deactivate_runtime_failure_is_publicly_safe():
+    """Compensation happens behind the retiring address exactly as behind the new one."""

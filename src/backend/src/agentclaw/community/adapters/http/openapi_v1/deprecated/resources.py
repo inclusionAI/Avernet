@@ -19,6 +19,8 @@ from agentclaw.community.adapters.http.openapi_v1.resources import (
     router as resources_router,
 )
 
+from fastapi import APIRouter
+
 from ._relocate import bot_first_to_query, relocate
 from ._requery import LegacyBotIdQuery, deprecated_doc, with_query_parameter
 from ._shim import legacy_router
@@ -33,7 +35,7 @@ def _bot_to_query(endpoint, method, new_path):
     )
 
 
-router = relocate(
+router: APIRouter = relocate(
     resources_router,
     legacy_router("/openapi/v1/bots/resources", "resources"),
     bot_first_to_query("resources"),

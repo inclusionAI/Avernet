@@ -89,8 +89,10 @@ class EngineConfigService:
 
         Returns:
             The parsed config dict on success; ``{}`` **only** when the config file is
-            missing or empty on the device. Every other failure is surfaced (raised),
-            never collapsed into an empty result.
+            missing or empty on the device — a bot whose config has never been
+            written reads as empty, which every ``DeviceFileSystem`` reports as
+            ``None``. Every other failure is surfaced (raised), never collapsed into
+            an empty result.
 
         Raises:
             DeviceNotBoundError: there is no resolvable active-stage device binding —
@@ -100,6 +102,10 @@ class EngineConfigService:
                 error (not masked as an empty config).
             json.JSONDecodeError: the config file exists but is not valid JSON
                 (the caller maps this to a malformed-config error response).
+
+        A device that is unreachable or refuses the read raises out of ``read_file``
+        rather than reading as an absent config — absence and unavailability must
+        stay distinguishable, or a caller would overwrite a config it never read.
         """
         owner_id = record.owner_id
         bot_id = record.source_bot_id
@@ -165,8 +171,10 @@ class EngineConfigService:
     ) -> dict:
         """Read a bot's engine config from its own device, provider-blind.
 
-        Returns the parsed dict; ``{}`` only when the file is missing/empty. Resolve
-        errors and ``json.JSONDecodeError`` propagate (the caller surfaces them).
+        Returns the parsed dict; ``{}`` only when the file is missing/empty — a bot
+        that has never had a config written reads as empty on every provider, not as
+        an error. Resolve errors, a device that refuses the read, and
+        ``json.JSONDecodeError`` propagate (the caller surfaces them).
         """
         device_fs = self._bot_config_device_fs(
             bot_id=bot_id, owner_id=owner_id, entity_id=entity_id,

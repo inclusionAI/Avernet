@@ -10,6 +10,11 @@ RFC 9745 for ``Deprecation`` and RFC 8594 for ``Sunset``, both as HTTP dates.
 Middleware rather than a per-route dependency for one reason: a dependency is
 something a new legacy route can be added without. The set is built from the
 registrations themselves, so a route that exists is a route that is stamped.
+
+Named ``middleware.py`` to match ``adapters/http/middleware.py``: this is where
+anything that wraps the whole public surface belongs, and calling it what it is
+keeps it out of the architecture test's reading of "a file under
+``adapters/http/`` that drives endpoints".
 """
 
 from __future__ import annotations

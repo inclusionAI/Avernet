@@ -37,28 +37,30 @@ from agentclaw.community.adapters.http.openapi_v1.identity import (
     router as identity_router,
 )
 
+from fastapi import APIRouter
+
 from ._relocate import bot_first_to_component_first, relocate
 from ._shim import legacy_router
 
-connection = relocate(
+connection: APIRouter = relocate(
     connection_router,
     legacy_router("/openapi/v1/bots/connection", "connection"),
     bot_first_to_component_first("connection"),
 )
 
-engine = relocate(
+engine: APIRouter = relocate(
     engine_router,
     legacy_router("/openapi/v1/bots/engine", "engine"),
     bot_first_to_component_first("engine"),
 )
 
-models = relocate(
+models: APIRouter = relocate(
     models_router,
     legacy_router("/openapi/v1/bots/models", "models"),
     bot_first_to_component_first("models"),
 )
 
-sessions = relocate(
+sessions: APIRouter = relocate(
     sessions_router,
     legacy_router("/openapi/v1/bots/sessions", "sessions"),
     bot_first_to_component_first("sessions"),
@@ -66,24 +68,24 @@ sessions = relocate(
 
 #: The approvals reads. The write shares this address and differs only by
 #: method, so it is excluded here and shimmed in :mod:`.approvals`.
-approvals = relocate(
+approvals: APIRouter = relocate(
     approvals_router,
     legacy_router("/openapi/v1/bots/approvals", "approvals"),
     bot_first_to_component_first("approvals"),
     skip=lambda method, _path: method == "PUT",
 )
 
-identity = relocate(
+identity: APIRouter = relocate(
     identity_router,
     legacy_router("/openapi/v1/bots/identity", "identity"),
     bot_first_to_component_first("identity"),
 )
 
 #: Mounted with ``ENGINE_RUNTIME_ERROR_RESPONSES``, like their replacements.
-ENGINE_RUNTIME = [connection, engine, models, sessions, approvals]
+ENGINE_RUNTIME: list[APIRouter] = [connection, engine, models, sessions, approvals]
 
 #: Mounted grant-checked, like its replacement.
-GRANT_CHECKED = [identity]
+GRANT_CHECKED: list[APIRouter] = [identity]
 
 __all__ = [
     "ENGINE_RUNTIME",

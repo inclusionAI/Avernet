@@ -12,6 +12,8 @@ from agentclaw.community.adapters.http.openapi_v1.bots.engine_config import (
     router as engine_config_router,
 )
 
+from fastapi import APIRouter
+
 from ._relocate import relocate
 from ._shim import legacy_router
 
@@ -24,7 +26,7 @@ def _to_hyphenated(path: str) -> str | None:
     return "/openapi/v1/bots/{bot_id}/engine-config"
 
 
-router = relocate(
+router: APIRouter = relocate(
     engine_config_router,
     legacy_router("/openapi/v1/bots", "bots"),
     _to_hyphenated,
