@@ -308,7 +308,16 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #:
 #: ``path`` moved 31 → 34 with the startup-script operations (GET/PUT/DELETE on
 #: ``/bots/{bot_id}/startup-script``) — all three address a bot, none moved.
-_BOT_ID_PLACEMENT = {"path": 34, "query": 16, "none": 21}
+#:
+#: Then bot-first addressing moved 34/16/21 → 54/1/16, and this counter stopped
+#: meaning what its name says: ``bot_id`` is no longer untouched, it was the
+#: point. Every operation that acts on one bot now names it in the path, so the
+#: only ``query`` left is ``GET /bots/logs/traces``, where ``bot_id`` is a
+#: filter over a tenant-level trace query rather than an address — the one
+#: placement the rule deliberately keeps. ``none`` fell 21 → 16 because the five
+#: operations that named no bot at all (the resources and routines collection
+#: roots, skills list and upload) now do.
+_BOT_ID_PLACEMENT = {"path": 54, "query": 1, "none": 16}
 
 
 def _schema() -> dict:
@@ -423,7 +432,7 @@ def test_user_id_is_never_a_body_field_or_a_path_segment():
         )
 
 
-def test_bot_id_placement_is_untouched():
+def test_bot_id_is_in_the_path_wherever_it_addresses_a_bot():
     """This change moved no ``bot_id``. If it ever does, it is on purpose."""
     counts = {"path": 0, "query": 0, "none": 0}
     for _, _, operation in _operations(_schema()):

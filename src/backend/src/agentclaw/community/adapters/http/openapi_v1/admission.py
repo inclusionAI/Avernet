@@ -159,12 +159,12 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/runs"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     # skills — the first two carry ``bot_id``; the four ``{skill_id}`` routes
     # carry none and must resolve it from the skill (``SKILL_SCOPED_OPERATIONS``).
-    ("GET", "/openapi/v1/bots/skills"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("POST", "/openapi/v1/bots/skills/upload"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("GET", "/openapi/v1/bots/skills/{skill_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("DELETE", "/openapi/v1/bots/skills/{skill_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("POST", "/openapi/v1/bots/skills/{skill_id}/activate"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("POST", "/openapi/v1/bots/skills/{skill_id}/deactivate"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/skills"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/skills"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("DELETE", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     # ── addressed bot: names a bot *and* an owner, adjudicated by the gate ───
     ("GET", "/openapi/v1/bots/{bot_id}/sessions"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("POST", "/openapi/v1/bots/{bot_id}/sessions"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
@@ -259,10 +259,10 @@ BODY_BOT_ID_OPERATIONS: frozenset[tuple[str, str]] = frozenset()
 #: checked against that pair.
 SKILL_SCOPED_OPERATIONS = frozenset(
     {
-        ("GET", "/openapi/v1/bots/skills/{skill_id}"),
-        ("DELETE", "/openapi/v1/bots/skills/{skill_id}"),
-        ("POST", "/openapi/v1/bots/skills/{skill_id}/activate"),
-        ("POST", "/openapi/v1/bots/skills/{skill_id}/deactivate"),
+        ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"),
+        ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate"),
+        ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate"),
     }
 )
 
@@ -278,8 +278,8 @@ SKILL_SCOPED_OPERATIONS = frozenset(
 #: owner's ``default``, and it refused a legitimate grant on a shared bot.
 OWNER_ADDRESSED_OPERATIONS = frozenset(
     {
-        ("GET", "/openapi/v1/bots/skills"),
-        ("POST", "/openapi/v1/bots/skills/upload"),
+        ("GET", "/openapi/v1/bots/{bot_id}/skills"),
+        ("POST", "/openapi/v1/bots/{bot_id}/skills"),
     }
 )
 

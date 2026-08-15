@@ -206,10 +206,10 @@ def client(skills, cron):
 @pytest.mark.parametrize(
     ("method", "template"),
     [
-        ("get", "/openapi/v1/bots/skills/{skill}"),
-        ("delete", "/openapi/v1/bots/skills/{skill}"),
-        ("post", "/openapi/v1/bots/skills/{skill}/activate"),
-        ("post", "/openapi/v1/bots/skills/{skill}/deactivate"),
+        ("get", "/openapi/v1/bots/{bot}/skills/{skill}"),
+        ("delete", "/openapi/v1/bots/{bot}/skills/{skill}"),
+        ("post", "/openapi/v1/bots/{bot}/skills/{skill}/activate"),
+        ("post", "/openapi/v1/bots/{bot}/skills/{skill}/deactivate"),
     ],
 )
 def test_a_skill_on_an_ungranted_bot_is_refused(client, method, template):
@@ -219,7 +219,9 @@ def test_a_skill_on_an_ungranted_bot_is_refused(client, method, template):
     service beneath scopes by user, so it would happily serve this — a ``200``
     carrying a skill the application has no authorization for.
     """
-    response = getattr(client, method)(template.format(skill=OTHER_SKILL))
+    response = getattr(client, method)(
+        template.format(bot=OTHER_BOT, skill=OTHER_SKILL)
+    )
 
     assert response.status_code == 404, response.json()
 
@@ -227,15 +229,17 @@ def test_a_skill_on_an_ungranted_bot_is_refused(client, method, template):
 @pytest.mark.parametrize(
     ("method", "template"),
     [
-        ("get", "/openapi/v1/bots/skills/{skill}"),
-        ("delete", "/openapi/v1/bots/skills/{skill}"),
-        ("post", "/openapi/v1/bots/skills/{skill}/activate"),
-        ("post", "/openapi/v1/bots/skills/{skill}/deactivate"),
+        ("get", "/openapi/v1/bots/{bot}/skills/{skill}"),
+        ("delete", "/openapi/v1/bots/{bot}/skills/{skill}"),
+        ("post", "/openapi/v1/bots/{bot}/skills/{skill}/activate"),
+        ("post", "/openapi/v1/bots/{bot}/skills/{skill}/deactivate"),
     ],
 )
 def test_a_skill_on_the_granted_bot_is_served(client, method, template):
     """The same four operations still work where the grant covers them."""
-    response = getattr(client, method)(template.format(skill=GRANTED_SKILL))
+    response = getattr(client, method)(
+        template.format(bot=GRANTED_BOT, skill=GRANTED_SKILL)
+    )
 
     assert response.status_code == 200, response.json()
 
@@ -245,8 +249,8 @@ def test_the_refusal_happens_before_the_skill_is_touched(client, skills):
 
     A delete that ran and then answered 404 would be the worst of both.
     """
-    client.delete(f"/openapi/v1/bots/skills/{OTHER_SKILL}")
-    client.post(f"/openapi/v1/bots/skills/{OTHER_SKILL}/activate")
+    client.delete(f"/openapi/v1/bots/{OTHER_BOT}/skills/{OTHER_SKILL}")
+    client.post(f"/openapi/v1/bots/{OTHER_BOT}/skills/{OTHER_SKILL}/activate")
 
     assert skills.deleted == []
     assert skills.activated == []
@@ -297,7 +301,7 @@ def test_listing_skills_on_an_ungranted_bot_is_refused(client, skills):
     else's, and a legitimate grant on a shared bot would be refused.
     """
     response = client.get(
-        "/openapi/v1/bots/skills", params={"bot_id": OTHER_BOT}
+        "/openapi/v1/bots/{bot}/skills", params={"bot_id": OTHER_BOT}
     )
 
     assert response.status_code == 404, response.json()
@@ -305,9 +309,7 @@ def test_listing_skills_on_an_ungranted_bot_is_refused(client, skills):
 
 
 def test_listing_skills_on_the_granted_bot_works(client, skills):
-    response = client.get(
-        "/openapi/v1/bots/skills", params={"bot_id": GRANTED_BOT}
-    )
+    response = client.get(f"/openapi/v1/bots/{GRANTED_BOT}/skills")
 
     assert response.status_code == 200, response.json()
     assert skills.listed == [(GRANTED_BOT, USER)]
@@ -323,7 +325,7 @@ def test_listing_another_owners_bot_is_refused_even_with_a_same_named_grant(
     it.
     """
     response = client.get(
-        "/openapi/v1/bots/skills",
+        "/openapi/v1/bots/{bot}/skills",
         params={"bot_id": GRANTED_BOT, "owner_entity_id": "someone-else"},
     )
 
@@ -334,7 +336,7 @@ def test_listing_another_owners_bot_is_refused_even_with_a_same_named_grant(
 def test_uploading_a_skill_to_an_ungranted_bot_is_refused(client, skills):
     """A write makes the mis-binding worse — it would create a skill there."""
     response = client.post(
-        "/openapi/v1/bots/skills/upload",
+        "/openapi/v1/bots/{bot}/skills",
         params={"bot_id": OTHER_BOT},
         content=b"PK\x03\x04",
         headers={"content-type": "application/zip"},

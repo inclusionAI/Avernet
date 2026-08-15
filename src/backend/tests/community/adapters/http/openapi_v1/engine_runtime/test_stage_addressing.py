@@ -58,6 +58,11 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("get", "/openapi/v1/bots/{bot_id}/authorized-apps"),
     ("post", "/openapi/v1/bots/{bot_id}/authorized-apps"),
     ("delete", "/openapi/v1/bots/{bot_id}/authorized-apps/{app_id}"),
+    # The skills group addresses an owner too, and now says so under the same
+    # name as everywhere else — it spelled this owner_entity_id until the
+    # bot-first change, which is why it was not in this set before.
+    ("get", "/openapi/v1/bots/{bot_id}/skills"),
+    ("post", "/openapi/v1/bots/{bot_id}/skills"),
 }
 
 
@@ -242,7 +247,7 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
     assert sorted(carrying_owner) == sorted(
         set(engine_runtime) | _OWNER_ADDRESSED_ELSEWHERE
     ), (
-        "owner_id belongs to the engine-runtime operations and the three "
+        "owner_id belongs to the engine-runtime operations, the three "
         "authorization operations, and to nothing else by accident"
     )
 

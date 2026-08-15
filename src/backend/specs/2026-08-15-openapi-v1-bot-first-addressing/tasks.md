@@ -74,14 +74,14 @@ parameter. Verify each with the dump.
       together with the comment explaining why the check ran there. Verify: the
       published `RoutineCreate` schema has no `bot_id`; task 1 still green.
 
-- [ ] **13. `skills` — addresses.** Prefix → `/openapi/v1/bots/{bot_id}/skills`;
+- [x] **13. `skills` — addresses.** Prefix → `/openapi/v1/bots/{bot_id}/skills`;
       decorators `""` (GET list, POST upload), `/{skill_id}`,
       `/{skill_id}/activate`, `/{skill_id}/deactivate`. Change `bot_id` to
       `BotIdPath` on the two that had it, and **add** it to the four
       `{skill_id}` operations. Verify: `POST …/{bot_id}/skills` still answers
       201 `created` / 200 `updated`, and no `…/skills/upload` address remains.
 
-- [ ] **14. `skills` — `owner_entity_id` → `owner_id`.** Rename the parameter on
+- [x] **14. `skills` — `owner_entity_id` → `owner_id`.** Rename the parameter on
       the list and upload operations, reusing the `owner_id` description the
       engine-runtime groups publish. Remove the two inline
       `caller.require_bot(...)` calls and their comments. Verify: no

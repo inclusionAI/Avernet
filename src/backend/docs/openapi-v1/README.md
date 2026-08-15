@@ -835,8 +835,7 @@ list still equals the literals the routes actually publish:
 
 <!-- reserved-component-names -->
 ```text
-authorized  ceiling  check-name  loadtest  logs  mcp  resources
-routines  skills
+authorized  ceiling  check-name  loadtest  logs  mcp
 ```
 
 **Reserved ahead of their routes.** A second, separate list — names claimed here
