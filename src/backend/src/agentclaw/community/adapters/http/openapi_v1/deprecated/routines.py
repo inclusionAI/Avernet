@@ -15,7 +15,7 @@ contract* survives here, and it is deleted when these addresses are.
 from __future__ import annotations
 
 from fastapi import Request
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
 from agentclaw.community.adapters.http.openapi_v1.principal import (
@@ -42,6 +42,24 @@ _CREATE = "/openapi/v1/bots/{bot_id}/routines"
 
 class LegacyRoutineCreate(RoutineCreate):
     """The create body as it was, with the bot named inside it."""
+
+    # Its own example, because ``model_config`` is inherited: with the bot
+    # dropped from ``RoutineCreate``'s, this model would publish an example
+    # missing the one field it *requires*. The current model has the opposite
+    # problem for the opposite reason, which is why neither can borrow the
+    # other's.
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "bot_id": "20260813_a7k2m9p1",
+                "name": "morning-brief",
+                "trigger": {"type": "schedule", "cron": "0 9 * * 1-5"},
+                "command": "Summarize yesterday's tickets and post the brief.",
+                "timezone": "Asia/Shanghai",
+                "enabled": True,
+            }
+        }
+    )
 
     bot_id: str = Field(description="The bot that will run the routine.")
 
@@ -107,7 +125,7 @@ legacy_route(
     replaces="/openapi/v1/bots/{bot_id}/routines",
     response_model=Envelope[Routine],
     status_code=201,
-    operation_id="create_routine_deprecated_post",
+    operation_name="create_routine",
 )
 
 __all__ = ["create_router", "router"]

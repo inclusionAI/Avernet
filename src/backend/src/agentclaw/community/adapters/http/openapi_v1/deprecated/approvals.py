@@ -88,7 +88,7 @@ legacy_route(
     set_approval_mode_legacy,
     replaces="/openapi/v1/bots/{bot_id}/approvals/mode",
     response_model=Envelope[ApprovalState],
-    operation_id="set_approval_mode_deprecated_put",
+    operation_name="set_approval_mode",
 )
 
 __all__ = ["router"]

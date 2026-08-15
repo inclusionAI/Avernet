@@ -187,7 +187,7 @@ legacy_route(
     replaces="/openapi/v1/bots/{bot_id}/skills",
     response_model=Envelope[Page[Skill]],
     responses=_source_responses(list_skills),
-    operation_id="list_skills_deprecated_get",
+    operation_name="list_skills",
 )
 
 legacy_route(
@@ -199,7 +199,7 @@ legacy_route(
     response_model=Envelope[SkillUpload],
     responses=_source_responses(upload_skill),
     status_code=201,
-    operation_id="upload_skill_deprecated_post",
+    operation_name="upload_skill",
 )
 
 
@@ -317,7 +317,7 @@ legacy_route(
     get_skill_legacy,
     replaces="/openapi/v1/bots/{bot_id}/skills/{skill_id}",
     response_model=Envelope[Skill],
-    operation_id="get_skill_deprecated_get",
+    operation_name="get_skill",
 )
 legacy_route(
     router,
@@ -326,7 +326,7 @@ legacy_route(
     delete_skill_legacy,
     replaces="/openapi/v1/bots/{bot_id}/skills/{skill_id}",
     response_model=Envelope[Deleted],
-    operation_id="delete_skill_deprecated_delete",
+    operation_name="delete_skill",
 )
 legacy_route(
     router,
@@ -335,7 +335,7 @@ legacy_route(
     _state_shim(activate_skill, "activate"),
     replaces="/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate",
     response_model=Envelope[SkillState],
-    operation_id="activate_skill_deprecated_post",
+    operation_name="activate_skill",
 )
 legacy_route(
     router,
@@ -344,7 +344,7 @@ legacy_route(
     _state_shim(deactivate_skill, "deactivate"),
     replaces="/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate",
     response_model=Envelope[SkillState],
-    operation_id="deactivate_skill_deprecated_post",
+    operation_name="deactivate_skill",
 )
 
 __all__ = ["router"]

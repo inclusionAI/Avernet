@@ -72,10 +72,13 @@ def relocate(
                 responses=route.responses,
                 status_code=route.status_code,
                 summary=route.summary,
-                # The operation id has to differ from the one the current
-                # address publishes, or the document carries two operations
-                # claiming the same id and generated clients collide on it.
-                operation_id=f"{route.name}_deprecated_{method.lower()}",
+                # The id this address published before it was retired, rebuilt
+                # from the route's own name and its former path. The current
+                # address is at a different path, so FastAPI's rule gives it a
+                # different id and the two cannot collide — while a client that
+                # has not migrated keeps the method names its SDK was generated
+                # with. See ``legacy_operation_id``.
+                operation_name=route.name,
                 name=f"{route.name}_deprecated",
             )
     return legacy

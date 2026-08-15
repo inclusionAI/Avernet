@@ -4479,7 +4479,6 @@
       "RoutineCreate": {
         "description": "Create-a-routine request body.",
         "example": {
-          "bot_id": "20260813_a7k2m9p1",
           "command": "Summarize yesterday's tickets and post the brief.",
           "enabled": true,
           "name": "morning-brief",
@@ -5666,7 +5665,7 @@
       "get": {
         "deprecated": true,
         "description": "Read the approval mode in force for a session.",
-        "operationId": "get_approval_mode_deprecated_get",
+        "operationId": "get_approval_mode_openapi_v1_bots_approvals__bot_id__mode_get",
         "parameters": [
           {
             "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
@@ -5903,7 +5902,7 @@
       "put": {
         "deprecated": true,
         "description": "Set the approval mode for a session.\n\nDeprecated: use PUT /openapi/v1/bots/{bot_id}/approvals/mode instead,\nwhich takes session_key as a query parameter like the matching read.",
-        "operationId": "set_approval_mode_deprecated_put",
+        "operationId": "set_approval_mode_openapi_v1_bots_approvals__bot_id__mode_put",
         "parameters": [
           {
             "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
@@ -6141,7 +6140,7 @@
       "get": {
         "deprecated": true,
         "description": "List the approval modes that can be set on this bot.\n\nAnswers 501 when the bot's engine cannot set an approval mode, so every\nvalue listed here is one the write endpoint accepts.",
-        "operationId": "list_approval_modes_deprecated_get",
+        "operationId": "list_approval_modes_openapi_v1_bots_approvals__bot_id__modes_get",
         "parameters": [
           {
             "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
@@ -6821,7 +6820,7 @@
       "get": {
         "deprecated": true,
         "description": "Get usable socket connections for a bot.",
-        "operationId": "get_connection_deprecated_get",
+        "operationId": "get_connection_openapi_v1_bots_connection__bot_id__get",
         "parameters": [
           {
             "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
@@ -7049,7 +7048,7 @@
       "get": {
         "deprecated": true,
         "description": "Engines available on this bot, with the active one marked.",
-        "operationId": "list_available_engines_deprecated_get",
+        "operationId": "list_available_engines_openapi_v1_bots_engine__bot_id__available_get",
         "parameters": [
           {
             "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
@@ -7277,7 +7276,7 @@
       "get": {
         "deprecated": true,
         "description": "What this bot can do.\n\nThe discovery endpoint for these groups: capabilities differ per bot, so the\nsame request can succeed for one of your bots and be refused for another.",
-        "operationId": "get_engine_capabilities_deprecated_get",
+        "operationId": "get_engine_capabilities_openapi_v1_bots_engine__bot_id__capabilities_get",
         "parameters": [
           {
             "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
@@ -7505,7 +7504,7 @@
       "get": {
         "deprecated": true,
         "description": "Runtime state of the bot's engine.",
-        "operationId": "get_engine_status_deprecated_get",
+        "operationId": "get_engine_status_openapi_v1_bots_engine__bot_id__status_get",
         "parameters": [
           {
             "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
@@ -7733,7 +7732,7 @@
       "get": {
         "deprecated": true,
         "description": "List every identity file type a bot can carry and whether each exists.\n\nA file reports exists false both when it is absent and when it exists\nwith empty content. Entry order is not guaranteed — key off type.",
-        "operationId": "list_bot_identity_files_deprecated_get",
+        "operationId": "list_bot_identity_files_openapi_v1_bots_identity__bot_id__get",
         "parameters": [
           {
             "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
@@ -7901,7 +7900,7 @@
       "get": {
         "deprecated": true,
         "description": "Read one identity file of a bot.\n\nA file that has never been written reads as an empty content string, not\nan error. Reads address the bot's draft runtime.",
-        "operationId": "get_bot_identity_file_deprecated_get",
+        "operationId": "get_bot_identity_file_openapi_v1_bots_identity__bot_id___file_type__get",
         "parameters": [
           {
             "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
@@ -8077,7 +8076,7 @@
       "put": {
         "deprecated": true,
         "description": "Create or overwrite one identity file of a bot.\n\nA full replacement — the body's content becomes the whole file. The\nresponse is a reference only; the content is not echoed back.",
-        "operationId": "update_bot_identity_file_deprecated_put",
+        "operationId": "update_bot_identity_file_openapi_v1_bots_identity__bot_id___file_type__put",
         "parameters": [
           {
             "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
@@ -10186,7 +10185,7 @@
       "get": {
         "deprecated": true,
         "description": "List the models this bot's engine can route to.",
-        "operationId": "list_models_deprecated_get",
+        "operationId": "list_models_openapi_v1_bots_models__bot_id__get",
         "parameters": [
           {
             "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
@@ -10441,7 +10440,7 @@
       "get": {
         "deprecated": true,
         "description": "Get one model by id.\n\nProvider-qualified ids contain a slash (`openai/gpt-5.3`); pass the value\nexactly as the list endpoint returned it.",
-        "operationId": "get_model_deprecated_get",
+        "operationId": "get_model_openapi_v1_bots_models__bot_id___model_id__get",
         "parameters": [
           {
             "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
@@ -10680,7 +10679,7 @@
       "delete": {
         "deprecated": true,
         "description": "Delete a file or directory from the bot's workspace, addressed by path.\n\nThe workspace decides existence, so a file that is not there is a 404. A\nrecord that is not there is not an error — a file the bot created never had\none.\n\nDeprecated: use DELETE /openapi/v1/bots/{bot_id}/resources instead.",
-        "operationId": "delete_file_deprecated_delete",
+        "operationId": "delete_file_openapi_v1_bots_resources_delete",
         "parameters": [
           {
             "description": "Workspace-relative path of the file or folder, e.g. 'docs/spec/a.txt' — exactly as returned in a listing entry's `path`. A leading slash is tolerated; '..' segments are refused (400).",
@@ -10857,7 +10856,7 @@
       "get": {
         "deprecated": true,
         "description": "List a directory of the bot's workspace.\n\nEntries come from the **workspace**, never from records. That is what makes\na file the bot produced itself a first-class resource: it has no record and\nnever will, and a record-backed listing simply could not see it. It also\nremoves the divergence the other direction — a record whose bytes are not\nwhere it claims can no longer be reported as a file that exists.\n\nThe path parameter selects the directory (empty = workspace root). Listing\nis non-recursive, which bounds the device round trip this endpoint makes.\n\nPaging is applied by this server over the whole directory, because the\nengine's listing API takes no page, limit or cursor: `page_size` bounds the\nresponse, not the work. Requesting a later page costs exactly what the\nfirst one costs.\n\nDeprecated: use GET /openapi/v1/bots/{bot_id}/resources instead.",
-        "operationId": "list_resources_deprecated_get",
+        "operationId": "list_resources_openapi_v1_bots_resources_get",
         "parameters": [
           {
             "description": "The bot this operation addresses.",
@@ -11082,7 +11081,7 @@
       "get": {
         "deprecated": true,
         "description": "Stream a file's bytes from the bot's workspace, addressed by path.\n\nRaw bytes, not an envelope — the body is the file.\n\nDeprecated: use GET /openapi/v1/bots/{bot_id}/resources/download instead.",
-        "operationId": "download_file_deprecated_get",
+        "operationId": "download_file_openapi_v1_bots_resources_download_get",
         "parameters": [
           {
             "description": "Workspace-relative path of the file or folder, e.g. 'docs/spec/a.txt' — exactly as returned in a listing entry's `path`. A leading slash is tolerated; '..' segments are refused (400).",
@@ -11275,7 +11274,7 @@
       "post": {
         "deprecated": true,
         "description": "Create a directory in the bot's workspace, addressed by path.\n\nIntermediate directories are created as needed. Directories exist on the\nworkspace filesystem only and are reported by listing it — they have no\nrecord.\n\nDeprecated: use POST /openapi/v1/bots/{bot_id}/resources/mkdir instead.",
-        "operationId": "create_directory_deprecated_post",
+        "operationId": "create_directory_openapi_v1_bots_resources_mkdir_post",
         "parameters": [
           {
             "description": "Workspace-relative path of the file or folder, e.g. 'docs/spec/a.txt' — exactly as returned in a listing entry's `path`. A leading slash is tolerated; '..' segments are refused (400).",
@@ -11454,7 +11453,7 @@
       "get": {
         "deprecated": true,
         "description": "A file's content as text, addressed by path.\n\nCapped at 1 MB (legacy parity) — over that is a 413, not a truncated preview,\nso a caller is never handed a prefix it might mistake for the whole file.\n\nDeprecated: use GET /openapi/v1/bots/{bot_id}/resources/preview instead.",
-        "operationId": "preview_file_deprecated_get",
+        "operationId": "preview_file_openapi_v1_bots_resources_preview_get",
         "parameters": [
           {
             "description": "Workspace-relative path of the file or folder, e.g. 'docs/spec/a.txt' — exactly as returned in a listing entry's `path`. A leading slash is tolerated; '..' segments are refused (400).",
@@ -11648,7 +11647,7 @@
       "get": {
         "deprecated": true,
         "description": "One file or folder's metadata, addressed by path.\n\nAnswers the questions a listing answers, for a single entry: whether it is\nthere at all (404 if not), whether it is a file or a folder, and how big it\nis. The workspace root has no entry of its own, so `path` is required here\neven though the listing accepts an empty one.\n\nEntries the listing hides — dotfiles, and the workspace-root identity files\n— are 404 here too, so the two surfaces agree on what exists.\n\nDeprecated: use GET /openapi/v1/bots/{bot_id}/resources/stat instead.",
-        "operationId": "stat_resource_deprecated_get",
+        "operationId": "stat_resource_openapi_v1_bots_resources_stat_get",
         "parameters": [
           {
             "description": "Workspace-relative path of the file or folder, e.g. 'docs/spec/a.txt' — exactly as returned in a listing entry's `path`. A leading slash is tolerated; '..' segments are refused (400).",
@@ -11827,7 +11826,7 @@
       "post": {
         "deprecated": true,
         "description": "Upload a file's raw bytes into the bot's workspace.\n\nThe body is the file's raw bytes (content type application/octet-stream),\nnot a multipart form. The path is workspace-relative and carries its own\ndirectories ('docs/spec/a.txt'); intermediate ones are created as needed\n— there is no separate name or parent-directory parameter. An occupied\npath answers 409 unless `overwrite` is set; the size limit is 500 MB, and\nonly common document, code, image and archive extensions are accepted\n(400 otherwise).\n\nDeprecated: use POST /openapi/v1/bots/{bot_id}/resources/upload instead.",
-        "operationId": "upload_resource_deprecated_post",
+        "operationId": "upload_resource_openapi_v1_bots_resources_upload_post",
         "parameters": [
           {
             "description": "Workspace-relative path of the file or folder, e.g. 'docs/spec/a.txt' — exactly as returned in a listing entry's `path`. A leading slash is tolerated; '..' segments are refused (400).",
@@ -12030,7 +12029,7 @@
       "get": {
         "deprecated": true,
         "description": "List a bot's routines (paginated).\n\nDeprecated: use GET /openapi/v1/bots/{bot_id}/routines instead.",
-        "operationId": "list_routines_deprecated_get",
+        "operationId": "list_routines_openapi_v1_bots_routines_get",
         "parameters": [
           {
             "description": "The bot this operation addresses.",
@@ -12241,7 +12240,7 @@
       "post": {
         "deprecated": true,
         "description": "Create a routine on a bot.\n\nDeprecated: use POST /openapi/v1/bots/{bot_id}/routines, which names the\nbot in the address and is authorized before the handler runs.",
-        "operationId": "create_routine_deprecated_post",
+        "operationId": "create_routine_openapi_v1_bots_routines_post",
         "parameters": [
           {
             "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
@@ -12408,7 +12407,7 @@
       "delete": {
         "deprecated": true,
         "description": "Delete a routine.\n\nA failure is never reported as a successful delete: an unknown routine\nanswers 404 and a timeout answers 502.\n\nDeprecated: use DELETE /openapi/v1/bots/{bot_id}/routines/{routine_id} instead.",
-        "operationId": "delete_routine_deprecated_delete",
+        "operationId": "delete_routine_openapi_v1_bots_routines__routine_id__delete",
         "parameters": [
           {
             "description": "The routine's id, exactly as returned on create or in the listing — an opaque string; treat it as a token.",
@@ -12585,7 +12584,7 @@
       "get": {
         "deprecated": true,
         "description": "Get a routine.\n\nThe bot_id query parameter is required — a routine id alone does not\nidentify the bot that holds it. Note the returned bot_id may be empty on\nthis read; keep the one you queried with.\n\nDeprecated: use GET /openapi/v1/bots/{bot_id}/routines/{routine_id} instead.",
-        "operationId": "get_routine_deprecated_get",
+        "operationId": "get_routine_openapi_v1_bots_routines__routine_id__get",
         "parameters": [
           {
             "description": "The routine's id, exactly as returned on create or in the listing — an opaque string; treat it as a token.",
@@ -12762,7 +12761,7 @@
       "patch": {
         "deprecated": true,
         "description": "Update a routine. Omitted fields are left unchanged.\n\nWhen sending a new trigger, send the timezone with it — a trigger update\nwithout one resets the schedule's zone to the default.\n\nDeprecated: use PATCH /openapi/v1/bots/{bot_id}/routines/{routine_id} instead.",
-        "operationId": "update_routine_deprecated_patch",
+        "operationId": "update_routine_openapi_v1_bots_routines__routine_id__patch",
         "parameters": [
           {
             "description": "The routine's id, exactly as returned on create or in the listing — an opaque string; treat it as a token.",
@@ -12951,7 +12950,7 @@
       "post": {
         "deprecated": true,
         "description": "Trigger a routine now.\n\nThe response describes the trigger attempt, not a finished run: status is\n'completed' (the engine acknowledged the trigger), 'failed' (it declined,\nwith a reason) or 'unknown', and both timestamps are null. Read the runs\nlisting for actual execution results and timings.\n\nDeprecated: use POST /openapi/v1/bots/{bot_id}/routines/{routine_id}/run instead.",
-        "operationId": "run_routine_deprecated_post",
+        "operationId": "run_routine_openapi_v1_bots_routines__routine_id__run_post",
         "parameters": [
           {
             "description": "The routine's id, exactly as returned on create or in the listing — an opaque string; treat it as a token.",
@@ -13130,7 +13129,7 @@
       "get": {
         "deprecated": true,
         "description": "List a routine's execution history, most recent first.\n\nThe engine keeps a bounded history per routine, so deep pages come back\nempty by construction.\n\nDeprecated: use GET /openapi/v1/bots/{bot_id}/routines/{routine_id}/runs instead.",
-        "operationId": "list_routine_runs_deprecated_get",
+        "operationId": "list_routine_runs_openapi_v1_bots_routines__routine_id__runs_get",
         "parameters": [
           {
             "description": "The routine's id, exactly as returned on create or in the listing — an opaque string; treat it as a token.",
@@ -13336,7 +13335,7 @@
       "get": {
         "deprecated": true,
         "description": "List the bot's sessions.",
-        "operationId": "list_sessions_deprecated_get",
+        "operationId": "list_sessions_openapi_v1_bots_sessions__bot_id__get",
         "parameters": [
           {
             "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
@@ -13625,7 +13624,7 @@
       "post": {
         "deprecated": true,
         "description": "Create a session.",
-        "operationId": "create_session_deprecated_post",
+        "operationId": "create_session_openapi_v1_bots_sessions__bot_id__post",
         "parameters": [
           {
             "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
@@ -13863,7 +13862,7 @@
       "delete": {
         "deprecated": true,
         "description": "Delete a session.",
-        "operationId": "delete_session_deprecated_delete",
+        "operationId": "delete_session_openapi_v1_bots_sessions__bot_id___session_id__delete",
         "parameters": [
           {
             "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
@@ -14100,7 +14099,7 @@
       "get": {
         "deprecated": true,
         "description": "Get one session.\n\nPass the `session_id` exactly as the list endpoint returned it. The value\nmay contain colons; no encoding is required.",
-        "operationId": "get_session_deprecated_get",
+        "operationId": "get_session_openapi_v1_bots_sessions__bot_id___session_id__get",
         "parameters": [
           {
             "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
@@ -14337,7 +14336,7 @@
       "patch": {
         "deprecated": true,
         "description": "Update a session. Omitted fields are left unchanged.",
-        "operationId": "update_session_deprecated_patch",
+        "operationId": "update_session_openapi_v1_bots_sessions__bot_id___session_id__patch",
         "parameters": [
           {
             "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
@@ -14586,7 +14585,7 @@
       "delete": {
         "deprecated": true,
         "description": "Clear a session's message history, keeping the session.",
-        "operationId": "clear_session_messages_deprecated_delete",
+        "operationId": "clear_session_messages_openapi_v1_bots_sessions__bot_id___session_id__messages_delete",
         "parameters": [
           {
             "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
@@ -14823,7 +14822,7 @@
       "get": {
         "deprecated": true,
         "description": "Read a session's message history, newest page first.\n\nPage 1 is the most recent messages; paging forward walks back through the\nhistory. Messages are chronological within a page.\n\nHistory is served to a depth of 5000 messages. A page reaching past that\ndepth is rejected with 422 rather than returned empty, so an end of history\nis never confused with the limit of what this endpoint serves.",
-        "operationId": "list_session_messages_deprecated_get",
+        "operationId": "list_session_messages_openapi_v1_bots_sessions__bot_id___session_id__messages_get",
         "parameters": [
           {
             "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
@@ -15089,7 +15088,7 @@
       "get": {
         "deprecated": true,
         "description": "List a bot's skills from stored desired state (paginated).\n\nAnswers even while the bot is offline: active reflects the desired\nstate, not the live runtime.\n\nDeprecated: use GET /openapi/v1/bots/{bot_id}/skills instead.",
-        "operationId": "list_skills_deprecated_get",
+        "operationId": "list_skills_openapi_v1_bots_skills_get",
         "parameters": [
           {
             "description": "The bot this operation addresses.",
@@ -15338,7 +15337,7 @@
       "post": {
         "deprecated": true,
         "description": "Upload a skill package (raw ZIP) to create or replace a bot's skill.\n\nThe body is the ZIP's raw bytes with content type application/zip — not a\nmultipart form. The archive must contain exactly one SKILL.md manifest,\nwhose front matter names the skill. When the bot already has a skill of\nthat name, its package is replaced in place (200, operation 'updated');\notherwise a new, inactive skill is created (201, operation 'created').\nLimits: 10 MB compressed, 50 MB uncompressed, 500 files (413 beyond).\n\nDeprecated: use POST /openapi/v1/bots/{bot_id}/skills instead.",
-        "operationId": "upload_skill_deprecated_post",
+        "operationId": "upload_skill_openapi_v1_bots_skills_upload_post",
         "parameters": [
           {
             "description": "The bot this operation addresses.",
@@ -15561,7 +15560,7 @@
       "delete": {
         "deprecated": true,
         "description": "Delete a skill by id.\n\nDeprecated: use DELETE /openapi/v1/bots/{bot_id}/skills/{skill_id}.",
-        "operationId": "delete_skill_deprecated_delete",
+        "operationId": "delete_skill_openapi_v1_bots_skills__skill_id__delete",
         "parameters": [
           {
             "description": "The skill's id, as returned by the listing or upload (decimal digits, e.g. '42'). The id alone identifies the skill and its bot.",
@@ -15727,7 +15726,7 @@
       "get": {
         "deprecated": true,
         "description": "Get public metadata for one Local Skill; the Skill ID selects its Bot.\n\nDeprecated: use GET /openapi/v1/bots/{bot_id}/skills/{skill_id}.",
-        "operationId": "get_skill_deprecated_get",
+        "operationId": "get_skill_openapi_v1_bots_skills__skill_id__get",
         "parameters": [
           {
             "description": "The skill's id, as returned by the listing or upload (decimal digits, e.g. '42'). The id alone identifies the skill and its bot.",
@@ -15895,7 +15894,7 @@
       "post": {
         "deprecated": true,
         "description": "Activate a skill so its bot can use it.\n\nIdempotent — activating an already-active skill succeeds with changed\nfalse. The bot's runtime is reconciled synchronously either way.\n\nDeprecated: use POST /openapi/v1/bots/{bot_id}/skills/{skill_id}/activate instead.",
-        "operationId": "activate_skill_deprecated_post",
+        "operationId": "activate_skill_openapi_v1_bots_skills__skill_id__activate_post",
         "parameters": [
           {
             "description": "The skill's id, as returned by the listing or upload (decimal digits, e.g. '42'). The id alone identifies the skill and its bot.",
@@ -16063,7 +16062,7 @@
       "post": {
         "deprecated": true,
         "description": "Deactivate a skill so its bot stops using it.\n\nIdempotent — deactivating an already-inactive skill succeeds with changed\nfalse. The bot's runtime is reconciled synchronously either way.\n\nDeprecated: use POST /openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate instead.",
-        "operationId": "deactivate_skill_deprecated_post",
+        "operationId": "deactivate_skill_openapi_v1_bots_skills__skill_id__deactivate_post",
         "parameters": [
           {
             "description": "The skill's id, as returned by the listing or upload (decimal digits, e.g. '42'). The id alone identifies the skill and its bot.",
@@ -18518,7 +18517,7 @@
       "get": {
         "deprecated": true,
         "description": "Read a bot's engine configuration (free-form JSON).\n\nA bot whose engine configuration has never been written reads as an empty\nobject — every engine keeps this configuration in a file its runtime creates\non first use, so \"not configured yet\" is an ordinary state, not an error.",
-        "operationId": "get_bot_engine_config_deprecated_get",
+        "operationId": "get_bot_engine_config_openapi_v1_bots__bot_id__engine_config_get",
         "parameters": [
           {
             "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
@@ -18684,7 +18683,7 @@
       "put": {
         "deprecated": true,
         "description": "Write a bot's engine configuration (free-form JSON).",
-        "operationId": "update_bot_engine_config_deprecated_put",
+        "operationId": "update_bot_engine_config_openapi_v1_bots__bot_id__engine_config_put",
         "parameters": [
           {
             "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
@@ -19317,7 +19316,7 @@
     "/openapi/v1/bots/{bot_id}/engine/config": {
       "get": {
         "description": "Read a bot's engine configuration (free-form JSON).\n\nA bot whose engine configuration has never been written reads as an empty\nobject — every engine keeps this configuration in a file its runtime creates\non first use, so \"not configured yet\" is an ordinary state, not an error.",
-        "operationId": "get_bot_engine_config_openapi_v1_bots__bot_id__engine_config_get",
+        "operationId": "get_bot_engine_config",
         "parameters": [
           {
             "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
@@ -19482,7 +19481,7 @@
       },
       "put": {
         "description": "Write a bot's engine configuration (free-form JSON).",
-        "operationId": "update_bot_engine_config_openapi_v1_bots__bot_id__engine_config_put",
+        "operationId": "update_bot_engine_config",
         "parameters": [
           {
             "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",

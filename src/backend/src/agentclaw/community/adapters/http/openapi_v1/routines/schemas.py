@@ -97,9 +97,14 @@ class RoutineCreate(BaseModel):
     """Create-a-routine request body."""
 
     model_config = ConfigDict(
+        # No ``bot_id``: it moved to the path, and this model no longer declares
+        # it. Pydantic ignores unknown fields rather than rejecting them, so an
+        # example that still showed one would be copied into real requests and
+        # silently dropped — the caller believing they had named a bot while the
+        # path decided. ``LegacyRoutineCreate`` keeps it, because there it is
+        # read.
         json_schema_extra={
             "example": {
-                "bot_id": "20260813_a7k2m9p1",
                 "name": "morning-brief",
                 "trigger": {"type": "schedule", "cron": "0 9 * * 1-5"},
                 "command": "Summarize yesterday's tickets and post the brief.",

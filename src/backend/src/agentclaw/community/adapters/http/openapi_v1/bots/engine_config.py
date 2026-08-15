@@ -64,10 +64,21 @@ def _engine_config_target(bot: dict[str, Any]) -> tuple[str, str, str]:
     return entity_id, entity_type, engine
 
 
+#: Named explicitly, and the only two operations on this surface that are.
+#:
+#: FastAPI's default id is the handler's name plus the path with every non-word
+#: character replaced by an underscore — under which ``…/engine-config`` and
+#: ``…/engine/config`` collapse to the *same* string, because ``-`` and ``/``
+#: both become ``_``. The retiring address keeps the id it published, so these
+#: two need one of their own or the document carries duplicate operation ids and
+#: a generated client picks one at random. Short rather than long-form because
+#: they are new: no client has generated against them yet, so the readable
+#: spelling costs nothing.
 @router.get(
     "/config",
     response_model=Envelope[dict[str, Any]],
     responses=USER_SCOPED_403,
+    operation_id="get_bot_engine_config",
 )
 @envelope_errors
 async def get_bot_engine_config(
@@ -98,6 +109,7 @@ async def get_bot_engine_config(
     "/config",
     response_model=Envelope[dict[str, Any]],
     responses=USER_SCOPED_403,
+    operation_id="update_bot_engine_config",
 )
 @envelope_errors
 async def update_bot_engine_config(

@@ -13,6 +13,7 @@ using. Both are asserted.
 
 from __future__ import annotations
 
+import re
 from email.utils import parsedate_to_datetime
 
 import pytest
@@ -138,3 +139,52 @@ def _concrete(template: str) -> str:
         "x" if segment.startswith("{") else segment for segment in template.split("/")
     ]
     return "/".join(parts)
+
+
+def test_no_two_operations_share_an_operation_id() -> None:
+    """A duplicate id makes a generated client pick one of them at random.
+
+    Real risk here rather than a formality: the retiring addresses keep the ids
+    they published, and FastAPI's default rule replaces every non-word character
+    with an underscore — under which ``…/engine-config`` and ``…/engine/config``
+    collapse to the *same* string. That collision was introduced and caught by
+    this assertion.
+    """
+    ids = [
+        operation["operationId"]
+        for _method, _path, operation in _published_operations(_document())
+        if "operationId" in operation
+    ]
+    duplicated = sorted({name for name in ids if ids.count(name) > 1})
+    assert not duplicated, f"operation ids serving more than one address: {duplicated}"
+
+
+def test_a_retiring_address_keeps_its_own_operation_id() -> None:
+    """The id a client's SDK was generated against must survive the window.
+
+    Generators turn ``operationId`` into a method name, so changing it renames
+    methods in every SDK built from this document — breaking a caller who has
+    *not* migrated and regenerates for an unrelated reason. That is the one
+    place a compatibility promise is least expected to fail.
+
+    Asserted as "derived from its own address, not its replacement's": each
+    retiring operation's id must match what FastAPI's own rule produces for the
+    legacy path, which is what that address published before it was retired.
+    """
+    document = _document()
+    wrong = []
+    for method, path, operation in _published_operations(document):
+        if (method, path) not in _LEGACY:
+            continue
+        # What FastAPI's rule contributes for *this* address. The endpoint name
+        # is the prefix and varies, so the suffix is what identifies which path
+        # the id was built from — and that is the whole question.
+        suffix = re.sub(r"\W", "_", path) + f"_{method.lower()}"
+        published = operation.get("operationId", "")
+        if not published.endswith(suffix):
+            wrong.append(f"{method} {path} -> {published} (expected to end {suffix})")
+    assert not wrong, (
+        "these retiring addresses publish an id that is not the one their own "
+        "address produces, so an SDK generated before the migration finds its "
+        f"method names changed: {wrong}"
+    )
