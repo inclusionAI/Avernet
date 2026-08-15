@@ -58,7 +58,9 @@
 - **深度闸门是引擎决策**:MISS 拆解前查核内派生深度(从 `relations` 递归),达内层 `MAX_DEPTH` → **自动升 BBS**(非 HUNG);BBS 链路 `loop_round` 达 `BBS_MAX_DEPTH` → STUCK → HUNG;规划器保持纯读图。
 - **派发只决定"谁来做"**:`dispatch` 经搜推匹配单 bot / 已有协作群 / 多 bot 动态拉协作群 / MISS;写 `run_info.run_mode`(str)/`assignee`;协作群协作模式(chat/manager_worker/state_machine)作 `form_coop_group` 内部参数(对齐 BCS `GroupStrategy`),**不进 `RuntimeInfo` 持久字段**(模型无 `collab_mode`)。
 - **执行三模态一个入口**:`TaskRunner.start_run(批量)` 按 `run_mode` 自适应分发单 bot/协作群/BBS;BBS = bot 认领任务后自算 gap+自规划子任务(落图 `run_mode="bbs"`,`assignee=bot_id`)→ 自执行 → 上报结果+验收;完成结果经 PUSH `TaskLoopCallback.report_result` 或 PULL `query_status`/`query_detail`/`query_result` 回收。
-- **执行主体只发 `task_loop_id`**:回调数据协议 `TaskCallbackData` 承载 `loop_task_id`/`workflow_type`/`workflow_id`/`instance_id`/`result`;框架适配层做 `loop_task_id↔(task_id,node_id)`、`result.success→verdict`、`result.data→output` 映射,再走图谱写口。
+- **执行主体只发 `task_loop_id`**:回调数据协议 `TaskCallbackData` 承载 `loop_task_id`/`workflow_type`/`workflow_id`/`instance_id`/`result`;合法终态严格为 `success:bool + data + gaps:list[str]`(FAIL 的 gaps 必须非空),执行/回收异常为 `exec_error`;框架适配层做 `loop_task_id↔(task_id,node_id)`、`success/gaps→verdict`、`data→output` 映射,再走图谱写口。空/非法终态不得默认 PASS,统一进入 Harness。
+- **BCS 身份边界**:任务领域、搜推结果和 `GroupFormation` 只保存产品 Bot ID;动态拉群时框架通过 BotService 权威 owner_id 在 BCS integration 边界转换为 `{product_bot_id}:{owner_id}`。BCS 请求中的 driver/originator/participant/manager/worker/binding bot_ids 使用 BCS UUID;state-machine binding key 是 workflow 逻辑名,不得使用 Bot ID,且 workflow binding 与 BCS ParticipantRole 分离。
+- **执行 SLA 单一所有者**:worker fire-and-poll 执行由结果 Poller 统一判定业务 SLA;Singlebox Adapter 只判传输错误,不得以更短 adapter timeout 提前截断仍在生成的 Bot。SLA/poll_exhausted 属执行异常(`exec_error→Harness`),不属于验收 FAIL。
 - **聚合收敛**:`terminal PASS` = `plan(root)==[]` ∧ 全非根节点 DONE ∧ 无 RUNNING → 根保持 PLANNING 等 owner bot 经 `TaskLoopCallback.report_result` 回投 verdict=PASS → 根节点 DONE ∧ 图 status=DONE;验收 100% 走回投(engine 不主动触发终验 skill,无 `OwnerBotVerifyPort`)。`terminal FAIL` 仅人工放弃(若提供),自动路径不产生终态 FAIL。
 - **并发安全**:同任务图推进串行化(可重入锁),跨任务并行;防止回投并发撕裂图。
 - **transport-agnostic**:core 逻辑不绑定框架/传输;搜推匹配与动态拉群不外泄为对外 API;图谱原子变更收口单一写网关(Harness 旁路同写口)。
@@ -154,6 +156,8 @@
 - **reroute 局部化**:补救挂该 FAIL/PLANNING 节点本体下,未触下游在依赖满足前从未入图,无下游可复位;自动 reroute 不调级联回滚。
 - **输入/验收上下文**:store 不提供投影 API;执行/验收上下文由 `TaskRunner` 内部用 `get_child_tasks`/`get_parent_task` 组合自算(验收只按 `(task_id,node_id)` 上报节点:有结构子→验收模式聚合结构子(子树)output;无结构子→执行模式聚合结构父 P 的聚合上下文={P.task_spec/goal + P 已 DONE 结构子(本节点兄弟)output};无 NODE/SUBTREE/TASK scope 区分,见 `plan.md` §3.5)。
 - **回投坑点**:`output` MERGE 只浅合并一层(patch 覆盖);`extend_props_patch` 扁平传不可再包一层。
+- **终态结果契约**:`success` 必须是 JSON bool;PASS=`success=true,gaps=[]`;FAIL=`success=false,gaps` 非空;旧 `fail_detail` 仅兼容归一为单 gap。空内容、非法 JSON、缺 success、类型错误、FAIL 无 gaps 均转 `terminal_result_invalid→Harness`,绝不默认 PASS。
+- **结果回收 SLA**:`TaskExecutorResultPoller` 是 worker single_bot/coop_group 业务 SLA 的唯一所有者;超时/连续轮询失败回投 `exec_error` 并 best-effort `cancel_run`;Singlebox worker collector 无独立业务超时。planning/search 的同步 `send_and_wait_async` 仍持各自调用 SLA。
 - **Harness 与主链解耦**:Harness 是旁路常驻、只读图谱+反向 `update_task_node_info`,不参与正向规划/派发;主链故障由 Harness 复位后,下一轮事件自然续驱。
 - **`loop_round` 审计 + 图级写归属**(外层 BBS 上升轮次):仅升 BBS 时 `TaskExecutionGraph.loop_round++`(正常补救不再 ++);达 `BBS_MAX_DEPTH`(默认 3)→ STUCK → HUNG。
   图级终态(图 `status`=DONE/HUNG、图 `output`、`loop_round`、图 `extend_props` 的 `bbs_mode`/`hung_reason`)由编排核经 `TaskGraphService.update_task_graph_info(TaskGraphPatch)` 图级写口收口(原子、加锁、SSOT 唯一图级写口);`TaskGraphPatch`(增量 patch:`loop_round_increment`/`status`/`output_patch`/`extend_props_patch`)是中间类型。编排核不直写返回的 graph 引用。

@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import os
 
-from injector import Binder, Module, inject, provider, singleton
+from injector import Binder, Injector, Module, inject, provider, singleton
 
 from agentclaw.community.adapters.http.task.auth import (
     CallbackAuthenticator, NoopCallbackAuthenticator,
 )
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
+from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.task_center.task_service import TaskService
@@ -47,6 +48,7 @@ class TaskModule(Module):
         graph: TaskGraphService,
         discover: BotDiscoverServiceProtocol,
         bot_public: BotPublicServiceProtocol,
+        injector: Injector,
     ) -> TaskService:
         """构造 TaskService facade(引擎自当 ResultSink/TaskContextBuilder;构造期收端口)。
 
@@ -59,10 +61,22 @@ class TaskModule(Module):
         """
         bot, bcs = self._resolve_ports()
         discover_port = self._resolve_discover(default=discover, bot_public=bot_public)
+        bcs_identity = None
+        if bcs is not None:
+            from agentclaw.community.core.task.task_runner.integration.bcs_bot_identity_resolver import (
+                BotServiceBcsBotIdentityResolver,
+            )
+            # BCS 建群时才需要跨模块解析 owner；纯内核/HTTP contract 测试不强制装配 Bot 模块。
+            bcs_identity = BotServiceBcsBotIdentityResolver(
+                injector.get(BotServiceProtocol)
+            )
         # harness 旁路常驻巡检(SLA 超时复位 / FAILED 重派重试 / PENDING 派发超时重搜推);
         # facade 内部 set_on_harness 回填编排核入口并启动 daemon 巡检线程。
         harness = TaskHarness(graph)
-        return TaskService(graph, harness=harness, bot=bot, bcs=bcs, discover=discover_port)
+        return TaskService(
+            graph, harness=harness, bot=bot, bcs=bcs, discover=discover_port,
+            bcs_identity=bcs_identity,
+        )
 
     @singleton
     @provider

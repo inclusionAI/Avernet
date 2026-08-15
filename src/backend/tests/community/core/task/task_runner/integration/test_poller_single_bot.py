@@ -10,10 +10,14 @@ class _Bot:
     def __init__(self, runs):
         self._runs = runs
         self.calls = 0
+        self.cancelled = []
 
     async def get_run(self, run_id):
         self.calls += 1
         return self._runs[run_id]
+
+    async def cancel_run(self, run_id):
+        self.cancelled.append(run_id)
 
 
 class _Sink:
@@ -35,7 +39,7 @@ def _poller(bot, sink, *, clock=None, sla=1000.0):
 
 
 def test_single_bot_terminal_reports_and_unregisters():
-    bot = _Bot({"r1": {"status": "COMPLETED", "result": {"content": "done"}}})
+    bot = _Bot({"r1": {"status": "COMPLETED", "result": {"content": '{"success":true,"data":"done","gaps":[]}'}}})
     sink = _Sink()
     p = _poller(bot, sink)
     p.set_on_result(sink)
@@ -65,7 +69,8 @@ def test_sla_timeout_reports_fail_and_unregisters():
     t[0] = 100.0  # 远超 sla
     _run(p._poll_once())
     assert sink.reports[0].result["success"] is False
-    assert sink.reports[0].result["fail_detail"] == "sla_timeout"
+    assert sink.reports[0].result["exec_error"] == "sla_timeout"
+    assert bot.cancelled == ["r1"]
     assert p.pending() == 0
 
 
@@ -80,5 +85,5 @@ def test_consecutive_failures_report_poll_exhausted():
     p.register(SingleBotHandle(loop_task_id="t1::c1", run_id="r1", bot_id="b1", registered_at=time.monotonic()))
     for _ in range(5):
         _run(p._poll_once())
-    assert any(r.result.get("fail_detail") == "poll_exhausted" for r in sink.reports)
+    assert any(r.result.get("exec_error") == "poll_exhausted" for r in sink.reports)
     assert p.pending() == 0

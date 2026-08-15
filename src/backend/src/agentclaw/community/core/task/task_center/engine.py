@@ -53,7 +53,7 @@ class ExecutionEngine:
     跨 task 并行。投递/拉群 IO 锁外 await,gather+Semaphore 并发。loop_round 仅升 BBS 时 ++。
     测试可经 facade/engine 子类覆写 ``_build_*`` 注入 stub 策略/投递(测试 seam)。"""
 
-    def __init__(self, graph, *, bot=None, bcs=None, discover=None) -> None:
+    def __init__(self, graph, *, bot=None, bcs=None, discover=None, bcs_identity=None) -> None:
         """graph: TaskGraphService;bot: OpenApiBotPort;bcs: BcsClientPort;discover: BotDiscoverServiceProtocol。
         端口由 DI 从配置注入(local/prod/double 只换端口实现,引擎代码不变)。prod 必传;测试子类覆写
         ``_build_*`` 注入 stub 策略/投递时可省略(走 super 路径默认 berth)。"""
@@ -61,6 +61,7 @@ class ExecutionEngine:
         self._bot = bot
         self._bcs = bcs
         self._discover = discover
+        self._bcs_identity = bcs_identity
         self._locks: dict[str, threading.RLock] = {}
         self._locks_guard = threading.RLock()
         from agentclaw.community.core.task.task_runner.callback_adapter import CallbackAdapter
@@ -86,7 +87,7 @@ class ExecutionEngine:
         poller.set_on_result(self)
         exe = TaskExecutor(
             bot=self._bot, bcs=self._bcs, formatter=PromptFormatterImpl(),
-            context=self, sink=self, poller=poller,
+            context=self, sink=self, poller=poller, identity_resolver=self._bcs_identity,
         )
         import threading as _t
         self._poller_thread = _t.Thread(target=poller.run_poll_loop, daemon=True, name="task-exec-poller")

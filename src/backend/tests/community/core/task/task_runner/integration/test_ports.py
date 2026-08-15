@@ -1,13 +1,13 @@
 from typing import Any, Protocol, runtime_checkable  # noqa: F401
 
 from agentclaw.community.core.task.task_runner.integration.ports import (
-    ApiKeyProvider, BcsClientPort, OpenApiBotPort, PromptFormatter,
+    ApiKeyProvider, BcsBotIdentityResolver, BcsClientPort, OpenApiBotPort, PromptFormatter,
     ResultSink, TaskContextBuilder,
 )
 
 
 def test_protocols_are_runtime_checkable():
-    for p in (OpenApiBotPort, BcsClientPort, ApiKeyProvider, TaskContextBuilder, PromptFormatter, ResultSink):
+    for p in (OpenApiBotPort, BcsBotIdentityResolver, BcsClientPort, ApiKeyProvider, TaskContextBuilder, PromptFormatter, ResultSink):
         assert hasattr(p, "_is_protocol")  # Protocol 子类
 
 
@@ -16,6 +16,11 @@ def test_open_api_bot_port_methods():
     assert hasattr(OpenApiBotPort, "ensure_grant")
     assert hasattr(OpenApiBotPort, "send_message")
     assert hasattr(OpenApiBotPort, "get_run")
+    assert hasattr(OpenApiBotPort, "cancel_run")
+
+
+def test_bcs_bot_identity_resolver_methods():
+    assert hasattr(BcsBotIdentityResolver, "resolve_many")
 
 
 def test_bcs_client_port_methods():

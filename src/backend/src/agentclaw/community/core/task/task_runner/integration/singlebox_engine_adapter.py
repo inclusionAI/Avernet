@@ -55,7 +55,7 @@ class SingleboxEngineAdapter(OpenApiBotPort):
         backend_base_url: str,
         user_id: str,
         http_client: httpx.AsyncClient | None = None,
-        collect_timeout: float = 120.0,
+        collect_timeout: float | None = None,
     ) -> None:
         self._backend = backend_base_url.rstrip("/")
         self._user_id = user_id
@@ -64,6 +64,8 @@ class SingleboxEngineAdapter(OpenApiBotPort):
         self._lock = threading.Lock()
         self._targets: dict[str, str] = {}  # bot_id → "localhost:20014"
         self._runs: dict[str, dict[str, Any]] = {}  # run_id → {status, result{content}, error}
+        self._collectors: dict[str, Any] = {}  # run_id → run_coroutine_threadsafe Future
+        self._cancelled_runs: set[str] = set()
         # 后台 loop:send_message 的 WS 收集器(poller 跨 loop 轮询 get_run,桥接流式→轮询)
         self._bg_loop = asyncio.new_event_loop()
         self._bg_thread = threading.Thread(
@@ -72,8 +74,15 @@ class SingleboxEngineAdapter(OpenApiBotPort):
         self._bg_thread.start()
 
     async def _aclose(self) -> None:
+        with self._lock:
+            collectors = list(self._collectors.values())
+            self._collectors.clear()
+        for future in collectors:
+            future.cancel()
         self._bg_loop.call_soon_threadsafe(self._bg_loop.stop)
         self._bg_thread.join(timeout=2.0)
+        if not self._bg_loop.is_closed():
+            self._bg_loop.close()
         await self._http.aclose()
 
     # ===== OpenApiBotPort =====
@@ -96,15 +105,27 @@ class SingleboxEngineAdapter(OpenApiBotPort):
         target, session_key = resolved
         with self._lock:
             self._runs[run_id] = {"status": "RUNNING"}
-        asyncio.run_coroutine_threadsafe(
+        future = asyncio.run_coroutine_threadsafe(
             self._collect(run_id, target, session_key, message), self._bg_loop
         )
+        with self._lock:
+            self._collectors[run_id] = future
+        future.add_done_callback(lambda done: self._collector_done(run_id, done))
         return run_id
 
     async def get_run(self, run_id: str) -> dict[str, Any]:
         """轮询 run 状态:未终态返 RUNNING;终态返 {status, result{content}, error}(对齐 BaaS)。"""
         with self._lock:
             return self._runs.get(run_id, {"status": "RUNNING"})
+
+    async def cancel_run(self, run_id: str) -> None:
+        """取消本地 WebSocket collector；用于 Poller 统一业务 SLA 到期后的清理。"""
+        with self._lock:
+            self._cancelled_runs.add(run_id)
+            future = self._collectors.pop(run_id, None)
+            self._runs[run_id] = {"status": "FAILED", "error": "cancelled"}
+        if future is not None:
+            future.cancel()
 
     async def send_and_wait_async(
         self,
@@ -125,9 +146,23 @@ class SingleboxEngineAdapter(OpenApiBotPort):
     # ===== internals =====
 
     async def _collect(self, run_id: str, target: str, session_key: str, message: str) -> None:
-        run = await self._ws_chat_roundtrip(target, session_key, message, self._collect_timeout)
+        try:
+            run = await self._ws_chat_roundtrip(target, session_key, message, self._collect_timeout)
+        except asyncio.CancelledError:
+            return
+        finally:
+            with self._lock:
+                self._collectors.pop(run_id, None)
         with self._lock:
-            self._runs[run_id] = run
+            if run_id not in self._cancelled_runs:
+                self._runs[run_id] = run
+
+    def _collector_done(self, run_id: str, future: Any) -> None:
+        """清理 collector 索引；覆盖 collector 在登记前极快结束的竞态。"""
+        with self._lock:
+            if self._collectors.get(run_id) is future:
+                self._collectors.pop(run_id, None)
+            self._cancelled_runs.discard(run_id)
 
     async def _resolve_roundtrip_inputs(self, bot_id: str) -> tuple[str, str] | str:
         """解析 target + 建 session,返 (target, session_key);失败返错误串。"""
@@ -172,11 +207,11 @@ class SingleboxEngineAdapter(OpenApiBotPort):
         return (r.json().get("data") or {}).get("id") or ""
 
     async def _ws_chat_roundtrip(
-        self, target: str, session_key: str, message: str, timeout: float
+        self, target: str, session_key: str, message: str, timeout: float | None
     ) -> dict[str, Any]:
         """开 WS:connect(proto3)→ chat.send → 收到 chat final/error/超时 → 返终态 run dict(不抛)。"""
         uri = f"ws://{target}{_WS_PATH}"
-        deadline = time.monotonic() + timeout
+        deadline = time.monotonic() + timeout if timeout is not None else None
         try:
             async with websockets.connect(uri, open_timeout=10) as ws:
                 # 1) 握手
@@ -192,10 +227,13 @@ class SingleboxEngineAdapter(OpenApiBotPort):
                 if not ack.get("ok"):
                     return {"status": "FAILED", "error": f"chat_send_rejected: {json.dumps(ack)[:200]}"}
                 # 3) 读事件到 final
-                remaining = max(2.0, deadline - time.monotonic())
-                while time.monotonic() < deadline:
+                while deadline is None or time.monotonic() < deadline:
                     try:
-                        raw = await asyncio.wait_for(ws.recv(), timeout=remaining)
+                        if deadline is None:
+                            raw = await ws.recv()
+                        else:
+                            remaining = max(0.1, deadline - time.monotonic())
+                            raw = await asyncio.wait_for(ws.recv(), timeout=remaining)
                     except asyncio.TimeoutError:
                         return {"status": "FAILED", "error": "timeout"}
                     data = json.loads(raw)
@@ -209,7 +247,6 @@ class SingleboxEngineAdapter(OpenApiBotPort):
                         return {"status": "COMPLETED", "result": {"content": _extract_final_text(payload)}}
                     if state == "error":
                         return {"status": "FAILED", "error": payload.get("errorMessage") or "chat_error"}
-                    remaining = max(2.0, deadline - time.monotonic())
                 return {"status": "FAILED", "error": "timeout"}
         except Exception as e:  # noqa: BLE001 本地链路异常收口成 FAILED(不抛)
             return {"status": "FAILED", "error": f"{type(e).__name__}: {e}"}
@@ -606,11 +643,16 @@ class SingleboxKeywordBotDiscover:
 
 
 def _extract_final_text(payload: dict[str, Any]) -> str:
-    """从 chat final 事件取完整文本(message.content[0].text),缺失返空串。"""
+    """从 chat final 事件聚合全部文本 content block，避免首块为 tool 时丢终态 JSON。"""
     msg = payload.get("message") or {}
     contents = msg.get("content") or []
-    if isinstance(contents, list) and contents:
-        first = contents[0] or {}
-        if isinstance(first, dict):
-            return first.get("text") or ""
-    return ""
+    if not isinstance(contents, list):
+        return ""
+    texts = []
+    for block in contents:
+        if not isinstance(block, dict):
+            continue
+        text = block.get("text")
+        if isinstance(text, str) and text.strip():
+            texts.append(text)
+    return "\n".join(texts)

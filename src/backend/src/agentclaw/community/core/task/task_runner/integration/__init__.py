@@ -11,6 +11,9 @@ from agentclaw.community.core.task.task_runner.integration.double.double_context
     _DoubleApiKeyProvider, _DoubleContextProvider,
 )
 from agentclaw.community.core.task.task_runner.integration.double.double_open_api_bot import _DoubleOpenApiBot
+from agentclaw.community.core.task.task_runner.integration.double.double_bcs_bot_identity_resolver import (
+    _DoubleBcsBotIdentityResolver,
+)
 from agentclaw.community.core.task.task_runner.integration.prompt_formatter import PromptFormatterImpl
 from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
 from agentclaw.community.core.task.task_runner.integration.task_executor_result_poller import (
@@ -18,12 +21,14 @@ from agentclaw.community.core.task.task_runner.integration.task_executor_result_
 )
 
 
-def build_integration(*, double: bool, sink, runner=None, poller_thread: bool = True) -> TaskExecutor:
+def build_integration(*, double: bool, sink, runner=None, poller_thread: bool = True,
+                      identity_resolver=None) -> TaskExecutor:
     """组合根:double(singlebox)/real(corp 覆写)。返装配好的 TaskExecutor(poller 可选起线程)。"""
     if double:
         bot = _DoubleOpenApiBot()
         bcs = _DoubleBcsClient()
         ctx = _DoubleContextProvider()
+        identity_resolver = identity_resolver or _DoubleBcsBotIdentityResolver()
     else:
         from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import BcsHttpAdapter
         from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import _RealToken  # corp 覆写
@@ -35,7 +40,10 @@ def build_integration(*, double: bool, sink, runner=None, poller_thread: bool = 
         ctx = _RunnerContextBuilder(runner) if runner is not None else _DoubleContextProvider()
     poller = TaskExecutorResultPoller(bot=bot, bcs=bcs)
     poller.set_on_result(sink)
-    exe = TaskExecutor(bot=bot, bcs=bcs, formatter=PromptFormatterImpl(), context=ctx, sink=sink, poller=poller)
+    exe = TaskExecutor(
+        bot=bot, bcs=bcs, formatter=PromptFormatterImpl(), context=ctx, sink=sink,
+        poller=poller, identity_resolver=identity_resolver,
+    )
     if poller_thread:
         t = threading.Thread(target=poller.run_poll_loop, daemon=True)
         t.start()

@@ -97,6 +97,14 @@ class OpenApiBotAdapter(OpenApiBotPort):
         _map_status(r)
         return r.json().get("data") or {}
 
+    async def cancel_run(self, run_id: str) -> None:
+        """Best-effort stop tracking hook.
+
+        当前 BaaS Open API 未暴露任务模块可用的 cancel endpoint；Poller 注销 handle 后不再消费晚到结果。
+        Singlebox 实现会真实取消本地 WebSocket collector。
+        """
+        return None
+
     def send_and_wait(self, *, bot_id: str, message: str, metadata: dict[str, Any] | None = None,
                       timeout: float = 180.0, poll_interval: float = 2.0) -> dict[str, Any]:
         """同步便捷接口:ensure_grant → send_message → 轮询 get_run 到终态(COMPLETED/FAILED)。

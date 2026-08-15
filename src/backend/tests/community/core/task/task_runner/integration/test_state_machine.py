@@ -11,6 +11,9 @@ from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter impo
 )
 from agentclaw.community.core.task.task_runner.integration.prompt_formatter import PromptFormatterImpl
 from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
+from agentclaw.community.core.task.task_runner.integration.double.double_bcs_bot_identity_resolver import (
+    _DoubleBcsBotIdentityResolver,
+)
 
 
 class _Tok:
@@ -62,8 +65,10 @@ def _node(group_id="g1"):
 class _Bcs:
     def __init__(self):
         self.run_input = None
+        self.created_req = None
 
     async def create_group(self, req):
+        self.created_req = req
         return BcsCreateGroupResult(group_id="g1", definition_ref={"id": "d1", "version": 1})
 
     async def start_state_machine_run(self, group_id, *, definition_yaml, definition_ref, session_id, input):
@@ -90,11 +95,34 @@ class _Ctx:
 def test_dispatch_state_machine_registers_run_handle():
     bcs = _Bcs()
     poller = _Poller()
-    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None, poller=poller)
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=poller, identity_resolver=_DoubleBcsBotIdentityResolver())
     _run(exe.form_coop_group(GroupFormation(bot_ids=["drv"], collab_mode="state_machine",
+                                            members_info=[{"bot_id": "drv", "role": "manager"}],
                                             extend_props={"collaboration_definition_yaml": "kind: collab"})))
     ok = _run(exe.dispatch([_node()]))
     assert ok == [True]
     h = poller.registered[0]
     assert h.run_id == "run_9" and h.session_id is None and h.collab_mode == "state_machine"
     assert bcs.run_input["query"]  # format_execute 产出
+
+
+def test_state_machine_binding_keys_are_roles_and_values_are_bcs_uuids():
+    bcs = _Bcs()
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver())
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["mgr", "worker"],
+        collab_mode="state_machine",
+        members_info=[
+            {"bot_id": "mgr", "role": "manager"},
+            {"bot_id": "worker", "role": "researcher"},
+        ],
+        extend_props={"collaboration_definition_yaml": "kind: collab"},
+    )))
+    req = bcs.created_req
+    assert req is not None
+    assert set(req.participant_bindings) == {"manager", "researcher"}
+    assert req.participant_bindings["manager"]["bot_ids"] == ["mgr:double-owner"]
+    assert req.participant_bindings["researcher"]["bot_ids"] == ["worker:double-owner"]
+    assert [p["role"] for p in req.participants] == ["driver", "consultant"]

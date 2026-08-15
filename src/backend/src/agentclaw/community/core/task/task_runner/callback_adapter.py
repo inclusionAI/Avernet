@@ -21,17 +21,23 @@ class CallbackAdapter:
 
     Avernet stub:loop_task_id 格式 = f"{task_id}::{node_id}"(start_run 时记录的格式);
     真实 workflow 的 loop_task_id 映射需 corp adapter 落地。
-    result.success/data→acceptance_result(PASS/FAIL)+ output;fail_detail→gaps/extend_props。
+    result.success/data/gaps→acceptance_result(PASS/FAIL)+output;旧 fail_detail→单 gap。
     """
 
     def adapt(self, data: TaskCallbackData) -> TaskNodePatch:
         """组装 TaskNodePatch。三路互斥(对齐 on_report 分流):
         ① result["exec_error"] 非空 → 执行报错(bot 没跑通)→ patch.exec_error(无 acceptance,→ on_harness 重投);
         ② success=True → 验收 PASS → acceptance_result=PASS;
-        ③ success=False → 验收不过 → acceptance_result=FAIL + gaps=[fail_detail](→ on_fail 补救)。"""
+        ③ success=False + 非空 gaps → 验收不过 → acceptance_result=FAIL(→ harness 重派)。
+        非法/空终态 → exec_error=terminal_result_invalid。"""
         task_id, node_id = data.loop_task_id.split("::", 1)
         out = data.result.get("data")
         fail_detail = data.result.get("fail_detail")
+        raw_gaps = data.result.get("gaps")
+        gaps = [str(g).strip() for g in raw_gaps if str(g).strip()] \
+            if isinstance(raw_gaps, list) else []
+        if fail_detail and not gaps:
+            gaps = [str(fail_detail)]
         exec_error = data.result.get("exec_error")
         ext = data.result.get("_ext_info") or {}
         ep_patch: dict[str, Any] = dict(ext)
@@ -46,13 +52,29 @@ class CallbackAdapter:
                 output_patch={"data": out} if out is not None else None,
                 extend_props_patch=ep_patch if ep_patch else None,
             )
-        success = bool(data.result.get("success", False))
+        success = data.result.get("success")
+        if type(success) is not bool:
+            return TaskNodePatch(
+                task_id=task_id,
+                node_id=node_id,
+                exec_error="terminal_result_invalid: success must be bool",
+                output_patch={"data": out} if out is not None else None,
+                extend_props_patch=ep_patch if ep_patch else None,
+            )
         if success:
             acceptance = AcceptanceResult(verdict=AcceptanceVerdict.PASS, acceptances_metric=["exec_ok"])
         else:
+            if not gaps:
+                return TaskNodePatch(
+                    task_id=task_id,
+                    node_id=node_id,
+                    exec_error="terminal_result_invalid: failed result requires gaps",
+                    output_patch={"data": out} if out is not None else None,
+                    extend_props_patch=ep_patch if ep_patch else None,
+                )
             acceptance = AcceptanceResult(
                 verdict=AcceptanceVerdict.FAIL,
-                gaps=[fail_detail] if fail_detail else ["unknown_gap"],
+                gaps=gaps,
             )
         return TaskNodePatch(
             task_id=task_id,

@@ -231,7 +231,7 @@ class TaskCallbackData:
     workflow_type: str            # "single_bot" | "bcn_coop_group" | "bbs" | ...
     workflow_id: int
     instance_id: int              # workflow 运行实例 id
-    result: dict[str, Any]        # {"success": bool, "data": "..."} / {"fail_detail": "..."}
+    result: dict[str, Any]        # {"success":bool,"data":Any,"gaps":list[str]} / {"exec_error":str}
 
 
 @dataclass

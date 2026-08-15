@@ -32,3 +32,7 @@ class DispatchError(TaskError):
 
 class DecomposeError(TaskError):
     """分解产出违反硬契约(结构父未就绪/重复节点/本批互为父子)。"""
+
+
+class BotIdentityResolutionError(TaskError):
+    """产品 Bot ID 无法唯一解析为 BCS Bot UUID。"""

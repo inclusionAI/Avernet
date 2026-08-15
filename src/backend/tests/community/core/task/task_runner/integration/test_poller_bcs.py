@@ -12,7 +12,10 @@ def _run(coro): return asyncio.new_event_loop().run_until_complete(coro)
 
 
 def test_poller_session_mode_reports_completed():
-    bcs = _DoubleBcsClient(session_status="completed", session_output={"r": 1})
+    bcs = _DoubleBcsClient(
+        session_status="completed",
+        session_output={"success": True, "data": {"r": 1}, "gaps": []},
+    )
     sink = _DoubleSink()
     p = TaskExecutorResultPoller(bot=None, bcs=bcs, clock=time.monotonic, sleep=lambda s: None,
                                  interval=0.0, default_sla=1000.0)
@@ -24,7 +27,10 @@ def test_poller_session_mode_reports_completed():
 
 
 def test_poller_run_mode_reports_completed():
-    bcs = _DoubleBcsClient(sm_status="completed", sm_output={"x": 1})
+    bcs = _DoubleBcsClient(
+        sm_status="completed",
+        sm_output={"success": True, "data": {"x": 1}, "gaps": []},
+    )
     sink = _DoubleSink()
     p = TaskExecutorResultPoller(bot=None, bcs=bcs, clock=time.monotonic, sleep=lambda s: None,
                                  interval=0.0, default_sla=1000.0)

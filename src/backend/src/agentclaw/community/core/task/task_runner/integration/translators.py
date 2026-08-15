@@ -2,7 +2,7 @@
 
 零 case:仅消费 dict 字段,不出现节点名。结果回流经 ResultSink → on_report。
 关键区分(Step2 harness):run **FAILED/SLA/poll 耗尽 = 执行报错**(bot 没跑通)→ result["exec_error"];
-run **COMPLETED = 执行通** → 解析 content 中的结构化验收判定 {success,fail_detail,data}(缺省 PASS)。
+run **COMPLETED = 执行通** → 严格解析 content 中的结构化验收判定 {success,data,gaps};非法终态进 Harness。
 执行报错≠验收不过:前者→harness 重投,后者→补救重规划。
 """
 from __future__ import annotations
@@ -14,14 +14,19 @@ from agentclaw.community.core.task.domain.models import TaskCallbackData
 
 
 def _cb(loop_task_id: str, workflow_type: str, *, success: bool, data: Any = None,
-        fail_detail: str | None = None, exec_error: str | None = None) -> TaskCallbackData:
-    """组装 TaskCallbackData。exec_error(执行报错)与 success+fail_detail(验收)互斥:
-    exec_error 非空 → 纯执行报错(无验收);否则 success/fail_detail 表验收判定。"""
+        gaps: list[str] | None = None, fail_detail: str | None = None,
+        exec_error: str | None = None) -> TaskCallbackData:
+    """组装 TaskCallbackData。exec_error(执行报错)与 success+gaps(验收)互斥。
+
+    ``fail_detail`` 只保留旧调用方过渡兼容；新终态使用 ``gaps``。
+    """
     result: dict[str, Any] = {"success": success}
     if data is not None:
         result["data"] = data
     if fail_detail is not None:
         result["fail_detail"] = fail_detail
+    if gaps is not None:
+        result["gaps"] = gaps
     if exec_error is not None:
         result["exec_error"] = exec_error
     return TaskCallbackData(
@@ -30,19 +35,44 @@ def _cb(loop_task_id: str, workflow_type: str, *, success: bool, data: Any = Non
     )
 
 
-def _parse_acceptance(content: Any) -> tuple[bool, str | None, Any] | None:
-    """尝试把 run COMPLETED 的 content 解析为结构化验收判定 {success, fail_detail, data}。
-    成功解析(含 success 字段)→ (success, fail_detail, data);无法解析 → None(调用方走缺省 PASS)。
-    支持:裸 JSON / ```json 代码块 / 散文包裹(经 ``extract_json``)。"""
+def _parse_acceptance(content: Any) -> tuple[bool, list[str], Any]:
+    """严格解析 ``{success: bool, data, gaps: list[str]}``;旧 fail_detail 归一成单 gap。"""
     if not content:
-        return None
+        raise ValueError("empty terminal content")
     try:
         obj = extract_json(content) if isinstance(content, str) else content
-    except (ValueError, TypeError):
-        return None
-    if isinstance(obj, dict) and "success" in obj:
-        return bool(obj.get("success")), obj.get("fail_detail"), obj.get("data")
-    return None
+    except (ValueError, TypeError) as exc:
+        raise ValueError("terminal content is not valid JSON") from exc
+    if not isinstance(obj, dict):
+        raise ValueError("terminal result must be a JSON object")
+    success = obj.get("success")
+    if type(success) is not bool:
+        raise ValueError("success must be bool")
+    raw_gaps = obj.get("gaps")
+    if raw_gaps is None and isinstance(obj.get("fail_detail"), str):
+        raw_gaps = [obj["fail_detail"]]
+    if raw_gaps is None:
+        gaps: list[str] = []
+    elif isinstance(raw_gaps, list):
+        if any(not isinstance(gap, str) for gap in raw_gaps):
+            raise ValueError("gaps must be a list of strings")
+        gaps = [gap.strip() for gap in raw_gaps if gap.strip()]
+    else:
+        raise ValueError("gaps must be a list of strings")
+    if not success and not gaps:
+        raise ValueError("failed acceptance must include non-empty gaps")
+    return success, gaps, obj.get("data")
+
+
+def _completed(loop_task_id: str, workflow_type: str, content: Any) -> TaskCallbackData:
+    try:
+        success, gaps, data = _parse_acceptance(content)
+    except ValueError as exc:
+        return _cb(
+            loop_task_id, workflow_type, success=False,
+            exec_error=f"terminal_result_invalid: {exc}",
+        )
+    return _cb(loop_task_id, workflow_type, success=success, data=data, gaps=gaps)
 
 
 class SingleBotRunTranslator:
@@ -54,13 +84,9 @@ class SingleBotRunTranslator:
             # 执行报错(run FAILED):非验收 → exec_error,走 harness
             fail_reason = "timeout" if (err and str(err).upper() == "TIME_OUT") else (err or f"run_{status}")
             return _cb(loop_task_id, "single_bot", success=False, exec_error=str(fail_reason))
-        # run COMPLETED = 执行通 → 解析结构化验收判定(缺省 PASS)
+        # run COMPLETED = 执行通 → 严格解析结构化验收判定；非法终态走 harness
         data = (run_dict.get("result") or {}).get("content")
-        parsed = _parse_acceptance(data)
-        if parsed is not None:
-            ok, fail_detail, acc_data = parsed
-            return _cb(loop_task_id, "single_bot", success=ok, data=acc_data if acc_data is not None else data, fail_detail=fail_detail)
-        return _cb(loop_task_id, "single_bot", success=True, data=data)
+        return _completed(loop_task_id, "single_bot", data)
 
 
 class BcsSessionTranslator:
@@ -77,12 +103,7 @@ class BcsSessionTranslator:
                 if (m.get("role") if isinstance(m, dict) else None) == "assistant":
                     data = m.get("content")
                     break
-        parsed = _parse_acceptance(data)
-        if parsed is not None:
-            ok, fail_detail, acc_data = parsed
-            return _cb(loop_task_id, "bcn_coop_group", success=ok,
-                       data=acc_data if acc_data is not None else data, fail_detail=fail_detail)
-        return _cb(loop_task_id, "bcn_coop_group", success=True, data=data)
+        return _completed(loop_task_id, "bcn_coop_group", data)
 
 
 class BcsStateMachineRunTranslator:
@@ -94,9 +115,4 @@ class BcsStateMachineRunTranslator:
             return _cb(loop_task_id, "bcn_coop_group", success=False,
                        exec_error="aborted" if status == "aborted" else (err or f"run_{status}"))
         data = run_dict.get("output")
-        parsed = _parse_acceptance(data)
-        if parsed is not None:
-            ok, fail_detail, acc_data = parsed
-            return _cb(loop_task_id, "bcn_coop_group", success=ok,
-                       data=acc_data if acc_data is not None else data, fail_detail=fail_detail)
-        return _cb(loop_task_id, "bcn_coop_group", success=True, data=data)
+        return _completed(loop_task_id, "bcn_coop_group", data)

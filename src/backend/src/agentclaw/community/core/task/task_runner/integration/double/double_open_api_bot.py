@@ -23,6 +23,7 @@ class _DoubleOpenApiBot:
         self._terminal_after = terminal_after
         self._runs: dict[str, dict] = {}
         self._poll_counts: dict[str, int] = {}
+        self.cancelled: list[str] = []
 
     async def ensure_grant(self, bot_id: str) -> None:
         return None
@@ -46,3 +47,7 @@ class _DoubleOpenApiBot:
             run["result"] = {"content": self._content}
             run["error"] = self._error
         return run
+
+    async def cancel_run(self, run_id: str) -> None:
+        self.cancelled.append(run_id)
+        self._runs[run_id] = {"status": "FAILED", "error": "cancelled"}

@@ -10,7 +10,7 @@
 skills/
 ├── planning/SKILL.md     # owner bot:计算 gap → 产 List[TaskSpec];返 []=gap 闭=验收通过
 ├── search/SKILL.md       # owner bot:候选集里决出 who+how → 4 态 SearchResult
-└── acceptance/SKILL.md   # worker bot:叶子 execute 时自验收(方案Y) → 折叠进回投 result.success/fail_detail
+└── acceptance/SKILL.md   # worker bot:叶子 execute 时自验收(方案Y) → 折叠进回投 result.success/data/gaps
 ```
 
 ## 上传与激活(集成用例 setup)
@@ -23,4 +23,4 @@ skills/
 
 - planning 返回格式 = `List[TaskSpec]`(对齐 `_parse_children`)。
 - search 返回格式 = 4 态 JSON(对齐 `_parse_search_result`),`HIT_MULTI_BOTS` 携 `collab_mode`/`group_name`/`members_info`/`definition_yaml`/`manager_bot_id`。
-- acceptance 不独立回投,折叠进 `TaskCallbackData.result`(对齐 `CallbackAdapter.adapt`:success→PASS / fail_detail→gaps)。
+- acceptance 不独立回投,折叠进严格 `TaskCallbackData.result`:`success` 必须是 bool;PASS 的 `gaps=[]`;FAIL 的 `gaps` 必须非空。非法/空终态进入 Harness,不默认 PASS。

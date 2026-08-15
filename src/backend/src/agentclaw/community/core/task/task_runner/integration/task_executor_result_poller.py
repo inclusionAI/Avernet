@@ -92,16 +92,18 @@ class TaskExecutorResultPoller:
     async def _poll_one(self, handle) -> None:
         now = self._clock()
         if now - handle.registered_at > self._sla_for(handle):
-            logger.warning("[poller] %s SLA 超时(%.0fs>%.0fs)→FAIL sla_timeout",
+            logger.warning("[poller] %s SLA 超时(%.0fs>%.0fs)→exec_error sla_timeout",
                            handle.loop_task_id, now - handle.registered_at, self._sla_for(handle))
-            await self._report(self._fail(handle, "sla_timeout"), handle)
+            await self._cancel_handle(handle)
+            await self._report(self._exec_error(handle, "sla_timeout"), handle)
             return
         try:
             data = await self._poll_terminal(handle)
         except Exception:  # noqa: BLE001 任意端口异常→累计;达上限 poll_exhausted
             handle.fails += 1
             if handle.fails >= _MAX_CONSEC_FAIL:
-                await self._report(self._fail(handle, "poll_exhausted"), handle)
+                await self._cancel_handle(handle)
+                await self._report(self._exec_error(handle, "poll_exhausted"), handle)
             return
         if data is not None:
             handle.fails = 0
@@ -131,11 +133,22 @@ class TaskExecutorResultPoller:
             return None
         return None
 
-    def _fail(self, handle, reason: str) -> TaskCallbackData:
+    async def _cancel_handle(self, handle) -> None:
+        if not isinstance(handle, SingleBotHandle):
+            return
+        cancel = getattr(self._bot, "cancel_run", None)
+        if cancel is None:
+            return
+        try:
+            await cancel(handle.run_id)
+        except Exception as exc:  # noqa: BLE001 取消是 best-effort,不能吞掉主回投
+            logger.warning("[poller] %s cancel_run failed: %s", handle.loop_task_id, exc)
+
+    def _exec_error(self, handle, reason: str) -> TaskCallbackData:
         return TaskCallbackData(
             loop_task_id=handle.loop_task_id,
             workflow_type="single_bot" if isinstance(handle, SingleBotHandle) else "bcn_coop_group",
-            workflow_id=0, instance_id=0, result={"success": False, "fail_detail": reason},
+            workflow_id=0, instance_id=0, result={"success": False, "exec_error": reason},
         )
 
     async def _poll_once(self) -> list[TaskCallbackData]:

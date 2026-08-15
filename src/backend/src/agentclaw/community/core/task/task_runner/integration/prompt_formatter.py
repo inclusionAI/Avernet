@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from agentclaw.community.core.task.domain.models import TaskNode
@@ -17,9 +18,24 @@ class PromptFormatterImpl(PromptFormatter):
         instr = context.get("node_instruction") or node.task_spec.metadata.instruction
         goal = node.task_spec.goal.objective
         siblings = context.get("sibling_outputs") or {}
-        parts = [f"目标:{goal}", f"指令:{instr}"]
+        acceptances = [
+            {"id": acceptance.id, "description": acceptance.description}
+            for acceptance in node.task_spec.goal.acceptances
+        ]
+        parts = [
+            "请执行任务，并在完成后根据验收标准进行自验收。",
+            f"目标:{goal}",
+            f"指令:{instr}",
+            f"验收标准:{json.dumps(acceptances, ensure_ascii=False)}",
+        ]
         if siblings:
-            parts.append(f"上游产出:{siblings}")
+            parts.append(f"上游产出:{json.dumps(siblings, ensure_ascii=False, default=str)}")
+        parts.append(
+            "最终只能输出一个 JSON 对象，不要输出 Markdown 代码块或额外解释。"
+            "通过示例:{\"success\":true,\"data\":{\"result\":\"任务实际产出\"},\"gaps\":[]};"
+            "未通过示例:{\"success\":false,\"data\":{\"result\":\"当前已有产出\"},"
+            "\"gaps\":[\"尚未满足的验收差距\"]}。"
+        )
         return "\n".join(parts)
 
     def format_verify(self, context: dict[str, Any], node: TaskNode) -> str:

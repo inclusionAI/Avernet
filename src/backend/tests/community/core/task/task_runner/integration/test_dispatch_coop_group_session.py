@@ -7,6 +7,9 @@ from agentclaw.community.core.task.task_dispatch.strategies import GroupFormatio
 from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import BcsCreateGroupResult
 from agentclaw.community.core.task.task_runner.integration.prompt_formatter import PromptFormatterImpl
 from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
+from agentclaw.community.core.task.task_runner.integration.double.double_bcs_bot_identity_resolver import (
+    _DoubleBcsBotIdentityResolver,
+)
 
 
 def _node(group_id="g1", task_id="t1"):
@@ -56,25 +59,33 @@ def _run(coro):
 
 def test_form_coop_group_chat_stores_meta_and_returns_gid():
     bcs = _Bcs()
-    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None, poller=_Poller())
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver())
     gid = _run(exe.form_coop_group(GroupFormation(bot_ids=["drv", "w1"], collab_mode="chat")))
     assert gid == "g1"
     assert exe._group_meta["g1"]["collab_mode"] == "chat"
     assert bcs.created[0].group_strategy is None  # chat 省略
+    assert bcs.created[0].driver_bot == "drv:double-owner"
+    assert [p["bot_uuid"] for p in bcs.created[0].participants] == [
+        "drv:double-owner", "w1:double-owner"
+    ]
 
 
 def test_form_coop_group_manager_worker_sets_strategy():
     bcs = _Bcs()
-    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None, poller=_Poller())
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver())
     _run(exe.form_coop_group(GroupFormation(bot_ids=["mgr", "w1"], collab_mode="manager_worker",
                                             extend_props={"manager_bot_id": "mgr"})))
     assert bcs.created[0].group_strategy == "manager_worker"
+    assert bcs.created[0].driver_bot == "mgr:double-owner"
 
 
 def test_dispatch_coop_group_session_mode_registers_session_handle():
     bcs = _Bcs()
     poller = _Poller()
-    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None, poller=poller)
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=poller, identity_resolver=_DoubleBcsBotIdentityResolver())
     _run(exe.form_coop_group(GroupFormation(bot_ids=["drv"], collab_mode="chat")))
     ok = _run(exe.dispatch([_node(group_id="g1")]))
     assert ok == [True]

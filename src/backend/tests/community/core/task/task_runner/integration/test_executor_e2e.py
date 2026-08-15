@@ -21,6 +21,9 @@ from agentclaw.community.core.task.task_center.engine import ExecutionEngine
 from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.task_runner.integration.double.double_bcs_client import _DoubleBcsClient
 from agentclaw.community.core.task.task_runner.integration.double.double_open_api_bot import _DoubleOpenApiBot
+from agentclaw.community.core.task.task_runner.integration.double.double_bcs_bot_identity_resolver import (
+    _DoubleBcsBotIdentityResolver,
+)
 
 
 # ===== double:phase-aware bot (planning/search round-trip + execute poll)=====
@@ -54,7 +57,11 @@ class _PhaseBot(_DoubleOpenApiBot):
         run = await super().get_run(run_id)
         # execute 回投:把 content 设成模拟产出(worker bot 跑完的产出字符串)
         if run.get("status") == "COMPLETED":
-            run["result"] = {"content": f"output_{run_id[:6]}"}
+            run["result"] = {"content": json.dumps({
+                "success": True,
+                "data": f"output_{run_id[:6]}",
+                "gaps": [],
+            }, ensure_ascii=False)}
         return run
 
 
@@ -141,7 +148,8 @@ class TestSingleBotPollReportE2E:
     def test_single_bot_dispatch_poll_report_done(self):
         svc = TaskGraphService()
         svc.initialize_graph(_task_info())
-        eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=_DoubleBcsClient(), discover=_DiscoverStub())
+        eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=_DoubleBcsClient(), discover=_DiscoverStub(),
+                              bcs_identity=_DoubleBcsBotIdentityResolver())
         _run(eng.on_execute("t_phase"))
         g = svc.query_task_dashboard("t_phase")
         nodes = {n.node_id: n for n in g.tasks}
@@ -166,9 +174,11 @@ class TestCoopGroupManagerWorkerE2E:
     def test_form_group_and_dispatch(self):
         svc = TaskGraphService()
         svc.initialize_graph(_task_info())
-        bcs = _DoubleBcsClient(session_status="completed", session_output="group_out",
+        bcs = _DoubleBcsClient(session_status="completed", session_output={
+                                   "success": True, "data": "group_out", "gaps": []},
                                poll_once_then_terminal=True, terminal_after=1)
-        eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=bcs, discover=_DiscoverStub())
+        eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=bcs, discover=_DiscoverStub(),
+                              bcs_identity=_DoubleBcsBotIdentityResolver())
         _run(eng.on_execute("t_phase"))
         g = svc.query_task_dashboard("t_phase")
         n_group = next(n for n in g.tasks if n.node_id == "N_group")
@@ -189,9 +199,11 @@ class TestCoopGroupStateMachineE2E:
     def test_state_machine_group(self):
         svc = TaskGraphService()
         svc.initialize_graph(_task_info())
-        bcs = _DoubleBcsClient(sm_status="completed", sm_output="sm_out",
+        bcs = _DoubleBcsClient(sm_status="completed", sm_output={
+                                   "success": True, "data": "sm_out", "gaps": []},
                                poll_once_then_terminal=True, terminal_after=1)
-        eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=bcs, discover=_DiscoverStub())
+        eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=bcs, discover=_DiscoverStub(),
+                              bcs_identity=_DoubleBcsBotIdentityResolver())
         _run(eng.on_execute("t_phase"))
         g = svc.query_task_dashboard("t_phase")
         n_sm = next(n for n in g.tasks if n.node_id == "N_sm")
@@ -211,7 +223,8 @@ class TestBbsNoOpE2E:
         svc = TaskGraphService()
         svc.initialize_graph(_task_info("t_bbs"))
         bcs = _DoubleBcsClient()
-        exe = eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=bcs, discover=_DiscoverStub())
+        exe = eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=bcs, discover=_DiscoverStub(),
+                                    bcs_identity=_DoubleBcsBotIdentityResolver())
         n = TaskNode(node_id="N_bbs", task_id="t_bbs", status=Status.RUNNING,
                      task_spec=_task_info("t_bbs").task_spec,
                      run_info=RuntimeInfo(run_mode="bbs", assignee="bbs_bot"),
@@ -229,7 +242,8 @@ class TestR3LockModel:
         per-task threading.RLock 应保证 on_report 串行执行,不竞态翻态(update_task_node_info 状态机不破)。"""
         svc = TaskGraphService()
         svc.initialize_graph(_task_info("t_lock"))
-        eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=_DoubleBcsClient(), discover=_DiscoverStub())
+        eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=_DoubleBcsClient(), discover=_DiscoverStub(),
+                              bcs_identity=_DoubleBcsBotIdentityResolver())
         # 手动建两个 PENDING 子节点 + 父 PLANNING,模拟一批兄弟
         from agentclaw.community.core.task.domain.models import TaskNodePatch, AcceptanceResult, AcceptanceVerdict
         children = [

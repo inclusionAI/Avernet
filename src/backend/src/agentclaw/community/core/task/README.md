@@ -171,6 +171,20 @@ stateDiagram-v2
 - 多节点投递并发:`asyncio.gather` + `asyncio.Semaphore(_DELIVER_CONCURRENCY=8)` **下沉 `TaskRunner.start_run` 内部**(投递是 runner 职责;engine 批量调 `start_run`,不持锁内拆单节点)。
 - 对齐 backend `desktop_bot/lifecycle.py` 的 `_check_one_bot` Semaphore 限流模式,防多节点投递雪崩。
 
+### BCS Bot 身份边界
+
+- 任务领域只保存产品 Bot ID:`SearchResult.bot_id`/`GroupFormation.bot_ids`/单 Bot `assignee` 不保存 BCS UUID。
+- 动态拉群在 `TaskExecutor.form_coop_group` 的 BCS integration 边界,经内部 `BcsBotIdentityResolver` 查询 BotService 权威 `owner_id`,转换为 ``{product_bot_id}:{owner_id}``。
+- BCS 请求的 `driver_bot`/`originator`/`participants[].bot_uuid`/manager-worker/`participant_bindings[*].bot_ids` 使用 BCS UUID。
+- state-machine `participant_bindings` 的 key 是 workflow YAML 逻辑 binding 名;不得以 Bot ID 作为 binding key。workflow binding 与 BCS ParticipantRole 分离,`participants[].role` 只使用 BCS 合法角色。
+
+### 执行结果与 SLA 契约
+
+- worker 最终结果严格为 `{"success":bool,"data":Any,"gaps":list[str]}`:PASS 的 `gaps=[]`;FAIL 的 `gaps` 必须非空。旧 `fail_detail` 仅作过渡兼容并归一成单 gap。
+- 空内容、非法 JSON、缺 `success`、`success` 非 bool、FAIL 无 gaps 均转 `exec_error=terminal_result_invalid`,进入 Harness;不得默认 PASS。
+- `TaskExecutorResultPoller` 是 worker fire-and-poll 业务 SLA 的唯一所有者。SLA 超时/连续轮询失败属于执行异常(`exec_error`),不是验收 FAIL。
+- Poller 超时后 best-effort `cancel_run`;Singlebox 真实取消后台 WebSocket collector。Singlebox Adapter 仅保留连接/握手/send ACK 等传输超时,不再用更短业务超时提前截断 Bot。
+
 ### graph 与 harness
 
 - `TaskGraphService` **保持同步**(内存快;`to_thread` 隔离语义留 corp DB 适配,本轮不动)。

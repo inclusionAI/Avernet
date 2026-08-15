@@ -78,8 +78,14 @@ class TestAdapt:
     def test_fail_without_detail_default_gap(self):
         adapter = CallbackAdapter()
         patch = adapter.adapt(_data(success=False))
-        assert patch.acceptance_result.verdict == AcceptanceVerdict.FAIL
-        assert patch.acceptance_result.gaps == ["unknown_gap"]
+        assert patch.acceptance_result is None
+        assert patch.exec_error == "terminal_result_invalid: failed result requires gaps"
+
+    def test_success_string_is_terminal_contract_error(self):
+        adapter = CallbackAdapter()
+        patch = adapter.adapt(_data(success="false"))
+        assert patch.acceptance_result is None
+        assert patch.exec_error == "terminal_result_invalid: success must be bool"
         assert patch.extend_props_patch is None
 
     def test_no_data_no_output_patch(self):

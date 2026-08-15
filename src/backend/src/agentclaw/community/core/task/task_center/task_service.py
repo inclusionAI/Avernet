@@ -29,11 +29,13 @@ class TaskService(TaskServiceProtocol):
     验收 100% 走回调回投;engine 不主动验,无 verify/bbs port。engine 对调用方不可见(无 property)。
     """
 
-    def __init__(self, graph, harness=None, *, bot=None, bcs=None, discover=None) -> None:
+    def __init__(self, graph, harness=None, *, bot=None, bcs=None, discover=None,
+                 bcs_identity=None) -> None:
         """graph: TaskGraphService;harness: TaskHarness | None(旁路复位,可选);
         bot/bcs/discover: 传输端口(DI 从配置注入 local/prod/double 实现传给引擎;省略=stub 路径/纯内核单测)。"""
         self._graph = graph
         self._harness = harness
+        self._bcs_identity = bcs_identity
         self._engine = self._build_engine(bot=bot, bcs=bcs, discover=discover)
         # 回投适配层:执行实体 PUSH → 适配 → 编排核 on_report
         self._callback = TaskLoopCallback(CallbackAdapter(), self._engine)
@@ -47,7 +49,10 @@ class TaskService(TaskServiceProtocol):
     def _build_engine(self, *, bot=None, bcs=None, discover=None) -> ExecutionEngine:
         """构造编排核:ExecutionEngine(graph, bot=, bcs=, discover=)。引擎内部 ``_build_*`` new 自带策略 +
         接线 TaskExecutor。测试可经 facade/engine 子类覆写本方法注入 stub 策略/投递的引擎(测试 seam)。"""
-        return ExecutionEngine(self._graph, bot=bot, bcs=bcs, discover=discover)
+        return ExecutionEngine(
+            self._graph, bot=bot, bcs=bcs, discover=discover,
+            bcs_identity=self._bcs_identity,
+        )
 
     @property
     def callback(self) -> TaskLoopCallback:

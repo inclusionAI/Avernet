@@ -77,3 +77,6 @@ def test_prompt_formatter_uses_context_and_node_spec():
     n = _node()
     s = fmt.format_execute({"mode": "execute", "node_instruction": "分析行业"}, n)
     assert "分析行业" in s
+    assert "验收标准" in s
+    assert '"success"' in s
+    assert '"gaps"' in s
