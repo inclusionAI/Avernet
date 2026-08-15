@@ -17,7 +17,7 @@ cd src/backend && DEPLOY_PROFILE=test uv run python scripts/dump_openapi.py /tmp
       bodies and path-item-level parameters. Passes today; it is what keeps the
       original defect from coming back. Verify: green before any router edit.
 
-- [ ] **2. The parity harness.** New
+- [x] **2. The parity harness.** New
       `tests/…/openapi_v1/test_legacy_parity.py` with the pair table empty and a
       helper that, given `(legacy_method, legacy_path, legacy_kwargs)` and the
       new equivalent, drives both through the test client and asserts identical
