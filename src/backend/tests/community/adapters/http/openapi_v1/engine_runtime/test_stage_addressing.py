@@ -37,10 +37,18 @@ from .conftest import BOT, OWNER, fails, ok
 #: assert it carries parameters it has no business carrying.
 def _engine_runtime_paths() -> frozenset[str]:
     from agentclaw.community.adapters.http.openapi_v1 import _ENGINE_RUNTIME_GROUPS
+    from agentclaw.community.adapters.http.openapi_v1.deprecated import (
+        ENGINE_RUNTIME_GROUPS as LEGACY_ENGINE_RUNTIME,
+    )
 
+    # The retiring addresses are mounted with the same response table and take
+    # the same parameters — they are the same operations at a former address —
+    # so they belong in this set until they are deleted. Leaving them out would
+    # have the test assert they carry neither owner_id nor stage, which is the
+    # opposite of the parity this feature promises.
     return frozenset(
         route.path.replace(":path", "")
-        for group in _ENGINE_RUNTIME_GROUPS
+        for group in [*_ENGINE_RUNTIME_GROUPS, *LEGACY_ENGINE_RUNTIME]
         for route in group.routes
         if isinstance(route, APIRoute)
     )
@@ -245,7 +253,10 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
             # parameter existed.
             assert not params["owner_id"].get("required", False), path
 
-    assert len(engine_runtime) == 16
+    # 16 current operations, and the same 16 answering at their former
+    # addresses while callers migrate. The number halves again when the
+    # deprecated package is deleted.
+    assert len(engine_runtime) == 32
     assert sorted(carrying_stage) == sorted(engine_runtime), "stage is theirs alone"
     assert sorted(carrying_owner) == sorted(
         set(engine_runtime) | _OWNER_ADDRESSED_ELSEWHERE

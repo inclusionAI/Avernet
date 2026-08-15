@@ -18,7 +18,27 @@ _BOTS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/"
 
 
 def _engine_runtime_routes() -> list[APIRoute]:
+    """The current engine-runtime routes."""
     return [r for g in _ENGINE_RUNTIME_GROUPS for r in g.routes if isinstance(r, APIRoute)]
+
+
+def _all_engine_runtime_paths() -> set[str]:
+    """Current *and* retiring, for the assertions about the response table.
+
+    The legacy addresses are mounted with the same table and answer with the
+    same handlers, so they document the 501 and 504 too — as they must, or the
+    old address would stop describing what it returns.
+    """
+    from agentclaw.community.adapters.http.openapi_v1.deprecated import (
+        ENGINE_RUNTIME_GROUPS as LEGACY,
+    )
+
+    return {
+        _schema_path(r.path)
+        for g in [*_ENGINE_RUNTIME_GROUPS, *LEGACY]
+        for r in g.routes
+        if isinstance(r, APIRoute)
+    }
 
 
 def _document() -> dict:
@@ -124,7 +144,7 @@ def test_engine_runtime_routes_document_501_and_504():
     """And the rest of the surface does not — they cannot return them."""
     schema = _document()
 
-    runtime_paths = {_schema_path(r.path) for r in _engine_runtime_routes()}
+    runtime_paths = _all_engine_runtime_paths()
     for path, methods in schema["paths"].items():
         for method, operation in methods.items():
             documented = set(operation["responses"])

@@ -105,34 +105,34 @@ parameter. Verify each with the dump.
 
 ## The deprecated package
 
-- [ ] **17. Scaffolding.** New `openapi_v1/deprecated/` with `_shim.py` holding
+- [x] **17. Scaffolding.** New `openapi_v1/deprecated/` with `_shim.py` holding
       the route-registration helper (sets `deprecated=True` and the
       `" (deprecated)"` tag suffix) and `__init__.py` exposing
       `build_deprecated_router()` and `LEGACY_ROUTES`, the `(method, path)` set
       built from the registrations rather than restated.
 
-- [ ] **18. Re-register the eighteen.** `deprecated/engine_runtime.py`: one line
+- [x] **18. Re-register the eighteen.** `deprecated/engine_runtime.py`: one line
       per route binding the *existing* handler to its old path, for identity,
       connection, engine, models, sessions, and the approvals GET. Not the
       approvals PUT — its body changed, so it is task 19.
 
-- [ ] **19. Shim the approvals PUT.** Old address, old body (with
+- [x] **19. Shim the approvals PUT.** Old address, old body (with
       `session_key`), delegating to the new handler.
 
-- [ ] **20. Shim `resources` (7).** Old address, `bot_id` as a required query
+- [x] **20. Shim `resources` (7).** Old address, `bot_id` as a required query
       parameter, delegating.
 
-- [ ] **21. Shim `routines` (7).** Old addresses; the create keeps
+- [x] **21. Shim `routines` (7).** Old addresses; the create keeps
       `bot_id` in its body via a `LegacyRoutineCreate` model declared in the
       package.
 
-- [ ] **22. Shim `skills` (6).** Old addresses including `…/skills/upload`, and
+- [x] **22. Shim `skills` (6).** Old addresses including `…/skills/upload`, and
       `owner_entity_id` preserved as the parameter name.
 
-- [ ] **23. Shim `engine-config` (2).** The old `/{bot_id}/engine-config`
+- [x] **23. Shim `engine-config` (2).** The old `/{bot_id}/engine-config`
       address.
 
-- [ ] **24. Move the second authorization mechanism into the package.** The
+- [x] **24. Move the second authorization mechanism into the package.** The
       legacy routers mount **without** `_GRANT_CHECKED`; each shim whose bot is
       not visible to the shared dependency performs the same
       `caller.require_bot(bot_id, owner_id=…)` call the handlers make today,
@@ -140,11 +140,11 @@ parameter. Verify each with the dump.
       the same masked 404 on every legacy address it gets on the new one —
       extend `test_app_only_refusals.py`.
 
-- [ ] **25. Mount it.** In `openapi_v1/__init__.py`, include the deprecated
+- [x] **25. Mount it.** In `openapi_v1/__init__.py`, include the deprecated
       router. Order it with the other literal groups, before the bots wildcard
       router.
 
-- [ ] **26. Deprecation headers.** New `openapi_v1/deprecation.py` middleware
+- [x] **26. Deprecation headers.** New `openapi_v1/deprecation.py` middleware
       stamping `Deprecation: true` and `Sunset: <http-date>` when the matched
       route is in `LEGACY_ROUTES`; register it in `adapters/http/app.py`. The
       sunset date is one module constant — use the date agreed at the review
@@ -170,13 +170,13 @@ parameter. Verify each with the dump.
 
 ## Tests, docs, artifact
 
-- [ ] **29. Convention test.** Rewrite `test_path_convention.py` for the new
+- [x] **29. Convention test.** Rewrite `test_path_convention.py` for the new
       rule: every bot-scoped operation is `/openapi/v1/bots/{bot_id}/…`; the
       routed reserved list is the six literals still in the `{bot_id}` segment;
       a **second** list covers the literals in the segment after `{bot_id}` and
       asserts they are unique. Both parsed from `README.md`, as today.
 
-- [ ] **30. Fill the parity table.** One row per legacy/new pair — 39 of them.
+- [x] **30. Fill the parity table.** One row per legacy/new pair — 39 of them.
       This is the task that proves the compatibility promise; do not treat a
       re-registered route as trivially equal, since `admission.py` and the
       mount-level dependencies differ between the two.

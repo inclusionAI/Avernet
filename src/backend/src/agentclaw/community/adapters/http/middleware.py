@@ -320,6 +320,16 @@ def install_middleware(
 
     app.add_middleware(PublicApiAccessLogMiddleware)
 
+    # Tells a caller on the wire that the address they used is retiring. Beside
+    # the access log because both read the *matched route* off the scope on the
+    # way out, and both are about the public surface only. Lazily imported for
+    # the same reason.
+    from agentclaw.community.adapters.http.openapi_v1.deprecation import (
+        DeprecationHeaderMiddleware,
+    )
+
+    app.add_middleware(DeprecationHeaderMiddleware)
+
     # Add last so it is outermost: it must sanitize the shared ASGI scope
     # before tracer, auth context, and default access logging use it.
     app.add_middleware(CompatibilityCtokenMiddleware)

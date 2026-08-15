@@ -26,6 +26,9 @@ from __future__ import annotations
 import pytest
 
 from agentclaw.community.adapters.http.openapi_v1 import build_public_router
+from agentclaw.community.adapters.http.openapi_v1.deprecated import (
+    SELF_CHECKED_ROUTES,
+)
 from agentclaw.community.adapters.http.openapi_v1.admission import (
     ADMISSION,
     ADMITTING_MODES,
@@ -156,8 +159,20 @@ def test_every_grant_checked_operation_actually_checks():
     for the wholly own-bot groups, per route in the mixed ``bots`` group, and
     transitively through ``OwnerIdDep`` on the engine-runtime groups. A test
     that looked for one spelling would pass while the other two rotted.
+
+    The retiring addresses in ``SELF_CHECKED_ROUTES`` are the exception, and a
+    named one: their bot is in the request body or resolved from a skill, so the
+    shared dependency cannot see it — mounting them with it would refuse an
+    application caller outright rather than defer, turning a working legacy call
+    into a 404. They check it themselves, first, before acting. This is the
+    second mechanism ``TODO(#960)`` recorded, alive only where the old contract
+    keeps it alive, and the set is empty the day the deprecated package goes.
     """
-    expected = {key for key, mode in ADMISSION.items() if mode in _GRANT_CHECKED_MODES}
+    expected = {
+        key
+        for key, mode in ADMISSION.items()
+        if mode in _GRANT_CHECKED_MODES and key not in SELF_CHECKED_ROUTES
+    }
     actual = {
         key
         for key, ctx in _operations()

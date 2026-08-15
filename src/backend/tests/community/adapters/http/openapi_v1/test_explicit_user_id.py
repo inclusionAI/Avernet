@@ -326,6 +326,23 @@ def _schema() -> dict:
     return app.openapi()
 
 
+def _current_operations(schema: dict):
+    """``(path, method, operation)`` for the operations of the current contract.
+
+    The retiring addresses answer beside them and take the same ``user_id``,
+    but every count in this file is pinned — and a pin that silently doubled
+    when the deprecated package landed, then halved again when it went, would
+    be measuring the migration rather than the rule. The rule is about the
+    surface this API has.
+    """
+    for path, item in schema["paths"].items():
+        for method, operation in item.items():
+            if not isinstance(operation, dict) or "responses" not in operation:
+                continue
+            if not operation.get("deprecated", False):
+                yield path, method, operation
+
+
 def _operations(schema: dict):
     for path, methods in schema["paths"].items():
         for method, operation in methods.items():
@@ -374,7 +391,7 @@ def test_the_pinned_number_of_operations_take_it():
     """
     taking = [
         1
-        for path, method, operation in _operations(_schema())
+        for path, method, operation in _current_operations(_schema())
         if _user_scoped(path, method) and _param(operation, USER_ID_QUERY)
     ]
     # 60 on the merge base, +3 for the startup-script operations, +2 for the
@@ -433,9 +450,15 @@ def test_user_id_is_never_a_body_field_or_a_path_segment():
 
 
 def test_bot_id_is_in_the_path_wherever_it_addresses_a_bot():
-    """This change moved no ``bot_id``. If it ever does, it is on purpose."""
+    """Counted over the current contract only.
+
+    The retiring addresses carry ``bot_id`` where they always did — in the
+    query, in a body, or nowhere — which is the whole point of keeping them.
+    Counting them here would measure how far through the migration we are
+    rather than whether the rule holds.
+    """
     counts = {"path": 0, "query": 0, "none": 0}
-    for _, _, operation in _operations(_schema()):
+    for _, _, operation in _current_operations(_schema()):
         parameter = _param(operation, "bot_id")
         counts[parameter["in"] if parameter else "none"] += 1
     assert counts == _BOT_ID_PLACEMENT

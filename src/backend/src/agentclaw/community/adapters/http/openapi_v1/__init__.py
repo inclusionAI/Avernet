@@ -132,6 +132,11 @@ from .authorized_apps import app_view_router as authorized_bots_router
 from .authorized_apps import router as authorized_apps_router
 from .bots import router as bots_router
 from .bots.engine_config import router as engine_config_router
+from .deprecated import (
+    ENGINE_RUNTIME_GROUPS as _LEGACY_ENGINE_RUNTIME,
+    GRANT_CHECKED_GROUPS as _LEGACY_GRANT_CHECKED,
+    SELF_CHECKED_GROUPS as _LEGACY_SELF_CHECKED,
+)
 from .contracts import (
     ENGINE_RUNTIME_ERROR_RESPONSES,
     ERROR_RESPONSES,
@@ -295,6 +300,29 @@ def build_public_router() -> APIRouter:
             responses=ENGINE_RUNTIME_ERROR_RESPONSES,
             dependencies=_PUBLIC_AUTH,
         )
+    # The addresses this surface used to have. Each legacy group is mounted the
+    # way its replacement is, because the mount decides half of what a caller
+    # experiences and parity means the old address answers as it always did.
+    # The exception is `skills`, whose retiring item operations name no bot for
+    # `require_granted_bot` to read and so check it themselves — see
+    # `deprecated/__init__.py`.
+    for router in _LEGACY_ENGINE_RUNTIME:
+        public.include_router(
+            router,
+            responses=ENGINE_RUNTIME_ERROR_RESPONSES,
+            dependencies=_PUBLIC_AUTH,
+        )
+    for router in _LEGACY_GRANT_CHECKED:
+        public.include_router(
+            router,
+            responses=USER_SCOPED_ERROR_RESPONSES,
+            dependencies=_PUBLIC_AUTH + _GRANT_CHECKED,
+        )
+    for router in _LEGACY_SELF_CHECKED:
+        public.include_router(
+            router, responses=USER_SCOPED_ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
+        )
+
     # `bots` is mixed too, but stays last for the wildcard-ordering rule above.
     public.include_router(
         bots_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH

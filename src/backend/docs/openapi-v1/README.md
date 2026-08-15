@@ -835,8 +835,23 @@ list still equals the literals the routes actually publish:
 
 <!-- reserved-component-names -->
 ```text
+approvals  authorized  ceiling  check-name  connection  engine  identity
+loadtest  logs  mcp  models  resources  routines  sessions  skills
+```
+
+Nine of those fifteen — `approvals`, `connection`, `engine`, `identity`,
+`models`, `resources`, `routines`, `sessions`, `skills` — are held **only by the
+retiring addresses**. Bot-first addressing moved every bot-scoped component out
+of that segment, so once the deprecated addresses are removed the list is the
+six that remain:
+
+```text
 authorized  ceiling  check-name  loadtest  logs  mcp
 ```
+
+They are still reserved today, and the list above is the accurate one: a bot
+whose id is `sessions` is unreachable at `/openapi/v1/bots/sessions` for as long
+as the old address answers there.
 
 **Reserved ahead of their routes.** A second, separate list — names claimed here
 before any route publishes them. They are *not* reserved for the reason above:

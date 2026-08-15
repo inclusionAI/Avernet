@@ -9,150 +9,106 @@ So each pair is driven twice — once at the address a client uses today, once a
 the address it will use tomorrow — through the *same* application, and the two
 responses are compared. Status, envelope ``code`` and ``message``, and ``data``.
 
-Two shapes of legacy route, and the distinction matters for what this catches:
+Some legacy routes are re-registrations of the *same endpoint function* under
+the old path, because ``bot_id`` is a path parameter in both shapes. It is
+tempting to call those trivially equal and skip them. They are not: the two
+registrations differ in the router they hang off, and therefore in the
+mount-level dependencies and the ``admission.py`` entry that governs them —
+exactly the things that decide whether an application caller is admitted. So
+they are checked like any other pair.
 
-- Eighteen operations are re-registrations of the *same endpoint function* under
-  the old path, because ``bot_id`` is a path parameter in both shapes. It is
-  tempting to call those trivially equal and skip them. They are not: the two
-  registrations differ in the router they hang off, and therefore in the
-  mount-level dependencies (`_GRANT_CHECKED`) and the ``admission.py`` entry
-  that governs them. Those are exactly the things that decide whether an
-  application caller is admitted, so they are tested like any other pair.
-- The rest are real shims with their own signature, where the translation is
-  the thing under test.
+Rather than a table of hand-written request pairs, the rows are **generated
+from the registrations**: every legacy address knows the address that replaced
+it, so the pair is already recorded and a hand-written table would only be a
+second, driftable copy of it.
 
-``PAIRS`` fills in as each group lands. ``test_every_legacy_route_has_a_row``
-is what makes a missing row loud rather than invisible: once the deprecated
-package exists it asserts the table covers every route the package publishes.
+What each row asserts is that both addresses reach the same decision. The
+requests here are unauthenticated, so both answer the surface's masked failure
+— which is exactly the comparison worth making automatically, because it covers
+every one of the forty-one addresses and catches the failure that actually
+happens: a legacy route mounted with different dependencies, or missing from
+``admission.py``, answering a *different* refusal than its replacement. A
+difference there is a hole or a wall, and either is a broken promise.
+
+Behavioural parity on the success path is asserted where the services are
+stubbed and the answers are meaningful — the per-group suites — not here, where
+a shared fixture for all forty-one would have to stub every service on the
+surface at once and would prove less than it appeared to.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Callable
-
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from agentclaw.community.adapters.http.openapi_v1 import build_public_router
+from agentclaw.community.adapters.http.openapi_v1.deprecated import LEGACY_ROUTES
 
-@dataclass(frozen=True)
-class LegacyPair:
-    """One legacy address and the new address that replaces it.
+from .conftest import mount_public_error_handlers
 
-    ``client_factory`` builds the application both halves run against. It is
-    per-pair rather than a shared fixture because each group stubs its own
-    services, and a single application wired for all of them would be a fixture
-    nobody could read — and would let one group's stub satisfy another group's
-    assertion.
+
+def _client() -> TestClient:
+    app = FastAPI()
+    app.include_router(build_public_router())
+    mount_public_error_handlers(app)
+    return TestClient(app)
+
+
+def _concrete(template: str) -> str:
+    """A callable path for a template, every parameter filled with the same id.
+
+    The same value in both halves of a pair, so a difference in the response is
+    a difference in the *route*, never in what was addressed.
     """
-
-    method: str
-    legacy_path: str
-    new_path: str
-    client_factory: Callable[[], TestClient]
-    #: Query parameters as the *legacy* address takes them (e.g. ``bot_id``).
-    legacy_params: dict[str, Any] = field(default_factory=dict)
-    #: Query parameters as the *new* address takes them; usually the legacy set
-    #: minus whatever moved into the path.
-    new_params: dict[str, Any] = field(default_factory=dict)
-    legacy_json: Any = None
-    new_json: Any = None
-    content: bytes | None = None
-    headers: dict[str, str] = field(default_factory=dict)
-
-    @property
-    def id(self) -> str:
-        return f"{self.method} {self.legacy_path} -> {self.new_path}"
-
-
-def _call(client: TestClient, method: str, path: str, params, json, content, headers):
-    kwargs: dict[str, Any] = {"params": params, "headers": headers or None}
-    if json is not None:
-        kwargs["json"] = json
-    if content is not None:
-        kwargs["content"] = content
-    return client.request(method, path, **{k: v for k, v in kwargs.items() if v is not None})
-
-
-def assert_parity(pair: LegacyPair) -> None:
-    """Drive both addresses and compare what a client would see."""
-    legacy = _call(
-        pair.client_factory(),
-        pair.method,
-        pair.legacy_path,
-        pair.legacy_params,
-        pair.legacy_json,
-        pair.content,
-        pair.headers,
-    )
-    new = _call(
-        pair.client_factory(),
-        pair.method,
-        pair.new_path,
-        pair.new_params or pair.legacy_params,
-        pair.new_json if pair.new_json is not None else pair.legacy_json,
-        pair.content,
-        pair.headers,
+    return "/".join(
+        "x" if segment.startswith("{") else segment
+        for segment in template.replace(":path", "").split("/")
     )
 
-    assert legacy.status_code == new.status_code, (
-        f"{pair.id}: legacy answered {legacy.status_code}, new answered "
-        f"{new.status_code}"
+
+PAIRS = sorted(
+    (method, legacy, replacement)
+    for (method, legacy), replacement in LEGACY_ROUTES.items()
+)
+
+
+@pytest.mark.parametrize(
+    ("method", "legacy", "replacement"),
+    PAIRS,
+    ids=[f"{m} {legacy}" for m, legacy, _ in PAIRS],
+)
+def test_a_legacy_address_refuses_exactly_as_its_replacement_does(
+    method: str, legacy: str, replacement: str
+) -> None:
+    client = _client()
+    old = client.request(method, _concrete(legacy))
+    new = client.request(method, _concrete(replacement))
+
+    assert old.status_code == new.status_code, (
+        f"{method} {legacy} answered {old.status_code} where its replacement "
+        f"{replacement} answered {new.status_code} — the two are mounted "
+        "differently, or one is missing from admission.py"
     )
-    legacy_body, new_body = legacy.json(), new.json()
-    for key in ("code", "message", "data"):
-        assert legacy_body.get(key) == new_body.get(key), (
-            f"{pair.id}: envelope {key!r} differs — legacy "
-            f"{legacy_body.get(key)!r}, new {new_body.get(key)!r}"
-        )
+    assert old.json().get("code") == new.json().get("code")
+    assert old.json().get("message") == new.json().get("message")
 
 
-#: Populated group by group as each set of addresses lands.
-PAIRS: list[LegacyPair] = []
+def test_every_legacy_route_names_a_replacement_that_exists() -> None:
+    """A legacy address pointing at nothing would be a dead end in the document."""
+    published = set(_client().app.openapi()["paths"])
+    missing = sorted(
+        replacement
+        for replacement in LEGACY_ROUTES.values()
+        if replacement.replace(":path", "") not in published
+    )
+    assert not missing, f"legacy addresses naming a replacement that is not served: {missing}"
 
 
-@pytest.mark.parametrize("pair", PAIRS, ids=lambda pair: pair.id)
-def test_legacy_answers_exactly_as_the_new_address_does(pair: LegacyPair) -> None:
-    assert_parity(pair)
+def test_the_expected_number_of_addresses_are_retiring() -> None:
+    """Thirty-nine re-addressed operations, plus the two engine-config ones.
 
-
-def test_every_legacy_route_has_a_row() -> None:
-    """The table covers every address the deprecated package publishes.
-
-    Skipped until that package exists, so this file is green from the moment it
-    lands and becomes the completeness check the moment there is something to
-    be complete about.
+    Pinned so that adding a legacy address, or losing one, is a number somebody
+    has to look at rather than a silent change to what this API still answers.
     """
-    try:
-        from agentclaw.community.adapters.http.openapi_v1.deprecated import (
-            LEGACY_ROUTES,
-        )
-    except ImportError:
-        pytest.skip("the deprecated package has not landed yet")
-
-    covered = {(pair.method.upper(), pair.legacy_path) for pair in PAIRS}
-    missing = {
-        route
-        for route in LEGACY_ROUTES
-        if not any(_matches(route, call) for call in covered)
-    }
-    assert not missing, f"legacy addresses with no parity row: {sorted(missing)}"
-
-
-def _matches(route: tuple[str, str], call: tuple[str, str]) -> bool:
-    """Whether a concrete call exercises a route template.
-
-    Rows call real addresses (``/openapi/v1/bots/sessions/b-1``);
-    ``LEGACY_ROUTES`` holds templates (``/openapi/v1/bots/sessions/{bot_id}``).
-    A ``{…}`` segment matches whatever the row put there; every other segment
-    matches itself.
-    """
-    method, template = route
-    called_method, called = call
-    if method != called_method:
-        return False
-    pattern, parts = template.split("/"), called.split("/")
-    return len(pattern) == len(parts) and all(
-        expected.startswith("{") or expected == actual
-        for expected, actual in zip(pattern, parts)
-    )
+    assert len(LEGACY_ROUTES) == 41
