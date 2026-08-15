@@ -24,7 +24,7 @@ cd src/backend && DEPLOY_PROFILE=test uv run python scripts/dump_openapi.py /tmp
       status, envelope `code`/`message`, and `data`. Rows land as each group is
       re-addressed. Verify: collects and passes with an empty table.
 
-- [ ] **3. Pin the current surface.** Dump the document to
+- [x] **3. Pin the current surface.** Dump the document to
       `/tmp/before.json` and keep it for the duration — every later task diffs
       against it, and the 39/32 split in the spec is what the diff must show.
 
