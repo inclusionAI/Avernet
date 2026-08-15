@@ -97,7 +97,7 @@ parameter. Verify each with the dump.
       `…/{bot_id}/engine/config` alongside `…/{bot_id}/engine/status`, and the
       config operations document no 501.
 
-- [ ] **16. `session_key` out of the approvals write body.** In
+- [x] **16. `session_key` out of the approvals write body.** In
       `engine_runtime/approvals/`, move it from the PUT body model to a query
       parameter with the same description the GET publishes; the body carries
       `mode` alone. Verify: task 1 still green and the two operations now agree

@@ -67,7 +67,7 @@ ROUTES = [
     ("get", "/{bot}/models", None),
     ("get", "/{bot}/models/openai/gpt-5.3", None),
     ("get", "/{bot}/approvals/mode?session_key=k", None),
-    ("put", "/{bot}/approvals/mode", {"session_key": "k", "mode": "never"}),
+    ("put", "/{bot}/approvals/mode?session_key=k", {"mode": "never"}),
     ("get", "/{bot}/approvals/modes", None),
     ("get", "/{bot}/connection", None),
 ]

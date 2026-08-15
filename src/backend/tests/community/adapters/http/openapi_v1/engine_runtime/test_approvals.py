@@ -33,7 +33,7 @@ def test_get_mode_requires_a_session_key(client, relay):
 
 def test_set_mode_forwards_the_value_verbatim(client, relay):
     relay.results = [EngineResult(data={"mode": "never", "sessionKey": SESSION})]
-    ok(client.put(f"{BASE}/mode", json={"session_key": SESSION, "mode": "never"}))
+    ok(client.put(f"{BASE}/mode?session_key={SESSION}", json={"mode": "never"}))
     assert relay.calls[0]["body"] == {
         "session_key": SESSION,
         "mode": "never",
@@ -48,7 +48,7 @@ def test_a_refused_set_is_not_reported_as_applied(client, relay):
     relay.results = [
         EngineResult(data={"ok": False, "mode": "never", "sessionKey": SESSION})
     ]
-    resp = client.put(f"{BASE}/mode", json={"session_key": SESSION, "mode": "never"})
+    resp = client.put(f"{BASE}/mode?session_key={SESSION}", json={"mode": "never"})
     assert resp.status_code == 502
 
 
@@ -56,7 +56,7 @@ def test_an_applied_set_is_reported_as_applied(client, relay):
     relay.results = [
         EngineResult(data={"ok": True, "mode": "never", "sessionKey": SESSION})
     ]
-    data = ok(client.put(f"{BASE}/mode", json={"session_key": SESSION, "mode": "never"}))
+    data = ok(client.put(f"{BASE}/mode?session_key={SESSION}", json={"mode": "never"}))
     assert data["mode"] == "never"
 
 
@@ -71,14 +71,14 @@ def test_a_read_without_an_ok_flag_is_not_treated_as_refused(client, relay):
 @pytest.mark.parametrize("mode", ["approve", "on-miss", "never"])
 def test_advertised_modes_are_accepted(client, relay, mode):
     relay.results = [EngineResult(data={"mode": mode, "sessionKey": SESSION})]
-    ok(client.put(f"{BASE}/mode", json={"session_key": SESSION, "mode": mode}))
+    ok(client.put(f"{BASE}/mode?session_key={SESSION}", json={"mode": mode}))
 
 
 @pytest.mark.parametrize("alias", ["always", "on_miss", "off", "auto"])
 def test_undocumented_aliases_are_rejected(client, relay, alias):
     """The engine accepts six spellings; publishing them would bless two
     public names for one mode, permanently."""
-    resp = client.put(f"{BASE}/mode", json={"session_key": SESSION, "mode": alias})
+    resp = client.put(f"{BASE}/mode?session_key={SESSION}", json={"mode": alias})
     assert resp.status_code == 422, resp.json()
     assert relay.calls == []
 
@@ -92,9 +92,8 @@ def test_a_stub_returning_auto_does_not_500(client, relay):
 
 
 def test_caller_supplied_user_id_is_rejected(client, relay):
-    resp = client.put(
-        f"{BASE}/mode",
-        json={"session_key": SESSION, "mode": "never", "user_id": "someone-else"},
+    resp = client.put(f"{BASE}/mode?session_key={SESSION}",
+        json={"mode": "never", "user_id": "someone-else"},
     )
     assert resp.status_code == 422
     assert relay.calls == []

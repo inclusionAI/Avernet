@@ -129,6 +129,9 @@ async def set_approval_mode(
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,
+    session_key: Annotated[
+        str, Query(description="Session to change the mode for.")
+    ],
     stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[ApprovalState]:
@@ -148,13 +151,13 @@ async def set_approval_mode(
         method="POST",
         path="/api/approvals/mode/set",
         body={
-            "session_key": body.session_key,
+            "session_key": session_key,
             "mode": body.mode.value,
             "user_id": user_id,
         },
     )
     _reject_refused_set(result.data)
-    return envelope(_state(result.data, body.session_key), request)
+    return envelope(_state(result.data, session_key), request)
 
 
 @router.get("/modes", response_model=Envelope[list[ApprovalModeInfo]])
