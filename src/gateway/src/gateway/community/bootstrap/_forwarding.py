@@ -110,7 +110,7 @@ def _internal_openapi_domains(config: Config) -> dict[str, dict[str, object]]:
         return {}
     schemas = raw.get("schemas", {})
     if not isinstance(schemas, dict):
-        return {}
+        raise ValueError("internal_api_docs.schemas: must be a mapping")
     result: dict[str, dict[str, object]] = {}
     for name, schema in schemas.items():
         domain_name = str(name)
