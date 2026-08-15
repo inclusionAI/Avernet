@@ -163,7 +163,9 @@ one — see **Decisions**.
 ## Out of Scope
 
 Each of these was checked against the callers of
-`DeviceContextResolver.resolve_for_bot`, not assumed.
+`DeviceContextResolver.resolve_for_bot`, not assumed. The audit covers all 31
+call sites; an earlier pass of it was truncated and missed MCP, which is why
+that group is enumerated below rather than absent.
 
 - **The startup-script operations** (`GET`/`PUT`/`DELETE
   …/{bot_id}/startup-script`). Named as affected in the original request; they
@@ -190,6 +192,33 @@ Each of these was checked against the callers of
 - **Routines.** `CronRelayService` resolves `resolve_for_bot`, but a routine is
   not a per-bot file and its stage pin is already filed as
   [#908](https://github.com/inclusionAI/Avernet/issues/908).
+- **The MCP group** (6 operations) — out for a different reason from the rest,
+  and the reason is worth stating because the group *does* reach devices.
+
+  **None of the six addresses a bot.** They are keyed by `server_code` and
+  `user_id`: `/openapi/v1/bots/mcp/servers`, `/tenants`,
+  `/servers/{server_code}`, `…/permissions`, and `GET`/`PUT …/config`. #1074
+  keeps all six at their current addresses for exactly that reason — a bot id
+  would have nothing to name.
+
+  **But `PUT …/servers/{server_code}/config` is not bot-free in effect.**
+  `write_unified_config` → `MCPSyncService.sync_mcp_detail_to_all_bots` lists
+  every bot under the identity and calls `resolve_for_bot(bot_id, entity_id)`
+  for each, pushing the config to that bot's device. One account-level write
+  fans out to N bots.
+
+  A `stage` parameter still does not belong there, and not merely because the
+  group is out of scope. The operation names no single bot, so there is no one
+  runtime for a stage to name; and what a published stage would ask for is a
+  fan-out write to published runtimes, which is precisely what this feature's
+  write rule refuses.
+
+  **The fan-out reaches drafts only, and that is correct rather than a gap** —
+  by the same rule, arrived at independently. A release inlines its MCP
+  credentials into the artifact (`sync_service.py`: "凭据已内联进产物，改
+  api_key 即改产物字节"), so a published runtime's MCP config changes by
+  republishing, not by being written. That is this spec's D1 reasoning holding
+  on a surface that never consulted it.
 - **Internal `/api/...` routes.** They stay draft-only, explicitly, at their
   call sites.
 - **Any change to what a published runtime contains.** This surface reads it; the

@@ -229,6 +229,7 @@ adapters/http/openapi_v1/responses.py
 
 | Risk | Mitigation |
 | --- | --- |
+| The surface audit missed a group | Re-run over all 31 `resolve_for_bot` call sites, not a truncated listing — that is how MCP was found. The groups reachable from `/openapi/v1` are engine-config, identity, resources, skills, MCP, routines and the engine-runtime relay; the rest are internal-only surfaces |
 | The draft path changes behaviour by accident | The draft branch is literally `resolve_for_bot(bot_id, owner_id)`; a test asserts the resolver call is identical with and without `?stage=draft`, and that no bot lookup is made on the identity draft path |
 | Two new constructor deps break direct service construction in tests | Nine call sites, enumerated in the task list; `injector` supplies them in prod (`DeviceBindingRepository` and `BotPublishRepositoryProtocol` are both already bound) |
 | `test_stage_addressing.py` asserts `stage` is on *exactly* sixteen operations | The document half gains a `_STAGE_ADDRESSED_ELSEWHERE` set, mirroring the existing `_OWNER_ADDRESSED_ELSEWHERE` — so the assertion stays exact rather than being loosened |

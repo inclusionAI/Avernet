@@ -331,6 +331,10 @@
         deliberately take no stage.
   - [ ] Resources / skills / routines are named as the remaining draft-only
         device surfaces, with the reason each is deferred (spec Out of Scope).
+  - [ ] MCP is named too, and correctly: its six operations address no bot, but
+        its config write fans out to every bot's draft device. Draft-only is
+        the right answer there for the same reason the writes here refuse a
+        published stage — say so, so a later reader does not file it as a gap.
 - **Depends on:** C2, C3
 
 ---
