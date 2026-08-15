@@ -34,7 +34,7 @@ For each: change the router prefix, strip `/{bot_id}` from the decorator paths,
 update the module docstring. The handler keeps its `bot_id: BotIdPath`
 parameter. Verify each with the dump.
 
-- [ ] **4. `identity`.** Prefix → `/openapi/v1/bots/{bot_id}/identity`;
+- [x] **4. `identity`.** Prefix → `/openapi/v1/bots/{bot_id}/identity`;
       decorators `/{bot_id}` → `""`, `/{bot_id}/{file_type}` → `/{file_type}`.
 
 - [ ] **5. `connection`.** Prefix → `/openapi/v1/bots/{bot_id}/connection`;

@@ -1,9 +1,10 @@
-"""Identity group — ``/openapi/v1/bots/identity/{bot_id}`` bot identity files.
+"""Identity group — ``/openapi/v1/bots/{bot_id}/identity`` bot identity files.
 
 Read/write a bot's identity markdown files (RULES, SOUL, …), addressed by bot.
-``{bot_id}`` is the first segment after the component, as everywhere on this
-surface — there is no ``/bot/`` segment before it, because the base already
-says ``bots`` and saying it twice told a reader nothing the base did not.
+``{bot_id}`` comes first, ahead of the component, as everywhere on this
+surface: an operation that acts on one bot starts with that bot's address.
+The component name follows it, and there is no ``/bot/`` segment anywhere —
+the base already says ``bots``.
 Every route requires an authenticated user principal. ``entity_type`` is
 hardcoded to ``staff`` for the personal-bot surface — ``proj``/``team``
 identity files (both valid entity types) are intentionally out of scope for
@@ -40,7 +41,7 @@ from .schemas import (
     IdentityFileWrite,
 )
 
-router = APIRouter(prefix="/openapi/v1/bots/identity", tags=["identity"])
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/identity", tags=["identity"])
 
 #: The path parameter naming which identity file an operation addresses.
 FileTypePath = Annotated[
@@ -53,7 +54,7 @@ FileTypePath = Annotated[
 ]
 
 
-@router.get("/{bot_id}", response_model=Envelope[IdentityFileList])
+@router.get("", response_model=Envelope[IdentityFileList])
 @envelope_errors
 async def list_bot_identity_files(
     bot_id: BotIdPath,
@@ -88,7 +89,7 @@ async def list_bot_identity_files(
 
 
 @router.get(
-    "/{bot_id}/{file_type}",
+    "/{file_type}",
     response_model=Envelope[IdentityFile],
 )
 @envelope_errors
@@ -134,7 +135,7 @@ async def get_bot_identity_file(
 
 
 @router.put(
-    "/{bot_id}/{file_type}",
+    "/{file_type}",
     response_model=Envelope[IdentityFileRef],
 )
 @envelope_errors
