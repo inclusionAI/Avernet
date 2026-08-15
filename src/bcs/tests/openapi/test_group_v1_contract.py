@@ -9,6 +9,8 @@ sys.path.insert(0, str(BCS_ROOT))
 
 from scripts.bundle_openapi_contract import bundle_contract  # noqa: E402
 from scripts.validate_openapi_contract import (  # noqa: E402
+    INTERNAL_COLLABORATION_PREFIX,
+    PUBLIC_COLLABORATION_PREFIX,
     _json_pointer,
     load_contract,
     validate_contract,
@@ -22,6 +24,22 @@ def test_contract_obeys_bcn_openapi_rules() -> None:
     contract = load_contract(CONTRACT_ROOT)
 
     assert validate_contract(contract) == []
+
+
+def test_contract_validator_keeps_public_and_internal_prefixes_separate() -> None:
+    public_contract = load_contract(CONTRACT_ROOT)
+    internal_contract = load_contract(CONTRACT_ROOT, entrypoint="internal.yaml")
+
+    public_errors = validate_contract(
+        public_contract, path_prefix=PUBLIC_COLLABORATION_PREFIX
+    )
+    assert public_errors == []
+    assert (
+        validate_contract(internal_contract, path_prefix=INTERNAL_COLLABORATION_PREFIX)
+        == []
+    )
+    assert validate_contract(public_contract, path_prefix=INTERNAL_COLLABORATION_PREFIX)
+    assert validate_contract(internal_contract, path_prefix=PUBLIC_COLLABORATION_PREFIX)
 
 
 def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
