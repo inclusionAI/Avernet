@@ -99,12 +99,18 @@ one — see **Decisions**.
 
 ### Legacy addresses
 
-- The deprecated addresses #1074 keeps answering — `…/bots/identity/{bot_id}`,
-  `…/bots/{bot_id}/engine-config`, and the rest — **do not gain `stage`.**
-  Their contract is frozen byte for byte by that feature: same parameters, same
-  locations, same schemas. Adding one there would break the freeze, and it would
-  also be pointless — a caller who wants a published runtime is a caller who can
-  move to the new address.
+- The five retiring twins of the operations above — `…/bots/identity/{bot_id}`,
+  `…/bots/identity/{bot_id}/{file_type}`, `…/bots/{bot_id}/engine-config` —
+  **do not gain `stage`.** #1074 freezes their contract byte for byte: same
+  parameters, same locations, same schemas, until the 2027-08-15 sunset. Adding
+  one there would break the freeze, and it would also be pointless — a caller
+  who wants a published runtime is a caller who can move to the new address.
+- **This is not a claim about every deprecated address.** The retiring
+  engine-runtime addresses *do* carry `stage`, because they always did: they are
+  the same operations at a former address, mounted with the same response table
+  and the same parameters, and #1074's parity promise is exactly that they keep
+  it. The rule is "a retiring address keeps the contract it had", which for
+  those means keeping `stage` and for these five means never acquiring it.
 - A caller on a legacy address therefore keeps reading the draft, which is
   exactly what that address does today. Nothing regresses; the new capability
   simply lives only on the new addresses.
@@ -293,18 +299,16 @@ consequences, both deliberate:
 
 None blocking.
 
-**Noted for #1074, found while writing this spec.** Its Task 15 moves
-engine-config to `/openapi/v1/bots/{bot_id}/engine/config`, and its new
-`_is_engine_runtime(path)` predicate in `test_stage_addressing.py` classifies a
-path by `parts[4] == "{bot_id}" and parts[5] in {sessions, engine, models,
-approvals, connection}`. That predicate matches the moved engine-config path,
-which is **not** an engine-runtime operation — it carries `user_id` rather than
-`owner_id`, and Task 15 gives it the ordinary error table precisely because it
-cannot produce the 501/504 those groups document. The predicate's first
-assertion is `"owner_id" in params`, so Task 15 will fail that test on its own,
-before this feature exists. It belongs to #1074 to narrow the predicate (a
-`("engine", "config")` exclusion, or matching the operation set rather than the
-segment); Task D4 here depends on whichever shape it takes.
+**Resolved — the `_is_engine_runtime` collision.** Raised here while #1074 was
+still specification: its segment predicate would have matched the moved
+`/openapi/v1/bots/{bot_id}/engine/config` and asserted `owner_id` on an
+operation that publishes `user_id`. #1074 settled it by dropping the segment
+test for a **path-set membership** test — `_engine_runtime_paths()` collects the
+routes off `_ENGINE_RUNTIME_GROUPS` and the deprecated package's
+`ENGINE_RUNTIME_GROUPS`, so the classification comes from what is mounted rather
+than from what a path looks like. Task D4 builds on that shape: the five
+operations here are simply not in that set, so they belong in
+`_STAGE_ADDRESSED_ELSEWHERE`.
 
 **Noted for the follow-up work:** when resources is stage-addressed,
 `ResourceFileService`'s `publish_id` parameter and a new `stage` parameter would

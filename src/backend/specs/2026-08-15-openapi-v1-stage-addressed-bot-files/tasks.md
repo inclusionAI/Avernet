@@ -6,9 +6,8 @@
 > addresses below are its bot-first ones, and the two suites Group D extends are
 > the ones it rewrites. Do not start Group C before it is in.
 >
-> PR #1073 is also open, against the same two read methods in
-> `core/services/engine_config.py` that Task B1 edits — see the plan's
-> **Dependencies**; rebase onto its head before starting B1 if it is still open.
+> PR #1073 has merged (`a5afd54`); Task B1 edits `engine_config.py` as it left
+> it, through its `_read_config_bytes` helper. Nothing to rebase.
 >
 > Groups run in order. Within a group the tasks may be done together.
 
@@ -292,20 +291,20 @@
 
 - **Files:** `tests/community/adapters/http/openapi_v1/engine_runtime/test_stage_addressing.py`
 - **Done when:**
-  - [ ] **First**, read how #1074 settled the `_is_engine_runtime()` /
-        `…/{bot_id}/engine/config` collision (spec **Open Questions**) — that
-        predicate matches the moved engine-config path, which carries `user_id`
-        rather than `owner_id`. Build on its resolution; do not add a second
-        one.
+  - [ ] Build on #1074's `_engine_runtime_paths()` — membership in the mounted
+        route set, not a segment match (spec **Open Questions**, resolved). The
+        five operations here are not in that set, so they need no change to the
+        predicate; do not add a second classification.
   - [ ] A `_STAGE_ADDRESSED_ELSEWHERE` set names the five bot-first operations,
         mirroring the existing `_OWNER_ADDRESSED_ELSEWHERE`, so
         `test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations`
         stays an **exact** assertion (16 + 5) rather than being loosened.
   - [ ] `stage` is still optional on every operation carrying it, and still
         never a body field or a path segment.
-  - [ ] **No deprecated address carries `stage`** — the exact-set assertion
-        already gives this, since the legacy operations are in neither set;
-        make it a named check rather than a side effect.
+  - [ ] **None of the five retiring twins carries `stage`** — and note the
+        distinction: the retiring *engine-runtime* addresses do carry it and
+        must keep doing so (they always had it, and #1074's parity promise is
+        that they keep their contract). The claim is about these five only.
   - [ ] The module docstring is updated: "sixteen … and nowhere else" is no
         longer true.
 - **Depends on:** C2, C3

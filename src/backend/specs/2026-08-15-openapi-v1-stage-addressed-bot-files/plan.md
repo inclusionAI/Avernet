@@ -206,24 +206,19 @@ adapters/http/openapi_v1/responses.py
   constrains: the deprecated addresses it registers are frozen byte for byte and
   must **not** gain `stage` (spec D7).
 
-  It also rewrites the two suites this feature extends —
-  `test_stage_addressing.py`'s prefix test becomes the `_is_engine_runtime()`
-  segment test, and `_OWNER_ADDRESSED_ELSEWHERE` gains the two skills
-  operations. Task D4 is written against that shape, not today's.
+  It also rewrites the suite Task D4 extends: `test_stage_addressing.py`'s
+  prefix test becomes `_is_engine_runtime()`, backed by an
+  `_engine_runtime_paths()` set read off the mounted routers (current groups
+  plus the deprecated package's). Task D4 is written against that shape, not
+  today's. Its `_OWNER_ADDRESSED_ELSEWHERE` also gains the two skills
+  operations, now that they spell the locator `owner_id`.
 
 - **PR #1073** (`fix(backend): read an unwritten engine config as empty, not
-  500`) is open against `dev` and touches
-  `core/services/engine_config.py` — the same file Task B1 edits, in the same
-  two read methods.
-
-  This branch is based on **`dev`**, not on #1073, so the two changes are
-  independent until B1 lands. Whichever merges second resolves the overlap; if
-  #1073 is still open when implementation starts, rebase onto its head first so
-  B1 is written against the `_read_config_bytes` helper it introduces rather
-  than against the raw `device_fs.read_file` call it replaces. The two edits are
-  compatible in substance — #1073 changes *how a missing file is decoded*, B1
-  changes *which device is read* — so this is a textual conflict, not a design
-  one.
+  500`) — **merged to `dev` as `a5afd54`.** No longer a conflict to manage:
+  Task B1 edits `read_bot_config`/`read_publish_config` as #1073 left them, so
+  the read goes through its `_read_config_bytes` helper rather than a raw
+  `device_fs.read_file`. #1074 carried the same merge and reports one conflict
+  on the relocated handler, resolved in its favour.
 
 ## Risks & Mitigations
 
