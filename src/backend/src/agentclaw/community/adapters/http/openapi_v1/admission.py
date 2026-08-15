@@ -141,13 +141,13 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # routes left: a record id cannot address a file the bot created itself, and
     # links are no longer part of this group. Each resolves its workspace from
     # the caller-supplied ``bot_id``, so each carries the own-bot grant check.
-    ("GET", "/openapi/v1/bots/resources"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("DELETE", "/openapi/v1/bots/resources"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("GET", "/openapi/v1/bots/resources/stat"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("POST", "/openapi/v1/bots/resources/upload"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("GET", "/openapi/v1/bots/resources/download"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("GET", "/openapi/v1/bots/resources/preview"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("POST", "/openapi/v1/bots/resources/mkdir"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/resources"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("DELETE", "/openapi/v1/bots/{bot_id}/resources"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/resources/stat"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/resources/upload"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/resources/download"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/resources/preview"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/resources/mkdir"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     # routines — query ``bot_id``, except the create, which carries it in the
     # body and is checked in the handler (see ``BODY_BOT_ID_OPERATIONS``).
     ("GET", "/openapi/v1/bots/routines"): AdmissionMode.GRANT_CHECKED_OWN_BOT,

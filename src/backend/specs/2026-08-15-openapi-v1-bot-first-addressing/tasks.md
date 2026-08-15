@@ -55,7 +55,7 @@ parameter. Verify each with the dump.
 
 ## New addresses — bot moves out of the query
 
-- [ ] **10. `resources`.** Prefix → `/openapi/v1/bots/{bot_id}/resources`;
+- [x] **10. `resources`.** Prefix → `/openapi/v1/bots/{bot_id}/resources`;
       decorators drop nothing (they are already `""`, `/download`, `/preview`,
       `/stat`, `/mkdir`, `/upload`). On all seven handlers change
       `bot_id: str = Query(...)` to `bot_id: BotIdPath`. Leave `path` a query
