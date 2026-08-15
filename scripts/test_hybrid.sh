@@ -297,11 +297,13 @@ test_provider_bot_registration_keeps_profile_display_name() (
     bcs_baas_provider_register
     [ "$(jq -r '.name' "$captured_provider_bot_payload")" = '平台数据分析' ]
     ! jq -e '.name | contains("（当前）")' "$captured_provider_bot_payload" >/dev/null
+    [ "$(jq -r '.provider_bot_ref' "$captured_provider_bot_payload")" = 'merchant-platform-data:mock-user' ]
+    [ "$(jq -r '.bots[0].bot_uuid' "$BCS_BAAS_PROVIDER_STATE_FILE")" = 'bot-provider-test' ]
 )
 
 test_provider_bot_registration_keeps_profile_display_name
 
-test_provider_registration_is_reused_across_restarts() (
+test_provider_binding_reuses_bcs_bot_and_syncs_baas_route() (
     export CLAUDE_BOTS_STATE_FILE="$TMP/reuse-claude-bots-state.json"
     export BCS_BAAS_PROVIDER_STATE_FILE="$TMP/reuse-provider-state.json"
     export BCS_BAAS_PROVIDER_TOKEN_FILE="$TMP/reuse-provider-tokens.json"
@@ -310,11 +312,12 @@ test_provider_registration_is_reused_across_restarts() (
 
     printf '%s\n' '{"entity_id":"mock-user","bots":[{"role":"platform-data","bot_id":"bot-data","name":"平台数据分析"}]}' \
         > "$CLAUDE_BOTS_STATE_FILE"
-    printf '%s\n' '{"baas_token":"baas","provider_id":"provider-existing","provider_admin_token":"provider-admin","bcs_to_provider_token":"bcs-token","provider_bots":{}}' \
+    printf '%s\n' '{"provider_id":"provider-existing","bcs_owner_id":"001","bots":[{"role":"platform-data","provider_bot_ref":"legacy-bot:mock-user","bot_uuid":"provider-bot-opaque-42"}]}' \
+        > "$BCS_BAAS_PROVIDER_STATE_FILE"
+    printf '%s\n' '{"baas_token":"baas","provider_id":"provider-existing","provider_admin_token":"provider-admin","bcs_to_provider_token":"bcs-token","provider_bots":{"platform-data":{"provider_bot_ref":"legacy-bot:mock-user","baas_bot_ref":"stale-bot:mock-user","bot_runtime_token":"bot-runtime"}}}' \
         > "$BCS_BAAS_PROVIDER_TOKEN_FILE"
 
     bcs_baas_provider_bcs_owner_id() { printf '%s\n' '001'; }
-    bcs_baas_provider_add_bot_token() { :; }
     log_info() { :; }
     curl() {
         local method=GET url=''
@@ -341,11 +344,8 @@ test_provider_registration_is_reused_across_restarts() (
             "GET http://127.0.0.1:21000/providers/provider-existing")
                 printf '%s\n' '{"provider_id":"provider-existing"}'
                 ;;
-            "POST http://127.0.0.1:21000/providers/provider-existing/bots")
-                printf '%s\n' '{"bot_runtime_token":"bot-runtime","bot_uuid":"bot-provider"}'
-                ;;
-            "PUT http://127.0.0.1:21000/bots/bot-provider/visibility")
-                printf '%s\n' '{"success":true,"data":{"visibility":"public"}}'
+            "GET http://127.0.0.1:21000/providers/provider-existing/bots")
+                printf '%s\n' '{"items":[{"provider_bot_ref":"legacy-bot:mock-user","bot_uuid":"provider-bot-opaque-42","disabled":false}]}'
                 ;;
             *)
                 return 1
@@ -353,14 +353,17 @@ test_provider_registration_is_reused_across_restarts() (
         esac
     }
 
-    bcs_baas_provider_register
+    bcs_baas_provider_ensure_registration
     grep -Fxq 'GET http://127.0.0.1:21000/providers/provider-existing' "$calls"
-    grep -Fxq 'POST http://127.0.0.1:21000/providers/provider-existing/bots' "$calls"
+    grep -Fxq 'GET http://127.0.0.1:21000/providers/provider-existing/bots' "$calls"
     ! grep -Fxq 'POST http://127.0.0.1:21000/providers' "$calls"
-    [ "$(jq -r '.provider_id' "$BCS_BAAS_PROVIDER_STATE_FILE")" = provider-existing ]
+    ! grep -Fq 'POST http://127.0.0.1:21000/providers/provider-existing/bots' "$calls"
+    ! grep -Fq 'DELETE http://127.0.0.1:21000/providers/provider-existing/bots/' "$calls"
+    [ "$(jq -r '.bots[0].bot_uuid' "$BCS_BAAS_PROVIDER_STATE_FILE")" = provider-bot-opaque-42 ]
+    [ "$(jq -r '.provider_bots["platform-data"].baas_bot_ref' "$BCS_BAAS_PROVIDER_TOKEN_FILE")" = 'bot-data:mock-user' ]
 )
 
-test_provider_registration_is_reused_across_restarts
+test_provider_binding_reuses_bcs_bot_and_syncs_baas_route
 
 test_provider_bot_cleanup_preserves_provider_credentials() (
     export BCS_BAAS_PROVIDER_STATE_FILE="$TMP/cleanup-provider-state.json"

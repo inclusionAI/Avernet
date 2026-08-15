@@ -105,7 +105,7 @@ function providerBody(method, runId = 'run-1') {
     method,
     session_id: 'session-not-logged',
     bcn_group_id: 'group-not-logged',
-    to_bot: { provider_id: 'provider-1', provider_bot_ref: 'bot-1:mock-user' },
+    to_bot: { provider_id: 'provider-1', provider_bot_ref: 'merchant-platform-data:mock-user' },
     from: { kind: 'human', id: 'mock-user' },
     message: { role: 'user', content: 'message-not-logged' },
   };
@@ -137,7 +137,13 @@ writeFileSync(tokenFile, JSON.stringify({
   provider_id: 'provider-1',
   provider_admin_token: 'provider-admin-test',
   bcs_to_provider_token: 'bcs-to-provider-test',
-  provider_bots: { platform_data: { provider_bot_ref: 'bot-1:mock-user', bot_runtime_token: 'bot-runtime-test' } },
+  provider_bots: {
+    'platform-data': {
+      provider_bot_ref: 'merchant-platform-data:mock-user',
+      baas_bot_ref: 'bot-1:mock-user',
+      bot_runtime_token: 'bot-runtime-test',
+    },
+  },
 }), { mode: 0o600 });
 
 let bridge;
@@ -162,6 +168,7 @@ try {
   assert.match(response.body, /event: chat/);
   assert.equal(seen.at(-1).transport, 'sse');
   assert.equal(seen.at(-1).authorization, 'Bearer baas-test');
+  assert.equal(seen.at(-1).body.to_bot.provider_bot_ref, 'bot-1:mock-user');
 
   response = await h2RequestWithSplitPreface(bridgePort, { body: providerBody('chat.send', 'run-split-preface') });
   assert.equal(response.status, 200);
