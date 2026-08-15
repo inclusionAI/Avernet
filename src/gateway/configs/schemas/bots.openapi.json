@@ -18492,7 +18492,7 @@
     "/openapi/v1/bots/{bot_id}/engine-config": {
       "get": {
         "deprecated": true,
-        "description": "Read a bot's engine configuration (free-form JSON).",
+        "description": "Read a bot's engine configuration (free-form JSON).\n\nA bot whose engine configuration has never been written reads as an empty\nobject — every engine keeps this configuration in a file its runtime creates\non first use, so \"not configured yet\" is an ordinary state, not an error.",
         "operationId": "get_bot_engine_config_deprecated_get",
         "parameters": [
           {
@@ -19291,7 +19291,7 @@
     },
     "/openapi/v1/bots/{bot_id}/engine/config": {
       "get": {
-        "description": "Read a bot's engine configuration (free-form JSON).",
+        "description": "Read a bot's engine configuration (free-form JSON).\n\nA bot whose engine configuration has never been written reads as an empty\nobject — every engine keeps this configuration in a file its runtime creates\non first use, so \"not configured yet\" is an ordinary state, not an error.",
         "operationId": "get_bot_engine_config_openapi_v1_bots__bot_id__engine_config_get",
         "parameters": [
           {
