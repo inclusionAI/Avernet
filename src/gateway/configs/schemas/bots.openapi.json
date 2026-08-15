@@ -15395,6 +15395,16 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SkillUpload_"
+                }
+              }
+            },
+            "description": "Existing Local Skill safely replaced."
+          },
           "201": {
             "content": {
               "application/json": {
@@ -15479,6 +15489,21 @@
               }
             },
             "description": "Conflicts with current state"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 413101,
+                  "message": "Skill package is too large",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "ZIP package exceeds an upload limit."
           },
           "422": {
             "content": {

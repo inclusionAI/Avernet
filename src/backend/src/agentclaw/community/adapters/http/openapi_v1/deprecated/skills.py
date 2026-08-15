@@ -21,9 +21,11 @@ whole reason it is worth writing this package rather than serving aliases.
 
 from __future__ import annotations
 
+import inspect
 from typing import Annotated, Any
 
 from fastapi import Query, Request
+from fastapi.routing import APIRoute
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Deleted,
@@ -81,14 +83,100 @@ LegacyOwnerEntityId = Annotated[
 
 
 def _collection_shim(handler, method: str, replacement: str):
-    """Bot back in the query, owner back under its old name."""
+    """Bot back in the query, owner back under its old name, grant re-checked.
+
+    The grant check is the part that is easy to lose here, and losing it is a
+    hole rather than an inconvenience. The replacement addresses get it from
+    ``dependencies=_GRANT_CHECKED`` on their own routes, so their handlers no
+    longer call ``require_bot`` themselves — but ``legacy_route`` registers an
+    *endpoint*, not a route, and route-level dependencies are not carried
+    across. These two addresses are mounted self-checked (their owner is
+    published as ``owner_entity_id``, which the shared dependency does not
+    know), so without :func:`_check_collection_grant` an application holding no
+    grant at all would read and write skills through them.
+
+    That is not hypothetical: it is exactly what this file did for one commit,
+    caught in review.
+    """
     shim = with_query_parameter(handler, "bot_id", LegacyBotIdQuery)
-    return with_query_parameter(
+    shim = with_query_parameter(
         shim,
         "owner_id",
         LegacyOwnerEntityId,
         doc=deprecated_doc(handler, f"{method} {replacement}"),
     )
+    return _grant_checked(shim)
+
+
+def _check_collection_grant(caller, *, bot_id: str, owner_id: str | None, actor_id: str) -> None:
+    """The owner-aware check the retiring collection addresses carry themselves.
+
+    Identical to what ``list_skills`` and ``upload_skill`` used to do inline:
+    bind the grant to ``(bot, owner_id or the caller)`` — the same pair the
+    handler is about to act on, so the check and the resolution cannot mean
+    different bots. A no-op for a human caller, whose own user-scoped resolve is
+    the check.
+    """
+    if not caller.is_application:
+        return
+    caller.require_bot(bot_id, owner_id=owner_id or actor_id)
+
+
+def _grant_checked(shim):
+    """*shim* with a ``caller`` parameter added, checked before it runs.
+
+    The parameter has to be added to the **synthesized** signature rather than
+    declared in a wrapper's own, because FastAPI builds the route from
+    ``__signature__`` — a wrapper taking ``**kwargs`` would publish an operation
+    with no parameters at all.
+    """
+    signature = inspect.signature(shim)
+    if "caller" in signature.parameters:
+        return shim
+
+    async def guarded(**kwargs: Any) -> Any:
+        caller = kwargs.pop("caller")
+        _check_collection_grant(
+            caller,
+            bot_id=kwargs["bot_id"],
+            owner_id=kwargs.get("owner_id"),
+            actor_id=kwargs["actor_id"],
+        )
+        return await shim(**kwargs)
+
+    caller_param = inspect.Parameter(
+        "caller",
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        annotation=ActingCallerDep,
+    )
+    # Ahead of any parameter carrying a default, or the signature is invalid.
+    parameters = list(signature.parameters.values())
+    cut = next(
+        (i for i, p in enumerate(parameters) if p.default is not inspect.Parameter.empty),
+        len(parameters),
+    )
+    guarded.__signature__ = signature.replace(
+        parameters=parameters[:cut] + [caller_param] + parameters[cut:]
+    )
+    guarded.__name__ = getattr(shim, "__name__", "shim")
+    guarded.__doc__ = shim.__doc__
+    return guarded
+
+
+def _source_responses(endpoint) -> dict:
+    """The response table the current route publishes for *endpoint*.
+
+    Read off the real route rather than restated. ``relocate()`` does this for
+    every address it registers; these two are hand-registered because their
+    path does not follow a pattern, and they need the same treatment for the
+    same reason. Restating a subset is how the upload address came to publish
+    neither its ``200`` replacement case nor its ``413`` — both of which the
+    reused handler can still return.
+    """
+    for route in skills_router.routes:
+        if isinstance(route, APIRoute) and route.endpoint is endpoint:
+            return route.responses
+    raise LookupError(f"no current route serves {endpoint.__name__}")
 
 
 legacy_route(
@@ -98,6 +186,7 @@ legacy_route(
     _collection_shim(list_skills, "GET", "/openapi/v1/bots/{bot_id}/skills"),
     replaces="/openapi/v1/bots/{bot_id}/skills",
     response_model=Envelope[Page[Skill]],
+    responses=_source_responses(list_skills),
     operation_id="list_skills_deprecated_get",
 )
 
@@ -108,6 +197,7 @@ legacy_route(
     _collection_shim(upload_skill, "POST", "/openapi/v1/bots/{bot_id}/skills"),
     replaces="/openapi/v1/bots/{bot_id}/skills",
     response_model=Envelope[SkillUpload],
+    responses=_source_responses(upload_skill),
     status_code=201,
     operation_id="upload_skill_deprecated_post",
 )
