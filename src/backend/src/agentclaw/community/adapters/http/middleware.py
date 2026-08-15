@@ -283,6 +283,17 @@ def install_middleware(
     from agentclaw.community.di.config import CorsConfig
 
     cors = cors_config if cors_config is not None else CorsConfig()
+    # ``allow_headers`` governs what a browser may *send*; reading a response
+    # header it did not already know about needs ``expose_headers``. The
+    # deprecation pair is not CORS-safelisted, so without this a browser SDK
+    # cannot see that the address it is calling is retiring — the one client
+    # kind that learns it from the wire rather than the document. Not a
+    # deployment choice, so it is not in ``CorsConfig``: the surface either
+    # sends these headers or it does not.
+    from agentclaw.community.adapters.http.openapi_v1.middleware import (
+        EXPOSED_HEADERS as _DEPRECATION_HEADERS,
+    )
+
     app.add_middleware(
         RegexCORSMiddleware,
         allow_origins=list(cors.allow_origins),
@@ -290,6 +301,7 @@ def install_middleware(
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=list(_DEPRECATION_HEADERS),
     )
 
     # 注入用户上下文中间件（在 CORS 之后，tracer 之前）

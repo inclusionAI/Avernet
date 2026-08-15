@@ -187,3 +187,61 @@ def test_a_retiring_address_keeps_its_own_operation_id() -> None:
         "address produces, so an SDK generated before the migration finds its "
         f"method names changed: {wrong}"
     )
+
+
+def test_a_browser_can_actually_read_the_headers_cross_origin() -> None:
+    """Sending a header and letting JavaScript read it are two different things.
+
+    ``Deprecation`` and ``Sunset`` are not CORS-safelisted response headers, so
+    a cross-origin ``fetch`` sees neither unless the server also names them in
+    ``Access-Control-Expose-Headers``. Without that the migration signal reaches
+    every client *except* browser SDKs — the ones most likely to be regenerated
+    from this document, and the ones that cannot read the access log to find out
+    another way.
+
+    Asserted through the real middleware stack rather than by reading the CORS
+    keyword argument, because what matters is the header on the response: a
+    configuration that is present but ordered behind something that strips it
+    would satisfy the weaker check and fail the caller.
+    """
+    from agentclaw.community.adapters.http.middleware import install_middleware
+    from agentclaw.community.adapters.http.openapi_v1.middleware import (
+        EXPOSED_HEADERS,
+    )
+
+    class _NoTracer:
+        def install(self, _app):
+            return None
+
+        def current_trace_id(self):
+            return None
+
+    class _NoAuth:
+        async def get_current_user(self, *_args, **_kwargs):
+            return None
+
+    app = FastAPI()
+    app.include_router(build_public_router())
+    mount_public_error_handlers(app)
+    # The real installer, with the two plugins stubbed: what is under test is
+    # the CORS registration it performs, and re-creating that here would be the
+    # copy this test exists to avoid trusting.
+    install_middleware(app, auth_plugin=_NoAuth(), tracer=_NoTracer())
+
+    method, path = sorted(LEGACY_ROUTES)[0]
+    response = TestClient(app).request(
+        method, _concrete(path), headers={"Origin": "http://localhost:3000"}
+    )
+
+    exposed = {
+        name.strip().lower()
+        for name in response.headers.get("access-control-expose-headers", "").split(",")
+        if name.strip()
+    }
+    missing = sorted(
+        name for name in EXPOSED_HEADERS if name.lower() not in exposed
+    )
+    assert not missing, (
+        "a cross-origin caller cannot read these headers, so a browser SDK "
+        f"never learns the address is retiring: {missing}"
+    )

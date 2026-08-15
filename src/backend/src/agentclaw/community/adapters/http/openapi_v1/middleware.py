@@ -48,6 +48,17 @@ SUNSET = datetime(2027, 8, 15, tzinfo=timezone.utc)
 #: as an ``sf-date`` — see the note above on why it is not an HTTP-date.
 DEPRECATION = datetime(2026, 8, 15, tzinfo=timezone.utc)
 
+#: The two headers this middleware stamps, in the spelling a browser needs.
+#:
+#: Exported because CORS has to name them too: neither is a safelisted response
+#: header, so cross-origin JavaScript cannot read a header the server sends
+#: unless it is also in ``Access-Control-Expose-Headers``. A browser SDK would
+#: otherwise see nothing at all — the migration signal reaches every client
+#: except the ones most likely to be regenerated from the document. One tuple
+#: rather than two lists, so the CORS configuration cannot drift from what is
+#: actually sent.
+EXPOSED_HEADERS = ("Deprecation", "Sunset")
+
 _DEPRECATION_HEADER = b"deprecation"
 _SUNSET_HEADER = b"sunset"
 

@@ -356,8 +356,13 @@ None blocking. Two recorded for the reviewer:
   drives the same request through both addresses and compares the responses.
 - Every legacy operation is `deprecated: true` in the published description and
   answers with `Deprecation` and `Sunset` headers.
-- The reserved-name list in `docs/openapi-v1/README.md` is six routed names, and
-  the convention test still derives it from the routes.
+- The reserved-name list in `docs/openapi-v1/README.md` is **fifteen** routed
+  names while the retiring addresses answer, and the convention test still
+  derives it from the routes. Six is the *post-removal* figure: nine of the
+  fifteen are held only by the component-first addresses, and the list drops to
+  six the day those are deleted. Stated both ways deliberately — a criterion
+  demanding six today would be unmeetable while the compatibility window is
+  open, and the way to "meet" it would be to weaken the test or the docs.
 - `admission.py` has an entry for every new address, and
   `BODY_BOT_ID_OPERATIONS` and `OWNER_ADDRESSED_OPERATIONS` are gone.
   `SKILL_SCOPED_OPERATIONS` remains, holding exactly the four `{skill_id}`
