@@ -2,7 +2,11 @@
 
 > Status legend: `[ ]` todo · `[~]` in-progress · `[x]` done · `[!]` blocked
 >
-> Base: `dev`. PR #1073 is open against the same two read methods in
+> Base: `dev`, **after PR #1074 lands** — a hard ordering dependency. The five
+> addresses below are its bot-first ones, and the two suites Group D extends are
+> the ones it rewrites. Do not start Group C before it is in.
+>
+> PR #1073 is also open, against the same two read methods in
 > `core/services/engine_config.py` that Task B1 edits — see the plan's
 > **Dependencies**; rebase onto its head before starting B1 if it is still open.
 >
@@ -166,8 +170,14 @@
 
 ### Task C2: `stage` on the two engine-config operations  `[ ]`
 
-- **Goal:** `GET` serves three runtimes; `PUT` refuses two.
-- **Files:** `src/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/router.py`
+- **Goal:** `GET /openapi/v1/bots/{bot_id}/engine/config` serves three runtimes;
+  `PUT` of the same address refuses two.
+- **Files:** the engine-config router #1074's Task 15 mounts at
+  `/openapi/v1/bots/{bot_id}/engine` — it moves the two handlers out of
+  `adapters/http/openapi_v1/bots/router.py` unchanged, so
+  `_engine_config_target` travels with them. **Start by locating them**; if Task
+  15 shipped after #1074 rather than in it, they are still in `bots/router.py`
+  at `/{bot_id}/engine-config` and the edit is the same apart from the file.
 - **Done when:**
   - [ ] `_stage_address(bot, stage)` helper builds the `StageAddress` from the
         record `bot_service.get_bot(bot_id, owner_id)` already returned —
@@ -178,12 +188,17 @@
         RuntimeStage.DRAFT)` passes `stage=stage.value`.
   - [ ] Both docstrings are caller-facing prose only (they are published
         verbatim); rationale stays in `#` comments.
-- **Depends on:** B1, C1
+  - [ ] The **deprecated** `/{bot_id}/engine-config` shim is left alone: it
+        declares no `stage`, and its handler keeps calling the service with
+        `DRAFT_ADDRESS` / `STAGE_DRAFT` (#1074 froze its contract).
+- **Depends on:** B1, C1, and #1074
 
 ### Task C3: `stage` on the three identity operations  `[ ]`
 
-- **Goal:** Same contract on identity, without changing the draft path.
+- **Goal:** Same contract on `/openapi/v1/bots/{bot_id}/identity` and
+  `…/identity/{file_type}`, without changing the draft path.
 - **Files:** `src/backend/src/agentclaw/community/adapters/http/openapi_v1/identity/router.py`
+  (already mounted bot-first by #1074's Task 4)
 - **Done when:**
   - [ ] A module-level `_stage_address(bot_id, owner_id, stage, bot_repo)`
         returns `DRAFT_ADDRESS` **without any query** for the draft, and
@@ -201,7 +216,9 @@
   - [ ] The direct-invocation tests in
         `tests/…/openapi_v1/identity/test_identity_handlers.py` are updated for
         the new handler parameters (their stub gains `address`/`stage`).
-- **Depends on:** B2, C1
+  - [ ] The **deprecated** `…/bots/identity/{bot_id}` shims are left alone —
+        no `stage`, draft only.
+- **Depends on:** B2, C1, and #1074
 
 ### Task C4: The internal routes say `draft` out loud  `[ ]`
 
@@ -254,8 +271,10 @@
 
 - **Files:** new `tests/community/adapters/http/openapi_v1/test_stage_addressed_bot_files.py`
 - **Done when:**
-  - [ ] Each of the three reads with `stage=draft|verify|online` hands the
-        service the matching `StageAddress`.
+  - [ ] Each of the three reads — `GET …/{bot_id}/engine/config`,
+        `GET …/{bot_id}/identity`, `GET …/{bot_id}/identity/{file_type}` —
+        with `stage=draft|verify|online` hands the service the matching
+        `StageAddress`.
   - [ ] No parameter → `DRAFT_ADDRESS`, and on identity **no bot lookup at
         all** (the byte-for-byte pin).
   - [ ] Both writes with `stage=verify|online` → `409` and the body message
@@ -264,18 +283,29 @@
   - [ ] A published stage on a personal bot read → `409 "No live runtime at the
         requested stage"`.
   - [ ] `stage=eval` → `422`, no handler reached.
+  - [ ] The deprecated twins still read the draft when `?stage=online` is sent
+        at them — FastAPI ignores the undeclared parameter, and this pins that
+        the shim was not wired to the new code path by accident.
 - **Depends on:** C2, C3
 
 ### Task D4: The published document  `[ ]`
 
 - **Files:** `tests/community/adapters/http/openapi_v1/engine_runtime/test_stage_addressing.py`
 - **Done when:**
-  - [ ] A `_STAGE_ADDRESSED_ELSEWHERE` set names the five operations, mirroring
-        the existing `_OWNER_ADDRESSED_ELSEWHERE`, so
+  - [ ] **First**, read how #1074 settled the `_is_engine_runtime()` /
+        `…/{bot_id}/engine/config` collision (spec **Open Questions**) — that
+        predicate matches the moved engine-config path, which carries `user_id`
+        rather than `owner_id`. Build on its resolution; do not add a second
+        one.
+  - [ ] A `_STAGE_ADDRESSED_ELSEWHERE` set names the five bot-first operations,
+        mirroring the existing `_OWNER_ADDRESSED_ELSEWHERE`, so
         `test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations`
         stays an **exact** assertion (16 + 5) rather than being loosened.
   - [ ] `stage` is still optional on every operation carrying it, and still
         never a body field or a path segment.
+  - [ ] **No deprecated address carries `stage`** — the exact-set assertion
+        already gives this, since the legacy operations are in neither set;
+        make it a named check rather than a side effect.
   - [ ] The module docstring is updated: "sixteen … and nowhere else" is no
         longer true.
 - **Depends on:** C2, C3
@@ -290,8 +320,12 @@
 - **Files:** `src/backend/docs/openapi-v1/README.md`
 - **Done when:**
   - [ ] The `?owner_id=`/`?stage=` section says `stage` reaches the five
-        per-bot file operations too, and that on the two writes only the draft
-        is writable.
+        bot-first per-bot file operations too, and that on the two writes only
+        the draft is writable. Its example URLs use the bot-first form #1074's
+        Task 32 leaves behind (`/openapi/v1/bots/{bot_id}/engine/status?stage=`,
+        not `/openapi/v1/bots/engine/{bot_id}/status?stage=`).
+  - [ ] It states that the deprecated addresses do not take `stage`, in the
+        deprecation section #1074's Task 32 adds rather than as a new one.
   - [ ] The startup-script finding is recorded where a reader looking for it
         would land: those operations are storage-keyed, not runtime-keyed, and
         deliberately take no stage.

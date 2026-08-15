@@ -44,7 +44,7 @@ lookup, no new error — and the published branch is the only new path.
 | `api/engine_config_service.py` | Protocol mirrors both signatures |
 | `adapters/http/openapi_v1/engine_runtime/params.py` | `WRITE_STAGE_DESCRIPTION`, `WriteStageQuery` |
 | `adapters/http/openapi_v1/responses.py` | `EngineStageReadOnlyError → (409, …)` |
-| `adapters/http/openapi_v1/bots/router.py` | `stage` on the two engine-config handlers |
+| the engine-config router #1074 Task 15 creates at `/openapi/v1/bots/{bot_id}/engine` | `stage` on its two handlers |
 | `adapters/http/openapi_v1/identity/router.py` | `stage` on the three handlers; `BotRepository` injected for the published branch |
 | `adapters/http/bot_management/router.py` | two internal call sites say `draft` explicitly |
 | `docs/openapi-v1/README.md` | the stage section covers 21 operations, not 16 |
@@ -119,15 +119,23 @@ existing caller is untouched.
 
 ### The five handlers
 
+The two engine-config handlers are edited **wherever #1074's Task 15 leaves
+them** — its own router mounted at `/openapi/v1/bots/{bot_id}/engine`, serving
+`GET`/`PUT …/config`. Task 15 moves the handler bodies unchanged, so
+`_engine_config_target` and the `_stage_address` helper below travel with them;
+if Task 15 has not landed, the same two handlers are still in
+`openapi_v1/bots/router.py` at `/{bot_id}/engine-config` and the edit is
+identical apart from the file.
+
 ```python
-# bots/router.py — GET keeps the record it already fetched
+# the engine-config router — GET keeps the record it already fetched
 async def get_bot_engine_config(bot_id, request, owner_id,
                                 stage: StageQuery = RuntimeStage.DRAFT, ...):
     bot = bot_service.get_bot(bot_id, owner_id)        # ownership/tenant guard
     ...
     address=_stage_address(bot, stage)                 # pk + type from that record
 
-# bots/router.py — PUT takes the parameter to refuse it
+# the engine-config router — PUT takes the parameter to refuse it
 async def update_bot_engine_config(..., stage: WriteStageQuery = RuntimeStage.DRAFT, ...):
     ...
     await engine_config_service.write_bot_config(..., stage=stage.value)
@@ -188,6 +196,21 @@ adapters/http/openapi_v1/responses.py
 
 ## Dependencies
 
+- **PR #1074** (`docs(openapi-v1): specify bot-first addressing…`) — a **hard
+  ordering dependency**, confirmed with the owner: it lands first and this is
+  written against the surface it leaves.
+
+  What it gives us: identity already sits at `/openapi/v1/bots/{bot_id}/identity`
+  (its Task 4, done), and its Task 15 moves engine-config to
+  `/openapi/v1/bots/{bot_id}/engine/config` onto its own router. What it
+  constrains: the deprecated addresses it registers are frozen byte for byte and
+  must **not** gain `stage` (spec D7).
+
+  It also rewrites the two suites this feature extends —
+  `test_stage_addressing.py`'s prefix test becomes the `_is_engine_runtime()`
+  segment test, and `_OWNER_ADDRESSED_ELSEWHERE` gains the two skills
+  operations. Task D4 is written against that shape, not today's.
+
 - **PR #1073** (`fix(backend): read an unwritten engine config as empty, not
   500`) is open against `dev` and touches
   `core/services/engine_config.py` — the same file Task B1 edits, in the same
@@ -209,6 +232,8 @@ adapters/http/openapi_v1/responses.py
 | The draft path changes behaviour by accident | The draft branch is literally `resolve_for_bot(bot_id, owner_id)`; a test asserts the resolver call is identical with and without `?stage=draft`, and that no bot lookup is made on the identity draft path |
 | Two new constructor deps break direct service construction in tests | Nine call sites, enumerated in the task list; `injector` supplies them in prod (`DeviceBindingRepository` and `BotPublishRepositoryProtocol` are both already bound) |
 | `test_stage_addressing.py` asserts `stage` is on *exactly* sixteen operations | The document half gains a `_STAGE_ADDRESSED_ELSEWHERE` set, mirroring the existing `_OWNER_ADDRESSED_ELSEWHERE` — so the assertion stays exact rather than being loosened |
+| #1074's `_is_engine_runtime()` matches the moved `…/{bot_id}/engine/config` and asserts `owner_id` on it, which engine-config does not carry | Not ours to fix and not ours to work around — it breaks #1074's Task 15 before this feature exists (spec **Open Questions**). Task D4 starts by confirming which shape #1074 settled on, and adds the five to `_STAGE_ADDRESSED_ELSEWHERE` on top of it |
+| `stage` leaks onto a deprecated address | The deprecated package re-registers old addresses against their own shim handlers; this feature edits only the new-address handlers. Task D4's exact-set assertion is what catches a leak |
 | A future reader re-merges the two 409s | Both messages, both error docstrings and the `ENVELOPE_ERRORS` comment state the distinction |
 | The write refusal drifts into "write the draft instead" | The write path never receives a `StageAddress`, so there is nothing to resolve a published binding *with* |
 
@@ -254,13 +279,18 @@ new: tests/community/core/services/test_identity_stage_addressing.py
     the same two pins for identity read/list/write
 
 new: tests/…/openapi_v1/test_stage_addressed_bot_files.py
-    GET engine-config / identity with each stage → the address the service saw
+    GET …/{bot_id}/engine/config and …/{bot_id}/identity[/{file_type}] with
+      each stage → the address the service saw
     default (no parameter) → DRAFT_ADDRESS, and no bot lookup on identity
     PUT with stage=verify|online → 409 "The requested stage is read-only"
     PUT with no stage → unchanged 200
     stage=eval → 422 from the enum, no handler run
+    the deprecated twins (…/bots/identity/{bot_id}, …/{bot_id}/engine-config)
+      do not declare `stage` in the document, and a request that sends it
+      anyway still reads the draft — FastAPI ignores an undeclared query
+      parameter, which is the freeze behaving as #1074 specified it
 
 tests/…/openapi_v1/engine_runtime/test_stage_addressing.py   (extend)
     the document half: stage now on 16 + 5, still optional everywhere,
-    still never a body field or path segment
+    still never a body field or path segment, and on no deprecated address
 ```
