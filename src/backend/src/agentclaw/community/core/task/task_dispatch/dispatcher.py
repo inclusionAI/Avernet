@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+import logging
+
 from agentclaw.community.core.task.domain.models import TaskExecutionGraph, TaskNode
 from agentclaw.community.core.task.task_dispatch.strategies import (
     DirectDispatchStrategy,
@@ -13,6 +15,8 @@ from agentclaw.community.core.task.task_dispatch.strategies import (
     SearchBasedDispatchStrategy,
     SearchOutcome,
 )
+
+logger = logging.getLogger("task.dispatcher")
 
 
 class TaskDispatcher:
