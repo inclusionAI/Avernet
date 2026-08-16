@@ -110,16 +110,32 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["server_code"],
+      "description": "One MCP server, in one of two mutually exclusive forms discriminated by 'transport': 'stdio' reads the 'stdio' object; 'http'/'sse' read 'endpoint' + 'headers'.",
       "properties": {
         "server_code": { "type": "string" },
         "name": { "type": ["string", "null"] },
-        "endpoint": { "type": ["string", "null"], "description": "May carry an inlined ?authorization=<token> query." },
-        "transport": { "type": ["string", "null"] },
+        "endpoint": { "type": ["string", "null"], "description": "Remote form. May carry an inlined ?authorization=<token> query." },
+        "transport": { "type": ["string", "null"], "description": "Discriminator: 'stdio' (local) | 'http' | 'sse' (remote)." },
         "headers": {
           "type": "object",
-          "description": "May carry inlined secret headers (e.g. x-ling-auth).",
+          "description": "Remote form. May carry inlined secret headers (e.g. x-ling-auth).",
           "additionalProperties": { "type": "string" }
+        },
+        "stdio": {
+          "$ref": "#/definitions/stdioSpec",
+          "description": "Local form (transport == 'stdio'). Null/absent for a remote server."
         }
+      }
+    },
+    "stdioSpec": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["command"],
+      "description": "How to launch a local MCP server: the engine spawns 'command' as a child process and speaks JSON-RPC over its stdin/stdout. Carries no credentials — the child runs inside the engine's own container.",
+      "properties": {
+        "command": { "type": "string", "description": "Executable, e.g. 'python3'." },
+        "args": { "type": "array", "items": { "type": "string" } },
+        "env": { "type": "object", "additionalProperties": { "type": "string" } }
       }
     }
   }

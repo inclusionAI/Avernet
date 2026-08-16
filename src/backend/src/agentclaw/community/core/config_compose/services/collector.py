@@ -32,12 +32,14 @@ from agentclaw.community.core.config_compose.models import (
     CollectedSkill,
     ComposeRequest,
     McpComposeInput,
+    StdioLaunch,
 )
 from agentclaw.community.core.config_compose.protocols import ComposeInputCollector
 from agentclaw.community.core.config_compose.services.mcporter_composer import (
     mcp_network_priority_for,
 )
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
+from agentclaw.community.core.mcp.services.local_mcp_registry import LocalMCPRegistry
 from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.workspace.path_factory import (
@@ -90,6 +92,7 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         path_factory: WorkspacePathFactory,
         identity_service: "IdentityService",
         overrides_reader: ChannelEngineOverridesReader,
+        local_mcp_registry: LocalMCPRegistry | None = None,
     ) -> None:
         self._skill_set_service_factory = skill_set_service_factory
         self._mcp_config_service = mcp_config_service
@@ -98,6 +101,13 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         self._path_factory = path_factory
         self._identity_service = identity_service
         self._overrides_reader = overrides_reader
+        # Defaulting to the bare registry (its own default config path) matches
+        # what ``passport_scope`` already does for every caller, so "is this
+        # server local?" has one answer across the codebase. A divergent source
+        # here would let passport treat a server as local while compose treated
+        # it as remote — and the remote path would then fail looking for an
+        # endpoint that never existed. Injectable for tests.
+        self._local_mcp_registry = local_mcp_registry or LocalMCPRegistry()
 
     # ── skills ──────────────────────────────────────────────────────────
     def skills(self, req: ComposeRequest) -> list[CollectedSkill]:
@@ -191,6 +201,7 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         inputs: list[McpComposeInput] = []
         for md in raw:
             md = self._enrich_mcp_detail(svc, md)
+            server_code = md.get("server_code") or md.get("serverCode") or ""
             api_key, headers, endpoint_env, transport = (
                 self._mcp_config_service.build_mcp_sync_payload(
                     user_id=req.user_id,
@@ -206,9 +217,45 @@ class ConfigComposerInputCollector(ComposeInputCollector):
                     endpoint_env=endpoint_env,
                     transport_protocol=transport,
                     network_priority=network_priority,
+                    stdio=self._stdio_launch_for(server_code, md),
                 )
             )
         return inputs
+
+    def _stdio_launch_for(
+        self, server_code: str, md: dict[str, Any]
+    ) -> StdioLaunch | None:
+        """Resolve a LOCAL server's launch instruction; ``None`` if it is remote.
+
+        Reads :class:`LocalMCPRegistry` (a local YAML file) **first**, falling back
+        to ``md`` only if the registry has no entry. That order is the point: the
+        enrichment above is best-effort, so on an MCP Center failure ``md`` carries
+        neither ``runMode`` nor ``stdioConfigs`` — and a local server, having no
+        endpoint to find, would then fail the remote path outright. The registry
+        needs no network, so a local server stays recognizable regardless.
+
+        The registry normalizes the YAML's flat ``command``/``args``/``env`` into
+        ``stdioConfigs: [{command, arguments, envVariables}]``; today that list is
+        always single-entry (a multi-variant form would need a per-variant
+        discriminator the shape does not yet carry), so the first entry is taken.
+        """
+        if not server_code:
+            return None
+        detail = self._local_mcp_registry.get_mcp_detail(server_code) or md
+        configs = detail.get("stdioConfigs") or detail.get("stdio_configs") or []
+        if not configs or not isinstance(configs, list):
+            return None
+        cfg = configs[0]
+        if not isinstance(cfg, dict) or not cfg.get("command"):
+            return None
+        return StdioLaunch(
+            command=str(cfg["command"]),
+            args=[str(a) for a in (cfg.get("arguments") or cfg.get("args") or [])],
+            env={
+                str(k): str(v)
+                for k, v in (cfg.get("envVariables") or cfg.get("env") or {}).items()
+            },
+        )
 
     def _enrich_mcp_detail(self, svc: Any, md: dict[str, Any]) -> dict[str, Any]:
         """Merge MCP Center detail (endpoints/runMode/…) over a bare association.

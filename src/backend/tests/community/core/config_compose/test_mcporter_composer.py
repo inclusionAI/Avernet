@@ -6,13 +6,15 @@ from dataclasses import asdict
 
 import pytest
 
-from agentclaw.community.core.config_compose.models import McpComposeInput
+from agentclaw.community.core.config_compose.models import McpComposeInput, StdioLaunch
 from agentclaw.community.core.config_compose.services.mcporter_composer import (
+    STDIO_TRANSPORT,
     TECLAW_MCP_NETWORK_PRIORITY,
     McporterComposeError,
     McporterComposer,
     mcp_network_priority_for,
 )
+from agentclaw.community.kernel.bot_config import StdioSpec
 
 
 SECRET_TOKEN = "supersecrettoken-inlined-123"
@@ -159,34 +161,73 @@ def test_no_matching_env_endpoint_raises() -> None:
         composer.compose_server(McpComposeInput(mcp_data=md, endpoint_env="PROD"))
 
 
-def test_local_stdio_raises_as_unmodeled() -> None:
+def test_local_without_resolved_launch_raises_naming_the_registry() -> None:
+    """A LOCAL entry that arrives with no ``stdio`` cannot be composed either way.
+
+    It has no endpoint to select (local servers have none), so the failure must
+    name the real cause — the local-MCP registry had no entry — rather than the
+    endpoint error that would send a reader hunting in MCP Center.
+    """
     composer = McporterComposer()
     md = {"server_code": "fs", "run_mode": "LOCAL", "stdio_configs": [{"command": "node"}]}
-    with pytest.raises(McporterComposeError):
+
+    with pytest.raises(McporterComposeError, match="local-MCP registry"):
         composer.compose_server(McpComposeInput(mcp_data=md))
 
 
-def test_compose_skips_local_stdio_servers() -> None:
+def test_compose_emits_local_stdio_servers() -> None:
+    """LOCAL servers ride the artifact as ``stdio`` entries, no longer dropped."""
     composer = McporterComposer()
     manifest = composer.compose(
         [
             McpComposeInput(mcp_data=_remote_mcp("remote"), endpoint_env="PROD"),
             McpComposeInput(
-                mcp_data={
-                    "server_code": "hitl",
-                    "runMode": "LOCAL",
-                    "stdioConfigs": [
-                        {
-                            "command": "python3",
-                            "arguments": ["/home/admin/hitl/hitl_mcp_server.py"],
-                        }
-                    ],
-                }
+                mcp_data={"server_code": "hitl", "runMode": "LOCAL"},
+                stdio=StdioLaunch(
+                    command="python3",
+                    args=["/home/admin/hitl/hitl_mcp_server.py"],
+                    env={"MCP_TRANSPORT": "stdio"},
+                ),
             ),
         ]
     )
 
-    assert [s.server_code for s in manifest.servers] == ["remote"]
+    assert [s.server_code for s in manifest.servers] == ["remote", "hitl"]
+
+    local = manifest.servers[1]
+    assert local.transport == STDIO_TRANSPORT
+    assert local.stdio == StdioSpec(
+        command="python3",
+        args=["/home/admin/hitl/hitl_mcp_server.py"],
+        env={"MCP_TRANSPORT": "stdio"},
+    )
+    # The local form carries no remote fields — a stdio child needs no endpoint
+    # and has nothing to authenticate against.
+    assert local.endpoint is None
+    assert local.headers == {}
+
+
+def test_local_stdio_ignores_credentials_rather_than_inlining_them() -> None:
+    """Credentials on a LOCAL input are dropped, not smuggled into the entry.
+
+    ``build_mcp_sync_payload`` merges a user's stored config for every server
+    regardless of run mode, so a local entry can arrive carrying an api_key. There
+    is no endpoint to append it to and no request to sign, so it must not survive
+    into the published artifact.
+    """
+    composer = McporterComposer()
+    manifest = composer.compose(
+        [
+            McpComposeInput(
+                mcp_data={"server_code": "hitl", "runMode": "LOCAL"},
+                api_key=f"authorization={SECRET_TOKEN}",
+                headers={"x-ling-auth": SECRET_TOKEN},
+                stdio=StdioLaunch(command="python3"),
+            )
+        ]
+    )
+
+    assert SECRET_TOKEN not in _manifest_json(manifest)
 
 
 def test_missing_server_code_raises() -> None:
