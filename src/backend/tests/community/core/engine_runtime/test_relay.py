@@ -44,11 +44,14 @@ BOT = "bot-1"
 
 
 class _BotService:
-    """Stands in for BotService.get_bot's owner-scoped lookup."""
+    """Stands in for BotService's owner-scoped lookups."""
 
     def __init__(self, bots: dict[tuple[str, str], dict] | None = None) -> None:
         self._bots = bots if bots is not None else {(BOT, OWNER): {"bot_id": BOT}}
         self.calls: list[tuple[str, str]] = []
+        #: ``get_bot_pk`` calls, counted separately from ``get_bot`` so a test
+        #: can assert the published-stage path re-reads the key exactly once.
+        self.pk_calls: list[tuple[str, str]] = []
 
     def get_bot(self, bot_id: str, user_id: str) -> dict:
         self.calls.append((bot_id, user_id))
@@ -56,6 +59,19 @@ class _BotService:
         if bot is None:
             raise BotNotFoundError(f"Bot not found: {bot_id}")
         return bot
+
+    def get_bot_pk(self, bot_id: str, user_id: str) -> int:
+        """The narrow key read the published-stage path makes.
+
+        Mirrors the real method: same owner-scoped lookup as ``get_bot``. A row
+        that is gone raises; one that carries no key answers 0, leaving the
+        refusal to ``resolve_stage_bind_id`` as it was before the re-read.
+        """
+        self.pk_calls.append((bot_id, user_id))
+        bot = self._bots.get((bot_id, user_id))
+        if bot is None:
+            raise BotNotFoundError(f"Bot not found: {bot_id}")
+        return int(bot.get("id") or 0)
 
 
 class _Resolver:
@@ -722,6 +738,54 @@ async def test_service_bot_without_a_primary_key_is_not_ready():
             publish_repo=repo,
         ).call(bot_id=BOT, owner_id=OWNER, stage="online", method="GET", path="/api/models")
 
+    assert repo.calls == []
+
+
+@pytest.mark.asyncio
+async def test_published_stage_rereads_the_primary_key_once():
+    """The key is re-read here, not carried on the facts.
+
+    ``BotFacts`` is the caller-facing projection and deliberately does not
+    carry ``ac_bots.id``; the published-stage path is the one consumer that no
+    longer holds the row, so it pays a single narrow read. ``get_bot_pk`` and
+    not ``get_bot``: the latter also fetches the device binding and template.
+    """
+    bot_service = _service_bot_service(100)
+    repo = _PublishRepo({100: [_PublishRecord({"binding": {"online": 42}})]})
+    resolver = _Resolver()
+
+    await _relay(
+        bot_service=bot_service, resolver=resolver, publish_repo=repo
+    ).call(bot_id=BOT, owner_id=OWNER, stage="online", method="GET", path="/api/models")
+
+    assert bot_service.pk_calls == [(BOT, OWNER)]
+    # Keyed on the re-read pk, so the record scan still lands on this bot's row.
+    assert resolver.binding_calls == [(42, OWNER, BOT)]
+
+
+@pytest.mark.asyncio
+async def test_bot_deleted_between_adjudication_and_key_reread_is_not_found():
+    """The one failure the re-read adds, and it must not read as "retry later".
+
+    A bot that disappears after the operator adjudication is gone, not a device
+    that is warming up. Folding it into ``EngineDeviceNotReadyError`` would
+    invite a caller to retry a bot that no longer exists.
+    """
+
+    class _VanishingBotService(_BotService):
+        def get_bot_pk(self, bot_id, user_id):
+            raise BotNotFoundError(f"Bot not found: {bot_id}")
+
+    repo = _PublishRepo({100: [_PublishRecord({"binding": {"online": 42}})]})
+    with pytest.raises(BotNotFoundError):
+        await _relay(
+            bot_service=_VanishingBotService(
+                {(BOT, OWNER): {"bot_id": BOT, "bot_type": "service", "id": 100}}
+            ),
+            publish_repo=repo,
+        ).call(bot_id=BOT, owner_id=OWNER, stage="online", method="GET", path="/api/models")
+
+    # Refused before the publish scan, like every other "no safe key" answer.
     assert repo.calls == []
 
 

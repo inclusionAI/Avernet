@@ -189,7 +189,11 @@ class EngineConnectionService:
         facts = BotFacts.from_record(bot, bot_id=bot_id, owner_id=owner_id)
         resolved_id = facts.bot_id
         resolved_owner = facts.owner_id
-        bot_pk = facts.bot_pk
+        # From the row read just above, not from the facts: both the
+        # collaborator adjudication and the publish lookup are keyed on
+        # ``ac_bots.id``, and that internal join key stays off the narrow
+        # projection — this method holds the record, so it costs nothing here.
+        bot_pk = int(bot.get("id") or 0)
         # The socket this endpoint publishes is **not** chat-scoped, however it
         # is labelled: the engine's ``hello`` advertises the ``sessions.*`` and
         # ``exec.approvals`` methods and grants ``operator.admin``, so the
