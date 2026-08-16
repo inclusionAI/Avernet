@@ -14,6 +14,7 @@ from typing import Any, Protocol
 
 from agentclaw.community.core.task.domain.json_extract import extract_json
 from agentclaw.community.core.task.domain.models import TaskExecutionGraph, TaskNode
+from agentclaw.community.core.task.domain.prompt_constants import NO_WEB_SEARCH_CONSTRAINT
 
 logger = logging.getLogger("task.dispatcher")
 
@@ -242,7 +243,7 @@ def _compose_search_prompt(node: TaskNode, candidates: list[dict]) -> str:
         '```'
     )
     return (f"[search] 请基于以下子任务需求与候选 bot 集决出执行者(who)与协作方式(how)。\n"
-            f"子任务需求+候选集\n{_json.dumps({'demand': demand, 'catalog': catalog}, ensure_ascii=False)}\n\n{return_fmt}")
+            f"子任务需求+候选集\n{_json.dumps({'demand': demand, 'catalog': catalog}, ensure_ascii=False)}\n\n{return_fmt}\n\n{NO_WEB_SEARCH_CONSTRAINT}")
 
 
 def _parse_search_result(run: dict) -> SearchResult:

@@ -7,6 +7,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from agentclaw.community.core.task.domain.prompt_constants import NO_WEB_SEARCH_CONSTRAINT
+
 from agentclaw.community.core.task.domain.models import TaskNode
 from agentclaw.community.core.task.task_runner.integration.ports import (
     PromptFormatter, TaskContextBuilder,
@@ -36,13 +38,14 @@ class PromptFormatterImpl(PromptFormatter):
             "未通过示例:{\"success\":false,\"data\":{\"result\":\"当前已有产出\"},"
             "\"gaps\":[\"尚未满足的验收差距\"]}。"
         )
+        parts.append(NO_WEB_SEARCH_CONSTRAINT)
         return "\n".join(parts)
 
     def format_verify(self, context: dict[str, Any], node: TaskNode) -> str:
         child_outputs = context.get("child_outputs") or {}
         acceptances = context.get("acceptances") or []
         acc = ";".join(a.description for a in acceptances)
-        return f"验收标准:{acc}\n子产出:{child_outputs}"
+        return f"验收标准:{acc}\n子产出:{child_outputs}\n\n{NO_WEB_SEARCH_CONSTRAINT}"
 
 
 class _RunnerContextBuilder(TaskContextBuilder):
