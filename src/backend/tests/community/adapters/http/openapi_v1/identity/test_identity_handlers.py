@@ -104,6 +104,7 @@ class _StubIdentityService:
         owner_id,
         *,
         engine_type=None,
+        stage="draft",
     ):
         self.last_call_kwargs = {
             "entity_type": entity_type,
@@ -111,6 +112,7 @@ class _StubIdentityService:
             "bot_id": bot_id,
             "owner_id": owner_id,
             "engine_type": engine_type,
+            "stage": stage,
         }
         return self._presence
 
@@ -192,7 +194,8 @@ async def test_list_bot_identity_files_400_when_entity_type_invalid():
 
     class _RaisingService:
         async def list_bot_files(
-            self, entity_type, entity_id, bot_id, owner_id, *, engine_type=None
+            self, entity_type, entity_id, bot_id, owner_id, *, engine_type=None,
+            stage="draft",
         ):
             raise InvalidIdentityEntityTypeError(f"Invalid entity_type: {entity_type}")
 
@@ -266,6 +269,8 @@ class _StubGetUpdateService:
         operator_id,
         publish_id=None,
         engine_type=None,
+        *,
+        stage="draft",
     ):
         self.last_get_call = {
             "entity_type": entity_type,
@@ -275,6 +280,7 @@ class _StubGetUpdateService:
             "operator_id": operator_id,
             "publish_id": publish_id,
             "engine_type": engine_type,
+            "stage": stage,
         }
         if self._raise_on_get:
             raise self._raise_on_get
@@ -294,6 +300,8 @@ class _StubGetUpdateService:
         content,
         operator_id,
         engine_type=None,
+        *,
+        stage="draft",
     ):
         self.last_update_call = {
             "entity_type": entity_type,
@@ -303,6 +311,7 @@ class _StubGetUpdateService:
             "content": content,
             "operator_id": operator_id,
             "engine_type": engine_type,
+            "stage": stage,
         }
         if self._raise_on_update:
             raise self._raise_on_update

@@ -176,21 +176,21 @@
 
 ## Group C — Adapters
 
-### Task C1: The write-side parameter  `[ ]`
+### Task C1: The write-side parameter  `[x]`
 
 - **Goal:** One parameter, two published descriptions — the write's must not
   advertise verify/online as addressable.
 - **Files:** `src/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/params.py`
 - **Done when:**
-  - [ ] `WRITE_STAGE_DESCRIPTION` states that only the draft accepts writes,
+  - [x] `WRITE_STAGE_DESCRIPTION` states that only the draft accepts writes,
         that a published runtime is replaced by publishing again, and that
         naming one is a 409 with nothing written.
-  - [ ] `WriteStageQuery` alongside `StageQuery`; both exported.
-  - [ ] Module docstring records that `stage` is now imported outside this
+  - [x] `WriteStageQuery` alongside `StageQuery`; both exported.
+  - [x] Module docstring records that `stage` is now imported outside this
         group (the per-bot file operations) and why it still lives here.
 - **Depends on:** —
 
-### Task C2: `stage` on the two engine-config operations  `[ ]`
+### Task C2: `stage` on the two engine-config operations  `[x]`
 
 - **Goal:** `GET /openapi/v1/bots/{bot_id}/engine/config` serves three runtimes;
   `PUT` of the same address refuses two.
@@ -201,40 +201,46 @@
   15 shipped after #1074 rather than in it, they are still in `bots/router.py`
   at `/{bot_id}/engine-config` and the edit is the same apart from the file.
 - **Done when:**
-  - [ ] `get_bot_engine_config(..., stage: StageQuery = RuntimeStage.DRAFT)`
+  - [x] `get_bot_engine_config(..., stage: StageQuery = RuntimeStage.DRAFT)`
         passes `stage=stage.value`. No adapter-side helper and no extra
         lookup — the service resolves its own facts (spec D8).
-  - [ ] `update_bot_engine_config(..., stage: WriteStageQuery =
+  - [x] `update_bot_engine_config(..., stage: WriteStageQuery =
         RuntimeStage.DRAFT)` passes `stage=stage.value`.
-  - [ ] Both docstrings are caller-facing prose only (they are published
+  - [x] Both docstrings are caller-facing prose only (they are published
         verbatim); rationale stays in `#` comments.
-  - [ ] The **deprecated** `/{bot_id}/engine-config` shim is left alone: it
-        declares no `stage`, and its handler keeps calling the service with
-        `stage=STAGE_DRAFT` (#1074 froze its contract).
+  - [x] The **deprecated** `/{bot_id}/engine-config` twin declares no `stage`.
+        **Leaving the shim alone was not enough** — `relocate` re-registers the
+        *same endpoint function*, so the parameter would have appeared on both
+        addresses. A new `without_parameter` transform (the mirror of the
+        existing `with_query_parameter`) drops it from the registered signature,
+        and the handler's own default applies.
 - **Depends on:** B1, C1, and #1074
 
-### Task C3: `stage` on the three identity operations  `[ ]`
+### Task C3: `stage` on the three identity operations  `[x]`
 
 - **Goal:** Same contract on `/openapi/v1/bots/{bot_id}/identity` and
   `…/identity/{file_type}`, without changing the draft path.
 - **Files:** `src/backend/src/agentclaw/community/adapters/http/openapi_v1/identity/router.py`
   (already mounted bot-first by #1074's Task 4)
 - **Done when:**
-  - [ ] `list_bot_identity_files` and `get_bot_identity_file` take
+  - [x] `list_bot_identity_files` and `get_bot_identity_file` take
         `stage: StageQuery = RuntimeStage.DRAFT` and pass `stage=stage.value`.
-  - [ ] `update_bot_identity_file` takes `stage: WriteStageQuery =
+  - [x] `update_bot_identity_file` takes `stage: WriteStageQuery =
         RuntimeStage.DRAFT` and passes `stage=stage.value`.
-  - [ ] **No `BotRepository` injection and no bot lookup anywhere in this
+  - [x] **No `BotRepository` injection and no bot lookup anywhere in this
         router** — the earlier draft had a conditional one; resolving the facts
         in the shared helper removed the need. The draft path adds no row read
         of its own, so its failure mode is unchanged (409, not 404).
-  - [ ] The stale "Reads address the bot's draft runtime." line in
+  - [x] The stale "Reads address the bot's draft runtime." line in
         `get_bot_identity_file`'s published docstring is corrected.
-  - [ ] The direct-invocation tests in
+  - [x] The direct-invocation tests in
         `tests/…/openapi_v1/identity/test_identity_handlers.py` are updated for
         the new handler parameters (their stub gains `address`/`stage`).
-  - [ ] The **deprecated** `…/bots/identity/{bot_id}` shims are left alone —
-        no `stage`, draft only.
+  - [x] The **deprecated** `…/bots/identity/{bot_id}` twins declare no `stage`,
+        via the same `without_parameter` transform. Note the contrast recorded
+        in `deprecated/engine_runtime.py`: the engine-runtime groups keep
+        publishing `stage` at both addresses, because they took it before the
+        freeze — identity gained it after, which makes it a new capability.
 - **Depends on:** B2, C1, and #1074
 
 ### Task C4: The internal routes say `draft` out loud  `[x]`

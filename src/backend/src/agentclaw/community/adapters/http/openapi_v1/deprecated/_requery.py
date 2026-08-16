@@ -5,6 +5,9 @@ one way: ``bot_id`` was a required query parameter and is now a path segment.
 Everything else — the other parameters, the body, the response model, the
 service calls — is identical.
 
+A second, smaller need is the mirror image: a parameter the current address
+gained that the retiring one must not publish (see :func:`without_parameter`).
+
 Writing those twenty-one shims by hand means copying twenty-one signatures,
 each one a second declaration of a contract that already exists a few files
 away. The copies would be correct on the day they were written and wrong the
@@ -81,6 +84,50 @@ def with_query_parameter(
     # — so FastAPI would build the route from the *new* signature and the shim
     # would publish a path parameter its address does not have.
     shim.__signature__ = signature.replace(parameters=parameters)  # type: ignore[attr-defined]
+    shim.__name__ = f"{handler.__name__}_{suffix}"
+    shim.__doc__ = doc or handler.__doc__
+    return shim
+
+
+def without_parameter(
+    handler: Callable[..., Any],
+    name: str,
+    *,
+    suffix: str = "legacy",
+    doc: str | None = None,
+) -> Callable[..., Any]:
+    """A shim calling *handler* with *name* dropped from the published signature.
+
+    The mirror of :func:`with_query_parameter`, for a parameter the retiring
+    address must **not** publish at all. The handler's own default supplies the
+    value, so the shim's behaviour is whatever the address did before the
+    parameter existed.
+
+    Why a retiring address would want this: a legacy route registered by
+    ``relocate`` is *the same endpoint function* as its replacement, so a
+    parameter added to the handler appears on both. When the addition is a new
+    capability rather than a rename, publishing it on the retiring address
+    widens a contract that is supposed to be frozen — and hands a caller a
+    reason to stay there.
+    """
+    signature = inspect.signature(handler, eval_str=True)
+    if name not in signature.parameters:
+        raise ValueError(f"{handler.__name__} has no parameter {name!r}")
+    if signature.parameters[name].default is inspect.Parameter.empty:
+        raise ValueError(
+            f"{handler.__name__}.{name} has no default, so dropping it from the "
+            "legacy signature would leave the shim unable to call the handler"
+        )
+
+    async def shim(**kwargs: Any) -> Any:
+        return await handler(**kwargs)
+
+    # Same reason as ``with_query_parameter``: set, not ``functools.wraps``,
+    # or ``inspect.signature`` follows ``__wrapped__`` back to the original and
+    # FastAPI republishes the parameter this exists to remove.
+    shim.__signature__ = signature.replace(  # type: ignore[attr-defined]
+        parameters=[p for k, p in signature.parameters.items() if k != name]
+    )
     shim.__name__ = f"{handler.__name__}_{suffix}"
     shim.__doc__ = doc or handler.__doc__
     return shim

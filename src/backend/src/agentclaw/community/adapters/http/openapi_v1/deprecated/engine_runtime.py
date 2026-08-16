@@ -40,7 +40,24 @@ from agentclaw.community.adapters.http.openapi_v1.identity import (
 from fastapi import APIRouter
 
 from ._relocate import bot_first_to_component_first, relocate
+from ._requery import deprecated_doc, without_parameter
 from ._shim import legacy_router
+
+
+def _drop_stage(endpoint, method, new_path):
+    """Keep ``stage`` off identity's retiring addresses.
+
+    The engine-runtime groups above publish ``stage`` at both addresses, and
+    should: they have taken it since before this package existed, so it is part
+    of the contract those addresses are frozen with. Identity gained it after,
+    which makes it a new capability — and a retiring address that grows one is a
+    reason not to migrate.
+    """
+    return without_parameter(
+        endpoint,
+        "stage",
+        doc=deprecated_doc(endpoint, f"{method} {new_path}"),
+    )
 
 connection: APIRouter = relocate(
     connection_router,
@@ -79,6 +96,7 @@ identity: APIRouter = relocate(
     identity_router,
     legacy_router("/openapi/v1/bots/identity", "identity"),
     bot_first_to_component_first("identity"),
+    transform=_drop_stage,
 )
 
 #: Mounted with ``ENGINE_RUNTIME_ERROR_RESPONSES``, like their replacements.
