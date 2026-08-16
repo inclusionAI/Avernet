@@ -202,7 +202,7 @@ def resolve_stage_bind_id(
     stages: a verify request is never answered by the online runtime, or the
     reverse. A stage with no live runtime raises
     :class:`EngineStageNotLiveError`, the caller-facing "not live" answer.
-    Malformed data on our side (a facts object with no primary key, an
+    Malformed data on our side (a row that carried no primary key, an
     unreadable ``ext``) stays :class:`DeviceNotBoundError`, exactly as it was
     before stages were addressable.
 
@@ -375,7 +375,12 @@ def resolve_stage_device_context(
     bind_id = resolve_stage_bind_id(
         publish_repo,
         binding_repo,
-        bot_pk=facts.bot_pk,
+        # Straight off the row this function just read — the publish lookup's
+        # key is ``ac_bots.id`` and does not travel on :class:`BotFacts`. An
+        # absent row is already refused by ``require_stage_addressable`` above
+        # (empty ``bot_type`` is not ``service``), so this cannot reach
+        # ``resolve_stage_bind_id`` as ``0`` on that path.
+        bot_pk=int(record.get("id") or 0),
         bot_id=facts.bot_id,
         stage=stage,
         env=get_current_env(),
