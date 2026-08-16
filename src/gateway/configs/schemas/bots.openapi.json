@@ -7732,7 +7732,7 @@
     "/openapi/v1/bots/identity/{bot_id}": {
       "get": {
         "deprecated": true,
-        "description": "List every identity file type a bot can carry and whether each exists.\n\nA file reports exists false both when it is absent and when it exists\nwith empty content. Entry order is not guaranteed — key off type.",
+        "description": "List every identity file type a bot can carry and whether each exists.\n\nEvery entry comes from the bot's own workspace.\n\nA file reports exists false both when it is absent and when it exists\nwith empty content. Entry order is not guaranteed — key off type.\n\nDeprecated: use GET /openapi/v1/bots/{bot_id}/identity instead.",
         "operationId": "list_bot_identity_files_openapi_v1_bots_identity__bot_id__get",
         "parameters": [
           {
@@ -7900,7 +7900,7 @@
     "/openapi/v1/bots/identity/{bot_id}/{file_type}": {
       "get": {
         "deprecated": true,
-        "description": "Read one identity file of a bot.\n\nA file that has never been written reads as an empty content string, not\nan error. Reads address the bot's draft runtime.",
+        "description": "Read one identity file of a bot.\n\nReads the bot's own workspace. Reaching a published runtime is offered at\nthe address that replaces this one.\n\nA file that has never been written reads as an empty content string, not\nan error.\n\nDeprecated: use GET /openapi/v1/bots/{bot_id}/identity/{file_type} instead.",
         "operationId": "get_bot_identity_file_openapi_v1_bots_identity__bot_id___file_type__get",
         "parameters": [
           {
@@ -8076,7 +8076,7 @@
       },
       "put": {
         "deprecated": true,
-        "description": "Create or overwrite one identity file of a bot.\n\nA full replacement — the body's content becomes the whole file. The\nresponse is a reference only; the content is not echoed back.",
+        "description": "Create or overwrite one identity file of a bot.\n\nA full replacement — the body's content becomes the whole file. The\nresponse is a reference only; the content is not echoed back.\n\nWrites the bot's own workspace.\n\nDeprecated: use PUT /openapi/v1/bots/{bot_id}/identity/{file_type} instead.",
         "operationId": "update_bot_identity_file_openapi_v1_bots_identity__bot_id___file_type__put",
         "parameters": [
           {
@@ -18517,7 +18517,7 @@
     "/openapi/v1/bots/{bot_id}/engine-config": {
       "get": {
         "deprecated": true,
-        "description": "Read a bot's engine configuration (free-form JSON).\n\nA bot whose engine configuration has never been written reads as an empty\nobject — every engine keeps this configuration in a file its runtime creates\non first use, so \"not configured yet\" is an ordinary state, not an error.",
+        "description": "Read a bot's engine configuration (free-form JSON).\n\nReads the bot's own workspace. Reaching a published runtime is offered at\nthe address that replaces this one.\n\nA bot whose engine configuration has never been written reads as an empty\nobject — every engine keeps this configuration in a file its runtime creates\non first use, so \"not configured yet\" is an ordinary state, not an error.\n\nDeprecated: use GET /openapi/v1/bots/{bot_id}/engine/config instead.",
         "operationId": "get_bot_engine_config_openapi_v1_bots__bot_id__engine_config_get",
         "parameters": [
           {
@@ -18683,7 +18683,7 @@
       },
       "put": {
         "deprecated": true,
-        "description": "Write a bot's engine configuration (free-form JSON).",
+        "description": "Write a bot's engine configuration (free-form JSON).\n\nWrites the bot's own workspace.\n\nDeprecated: use PUT /openapi/v1/bots/{bot_id}/engine/config instead.",
         "operationId": "update_bot_engine_config_openapi_v1_bots__bot_id__engine_config_put",
         "parameters": [
           {
@@ -19316,7 +19316,7 @@
     },
     "/openapi/v1/bots/{bot_id}/engine/config": {
       "get": {
-        "description": "Read a bot's engine configuration (free-form JSON).\n\nA bot whose engine configuration has never been written reads as an empty\nobject — every engine keeps this configuration in a file its runtime creates\non first use, so \"not configured yet\" is an ordinary state, not an error.",
+        "description": "Read a bot's engine configuration (free-form JSON).\n\nReads the runtime named by the stage parameter — the bot's own workspace\nunless a published one is asked for.\n\nA bot whose engine configuration has never been written reads as an empty\nobject — every engine keeps this configuration in a file its runtime creates\non first use, so \"not configured yet\" is an ordinary state, not an error.",
         "operationId": "get_bot_engine_config",
         "parameters": [
           {
@@ -19328,6 +19328,17 @@
               "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
               "title": "Bot Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
             }
           },
           {
@@ -19481,7 +19492,7 @@
         ]
       },
       "put": {
-        "description": "Write a bot's engine configuration (free-form JSON).",
+        "description": "Write a bot's engine configuration (free-form JSON).\n\nWrites the bot's own workspace. A published runtime is what a release\nproduced and is replaced by publishing again, never edited, so naming one is\nrefused and nothing is written.",
         "operationId": "update_bot_engine_config",
         "parameters": [
           {
@@ -19493,6 +19504,17 @@
               "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
               "title": "Bot Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Which of the bot's runtimes this request addresses. Only the draft — the bot's own workspace — accepts writes, and it is the default. A published runtime is what a release produced and is replaced by publishing again, never edited: naming verify or online is refused (409) and nothing is written anywhere.",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Only the draft — the bot's own workspace — accepts writes, and it is the default. A published runtime is what a release produced and is replaced by publishing again, never edited: naming verify or online is refused (409) and nothing is written anywhere."
             }
           },
           {
@@ -19887,7 +19909,7 @@
     },
     "/openapi/v1/bots/{bot_id}/identity": {
       "get": {
-        "description": "List every identity file type a bot can carry and whether each exists.\n\nA file reports exists false both when it is absent and when it exists\nwith empty content. Entry order is not guaranteed — key off type.",
+        "description": "List every identity file type a bot can carry and whether each exists.\n\nEvery entry comes from the one runtime the stage parameter names, so a\nfile's presence is always reported for the runtime asked about.\n\nA file reports exists false both when it is absent and when it exists\nwith empty content. Entry order is not guaranteed — key off type.",
         "operationId": "list_bot_identity_files_openapi_v1_bots__bot_id__identity_get",
         "parameters": [
           {
@@ -19899,6 +19921,17 @@
               "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
               "title": "Bot Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
             }
           },
           {
@@ -20054,7 +20087,7 @@
     },
     "/openapi/v1/bots/{bot_id}/identity/{file_type}": {
       "get": {
-        "description": "Read one identity file of a bot.\n\nA file that has never been written reads as an empty content string, not\nan error. Reads address the bot's draft runtime.",
+        "description": "Read one identity file of a bot.\n\nReads the runtime named by the stage parameter — the bot's own workspace\nunless a published one is asked for.\n\nA file that has never been written reads as an empty content string, not\nan error.",
         "operationId": "get_bot_identity_file_openapi_v1_bots__bot_id__identity__file_type__get",
         "parameters": [
           {
@@ -20076,6 +20109,17 @@
             "schema": {
               "$ref": "#/components/schemas/IdentityFileType",
               "description": "Which identity file to address — one of the whitelisted types (see the enum's per-value documentation for what each file is for)."
+            }
+          },
+          {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
             }
           },
           {
@@ -20229,7 +20273,7 @@
         ]
       },
       "put": {
-        "description": "Create or overwrite one identity file of a bot.\n\nA full replacement — the body's content becomes the whole file. The\nresponse is a reference only; the content is not echoed back.",
+        "description": "Create or overwrite one identity file of a bot.\n\nA full replacement — the body's content becomes the whole file. The\nresponse is a reference only; the content is not echoed back.\n\nWrites the bot's own workspace. A published runtime is what a release\nproduced and is replaced by publishing again, never edited, so naming one is\nrefused and nothing is written.",
         "operationId": "update_bot_identity_file_openapi_v1_bots__bot_id__identity__file_type__put",
         "parameters": [
           {
@@ -20251,6 +20295,17 @@
             "schema": {
               "$ref": "#/components/schemas/IdentityFileType",
               "description": "Which identity file to address — one of the whitelisted types (see the enum's per-value documentation for what each file is for)."
+            }
+          },
+          {
+            "description": "Which of the bot's runtimes this request addresses. Only the draft — the bot's own workspace — accepts writes, and it is the default. A published runtime is what a release produced and is replaced by publishing again, never edited: naming verify or online is refused (409) and nothing is written anywhere.",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Only the draft — the bot's own workspace — accepts writes, and it is the default. A published runtime is what a release produced and is replaced by publishing again, never edited: naming verify or online is refused (409) and nothing is written anywhere."
             }
           },
           {
