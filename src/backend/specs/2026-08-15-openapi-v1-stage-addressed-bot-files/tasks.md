@@ -348,24 +348,24 @@
 
 ## Group E — Documentation
 
-### Task E1: `docs/openapi-v1/README.md`  `[ ]`
+### Task E1: `docs/openapi-v1/README.md`  `[x]`
 
 - **Goal:** The operator-facing description matches the surface.
 - **Files:** `src/backend/docs/openapi-v1/README.md`
 - **Done when:**
-  - [ ] The `?owner_id=`/`?stage=` section says `stage` reaches the five
+  - [x] The `?owner_id=`/`?stage=` section says `stage` reaches the five
         bot-first per-bot file operations too, and that on the two writes only
         the draft is writable. Its example URLs use the bot-first form #1074's
         Task 32 leaves behind (`/openapi/v1/bots/{bot_id}/engine/status?stage=`,
         not `/openapi/v1/bots/engine/{bot_id}/status?stage=`).
-  - [ ] It states that the deprecated addresses do not take `stage`, in the
+  - [x] It states that the deprecated addresses do not take `stage`, in the
         deprecation section #1074's Task 32 adds rather than as a new one.
-  - [ ] The startup-script finding is recorded where a reader looking for it
+  - [x] The startup-script finding is recorded where a reader looking for it
         would land: those operations are storage-keyed, not runtime-keyed, and
         deliberately take no stage.
-  - [ ] Resources / skills / routines are named as the remaining draft-only
+  - [x] Resources / skills / routines are named as the remaining draft-only
         device surfaces, with the reason each is deferred (spec Out of Scope).
-  - [ ] MCP is named too, and correctly: its six operations address no bot, but
+  - [x] MCP is named too, and correctly: its six operations address no bot, but
         its config write fans out to every bot's draft device. Draft-only is
         the right answer there for the same reason the writes here refuse a
         published stage — say so, so a later reader does not file it as a gap.

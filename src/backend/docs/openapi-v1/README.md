@@ -744,6 +744,8 @@ rule as `user_id` (query string, never a body field or a path segment):
 GET /openapi/v1/bots/b-1/sessions?user_id=u-collab&owner_id=u-owner            collaborator, team bot
 GET /openapi/v1/bots/b-1/engine/status?user_id=u-owner&stage=online            owner, live runtime
 GET /openapi/v1/bots/b-1/connection?user_id=u-collab&owner_id=u-owner&stage=verify
+GET /openapi/v1/bots/b-1/engine/config?user_id=u-owner&stage=online            the release's own config
+GET /openapi/v1/bots/b-1/identity/RULES?user_id=u-owner&stage=verify           what verify received
 ```
 
 - **`owner_id`** — the owner of the bot the request addresses. Defaults to
@@ -759,6 +761,63 @@ GET /openapi/v1/bots/b-1/connection?user_id=u-collab&owner_id=u-owner&stage=veri
   published stage named on a personal bot — is `409` `"No live runtime at
   the requested stage"`, never a fallback to another stage's binding.
   (`eval` has no long-lived runtime and is not addressable.)
+
+### `?stage=` beyond the operator console
+
+Five more operations take it — the ones that read or write a file **on** a
+runtime, rather than forwarding a request to it:
+
+```text
+GET, PUT  /openapi/v1/bots/{bot_id}/engine/config
+GET       /openapi/v1/bots/{bot_id}/identity
+GET, PUT  /openapi/v1/bots/{bot_id}/identity/{file_type}
+```
+
+Same vocabulary, same default, same liveness rule. Two differences worth
+knowing:
+
+- **The reads serve all three stages; the writes accept only the draft.** A
+  published runtime is what a release produced and is replaced by publishing
+  again, never edited, so `PUT …?stage=verify` or `?stage=online` is refused
+  with `409` `"The requested stage is read-only"` and **nothing is written** —
+  not to the published runtime, and not to the draft as a substitute. This is
+  deliberately not a `200` carrying a no-op flag: automation that checks the
+  status code would record the write as landed. It is also a different answer
+  from `"No live runtime at the requested stage"`, which would send a caller
+  off to publish something and retry; publishing would not make the write land.
+- **The list reports one runtime.** `GET …/identity?stage=verify` probes every
+  identity file against the verify runtime, so a caller never sees a draft row
+  beside a verify row.
+
+These five carry `user_id`, not `owner_id`: they are owner-scoped, not operator
+console operations, and reaching another owner's bot through them is not
+offered.
+
+**The retiring addresses do not take `stage`.** `…/bots/identity/{bot_id}`,
+`…/bots/{bot_id}/engine-config` and their siblings answer with the contract they
+were frozen with, which is the draft. A caller who sends the parameter at one of
+them gets the draft, because the parameter is not declared there. The
+engine-runtime groups are the exception and not a contradiction: their retiring
+addresses *do* publish `stage`, because they took it before the freeze, so it is
+part of the contract those addresses are frozen with.
+
+### Per-bot device surfaces that are still draft-only
+
+Named so a reader looking for them stops here rather than in the source:
+
+- **Startup script** (`GET`/`PUT`/`DELETE …/{bot_id}/startup-script`) takes no
+  `stage`, and that is not an omission. It is backed by
+  `ac_bot_startup_script`, keyed `(env, entity_id, bot_id)` — one row per bot,
+  not one per runtime — so the parameter would be inert.
+- **MCP** addresses no bot at all; its six operations are keyed by
+  `server_code` and `user_id`. The config write does fan out to every bot's
+  **draft** device, which is correct for the same reason the writes above are
+  draft-only: a release inlines its MCP credentials into the artifact, so a
+  published runtime's config changes by republishing.
+- **Resources, skills and routines** read or write per-bot device state and are
+  still draft-only. Deferred, with reasons, in
+  `specs/2026-08-15-openapi-v1-stage-addressed-bot-files/spec.md`; routines'
+  stage pin is [#908](https://github.com/inclusionAI/Avernet/issues/908).
 
 **What an operator sees is device-wide, by documented contract.** The
 engine's session collection is not scoped per caller — the engine ports drop
@@ -792,8 +851,11 @@ addresses still publish the old name (spec Open Question 1, closed).
 `tests/…/openapi_v1/engine_runtime/test_operator_access.py` sweeps the
 operator matrix across all sixteen operations;
 `…/test_stage_addressing.py` pins the stage behaviour and asserts the two
-parameters sit on exactly the sixteen, optional, in the query;
-`tests/community/core/engine_runtime/test_stage.py` pins the liveness rule.
+parameters sit on exactly the operations listed above — optional, in the query,
+and on no retiring address that did not already have them;
+`tests/community/core/engine_runtime/test_stage.py` pins the liveness rule;
+`…/openapi_v1/test_stage_addressed_bot_files.py` pins the five file operations,
+including that their retiring twins still read the draft.
 
 ---
 
