@@ -41,10 +41,14 @@ def _sample_artifact() -> BotConfigArtifact:
         version=7,
         mcp=McpManifest(
             servers=[
+                # "http" — not "STREAMABLE_HTTP". That is MCP Center's endpoint
+                # vocabulary; ``McporterComposer._select_endpoint`` maps it onto
+                # the artifact's own transport values ("http" / "sse"), which are
+                # what the discriminator in the schema enumerates.
                 McpServerRef(
                     server_code="mcp.ant.faas.xxx",
                     endpoint="https://example/mcp",
-                    transport="STREAMABLE_HTTP",
+                    transport="http",
                     headers={"x-ling-auth": "ak-antchat-inlined"},
                 )
             ]

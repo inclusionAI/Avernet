@@ -4,18 +4,21 @@ Verifies the concrete collector adapts each source service into the composer's
 container-view inputs: skill scope/name derivation, the MCP collect+merge loop,
 resource/identity mapping, and the engine_overrides default.
 """
+import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+import yaml
 
 from agentclaw.community.core.channel.services.engine_overrides_reader import (
     ChannelEngineOverridesReader,
 )
-from agentclaw.community.core.config_compose.models import ComposeRequest
+from agentclaw.community.core.config_compose.models import ComposeRequest, StdioLaunch
 from agentclaw.community.core.config_compose.services.collector import (
     ConfigComposerInputCollector,
 )
+from agentclaw.community.core.mcp.services.local_mcp_registry import LocalMCPRegistry
 
 
 def _req() -> ComposeRequest:
@@ -36,7 +39,8 @@ def _reader_over(channel_repo) -> ChannelEngineOverridesReader:
 
 def _collector(*, skill_set_service=None, mcp_config_service=None,
                resource_repository=None,
-               identity_service=None, channel_repo=None):
+               identity_service=None, channel_repo=None,
+               local_mcp_registry=None):
     return ConfigComposerInputCollector(
         skill_set_service_factory=_factory_returning(skill_set_service or MagicMock()),
         mcp_config_service=mcp_config_service or MagicMock(),
@@ -45,7 +49,20 @@ def _collector(*, skill_set_service=None, mcp_config_service=None,
         path_factory=MagicMock(),
         identity_service=identity_service or MagicMock(),
         overrides_reader=_reader_over(channel_repo),
+        # Default to an EMPTY registry rather than the production default, which
+        # would read the repo's bundled local-mcp-servers.yaml off disk and make
+        # every test here depend on that file's contents.
+        local_mcp_registry=local_mcp_registry or _registry_over({}),
     )
+
+
+def _registry_over(servers: dict) -> LocalMCPRegistry:
+    """A REAL registry over a temp catalog, so these tests exercise its actual
+    normalization (flat ``command``/``args``/``env`` → ``stdioConfigs`` with
+    ``arguments``/``envVariables``) rather than a mock's idea of it."""
+    path = Path(tempfile.mkdtemp()) / "local-mcp-servers.yaml"
+    path.write_text(yaml.safe_dump({"servers": servers}), encoding="utf-8")
+    return LocalMCPRegistry(path)
 
 
 def _factory_returning(svc):
@@ -122,6 +139,133 @@ def test_mcps_run_collect_then_per_server_merge():
     assert inputs[0].endpoint_env == "PROD"
     assert inputs[0].transport_protocol == "http"
     assert mcp_cfg.build_mcp_sync_payload.call_count == 2
+
+
+_HITL_CATALOG = {
+    "hitl": {
+        "command": "python3",
+        "args": ["/home/admin/hitl/hitl_mcp_server.py"],
+        "env": {"MCP_TRANSPORT": "stdio"},
+    }
+}
+
+
+def _mcps_with(servers, *, center_detail, registry_catalog):
+    """Run ``mcps()`` over one collected server code, with the given Center reply."""
+    svc = MagicMock()
+    svc.collect_bot_active_mcps.return_value = servers
+    svc.mcp_center.get_mcp_detail.return_value = center_detail
+    mcp_cfg = MagicMock()
+    mcp_cfg.build_mcp_sync_payload.return_value = (None, {}, "PROD", None)
+    return _collector(
+        skill_set_service=svc,
+        mcp_config_service=mcp_cfg,
+        local_mcp_registry=_registry_over(registry_catalog),
+    ).mcps(_req())
+
+
+@pytest.mark.unit
+def test_mcps_resolve_stdio_launch_from_registry():
+    """A server in the local registry arrives at the composer as the local form.
+
+    Also pins the key-name translation: the registry normalizes to
+    ``arguments``/``envVariables``, the compose input speaks ``args``/``env``.
+    """
+    inputs = _mcps_with(
+        [{"server_code": "hitl"}], center_detail=None, registry_catalog=_HITL_CATALOG
+    )
+
+    assert inputs[0].stdio == StdioLaunch(
+        command="python3",
+        args=["/home/admin/hitl/hitl_mcp_server.py"],
+        env={"MCP_TRANSPORT": "stdio"},
+    )
+
+
+@pytest.mark.unit
+def test_mcps_resolve_stdio_launch_when_center_lookup_fails():
+    """The registry is consulted even when enrichment gives us nothing.
+
+    This is the whole reason classification lives here rather than reading
+    ``run_mode`` downstream: MCP Center is best-effort, and a local server has no
+    endpoint, so a Center outage must not turn it into a remote entry that then
+    fails compose outright.
+    """
+    svc = MagicMock()
+    svc.collect_bot_active_mcps.return_value = [{"server_code": "hitl"}]
+    svc.mcp_center.get_mcp_detail.side_effect = RuntimeError("center down")
+    mcp_cfg = MagicMock()
+    mcp_cfg.build_mcp_sync_payload.return_value = (None, {}, "PROD", None)
+
+    inputs = _collector(
+        skill_set_service=svc,
+        mcp_config_service=mcp_cfg,
+        local_mcp_registry=_registry_over(_HITL_CATALOG),
+    ).mcps(_req())
+
+    assert inputs[0].stdio is not None
+    assert inputs[0].stdio.command == "python3"
+
+
+@pytest.mark.unit
+def test_mcps_center_remote_wins_over_colliding_registry_name():
+    """A caller's own REMOTE server is not hijacked by a same-named local entry.
+
+    The bundled catalog ships ``hitl``/``clawmind``; a deployment may legitimately
+    register a remote server under one of those codes. Center positively reporting
+    REMOTE settles it — otherwise the entry would be rewritten into a launch
+    command for a binary that deployment's image need not even contain.
+    """
+    inputs = _mcps_with(
+        [{"server_code": "hitl"}],
+        center_detail={"serverCode": "hitl", "runMode": "REMOTE",
+                       "endpoints": [{"env": "PROD", "networkType": "INTERNET",
+                                      "transportProtocol": "STREAMABLE_HTTP",
+                                      "url": "https://byo.example/hitl"}]},
+        registry_catalog=_HITL_CATALOG,
+    )
+
+    assert inputs[0].stdio is None
+    assert inputs[0].mcp_data["endpoints"][0]["url"] == "https://byo.example/hitl"
+
+
+@pytest.mark.unit
+def test_mcps_remote_server_absent_from_registry_has_no_stdio():
+    inputs = _mcps_with(
+        [{"server_code": "dima"}], center_detail=None, registry_catalog=_HITL_CATALOG
+    )
+
+    assert inputs[0].stdio is None
+
+
+@pytest.mark.unit
+def test_mcps_registry_entry_without_command_yields_no_launch():
+    """An unlaunchable catalog entry must not produce a half-formed local entry.
+
+    Better to fall through to the remote path — which raises naming the registry —
+    than to publish a stdio entry the engine cannot act on.
+    """
+    inputs = _mcps_with(
+        [{"server_code": "broken"}],
+        center_detail=None,
+        registry_catalog={"broken": {"args": ["--x"]}},
+    )
+
+    assert inputs[0].stdio is None
+
+
+@pytest.mark.unit
+def test_mcps_fall_back_to_collected_stdio_configs_when_registry_empty():
+    """With no registry entry, a ``stdioConfigs`` carried on the collected dict
+    still resolves — the registry is the preferred source, not the only one."""
+    inputs = _mcps_with(
+        [{"server_code": "fs"}],
+        center_detail={"serverCode": "fs", "runMode": "LOCAL",
+                       "stdioConfigs": [{"command": "node", "arguments": ["/srv.js"]}]},
+        registry_catalog={},
+    )
+
+    assert inputs[0].stdio == StdioLaunch(command="node", args=["/srv.js"], env={})
 
 
 @pytest.mark.unit

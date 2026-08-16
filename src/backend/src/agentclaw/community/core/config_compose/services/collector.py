@@ -227,12 +227,21 @@ class ConfigComposerInputCollector(ComposeInputCollector):
     ) -> StdioLaunch | None:
         """Resolve a LOCAL server's launch instruction; ``None`` if it is remote.
 
-        Reads :class:`LocalMCPRegistry` (a local YAML file) **first**, falling back
-        to ``md`` only if the registry has no entry. That order is the point: the
-        enrichment above is best-effort, so on an MCP Center failure ``md`` carries
-        neither ``runMode`` nor ``stdioConfigs`` — and a local server, having no
-        endpoint to find, would then fail the remote path outright. The registry
-        needs no network, so a local server stays recognizable regardless.
+        A ``run_mode`` of REMOTE on the collected entry settles it. That value only
+        appears when the MCP Center lookup **succeeded**, and Center is
+        authoritative for the servers it knows, so a caller's own remote server is
+        never reclassified just because its ``server_code`` collides with a name in
+        the bundled registry (``hitl`` / ``clawmind``). The registry is a fallback
+        catalog for servers Center does not carry, not an override — which also
+        keeps a community deployment, where the MCP Center plugin deliberately
+        ignores that bundled file, from inheriting its company-only launch paths.
+
+        Otherwise :class:`LocalMCPRegistry` (a local YAML read) is consulted before
+        ``md``. That order is the point: the enrichment above is best-effort, so on
+        an MCP Center failure ``md`` carries neither ``runMode`` nor
+        ``stdioConfigs`` — and a local server, having no endpoint to find, would
+        then fail the remote path outright. The registry needs no network, so a
+        local server stays recognizable exactly when Center cannot vouch for it.
 
         The registry normalizes the YAML's flat ``command``/``args``/``env`` into
         ``stdioConfigs: [{command, arguments, envVariables}]``; today that list is
@@ -240,6 +249,9 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         discriminator the shape does not yet carry), so the first entry is taken.
         """
         if not server_code:
+            return None
+        run_mode = md.get("run_mode") or md.get("runMode")
+        if isinstance(run_mode, str) and run_mode.strip().upper() == "REMOTE":
             return None
         detail = self._local_mcp_registry.get_mcp_detail(server_code) or md
         configs = detail.get("stdioConfigs") or detail.get("stdio_configs") or []
