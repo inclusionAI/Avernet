@@ -367,33 +367,38 @@ def test_engine_runtime_errors_map_to_their_own_status(exc_name, expected_status
     assert status == expected_status
 
 
-def test_the_three_409s_do_not_share_a_message():
+def test_engine_runtime_409s_do_not_share_a_message():
     """Status alone cannot tell them apart, so the message has to.
 
-    ``EngineDeviceNotReadyError``, ``EngineStageNotLiveError`` and
-    ``EngineStageReadOnlyError`` all answer 409 and mean three different things:
-    retry, publish something, and stop. Asserting only the status lets a
-    copy-pasted message — the entries are adjacent in ``responses.py`` — pass
-    while the caller loses the distinction the errors exist for.
+    Several engine-runtime errors answer 409 and mean different things: retry
+    (device not ready), publish something (stage not live), stop (stage
+    read-only). Asserting only the status lets a copy-pasted message — the
+    entries are adjacent in ``responses.py`` — pass while the caller loses the
+    distinction the errors exist for.
+
+    The set is derived from the mapping rather than listed, so a 409 added later
+    is covered without editing this test. Scoped to engine-runtime: the surface
+    has other 409s (startup script, local skills) whose messages are not this
+    block's business.
     """
+    from agentclaw.community.adapters.http.openapi_v1.responses import ENVELOPE_ERRORS
     from agentclaw.community.core.engine_runtime.errors import (
-        EngineDeviceNotReadyError,
-        EngineStageNotLiveError,
+        EngineRuntimeError,
         EngineStageReadOnlyError,
     )
 
-    answers = {
-        exc: _lookup(exc("boom"))
-        for exc in (
-            EngineDeviceNotReadyError,
-            EngineStageNotLiveError,
-            EngineStageReadOnlyError,
-        )
+    conflicting = {
+        exc: message
+        for exc, (status, message) in ENVELOPE_ERRORS.items()
+        if status == 409
+        and isinstance(exc, type)
+        and issubclass(exc, EngineRuntimeError)
     }
-    assert all(status == 409 for status, _ in answers.values())
-    assert answers[EngineStageReadOnlyError][1] == "The requested stage is read-only"
-    messages = [message for _, message in answers.values()]
-    assert len(set(messages)) == 3, f"two 409s share a message: {messages}"
+    assert len(conflicting) >= 3, "the engine-runtime 409s went missing"
+    assert conflicting[EngineStageReadOnlyError] == "The requested stage is read-only"
+    assert len(set(conflicting.values())) == len(conflicting), (
+        f"two engine-runtime 409s share a message: {sorted(conflicting.values())}"
+    )
 
 
 def test_engine_runtime_base_does_not_swallow_its_leaves():
@@ -412,27 +417,35 @@ def test_engine_runtime_base_does_not_swallow_its_leaves():
     from agentclaw.community.adapters.http.openapi_v1.responses import ENVELOPE_ERRORS
     from agentclaw.community.core.engine_runtime.errors import EngineRuntimeError
 
-    exported = [getattr(errs, name) for name in errs.__all__]
+    # Read off the classes the module *defines*, not off ``__all__``. Deriving
+    # from ``__all__`` looks self-maintaining and is not: a class added to the
+    # module but forgotten in ``__all__`` disappears from the inventory and from
+    # the loop, which is one of the two ways this regression actually happens.
     leaves = [
         obj
-        for obj in exported
+        for obj in vars(errs).values()
         if isinstance(obj, type)
         and obj is not EngineRuntimeError
         and issubclass(obj, EngineRuntimeError)
+        and obj.__module__ == errs.__name__
     ]
-    # Every export is a leaf but the base itself. A floor (">= 7") would have
-    # tolerated exactly the regression this test exists to catch: drop a name
-    # from ``__all__`` and the loop below simply never sees it.
-    assert len(leaves) == len(exported) - 1, (
-        "the errors module exports something that is not an EngineRuntimeError "
-        "leaf; this test's inventory assumption no longer holds"
-    )
+    assert len(leaves) >= 8, "the errors module stopped defining its leaves"
 
     order = list(ENVELOPE_ERRORS)
-    base = order.index(EngineRuntimeError)
     for leaf in leaves:
         assert leaf in ENVELOPE_ERRORS, f"{leaf.__name__} has no mapped status"
-        assert order.index(leaf) < base, f"{leaf.__name__} listed after its base"
+
+    # Every mapped ancestor, not just the root: an intermediate base (say an
+    # ``EngineStageError`` grouping the two stage errors) listed above its own
+    # subclasses would swallow them exactly as the root would, and a
+    # root-only check passes while the distinction is lost.
+    for leaf in leaves:
+        for ancestor in leaf.__mro__[1:]:
+            if ancestor in ENVELOPE_ERRORS:
+                assert order.index(leaf) < order.index(ancestor), (
+                    f"{leaf.__name__} is listed after its ancestor "
+                    f"{ancestor.__name__}, which will swallow it"
+                )
 
 
 def test_transport_errors_are_siblings_and_map_independently():

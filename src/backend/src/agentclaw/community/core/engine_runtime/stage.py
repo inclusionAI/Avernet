@@ -27,6 +27,7 @@ keyed by publish record, go there.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any, TYPE_CHECKING
 
@@ -117,8 +118,13 @@ def require_stage_writable(stage: str) -> None:
     Deliberately **not** conditional on the bot's type or on the stage being
     live. Both would need a row read to answer, and neither changes the answer:
     no runtime at ``verify`` or ``online``, live or not, on a service bot or
-    otherwise, accepts a write through this surface. Running first is what makes
-    "nothing is written" structural rather than a promise.
+    otherwise, accepts a write through this surface. It is also what lets this
+    run as a method's *first* statement, before anything is resolved.
+
+    What that buys is narrower than "structural", and worth stating exactly: in
+    the two write paths that call it, nothing downstream can reach a published
+    binding, because neither resolves :class:`BotFacts` at all. A write surface
+    added later inherits none of that and must call this itself.
     """
     _require_known_stage(stage)
     if stage != STAGE_DRAFT:
@@ -286,6 +292,32 @@ def _binding_is_active(binding_repo: DeviceBindingRepository, bind_id: int) -> b
     return binding is not None and str(binding.status) == DeviceBindingStatus.ACTIVE
 
 
+async def resolve_published_device_context_off_loop(
+    resolver: "DeviceContextResolver",
+    publish_repo: BotPublishRepositoryProtocol,
+    binding_repo: DeviceBindingRepository,
+    *,
+    facts: BotFacts,
+    stage: str,
+) -> DeviceContext:
+    """:func:`resolve_published_device_context`, run in a worker thread.
+
+    The safe call for anything on an event loop, and the reason it exists rather
+    than a warning in prose: the work below is blocking I/O with a 30-second
+    provider timeout, and every caller of this seam is an ``async`` service
+    method. ``relay.resolve_bot_off_loop`` is the same pattern for the same
+    reason.
+    """
+    return await asyncio.to_thread(
+        resolve_published_device_context,
+        resolver,
+        publish_repo,
+        binding_repo,
+        facts=facts,
+        stage=stage,
+    )
+
+
 def resolve_published_device_context(
     resolver: DeviceContextResolver,
     publish_repo: BotPublishRepositoryProtocol,
@@ -327,16 +359,21 @@ def resolve_published_device_context(
     a published service binding — those ids are not on ``ac_bots.binding_id`` —
     so the returned context carries an **empty** ``bot_type``.
 
-    Two consumers already read it, so this is a live hazard rather than a
-    hypothetical one: ``DefaultDeviceFileSystemResolver`` forks
-    ``bot_type == "desktop"`` inside its baas branch, and
-    ``_validate_bot_device_combination`` skips its legality check entirely on an
-    empty value (logging a warning). Neither misbehaves for the bots this
-    function serves — a published *service* bot is not ``desktop`` whether the
-    field is filled or empty, so it lands on the cloud filesystem either way,
-    and it is exactly what the three existing publish-addressed reads already
-    get. But a second arm added beside that ``desktop`` fork would receive an
-    empty string here and mis-dispatch silently.
+    One consumer reads it in production: ``DefaultDeviceFileSystemResolver``
+    forks ``bot_type == "desktop"`` inside its baas branch. A published
+    *service* bot is not ``desktop`` whether the field is filled or empty, so it
+    lands on the cloud filesystem either way — and this is exactly what the three
+    existing publish-addressed reads already get. A second arm added beside that
+    fork would receive an empty string here and mis-dispatch silently.
+
+    **Do not "fix" the empty value by filling it in.** The other reader,
+    ``_validate_bot_device_combination``, lists ``("service", "baas")`` in
+    ``_ILLEGAL_BOT_DEVICE_COMBINATIONS`` — the combination is not yet supported
+    — and raises ``DeviceServiceError`` for it. It skips the check entirely when
+    ``bot_type`` is empty, and it is reached only from the dispatcher's legacy
+    direct-construction path, so nothing breaks today; but a correctly-filled
+    ``bot_type`` would turn every published service-bot read on that path into a
+    refusal. The emptiness is load-bearing, not merely tolerated.
 
     **Synchronous, and blocking.** The publish scan, the binding read and the
     provider resolve are all blocking I/O — on the BaaS path
@@ -380,5 +417,6 @@ __all__ = [
     "require_stage_addressable",
     "require_stage_writable",
     "resolve_published_device_context",
+    "resolve_published_device_context_off_loop",
     "resolve_stage_bind_id",
 ]

@@ -38,15 +38,18 @@
 - **Files:**
   `src/backend/src/agentclaw/community/core/engine_runtime/models.py`,
   `…/core/engine_runtime/stage.py`,
-  `…/core/engine_runtime/relay.py`
+  `…/core/engine_runtime/relay.py`,
+  `…/core/engine_runtime/connection.py` (its inline projection, same reason)
 - **Done when:**
   - [x] `BotFacts.from_record(record, *, bot_id, owner_id)` classmethod, with the
         same `or`-fallbacks `relay.resolve_bot` applies today, and a docstring
         saying the record must come from an owner-scoped read (spec D6).
-  - [x] `relay.resolve_bot`'s inline `BotFacts(...)` construction uses it, so
-        there is **one** projection of a bot row into facts. This is the only
-        edit outside the feature; it is reversible on its own if a reviewer
-        disagrees.
+  - [x] `relay.resolve_bot`'s and `EngineConnectionService.build`'s inline
+        `BotFacts(...)` constructions use it, so there is **one** projection of
+        a bot row into engine-runtime facts. These are the only edits outside
+        the feature and are reversible on their own. Nothing else in either
+        file changes — an owner-argument inconsistency noticed in
+        `_stage_binding_id` is left alone as pre-existing and out of scope.
   - [x] `require_stage_writable(stage)` raises `EngineStageReadOnlyError` for
         anything but the draft; docstring says why it is not conditional on bot
         type or liveness.

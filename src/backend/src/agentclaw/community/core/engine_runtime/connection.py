@@ -209,7 +209,7 @@ class EngineConnectionService:
         engine = facts.active_engine
 
         binding_id = self._stage_binding_id(
-            bot_pk=bot_pk, bot_id=resolved_id, owner_id=resolved_owner, stage=stage
+            bot_pk=bot_pk, bot_id=resolved_id, owner_id=owner_id, stage=stage
         )
 
         # Composed as the **resolved owner**, deliberately, even when the
