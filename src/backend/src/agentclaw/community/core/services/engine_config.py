@@ -16,6 +16,11 @@ The config file is addressed by the canonical logical path
 
 The router resolves and passes ``engine_type`` (this service does no engine guessing),
 and passes the already-fetched ``BotPublishRecord`` (no second lookup).
+
+The bot-level read/write below address a bot rather than a publish record. The
+read takes a ``stage``: the draft is the bot's own binding, and a service bot's
+verify/online runtimes resolve through the shared rule in
+``core/engine_runtime/stage.py``. Only the draft accepts a write.
 """
 from __future__ import annotations
 
@@ -31,6 +36,16 @@ from agentclaw.community.core.config_compose.teclaw_paths import (
 from agentclaw.community.core.devices.services.device_context import DeviceNotBoundError
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
+)
+from agentclaw.community.core.engine_runtime.stage import (
+    require_stage_writable,
+    resolve_stage_device_context,
+)
+from agentclaw.community.core.repository.protocols.devices import (
+    DeviceBindingRepository,
+)
+from agentclaw.community.core.repository.protocols.publishing import (
+    BotPublishRepositoryProtocol,
 )
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishRecord,
@@ -64,7 +79,11 @@ def _decode_config(content_bytes: bytes | None) -> dict:
 
 
 class EngineConfigService:
-    """Reads a service bot's deployed engine config for a publish record, provider-blind."""
+    """Reads and writes a bot's engine config, provider-blind.
+
+    Three addresses, two of them read-only: a publish record (``publish_id``), a
+    bot at a named runtime stage, and a bot's draft for the one write.
+    """
 
     @inject
     def __init__(
@@ -72,10 +91,18 @@ class EngineConfigService:
         bot_repo: BotRepository,
         resolver: DeviceContextResolver,
         device_fs_dispatcher: DeviceFilesystemDispatcher,
+        publish_repo: BotPublishRepositoryProtocol,
+        binding_repo: DeviceBindingRepository,
     ):
         self._bot_repo = bot_repo
         self._resolver = resolver
         self._device_fs_dispatcher = device_fs_dispatcher
+        # Both only for a read that names a published stage: finding that
+        # stage's live runtime among this bot's publish records, and confirming
+        # a retained verify binding is still ACTIVE. The draft read and every
+        # write touch neither.
+        self._publish_repo = publish_repo
+        self._binding_repo = binding_repo
 
     async def read_publish_config(
         self, record: BotPublishRecord, engine_type: str
@@ -120,6 +147,13 @@ class EngineConfigService:
         # Select by record.status; a missing/0 bind_id means there is no resolvable
         # active-stage binding (binding PKs are ≥1, so 0 is never a real binding).
         # This is a real failure, not an empty config — surface it (don't swallow).
+        # Deliberately NOT ``engine_runtime.stage.resolve_stage_bind_id``, which
+        # the bot-level stage-addressed read below uses. The two answer different
+        # questions and this one is keyed by *record*: the caller named a
+        # ``publish_id``, and that rule picks the newest record at a status — so
+        # routing this path through it would answer a question about release 7
+        # from whichever release happens to be newest. The stage module's own
+        # docstring draws the same line.
         bind_id = select_stage_bind_id(ext.get("binding", {}), record.status)
         if not bind_id:
             raise DeviceNotBoundError(
@@ -139,7 +173,7 @@ class EngineConfigService:
         content_bytes = await device_fs.read_file(_CONFIG_LOGICAL_PATH)
         return _decode_config(content_bytes)
 
-    # ── bot-level (draft/current binding) read + write ───────────────────────
+    # ── bot-level (stage-addressed read, draft-only write) ───────────────────
 
     def _bot_config_device_fs(
         self,
@@ -149,12 +183,27 @@ class EngineConfigService:
         entity_id: str,
         entity_type: str,
         engine_type: str,
+        stage: str,
     ):
-        """Resolve the bot's own (draft/current) binding and build its config-addressing
+        """Resolve the runtime ``stage`` names and build its config-addressing
         DeviceFileSystem via the dispatcher (mirrors
-        ``IdentityService._identity_device_fs``). Raises ``DeviceNotBoundError`` if the
-        bot has no active binding — same as the legacy ``for_bot`` path."""
-        ctx = self._resolver.resolve_for_bot(bot_id, owner_id)
+        ``IdentityService._identity_device_fs``).
+
+        The draft raises ``DeviceNotBoundError`` if the bot has no active
+        binding, same as the legacy ``for_bot`` path; a published stage raises
+        ``EngineStageNotLiveError`` when that stage has no live runtime. Both
+        legs, and the reasons behind them, live in
+        :func:`resolve_stage_device_context`.
+        """
+        ctx = resolve_stage_device_context(
+            self._resolver,
+            self._publish_repo,
+            self._binding_repo,
+            self._bot_repo,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            stage=stage,
+        )
         return self._device_fs_dispatcher.dispatch_addressed(
             ctx, namespace=CONFIG_NS, entity_type=entity_type, entity_id=entity_id,
             bot_id=bot_id, engine_type=engine_type,
@@ -168,17 +217,23 @@ class EngineConfigService:
         entity_id: str,
         entity_type: str,
         engine_type: str,
+        stage: str,
     ) -> dict:
-        """Read a bot's engine config from its own device, provider-blind.
+        """Read a bot's engine config from the runtime ``stage`` names, provider-blind.
+
+        ``stage`` is required rather than defaulted — see the Service API
+        contract for why. ``STAGE_DRAFT`` is the bot's own workspace, what every
+        caller read before stages were addressable.
 
         Returns the parsed dict; ``{}`` only when the file is missing/empty — a bot
         that has never had a config written reads as empty on every provider, not as
         an error. Resolve errors, a device that refuses the read, and
-        ``json.JSONDecodeError`` propagate (the caller surfaces them).
+        ``json.JSONDecodeError`` propagate (the caller surfaces them), as does
+        ``EngineStageNotLiveError`` for a published stage with no live runtime.
         """
         device_fs = self._bot_config_device_fs(
             bot_id=bot_id, owner_id=owner_id, entity_id=entity_id,
-            entity_type=entity_type, engine_type=engine_type,
+            entity_type=entity_type, engine_type=engine_type, stage=stage,
         )
         content_bytes = await device_fs.read_file(_CONFIG_LOGICAL_PATH)
         return _decode_config(content_bytes)
@@ -192,16 +247,25 @@ class EngineConfigService:
         entity_type: str,
         engine_type: str,
         config: dict,
+        stage: str,
     ) -> None:
         """Write a bot's engine config to its own device, provider-blind.
+
+        Only the draft accepts a write. ``stage`` is taken so that a caller
+        naming a published runtime is *refused* (``EngineStageReadOnlyError``)
+        rather than having their edit quietly applied to the draft — a write
+        that would report success for a runtime it never touched. The refusal is
+        the first thing that happens, before any row or device is resolved, so
+        nothing is written anywhere.
 
         Bytes are ``json.dumps(config, ensure_ascii=False, indent=2)`` — byte-identical
         to the legacy ``update_engine_config`` serialization. Resolve/write errors
         propagate (the caller surfaces them).
         """
+        require_stage_writable(stage)
         device_fs = self._bot_config_device_fs(
             bot_id=bot_id, owner_id=owner_id, entity_id=entity_id,
-            entity_type=entity_type, engine_type=engine_type,
+            entity_type=entity_type, engine_type=engine_type, stage=stage,
         )
         payload = json.dumps(config, ensure_ascii=False, indent=2).encode("utf-8")
         await device_fs.write_file(_CONFIG_LOGICAL_PATH, payload)

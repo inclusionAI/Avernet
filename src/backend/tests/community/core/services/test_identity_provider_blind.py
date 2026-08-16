@@ -37,6 +37,7 @@ def _service(*, provider: str, engine: str):
         bot_repo=bot_repo,
         resolver=resolver,
         device_fs_dispatcher=dispatcher,
+        binding_repo=MagicMock(),
     )
     return svc, dispatcher, device_fs
 
@@ -110,6 +111,7 @@ def _publish_service(*, provider: str, engine: str, ext: dict):
     svc = IdentityService(
         path_factory=MagicMock(), publish_repo=publish_repo,
         bot_repo=bot_repo, resolver=resolver, device_fs_dispatcher=dispatcher,
+        binding_repo=MagicMock(),
     )
     return svc, resolver, device_fs
 

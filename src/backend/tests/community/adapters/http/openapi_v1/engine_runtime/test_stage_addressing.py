@@ -4,10 +4,11 @@ The behavioural half: the default is the draft byte-for-byte, a named stage
 travels to the forward unchanged, a stage a bot cannot have is the one fixed
 409, and a value outside the enum never reaches a handler. The document half,
 in the shape of ``test_explicit_user_id.py``: ``stage`` is an optional query
-parameter on exactly the sixteen engine-runtime operations and nowhere else,
-and ``owner_id`` on those plus the three bot-scoped authorization operations —
-asserted against the generated description so a later operation is covered
-without editing this file.
+parameter on exactly the engine-runtime operations (current and retiring) plus
+the five per-bot file operations that address a runtime, and ``owner_id`` on the
+engine-runtime ones plus the bot-scoped authorization and skills operations — asserted against the
+generated description so a later operation is covered without editing this
+file.
 """
 
 from __future__ import annotations
@@ -58,6 +59,23 @@ def _is_engine_runtime(path: str) -> bool:
     """Whether *path* is served by one of the engine-runtime groups."""
     return path in _engine_runtime_paths()
 
+
+#: The per-bot file operations. They read or write a file **on** the addressed
+#: runtime, so they name one the same way the forwarding groups do — but they
+#: are not engine-runtime operations: they carry ``user_id`` rather than
+#: ``owner_id``, and engine-config publishes the ordinary error table because it
+#: cannot produce the 501 or 504 those groups document.
+#:
+#: The retiring twins of these five are deliberately absent. Their contract is
+#: frozen, so they must not have grown the parameter — which the exclusivity
+#: assertion below is what proves.
+_STAGE_ADDRESSED_ELSEWHERE = {
+    ("get", "/openapi/v1/bots/{bot_id}/engine/config"),
+    ("put", "/openapi/v1/bots/{bot_id}/engine/config"),
+    ("get", "/openapi/v1/bots/{bot_id}/identity"),
+    ("get", "/openapi/v1/bots/{bot_id}/identity/{file_type}"),
+    ("put", "/openapi/v1/bots/{bot_id}/identity/{file_type}"),
+}
 
 #: The other operations that address a bot by ``(owner, bot_id)``.
 #:
@@ -257,7 +275,13 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
     # addresses while callers migrate. The number halves again when the
     # deprecated package is deleted.
     assert len(engine_runtime) == 32
-    assert sorted(carrying_stage) == sorted(engine_runtime), "stage is theirs alone"
+    assert sorted(carrying_stage) == sorted(
+        set(engine_runtime) | _STAGE_ADDRESSED_ELSEWHERE
+    ), (
+        "stage belongs to the engine-runtime operations and the five per-bot "
+        "file operations, and to nothing else by accident — in particular to "
+        "no retiring address of those five, whose contract is frozen"
+    )
     assert sorted(carrying_owner) == sorted(
         set(engine_runtime) | _OWNER_ADDRESSED_ELSEWHERE
     ), (

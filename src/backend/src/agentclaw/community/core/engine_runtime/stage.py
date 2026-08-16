@@ -8,33 +8,62 @@ publish records (which share the bot's own ``publish_bot_id``; no ``…pub…``
 id is ever written). A ``personal`` bot has only its own workspace runtime —
 the ``draft`` stage.
 
-Two callers translate a stage into a published binding — the relay's device
-resolution and ``EngineConnectionService``'s socket composition — and they
-must agree on which runtime a stage names: a socket composed against one
-binding while the sessions group forwards to another would let the two
-surfaces describe different devices for the same request. So the lookup lives
-here, once, like the gate.
+Several callers translate a stage into a published binding — the relay's device
+resolution, ``EngineConnectionService``'s socket composition, and the per-bot
+file surfaces (engine config, identity) — and they must agree on which runtime
+a stage names: a socket composed against one binding while the sessions group
+forwards to another would let the two surfaces describe different devices for
+the same request. So the lookup lives here, once, like the gate.
+
+**A stage is not the only way to name a runtime, and the other way is not this
+one.** ``select_stage_bind_id`` (``core/service_bot/repository/models.py``)
+answers a different question — *one publish record* was named, which of its
+bindings is that record's runtime — for the ``publish_id``-addressed internal
+reads. It cannot answer this module's question, and this module must not answer
+its: :func:`resolve_stage_bind_id` picks the newest record at a status and would
+ignore the record the caller actually addressed. Keyed by stage, come here;
+keyed by publish record, go there.
 """
 
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from agentclaw.community.core.devices.models import DeviceBindingStatus
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.devices import (
     DeviceBindingRepository,
 )
 from agentclaw.community.core.devices.services.device_context import (
+    DeviceContext,
     DeviceNotBoundError,
 )
-from agentclaw.community.core.engine_runtime.errors import EngineStageNotLiveError
+from agentclaw.community.core.engine_runtime.models import BotFacts
+from agentclaw.community.core.engine_runtime.errors import (
+    EngineStageNotLiveError,
+    EngineStageReadOnlyError,
+)
 from agentclaw.community.core.repository.protocols.publishing import (
     BotPublishRepositoryProtocol,
 )
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.env_utils import get_current_env
+
+# Deferred because it is *heavy*, not merely because it is an annotation:
+# ``device_context_resolver`` pulls all four conn-info builders and
+# ``BaasService`` behind them. ``gate.py`` imports this module and every
+# openapi_v1 router imports the gate, so naming the concrete resolver at module
+# scope would put that graph in every process that touches the gate. The other
+# annotations above are imported normally — their modules are already loaded
+# here, and splitting one module's names across two import styles for no saving
+# is how ``DeviceNotBoundError`` ends up in the guarded block by accident.
+if TYPE_CHECKING:
+    from agentclaw.community.core.devices.services.device_context_resolver import (
+        DeviceContextResolver,
+    )
 
 logger = get_logger()
 
@@ -64,20 +93,57 @@ STAGE_ONLINE = PublishStage.ONLINE.value
 RUNTIME_STAGES = frozenset({STAGE_DRAFT, STAGE_VERIFY, STAGE_ONLINE})
 
 
+def require_known_stage(stage: str) -> None:
+    """Refuse a stage name outside :data:`RUNTIME_STAGES`.
+
+    Unreachable from HTTP, where the adapter's enum answers 422 first, but a
+    programmatic caller's typo must not sail through — and must not be *mistaken
+    for something else*, which is why this runs ahead of both the addressable
+    and the writable checks rather than being folded into either.
+    """
+    if stage not in RUNTIME_STAGES:
+        raise EngineStageNotLiveError(f"unknown stage {stage!r}")
+
+
+def require_stage_writable(stage: str) -> None:
+    """Refuse a write addressed to a published runtime, before anything else.
+
+    A published runtime is what a release produced; it is replaced by publishing
+    again, never edited. Neither thing a write could do here is honest — editing
+    the published runtime forks it from the record that describes it, and
+    writing the draft instead reports success for an edit the addressed runtime
+    never received — so the request is refused outright with
+    :class:`EngineStageReadOnlyError`.
+
+    Deliberately **not** conditional on the bot's type or on the stage being
+    live. Both would need a row read to answer, and neither changes the answer:
+    no runtime at ``verify`` or ``online``, live or not, on a service bot or
+    otherwise, accepts a write through this surface. It is also what lets this
+    run as a method's *first* statement, before anything is resolved.
+
+    What that buys is narrower than "structural", and worth stating exactly: in
+    the two write paths that call it, nothing downstream can reach a published
+    binding, because neither resolves :class:`BotFacts` at all. A write surface
+    added later inherits none of that and must call this itself.
+    """
+    require_known_stage(stage)
+    if stage != STAGE_DRAFT:
+        raise EngineStageReadOnlyError(
+            f"the {stage} runtime is published and does not accept writes"
+        )
+
+
 def require_stage_addressable(bot_type: str, stage: str) -> None:
     """Refuse a stage this bot cannot have, before any device work.
 
     Two refusals, one answer (:class:`EngineStageNotLiveError`): a stage name
-    outside :data:`RUNTIME_STAGES` — unreachable from HTTP, where the
-    adapter's enum answers 422 first, but a programmatic caller's typo must
-    not sail through to an unmapped 500 at device resolution — and a
-    published stage named on anything but a ``service`` bot, which has no
-    such runtime to be live. Run by the gate (before device work, for the
-    public surface) and by the relay's device resolution (for callers that
-    bypass the gate); one implementation so the two cannot drift.
+    outside :data:`RUNTIME_STAGES` (see :func:`require_known_stage`), and a
+    published stage named on anything but a ``service`` bot, which has no such
+    runtime to be live. Run by the gate (before device work, for the public
+    surface) and by the relay's device resolution (for callers that bypass the
+    gate); one implementation so the two cannot drift.
     """
-    if stage not in RUNTIME_STAGES:
-        raise EngineStageNotLiveError(f"unknown stage {stage!r}")
+    require_known_stage(stage)
     if stage != STAGE_DRAFT and bot_type != SERVICE_BOT_TYPE:
         raise EngineStageNotLiveError(
             f"a {bot_type} bot has no {stage} runtime; only its workspace"
@@ -226,12 +292,106 @@ def _binding_is_active(binding_repo: DeviceBindingRepository, bind_id: int) -> b
     return binding is not None and str(binding.status) == DeviceBindingStatus.ACTIVE
 
 
+def resolve_stage_device_context(
+    resolver: "DeviceContextResolver",
+    publish_repo: BotPublishRepositoryProtocol,
+    binding_repo: DeviceBindingRepository,
+    bot_repo: BotRepository,
+    *,
+    bot_id: str,
+    owner_id: str,
+    stage: str,
+) -> DeviceContext:
+    """The device context of the runtime ``stage`` names.
+
+    The one entry point for a read that addresses a stage, so the surfaces that
+    read a bot's files cannot drift from each other or from the surfaces that
+    forward to it: which runtime a stage names is :func:`resolve_stage_bind_id`'s
+    rule, shared with cron, the relay and the connection socket.
+
+    **The draft costs nothing extra.** It resolves the bot's own binding through
+    the same owner-scoped ``resolve_for_bot`` its callers always used — no bot
+    row is read here that was not read before, which is what keeps a request
+    naming no stage byte-for-byte what it was. (``resolve_for_bot`` reads the row
+    itself, to fill ``ctx.bot_type``; the point is that this function adds
+    nothing.)
+
+    **A published stage costs one owner-scoped row read here**, for the primary
+    key and the bot type. An adapter that already fetched the row for its own
+    ownership guard — engine config does — pays for it twice on that request;
+    that is the accepted cost of resolving the facts in one place instead of
+    threading them through every caller (spec D8). ``get_by_id_and_owner`` and not ``get_by_id``: ``bot_id``
+    carries no unique constraint and every user's first bot is called
+    ``default``, so a wider query can return another owner's row — and
+    ``bot_pk`` is what the publish lookup trusts to stay on the addressed bot.
+
+    A row that is not there yields empty facts rather than an exception, and
+    :func:`require_stage_addressable` then refuses the published stage as having
+    no live runtime. That is a 409, the same class of answer the draft leg gives
+    for a bot that is not the caller's; a 404 here would make a published-stage
+    request the one way to learn whether a bot exists.
+
+    ``resolve_for_binding`` rather than the relay's
+    ``resolve_for_binding_invoke``: callers here address a **filesystem** on the
+    resolved device and need the full connection info the invoke variant omits.
+    That one line is why this is a sibling of
+    ``relay._resolve_published_device`` rather than a shared body; what the two
+    share is :func:`resolve_stage_bind_id`, the rule that must not drift.
+
+    ``DefaultDeviceFileSystemResolver`` reads ``ctx.bot_type``: inside its baas
+    branch it forks on ``bot_type == "desktop"``. ``resolve_for_binding`` derives
+    that from ``get_by_binding_id``, which finds nothing for a published service
+    binding — those ids are not on ``ac_bots.binding_id`` — so the context comes
+    back with an empty ``bot_type``. A published *service* bot is not
+    ``desktop`` either way, so it lands on the cloud filesystem, and this is
+    exactly what the three existing publish-addressed reads already get; but a
+    second arm added beside that fork would receive an empty string here and
+    mis-dispatch silently.
+
+    **Synchronous, and blocking.** The publish scan, the binding read and the
+    provider resolve are all blocking I/O — on the BaaS path
+    ``resolve_for_binding`` reaches ``get_ws_info`` over a sync ``httpx`` client
+    with a 30-second timeout. ``relay._resolve_device`` carries the same warning
+    and ``relay.call`` offloads it in one worker-thread hop. The file surfaces do
+    not offload today: their draft leg already calls ``resolve_for_bot`` inline
+    from an ``async`` method, so this is no worse than the path beside it — but
+    it is not better either. Resolve **once per request**, not once per file.
+
+    **Resolver errors are not translated**, deliberately. ``DeviceNotBoundError``
+    and ``ConnInfoBuildError`` propagate as themselves, exactly as they do from
+    the ``resolve_for_bot`` call on the draft leg of the same endpoints. The
+    relay folds them into ``EngineDeviceNotReadyError`` because it presents a
+    device-forwarding contract; doing that here would make ``?stage=online``
+    answer differently from ``?stage=draft`` on one endpoint, which is a worse
+    inconsistency than the one it would fix.
+    """
+    require_known_stage(stage)
+    if stage == STAGE_DRAFT:
+        return resolver.resolve_for_bot(bot_id, owner_id)
+
+    record = bot_repo.get_by_id_and_owner(bot_id, owner_id) or {}
+    facts = BotFacts.from_record(record, bot_id=bot_id, owner_id=owner_id)
+    require_stage_addressable(facts.bot_type, stage)
+    bind_id = resolve_stage_bind_id(
+        publish_repo,
+        binding_repo,
+        bot_pk=facts.bot_pk,
+        bot_id=facts.bot_id,
+        stage=stage,
+        env=get_current_env(),
+    )
+    return resolver.resolve_for_binding(bind_id, facts.owner_id, bot_id=facts.bot_id)
+
+
 __all__ = [
     "RUNTIME_STAGES",
     "SERVICE_BOT_TYPE",
     "STAGE_DRAFT",
     "STAGE_ONLINE",
     "STAGE_VERIFY",
+    "require_known_stage",
     "require_stage_addressable",
+    "require_stage_writable",
     "resolve_stage_bind_id",
+    "resolve_stage_device_context",
 ]

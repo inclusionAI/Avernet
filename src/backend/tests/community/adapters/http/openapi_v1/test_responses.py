@@ -354,6 +354,7 @@ def test_local_skill_edit_errors_have_distinct_public_responses(error, expected)
         ("EngineBotTypeNotSupportedError", 501),
         ("EngineCapabilityUnsupportedError", 501),
         ("EngineDeviceNotReadyError", 409),
+        ("EngineStageReadOnlyError", 409),
         ("EngineResourceNotFoundError", 404),
         ("EngineUpstreamError", 502),
     ],
@@ -366,31 +367,101 @@ def test_engine_runtime_errors_map_to_their_own_status(exc_name, expected_status
     assert status == expected_status
 
 
-def test_engine_runtime_base_does_not_swallow_its_leaves():
-    """``EngineRuntimeError`` is the base of all four; it must be listed last.
+def test_engine_runtime_409s_do_not_share_a_message():
+    """Status alone cannot tell them apart, so the message has to.
 
-    This is the "map the base class last" trap from the Track B gotchas, and
-    Track C introduces two base/leaf pairs at once — so it is asserted, not
-    trusted.
+    Several engine-runtime errors answer 409 and mean different things: retry
+    (device not ready), publish something (stage not live), stop (stage
+    read-only). Asserting only the status lets a copy-pasted message — the
+    entries are adjacent in ``responses.py`` — pass while the caller loses the
+    distinction the errors exist for.
+
+    The set is derived from the mapping rather than listed, so a 409 added later
+    is covered without editing this test. Scoped to engine-runtime: the surface
+    has other 409s (startup script, local skills) whose messages are not this
+    block's business.
     """
     from agentclaw.community.adapters.http.openapi_v1.responses import ENVELOPE_ERRORS
     from agentclaw.community.core.engine_runtime.errors import (
-        EngineCapabilityUnsupportedError,
-        EngineDeviceNotReadyError,
-        EngineResourceNotFoundError,
         EngineRuntimeError,
-        EngineUpstreamError,
+        EngineStageReadOnlyError,
     )
 
+    # Resolved through ``_lookup``, not read out of the dict. ``envelope_errors``
+    # returns on the first isinstance match in insertion order, so the entry a
+    # key *holds* and the answer a caller *gets* are different questions — and
+    # the second is the one this test is about.
+    candidates = [
+        exc
+        for exc, (status, _) in ENVELOPE_ERRORS.items()
+        if status == 409 and issubclass(exc, EngineRuntimeError)
+    ]
+    assert len(candidates) >= 3, "the engine-runtime 409s went missing"
+
+    answers = {exc: _lookup(exc("boom")) for exc in candidates}
+    assert answers[EngineStageReadOnlyError] == (
+        409,
+        "The requested stage is read-only",
+    ), "the read-only refusal no longer resolves to its own answer"
+
+    messages = [message for _, message in answers.values()]
+    assert len(set(messages)) == len(messages), (
+        f"two engine-runtime 409s resolve to one message: {sorted(messages)}"
+    )
+
+
+def test_engine_runtime_base_does_not_swallow_its_leaves():
+    """``EngineRuntimeError`` is the base of every ``Engine*``; it is listed last.
+
+    This is the "map the base class last" trap from the Track B gotchas, and
+    Track C introduced two base/leaf pairs at once — so it is asserted, not
+    trusted.
+
+    The leaves are read off the errors module rather than listed here. A
+    hand-written list is a second inventory that a new error joins only if
+    someone remembers, and the cost of forgetting is silent: a leaf placed after
+    its base still resolves, just to the base's 502, with a green suite.
+    """
+    import agentclaw.community.core.engine_runtime.errors as errs
+    from agentclaw.community.adapters.http.openapi_v1.responses import ENVELOPE_ERRORS
+    from agentclaw.community.core.engine_runtime.errors import EngineRuntimeError
+
+    # The union of what the module *defines* and what it *exports*. Either alone
+    # has a hole: reading only ``__all__`` misses a class defined here and left
+    # out of it, and reading only ``vars`` misses one defined in a sibling module
+    # and re-exported through it. Both are ways this regression actually happens.
+    candidates = list(vars(errs).values()) + [
+        getattr(errs, name) for name in errs.__all__
+    ]
+    leaves = {
+        obj
+        for obj in candidates
+        if isinstance(obj, type)
+        and obj is not EngineRuntimeError
+        and issubclass(obj, EngineRuntimeError)
+    }
+    assert len(leaves) >= 8, "the errors module stopped carrying its leaves"
+
     order = list(ENVELOPE_ERRORS)
-    base = order.index(EngineRuntimeError)
-    for leaf in (
-        EngineCapabilityUnsupportedError,
-        EngineDeviceNotReadyError,
-        EngineResourceNotFoundError,
-        EngineUpstreamError,
-    ):
-        assert order.index(leaf) < base, f"{leaf.__name__} listed after its base"
+    for leaf in leaves:
+        # An intermediate grouping base needs no entry of its own — its
+        # subclasses carry the answers and ``EngineRuntimeError`` is the
+        # fallback — so only classes with no mapped subclass must be mapped.
+        if not any(
+            other is not leaf and issubclass(other, leaf) and other in ENVELOPE_ERRORS
+            for other in leaves
+        ):
+            assert leaf in ENVELOPE_ERRORS, f"{leaf.__name__} has no mapped status"
+
+        # Every mapped ancestor, not just the root: an intermediate base listed
+        # above its own subclasses would swallow them exactly as the root would.
+        if leaf in ENVELOPE_ERRORS:
+            for ancestor in leaf.__mro__[1:]:
+                if ancestor in ENVELOPE_ERRORS:
+                    assert order.index(leaf) < order.index(ancestor), (
+                        f"{leaf.__name__} is listed after its ancestor "
+                        f"{ancestor.__name__}, which will swallow it"
+                    )
 
 
 def test_transport_errors_are_siblings_and_map_independently():

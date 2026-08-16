@@ -187,6 +187,7 @@ def _make_identity_service(*, bot_repo, device_repo) -> IdentityService:
         bot_repo=bot_repo,
         resolver=_make_real_resolver(device_repo, bot_repo),
         device_fs_dispatcher=MagicMock(),
+        binding_repo=MagicMock(),
     )
 
 

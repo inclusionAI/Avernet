@@ -11,9 +11,20 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, MagicMock
 
+from types import SimpleNamespace
+
 import pytest
 
 from agentclaw.community.core.devices.services.device_context import DeviceNotBoundError
+from agentclaw.community.core.engine_runtime.errors import (
+    EngineStageNotLiveError,
+    EngineStageReadOnlyError,
+)
+from agentclaw.community.core.engine_runtime.stage import (
+    STAGE_DRAFT,
+    STAGE_ONLINE,
+    STAGE_VERIFY,
+)
 from agentclaw.community.core.services.engine_config import EngineConfigService
 
 
@@ -50,6 +61,7 @@ def _service(*, read_return=b'{"a": 1}', resolve_raises=None, provider="arca"):
 
     svc = EngineConfigService(
         bot_repo=bot_repo, resolver=resolver, device_fs_dispatcher=dispatcher,
+        publish_repo=MagicMock(), binding_repo=MagicMock(),
     )
     return svc, resolver, dispatcher, device_fs
 
@@ -155,6 +167,7 @@ def _bot_service(*, read_return=b'{"a": 1}', resolve_raises=None, provider="arca
 
     svc = EngineConfigService(
         bot_repo=MagicMock(), resolver=resolver, device_fs_dispatcher=dispatcher,
+        publish_repo=MagicMock(), binding_repo=MagicMock(),
     )
     return svc, resolver, dispatcher, device_fs
 
@@ -169,7 +182,7 @@ _BOT_COORDS = dict(
 async def test_read_bot_config_parses_via_resolve_for_bot():
     svc, resolver, dispatcher, device_fs = _bot_service(read_return=b'{"k": "v"}')
 
-    data = await svc.read_bot_config(**_BOT_COORDS)
+    data = await svc.read_bot_config(**_BOT_COORDS, stage=STAGE_DRAFT)
 
     assert data == {"k": "v"}
     resolver.resolve_for_bot.assert_called_once_with("default", "100018")
@@ -183,21 +196,21 @@ async def test_read_bot_config_parses_via_resolve_for_bot():
 async def test_read_bot_config_empty_file_returns_empty_dict():
     for ret in (None, b"", b"  \n"):
         svc, _, _, _ = _bot_service(read_return=ret)
-        assert await svc.read_bot_config(**_BOT_COORDS) == {}
+        assert await svc.read_bot_config(**_BOT_COORDS, stage=STAGE_DRAFT) == {}
 
 
 @pytest.mark.asyncio
 async def test_read_bot_config_malformed_propagates():
     svc, _, _, _ = _bot_service(read_return=b"{bad")
     with pytest.raises(json.JSONDecodeError):
-        await svc.read_bot_config(**_BOT_COORDS)
+        await svc.read_bot_config(**_BOT_COORDS, stage=STAGE_DRAFT)
 
 
 @pytest.mark.asyncio
 async def test_write_bot_config_serializes_and_targets_canonical_path():
     svc, resolver, dispatcher, device_fs = _bot_service()
 
-    await svc.write_bot_config(**_BOT_COORDS, config={"x": 1, "y": "z"})
+    await svc.write_bot_config(**_BOT_COORDS, stage=STAGE_DRAFT, config={"x": 1, "y": "z"})
 
     resolver.resolve_for_bot.assert_called_once_with("default", "100018")
     _, kwargs = dispatcher.dispatch_addressed.call_args
@@ -212,7 +225,7 @@ async def test_write_bot_config_serializes_and_targets_canonical_path():
 async def test_bot_config_resolve_failure_propagates():
     svc, _, dispatcher, _ = _bot_service(resolve_raises=DeviceNotBoundError("unbound"))
     with pytest.raises(DeviceNotBoundError):
-        await svc.read_bot_config(**_BOT_COORDS)
+        await svc.read_bot_config(**_BOT_COORDS, stage=STAGE_DRAFT)
     dispatcher.dispatch_addressed.assert_not_called()
 
 
@@ -233,7 +246,7 @@ async def test_read_bot_config_device_read_failure_propagates():
     svc, _, _, _ = _bot_service(read_return=RuntimeError("device unreachable"))
 
     with pytest.raises(RuntimeError, match="device unreachable"):
-        await svc.read_bot_config(**_BOT_COORDS)
+        await svc.read_bot_config(**_BOT_COORDS, stage=STAGE_DRAFT)
 
 
 @pytest.mark.asyncio
@@ -244,3 +257,92 @@ async def test_read_publish_config_device_read_failure_propagates():
         await svc.read_publish_config(
             _record(status="success", binding={"online": 7}), "openclaw"
         )
+
+
+# ── stage addressing ─────────────────────────────────────────────────────────
+
+
+def _staged_service(*, bot_type="service", online_binding=41, read_return=b"{}"):
+    """A bot-level service wired so a published stage can actually resolve."""
+    resolver = MagicMock()
+    resolver.resolve_for_binding.return_value = MagicMock(provider="baas")
+
+    device_fs = MagicMock()
+    device_fs.read_file = AsyncMock(return_value=read_return)
+    device_fs.write_file = AsyncMock()
+    dispatcher = MagicMock()
+    dispatcher.dispatch_addressed.return_value = device_fs
+
+    bot_repo = MagicMock()
+    bot_repo.get_by_id_and_owner.return_value = {
+        "id": 100, "bot_id": "default", "bot_type": bot_type, "owner_id": "100018",
+    }
+    publish_repo = MagicMock()
+    publish_repo.list_by_source_bot.return_value = [
+        SimpleNamespace(
+            id=7, status="success", ext={"binding": {"online": online_binding}}
+        )
+    ]
+    svc = EngineConfigService(
+        bot_repo=bot_repo, resolver=resolver, device_fs_dispatcher=dispatcher,
+        publish_repo=publish_repo, binding_repo=MagicMock(),
+    )
+    return svc, resolver, dispatcher, device_fs
+
+
+@pytest.mark.asyncio
+async def test_reading_online_resolves_the_published_binding_not_the_draft():
+    svc, resolver, dispatcher, device_fs = _staged_service(
+        read_return=b'{"model": "published"}'
+    )
+
+    data = await svc.read_bot_config(**_BOT_COORDS, stage=STAGE_ONLINE)
+
+    assert data == {"model": "published"}
+    resolver.resolve_for_bot.assert_not_called()
+    resolver.resolve_for_binding.assert_called_once_with(
+        41, "100018", bot_id="default"
+    )
+    # Same canonical logical path on every runtime — the stage picks the device,
+    # not the filename.
+    device_fs.read_file.assert_awaited_once_with("config/teclaw.json")
+
+
+@pytest.mark.asyncio
+async def test_reading_a_published_stage_on_a_personal_bot_is_not_live():
+    svc, resolver, _, _ = _staged_service(bot_type="personal")
+
+    with pytest.raises(EngineStageNotLiveError):
+        await svc.read_bot_config(**_BOT_COORDS, stage=STAGE_ONLINE)
+
+    resolver.resolve_for_binding.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", [STAGE_VERIFY, STAGE_ONLINE])
+async def test_writing_a_published_stage_is_refused_and_writes_nothing(stage):
+    """The safety-critical half: refused, and nothing reached a device.
+
+    ``assert_not_called`` on the dispatcher is the claim that matters — a
+    refusal that had already resolved a device would mean the draft was one
+    line away from being written instead.
+    """
+    svc, resolver, dispatcher, device_fs = _staged_service()
+
+    with pytest.raises(EngineStageReadOnlyError):
+        await svc.write_bot_config(**_BOT_COORDS, stage=stage, config={"x": 1})
+
+    dispatcher.dispatch_addressed.assert_not_called()
+    device_fs.write_file.assert_not_awaited()
+    resolver.resolve_for_bot.assert_not_called()
+    resolver.resolve_for_binding.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_the_draft_write_still_lands():
+    svc, resolver, _, device_fs = _staged_service()
+
+    await svc.write_bot_config(**_BOT_COORDS, stage=STAGE_DRAFT, config={"x": 1})
+
+    resolver.resolve_for_bot.assert_called_once_with("default", "100018")
+    device_fs.write_file.assert_awaited_once()

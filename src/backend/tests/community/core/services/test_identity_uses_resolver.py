@@ -50,6 +50,7 @@ def _make_identity(
         bot_repo=bot_repo or MagicMock(),
         resolver=resolver or MagicMock(),
         device_fs_dispatcher=dispatcher or MagicMock(),
+        binding_repo=MagicMock(),
     )
 
 
