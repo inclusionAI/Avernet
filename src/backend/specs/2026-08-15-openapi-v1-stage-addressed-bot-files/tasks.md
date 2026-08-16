@@ -15,18 +15,18 @@
 
 ## Group A — Core: the stage seam and the refusal
 
-### Task A1: A core error for a write addressed to a published runtime  `[ ]`
+### Task A1: A core error for a write addressed to a published runtime  `[x]`
 
 - **Goal:** One named domain state for "that runtime does not take writes",
   distinct from "that runtime is not up".
 - **Files:** `src/backend/src/agentclaw/community/core/engine_runtime/errors.py`
 - **Done when:**
-  - [ ] `EngineStageReadOnlyError(EngineRuntimeError)` exists, docstring says
+  - [x] `EngineStageReadOnlyError(EngineRuntimeError)` exists, docstring says
         why a published runtime is replaced rather than edited, and states
         explicitly that it is **not** `EngineStageNotLiveError` — it does not
         depend on liveness, so publishing a runtime would not make the write
         land.
-  - [ ] Listed in `__all__`, placed above the `EngineRuntimeError` base's own
+  - [x] Listed in `__all__`, placed above the `EngineRuntimeError` base's own
         entry in nothing (this file has no ordering rule; `responses.py` does).
 - **Depends on:** —
 
