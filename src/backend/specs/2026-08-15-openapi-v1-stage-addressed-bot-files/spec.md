@@ -159,9 +159,10 @@ one — see **Decisions**.
 
 - `?stage=` on the five operations above.
 - One new core error for the write refusal, mapped once in `ENVELOPE_ERRORS`.
-- One shared core helper that turns a stage into a device context, so the file
-  surfaces and the forwarding surfaces cannot drift on which runtime a stage
-  names.
+- One shared core helper that turns a **published** stage into a device
+  context, so the file surfaces and the forwarding surfaces cannot drift on
+  which runtime a stage names. The draft stays the `resolve_for_bot` call it
+  already is.
 - A recorded decision on the two divergent stage-selection rules, and a comment
   at each call site that keeps them apart.
 - Doc update in `docs/openapi-v1/README.md`.
@@ -266,20 +267,46 @@ longer happens: every stage-keyed caller goes through `resolve_stage_bind_id`,
 every record-keyed caller through `select_stage_bind_id`, and the split is
 stated in both modules and at each call site.
 
-**D4 — Writes never carry the bot facts a published stage would need.** The
+**D4 — A write never resolves the bot facts a published stage would need.** The
 write path takes only the stage name, refuses anything but the draft, and then
-resolves the draft. There is therefore no code path from a write to a published
-runtime's binding — the guarantee is structural, not a promise kept by a guard.
+resolves the draft through the same owner-scoped call it always used. It never
+reaches the branch that reads a bot row or a publish record, so there is no code
+path from a write to a published runtime's binding — the guarantee is
+structural, not a promise kept by a guard.
 
 **D5 — `stage` is imported from `engine_runtime/params.py`, not re-declared.**
 A second spelling of the same parameter is a second thing to keep in step. The
 module keeps the vocabulary; the group does not own the parameter.
 
-**D6 — The bot primary key comes from the ownership check, never a fresh
-lookup.** `resolve_stage_bind_id` is keyed on `ac_bots.id` because `bot_id`
-carries no unique constraint and every user's first bot is called `default`. The
-key passed is the one from the record the request's ownership guard already
-resolved.
+**D6 — The bot primary key always comes from an owner-scoped read.**
+`resolve_stage_bind_id` is keyed on `ac_bots.id` because `bot_id` carries no
+unique constraint and every user's first bot is called `default`, so a lookup by
+`bot_id` alone can select another owner's row and hand back their running
+device. The invariant is therefore about *which query* produced the key, not
+about how few queries ran: it must come from a `(bot_id, owner_id)` read. Under
+**D8** that read happens inside the service, on the published branch only — the
+same ownership check the adapter performs, run again rather than threaded down.
+A `bot_id`-only lookup is never acceptable, here or anywhere.
+
+**D8 — One bot-identity model: `BotFacts`, with `stage` beside it as a `str`.**
+This is the shape every stage-aware path in the codebase already uses — the
+relay's `_resolve_device(bot_id, owner_id, facts, stage)` and
+`_resolve_published_device(facts, owner_id, stage)`, and
+`EngineRuntimeRelayProtocol.call(..., facts, stage)`. These services adopt it
+rather than introducing a second projection of the same concept.
+
+An earlier draft of this spec proposed a `StageAddress` value object carrying
+`(stage, bot_pk, bot_type)`. It was rejected on review: those are a subset of
+`BotFacts` fused with the stage, so it would have put two overlapping
+bot-identity models next to each other for the sake of two services.
+
+The consequence is that a published-stage request does one owner-scoped row read
+inside the service instead of reusing the record the adapter already fetched.
+That is the accepted cost. It buys back more than it spends: the adapters pass a
+single `stage=` string and nothing else, the identity router needs no bot
+repository and no conditional lookup, and no parameter has to be threaded
+through four service layers. The draft path — every request that names no stage
+— reads no extra row at all.
 
 **D7 — This lands after #1074, on the bot-first addresses only.** Two
 consequences, both deliberate:

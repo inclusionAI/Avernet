@@ -8,9 +8,9 @@ already publish the parameter, and `EngineConnectionService._stage_binding_id`
 is the worked example. Three things are missing and this plan adds exactly
 those:
 
-1. A core helper that goes one step further than `resolve_stage_bind_id` —
-   stage → **`DeviceContext`** — because a file surface needs to address a
-   filesystem, not forward a request. `EngineConfigService` and
+1. A core helper that goes one step further than `resolve_stage_bind_id` — a
+   published stage → **`DeviceContext`** — because a file surface needs to
+   address a filesystem, not forward a request. `EngineConfigService` and
    `IdentityService` both call it, so the two cannot drift from each other or
    from the relay.
 2. A core refusal for a write addressed to a published runtime, mapped once.
@@ -23,12 +23,16 @@ lookup, no new error — and the published branch is the only new path.
 
 ## The rules
 
-- **Reads** carry a `StageAddress` — stage plus the `(bot_pk, bot_type)` from
-  the read that proved the caller's ownership. Published stages need both; the
-  draft reads neither.
-- **Writes** carry only a stage name. `require_stage_writable` refuses anything
+- **One bot-identity model.** `BotFacts` with `stage: str` beside it — the shape
+  the relay and the Service API Protocol already use (spec D8). No new value
+  object.
+- **Reads** take `stage: str`. The draft branch is the existing
+  `resolve_for_bot(bot_id, owner_id)` call, unchanged. The published branch
+  resolves `BotFacts` from an owner-scoped read *inside the service*, then goes
+  through the shared rule.
+- **Writes** take `stage: str` too. `require_stage_writable` refuses anything
   but the draft as the first statement of the method, then the draft is
-  resolved. There is no code path from a write to a published binding.
+  resolved. A write never reaches the facts-resolving branch at all.
 - **Stage-keyed → `resolve_stage_bind_id`. Record-keyed →
   `select_stage_bind_id`.** Stated in both modules' docstrings and at all four
   call sites (spec D3).
@@ -38,14 +42,16 @@ lookup, no new error — and the published branch is the only new path.
 | Component | Change |
 | --- | --- |
 | `core/engine_runtime/errors.py` | new `EngineStageReadOnlyError` |
-| `core/engine_runtime/stage.py` | `StageAddress`, `DRAFT_ADDRESS`, `require_stage_writable`, `resolve_stage_device_context`; docstring records the second rule |
-| `core/services/engine_config.py` | two new constructor deps; read takes `address`, write takes `stage` |
-| `core/services/identity.py` | one new constructor dep; `address` threaded down the read path; `stage` on the write |
+| `core/engine_runtime/models.py` | `BotFacts.from_record` — one projection of a bot row into facts |
+| `core/engine_runtime/relay.py` | its one `BotFacts(...)` construction moves onto `from_record` |
+| `core/engine_runtime/stage.py` | `require_stage_writable`, `resolve_published_device_context`; docstring records the second rule |
+| `core/services/engine_config.py` | two new constructor deps; `_bot_facts`; read and write each take `stage: str` |
+| `core/services/identity.py` | one new constructor dep; `_bot_facts`; `stage: str` threaded down the read path and on the write |
 | `api/engine_config_service.py` | Protocol mirrors both signatures |
 | `adapters/http/openapi_v1/engine_runtime/params.py` | `WRITE_STAGE_DESCRIPTION`, `WriteStageQuery` |
 | `adapters/http/openapi_v1/responses.py` | `EngineStageReadOnlyError → (409, …)` |
 | the engine-config router #1074 Task 15 creates at `/openapi/v1/bots/{bot_id}/engine` | `stage` on its two handlers |
-| `adapters/http/openapi_v1/identity/router.py` | `stage` on the three handlers; `BotRepository` injected for the published branch |
+| `adapters/http/openapi_v1/identity/router.py` | `stage` on the three handlers — nothing else |
 | `adapters/http/bot_management/router.py` | two internal call sites say `draft` explicitly |
 | `docs/openapi-v1/README.md` | the stage section covers 21 operations, not 16 |
 
@@ -59,112 +65,138 @@ this addresses them.
 ### The core seam
 
 ```python
+# core/engine_runtime/models.py — one projection of a bot row into facts
+@classmethod
+def from_record(cls, record: dict, *, bot_id: str, owner_id: str) -> "BotFacts":
+    """The narrow facts, from an owner-scoped ``(bot_id, owner_id)`` row."""
+
 # core/engine_runtime/stage.py
-
-@dataclass(frozen=True)
-class StageAddress:
-    stage: str
-    bot_pk: int      # from the ownership-proving read; unread on draft
-    bot_type: str    # decides whether a published stage is refused
-
-DRAFT_ADDRESS = StageAddress(stage=STAGE_DRAFT, bot_pk=0, bot_type="")
-
 def require_stage_writable(stage: str) -> None:
     """Refuse a write to a published runtime. Not conditional on bot type or
     liveness — neither changes the answer, and both would need a lookup."""
 
-def resolve_stage_device_context(
-    resolver, publish_repo, binding_repo, *, address, bot_id, owner_id
+def resolve_published_device_context(
+    resolver, publish_repo, binding_repo, *, facts: BotFacts, stage: str
 ) -> DeviceContext:
-    require_stage_addressable(address.bot_type, address.stage)
-    if address.stage == STAGE_DRAFT:
-        return resolver.resolve_for_bot(bot_id, owner_id)          # unchanged path
+    """The device context of the published runtime ``stage`` names."""
+    require_stage_addressable(facts.bot_type, stage)
     bind_id = resolve_stage_bind_id(publish_repo, binding_repo,
-                                    bot_pk=address.bot_pk, bot_id=bot_id,
-                                    stage=address.stage, env=get_current_env())
-    return resolver.resolve_for_binding(bind_id, owner_id, bot_id=bot_id)
+                                    bot_pk=facts.bot_pk, bot_id=facts.bot_id,
+                                    stage=stage, env=get_current_env())
+    return resolver.resolve_for_binding(bind_id, facts.owner_id, bot_id=facts.bot_id)
 ```
 
-`resolve_for_binding`, not the relay's `resolve_for_binding_invoke`: callers
-here address a **filesystem** on the resolved device and need the full
-connection info the invoke variant deliberately omits.
+**Published-only, and the branch stays at the caller** — which is exactly
+`relay._resolve_device`'s structure, where the draft leg is an inline
+`resolve_for_bot` and the published leg is a separate method. Each service reads:
 
-`StageAddress` is one value rather than three parameters because identity
-threads it four levels deep (`get_bot_file` → `read_identity_file` →
-`_device_read` → `_identity_device_fs`); three parameters at each hop is three
-chances to drop one.
+```python
+if stage == STAGE_DRAFT:
+    ctx = self._resolver.resolve_for_bot(bot_id, owner_id)   # unchanged; no row read
+else:
+    facts = self._bot_facts(bot_id, owner_id)                # owner-scoped
+    ctx = resolve_published_device_context(
+        self._resolver, self._publish_repo, self._binding_repo,
+        facts=facts, stage=stage,
+    )
+```
+
+Two notes on why it is shaped this way rather than as one function covering both
+legs: a helper that handled the draft would need `BotFacts` for the draft, which
+is the row read the compatibility requirement forbids; and
+`require_stage_addressable` needs `bot_type`, which only the published branch has
+resolved — so a personal bot naming `verify` costs one row read and is then
+refused, before any device work.
+
+`resolve_for_binding`, not the relay's `resolve_for_binding_invoke`: callers here
+address a **filesystem** on the resolved device and need the full connection info
+the invoke variant deliberately omits. That single differing line is why this is
+a sibling of `relay._resolve_published_device` rather than a shared body; what
+they *do* share is `resolve_stage_bind_id`, which is the rule that must not
+drift.
+
+`BotFacts.from_record` is the one touch outside the feature: the relay's single
+construction site moves onto it, so there is one projection of a bot row into
+facts rather than two. Reversible in isolation if a reviewer disagrees.
 
 ### The service signatures
 
 ```python
 # core/services/engine_config.py  (+ api/engine_config_service.py, identically)
 async def read_bot_config(self, *, bot_id, owner_id, entity_id, entity_type,
-                          engine_type, address: StageAddress) -> dict: ...
+                          engine_type, stage: str) -> dict: ...
 async def write_bot_config(self, *, bot_id, owner_id, entity_id, entity_type,
                            engine_type, config, stage: str) -> None: ...
 ```
 
-**Required, not defaulted, on this pair only.** The conformance test
-(`test_service_api_conformance.py`) compares defaults *by value*, so a default
-would force `api/` to import `core.engine_runtime` at runtime — and that
-package's import graph reaches the DI container and a partially-initialised
-`bot_service`. Verified: it raises `ImportError` when `api/engine_config_service`
-is imported first. Both adapters therefore state the runtime they address, which
-reads better regardless.
+One added parameter, the same `str` the relay carries.
 
-`IdentityService` has no Protocol and many internal callers
-(`bot_profile`, `sync_agents_md`, the legacy `/api/identity` router), so there
-the parameters are **defaulted** to `DRAFT_ADDRESS` / `STAGE_DRAFT` and every
-existing caller is untouched.
+**Required, not defaulted, on this pair** — matching
+`EngineRuntimeRelayProtocol`, which documents `stage` as "required with no
+default, so the stage a handler gated on and the stage it forwards to cannot
+silently diverge." A default would also have to be the same object on both sides
+(`test_service_api_conformance.py` compares defaults by value), which means
+`api/` importing `core.engine_runtime` at runtime — verified to raise
+`ImportError`, because that package's import graph reaches the DI container and
+a partially-initialised `bot_service`. Convention and mechanics agree.
+
+`IdentityService` has no Protocol and many internal callers (`bot_profile`,
+`sync_agents_md`, the legacy `/api/identity` router), so there `stage` is
+**defaulted** to `STAGE_DRAFT` and every existing caller is untouched. That is a
+deliberate departure from the required-no-default convention, taken because the
+alternative is editing ten call sites to say what they already mean.
 
 ### The five handlers
 
 The two engine-config handlers are edited **wherever #1074's Task 15 leaves
 them** — its own router mounted at `/openapi/v1/bots/{bot_id}/engine`, serving
 `GET`/`PUT …/config`. Task 15 moves the handler bodies unchanged, so
-`_engine_config_target` and the `_stage_address` helper below travel with them;
+`_engine_config_target` travels with them;
 if Task 15 has not landed, the same two handlers are still in
 `openapi_v1/bots/router.py` at `/{bot_id}/engine-config` and the edit is
 identical apart from the file.
 
+Every one of the five is the same two-line edit — declare the parameter, pass
+its value. No adapter helper, no repository, no branching:
+
 ```python
-# the engine-config router — GET keeps the record it already fetched
+# the engine-config router
 async def get_bot_engine_config(bot_id, request, owner_id,
                                 stage: StageQuery = RuntimeStage.DRAFT, ...):
-    bot = bot_service.get_bot(bot_id, owner_id)        # ownership/tenant guard
     ...
-    address=_stage_address(bot, stage)                 # pk + type from that record
+    await engine_config_service.read_bot_config(..., stage=stage.value)
 
-# the engine-config router — PUT takes the parameter to refuse it
 async def update_bot_engine_config(..., stage: WriteStageQuery = RuntimeStage.DRAFT, ...):
     ...
     await engine_config_service.write_bot_config(..., stage=stage.value)
 ```
 
-The identity router today resolves no bot at all — the owner-scoping is the
-`(bot_id, owner_id)` binding query inside `resolve_for_bot`. Adding an
-unconditional lookup would change the draft path's failure mode (today a bot
-that is not the caller's fails as `409 Bot has no active device`; a lookup would
-make it `404`). So the lookup happens **only when a published stage is named**:
+The identity router in particular needs **no** change beyond that. It resolves no
+bot today — the owner-scoping is the `(bot_id, owner_id)` binding query inside
+`resolve_for_bot` — and it still resolves none. An earlier draft had it inject
+`BotRepository` and look the bot up when a published stage was named, to avoid
+changing the draft path's failure mode (today a bot that is not the caller's
+fails as `409 Bot has no active device`; an unconditional lookup would make it
+`404`). Moving the facts resolution into the service removes the need for that
+conditional entirely: the draft path never reaches it.
+
+The service-side helper both services gain:
 
 ```python
-# identity/router.py
-def _stage_address(bot_id, owner_id, stage, bot_repo) -> StageAddress:
-    if stage is RuntimeStage.DRAFT:
-        return DRAFT_ADDRESS                            # no query, no change
-    bot = bot_repo.get_by_id_and_owner(bot_id, owner_id)
-    if not bot:
+def _bot_facts(self, bot_id: str, owner_id: str) -> BotFacts:
+    """The addressed bot's facts, from an owner-scoped read.
+
+    ``get_by_id_and_owner`` and not ``get_by_id``: ``bot_id`` is not unique
+    across owners, so a wider query can name another owner's row (spec D6).
+    """
+    record = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+    if not record:
         raise BotNotFoundError(f"Bot not found: {bot_id}")
-    return StageAddress(stage=stage.value, bot_pk=int(bot.get("id") or 0),
-                        bot_type=str(bot.get("bot_type") or ""))
+    return BotFacts.from_record(record, bot_id=bot_id, owner_id=owner_id)
 ```
 
-`BotRepository` injected directly in the adapter follows the resources router's
-precedent, and avoids `bot_service.get_bot`, which attaches `device_binding` —
-device topology this surface exists to stop publishing.
-
-The identity **PUT** adds no lookup at all: it passes `stage=stage.value` and
-the service refuses before anything is resolved.
+Both services already hold `BotRepository` (`self._bot_repo`), so this adds no
+constructor dependency.
 
 ## Key Files & Functions
 
@@ -172,22 +204,30 @@ the service refuses before anything is resolved.
 core/engine_runtime/errors.py
     + EngineStageReadOnlyError            # sibling of EngineStageNotLiveError
 
+core/engine_runtime/models.py
+    + BotFacts.from_record(record, *, bot_id, owner_id)
+
+core/engine_runtime/relay.py
+    ~ resolve_bot: its BotFacts(...) construction → BotFacts.from_record
+                   (the one touch outside the feature; one projection, not two)
+
 core/engine_runtime/stage.py
-    + StageAddress, DRAFT_ADDRESS
     + require_stage_writable
-    + resolve_stage_device_context
+    + resolve_published_device_context
     ~ module docstring: names select_stage_bind_id as the *other* question
 
 core/services/engine_config.py
     ~ __init__(+ publish_repo, + binding_repo)
-    ~ _bot_config_device_fs(+ address)  → resolve_stage_device_context
-    ~ read_bot_config(+ address) / write_bot_config(+ stage)
+    + _bot_facts(bot_id, owner_id)
+    ~ _bot_config_device_fs(+ stage)  → draft inline / published via the helper
+    ~ read_bot_config(+ stage) / write_bot_config(+ stage)
     ~ read_publish_config: comment on why it stays record-keyed
 
 core/services/identity.py
     ~ __init__(+ binding_repo)
-    ~ _identity_device_fs / _device_read / read_identity_file (+ address=DRAFT_ADDRESS)
-    ~ get_bot_file / list_bot_files (+ address), update_bot_file (+ stage)
+    + _bot_facts(bot_id, owner_id)
+    ~ _identity_device_fs / _device_read / read_identity_file (+ stage=STAGE_DRAFT)
+    ~ get_bot_file / list_bot_files / update_bot_file (+ stage=STAGE_DRAFT)
     ~ _read_from_publish_device: comment on why it stays record-keyed
 
 adapters/http/openapi_v1/responses.py
@@ -231,7 +271,8 @@ adapters/http/openapi_v1/responses.py
 | #1074's `_is_engine_runtime()` matches the moved `…/{bot_id}/engine/config` and asserts `owner_id` on it, which engine-config does not carry | Not ours to fix and not ours to work around — it breaks #1074's Task 15 before this feature exists (spec **Open Questions**). Task D4 starts by confirming which shape #1074 settled on, and adds the five to `_STAGE_ADDRESSED_ELSEWHERE` on top of it |
 | `stage` leaks onto a deprecated address | The deprecated package re-registers old addresses against their own shim handlers; this feature edits only the new-address handlers. Task D4's exact-set assertion is what catches a leak |
 | A future reader re-merges the two 409s | Both messages, both error docstrings and the `ENVELOPE_ERRORS` comment state the distinction |
-| The write refusal drifts into "write the draft instead" | The write path never receives a `StageAddress`, so there is nothing to resolve a published binding *with* |
+| The write refusal drifts into "write the draft instead" | The write path never resolves `BotFacts`, so there is nothing to resolve a published binding *with* |
+| The in-service facts read duplicates one the adapter already did | Accepted and recorded (spec D8). It is one owner-scoped row read, on published-stage requests only; the draft path — every request that names no stage — reads nothing extra. Task D3 pins that |
 
 ## Alternatives Considered
 
@@ -247,8 +288,14 @@ adapters/http/openapi_v1/responses.py
   changes the draft path's failure mode (409 → 404), which the "byte-for-byte"
   requirement forbids. It would be an improvement to make deliberately, on its
   own.
-- **Give writes a `StageAddress` for symmetry.** Rejected: it would carry facts
-  the write must never use, and weaken D4 from structural to conventional.
+- **A `StageAddress` value object** carrying `(stage, bot_pk, bot_type)`.
+  Rejected on review: those are a subset of `BotFacts` fused with the stage, so
+  it would stand a second bot-identity model beside the one the relay and the
+  Service API Protocol already use (spec D8).
+- **Threading `BotFacts` down from the adapters** instead of resolving it in the
+  service. Rejected with D8: it avoids one row read on the published path, at
+  the cost of an optional at every service boundary (`None` meaning draft) and a
+  conditional bot lookup in the identity router.
 
 ## Rollout
 
@@ -260,11 +307,11 @@ unchanged. No DDL, no migration, no config. Rollback is the revert.
 ```text
 tests/community/core/engine_runtime/test_stage.py            (extend)
     require_stage_writable: draft passes; verify/online raise
-    resolve_stage_device_context: draft → resolve_for_bot with (bot_id, owner_id)
-                                  and NOT resolve_for_binding; published →
-                                  resolve_for_binding with the resolved bind_id;
+    resolve_published_device_context: resolve_for_binding with the resolved
+                                  bind_id, facts.owner_id and facts.bot_id;
                                   personal + published → EngineStageNotLiveError
                                   before any resolver call
+    BotFacts.from_record: same fallbacks the relay applied inline
 
 tests/community/core/services/test_engine_config_service.py  (extend)
     read at verify/online resolves through the publish record's binding
@@ -277,7 +324,7 @@ new: tests/community/core/services/test_identity_stage_addressing.py
 new: tests/…/openapi_v1/test_stage_addressed_bot_files.py
     GET …/{bot_id}/engine/config and …/{bot_id}/identity[/{file_type}] with
       each stage → the address the service saw
-    default (no parameter) → DRAFT_ADDRESS, and no bot lookup on identity
+    default (no parameter) → the draft resolve, and no bot row read at all
     PUT with stage=verify|online → 409 "The requested stage is read-only"
     PUT with no stage → unchanged 200
     stage=eval → 422 from the enum, no handler run
