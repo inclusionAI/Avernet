@@ -173,6 +173,13 @@ def _build_facade(svc=None, *, decomposer=None, discover=None, runner=None,
 def _run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
 
+def _exec(facade, ti):
+    """execute(fire-and-forget)→drain_background 等首帧落定(测试确定性 seam)。"""
+    async def _go():
+        r = await facade.execute(ti)
+        await facade.drain_background()
+        return r
+    return _run(_go())
 
 # ===== composition root / protocol =====
 class TestProtocolConformance:
@@ -185,7 +192,7 @@ class TestProtocolConformance:
 class TestExecute:
     def test_execute_first_frame(self):
         facade, svc, *__, runner = _build_facade(decomposer=lambda g: [_child("c1"), _child("c2")])
-        result = _run(facade.execute(_task_info()))
+        result = _exec(facade, _task_info())
         assert result.task_id == "t1"
         assert result.success is True
         assert result.run_id is not None
@@ -199,7 +206,7 @@ class TestExecute:
     def test_execute_no_plan_gap_closed_finishes(self):
         # Step2:plan[]+has_gap=F = 根 gap 闭(终验通过)→ 翻根 DONE + 图 DONE
         facade, svc, *_ = _build_facade(decomposer=lambda g: [])
-        result = _run(facade.execute(_task_info()))
+        result = _exec(facade, _task_info())
         assert result.success is True
         graph = svc.query_task_dashboard("t1")
         assert svc._get_node(graph, "t1").status == Status.DONE
@@ -210,13 +217,13 @@ class TestExecute:
 class TestGetDashboard:
     def test_returns_full_graph(self):
         facade, svc, *_ = _build_facade()
-        _run(facade.execute(_task_info()))
+        _exec(facade, _task_info())
         g = facade.get_task_dashboard("t1")
         assert g.tasks[0].node_id == "t1"
 
     def test_subtree_projection(self):
         facade, svc, *_ = _build_facade(decomposer=lambda g: [_child("c1")])
-        _run(facade.execute(_task_info()))
+        _exec(facade, _task_info())
         sub = facade.get_task_dashboard("t1", "c1")
         assert {n.node_id for n in sub.tasks} == {"c1"}
 
@@ -230,7 +237,7 @@ class TestCallback:
 
     def test_report_result_flips_node_via_callback(self):
         facade, svc, *_ = _build_facade(decomposer=lambda g: [_child("c1")])
-        _run(facade.execute(_task_info()))
+        _exec(facade, _task_info())
         _run(facade.callback.report_result(TaskCallbackData(
             loop_task_id="t1::c1", workflow_type="single_bot", workflow_id=1, instance_id=9,
             result={"success": True, "data": "done"},
@@ -247,7 +254,7 @@ class TestHarnessWiring:
         svc = TaskGraphService()
         harness = TaskHarness(svc)
         facade = _CaseTaskService(svc, planner_factory=lambda g: [_child("c1")], harness=harness)
-        _run(facade.execute(_task_info()))
+        _exec(facade, _task_info())
         assert "t1" in harness._registered
         assert harness._on_harness_fn == facade._engine.on_harness
 
@@ -260,7 +267,7 @@ class TestAcceptanceViaReport:
         svc = TaskGraphService()
         # decomposer 首批产 c1,c1 DONE 后 plan[]→ gap 闭=终验通过 → 翻根 DONE
         facade = _CaseTaskService(svc, planner_factory=lambda g: [_child("c1")])
-        _run(facade.execute(_task_info()))
+        _exec(facade, _task_info())
         _run(facade.callback.report_result(TaskCallbackData(
             loop_task_id="t1::c1", workflow_type="single_bot", workflow_id=1, instance_id=1,
             result={"success": True, "data": "x"},
@@ -279,7 +286,7 @@ class TestBbsEscalationNoMarket:
         ti = _task_info("t3")
         ti.execution_config["MAX_DEPTH"] = 1
         facade = _CaseTaskService(svc, planner_factory=lambda g: [_child("c1", "t3")])
-        _run(facade.execute(ti))
+        _exec(facade, ti)
         _run(facade.callback.report_result(TaskCallbackData(
             loop_task_id="t3::c1", workflow_type="single_bot", workflow_id=1, instance_id=1,
             result={"success": False, "fail_detail": "缺x"},

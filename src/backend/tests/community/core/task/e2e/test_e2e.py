@@ -79,6 +79,13 @@ def _cb(success: bool, loop_task_id: str, *, data="done", fail_detail=None) -> T
 def _run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
 
+def _exec(facade, ti):
+    """execute(fire-and-forget)→drain_background 等首帧落定(测试确定性 seam)。"""
+    async def _go():
+        r = await facade.execute(ti)
+        await facade.drain_background()
+        return r
+    return _run(_go())
 
 # ===== case decomposer(三阶段 AC 拆解 + FAIL/MISS 叶补救)=====
 class CaseDecomposer:
@@ -297,7 +304,7 @@ class TestThreeModesHappyToDone:
     def test_full_flow(self):
         facade, svc, runner = _wire_facade()
         root_id = "t_case"
-        _run(facade.execute(_task_info(root_id)))
+        _exec(facade, _task_info(root_id))
         g = svc.query_task_dashboard(root_id)
         ov = svc._get_node(g, "N_overview")
         assert ov.run_info.run_mode == "single_bot"
@@ -347,7 +354,7 @@ class TestThreeModesHappyToDone:
 
     def test_relations_decomposition_tree_single_in(self):
         facade, svc, *_ = _wire_facade()
-        _run(facade.execute(_task_info("t_case")))
+        _exec(facade, _task_info("t_case"))
         _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="x")))
         g = svc.query_task_dashboard("t_case")
         non_root = [n for n in g.tasks if n.node_id != "t_case"]
@@ -361,7 +368,7 @@ class TestThreeModesHappyToDone:
 class TestFailRemedyCure:
     def test_fail_then_remedy_pass_cures_and_propagates(self):
         facade, svc, runner = _wire_facade(max_depth=3)
-        _run(facade.execute(_task_info("t_case", max_depth=3)))
+        _exec(facade, _task_info("t_case", max_depth=3))
         _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="overview")))
         _run(facade.callback.report_result(_cb(True, "t_case::N_compete", data="compete")))
         # 验收不过 → FAILED(v4:不立即补救拆子,交 harness 重新派发执行重试)
@@ -391,7 +398,7 @@ class TestFailRemedyCure:
 class TestMissEscalateBbs:
     def test_miss_at_max_escalates_bbs(self):
         facade, svc, runner = _wire_facade(max_depth=1, miss_nodes={"N_practice_bbs"})
-        _run(facade.execute(_task_info("t_case", max_depth=1)))
+        _exec(facade, _task_info("t_case", max_depth=1))
         _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="overview")))
         for nid in ("N_market", "N_tech", "N_compete", "N_customer"):
             _run(facade.callback.report_result(_cb(True, f"t_case::{nid}", data=nid)))
@@ -408,7 +415,7 @@ class TestMissEscalateBbs:
         BBS bot 认领任务 → 复位图态/根委托态/已 HUNG 的 N_practice_bbs 标 DONE(BBS 已 fulfilled)
         → 自规划子任务 N_practice_bbs_bbs 挂 root → 执行 → 回投 → 根重 plan → N_report → 终验 DONE。"""
         facade, svc, runner = _wire_facade(max_depth=1, miss_nodes={"N_practice_bbs"})
-        _run(facade.execute(_task_info("t_case", max_depth=1)))
+        _exec(facade, _task_info("t_case", max_depth=1))
         _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="overview")))
         for nid in ("N_market", "N_tech", "N_compete", "N_customer"):
             _run(facade.callback.report_result(_cb(True, f"t_case::{nid}", data=nid)))
@@ -447,7 +454,7 @@ class TestMissEscalateBbs:
 class TestBbsStuckHung:
     def test_miss_at_max_graph_hung(self):
         facade, svc, runner = _wire_facade(max_depth=1, miss_nodes={"N_practice_bbs"})
-        _run(facade.execute(_task_info("t_case", max_depth=1)))
+        _exec(facade, _task_info("t_case", max_depth=1))
         _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="overview")))
         for nid in ("N_market", "N_tech", "N_compete", "N_customer"):
             _run(facade.callback.report_result(_cb(True, f"t_case::{nid}", data=nid)))
@@ -465,7 +472,7 @@ class TestBbsStuckHung:
 class TestDashboardTerminal:
     def test_query_result_and_detail(self):
         facade, svc, *_ = _wire_facade()
-        _run(facade.execute(_task_info("t_case")))
+        _exec(facade, _task_info("t_case"))
         _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="行业全貌")))
         from agentclaw.community.core.task.task_runner.runner import TaskRunner
         r = TaskRunner(svc)

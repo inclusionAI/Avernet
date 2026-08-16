@@ -38,6 +38,8 @@ class TaskService(TaskServiceProtocol):
         self._harness = harness
         self._bcs_identity = bcs_identity
         self._engine = self._build_engine(bot=bot, bcs=bcs, discover=discover)
+        # fire-and-forget 后台推进任务跟踪(防 GC + 异常可见 + drain seam)
+        self._bg_tasks: set[asyncio.Task] = set()
         # 回投适配层:执行实体 PUSH → 适配 → 编排核 on_report
         self._callback = TaskLoopCallback(CallbackAdapter(), self._engine)
         # harness 复位重投入口回填(编排核已建,harness 才能拿到 on_harness)+ 启动旁路巡检 daemon 线程
@@ -61,19 +63,43 @@ class TaskService(TaskServiceProtocol):
         return self._callback
 
     async def execute(self, task_info: TaskInfo) -> TaskOpResult:
-        """提交执行任务:initialize_graph(根 PENDING)→ 编排核 on_execute(首帧推进:
-        条件 a 根 PENDING → plan → add_task_nodes → dispatch → start_run)。返回 TaskOpResult(含 run_id)。
-        协程化:await on_execute(async 链路),耗时投递(BCS/真实 workflow)不阻塞调用方。"""
+        """提交执行任务:initialize_graph(根 PENDING)+ harness.register 同步完成,
+        随即后台调度编排核 on_execute 首帧推进(plan→add_task_nodes→dispatch→start_run),
+        立即返回 TaskOpResult(含 run_id)。
+
+        fire-and-forget:on_execute 在后台 asyncio.Task 推进,不阻塞调用方(HTTP 响应秒回);
+        长编排(owner bot ``send_and_wait_async`` 分钟级 + dispatch 投递)异步进行,
+        调用方经 ``get_task_dashboard`` 轮询观察推进。后台任务异常经 done_callback 记 log
+        (不向调用方抛;图停在中间态由 harness 旁路巡检兜底复位)。"""
         graph = self._graph.initialize_graph(task_info)
         task_id = task_info.task_spec.metadata.task_id
-        logger.info("[execute] task=%s source=%s title=%s → initialize(run_id=%s)+on_execute",
+        logger.info("[execute] task=%s source=%s title=%s → initialize(run_id=%s)+on_execute(后台推进)",
                     task_id, task_info.source_channel_id,
                     task_info.task_spec.metadata.title, graph.run_id)
         if self._harness is not None:
             self._harness.register(task_id)
-        await self._engine.on_execute(task_id)
-        logger.info("[execute] task=%s 首帧推进完成", task_id)
+        bg = asyncio.create_task(self._engine.on_execute(task_id))
+        self._bg_tasks.add(bg)
+        bg.add_done_callback(self._on_bg_done)
         return TaskOpResult(task_id=task_id, success=True, run_id=graph.run_id)
+
+    def _on_bg_done(self, bg: "asyncio.Task") -> None:
+        """后台 on_execute 完成:脱离跟踪集 + 异常可见(记 log,不抛)。"""
+        self._bg_tasks.discard(bg)
+        if bg.cancelled():
+            return
+        exc = bg.exception()
+        if exc is not None:
+            logger.error("[execute] 后台 on_execute 异常: %s", exc, exc_info=exc)
+
+    async def drain_background(self) -> None:
+        """await 所有在途后台 on_execute 推进完成。
+
+        fire-and-forget 语义下供测试确定性(等首帧落定后再断言图态)与优雅停机用;
+        生产 HTTP 调用方不调用(经 dashboard 观察)。"""
+        if not self._bg_tasks:
+            return
+        await asyncio.gather(*self._bg_tasks, return_exceptions=True)
 
     def get_task_dashboard(
         self, task_id: str, node_id: str | None = None
