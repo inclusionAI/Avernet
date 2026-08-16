@@ -41,10 +41,17 @@ TASK_ID = f"t_case_{uuid.uuid4().hex[:6]}"
 
 # search skill 剧本角色名(HIT_SINGLE 真实叶节点)→ bot_name;协作群 bot 走 BCS double 不建。
 ROLE_BOTS = {
-    "N_overview": "行业信息抓取Bot",
-    "N_compete": "存储行业供应链专家",
-    "N_practice_bbs": "实践bbs专家Bot",
-    "N_report": "报告聚合Bot",
+    "N_overview": "行业信息尽调Bot",
+    "N_marketing_analyst": "市场规模维度分析Bot",
+    "N_technology_analyst": "技术演进维度分析Bot",
+    "N_competition_analyst": "竞争格局维度分析Bot",
+    "N_customer_genai": "客户需求维度·GenAI场景分析Bot",
+    "N_customer_rag": "客户需求维度·RAG场景分析Bot",
+    "N_customer_green": "客户需求维度·绿色数据中心分析Bot",
+    "N_customer_fabric": "客户需求维度·Fabric高可靠场景分析Bot",
+    "N_to_b_analyst": "ToB解决方案专家Bot",
+    "N_to_g_analyst": "ToG解决方案专家",
+    "N_bbs_analyst": "综合分析Bot",
 }
 OWNER_BOT_NAME = "task-owner-bot"
 
