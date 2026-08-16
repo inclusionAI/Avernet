@@ -12,9 +12,12 @@ teclaw）。他们的内容资产维护在自己的 CMS 服务上：人设 md、
 质检 skill、常见问题数据。今天每新开一个 bot 或每次内容更新，他们要按顺序
 手工调 4~5 个 open API；容器重建后 bot 立即可用但内容可能滞后。
 
-CMS 是私有源，先做一次性的租户级凭证注册（fetch 时注入为 `Authorization`
-头，且只会发给 `cms.example.com`；secret 写后不可读回——
-`manifest-schema.zh-CN.md` §2.1）：
+CMS 是私有源，**业务方先调用平台的 TC Open API**，做一次性的租户级凭证注册
+（方向与上传 skill、写 identity 相同：业务方 → 平台）。此后每个 apply 点由
+**平台的 fetcher 携带此凭证访问业务方的 CMS**（平台 → 业务方源站）——这是
+平台对业务方唯一的出向调用。fetch 时凭证注入为 `Authorization` 头，且只会
+发给 `cms.example.com`；secret 写后不可读回（`manifest-schema.zh-CN.md`
+§2.1）：
 
 ```text
 PUT /openapi/v1/provisioning/credentials/cms
