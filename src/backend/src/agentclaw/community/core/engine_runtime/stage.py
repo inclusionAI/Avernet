@@ -27,7 +27,6 @@ keyed by publish record, go there.
 
 from __future__ import annotations
 
-import asyncio
 import json
 from typing import Any, TYPE_CHECKING
 
@@ -292,32 +291,6 @@ def _binding_is_active(binding_repo: DeviceBindingRepository, bind_id: int) -> b
     return binding is not None and str(binding.status) == DeviceBindingStatus.ACTIVE
 
 
-async def resolve_published_device_context_off_loop(
-    resolver: "DeviceContextResolver",
-    publish_repo: BotPublishRepositoryProtocol,
-    binding_repo: DeviceBindingRepository,
-    *,
-    facts: BotFacts,
-    stage: str,
-) -> DeviceContext:
-    """:func:`resolve_published_device_context`, run in a worker thread.
-
-    The safe call for anything on an event loop, and the reason it exists rather
-    than a warning in prose: the work below is blocking I/O with a 30-second
-    provider timeout, and every caller of this seam is an ``async`` service
-    method. ``relay.resolve_bot_off_loop`` is the same pattern for the same
-    reason.
-    """
-    return await asyncio.to_thread(
-        resolve_published_device_context,
-        resolver,
-        publish_repo,
-        binding_repo,
-        facts=facts,
-        stage=stage,
-    )
-
-
 def resolve_published_device_context(
     resolver: DeviceContextResolver,
     publish_repo: BotPublishRepositoryProtocol,
@@ -359,29 +332,29 @@ def resolve_published_device_context(
     a published service binding — those ids are not on ``ac_bots.binding_id`` —
     so the returned context carries an **empty** ``bot_type``.
 
-    One consumer reads it in production: ``DefaultDeviceFileSystemResolver``
-    forks ``bot_type == "desktop"`` inside its baas branch. A published
-    *service* bot is not ``desktop`` whether the field is filled or empty, so it
-    lands on the cloud filesystem either way — and this is exactly what the three
-    existing publish-addressed reads already get. A second arm added beside that
-    fork would receive an empty string here and mis-dispatch silently.
-
-    **Do not "fix" the empty value by filling it in.** The other reader,
-    ``_validate_bot_device_combination``, lists ``("service", "baas")`` in
-    ``_ILLEGAL_BOT_DEVICE_COMBINATIONS`` — the combination is not yet supported
-    — and raises ``DeviceServiceError`` for it. It skips the check entirely when
-    ``bot_type`` is empty, and it is reached only from the dispatcher's legacy
-    direct-construction path, so nothing breaks today; but a correctly-filled
-    ``bot_type`` would turn every published service-bot read on that path into a
-    refusal. The emptiness is load-bearing, not merely tolerated.
+    ``DefaultDeviceFileSystemResolver`` reads it: inside its baas branch it
+    forks on ``bot_type == "desktop"``. A published *service* bot is not
+    ``desktop`` whether the field is filled or empty, so it lands on the cloud
+    filesystem either way — and this is exactly what the three existing
+    publish-addressed reads already get. A second arm added beside that fork
+    would receive an empty string here and mis-dispatch silently, so check this
+    before adding one.
 
     **Synchronous, and blocking.** The publish scan, the binding read and the
     provider resolve are all blocking I/O — on the BaaS path
     ``resolve_for_binding`` reaches ``get_ws_info`` over a sync ``httpx`` client
     with a 30-second timeout. ``relay._resolve_device`` carries the same warning
-    and its caller offloads to a worker thread; an ``async`` caller here must do
-    the same rather than calling this inline, or one slow stage read parks the
-    event loop for every unrelated request on the worker.
+    and ``relay.call`` offloads it, with the bot resolution, in **one** worker
+    thread hop.
+
+    The file surfaces do not offload today: their draft leg already calls
+    ``resolve_for_bot`` inline from an ``async`` method, so this branch is no
+    worse than the path beside it — but it is not better either, and both belong
+    in one hop rather than two. Offloading is a change to those services' shape,
+    not to this function, which is why there is no ``…_off_loop`` sibling here:
+    it could not be awaited from the synchronous ``_device_fs`` helpers that
+    call it, and adding a second hop around only half the blocking work would
+    buy nothing.
 
     **Resolver errors are not translated**, deliberately. ``DeviceNotBoundError``
     and ``ConnInfoBuildError`` propagate as themselves, exactly as they do from
@@ -417,6 +390,5 @@ __all__ = [
     "require_stage_addressable",
     "require_stage_writable",
     "resolve_published_device_context",
-    "resolve_published_device_context_off_loop",
     "resolve_stage_bind_id",
 ]

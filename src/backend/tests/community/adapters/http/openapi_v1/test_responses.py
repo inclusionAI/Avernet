@@ -387,17 +387,26 @@ def test_engine_runtime_409s_do_not_share_a_message():
         EngineStageReadOnlyError,
     )
 
-    conflicting = {
-        exc: message
-        for exc, (status, message) in ENVELOPE_ERRORS.items()
-        if status == 409
-        and isinstance(exc, type)
-        and issubclass(exc, EngineRuntimeError)
-    }
-    assert len(conflicting) >= 3, "the engine-runtime 409s went missing"
-    assert conflicting[EngineStageReadOnlyError] == "The requested stage is read-only"
-    assert len(set(conflicting.values())) == len(conflicting), (
-        f"two engine-runtime 409s share a message: {sorted(conflicting.values())}"
+    # Resolved through ``_lookup``, not read out of the dict. ``envelope_errors``
+    # returns on the first isinstance match in insertion order, so the entry a
+    # key *holds* and the answer a caller *gets* are different questions — and
+    # the second is the one this test is about.
+    candidates = [
+        exc
+        for exc, (status, _) in ENVELOPE_ERRORS.items()
+        if status == 409 and issubclass(exc, EngineRuntimeError)
+    ]
+    assert len(candidates) >= 3, "the engine-runtime 409s went missing"
+
+    answers = {exc: _lookup(exc("boom")) for exc in candidates}
+    assert answers[EngineStageReadOnlyError] == (
+        409,
+        "The requested stage is read-only",
+    ), "the read-only refusal no longer resolves to its own answer"
+
+    messages = [message for _, message in answers.values()]
+    assert len(set(messages)) == len(messages), (
+        f"two engine-runtime 409s resolve to one message: {sorted(messages)}"
     )
 
 
@@ -417,35 +426,42 @@ def test_engine_runtime_base_does_not_swallow_its_leaves():
     from agentclaw.community.adapters.http.openapi_v1.responses import ENVELOPE_ERRORS
     from agentclaw.community.core.engine_runtime.errors import EngineRuntimeError
 
-    # Read off the classes the module *defines*, not off ``__all__``. Deriving
-    # from ``__all__`` looks self-maintaining and is not: a class added to the
-    # module but forgotten in ``__all__`` disappears from the inventory and from
-    # the loop, which is one of the two ways this regression actually happens.
-    leaves = [
+    # The union of what the module *defines* and what it *exports*. Either alone
+    # has a hole: reading only ``__all__`` misses a class defined here and left
+    # out of it, and reading only ``vars`` misses one defined in a sibling module
+    # and re-exported through it. Both are ways this regression actually happens.
+    candidates = list(vars(errs).values()) + [
+        getattr(errs, name) for name in errs.__all__
+    ]
+    leaves = {
         obj
-        for obj in vars(errs).values()
+        for obj in candidates
         if isinstance(obj, type)
         and obj is not EngineRuntimeError
         and issubclass(obj, EngineRuntimeError)
-        and obj.__module__ == errs.__name__
-    ]
-    assert len(leaves) >= 8, "the errors module stopped defining its leaves"
+    }
+    assert len(leaves) >= 8, "the errors module stopped carrying its leaves"
 
     order = list(ENVELOPE_ERRORS)
     for leaf in leaves:
-        assert leaf in ENVELOPE_ERRORS, f"{leaf.__name__} has no mapped status"
+        # An intermediate grouping base needs no entry of its own — its
+        # subclasses carry the answers and ``EngineRuntimeError`` is the
+        # fallback — so only classes with no mapped subclass must be mapped.
+        if not any(
+            other is not leaf and issubclass(other, leaf) and other in ENVELOPE_ERRORS
+            for other in leaves
+        ):
+            assert leaf in ENVELOPE_ERRORS, f"{leaf.__name__} has no mapped status"
 
-    # Every mapped ancestor, not just the root: an intermediate base (say an
-    # ``EngineStageError`` grouping the two stage errors) listed above its own
-    # subclasses would swallow them exactly as the root would, and a
-    # root-only check passes while the distinction is lost.
-    for leaf in leaves:
-        for ancestor in leaf.__mro__[1:]:
-            if ancestor in ENVELOPE_ERRORS:
-                assert order.index(leaf) < order.index(ancestor), (
-                    f"{leaf.__name__} is listed after its ancestor "
-                    f"{ancestor.__name__}, which will swallow it"
-                )
+        # Every mapped ancestor, not just the root: an intermediate base listed
+        # above its own subclasses would swallow them exactly as the root would.
+        if leaf in ENVELOPE_ERRORS:
+            for ancestor in leaf.__mro__[1:]:
+                if ancestor in ENVELOPE_ERRORS:
+                    assert order.index(leaf) < order.index(ancestor), (
+                        f"{leaf.__name__} is listed after its ancestor "
+                        f"{ancestor.__name__}, which will swallow it"
+                    )
 
 
 def test_transport_errors_are_siblings_and_map_independently():
