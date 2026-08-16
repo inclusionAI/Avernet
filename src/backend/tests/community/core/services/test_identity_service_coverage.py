@@ -23,6 +23,7 @@ def _svc(*, resolver=None, dispatcher=None, bot_repo=None, publish_repo=None, pa
         bot_repo=bot_repo or MagicMock(),
         resolver=resolver or MagicMock(),
         device_fs_dispatcher=dispatcher or MagicMock(),
+        binding_repo=MagicMock(),
     )
 
 

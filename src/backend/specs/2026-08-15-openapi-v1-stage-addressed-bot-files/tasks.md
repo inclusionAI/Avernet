@@ -120,34 +120,34 @@
   - [x] `tests/community/architecture/test_service_api_conformance.py` passes.
 - **Depends on:** A2
 
-### Task B2: `IdentityService` reads a stage, writes only the draft  `[ ]`
+### Task B2: `IdentityService` reads a stage, writes only the draft  `[x]`
 
 - **Goal:** Same contract for the identity files, threaded through the layers
   that actually reach the device.
 - **Files:** `src/backend/src/agentclaw/community/core/services/identity.py`
 - **Done when:**
-  - [ ] Constructor takes `binding_repo: DeviceBindingRepository`.
-  - [ ] `_bot_facts(bot_id, owner_id)` as in B1 — same shape, same reason.
-  - [ ] `_identity_device_fs`, `_device_read`, `read_identity_file` take
+  - [x] Constructor takes `binding_repo: DeviceBindingRepository`.
+  - [x] `_bot_facts(bot_id, owner_id)` as in B1 — same shape, same reason.
+  - [x] `_identity_device_fs`, `_device_read`, `read_identity_file` take
         `stage: str = STAGE_DRAFT`; `_identity_device_fs` carries the same
         draft/published branch B1 describes.
-  - [ ] `get_bot_file` and `list_bot_files` take keyword-only
+  - [x] `get_bot_file` and `list_bot_files` take keyword-only
         `stage: str = STAGE_DRAFT` and pass it down; `list_bot_files` probes all
         16 files against the **one** addressed runtime, resolving the facts once
         rather than per file.
-  - [ ] `get_bot_file`'s docstring states the precedence: `publish_id` (a
+  - [x] `get_bot_file`'s docstring states the precedence: `publish_id` (a
         record) wins over `stage`, because it names one exact release, and
         because it is the older internal contract.
-  - [ ] `update_bot_file` takes keyword-only `stage: str = STAGE_DRAFT` and
+  - [x] `update_bot_file` takes keyword-only `stage: str = STAGE_DRAFT` and
         calls `require_stage_writable(stage)` first; the write path below it is
         unchanged and never resolves facts.
-  - [ ] `_read_from_publish_device` unchanged in behaviour, with the same
+  - [x] `_read_from_publish_device` unchanged in behaviour, with the same
         record-keyed-vs-stage-keyed comment as B1.
-  - [ ] `write_identity_file` / `sync_agents_md` untouched — draft-only by
+  - [x] `write_identity_file` / `sync_agents_md` untouched — draft-only by
         construction.
 - **Depends on:** A2
 
-### Task B3: Fix up direct service construction in tests  `[ ]`
+### Task B3: Fix up direct service construction in tests  `[x]`
 
 - **Goal:** The new constructor dependencies do not silently break unrelated
   suites.
@@ -161,11 +161,11 @@
   `tests/community/adapters/http/test_identity_tenant_indirect_isolation.py`,
   `tests/community/core/services/test_engine_config_service.py` (×2)
 - **Done when:**
-  - [ ] Every direct `IdentityService(...)` passes `binding_repo`; every direct
+  - [x] Every direct `IdentityService(...)` passes `binding_repo`; every direct
         `EngineConfigService(...)` passes `publish_repo` and `binding_repo`.
-  - [ ] `read_bot_config` / `write_bot_config` call sites in
+  - [x] `read_bot_config` / `write_bot_config` call sites in
         `test_engine_config_service.py` pass `stage=STAGE_DRAFT`.
-  - [ ] Those suites pass unchanged otherwise.
+  - [x] Those suites pass unchanged otherwise.
 - **Depends on:** B1, B2
 
 ---

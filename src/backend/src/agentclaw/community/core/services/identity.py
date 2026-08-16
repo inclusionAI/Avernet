@@ -31,6 +31,15 @@ from agentclaw.community.core.devices.services.device_context import (
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
+from agentclaw.community.core.engine_runtime.models import BotFacts
+from agentclaw.community.core.engine_runtime.stage import (
+    STAGE_DRAFT,
+    require_stage_writable,
+    resolve_published_device_context,
+)
+from agentclaw.community.core.repository.protocols.devices import (
+    DeviceBindingRepository,
+)
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.devices.services import device_info as device_info_lookup
 from agentclaw.community.di.modules.skill_center_module import (
@@ -181,12 +190,16 @@ class IdentityService:
         bot_repo: BotRepository,
         resolver: DeviceContextResolver,
         device_fs_dispatcher: DeviceFilesystemDispatcher,
+        binding_repo: DeviceBindingRepository,
     ):
         self.path_factory = path_factory
         self._publish_repo = publish_repo
         self._resolver = resolver
         self._device_fs_dispatcher = device_fs_dispatcher
         self._bot_repo = bot_repo
+        # Only for a read that names a published stage: confirming that a verify
+        # runtime retained after promotion still has an ACTIVE binding.
+        self._binding_repo = binding_repo
 
     # ==================== Validation ====================
 
@@ -246,6 +259,24 @@ class IdentityService:
     # a bot with no resolvable device context is a bug and surfaces as the
     # resolver's error (fail early, never silently touch a dead local path).
 
+    def _bot_facts(self, bot_id: str, owner_id: str) -> BotFacts:
+        """The addressed bot's facts, from an **owner-scoped** read.
+
+        ``get_by_id_and_owner`` and not ``get_by_id``: ``bot_id`` carries no
+        unique constraint, so a wider query can return another owner's row — and
+        ``bot_pk`` is what the publish lookup trusts to stay on the addressed
+        bot.
+
+        A row that is not there yields empty facts rather than an exception, and
+        ``require_stage_addressable`` downstream refuses the published stage as
+        having no live runtime. That is a 409, the same class of answer this
+        service's draft leg already gives for a bot that is not the caller's; a
+        404 here would make a published-stage request the one way to learn
+        whether a bot exists.
+        """
+        record = self._bot_repo.get_by_id_and_owner(bot_id, owner_id) or {}
+        return BotFacts.from_record(record, bot_id=bot_id, owner_id=owner_id)
+
     def _identity_device_fs(
         self,
         *,
@@ -254,10 +285,26 @@ class IdentityService:
         bot_id: str,
         owner_id: str,
         engine_type: str,
+        stage: str = STAGE_DRAFT,
     ):
-        """Resolve the bot's device context (raises if unbound) and build its
-        identity-addressing DeviceFileSystem via the dispatcher."""
-        ctx = self._resolver.resolve_for_bot(bot_id, owner_id)
+        """Resolve the runtime ``stage`` names and build its identity-addressing
+        DeviceFileSystem via the dispatcher.
+
+        The default is the bot's own workspace, resolved exactly as it always
+        was (raises if unbound) and reading no bot row. A service bot's
+        published runtimes resolve through the shared stage rule, which raises
+        ``EngineStageNotLiveError`` when the named stage has none up.
+        """
+        if stage == STAGE_DRAFT:
+            ctx = self._resolver.resolve_for_bot(bot_id, owner_id)
+        else:
+            ctx = resolve_published_device_context(
+                self._resolver,
+                self._publish_repo,
+                self._binding_repo,
+                facts=self._bot_facts(bot_id, owner_id),
+                stage=stage,
+            )
         return self._device_fs_dispatcher.dispatch_addressed(
             ctx,
             namespace=IDENTITY_NS,
@@ -276,6 +323,7 @@ class IdentityService:
         file_type: str,
         owner_id: str,
         engine_type: str,
+        stage: str = STAGE_DRAFT,
     ) -> str:
         device_fs = self._identity_device_fs(
             entity_type=entity_type,
@@ -283,6 +331,7 @@ class IdentityService:
             bot_id=bot_id,
             owner_id=owner_id,
             engine_type=engine_type,
+            stage=stage,
         )
         # identity 域的契约是"缺省即空内容"。``DeviceFileSystem.read_file`` 的契约
         # 同样是"文件不存在 → None",baas/teclaw/local 都已按此实现,所以正常路径
@@ -332,12 +381,16 @@ class IdentityService:
         owner_id: str,
         *,
         engine_type: str | None = None,
+        stage: str = STAGE_DRAFT,
     ) -> str:
         """Read a bot-level **identity** file (provider-blind, coordinate-based).
 
-        ``engine_type`` is resolved per-bot when not given. The high-level identity
-        methods + ``bot_profile`` use this; it addresses the file as
-        ``identity/<file_type>`` and lets the factory compose the device address.
+        ``engine_type`` is resolved per-bot when not given. ``stage`` names which
+        of the bot's runtimes to read and defaults to its own workspace, so every
+        caller that does not address a stage reads what it always did. The
+        high-level identity methods + ``bot_profile`` use this; it addresses the
+        file as ``identity/<file_type>`` and lets the factory compose the device
+        address.
         """
         eng = resolve_engine_for_bot(
             bot_id, entity_id, override=engine_type, bot_repo=self._bot_repo
@@ -349,6 +402,7 @@ class IdentityService:
             file_type=file_type,
             owner_id=owner_id,
             engine_type=eng,
+            stage=stage,
         )
 
     async def write_identity_file(
@@ -611,7 +665,19 @@ class IdentityService:
         operator_id: str,
         publish_id: str | None = None,
         engine_type: str | None = None,
+        *,
+        stage: str = STAGE_DRAFT,
     ) -> BotIdentityFileResponse:
+        """Read one identity file of a bot.
+
+        Two ways to name a runtime other than the draft, and they are not
+        interchangeable. ``stage`` names a **stage** and resolves whichever
+        runtime that stage currently has; ``publish_id`` names a **release
+        record** and reads the binding that record holds. The record-keyed
+        branch wins when both are given — it names one exact release, which is
+        the more specific address — and it is the older internal contract, so
+        nothing about it changes here.
+        """
         self.validate_entity_type(entity_type)
         self.validate_file_type(file_type)
         eng = resolve_engine_for_bot(
@@ -652,6 +718,7 @@ class IdentityService:
             file_type,
             owner_id,
             engine_type=eng,
+            stage=stage,
         )
         return BotIdentityFileResponse(
             success=True,
@@ -671,6 +738,7 @@ class IdentityService:
         owner_id: str,
         *,
         engine_type: str | None = None,
+        stage: str = STAGE_DRAFT,
     ) -> list[tuple[str, bool]]:
         """Probe each whitelisted identity file_type's presence for a bot.
 
@@ -679,6 +747,9 @@ class IdentityService:
         returned non-empty content. Provider-blind: ``read_identity_file``
         addresses each file as ``identity/<file_type>`` and turns a device
         404 into an empty string (absent → ``exists=False``).
+
+        ``stage`` names which runtime is probed, and the whole list comes from
+        that one runtime — a caller never sees a draft row beside a verify row.
         """
         self.validate_entity_type(entity_type)
         # Probe all 16 identity files concurrently: each read is a device
@@ -703,6 +774,7 @@ class IdentityService:
                     ft,
                     owner_id,
                     engine_type=engine_type,
+                    stage=stage,
                 )
                 for ft in ordered
             )
@@ -727,6 +799,13 @@ class IdentityService:
         device_fs.read_file("identity/<file>")`` — covering arca / baas / teclaw
         uniformly (replaces the old ``ARCA_`` target string-sniff). Returns ``None``
         when the publish record / stage binding can't be resolved.
+
+        Deliberately **not** ``engine_runtime.stage.resolve_stage_bind_id``,
+        which the stage-addressed read uses. The caller here named one publish
+        record, and that rule picks the newest record at a status — routing this
+        path through it would answer a question about release 7 from whichever
+        release is currently newest. Keyed by record, stay here; keyed by stage,
+        go there.
         """
         from agentclaw.community.core.service_bot.repository.models import (
             select_stage_bind_id,
@@ -787,7 +866,19 @@ class IdentityService:
         content: str,
         operator_id: str,
         engine_type: str | None = None,
+        *,
+        stage: str = STAGE_DRAFT,
     ) -> BotIdentityFileUpdateResponse:
+        """Create or overwrite one identity file of a bot.
+
+        Only the draft accepts a write, and it is the default. ``stage`` is taken
+        so that a caller naming a published runtime is *refused*
+        (``EngineStageReadOnlyError``) rather than having their edit quietly
+        applied to the draft. The refusal is the first thing that happens, before
+        anything is resolved — which is also why the write path below needs no
+        stage of its own: there is only one runtime it can reach.
+        """
+        require_stage_writable(stage)
         self.validate_entity_type(entity_type)
         self.validate_file_type(file_type)
         eng = resolve_engine_for_bot(
