@@ -48,6 +48,7 @@ from agentclaw.community.api.engine_config_service import EngineConfigServicePro
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
 )
+from agentclaw.community.core.engine_runtime.stage import STAGE_DRAFT
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.di import Injected
 
@@ -100,7 +101,7 @@ async def get_bot_engine_config(
     entity_id, entity_type, engine = _engine_config_target(bot)
     data = await engine_config_service.read_bot_config(
         bot_id=bot_id, owner_id=owner_id, entity_id=entity_id,
-        entity_type=entity_type, engine_type=engine,
+        entity_type=entity_type, engine_type=engine, stage=STAGE_DRAFT,
     )
     return envelope(data, request)
 
@@ -128,5 +129,6 @@ async def update_bot_engine_config(
     await engine_config_service.write_bot_config(
         bot_id=bot_id, owner_id=owner_id, entity_id=entity_id,
         entity_type=entity_type, engine_type=engine, config=body,
+        stage=STAGE_DRAFT,
     )
     return envelope(body, request)

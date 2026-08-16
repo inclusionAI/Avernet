@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agentclaw.community.core.devices.services.device_context import DeviceNotBoundError
+from agentclaw.community.core.engine_runtime.stage import STAGE_DRAFT
 from agentclaw.community.core.services.engine_config import EngineConfigService
 
 
@@ -50,6 +51,7 @@ def _service(*, read_return=b'{"a": 1}', resolve_raises=None, provider="arca"):
 
     svc = EngineConfigService(
         bot_repo=bot_repo, resolver=resolver, device_fs_dispatcher=dispatcher,
+        publish_repo=MagicMock(), binding_repo=MagicMock(),
     )
     return svc, resolver, dispatcher, device_fs
 
@@ -155,6 +157,7 @@ def _bot_service(*, read_return=b'{"a": 1}', resolve_raises=None, provider="arca
 
     svc = EngineConfigService(
         bot_repo=MagicMock(), resolver=resolver, device_fs_dispatcher=dispatcher,
+        publish_repo=MagicMock(), binding_repo=MagicMock(),
     )
     return svc, resolver, dispatcher, device_fs
 
@@ -169,7 +172,7 @@ _BOT_COORDS = dict(
 async def test_read_bot_config_parses_via_resolve_for_bot():
     svc, resolver, dispatcher, device_fs = _bot_service(read_return=b'{"k": "v"}')
 
-    data = await svc.read_bot_config(**_BOT_COORDS)
+    data = await svc.read_bot_config(**_BOT_COORDS, stage=STAGE_DRAFT)
 
     assert data == {"k": "v"}
     resolver.resolve_for_bot.assert_called_once_with("default", "100018")
@@ -183,21 +186,21 @@ async def test_read_bot_config_parses_via_resolve_for_bot():
 async def test_read_bot_config_empty_file_returns_empty_dict():
     for ret in (None, b"", b"  \n"):
         svc, _, _, _ = _bot_service(read_return=ret)
-        assert await svc.read_bot_config(**_BOT_COORDS) == {}
+        assert await svc.read_bot_config(**_BOT_COORDS, stage=STAGE_DRAFT) == {}
 
 
 @pytest.mark.asyncio
 async def test_read_bot_config_malformed_propagates():
     svc, _, _, _ = _bot_service(read_return=b"{bad")
     with pytest.raises(json.JSONDecodeError):
-        await svc.read_bot_config(**_BOT_COORDS)
+        await svc.read_bot_config(**_BOT_COORDS, stage=STAGE_DRAFT)
 
 
 @pytest.mark.asyncio
 async def test_write_bot_config_serializes_and_targets_canonical_path():
     svc, resolver, dispatcher, device_fs = _bot_service()
 
-    await svc.write_bot_config(**_BOT_COORDS, config={"x": 1, "y": "z"})
+    await svc.write_bot_config(**_BOT_COORDS, stage=STAGE_DRAFT, config={"x": 1, "y": "z"})
 
     resolver.resolve_for_bot.assert_called_once_with("default", "100018")
     _, kwargs = dispatcher.dispatch_addressed.call_args
@@ -212,7 +215,7 @@ async def test_write_bot_config_serializes_and_targets_canonical_path():
 async def test_bot_config_resolve_failure_propagates():
     svc, _, dispatcher, _ = _bot_service(resolve_raises=DeviceNotBoundError("unbound"))
     with pytest.raises(DeviceNotBoundError):
-        await svc.read_bot_config(**_BOT_COORDS)
+        await svc.read_bot_config(**_BOT_COORDS, stage=STAGE_DRAFT)
     dispatcher.dispatch_addressed.assert_not_called()
 
 
@@ -233,7 +236,7 @@ async def test_read_bot_config_device_read_failure_propagates():
     svc, _, _, _ = _bot_service(read_return=RuntimeError("device unreachable"))
 
     with pytest.raises(RuntimeError, match="device unreachable"):
-        await svc.read_bot_config(**_BOT_COORDS)
+        await svc.read_bot_config(**_BOT_COORDS, stage=STAGE_DRAFT)
 
 
 @pytest.mark.asyncio

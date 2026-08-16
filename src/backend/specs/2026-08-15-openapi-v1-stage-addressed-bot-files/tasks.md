@@ -85,7 +85,7 @@
 
 ## Group B — Core services
 
-### Task B1: `EngineConfigService` reads a stage, writes only the draft  `[ ]`
+### Task B1: `EngineConfigService` reads a stage, writes only the draft  `[x]`
 
 - **Goal:** The engine-config read reaches all three runtimes; the write reaches
   one and refuses the rest before touching a device.
@@ -93,31 +93,31 @@
   `src/backend/src/agentclaw/community/core/services/engine_config.py`,
   `src/backend/src/agentclaw/community/api/engine_config_service.py`
 - **Done when:**
-  - [ ] Constructor takes `publish_repo: BotPublishRepositoryProtocol` and
+  - [x] Constructor takes `publish_repo: BotPublishRepositoryProtocol` and
         `binding_repo: DeviceBindingRepository`, with a comment that both exist
         only for the stage-addressed read.
-  - [ ] `_bot_facts(bot_id, owner_id)` builds `BotFacts` from
+  - [x] `_bot_facts(bot_id, owner_id)` builds `BotFacts` from
         `self._bot_repo.get_by_id_and_owner`, raising `BotNotFoundError` on a
         miss. No new constructor dependency — the service already holds the
         repository.
-  - [ ] `_bot_config_device_fs(..., stage)` branches: draft → the existing
+  - [x] `_bot_config_device_fs(..., stage)` branches: draft → the existing
         `resolve_for_bot(bot_id, owner_id)` **unchanged and with no row read**;
         published → `_bot_facts` then `resolve_published_device_context`.
-  - [ ] `read_bot_config(..., stage: str)` — required, not defaulted.
-  - [ ] `write_bot_config(..., stage: str)` calls `require_stage_writable(stage)`
+  - [x] `read_bot_config(..., stage: str)` — required, not defaulted.
+  - [x] `write_bot_config(..., stage: str)` calls `require_stage_writable(stage)`
         as its **first** statement, then takes the draft branch. It must never
         reach `_bot_facts`.
-  - [ ] `read_publish_config` unchanged in behaviour, with a comment at the
+  - [x] `read_publish_config` unchanged in behaviour, with a comment at the
         `select_stage_bind_id` call saying why it is deliberately not the stage
         rule (spec D3).
-  - [ ] `EngineConfigServiceProtocol` mirrors both signatures exactly; its
+  - [x] `EngineConfigServiceProtocol` mirrors both signatures exactly; its
         class docstring records why `stage` is required rather than defaulted —
         `EngineRuntimeRelayProtocol` states the same convention, and a default
         would also need a runtime `api → core.engine_runtime` import, which hits
         a partially-initialised `bot_service`.
-  - [ ] Module and class docstrings updated to describe three addresses, two of
+  - [x] Module and class docstrings updated to describe three addresses, two of
         them read-only.
-  - [ ] `tests/community/architecture/test_service_api_conformance.py` passes.
+  - [x] `tests/community/architecture/test_service_api_conformance.py` passes.
 - **Depends on:** A2
 
 ### Task B2: `IdentityService` reads a stage, writes only the draft  `[ ]`
@@ -233,16 +233,19 @@
         no `stage`, draft only.
 - **Depends on:** B2, C1, and #1074
 
-### Task C4: The internal routes say `draft` out loud  `[ ]`
+### Task C4: The internal routes say `draft` out loud  `[x]`
 
 - **Goal:** The two now-required arguments are supplied, and the internal
   console's draft-only scope is stated rather than inherited.
 - **Files:** `src/backend/src/agentclaw/community/adapters/http/bot_management/router.py`
 - **Done when:**
-  - [ ] `read_bot_config(..., stage=STAGE_DRAFT)` and
+  - [x] `read_bot_config(..., stage=STAGE_DRAFT)` and
         `write_bot_config(..., stage=STAGE_DRAFT)`, with a comment that naming a
         runtime is the public surface's parameter, not this route's.
-  - [ ] `tests/community/api/bot_management/test_router.py` passes.
+  - [x] `tests/community/api/bot_management/test_router.py` passes.
+- **Note:** landed inside B1's commit rather than its own. Making `stage`
+  required breaks these two call sites the moment the service changes, so
+  splitting them would have left one commit that does not run.
 - **Depends on:** B1
 
 ---
