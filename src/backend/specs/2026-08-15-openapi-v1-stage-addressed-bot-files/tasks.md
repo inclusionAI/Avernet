@@ -299,46 +299,48 @@
         `address` takes the record-keyed branch (the documented precedence).
 - **Depends on:** B1, B2
 
-### Task D3: HTTP behaviour  `[ ]`
+### Task D3: HTTP behaviour  `[x]`
 
 - **Files:** new `tests/community/adapters/http/openapi_v1/test_stage_addressed_bot_files.py`
 - **Done when:**
-  - [ ] Each of the three reads — `GET …/{bot_id}/engine/config`,
+  - [x] Each of the three reads — `GET …/{bot_id}/engine/config`,
         `GET …/{bot_id}/identity`, `GET …/{bot_id}/identity/{file_type}` —
         with `stage=draft|verify|online` hands the service the matching
         stage string.
-  - [ ] No parameter → `stage="draft"`, and the draft path reads **no bot
+  - [x] No parameter → `stage="draft"`, and the draft path reads **no bot
         row** — assert the repository was not touched (the byte-for-byte pin).
-  - [ ] Both writes with `stage=verify|online` → `409` and the body message
+  - [x] Both writes with `stage=verify|online` → `409` and the body message
         `"The requested stage is read-only"`; with no parameter → unchanged
         `200`.
-  - [ ] A published stage on a personal bot read → `409 "No live runtime at the
+  - [x] A published stage on a personal bot read → `409 "No live runtime at the
         requested stage"`.
-  - [ ] `stage=eval` → `422`, no handler reached.
-  - [ ] The deprecated twins still read the draft when `?stage=online` is sent
+  - [x] `stage=eval` → `422`, no handler reached.
+  - [x] The deprecated twins still read the draft when `?stage=online` is sent
         at them — FastAPI ignores the undeclared parameter, and this pins that
         the shim was not wired to the new code path by accident.
 - **Depends on:** C2, C3
 
-### Task D4: The published document  `[ ]`
+### Task D4: The published document  `[x]`
 
 - **Files:** `tests/community/adapters/http/openapi_v1/engine_runtime/test_stage_addressing.py`
 - **Done when:**
-  - [ ] Build on #1074's `_engine_runtime_paths()` — membership in the mounted
+  - [x] Build on #1074's `_engine_runtime_paths()` — membership in the mounted
         route set, not a segment match (spec **Open Questions**, resolved). The
         five operations here are not in that set, so they need no change to the
         predicate; do not add a second classification.
-  - [ ] A `_STAGE_ADDRESSED_ELSEWHERE` set names the five bot-first operations,
+  - [x] A `_STAGE_ADDRESSED_ELSEWHERE` set names the five bot-first operations,
         mirroring the existing `_OWNER_ADDRESSED_ELSEWHERE`, so
         `test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations`
-        stays an **exact** assertion (16 + 5) rather than being loosened.
-  - [ ] `stage` is still optional on every operation carrying it, and still
+        stays an **exact** assertion rather than being loosened. The
+        engine-runtime side is 32 post-#1074 — sixteen current plus sixteen
+        retiring — so the total is 32 + 5.
+  - [x] `stage` is still optional on every operation carrying it, and still
         never a body field or a path segment.
-  - [ ] **None of the five retiring twins carries `stage`** — and note the
+  - [x] **None of the five retiring twins carries `stage`** — and note the
         distinction: the retiring *engine-runtime* addresses do carry it and
         must keep doing so (they always had it, and #1074's parity promise is
         that they keep their contract). The claim is about these five only.
-  - [ ] The module docstring is updated: "sixteen … and nowhere else" is no
+  - [x] The module docstring is updated: "sixteen … and nowhere else" is no
         longer true.
 - **Depends on:** C2, C3
 
