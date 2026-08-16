@@ -379,12 +379,22 @@
 
 ## Verification
 
-- [ ] `ruff check` clean on every changed file.
-- [ ] `tests/community/architecture` — passes (conformance + boundary gates).
-- [ ] `tests/community/core/engine_runtime`, `tests/community/core/services`,
-      `tests/community/adapters/http/openapi_v1`,
-      `tests/community/api/bot_management` — pass.
-- [ ] `scripts/ci/pre_push.sh` per the AGENTS.md contract (lint-only by
-      default; `OCB_PRE_PUSH_RUN_CI=1` for the full module gates).
-- [ ] PR titled `feat(backend): address published runtimes on the per-bot file
-      endpoints`, body using the Problem / Solution / Validation template.
+- [x] `ruff check` clean on every changed file. (One touched test file carries
+      9 pre-existing errors — identical with the change stashed.)
+- [x] `scripts/ci/python_sast_local.sh src/backend` — flags 100 files
+      repo-wide, none of them this change's.
+- [x] `tests/community/architecture` — 135 passed (conformance + boundary
+      gates). `core.repository.protocols.bot` added to engine_runtime's context
+      boundary, which `stage.py` now imports.
+- [x] Full backend suite — **9,915 passed, 4 skipped, 2 failed**. Both failures
+      shell out to `rsync`, absent from this container; verified pre-existing by
+      re-running with the branch's work stashed (#1073 and #1074 recorded the
+      same pair).
+- [x] The published document asserted directly: `stage` optional, in the query,
+      defaulted `draft`, enum of exactly three, 409 documented — on the five,
+      and on none of their retiring twins.
+- [!] `scripts/ci/pre_push.sh` full-gate mode stops at the two rsync failures
+      above, so the changed-line-coverage and Singlebox E2E stages did **not**
+      run locally. GitHub's runners are the authority for those two.
+- [x] PR #1075, titled `feat(backend): address published runtimes on the per-bot
+      file endpoints`, body using the Problem / Solution / Validation template.
