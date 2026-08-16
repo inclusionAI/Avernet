@@ -66,15 +66,15 @@
   - [x] `__all__` updated. `ruff check` clean.
 - **Depends on:** A1
 
-### Task A3: Map the refusal to 409  `[ ]`
+### Task A3: Map the refusal to 409  `[x]`
 
 - **Goal:** The new error leaves the envelope as a fixed-message 409, not a 500.
 - **Files:** `src/backend/src/agentclaw/community/adapters/http/openapi_v1/responses.py`
 - **Done when:**
-  - [ ] `EngineStageReadOnlyError: (409, "The requested stage is read-only")`,
+  - [x] `EngineStageReadOnlyError: (409, "The requested stage is read-only")`,
         placed inside the engine-runtime block **above** the
         `EngineRuntimeError` base (the block's stated ordering rule).
-  - [ ] Comment says why it is a separate answer from
+  - [x] Comment says why it is a separate answer from
         `EngineStageNotLiveError` and from a `200` with a no-op flag.
 - **Depends on:** A1
 
