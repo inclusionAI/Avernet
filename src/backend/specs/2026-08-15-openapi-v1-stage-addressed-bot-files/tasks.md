@@ -256,8 +256,10 @@
         record's binding and call `resolve_for_binding` with `facts.owner_id`
         and `facts.bot_id`; a published stage on a `personal` bot raises
         `EngineStageNotLiveError` **before** any resolver call; a draft stage
-        raises `ValueError` from `resolve_stage_bind_id` (it is not this
-        function's job).
+        raises `ValueError` naming the call to make instead. (Round-1 review:
+        falling through to `resolve_stage_bind_id`'s generic "not a published
+        stage" left the caller without the fix. The guard is local so the
+        message can name `resolve_for_bot`.)
   - [ ] `BotFacts.from_record` applies the same fallbacks the relay applied
         inline, and `relay.resolve_bot` still returns identical facts — the
         existing relay tests are the check.

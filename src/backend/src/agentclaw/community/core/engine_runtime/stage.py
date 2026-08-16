@@ -35,8 +35,10 @@ from agentclaw.community.core.repository.protocols.devices import (
     DeviceBindingRepository,
 )
 from agentclaw.community.core.devices.services.device_context import (
+    DeviceContext,
     DeviceNotBoundError,
 )
+from agentclaw.community.core.engine_runtime.models import BotFacts
 from agentclaw.community.core.engine_runtime.errors import (
     EngineStageNotLiveError,
     EngineStageReadOnlyError,
@@ -49,17 +51,18 @@ from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
 
-# Annotations only, and deliberately deferred. ``gate.py`` imports this module
-# and every openapi_v1 router imports the gate, so naming the concrete resolver
-# at module scope would pull all four conn-info builders — and ``BaasService``
-# behind them — into the import graph of every process that touches the gate.
-# ``from __future__ import annotations`` above is what lets these stay here.
+# Deferred because it is *heavy*, not merely because it is an annotation:
+# ``device_context_resolver`` pulls all four conn-info builders and
+# ``BaasService`` behind them. ``gate.py`` imports this module and every
+# openapi_v1 router imports the gate, so naming the concrete resolver at module
+# scope would put that graph in every process that touches the gate. The other
+# annotations above are imported normally — their modules are already loaded
+# here, and splitting one module's names across two import styles for no saving
+# is how ``DeviceNotBoundError`` ends up in the guarded block by accident.
 if TYPE_CHECKING:
-    from agentclaw.community.core.devices.services.device_context import DeviceContext
     from agentclaw.community.core.devices.services.device_context_resolver import (
         DeviceContextResolver,
     )
-    from agentclaw.community.core.engine_runtime.models import BotFacts
 
 logger = get_logger()
 
@@ -322,10 +325,26 @@ def resolve_published_device_context(
     device``, ``EngineConfigService.read_publish_config``): ``resolve_for_binding``
     derives ``ctx.bot_type`` from ``get_by_binding_id``, which finds nothing for
     a published service binding — those ids are not on ``ac_bots.binding_id`` —
-    so the returned context carries an empty ``bot_type``. Harmless today, since
-    the filesystem resolver branches only on provider, and identical to what the
-    three existing callers already get. A future ``(provider, bot_type)`` branch
-    must not rely on it.
+    so the returned context carries an **empty** ``bot_type``.
+
+    Two consumers already read it, so this is a live hazard rather than a
+    hypothetical one: ``DefaultDeviceFileSystemResolver`` forks
+    ``bot_type == "desktop"`` inside its baas branch, and
+    ``_validate_bot_device_combination`` skips its legality check entirely on an
+    empty value (logging a warning). Neither misbehaves for the bots this
+    function serves — a published *service* bot is not ``desktop`` whether the
+    field is filled or empty, so it lands on the cloud filesystem either way,
+    and it is exactly what the three existing publish-addressed reads already
+    get. But a second arm added beside that ``desktop`` fork would receive an
+    empty string here and mis-dispatch silently.
+
+    **Synchronous, and blocking.** The publish scan, the binding read and the
+    provider resolve are all blocking I/O — on the BaaS path
+    ``resolve_for_binding`` reaches ``get_ws_info`` over a sync ``httpx`` client
+    with a 30-second timeout. ``relay._resolve_device`` carries the same warning
+    and its caller offloads to a worker thread; an ``async`` caller here must do
+    the same rather than calling this inline, or one slow stage read parks the
+    event loop for every unrelated request on the worker.
 
     **Resolver errors are not translated**, deliberately. ``DeviceNotBoundError``
     and ``ConnInfoBuildError`` propagate as themselves, exactly as they do from

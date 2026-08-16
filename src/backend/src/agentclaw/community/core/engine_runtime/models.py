@@ -72,11 +72,18 @@ class BotFacts:
     ) -> "BotFacts":
         """Project an ``ac_bots`` row onto the narrow facts.
 
-        The one place a bot record becomes facts, so two callers cannot disagree
-        about which columns matter or how a missing one reads. ``bot_id`` and
-        ``owner_id`` are the *requested* values, used only as the fallback when
-        the row does not carry its own — the same fallback this projection has
-        always applied.
+        The one place an ``ac_bots`` row becomes **engine-runtime** facts — the
+        relay, the connection socket and the stage-addressed file reads all come
+        through here, so they cannot disagree about which columns matter or how a
+        missing one reads. ``bot_id`` and ``owner_id`` are the *requested*
+        values, used only as the fallback when the row does not carry its own —
+        the same fallback this projection has always applied.
+
+        Not every projection on the surface: ``authorized_apps.gating`` reads the
+        same row and deliberately **refuses** an empty ``owner_id`` rather than
+        substituting the requested one, because that value is written into a
+        grant record where it must name a real owner. Its rule is stricter on
+        purpose and is not folded in here.
 
         ``record`` must come from an **owner-scoped** ``(bot_id, owner_id)``
         read. ``bot_id`` carries no unique constraint and every user's first bot
