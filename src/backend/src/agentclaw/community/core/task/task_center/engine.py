@@ -191,15 +191,16 @@ class ExecutionEngine:
         return pr
 
     def _mark_planning(self, task_id: str, node_id: str) -> None:
-        """节点被 owner bot 规划时,落 run_mode="planning" + assignee=owner(source_channel_id)。
-        规划本身就是 owner bot 的 bot 工作(组 prompt→owner bot 算 gap 产子),故节点应归属 owner,
-        而非 run_mode/assignee 留空。叶子派发执行时由 _prepare_into 覆写为 single_bot/coop_group/bbs+worker。"""
+        """节点进入规划委托态:PENDING→PLANNING(幂等,已 PLANNING 不重翻)。
+        规划是编排态(Status.PLANNING),不是执行模式:run_mode/assignee 保持 None。
+        规划者(owner bot)隐式来自 graph.extend_props.source_channel_id,不落节点 run_info。
+        叶子派发执行时由 _prepare_into 覆写为 single_bot/coop_group/bbs+worker。"""
         graph = self._graph.query_task_dashboard(task_id)
-        owner = str(graph.extend_props.get("source_channel_id") or "")
-        if not owner:
-            return
+        node = next((n for n in graph.tasks if n.node_id == node_id), None)
+        if node is None or node.status != Status.PENDING:
+            return  # 已 PLANNING / 已终态 → 幂等不翻
         self._graph.update_task_node_info(
-            TaskNodePatch(task_id=task_id, node_id=node_id, run_mode="planning", assignee=owner)
+            TaskNodePatch(task_id=task_id, node_id=node_id, status=Status.PLANNING)
         )
 
     # ===== on_execute =====

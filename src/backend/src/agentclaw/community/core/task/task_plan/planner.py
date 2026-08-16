@@ -65,15 +65,17 @@ class TaskPlanner:
         return PlanResult(children=[], has_gap=False, gap_detail="no_strategy_hit")  # 兜底(不应发生:GapBased 兜底)
 
     def _resolve_target(self, graph: TaskExecutionGraph, target_node_id: str | None) -> TaskNode | None:
-        """解析显式 target_node_id → 节点;None → 自发现根 PENDING(无父,初始规划目标)。零 case 知识。"""
+        """解析显式 target_node_id → 节点;None → 自发现可规划根(PENDING 初始 / PLANNING 已进入规划态,
+        无父)。on_execute 唯一 None 调用方;_mark_planning 会将根先翻 PENDING→PLANNING 再 plan,
+        故自发现须接受 PLANNING 根。零 case 知识。"""
         if target_node_id is not None:
             for n in graph.tasks:
                 if n.node_id == target_node_id:
                     return n
             return None
-        # None(on_execute):根 PENDING(无结构父)
+        # None(on_execute):根(无结构父),处于可规划态 PENDING(尚未规划)/ PLANNING(已进入规划)
         for n in graph.tasks:
-            if n.status == Status.PENDING and not self._has_child(graph, n.node_id) and self._get_parent_id(graph, n.node_id) is None:
+            if n.status in {Status.PENDING, Status.PLANNING} and not self._has_child(graph, n.node_id) and self._get_parent_id(graph, n.node_id) is None:
                 return n
         return None
 

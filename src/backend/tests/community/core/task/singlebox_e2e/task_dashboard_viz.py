@@ -140,6 +140,10 @@ svg#graph{width:100%;height:100%;display:block}
 <script>
 const C={PENDING:'#6e7681',PLANNING:'#4cc9f0',RUNNING:'#ff8a3d',DONE:'#3fe07a',FAILED:'#ff5c6c',HUNG:'#b388ff'};
 const ICON={planning:'⚙',single_bot:'👤',coop_group:'👥',bbs:'📡'};
+function modeIcon(ri){if(ri.run_mode&&ICON[ri.run_mode])return ICON[ri.run_mode];return null;}
+function modeOf(ri,t){if(ri.run_mode)return ri.run_mode;if(t.status==='PLANNING')return 'planning';if(t.status==='PENDING')return 'pending';return null;}
+function iconFor(ri,t){return modeIcon(ri)||(t.status==='PLANNING'?'⚙':(t.status==='PENDING'?'⏳':'▢'));}
+function modeLabel(ri,t){const m=modeOf(ri,t);return m?(ICON[m]||'')+' '+m:'—';}
 const SVG=document.getElementById('graph');
 function inferParent(n,all){
   const ep=(n.context&&n.context.extend_props)||{};
@@ -237,7 +241,7 @@ function render(d){
     if(t.status==='RUNNING'){ng.append('rect').attr('x',-w/2-4).attr('y',-h/2-4).attr('width',w+8).attr('height',h+8).attr('rx',14)
       .attr('fill','none').attr('stroke',col).attr('stroke-width',1.5).attr('opacity',.6)
       .append('animate').attr('attributeName','stroke-width').attr('values','1;5;1').attr('dur','1.6s').attr('repeatCount','indefinite');}
-    const icon=ICON[ri.run_mode]||'▢';
+    const icon=iconFor(ri,t);
     ng.append('text').attr('class','t').attr('text-anchor','middle').attr('y',-8).text(icon+' '+truncate(m.title||t.node_id,18));
     ng.append('text').attr('class','s').attr('text-anchor','middle').attr('y',6).text(t.node_id);
     const st=ng.append('text').attr('class','st').attr('text-anchor','middle').attr('y',20).attr('fill',col);
@@ -248,7 +252,7 @@ function detail(t){const m=t.task_spec,ri=t.run_info||{};const ac=ri.acceptance_
   const ep=(t.context&&t.context.extend_props)||{};const miss=ep.miss_events||[];const grp=ep.pending_group_formation;
   let h=`<h3 style="color:${C[t.status]}">${esc(m.metadata.title)}</h3>`;
   h+=`<div class="k">task / node</div><div class="v mono">${esc(t.task_id)} :: ${t.node_id}</div>`;
-  h+=`<div class="k">状态 / 运行模式 / 执行者</div><div class="v"><b style="color:${C[t.status]}">${t.status}</b> · ${ICON[ri.run_mode]||''} ${ri.run_mode||'—'} · ${ri.assignee||'—'}</div>`;
+  h+=`<div class="k">状态 / 运行模式 / 执行者</div><div class="v"><b style="color:${C[t.status]}">${t.status}</b> · ${modeLabel(ri,t)} · ${ri.assignee||'—'}</div>`;
   h+=`<div class="k">目标 Objective</div><div class="v">${esc(m.goal.objective)}</div>`;
   h+=`<div class="k">指令 Instruction</div><div class="v">${esc(m.metadata.instruction)}</div>`;
   const acs=m.goal.acceptances||[];if(acs.length){h+=`<div class="k">验收标准</div><div class="v">${acs.map(a=>'• '+esc(a.description)).join('<br>')}</div>`;}

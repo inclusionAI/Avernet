@@ -164,6 +164,20 @@ class TestOnExecute:
         assert len(runner.run_calls) == 1
         assert {n.node_id for n in runner.run_calls[0]} == {"c1", "c2"}
 
+    def test_mark_planning_no_run_mode_only_status(self, svc, graph):
+        # v5:planning 是 Status.PLANNING,不是 run_mode;run_mode 仅供 single_bot/coop_group/bbs
+        planner = StubPlanner(lambda g: [_child("c1")])
+        eng = _engine(svc, planner=planner)
+        _run(eng.on_execute("t1"))
+        root = svc._get_node(graph, "t1")
+        assert root.status == Status.PLANNING
+        assert root.run_info.run_mode is None  # 不再写 "planning"
+        assert root.run_info.assignee is None
+        # 叶子派发执行:run_mode=执行态 + start_time 写入
+        leaf = svc._get_node(graph, "c1")
+        assert leaf.run_info.run_mode == "single_bot"
+        assert leaf.run_info.start_time is not None
+
     def test_no_plan_gap_closed_finishes(self, svc, graph):
         # Step2:plan 返 []+has_gap=F = 根 gap 闭(终验通过)→ 翻根 DONE + 图 DONE
         eng = _engine(svc, planner=StubPlanner(lambda g: [], has_gap_when_empty=False))

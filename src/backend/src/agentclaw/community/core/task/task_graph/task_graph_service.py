@@ -41,11 +41,12 @@ _ACCEPTANCE_TRANSITIONS: dict[Status, set[Status]] = {
 }
 # status 直驱(框架内部:派发/复位/传播/HUNG)。v4:父节点规划出子由 add_task_nodes 直置 PLANNING(不走此表),
 #   故 PLANNING->RUNNING 已废弃;RUNNING 已不再表示委托态(委托态=PLANNING),RUNNING->PLANNING 已废弃。
-#   PENDING->RUNNING(叶子派发执行) / RUNNING->PENDING(harness 复位重投) / RUNNING->DONE(gap 闭) / RUNNING->HUNG
+#   PENDING->PLANNING(初始根/MISS 叶进入规划) / PENDING->RUNNING(叶子派发执行) /
+#   RUNNING->PENDING(harness 复位重投) / RUNNING->DONE(gap 闭) / RUNNING->HUNG
 #   PLANNING->DONE(gap 闭传播) / PLANNING->HUNG(depth>=MAX 拆不动)
 #   FAILED->PENDING(harness 重新派发执行重试) / FAILED->HUNG(重试达上限)
 _DIRECT_TRANSITIONS: dict[Status, set[Status]] = {
-    Status.PENDING: {Status.RUNNING, Status.HUNG, Status.DONE},
+    Status.PENDING: {Status.PLANNING, Status.RUNNING, Status.HUNG, Status.DONE},
     Status.PLANNING: {Status.DONE, Status.HUNG},
     Status.RUNNING: {Status.PENDING, Status.DONE, Status.HUNG},
     Status.FAILED: {Status.PENDING, Status.HUNG},
@@ -257,15 +258,29 @@ class TaskGraphService:
                     raise TaskStateError(
                         f"status 直驱非法: {node.status} → {new_status}"
                     )
-            # fold 非状态字段
+            # fold 非状态字段(空串归一为 None:run_mode 只有 single_bot/coop_group/bbs 三态,None=非执行/规划态)
             if patch.output_patch is not None:
                 node.run_info.output.update(patch.output_patch)
             if patch.run_mode is not None:
-                node.run_info.run_mode = patch.run_mode
+                # 空串 -> None(规划/复位清执行者场景把 "" 当"清除"语义)
+                node.run_info.run_mode = patch.run_mode or None
             if patch.assignee is not None:
-                node.run_info.assignee = patch.assignee
+                # 空串 -> None(同上,清执行者)
+                node.run_info.assignee = patch.assignee or None
             if patch.extend_props_patch is not None:
                 node.run_info.extend_props.update(patch.extend_props_patch)
+            # 时间戳(统一在 SSOT 网关按状态转移自动写):
+            #   进入 RUNNING(真执行) → 写 start_time,清 end_time(新一轮 attempt)
+            #   进入 DONE/FAILED/HUNG(终态) → 写 end_time(start_time 可能仍 None:纯规划后直终态)
+            #   回到 PENDING(harness 复位重投) → 清 start_time/end_time(下次重派重写 start_time)
+            if new_status == Status.RUNNING and prev_status != Status.RUNNING:
+                node.run_info.start_time = time.time()
+                node.run_info.end_time = None
+            elif new_status in {Status.DONE, Status.FAILED, Status.HUNG}:
+                node.run_info.end_time = time.time()
+            elif new_status == Status.PENDING:
+                node.run_info.start_time = None
+                node.run_info.end_time = None
             # 应用翻态
             if new_status is not None:
                 node.status = new_status

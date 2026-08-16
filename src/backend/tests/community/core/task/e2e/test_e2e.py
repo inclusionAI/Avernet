@@ -103,7 +103,7 @@ class CaseDecomposer:
                 continue
             if n.status == Status.FAILED and n.run_info.acceptance_result and n.run_info.acceptance_result.gaps:
                 return [self._node(f"{n.node_id}_remedy")]
-            if n.status == Status.PENDING and n.run_info.extend_props.get("miss_events"):
+            if n.status in {Status.PENDING, Status.PLANNING} and n.run_info.extend_props.get("miss_events"):
                 return [self._node(f"{n.node_id}_miss_remedy")]
         # 2) root 批步进
         root = self._root(graph)
@@ -111,7 +111,7 @@ class CaseDecomposer:
             return []
         children = self._children(graph, root.node_id)
         child_ids = {c.node_id for c in children}
-        if not children and root.status == Status.PENDING:
+        if not children and root.status in {Status.PENDING, Status.PLANNING}:
             return [self._node("N_overview")]
         if child_ids == {"N_overview"} and self._is_done(graph, "N_overview"):
             return [self._node(nid) for nid in self.FOUR]
@@ -305,7 +305,8 @@ class TestThreeModesHappyToDone:
         assert ov.status == Status.RUNNING
         # v4:规划出子的父恒为 PLANNING(委托/编排态),RUNNING 只给真正派发执行的叶子
         assert svc._get_node(g, root_id).status == Status.PLANNING
-        assert svc._get_node(g, root_id).run_info.run_mode == "planning"
+        assert svc._get_node(g, root_id).run_info.run_mode is None
+        assert svc._get_node(g, root_id).run_info.assignee is None
         assert len(runner._run_log) == 1
 
         # 回投 N_overview PASS → 批2 four专题

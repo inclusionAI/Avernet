@@ -102,7 +102,7 @@ class TaskHarness:
                 )
             except Exception:  # noqa: BLE001 - task 已删 → 跳过
                 continue
-            # 只监控真正派发执行的叶子(run_mode ∈ 三模态);委托态父节点(RUNNING 但 run_mode=planning/None)
+            # 只监控真正派发执行的叶子(run_mode ∈ 三模态);委托态父节点是 Status.PLANNING(非 RUNNING),
             # 不执行 bot run,不纳入 SLA 超时巡检(避免误复位委托中的分解/聚合节点)。
             _EXEC_MODES = ("single_bot", "coop_group", "bbs")
             nodes = [n for n in nodes if n.run_info.run_mode in _EXEC_MODES]

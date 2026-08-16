@@ -237,6 +237,70 @@ class TestUpdateTaskNodeInfo:
         svc.update_task_node_info(_patch("t1", "c1", extend_props_patch={"miss_events": ["no_bot"]}))
         assert svc._get_node(graph, "c1").run_info.extend_props.get("miss_events") == ["no_bot"]
 
+    # ---- v5: run_mode 空串归一 + 时间戳自动写 ----
+    def test_run_mode_empty_string_normalized_to_none(self, svc, graph):
+        # 空串(清执行者语义)归一为 None;run_mode 只有 single_bot/coop_group/bbs 三态
+        svc.add_task_nodes([_node("c1")], parent_node_id="t1")
+        svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
+        assert svc._get_node(graph, "c1").run_info.run_mode == "single_bot"
+        svc.update_task_node_info(_patch("t1", "c1", run_mode="", assignee=""))
+        node = svc._get_node(graph, "c1")
+        assert node.run_info.run_mode is None
+        assert node.run_info.assignee is None
+
+    def test_pending_to_planning_allowed(self, svc, graph):
+        # PENDING->PLANNING 合法(_mark_planning 初始根/MISS 叶进入规划)
+        r = svc.update_task_node_info(_patch("t1", "t1", status=Status.PLANNING))
+        assert r.new_status == Status.PLANNING
+        assert svc._get_node(graph, "t1").status == Status.PLANNING
+
+    def test_enter_running_writes_start_time(self, svc, graph):
+        svc.add_task_nodes([_node("c1")], parent_node_id="t1")
+        svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
+        node = svc._get_node(graph, "c1")
+        assert node.run_info.start_time is not None
+        assert node.run_info.end_time is None
+
+    def test_pass_done_writes_end_time(self, svc, graph):
+        svc.add_task_nodes([_node("c1")], parent_node_id="t1")
+        svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
+        t0 = svc._get_node(graph, "c1").run_info.start_time
+        svc.update_task_node_info(
+            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS, acceptances_metric=["ac1"]))
+        )
+        node = svc._get_node(graph, "c1")
+        assert node.status == Status.DONE
+        assert node.run_info.end_time is not None
+        assert node.run_info.start_time == t0
+
+    def test_fail_writes_end_time(self, svc, graph):
+        svc.add_task_nodes([_node("c1")], parent_node_id="t1")
+        svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
+        svc.update_task_node_info(
+            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAIL, gaps=["x"]))
+        )
+        assert svc._get_node(graph, "c1").run_info.end_time is not None
+
+    def test_reset_to_pending_clears_timestamps(self, svc, graph):
+        svc.add_task_nodes([_node("c1")], parent_node_id="t1")
+        svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
+        assert svc._get_node(graph, "c1").run_info.start_time is not None
+        svc.update_task_node_info(_patch("t1", "c1", status=Status.PENDING))
+        node = svc._get_node(graph, "c1")
+        assert node.status == Status.PENDING
+        assert node.run_info.start_time is None
+        assert node.run_info.end_time is None
+
+    def test_planning_to_hung_writes_end_time_only(self, svc, graph):
+        # 纯规划节点从未执行(无 start)->直 HUNG:写 end_time,start 保持 None
+        svc.update_task_node_info(_patch("t1", "t1", status=Status.PLANNING))
+        assert svc._get_node(graph, "t1").run_info.start_time is None
+        svc.update_task_node_info(_patch("t1", "t1", status=Status.HUNG))
+        node = svc._get_node(graph, "t1")
+        assert node.status == Status.HUNG
+        assert node.run_info.end_time is not None
+        assert node.run_info.start_time is None
+
 
 # ===== relations 派生查询 =====
 class TestDerivedQueries:
