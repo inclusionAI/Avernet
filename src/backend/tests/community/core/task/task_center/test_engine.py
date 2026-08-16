@@ -178,6 +178,27 @@ class TestOnExecute:
         assert leaf.run_info.run_mode == "single_bot"
         assert leaf.run_info.start_time is not None
 
+    def test_action_log_records_plan_dispatch(self, svc, graph):
+        # 动作历史:根 PLAN + 叶 DISPATCH(execute 后 EXECUTE/VERIFY 在 test_task_service 回投流覆盖)
+        planner = StubPlanner(lambda g: [_child("c1")])
+        eng = _engine(svc, planner=planner)
+        _run(eng.on_execute("t1"))
+        root = svc._get_node(graph, "t1")
+        assert [e.action.value for e in root.run_info.action_log] == ["plan"]
+        assert root.run_info.action_log[0].payload["children"] == ["c1"]
+        leaf = svc._get_node(graph, "c1")
+        assert [e.action.value for e in leaf.run_info.action_log] == ["dispatch"]
+        assert leaf.run_info.action_log[0].payload["outcome"] == "HIT_SINGLE"
+
+    def test_action_log_append_only_seq_monotonic(self, svc, graph):
+        # append-only:seq 单调递增;多次 plan 不覆盖
+        planner = StubPlanner(lambda g: [_child("c1")])
+        eng = _engine(svc, planner=planner)
+        _run(eng.on_execute("t1"))
+        root = svc._get_node(graph, "t1")
+        seqs = [e.seq for e in root.run_info.action_log]
+        assert seqs == list(range(1, len(seqs) + 1))
+
     def test_no_plan_gap_closed_finishes(self, svc, graph):
         # Step2:plan 返 []+has_gap=F = 根 gap 闭(终验通过)→ 翻根 DONE + 图 DONE
         eng = _engine(svc, planner=StubPlanner(lambda g: [], has_gap_when_empty=False))

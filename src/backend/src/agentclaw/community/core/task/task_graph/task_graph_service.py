@@ -19,6 +19,8 @@ from agentclaw.community.core.task.domain.errors import (
 )
 from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
+    NodeAction,
+    NodeActionEvent,
     NodeOpResult,
     Relation,
     RelationType,
@@ -290,6 +292,40 @@ class TaskGraphService:
                 success=True,
                 prev_status=prev_status,
                 new_status=node.status,
+            )
+
+    def append_action_event(
+        self,
+        task_id: str,
+        node_id: str,
+        action: NodeAction,
+        payload: dict[str, Any],
+        *,
+        attempt: int = 0,
+        status_from: Status | None = None,
+        status_to: Status | None = None,
+    ) -> None:
+        """节点级动作历史快照追加口(append-only;纯可观测,不入状态机)。
+
+        由编排核在各逻辑动作(PLAN/DISPATCH/EXECUTE/VERIFY/RESET/TRANSITION)完成时调用;
+        纯追加,不翻态、不 fold 任何单值字段、不影响驱动决策。``seq``/``ts``/``loop_round``
+        由本网关在锁内填(序号=当前 action_log 长度+1);``status_from``/``status_to`` 由调用方
+        按动作发生前/后态显式传(未翻态时二者相等或均 None)。与 ``update_task_node_info`` 同锁域。
+        """
+        with self._lock_for(task_id):
+            graph = self._require_graph(task_id)
+            node = self._require_node(graph, node_id)
+            node.run_info.action_log.append(
+                NodeActionEvent(
+                    seq=len(node.run_info.action_log) + 1,
+                    ts=time.time(),
+                    action=action,
+                    loop_round=graph.loop_round,
+                    attempt=attempt,
+                    status_from=status_from,
+                    status_to=status_to,
+                    payload=dict(payload),
+                )
             )
 
     def update_task_graph_info(self, task_id: str, patch: TaskGraphPatch) -> TaskExecutionGraph:

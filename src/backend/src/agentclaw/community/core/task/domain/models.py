@@ -37,6 +37,17 @@ class RelationType(StrEnum):
     DEPENDENCY = "DEPENDENCY"   # 分解树边(承载结构归属,单入)
 
 
+class NodeAction(StrEnum):
+    """节点动作级事件类型(append-only 历史快照;纯可观测,不入状态机驱动)。"""
+
+    PLAN = "plan"               # 规划(gap 计算 + 产子);payload: target/children/has_gap/gap_detail
+    DISPATCH = "dispatch"       # 搜推派发结果;payload: outcome(HIT_SINGLE|HIT_MULTI|MISS)/run_mode/assignee/miss_reason
+    EXECUTE = "execute"         # 执行产出(bot 回投 output/exec_error);payload: success/exec_error/output
+    VERIFY = "verify"           # 验收结论;payload: verdict/acceptances_metric/gaps
+    RESET = "reset"             # harness 复位重投;payload: reason/prev_status/harness_retries
+    TRANSITION = "transition"   # 框架直驱翻态(HUNG/传播 DONE);payload: reason
+
+
 # ===== 规格面(Task Specification)=====
 @dataclass
 class Metadata:
@@ -91,8 +102,30 @@ class AcceptanceResult:
 
 
 @dataclass
+class NodeActionEvent:
+    """节点动作级历史快照(append-only;纯可观测回溯/BBS 上下文聚合,不入驱动逻辑)。
+
+    单值字段(output/acceptance_result/start_time 等)是「当前态/最新态」,
+    编排核只读单值;``action_log`` 是「动作轨迹」,按动作发生顺序只增不覆盖。
+    """
+
+    seq: int                              # 节点内自增序号(1-based;由 SSOT 网关 append 时填)
+    ts: float                             # 动作发生时间戳(由网关填 time.time())
+    action: NodeAction
+    loop_round: int = 0                   # 图级 loop_round 快照(定位第几轮)
+    attempt: int = 0                      # planning/执行重试序号(harness_retries 快照)
+    status_from: Status | None = None     # 动作发生前态
+    status_to: Status | None = None       # 动作发生后态(None=未翻态,如纯 plan)
+    payload: dict[str, Any] = field(default_factory=dict)  # 动作产出全量(按 action 类型)
+
+
+@dataclass
 class RuntimeInfo:
-    """节点运行时实时执行信息(所有 None 均合法域态)。"""
+    """节点运行时实时执行信息(所有 None 均合法域态)。
+
+    单值字段(output/acceptance_result/start_time 等)= 当前态/最新态(编排核只读驱动);
+    ``action_log`` = 动作级历史快照(append-only,默认不序列化,诊断页 include_action_log 开)。
+    """
 
     run_mode: str | None = None              # "single_bot"/"coop_group"/"bbs";无 collab_mode
     assignee: str | None = None              # 执行者(bot_id / group_id)
@@ -101,6 +134,7 @@ class RuntimeInfo:
     output: dict[str, Any] = field(default_factory=dict)
     acceptance_result: AcceptanceResult | None = None
     extend_props: dict[str, Any] = field(default_factory=dict)  # miss_events/崩溃栈/超时/hung_reason(stuck)
+    action_log: list[NodeActionEvent] = field(default_factory=list)  # 动作级历史快照(append-only)
 
 
 @dataclass

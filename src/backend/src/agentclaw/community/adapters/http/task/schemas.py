@@ -114,6 +114,18 @@ class AcceptanceResultDTO(BaseModel):
     gaps: list[str] = Field(default_factory=list)
 
 
+class NodeActionEventDTO(BaseModel):
+    """节点动作级历史快照(诊断用;默认不序列化,include_action_log=true 时返回)。"""
+    seq: int
+    ts: float
+    action: str
+    loop_round: int = 0
+    attempt: int = 0
+    status_from: str | None = None
+    status_to: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
 class RuntimeInfoDTO(BaseModel):
     run_mode: str | None = None
     assignee: str | None = None
@@ -122,6 +134,7 @@ class RuntimeInfoDTO(BaseModel):
     output: dict[str, Any] = Field(default_factory=dict)
     acceptance_result: AcceptanceResultDTO | None = None
     extend_props: dict[str, Any] = Field(default_factory=dict)
+    action_log: list[NodeActionEventDTO] = Field(default_factory=list)
 
 
 class TaskNodeDTO(BaseModel):
@@ -203,7 +216,7 @@ def acceptance_result_from_dto(dto: AcceptanceResultDTO):
     )
 
 
-def graph_to_dto(graph) -> TaskExecutionGraphDTO:
+def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGraphDTO:
     nodes: list[TaskNodeDTO] = []
     for n in graph.tasks:
         ar = n.run_info.acceptance_result
@@ -229,7 +242,15 @@ def graph_to_dto(graph) -> TaskExecutionGraphDTO:
                                     end_time=n.run_info.end_time,
                                     output=dict(n.run_info.output),
                                     acceptance_result=ar_dto,
-                                    extend_props=dict(n.run_info.extend_props)),
+                                    extend_props=dict(n.run_info.extend_props),
+                                    action_log=([NodeActionEventDTO(
+                                        seq=e.seq, ts=e.ts, action=e.action.value,
+                                        loop_round=e.loop_round, attempt=e.attempt,
+                                        status_from=e.status_from.value if e.status_from else None,
+                                        status_to=e.status_to.value if e.status_to else None,
+                                        payload=dict(e.payload),
+                                    ) for e in n.run_info.action_log]
+                                    if include_action_log else [])),
         ))
     return TaskExecutionGraphDTO(
         run_id=graph.run_id, loop_round=graph.loop_round, status=graph.status.value,

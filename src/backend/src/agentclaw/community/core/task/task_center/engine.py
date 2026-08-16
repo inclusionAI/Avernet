@@ -29,6 +29,7 @@ import threading
 from agentclaw.community.core.task.domain.errors import NodeNotFoundError, TaskStateError
 from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
+    NodeAction,
     NodeOpResult,
     Status,
     TaskCallbackData,
@@ -188,6 +189,22 @@ class ExecutionEngine:
                 "last_plan_has_gap": pr.has_gap,
                 "last_plan_detail": pr.gap_detail,
             }))
+        # 动作历史:PLAN 事件(gap 计算 + 产子结果)挂到被规划目标节点(根 gap 反复计算的轨迹留痕)
+        target_id = target_node_id
+        if target_id is None:
+            root = self._root(task_id)
+            target_id = root.node_id if root else None
+        if target_id is not None:
+            self._log_action(
+                task_id, target_id, NodeAction.PLAN,
+                {
+                    "target": target_node_id or "<root>",
+                    "children": [c.node_id for c in pr.children],
+                    "has_gap": pr.has_gap,
+                    "gap_detail": pr.gap_detail,
+                },
+                status_from=Status.PLANNING, status_to=Status.PLANNING,
+            )
         return pr
 
     def _mark_planning(self, task_id: str, node_id: str) -> None:
@@ -202,6 +219,30 @@ class ExecutionEngine:
         self._graph.update_task_node_info(
             TaskNodePatch(task_id=task_id, node_id=node_id, status=Status.PLANNING)
         )
+
+    def _log_action(
+        self, task_id: str, node_id: str, action: NodeAction, payload: dict,
+        *, attempt: int | None = None, status_from: Status | None = None,
+        status_to: Status | None = None,
+    ) -> None:
+        """追加节点动作历史快照(append-only;零侵入驱动逻辑)。
+
+        供各逻辑动作(PLAN/DISPATCH/EXECUTE/VERIFY/RESET/TRANSITION)完成时调用,
+        纯可观测旁路:不翻态、不读回驱动。``attempt`` 省略时取节点 harness_retries 快照;
+        ``status_from``/``status_to`` 省略时由调用方按动作前/后态传(未翻态可不传)。
+        """
+        if attempt is None:
+            node = next((n for n in self._graph.query_task_dashboard(task_id).tasks
+                         if n.node_id == node_id), None)
+            attempt = int(node.run_info.extend_props.get("harness_retries", 0)) if node else 0
+        try:
+            self._graph.append_action_event(
+                task_id, node_id, action, payload,
+                attempt=attempt, status_from=status_from, status_to=status_to,
+            )
+        except Exception as ex:  # noqa: BLE001  历史快照写入失败不影响驱动
+            logger.warning("[action-log] task=%s node=%s action=%s 追加失败:%s",
+                           task_id, node_id, action.value, ex)
 
     # ===== on_execute =====
     async def on_execute(self, task_id: str) -> None:
@@ -263,6 +304,30 @@ class ExecutionEngine:
                     patch.acceptance_result.verdict if patch.acceptance_result else "fold-only")
         with self._lock_for(patch.task_id):
             result = self._graph.update_task_node_info(patch)
+            # 动作历史:EXECUTE(执行产出)+ VERIFY(验收结论)——回投即一个执行动作闭环
+            _out = dict(patch.output_patch) if patch.output_patch else {}
+            if patch.exec_error is not None:
+                self._log_action(
+                    patch.task_id, patch.node_id, NodeAction.EXECUTE,
+                    {"success": False, "exec_error": patch.exec_error, "output": _out},
+                    status_from=result.prev_status, status_to=result.new_status,
+                )
+            elif patch.acceptance_result is not None:
+                _ar = patch.acceptance_result
+                self._log_action(
+                    patch.task_id, patch.node_id, NodeAction.EXECUTE,
+                    {"success": _ar.verdict == AcceptanceVerdict.PASS, "output": _out},
+                    status_from=result.prev_status, status_to=result.new_status,
+                )
+                self._log_action(
+                    patch.task_id, patch.node_id, NodeAction.VERIFY,
+                    {
+                        "verdict": _ar.verdict.value,
+                        "acceptances_metric": list(_ar.acceptances_metric),
+                        "gaps": list(_ar.gaps),
+                    },
+                    status_from=result.prev_status, status_to=result.new_status,
+                )
             if patch.exec_error is not None:
                 side: list[tuple] = []
                 await self._on_harness_collect(patch.task_id, patch.node_id, patch.exec_error, side)
@@ -353,6 +418,12 @@ class ExecutionEngine:
             self._graph.update_task_node_info(
                 TaskNodePatch(task_id=task_id, node_id=parent.node_id, status=Status.DONE)
             )
+            # 动作历史:TRANSITION(非根 gap 闭传播 DONE)
+            self._log_action(
+                task_id, parent.node_id, NodeAction.TRANSITION,
+                {"reason": "gap_closed_propagate", "to": "DONE"},
+                status_from=Status.PLANNING, status_to=Status.DONE,
+            )
             await self._on_pass_collect(task_id, parent.node_id, side)
         else:
             self._hung_and_escalate(task_id, parent.node_id, "gap_no_progress")
@@ -394,8 +465,16 @@ class ExecutionEngine:
         # 复位到 PENDING 重新派发执行:FAILED/RUNNING→PENDING;PENDING 派发卡住(搜推无响应/派发失败)清
         # dispatch_error 让 _prepare_into 重新搜推(harness owns 重试计数+HUNG 上限,正常 cycle 跳过 dispatch_error 节点)
         if node.status in {Status.FAILED, Status.RUNNING}:
+            _prev = node.status
             self._graph.update_task_node_info(
                 TaskNodePatch(task_id=task_id, node_id=node_id, status=Status.PENDING)
+            )
+            # 动作历史:RESET(harness 重新派发执行重试)
+            self._log_action(
+                task_id, node_id, NodeAction.RESET,
+                {"reason": exec_error or "failed_retry", "prev_status": _prev.value,
+                 "harness_retries_after": retries},
+                attempt=retries, status_from=_prev, status_to=Status.PENDING,
             )
         elif node.status == Status.PENDING and node.run_info.extend_props.get("dispatch_error"):
             self._graph.update_task_node_info(
@@ -414,6 +493,16 @@ class ExecutionEngine:
             depth = self._graph._node_depth(patch.task_id, patch.node_id)
             cfg = self._graph._execution_config(patch.task_id)
             max_depth = cfg["MAX_DEPTH"]
+            # 动作历史:DISPATCH(MISS 搜推未命中执行者)
+            _miss_reason = ""
+            _ep = patch.extend_props_patch or {}
+            if isinstance(_ep.get("miss_events"), list) and _ep["miss_events"]:
+                _miss_reason = str(_ep["miss_events"][0])
+            self._log_action(
+                patch.task_id, patch.node_id, NodeAction.DISPATCH,
+                {"outcome": "MISS", "miss_reason": _miss_reason, "depth": depth, "max_depth": max_depth},
+                status_from=Status.PENDING, status_to=Status.PENDING,
+            )
             if depth >= max_depth:
                 logger.info("[on_miss] task=%s node=%s depth=%d/%d 拆不动→HUNG", patch.task_id, patch.node_id, depth, max_depth)
                 self._hung_and_escalate(patch.task_id, patch.node_id, "miss_depth_exhausted")
@@ -453,9 +542,17 @@ class ExecutionEngine:
 
     def _hung_and_escalate(self, task_id: str, node_id: str, hung_reason: str) -> None:
         """节点置 HUNG + 父终态传播检查 + 升 BBS(loop_round++,bbs_mode;节点保留不 remove)。纯同步(锁内)。"""
+        _prev = next((n.status for n in self._graph.query_task_dashboard(task_id).tasks
+                      if n.node_id == node_id), None)
         self._graph.update_task_node_info(
             TaskNodePatch(task_id=task_id, node_id=node_id, status=Status.HUNG,
                           extend_props_patch={"hung_reason": hung_reason}))
+        # 动作历史:TRANSITION(节点 HUNG)
+        self._log_action(
+            task_id, node_id, NodeAction.TRANSITION,
+            {"reason": hung_reason, "to": "HUNG"},
+            status_from=_prev, status_to=Status.HUNG,
+        )
         logger.info("[hung] task=%s node=%s reason=%s → 升 BBS(loop_round++)", task_id, node_id, hung_reason)
         self._graph.update_task_graph_info(task_id, TaskGraphPatch(extend_props_patch={"bbs_mode": True}))
         self._bump_loop_round(task_id)
@@ -581,6 +678,18 @@ class ExecutionEngine:
                         TaskNodePatch(task_id=task_id, node_id=node.node_id, status=Status.RUNNING,
                                       run_mode=node.run_info.run_mode, assignee=gid,
                                       extend_props_patch={"dispatching": None}))
+                # 动作历史:DISPATCH(HIT_MULTI 协作群)
+                self._log_action(
+                    task_id, node.node_id, NodeAction.DISPATCH,
+                    {
+                        "outcome": "HIT_MULTI",
+                        "run_mode": "coop_group",
+                        "assignee": gid,
+                        "collab_mode": getattr(gf, "collab_mode", None),
+                        "bot_ids": list(getattr(gf, "bot_ids", []) or []),
+                    },
+                    status_from=Status.PENDING, status_to=Status.RUNNING,
+                )
                 run_nodes.append(node)
             elif kind == "miss":
                 miss_tasks.append(payload[0])
@@ -613,6 +722,16 @@ class ExecutionEngine:
                         self._graph.update_task_node_info(
                             TaskNodePatch(task_id=task_id, node_id=node.node_id, status=Status.RUNNING,
                                           extend_props_patch={"dispatching": None}))
+                        # 动作历史:DISPATCH(HIT_SINGLE 单 bot 派发执行)
+                        self._log_action(
+                            task_id, node.node_id, NodeAction.DISPATCH,
+                            {
+                                "outcome": "HIT_SINGLE",
+                                "run_mode": cur.run_info.run_mode,
+                                "assignee": cur.run_info.assignee,
+                            },
+                            status_from=Status.PENDING, status_to=Status.RUNNING,
+                        )
         # ② dispatch_fail:落 dispatch_error(留 PENDING,harness 按超时重试搜推)
         for patch in dispatch_fail_patches:
             self._graph.update_task_node_info(patch)
@@ -626,5 +745,12 @@ class ExecutionEngine:
             task_id, TaskGraphPatch(status=Status.DONE, output_patch={"result": "all_done"}))
         root = self._root(task_id)
         if root is not None and root.status != Status.DONE:
+            _rprev = root.status
             self._graph.update_task_node_info(
                 TaskNodePatch(task_id=task_id, node_id=root.node_id, status=Status.DONE))
+            # 动作历史:TRANSITION(根 gap 闭终验通过 → root DONE)
+            self._log_action(
+                task_id, root.node_id, NodeAction.TRANSITION,
+                {"reason": "root_gap_closed", "to": "DONE"},
+                status_from=_rprev, status_to=Status.DONE,
+            )

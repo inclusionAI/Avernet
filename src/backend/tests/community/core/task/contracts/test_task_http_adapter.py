@@ -99,6 +99,25 @@ class TestTaskDashboard:
         root = next(n for n in body["tasks"] if n["node_id"] == "t_http")
         assert root["task_spec"]["metadata"]["task_id"] == "t_http"
         assert root["task_spec"]["goal"]["objective"] == "产出尽调报告"
+        # include_action_log 默认关:action_log 不返回(空),避免常规查询 payload 膨胀
+        assert root["run_info"]["action_log"] == []
+
+    def test_dashboard_include_action_log_populates(self, client):
+        c, _ = client
+        c.post("/api/task/execute", json=_task_info_dict())
+        r = c.get("/api/task/dashboard",
+                  params={"task_id": "t_http", "include_action_log": "true"})
+        assert r.status_code == 200, r.text
+        body = r.json()["data"]
+        root = next(n for n in body["tasks"] if n["node_id"] == "t_http")
+        # 根经历 plan(无规划端口 has_gap=T,children=[])→ HUNG:至少 1 条 plan + 1 条 transition
+        actions = [e["action"] for e in root["run_info"]["action_log"]]
+        assert "plan" in actions
+        assert "transition" in actions
+        # 示例事件 payload 含全量字段
+        plan_ev = next(e for e in root["run_info"]["action_log"] if e["action"] == "plan")
+        assert "children" in plan_ev["payload"] and "has_gap" in plan_ev["payload"]
+        assert plan_ev["seq"] >= 1 and plan_ev["ts"] > 0
 
 
 class TestTaskCallbackReport:

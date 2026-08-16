@@ -59,17 +59,20 @@ async def execute_task(
 async def get_task_dashboard(
     task_id: str,
     node_id: str | None = None,
+    include_action_log: bool = False,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
 ) -> ApiResponse[TaskExecutionGraphDTO]:
     """任务执行详情可视化(整图或按 node_id 子树投影),只读。
 
-    任务不存在 → 404(显式可读,非 500)。"""
+    ``include_action_log=true`` 时返回各节点动作级历史快照(PLAN/DISPATCH/EXECUTE/VERIFY/RESET/
+    TRANSITION 全量 payload),默认关(诊断页开)。任务不存在 → 404(显式可读,非 500)。"""
     from fastapi import HTTPException
     try:
         graph = service.get_task_dashboard(task_id, node_id)
     except (TaskNotFoundError, NodeNotFoundError):
         raise HTTPException(status_code=404, detail=f"task_id={task_id} 不存在") from None
-    return ApiResponse(success=True, message="OK", error_code=200, data=graph_to_dto(graph))
+    return ApiResponse(success=True, message="OK", error_code=200,
+                       data=graph_to_dto(graph, include_action_log=include_action_log))
 
 
 @router.get("/list", response_model=ApiResponse[list[TaskSummaryDTO]])

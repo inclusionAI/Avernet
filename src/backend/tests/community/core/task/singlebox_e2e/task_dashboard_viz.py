@@ -109,6 +109,12 @@ svg#graph{width:100%;height:100%;display:block}
 #detail .miss{color:var(--hung)}
 #detail .grp{color:var(--planning)}
 .tip{position:fixed;left:20px;bottom:14px;font-size:11px;color:var(--muted);z-index:20}
+.tl{max-height:260px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:6px;background:rgba(10,14,26,.6)}
+.tl .ev{padding:4px 6px;border-bottom:1px solid rgba(255,255,255,.06);font-size:11px;line-height:1.45}
+.tl .ev:last-child{border-bottom:none}
+.tl .ts{color:var(--muted);font-size:10px;margin-left:4px}
+.tl .pl{margin-top:2px;display:flex;flex-wrap:wrap;gap:4px 8px}
+.tl .kv{color:#9fb0d0;background:rgba(76,201,240,.08);padding:1px 5px;border-radius:4px;font-size:10px;word-break:break-all}
 </style>
 </head>
 <body>
