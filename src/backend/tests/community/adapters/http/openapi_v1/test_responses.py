@@ -354,6 +354,7 @@ def test_local_skill_edit_errors_have_distinct_public_responses(error, expected)
         ("EngineBotTypeNotSupportedError", 501),
         ("EngineCapabilityUnsupportedError", 501),
         ("EngineDeviceNotReadyError", 409),
+        ("EngineStageReadOnlyError", 409),
         ("EngineResourceNotFoundError", 404),
         ("EngineUpstreamError", 502),
     ],
@@ -367,29 +368,33 @@ def test_engine_runtime_errors_map_to_their_own_status(exc_name, expected_status
 
 
 def test_engine_runtime_base_does_not_swallow_its_leaves():
-    """``EngineRuntimeError`` is the base of all four; it must be listed last.
+    """``EngineRuntimeError`` is the base of every ``Engine*``; it is listed last.
 
     This is the "map the base class last" trap from the Track B gotchas, and
-    Track C introduces two base/leaf pairs at once — so it is asserted, not
+    Track C introduced two base/leaf pairs at once — so it is asserted, not
     trusted.
+
+    The leaves are read off the errors module rather than listed here. A
+    hand-written list is a second inventory that a new error joins only if
+    someone remembers, and the cost of forgetting is silent: a leaf placed after
+    its base still resolves, just to the base's 502, with a green suite.
     """
+    import agentclaw.community.core.engine_runtime.errors as errs
     from agentclaw.community.adapters.http.openapi_v1.responses import ENVELOPE_ERRORS
-    from agentclaw.community.core.engine_runtime.errors import (
-        EngineCapabilityUnsupportedError,
-        EngineDeviceNotReadyError,
-        EngineResourceNotFoundError,
-        EngineRuntimeError,
-        EngineUpstreamError,
-    )
+    from agentclaw.community.core.engine_runtime.errors import EngineRuntimeError
+
+    leaves = [
+        getattr(errs, name)
+        for name in errs.__all__
+        if name != "EngineRuntimeError"
+        and issubclass(getattr(errs, name), EngineRuntimeError)
+    ]
+    assert len(leaves) >= 7, "the errors module stopped exporting its leaves"
 
     order = list(ENVELOPE_ERRORS)
     base = order.index(EngineRuntimeError)
-    for leaf in (
-        EngineCapabilityUnsupportedError,
-        EngineDeviceNotReadyError,
-        EngineResourceNotFoundError,
-        EngineUpstreamError,
-    ):
+    for leaf in leaves:
+        assert leaf in ENVELOPE_ERRORS, f"{leaf.__name__} has no mapped status"
         assert order.index(leaf) < base, f"{leaf.__name__} listed after its base"
 
 

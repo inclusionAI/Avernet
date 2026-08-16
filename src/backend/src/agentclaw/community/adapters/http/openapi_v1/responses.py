@@ -299,7 +299,9 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     InvalidIdentityFileTypeError: (400, "Invalid file type"),
     # ── Engine-runtime (Track C) ──────────────────────────────────────────
     # Ordering inside this block is load-bearing: ``EngineRuntimeError`` is the
-    # base of the four ``Engine*`` errors below it and is listed AFTER them.
+    # base of every ``Engine*`` error below it and is listed AFTER them.
+    # ``test_engine_runtime_base_does_not_swallow_its_leaves`` reads the leaves
+    # off ``errors.__all__``, so a new one is covered without editing a list.
     # Lookup returns on the first isinstance match in insertion order, so a base
     # placed first would swallow every leaf under it — the trap recorded in the
     # Track B gotchas.
