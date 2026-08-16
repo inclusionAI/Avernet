@@ -66,6 +66,32 @@ class BotFacts:
     #: caller actually addressed.
     bot_pk: int = 0
 
+    @classmethod
+    def from_record(
+        cls, record: dict[str, Any], *, bot_id: str, owner_id: str
+    ) -> "BotFacts":
+        """Project an ``ac_bots`` row onto the narrow facts.
+
+        The one place a bot record becomes facts, so two callers cannot disagree
+        about which columns matter or how a missing one reads. ``bot_id`` and
+        ``owner_id`` are the *requested* values, used only as the fallback when
+        the row does not carry its own — the same fallback this projection has
+        always applied.
+
+        ``record`` must come from an **owner-scoped** ``(bot_id, owner_id)``
+        read. ``bot_id`` carries no unique constraint and every user's first bot
+        is called ``default``, so a row fetched by ``bot_id`` alone can belong to
+        another owner — and ``bot_pk`` is exactly the value later lookups trust
+        to stay on the addressed bot.
+        """
+        return cls(
+            bot_id=str(record.get("bot_id") or bot_id),
+            bot_type=str(record.get("bot_type") or ""),
+            active_engine=str(record.get("active_engine") or ""),
+            owner_id=str(record.get("owner_id") or owner_id),
+            bot_pk=int(record.get("id") or 0),
+        )
+
 
 @dataclass(frozen=True)
 class SocketInfo:

@@ -130,22 +130,15 @@ class EngineRuntimeRelay:
         impossible rather than merely discouraged.
         """
         bot = self._bot_service.get_bot(bot_id, owner_id)
-        resolved_id = str(bot.get("bot_id") or bot_id)
-        resolved_owner = str(bot.get("owner_id") or owner_id)
+        facts = BotFacts.from_record(bot, bot_id=bot_id, owner_id=owner_id)
         require_bot_operator(
             self._collaborators,
-            bot_pk=int(bot.get("id") or 0),
-            bot_id=resolved_id,
+            bot_pk=facts.bot_pk,
+            bot_id=facts.bot_id,
             caller_id=caller_id,
-            owner_id=resolved_owner,
+            owner_id=facts.owner_id,
         )
-        return BotFacts(
-            bot_id=resolved_id,
-            bot_type=str(bot.get("bot_type") or ""),
-            active_engine=str(bot.get("active_engine") or ""),
-            owner_id=resolved_owner,
-            bot_pk=int(bot.get("id") or 0),
-        )
+        return facts
 
     async def resolve_bot_off_loop(
         self, bot_id: str, owner_id: str, caller_id: str

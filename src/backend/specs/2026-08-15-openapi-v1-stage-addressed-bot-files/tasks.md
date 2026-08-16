@@ -30,7 +30,7 @@
         entry in nothing (this file has no ordering rule; `responses.py` does).
 - **Depends on:** —
 
-### Task A2: `BotFacts.from_record`, `require_stage_writable`, `resolve_published_device_context`  `[ ]`
+### Task A2: `BotFacts.from_record`, `require_stage_writable`, `resolve_published_device_context`  `[x]`
 
 - **Goal:** A published stage → `DeviceContext`, in one place, for the surfaces
   that read a bot's files — so they cannot drift from the surfaces that forward
@@ -40,30 +40,30 @@
   `…/core/engine_runtime/stage.py`,
   `…/core/engine_runtime/relay.py`
 - **Done when:**
-  - [ ] `BotFacts.from_record(record, *, bot_id, owner_id)` classmethod, with the
+  - [x] `BotFacts.from_record(record, *, bot_id, owner_id)` classmethod, with the
         same `or`-fallbacks `relay.resolve_bot` applies today, and a docstring
         saying the record must come from an owner-scoped read (spec D6).
-  - [ ] `relay.resolve_bot`'s inline `BotFacts(...)` construction uses it, so
+  - [x] `relay.resolve_bot`'s inline `BotFacts(...)` construction uses it, so
         there is **one** projection of a bot row into facts. This is the only
         edit outside the feature; it is reversible on its own if a reviewer
         disagrees.
-  - [ ] `require_stage_writable(stage)` raises `EngineStageReadOnlyError` for
+  - [x] `require_stage_writable(stage)` raises `EngineStageReadOnlyError` for
         anything but the draft; docstring says why it is not conditional on bot
         type or liveness.
-  - [ ] `resolve_published_device_context(resolver, publish_repo, binding_repo,
+  - [x] `resolve_published_device_context(resolver, publish_repo, binding_repo,
         *, facts: BotFacts, stage: str)`: `require_stage_addressable(
         facts.bot_type, stage)` first, then `resolve_stage_bind_id(...)` keyed
         on `facts.bot_pk`, then `resolve_for_binding(bind_id, facts.owner_id,
         bot_id=facts.bot_id)`.
-  - [ ] Its docstring says **why published-only** — a draft leg would need facts
+  - [x] Its docstring says **why published-only** — a draft leg would need facts
         the draft path must not read (spec D8) — and why `resolve_for_binding`
         rather than the relay's `…_invoke` (a filesystem needs the full conn
         info). It names `relay._resolve_published_device` as its sibling and
         `resolve_stage_bind_id` as the rule they share.
-  - [ ] Module docstring gains the *other question* paragraph: stage-keyed comes
+  - [x] Module docstring gains the *other question* paragraph: stage-keyed comes
         here, record-keyed goes to `select_stage_bind_id`, and why routing a
         `publish_id` through this rule would answer about the wrong release.
-  - [ ] `__all__` updated. `ruff check` clean.
+  - [x] `__all__` updated. `ruff check` clean.
 - **Depends on:** A1
 
 ### Task A3: Map the refusal to 409  `[ ]`
