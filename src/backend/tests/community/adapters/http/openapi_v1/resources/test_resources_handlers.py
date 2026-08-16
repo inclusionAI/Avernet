@@ -708,16 +708,24 @@ async def test_no_handler_can_fall_back_to_a_bot_derived_owner():
     mounted = [
         route
         for route in _api_routes(build_public_router())
-        if route.path.startswith("/openapi/v1/bots/resources")
+        if route.path.startswith("/openapi/v1/bots/{bot_id}/resources")
     ]
-    # 7 routes, all path-addressed. The count is a tripwire — a resources route
-    # added without the shared user_id dependency is exactly the silent owner
-    # fallback this guard exists to prevent.
+    # 7 routes. The count is a tripwire — a resources route added without the
+    # shared user_id dependency is exactly the silent owner fallback this guard
+    # exists to prevent.
     assert len(mounted) == 7, [r.path for r in mounted]
-    # And none of them is addressed by a record id: the group has no path
-    # parameters at all now, so a future ``/{resource_id}`` cannot creep back in
-    # without this failing.
-    assert not [r for r in mounted if "{" in r.path], [r.path for r in mounted]
+    # The only path parameter is the bot the operation addresses. This used to
+    # read "no path parameters at all", which stopped being sayable when the
+    # group moved from /bots/resources?bot_id= to /bots/{bot_id}/resources — but
+    # the property it was really protecting still holds: the group is addressed
+    # by workspace path, never by a record id, so a future ``/{resource_id}``
+    # still cannot creep in without failing here.
+    assert {
+        segment
+        for route in mounted
+        for segment in route.path.split("/")
+        if segment.startswith("{")
+    } == {"{bot_id}"}, [r.path for r in mounted]
 
     def guarded(dependant) -> bool:
         return dependant.call is require_user_id or any(

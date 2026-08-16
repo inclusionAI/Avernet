@@ -1,4 +1,4 @@
-"""Resources group — ``/openapi/v1/bots/resources``.
+"""Resources group — ``/openapi/v1/bots/{bot_id}/resources``.
 
 The bot's workspace files and folders. The engine is the source of truth: every
 handler resolves against the workspace, and every entry is addressed by its
@@ -47,6 +47,7 @@ from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
 
 from agentclaw.community.api.resource_service import ResourceServiceFactoryProtocol
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
+    BotIdPath,
     Deleted,
     Envelope,
     ErrorEnvelope,
@@ -251,7 +252,7 @@ async def _list_dir_or_empty(
     return listed or []
 
 
-router = APIRouter(prefix="/openapi/v1/bots/resources", tags=["resources"])
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/resources", tags=["resources"])
 
 #: The query parameter addressing a file or folder, documented once. Kept as an
 #: Annotated default so handlers stay directly callable in tests.
@@ -272,7 +273,7 @@ async def list_resources(
     page: PageParamsDep,
     owner_id: UserIdDep,
     request: Request,
-    bot_id: str = Query(..., description="Bot ID this resource belongs to."),
+    bot_id: BotIdPath,
     path: str = Query(
         "", description="Directory to list, relative to the workspace root."
     ),
@@ -329,7 +330,7 @@ async def stat_resource(
     owner_id: UserIdDep,
     path: FilePathQuery,
     request: Request,
-    bot_id: str = Query(..., description="Bot ID this resource belongs to."),
+    bot_id: BotIdPath,
     bot_repo: BotRepository = Injected(BotRepository),
     file_svc: ResourceFileService = Injected(ResourceFileService),
 ) -> Envelope[FileEntry]:
@@ -371,7 +372,7 @@ async def upload_resource(
     path: FilePathQuery,
     content: Annotated[bytes, Body(media_type="application/octet-stream")],
     request: Request,
-    bot_id: str = Query(..., description="Bot ID this resource belongs to."),
+    bot_id: BotIdPath,
     overwrite: Annotated[
         bool,
         Query(
@@ -618,7 +619,7 @@ async def download_file(
     # rejected path would surface as a 500 rather than a 400. The success path
     # still returns raw bytes, not an envelope.
     request: Request,
-    bot_id: str = Query(..., description="Bot ID this resource belongs to."),
+    bot_id: BotIdPath,
     bot_repo: BotRepository = Injected(BotRepository),
     file_svc: ResourceFileService = Injected(ResourceFileService),
 ) -> Response:
@@ -642,7 +643,7 @@ async def preview_file(
     owner_id: UserIdDep,
     path: FilePathQuery,
     request: Request,
-    bot_id: str = Query(..., description="Bot ID this resource belongs to."),
+    bot_id: BotIdPath,
     bot_repo: BotRepository = Injected(BotRepository),
     file_svc: ResourceFileService = Injected(ResourceFileService),
 ) -> Envelope[Preview]:
@@ -681,7 +682,7 @@ async def create_directory(
     owner_id: UserIdDep,
     path: FilePathQuery,
     request: Request,
-    bot_id: str = Query(..., description="Bot ID this resource belongs to."),
+    bot_id: BotIdPath,
     bot_repo: BotRepository = Injected(BotRepository),
     file_svc: ResourceFileService = Injected(ResourceFileService),
 ) -> Envelope[FileEntry]:
@@ -723,7 +724,7 @@ async def delete_file(
     owner_id: UserIdDep,
     path: FilePathQuery,
     request: Request,
-    bot_id: str = Query(..., description="Bot ID this resource belongs to."),
+    bot_id: BotIdPath,
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
     file_svc: ResourceFileService = Injected(ResourceFileService),

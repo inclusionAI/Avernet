@@ -481,7 +481,7 @@ AvernetTenantMiddleware → resolve_avernet_tenant(request)  ─┐
 GET    /openapi/v1/bots/b-1?user_id=u-42
 PUT    /openapi/v1/bots/b-1?user_id=u-42        {"bot_name": "Ada"}
 DELETE /openapi/v1/bots/b-1?user_id=u-42
-POST   /openapi/v1/bots/skills/upload?bot_id=b-1&user_id=u-42    <raw zip>
+POST   /openapi/v1/bots/b-1/skills?user_id=u-42                  <raw zip>
 ```
 
 **为什么只有一种位置。** `user_id` 不是这个面上任何资源的属性，它表示*这次调用是为谁
@@ -496,7 +496,7 @@ POST   /openapi/v1/bots/skills/upload?bot_id=b-1&user_id=u-42    <raw zip>
 
 | 已否决 | 原因 |
 | --- | --- |
-| 放进 11 个 JSON body 写操作的 body | 对于 body 不由本 API 定义的写操作需要一张三行例外表 —— 两个裸字节上传，以及自由格式的 `PUT …/engine-config` —— 并且会让同一个资源上的同一个概念分裂成两种位置 |
+| 放进 11 个 JSON body 写操作的 body | 对于 body 不由本 API 定义的写操作需要一张三行例外表 —— 两个裸字节上传，以及自由格式的 `PUT …/engine/config` —— 并且会让同一个资源上的同一个概念分裂成两种位置 |
 | 放进路径 | 如上，归属关系反了；用户在前的 `/openapi/v1/users/{user_id}/…` 形式本身自洽，但此处走不通：`/openapi/v1` 之后的第一段是网关的**域选择器** |
 | `X-Avernet-User-Id` header | 统一，且与网关的委托草案一致（auth design §15），但会让用户变成传输层元数据，而不是操作的一个参数 |
 
@@ -553,9 +553,9 @@ Bot 的**拥有者**，或 **member 级及以上的协作者** —— 与内部�
 放在 body 或路径段）：
 
 ```text
-GET /openapi/v1/bots/sessions/b-1?user_id=u-collab&owner_id=u-owner            协作者，团队 Bot
-GET /openapi/v1/bots/engine/b-1/status?user_id=u-owner&stage=online            拥有者，线上运行态
-GET /openapi/v1/bots/connection/b-1?user_id=u-collab&owner_id=u-owner&stage=verify
+GET /openapi/v1/bots/b-1/sessions?user_id=u-collab&owner_id=u-owner            协作者，团队 Bot
+GET /openapi/v1/bots/b-1/engine/status?user_id=u-owner&stage=online            拥有者，线上运行态
+GET /openapi/v1/bots/b-1/connection?user_id=u-collab&owner_id=u-owner&stage=verify
 ```
 
 - **`owner_id`** —— 请求所指向 Bot 的拥有者。默认是调用者本人，因此操作自己的 Bot
@@ -582,8 +582,8 @@ GET /openapi/v1/bots/connection/b-1?user_id=u-collab&owner_id=u-owner&stage=veri
 
 延后但未丢失 —— 已建 issue：数据类目的协作者访问（#906、#907）、routines 的阶段
 钉死（#908）、发布生命周期（#909）、可见性/协作者管理（#910）、delegation（#911）。
-skills 组的 `owner_entity_id` 定位参数早于 `owner_id`，应在 skills 发布前统一到
-`owner_id`（spec 未决问题 1）。
+skills 组的 `owner_entity_id` 定位参数早于 `owner_id`；已于 2026-08-15 随 Agent 在前的
+寻址统一为 `owner_id`，待退役的 skills 旧地址仍发布旧参数名（spec 未决问题 1，已关闭）。
 
 `tests/…/openapi_v1/engine_runtime/test_operator_access.py` 对全部十六个操作扫掠
 运维者矩阵；`…/test_stage_addressing.py` 钉住阶段行为并断言两个参数恰好出现在这
@@ -594,41 +594,70 @@ skills 组的 `owner_entity_id` 定位参数早于 `owner_id`，应在 skills �
 
 ## 寻址规则
 
-**每个操作的地址都是 `/openapi/v1/bots/<component>/…`。** 组件的**字面**名称在前；
-带 Agent 作用域的操作把 `{bot_id}` 放在组件名**之后**的第一段 —— 不在它前面，中间
-也不再夹一个 `/bot/`。
+**每个带 Agent 作用域的操作，地址都是 `/openapi/v1/bots/{bot_id}/<component>/…`。**
+Agent 在前，组件的字面名称挂在它下面。
 
 ```text
-/openapi/v1/bots/<component>            # 该组件自己的集合
-/openapi/v1/bots/<component>/{bot_id}   # …限定到某一个 Agent
+/openapi/v1/bots                        # 账户级集合
+/openapi/v1/bots/{bot_id}               # 某一个 Agent
+/openapi/v1/bots/{bot_id}/<component>   # …该 Agent 的某个组件
 ```
 
-`bots` 组件是唯一的例外，而且仅仅因为它**就是** base 所命名的那个组件：它拥有
-`/openapi/v1/bots` 与 `/openapi/v1/bots/{bot_id}`，它自己的子资源（`/status`、
-`/passport`、`/restart`、`/auth-status`、`/engine-config`、`/startup-script`）挂在这个 Agent 记录之下。
-这些是 Agent 本身的属性，而不是别的组件来借用 Agent 的地址。
+Agent 是这套 API 所讨论的那个名词，所以地址先说是哪个 Agent，再说关于它的什么；同一个
+Agent 上的所有操作共享同一个前缀。bots 组件自己的子资源（`/status`、`/passport`、
+`/restart`、`/auth-status`、`/engine/config`、`/startup-script`）就落在第三段的同一个
+位置上，与 `sessions`、`skills` 等并列 —— Agent 的属性与 Agent 的组件在寻址上不再有
+区别。
 
-**为什么。** 曾有三处违反此规则 —— `identity` 多带了一段冗余的 `/bot/`；
-`connection`/`engine`/`approvals`/`sessions`/`models`/`skills` 则把 `{bot_id}` 放在了
-自己的组件名之前。这让一个路由文件无法自述其地址（读
-`engine_runtime/sessions/router.py` 的人无从判断 `/openapi/v1/bots/{bot_id}/sessions`
-是由该文件提供，还是由 bots 组件里某个 `{bot_id}` 形态的路由提供），也堵死了同一个
-base 之下再容纳第二个 owner 的可能 —— BCS 正是从另一侧撞上同一问题，并以同样方式把自
-己的控制面迁到了 `/openapi/v1/bots/collaboration/{bot_id}`
-（`src/bcs/docs/plans/2026-08-03-bcn-collaboration-paths-design.md`）。本次在
-`2026-08-03-openapi-v1-path-normalization` 规格中统一；测试
+**`bot_id` 永远在路径上。** 不在查询串里，也不在请求体里。一个操作作用于哪个 Agent 是
+它的**地址**，而不是调用的参数；要求客户端把同一个 id 填两遍，等于把地址告诉了它两次。
+这正是本规则修掉的那个具体缺陷：九个操作在查询串里取 `bot_id`、一个在请求体里取，而它们
+的路径上本来就有位置可放。
+
+**为什么值得做这次迁移。** 有两件事是组件在前的形态给不了的。
+
+*鉴权收敛成一套机制。* `require_granted_bot` 对整个面上的每一个操作，都以同样的方式从
+路径上读出被寻址的 Agent。旧形态下有七个操作把 Agent 放在该依赖看不到的地方，只能在各自
+的 handler 里自查授权 —— 一件事两套机制，并且已经因此产生过一个真实缺陷。那就是
+`TODO(#960)`，Agent 在前的寻址把它从七个操作收窄到四个。剩下的四个是
+`{skill_id}` 系列 skills 操作：它们按 `(skill, actor)` 解析，被寻址 Bot 的
+*owner* 是随记录返回的、而不是来自请求 —— 协作者访问他人 Bot 上的技能是常态 ——
+因此在读到记录之前，共享依赖没有可供查询授权的对象。它们记录在
+`admission.SKILL_SCOPED_OPERATIONS` 中，并在各自 handler 里检查授权。
+**不要以为共享依赖覆盖了它们而删除这些检查；它并没有。**
+
+*保留名清单缩到真正需要它的那些操作。* 因为 `{bot_id}` 是单段通配，凡是占据该段的字面量
+都是 Agent 不能取的名字。组件在前把**每一个**组件名都放进了那一段；Agent 在前则把它们整体
+下移一段，在那里不与任何东西相撞。
+
+仍然在该段保留字面量的，是那些没有单一 Agent 可指的操作：创建 Agent、列出 Agent、
+`check-name`、`ceiling`、`authorized` 两组、租户级的 `mcp` 目录、`logs`（跨 Agent 的
+trace 查询）以及 `loadtest`。只有它们。
+
+规格见 `specs/2026-08-15-openapi-v1-bot-first-addressing`；测试
 （`tests/…/openapi_v1/test_path_convention.py`）直接针对生成的文档断言该规则，因此违反
 它的路由会在测试里失败，而不是留给评审去发现。
 
 **保留名。** 由于 `bots` 组件保留了裸的 `/openapi/v1/bots/{bot_id}`，如果某个 Agent 的
-id 恰好等于某个组件名，它在该地址上就不可达。这个集合是固定的，同一个测试会断言下面这份
-清单仍然等于路由实际发布的字面量（英文版 `README.md` 中的同名清单是被解析的那一份）：
+id 恰好等于该段上的某个字面量，它在该地址上就不可达。同一个测试会断言下面这份清单仍然等于
+路由实际发布的字面量（英文版 `README.md` 中的同名清单是被解析的那一份）：
 
 <!-- reserved-component-names -->
 ```text
-approvals  ceiling  check-name  connection  engine  identity  loadtest
-logs  mcp  models  resources  routines  sessions  skills
+approvals  authorized  ceiling  check-name  connection  engine  identity
+loadtest  logs  mcp  models  resources  routines  sessions  skills
 ```
+
+其中九个 —— `approvals`、`connection`、`engine`、`identity`、`models`、`resources`、
+`routines`、`sessions`、`skills` —— **只被待退役的旧地址占着**。Agent 在前的寻址已把每个
+带 Agent 作用域的组件移出了那一段，因此旧地址删除之后，清单只剩下六个：
+
+```text
+authorized  ceiling  check-name  loadtest  logs  mcp
+```
+
+在旧地址还在应答的这段时间里，上面那份长清单才是准确的：id 为 `sessions` 的 Agent 在
+`/openapi/v1/bots/sessions` 上依然不可达。
 
 **先于路由保留的名字。** 另有一份独立清单 —— 在任何路由发布它们之前就已在此占位的名字。
 它们的保留理由与上面那份**不同**：没有任何路由提供它们，因此当前也不存在"某个地址不可达"
@@ -650,10 +679,45 @@ messages
 断言两份清单互不相交，因此"加了路由却没搬名字"会在测试里失败，而不是留给评审去发现。
 
 > **挂载顺序是有承重作用的。** `build_public_router()` 会先挂字面量子组，再挂 bots 组，
-> 这样 `/openapi/v1/bots/resources` 才能排在通配的 `/openapi/v1/bots/{bot_id}` 前面被
-> 解析。如今真正依赖它的只剩下那些提供单段集合根的组件（`resources`、`routines`，以及
-> bots 自己的 `check-name`/`ceiling`）—— 其余组件都只在两段及以上才可达 —— 但新增的组
-> 仍应放进 `_SUBGROUPS` 列表里、位于 bots 路由之前，而不是每次都去重新推演这个例外。
+> 这样 `/openapi/v1/bots/check-name` 才能排在通配的 `/openapi/v1/bots/{bot_id}` 前面被
+> 解析。在 Agent 在前的寻址下，真正依赖它的只剩下那些确实在该段保留字面量的组 —— 上面
+> 列出的账户级操作，以及按定义就是组件在前的待退役地址。当前带 Agent 作用域的各组都以
+> `{bot_id}` 开头，挂载顺序对它们已无所谓。新增的组仍应放在 bots 路由之前，而不是每次都
+> 去重新推演这个例外。
+
+## 待退役地址（迁移窗口）
+
+**没有删除任何东西。** Agent 在前的寻址之前这套面上应答的每一个地址，现在仍然应答 ——
+形态不变、参数不变、位置不变，包括本规则要消除的那个查询串里的 `bot_id` 和那个请求体里的
+`bot_id`。共四十一个操作，由 `openapi_v1/deprecated/` 提供。
+
+它们不是别名。待退役地址仍以**旧的**参数名、在**旧的**位置上发布参数，然后自行转译，因此
+尚未迁移的客户端可以原样继续工作。`tests/…/openapi_v1/test_legacy_parity.py` 会把每个待退
+役地址和它的替代地址送进同一个应用，断言两者作出相同的决定；这条断言就是全部的兼容承诺。
+
+调用方从两个渠道得知：
+
+| 渠道 | 内容 |
+|---|---|
+| 发布的文档 | 每个待退役操作上都有 `deprecated: true`，据此生成的客户端可以打上标注 |
+| 响应头 | `Deprecation: @1786752000` 与 `Sunset: Sun, 15 Aug 2027 00:00:00 GMT`，在该地址的**每一个**响应上，包括失败响应。两者拼写不同是刻意的：`Deprecation` 是 RFC 9745 的结构化字段日期（`@` 加自纪元起的秒数），`Sunset` 是 RFC 8594 的 HTTP 日期。 |
+
+**窗口为 2026-08-15 → 2027-08-15。** 真正决定何时删除的是流量而不是日期：公共访问日志会
+告诉我们某个地址已经没有调用方，那才是删除它的时刻。这个日期是客户端可以据以规划的外沿，
+不是倒计时。
+
+**迁移是机械的。** 把 `bot_id` 从查询串（`POST …/routines` 是从请求体）挪到路径上，组件名
+放到它后面：
+
+```text
+GET  /openapi/v1/bots/sessions/{bot_id}          →  GET  /openapi/v1/bots/{bot_id}/sessions
+GET  /openapi/v1/bots/resources?bot_id=b-1       →  GET  /openapi/v1/bots/b-1/resources
+POST /openapi/v1/bots/skills/upload?bot_id=b-1   →  POST /openapi/v1/bots/b-1/skills
+```
+
+随之而来的只有两处改名，也是本次迁移里仅有的参数变化：`skills` 的 owner 定位参数改为与整
+个面一致的 `owner_id`（原为 `owner_entity_id`），以及 `PUT …/approvals/mode` 不再接收它从
+未读取过的 `session_key`。
 
 除注明外，所有响应都使用 `openapi_v1/contracts.py` 里的 `Envelope[T]` / `Page[T]` 结构
 （二进制流不走信封）。
@@ -675,8 +739,8 @@ messages
 | GET | `/openapi/v1/bots/{bot_id}/auth-status` | 轮询 Passport 授权；ISSUED 时完成创建 | `Envelope[BotAuthStatus]` |
 | GET | `/openapi/v1/bots/{bot_id}/status` | 运行时/设备就绪状态 | `Envelope[BotStatus]` |
 | GET | `/openapi/v1/bots/{bot_id}/passport` | 获取 Agent Passport | `Envelope[Passport]` |
-| GET | `/openapi/v1/bots/{bot_id}/engine-config` | 读取引擎配置（自由格式 JSON） | `Envelope[dict]` |
-| PUT | `/openapi/v1/bots/{bot_id}/engine-config` | 写入引擎配置（自由格式 JSON） | `Envelope[dict]` |
+| GET | `/openapi/v1/bots/{bot_id}/engine/config` | 读取引擎配置（自由格式 JSON） | `Envelope[dict]` |
+| PUT | `/openapi/v1/bots/{bot_id}/engine/config` | 写入引擎配置（自由格式 JSON） | `Envelope[dict]` |
 
 _bots 上**刻意不暴露**的字段：创建时的 `engine_options`（下游目前没有任何代码会读
 `BotCreateSpec.extra_properties`，暴露它等于承诺一个服务端其实会忽略的东西），以及更新时的
@@ -726,13 +790,13 @@ Bot 工作区的文件与目录；存储位置从不暴露。所有操作都以�
 查询参数寻址，七个端点均要求 `bot_id` 与 `user_id`。
 | 方法 | 路径 | 用途 | 成功响应 |
 |---|---|---|---|
-| GET | `/openapi/v1/bots/resources` | 列目录（`path`、`type`、分页） | `Envelope[Page[FileEntry]]` |
-| GET | `/openapi/v1/bots/resources/stat` | 单个条目的元数据（`path`） | `Envelope[FileEntry]` |
-| POST | `/openapi/v1/bots/resources/upload` | 上传原始字节（`application/octet-stream`、`overwrite`） | `201 Envelope[FileEntry]` |
-| GET | `/openapi/v1/bots/resources/download` | 下载字节（**原始，不走信封**） | `application/octet-stream` |
-| GET | `/openapi/v1/bots/resources/preview` | 文本预览（1 MB 上限 → 413） | `Envelope[Preview]` |
-| POST | `/openapi/v1/bots/resources/mkdir` | 创建目录 | `201 Envelope[FileEntry]` |
-| DELETE | `/openapi/v1/bots/resources` | 删除文件或目录 | `Envelope[Deleted]` |
+| GET | `/openapi/v1/bots/{bot_id}/resources` | 列目录（`path`、`type`、分页） | `Envelope[Page[FileEntry]]` |
+| GET | `/openapi/v1/bots/{bot_id}/resources/stat` | 单个条目的元数据（`path`） | `Envelope[FileEntry]` |
+| POST | `/openapi/v1/bots/{bot_id}/resources/upload` | 上传原始字节（`application/octet-stream`、`overwrite`） | `201 Envelope[FileEntry]` |
+| GET | `/openapi/v1/bots/{bot_id}/resources/download` | 下载字节（**原始，不走信封**） | `application/octet-stream` |
+| GET | `/openapi/v1/bots/{bot_id}/resources/preview` | 文本预览（1 MB 上限 → 413） | `Envelope[Preview]` |
+| POST | `/openapi/v1/bots/{bot_id}/resources/mkdir` | 创建目录 | `201 Envelope[FileEntry]` |
+| DELETE | `/openapi/v1/bots/{bot_id}/resources` | 删除文件或目录 | `Envelope[Deleted]` |
 
 _注：upload 已定稿为原始 `application/octet-stream` body（非 multipart）。与 PR #363 总览的 multipart 描述不一致——实现以路由为准，若后续需改 multipart 是契约 PR。_
 
@@ -755,12 +819,12 @@ verified principal、按 owner/Bot 作用域处理，并使用标准 `Envelope` 
 
 | 方法 | 路径 | 用途 | 成功响应 |
 |---|---|---|---|
-| GET | `/openapi/v1/bots/skills` | 列出精确 Bot-owned Local Skill 元数据（`bot_id`、可选 owner locator、`active`、`keyword`、分页） | `Envelope[Page[Skill]]` |
-| POST | `/openapi/v1/bots/skills/upload` | 创建或安全替换一个原始 `application/zip` Local Skill 包 | `201 Envelope[SkillUpload]` / 替换时 `200` |
-| GET | `/openapi/v1/bots/skills/{skill_id}` | 读取一个部署范围 Skill ID 的公开元数据 | `Envelope[Skill]` |
-| POST | `/openapi/v1/bots/skills/{skill_id}/activate` | 设为 Active desired state 并同步 runtime | `Envelope[SkillState]` |
-| POST | `/openapi/v1/bots/skills/{skill_id}/deactivate` | 设为 Inactive desired state 并同步 runtime | `Envelope[SkillState]` |
-| DELETE | `/openapi/v1/bots/skills/{skill_id}` | 可恢复地删除一个 Inactive Local Skill | `Envelope[Deleted]` |
+| GET | `/openapi/v1/bots/{bot_id}/skills` | 列出精确 Bot-owned Local Skill 元数据（`bot_id`、可选 owner locator、`active`、`keyword`、分页） | `Envelope[Page[Skill]]` |
+| POST | `/openapi/v1/bots/{bot_id}/skills` | 创建或安全替换一个原始 `application/zip` Local Skill 包 | `201 Envelope[SkillUpload]` / 替换时 `200` |
+| GET | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | 读取一个部署范围 Skill ID 的公开元数据 | `Envelope[Skill]` |
+| POST | `/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate` | 设为 Active desired state 并同步 runtime | `Envelope[SkillState]` |
+| POST | `/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate` | 设为 Inactive desired state 并同步 runtime | `Envelope[SkillState]` |
+| DELETE | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | 可恢复地删除一个 Inactive Local Skill | `Envelope[Deleted]` |
 
 `413101` 只在原始 ZIP upload 上公开。稳定 Local Skill subcode 为 `400101`、`404000`、
 `409101`–`409104`、`413101`、`502101`、`502102`；既有公共类别保持原有 `xxx000` code。
@@ -774,22 +838,22 @@ Generated OpenAPI 已由合同测试锁定为恰好这六个操作。
 定时/触发的 Agent 任务（原来的 "cron"）；触发器是嵌套对象。
 | 方法 | 路径 | 用途 | 成功响应 |
 |---|---|---|---|
-| GET | `/openapi/v1/bots/routines` | 列表（`bot_id`、`status`、分页） | `Envelope[Page[Routine]]` |
-| POST | `/openapi/v1/bots/routines` | 创建 | `201 Envelope[Routine]` |
-| GET | `/openapi/v1/bots/routines/{routine_id}` | 获取 | `Envelope[Routine]` |
-| PATCH | `/openapi/v1/bots/routines/{routine_id}` | 局部更新 | `Envelope[Routine]` |
-| DELETE | `/openapi/v1/bots/routines/{routine_id}` | 删除 | `Envelope[Deleted]` |
-| POST | `/openapi/v1/bots/routines/{routine_id}/run` | 立即执行一次 | `Envelope[RoutineRun]` |
-| GET | `/openapi/v1/bots/routines/{routine_id}/runs` | 执行历史（分页） | `Envelope[Page[RoutineRun]]` |
+| GET | `/openapi/v1/bots/{bot_id}/routines` | 列表（`bot_id`、`status`、分页） | `Envelope[Page[Routine]]` |
+| POST | `/openapi/v1/bots/{bot_id}/routines` | 创建 | `201 Envelope[Routine]` |
+| GET | `/openapi/v1/bots/{bot_id}/routines/{routine_id}` | 获取 | `Envelope[Routine]` |
+| PATCH | `/openapi/v1/bots/{bot_id}/routines/{routine_id}` | 局部更新 | `Envelope[Routine]` |
+| DELETE | `/openapi/v1/bots/{bot_id}/routines/{routine_id}` | 删除 | `Envelope[Deleted]` |
+| POST | `/openapi/v1/bots/{bot_id}/routines/{routine_id}/run` | 立即执行一次 | `Envelope[RoutineRun]` |
+| GET | `/openapi/v1/bots/{bot_id}/routines/{routine_id}/runs` | 执行历史（分页） | `Envelope[Page[RoutineRun]]` |
 
 ### 🟩 lucas-xzp · P2 —— identity（3 个端点）· `openapi_v1/identity/router.py`
 读写某个 Agent 的身份 markdown 文件（RULES、SOUL 等），`file_type` 是枚举白名单。没有自己的
 Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
 | 方法 | 路径 | 用途 | 成功响应 |
 |---|---|---|---|
-| GET | `/openapi/v1/bots/identity/{bot_id}` | 列出身份文件（含是否存在） | `Envelope[IdentityFileList]` |
-| GET | `/openapi/v1/bots/identity/{bot_id}/{file_type}` | 读取单个身份文件 | `Envelope[IdentityFile]` |
-| PUT | `/openapi/v1/bots/identity/{bot_id}/{file_type}` | 覆写单个身份文件（`content`） | `Envelope[IdentityFileRef]` |
+| GET | `/openapi/v1/bots/{bot_id}/identity` | 列出身份文件（含是否存在） | `Envelope[IdentityFileList]` |
+| GET | `/openapi/v1/bots/{bot_id}/identity/{file_type}` | 读取单个身份文件 | `Envelope[IdentityFile]` |
+| PUT | `/openapi/v1/bots/{bot_id}/identity/{file_type}` | 覆写单个身份文件（`content`） | `Envelope[IdentityFileRef]` |
 
 ### ✅ loadtest（2 个端点）· `openapi_v1/loadtest/router.py` —— **已实现**
 
@@ -845,11 +909,11 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 
 | 组 | 端点数 | 公共路径 |
 |---|---|---|
-| sessions | 7 | `/openapi/v1/bots/sessions/{bot_id}…` —— 拥有者/协作者运维 |
-| engine | 3 | `/openapi/v1/bots/engine/{bot_id}/{status,capabilities,available}` |
-| models | 2 | `/openapi/v1/bots/models/{bot_id}`、`…/{bot_id}/{model_id}` |
-| approvals | 3 | `/openapi/v1/bots/approvals/{bot_id}/mode`（GET/PUT）、`…/modes` |
-| connection | 1 | `/openapi/v1/bots/connection/{bot_id}` —— 完整 WS URL，取代 `get_device_connection` |
+| sessions | 7 | `/openapi/v1/bots/{bot_id}/sessions…` —— 拥有者/协作者运维 |
+| engine | 3 | `/openapi/v1/bots/{bot_id}/engine/{status,capabilities,available}` |
+| models | 2 | `/openapi/v1/bots/{bot_id}/models`、`…/models/{model_id}` |
+| approvals | 3 | `/openapi/v1/bots/{bot_id}/approvals/mode`（GET/PUT）、`…/modes` |
+| connection | 1 | `/openapi/v1/bots/{bot_id}/connection` —— 完整 WS URL，取代 `get_device_connection` |
 
 ---
 
@@ -944,6 +1008,20 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 ---
 
 ## Changelog（变更记录）（每次挪动看板时追加一条带日期的记录）
+
+- **2026-08-15** —— **Agent 在前的寻址。** 每个带 Agent 作用域的操作都迁到
+  `/openapi/v1/bots/{bot_id}/<component>/…`，推翻了 2026-08-03 的组件在前规则。原先九个
+  在查询串里取 `bot_id`、一个在请求体里取的操作，现在都从路径上取 —— 它们的地址上本来就
+  有位置可放，让客户端填两遍的重复字段就此消失。同时带上两处契约修正：`skills` 的 owner
+  定位参数改为与整个面一致的 `owner_id`，`PUT …/approvals/mode` 不再接收它从未读取过的
+  `session_key`。`TODO(#960)` 随之从七个操作收窄到四个，而非关闭：Agent 在路径上之后，
+  `require_granted_bot` 为除四个 `{skill_id}` skills 操作之外的每一个操作检查授权；
+  那四个的 Bot owner 只有读到技能记录后才知道，因此仍在各自 handler 里检查
+  （`admission.SKILL_SCOPED_OPERATIONS`）。带 Agent 作用域的组件名离开了 `{bot_id}` 那
+  一段，因此旧地址删除后保留名清单从十五个降到六个。**没有删除任何东西** —— 此前的四十
+  一个地址全部照常应答，形态不变，标记为 `deprecated` 并带 `Deprecation`/`Sunset` 响应
+  头；窗口至 **2027-08-15**，实际删除由流量决定。参见上文**待退役地址**与
+  `specs/2026-08-15-openapi-v1-bot-first-addressing`。
 
 - **2026-08-09** —— **engine-runtime 各组开始服务共享 Bot 与已发布阶段。** 运维者规则
   取代了共享 Bot 一律拒绝：Bot 的拥有者与 member 级及以上协作者可以操作它 —— 包括公开
@@ -1157,7 +1235,7 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
   `engine`、`approvals`、`sessions`、`models`、`skills` 把 `{bot_id}` 放在了自己的组件名
   之前 —— 这让那些路由文件无法自述地址，也让共享 base 之下再容纳第二个 owner 变得不可能
   （BCS 从另一侧撞上同一冲突，并以同样方式解决）。`skills` 另外获得一段字面的 `catalog`，
-  否则它的两类资源都会去争 `/openapi/v1/bots/skills/{…}`。`channels` 是删除而非搁置。
+  否则它的两类资源都会去争 `/openapi/v1/bots/{bot_id}/skills/{…}`。`channels` 是删除而非搁置。
   已发布路径 41 条（此前 43 条）。handler、schema、状态码、鉴权规则与租户隔离规则均未改变
   —— 只改地址，且**不提供兼容别名**：该界面尚无可达的外部调用方，因此没有需要保留的契约。
   网关钉住的 `bots.openapi.json` 经真实兼容性闸门（`--allow-breaking`）重新生成；它自

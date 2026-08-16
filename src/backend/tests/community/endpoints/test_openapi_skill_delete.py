@@ -229,10 +229,10 @@ def _seed_inactive_skill_in_active_custom_set(world) -> None:
 
 @endpoint_test(
     method="DELETE",
-    path="/openapi/v1/bots/skills/{skill_id}",
+    path="/openapi/v1/bots/{bot_id}/skills/{skill_id}",
     scenario="deletes_exact_inactive_local_skill",
     input=CaseInput(
-        path_params={"skill_id": "1"},
+        path_params={"bot_id": _BOT_ID, "skill_id": "1"},
         query_params={"user_id": _OWNER},
         headers=_HEADERS,
     ),
@@ -245,10 +245,10 @@ def delete_inactive_local_skill():
 
 @endpoint_test(
     method="DELETE",
-    path="/openapi/v1/bots/skills/{skill_id}",
+    path="/openapi/v1/bots/{bot_id}/skills/{skill_id}",
     scenario="rejects_active_local_skill",
     input=CaseInput(
-        path_params={"skill_id": "1"},
+        path_params={"bot_id": _BOT_ID, "skill_id": "1"},
         query_params={"user_id": _OWNER},
         headers=_HEADERS,
     ),
@@ -264,10 +264,10 @@ def delete_active_local_skill_is_rejected():
 
 @endpoint_test(
     method="DELETE",
-    path="/openapi/v1/bots/skills/{skill_id}",
+    path="/openapi/v1/bots/{bot_id}/skills/{skill_id}",
     scenario="rejects_inactive_default_skill_referenced_by_active_custom_set",
     input=CaseInput(
-        path_params={"skill_id": "1"},
+        path_params={"bot_id": _BOT_ID, "skill_id": "1"},
         query_params={"user_id": _OWNER},
         headers=_HEADERS,
     ),
@@ -279,3 +279,43 @@ def delete_active_local_skill_is_rejected():
 )
 def delete_skill_referenced_by_active_custom_set_is_rejected():
     """Default exclusion cannot override an active custom SkillSet reference."""
+
+
+# The retiring address, driven for the same reason as the state commands: it
+# names no bot, so the shim resolves it from the skill record and re-checks the
+# grant before deleting anything.
+
+
+@endpoint_test(
+    method="DELETE",
+    path="/openapi/v1/bots/skills/{skill_id}",
+    scenario="legacy_address_deletes_the_same_skill",
+    input=CaseInput(
+        path_params={"skill_id": "1"},
+        query_params={"user_id": _OWNER},
+        headers=_HEADERS,
+    ),
+    seed=_seed_inactive_delete,
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": {"deleted": True}}),
+)
+def legacy_delete_resolves_the_bot_from_the_skill():
+    """The bot the address does not name is found behind the skill id."""
+
+
+@endpoint_test(
+    method="DELETE",
+    path="/openapi/v1/bots/skills/{skill_id}",
+    scenario="legacy_address_rejects_active_skill_identically",
+    input=CaseInput(
+        path_params={"skill_id": "1"},
+        query_params={"user_id": _OWNER},
+        headers=_HEADERS,
+    ),
+    seed=_seed_active_delete,
+    expect=ExpectError(
+        status=409,
+        json_contains={"code": 409102, "message": "Skill is active", "data": None},
+    ),
+)
+def legacy_delete_active_local_skill_is_rejected():
+    """The active conflict survives the translation."""

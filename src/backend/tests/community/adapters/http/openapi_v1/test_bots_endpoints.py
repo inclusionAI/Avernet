@@ -21,6 +21,9 @@ from tests.community.adapters.http.openapi_v1.conftest import (
     mount_public_error_handlers,
     user_scoped_client,
 )
+from agentclaw.community.adapters.http.openapi_v1.bots.engine_config import (
+    router as engine_config_router,
+)
 from agentclaw.community.adapters.http.openapi_v1.bots.router import router
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.api.bot_service import BotServiceProtocol
@@ -134,6 +137,9 @@ def client(svc, policy, passport, engine_config, bot_repo, skill_set_factory, au
 
     app = FastAPI()
     app.include_router(router)
+    # Engine config is bots-component work served at an engine-component
+    # address, so it hangs off its own router and has to be mounted alongside.
+    app.include_router(engine_config_router)
     app.dependency_overrides[require_principal] = lambda: {"user_id": "u1"}
     attach_injector(app, Injector([_M()]))
     mount_public_error_handlers(app)
@@ -251,7 +257,7 @@ def test_restart_bot(client):
 
 
 def test_get_engine_config(client, engine_config):
-    data = _ok(client.get("/openapi/v1/bots/b1/engine-config"))
+    data = _ok(client.get("/openapi/v1/bots/b1/engine/config"))
     assert data == {"k": "v"}
     kw = engine_config.read_bot_config.call_args.kwargs
     assert kw["bot_id"] == "b1" and kw["owner_id"] == "u1"
@@ -259,7 +265,7 @@ def test_get_engine_config(client, engine_config):
 
 
 def test_update_engine_config(client, engine_config):
-    data = _ok(client.put("/openapi/v1/bots/b1/engine-config", json={"a": 1}))
+    data = _ok(client.put("/openapi/v1/bots/b1/engine/config", json={"a": 1}))
     assert data == {"a": 1}  # echoes the written config
     kw = engine_config.write_bot_config.call_args.kwargs
     assert kw["config"] == {"a": 1} and kw["owner_id"] == "u1"
@@ -268,7 +274,7 @@ def test_update_engine_config(client, engine_config):
 def test_mutating_not_found_masked(client, svc):
     svc.get_bot.side_effect = BotNotFoundError("x")
     # engine-config guards via get_bot → masked 404
-    assert client.get("/openapi/v1/bots/b1/engine-config").status_code == 404
+    assert client.get("/openapi/v1/bots/b1/engine/config").status_code == 404
     svc.update_bot.side_effect = BotNotFoundError("x")
     assert client.put("/openapi/v1/bots/b1", json={"bot_name": "y"}).status_code == 404
 
@@ -450,7 +456,7 @@ def test_engine_config_device_not_bound_is_enveloped(client, engine_config):
     )
 
     engine_config.read_bot_config.side_effect = DeviceNotBoundError("no binding")
-    resp = client.get("/openapi/v1/bots/b1/engine-config")
+    resp = client.get("/openapi/v1/bots/b1/engine/config")
     assert resp.status_code == 409
     assert resp.json()["code"] == 409000
 
@@ -460,7 +466,7 @@ def test_engine_config_malformed_json_is_enveloped(client, engine_config):
     import json
 
     engine_config.read_bot_config.side_effect = json.JSONDecodeError("bad", "{", 0)
-    resp = client.get("/openapi/v1/bots/b1/engine-config")
+    resp = client.get("/openapi/v1/bots/b1/engine/config")
     assert resp.status_code == 500
     assert resp.json()["code"] == 500000
     assert resp.json()["data"] is None
@@ -591,7 +597,7 @@ def test_engine_config_unknown_provider_is_enveloped(client, engine_config):
     )
 
     engine_config.read_bot_config.side_effect = UnknownProviderError("bad provider")
-    resp = client.get("/openapi/v1/bots/b1/engine-config")
+    resp = client.get("/openapi/v1/bots/b1/engine/config")
     assert resp.status_code == 500
     assert resp.json()["code"] == 500000
     assert resp.json()["data"] is None
@@ -604,7 +610,7 @@ def test_engine_config_conn_info_failure_is_enveloped(client, engine_config):
     )
 
     engine_config.read_bot_config.side_effect = ConnInfoBuildError("baas down")
-    resp = client.get("/openapi/v1/bots/b1/engine-config")
+    resp = client.get("/openapi/v1/bots/b1/engine/config")
     assert resp.status_code == 502
     assert resp.json()["code"] == 502000
     assert resp.json()["data"] is None

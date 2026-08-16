@@ -50,7 +50,7 @@ def client(make_client):
 
 
 def _base(bot: str = BOT) -> str:
-    return f"/openapi/v1/bots/sessions/{bot}"
+    return f"/openapi/v1/bots/{bot}/sessions"
 
 
 # ── success paths ─────────────────────────────────────────────────────────────
@@ -453,7 +453,7 @@ def test_a_non_operator_is_the_masked_404(make_client, relay):
     forward is even attempted."""
     client = make_client(router, caller="u9")
     refused = fails(client.get(_base(), params={"owner_id": OWNER}), 404)
-    absent = fails(client.get("/openapi/v1/bots/sessions/no-such-bot"), 404)
+    absent = fails(client.get("/openapi/v1/bots/no-such-bot/sessions"), 404)
     assert refused == {**absent, "request_id": refused["request_id"]}
     assert relay.attempts == []
 

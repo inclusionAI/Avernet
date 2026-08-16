@@ -56,6 +56,9 @@ class Routine(BaseModel):
         json_schema_extra={
             "example": {
                 "routine_id": "5f0f2c9a-b1c3-4f6e-9a0d-2e7c8b1d4a55",
+                # The *response* still carries the bot — it is a property of the
+                # routine, not a way of addressing it, and the model requires
+                # it. Only the create *body* lost it, to the path.
                 "bot_id": "20260813_a7k2m9p1",
                 "name": "morning-brief",
                 "trigger": {"type": "schedule", "cron": "0 9 * * 1-5"},
@@ -94,13 +97,28 @@ class Routine(BaseModel):
     )
 
 
-class RoutineCreate(BaseModel):
+# Named `RoutineSpec` rather than `RoutineCreate` because the retiring address
+# still publishes a `RoutineCreate` — the shape it always had, with `bot_id` in
+# the body. A component name is part of what a generated client is written
+# against: had the two swapped, a caller who regenerated an SDK while staying on
+# the old address would find `RoutineCreate` still present but missing the field
+# they set. The retiring contract keeps the retiring name, and this one is
+# chosen to still read well once that name is gone.
+#
+# A model docstring is published verbatim as the schema's description, so the
+# reasoning lives here rather than there.
+class RoutineSpec(BaseModel):
     """Create-a-routine request body."""
 
     model_config = ConfigDict(
+        # No ``bot_id``: it moved to the path, and this model no longer declares
+        # it. Pydantic ignores unknown fields rather than rejecting them, so an
+        # example that still showed one would be copied into real requests and
+        # silently dropped — the caller believing they had named a bot while the
+        # path decided. ``LegacyRoutineCreate`` keeps it, because there it is
+        # read.
         json_schema_extra={
             "example": {
-                "bot_id": "20260813_a7k2m9p1",
                 "name": "morning-brief",
                 "trigger": {"type": "schedule", "cron": "0 9 * * 1-5"},
                 "command": "Summarize yesterday's tickets and post the brief.",
@@ -110,7 +128,6 @@ class RoutineCreate(BaseModel):
         }
     )
 
-    bot_id: str = Field(description="The bot that will run the routine.")
     name: str = Field(description="Human-readable routine name.")
     trigger: ScheduleTrigger = Field(description="When the routine fires.")
     command: str = Field(description=_COMMAND_DESC)

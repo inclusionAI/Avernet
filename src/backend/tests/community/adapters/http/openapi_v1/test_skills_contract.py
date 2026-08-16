@@ -16,37 +16,36 @@ def test_openapi_exposes_exactly_the_six_ratified_skills_operations() -> None:
     skill_paths = {
         path: set(operations)
         for path, operations in schema["paths"].items()
-        if path.startswith("/openapi/v1/bots/skills")
+        if "/skills" in path and path.startswith("/openapi/v1/bots/{bot_id}")
         or path.startswith("/openapi/v1/bots/{bot_id}/skills")
     }
 
     assert skill_paths == {
-        "/openapi/v1/bots/skills": {"get"},
-        "/openapi/v1/bots/skills/upload": {"post"},
-        "/openapi/v1/bots/skills/{skill_id}": {"get", "delete"},
-        "/openapi/v1/bots/skills/{skill_id}/activate": {"post"},
-        "/openapi/v1/bots/skills/{skill_id}/deactivate": {"post"},
+        "/openapi/v1/bots/{bot_id}/skills": {"get", "post"},
+        "/openapi/v1/bots/{bot_id}/skills/{skill_id}": {"get", "delete"},
+        "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate": {"post"},
+        "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate": {"post"},
     }
 
 
-def test_collection_and_upload_are_bot_scoped_query_contracts() -> None:
+def test_collection_and_upload_are_bot_addressed_contracts() -> None:
     paths = _schema()["paths"]
 
     list_parameters = {
         parameter["name"]: parameter
-        for parameter in paths["/openapi/v1/bots/skills"]["get"]["parameters"]
+        for parameter in paths["/openapi/v1/bots/{bot_id}/skills"]["get"]["parameters"]
     }
-    assert list_parameters["bot_id"]["required"] is True
-    assert list_parameters["owner_entity_id"]["required"] is False
+    assert list_parameters["bot_id"]["in"] == "path"
+    assert list_parameters["owner_id"]["required"] is False
     assert list_parameters["active"]["required"] is False
     assert list_parameters["keyword"]["required"] is False
 
-    upload = paths["/openapi/v1/bots/skills/upload"]["post"]
+    upload = paths["/openapi/v1/bots/{bot_id}/skills"]["post"]
     upload_parameters = {
         parameter["name"]: parameter for parameter in upload["parameters"]
     }
-    assert upload_parameters["bot_id"]["required"] is True
-    assert upload_parameters["owner_entity_id"]["required"] is False
+    assert upload_parameters["bot_id"]["in"] == "path"
+    assert upload_parameters["owner_id"]["required"] is False
     assert set(upload["requestBody"]["content"]) == {"application/zip"}
 
 
@@ -54,12 +53,12 @@ def test_operation_responses_use_the_ratified_local_skill_models() -> None:
     schema = _schema()
     paths = schema["paths"]
 
-    list_schema = paths["/openapi/v1/bots/skills"]["get"]["responses"]["200"][
+    list_schema = paths["/openapi/v1/bots/{bot_id}/skills"]["get"]["responses"]["200"][
         "content"
     ]["application/json"]["schema"]
     assert list_schema["$ref"].endswith("Envelope_Page_Skill__")
 
-    detail = paths["/openapi/v1/bots/skills/{skill_id}"]
+    detail = paths["/openapi/v1/bots/{bot_id}/skills/{skill_id}"]
     assert detail["get"]["responses"]["200"]["content"]["application/json"]["schema"][
         "$ref"
     ].endswith("Envelope_Skill_")
@@ -67,7 +66,7 @@ def test_operation_responses_use_the_ratified_local_skill_models() -> None:
         "schema"
     ]["$ref"].endswith("Envelope_Deleted_")
 
-    upload = paths["/openapi/v1/bots/skills/upload"]["post"]
+    upload = paths["/openapi/v1/bots/{bot_id}/skills"]["post"]
     assert {"200", "201", "413"} <= set(upload["responses"])
     for status in ("200", "201"):
         assert upload["responses"][status]["content"]["application/json"]["schema"][
@@ -75,7 +74,7 @@ def test_operation_responses_use_the_ratified_local_skill_models() -> None:
         ].endswith("Envelope_SkillUpload_")
 
     for action in ("activate", "deactivate"):
-        operation = paths[f"/openapi/v1/bots/skills/{{skill_id}}/{action}"]["post"]
+        operation = paths[f"/openapi/v1/bots/{{bot_id}}/skills/{{skill_id}}/{action}"]["post"]
         assert operation["responses"]["200"]["content"]["application/json"]["schema"][
             "$ref"
         ].endswith("Envelope_SkillState_")

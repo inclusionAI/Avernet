@@ -1,4 +1,4 @@
-"""Approvals group — ``/openapi/v1/bots/approvals/{bot_id}``.
+"""Approvals group — ``/openapi/v1/bots/{bot_id}/approvals``.
 
 An **operator console**: served to the addressed bot's owner and its
 member-level collaborators, for the stage the request names (``?stage=``,
@@ -18,7 +18,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.approvals.schemas import (
     ApprovalModeInfo,
-    ApprovalModeSet,
+    ApprovalModeChoice,
     ApprovalState,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
@@ -44,7 +44,7 @@ from agentclaw.community.core.engine_runtime.errors import (
 )
 from agentclaw.community.di import Injected
 
-router = APIRouter(prefix="/openapi/v1/bots/approvals", tags=["approvals"])
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/approvals", tags=["approvals"])
 
 
 #: Engine capability a mode *change* needs. ``approval.get`` is defined
@@ -88,7 +88,7 @@ def _reject_refused_set(raw: Any) -> None:
         raise EngineUpstreamError("engine refused the approval-mode change")
 
 
-@router.get("/{bot_id}/mode", response_model=Envelope[ApprovalState])
+@router.get("/mode", response_model=Envelope[ApprovalState])
 @envelope_errors
 async def get_approval_mode(
     bot_id: BotIdPath,
@@ -121,14 +121,17 @@ async def get_approval_mode(
     return envelope(_state(result.data, session_key), request)
 
 
-@router.put("/{bot_id}/mode", response_model=Envelope[ApprovalState])
+@router.put("/mode", response_model=Envelope[ApprovalState])
 @envelope_errors
 async def set_approval_mode(
     bot_id: BotIdPath,
-    body: ApprovalModeSet,
+    body: ApprovalModeChoice,
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,
+    session_key: Annotated[
+        str, Query(description="Session to change the mode for.")
+    ],
     stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[ApprovalState]:
@@ -148,16 +151,16 @@ async def set_approval_mode(
         method="POST",
         path="/api/approvals/mode/set",
         body={
-            "session_key": body.session_key,
+            "session_key": session_key,
             "mode": body.mode.value,
             "user_id": user_id,
         },
     )
     _reject_refused_set(result.data)
-    return envelope(_state(result.data, body.session_key), request)
+    return envelope(_state(result.data, session_key), request)
 
 
-@router.get("/{bot_id}/modes", response_model=Envelope[list[ApprovalModeInfo]])
+@router.get("/modes", response_model=Envelope[list[ApprovalModeInfo]])
 @envelope_errors
 async def list_approval_modes(
     bot_id: BotIdPath,
