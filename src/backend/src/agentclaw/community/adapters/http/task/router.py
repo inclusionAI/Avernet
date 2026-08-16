@@ -14,16 +14,21 @@ from fastapi import APIRouter
 
 from agentclaw.community.adapters.http.task.schemas import (
     ApiResponse,
+    BbsAttachDTO,
+    BbsClaimDTO,
+    BbsResultDTO,
     TaskCallbackDataDTO,
     TaskExecutionGraphDTO,
     TaskInfoDTO,
     TaskOpResultDTO,
     TaskSummaryDTO,
+    acceptance_result_from_dto,
     callback_from_dto,
     graph_to_dto,
     op_result_to_dto,
     summary_to_dto,
     task_info_from_dto,
+    task_spec_from_dto,
 )
 from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
@@ -87,6 +92,75 @@ async def report_callback(
     """执行实体(bot workflow / bcn 协作群)PUSH 回投 → 适配层 → 编排核 on_report → 翻态推进。"""
     data = callback_from_dto(body)
     await callback.report_result(data)
+    return ApiResponse(success=True, message="OK", error_code=200, data={"ok": True})
+
+
+@router.post("/bbs/claim", response_model=ApiResponse[dict[str, Any]])
+async def bbs_claim(
+    body: BbsClaimDTO,
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
+) -> ApiResponse[dict[str, Any]]:
+    """BBS 接力步②:任务根级 CAS 占有;恰一赢,输者/非 bbs 任务 → 409。
+
+    幂等:同 bot 重 claim 返 200(视为已占有);非 bbs 任务或已被他人占有 → 409。
+    """
+    from fastapi import HTTPException
+
+    from agentclaw.community.core.task.domain.errors import TaskStateError
+    try:
+        result = service.claim_bbs_task(body.task_id, body.bot_id)
+    except TaskStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    return ApiResponse(success=True, message="OK", error_code=200,
+                       data={"root_node_id": result.node_id, "task_id": body.task_id})
+
+
+@router.post("/bbs/attach", response_model=ApiResponse[dict[str, Any]])
+async def bbs_attach(
+    body: BbsAttachDTO,
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
+) -> ApiResponse[dict[str, Any]]:
+    """BBS 接力步④:在 parent 下挂 run_mode=bbs scoped 子节点 + start(create+start 合一)。仅 claim 持有者可挂。
+
+    owner 校验失败 / BBS 深度闸 / 分解树完整性违反 → 409(TaskStateError / GraphIntegrityError)。
+    """
+    from fastapi import HTTPException
+
+    from agentclaw.community.core.task.domain.errors import (
+        GraphIntegrityError, TaskStateError,
+    )
+    task_spec = task_spec_from_dto(body.task_spec)
+    try:
+        node = service.attach_bbs_node(body.task_id, body.parent_node_id, task_spec, body.bot_id)
+    except (TaskStateError, GraphIntegrityError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    return ApiResponse(success=True, message="OK", error_code=200,
+                       data={"node_id": node.node_id, "task_id": body.task_id})
+
+
+@router.post("/bbs/result", response_model=ApiResponse[dict[str, Any]])
+async def bbs_result(
+    body: BbsResultDTO,
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
+) -> ApiResponse[dict[str, Any]]:
+    """BBS 接力步⑤:回投 scoped 节点终态 + 释放 claim(collector-free)。
+
+    ``acceptance_result``(PASS→DONE / FAIL+gaps→FAILED)/ ``output_patch``(checkpoint fold)/
+    ``exec_error``(执行报错 fold);``root_verified=True`` → 根 PLANNING→DONE + 图 DONE。
+    ``bot_id`` 须为当前 ``bbs_owner``,否则 ``TaskStateError`` → 409。
+    """
+    from fastapi import HTTPException
+
+    from agentclaw.community.core.task.domain.errors import TaskStateError
+    ar = acceptance_result_from_dto(body.acceptance_result) if body.acceptance_result else None
+    try:
+        await service.report_bbs_result(
+            body.task_id, body.node_id, body.bot_id,
+            acceptance_result=ar, output_patch=body.output_patch,
+            exec_error=body.exec_error, root_verified=body.root_verified,
+        )
+    except TaskStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
     return ApiResponse(success=True, message="OK", error_code=200, data={"ok": True})
 
 

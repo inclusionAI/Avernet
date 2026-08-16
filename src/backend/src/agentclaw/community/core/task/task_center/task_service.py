@@ -12,7 +12,8 @@ import logging
 
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.domain.models import (
-    Status, TaskExecutionGraph, TaskInfo, TaskOpResult, TaskSummary,
+    AcceptanceResult, NodeOpResult, Status, TaskExecutionGraph, TaskInfo, TaskNode, TaskNodePatch,
+    TaskOpResult, TaskSpec, TaskSummary,
 )
 from agentclaw.community.core.task.task_center.engine import ExecutionEngine
 from agentclaw.community.core.task.task_runner.callback_adapter import (
@@ -84,6 +85,42 @@ class TaskService(TaskServiceProtocol):
         """列任务摘要(轻量投影),按 run_id 降序;status 非 None 时按图级状态过滤。"""
         st = Status(status) if status else None
         return self._graph.list_task_summaries(st)
+
+    def claim_bbs_task(self, task_id: str, bot_id: str) -> NodeOpResult:
+        """BBS 接力步②:任务根级 CAS 占有(委托 TaskGraphService.claim_bbs_owner)。
+
+        供 bbs/claim 路由(FR-PICK-02)调用:恰一赢,输者/非 bbs 任务 → TaskStateError。
+        """
+        return self._graph.claim_bbs_owner(task_id, bot_id)
+
+    def attach_bbs_node(
+        self, task_id: str, parent_node_id: str, task_spec: TaskSpec, bot_id: str
+    ) -> TaskNode:
+        """BBS 接力步④:在 parent 下挂 run_mode=bbs scoped 节点 + PENDING→RUNNING(create+start 合一)。
+
+        供 bbs 接力执行实体(FR-PICK-04)调用,委托 TaskGraphService.attach_bbs_node:
+        owner 校验 + 深度闸 + 翻 RUNNING + bbs_relay_count++。
+        """
+        return self._graph.attach_bbs_node(task_id, parent_node_id, task_spec, bot_id)
+
+    async def report_bbs_result(
+        self, task_id: str, node_id: str, bot_id: str,
+        acceptance_result: AcceptanceResult | None = None,
+        output_patch: dict | None = None, exec_error: str | None = None,
+        root_verified: bool = False,
+    ) -> NodeOpResult:
+        """BBS 接力步⑤:回投 scoped 节点终态 + 释放 claim。collector-free(经 ``on_bbs_report``)。
+
+        供 bbs 接力执行实体(FR-PICK-05)回投:``acceptance_result``(PASS→DONE / FAIL+gaps→FAILED)/
+        ``output_patch``(checkpoint fold)/``exec_error``(执行报错 fold);``root_verified=True`` →
+        根 PLANNING→DONE + 图 DONE。``bot_id`` 须为当前 ``bbs_owner``(经 on_bbs_report 持有者校验),
+        否则 ``TaskStateError``。
+        """
+        patch = TaskNodePatch(
+            task_id=task_id, node_id=node_id, assignee=bot_id,
+            acceptance_result=acceptance_result, output_patch=output_patch, exec_error=exec_error,
+        )
+        return await self._engine.on_bbs_report(patch, root_verified=root_verified)
 
 
 def run_execute(facade: TaskService, task_info: TaskInfo) -> TaskOpResult:

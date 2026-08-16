@@ -11,7 +11,13 @@ import threading
 import time
 from typing import Callable
 
-from agentclaw.community.core.task.domain.models import Status, TaskNodePatch, TaskNodeQueryCriteria
+from agentclaw.community.core.task.domain.models import (
+    AcceptanceResult,
+    AcceptanceVerdict,
+    Status,
+    TaskNodePatch,
+    TaskNodeQueryCriteria,
+)
 
 _DEFAULT_SLA_TIMEOUT = 600.0   # RUNNING 卡死 backstop(>poller execute SLA 300s,poller 先判 FAIL 走正常重试;此仅兜底 poller 漏判)
 _DEFAULT_PENDING_TIMEOUT = 180.0  # PENDING 派发异常/未派发→重搜推(短阈值尽快重试)
@@ -110,6 +116,19 @@ class TaskHarness:
                     self._dispatched_at[key] = now  # 首见:记时,本轮不判
                     continue
                 if now - t0 > sla:
+                    if n.run_info.run_mode == "bbs":
+                        # BBS lease 到期(FR-EXT-06):owner bot 崩溃/挂起导致 RUNNING 超 SLA。
+                        # 直写图(self._graph),不走 on_harness_fn:后者复位 RUNNING→PENDING 重派,
+                        # 与"标终态不重派"语义相反。① scoped 节点验收 FAIL→FAILED(终态);
+                        # ② 清根 bbs_owner(root node_id == task_id)释放接力所有权;continue 跳过 PENDING reset。
+                        self._graph.update_task_node_info(TaskNodePatch(
+                            task_id=task_id, node_id=n.node_id,
+                            acceptance_result=AcceptanceResult(
+                                verdict=AcceptanceVerdict.FAIL, gaps=["bbs_lease_expired"])))
+                        self._graph.update_task_node_info(TaskNodePatch(
+                            task_id=task_id, node_id=task_id,
+                            extend_props_patch={"bbs_owner": None}))
+                        continue
                     resets.append(
                         TaskNodePatch(
                             task_id=task_id,
@@ -134,6 +153,10 @@ class TaskHarness:
                 continue
             for n in failed:
                 if n.run_info.run_mode not in _EXEC_MODES:
+                    continue
+                if n.run_info.run_mode == "bbs":
+                    # bbs 节点 bot 自驱;FAILED 后由下个 bot 接力挂新节点(§10.4),harness 不重派。
+                    # 与 RUNNING-scan 的 bbs lease-expire 分支一致(标终态不重派 FR-EXT-06)。
                     continue
                 failed_resets.append(TaskNodePatch(
                     task_id=task_id, node_id=n.node_id, exec_error="acceptance_fail_retry"))

@@ -21,6 +21,7 @@ from agentclaw.community.core.task.domain.models import (
     Status,
     TaskInfo,
     TaskNode,
+    TaskNodePatch,
     TaskSpec,
     TaskCallbackData,
 )
@@ -423,9 +424,10 @@ class TestMissEscalateBbs:
         # BBS bot 自规划子任务(run_mode=bbs,挂 root 下)
         bbs_sub = _node("N_practice_bbs_bbs", "t_case", run_mode="bbs", assignee="bot_bbs_7")
         svc.add_task_nodes([bbs_sub], parent_node_id="t_case")
-        side: list[tuple] = []
-        _run(facade._engine._prepare_into("t_case", side))
-        _run(facade._engine._drain("t_case", side))
+        # Task 9 守卫(FR-EXT-06):_prepare_into 跳过 run_mode=bbs 节点,框架不自动派发/翻态;
+        # bbs 叶由 bot 经 attach_bbs_node 自驱(create+start 合一:PENDING→RUNNING),此处直翻模拟启动
+        svc.update_task_node_info(
+            TaskNodePatch(task_id="t_case", node_id="N_practice_bbs_bbs", status=Status.RUNNING))
         g = svc.query_task_dashboard("t_case")
         assert svc._get_node(g, "N_practice_bbs_bbs").status == Status.RUNNING
         assert svc._get_node(g, "N_practice_bbs_bbs").run_info.run_mode == "bbs"

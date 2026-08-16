@@ -58,6 +58,34 @@ class TaskInfoDTO(BaseModel):
     execution_config: dict[str, Any] = Field(default_factory=dict, description="执行配置(MAX_DEPTH/MAX_LOOP/MAX_HARNESS/bot/workflow 等)")
 
 
+class BbsClaimDTO(BaseModel):
+    """POST /api/task/bbs/claim 请求体。"""
+
+    task_id: str = Field(..., description="任务ID(BBS 接力根级 CAS 占有目标)")
+    bot_id: str = Field(..., description="发起占有的 bot id")
+
+
+class BbsAttachDTO(BaseModel):
+    """POST /api/task/bbs/attach 请求体(BBS 接力步④:挂 scoped bbs 子节点 + start)。"""
+
+    task_id: str = Field(..., description="任务ID")
+    parent_node_id: str = Field(..., description="父节点ID(挂入分解树的 parent)")
+    task_spec: TaskSpecDTO = Field(..., description="scoped 子节点任务规格")
+    bot_id: str = Field(..., description="发起挂接的 bot id(须为当前 bbs_owner)")
+
+
+class BbsResultDTO(BaseModel):
+    """POST /api/task/bbs/result 请求体(BBS 接力步⑤:回投 scoped 节点终态 + 释放 claim)。"""
+
+    task_id: str = Field(..., description="任务ID")
+    node_id: str = Field(..., description="scoped 子节点ID(attach 返回的 bbs- 节点)")
+    bot_id: str = Field(..., description="回投 bot id(须为当前 bbs_owner)")
+    acceptance_result: AcceptanceResultDTO | None = Field(None, description="验收结论(PASS/FAIL)")
+    output_patch: dict[str, Any] | None = Field(None, description="checkpoint fold 增量输出")
+    exec_error: str | None = Field(None, description="执行报错(fold 进节点)")
+    root_verified: bool = Field(False, description="True → 根 PLANNING→DONE + 图 DONE")
+
+
 class TaskCallbackDataDTO(BaseModel):
     """POST /api/task/callback/report 请求体(执行实体回投)。"""
     loop_task_id: str = Field(..., description="回投标识 f'{task_id}::{node_id}'")
@@ -112,6 +140,7 @@ class TaskSummaryDTO(BaseModel):
     title: str = ""
     node_count: int = 0
     loop_round: int = 0
+    bbs_mode: bool = False
 
 
 class TaskExecutionGraphDTO(BaseModel):
@@ -126,21 +155,27 @@ class TaskExecutionGraphDTO(BaseModel):
 # ===== DTO <-> domain conversion(Rule 22:adapter 唯一写/读翻译位) =====
 
 
-def task_info_from_dto(dto: TaskInfoDTO):
+def task_spec_from_dto(dto: TaskSpecDTO):
+    """TaskSpecDTO → domain TaskSpec(Rule 22:adapter 唯一写翻译位;task_info_from_dto / bbs_attach 复用)。"""
     from agentclaw.community.core.task.domain.models import (
-        AcceptanceCriteria, Context, Goal, Metadata, TaskInfo, TaskSpec,
+        AcceptanceCriteria, Context, Goal, Metadata, TaskSpec,
     )
+    return TaskSpec(
+        metadata=Metadata(task_id=dto.metadata.task_id,
+                          title=dto.metadata.title,
+                          instruction=dto.metadata.instruction),
+        context=Context(background=dto.context.background,
+                        extend_props=dict(dto.context.extend_props)),
+        goal=Goal(objective=dto.goal.objective,
+                  acceptances=[AcceptanceCriteria(id=a.id, description=a.description)
+                               for a in dto.goal.acceptances]),
+    )
+
+
+def task_info_from_dto(dto: TaskInfoDTO):
+    from agentclaw.community.core.task.domain.models import TaskInfo
     return TaskInfo(
-        task_spec=TaskSpec(
-            metadata=Metadata(task_id=dto.task_spec.metadata.task_id,
-                              title=dto.task_spec.metadata.title,
-                              instruction=dto.task_spec.metadata.instruction),
-            context=Context(background=dto.task_spec.context.background,
-                            extend_props=dict(dto.task_spec.context.extend_props)),
-            goal=Goal(objective=dto.task_spec.goal.objective,
-                      acceptances=[AcceptanceCriteria(id=a.id, description=a.description)
-                                   for a in dto.task_spec.goal.acceptances]),
-        ),
+        task_spec=task_spec_from_dto(dto.task_spec),
         source_channel_type=dto.source_channel_type,
         source_channel_id=dto.source_channel_id,
         execution_config=dict(dto.execution_config),
@@ -155,6 +190,16 @@ def callback_from_dto(dto: TaskCallbackDataDTO):
         workflow_id=dto.workflow_id,
         instance_id=dto.instance_id,
         result=dict(dto.result),
+    )
+
+
+def acceptance_result_from_dto(dto: AcceptanceResultDTO):
+    """AcceptanceResultDTO → domain AcceptanceResult(Rule 22:adapter 唯一写翻译位;bbs/result 路由复用)。"""
+    from agentclaw.community.core.task.domain.models import AcceptanceResult, AcceptanceVerdict
+    return AcceptanceResult(
+        verdict=AcceptanceVerdict(dto.verdict),
+        acceptances_metric=list(dto.acceptances_metric),
+        gaps=list(dto.gaps),
     )
 
 
@@ -196,7 +241,8 @@ def graph_to_dto(graph) -> TaskExecutionGraphDTO:
 def summary_to_dto(s) -> TaskSummaryDTO:
     """TaskSummary -> TaskSummaryDTO(Rule 22)。"""
     return TaskSummaryDTO(task_id=s.task_id, run_id=s.run_id, status=s.status.value,
-                          title=s.title, node_count=s.node_count, loop_round=s.loop_round)
+                          title=s.title, node_count=s.node_count, loop_round=s.loop_round,
+                          bbs_mode=s.bbs_mode)
 
 def op_result_to_dto(result) -> TaskOpResultDTO:
     return TaskOpResultDTO(task_id=result.task_id, success=result.success, run_id=result.run_id,

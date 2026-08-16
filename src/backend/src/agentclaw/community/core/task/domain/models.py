@@ -152,6 +152,7 @@ class TaskSummary:
     title: str = ""              # 根节点 task_spec.metadata.title
     node_count: int = 0          # 图中节点总数
     loop_round: int = 0          # 图级轮次
+    bbs_mode: bool = False       # 图 extend_props["bbs_mode"] 投影(BBS-relay 升级标志)
 
 # ===== 中间类型(patch/criteria/op_result/callback)=====
 @dataclass

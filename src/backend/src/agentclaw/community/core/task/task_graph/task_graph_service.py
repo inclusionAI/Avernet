@@ -6,6 +6,8 @@ in-memory store(M1);ORM 适配按需后续。查询返回引用(D3-A:调用方�
 from __future__ import annotations
 
 import threading
+import time
+import uuid
 from typing import Any
 
 from agentclaw.community.core.task.domain.errors import (
@@ -52,6 +54,7 @@ _DELEGATABLE_PARENT: set[Status] = {Status.PENDING, Status.FAILED, Status.PLANNI
 
 _DEFAULT_MAX_DEPTH = 2
 _DEFAULT_MAX_LOOP = 10  # 图级总轮次(根 gap 不闭 + 反复升 BBS)
+_DEFAULT_BBS_MAX_DEPTH = 3
 
 
 class TaskGraphService:
@@ -289,6 +292,78 @@ class TaskGraphService:
                 graph.extend_props.update(patch.extend_props_patch)
             return graph
 
+    def claim_bbs_owner(self, task_id: str, bot_id: str) -> NodeOpResult:
+        """BBS 接力:任务根级 CAS 占有(root.run_info.extend_props['bbs_owner'])。
+
+        恰一赢:首个 bot 写入成功;后续不同 bot 重 claim 抛 ``TaskStateError``(CAS 输者)。
+        同 bot 重 claim 幂等(成功)。非 ``bbs_mode`` 任务拒绝(``TaskStateError``)。
+        实现:取 ``_lock_for(task_id)``(RLock 可重入)后调 ``update_task_node_info`` 折叠
+        ``extend_props_patch={'bbs_owner','bbs_claim_at'}`` —— 不翻态,PLANNING/HUNG 根均可写。
+        """
+        with self._lock_for(task_id):
+            graph = self._require_graph(task_id)
+            if not graph.extend_props.get("bbs_mode"):
+                raise TaskStateError(f"claim_bbs_owner: task={task_id} 非 bbs_mode 任务")
+            root = next((n for n in graph.tasks if n.node_id == task_id), None)
+            if root is None:
+                raise TaskNotFoundError(f"claim_bbs_owner: root not found task={task_id}")
+            owner = root.run_info.extend_props.get("bbs_owner")
+            if owner is not None and owner != bot_id:
+                raise TaskStateError(f"claim_bbs_owner: task={task_id} 已被 {owner} 占有")
+            return self.update_task_node_info(
+                TaskNodePatch(
+                    task_id=task_id,
+                    node_id=task_id,
+                    extend_props_patch={"bbs_owner": bot_id, "bbs_claim_at": time.time()},
+                )
+            )
+
+    def attach_bbs_node(
+        self, task_id: str, parent_node_id: str, task_spec: "TaskSpec", bot_id: str
+    ) -> TaskNode:
+        """BBS 接力步④:在 parent 下新建 run_mode=bbs scoped 子节点 + 翻 PENDING→RUNNING(create+start 合一)。
+
+        前置:调用者须为当前 ``bbs_owner``(root.run_info.extend_props['bbs_owner'] == bot_id,否则 TaskStateError);
+        parent 须满足 add 触发条件(根 PLANNING 等);深度闸 ``bbs_relay_count >= BBS_MAX_DEPTH`` →
+        图级 HUNG(``hung_reason=bbs_relay_exhausted``)+ TaskStateError。
+        实现:add_task_nodes(挂 parent 下,parent→PLANNING)→ update_task_node_info(PENDING→RUNNING)
+        → update_task_graph_info(bbs_relay_count++);返回新建节点(add_task_nodes 挂入为同一引用,
+        update_task_node_info 原地翻 RUNNING,故返回节点 status=RUNNING)。
+        """
+        with self._lock_for(task_id):
+            graph = self._require_graph(task_id)
+            root = next((n for n in graph.tasks if n.node_id == task_id), None)
+            if root is None or root.run_info.extend_props.get("bbs_owner") != bot_id:
+                raise TaskStateError(f"attach_bbs_node: 非claim持有者 task={task_id}")
+            relay_count = int(graph.extend_props.get("bbs_relay_count", 0))
+            if relay_count >= self._execution_config(task_id)["BBS_MAX_DEPTH"]:
+                self.update_task_graph_info(
+                    task_id,
+                    TaskGraphPatch(
+                        status=Status.HUNG,
+                        extend_props_patch={"hung_reason": "bbs_relay_exhausted"},
+                    ),
+                )
+                raise TaskStateError(f"attach_bbs_node: BBS relay 深度达上限 task={task_id}")
+            node_id = f"bbs-{uuid.uuid4().hex[:8]}"
+            node = TaskNode(
+                node_id=node_id,
+                task_id=task_id,
+                status=Status.PENDING,
+                task_spec=task_spec,
+                run_info=RuntimeInfo(run_mode="bbs", assignee=bot_id, start_time=time.time()),
+                node_run_graph=graph,
+            )
+            self.add_task_nodes([node], parent_node_id=parent_node_id)  # a/b/c/d 校验 + 父→PLANNING
+            self.update_task_node_info(
+                TaskNodePatch(task_id=task_id, node_id=node_id, status=Status.RUNNING)
+            )  # create+start:PENDING→RUNNING 是 _DIRECT_TRANSITIONS 合法翻
+            self.update_task_graph_info(
+                task_id,
+                TaskGraphPatch(extend_props_patch={"bbs_relay_count": relay_count + 1}),
+            )
+            return node
+
     def query_task_dashboard(self, task_id: str, node_id: str | None = None) -> TaskExecutionGraph:
         """只读看板快照。node_id=None 返回整图引用;指定 node_id 返回该节点子树投影(新构造对象)。"""
         with self._lock_for(task_id):
@@ -375,7 +450,8 @@ class TaskGraphService:
                 title = root.task_spec.metadata.title if root else ""
                 summaries.append(TaskSummary(
                     task_id=tid, run_id=graph.run_id, status=graph.status,
-                    title=title, node_count=len(graph.tasks), loop_round=graph.loop_round))
+                    title=title, node_count=len(graph.tasks), loop_round=graph.loop_round,
+                    bbs_mode=bool(graph.extend_props.get("bbs_mode", False))))
             summaries.sort(key=lambda s: s.run_id, reverse=True)
             return summaries
 
@@ -406,4 +482,5 @@ class TaskGraphService:
             cfg.setdefault("MAX_DEPTH", _DEFAULT_MAX_DEPTH)
             cfg.setdefault("MAX_LOOP", _DEFAULT_MAX_LOOP)
             cfg.setdefault("MAX_HARNESS", 3)
+            cfg.setdefault("BBS_MAX_DEPTH", _DEFAULT_BBS_MAX_DEPTH)
             return cfg

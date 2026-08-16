@@ -278,6 +278,41 @@ class ExecutionEngine:
             await self._drain(patch.task_id, side)
             return result
 
+    # ===== on_bbs_report:BBS 接力步⑤回投(collector-free)=====
+    async def on_bbs_report(self, patch: TaskNodePatch, root_verified: bool = False) -> NodeOpResult:
+        """BBS 接力步⑤回投:collector-free——仅翻 scoped 节点终态(SSOT ``update_task_node_info``),
+        不跑 ``_on_pass_collect``/``_on_fail_collect``/``_drain``(避免框架经 owner-bot 重规划抢占接力,
+        对齐 spec §10.4)。``root_verified=True`` → 根 PLANNING→DONE + 图 DONE。最后清根 ``bbs_owner`` 释放 claim。
+
+        持有者校验:``root.run_info.extend_props['bbs_owner']`` 须 == ``patch.assignee``(调用方
+        ``report_bbs_result`` 设 ``patch.assignee=bot_id``);非持有者 → ``TaskStateError``(在校验抛,
+        不清 claim)。
+
+        释放安全:scoped 翻态 / root_verified 根翻态(HUNG→DONE 等非法翻会抛)全部收在 ``try`` 内,
+        ``finally`` 无条件清根 ``bbs_owner`` —— 翻态抛错也释放 claim,避免持卡者死锁(他 bot claim 被
+        CAS 拒、持卡者重报已 DONE 节点再翻 DONE 亦非法)。owner 校验在 ``try`` 之前,非持有者抛错不清他卡。"""
+        with self._lock_for(patch.task_id):
+            graph = self._graph.query_task_dashboard(patch.task_id)
+            root = next((n for n in graph.tasks if n.node_id == patch.task_id), None)
+            if root is None or root.run_info.extend_props.get("bbs_owner") != patch.assignee:
+                raise TaskStateError(f"on_bbs_report: 非claim持有者 task={patch.task_id}")
+            try:
+                # scoped 节点终态翻转(acceptance→DONE/FAILED)或 fold(output_patch/exec_error);无 collector
+                result = self._graph.update_task_node_info(patch)
+                if root_verified:
+                    # 根 PLANNING→DONE:走 status 直驱(_DIRECT_TRANSITIONS 允许 PLANNING→DONE/HUNG);
+                    # acceptance 驱动仅允许 RUNNING→DONE/FAILED(_ACCEPTANCE_TRANSITIONS),根非 RUNNING 故不可走 acceptance
+                    self._graph.update_task_node_info(
+                        TaskNodePatch(task_id=patch.task_id, node_id=patch.task_id, status=Status.DONE))
+                    self._graph.update_task_graph_info(
+                        patch.task_id, TaskGraphPatch(status=Status.DONE))
+                return result
+            finally:
+                # 无论翻态是否抛(如 root_verified 在根 HUNG 时 HUNG→DONE 非法),都清根 bbs_owner 释放 claim
+                self._graph.update_task_node_info(
+                    TaskNodePatch(task_id=patch.task_id, node_id=patch.task_id,
+                                  extend_props_patch={"bbs_owner": None}))
+
     async def _on_pass_collect(self, task_id: str, node_id: str, side: list[tuple]) -> None:
         """PASS→DONE 后:查结构父 P。v4 父恒 PLANNING(委托态),无需翻态:
         兄弟仍有未终态(RUNNING/PLANNING/PENDING)→等待;兄弟全 DONE(plan-ready)→ plan(target=parent):
@@ -467,14 +502,16 @@ class ExecutionEngine:
 
         状态机:RUNNING=真执行;派发命中只填执行者+置 dispatching,PENDING 维持到 start_run 成功后才翻。
         跳过:① dispatching=True 节点(已交付 _drain 待翻 RUNNING 的飞行态,防双派发);② dispatch_error 节点
-        (搜推异常/派发失败,harness owns 重试+HUNG 上限,正常 cycle 不重复搜推防 bot 调用风暴)。
+        (搜推异常/派发失败,harness owns 重试+HUNG 上限,正常 cycle 不重复搜推防 bot 调用风暴);
+        ③ run_mode=="bbs" 节点(FR-EXT-06:bbs 由 bot 经 bbs/attach 自驱,框架不自动派发/翻态)。
         reset 节点(FAILED/RUNNING→PENDING 复位,无 dispatching)不在跳过之列→重新派发执行。"""
         all_pending = self._graph.query_task_nodes(
             task_id, TaskNodeQueryCriteria(status=Status.PENDING)
         )
         pending = [n for n in all_pending
                    if not n.run_info.extend_props.get("dispatching")
-                   and not n.run_info.extend_props.get("dispatch_error")]
+                   and not n.run_info.extend_props.get("dispatch_error")
+                   and n.run_info.run_mode != "bbs"]
         if not pending:
             return
         logger.info("[prepare] task=%s 待派发节点=%s", task_id, [n.node_id for n in pending])
