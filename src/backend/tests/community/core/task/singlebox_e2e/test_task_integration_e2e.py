@@ -41,7 +41,7 @@ TASK_ID = f"t_case_{uuid.uuid4().hex[:6]}"
 
 # search skill 剧本角色名(HIT_SINGLE 真实叶节点)→ bot_name;协作群 bot 走 BCS double 不建。
 ROLE_BOTS = {
-    "N_overview": "行业信息尽调Bot",
+    "N_overview": "存储行业信息尽调Bot",
     "N_marketing_analyst": "市场规模维度分析Bot",
     "N_technology_analyst": "技术演进维度分析Bot",
     "N_competition_analyst": "竞争格局维度分析Bot",
