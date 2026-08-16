@@ -57,11 +57,11 @@ from ._shim import legacy_router
 _IDENTITY = "/openapi/v1/bots/{bot_id}/identity"
 _IDENTITY_FILE = f"{_IDENTITY}/{{file_type}}"
 
-_REWORDS = {
+_DROP_STAGE = drop_parameter("stage", {
     ("GET", _IDENTITY): ("Every entry comes from the one runtime the stage parameter names, so a\nfile's presence is always reported for the runtime asked about.", "Every entry comes from the bot's own workspace."),
     ("GET", _IDENTITY_FILE): ("Reads the runtime named by the stage parameter — the bot's own workspace\nunless a published one is asked for.", "Reads the bot's own workspace. Reaching a published runtime is offered at\nthe address that replaces this one."),
     ("PUT", _IDENTITY_FILE): ("Writes the bot's own workspace. A published runtime is what a release\nproduced and is replaced by publishing again, never edited, so naming one is\nrefused and nothing is written.", "Writes the bot's own workspace."),
-}
+})
 
 connection: APIRouter = relocate(
     connection_router,
@@ -100,7 +100,7 @@ identity: APIRouter = relocate(
     identity_router,
     legacy_router("/openapi/v1/bots/identity", "identity"),
     bot_first_to_component_first("identity"),
-    transform=drop_parameter("stage", _REWORDS),
+    transform=_DROP_STAGE,
 )
 
 #: Mounted with ``ENGINE_RUNTIME_ERROR_RESPONSES``, like their replacements.
@@ -119,3 +119,8 @@ __all__ = [
     "models",
     "sessions",
 ]
+
+# A reword written for a route that no longer exists would be skipped in
+# silence, republishing the description it was written to remove.
+_DROP_STAGE.verify_all_applied()
+

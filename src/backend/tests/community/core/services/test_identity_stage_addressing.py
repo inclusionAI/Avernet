@@ -124,13 +124,30 @@ async def test_listing_resolves_the_runtime_once_for_all_sixteen_files():
 
 @pytest.mark.asyncio
 async def test_listing_reports_every_file_from_the_one_addressed_runtime():
-    svc, _, _, _ = _service(read_return=b"")
+    """Every read goes through the *same* filesystem object.
+
+    A single shared stub could not show this — it is returned for any context —
+    so the dispatcher hands back a distinct filesystem per resolved binding and
+    the test asserts all sixteen reads landed on one of them.
+    """
+    svc, resolver, dispatcher, _ = _service()
+
+    per_binding = {}
+
+    def _dispatch(ctx, **kwargs):
+        fs = per_binding.setdefault(id(ctx), MagicMock())
+        fs.read_file = AsyncMock(return_value=b"")
+        return fs
+
+    dispatcher.dispatch_addressed.side_effect = _dispatch
+    resolver.resolve_for_binding.side_effect = lambda *a, **k: MagicMock()
 
     presence = await svc.list_bot_files(
         "staff", OWNER, BOT, OWNER, stage=STAGE_ONLINE
     )
 
     assert {exists for _ft, exists in presence} == {False}
+    assert len(per_binding) == 1, "the sixteen reads spanned more than one runtime"
 
 
 @pytest.mark.asyncio
@@ -178,9 +195,13 @@ async def test_the_draft_write_still_lands():
     # published one. Not an exact call count: RULES.md is a reference file and
     # the engine is openclaw, so the write is followed by the AGENTS.md sync,
     # which reads and writes more files through the same draft runtime.
-    assert resolver.resolve_for_bot.call_args_list == [
-        (((BOT, OWNER)), {})
-    ] * resolver.resolve_for_bot.call_count
+    assert resolver.resolve_for_bot.call_count >= 1, (
+        "a comparison against N copies of the expected call is vacuously true "
+        "when N is zero, so the floor is what makes this assert anything"
+    )
+    assert all(
+        call.args == (BOT, OWNER) for call in resolver.resolve_for_bot.call_args_list
+    )
     resolver.resolve_for_binding.assert_not_called()
     device_fs.write_file.assert_awaited()
 

@@ -793,13 +793,24 @@ These five carry `user_id`, not `owner_id`: they are owner-scoped, not operator
 console operations, and reaching another owner's bot through them is not
 offered.
 
-**The retiring addresses do not take `stage`.** `…/bots/identity/{bot_id}`,
-`…/bots/{bot_id}/engine-config` and their siblings answer with the contract they
-were frozen with, which is the draft. A caller who sends the parameter at one of
-them gets the draft, because the parameter is not declared there. The
-engine-runtime groups are the exception and not a contradiction: their retiring
-addresses *do* publish `stage`, because they took it before the freeze, so it is
-part of the contract those addresses are frozen with.
+**These five retiring addresses do not take `stage`:**
+
+```text
+GET, PUT  /openapi/v1/bots/{bot_id}/engine-config
+GET       /openapi/v1/bots/identity/{bot_id}
+GET, PUT  /openapi/v1/bots/identity/{bot_id}/{file_type}
+```
+
+They answer with the contract they were frozen with, which is the draft. A
+caller who sends the parameter at one of them gets the draft, because the
+parameter is not declared there — including on the two writes, which therefore
+answer `200` and write the draft where their replacements answer `409` and write
+nothing. That divergence is the strongest reason to migrate.
+
+This is **not** a statement about every retiring address. The engine-runtime
+ones — `…/bots/sessions/{bot_id}`, `…/bots/engine/{bot_id}/status` and the rest
+— *do* publish `stage` and honour it, because they took it before the freeze, so
+it is part of the contract they were frozen with.
 
 ### Per-bot device surfaces that are still draft-only
 

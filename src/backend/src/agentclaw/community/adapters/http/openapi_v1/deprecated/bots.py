@@ -28,10 +28,10 @@ _CONFIG = "/openapi/v1/bots/{bot_id}/engine/config"
 
 #: The handler descriptions name the stage parameter; this address does not have
 #: one, so they are reworded rather than republished as written.
-_REWORDS = {
+_DROP_STAGE = drop_parameter("stage", {
     ("GET", _CONFIG): ("Reads the runtime named by the stage parameter — the bot's own workspace\nunless a published one is asked for.", "Reads the bot's own workspace. Reaching a published runtime is offered at\nthe address that replaces this one."),
     ("PUT", _CONFIG): ("Writes the bot's own workspace. A published runtime is what a release\nproduced and is replaced by publishing again, never edited, so naming one is\nrefused and nothing is written.", "Writes the bot's own workspace."),
-}
+})
 
 
 def _to_hyphenated(path: str) -> str | None:
@@ -46,7 +46,11 @@ router: APIRouter = relocate(
     engine_config_router,
     legacy_router("/openapi/v1/bots", "bots"),
     _to_hyphenated,
-    transform=drop_parameter("stage", _REWORDS),
+    transform=_DROP_STAGE,
 )
+
+# A reword written for a route that no longer exists would be skipped in
+# silence, republishing the description it was written to remove.
+_DROP_STAGE.verify_all_applied()
 
 __all__ = ["router"]

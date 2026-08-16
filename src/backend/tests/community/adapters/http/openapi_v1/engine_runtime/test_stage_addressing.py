@@ -60,12 +60,6 @@ def _is_engine_runtime(path: str) -> bool:
     return path in _engine_runtime_paths()
 
 
-#: The other operations that address a bot by ``(owner, bot_id)``.
-#:
-#: They take ``owner_id`` for the same reason and with the same default — the
-#: caller's own bot — because ``bot_id`` alone does not identify one. They do
-#: **not** take ``stage``: there is no runtime in question when you are
-#: recording who may reach a bot, or listing a bot's stored skills.
 #: The per-bot file operations. They read or write a file **on** the addressed
 #: runtime, so they name one the same way the forwarding groups do — but they
 #: are not engine-runtime operations: they carry ``user_id`` rather than

@@ -145,10 +145,39 @@ def test_naming_no_stage_addresses_the_draft(client, engine_config, identity):
     assert identity.update_bot_file.call_args.kwargs["stage"] == "draft"
 
 
-def test_a_stage_outside_the_enum_never_reaches_a_handler(client, engine_config):
-    resp = client.get(_ENGINE_CONFIG, params={"stage": "eval"})
-    assert resp.status_code == 422
-    engine_config.read_bot_config.assert_not_called()
+@pytest.mark.parametrize(
+    ("method", "url", "body"),
+    [
+        ("get", _ENGINE_CONFIG, None),
+        ("put", _ENGINE_CONFIG, {"a": 1}),
+        ("get", _IDENTITY_LIST, None),
+        ("get", _IDENTITY_FILE, None),
+        ("put", _IDENTITY_FILE, {"content": "x"}),
+    ],
+)
+def test_a_stage_outside_the_enum_never_reaches_a_handler(
+    client, engine_config, identity, method, url, body
+):
+    """All five, and the writes especially.
+
+    ``eval`` is a real publish stage with no long-lived runtime, so it is the
+    value a caller is most likely to try. If the enum were ever loosened to a
+    bare string the writes would answer a typo as "no live runtime" instead of
+    422 — a different contract, pinned separately at the core level.
+    """
+    kwargs = {"params": {"stage": "eval"}}
+    if body is not None:
+        kwargs["json"] = body
+    assert getattr(client, method)(url, **kwargs).status_code == 422
+
+    for m in (
+        engine_config.read_bot_config,
+        engine_config.write_bot_config,
+        identity.list_bot_files,
+        identity.get_bot_file,
+        identity.update_bot_file,
+    ):
+        m.assert_not_called()
 
 
 # ── refusals ─────────────────────────────────────────────────────────────────

@@ -23,6 +23,7 @@ publish an operation with no parameters at all.
 from __future__ import annotations
 
 import inspect
+from collections.abc import Mapping
 from typing import Annotated, Any, Callable
 
 from fastapi import Query, params
@@ -132,7 +133,11 @@ def without_parameter(
         )
 
     async def shim(**kwargs: Any) -> Any:
-        return await handler(**kwargs)
+        # The value is supplied, not left to Python's own default binding. For
+        # the marker form the parameter's real default *is* the ``Query``
+        # object, so omitting it would hand the handler a marker instead of a
+        # value — the unwrapped default above is the one that was validated.
+        return await handler(**kwargs, **{name: default})
 
     # Same reason as ``with_query_parameter``: set, not ``functools.wraps``,
     # or ``inspect.signature`` follows ``__wrapped__`` back to the original and
@@ -147,7 +152,7 @@ def without_parameter(
 
 def drop_parameter(
     name: str,
-    rewords: dict[tuple[str, str], tuple[str, str]] | None = None,
+    rewords: Mapping[tuple[str, str], tuple[str, str]],
 ) -> Callable[..., Any]:
     """A ``relocate`` transform that keeps *name* off the retiring address.
 
@@ -162,20 +167,51 @@ def drop_parameter(
     handler describes the parameter in its own words, and ``deprecated_doc``
     matches the stale text literally — so editing a handler's docstring without
     revisiting the map fails at import instead of shipping the contradiction.
-    """
 
-    def transform(endpoint, method, new_path):
+    Both halves of that promise are enforced. The stale-text half is
+    ``deprecated_doc``'s. The **key** half is
+    :meth:`~_DropParameter.verify_all_applied`, which the caller runs after
+    ``relocate``: an entry whose ``(method, path)`` no longer matches any route
+    would otherwise be skipped in silence, republishing the very contradiction
+    the entry was written to remove.
+
+    Required, not defaulted: every caller has one, and an empty map means "this
+    handler never mentions the parameter", which is a claim worth writing out.
+    """
+    return _DropParameter(name, rewords)
+
+
+class _DropParameter:
+    """The transform :func:`drop_parameter` returns; see it for the contract."""
+
+    def __init__(
+        self, name: str, rewords: Mapping[tuple[str, str], tuple[str, str]]
+    ) -> None:
+        self._name = name
+        self._rewords = rewords
+        self._applied: set[tuple[str, str]] = set()
+
+    def __call__(self, endpoint, method, new_path):
+        key = (method, new_path)
+        reword = self._rewords.get(key)
+        if reword is not None:
+            self._applied.add(key)
         return without_parameter(
             endpoint,
-            name,
-            doc=deprecated_doc(
-                endpoint,
-                f"{method} {new_path}",
-                reword=(rewords or {}).get((method, new_path)),
-            ),
+            self._name,
+            doc=deprecated_doc(endpoint, f"{method} {new_path}", reword=reword),
         )
 
-    return transform
+    def verify_all_applied(self) -> None:
+        """Raise if any reword was written for a route that does not exist."""
+        unused = sorted(set(self._rewords) - self._applied)
+        if unused:
+            raise ValueError(
+                f"reword entries for {self._name!r} matched no route: {unused}. "
+                "The address moved or the key is mistyped — either way the "
+                "retiring address would publish a description naming a "
+                "parameter it does not have."
+            )
 
 
 def deprecated_doc(
