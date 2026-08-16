@@ -21,16 +21,17 @@ from agentclaw.community.adapters.http.openapi_v1.bots.engine_config import (
 from fastapi import APIRouter
 
 from ._relocate import relocate
-from ._requery import deprecated_doc, without_parameter
+from ._requery import drop_parameter
 from ._shim import legacy_router
 
+_CONFIG = "/openapi/v1/bots/{bot_id}/engine/config"
 
-def _drop_stage(endpoint, method, new_path):
-    return without_parameter(
-        endpoint,
-        "stage",
-        doc=deprecated_doc(endpoint, f"{method} {new_path}"),
-    )
+#: The handler descriptions name the stage parameter; this address does not have
+#: one, so they are reworded rather than republished as written.
+_REWORDS = {
+    ("GET", _CONFIG): ("Reads the runtime named by the stage parameter — the bot's own workspace\nunless a published one is asked for.", "Reads the bot's own workspace. Reaching a published runtime is offered at\nthe address that replaces this one."),
+    ("PUT", _CONFIG): ("Writes the bot's own workspace. A published runtime is what a release\nproduced and is replaced by publishing again, never edited, so naming one is\nrefused and nothing is written.", "Writes the bot's own workspace."),
+}
 
 
 def _to_hyphenated(path: str) -> str | None:
@@ -45,7 +46,7 @@ router: APIRouter = relocate(
     engine_config_router,
     legacy_router("/openapi/v1/bots", "bots"),
     _to_hyphenated,
-    transform=_drop_stage,
+    transform=drop_parameter("stage", _REWORDS),
 )
 
 __all__ = ["router"]

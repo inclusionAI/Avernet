@@ -113,10 +113,22 @@ def without_parameter(
     signature = inspect.signature(handler, eval_str=True)
     if name not in signature.parameters:
         raise ValueError(f"{handler.__name__} has no parameter {name!r}")
-    if signature.parameters[name].default is inspect.Parameter.empty:
+
+    # A handler may declare the parameter either way — ``Annotated[...] = value``
+    # or a plain type with a FastAPI marker *as* the default — and only the first
+    # leaves a usable value behind when the parameter is dropped. The second
+    # would bind the ``Query`` object itself, so it is refused rather than
+    # shipped. ``with_query_parameter`` unwraps the same two shapes.
+    default = signature.parameters[name].default
+    if isinstance(default, params.Param):
+        default = (
+            inspect.Parameter.empty if default.default is Ellipsis else default.default
+        )
+    if default is inspect.Parameter.empty:
         raise ValueError(
-            f"{handler.__name__}.{name} has no default, so dropping it from the "
-            "legacy signature would leave the shim unable to call the handler"
+            f"{handler.__name__}.{name} has no usable default, so dropping it "
+            "from the legacy signature would leave the shim unable to call the "
+            "handler"
         )
 
     async def shim(**kwargs: Any) -> Any:
@@ -131,6 +143,39 @@ def without_parameter(
     shim.__name__ = f"{handler.__name__}_{suffix}"
     shim.__doc__ = doc or handler.__doc__
     return shim
+
+
+def drop_parameter(
+    name: str,
+    rewords: dict[tuple[str, str], tuple[str, str]] | None = None,
+) -> Callable[..., Any]:
+    """A ``relocate`` transform that keeps *name* off the retiring address.
+
+    Wraps :func:`without_parameter` with the description handling every legacy
+    registration needs, so it is written once rather than once per group.
+
+    ``rewords`` maps ``(method, current_path)`` to the ``(stale, correct)`` pair
+    :func:`deprecated_doc` should apply. Dropping a parameter almost always
+    needs one: a handler docstring that mentions the parameter is republished at
+    an address whose parameter table does not list it, which is precisely the
+    contradiction ``reword`` exists to prevent. Per-operation because each
+    handler describes the parameter in its own words, and ``deprecated_doc``
+    matches the stale text literally — so editing a handler's docstring without
+    revisiting the map fails at import instead of shipping the contradiction.
+    """
+
+    def transform(endpoint, method, new_path):
+        return without_parameter(
+            endpoint,
+            name,
+            doc=deprecated_doc(
+                endpoint,
+                f"{method} {new_path}",
+                reword=(rewords or {}).get((method, new_path)),
+            ),
+        )
+
+    return transform
 
 
 def deprecated_doc(

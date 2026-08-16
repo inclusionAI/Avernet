@@ -186,16 +186,40 @@ async def test_the_draft_write_still_lands():
 
 
 @pytest.mark.asyncio
-async def test_a_publish_id_wins_over_a_stage_and_a_bogus_stage_is_still_refused():
-    """The documented precedence, and its limit.
+async def test_a_publish_id_wins_over_a_named_stage():
+    """The documented precedence: a release record is the more specific address.
 
-    ``publish_id`` names one exact release and is the more specific address, so
-    it wins. A stage name that is not a stage is still refused, rather than
-    silently discarded because the other branch was taken.
+    Both are given, and both are *valid* — so this actually exercises the
+    branch. The record-keyed read is taken, which means the stage rule is never
+    consulted and the resolver is reached by binding rather than by stage.
+    """
+    svc, resolver, _, _ = _service()
+    svc._read_from_publish_device = AsyncMock(return_value="from-the-record")
+
+    resp = await svc.get_bot_file(
+        "staff", OWNER, BOT, "RULES.md", OWNER, publish_id="7", stage=STAGE_ONLINE
+    )
+
+    assert resp.content == "from-the-record"
+    svc._read_from_publish_device.assert_awaited_once()
+    resolver.resolve_for_binding.assert_not_called()
+    resolver.resolve_for_bot.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_bogus_stage_is_refused_even_when_publish_id_would_win():
+    """The limit of that precedence.
+
+    The record-keyed branch ignores ``stage``, so without an explicit check a
+    caller who misspelled it would get a 200 and never learn the argument was
+    discarded.
     """
     svc, _, _, _ = _service()
+    svc._read_from_publish_device = AsyncMock(return_value="from-the-record")
 
     with pytest.raises(EngineStageNotLiveError):
         await svc.get_bot_file(
             "staff", OWNER, BOT, "RULES.md", OWNER, publish_id="7", stage="onlien"
         )
+
+    svc._read_from_publish_device.assert_not_awaited()

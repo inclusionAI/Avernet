@@ -165,8 +165,6 @@ WriteStageQuery = Annotated[RuntimeStage, Query(description=WRITE_STAGE_DESCRIPT
 
 __all__ = [
     "OWNER_ID_QUERY",
-    "STAGE_DESCRIPTION",
-    "WRITE_STAGE_DESCRIPTION",
     "OwnerIdDep",
     "StageQuery",
     "WriteStageQuery",

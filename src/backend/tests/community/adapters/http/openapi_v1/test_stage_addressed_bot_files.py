@@ -9,7 +9,7 @@ never gained the parameter.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock, create_autospec
 
 import pytest
 from fastapi import FastAPI
@@ -69,7 +69,11 @@ def bot_service():
 
 @pytest.fixture
 def engine_config():
-    m = AsyncMock()
+    # ``create_autospec`` rather than a bare AsyncMock: it binds the real
+    # signatures, so an adapter forwarding a keyword the service does not accept
+    # fails here instead of at the first production request. A ``spec=`` alone
+    # would only restrict attribute *names*.
+    m = create_autospec(EngineConfigServiceProtocol, instance=True)
     m.read_bot_config.return_value = {"k": "v"}
     m.write_bot_config.return_value = None
     return m
@@ -77,14 +81,15 @@ def engine_config():
 
 @pytest.fixture
 def identity():
-    m = MagicMock(spec=IdentityService)
-    m.list_bot_files = AsyncMock(return_value=[("RULES.md", True)])
-    m.get_bot_file = AsyncMock(
-        return_value=MagicMock(content="body", file_path="identity/RULES.md")
+    # Autospecced for the reason above. The return values are set on the
+    # autospecced children rather than replacing them, which would discard the
+    # bound signature and the check with it.
+    m = create_autospec(IdentityService, instance=True)
+    m.list_bot_files.return_value = [("RULES.md", True)]
+    m.get_bot_file.return_value = MagicMock(
+        content="body", file_path="identity/RULES.md"
     )
-    m.update_bot_file = AsyncMock(
-        return_value=MagicMock(file_path="identity/RULES.md")
-    )
+    m.update_bot_file.return_value = MagicMock(file_path="identity/RULES.md")
     return m
 
 
@@ -202,3 +207,32 @@ def test_the_retiring_addresses_still_read_the_draft(
         if m.call_args is not None
     ]
     assert forwarded and set(forwarded) == {"draft"}
+
+
+@pytest.mark.parametrize(
+    ("url", "body"),
+    [
+        (_LEGACY_ENGINE_CONFIG, {"a": 1}),
+        (_LEGACY_IDENTITY_FILE, {"content": "x"}),
+    ],
+)
+def test_a_retiring_write_naming_a_published_stage_still_writes_the_draft(
+    client, engine_config, identity, url, body
+):
+    """Pinned because it is the one place "nothing is written" does not hold.
+
+    The current addresses refuse a published write with a 409. These do not:
+    they never declared the parameter, so it is ignored and the draft is
+    written — the contract they were frozen with. That is a deliberate
+    consequence of freezing them rather than an oversight, and it is the
+    strongest reason to migrate, so it is asserted rather than left to be
+    discovered.
+    """
+    assert client.put(url, params={"stage": "online"}, json=body).status_code == 200
+
+    written = [
+        m.call_args.kwargs.get("stage")
+        for m in (engine_config.write_bot_config, identity.update_bot_file)
+        if m.call_args is not None
+    ]
+    assert written == ["draft"]

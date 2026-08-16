@@ -84,6 +84,11 @@ _STAGE_ADDRESSED_ELSEWHERE = {
 }
 
 #: The other operations that address a bot by ``(owner, bot_id)``.
+#:
+#: They take ``owner_id`` for the same reason and with the same default — the
+#: caller's own bot — because ``bot_id`` alone does not identify one. They do
+#: **not** take ``stage``: there is no runtime in question when you are
+#: recording who may reach a bot, or listing a bot's stored skills.
 _OWNER_ADDRESSED_ELSEWHERE = {
     ("get", "/openapi/v1/bots/{bot_id}/authorized-apps"),
     ("post", "/openapi/v1/bots/{bot_id}/authorized-apps"),

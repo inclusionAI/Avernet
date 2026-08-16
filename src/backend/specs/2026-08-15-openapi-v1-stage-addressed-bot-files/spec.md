@@ -322,6 +322,23 @@ consequences, both deliberate:
   about to be deprecated and then adding it again to its replacement, and the
   deprecation freeze would make the first of those a contract violation.
 
+## Known limitations
+
+**A published stage is addressed with the bot's *current* engine.** Both
+services resolve `engine_type` from the live `ac_bots` row, and that value picks
+the per-engine directory and the provider's config filename. A service bot
+published on `openclaw` whose owner later switches to `claude_code` will have its
+online runtime read at the claude_code paths, where the release never wrote
+anything — so the caller sees "never configured" rather than the config that is
+there.
+
+Not introduced here: `read_publish_config`'s route resolves the engine the same
+way, from the same row, and has shipped that way. What this feature changes is
+that the mismatch is now reachable from the public surface rather than only from
+the internal `publish_id` route. Fixing it needs the engine the release was cut
+with, which no publish record currently stores — so it is recorded rather than
+patched around.
+
 ## Open Questions
 
 None blocking.

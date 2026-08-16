@@ -316,8 +316,11 @@ def resolve_stage_device_context(
     itself, to fill ``ctx.bot_type``; the point is that this function adds
     nothing.)
 
-    **A published stage costs one owner-scoped row read**, for the primary key
-    and the bot type. ``get_by_id_and_owner`` and not ``get_by_id``: ``bot_id``
+    **A published stage costs one owner-scoped row read here**, for the primary
+    key and the bot type. An adapter that already fetched the row for its own
+    ownership guard — engine config does — pays for it twice on that request;
+    that is the accepted cost of resolving the facts in one place instead of
+    threading them through every caller (spec D8). ``get_by_id_and_owner`` and not ``get_by_id``: ``bot_id``
     carries no unique constraint and every user's first bot is called
     ``default``, so a wider query can return another owner's row — and
     ``bot_pk`` is what the publish lookup trusts to stay on the addressed bot.

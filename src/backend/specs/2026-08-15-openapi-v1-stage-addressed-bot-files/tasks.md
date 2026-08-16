@@ -307,8 +307,12 @@
         `GET …/{bot_id}/identity`, `GET …/{bot_id}/identity/{file_type}` —
         with `stage=draft|verify|online` hands the service the matching
         stage string.
-  - [x] No parameter → `stage="draft"`, and the draft path reads **no bot
-        row** — assert the repository was not touched (the byte-for-byte pin).
+  - [x] No parameter → `stage="draft"` on all five. The "reads no bot row" half
+        of this pin lives at the core level
+        (`test_stage.py::test_the_draft_resolves_the_bots_own_binding_and_reads_no_extra_row`),
+        because it is not true at the HTTP level for engine config: that
+        adapter reads the row unconditionally for its ownership guard, and did
+        before this change.
   - [x] Both writes with `stage=verify|online` → `409` and the body message
         `"The requested stage is read-only"`; with no parameter → unchanged
         `200`.
