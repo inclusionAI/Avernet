@@ -30,6 +30,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskNode,
     TaskNodePatch,
     TaskNodeQueryCriteria,
+    TaskSpec,
     TaskSummary,
 )
 
@@ -319,7 +320,7 @@ class TaskGraphService:
             )
 
     def attach_bbs_node(
-        self, task_id: str, parent_node_id: str, task_spec: "TaskSpec", bot_id: str
+        self, task_id: str, parent_node_id: str, task_spec: TaskSpec, bot_id: str
     ) -> TaskNode:
         """BBS 接力步④:在 parent 下新建 run_mode=bbs scoped 子节点 + 翻 PENDING→RUNNING(create+start 合一)。
 
