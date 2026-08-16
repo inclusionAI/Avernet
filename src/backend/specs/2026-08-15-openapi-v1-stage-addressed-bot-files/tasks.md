@@ -262,13 +262,13 @@
 
 ## Group D — Tests
 
-### Task D1: Core stage seam  `[ ]`
+### Task D1: Core stage seam  `[x]`
 
 - **Files:** `tests/community/core/engine_runtime/test_stage.py`
 - **Done when:**
-  - [ ] `require_stage_writable`: draft passes; verify and online raise
+  - [x] `require_stage_writable`: draft passes; verify and online raise
         `EngineStageReadOnlyError`.
-  - [ ] `resolve_published_device_context`: verify/online resolve the publish
+  - [x] `resolve_published_device_context`: verify/online resolve the publish
         record's binding and call `resolve_for_binding` with `facts.owner_id`
         and `facts.bot_id`; a published stage on a `personal` bot raises
         `EngineStageNotLiveError` **before** any resolver call; a draft stage
@@ -276,26 +276,26 @@
         falling through to `resolve_stage_bind_id`'s generic "not a published
         stage" left the caller without the fix. The guard is local so the
         message can name `resolve_for_bot`.)
-  - [ ] `BotFacts.from_record` applies the same fallbacks the relay applied
+  - [x] `BotFacts.from_record` applies the same fallbacks the relay applied
         inline, and `relay.resolve_bot` still returns identical facts — the
         existing relay tests are the check.
 - **Depends on:** A2
 
-### Task D2: Service-level behaviour  `[ ]`
+### Task D2: Service-level behaviour  `[x]`
 
 - **Files:**
   `tests/community/core/services/test_engine_config_service.py`,
   new `tests/community/core/services/test_identity_stage_addressing.py`
 - **Done when:**
-  - [ ] Engine-config: a verify/online read resolves through the publish
+  - [x] Engine-config: a verify/online read resolves through the publish
         record's binding and reads the same canonical `config/teclaw.json`
         path.
-  - [ ] Engine-config: a verify/online write raises
+  - [x] Engine-config: a verify/online write raises
         `EngineStageReadOnlyError` and the dispatcher is **never** called —
         the "nothing is written" claim, asserted rather than described.
-  - [ ] Identity: the same two pins for `get_bot_file`, plus `list_bot_files`
+  - [x] Identity: the same two pins for `get_bot_file`, plus `list_bot_files`
         probing the addressed runtime, plus the write refusal.
-  - [ ] Identity: `get_bot_file` with both `publish_id` and a published
+  - [x] Identity: `get_bot_file` with both `publish_id` and a published
         `address` takes the record-keyed branch (the documented precedence).
 - **Depends on:** B1, B2
 
