@@ -15,6 +15,7 @@ use bcs_test_support::{
     NoopSecretService, NoopSessionFileService, NoopSessionManagementService,
     NoopSystemMessageService, NoopWorkbenchSessionService,
 };
+use bcs_test_support::NoopInteractionService;
 use std::sync::Arc;
 
 #[test]
@@ -46,6 +47,7 @@ fn build_succeeds_when_all_required_services_set() {
         .friend(Arc::new(NoopFriendCoreService))
         .relation(Arc::new(NoopRelationCoreService))
         .message_flow(Arc::new(NoopMessageFlowService))
+        .interactions(Arc::new(NoopInteractionService))
         .a2a_chat(Arc::new(NoopA2aChatService))
         .a2a_chat_runs(Arc::new(NoopA2aChatRunService))
         .collaboration_runtime(Arc::new(NoopCollaborationRuntimeService))
@@ -92,6 +94,7 @@ fn fully_wired_builder_without_organization_management() -> ServicesBuilder {
         .friend(Arc::new(NoopFriendCoreService))
         .relation(Arc::new(NoopRelationCoreService))
         .message_flow(Arc::new(NoopMessageFlowService))
+        .interactions(Arc::new(NoopInteractionService))
         .a2a_chat(Arc::new(NoopA2aChatService))
         .a2a_chat_runs(Arc::new(NoopA2aChatRunService))
         .collaboration_runtime(Arc::new(NoopCollaborationRuntimeService))

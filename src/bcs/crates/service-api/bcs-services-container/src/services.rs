@@ -19,6 +19,7 @@ use bcs_service_api::{
     SecretService, SessionFileService, SessionManagementService, SystemMessageService, WorkbenchSessionService,
     backfill_bot_names,
 };
+use bcs_service_api::InteractionService;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -46,6 +47,8 @@ pub struct Services {
     pub relation: Arc<dyn RelationCoreService>,
     /// Message/chat flow orchestration service.
     pub message_flow: Arc<dyn MessageFlowService>,
+    /// Human interaction orchestration application service.
+    pub interactions: Arc<dyn InteractionService>,
     /// A2A direct chat and async run service.
     pub a2a_chat: Arc<dyn A2aChatService>,
     /// A2A route-closure chat run service.
@@ -133,6 +136,7 @@ pub struct ServicesBuilder {
     friend: Option<Arc<dyn FriendCoreService>>,
     relation: Option<Arc<dyn RelationCoreService>>,
     message_flow: Option<Arc<dyn MessageFlowService>>,
+    interactions: Option<Arc<dyn InteractionService>>,
     a2a_chat: Option<Arc<dyn A2aChatService>>,
     a2a_chat_runs: Option<Arc<dyn A2aChatRunService>>,
     collaboration_runtime: Option<Arc<dyn CollaborationRuntimeService>>,
@@ -217,6 +221,12 @@ impl ServicesBuilder {
     /// Set the message flow service.
     pub fn message_flow(mut self, service: Arc<dyn MessageFlowService>) -> Self {
         self.message_flow = Some(service);
+        self
+    }
+
+    /// Set the human interaction orchestration service.
+    pub fn interactions(mut self, service: Arc<dyn InteractionService>) -> Self {
+        self.interactions = Some(service);
         self
     }
 
@@ -423,6 +433,7 @@ impl ServicesBuilder {
             friend: required(self.friend, "friend")?,
             relation: required(self.relation, "relation")?,
             message_flow: required(self.message_flow, "message_flow")?,
+            interactions: required(self.interactions, "interactions")?,
             a2a_chat: required(self.a2a_chat, "a2a_chat")?,
             a2a_chat_runs: required(self.a2a_chat_runs, "a2a_chat_runs")?,
             collaboration_runtime: required(self.collaboration_runtime, "collaboration_runtime")?,
@@ -476,7 +487,7 @@ impl ServicesBuilder {
             NoopGroupFusionService, NoopGroupManagementService, NoopGroupMessageHistoryService,
             NoopGroupProposalService, NoopGroupQueryService, NoopHumanActorService,
             NoopCollaborationRuntimeService, NoopCollaborationTemplateService,
-            NoopMessageFlowService, NoopOrganizationManagementService,
+            NoopInteractionService, NoopMessageFlowService, NoopOrganizationManagementService,
             NoopProposalCoreService, NoopProviderBotCoreService, NoopProviderBotEventService,
             NoopProviderCoreService,
             NoopProviderManagementService, NoopRelationCoreService, NoopRoutingCoreService,
@@ -507,6 +518,9 @@ impl ServicesBuilder {
             message_flow: self
                 .message_flow
                 .unwrap_or_else(|| Arc::new(NoopMessageFlowService)),
+            interactions: self
+                .interactions
+                .unwrap_or_else(|| Arc::new(NoopInteractionService)),
             a2a_chat: self
                 .a2a_chat
                 .unwrap_or_else(|| Arc::new(NoopA2aChatService)),

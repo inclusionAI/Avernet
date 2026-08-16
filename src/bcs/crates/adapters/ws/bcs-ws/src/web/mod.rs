@@ -13,6 +13,6 @@ pub use dispatcher::{
     WebClientConnectionState, WebConnectionPhase, WebDispatchOutcome, WebDispatchState,
     WebWsDispatchError, dispatch_client_frame,
 };
-pub use frontend_delivery::WorkbenchFrontendDelivery;
+pub use frontend_delivery::{WorkbenchFrontendDelivery, WorkbenchInteractionDelivery};
 pub use group_session::{GROUP_SESSION_WS_ENDPOINT, group_session_websocket_router};
 pub use handler::handle_client_connection;
