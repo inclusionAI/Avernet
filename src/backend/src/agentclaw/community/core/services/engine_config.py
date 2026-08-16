@@ -37,11 +37,9 @@ from agentclaw.community.core.devices.services.device_context import DeviceNotBo
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
-from agentclaw.community.core.engine_runtime.models import BotFacts
 from agentclaw.community.core.engine_runtime.stage import (
-    STAGE_DRAFT,
     require_stage_writable,
-    resolve_published_device_context,
+    resolve_stage_device_context,
 )
 from agentclaw.community.core.repository.protocols.devices import (
     DeviceBindingRepository,
@@ -150,7 +148,7 @@ class EngineConfigService:
         # active-stage binding (binding PKs are ≥1, so 0 is never a real binding).
         # This is a real failure, not an empty config — surface it (don't swallow).
         # Deliberately NOT ``engine_runtime.stage.resolve_stage_bind_id``, which
-        # the stage-addressed read above uses. The two answer different
+        # the bot-level stage-addressed read below uses. The two answer different
         # questions and this one is keyed by *record*: the caller named a
         # ``publish_id``, and that rule picks the newest record at a status — so
         # routing this path through it would answer a question about release 7
@@ -177,25 +175,6 @@ class EngineConfigService:
 
     # ── bot-level (stage-addressed read, draft-only write) ───────────────────
 
-    def _bot_facts(self, bot_id: str, owner_id: str) -> BotFacts:
-        """The addressed bot's facts, from an **owner-scoped** read.
-
-        ``get_by_id_and_owner`` and not ``get_by_id``: ``bot_id`` carries no
-        unique constraint and every user's first bot is called ``default``, so a
-        wider query can return another owner's row — and ``bot_pk`` is what the
-        publish lookup trusts to stay on the addressed bot.
-
-        A row that is not there yields empty facts rather than an exception, and
-        the guards downstream answer it: ``require_stage_addressable`` sees a
-        ``bot_type`` that is not ``service`` and refuses the published stage as
-        having no live runtime. That is a 409, which is the same class of answer
-        this endpoint's draft leg gives for a bot that is not the caller's —
-        raising a 404 here instead would make a published-stage request the one
-        way to learn whether a bot exists.
-        """
-        record = self._bot_repo.get_by_id_and_owner(bot_id, owner_id) or {}
-        return BotFacts.from_record(record, bot_id=bot_id, owner_id=owner_id)
-
     def _bot_config_device_fs(
         self,
         *,
@@ -210,22 +189,21 @@ class EngineConfigService:
         DeviceFileSystem via the dispatcher (mirrors
         ``IdentityService._identity_device_fs``).
 
-        The draft is the bot's own binding, resolved exactly as it always was —
-        no bot row is read — and raises ``DeviceNotBoundError`` if the bot has
-        no active binding, same as the legacy ``for_bot`` path. A published
-        stage resolves that stage's live runtime and raises
-        ``EngineStageNotLiveError`` when there is none.
+        The draft raises ``DeviceNotBoundError`` if the bot has no active
+        binding, same as the legacy ``for_bot`` path; a published stage raises
+        ``EngineStageNotLiveError`` when that stage has no live runtime. Both
+        legs, and the reasons behind them, live in
+        :func:`resolve_stage_device_context`.
         """
-        if stage == STAGE_DRAFT:
-            ctx = self._resolver.resolve_for_bot(bot_id, owner_id)
-        else:
-            ctx = resolve_published_device_context(
-                self._resolver,
-                self._publish_repo,
-                self._binding_repo,
-                facts=self._bot_facts(bot_id, owner_id),
-                stage=stage,
-            )
+        ctx = resolve_stage_device_context(
+            self._resolver,
+            self._publish_repo,
+            self._binding_repo,
+            self._bot_repo,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            stage=stage,
+        )
         return self._device_fs_dispatcher.dispatch_addressed(
             ctx, namespace=CONFIG_NS, entity_type=entity_type, entity_id=entity_id,
             bot_id=bot_id, engine_type=engine_type,
@@ -287,7 +265,7 @@ class EngineConfigService:
         require_stage_writable(stage)
         device_fs = self._bot_config_device_fs(
             bot_id=bot_id, owner_id=owner_id, entity_id=entity_id,
-            entity_type=entity_type, engine_type=engine_type, stage=STAGE_DRAFT,
+            entity_type=entity_type, engine_type=engine_type, stage=stage,
         )
         payload = json.dumps(config, ensure_ascii=False, indent=2).encode("utf-8")
         await device_fs.write_file(_CONFIG_LOGICAL_PATH, payload)

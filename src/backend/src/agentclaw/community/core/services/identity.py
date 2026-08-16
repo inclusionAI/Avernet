@@ -31,11 +31,11 @@ from agentclaw.community.core.devices.services.device_context import (
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
-from agentclaw.community.core.engine_runtime.models import BotFacts
 from agentclaw.community.core.engine_runtime.stage import (
     STAGE_DRAFT,
+    require_known_stage,
     require_stage_writable,
-    resolve_published_device_context,
+    resolve_stage_device_context,
 )
 from agentclaw.community.core.repository.protocols.devices import (
     DeviceBindingRepository,
@@ -259,24 +259,6 @@ class IdentityService:
     # a bot with no resolvable device context is a bug and surfaces as the
     # resolver's error (fail early, never silently touch a dead local path).
 
-    def _bot_facts(self, bot_id: str, owner_id: str) -> BotFacts:
-        """The addressed bot's facts, from an **owner-scoped** read.
-
-        ``get_by_id_and_owner`` and not ``get_by_id``: ``bot_id`` carries no
-        unique constraint, so a wider query can return another owner's row — and
-        ``bot_pk`` is what the publish lookup trusts to stay on the addressed
-        bot.
-
-        A row that is not there yields empty facts rather than an exception, and
-        ``require_stage_addressable`` downstream refuses the published stage as
-        having no live runtime. That is a 409, the same class of answer this
-        service's draft leg already gives for a bot that is not the caller's; a
-        404 here would make a published-stage request the one way to learn
-        whether a bot exists.
-        """
-        record = self._bot_repo.get_by_id_and_owner(bot_id, owner_id) or {}
-        return BotFacts.from_record(record, bot_id=bot_id, owner_id=owner_id)
-
     def _identity_device_fs(
         self,
         *,
@@ -291,20 +273,20 @@ class IdentityService:
         DeviceFileSystem via the dispatcher.
 
         The default is the bot's own workspace, resolved exactly as it always
-        was (raises if unbound) and reading no bot row. A service bot's
-        published runtimes resolve through the shared stage rule, which raises
-        ``EngineStageNotLiveError`` when the named stage has none up.
+        was (raises if unbound). A service bot's published runtimes resolve
+        through the shared stage rule, which raises ``EngineStageNotLiveError``
+        when the named stage has none up. Both legs, and the reasons behind
+        them, live in :func:`resolve_stage_device_context`.
         """
-        if stage == STAGE_DRAFT:
-            ctx = self._resolver.resolve_for_bot(bot_id, owner_id)
-        else:
-            ctx = resolve_published_device_context(
-                self._resolver,
-                self._publish_repo,
-                self._binding_repo,
-                facts=self._bot_facts(bot_id, owner_id),
-                stage=stage,
-            )
+        ctx = resolve_stage_device_context(
+            self._resolver,
+            self._publish_repo,
+            self._binding_repo,
+            self._bot_repo,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            stage=stage,
+        )
         return self._device_fs_dispatcher.dispatch_addressed(
             ctx,
             namespace=IDENTITY_NS,
@@ -342,6 +324,16 @@ class IdentityService:
         # 抛 404,这里兜住,避免 router 吃 500、前端打不开编辑器。等 arca 侧也按契约
         # 把 404 收敛成 None,这段 except 就该整体删掉——core 不该认识 HTTP 状态码。
         # 非 404 的 HTTPStatusError(代理 401/沙箱 5xx 等)始终透出。
+        return await self._read_through(device_fs, file_type)
+
+    @staticmethod
+    async def _read_through(device_fs, file_type: str) -> str:
+        """One identity file, through an **already-resolved** ``device_fs``.
+
+        Split out of :meth:`_device_read` so a caller reading many files for one
+        runtime resolves that runtime once — see :meth:`list_bot_files`. The 404
+        contract is the one described there and is not repeated.
+        """
         try:
             content_bytes = await device_fs.read_file(f"{IDENTITY_NS}/{file_type}")
         except httpx.HTTPStatusError as e:
@@ -680,6 +672,10 @@ class IdentityService:
         """
         self.validate_entity_type(entity_type)
         self.validate_file_type(file_type)
+        # Checked even though the ``publish_id`` branch below ignores ``stage``:
+        # a caller who passed a stage name that is not one should hear about it
+        # rather than have the argument silently discarded.
+        require_known_stage(stage)
         eng = resolve_engine_for_bot(
             bot_id, entity_id, override=engine_type, bot_repo=self._bot_repo
         )
@@ -752,6 +748,26 @@ class IdentityService:
         that one runtime — a caller never sees a draft row beside a verify row.
         """
         self.validate_entity_type(entity_type)
+
+        # The runtime is resolved **once**, not once per file. Every resolution
+        # step is synchronous — the engine lookup, and on a published stage a
+        # bot-row read, a publish-record scan, a binding read and a provider
+        # call with a 30-second timeout — and synchronous work in a coroutine
+        # runs before its first ``await``, so ``gather`` would execute sixteen
+        # of them back to back on the event loop rather than concurrently. One
+        # resolution, sixteen reads through it.
+        eng = resolve_engine_for_bot(
+            bot_id, entity_id, override=engine_type, bot_repo=self._bot_repo
+        )
+        device_fs = self._identity_device_fs(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            engine_type=eng,
+            stage=stage,
+        )
+
         # Probe all 16 identity files concurrently: each read is a device
         # round-trip (baas/arca = a network hop), so gathering instead of a
         # serial loop cuts this list endpoint's tail latency from 16× to ~1×.
@@ -766,18 +782,7 @@ class IdentityService:
         # cap is needed, wrap the gather in asyncio.Semaphore.
         ordered = list(VALID_IDENTITY_FILES)
         contents = await asyncio.gather(
-            *(
-                self.read_identity_file(
-                    entity_type,
-                    entity_id,
-                    bot_id,
-                    ft,
-                    owner_id,
-                    engine_type=engine_type,
-                    stage=stage,
-                )
-                for ft in ordered
-            )
+            *(self._read_through(device_fs, ft) for ft in ordered)
         )
         return list(zip(ordered, [bool(c) for c in contents]))
 
@@ -878,9 +883,13 @@ class IdentityService:
         anything is resolved — which is also why the write path below needs no
         stage of its own: there is only one runtime it can reach.
         """
-        require_stage_writable(stage)
+        # The two static validators run first: they resolve nothing, so the
+        # stage guard keeps its "before anything is resolved" property, and a
+        # request that is *also* malformed still hears which part is wrong
+        # rather than being answered only about its stage.
         self.validate_entity_type(entity_type)
         self.validate_file_type(file_type)
+        require_stage_writable(stage)
         eng = resolve_engine_for_bot(
             bot_id, entity_id, override=engine_type, bot_repo=self._bot_repo
         )

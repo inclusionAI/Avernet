@@ -92,7 +92,7 @@ def resolve_published_device_context(
 
 ```python
 if stage == STAGE_DRAFT:
-    ctx = self._resolver.resolve_for_bot(bot_id, owner_id)   # unchanged; no row read
+    ctx = self._resolver.resolve_for_bot(bot_id, owner_id)   # unchanged; adds no read
 else:
     facts = self._bot_facts(bot_id, owner_id)                # owner-scoped
     ctx = resolve_published_device_context(
@@ -324,7 +324,7 @@ new: tests/community/core/services/test_identity_stage_addressing.py
 new: tests/…/openapi_v1/test_stage_addressed_bot_files.py
     GET …/{bot_id}/engine/config and …/{bot_id}/identity[/{file_type}] with
       each stage → the address the service saw
-    default (no parameter) → the draft resolve, and no bot row read at all
+    default (no parameter) → the draft resolve, with no read added to it
     PUT with stage=verify|online → 409 "The requested stage is read-only"
     PUT with no stage → unchanged 200
     stage=eval → 422 from the enum, no handler run

@@ -96,13 +96,17 @@
   - [x] Constructor takes `publish_repo: BotPublishRepositoryProtocol` and
         `binding_repo: DeviceBindingRepository`, with a comment that both exist
         only for the stage-addressed read.
-  - [x] `_bot_facts(bot_id, owner_id)` builds `BotFacts` from
-        `self._bot_repo.get_by_id_and_owner`, raising `BotNotFoundError` on a
-        miss. No new constructor dependency — the service already holds the
-        repository.
-  - [x] `_bot_config_device_fs(..., stage)` branches: draft → the existing
-        `resolve_for_bot(bot_id, owner_id)` **unchanged and with no row read**;
-        published → `_bot_facts` then `resolve_published_device_context`.
+  - [x] `_bot_config_device_fs(..., stage)` delegates both legs to
+        `resolve_stage_device_context`. **Deviation, recorded:** the plan had a
+        per-service `_bot_facts` raising `BotNotFoundError` on a miss. Review
+        showed that duplicated the branch in two services, so the facts
+        resolution moved into the shared helper — and a missing row yields empty
+        facts, which `require_stage_addressable` refuses as 409 "no live
+        runtime". A 404 would have made a published-stage request the one way to
+        learn whether a bot exists.
+  - [x] The draft leg adds **no row read of its own**. It is not row-free —
+        `resolve_for_bot` reads the bot to fill `ctx.bot_type` — but nothing is
+        added to what it already did.
   - [x] `read_bot_config(..., stage: str)` — required, not defaulted.
   - [x] `write_bot_config(..., stage: str)` calls `require_stage_writable(stage)`
         as its **first** statement, then takes the draft branch. It must never
@@ -222,8 +226,8 @@
         RuntimeStage.DRAFT` and passes `stage=stage.value`.
   - [ ] **No `BotRepository` injection and no bot lookup anywhere in this
         router** — the earlier draft had a conditional one; resolving the facts
-        in the service removed the need. The draft path still reads no bot row,
-        so its failure mode is unchanged (409, not 404).
+        in the shared helper removed the need. The draft path adds no row read
+        of its own, so its failure mode is unchanged (409, not 404).
   - [ ] The stale "Reads address the bot's draft runtime." line in
         `get_bot_identity_file`'s published docstring is corrected.
   - [ ] The direct-invocation tests in
