@@ -4,6 +4,10 @@ import time
 from typing import TYPE_CHECKING, Callable
 
 from agentclaw.community.core.devices.models import DeviceBindingStatus
+from agentclaw.community.core.devices.services.device_context import (
+    DeviceNotBoundError,
+    UnknownProviderError,
+)
 from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
     TECLAW_DEVICE_PROVIDER,
 )
@@ -19,6 +23,9 @@ from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.bot_collaborator.services.credentials_admins_writer import (
+        DeviceCredentialsAdminsWriter,
+    )
     from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
     from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
     from agentclaw.community.core.service_bot.services.baas_service import BaasService
@@ -97,12 +104,14 @@ class TeclawPublishTaskHandler:
         baas_service: BaasService,
         device_binding_repo: DeviceBindingRepository,
         passport_plugin: PassportPlugin,
+        credentials_admins_writer: "DeviceCredentialsAdminsWriter",
         poll_delay_seconds: float = 5.0,
         clock: Callable[[], float] = time.time,
     ) -> None:
         self._baas = baas_service
         self._device_binding_repo = device_binding_repo
         self._passport_plugin = passport_plugin
+        self._creds_writer = credentials_admins_writer
         self._poll_delay_seconds = poll_delay_seconds
         self._clock = clock
 
@@ -329,6 +338,45 @@ class TeclawPublishTaskHandler:
             publish_id,
             len(updated),
         )
+        # Token delivered to a ready device → now seed admins into the same
+        # online container's .credentials. Runs in the success tail of every
+        # entry into _deliver_outbound_rule (first publish AND crash-resume
+        # replay), is idempotent (read-modify-write), and a transient failure
+        # keeps the task recoverable (Retry) without rolling back the token push.
+        return self._seed_admins(bot_id=bot_id, binding=binding)
+
+    def _seed_admins(self, *, bot_id: str, binding: "DeviceBindingRecord") -> TaskOutcome:
+        """Seed collaborator admins into the just-started container's ``.credentials``.
+
+        Reached only after the agentpass token was delivered to a ready device,
+        so the container's file API is reachable. A transient write failure →
+        ``Retry`` (the queue re-drives token + seed; both are idempotent — token
+        is a REPLACE, ``.credentials`` is a read-modify-write). A missing /
+        unknown binding → ``Complete`` (nothing to write to).
+        """
+        try:
+            self._creds_writer.seed_for_publish(
+                binding.id, bot_id, binding.entity_id
+            )
+        except (DeviceNotBoundError, UnknownProviderError) as exc:
+            logger.info(
+                "[TeclawPublishTaskHandler] admins seed skipped (no running device): "
+                "bot_id=%s binding_id=%s reason=%s",
+                bot_id, binding.id, exc,
+            )
+            return Complete()
+        except Exception as exc:  # noqa: BLE001 - keep the task recoverable, don't strand the container
+            logger.warning(
+                "[TeclawPublishTaskHandler] admins seed failed (will retry): "
+                "bot_id=%s binding_id=%s error=%s",
+                bot_id, binding.id, exc,
+            )
+            return Retry(f"seed admins to .credentials failed: {exc}")
+        logger.info(
+            "[TeclawPublishTaskHandler] admins seeded to .credentials: "
+            "bot_id=%s binding_id=%s",
+            bot_id, binding.id,
+        )
         return Complete()
 
 
@@ -341,11 +389,13 @@ class TeclawPublishTaskLifecycle(LifecycleBase):
         baas_service: BaasService,
         device_binding_repo: DeviceBindingRepository,
         passport_plugin: PassportPlugin,
+        credentials_admins_writer: "DeviceCredentialsAdminsWriter",
     ) -> None:
         self._registry = registry
         self._baas_service = baas_service
         self._device_binding_repo = device_binding_repo
         self._passport_plugin = passport_plugin
+        self._creds_writer = credentials_admins_writer
 
     async def bootstrap(self) -> None:
         self._registry.register(
@@ -353,5 +403,6 @@ class TeclawPublishTaskLifecycle(LifecycleBase):
                 baas_service=self._baas_service,
                 device_binding_repo=self._device_binding_repo,
                 passport_plugin=self._passport_plugin,
+                credentials_admins_writer=self._creds_writer,
             )
         )

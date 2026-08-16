@@ -378,6 +378,7 @@ dependencies = [
  "tracing-appender",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "url",
  "urlencoding",
  "uuid",
 ]
@@ -409,6 +410,9 @@ dependencies = [
  "async-trait",
  "axum",
  "bcs-service-api",
+ "bcs-storage-api",
+ "bytes",
+ "futures",
  "jsonwebtoken",
  "serde",
  "serde_json",
@@ -421,6 +425,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ulid",
+ "url",
 ]
 
 [[package]]
@@ -434,6 +439,7 @@ dependencies = [
  "bcs-friend",
  "bcs-service-api",
  "bcs-test-support",
+ "serde_json",
  "tempfile",
  "tokio",
 ]
@@ -490,16 +496,19 @@ dependencies = [
  "bcs-friend",
  "bcs-group",
  "bcs-group-store",
- "bcs-message",
- "bcs-message-store",
  "bcs-relation",
  "bcs-service-api",
  "bcs-session",
+ "bcs-session-file",
+ "bcs-session-file-store",
  "bcs-session-store",
+ "bcs-storage-api",
  "bcs-test-support",
+ "bytes",
  "serde_json",
  "time",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -639,6 +648,7 @@ dependencies = [
  "bcs-db-local",
  "bcs-organization",
  "bcs-organization-store",
+ "bcs-protocol",
  "bcs-route-security",
  "bcs-service-api",
  "bcs-test-support",
@@ -1037,6 +1047,7 @@ dependencies = [
  "async-trait",
  "axum",
  "base64 0.22.1",
+ "bcs-app-session",
  "bcs-auth-api",
  "bcs-auth-local",
  "bcs-bot",

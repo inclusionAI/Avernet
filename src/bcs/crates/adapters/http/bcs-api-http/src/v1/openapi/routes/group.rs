@@ -50,6 +50,7 @@ async fn list_groups(
             offset: query.offset,
             limit: query.limit,
             q: query.q,
+            visibility: query.visibility,
             membership,
             kind,
             strategy: query.strategy,

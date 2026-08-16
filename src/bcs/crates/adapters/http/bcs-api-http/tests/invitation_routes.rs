@@ -15,7 +15,7 @@ use bcs_service_api::application::v1::{
     InvitationTargetType, ListGroups, ListBotFriendRequests, ListBotFriendships,
     ListSessionMessages, ListSessions, Page, RejectFriendRequest, DeleteBotFriendship,
     SessionCompletionResult,
-    SessionDetail, SessionMessagePage, SessionMessageService, SessionParticipant, SessionService,
+    SessionDetail, SessionMessageService, SessionParticipant, SessionService,
     SessionSummary, UpdateGroup, UpdateGroupParticipant, UpdateSession,
     UpdateSessionParticipant,
 };
@@ -174,6 +174,20 @@ impl SessionService for NoopSessionService {
         Err(ApplicationError::internal("session not configured"))
     }
 
+    async fn collect(
+        &self,
+        _: bcs_service_api::application::v1::CollectSession,
+    ) -> Result<bcs_service_api::application::v1::SessionCollectionResult, ApplicationError> {
+        Err(ApplicationError::internal("session not configured"))
+    }
+
+    async fn uncollect(
+        &self,
+        _: bcs_service_api::application::v1::UncollectSession,
+    ) -> Result<bcs_service_api::application::v1::SessionCollectionResult, ApplicationError> {
+        Err(ApplicationError::internal("session not configured"))
+    }
+
     async fn add_participant(
         &self,
         _command: AddSessionParticipant,
@@ -203,7 +217,7 @@ impl SessionMessageService for NoopSessionMessageService {
     async fn list(
         &self,
         _query: ListSessionMessages,
-    ) -> Result<SessionMessagePage, ApplicationError> {
+    ) -> Result<Vec<bcs_service_api::GroupMessage>, ApplicationError> {
         Err(ApplicationError::internal("session messages not configured"))
     }
 }

@@ -29,6 +29,7 @@ export type InteractionHandlerDeps = {
   runtimeRegistry: SessionRuntimeRegistry;
   contextTurns: number;
   maxContextChars: number;
+  systemPromptPrefix?: string;
 };
 
 export type InteractionHandler = (
@@ -189,6 +190,7 @@ export const handleInteractionResolve: InteractionHandler = async (ctx, frame, d
       runtimeRegistry: deps.runtimeRegistry,
       contextTurns: deps.contextTurns,
       maxContextChars: deps.maxContextChars,
+      systemPromptPrefix: deps.systemPromptPrefix,
     }).catch(err => {
       log.error('interaction:continuation-threw', {
         interactionId: params.interactionId,
@@ -309,6 +311,7 @@ export const handleModeTransitionResolve: InteractionHandler = async (ctx, frame
       runtimeRegistry: deps.runtimeRegistry,
       contextTurns: deps.contextTurns,
       maxContextChars: deps.maxContextChars,
+      systemPromptPrefix: deps.systemPromptPrefix,
     }).catch(err => {
       log.error('mode_transition:continuation-threw', {
         transitionId,

@@ -44,7 +44,7 @@ def _app() -> AppPrincipal:
 
 def _req() -> ForwardRequest:
     return ForwardRequest(
-        method="GET", url="http://up/x", headers={"x-existing": "keep"}, content=b""
+        method="GET", url="http://up/x", headers={"x-existing": "keep"}
     )
 
 

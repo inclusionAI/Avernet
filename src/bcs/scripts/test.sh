@@ -896,7 +896,7 @@ send_and_wait() {
 
     if [ "$use_bcs_routing" = "true" ]; then
         # BCS-mediated mode: single call, response comes back directly
-        echo -e "${DIM}[IM→BCS] POST /bots/${real_target}/chat${NC}" >&2
+        echo -e "${DIM}[IM→BCS] POST /bots/${real_target}/chat-async${NC}" >&2
         echo -e "${DIM}    from: $from_display, message: ${message:0:50}...${NC}" >&2
 
         local result

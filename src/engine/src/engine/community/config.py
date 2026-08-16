@@ -59,6 +59,30 @@ class EngineProcessSettings:
         return len(self.start_cmd) > 0
 
 
+@dataclass(frozen=True)
+class TemporaryUrlSettings:
+    max_bytes: int
+    image_max_bytes: int
+    timeout_seconds: float
+
+
+def load_temporary_url_settings() -> TemporaryUrlSettings:
+    max_bytes = int(
+        os.getenv("ENGINE_TEMPORARY_URL_MAX_BYTES", str(100 * 1024 * 1024))
+    )
+    image_max_bytes = int(
+        os.getenv("ENGINE_TEMPORARY_URL_IMAGE_MAX_BYTES", str(20 * 1024 * 1024))
+    )
+    timeout_seconds = float(os.getenv("ENGINE_TEMPORARY_URL_TIMEOUT_SECONDS", "60"))
+    if max_bytes <= 0 or image_max_bytes <= 0 or timeout_seconds <= 0:
+        raise ValueError("temporary URL limits must be positive")
+    return TemporaryUrlSettings(
+        max_bytes=max_bytes,
+        image_max_bytes=image_max_bytes,
+        timeout_seconds=timeout_seconds,
+    )
+
+
 def _to_bool(value: Any, default: bool) -> bool:
     if isinstance(value, bool):
         return value

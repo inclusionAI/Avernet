@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, call as mock_call, patch
 
 import pytest
 
+from agentclaw.community.core.bot_management.services import bot_service as bot_service_module
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
     DefaultBotTeclawNotAllowedError,
@@ -39,6 +40,10 @@ def _make_bot(
     template_type: str | None = None,
 ) -> dict:
     result = {
+        # ac_bots' primary key, distinct from the logical bot_id. Neither
+        # purge reads it — both key on (entity_id, bot_id) — but a real row
+        # always carries it, so the fixture does too.
+        "id": 4242,
         "bot_id": bot_id,
         "owner_id": owner_id,
         "status": status,
@@ -708,7 +713,125 @@ class TestDeleteBot:
 
         result = svc.delete_bot("mybot", "user001")
         assert result is True
-        svc._cleanup_service.cleanup_single_bot_data.assert_called_once_with("mybot", "user001")
+        svc._cleanup_service.cleanup_single_bot_data.assert_called_once_with(
+            "mybot", "user001"
+        )
+
+    def test_the_startup_script_is_purged_keyed_by_entity_not_owner(self):
+        """The script is stored under ``entity_id``, which is only *usually* the
+        owner id — under a team entity they differ. Passing ``user_id`` in its
+        place would look right in every single-owner test and silently miss the
+        row for every team-owned bot.
+        """
+        svc = _make_service()
+        bot = _make_bot(bot_id="mybot", binding_id=None, entity_id="team_42")
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._passport_plugin.destroy_passport.return_value = None
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        assert svc.delete_bot("mybot", "user001") is True
+        assert svc._cleanup_service.purge_startup_script.call_args_list[0].kwargs == {
+            "entity_id": "team_42",
+            "bot_id": "mybot",
+        }
+
+    def test_a_failed_script_purge_aborts_the_delete_with_the_bot_intact(self):
+        """Unlike the skill sweeps, this one is not allowed to fail quietly: the
+        leftover is executable content that would run on the next owner of the
+        same bot id. It runs before the destructive steps, so a failure leaves
+        the bot whole and the caller sees the error.
+        """
+        svc = _make_service()
+        bot = _make_bot(bot_id="mybot", binding_id=None)
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._cleanup_service.purge_startup_script.side_effect = RuntimeError("db down")
+
+        with pytest.raises(BotServiceError):
+            svc.delete_bot("mybot", "user001")
+
+        svc._repository.soft_delete_by_owner.assert_not_called()
+        svc._passport_plugin.destroy_passport.assert_not_called()
+
+    def test_a_write_landing_inside_the_purge_to_soft_delete_gap_is_swept(self):
+        """The first purge and the post-write re-check together still miss one
+        ordering, which is why there is a second sweep.
+
+        ``release_device`` and ``destroy_passport`` — the latter unconditional
+        and a blocking external call — sit between the first purge and
+        ``soft_delete_by_owner``. A PUT whose check, write and re-check all fall
+        inside that gap sees a live bot every time and leaves its row behind.
+        Only a purge on the far side of the soft delete catches it.
+        """
+        svc = _make_service()
+        bot = _make_bot(bot_id="mybot", binding_id=None, entity_id="team_42")
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._passport_plugin.destroy_passport.return_value = None
+        svc._repository.soft_delete_by_owner.return_value = True
+        # Nothing there when the deletion began; the racing PUT's row appears
+        # in the gap and is found by the second sweep.
+        svc._cleanup_service.purge_startup_script.side_effect = [False, True]
+
+        with patch.object(bot_service_module, "logger") as mock_logger:
+            assert svc.delete_bot("mybot", "user001") is True
+
+        assert svc._cleanup_service.purge_startup_script.call_count == 2
+        assert any(
+            "while it was being deleted" in str(c.args[0])
+            for c in mock_logger.warning.call_args_list
+        )
+
+    def test_the_script_is_purged_once_before_the_destructive_steps(self):
+        """One purge, unconditional, while the bot is still intact.
+
+        No second sweep after the soft delete: ``ac_bots`` constrains
+        ``uk_bot_id_entity_id_env`` and the delete is a soft update, so the
+        deleted row keeps occupying the tuple and no later bot can be created
+        onto it. A row that somehow survived is unreachable rather than
+        inherited, so the purge is hygiene and one pass is enough.
+        """
+        svc = _make_service()
+        bot = _make_bot(bot_id="mybot", binding_id=None, entity_id="team_42")
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._passport_plugin.destroy_passport.return_value = None
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        assert svc.delete_bot("mybot", "user001") is True
+
+        # Keyed by entity_id, not the owner id: the two differ under a team
+        # entity, and using the owner would miss the row for every team bot.
+        # Both passes use that key — the second is the sweep after the soft
+        # delete, covered by its own test above.
+        assert svc._cleanup_service.purge_startup_script.call_args_list == [
+            mock_call(entity_id="team_42", bot_id="mybot"),
+            mock_call(entity_id="team_42", bot_id="mybot"),
+        ]
+
+    def test_the_default_bot_is_exempt_from_both_purges(self):
+        """That delete is a restart; the script survives it as the skills and
+        config already do. Neither pass may touch it.
+        """
+        svc = _make_service()
+        bot = _make_bot(bot_id="default", binding_id=None)
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._passport_plugin.destroy_passport.return_value = None
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        svc.delete_bot("default", "user001")
+
+        svc._cleanup_service.purge_startup_script.assert_not_called()
+
+    def test_a_bot_with_no_entity_has_no_script_to_purge(self):
+        """The write path requires both halves of the key, so a bot with no
+        entity id never had a script — nothing to delete, no id to invent.
+        """
+        svc = _make_service()
+        bot = _make_bot(bot_id="mybot", binding_id=None, entity_id="")
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._passport_plugin.destroy_passport.return_value = None
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        assert svc.delete_bot("mybot", "user001") is True
+        svc._cleanup_service.purge_startup_script.assert_not_called()
 
     def test_cleanup_failure_does_not_block_delete(self):
         svc = _make_service()

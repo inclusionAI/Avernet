@@ -5,7 +5,7 @@ set -e
 #
 # Usage:
 #   ./scripts/singlebox.sh                              # Default standalone local stack (setup current all group + start current all group)
-#   ./scripts/singlebox.sh install-tools                # Install/upgrade dev tools (toolchain)
+#   ./scripts/singlebox.sh install-tools                # Install/upgrade dev tools (Claude Code is optional)
 #   ./scripts/singlebox.sh setup [service|group|all]    # Prepare artifacts/config/links; rebuild stale binaries
 #   ./scripts/singlebox.sh start [service|group|all]    # Start target (default: current all group)
 #   ./scripts/singlebox.sh stop [service|group|all]     # Stop target (default: current all group)
@@ -20,6 +20,7 @@ set -e
 #   all             Full local product stack (BAAS + Backend + BCS + BCSFuse + 5 OpenClaw bots + demo bot + Frontend)
 #   bcs_bots        BCS + 5 local OpenClaw bots
 #   bcs_frontend    BCS + Frontend (E2E)
+#   hybrid          OpenClaw profile stack with optional Claude Code bots
 #
 
 # ============ 常量配置 ============
@@ -74,8 +75,21 @@ BCSFUSE_PORT="${BCSFUSE_PORT:-${DEFAULT_BCSFUSE_PORT}}"
 FRONTEND_PORT="${FRONTEND_PORT:-${DEFAULT_FRONTEND_PORT}}"
 CHAT_ENGINE="${CHAT_ENGINE:-openclaw}"
 BOTS_PROFILE_DIR="${BOTS_PROFILE_DIR:-}"
+BOTS_EXCLUDED_PROFILE_SOURCE="${BOTS_EXCLUDED_PROFILE_SOURCE:-}"
+CLAUDE_PROFILE_DIR="${CLAUDE_PROFILE_DIR:-}"
+HYBRID_USE_CLAUDE_CODE="${HYBRID_USE_CLAUDE_CODE:-}"
+HYBRID_INSTALL_CLAUDE_CODE="${HYBRID_INSTALL_CLAUDE_CODE:-}"
+HYBRID_CLAUDE_CONFIG_MODE="${HYBRID_CLAUDE_CONFIG_MODE:-}"
+HYBRID_RUNTIME_SELECTION_EXPLICIT="${HYBRID_RUNTIME_SELECTION_EXPLICIT:-0}"
+HYBRID_PROFILE_OPTIONS_EXPLICIT="${HYBRID_PROFILE_OPTIONS_EXPLICIT:-0}"
+if [ -n "${BOTS_PROFILE_DIR:-}" ] || [ -n "${BOTS_EXCLUDED_PROFILE_SOURCE:-}" ] || [ -n "${CLAUDE_PROFILE_DIR:-}" ]; then
+    HYBRID_PROFILE_OPTIONS_EXPLICIT=1
+fi
 BCN_PLUGIN_SOURCE="${BCN_PLUGIN_SOURCE:-source}"
 BCN_PLUGIN_VERSION="${BCN_PLUGIN_VERSION:-latest}"
+HYBRID_DEFAULT_PROFILE_DIR="scripts/4bots_merchant_operations_profile"
+MERCHANT_HYBRID_DEFAULT_EXCLUDED_PROFILE_SOURCE="platform-data"
+MERCHANT_HYBRID_DEFAULT_CLAUDE_PROFILE_DIR="scripts/4bots_merchant_operations_profile_for_claude"
 
 # openclaw 配置目录和模板路径
 OPENCLAW_CONFIG_DIR="${HOME}/.openclaw"
@@ -138,6 +152,11 @@ mkdir -p "${RUNTIME_DATA_DIR}"
 source "${SCRIPT_DIR}/utils.sh"
 apply_cn_mirror_overrides
 source "${SCRIPT_DIR}/toolchain.sh"
+# rustup updates shell profiles for future terminals, but a prior
+# `singlebox.sh install-tools` process cannot mutate its parent shell. Load the
+# user-local Rust environment for every Singlebox invocation so a subsequent
+# setup/start command can use Cargo immediately.
+load_rust_environment
 source "${SCRIPT_DIR}/modules/model_config.sh"
 
 # Service modules
@@ -149,11 +168,16 @@ source "${SCRIPT_DIR}/modules/bcs.sh"
 source "${SCRIPT_DIR}/modules/bcsfuse.sh"
 source "${SCRIPT_DIR}/modules/bots.sh"
 source "${SCRIPT_DIR}/modules/demo_bot.sh"
+source "${SCRIPT_DIR}/modules/claude_profile.sh"
+source "${SCRIPT_DIR}/modules/claude_relays.sh"
+source "${SCRIPT_DIR}/modules/claude_bots.sh"
+source "${SCRIPT_DIR}/modules/bcs_baas_provider.sh"
 source "${SCRIPT_DIR}/modules/bcs_bots.sh"
 
 # Group modules (must be after service modules they compose)
 source "${SCRIPT_DIR}/modules/all.sh"
 source "${SCRIPT_DIR}/modules/bcs_frontend.sh"
+source "${SCRIPT_DIR}/modules/hybrid.sh"
 
 # ============ Git hooks ============
 ensure_git_hooks_installed() {
@@ -185,6 +209,10 @@ resolve_services() {
             ;;
         bcs_bots)
             echo "bcs bots"
+            ;;
+        hybrid|merchant_hybrid)
+            hybrid_configure_mode
+            echo "${HYBRID_START_ORDER[*]}"
             ;;
         *)
             echo "$target"
@@ -377,7 +405,7 @@ show_help() {
     echo "  --standalone, -s Compatibility alias for the default mode"
     echo ""
     echo "Commands:"
-    echo "  install-tools                  Install/upgrade dev tools (node, npm, uv, openclaw, ...)"
+    echo "  install-tools                  Install/upgrade dev tools (node, npm, uv, openclaw, optional Claude Code, ...)"
     echo "  setup [service|group|all]      Prepare artifacts/config/links; rebuild stale binaries"
     echo "  start [service|group|all]      Start target (default: current all group)"
     echo "  stop [service|group|all]       Stop target (default: current all group)"
@@ -397,7 +425,12 @@ show_help() {
     echo "  --bcn-plugin-source source|npm  BCN plugin source: build from repo (source, default) or install"
     echo "                                  @avernet-plugin/openclaw-channel-bcn (npm). Env: BCN_PLUGIN_SOURCE,"
     echo "                                  BCN_PLUGIN_VERSION (npm mode, default latest)"
-    echo "  --profile-dir DIR            Bot persona source dir for 'bots' target; requires DIR/bots.json"
+    echo "  --profile-dir DIR            Bot persona source dir for bots, hybrid, bcs_frontend, or bcsfuse; requires DIR/bots.json"
+    echo "  --exclusive-profile-dir SOURCE Exclude one OpenClaw profile source; only valid for hybrid with --claude-profile-dir"
+    echo "  --claude-profile-dir DIR     Optional Claude Code profile source dir for hybrid; requires --exclusive-profile-dir"
+    echo "                                  Hybrid env controls: HYBRID_USE_CLAUDE_CODE=yes|no,"
+    echo "                                  HYBRID_INSTALL_CLAUDE_CODE=yes|no,"
+    echo "                                  HYBRID_CLAUDE_CONFIG_MODE=env-local|user"
     echo "  --bcs-auto-onboard            Legacy compatibility flag; use bcs_bots for BCS + bots"
     echo "  --no-bcs-auto-onboard         Legacy compatibility flag; use bcs for BCS-only"
     echo "  --with-bcs-coverage           Build instrumented bcs (target/cov-e2e) for e2e line coverage"
@@ -412,7 +445,7 @@ show_help() {
     done
     echo ""
     echo "Groups:"
-    for grp in all bcs_bots bcs_frontend; do
+    for grp in all bcs_bots bcs_frontend hybrid; do
         if type -t "${grp}_help" &>/dev/null; then
             echo "  $( "${grp}_help" )"
         fi
@@ -426,6 +459,10 @@ show_help() {
     echo "  $0 restart bcs                 Restart only the BCS server"
     echo "  $0 restart bots                Restart only the 5 local bot gateways"
     echo "  $0 start bots --profile-dir scripts/8bots_micro_merchant_profile"
+    echo "  $0 start bcs_frontend --profile-dir scripts/4bots_merchant_operations_profile"
+    echo "  SINGLEBOX_MODEL_CONFIG_MODE=home SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED=1 $0 start hybrid"
+    echo "  SINGLEBOX_MODEL_CONFIG_MODE=home SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED=1 $0 start hybrid --profile-dir scripts/4bots_merchant_operations_profile"
+    echo "  SINGLEBOX_MODEL_CONFIG_MODE=home SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED=1 $0 start hybrid --profile-dir scripts/4bots_merchant_operations_profile --exclusive-profile-dir platform-data --claude-profile-dir scripts/4bots_merchant_operations_profile_for_claude"
     echo "  $0 restart bcs_bots            Restart BCS + 5 local bot gateways"
     echo "  $0 clean bcs                   Clean only local BCS runtime data"
     echo "  $0 clean bots                  Clean only local bot profiles/workspaces"
@@ -433,6 +470,221 @@ show_help() {
     echo "  $0 check                       Check the isolated standalone local stack"
     echo "  $0 status                      Show service status"
     echo ""
+}
+
+validate_hybrid_profile_options() {
+    if { [ -n "${BOTS_EXCLUDED_PROFILE_SOURCE:-}" ] && [ -z "${CLAUDE_PROFILE_DIR:-}" ]; } || \
+       { [ -z "${BOTS_EXCLUDED_PROFILE_SOURCE:-}" ] && [ -n "${CLAUDE_PROFILE_DIR:-}" ]; }; then
+        log_error "--exclusive-profile-dir and --claude-profile-dir must be provided together"
+        return 1
+    fi
+    if { [ -n "${BOTS_EXCLUDED_PROFILE_SOURCE:-}" ] || [ -n "${CLAUDE_PROFILE_DIR:-}" ]; } && \
+       [ -z "${BOTS_PROFILE_DIR:-}" ]; then
+        log_error "hybrid custom Claude mode requires --profile-dir, --exclusive-profile-dir, and --claude-profile-dir together"
+        return 1
+    fi
+    if [ -n "${CLAUDE_PROFILE_DIR:-}" ]; then
+        if [ "$#" -ne 1 ] || { [ "$1" != hybrid ] && [ "$1" != merchant_hybrid ]; }; then
+            log_error "--claude-profile-dir and --exclusive-profile-dir only support hybrid"
+            return 1
+        fi
+    fi
+}
+
+hybrid_confirm_choice() {
+    local configured_value="$1"
+    local prompt="$2"
+    local answer=""
+
+    case "$configured_value" in
+        1|true|TRUE|yes|YES|y|Y)
+            return 0
+            ;;
+        0|false|FALSE|no|NO|n|N)
+            return 1
+            ;;
+        '')
+            ;;
+        *)
+            log_error "Invalid yes/no value: ${configured_value}"
+            return 2
+            ;;
+    esac
+
+    if [ -t 0 ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        printf '%s [y/N]: ' "$prompt" >&2
+        read -r answer </dev/tty || return 2
+        case "$answer" in
+            Y|y|YES|Yes|yes)
+                return 0
+                ;;
+            *)
+                return 1
+                ;;
+        esac
+    fi
+
+    log_error "Interactive confirmation required: ${prompt}"
+    return 2
+}
+
+hybrid_enable_default_claude_profile() {
+    BOTS_EXCLUDED_PROFILE_SOURCE="${MERCHANT_HYBRID_DEFAULT_EXCLUDED_PROFILE_SOURCE}"
+    CLAUDE_PROFILE_DIR="${MERCHANT_HYBRID_DEFAULT_CLAUDE_PROFILE_DIR}"
+}
+
+apply_hybrid_profile_defaults() {
+    local target_command="$1"
+    shift
+
+    case "$target_command" in
+        setup|start|restart)
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+    if [ "$#" -ne 1 ]; then
+        return 0
+    fi
+
+    if [ "$target_command" = "restart" ] && \
+       { [ "$1" = hybrid ] || [ "$1" = merchant_hybrid ]; } && \
+       [ "${HYBRID_PROFILE_OPTIONS_EXPLICIT:-0}" != "1" ]; then
+        if [ ! -f "$HYBRID_STATE_FILE" ]; then
+            log_error "No active hybrid runtime state to restart. Run start hybrid first."
+            return 1
+        fi
+        HYBRID_RESTART_FROM_STATE=1
+        export HYBRID_RESTART_FROM_STATE
+        hybrid_restore_runtime_state || return 1
+        if [ -z "${SINGLEBOX_MODEL_CONFIG_MODE:-}" ]; then
+            log_error "The previous hybrid runtime does not record its model configuration mode."
+            log_error "Run start hybrid once to create restartable runtime state."
+            return 1
+        fi
+        if [ "$SINGLEBOX_MODEL_CONFIG_MODE" = "home" ]; then
+            SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED=1
+            export SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED
+        fi
+        log_info "hybrid restart restored the previous runtime selection without prompting"
+        return 0
+    fi
+
+    case "$1" in
+        hybrid|merchant_hybrid)
+            if [ -z "${BOTS_PROFILE_DIR:-}" ] && \
+               [ -z "${BOTS_EXCLUDED_PROFILE_SOURCE:-}" ] && \
+               [ -z "${CLAUDE_PROFILE_DIR:-}" ]; then
+                BOTS_PROFILE_DIR="${HYBRID_DEFAULT_PROFILE_DIR}"
+                local choice_rc=0
+                hybrid_confirm_choice "${HYBRID_USE_CLAUDE_CODE:-}" "Use Claude Code for the platform-data bot?" || choice_rc=$?
+                case "$choice_rc" in
+                    0)
+                        HYBRID_USE_CLAUDE_CODE=1
+                        hybrid_enable_default_claude_profile
+                        log_info "hybrid profile configuration resolved mode=default-mixed excluded_source=${BOTS_EXCLUDED_PROFILE_SOURCE}"
+                        ;;
+                    1)
+                        HYBRID_USE_CLAUDE_CODE=0
+                        log_info "hybrid profile configuration resolved mode=default-openclaw-only"
+                        ;;
+                    *)
+                        log_error "Set HYBRID_USE_CLAUDE_CODE=yes or no for non-interactive startup."
+                        return 1
+                        ;;
+                esac
+                HYBRID_RUNTIME_SELECTION_EXPLICIT=1
+                export HYBRID_USE_CLAUDE_CODE HYBRID_RUNTIME_SELECTION_EXPLICIT
+            elif [ -n "${BOTS_PROFILE_DIR:-}" ] && \
+                 [ -z "${BOTS_EXCLUDED_PROFILE_SOURCE:-}" ] && \
+                 [ -z "${CLAUDE_PROFILE_DIR:-}" ]; then
+                HYBRID_RUNTIME_SELECTION_EXPLICIT=1
+                export HYBRID_RUNTIME_SELECTION_EXPLICIT
+                log_info "hybrid profile configuration resolved mode=openclaw-only"
+            elif [ -n "${BOTS_PROFILE_DIR:-}" ] && \
+                 [ -n "${BOTS_EXCLUDED_PROFILE_SOURCE:-}" ] && \
+                 [ -n "${CLAUDE_PROFILE_DIR:-}" ]; then
+                HYBRID_RUNTIME_SELECTION_EXPLICIT=1
+                export HYBRID_RUNTIME_SELECTION_EXPLICIT
+                log_info "hybrid profile configuration resolved mode=custom-mixed excluded_source=${BOTS_EXCLUDED_PROFILE_SOURCE}"
+            fi
+            ;;
+    esac
+}
+
+prepare_hybrid_claude_runtime_choice() {
+    local target_command="$1"
+    shift
+
+    case "$target_command" in
+        setup|start|restart)
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+    if [ "$#" -ne 1 ] || { [ "$1" != hybrid ] && [ "$1" != merchant_hybrid ]; }; then
+        return 0
+    fi
+    [ -n "${CLAUDE_PROFILE_DIR:-}" ] || return 0
+
+    local claude_cli=""
+    claude_cli="$(claude_relay_find_cli 2>/dev/null || true)"
+    if [ -z "$claude_cli" ]; then
+        if [ "${HYBRID_RESTART_FROM_STATE:-0}" = "1" ]; then
+            log_error "Claude Code from the previous hybrid runtime is no longer available; restart will not install it interactively."
+            log_error "Run start hybrid to repair or change the runtime selection."
+            return 1
+        fi
+        local install_rc=0
+        hybrid_confirm_choice "${HYBRID_INSTALL_CLAUDE_CODE:-}" "Claude Code was not found. Install it now?" || install_rc=$?
+        case "$install_rc" in
+            0)
+                claude_relay_install_cli || return 1
+                claude_cli="$(claude_relay_find_cli 2>/dev/null || true)"
+                ;;
+            1)
+                log_error "Claude Code is required for this hybrid configuration; startup cancelled."
+                return 1
+                ;;
+            *)
+                log_error "Set HYBRID_INSTALL_CLAUDE_CODE=yes or no for non-interactive startup."
+                return 1
+                ;;
+        esac
+    fi
+    [ -n "$claude_cli" ] || {
+        log_error "Claude Code installation completed but the claude executable is still unavailable."
+        return 1
+    }
+    log_info "Claude Code found: ${claude_cli}"
+
+    case "${HYBRID_CLAUDE_CONFIG_MODE:-}" in
+        env|env-local|manual)
+            HYBRID_CLAUDE_CONFIG_MODE="env-local"
+            ;;
+        user)
+            ;;
+        '')
+            HYBRID_CLAUDE_CONFIG_MODE="env-local"
+            ;;
+        *)
+            log_error "Invalid HYBRID_CLAUDE_CONFIG_MODE: ${HYBRID_CLAUDE_CONFIG_MODE}"
+            log_error "Valid values: env-local, user"
+            return 1
+            ;;
+    esac
+
+    if [ "$HYBRID_CLAUDE_CONFIG_MODE" = "env-local" ]; then
+        SINGLEBOX_MODEL_CONFIG_MODE="manual"
+        export SINGLEBOX_MODEL_CONFIG_MODE
+        claude_relay_prepare_env_local_model || return 1
+        log_info "Claude Code model configuration uses .env.local by default."
+    else
+        log_info "Claude Code will keep the user's model configuration."
+    fi
+    export HYBRID_CLAUDE_CONFIG_MODE
 }
 
 # 编译插编 bcs 到 target/cov-e2e/llvm-cov-target/ 并 export BCS_BIN/LLVM_PROFILE_FILE。
@@ -665,6 +917,27 @@ main() {
                     exit 1
                 fi
                 BOTS_PROFILE_DIR="$2"
+                HYBRID_PROFILE_OPTIONS_EXPLICIT=1
+                shift 2
+                ;;
+            --exclusive-profile-dir)
+                if [ -z "$2" ] || [ "$2" = -* ]; then
+                    log_error "Excluded profile source required for $1"
+                    show_help
+                    exit 1
+                fi
+                BOTS_EXCLUDED_PROFILE_SOURCE="$2"
+                HYBRID_PROFILE_OPTIONS_EXPLICIT=1
+                shift 2
+                ;;
+            --claude-profile-dir)
+                if [ -z "$2" ] || [ "$2" = -* ]; then
+                    log_error "Claude profile directory required for $1"
+                    show_help
+                    exit 1
+                fi
+                CLAUDE_PROFILE_DIR="$2"
+                HYBRID_PROFILE_OPTIONS_EXPLICIT=1
                 shift 2
                 ;;
             --bcs-auto-onboard)
@@ -711,7 +984,7 @@ main() {
                 LOCAL_MODE=true
                 shift
                 ;;
-            baas|backend|bcs|bcsfuse|frontend|engine|bots|bcs_bots|bcs_frontend|all)
+            baas|backend|bcs|bcsfuse|frontend|engine|bots|bcs_bots|bcs_frontend|hybrid|merchant_hybrid|all)
                 # Legacy: service name without command defaults to start
                 services+=("$1")
                 if [ -z "$command" ]; then
@@ -757,14 +1030,24 @@ main() {
     if [ ${#services[@]} -eq 0 ]; then
         services=(all)
     fi
+    apply_hybrid_profile_defaults "$command" "${services[@]}" || exit 1
     if [ -n "${BOTS_PROFILE_DIR:-}" ]; then
         for svc in "${services[@]}"; do
-            if [ "$svc" != "bots" ]; then
-                log_error "--profile-dir only supports the bots target, for example: ./scripts/singlebox.sh $(singlebox_mode_option) start bots --profile-dir <dir>"
-                exit 1
-            fi
+            # --profile-dir / BOTS_PROFILE_DIR is primarily for the bots target,
+            # but bcs_frontend and bcsfuse are allowed because they are started
+            # before bots and need the same profile dir to be wired into BCS.
+            case "$svc" in
+                bots|bcs_frontend|bcsfuse|hybrid|merchant_hybrid)
+                    ;;
+                *)
+                    log_error "--profile-dir only supports the bots target (or bcs_frontend/bcsfuse when the same profile dir is needed), for example: ./scripts/singlebox.sh $(singlebox_mode_option) start bots --profile-dir <dir>"
+                    exit 1
+                    ;;
+            esac
         done
     fi
+    validate_hybrid_profile_options "${services[@]}" || exit 1
+    prepare_hybrid_claude_runtime_choice "$command" "${services[@]}" || exit 1
     if [ "$STANDALONE_MODE" = true ]; then
         export SINGLEBOX_MODE=standalone
     else

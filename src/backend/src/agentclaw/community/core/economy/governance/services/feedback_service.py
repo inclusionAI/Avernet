@@ -428,7 +428,7 @@ class GovernanceFeedbackService:
                 ticket.bot_id,
                 ticket.owner_id,
                 notification_id=notification_id,
-                actor_id=effective_user_id,
+                actor_id=effective_actor,
                 action_taken=AuditAction.FEEDBACK_DUPLICATE_IGNORED,
                 source=source,
                 dry_run=0,
@@ -446,7 +446,7 @@ class GovernanceFeedbackService:
                 ticket.bot_id,
                 ticket.owner_id,
                 notification_id=notification_id,
-                actor_id=effective_user_id,
+                actor_id=effective_actor,
                 action_taken=AuditAction.FEEDBACK_TERMINAL_IGNORED,
                 source=source,
                 error_msg=f"status={ticket.governance_status}",
@@ -575,7 +575,7 @@ class GovernanceFeedbackService:
             ticket.bot_id,
             ticket.owner_id,
             notification_id=notification_id,
-            actor_id=effective_user_id,
+            actor_id=effective_actor,
             check_result="actionable",
             action_taken=audit_action,
             source=source,
@@ -598,5 +598,3 @@ class GovernanceFeedbackService:
     # 无真实用户主动调用,    治理反馈真入口是 card-callback(经 resolve)。完整移除于
     # admin-router-regroup Task 7。仅保留 resolve。
     # ------------------------------------------------------------------
-
-    

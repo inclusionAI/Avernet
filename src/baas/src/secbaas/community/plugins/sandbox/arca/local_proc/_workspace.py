@@ -8,7 +8,7 @@ from pathlib import Path
 from secbaas.community.config import ConfigPath, get_config, get_config_by_path
 from secbaas.community.logger import get_logger
 
-logger = get_logger("plugin-sandbox-arca-local-proc")
+logger = get_logger("plugin-sandbox")
 
 
 def resolve_workspace_dir(metadata: dict[str, str], bot_id: str) -> Path:

@@ -186,7 +186,7 @@ def live_baas():
         if not _wait_for_baas_healthy():
             raise RuntimeError(
                 f"baas not healthy within {BAAS_HEALTH_TIMEOUT_SEC}s; "
-                f"check scripts/.dependences/logs/baas.log"
+                f"check scripts/.dependencies/logs/baas.log"
             )
         yield BAAS_URL
         return
@@ -215,7 +215,7 @@ def live_baas():
         if not _wait_for_baas_healthy():
             raise RuntimeError(
                 f"baas not healthy within {BAAS_HEALTH_TIMEOUT_SEC}s; "
-                f"check scripts/.dependences/logs/baas.log"
+                f"check scripts/.dependencies/logs/baas.log"
             )
         yield BAAS_URL
     finally:

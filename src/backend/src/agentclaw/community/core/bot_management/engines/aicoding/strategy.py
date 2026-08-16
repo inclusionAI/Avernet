@@ -4,6 +4,7 @@ All knowledge about coding template types, relay default envs and CodeFuse token
 provisioning lives here instead of being duplicated in bot/device/template
 services.
 """
+
 from __future__ import annotations
 
 import json
@@ -16,6 +17,7 @@ from agentclaw.community.core.bot_management.capabilities import (
 
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.utils import secret_utils
+from agentclaw.community.log import get_logger
 
 from ..provisioning import BotProvisioningContext, EngineProvisioningStrategy
 
@@ -38,6 +40,8 @@ LEGACY_BOT_TYPE_ENV_MAP = {
 }
 _THETA_KEY_PATH = ("bot_template_config", "ext_config", "thetaKey")
 _ENCRYPTED_VALUE_PREFIX = "enc:v1:"
+
+logger = get_logger()
 
 
 class AicodingBaasEngineBucketResolver:
@@ -76,6 +80,16 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
     def engine_type(self) -> str:
         return self._engine_type
 
+    def resolve_bot_engine(self, bot: dict[str, Any]) -> str | None:
+        active_engine = bot.get("active_engine")
+        active_engine = active_engine if isinstance(active_engine, str) else None
+        if self.should_use_aicoding_runtime_engine(
+            active_engine=active_engine,
+            template_type=bot.get("template_type"),
+        ):
+            return AICODING_ENGINE_TYPE
+        return active_engine
+
     @staticmethod
     def normalize_engine_type(
         engine_type: str | None, *, default: str = "openclaw"
@@ -91,19 +105,13 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         return template_type in CODING_TEMPLATE_TYPES
 
     @classmethod
-    def should_use_aicoding_baas_bucket(
+    def should_use_aicoding_runtime_engine(
         cls,
         *,
         active_engine: str | None,
         template_type: str | None,
     ) -> bool:
-        """Whether this context should select the aicoding BaaS bucket.
-
-        BaaS bucket routing is an image/runtime selection policy: all explicit
-        claude_code template-factory types except normalCC reuse the aicoding
-        BaaS template bucket. It only depends on active_engine + template_type;
-        caller/create routing may only have template_type available.
-        """
+        """Whether this bot should use the aicoding runtime engine."""
         if (
             cls.normalize_engine_type(active_engine, default="")
             != CLAUDE_CODE_ENGINE_TYPE
@@ -113,6 +121,19 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         return bool(
             normalized_template_type
             and normalized_template_type != NORMAL_CC_TEMPLATE_TYPE
+        )
+
+    @classmethod
+    def should_use_aicoding_baas_bucket(
+        cls,
+        *,
+        active_engine: str | None,
+        template_type: str | None,
+    ) -> bool:
+        """Whether this context should select the aicoding BaaS bucket."""
+        return cls.should_use_aicoding_runtime_engine(
+            active_engine=active_engine,
+            template_type=template_type,
         )
 
     @classmethod
@@ -154,7 +175,10 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
             template_config.get("template_key") and template_config.get("template_uid")
         )
         normalized_engine = cls.normalize_engine_type(active_engine, default="")
-        return normalized_engine in TEMPLATE_CONFIG_CONSUMING_ENGINES and has_template_identity
+        return (
+            normalized_engine in TEMPLATE_CONFIG_CONSUMING_ENGINES
+            and has_template_identity
+        )
 
     def build_extra_envs(self, ctx: BotProvisioningContext) -> Dict[str, str] | None:
         template_type = ctx.template_type
@@ -171,9 +195,7 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         # template-factory templates expose their template_type verbatim so new
         # template types do not require backend enum/map changes.
         if template_type:
-            envs["BOT_TYPE"] = LEGACY_BOT_TYPE_ENV_MAP.get(
-                template_type, template_type
-            )
+            envs["BOT_TYPE"] = LEGACY_BOT_TYPE_ENV_MAP.get(template_type, template_type)
 
         devflow_workflow = template_config.get("devflow_workflow", "")
         if isinstance(devflow_workflow, dict):
@@ -196,7 +218,11 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
             if not isinstance(repos, list):
                 continue
             for repo in repos:
-                if isinstance(repo, str) and repo_key not in legacy_repo_keys and repo.strip():
+                if (
+                    isinstance(repo, str)
+                    and repo_key not in legacy_repo_keys
+                    and repo.strip()
+                ):
                     repo_list.append(repo.strip())
                 elif isinstance(repo, dict):
                     for url_key in ("repo_url", "url", "git_url", "ssh_url"):
@@ -249,30 +275,99 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
             ctx.active_engine not in TEMPLATE_CONFIG_CONSUMING_ENGINES
             and ctx.template_type not in CODING_TEMPLATE_TYPES
         ):
+            logger.info(
+                "[AicodingProvisioningStrategy.build_extra_properties] skipped: "
+                "bot_id=%s, active_engine=%s, template_type=%s, "
+                "reason=unsupported_engine_or_template",
+                ctx.bot_id,
+                ctx.active_engine,
+                ctx.template_type,
+            )
             return None
 
         stored = self._get_template_value(ctx.template_config, _THETA_KEY_PATH)
-        if (
-            secret_resolver is None
-            or not theta_master_key_secret
-            or not isinstance(stored, str)
-            or not stored.startswith(_ENCRYPTED_VALUE_PREFIX)
-        ):
+        has_theta_key = isinstance(stored, str) and bool(stored)
+        has_encrypted_theta_key = isinstance(stored, str) and stored.startswith(
+            _ENCRYPTED_VALUE_PREFIX
+        )
+        logger.info(
+            "[AicodingProvisioningStrategy.build_extra_properties] input: "
+            "bot_id=%s, active_engine=%s, template_type=%s, "
+            "has_template_config=%s, has_theta_key=%s, "
+            "has_encrypted_theta_key=%s, has_secret_resolver=%s, "
+            "has_theta_master_key_secret=%s",
+            ctx.bot_id,
+            ctx.active_engine,
+            ctx.template_type,
+            isinstance(ctx.template_config, dict),
+            has_theta_key,
+            has_encrypted_theta_key,
+            secret_resolver is not None,
+            bool(theta_master_key_secret),
+        )
+        if secret_resolver is None:
+            logger.warning(
+                "[AicodingProvisioningStrategy.build_extra_properties] fallback: "
+                "bot_id=%s, reason=secret_resolver_missing",
+                ctx.bot_id,
+            )
             return None
-        ciphertext = stored[len(_ENCRYPTED_VALUE_PREFIX):]
+        if not theta_master_key_secret:
+            logger.warning(
+                "[AicodingProvisioningStrategy.build_extra_properties] fallback: "
+                "bot_id=%s, reason=theta_master_key_secret_name_missing",
+                ctx.bot_id,
+            )
+            return None
+        if not has_encrypted_theta_key:
+            logger.warning(
+                "[AicodingProvisioningStrategy.build_extra_properties] fallback: "
+                "bot_id=%s, reason=encrypted_theta_key_missing_or_invalid",
+                ctx.bot_id,
+            )
+            return None
+
+        ciphertext = stored[len(_ENCRYPTED_VALUE_PREFIX) :]
         if not ciphertext:
+            logger.warning(
+                "[AicodingProvisioningStrategy.build_extra_properties] fallback: "
+                "bot_id=%s, reason=theta_ciphertext_empty",
+                ctx.bot_id,
+            )
             return None
 
         try:
             secret = secret_resolver.get_secret(theta_master_key_secret)
             master_key = getattr(secret, "secret_value", secret) if secret else None
             if not master_key:
+                logger.warning(
+                    "[AicodingProvisioningStrategy.build_extra_properties] fallback: "
+                    "bot_id=%s, reason=theta_master_secret_empty",
+                    ctx.bot_id,
+                )
                 return None
             api_key = secret_utils.symmetric_decrypt(ciphertext, str(master_key))
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "[AicodingProvisioningStrategy.build_extra_properties] fallback: "
+                "bot_id=%s, reason=theta_key_decrypt_failed, error_type=%s",
+                ctx.bot_id,
+                type(exc).__name__,
+            )
             return None
         if not isinstance(api_key, str) or not api_key:
+            logger.warning(
+                "[AicodingProvisioningStrategy.build_extra_properties] fallback: "
+                "bot_id=%s, reason=decrypted_theta_key_empty",
+                ctx.bot_id,
+            )
             return None
+
+        logger.info(
+            "[AicodingProvisioningStrategy.build_extra_properties] resolved: "
+            "bot_id=%s, custom_outbound_key_resolved=True",
+            ctx.bot_id,
+        )
         return {"outbound_api_key": api_key}
 
     def should_encrypt_template_token(self, ctx: BotProvisioningContext) -> bool:
@@ -310,6 +405,58 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         if self._engine_type == CLAUDE_CODE_ENGINE_TYPE:
             return f"session:{uuid.uuid4()}:user:{user_id}"
         return f"user:{user_id}:session:{uuid.uuid4()}:agent:{ctx.bot_id}"
+
+    @staticmethod
+    def _template_version_id(config: Any) -> int | None:
+        """Return a comparable template version id from a saved snapshot."""
+        if not isinstance(config, dict):
+            return None
+        value = config.get("template_version_id")
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def apply_restart_extra_configs(
+        self,
+        ctx: BotProvisioningContext,
+        extra_configs: dict[str, Any] | None,
+        *,
+        template_service: Any,
+    ) -> None:
+        """Apply AICoding/Claude Code values from generic restart extras."""
+        active_engine = self.normalize_engine_type(ctx.active_engine, default="")
+        if active_engine not in TEMPLATE_CONFIG_CONSUMING_ENGINES:
+            return
+        if not isinstance(extra_configs, dict):
+            return
+        candidate = extra_configs.get("template_config")
+        if not isinstance(candidate, dict):
+            return
+
+        stored_config = template_service.get_template_config(ctx.bot_id) or {}
+        incoming_version = self._template_version_id(candidate)
+        stored_version = self._template_version_id(stored_config)
+        if incoming_version is None or incoming_version < 0:
+            return
+        if stored_version is not None and incoming_version <= stored_version:
+            return
+
+        template_service.update_template(
+            bot_id=ctx.bot_id,
+            template_config=candidate,
+            template_type=ctx.template_type,
+            active_engine=ctx.active_engine,
+        )
+        logger.info(
+            "[aicoding.restart] persisted newer template snapshot: "
+            "bot_id=%s old_version=%s new_version=%s",
+            ctx.bot_id,
+            stored_version,
+            incoming_version,
+        )
 
     def on_bot_created(self, ctx: BotProvisioningContext) -> None:
         # Application-only hooks (DIMA workspace/memory/cron) intentionally stay

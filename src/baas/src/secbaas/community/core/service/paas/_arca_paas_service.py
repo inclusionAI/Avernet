@@ -961,7 +961,7 @@ class ArcaPaasService(PaasService):
                     old_expiration_time=old_expiration,
                     new_expiration_time=old_expiration,
                     success=False,
-                    skipped=False,
+                    skipped=True,
                     error="Already at or past target expiration",
                 )
 

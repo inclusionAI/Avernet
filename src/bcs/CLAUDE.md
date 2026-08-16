@@ -173,7 +173,7 @@ Bots have a `created_by` field set during onboard when a user identity is availa
 | None (production) | Any | Allow |
 
 ### Protected Endpoints (write operations)
-- `DELETE /bots/{id}`, `POST /bots/status`, `POST /bots/{id}/chat`
+- `DELETE /bots/{id}`, `POST /bots/status`, `POST /bots/{id}/chat-async`
 - `POST /groups/request`, `POST /groups`, `POST /groups/{id}/members`
 - `DELETE /groups/{id}`, `POST /groups/{id}/chat`
 - `POST /sessions/{id}/state-machine-runs` requires an authenticated Bot and
@@ -371,7 +371,6 @@ export BOT_DATA_DIR=/path/to/bot/data
 | `/bots/{id}` | DELETE | Bot leaves network |
 | `/bots/discover` | GET | Discover bots by query |
 | `/bots/status` | POST | Update bot status |
-| `/bots/{id}/chat` | POST | Send 1:1 message to bot |
 | `/bots/{id}/friends` | GET | Query friend list |
 | `/bots/{id}/visibility` | GET | Query bot visibility |
 | `/bots/{id}/visibility` | PUT | Set bot visibility |

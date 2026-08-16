@@ -22,6 +22,10 @@ from secbaas.community.plugins.bot_service import (
     LocalBotServicePlugin,
     StubBotServicePlugin,
 )
+from secbaas.community.plugins.bot_service.real._plugin import (
+    _CLAUDE_CODE_NORMAL_TEMPLATE,
+    resolve_claude_code_engine,
+)
 from secbaas.community.spi.bot_service import BotBindingData, LogRelationPayload
 
 # ==================== Tests: AiohttpBotServicePlugin construction ==============
@@ -509,6 +513,52 @@ class TestAiohttpBotServicePluginGetBinding:
         assert exc_info.value.code == ErrorCode.PLATFORM_UNAVAILABLE
 
     @pytest.mark.asyncio
+    async def test_get_binding_retries_transient_timeout(self):
+        """A transient timeout is retried once before a successful response."""
+        plugin = AiohttpBotServicePlugin(
+            base_url="https://agentclaw.example.com",
+        )
+
+        api_response = {
+            "success": True,
+            "message": "查询成功",
+            "error_code": None,
+            "data": {
+                "bot_id": "bot_001",
+                "owner_id": "owner_001",
+                "bot_type": "service",
+                "engine_type": "openclaw",
+                "binding_id": 202,
+                "device_provider": "baas",
+                "device_id": "device-001",
+            },
+        }
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value=api_response)
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(
+            side_effect=[TimeoutError("timed out"), mock_response]
+        )
+        mock_session.closed = False
+        mock_session.close = AsyncMock()
+        plugin._session = mock_session
+
+        with patch(
+            "secbaas.community.plugins.bot_service.real._plugin.asyncio.sleep",
+            new=AsyncMock(),
+        ) as mock_sleep:
+            result = await plugin.get_binding("bot_001", "owner_001", "online")
+
+        assert result.binding_id == 202
+        assert mock_session.get.call_count == 2
+        mock_sleep.assert_awaited_once()
+        await plugin.close()
+
+    @pytest.mark.asyncio
     async def test_get_binding_timeout_raises_platform_unavailable(self):
         """TimeoutError → PaasError(PLATFORM_UNAVAILABLE)."""
         plugin = AiohttpBotServicePlugin(
@@ -899,7 +949,7 @@ class TestAiohttpBotServicePluginRuntimeEngineSelection:
             "owner_id": "20881234",
             "bot_type": "personal",
             "engine_type": "claude_code",
-            "template_type": "generCC",
+            "template_type": "normalCC",
             "binding_id": 101,
             "device_provider": "arca",
             "device_id": "ARCA-SANDBOX-001",
@@ -973,3 +1023,61 @@ class TestAiohttpBotServicePluginRuntimeEngineSelection:
 
         assert result.engine_type == "claude_code"
         mock_logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("template_type", ["generCC", "  aicoding-default  "])
+    async def test_claude_code_with_non_normal_template_routes_to_aicoding(
+        self, template_type
+    ):
+        plugin = AiohttpBotServicePlugin(base_url="https://agentclaw.example.com")
+        plugin._get_binding_raw = AsyncMock(
+            return_value=self._binding_inner(template_type=template_type)
+        )
+
+        result = await plugin.get_binding("bot_personal_001", "20881234", "online")
+
+        assert result.engine_type == "aicoding"
+
+    @pytest.mark.asyncio
+    async def test_claude_code_original_with_normal_template_stays_claude_code(self):
+        plugin = AiohttpBotServicePlugin(base_url="https://agentclaw.example.com")
+        plugin._get_binding_raw = AsyncMock(
+            return_value=self._binding_inner(template_type="normalCC")
+        )
+
+        result = await plugin.get_binding("bot_personal_001", "20881234", "online")
+
+        assert result.engine_type == "claude_code"
+
+
+class TestResolveClaudeCodeEngine:
+    """Routing of a claude_code active engine by template_type."""
+
+    def test_claude_code_with_non_normal_template_routes_to_aicoding(self):
+        for template_type in ("generCC", "  aicoding-default  ", "other"):
+            assert (
+                resolve_claude_code_engine("claude_code", template_type) == "aicoding"
+            )
+
+    @pytest.mark.parametrize(
+        "template_type", [None, "", "   ", _CLAUDE_CODE_NORMAL_TEMPLATE]
+    )
+    def test_claude_code_with_empty_or_normal_template_stays_claude_code(
+        self, template_type
+    ):
+        assert resolve_claude_code_engine("claude_code", template_type) == "claude_code"
+
+    def test_claude_code_normal_template_is_whitespace_insensitive(self):
+        assert resolve_claude_code_engine("claude_code", " normalCC ") == "claude_code"
+
+    @pytest.mark.parametrize(
+        "active_engine", ["openclaw", "teclaw", "aicoding", "hermes"]
+    )
+    def test_non_claude_code_engine_unchanged_regardless_of_template(
+        self, active_engine
+    ):
+        for template_type in (None, "", "normalCC", "generCC", "  x  ", 123):
+            assert (
+                resolve_claude_code_engine(active_engine, template_type)
+                == active_engine
+            )

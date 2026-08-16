@@ -222,7 +222,10 @@ The five newly merged operations already require Human semantically:
 
 Their Application service continues to compare `caller.user.id` with the
 stored `created_by` value where ownership is required. The other authenticated
-identity kinds neither grant nor deny access.
+identity kinds neither grant nor deny access. `list_bot_candidates` also
+accepts the current Human's own `human_<subject.id>` record (including Human
+Actor) as the path Bot perspective; a different Human Actor remains forbidden,
+and candidate results remain physical Bots only.
 
 ### Bot-scoped Friendship operations
 

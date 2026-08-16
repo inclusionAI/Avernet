@@ -11,13 +11,11 @@ max_history_per_session = 1000
 store_messages = false
 strict_container_validation = true
 
-# Switch for Provider 2.0 SSE gray-list mode. Default is false.
-# When false, Provider 2.0 downlink rolls out over SSE for all providers.
-# When true, only created_by entries in the gray list use SSE.
+# Deprecated compatibility setting. Provider 2.0 chat.send is always SSE-first;
+# this value is retained for config/API compatibility and has no effect.
 provider_stream_gray_enabled = false
 
-# created_by staff IDs whose Provider 2.0 bots receive chat.send with SSE
-# transport when gray-list mode is enabled.
+# Deprecated compatibility setting; retained but no longer consulted.
 provider_stream_gray_created_by = []
 
 max_groups_as_driver = 20
@@ -254,6 +252,9 @@ default_ttl_seconds = 86400
 base_url = "https://bcs.example.com"
 group_link_url = "https://botchat.example.com/groups/{group_id}"
 session_link_url = "https://botchat.example.com/sessions/{session_id}"
+
+[openapi_v1]
+public_collaboration_base_url = "https://gateway.example.com/api/v1/collaboration"
 
 [session_files]
 storage_backend = "local"      # or "baas"

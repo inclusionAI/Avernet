@@ -6,25 +6,24 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tracing::warn;
 
+use bcs_service_api::core::WorkerProfileCoreService;
 use bcs_service_api::{
     ActorCapabilitiesView, ActorDirectoryEntry, ActorDirectoryService, ActorListCommand,
     ActorListResult, ActorSearchCommand, ActorSearchContext, ActorSearchResult,
-    ActorStatusUpdateCommand, ActorStatusUpdateResult, BotDeliveryTarget, BotRegistryCoreService,
-    DynamicStatusResponse, FriendCoreService, RegisteredBot, RelationCoreService, ServiceError,
-    ServiceResult, WorkerProfile, WorkerProfileService, WorkerRecommendCommand,
-    WorkerRecommendResult,
+    ActorStatusUpdateCommand, ActorStatusUpdateResult, BotCandidateSearchCoreService,
+    BotCandidateSearchMode, BotCandidateSearchQuery, BotCandidateVisibility, BotDeliveryTarget,
+    BotRegistryCoreService, DynamicStatusResponse, FriendCoreService, RegisteredBot,
+    RelationCoreService, ServiceError, ServiceResult,
 };
 
-const DEFAULT_RECOMMEND_MIN_SCORE: f64 = 0.0;
-
-/// Actor directory service backed by registry, friend, relation, and optional
-/// worker-profile providers.
+/// Actor directory service backed by registry, friend, relation, worker-profile,
+/// and candidate-search Core services selected by the composition root.
 pub struct ActorDirectory {
     registry: Arc<dyn BotRegistryCoreService>,
     friend: Arc<dyn FriendCoreService>,
     relation: Arc<dyn RelationCoreService>,
-    worker_profiles: Arc<dyn WorkerProfileService>,
-    recommend_min_score: f64,
+    worker_profiles: Arc<dyn WorkerProfileCoreService>,
+    candidate_search: Arc<dyn BotCandidateSearchCoreService>,
 }
 
 impl ActorDirectory {
@@ -32,24 +31,16 @@ impl ActorDirectory {
         registry: Arc<dyn BotRegistryCoreService>,
         friend: Arc<dyn FriendCoreService>,
         relation: Arc<dyn RelationCoreService>,
+        worker_profiles: Arc<dyn WorkerProfileCoreService>,
+        candidate_search: Arc<dyn BotCandidateSearchCoreService>,
     ) -> Self {
         Self {
             registry,
             friend,
             relation,
-            worker_profiles: Arc::new(EmptyWorkerProfileService),
-            recommend_min_score: DEFAULT_RECOMMEND_MIN_SCORE,
+            worker_profiles,
+            candidate_search,
         }
-    }
-
-    pub fn with_worker_profiles(mut self, worker_profiles: Arc<dyn WorkerProfileService>) -> Self {
-        self.worker_profiles = worker_profiles;
-        self
-    }
-
-    pub fn with_recommend_min_score(mut self, min_score: f64) -> Self {
-        self.recommend_min_score = min_score;
-        self
     }
 
     async fn friend_set_for(&self, actor_id: &str) -> HashSet<String> {
@@ -76,137 +67,6 @@ impl ActorDirectory {
             );
         }
         entries
-    }
-
-    async fn fallback_search(
-        &self,
-        command: &ActorSearchCommand,
-        recommend_response: Option<serde_json::Value>,
-    ) -> ActorSearchResult {
-        let friend_set = self.friend_set_for(&command.current_bot_uuid).await;
-        let (bots, _) = self
-            .registry
-            .list_bots_by_name_and_cooperatable_with(
-                command.query.trim(),
-                &command.current_bot_uuid,
-                command.cooperatable_only,
-                &friend_set,
-                0,
-                command.limit,
-            )
-            .await;
-
-        let ids: Vec<String> = bots.iter().map(|(bot, _)| bot.bot_uuid.clone()).collect();
-        let tags_by_id = self.worker_tags_for(&ids).await;
-
-        let mut entries = Vec::with_capacity(bots.len());
-        for (bot, is_friend) in bots {
-            let skills_display = {
-                let names: Vec<&str> = bot
-                    .capabilities
-                    .skills
-                    .iter()
-                    .map(|skill| skill.name.as_str())
-                    .collect();
-                format!("bot 能力: {}", names.join(";"))
-            };
-            let tags = tags_by_id.get(&bot.bot_uuid).cloned().unwrap_or_default();
-            entries.push(
-                self.build_actor_entry(bot, is_friend, tags, Some(0.0), Some(skills_display))
-                    .await,
-            );
-        }
-
-        ActorSearchResult {
-            bots: entries,
-            context: ActorSearchContext { recommend_response },
-        }
-    }
-
-    async fn search_with_worker_profiles(
-        &self,
-        command: &ActorSearchCommand,
-        friend_set: &HashSet<String>,
-    ) -> Option<ActorSearchResult> {
-        let top_k = command.limit.min(u32::MAX as usize) as u32;
-        let recommend = match self
-            .worker_profiles
-            .recommend_workers(WorkerRecommendCommand {
-                query: command.query.trim().to_string(),
-                top_k,
-                min_score: self.recommend_min_score,
-            })
-            .await
-        {
-            Ok(result) => result,
-            Err(error) => {
-                warn!(
-                    error = %error,
-                    "actor search: worker profile recommend failed, falling back to registry"
-                );
-                return None;
-            }
-        };
-
-        if recommend.recommendations.is_empty() {
-            return Some(ActorSearchResult {
-                bots: Vec::new(),
-                context: ActorSearchContext {
-                    recommend_response: Some(recommend.raw_response),
-                },
-            });
-        }
-
-        let mut rows = Vec::with_capacity(recommend.recommendations.len());
-        for recommendation in &recommend.recommendations {
-            if recommendation.worker_id == command.current_bot_uuid {
-                continue;
-            }
-            let Some(bot) = self.registry.get(&recommendation.worker_id).await else {
-                continue;
-            };
-            let is_friend = friend_set.contains(&bot.bot_uuid);
-            if !is_visible_for_actor_search(&bot, command.cooperatable_only, is_friend) {
-                continue;
-            }
-            rows.push((
-                bot,
-                is_friend,
-                recommendation.score,
-                recommendation.short_profile.clone(),
-            ));
-        }
-
-        if rows.is_empty() {
-            return Some(ActorSearchResult {
-                bots: Vec::new(),
-                context: ActorSearchContext {
-                    recommend_response: Some(recommend.raw_response),
-                },
-            });
-        }
-
-        let ids: Vec<String> = rows
-            .iter()
-            .map(|(bot, _, _, _)| bot.bot_uuid.clone())
-            .collect();
-        let tags_by_id = self.worker_tags_for(&ids).await;
-
-        let mut entries = Vec::with_capacity(rows.len());
-        for (bot, is_friend, score, short_profile) in rows {
-            let tags = tags_by_id.get(&bot.bot_uuid).cloned().unwrap_or_default();
-            entries.push(
-                self.build_actor_entry(bot, is_friend, tags, Some(score), short_profile)
-                    .await,
-            );
-        }
-
-        Some(ActorSearchResult {
-            bots: entries,
-            context: ActorSearchContext {
-                recommend_response: Some(recommend.raw_response),
-            },
-        })
     }
 
     async fn worker_tags_for(
@@ -268,28 +128,6 @@ impl ActorDirectory {
     }
 }
 
-struct EmptyWorkerProfileService;
-
-#[async_trait]
-impl WorkerProfileService for EmptyWorkerProfileService {
-    async fn recommend_workers(
-        &self,
-        _command: WorkerRecommendCommand,
-    ) -> ServiceResult<WorkerRecommendResult> {
-        Ok(WorkerRecommendResult {
-            recommendations: Vec::new(),
-            raw_response: serde_json::Value::Null,
-        })
-    }
-
-    async fn batch_query_worker_profiles(
-        &self,
-        _worker_ids: &[String],
-    ) -> ServiceResult<Vec<WorkerProfile>> {
-        Ok(Vec::new())
-    }
-}
-
 #[async_trait]
 impl ActorDirectoryService for ActorDirectory {
     async fn list_actors(&self, command: ActorListCommand) -> ActorListResult {
@@ -314,29 +152,52 @@ impl ActorDirectoryService for ActorDirectory {
     }
 
     async fn search_actors(&self, command: ActorSearchCommand) -> ActorSearchResult {
-        if command.query.trim().is_empty() {
-            return ActorSearchResult {
-                bots: Vec::new(),
-                context: ActorSearchContext {
-                    recommend_response: None,
+        let result = self
+            .candidate_search
+            .search_candidates_for_legacy(BotCandidateSearchQuery {
+                query: command.query.trim().to_string(),
+                acting_actor_id: command.current_bot_uuid,
+                visibility: if command.cooperatable_only {
+                    BotCandidateVisibility::Collaboration
+                } else {
+                    BotCandidateVisibility::Discovery
                 },
+                limit: command.limit,
+            })
+            .await;
+        let mode = result.result.mode;
+        let mut entries = Vec::with_capacity(result.result.hits.len());
+        for hit in result.result.hits {
+            let (score, short_profile) = match mode {
+                BotCandidateSearchMode::NameFallback => {
+                    let skill_names = hit
+                        .bot
+                        .capabilities
+                        .skills
+                        .iter()
+                        .map(|skill| skill.name.as_str())
+                        .collect::<Vec<_>>();
+                    (
+                        Some(0.0),
+                        Some(format!("bot 能力: {}", skill_names.join(";"))),
+                    )
+                }
+                BotCandidateSearchMode::Semantic | BotCandidateSearchMode::EmptyQuery => {
+                    (hit.score, hit.short_profile)
+                }
             };
+            entries.push(
+                self.build_actor_entry(hit.bot, hit.is_friend, hit.tags, score, short_profile)
+                    .await,
+            );
         }
 
-        let friend_set = self.friend_set_for(&command.current_bot_uuid).await;
-        if let Some(result) = self
-            .search_with_worker_profiles(&command, &friend_set)
-            .await
-        {
-            if !result.bots.is_empty() {
-                return result;
-            }
-            return self
-                .fallback_search(&command, result.context.recommend_response)
-                .await;
+        ActorSearchResult {
+            bots: entries,
+            context: ActorSearchContext {
+                recommend_response: result.recommend_response,
+            },
         }
-
-        self.fallback_search(&command, None).await
     }
 
     async fn update_actor_status_for_caller(
@@ -382,18 +243,5 @@ fn actor_capabilities_view(bot: &RegisteredBot) -> ActorCapabilitiesView {
         skills: bot.capabilities.skills.clone(),
         domains: bot.capabilities.domains.clone(),
         scopes: bot.capabilities.scopes.clone(),
-    }
-}
-
-fn is_visible_for_actor_search(
-    bot: &RegisteredBot,
-    cooperatable_only: bool,
-    is_friend: bool,
-) -> bool {
-    let visibility = bot.capabilities.visibility.as_str();
-    if cooperatable_only {
-        visibility == "public" || is_friend
-    } else {
-        matches!(visibility, "public" | "protected")
     }
 }

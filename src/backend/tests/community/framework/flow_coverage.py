@@ -79,6 +79,10 @@ _SESSION_RESOURCES_EXEMPT_REASON = (
     "covers the module with core and HTTP API tests."
 )
 
+_TASK_FRAMEWORK_EXEMPT_REASON = (
+    "Task goal-driven execution framework skeleton (core/task). No HTTP/router or DI surface is wired yet (no adapters/http/task/, no di/modules/task_module.py), so there is no endpoint for an e2e flow to drive. Covered by domain/unit tests on the graph, planner, dispatcher, runner, and harness as each lands. Drain this when a router + DI provider expose the TaskService facade over a real singlebox stack."
+)
+
 _ENGINE_RUNTIME_EXEMPT_REASON = (
     "TEMPORARY, and blocked twice over. FIRST, on the auth workstream — not on "
     "this module: every /openapi/v1 route answers 401 in singlebox, so a flow "
@@ -137,6 +141,20 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "approval": _EXEMPT_REASON,
     "auth": _EXEMPT_REASON,
     "bot_public": _EXEMPT_REASON,
+    "bot_startup_script": (
+        "The script's effect is only observable inside a provisioned container: "
+        "it is appended to the start sequence the backend composes and runs "
+        "there, so an end-to-end flow needs a real BaaS device to assert "
+        "anything beyond storage. Covered meanwhile by "
+        "tests/community/repository/bot/test_bot_startup_script_repository.py "
+        "(repository over a real database), "
+        "tests/community/core/bot_startup_script/ (the size cap and the "
+        "absent-is-empty contract the payload path depends on), and the "
+        "start-command composition tests in "
+        "tests/community/core/service_bot/services/test_baas_service_start_cmd.py "
+        "(byte-identical output without a script, and the exit-status guard "
+        "with one). Drain this when singlebox can provision a container."
+    ),
     "channel": _EXEMPT_REASON,
     "caller_identity": (
         "Agent Principal and BaaS outbound-rule calls require remote credentials; "
@@ -146,6 +164,7 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "config": _EXEMPT_REASON,
     "config_compose": _EXEMPT_REASON,
     "desktop_bot": _EXEMPT_REASON,
+    "task": _TASK_FRAMEWORK_EXEMPT_REASON,
     "economy": _EXEMPT_REASON,
     "events": _EXEMPT_REASON,
     "gateway_principal": _GATEWAY_PRINCIPAL_EXEMPT_REASON,

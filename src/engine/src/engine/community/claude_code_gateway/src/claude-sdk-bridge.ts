@@ -21,6 +21,7 @@ import type {
 } from './claude-cli-bridge.js';
 import { createLogger } from './debug.js';
 import { EXEC_APPROVAL_TIMEOUT_MS } from './interaction/builders.js';
+import { loadRelayModelProviderEnv } from './model-provider-settings.js';
 
 // ---- HITL Suspend/Resume Types ----
 
@@ -183,6 +184,10 @@ export function shouldGateTool(toolName: string): boolean {
   return GATED_TOOLS.has(toolName);
 }
 
+export function shouldInstallInteractiveToolGate(permissionMode: string | undefined, hasInteractionCallback: boolean): boolean {
+  return hasInteractionCallback && permissionMode !== 'bypassPermissions';
+}
+
 /**
  * Resolve the path to the Claude Code CLI executable.
  * Priority:
@@ -339,6 +344,16 @@ export type StartClaudeSdkParams = {
   /** Callback when an interaction is requested (tool use needs approval). */
   onInteractionRequested?: (event: InteractionRequestedRuntimeEvent) => void;
 };
+
+/** Apply relay-level thinking controls to the concrete SDK query options. */
+export function applySdkThinkingPolicy(
+  options: Record<string, unknown>,
+  env: Record<string, string | undefined>,
+): void {
+  if (env.MAX_THINKING_TOKENS?.trim() === '0') {
+    options.thinking = { type: 'disabled' };
+  }
+}
 
 /**
  * Probe whether the Claude Agent SDK is installed and importable.
@@ -541,18 +556,22 @@ export function startClaudePromptSdk(
 
     const claudeHomeOverride = process.env.RELAY_CLAUDE_HOME?.trim();
     const claudeConfigDirOverride = process.env.RELAY_CLAUDE_CONFIG_DIR?.trim();
+    const modelProviderEnv = loadRelayModelProviderEnv();
+    const sdkEnv = {
+      ...process.env,
+      ...modelProviderEnv,
+      ...(claudeHomeOverride ? { HOME: claudeHomeOverride } : {}),
+      ...(claudeConfigDirOverride ? { CLAUDE_CONFIG_DIR: claudeConfigDirOverride } : {}),
+      ...(params.env ?? {}),
+    };
     const options: Record<string, unknown> = {
       cwd: params.cwd,
-      env: {
-        ...process.env,
-        ...(claudeHomeOverride ? { HOME: claudeHomeOverride } : {}),
-        ...(claudeConfigDirOverride ? { CLAUDE_CONFIG_DIR: claudeConfigDirOverride } : {}),
-        ...(params.env ?? {}),
-      },
+      env: sdkEnv,
       includePartialMessages: true,
       abortController,
       ...(params.sdkOptions ?? {}),
     };
+    applySdkThinkingPolicy(options, sdkEnv);
     if (params.additionalDirectories?.length) {
       const cleaned = params.additionalDirectories.filter(p => typeof p === 'string' && p.trim()).map(p => p.trim());
       if (cleaned.length) options.additionalDirectories = cleaned;
@@ -567,7 +586,7 @@ export function startClaudePromptSdk(
     });
 
     // Inject canUseTool hook for HITL suspend/resume
-    if (params.onInteractionRequested) {
+    if (shouldInstallInteractiveToolGate(params.permissionMode, Boolean(params.onInteractionRequested))) {
       // EXEC_APPROVAL_TIMEOUT_MS 统一从 interaction/builders 导出（可通过
       // RELAY_INTERACTION_TIMEOUT_MS 配置，默认 5min），避免多处硬编码。
       // 排查日志：确认 canUseTool 生效的审批超时值
@@ -678,6 +697,8 @@ export function startClaudePromptSdk(
           throw err;
         }
       };
+    } else if (params.onInteractionRequested && params.permissionMode === 'bypassPermissions') {
+      log.debug('canUseTool: skipped HITL gate for bypassPermissions', { runId, sessionKey });
     }
 
     // Use explicit CLI path if provided (useful when SDK's bundled binary is unavailable)

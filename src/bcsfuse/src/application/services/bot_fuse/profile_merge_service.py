@@ -436,6 +436,26 @@ class ProfileMergeService:
                 else:
                     dedup_count += 1
 
+            # 收集 tools.md
+            tools = profile.contents.get("tools.md")
+            if tools:
+                md5 = self._compute_md5(tools)
+                if md5 not in seen_hashes["tools"]:
+                    seen_hashes["tools"].add(md5)
+                    collected["tools"].append((pid, tools))
+                else:
+                    dedup_count += 1
+
+            # 收集 agents.md
+            agents = profile.contents.get("agents.md")
+            if agents:
+                md5 = self._compute_md5(agents)
+                if md5 not in seen_hashes["agents"]:
+                    seen_hashes["agents"].add(md5)
+                    collected["agents"].append((pid, agents))
+                else:
+                    dedup_count += 1
+
             # 收集 description
             if profile.description:
                 md5 = self._compute_md5(profile.description)
@@ -598,6 +618,18 @@ class ProfileMergeService:
                 memory_preview = memory[:500]
                 expert_parts.append(f"**经验(Memory)**:\n{memory_preview}")
 
+            # tools.md
+            tools = profile.contents.get("tools.md")
+            if tools:
+                tools_preview = tools[:500]
+                expert_parts.append(f"**工具(Tools)**:\n{tools_preview}")
+
+            # agents.md
+            agents = profile.contents.get("agents.md")
+            if agents:
+                agents_preview = agents[:500]
+                expert_parts.append(f"**工作空间(Agents)**:\n{agents_preview}")
+
             # 技能
             if profile.skill_sets:
                 skill_names = [s.name for s in profile.skill_sets[:10]]
@@ -746,6 +778,8 @@ class ProfileMergeService:
                 soul=profile.soul_md,
                 identity=profile.contents.get("identity.md"),
                 memory=profile.contents.get("memory.md"),
+                tools=profile.contents.get("tools.md"),
+                agents=profile.contents.get("agents.md"),
                 skills=[s.name for s in profile.skill_sets],
             )
             expert_profiles.append(expert)
@@ -807,6 +841,8 @@ class ProfileMergeService:
                 soul=profile.soul_md,
                 identity=profile.contents.get("identity.md") if profile.contents else None,
                 memory=profile.contents.get("memory.md") if profile.contents else None,
+                tools=profile.contents.get("tools.md") if profile.contents else None,
+                agents=profile.contents.get("agents.md") if profile.contents else None,
                 skills=[s.name for s in profile.skill_sets] if profile.skill_sets else [],
             )
             expert_profiles.append(expert)

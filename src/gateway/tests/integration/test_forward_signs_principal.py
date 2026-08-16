@@ -59,7 +59,11 @@ class _CapturingForwarder:
             if False:  # pragma: no cover
                 yield
 
-        yield ForwardResponse(status_code=200, headers=[], body=_empty_body())
+        try:
+            yield ForwardResponse(status_code=200, headers=[], body=_empty_body())
+        finally:
+            if request.body is not None:
+                await request.body.aclose()
 
 
 class _BoomSigner:
@@ -186,6 +190,26 @@ async def test_forward_returns_500_when_signing_fails() -> None:
         resp = await client.get("/openapi/v1/bots/x")
 
     assert resp.status_code == 500
+
+
+async def test_signing_failure_does_not_consume_request_body() -> None:
+    body_consumed = False
+
+    async def body():
+        nonlocal body_consumed
+        body_consumed = True
+        yield b"must-not-be-read"
+
+    app = create_app()
+    app.state.authenticator = _StubAuthenticator()
+    app.state.forwarder = _CapturingForwarder()
+    app.state.principal_signer = _BoomSigner()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/openapi/v1/bots/upload", content=body())
+
+    assert response.status_code == 500
+    assert not body_consumed
 
 
 async def test_forward_returns_500_when_no_signing_key_is_configured() -> None:

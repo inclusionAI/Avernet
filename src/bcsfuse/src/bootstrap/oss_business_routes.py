@@ -58,6 +58,7 @@ class WorkerCreateRequestOSS(BaseModel):
     name: str = Field(..., min_length=1, description="Worker name")
     description: Optional[str] = Field(None, description="Worker description")
     skills: list[str] = Field(default_factory=list, description="Worker skills")
+    domains: list[str] = Field(default_factory=list, description="Worker domains")
     is_public: bool = Field(default=True, description="Public visibility")
 
 
@@ -590,8 +591,8 @@ def include_oss_business_routes(app) -> None:
                     handle=create_req.worker_id,  # Use worker_id as handle
                     description=create_req.description or f"OSS test worker: {create_req.name}",
                 ),
-                responsibilities=["test"],
-                domains=[],
+                responsibilities=["bot"],
+                domains=create_req.domains,
                 capabilities=[],
                 constraints=[],
                 skills=[],

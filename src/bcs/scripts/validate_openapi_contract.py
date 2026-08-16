@@ -24,6 +24,8 @@ HTTP_METHODS = {
 }
 ROUTING_ONLY_OPERATION_ID_PARTS = {"collaboration", "bcn", "openapi"}
 ENVELOPE_FIELDS = {"code", "message", "data", "request_id"}
+PUBLIC_COLLABORATION_PREFIX = "/openapi/v1/collaboration/"
+INTERNAL_COLLABORATION_PREFIX = "/api/v1/collaboration/"
 
 
 def _json_pointer(document: Any, pointer: str) -> Any:
@@ -101,8 +103,8 @@ def _resolve(
     }
 
 
-def load_contract(root: Path) -> dict[str, Any]:
-    entrypoint = root / "openapi.yaml"
+def load_contract(root: Path, entrypoint: str = "openapi.yaml") -> dict[str, Any]:
+    entrypoint = root / entrypoint
     cache: dict[Path, Any] = {}
     document = _read_yaml(entrypoint, cache)
     resolved = _resolve(document, current_file=entrypoint, cache=cache)
@@ -127,16 +129,18 @@ def _response_schema(response: dict[str, Any]) -> dict[str, Any] | None:
     return schema if isinstance(schema, dict) else None
 
 
-def validate_contract(contract: dict[str, Any]) -> list[str]:
+def validate_contract(
+    contract: dict[str, Any],
+    *,
+    path_prefix: str = PUBLIC_COLLABORATION_PREFIX,
+) -> list[str]:
     errors: list[str] = []
     operation_ids: set[str] = set()
 
     for method, path, operation in _iter_operations(contract):
         location = f"{method.upper()} {path}"
-        if not path.startswith("/openapi/v1/"):
-            errors.append(f"{location}: path is outside /openapi/v1/**")
-        if path.startswith("/openapi/v1/internal/"):
-            errors.append(f"{location}: Internal API is not in the first batch")
+        if not path.startswith(path_prefix):
+            errors.append(f"{location}: path is outside {path_prefix}**")
 
         operation_id = operation.get("operationId")
         if not operation_id:
@@ -161,20 +165,26 @@ def validate_contract(contract: dict[str, Any]) -> list[str]:
         if not responses:
             errors.append(f"{location}: missing responses")
         for status, response in responses.items():
+            status_text = str(status)
             websocket_upgrade = (
                 operation.get("x-avernet-protocol") == "websocket"
-                and str(status) == "101"
+                and status_text == "101"
+            )
+            raw_success = (
+                operation.get("x-avernet-raw-response") is True
+                and status_text.startswith(("2", "3"))
             )
             schema = _response_schema(response)
-            if schema is None and not websocket_upgrade:
+            if schema is None and not websocket_upgrade and not raw_success:
                 errors.append(f"{location} {status}: missing JSON response schema")
             elif schema is not None:
                 required = set(schema.get("required", []))
                 if not ENVELOPE_FIELDS.issubset(required):
                     errors.append(f"{location} {status}: response is not an envelope")
             if (
-                not str(status).startswith("2")
+                not status_text.startswith("2")
                 and not websocket_upgrade
+                and not raw_success
                 and not response.get("x-error-codes")
             ):
                 errors.append(f"{location} {status}: missing x-error-codes")
@@ -185,22 +195,27 @@ def validate_contract(contract: dict[str, Any]) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--entrypoint", default="openapi.yaml")
+    parser.add_argument("--path-prefix", default=PUBLIC_COLLABORATION_PREFIX)
     args = parser.parse_args()
 
     try:
-        contract = load_contract(args.root)
+        contract = load_contract(args.root, entrypoint=args.entrypoint)
     except (OSError, ValueError, yaml.YAMLError) as error:
         print(f"OpenAPI contract load failed: {error}")
         return 1
 
-    errors = validate_contract(contract)
+    errors = validate_contract(
+        contract,
+        path_prefix=args.path_prefix,
+    )
     if errors:
         for error in errors:
             print(error)
         return 1
 
     operation_count = sum(1 for _ in _iter_operations(contract))
-    print(f"{operation_count} operations validated")
+    print(f"{operation_count} operations validated for {args.entrypoint}")
     return 0
 
 

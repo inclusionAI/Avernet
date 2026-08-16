@@ -11,9 +11,15 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
+import pytest
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.economy.governance.orm import GovernanceNotificationOrm, GovernanceTicketOrm, WhitelistEntryOrm
+from agentclaw.community.core.economy.governance.orm import (
+    AuditLogOrm,
+    GovernanceNotificationOrm,
+    GovernanceTicketOrm,
+    WhitelistEntryOrm,
+)
 from agentclaw.community.core.economy.governance.domain.enums import AuditAction
 from agentclaw.community.core.repository.implementations.governance.audit import GovernanceAuditRepository
 from agentclaw.community.core.repository.implementations.governance.notify_log import NotifyLogRepository
@@ -109,6 +115,49 @@ def _make_svc(engine):
 class TestResolveEdgeBranches:
     """Uncovered branches inside resolve()."""
 
+    @pytest.mark.parametrize(
+        ("notification_overrides", "expected_action", "expected_success"),
+        [
+            ({}, AuditAction.USER_OPTIMIZED, True),
+            ({"response": "optimized"}, AuditAction.FEEDBACK_DUPLICATE_IGNORED, True),
+            (
+                {"governance_status": "closed"},
+                AuditAction.FEEDBACK_TERMINAL_IGNORED,
+                False,
+            ),
+        ],
+    )
+    def test_audit_records_explicit_actor_instead_of_ticket_owner(
+        self,
+        session,
+        engine,
+        notification_overrides,
+        expected_action,
+        expected_success,
+    ):
+        """Audit attribution follows the acting operator, not the ticket owner."""
+        svc = _make_svc(engine)
+        _make_notification(session, owner_id="owner-1", **notification_overrides)
+
+        result = svc.resolve(
+            "n-001",
+            "optimized",
+            "owner-1",
+            actor_id="operator-9",
+            source="admin_api",
+        )
+
+        assert result.success is expected_success
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as audit_session:
+            audit = (
+                audit_session.query(AuditLogOrm)
+                .filter_by(action_taken=expected_action)
+                .one()
+            )
+            assert audit.owner_id == "owner-1"
+            assert audit.actor_id == "operator-9"
+
     def test_existing_response_duplicate_ignored(self, session, engine):
         """ticket.response already set → duplicate_ignored (§7.4.1 step 2)."""
         svc = _make_svc(engine)
@@ -182,7 +231,6 @@ class TestResolveEdgeBranches:
             assert ticket.governance_status == "waiting_review"
 
         # 3. 审计 user_whitelisted(申请动作)仍写
-        from agentclaw.community.core.economy.governance.orm import AuditLogOrm
         with Session() as s:
             audits = [a for a in s.query(AuditLogOrm).all()
                       if a.action_taken == AuditAction.USER_WHITELIST]
@@ -191,4 +239,3 @@ class TestResolveEdgeBranches:
     # NOTE: test_commit_failure_returns_db_error removed — session commit
 # failure is now an internal implementation detail of self-managed
 # orm_session contexts and cannot be cleanly tested from the outside.
-

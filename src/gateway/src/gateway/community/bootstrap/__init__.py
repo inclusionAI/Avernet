@@ -61,6 +61,20 @@ class BootstrapResult:
             description=description,
         )
 
+    def served_internal_openapi(
+        self,
+        *,
+        title: str,
+        version: str,
+        description: str = "",
+    ) -> dict[str, object]:
+        """Return the served OpenAPI document for configured internal APIs."""
+        return self.forwarding.served_internal_openapi(
+            title=title,
+            version=version,
+            description=description,
+        )
+
     def shutdown(self) -> None:
         import asyncio
 
@@ -97,7 +111,7 @@ def bootstrap_app() -> BootstrapResult:
     )
     db = container.plugins().database()
     access_key_issuer = build_access_key_issuer(db, principal_signer)
-    app_registrar = build_app_registrar(db, principal_signer)
+    app_registrar = build_app_registrar(db)
     return BootstrapResult(
         authenticator=authenticator,
         forwarding=forwarding,

@@ -32,6 +32,9 @@ from injector import Binder, Injector, Module, inject, provider, singleton
 
 from agentclaw.community.api.baas_service import BaasServiceProtocol
 from agentclaw.community.api.bot_build_service import BotBuildServiceProtocol
+from agentclaw.community.api.bot_startup_script_service import (
+    BotStartupScriptServiceProtocol,
+)
 from agentclaw.community.api.bot_publish_service import BotPublishServiceProtocol
 from agentclaw.community.api.channel_service import ChannelServiceProtocol
 from agentclaw.community.api.publish_flow_service import PublishFlowServiceProtocol
@@ -71,6 +74,7 @@ from agentclaw.community.core.service_bot.services.bot_process import (
     BotProcessRegistry,
     EmptyBotProcess,
     PersonalBotProcess,
+    ServiceBotProcess,
 )
 from agentclaw.community.core.service_bot.services.bot_publish_service import BotPublishService
 from agentclaw.community.core.service_bot.services.deploy.arca_snapshot_producer import (
@@ -181,6 +185,7 @@ class ServiceBotModule(Module):
         secret_names: cfg.SecretNamesConfig,
         common_whitelist_service: CommonWhiteListService,
         outbound_rule_provider: OutboundRuleProvider,
+        startup_script_service: BotStartupScriptServiceProtocol,
     ) -> BaasService:
         """Construct ``BaasService`` from typed bindings.
 
@@ -215,6 +220,7 @@ class ServiceBotModule(Module):
             common_whitelist_service=common_whitelist_service,
             outbound_rule_provider=outbound_rule_provider,
             theta_master_key_secret=secret_names.aicoding_theta_master_key,
+            startup_script_reader=startup_script_service,
         )
         logger.info(
             "[NEW-ARCH] BaasService initialized: api_base=%s, tenant=%s, template_uuid=%s, "
@@ -267,6 +273,7 @@ class ServiceBotModule(Module):
         """Construct bot-type-specific binding response processors."""
         return BotProcessRegistry(
             personal_bot_process=PersonalBotProcess(template_service),
+            service_bot_process=ServiceBotProcess(template_service),
             default_bot_process=EmptyBotProcess(),
         )
 

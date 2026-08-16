@@ -169,6 +169,52 @@ def test_collaboration_socket_exemption_does_not_reach_the_http_plane() -> None:
     assert req[PrincipalType.USER] is Presence.REQUIRED
 
 
+def test_shipped_config_collects_all_optional_file_identities_and_keeps_share_public() -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+
+    protected = rs.resolve(
+        "PUT",
+        "/openapi/v1/collaboration/sessions/g1%3Aabcd1234/files/file-1/content",
+    )
+    assert protected == {
+        PrincipalType.USER: Presence.OPTIONAL,
+        PrincipalType.APP: Presence.OPTIONAL,
+        PrincipalType.BOT: Presence.OPTIONAL,
+    }
+    assert (
+        rs.resolve(
+            "GET",
+            "/openapi/v1/collaboration/sessions/shared-file/content",
+        )
+        == {}
+    )
+    sibling = rs.resolve("GET", "/openapi/v1/collaboration/sessions/session-1")
+    assert sibling is not None
+    assert sibling[PrincipalType.USER] is Presence.REQUIRED
+    assert sibling[PrincipalType.APP] is Presence.REQUIRED
+
+
+def test_shipped_config_requires_user_and_app_for_session_collection() -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+
+    for method, path in (
+        (
+            "POST",
+            "/openapi/v1/collaboration/sessions/session-1/collect",
+        ),
+        (
+            "DELETE",
+            "/openapi/v1/collaboration/sessions/session-1/collect",
+        ),
+    ):
+        requirement = rs.resolve(method, path)
+        assert requirement is not None
+        assert requirement[PrincipalType.USER] is Presence.REQUIRED
+        assert requirement[PrincipalType.APP] is Presence.REQUIRED
+
+
 _AUTHORIZED_APPS_PATH = "/openapi/v1/bots/bot-123/authorized-apps"
 _AUTHORIZED_BOTS_PATH = "/openapi/v1/bots/authorized"
 

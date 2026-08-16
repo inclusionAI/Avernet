@@ -49,6 +49,7 @@ reqwest         = { workspace = true }
 
 [dev-dependencies]
 futures = { workspace = true }
+bcs-app-session = { workspace = true }
 bcs-bot = { workspace = true }
 bcs-bot-store = { workspace = true }
 bcs-cli = { workspace = true }

@@ -1194,6 +1194,71 @@ async fn register_provider_returns_coordination_metadata() {
 }
 
 #[tokio::test]
+async fn register_provider_round_trips_native_mcp_tool_name_mapping() {
+    let TestApp { app, _temp_dir, .. } = test_app();
+    let assign_tool = "mcp_mcp.ant.agentclawscs.bcs_mcp_bcs_assign_task";
+    let send_message_tool = "mcp_mcp.ant.agentclawscs.bcs_mcp_bcs_send_task_message";
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/providers")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "name": "Provider",
+                        "webhook_url": "https://provider.example.com/bcs/webhook",
+                        "auth": {
+                            "mode": "static_bearer"
+                        },
+                        "coordination": {
+                            "mode": "native_mcp",
+                            "mcp_server": "mcp.ant.agentclawscs.bcs",
+                            "tool_name_mapping": {
+                                (assign_tool): "bcs_assign_task",
+                                (send_message_tool): "bcs_send_task_message"
+                            }
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let registered = response_json(response).await;
+    let provider_id = registered["provider_id"].as_str().unwrap();
+    let admin_token = registered["provider_admin_token"].as_str().unwrap();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/providers/{provider_id}"))
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["coordination"]["mode"], "native_mcp");
+    assert_eq!(
+        body["coordination"]["tool_name_mapping"][assign_tool],
+        "bcs_assign_task"
+    );
+    assert_eq!(
+        body["coordination"]["tool_name_mapping"][send_message_tool],
+        "bcs_send_task_message"
+    );
+}
+
+#[tokio::test]
 async fn patch_provider_updates_name_and_webhook_url() {
     let TestApp { app, _temp_dir, .. } = test_app();
     let provider = register_provider(

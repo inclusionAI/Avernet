@@ -19,9 +19,10 @@ use bcs_service_api::{
     BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotEventCommand,
     BotRunContext, BotRunContextPort, ChatEventState, DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
     GroupHistoryBotRequestPort, InteractionKind, InteractionProviderAck,
-    InteractionProviderCommand, InteractionProviderPort, InteractionService, MessageFlowService,
+    InteractionProviderCommand, InteractionProviderPort, InteractionService,
     ProviderInteractionRequestedCommand, ProviderInteractionResolvedCommand,
-    ProviderTransportPreference, ServiceError, ServiceResult,
+    ProviderEventIngestCommand, ProviderEventIngestService, ProviderEventSource,
+    ProviderRunTransport, ServiceError, ServiceResult,
 };
 use opentelemetry::global;
 use opentelemetry_http::HeaderInjector;
@@ -102,7 +103,9 @@ impl ProviderClientPolicy {
                 response_header_timeout: Some(Duration::from_millis(
                     SSE_RESPONSE_HEADER_TIMEOUT_MS,
                 )),
-                http2_only: true,
+                // Content negotiation must also reach HTTP/1.1 providers so
+                // they can select JSON callback fallback on this same POST.
+                http2_only: false,
             }
         } else {
             Self {
@@ -134,11 +137,11 @@ struct SseInteractionContext {
 pub struct HttpProviderTransport {
     /// Callback / history client with a 65s total timeout.
     client: reqwest::Client,
-    /// HTTP/2-only SSE client with NO total timeout (#3): a total `.timeout()`
-    /// would cut a long-lived stream. Idle detection is handled in the read loop.
+    /// SSE-capable client with NO total timeout: a total `.timeout()` would cut
+    /// a long-lived stream. HTTP/1.1 remains enabled for JSON callback fallback.
     sse_client: reqwest::Client,
     url_guard: OutboundUrlGuard,
-    message_flow: std::sync::RwLock<Option<Arc<dyn MessageFlowService>>>,
+    event_ingest: std::sync::RwLock<Option<Arc<dyn ProviderEventIngestService>>>,
     bot_run_context: std::sync::RwLock<Option<Arc<dyn BotRunContextPort>>>,
     interactions: std::sync::RwLock<Option<std::sync::Weak<dyn InteractionService>>>,
 }
@@ -149,14 +152,9 @@ impl HttpProviderTransport {
     }
 
     pub fn allowing_private_networks_for_tests() -> Self {
-        // Local contract servers are HTTP/1. Production constructors and every
-        // DNS-pinned SSE client keep the strict HTTP/2-only policy.
         Self::with_url_guard_and_sse_policy(
             OutboundUrlGuard::allowing_private_networks_for_tests(),
-            ProviderClientPolicy {
-                http2_only: false,
-                ..ProviderClientPolicy::for_request(true)
-            },
+            ProviderClientPolicy::for_request(true),
         )
     }
 
@@ -179,7 +177,7 @@ impl HttpProviderTransport {
                 .build()
                 .expect("build provider sse client"),
             url_guard,
-            message_flow: std::sync::RwLock::new(None),
+            event_ingest: std::sync::RwLock::new(None),
             bot_run_context: std::sync::RwLock::new(None),
             interactions: std::sync::RwLock::new(None),
         }
@@ -191,10 +189,10 @@ impl HttpProviderTransport {
     /// circular-dependency bootstrap cycle.
     pub fn set_ingest(
         &self,
-        message_flow: Arc<dyn MessageFlowService>,
+        event_ingest: Arc<dyn ProviderEventIngestService>,
         bot_run_context: Arc<dyn BotRunContextPort>,
     ) {
-        *self.message_flow.write().expect("message_flow lock poisoned") = Some(message_flow);
+        *self.event_ingest.write().expect("event_ingest lock poisoned") = Some(event_ingest);
         *self.bot_run_context.write().expect("bot_run_context lock poisoned") = Some(bot_run_context);
     }
 
@@ -365,14 +363,47 @@ impl BotDeliveryPort for HttpProviderTransport {
             BotDeliveryTarget::HttpProvider { protocol_version, .. } if protocol_version == "2.0"
         );
         if is_proto2 {
-            let wants_sse = matches!(
-                cmd.provider_transport,
-                ProviderTransportPreference::CallbackSse
-            ) && method == "chat.send";
+            let wants_sse = method == "chat.send";
             let client = if wants_sse { &self.sse_client } else { &self.client };
-            let resp =
-                send_provider_request(client, &self.url_guard, &cmd.target, &body, wants_sse, &cmd.provider_bypass_headers)
-                    .await?;
+            let run_context = self
+                .bot_run_context
+                .read()
+                .expect("bot_run_context lock poisoned")
+                .clone();
+            if wants_sse {
+                if let Some(context) = run_context.as_ref() {
+                    let began = context
+                        .begin_provider_transport(
+                            &run_id,
+                            bcs_protocol::now_ms().saturating_add(body.timeout_ms),
+                        )
+                        .await;
+                    if !began {
+                        return Err(ServiceError::InvalidOperation {
+                            message: "provider run transport is already registered".to_string(),
+                            request_id: Some(run_id),
+                        });
+                    }
+                }
+            }
+            let resp = match send_provider_request(
+                client,
+                &self.url_guard,
+                &cmd.target,
+                &body,
+                wants_sse,
+                &cmd.provider_bypass_headers,
+            )
+            .await
+            {
+                Ok(response) => response,
+                Err(error) => {
+                    if let Some(context) = run_context.as_ref() {
+                        context.clear_provider_transport(&run_id).await;
+                    }
+                    return Err(error);
+                }
+            };
             let ctype = resp
                 .headers()
                 .get(reqwest::header::CONTENT_TYPE)
@@ -380,9 +411,24 @@ impl BotDeliveryPort for HttpProviderTransport {
                 .unwrap_or("")
                 .to_string();
             if wants_sse && ctype.starts_with("text/event-stream") {
+                if let Some(context) = run_context.as_ref() {
+                    let bound = context
+                        .bind_provider_transport(&run_id, ProviderRunTransport::Sse)
+                        .await;
+                    if !bound {
+                        return Err(ServiceError::InvalidOperation {
+                            message: "provider run is already bound to another transport"
+                                .to_string(),
+                            request_id: Some(run_id),
+                        });
+                    }
+                }
                 let (Some(flow), Some(ctx)) =
-                    (self.message_flow.read().expect("message_flow lock poisoned").clone(), self.bot_run_context.read().expect("bot_run_context lock poisoned").clone())
+                    (self.event_ingest.read().expect("event_ingest lock poisoned").clone(), self.bot_run_context.read().expect("bot_run_context lock poisoned").clone())
                 else {
+                    if let Some(context) = run_context.as_ref() {
+                        context.clear_provider_transport(&run_id).await;
+                    }
                     warn!(
                         target_bot_id = %target_bot_id,
                         provider_id = %provider_id,
@@ -444,6 +490,9 @@ impl BotDeliveryPort for HttpProviderTransport {
             let ack = match read_provider_ack_body(resp, json_body_timeout).await {
                 Ok(ack) => ack,
                 Err(ProviderAckBodyError::Decode(error)) => {
+                    if let Some(context) = run_context.as_ref() {
+                        context.clear_provider_transport(&run_id).await;
+                    }
                     warn!(
                         target_bot_id = %target_bot_id,
                         provider_id = %provider_id,
@@ -458,6 +507,9 @@ impl BotDeliveryPort for HttpProviderTransport {
                     )));
                 }
                 Err(ProviderAckBodyError::Timeout) => {
+                    if let Some(context) = run_context.as_ref() {
+                        context.clear_provider_transport(&run_id).await;
+                    }
                     warn!(
                         target_bot_id = %target_bot_id,
                         provider_id = %provider_id,
@@ -474,6 +526,20 @@ impl BotDeliveryPort for HttpProviderTransport {
                 }
             };
             if ack.ok {
+                if wants_sse {
+                    if let Some(context) = run_context.as_ref() {
+                        let bound = context
+                            .bind_provider_transport(&run_id, ProviderRunTransport::Callback)
+                            .await;
+                        if !bound {
+                            return Err(ServiceError::InvalidOperation {
+                                message: "provider run is already bound to another transport"
+                                    .to_string(),
+                                request_id: Some(run_id),
+                            });
+                        }
+                    }
+                }
                 info!(
                     target_bot_id = %target_bot_id,
                     provider_id = %provider_id,
@@ -482,6 +548,9 @@ impl BotDeliveryPort for HttpProviderTransport {
                     "provider downlink: 2.0 JSON ack accepted (callback transport)"
                 );
             } else {
+                if let Some(context) = run_context.as_ref() {
+                    context.clear_provider_transport(&run_id).await;
+                }
                 warn!(
                     target_bot_id = %target_bot_id,
                     provider_id = %provider_id,
@@ -1243,7 +1312,7 @@ async fn stream_and_drive(
     resp: reqwest::Response,
     bcn_run_id: String,
     bot_id: String,
-    flow: Arc<dyn MessageFlowService>,
+    flow: Arc<dyn ProviderEventIngestService>,
     ctx: Arc<dyn BotRunContextPort>,
     interaction_context: Option<SseInteractionContext>,
 ) {
@@ -1423,6 +1492,7 @@ async fn stream_and_drive(
     }
     // #2: mark the run terminal in the run-context store after closing.
     ctx.mark_terminal(&bcn_run_id).await;
+    ctx.mark_provider_transport_terminal(&bcn_run_id).await;
     if let Some(interactions) = interaction_context {
         if let Err(error) = interactions
             .service
@@ -1462,7 +1532,7 @@ async fn drive_frame_bytes(
     deadline_ms: u64,
     dedup: &mut SeqDedup,
     lag: &mut LagTracker,
-    flow: &Arc<dyn MessageFlowService>,
+    flow: &Arc<dyn ProviderEventIngestService>,
     interaction_context: Option<&SseInteractionContext>,
 ) -> Option<bool> {
     // Decode only the complete frame bytes (#5). Lossy + WARN on invalid UTF-8.
@@ -1503,7 +1573,7 @@ async fn drive_sse_frame(
     deadline_ms: u64,
     dedup: &mut SeqDedup,
     lag: &mut LagTracker,
-    flow: &Arc<dyn MessageFlowService>,
+    flow: &Arc<dyn ProviderEventIngestService>,
     interaction_context: Option<&SseInteractionContext>,
 ) -> Option<bool> {
     let frame = parse_sse_block(block)?;
@@ -1841,6 +1911,7 @@ fn build_event_payload(event: &StreamEvent, run_id: &str, group_id: &str) -> Val
                 stop_reason: chat.stop_reason.clone(),
                 error_message: chat.error_message.clone(),
                 error_kind: chat.error_kind.clone(),
+                error_code: chat.error_code.clone(),
                 tool_call_id: None,
                 tool_name: None,
                 args: None,
@@ -1884,6 +1955,7 @@ fn build_chat_error_payload(run_id: &str, group_id: &str) -> Value {
         stop_reason: None,
         error_message: None,
         error_kind: None,
+        error_code: None,
         tool_call_id: None,
         tool_name: None,
         args: None,
@@ -1901,7 +1973,7 @@ async fn ingest_synthesized_error(
     group_id: &str,
     bot_id: &str,
     bcs_session_id: &Option<String>,
-    flow: &Arc<dyn MessageFlowService>,
+    flow: &Arc<dyn ProviderEventIngestService>,
 ) {
     warn!(run_id = %bcn_run_id, "sse closed without chat terminal; synthesizing error terminal");
     let payload = build_chat_error_payload(bcn_run_id, group_id);
@@ -1928,7 +2000,7 @@ async fn ingest(
     event_type: String,
     state: ChatEventState,
     payload: Value,
-    flow: &Arc<dyn MessageFlowService>,
+    flow: &Arc<dyn ProviderEventIngestService>,
 ) {
     let cmd = BotEventCommand {
         bot_id: bot_id.to_string(),
@@ -1939,7 +2011,13 @@ async fn ingest(
         state,
         bcs_session_id: bcs_session_id.clone(),
     };
-    if let Err(error) = flow.handle_bot_event(cmd).await {
+    if let Err(error) = flow
+        .ingest_provider_event(ProviderEventIngestCommand {
+            source: ProviderEventSource::Sse,
+            event: cmd,
+        })
+        .await
+    {
         warn!(run_id = %bcn_run_id, %error, "ingest handle_bot_event failed");
     }
 }
@@ -2004,7 +2082,7 @@ Connection: keep-alive\r\n\
     }
 
     #[test]
-    fn sse_policy_is_http2_only_without_total_timeout() {
+    fn sse_policy_allows_http1_fallback_without_total_timeout() {
         let policy = ProviderClientPolicy::for_request(true);
 
         assert_eq!(policy.total_timeout, None);
@@ -2013,7 +2091,7 @@ Connection: keep-alive\r\n\
             policy.response_header_timeout,
             Some(Duration::from_secs(125))
         );
-        assert!(policy.http2_only);
+        assert!(!policy.http2_only);
     }
 
     #[test]
@@ -2221,7 +2299,7 @@ Connection: keep-alive\r\n\
     }
 
     #[tokio::test]
-    async fn sse_builder_rejects_http1_while_callback_builder_accepts_it() {
+    async fn sse_and_callback_builders_accept_http1() {
         let callback_addr = spawn_http1_server().await;
         let callback_client = provider_client_builder(ProviderClientPolicy::for_request(false))
             .build()
@@ -2237,12 +2315,12 @@ Connection: keep-alive\r\n\
         let sse_client = provider_client_builder(ProviderClientPolicy::for_request(true))
             .build()
             .unwrap();
-        let error = sse_client
+        let sse_response = sse_client
             .get(format!("http://{sse_addr}"))
             .send()
             .await
-            .unwrap_err();
-        assert!(error.is_request());
+            .unwrap();
+        assert_eq!(sse_response.version(), reqwest::Version::HTTP_11);
     }
 }
 
@@ -2254,8 +2332,8 @@ mod sse_loop_tests {
         GroupCallbackOutcome, InteractionFrontendEvent, InteractionRequestedOutcome,
         InteractionService, InteractionServiceError, ProviderInteractionRequestedCommand,
         ProviderInteractionResolvedCommand, ResolveInteractionCommand, ResolveInteractionResult,
-        TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome,
-        TaskRunAliasRegistration, WebSendCommand, WebSendOutcome,
+        MessageFlowService, TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand,
+        TaskDispatchOutcome, TaskRunAliasRegistration, WebSendCommand, WebSendOutcome,
     };
     use std::sync::Mutex;
 
@@ -2389,6 +2467,16 @@ mod sse_loop_tests {
         }
     }
 
+    #[async_trait]
+    impl ProviderEventIngestService for RecordingFlow {
+        async fn ingest_provider_event(
+            &self,
+            cmd: ProviderEventIngestCommand,
+        ) -> ServiceResult<BotEventOutcome> {
+            self.handle_bot_event(cmd.event).await
+        }
+    }
+
     /// Fixed run-context fake: always resolves with the given group/bot and a
     /// configurable deadline (so the per-frame deadline guard can be exercised).
     struct FixedCtx {
@@ -2415,6 +2503,21 @@ mod sse_loop_tests {
             true
         }
         async fn release_terminal(&self, _run_id: &str) {}
+        async fn begin_provider_transport(&self, _run_id: &str, _deadline_ms: u64) -> bool {
+            false
+        }
+        async fn bind_provider_transport(
+            &self,
+            _run_id: &str,
+            _transport: ProviderRunTransport,
+        ) -> bool {
+            false
+        }
+        async fn get_provider_transport(&self, _run_id: &str) -> Option<ProviderRunTransport> {
+            None
+        }
+        async fn mark_provider_transport_terminal(&self, _run_id: &str) {}
+        async fn clear_provider_transport(&self, _run_id: &str) {}
     }
 
     /// Test wrapper: drive the per-frame ingest core over an in-memory SSE text
@@ -2425,7 +2528,7 @@ mod sse_loop_tests {
         bcn_run_id: &str,
         group_id: &str,
         bot_id: &str,
-        flow: &Arc<dyn MessageFlowService>,
+        flow: &Arc<dyn ProviderEventIngestService>,
     ) -> bool {
         run_sse_text_with_deadline(sse_text, bcn_run_id, group_id, bot_id, u64::MAX, flow).await
     }
@@ -2438,7 +2541,7 @@ mod sse_loop_tests {
         group_id: &str,
         bot_id: &str,
         deadline_ms: u64,
-        flow: &Arc<dyn MessageFlowService>,
+        flow: &Arc<dyn ProviderEventIngestService>,
     ) -> bool {
         let mut dedup = SeqDedup::default();
         let mut lag = LagTracker::default();
@@ -2470,7 +2573,7 @@ mod sse_loop_tests {
     #[tokio::test]
     async fn top_level_interactions_use_application_service_not_message_flow() {
         let recording_flow = Arc::new(RecordingFlow::default());
-        let flow: Arc<dyn MessageFlowService> = recording_flow.clone();
+        let flow: Arc<dyn ProviderEventIngestService> = recording_flow.clone();
         let interactions = Arc::new(RecordingInteractions::default());
         let context = SseInteractionContext {
             service: interactions.clone(),
@@ -2514,7 +2617,7 @@ mod sse_loop_tests {
     #[tokio::test]
     async fn read_loop_ingests_delta_then_final_and_dedupes() {
         let recording = Arc::new(RecordingFlow::default());
-        let flow: Arc<dyn MessageFlowService> = recording.clone();
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
         let sse = "event: agent\nid: 1\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\n\n\
 event: ping\ndata: {\"ts\":1}\n\n\
 event: agent\nid: 1\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\n\n\
@@ -2541,7 +2644,7 @@ event: chat\nid: 2\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"messa
     #[tokio::test]
     async fn read_loop_synthesizes_error_message_body() {
         let recording = Arc::new(RecordingFlow::default());
-        let flow: Arc<dyn MessageFlowService> = recording.clone();
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
         let sse = "event: chat\nid: 1\ndata: {\"runId\":\"engine-run\",\"seq\":1,\"state\":\"error\",\"errorMessage\":\"engine crashed\",\"errorKind\":\"provider_error\"}\n\n";
         let terminal = run_sse_text_for_test(sse, "bcn-run-err", "grp-1", "bot-1", &flow).await;
         assert!(terminal, "error should close the run");
@@ -2561,7 +2664,7 @@ event: chat\nid: 2\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"messa
     #[tokio::test]
     async fn read_loop_falls_back_from_blank_error_message_body() {
         let recording = Arc::new(RecordingFlow::default());
-        let flow: Arc<dyn MessageFlowService> = recording.clone();
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
         let sse = "event: chat\nid: 1\ndata: {\"runId\":\"engine-run\",\"seq\":1,\"state\":\"error\",\"errorMessage\":\"engine crashed\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"   \"}],\"timestamp\":0}}\n\n";
         let terminal = run_sse_text_for_test(sse, "bcn-run-err", "grp-1", "bot-1", &flow).await;
         assert!(terminal, "error should close the run");
@@ -2576,7 +2679,7 @@ event: chat\nid: 2\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"messa
     #[tokio::test]
     async fn crlf_frame_separators_are_split() {
         let recording = Arc::new(RecordingFlow::default());
-        let flow: Arc<dyn MessageFlowService> = recording.clone();
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
         // CRLF line endings AND CRLF-CRLF frame separators across the byte path.
         let sse = "event: agent\r\nid: 1\r\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\r\n\r\n\
 event: chat\r\nid: 2\r\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"message\":{\"role\":\"assistant\",\"content\":[],\"timestamp\":0}}\r\n\r\n";
@@ -2620,7 +2723,7 @@ event: chat\r\nid: 2\r\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"m
     #[tokio::test]
     async fn dedupe_works_without_sse_id_using_payload_seq() {
         let recording = Arc::new(RecordingFlow::default());
-        let flow: Arc<dyn MessageFlowService> = recording.clone();
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
         // No `id:` lines at all — dedupe must come from StreamEvent.seq (#4).
         let sse = "event: agent\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\n\n\
 event: agent\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\n\n\
@@ -2639,7 +2742,7 @@ event: agent\ndata: {\"runId\":\"e\",\"seq\":2,\"stream\":\"thinking\",\"delta\"
     #[tokio::test]
     async fn stream_end_without_terminal_synthesizes_error() {
         let recording = Arc::new(RecordingFlow::default());
-        let flow: Arc<dyn MessageFlowService> = recording.clone();
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
         let resp = sse_response(
             "event: agent\nid: 1\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\n\n",
         )
@@ -2660,7 +2763,7 @@ event: agent\ndata: {\"runId\":\"e\",\"seq\":2,\"stream\":\"thinking\",\"delta\"
     #[tokio::test]
     async fn approval_frame_closes_run_unsupported() {
         let recording = Arc::new(RecordingFlow::default());
-        let flow: Arc<dyn MessageFlowService> = recording.clone();
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
         let sse = "event: agent\nid: 1\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"approval\",\"phase\":\"requested\",\"kind\":\"exec\"}\n\n";
         let terminal = run_sse_text_for_test(sse, "bcn-run-1", "grp-1", "bot-1", &flow).await;
         assert!(terminal, "approval gate must close the run");
@@ -2675,7 +2778,7 @@ event: agent\ndata: {\"runId\":\"e\",\"seq\":2,\"stream\":\"thinking\",\"delta\"
         // A run whose deadline is already in the past must not ingest any frame:
         // the per-frame guard (#2) drops every frame + WARNs before ingest.
         let recording = Arc::new(RecordingFlow::default());
-        let flow: Arc<dyn MessageFlowService> = recording.clone();
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
         let sse = "event: agent\nid: 1\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\n\n\
 event: chat\nid: 2\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"message\":{\"role\":\"assistant\",\"content\":[],\"timestamp\":0}}\n\n";
         // deadline_ms = 0 is always in the past relative to now_ms().
@@ -2689,7 +2792,7 @@ event: chat\nid: 2\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"messa
 
         // Sanity: the very same stream with a fresh deadline ingests normally.
         let recording_ok = Arc::new(RecordingFlow::default());
-        let flow_ok: Arc<dyn MessageFlowService> = recording_ok.clone();
+        let flow_ok: Arc<dyn ProviderEventIngestService> = recording_ok.clone();
         let terminal_ok = run_sse_text_with_deadline(
             sse, "bcn-run-1", "grp-1", "bot-1", u64::MAX, &flow_ok,
         )

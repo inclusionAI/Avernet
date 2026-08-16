@@ -422,6 +422,121 @@ JSON
   rm -rf "$tmp"
 }
 
+test_dynamic_config_copies_thinking_default() {
+  local tmp; tmp="$(mktemp -d)"
+  local model_source="${tmp}/model-source.json"
+  local matching_config="${tmp}/matching-config.json"
+  local stale_config="${tmp}/stale-config.json"
+  local timeout_stale_config="${tmp}/timeout-stale-config.json"
+  cat > "$model_source" <<'JSON'
+{
+  "models": {"mode": "merge", "providers": {}},
+  "agents": {
+    "defaults": {
+      "model": {"primary": "test/model"},
+      "models": {"test/model": {"alias": "Test Model"}},
+      "thinkingDefault": "off",
+      "timeoutSeconds": 600
+    }
+  }
+}
+JSON
+  cat > "$matching_config" <<'JSON'
+{
+  "models": {"mode": "merge", "providers": {}},
+  "agents": {
+    "defaults": {
+      "model": {"primary": "test/model"},
+      "models": {"test/model": {"alias": "Test Model"}},
+      "thinkingDefault": "off",
+      "timeoutSeconds": 600,
+      "workspace": "/runtime/workspace"
+    }
+  }
+}
+JSON
+  cat > "$timeout_stale_config" <<'JSON'
+{
+  "models": {"mode": "merge", "providers": {}},
+  "agents": {
+    "defaults": {
+      "model": {"primary": "test/model"},
+      "models": {"test/model": {"alias": "Test Model"}},
+      "thinkingDefault": "off",
+      "workspace": "/runtime/workspace"
+    }
+  }
+}
+JSON
+  cat > "$stale_config" <<'JSON'
+{
+  "models": {"mode": "merge", "providers": {}},
+  "agents": {
+    "defaults": {
+      "model": {"primary": "test/model"},
+      "models": {"test/model": {"alias": "Test Model"}},
+      "workspace": "/runtime/workspace"
+    }
+  }
+}
+JSON
+
+  local model_fields
+  model_fields="$({
+    PROJECT_ROOT="${PROJECT_ROOT}"
+    BCS_DIR="${PROJECT_ROOT}/src/bcs"
+    OPENCLAW_MODEL_CONFIG_SOURCE="$model_source"
+    LOG_DIR="${tmp}/logs"
+    DEP_DIR="${tmp}/dep"
+    BCS_PORT=21000
+    . "${SCRIPT_DIR}/modules/bots.sh"
+    bots_dynamic_agent_model_fields_json
+  })"
+  printf '%s\n' "$model_fields" | jq -e '
+    .model.primary == "test/model"
+    and .models["test/model"].alias == "Test Model"
+    and .thinkingDefault == "off"
+    and .timeoutSeconds == 600
+  ' >/dev/null || fail "dynamic profile should copy the model thinking default"
+
+  (
+    PROJECT_ROOT="${PROJECT_ROOT}"
+    BCS_DIR="${PROJECT_ROOT}/src/bcs"
+    OPENCLAW_MODEL_CONFIG_SOURCE="$model_source"
+    LOG_DIR="${tmp}/logs"
+    DEP_DIR="${tmp}/dep"
+    BCS_PORT=21000
+    . "${SCRIPT_DIR}/modules/bots.sh"
+    bots_dynamic_config_matches_model_source "$matching_config"
+  ) || fail "matching dynamic model config should be preserved"
+  if (
+    PROJECT_ROOT="${PROJECT_ROOT}"
+    BCS_DIR="${PROJECT_ROOT}/src/bcs"
+    OPENCLAW_MODEL_CONFIG_SOURCE="$model_source"
+    LOG_DIR="${tmp}/logs"
+    DEP_DIR="${tmp}/dep"
+    BCS_PORT=21000
+    . "${SCRIPT_DIR}/modules/bots.sh"
+    bots_dynamic_config_matches_model_source "$stale_config"
+  ); then
+    fail "stale dynamic model config should be refreshed"
+  fi
+  if (
+    PROJECT_ROOT="${PROJECT_ROOT}"
+    BCS_DIR="${PROJECT_ROOT}/src/bcs"
+    OPENCLAW_MODEL_CONFIG_SOURCE="$model_source"
+    LOG_DIR="${tmp}/logs"
+    DEP_DIR="${tmp}/dep"
+    BCS_PORT=21000
+    . "${SCRIPT_DIR}/modules/bots.sh"
+    bots_dynamic_config_matches_model_source "$timeout_stale_config"
+  ); then
+    fail "dynamic model config without timeoutSeconds should be refreshed"
+  fi
+
+  rm -rf "$tmp"
+}
+
 test_load_dir_source_mode
 test_load_dir_npm_mode
 test_stack_script_forwards_mode
@@ -429,5 +544,6 @@ test_stack_script_has_npm_branch
 test_session_bot_uuid_requires_usable_session
 test_stack_config_allows_plugin_path_refresh
 test_dynamic_config_refreshes_plugin_path
+test_dynamic_config_copies_thinking_default
 
 if [ "$FAILS" -eq 0 ]; then echo "ALL PASS"; else echo "${FAILS} FAILURE(S)"; exit 1; fi

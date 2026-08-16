@@ -7,6 +7,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::{ActorStatus, DynamicStatusResponse, ServiceResult, Skill};
 
+#[deprecated(
+    note = "worker-profile contracts moved to bcs_service_api::core; import them from core"
+)]
+pub use crate::core::{
+    WorkerProfile, WorkerProfileCoreService as WorkerProfileService, WorkerRecommendCommand,
+    WorkerRecommendResult, WorkerRecommendation,
+};
+
 /// Request for listing actors visible to a caller.
 #[derive(Debug, Clone, Default)]
 pub struct ActorListCommand {
@@ -88,50 +96,6 @@ pub struct ActorCapabilitiesView {
     pub skills: Vec<Skill>,
     pub domains: Vec<String>,
     pub scopes: Vec<String>,
-}
-
-/// Worker-profile request for semantic actor recommendation.
-#[derive(Debug, Clone)]
-pub struct WorkerRecommendCommand {
-    pub query: String,
-    pub top_k: u32,
-    pub min_score: f64,
-}
-
-/// One worker recommendation from a worker-profile backend such as bcsfuse.
-#[derive(Debug, Clone)]
-pub struct WorkerRecommendation {
-    pub worker_id: String,
-    pub score: f64,
-    pub short_profile: Option<String>,
-}
-
-/// Result returned by worker semantic recommendation.
-#[derive(Debug, Clone)]
-pub struct WorkerRecommendResult {
-    pub recommendations: Vec<WorkerRecommendation>,
-    pub raw_response: serde_json::Value,
-}
-
-/// Worker profile metadata used to enrich actor directory cards.
-#[derive(Debug, Clone, Default)]
-pub struct WorkerProfile {
-    pub worker_id: String,
-    pub tags: BTreeMap<String, serde_json::Value>,
-}
-
-/// Optional external worker-profile capability used by actor directory search.
-#[async_trait]
-pub trait WorkerProfileService: Send + Sync {
-    async fn recommend_workers(
-        &self,
-        command: WorkerRecommendCommand,
-    ) -> ServiceResult<WorkerRecommendResult>;
-
-    async fn batch_query_worker_profiles(
-        &self,
-        worker_ids: &[String],
-    ) -> ServiceResult<Vec<WorkerProfile>>;
 }
 
 /// Actor directory application service.

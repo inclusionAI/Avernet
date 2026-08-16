@@ -8,7 +8,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+from urllib.parse import urlsplit
 
 
 def hash_identifier(value: str) -> str:
@@ -51,6 +52,34 @@ class MaterializationRequest(BaseModel):
             raise ValueError("bot_device_v1 requires device_path")
 
 
+class ChatAttachmentMaterializationRequest(BaseModel):
+    """Internal request for a short-lived chat attachment capability."""
+
+    attachment_id: str = Field(min_length=1, max_length=128)
+    session_key: str = Field(min_length=1, max_length=2048)
+    filename: str = Field(min_length=1, max_length=255)
+    temporary_url: str = Field(min_length=1, max_length=8192)
+    scope_key_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    expires_at_ms: int | None = Field(default=None, ge=0)
+    size_bytes: int | None = Field(default=None, ge=0)
+    content_hash: str | None = Field(default=None, pattern=r"^[a-fA-F0-9]{64}$")
+    media_type: str | None = Field(default=None, min_length=1, max_length=255)
+    download_max_bytes: int | None = Field(default=None, gt=0)
+
+    @field_validator("temporary_url")
+    @classmethod
+    def validate_temporary_url(cls, value: str) -> str:
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+        ):
+            raise ValueError("temporary_url must be an HTTP or HTTPS URL without userinfo")
+        return value
+
+
 class MaterializationResult(BaseModel):
     resource_id: str
     transfer_id: str
@@ -82,6 +111,19 @@ class ManifestEntry(BaseModel):
     observed_inode: int | None = None
     uploaded_at: datetime | None = None
     baas_tenant: str | None = None
+    source_kind: Literal["baas_session_file", "temporary_url"] = "baas_session_file"
+    source_attachment_id: str | None = None
+    source_url_hash: str | None = None
+
+
+@dataclass(frozen=True)
+class PreparedChatAttachment:
+    """Validated in-memory attachment ready for an Engine adapter."""
+
+    attachment_id: str
+    filename: str
+    media_type: str
+    content: bytes
 
 
 @dataclass(frozen=True)

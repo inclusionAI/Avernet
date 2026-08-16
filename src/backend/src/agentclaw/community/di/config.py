@@ -464,11 +464,13 @@ class WorkspaceConfig:
             from the YAML override). Source: ``user_config.workspace``
             block in ``application.yaml``.
         claude_code_root: Same shape, for Claude Code bots.
+        aicoding_root: Same shape, for AICoding bots.
     """
 
     openclaw_root: str = "/home/admin/.openclaw"
     claude_code_root: str = "/home/admin/.claude_code"
     claude_code_session_root: str = "/home/admin/.claude"
+    aicoding_root: str = "/home/admin/.aicoding"
 
 
 # ── Dormant bot recycle ──────────────────────────────────────────────────

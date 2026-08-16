@@ -1082,23 +1082,29 @@ impl GroupService for GroupServiceImpl {
             .into_iter()
             .map(|group| (group.id.clone(), (group, Membership::Direct)))
             .collect::<HashMap<_, _>>();
-        let session_group_ids = self
-            .sessions
-            .list_group_ids_by_session_participant(&view_actor_id)
-            .await
-            .map_err(|error| ApplicationError::internal(error.to_string()))?;
-        let mut related = direct;
-        for group_id in session_group_ids {
-            if related.contains_key(&group_id) {
-                continue;
-            }
-            if let Some(group) = self
-                .groups
-                .try_get(&group_id)
+        let direct_group_ids = direct.keys().cloned().collect::<HashSet<_>>();
+        let mut related = match command.membership {
+            MembershipFilter::All | MembershipFilter::Direct => direct,
+            MembershipFilter::SessionOnly => HashMap::new(),
+        };
+        if command.membership != MembershipFilter::Direct {
+            let session_group_ids = self
+                .sessions
+                .list_group_ids_by_session_participant(&view_actor_id)
                 .await
-                .map_err(map_service_error)?
-            {
-                related.insert(group_id, (group, Membership::SessionOnly));
+                .map_err(|error| ApplicationError::internal(error.to_string()))?;
+            for group_id in session_group_ids {
+                if direct_group_ids.contains(&group_id) {
+                    continue;
+                }
+                if let Some(group) = self
+                    .groups
+                    .try_get(&group_id)
+                    .await
+                    .map_err(map_service_error)?
+                {
+                    related.insert(group_id, (group, Membership::SessionOnly));
+                }
             }
         }
 
@@ -1110,10 +1116,10 @@ impl GroupService for GroupServiceImpl {
             .map(str::to_lowercase);
         let mut groups = related
             .into_values()
-            .filter(|(_, membership)| match command.membership {
-                MembershipFilter::All => true,
-                MembershipFilter::Direct => *membership == Membership::Direct,
-                MembershipFilter::SessionOnly => *membership == Membership::SessionOnly,
+            .filter(|(group, _)| {
+                command.visibility.is_none_or(|visibility| {
+                    group.visibility == visibility_name(visibility)
+                })
             })
             .filter(|(group, _)| match command.kind {
                 GroupKindFilter::Normal => group.group_kind == GroupKind::Normal,

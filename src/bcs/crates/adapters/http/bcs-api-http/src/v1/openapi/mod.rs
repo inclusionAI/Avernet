@@ -1,11 +1,18 @@
-mod dto;
+pub(crate) mod dto;
 mod routes;
+mod session_file_url;
 
 use axum::Router;
 
 use super::common::ApiState;
 
-pub fn router() -> Router<ApiState> {
+pub use session_file_url::SessionFileUrlProjector;
+pub use dto::session_file::{
+    ListSessionFilesQuery, PrepareSessionFileRequest, ProtectedFileContentQuery,
+    ShareSessionFileRequest, SharedFileContentQuery, UploadSessionFileQuery,
+};
+
+pub fn protected_router() -> Router<ApiState> {
     Router::new().nest(
         "/openapi/v1/collaboration",
         routes::bot::router()
@@ -14,4 +21,8 @@ pub fn router() -> Router<ApiState> {
             .merge(routes::invitation::router())
             .merge(routes::friendship::router()),
     )
+}
+
+pub fn public_router() -> Router<ApiState> {
+    Router::new()
 }

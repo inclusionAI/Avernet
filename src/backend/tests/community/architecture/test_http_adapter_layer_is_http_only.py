@@ -81,6 +81,13 @@ _NON_ENDPOINT_NAME_PATTERNS: tuple[str, ...] = (
     "principal",     # caller-identity extraction from the principal seam
     "enums",         # adapter-owned public enums (import-light by design:
                      # a public vocabulary must not depend on the HTTP stack)
+    "startup_script_support",
+                     # the bots group's startup-script helpers, split out when
+                     # router.py reached the module line cap. Plain functions
+                     # over a bot record and the Service API Protocol —
+                     # deliberately no FastAPI, which is what lets them be
+                     # tested without a client. Named in full rather than as a
+                     # short pattern so this entry cannot exempt anything else.
 )
 
 
@@ -308,6 +315,7 @@ _LEGACY_API_SUBDIR_ALLOWLIST: frozenset[str] = frozenset({
     "skill_center",
     "system",
     "system_config",
+    "task",
     "token_exchange",
 })
 

@@ -19,7 +19,7 @@ from secbaas.community.spi.sandbox.k8s import K8sSandbox, K8sSandboxPlugin
 if TYPE_CHECKING:
     from secbaas.community.api.device_manage import K8sCredentials
 
-logger = get_logger("plugin-sandbox-K8S")
+logger = get_logger("plugin-sandbox")
 
 
 class StubCommandResult:

@@ -103,6 +103,24 @@ test_backend_wait_fails_when_started_process_exits() {
   assert_eq "backend_stop" "$(cat "$events_file")" "exited backend process should trigger cleanup"
 }
 
+test_backend_default_readiness_window_covers_cold_start() (
+  setup_env
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/backend.sh"
+
+  local attempts=0
+  unset BACKEND_READY_ATTEMPTS
+  backend_ready() {
+    attempts=$((attempts + 1))
+    [ "$attempts" -ge 120 ]
+  }
+  backend_stop() { fail "backend should not stop during a normal cold start"; }
+  sleep() { :; }
+
+  backend_wait_until_ready
+  assert_eq "120" "$attempts" "default backend readiness attempts"
+)
+
 test_frontend_start_prepares_dependencies_before_launch() (
   setup_env
   export FRONTEND_DIR="$(mktemp -d)"
@@ -216,6 +234,18 @@ test_baas_stop_does_not_delegate_to_app_stop() {
     fail "baas_stop should stop pidfile process with ownership verification"
   grep -F 'stop_port_processes_if_owned "$port"' <<<"$stop_body" >/dev/null || \
     fail "baas_stop should clean the BAAS port with ownership verification"
+}
+
+test_baas_start_exports_environment_before_invoking_shell_wrapper() {
+  local start_body
+  start_body="$(
+    sed -n '/^baas_start()/,/^baas_stop()/p' "${ROOT}/scripts/modules/baas.sh"
+  )"
+  grep -F 'export "${baas_env_args[@]}"' <<<"$start_body" >/dev/null || \
+    fail "baas_start must export BAAS environment in its shell before invoking start_in_detached_session"
+  if grep -F 'env "${baas_env_args[@]}"' <<<"$start_body" >/dev/null; then
+    fail "baas_start must not use env to invoke the start_in_detached_session shell function"
+  fi
 }
 
 test_baas_bot_cleanup_preserves_bcs_sessions() {
@@ -442,7 +472,13 @@ test_baas_start_passes_bcn_runtime_configuration() (
   check_directory_exists() { return 0; }
   setup_bcn_plugin() { printf '%s\n' "setup" >> "$sequence_file"; }
   bots_bcn_plugin_load_dir() { printf '%s\n' "resolve" >> "$sequence_file"; printf '%s\n' "$plugin_dir"; }
-  env() { printf '%s\n' "start" >> "$sequence_file"; printf '%s\n' "$*" > "$captured_env"; return 0; }
+  start_in_detached_session() {
+    printf '%s\n' "start" >> "$sequence_file"
+    {
+      printf '%s\n' "BCN_PLUGIN_PATH=${BCN_PLUGIN_PATH:-}"
+      printf '%s\n' "BCS_PORT=${BCS_PORT:-}"
+    } > "$captured_env"
+  }
 
   baas_start
 
@@ -539,15 +575,51 @@ test_backend_separates_profile_env_and_workspace_folder() {
   fi
 }
 
+test_dynamic_bot_gateway_receives_manual_model_credential() (
+  setup_env
+  export BCS_PORT="21000"
+  export SINGLEBOX_MODEL_CONFIG_MODE="manual"
+  OPENCLAW_OPENAI_API_KEY="test-model-key"
+  export -n OPENCLAW_OPENAI_API_KEY
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/bots.sh"
+
+  local attempt
+  export TEST_DYNAMIC_PROFILE_DIR="$(mktemp -d)"
+  export TEST_DYNAMIC_WORKSPACE_DIR="$(mktemp -d)"
+  export TEST_DYNAMIC_CAPTURED_ENV="$(mktemp)"
+
+  bcs_bot_profile_dir() { printf '%s\n' "$TEST_DYNAMIC_PROFILE_DIR"; }
+  bots_dynamic_workspace_dir() { printf '%s\n' "$TEST_DYNAMIC_WORKSPACE_DIR"; }
+  bcs_cli_path() { printf '%s\n' /usr/bin/true; }
+  lsof() { return 1; }
+  port_is_listening() { return 0; }
+  start_in_detached_session() {
+    env | awk -F= '$1 == "OPENCLAW_OPENAI_API_KEY" { print $0 }' > "$TEST_DYNAMIC_CAPTURED_ENV"
+  }
+
+  bots_dynamic_start_openclaw "test-bot" "test-profile" "30999" \
+    "${LOG_DIR}/test-bot.log" "test-source"
+
+  for attempt in $(seq 1 20); do
+    [ -s "$TEST_DYNAMIC_CAPTURED_ENV" ] && break
+    sleep 0.05
+  done
+  assert_eq "OPENCLAW_OPENAI_API_KEY=test-model-key" "$(cat "$TEST_DYNAMIC_CAPTURED_ENV")" \
+    "dynamic gateway manual model credential"
+)
+
 test_all_start_rolls_back_started_services_on_failure
 test_backend_health_failure_stops_backend
 test_backend_wait_fails_when_started_process_exits
+test_backend_default_readiness_window_covers_cold_start
 test_frontend_start_prepares_dependencies_before_launch
 test_frontend_deps_require_dev_commands
 test_frontend_install_includes_dev_dependencies
 test_service_modules_use_ownership_aware_stop_helpers
 test_service_starts_fail_when_ports_remain_occupied
 test_baas_stop_does_not_delegate_to_app_stop
+test_baas_start_exports_environment_before_invoking_shell_wrapper
 test_baas_bot_cleanup_preserves_bcs_sessions
 test_baas_session_backup_normalizes_trailing_slashes
 test_baas_session_restore_normalizes_trailing_slashes
@@ -561,5 +633,6 @@ test_5bot_openclaw_config_is_written_private
 test_local_bcs_launchers_supply_required_signing_keys
 test_ready_banner_describes_full_stack
 test_backend_separates_profile_env_and_workspace_folder
+test_dynamic_bot_gateway_receives_manual_model_credential
 
 printf 'PASS: singlebox service guard tests\n'

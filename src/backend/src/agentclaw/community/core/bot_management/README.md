@@ -37,6 +37,7 @@ internal_dependencies:
   - agentclaw.community.api.policy_service
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_app_grant.protocols    # sweep contract: deletion withdraws the bot's app authorizations
+  - agentclaw.community.core.bot_startup_script.protocols    # sweep contract: deletion removes the bot's stored startup script
   - agentclaw.community.core.bot_collaborator
   - agentclaw.community.core.config
   - agentclaw.community.core.config_compose

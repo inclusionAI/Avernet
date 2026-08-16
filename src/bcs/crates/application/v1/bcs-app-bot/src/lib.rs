@@ -1,20 +1,22 @@
 //! Versioned Bot control-plane application facade for the BCN V1 API.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_service_api::application::v1::{
-    ApplicationError, Bot, BotCandidate, BotCandidatePurpose, BotDescriptor, BotKind, BotProvider,
+    ApplicationError, Bot, BotCandidate, BotCandidatePurpose, BotCandidateSearchItem,
+    BotCandidateSearchMode, BotCandidateSearchResult, BotDescriptor, BotKind, BotProvider,
     BotReachability, BotService, BotSkill, BotStatus, BotVisibility, GetBot, HumanBot,
-    ListBotCandidates, ListMyBots, Page, PhysicalBot, QueryBots, UpdateBot,
+    ListBotCandidates, ListMyBots, Page, PhysicalBot, QueryBots, SearchBotCandidates, UpdateBot,
     require_authenticated_user,
 };
 use bcs_service_api::{
-    ActorKind, ActorStatus, BotCandidateReadQuery, BotCandidateVisibility,
-    BotControlPlaneCoreService, BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery,
-    BotControlPlanePatch, BotControlPlaneRecord, BotControlPlaneView, BotRegistryCoreService,
-    FriendCoreService, ServiceError,
+    ActorKind, ActorStatus, BotCandidateReadQuery, BotCandidateSearchCoreService,
+    BotCandidateSearchMode as CoreCandidateSearchMode, BotCandidateSearchQuery,
+    BotCandidateVisibility, BotControlPlaneCoreService, BotControlPlaneDescriptorPatch,
+    BotControlPlaneOwnedQuery, BotControlPlanePatch, BotControlPlaneRecord, BotControlPlaneView,
+    BotRegistryCoreService, FriendCoreService, ServiceError,
 };
 
 #[derive(Debug, Clone)]
@@ -26,6 +28,7 @@ pub struct BotServiceImpl {
     control_plane: Arc<dyn BotControlPlaneCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
     friends: Arc<dyn FriendCoreService>,
+    candidate_search: Arc<dyn BotCandidateSearchCoreService>,
     config: BotServiceConfig,
 }
 
@@ -34,12 +37,14 @@ impl BotServiceImpl {
         control_plane: Arc<dyn BotControlPlaneCoreService>,
         registry: Arc<dyn BotRegistryCoreService>,
         friends: Arc<dyn FriendCoreService>,
+        candidate_search: Arc<dyn BotCandidateSearchCoreService>,
         config: BotServiceConfig,
     ) -> Self {
         Self {
             control_plane,
             registry,
             friends,
+            candidate_search,
             config,
         }
     }
@@ -185,6 +190,21 @@ impl BotServiceImpl {
             .next()
             .ok_or_else(|| ApplicationError::internal("Bot projection returned no record"))
     }
+
+    async fn authorize_candidate_perspective(
+        &self,
+        staff_no: &str,
+        bot_id: &str,
+    ) -> Result<BotControlPlaneRecord, ApplicationError> {
+        let acting = self.load_record(bot_id).await?;
+        match acting.kind {
+            ActorKind::Bot if acting.created_by.as_deref() == Some(staff_no) => Ok(acting),
+            ActorKind::Human if acting.bot_id == format!("human_{staff_no}") => Ok(acting),
+            _ => Err(ApplicationError::forbidden(format!(
+                "Current Human cannot use Bot '{bot_id}' as the candidate perspective"
+            ))),
+        }
+    }
 }
 
 #[async_trait]
@@ -196,19 +216,9 @@ impl BotService for BotServiceImpl {
         let staff_no = Self::human_staff_no(&command.caller)?;
         Self::validate_bot_id(&command.bot_id)?;
         Self::validate_pagination(command.offset, command.limit)?;
-        let acting = self.load_record(&command.bot_id).await?;
-        if acting.kind != ActorKind::Bot {
-            return Err(ApplicationError::invalid(
-                "invalid_bot_kind",
-                "Candidate search requires a physical acting Bot",
-            ));
-        }
-        if acting.created_by.as_deref() != Some(staff_no.as_str()) {
-            return Err(ApplicationError::forbidden(format!(
-                "Current Human does not manage Bot '{}'",
-                command.bot_id
-            )));
-        }
+        let acting = self
+            .authorize_candidate_perspective(&staff_no, &command.bot_id)
+            .await?;
 
         let friend_ids = self
             .friends
@@ -256,6 +266,85 @@ impl BotService for BotServiceImpl {
         })
     }
 
+    async fn search_candidates(
+        &self,
+        command: SearchBotCandidates,
+    ) -> Result<BotCandidateSearchResult, ApplicationError> {
+        const CANDIDATE_SEARCH_LIMIT: usize = 20;
+
+        let staff_no = Self::human_staff_no(&command.caller)?;
+        Self::validate_bot_id(&command.bot_id)?;
+        let acting = self
+            .authorize_candidate_perspective(&staff_no, &command.bot_id)
+            .await?;
+        let search = self
+            .candidate_search
+            .search_candidates(BotCandidateSearchQuery {
+                query: command
+                    .query
+                    .as_deref()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string(),
+                acting_actor_id: command.bot_id,
+                visibility: match command.purpose {
+                    BotCandidatePurpose::Discovery => BotCandidateVisibility::Discovery,
+                    BotCandidatePurpose::Collaboration => BotCandidateVisibility::Collaboration,
+                },
+                limit: CANDIDATE_SEARCH_LIMIT,
+            })
+            .await;
+        let search_mode = search.mode;
+        let searched_ids = search
+            .hits
+            .iter()
+            .map(|hit| hit.bot.bot_uuid.clone())
+            .collect::<Vec<_>>();
+        let projected = self
+            .project_records(
+                self.control_plane
+                    .get_by_ids(&searched_ids, &acting.env)
+                    .await
+                    .map_err(map_service_error)?,
+            )
+            .await?;
+        let mut projected_by_id = projected
+            .into_iter()
+            .map(|bot| (bot.bot_id().to_string(), bot))
+            .collect::<HashMap<_, _>>();
+        let mut items = Vec::with_capacity(search.hits.len());
+        for hit in search.hits {
+            let Some(bot) = projected_by_id.remove(&hit.bot.bot_uuid) else {
+                continue;
+            };
+            let Bot::Physical(bot) = bot else {
+                return Err(ApplicationError::internal(
+                    "Actor search returned a Human record",
+                ));
+            };
+            let (score, short_profile) = if search_mode == CoreCandidateSearchMode::Semantic {
+                (hit.score, hit.short_profile)
+            } else {
+                (None, None)
+            };
+            items.push(BotCandidateSearchItem {
+                bot,
+                is_friend: hit.is_friend,
+                tags: hit.tags,
+                score,
+                short_profile,
+            });
+        }
+        Ok(BotCandidateSearchResult {
+            items,
+            search_mode: match search_mode {
+                CoreCandidateSearchMode::EmptyQuery => BotCandidateSearchMode::EmptyQuery,
+                CoreCandidateSearchMode::Semantic => BotCandidateSearchMode::Semantic,
+                CoreCandidateSearchMode::NameFallback => BotCandidateSearchMode::NameFallback,
+            },
+        })
+    }
+
     async fn query(&self, command: QueryBots) -> Result<Vec<Bot>, ApplicationError> {
         Self::human_staff_no(&command.caller)?;
         if command.bot_ids.len() > 100
@@ -280,8 +369,7 @@ impl BotService for BotServiceImpl {
     async fn get(&self, query: GetBot) -> Result<Bot, ApplicationError> {
         Self::human_staff_no(&query.caller)?;
         Self::validate_bot_id(&query.bot_id)?;
-        self.project_one(self.load_view(&query.bot_id).await?)
-            .await
+        self.project_one(self.load_view(&query.bot_id).await?).await
     }
 
     async fn update(&self, command: UpdateBot) -> Result<Bot, ApplicationError> {

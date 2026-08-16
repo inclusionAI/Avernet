@@ -42,22 +42,22 @@ SESSION_ID = "session:abc:user:1"
 #: different halves (cross-tenant masking there, the operator matrix here)
 #: and must each fail on its own terms.
 ROUTES = [
-    ("get", "/sessions/{bot}", None),
-    ("post", "/sessions/{bot}", {"title": "T"}),
-    ("get", f"/sessions/{{bot}}/{SESSION_ID}", None),
-    ("patch", f"/sessions/{{bot}}/{SESSION_ID}", {"title": "T"}),
-    ("delete", f"/sessions/{{bot}}/{SESSION_ID}", None),
-    ("get", f"/sessions/{{bot}}/{SESSION_ID}/messages", None),
-    ("delete", f"/sessions/{{bot}}/{SESSION_ID}/messages", None),
-    ("get", "/engine/{bot}/status", None),
-    ("get", "/engine/{bot}/capabilities", None),
-    ("get", "/engine/{bot}/available", None),
-    ("get", "/models/{bot}", None),
-    ("get", "/models/{bot}/openai/gpt-5.3", None),
-    ("get", "/approvals/{bot}/mode?session_key=k", None),
-    ("put", "/approvals/{bot}/mode", {"session_key": "k", "mode": "never"}),
-    ("get", "/approvals/{bot}/modes", None),
-    ("get", "/connection/{bot}", None),
+    ("get", "/{bot}/sessions", None),
+    ("post", "/{bot}/sessions", {"title": "T"}),
+    ("get", f"/{{bot}}/sessions/{SESSION_ID}", None),
+    ("patch", f"/{{bot}}/sessions/{SESSION_ID}", {"title": "T"}),
+    ("delete", f"/{{bot}}/sessions/{SESSION_ID}", None),
+    ("get", f"/{{bot}}/sessions/{SESSION_ID}/messages", None),
+    ("delete", f"/{{bot}}/sessions/{SESSION_ID}/messages", None),
+    ("get", "/{bot}/engine/status", None),
+    ("get", "/{bot}/engine/capabilities", None),
+    ("get", "/{bot}/engine/available", None),
+    ("get", "/{bot}/models", None),
+    ("get", "/{bot}/models/openai/gpt-5.3", None),
+    ("get", "/{bot}/approvals/mode?session_key=k", None),
+    ("put", "/{bot}/approvals/mode?session_key=k", {"mode": "never"}),
+    ("get", "/{bot}/approvals/modes", None),
+    ("get", "/{bot}/connection", None),
 ]
 
 #: One payload every handler can map: each reads only the keys it needs.
@@ -189,8 +189,8 @@ def test_refused_and_absent_answers_are_byte_identical(make_caller):
     naming a bot that does not exist must be indistinguishable — anything
     else confirms the bot exists."""
     client = make_caller(STRANGER)
-    refused = client.get(_url("/sessions/{bot}"), params={"owner_id": OWNER}).json()
-    absent = client.get(_url("/sessions/{bot}", bot="no-such-bot")).json()
+    refused = client.get(_url("/{bot}/sessions"), params={"owner_id": OWNER}).json()
+    absent = client.get(_url("/{bot}/sessions", bot="no-such-bot")).json()
     # request_id differs per request by design; every other byte must not.
     refused.pop("request_id")
     absent.pop("request_id")

@@ -54,6 +54,7 @@ internal_dependencies:
   - agentclaw.community.core.access.models            # UserInfoRecord — typed in user_service.py
   - agentclaw.community.core.bot_app_grant.models    # BotAppGrantRecord — typed in bot_app_grant_service.py (real signatures, so the conformance gate can compare them)
   - agentclaw.community.core.bot_chat.schemas        # ConversationDetail, HealthCheckData — typed in bot_chat_service.py
+  - agentclaw.community.core.bot_startup_script.repository.models  # BotStartupScriptRecord — typed in bot_startup_script_service.py (real signatures, so the conformance gate can compare them)
   - agentclaw.community.core.caller_identity.contracts  # Caller identity API DTOs and stable errors
   - agentclaw.community.core.caller_identity.credential  # CallerToken — typed in caller_credential.py
   - agentclaw.community.core.caller_identity.protocols  # Caller collaborators — typed in caller_identity_service.py
@@ -74,6 +75,7 @@ internal_dependencies:
   - agentclaw.community.core.skill_center            # Local Skill upload lifecycle contract
   - agentclaw.community.core.skill_center            # Local Skill desired-state lifecycle contract
   - agentclaw.community.core.skill_center            # Local Skill recoverable deletion lifecycle contract
+  - agentclaw.community.core.task.domain.models      # TaskInfo, TaskExecutionGraph, TaskOpResult, TaskCallbackData — typed in task_service.py and task_loop_callback.py
   - agentclaw.community.kernel.device_dto            # OutBoundOperationRule — typed in baas_service.py Protocol (B6)
   - agentclaw.community.plugin_api.auth              # AuthRequestContext — typed in caller_iam_token_service.py
   - agentclaw.community.plugin_api.passport          # PassportPlugin — typed in caller_identity_service.py

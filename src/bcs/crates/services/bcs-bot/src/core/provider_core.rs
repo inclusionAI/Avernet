@@ -355,12 +355,50 @@ fn validate_provider_coordination_config(
         .as_deref()
         .map(str::trim)
         .is_some_and(|value| !value.is_empty());
+    let has_tool_name_mapping = !coordination.tool_name_mapping.is_empty();
+
+    if coordination.tool_name_mapping.len() > 32 {
+        return Err(ServiceError::InvalidOperation {
+            message: "coordination tool_name_mapping must not exceed 32 entries".to_string(),
+            request_id: None,
+        });
+    }
+    for (provider_tool_name, canonical_tool_name) in &coordination.tool_name_mapping {
+        let provider_tool_name_is_valid = !provider_tool_name.is_empty()
+            && provider_tool_name.len() <= 512
+            && provider_tool_name.trim() == provider_tool_name;
+        if !provider_tool_name_is_valid {
+            return Err(ServiceError::InvalidOperation {
+                message: "coordination tool_name_mapping contains an invalid provider tool name"
+                    .to_string(),
+                request_id: None,
+            });
+        }
+        if !matches!(
+            canonical_tool_name.as_str(),
+            "bcs_assign_task" | "bcs_send_task_message" | "bcs_task_complete"
+        ) {
+            return Err(ServiceError::InvalidOperation {
+                message: format!(
+                    "coordination tool_name_mapping has unsupported canonical tool '{canonical_tool_name}'"
+                ),
+                request_id: None,
+            });
+        }
+    }
 
     match coordination.mode {
         CoordinationMode::McporterMcp => {
             if !has_mcp_server || !has_mcporter_command {
                 return Err(ServiceError::InvalidOperation {
                     message: "mcporter_mcp coordination requires mcp_server and mcporter_command"
+                        .to_string(),
+                    request_id: None,
+                });
+            }
+            if has_tool_name_mapping {
+                return Err(ServiceError::InvalidOperation {
+                    message: "mcporter_mcp coordination must not set tool_name_mapping"
                         .to_string(),
                     request_id: None,
                 });
@@ -381,9 +419,9 @@ fn validate_provider_coordination_config(
             }
         }
         CoordinationMode::NativeTool => {
-            if has_mcp_server || has_mcporter_command {
+            if has_mcp_server || has_mcporter_command || has_tool_name_mapping {
                 return Err(ServiceError::InvalidOperation {
-                    message: "native_tool coordination must not set mcp_server or mcporter_command"
+                    message: "native_tool coordination must not set mcp_server, mcporter_command, or tool_name_mapping"
                         .to_string(),
                     request_id: None,
                 });

@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum AttachmentType {
     Image,
+    File,
 }
 
 /// A temporary attachment reference delivered alongside `chat.send`/`chat.inject`.
@@ -65,6 +66,7 @@ impl From<bcs_domain::AttachmentType> for AttachmentType {
     fn from(value: bcs_domain::AttachmentType) -> Self {
         match value {
             bcs_domain::AttachmentType::Image => Self::Image,
+            bcs_domain::AttachmentType::File => Self::File,
         }
     }
 }
@@ -73,6 +75,7 @@ impl From<AttachmentType> for bcs_domain::AttachmentType {
     fn from(value: AttachmentType) -> Self {
         match value {
             AttachmentType::Image => Self::Image,
+            AttachmentType::File => Self::File,
         }
     }
 }
@@ -101,7 +104,10 @@ mod tests {
         let domain: bcs_domain::Attachment = attachment.into();
         assert_eq!(domain.attachment_id, "att_1");
         assert_eq!(domain.attachment_type, bcs_domain::AttachmentType::Image);
-        assert_eq!(domain.url, "https://bcs.example.com/attachments?id=att_1&token=short");
+        assert_eq!(
+            domain.url,
+            "https://bcs.example.com/attachments?id=att_1&token=short"
+        );
     }
 
     #[test]
@@ -119,5 +125,19 @@ mod tests {
         assert_eq!(attachment.size, None);
         assert_eq!(attachment.sha256, None);
         assert_eq!(attachment.expires_at, None);
+    }
+
+    #[test]
+    fn accepts_temporary_file_url_without_unavailable_metadata() {
+        let attachment: Attachment = serde_json::from_value(serde_json::json!({
+            "attachment_id": "att_file",
+            "type": "file",
+            "file_name": "design.pdf",
+            "url": "https://download.example.com/temporary"
+        }))
+        .expect("deserialize temporary file attachment");
+
+        assert_eq!(attachment.attachment_type, AttachmentType::File);
+        assert_eq!(attachment.file_name, "design.pdf");
     }
 }

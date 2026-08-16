@@ -2,6 +2,7 @@ from unittest.mock import MagicMock
 
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxRegistry
+from agentclaw.community.core.workspace.engines.aicoding import AICodingSandboxProvider
 from agentclaw.community.core.workspace.engines.claude_code import ClaudeCodeSandboxProvider
 from agentclaw.community.core.workspace.engines.openclaw import OpenClawSandboxProvider
 from agentclaw.community.di import config as cfg
@@ -15,10 +16,13 @@ def _make_registry() -> EngineSandboxRegistry:
     registry = EngineSandboxRegistry()
     registry.register(OpenClawSandboxProvider(workspace=workspace))
     registry.register(ClaudeCodeSandboxProvider(workspace=workspace))
+    registry.register(AICodingSandboxProvider(workspace=workspace))
     return registry
 
 
 def _make_service(bot_repo=None) -> BaasService:
+    startup_script_reader = MagicMock()
+    startup_script_reader.get_body.return_value = ""
     return BaasService(
         baas_api_base="http://test",
         tenant="test",
@@ -35,6 +39,7 @@ def _make_service(bot_repo=None) -> BaasService:
         secret_resolver=MagicMock(),
         common_whitelist_service=MagicMock(),
         outbound_rule_provider=MagicMock(),
+        startup_script_reader=startup_script_reader,
     )
 
 

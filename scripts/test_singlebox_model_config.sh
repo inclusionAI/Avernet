@@ -26,9 +26,11 @@ setup_env() {
   unset OPENCLAW_OPENAI_PROVIDER_ID
   unset OPENCLAW_OPENAI_BASE_URL
   unset OPENCLAW_OPENAI_API_KEY
+  unset OPENAI_API_KEY
   unset OPENCLAW_OPENAI_MODEL_ID
   unset OPENCLAW_OPENAI_MODEL_NAME
   unset OPENCLAW_OPENAI_MODEL_API
+  unset OPENCLAW_ENABLE_THINKING
   unset OPENCLAW_MODEL_CONFIG_SOURCE
   unset SINGLEBOX_MODEL_CONFIG_FILE
   unset SINGLEBOX_MODEL_CONFIG_PREPARED
@@ -63,11 +65,79 @@ test_manual_generates_runtime_config_from_env() {
   assert_eq "600" "$(file_mode "$SINGLEBOX_MODEL_CONFIG_FILE")" "manual config file mode"
   jq -e '
     .models.providers["test-provider"].baseUrl == "https://model.example.test/v1"
-    and .models.providers["test-provider"].apiKey == "sk-test"
+    and .models.providers["test-provider"].apiKey == {
+      source: "env",
+      provider: "default",
+      id: "OPENCLAW_OPENAI_API_KEY"
+    }
     and .models.providers["test-provider"].models[0].id == "model-a"
     and .agents.defaults.model.primary == "test-provider/model-a"
+    and .agents.defaults.thinkingDefault == "off"
+    and (.agents.defaults.models["test-provider/model-a"] | has("params") | not)
   ' "$SINGLEBOX_MODEL_CONFIG_FILE" >/dev/null || fail "manual runtime config mismatch"
+  if grep -Fq 'sk-test' "$SINGLEBOX_MODEL_CONFIG_FILE"; then
+    fail "manual runtime config must not serialize the API key"
+  fi
   assert_eq "$SINGLEBOX_MODEL_CONFIG_FILE" "$OPENCLAW_MODEL_CONFIG_SOURCE" "5bot source"
+}
+
+test_manual_resolves_openai_key_reference_without_serializing_secret() {
+  setup_env
+  export SINGLEBOX_MODEL_CONFIG_MODE="manual"
+  export OPENCLAW_OPENAI_BASE_URL="https://model.example.test/v1"
+  export OPENCLAW_OPENAI_API_KEY="OPENAI_API_KEY"
+  export OPENAI_API_KEY="sk-test-reference"
+  export OPENCLAW_OPENAI_MODEL_ID="model-a"
+
+  # shellcheck source=/dev/null
+  source "$MODULE"
+  singlebox_model_config_prepare
+
+  assert_eq "sk-test-reference" "$OPENCLAW_OPENAI_API_KEY" \
+    "manual key reference should resolve before gateway startup"
+  jq -e '
+    .models.providers["openai-compatible"].apiKey == {
+      source: "env",
+      provider: "default",
+      id: "OPENCLAW_OPENAI_API_KEY"
+    }
+  ' "$SINGLEBOX_MODEL_CONFIG_FILE" >/dev/null || fail "manual key reference config mismatch"
+  if grep -Fq 'sk-test-reference' "$SINGLEBOX_MODEL_CONFIG_FILE"; then
+    fail "manual key reference must not serialize the resolved API key"
+  fi
+}
+
+test_manual_rejects_unresolved_openai_key_reference() {
+  setup_env
+  export SINGLEBOX_MODEL_CONFIG_MODE="manual"
+  export OPENCLAW_OPENAI_BASE_URL="https://model.example.test/v1"
+  export OPENCLAW_OPENAI_API_KEY="OPENAI_API_KEY"
+  export OPENCLAW_OPENAI_MODEL_ID="model-a"
+
+  # shellcheck source=/dev/null
+  source "$MODULE"
+  if singlebox_model_config_prepare; then
+    fail "manual mode must reject an unresolved OPENAI_API_KEY reference"
+  fi
+}
+
+test_manual_injects_glm_thinking_override_for_compatible_gateway() {
+  setup_env
+  export SINGLEBOX_MODEL_CONFIG_MODE="manual"
+  export OPENCLAW_OPENAI_PROVIDER_ID="openai-compatible"
+  export OPENCLAW_OPENAI_BASE_URL="https://proxy.example.test/v1"
+  export OPENCLAW_OPENAI_API_KEY="sk-test"
+  export OPENCLAW_OPENAI_MODEL_ID="glm-5.2"
+
+  # shellcheck source=/dev/null
+  source "$MODULE"
+  singlebox_model_config_prepare
+
+  jq -e '
+    .agents.defaults.thinkingDefault == "off"
+    and .agents.defaults.models["openai-compatible/glm-5.2"].params.extra_body.enable_thinking == false
+  ' "$SINGLEBOX_MODEL_CONFIG_FILE" >/dev/null \
+    || fail "OpenAI-compatible GLM should receive an explicit non-thinking request override"
 }
 
 test_manual_requires_complete_env() {
@@ -104,7 +174,18 @@ test_home_copies_only_model_fields() {
   "agents": {
     "defaults": {
       "model": {"primary": "home-provider/home-model"},
-      "models": {"home-provider/home-model": {"alias": "Home Model"}},
+      "models": {
+        "home-provider/home-model": {
+          "alias": "Home Model",
+          "params": {"extra_body": {"enable_thinking": true}}
+        },
+        "home-provider/glm-model": {
+          "params": {"extraBody": {"thinking": {"type": "enabled"}}}
+        },
+        "home-provider/qwen-model": {
+          "params": {"chat_template_kwargs": {"enable_thinking": true}}
+        }
+      },
       "workspace": "/should/not/copy"
     }
   },
@@ -120,9 +201,113 @@ JSON
   jq -e '
     .models.providers["home-provider"].apiKey == "home-key"
     and .agents.defaults.model.primary == "home-provider/home-model"
+    and .agents.defaults.thinkingDefault == "off"
+    and .agents.defaults.models["home-provider/home-model"].params.extra_body.enable_thinking == false
+    and .agents.defaults.models["home-provider/glm-model"].params.extraBody.thinking.type == "disabled"
+    and .agents.defaults.models["home-provider/qwen-model"].params.chat_template_kwargs.enable_thinking == false
     and (.agents.defaults | has("workspace") | not)
     and (. | has("gateway") | not)
   ' "$SINGLEBOX_MODEL_CONFIG_FILE" >/dev/null || fail "home runtime config mismatch"
+}
+
+test_home_injects_glm_thinking_override_for_compatible_gateway() {
+  setup_env
+  export SINGLEBOX_MODEL_CONFIG_MODE="home"
+  export SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED=1
+  mkdir -p "$(dirname "$OPENCLAW_CONFIG_FILE")"
+  cat > "$OPENCLAW_CONFIG_FILE" <<'JSON'
+{
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "openai-compatible": {
+        "baseUrl": "https://proxy.example.test/v1",
+        "apiKey": "home-key",
+        "api": "openai-completions",
+        "models": [{"id": "glm-5.2", "name": "glm-5.2", "reasoning": false}]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {"primary": "openai-compatible/glm-5.2"},
+      "models": {
+        "openai-compatible/glm-5.2": {"alias": "glm-5.2"}
+      }
+    }
+  }
+}
+JSON
+
+  # shellcheck source=/dev/null
+  source "$MODULE"
+  singlebox_model_config_prepare
+
+  jq -e '
+    .agents.defaults.thinkingDefault == "off"
+    and .agents.defaults.models["openai-compatible/glm-5.2"].alias == "glm-5.2"
+    and .agents.defaults.models["openai-compatible/glm-5.2"].params.extra_body.enable_thinking == false
+  ' "$SINGLEBOX_MODEL_CONFIG_FILE" >/dev/null \
+    || fail "OpenAI-compatible GLM should receive an explicit non-thinking request override"
+}
+
+test_thinking_can_be_enabled_from_env() {
+  setup_env
+  export SINGLEBOX_MODEL_CONFIG_MODE="home"
+  export SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED=1
+  export OPENCLAW_ENABLE_THINKING=true
+  mkdir -p "$(dirname "$OPENCLAW_CONFIG_FILE")"
+  cat > "$OPENCLAW_CONFIG_FILE" <<'JSON'
+{
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "home-provider": {
+        "baseUrl": "https://home.example.test/v1",
+        "apiKey": "home-key",
+        "models": [{"id": "home-model", "name": "Home Model"}]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {"primary": "home-provider/home-model"},
+      "models": {
+        "home-provider/home-model": {
+          "params": {
+            "extra_body": {
+              "enable_thinking": false,
+              "thinking": {"type": "disabled"}
+            }
+          }
+        }
+      }
+    }
+  }
+}
+JSON
+
+  # shellcheck source=/dev/null
+  source "$MODULE"
+  singlebox_model_config_prepare
+
+  jq -e '
+    .agents.defaults.thinkingDefault == "medium"
+    and .agents.defaults.models["home-provider/home-model"].params.extra_body.enable_thinking == true
+    and (.agents.defaults.models["home-provider/home-model"].params.extra_body | has("thinking") | not)
+  ' "$SINGLEBOX_MODEL_CONFIG_FILE" >/dev/null || fail "thinking env override mismatch"
+}
+
+test_invalid_thinking_env_is_rejected() {
+  setup_env
+  export SINGLEBOX_MODEL_CONFIG_MODE="mock"
+  export OPENCLAW_ENABLE_THINKING="sometimes"
+
+  # shellcheck source=/dev/null
+  source "$MODULE"
+  if singlebox_model_config_prepare; then
+    fail "invalid OPENCLAW_ENABLE_THINKING should fail"
+  fi
 }
 
 test_home_ignores_non_object_agents_when_models_exist() {
@@ -152,7 +337,7 @@ JSON
 
   jq -e '
     .models.providers["home-provider"].apiKey == "home-key"
-    and .agents.defaults == {}
+    and .agents.defaults == {"thinkingDefault": "off"}
   ' "$SINGLEBOX_MODEL_CONFIG_FILE" >/dev/null || fail "home mode should ignore non-object agents"
 }
 
@@ -501,8 +686,14 @@ test_mock_health_requires_exact_response() (
 )
 
 test_manual_generates_runtime_config_from_env
+test_manual_resolves_openai_key_reference_without_serializing_secret
+test_manual_rejects_unresolved_openai_key_reference
+test_manual_injects_glm_thinking_override_for_compatible_gateway
 test_manual_requires_complete_env
 test_home_copies_only_model_fields
+test_home_injects_glm_thinking_override_for_compatible_gateway
+test_thinking_can_be_enabled_from_env
+test_invalid_thinking_env_is_rejected
 test_home_ignores_non_object_agents_when_models_exist
 test_home_requires_confirmation
 test_mock_generates_local_provider

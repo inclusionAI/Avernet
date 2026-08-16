@@ -38,6 +38,49 @@ UpdateSessionParticipantRequest:
     mode:
       $ref: ../domain-models.yaml#/BotParticipantMode
 
+CollectSessionRequest:
+  type: object
+  additionalProperties: false
+  required:
+    - participant
+  properties:
+    participant:
+      type: string
+      minLength: 1
+
+SessionCollectionResult:
+  type: object
+  additionalProperties: false
+  required:
+    - session_id
+    - participant
+    - collected
+  properties:
+    session_id:
+      type: string
+    participant:
+      type: string
+    collected:
+      type: boolean
+
+SessionCollectionEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/SessionCollectionResult"
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
 GroupSessionsPath:
   post:
     operationId: create_session
@@ -360,11 +403,125 @@ SessionPath:
       "500":
         $ref: ../shared.yaml#/InternalErrorResponse
 
+SessionCollectionPath:
+  post:
+    operationId: collect_session
+    tags: ["Collaboration / Sessions"]
+    summary: Collect a Session on behalf of an owned participant Bot.
+    x-avernet-security:
+      user: required
+      app: required
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/CollectSessionRequest"
+    responses:
+      "200":
+        description: Idempotent collection result.
+        content:
+          application/json:
+            schema:
+              $ref: "#/SessionCollectionEnvelope"
+      "400":
+        description: Invalid session or participant identifier.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Human Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: The target is not a Bot owned by the authenticated Human.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Session is missing or the owned Bot is not a participant.
+        x-error-codes:
+          - session_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+  delete:
+    operationId: uncollect_session
+    tags: ["Collaboration / Sessions"]
+    summary: Uncollect a Session on behalf of an owned participant Bot.
+    x-avernet-security:
+      user: required
+      app: required
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+      - name: participant
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+    responses:
+      "200":
+        description: Idempotent uncollection result.
+        content:
+          application/json:
+            schema:
+              $ref: "#/SessionCollectionEnvelope"
+      "400":
+        description: Invalid session or participant identifier.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Human Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: The target is not a Bot owned by the authenticated Human.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Session is missing or the owned Bot is not a participant.
+        x-error-codes:
+          - session_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
 SessionMessagesPath:
   get:
     operationId: list_session_messages
     tags: ["Collaboration / Sessions"]
-    summary: List session message history (cursor-based).
+    summary: List session message history.
     x-avernet-security:
       user: required
       app: required
@@ -373,14 +530,13 @@ SessionMessagesPath:
       - name: before
         in: query
         description: >-
-          Opaque composite cursor (`"created_at:session_seq"`, e.g.
-          `"1234567890:42"`) exclusive bound. When set, only messages strictly
-          before this (created_at, session_seq) lexicographic position are
-          returned, so messages sharing a created_at at a page boundary are
-          not skipped. Omit on the first page; pass the response's next_cursor
-          to fetch the next page.
+          Exclusive millisecond timestamp bound compatible with the legacy
+          Session history API. When set, only messages before this timestamp
+          are returned.
         schema:
-          type: string
+          type: integer
+          format: int64
+          minimum: 0
       - name: limit
         in: query
         schema:
@@ -393,14 +549,14 @@ SessionMessagesPath:
       "200":
         description: >-
           Messages visible to the selected Session Participant, ordered by
-          created_at descending and session_seq descending (legacy behavior),
-          with cursor-based pagination. Omitting view_bot_id selects the
-          authenticated Human Participant; creator or manager status does not
-          create an implicit manager view.
+          legacy history semantics. Omitting view_bot_id selects the
+          authenticated Human Participant; creator or manager status does
+          not create an implicit manager view. The success Envelope data is
+          the same GroupMessage array returned by the legacy API.
         content:
           application/json:
             schema:
-              $ref: ../domain-models.yaml#/SessionMessagePageEnvelope
+              $ref: ../domain-models.yaml#/SessionMessagesEnvelope
       "400":
         description: Invalid filter.
         x-error-codes:

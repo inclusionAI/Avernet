@@ -21,6 +21,7 @@ from agentclaw.community.plugins.local.outbound_rules import NoopOutboundRulePro
 def _make_service() -> tuple[BaasService, LocalHttpClient]:
     http = LocalHttpClient(base_url="http://baas.test")
     service = BaasService(
+        startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base="http://baas.test",
         tenant="tnt",
         template_uuid="tpl",
@@ -77,6 +78,7 @@ class TestBaasServiceHttpMethods:
         result = service.upgrade_bot(
             bot_uuid="BOT-1",
             bot={
+                "id": 501,
                 "bot_id": "bot-1",
                 "bot_name": "Bot 1",
                 "entity_id": "user-1",

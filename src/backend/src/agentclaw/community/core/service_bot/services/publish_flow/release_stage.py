@@ -46,8 +46,9 @@ from agentclaw.community.core.service_bot.services.publish_flow.operation_runner
     TargetBotGoneError,
     acquire_deploy_workflow,
 )
-from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
-    service_skills_env_from_ext,
+from agentclaw.community.core.service_bot.services.deploy.service_publish_env import (
+    service_publish_extra_envs,
+    service_publish_template_config,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
@@ -181,7 +182,7 @@ class ReleaseStageRunner:
         is no config_artifact."""
         publish_id = publish_record.id
         owner_id = self._ext_state.owner_id(publish_record)
-        skills_env = service_skills_env_from_ext(publish_record.ext, bot)
+        skills_env = service_publish_extra_envs(publish_record.ext, bot)
         image_pin = self._ops.resolve_publish_image_pin(publish_record)
 
         # Compose through the single delivery seam (LIVE overrides re-fetch); the raw
@@ -208,6 +209,7 @@ class ReleaseStageRunner:
                 extra_envs=skills_env,
                 docker_image=image_pin.docker_image,
                 runtime_kind=self._ops.resolve_publish_runtime_kind(publish_record),
+                template_config=service_publish_template_config(bot),
             )
             if spec.first_release_passes_version:
                 release_kwargs["version"] = f"{publish_record.version}"
@@ -282,7 +284,7 @@ class ReleaseStageRunner:
         publish_id = publish_record.id
         version = f"{publish_record.version}"
         owner_id = self._ext_state.owner_id(publish_record)
-        skills_env = service_skills_env_from_ext(publish_record.ext, bot)
+        skills_env = service_publish_extra_envs(publish_record.ext, bot)
         image_pin = self._ops.resolve_publish_image_pin(publish_record)
 
         # Compose through the single delivery seam (LIVE overrides re-fetch); the raw
@@ -308,6 +310,7 @@ class ReleaseStageRunner:
                 extra_envs=skills_env,
                 docker_image=image_pin.docker_image,
                 runtime_kind=self._ops.resolve_publish_runtime_kind(publish_record),
+                template_config=service_publish_template_config(bot),
             )
 
         try:

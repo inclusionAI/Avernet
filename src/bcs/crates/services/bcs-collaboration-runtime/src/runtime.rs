@@ -23,6 +23,7 @@ use bcs_route_security::OutboundUrlGuard;
 use bcs_service_api::port::repo::MessageRepoPort;
 use bcs_service_api::{
     AuthenticatedHumanCaller, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
+    BotRunContext, BotRunContextPort,
     BotDeliveryTarget, BotRegistryCoreService, CancelStateMachineRunCommand, ChatEventState,
     CollaborationDefinitionRecord, CollaborationDefinitionValidationOutcome,
     CollaborationEventRepoPort, CollaborationRuntimeError, CollaborationRuntimeService,
@@ -80,6 +81,7 @@ pub struct CollaborationRuntime {
     sessions: Arc<dyn SessionManagementService>,
     bot_delivery: Arc<dyn BotDeliveryPort>,
     bot_registry: Option<Arc<dyn BotRegistryCoreService>>,
+    bot_run_context: Option<Arc<dyn BotRunContextPort>>,
     frontend_delivery: Option<Arc<dyn FrontendDeliveryPort>>,
     message_repo: Option<Arc<dyn MessageRepoPort>>,
     session_channel_outbound: Option<Arc<dyn SessionChannelOutboundPort>>,
@@ -119,6 +121,7 @@ impl CollaborationRuntime {
             sessions,
             bot_delivery,
             bot_registry: None,
+            bot_run_context: None,
             judge,
             frontend_delivery: None,
             message_repo: None,
@@ -130,6 +133,11 @@ impl CollaborationRuntime {
 
     pub fn with_bot_registry(mut self, bot_registry: Arc<dyn BotRegistryCoreService>) -> Self {
         self.bot_registry = Some(bot_registry);
+        self
+    }
+
+    pub fn with_bot_run_context(mut self, bot_run_context: Arc<dyn BotRunContextPort>) -> Self {
+        self.bot_run_context = Some(bot_run_context);
         self
     }
 
@@ -575,6 +583,30 @@ impl CollaborationRuntime {
             })
             .await?;
 
+        if let Some(bot_run_context) = self.bot_run_context.as_ref() {
+            let deadline_ms = self
+                .runs
+                .get_node_run(&run.run_id, node_id)
+                .await?
+                .and_then(|node| node.timeout_deadline_ms)
+                .unwrap_or_else(|| {
+                    bcs_protocol::now_ms()
+                        .saturating_add(bcs_service_api::DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS)
+                });
+            bot_run_context
+                .put_context(BotRunContext {
+                    run_id: delivery_request_id.clone(),
+                    bot_id: assignee_bot_id.clone(),
+                    // State-machine responses are consumed by the runtime and
+                    // must not enter ordinary group relay.
+                    group_id: String::new(),
+                    bcs_session_id: None,
+                    deadline_ms,
+                    terminal: false,
+                })
+                .await;
+        }
+
         let prompt = self.build_node_prompt(compiled, run, node_id).await?;
         let group_context = group_context_input(group, &run.session_id);
         log_state_machine_node_dispatch(
@@ -627,7 +659,6 @@ impl CollaborationRuntime {
                 run_id: delivery_request_id.clone(),
                 frame,
                 delivery_kind: BotDeliveryKind::TaskDispatch,
-                provider_transport: Default::default(),
                 provider_bypass_headers: Vec::new(),
             })
             .await
@@ -1558,7 +1589,16 @@ impl CollaborationRuntime {
         attempt: i32,
         error: String,
     ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
-        let max_attempts = compiled_node_max_attempts(compiled, node_id);
+        let max_attempts = self
+            .runs
+            .get_node_run(&run.run_id, node_id)
+            .await?
+            .ok_or_else(|| CollaborationRuntimeError::NodeNotFound {
+                run_id: run.run_id.clone(),
+                node_id: node_id.to_string(),
+            })?
+            .max_attempts
+            .max(1);
         if attempt + 1 < max_attempts {
             let next_attempt = attempt + 1;
             let scheduled = self
@@ -5002,18 +5042,6 @@ fn final_output_text(
         .and_then(|node| node.artifact_text.clone())
 }
 
-fn compiled_node_max_attempts(compiled: &CompiledStateMachine, node_id: &str) -> i32 {
-    match &compiled.definition.runtime {
-        CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine
-            .nodes
-            .get(node_id)
-            .and_then(|node| node.max_attempts)
-            .unwrap_or(state_machine.defaults.max_attempts)
-            .max(1),
-        _ => 1,
-    }
-}
-
 fn judge_service_error_message(error: &ServiceError) -> String {
     match error {
         ServiceError::InternalError(message) => message.clone(),
@@ -5032,6 +5060,22 @@ fn elapsed_ms(started_at: Instant) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bcs_collaboration_store::MemoryCollaborationStore;
+    use bcs_group_store::MemoryGroupRepo;
+    use bcs_service_api::JudgeDecision;
+    use bcs_session::SessionManagementServiceImpl;
+    use bcs_session_store::MemorySessionRepo;
+    use bcs_test_support::{NoopBotDeliveryPort, NoopGroupCoreService};
+
+    #[derive(Debug)]
+    struct UnusedJudge;
+
+    #[async_trait]
+    impl JudgeEvaluatorPort for UnusedJudge {
+        async fn judge(&self, _request: JudgeRequest) -> Result<JudgeDecision, ServiceError> {
+            unreachable!("missing-node retry check must not invoke the Judge")
+        }
+    }
 
     #[test]
     fn default_judge_timeout_is_ninety_seconds() {
@@ -5121,5 +5165,90 @@ runtime:
     #[test]
     fn runtime_cleanup_session_limit_is_sqlite_representable() {
         assert!(RUNTIME_CLEANUP_SESSION_LIMIT <= i64::MAX as u64);
+    }
+
+    #[tokio::test]
+    async fn retry_check_rejects_a_missing_persisted_node() {
+        let store = Arc::new(MemoryCollaborationStore::new());
+        let sessions = Arc::new(SessionManagementServiceImpl::new(
+            Arc::new(MemorySessionRepo::new()),
+            Arc::new(MemoryGroupRepo::new()),
+        ));
+        let runtime = CollaborationRuntime::new(
+            store.clone(),
+            store.clone(),
+            store.clone(),
+            store,
+            Arc::new(NoopGroupCoreService),
+            sessions,
+            Arc::new(NoopBotDeliveryPort),
+            Arc::new(UnusedJudge),
+        );
+        let definition: CollaborationDefinition = serde_yaml::from_str(
+            r#"
+api_version: bcs.collaboration/v1
+id: missing-node
+version: 1
+name: Missing Node
+participants:
+  worker:
+    bot_id: bot-a
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    nodes:
+      step:
+        kind: bot_task
+        display_name: Step
+        assignee:
+          type: bot_binding
+          binding: worker
+        instruction: Do the work.
+        final_output: true
+"#,
+        )
+        .unwrap();
+        let compiled = validate_definition(definition).unwrap();
+        let run = StateMachineRun {
+            run_id: "run-missing-node".to_string(),
+            definition_id: compiled.definition.id.clone(),
+            definition_version: compiled.definition.version,
+            group_id: "group".to_string(),
+            group_version: 1,
+            session_id: "session".to_string(),
+            created_by: None,
+            status: StateMachineRunStatus::Running,
+            input: Value::Null,
+            output: None,
+            error: None,
+            created_at: 1,
+            updated_at: 1,
+            completed_at: None,
+        };
+        runtime
+            .runs
+            .create_run(run.clone(), Vec::new())
+            .await
+            .unwrap();
+        let group = Group::new("group", "owner", Vec::new());
+
+        let error = runtime
+            .fail_node_or_schedule_retry(
+                &compiled,
+                &group,
+                &run,
+                "missing",
+                0,
+                "delivery failed".to_string(),
+            )
+            .await
+            .expect_err("missing persisted node must prevent retry scheduling");
+
+        assert!(matches!(
+            error,
+            CollaborationRuntimeError::NodeNotFound { run_id, node_id }
+                if run_id == "run-missing-node" && node_id == "missing"
+        ));
     }
 }

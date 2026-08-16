@@ -35,7 +35,7 @@ use crate::state::HttpAppState;
 
 use caller::{
     authenticated_bot_from_headers, bot_id_from_headers, bot_token_from_headers,
-    caller_actor_id_from_headers, container_header_matches, require_bot_id_from_headers,
+    caller_actor_id_from_headers, require_bot_id_from_headers,
     require_caller_actor_id_from_headers, validate_container_header,
 };
 

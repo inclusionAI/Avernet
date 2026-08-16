@@ -685,6 +685,7 @@ async fn list_filters_deduplicates_before_pagination_and_direct_wins() {
             offset: 0,
             limit: 10,
             q: None,
+            visibility: None,
             membership: MembershipFilter::All,
             kind: GroupKindFilter::All,
             strategy: Some(V1GroupStrategy::StateMachine),
@@ -717,6 +718,7 @@ async fn list_filters_deduplicates_before_pagination_and_direct_wins() {
             offset: 0,
             limit: 1,
             q: None,
+            visibility: None,
             membership: MembershipFilter::SessionOnly,
             kind: GroupKindFilter::All,
             strategy: None,
@@ -725,6 +727,117 @@ async fn list_filters_deduplicates_before_pagination_and_direct_wins() {
         .expect("list session-only");
     assert_eq!(session_only.total, 1);
     assert_eq!(session_only.items.len(), 1);
+}
+
+#[tokio::test]
+async fn list_groups_filters_by_visibility() {
+    let fixture = Fixture::new().await;
+    for bot in ["target", "driver"] {
+        fixture.add_public_bot(bot).await;
+    }
+
+    for (group_id, visibility, created_at) in [
+        ("public-newest", "public", 30),
+        ("private-middle", "private", 20),
+        ("public-oldest", "public", 10),
+    ] {
+        let mut group = normal_group(
+            group_id,
+            "driver",
+            vec![
+                Participant::bot("driver", ParticipantRole::Driver),
+                Participant::bot("target", ParticipantRole::Consultant),
+            ],
+            GroupStrategy::Chat,
+            created_at,
+        );
+        group.visibility = visibility.into();
+        fixture.groups.upsert(group).await.expect("store Group");
+    }
+
+    let page = fixture
+        .service
+        .list_groups(ListGroups {
+            caller: bot_principal("target"),
+            view_bot_id: Some("target".into()),
+            offset: 1,
+            limit: 1,
+            q: None,
+            visibility: Some(GroupVisibility::Public),
+            membership: MembershipFilter::Direct,
+            kind: GroupKindFilter::All,
+            strategy: None,
+        })
+        .await
+        .expect("list public Groups");
+
+    assert_eq!(page.total, 2);
+    assert_eq!(page.items.len(), 1);
+    match &page.items[0] {
+        GroupSummary::Normal(summary) => assert_eq!(summary.group_id, "public-oldest"),
+        other => panic!("expected normal summary, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn list_session_only_groups_filters_by_visibility() {
+    let fixture = Fixture::new().await;
+    for bot in ["target", "public-driver", "private-driver"] {
+        fixture.add_public_bot(bot).await;
+    }
+
+    for (group_id, driver, visibility, created_at) in [
+        ("public-session", "public-driver", "public", 20),
+        ("private-session", "private-driver", "private", 10),
+    ] {
+        let mut group = normal_group(
+            group_id,
+            driver,
+            vec![Participant::bot(driver, ParticipantRole::Driver)],
+            GroupStrategy::Chat,
+            created_at,
+        );
+        group.visibility = visibility.into();
+        fixture.groups.upsert(group).await.expect("store Group");
+        fixture
+            .sessions
+            .create_or_reactivate(CreateOrReactivateCommand {
+                group_id: group_id.into(),
+                session_id: None,
+                params: NewSessionParams {
+                    participants: vec![Participant::bot(
+                        "target",
+                        ParticipantRole::Consultant,
+                    )],
+                    ..Default::default()
+                },
+            })
+            .await
+            .expect("create Session");
+    }
+
+    let page = fixture
+        .service
+        .list_groups(ListGroups {
+            caller: bot_principal("target"),
+            view_bot_id: Some("target".into()),
+            offset: 0,
+            limit: 20,
+            q: None,
+            visibility: Some(GroupVisibility::Private),
+            membership: MembershipFilter::SessionOnly,
+            kind: GroupKindFilter::All,
+            strategy: None,
+        })
+        .await
+        .expect("list private session-only Groups");
+
+    assert_eq!(page.total, 1);
+    assert_eq!(page.items.len(), 1);
+    match &page.items[0] {
+        GroupSummary::Normal(summary) => assert_eq!(summary.group_id, "private-session"),
+        other => panic!("expected normal summary, got {other:?}"),
+    }
 }
 
 #[tokio::test]
@@ -776,6 +889,7 @@ async fn list_defaults_to_the_authenticated_human_and_accepts_only_authorized_vi
         offset: 0,
         limit: 20,
         q: None,
+        visibility: None,
         membership: MembershipFilter::All,
         kind: GroupKindFilter::All,
         strategy: None,
@@ -993,6 +1107,7 @@ async fn list_groups_sorts_by_created_at_desc_not_updated_at() {
             offset: 0,
             limit: 10,
             q: None,
+            visibility: None,
             membership: MembershipFilter::All,
             kind: GroupKindFilter::All,
             strategy: None,
@@ -1168,6 +1283,7 @@ async fn dm_kind_rejects_a_strategy_filter() {
             offset: 0,
             limit: 20,
             q: None,
+            visibility: None,
             membership: MembershipFilter::All,
             kind: GroupKindFilter::Dm,
             strategy: Some(V1GroupStrategy::Chat),
@@ -1192,6 +1308,7 @@ async fn explicit_view_requires_the_target_bot_to_exist_and_be_owned() {
             offset: 0,
             limit: 20,
             q: None,
+            visibility: None,
             membership: MembershipFilter::All,
             kind: GroupKindFilter::Normal,
             strategy: None,
@@ -1222,6 +1339,7 @@ async fn explicit_view_propagates_registry_database_failure() {
             offset: 0,
             limit: 20,
             q: None,
+            visibility: None,
             membership: MembershipFilter::All,
             kind: GroupKindFilter::Normal,
             strategy: None,
@@ -2880,6 +2998,7 @@ async fn session_only_nonmember_dm_summary_omits_peer_actor() {
             offset: 0,
             limit: 20,
             q: None,
+            visibility: None,
             membership: MembershipFilter::SessionOnly,
             kind: GroupKindFilter::Dm,
             strategy: None,

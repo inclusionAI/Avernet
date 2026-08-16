@@ -41,7 +41,10 @@ def _service(*, read_return=b'{"a": 1}', resolve_raises=None, provider="arca"):
         resolver.resolve_for_binding.return_value = ctx
 
     device_fs = MagicMock()
-    device_fs.read_file = AsyncMock(return_value=read_return)
+    if isinstance(read_return, Exception):
+        device_fs.read_file = AsyncMock(side_effect=read_return)
+    else:
+        device_fs.read_file = AsyncMock(return_value=read_return)
     dispatcher = MagicMock()
     dispatcher.dispatch_addressed.return_value = device_fs
 
@@ -142,7 +145,10 @@ def _bot_service(*, read_return=b'{"a": 1}', resolve_raises=None, provider="arca
         resolver.resolve_for_bot.return_value = ctx
 
     device_fs = MagicMock()
-    device_fs.read_file = AsyncMock(return_value=read_return)
+    if isinstance(read_return, Exception):
+        device_fs.read_file = AsyncMock(side_effect=read_return)
+    else:
+        device_fs.read_file = AsyncMock(return_value=read_return)
     device_fs.write_file = AsyncMock()
     dispatcher = MagicMock()
     dispatcher.dispatch_addressed.return_value = device_fs
@@ -208,3 +214,33 @@ async def test_bot_config_resolve_failure_propagates():
     with pytest.raises(DeviceNotBoundError):
         await svc.read_bot_config(**_BOT_COORDS)
     dispatcher.dispatch_addressed.assert_not_called()
+
+
+# ── a device failure is not an absent config ─────────────────────────────────
+#
+# Regression guard for the fix's shape. An unwritten config now reads as {} because
+# BaasDeviceFileSystem maps a verified 404 to None at the boundary (see
+# tests/community/plugins/prod/test_baas_device_filesystem.py), NOT because this
+# service catches transport errors — core stays transport-agnostic per AGENTS.md.
+# So anything read_file still raises must travel straight through: absence and
+# unavailability have to stay distinguishable, or a caller would overwrite a config
+# it never managed to read. These use a plain exception on purpose; a core test that
+# named an HTTP error would re-import the coupling the fix removed.
+
+
+@pytest.mark.asyncio
+async def test_read_bot_config_device_read_failure_propagates():
+    svc, _, _, _ = _bot_service(read_return=RuntimeError("device unreachable"))
+
+    with pytest.raises(RuntimeError, match="device unreachable"):
+        await svc.read_bot_config(**_BOT_COORDS)
+
+
+@pytest.mark.asyncio
+async def test_read_publish_config_device_read_failure_propagates():
+    svc, _, _, _ = _service(read_return=RuntimeError("device unreachable"))
+
+    with pytest.raises(RuntimeError, match="device unreachable"):
+        await svc.read_publish_config(
+            _record(status="success", binding={"online": 7}), "openclaw"
+        )

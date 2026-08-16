@@ -20,16 +20,10 @@ use crate::v1::openapi::dto::bot::{
 
 pub fn router() -> Router<ApiState> {
     Router::new()
-        .route(
-            "/bots/{bot_id}/candidates",
-            get(list_candidates),
-        )
         .route("/bots/query", post(query_bots))
         .route("/bots/mine", get(list_mine))
-        .route(
-            "/bots/{bot_id}",
-            get(get_bot).patch(update_bot),
-        )
+        .route("/bots/{bot_id}/candidates", get(list_candidates))
+        .route("/bots/{bot_id}", get(get_bot).patch(update_bot))
 }
 
 fn service(state: &ApiState, request_id: &RequestId) -> Result<Arc<dyn BotService>, ErrorResponse> {
@@ -39,6 +33,32 @@ fn service(state: &ApiState, request_id: &RequestId) -> Result<Arc<dyn BotServic
             ApplicationError::internal("Bot V1 service is not configured"),
         )
     })
+}
+
+async fn query_bots(
+    State(state): State<ApiState>,
+    Extension(caller): Extension<AuthenticatedCaller>,
+    Extension(request_id): Extension<RequestId>,
+    body: Result<Json<QueryBotsRequest>, JsonRejection>,
+) -> Result<Response, ErrorResponse> {
+    let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    let items = service(&state, &request_id)?
+        .query(QueryBots {
+            caller,
+            bot_ids: body.bot_ids,
+        })
+        .await
+        .map_err(|error| application_error_response(&request_id, error))?;
+    Ok((
+        StatusCode::OK,
+        Json(Envelope::success(
+            20_000,
+            "OK",
+            BotList { items },
+            request_id.0,
+        )),
+    )
+        .into_response())
 }
 
 async fn list_candidates(
@@ -64,32 +84,6 @@ async fn list_candidates(
     Ok((
         StatusCode::OK,
         Json(Envelope::success(20_000, "OK", result, request_id.0)),
-    )
-        .into_response())
-}
-
-async fn query_bots(
-    State(state): State<ApiState>,
-    Extension(caller): Extension<AuthenticatedCaller>,
-    Extension(request_id): Extension<RequestId>,
-    body: Result<Json<QueryBotsRequest>, JsonRejection>,
-) -> Result<Response, ErrorResponse> {
-    let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
-    let items = service(&state, &request_id)?
-        .query(QueryBots {
-            caller,
-            bot_ids: body.bot_ids,
-        })
-        .await
-        .map_err(|error| application_error_response(&request_id, error))?;
-    Ok((
-        StatusCode::OK,
-        Json(Envelope::success(
-            20_000,
-            "OK",
-            BotList { items },
-            request_id.0,
-        )),
     )
         .into_response())
 }

@@ -49,7 +49,7 @@ from fastapi import (
 from secbaas.community.bootstrap import ApplicationContainer
 from secbaas.community.logger import get_logger
 
-logger = get_logger("local_management_ws")
+logger = get_logger("core-service")
 
 
 router = APIRouter(tags=["Local Management WebSocket"])

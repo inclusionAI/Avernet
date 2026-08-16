@@ -27,8 +27,9 @@ use bcs_service_api::{
     GroupCallbackCommand, GroupCallbackOutcome, HandleBotTerminalEventCommand,
     HandleBotTerminalEventOutcome, MessageFlowService, ProviderAuthMode,
     ProviderBotBindingRepoPort, ProviderBotCoreService, ProviderCoordinationConfig,
-    ProviderCoreService, ProviderCredentialRepoPort, ProviderRepoPort,
-    RegisterProviderBotParams, ServiceResult, SessionHistoryResult, StartStateMachineRunCommand,
+    ProviderCoreService, ProviderCredentialRepoPort, ProviderEventIngestCommand,
+    ProviderEventSource, ProviderRepoPort, ProviderRunTransport, RegisterProviderBotParams,
+    ServiceResult, SessionHistoryResult, StartStateMachineRunCommand,
     StartStateMachineRunOutcome, StateMachineDeliveryCorrelation, StateMachineRunView,
     TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome,
     TaskMessageCommand, TaskMessageOutcome, TaskRunAliasRegistration, WebSendCommand,
@@ -560,7 +561,7 @@ async fn bot_events_rejects_state_machine_identity_mismatch_before_spawning() {
 }
 
 #[tokio::test]
-async fn bot_events_rejects_empty_state_machine_final_before_spawning() {
+async fn bot_events_accepts_empty_state_machine_final_for_runtime_failure_handling() {
     let collaboration_runtime = Arc::new(BlockingCollaborationRuntime::default());
     let runtime_port: Arc<dyn CollaborationRuntimeService> = collaboration_runtime.clone();
     let TestApp {
@@ -593,10 +594,13 @@ async fn bot_events_rejects_empty_state_machine_final_before_spawning() {
         ))
         .await
         .expect("empty final response");
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.status(), StatusCode::OK);
     let body = response_json(response).await;
-    assert_eq!(body["error"], "invalid_request");
-    assert_eq!(collaboration_runtime.terminal_call_count().await, 0);
+    assert_eq!(body["ok"], true);
+    collaboration_runtime.wait_for_terminal_start().await;
+    assert_eq!(collaboration_runtime.terminal_call_count().await, 1);
+    collaboration_runtime.release_terminal();
+    collaboration_runtime.wait_for_terminal_completion().await;
 }
 
 #[tokio::test]
@@ -1136,8 +1140,102 @@ async fn bot_events_accepts_callback_streaming_chat_final_and_closes_run() {
     assert_eq!(cmd.state, ChatEventState::Final);
     assert_eq!(cmd.event_payload["state"], "final");
     drop(events);
+    assert_eq!(
+        message_flow.sources.lock().await.as_slice(),
+        &[ProviderEventSource::Callback]
+    );
     // Terminal: the run must be closed.
     assert!(run_context.get_context("run-cb2").await.unwrap().terminal);
+}
+
+#[tokio::test]
+async fn bot_events_rejects_callback_for_sse_owned_run() {
+    let TestApp {
+        app,
+        provider_core,
+        provider_bot_core,
+        run_context,
+        message_flow,
+        ..
+    } = test_app(Arc::new(StaticAgentpassResolver::default()));
+    let registered = register_provider_bot(
+        provider_core.as_ref(),
+        provider_bot_core.as_ref(),
+        ProviderAuthMode::StaticBearer,
+        "reviewer-sse",
+    )
+    .await;
+    let token = registered.bot_runtime_token.expect("runtime token");
+    assert!(
+        run_context
+            .begin_provider_transport("run-sse-owned", bcs_protocol::now_ms() + 60_000)
+            .await
+    );
+    assert!(
+        run_context
+            .bind_provider_transport("run-sse-owned", ProviderRunTransport::Sse)
+            .await
+    );
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/bot/events")
+                .header("content-type", "application/json")
+                .header("X-BCN-Provider-Id", registered.provider_id.as_str())
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::from(
+                    json!({
+                        "run_id": "run-sse-owned",
+                        "event": "chat",
+                        "payload": {"state": "delta", "deltaText": "duplicate"}
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body = response_json(response).await;
+    assert_eq!(body["error"], "transport_conflict");
+    assert!(message_flow.events.lock().await.is_empty());
+
+    assert!(
+        run_context
+            .begin_provider_transport(
+                "run-negotiating",
+                bcs_protocol::now_ms() + 60_000,
+            )
+            .await
+    );
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/bot/events")
+                .header("content-type", "application/json")
+                .header("X-BCN-Provider-Id", registered.provider_id.as_str())
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::from(
+                    json!({
+                        "run_id": "run-negotiating",
+                        "event": "chat",
+                        "payload": {"state": "delta", "deltaText": "too early"}
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body = response_json(response).await;
+    assert_eq!(body["error"], "transport_conflict");
+    assert!(message_flow.events.lock().await.is_empty());
 }
 
 #[tokio::test]
@@ -2234,6 +2332,7 @@ async fn bot_coordination_accepts_mcporter_tool_result_for_matching_run() {
             mode: CoordinationMode::McporterMcp,
             mcp_server: Some("bcs".to_string()),
             mcporter_command: Some("mcporter".to_string()),
+            tool_name_mapping: Default::default(),
         }),
     )
     .await;
@@ -2308,6 +2407,7 @@ async fn bot_coordination_accepts_native_mcp_intent_for_matching_run() {
             mode: CoordinationMode::NativeMcp,
             mcp_server: Some("bcs".to_string()),
             mcporter_command: None,
+            tool_name_mapping: Default::default(),
         }),
     )
     .await;
@@ -2370,6 +2470,227 @@ async fn bot_coordination_accepts_native_mcp_intent_for_matching_run() {
 }
 
 #[tokio::test]
+async fn bot_coordination_accepts_mapped_native_mcp_tool_result() {
+    let TestApp {
+        app,
+        registry: _,
+        provider_core,
+        provider_bot_core,
+        run_context,
+        message_flow,
+        _temp_dir,
+    } = test_app(Arc::new(StaticAgentpassResolver::default()));
+    let provider_tool_name = "mcp_mcp.ant.agentclawscs.bcs_mcp_bcs_assign_task";
+    let registered = register_provider_bot_with_coordination(
+        provider_core.as_ref(),
+        provider_bot_core.as_ref(),
+        ProviderAuthMode::StaticBearer,
+        "mapped-native-mcp-manager",
+        Some(ProviderCoordinationConfig {
+            mode: CoordinationMode::NativeMcp,
+            mcp_server: Some("mcp.ant.agentclawscs.bcs".to_string()),
+            mcporter_command: None,
+            tool_name_mapping: [(
+                provider_tool_name.to_string(),
+                "bcs_assign_task".to_string(),
+            )]
+            .into_iter()
+            .collect(),
+        }),
+    )
+    .await;
+    let token = registered.bot_runtime_token.expect("runtime token");
+    run_context
+        .put_context(BotRunContext {
+            run_id: "run-native-mcp-tool-result".to_string(),
+            bot_id: registered.bot_uuid.clone(),
+            group_id: "group-native-mcp-tool-result".to_string(),
+            bcs_session_id: Some("group-native-mcp-tool-result:session".to_string()),
+            deadline_ms: bcs_protocol::now_ms() + 60_000,
+            terminal: false,
+        })
+        .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/bot/events/coordination")
+                .header("content-type", "application/json")
+                .header("X-BCN-Provider-Id", registered.provider_id.as_str())
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::from(
+                    json!({
+                        "run_id": "run-native-mcp-tool-result",
+                        "tool_call_id": "tool-native-1",
+                        "kind": "tool_result",
+                        "tool_name": provider_tool_name,
+                        "result_text": "{\"__bcs_coordination__\":true,\"v\":1,\"tool\":\"bcs_assign_task\",\"arguments\":{\"target_bot\":\"worker-a\",\"message\":\"review this file\"},\"status\":\"received\"}"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["ok"], true);
+    assert_eq!(body["processed"], true);
+    assert_eq!(body["duplicate"], false);
+
+    let dispatches = message_flow.task_dispatches.lock().await;
+    assert_eq!(dispatches.len(), 1);
+    let cmd = &dispatches[0];
+    assert_eq!(cmd.driver_bot_id, registered.bot_uuid);
+    assert_eq!(cmd.group_id, "group-native-mcp-tool-result");
+    assert_eq!(cmd.target_bot_id, "worker-a");
+    assert_eq!(cmd.payload["message"], "review this file");
+    assert_eq!(
+        cmd.payload["bcs_session_id"],
+        "group-native-mcp-tool-result:session"
+    );
+}
+
+#[tokio::test]
+async fn bot_coordination_rejects_unmapped_native_mcp_tool_result() {
+    let TestApp {
+        app,
+        registry: _,
+        provider_core,
+        provider_bot_core,
+        run_context,
+        message_flow,
+        _temp_dir,
+    } = test_app(Arc::new(StaticAgentpassResolver::default()));
+    let registered = register_provider_bot_with_coordination(
+        provider_core.as_ref(),
+        provider_bot_core.as_ref(),
+        ProviderAuthMode::StaticBearer,
+        "unmapped-native-mcp-manager",
+        Some(ProviderCoordinationConfig {
+            mode: CoordinationMode::NativeMcp,
+            mcp_server: Some("mcp.ant.agentclawscs.bcs".to_string()),
+            mcporter_command: None,
+            tool_name_mapping: [(
+                "configured-tool-name".to_string(),
+                "bcs_assign_task".to_string(),
+            )]
+            .into_iter()
+            .collect(),
+        }),
+    )
+    .await;
+    let token = registered.bot_runtime_token.expect("runtime token");
+    run_context
+        .put_context(BotRunContext {
+            run_id: "run-native-mcp-unmapped".to_string(),
+            bot_id: registered.bot_uuid,
+            group_id: "group-native-mcp-unmapped".to_string(),
+            bcs_session_id: Some("group-native-mcp-unmapped:session".to_string()),
+            deadline_ms: bcs_protocol::now_ms() + 60_000,
+            terminal: false,
+        })
+        .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/bot/events/coordination")
+                .header("content-type", "application/json")
+                .header("X-BCN-Provider-Id", registered.provider_id.as_str())
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::from(
+                    json!({
+                        "run_id": "run-native-mcp-unmapped",
+                        "tool_call_id": "tool-native-unmapped",
+                        "kind": "tool_result",
+                        "tool_name": "unexpected-tool-name",
+                        "result_text": "{\"__bcs_coordination__\":true,\"v\":1,\"tool\":\"bcs_assign_task\",\"arguments\":{\"target_bot\":\"worker-a\",\"message\":\"review this file\"},\"status\":\"received\"}"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert!(message_flow.task_dispatches.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn bot_coordination_rejects_native_mcp_tool_result_with_mismatched_canonical_tool() {
+    let TestApp {
+        app,
+        registry: _,
+        provider_core,
+        provider_bot_core,
+        run_context,
+        message_flow,
+        _temp_dir,
+    } = test_app(Arc::new(StaticAgentpassResolver::default()));
+    let provider_tool_name = "mcp_mcp.ant.agentclawscs.bcs_mcp_bcs_assign_task";
+    let registered = register_provider_bot_with_coordination(
+        provider_core.as_ref(),
+        provider_bot_core.as_ref(),
+        ProviderAuthMode::StaticBearer,
+        "mismatched-native-mcp-manager",
+        Some(ProviderCoordinationConfig {
+            mode: CoordinationMode::NativeMcp,
+            mcp_server: Some("mcp.ant.agentclawscs.bcs".to_string()),
+            mcporter_command: None,
+            tool_name_mapping: [(
+                provider_tool_name.to_string(),
+                "bcs_assign_task".to_string(),
+            )]
+            .into_iter()
+            .collect(),
+        }),
+    )
+    .await;
+    let token = registered.bot_runtime_token.expect("runtime token");
+    run_context
+        .put_context(BotRunContext {
+            run_id: "run-native-mcp-mismatched-tool".to_string(),
+            bot_id: registered.bot_uuid,
+            group_id: "group-native-mcp-mismatched-tool".to_string(),
+            bcs_session_id: Some("group-native-mcp-mismatched-tool:session".to_string()),
+            deadline_ms: bcs_protocol::now_ms() + 60_000,
+            terminal: false,
+        })
+        .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/bot/events/coordination")
+                .header("content-type", "application/json")
+                .header("X-BCN-Provider-Id", registered.provider_id.as_str())
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::from(
+                    json!({
+                        "run_id": "run-native-mcp-mismatched-tool",
+                        "tool_call_id": "tool-native-mismatched",
+                        "kind": "tool_result",
+                        "tool_name": provider_tool_name,
+                        "result_text": "{\"__bcs_coordination__\":true,\"v\":1,\"tool\":\"bcs_task_complete\",\"arguments\":{\"summary\":\"done\"},\"status\":\"received\"}"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert!(message_flow.task_dispatches.lock().await.is_empty());
+}
+
+#[tokio::test]
 async fn bot_coordination_rejects_native_tool_with_mcp_server() {
     let TestApp {
         app,
@@ -2389,6 +2710,7 @@ async fn bot_coordination_rejects_native_tool_with_mcp_server() {
             mode: CoordinationMode::NativeTool,
             mcp_server: None,
             mcporter_command: None,
+            tool_name_mapping: Default::default(),
         }),
     )
     .await;
@@ -2588,6 +2910,7 @@ impl BotRuntimeTokenResolverPort for StaticAgentpassResolver {
 struct RecordingRunContext {
     contexts: RwLock<HashMap<String, BotRunContext>>,
     processing: RwLock<std::collections::HashSet<String>>,
+    provider_transports: RwLock<HashMap<String, ProviderRunTransport>>,
 }
 
 #[async_trait::async_trait]
@@ -2637,11 +2960,48 @@ impl BotRunContextPort for RecordingRunContext {
     async fn release_terminal(&self, run_id: &str) {
         self.processing.write().await.remove(run_id);
     }
+
+    async fn begin_provider_transport(&self, run_id: &str, _deadline_ms: u64) -> bool {
+        let mut transports = self.provider_transports.write().await;
+        if transports.contains_key(run_id) {
+            return false;
+        }
+        transports.insert(run_id.to_string(), ProviderRunTransport::Negotiating);
+        true
+    }
+
+    async fn bind_provider_transport(
+        &self,
+        run_id: &str,
+        transport: ProviderRunTransport,
+    ) -> bool {
+        self.provider_transports
+            .write()
+            .await
+            .insert(run_id.to_string(), transport);
+        true
+    }
+
+    async fn get_provider_transport(&self, run_id: &str) -> Option<ProviderRunTransport> {
+        self.provider_transports.read().await.get(run_id).copied()
+    }
+
+    async fn mark_provider_transport_terminal(&self, run_id: &str) {
+        self.provider_transports
+            .write()
+            .await
+            .insert(run_id.to_string(), ProviderRunTransport::Terminal);
+    }
+
+    async fn clear_provider_transport(&self, run_id: &str) {
+        self.provider_transports.write().await.remove(run_id);
+    }
 }
 
 #[derive(Default)]
 struct RecordingMessageFlow {
     events: Mutex<Vec<BotEventCommand>>,
+    sources: Mutex<Vec<ProviderEventSource>>,
     task_dispatches: Mutex<Vec<TaskDispatchCommand>>,
     task_messages: Mutex<Vec<TaskMessageCommand>>,
     task_completes: Mutex<Vec<TaskCompleteCommand>>,
@@ -2675,6 +3035,14 @@ impl MessageFlowService for RecordingMessageFlow {
             failed_count: 0,
             delivery_results: Vec::new(),
         })
+    }
+
+    async fn ingest_provider_event(
+        &self,
+        cmd: ProviderEventIngestCommand,
+    ) -> ServiceResult<BotEventOutcome> {
+        self.sources.lock().await.push(cmd.source);
+        self.handle_bot_event(cmd.event).await
     }
 
     async fn handle_group_callback(

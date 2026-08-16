@@ -38,6 +38,89 @@ def test_session_list_and_history_use_the_shared_view_actor_contract() -> None:
     assert list_queries["view_bot_id"].get("required", False) is False
 
 
+def test_session_history_uses_legacy_group_message_array_envelope() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/messages"
+    ]["get"]
+    envelope = operation["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ]
+
+    assert envelope["additionalProperties"] is False
+    data = envelope["properties"]["data"]
+    assert data["type"] == "array"
+    message = data["items"]
+    assert message["additionalProperties"] is False
+    assert set(message["required"]) == {
+        "id",
+        "timestamp",
+        "sender",
+        "content",
+        "message_type",
+        "role",
+    }
+    assert set(message["properties"]) == {
+        "id",
+        "timestamp",
+        "sender",
+        "content",
+        "message_type",
+        "bot_name",
+        "role",
+        "run_id",
+        "historyMeta",
+        "metadata",
+        "attachments",
+    }
+    assert message["properties"]["message_type"]["enum"] == [
+        "bot",
+        "system",
+        "fusion",
+    ]
+    assert message["properties"]["role"]["enum"] == [
+        "user",
+        "tool_result",
+        "assistant",
+        "system",
+    ]
+    assert message["properties"]["historyMeta"]["additionalProperties"] is True
+    assert message["properties"]["metadata"]["additionalProperties"] is True
+    assert set(message["properties"]["attachments"]["items"]["properties"]) == {
+        "attachment_id",
+        "type",
+        "file_name",
+        "mime_type",
+        "size",
+        "sha256",
+        "url",
+        "expires_at",
+    }
+
+
+def test_session_history_before_is_a_legacy_timestamp_and_old_page_types_are_absent() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/messages"
+    ]["get"]
+    before = _query_parameters(operation)["before"]
+
+    assert before["schema"] == {
+        "type": "integer",
+        "format": "int64",
+        "minimum": 0,
+    }
+    schemas = contract["components"]["schemas"]
+    for old_name in [
+        "SessionMessage",
+        "SessionMessagePage",
+        "SessionMessagePageEnvelope",
+        "MessageSenderKind",
+        "SessionMessageKind",
+    ]:
+        assert old_name not in schemas
+
+
 def test_view_actor_failures_are_forbidden_without_a_bot_not_found_response() -> None:
     contract = load_contract(CONTRACT_ROOT)
     operations = [
@@ -85,6 +168,98 @@ def test_session_completion_endpoint_is_not_in_public_contract() -> None:
         "/openapi/v1/collaboration/sessions/{session_id}/completion"
         not in contract["paths"]
     )
+
+
+def test_session_collection_exposes_human_control_plane_operations() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    path = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/collect"
+    ]
+
+    assert set(path) == {"post", "delete"}
+    for operation in path.values():
+        assert operation["x-avernet-security"] == {
+            "user": "required",
+            "app": "required",
+        }
+        assert {
+            status: response["x-error-codes"]
+            for status, response in operation["responses"].items()
+            if status != "200" and "x-error-codes" in response
+        } == {
+            "400": ["invalid_request"],
+            "401": ["unauthenticated"],
+            "403": ["forbidden"],
+            "404": ["session_not_found"],
+            "500": ["internal_error"],
+        }
+
+
+def test_collect_session_requires_only_the_participant_json_field() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/collect"
+    ]["post"]
+
+    assert operation["operationId"] == "collect_session"
+    assert operation["requestBody"]["required"] is True
+    assert operation["requestBody"]["content"]["application/json"]["schema"] == {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["participant"],
+        "properties": {
+            "participant": {"type": "string", "minLength": 1},
+        },
+    }
+
+
+def test_uncollect_session_requires_only_the_participant_query() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/collect"
+    ]["delete"]
+
+    assert operation["operationId"] == "uncollect_session"
+    assert operation["parameters"][1:] == [
+        {
+            "name": "participant",
+            "in": "query",
+            "required": True,
+            "schema": {"type": "string", "minLength": 1},
+        }
+    ]
+
+
+def test_session_collection_returns_a_strict_result_envelope() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    path = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/collect"
+    ]
+
+    for operation in path.values():
+        envelope = operation["responses"]["200"]["content"]["application/json"][
+            "schema"
+        ]
+        assert envelope["additionalProperties"] is False
+        assert set(envelope["required"]) == {
+            "code",
+            "message",
+            "data",
+            "request_id",
+        }
+        data = envelope["properties"]["data"]
+        assert data["additionalProperties"] is False
+        assert set(data["required"]) == {
+            "session_id",
+            "participant",
+            "collected",
+        }
+        assert set(data["properties"]) == {
+            "session_id",
+            "participant",
+            "collected",
+        }
+        assert data["properties"]["collected"] == {"type": "boolean"}
 
 
 def test_add_session_participant_accepts_only_bot_uuid() -> None:

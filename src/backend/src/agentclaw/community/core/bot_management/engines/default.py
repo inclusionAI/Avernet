@@ -16,6 +16,10 @@ class DefaultProvisioningStrategy(EngineProvisioningStrategy):
     def engine_type(self) -> str:
         return self._engine_type
 
+    def resolve_bot_engine(self, bot: dict[str, object]) -> str | None:
+        engine = bot.get("active_engine")
+        return engine if isinstance(engine, str) else None
+
     def build_extra_envs(self, ctx: BotProvisioningContext) -> dict[str, str] | None:
         return None
 
@@ -43,6 +47,15 @@ class DefaultProvisioningStrategy(EngineProvisioningStrategy):
         raise NotImplementedError(
             f"engine {ctx.active_engine or self.engine_type} uses adapter chat session lifecycle"
         )
+
+    def apply_restart_extra_configs(
+        self,
+        ctx: BotProvisioningContext,
+        extra_configs: dict[str, object] | None,
+        *,
+        template_service: object,
+    ) -> None:
+        return None
 
     def on_bot_created(self, ctx: BotProvisioningContext) -> None:
         return None

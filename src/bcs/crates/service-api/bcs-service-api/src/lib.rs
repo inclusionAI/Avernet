@@ -27,8 +27,14 @@ pub mod workbench_use_cases;
 pub use actors::{
     ActorCapabilitiesView, ActorDirectoryEntry, ActorDirectoryService, ActorListCommand,
     ActorListResult, ActorSearchCommand, ActorSearchContext, ActorSearchResult,
-    ActorStatusUpdateCommand, ActorStatusUpdateResult, WorkerProfile, WorkerProfileService,
-    WorkerRecommendCommand, WorkerRecommendResult, WorkerRecommendation,
+    ActorStatusUpdateCommand, ActorStatusUpdateResult,
+};
+#[deprecated(
+    note = "worker-profile contracts moved to bcs_service_api::core; import them from core"
+)]
+pub use core::{
+    WorkerProfile, WorkerProfileCoreService as WorkerProfileService, WorkerRecommendCommand,
+    WorkerRecommendResult, WorkerRecommendation,
 };
 pub use application::SystemMessageService;
 pub use application::system_message::resolve_session_topic;
@@ -136,7 +142,8 @@ pub use message_flow::{
     FusionRequest, FusionResponse, GroupCallbackCommand, GroupCallbackOutcome, GroupChatCommand,
     GroupChatOutcome, GroupFusionCommand, GroupFusionService, MessageDeliveryResult,
     MessageFlowService, ParticipantPerspective, PersistentGroupSendCommand,
-    PersistentGroupSendOutcome, TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand,
+    PersistentGroupSendOutcome, ProviderEventIngestCommand, ProviderEventSource,
+    TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand,
     TaskDispatchOutcome, TaskMessageCommand, TaskMessageOutcome, TaskRunAliasRegistration,
     WebSendCommand, WebSendOutcome,
 };
@@ -148,6 +155,7 @@ pub use application::{
     DeleteProviderBotCommand, DeleteProviderBotOutcome, ProviderBotCoordinationCommand,
     ProviderBotCoordinationOutcome, ProviderBotEventCommand, ProviderBotEventCredential,
     ProviderBotEventError, ProviderBotEventOutcome, ProviderBotEventService,
+    ProviderEventIngestService,
     ProviderCoordinationEventKind, ProviderCoordinationIntent, ProviderManagementService,
     RegisterProviderBotCommand, RegisterProviderBotOutcome, RegisterProviderCommand,
     RegisterProviderOutcome, UpdateProviderCommand, DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
@@ -161,7 +169,7 @@ pub use port::{
     BotDeliveryResult, BotMetricCount, BotMetricsSnapshotPort, BotRepoPort, BotRunContext,
     BotControlPlaneRepoPort,
     BotRunContextPort, BotTerminalEvent, BotTerminalObserverPort, BotTerminalState,
-    CompositeBotTerminalObserver,
+    CompositeBotTerminalObserver, ProviderRunTransport,
     NoopBotTerminalObserver, NoopChannelBindingCleanupPort, ChatRunCleanupPort,
     ChatRunEventPort, ChatRunMetricCount, DeliveryBlockContext,
     DeliveryBlockReason, DeliveryBlockSurface, DeliveryMetricKind, DeliveryMetricTarget,
@@ -185,7 +193,7 @@ pub use port::{
     ListOrganizationsQuery, OrganizationCandidateReadPage, OrganizationCandidateReadPort,
     OrganizationCandidateReadQuery, OrganizationMemberPage, OrganizationRepoPort, UpdateOrganizationRecord,
     UpsertOrganizationMemberRecord,
-    ProviderTransportPreference, RelationRepoPort, RunFallbackDelivery,
+    RelationRepoPort, RunFallbackDelivery,
     SessionCallbackDispatchPort, SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
     SessionRepoPort, StateMachineDefinitionRepoPort, StateMachineResultPublishCommand,
     StateMachineResultPublisherPort, StateMachineRunRepoPort, StateMachineTerminalEvent,
@@ -219,7 +227,9 @@ pub use types::{
 
 pub use core::{
     ActorKind, ActorStatus, AgentCredentials, AuditEntry, BindingChannel, BindingChannels,
-    BotCapabilities, BotConnectParams, BotConnectResult, BotControlPlaneCandidate,
+    BotCandidateSearchCoreResult, BotCandidateSearchCoreService, BotCandidateSearchHit,
+    BotCandidateSearchMode, BotCandidateSearchQuery, BotCapabilities, BotConnectParams,
+    BotConnectResult, BotControlPlaneCandidate,
     BotControlPlaneCoreService, BotControlPlaneProvider, BotControlPlaneView, BotDynamicStatus,
     BotRegistryCoreService,
     BotSendResult, ChatEventRouting, ConnectError, ConnectionKind, ContextBotSummary, HiddenMentionInfo,
@@ -235,7 +245,8 @@ pub use core::{
     OrganizationCandidatePageQuery, OrganizationCandidateQuery,
     OrganizationCoreService, OrganizationMemberBotDetail, OrganizationMemberDetail,
     OrganizationMemberPageQuery, OrganizationMemberProfile, OrganizationMemberProfilePatch,
-    RelationCoreService, BCS_SYSTEM_MESSAGE, RelationEdge, ResponseMode, RouteAndSendResult,
+    LegacyBotCandidateSearchCoreResult, RelationCoreService, BCS_SYSTEM_MESSAGE, RelationEdge,
+    ResponseMode, RouteAndSendResult,
     RouteParticipantOverlay, RouteSelectorWire, RoutingCoreService, RoutingDecision,
     RoutingMode, RoutingPolicy, RoutingTarget, RuntimeBotIdentity, SenderRoutesValidationError,
     ServiceError, ServiceResult, ServiceSpec, Session, SessionKind, SessionStatus, Skill,

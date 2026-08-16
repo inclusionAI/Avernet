@@ -272,6 +272,62 @@ pub struct CollaborationConfig {
     pub templates: CollaborationTemplatesConfig,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenApiV1Config {
+    #[serde(default = "default_openapi_v1_public_collaboration_base_url")]
+    pub public_collaboration_base_url: String,
+}
+
+impl Default for OpenApiV1Config {
+    fn default() -> Self {
+        Self {
+            public_collaboration_base_url:
+                default_openapi_v1_public_collaboration_base_url(),
+        }
+    }
+}
+
+impl OpenApiV1Config {
+    pub fn validated_public_collaboration_base_url(&self) -> Result<String, String> {
+        let raw = self.public_collaboration_base_url.trim();
+        if raw.is_empty() {
+            return Err(
+                "openapi_v1.public_collaboration_base_url must not be blank".to_string(),
+            );
+        }
+        let mut url = url::Url::parse(raw).map_err(|_| {
+            "openapi_v1.public_collaboration_base_url must be an absolute HTTP(S) URL"
+                .to_string()
+        })?;
+        if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+            return Err(
+                "openapi_v1.public_collaboration_base_url must be an absolute HTTP(S) URL"
+                    .to_string(),
+            );
+        }
+        if !url.username().is_empty() || url.password().is_some() {
+            return Err(
+                "openapi_v1.public_collaboration_base_url must not contain userinfo"
+                    .to_string(),
+            );
+        }
+        if url.query().is_some() || url.fragment().is_some() {
+            return Err(
+                "openapi_v1.public_collaboration_base_url must not contain query or fragment"
+                    .to_string(),
+            );
+        }
+        let normalized_path = url.path().trim_end_matches('/').to_string();
+        url.set_path(&normalized_path);
+        Ok(url.to_string().trim_end_matches('/').to_string())
+    }
+}
+
+fn default_openapi_v1_public_collaboration_base_url() -> String {
+    "http://127.0.0.1:21000/api/v1/collaboration".to_string()
+}
+
 impl Default for CollaborationConfig {
     fn default() -> Self {
         Self {
@@ -518,6 +574,10 @@ pub struct BcsConfig {
     /// Structured collaboration authoring-template configuration.
     #[serde(default)]
     pub collaboration: CollaborationConfig,
+
+    /// Public base used by delivery adapters to project OpenAPI V1 URLs.
+    #[serde(default)]
+    pub openapi_v1: OpenApiV1Config,
 
     /// Whether to enable channel binding during bot onboard.
     /// When false (default), channel binding is handled at connect time for "default:{staff_id}" bots.
@@ -936,6 +996,7 @@ impl Default for BcsConfig {
             channels: ChannelConfigSection::default(),
             provider_http: ProviderHttpConfig::default(),
             collaboration: CollaborationConfig::default(),
+            openapi_v1: OpenApiV1Config::default(),
             max_groups_as_driver: default_max_groups_as_driver(),
             max_group_members: default_max_group_members(),
             max_groups_as_member: default_max_groups_as_member(),
@@ -1368,6 +1429,13 @@ fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn std::error::
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
     })?;
+    config
+        .openapi_v1
+        .validated_public_collaboration_base_url()
+        .map_err(|e| {
+            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
+                as Box<dyn std::error::Error>
+        })?;
     config.validate_metrics().map_err(|e| {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
@@ -2168,6 +2236,49 @@ tenant = "teamclaw"
         assert_eq!(cfg.share_link_ttl, 3600);
         assert_eq!(cfg.backend["endpoint"], toml::Value::String("http://baas:8080".into()));
         assert_eq!(cfg.backend["tenant"], toml::Value::String("teamclaw".into()));
+    }
+
+    #[test]
+    fn default_openapi_public_collaboration_base_url_uses_internal_path() {
+        assert_eq!(
+            OpenApiV1Config::default()
+                .validated_public_collaboration_base_url()
+                .unwrap(),
+            "http://127.0.0.1:21000/api/v1/collaboration"
+        );
+    }
+
+    #[test]
+    fn openapi_v1_public_base_url_is_validated_and_normalized() {
+        let cfg: OpenApiV1Config = toml::from_str(
+            r#"public_collaboration_base_url = "https://gateway.example.com/api/v1/collaboration/""#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            cfg.validated_public_collaboration_base_url().unwrap(),
+            "https://gateway.example.com/api/v1/collaboration"
+        );
+    }
+
+    #[test]
+    fn openapi_v1_public_base_url_rejects_unsafe_or_non_absolute_values() {
+        for value in [
+            "",
+            "/api/v1/collaboration",
+            "ftp://gateway.example.com/api/v1/collaboration",
+            "https://user@gateway.example.com/api/v1/collaboration",
+            "https://gateway.example.com/api/v1/collaboration?tenant=x",
+            "https://gateway.example.com/api/v1/collaboration#fragment",
+        ] {
+            let cfg = OpenApiV1Config {
+                public_collaboration_base_url: value.to_string(),
+            };
+            assert!(
+                cfg.validated_public_collaboration_base_url().is_err(),
+                "expected invalid URL: {value}"
+            );
+        }
     }
 
     #[test]

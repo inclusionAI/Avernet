@@ -183,36 +183,25 @@ export function selectWebsocketUrl(
   return `ws://localhost:20003${wsPath}`;
 }
 
-/**
- * 群聊 WS 的 BCS 基址（仅 dev 注入，见 config/config.local.ts 的 define）。
- * 值为含 BCS_PORT 的 BCS 地址（如 http://127.0.0.1:31000）。为真时聊天 WS 直连
- * ws://127.0.0.1:<BCS_PORT>/ws，跟随自定义端口，而非 bundle 里的静态 BCN 端口（默认 21000）。
- * 生产构建未注入该常量，typeof 守卫使本段被 tree-shake，走 getServers().BCN。
- */
-declare const DEV_BCN_BASE: string | undefined;
+/** local dev 注入的 BCS 端口；非 local 预设为空。 */
+declare const LOCAL_BCN_PORT: string | undefined;
 
-/**
- * 获取 BCN WebSocket URL（群聊用）
- * 根据 getServers() 配置动态构造 WebSocket 地址
- */
+/** 获取 BCN WebSocket URL（群聊用） */
 export function selectBcnWebsocketUrl(): string {
-  // dev：直连含 BCS_PORT 的本地 BCS（WS 不受 CORS 限制，可跨端口直连）。
-  if (typeof DEV_BCN_BASE !== 'undefined' && DEV_BCN_BASE) {
-    return `${DEV_BCN_BASE.replace(/^http/, 'ws')}/ws`;
+  // 外部用户访问开发机上的 local demo 时，hostname 是开发机，
+  // 而不是访问者电脑的 127.0.0.1。端口仍跟随 BCS_PORT。
+  if (typeof LOCAL_BCN_PORT !== 'undefined' && LOCAL_BCN_PORT) {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.hostname}:${LOCAL_BCN_PORT}/ws`;
   }
 
-  const servers = getServers();
-  const bcnServer = servers.BCN;
-
+  const bcnServer = getServers().BCN;
   if (!bcnServer) {
-    // 降级：BCN 未配置（真实环境 SERVERS.BCN 恒有值，此分支几乎不触发）
     console.warn('[connectionStore] BCN server not configured, using default');
     return 'ws://localhost:21000/ws';
   }
 
-  // 将 http/https 转换为 ws/wss
-  const wsUrl = bcnServer.replace(/^http/, 'ws');
-  return `${wsUrl}/ws`;
+  return `${bcnServer.replace(/^http/, 'ws')}/ws`;
 }
 
 // ─── 非 React 代码用的便捷方法 ──────────────────────────────

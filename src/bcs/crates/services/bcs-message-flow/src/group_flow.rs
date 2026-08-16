@@ -22,7 +22,7 @@ use bcs_service_api::{
     MessageLogContent, MessageLogEventType, MessageLogMode, MessageLogStatus,
     MessageLogTargetSummary, MESSAGE_LOG_SCHEMA_VERSION, message_log_json,
     MessageFlowService, MessageRole, Participant, ParticipantMode, ParticipantRole, PersistentGroupSendCommand,
-    PersistentGroupSendOutcome, ProviderStreamGrayList, ProviderTransportPreference,
+    PersistentGroupSendOutcome, ProviderStreamGrayList,
     RouteParticipantOverlay, RoutingDecision, RoutingCoreService, RoutingTarget, ServiceError, ServiceResult,
     SessionManagementService, ChannelService,
     SystemMessageEvent, SystemMessageService,
@@ -55,6 +55,8 @@ pub struct BcsMessageFlow {
     pub system_message: Option<Arc<dyn SystemMessageService>>,
     pub message_repo: Option<Arc<dyn MessageRepoPort>>,
     pub message_tracker: Arc<crate::message_tracker::MessageTracker>,
+    /// Deprecated compatibility setting. Transport selection is owned by the
+    /// HTTP Provider adapter and this value is no longer consulted.
     pub provider_stream_gray_list: Option<Arc<ProviderStreamGrayList>>,
     pub channel: Arc<OnceLock<Arc<dyn ChannelService>>>,
     pub bot_terminal_observer: Arc<dyn BotTerminalObserverPort>,
@@ -139,42 +141,6 @@ impl BcsMessageFlow {
     ) -> Self {
         self.provider_stream_gray_list = Some(gray_list);
         self
-    }
-
-    pub(crate) async fn provider_transport_preference(
-        &self,
-        target_bot_id: &str,
-        delivery_kind: &BotDeliveryKind,
-        delivery_target: &BotDeliveryTarget,
-    ) -> ProviderTransportPreference {
-        if !matches!(
-            delivery_kind,
-            BotDeliveryKind::Send
-                | BotDeliveryKind::TaskDispatch
-                | BotDeliveryKind::TaskMessage
-                | BotDeliveryKind::TaskResult
-        ) {
-            return ProviderTransportPreference::Callback;
-        }
-        if !matches!(
-            delivery_target,
-            BotDeliveryTarget::HttpProvider { protocol_version, .. } if protocol_version == "2.0"
-        ) {
-            return ProviderTransportPreference::Callback;
-        }
-        let Some(gray_list) = &self.provider_stream_gray_list else {
-            return ProviderTransportPreference::Callback;
-        };
-        let created_by = self
-            .registry
-            .get(target_bot_id)
-            .await
-            .and_then(|bot| bot.created_by);
-        if gray_list.contains(created_by.as_deref()) {
-            ProviderTransportPreference::CallbackSse
-        } else {
-            ProviderTransportPreference::Callback
-        }
     }
 
     pub fn with_interceptor<I>(mut self, interceptor: I) -> Self
@@ -345,17 +311,35 @@ pub(crate) async fn try_persist_group_message(
     }
 }
 
-fn persisted_inbound_content(content: &str, attachments: Option<&[Attachment]>) -> Value {
-    let Some(attachments) = attachments.filter(|items| !items.is_empty()) else {
+/// Persist the sender's original text verbatim so human-facing history keeps
+/// `@mention` markers visible (mention tokens are only stripped from bot-bound
+/// deliveries, via `RoutingDecision::cleaned_message`). Non-empty `mentions`
+/// ride along so frontends can render mention chips after a history reload.
+fn persisted_inbound_content(
+    content: &str,
+    attachments: Option<&[Attachment]>,
+    mentions: &[String],
+) -> Value {
+    let attachments = attachments.filter(|items| !items.is_empty());
+    if attachments.is_none() && mentions.is_empty() {
         return Value::String(content.to_string());
-    };
-    serde_json::json!({
-        "text": content,
-        "attachments": attachments
+    }
+    let mut stored = serde_json::json!({ "text": content });
+    if let Some(attachments) = attachments {
+        stored["attachments"] = attachments
             .iter()
             .map(Attachment::stable_metadata)
-            .collect::<Vec<_>>(),
-    })
+            .collect::<Vec<_>>()
+            .into();
+    }
+    if !mentions.is_empty() {
+        stored["mentions"] = mentions
+            .iter()
+            .map(|mention| Value::String(mention.clone()))
+            .collect::<Vec<_>>()
+            .into();
+    }
+    stored
 }
 
 #[cfg(test)]
@@ -377,12 +361,32 @@ mod attachment_persistence_tests {
             expires_at: None,
         };
 
-        let persisted = persisted_inbound_content("look", Some(&[attachment]));
+        let persisted = persisted_inbound_content("look", Some(&[attachment]), &[]);
 
         assert_eq!(persisted["text"], "look");
         assert_eq!(persisted["attachments"][0]["attachment_id"], "att-1");
         assert!(persisted["attachments"][0].get("url").is_none());
         assert!(!persisted.to_string().contains("token=temporary"));
+    }
+
+    #[test]
+    fn mention_text_is_persisted_verbatim_with_structured_mentions() {
+        let persisted = persisted_inbound_content(
+            "@Driver please review",
+            None,
+            &["bot-driver".to_string()],
+        );
+
+        assert_eq!(persisted["text"], "@Driver please review");
+        assert_eq!(persisted["mentions"][0], "bot-driver");
+        assert!(persisted.get("attachments").is_none());
+    }
+
+    #[test]
+    fn plain_text_without_attachments_or_mentions_stays_a_string() {
+        let persisted = persisted_inbound_content("plain chat", None, &[]);
+
+        assert_eq!(persisted, serde_json::Value::String("plain chat".to_string()));
     }
 }
 
@@ -516,7 +520,7 @@ pub async fn handle_web_send(
         &cmd.from_actor_id,
         sender_type,
         "chat",
-        persisted_inbound_content(&decision.cleaned_message, cmd.attachments.as_deref()),
+        persisted_inbound_content(&cmd.message, cmd.attachments.as_deref(), &cmd.mentions),
         cmd.idempotency_key.as_deref(),
         None,
         "", // run_id: user messages don't associate with bot runs
@@ -624,9 +628,6 @@ pub async fn handle_web_send(
         // in the Phase-5 follow-up list (Modify semantics completeness).
 
         let delivery_kind = bot_delivery_kind(delivery_type);
-        let provider_transport = flow
-            .provider_transport_preference(&target_bot_id, &delivery_kind, &delivery_target)
-            .await;
         let source_im_message_id = cmd
             .source_im_message_id
             .as_deref()
@@ -647,7 +648,6 @@ pub async fn handle_web_send(
                 run_id: run_id.clone(),
                 frame,
                 delivery_kind,
-                provider_transport,
                 provider_bypass_headers: cmd.provider_bypass_headers.clone(),
             })
             .await;
@@ -1098,9 +1098,6 @@ pub async fn handle_persistent_group_send(
         )
         .await;
         let delivery_kind = bot_delivery_kind(target.delivery_type);
-        let provider_transport = flow
-            .provider_transport_preference(&target.bot_uuid, &delivery_kind, &delivery_target)
-            .await;
         let result = flow
             .bot_delivery
             .deliver(BotDeliveryCommand {
@@ -1108,7 +1105,6 @@ pub async fn handle_persistent_group_send(
                 run_id: run_id.clone(),
                 frame,
                 delivery_kind,
-                provider_transport,
                 provider_bypass_headers: Vec::new(),
             })
             .await;
@@ -1511,9 +1507,6 @@ pub async fn handle_group_callback(
         .await;
 
         let delivery_kind = bot_delivery_kind(delivery_type);
-        let provider_transport = flow
-            .provider_transport_preference(&target_bot_id, &delivery_kind, &delivery_target)
-            .await;
         let delivery = flow
             .bot_delivery
             .deliver(BotDeliveryCommand {
@@ -1521,7 +1514,6 @@ pub async fn handle_group_callback(
                 run_id: run_id.clone(),
                 frame,
                 delivery_kind,
-                provider_transport,
                 provider_bypass_headers: Vec::new(),
             })
             .await;
@@ -1649,7 +1641,6 @@ pub async fn handle_chat_abort(
                 run_id: delivery_run_id,
                 frame: build_chat_abort_frame(&session_key, cmd.run_id.as_deref()),
                 delivery_kind: BotDeliveryKind::Abort,
-                provider_transport: Default::default(),
                 provider_bypass_headers: Vec::new(),
             })
             .await;
@@ -2224,12 +2215,17 @@ async fn frame_for_target(
     );
     let context_projection =
         context_projection_for_delivery(flow, group, cmd.session_id.as_deref()).await;
-    let wire_attachments = cmd.attachments.as_ref().map(|attachments| {
-        attachments
+    let wire_attachments = cmd.attachments.as_ref().and_then(|attachments| {
+        let attachments = attachments
             .iter()
+            .filter(|attachment| {
+                target.delivery_type == DeliveryType::Send
+                    || attachment.attachment_type != bcs_domain::AttachmentType::File
+            })
             .cloned()
             .map(WireAttachment::from)
-            .collect()
+            .collect::<Vec<_>>();
+        (!attachments.is_empty()).then_some(attachments)
     });
     match target.delivery_type {
         DeliveryType::Send => {
@@ -2553,14 +2549,19 @@ async fn build_workbench_user_event(flow: &BcsMessageFlow, cmd: &WebSendCommand)
     serde_json::to_string(&frame).unwrap_or_default()
 }
 
-/// Echo the inbound attachments verbatim (including the client-provided
-/// `url`/`expires_at`, which stays in **milliseconds**) so other frontends can
-/// render images without waiting for a history refresh. Returns `None` when
-/// there are no attachments, so the event omits the `attachments` key entirely
-/// (older frontends unaffected).
+/// Echo image capabilities so frontends can render them immediately, while
+/// exposing only stable metadata for files whose URL is target-bot-only.
 fn echo_event_attachments(attachments: Option<&[Attachment]>) -> Option<Value> {
     let attachments = attachments.filter(|items| !items.is_empty())?;
-    serde_json::to_value(attachments).ok()
+    let sanitized = attachments
+        .iter()
+        .map(|attachment| match attachment.attachment_type {
+            bcs_domain::AttachmentType::Image => serde_json::to_value(attachment).ok(),
+            // COSEC: file URLs are bearer capabilities scoped to active chat.send.
+            bcs_domain::AttachmentType::File => Some(attachment.stable_metadata()),
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(Value::Array(sanitized))
 }
 
 fn effective_message_log_session_id<'a>(group_id: &'a str, session_id: Option<&'a str>) -> &'a str {
@@ -2612,7 +2613,9 @@ fn log_routing_digest(
     mode: MessageLogMode,
     route_source: &'static str,
 ) {
-    let content = MessageLogContent::from_text(&decision.cleaned_message);
+    // Log the sender's original text so the digest joins with `message_received`;
+    // the @-stripped `cleaned_message` only applies to bot-bound deliveries.
+    let content = MessageLogContent::from_text(&cmd.message);
     let targets_summary: Vec<MessageLogTargetSummary> = decision
         .targets
         .iter()

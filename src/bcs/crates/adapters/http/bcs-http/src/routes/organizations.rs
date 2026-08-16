@@ -410,6 +410,7 @@ fn candidate_to_response(bot: OrganizationCandidateBot) -> OrganizationCandidate
     OrganizationCandidateBotResponse {
         bot_uuid: bot.bot_uuid,
         provider_id: bot.provider_id,
+        agent_code: bot.agent_code,
         name: bot.capabilities.name,
     }
 }

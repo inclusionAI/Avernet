@@ -59,6 +59,10 @@ class EngineProvisioningStrategy(ABC):
         """Stable identifier this strategy is registered under."""
 
     @abstractmethod
+    def resolve_bot_engine(self, bot: Dict[str, Any]) -> str | None:
+        """Resolve the effective runtime engine for a bot record."""
+
+    @abstractmethod
     def build_extra_envs(self, ctx: BotProvisioningContext) -> Dict[str, str] | None:
         """Return extra env vars to inject into the runtime container."""
 
@@ -101,6 +105,21 @@ class EngineProvisioningStrategy(ABC):
         the wire format instead of ExpertChat branching on engine literals.
         Versioned service-bot formats are documented in
         ``src/backend/specs/2026-08-10-expert-chat-service-bot-session-keys/spec.md``.
+        """
+
+    @abstractmethod
+    def apply_restart_extra_configs(
+        self,
+        ctx: BotProvisioningContext,
+        extra_configs: Dict[str, Any] | None,
+        *,
+        template_service: Any,
+    ) -> None:
+        """Apply engine-owned values from the restart extension envelope.
+
+        Concrete engines own their keys, validation, and side effects.
+        Unsupported engines should no-op so the core restart path remains
+        engine-agnostic and backward compatible.
         """
 
     @abstractmethod

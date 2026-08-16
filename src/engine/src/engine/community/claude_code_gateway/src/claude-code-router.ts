@@ -132,7 +132,7 @@ export function createRoutedRunner(routeMap: Map<string, Record<string, string>>
         sdkModel,
         envAnthropicModel: process.env.ANTHROPIC_MODEL,
         envAnthropicBaseUrl: process.env.ANTHROPIC_BASE_URL ? '(set)' : '(unset)',
-        envAnthropicAuthToken: process.env.ANTHROPIC_AUTH_TOKEN ? process.env.ANTHROPIC_AUTH_TOKEN.substring(0, 8) + '...' : '(unset)',
+        envAnthropicAuthTokenSet: Boolean(process.env.ANTHROPIC_AUTH_TOKEN),
         mergedEnvKeys: mergedEnv ? Object.keys(mergedEnv) : [],
       });
       const running = startClaudePromptSdk({

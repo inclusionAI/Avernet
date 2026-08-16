@@ -185,6 +185,10 @@ impl BotEventRouteError {
     fn gone(message: impl Into<String>) -> Self {
         Self::new(StatusCode::GONE, "run_terminated", message)
     }
+
+    fn conflict(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::CONFLICT, "transport_conflict", message)
+    }
 }
 
 impl IntoResponse for BotEventRouteError {
@@ -526,6 +530,9 @@ fn bot_event_error(error: ProviderBotEventError) -> BotEventRouteError {
         ProviderBotEventError::InvalidRequest(message) => BotEventRouteError::bad_request(message),
         ProviderBotEventError::RunNotFound(message) => BotEventRouteError::not_found(message),
         ProviderBotEventError::RunTerminated(message) => BotEventRouteError::gone(message),
+        ProviderBotEventError::TransportConflict(message) => {
+            BotEventRouteError::conflict(message)
+        }
         ProviderBotEventError::BotNotFound(bot_id) => {
             BotEventRouteError::bot_not_found(format!("bot not found: {bot_id}"))
         }

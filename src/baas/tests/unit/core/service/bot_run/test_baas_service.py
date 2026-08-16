@@ -190,6 +190,113 @@ class TestCreateSessionTenantValidation:
             )
 
 
+class TestSessionRoutingAffinityPrefix:
+    """device_affinity 必须对 ``agent:main:`` 前缀不敏感。
+
+    同一会话经 DingTalk(裸 id)与 Open API(带前缀 id)两次投递必须哈希到同一实例,
+    因此 ``_create_session_consistency_key`` 对非 None session_id 剥离前导 ``agent:main:``。
+    """
+
+    def test_prefixed_and_raw_collapse_to_same_affinity(self, service):
+        raw = "bcs-sess-123"
+        prefixed = f"agent:main:{raw}"
+        kwargs = dict(
+            engine_type="openclaw",
+            tc_bot_id=BOT_UUID,
+            user_id="u-1",
+            run_id="run-1",
+        )
+        assert (
+            service._create_session_consistency_key(session_id=raw, **kwargs)
+            == service._create_session_consistency_key(session_id=prefixed, **kwargs)
+            == raw
+        )
+
+    def test_non_prefix_id_unchanged(self, service):
+        assert (
+            service._create_session_consistency_key(
+                engine_type="openclaw",
+                tc_bot_id=BOT_UUID,
+                user_id="u-1",
+                run_id="run-1",
+                session_id="plain-sess",
+            )
+            == "plain-sess"
+        )
+
+    def test_none_branch_synthetic_key_unchanged(self, service):
+        """session_id=None 的合成键保持不变,不动既有 first-call 路由 stickiness。"""
+        assert (
+            service._create_session_consistency_key(
+                engine_type="openclaw",
+                tc_bot_id=BOT_UUID,
+                user_id="u-1",
+                run_id="run-1",
+                session_id=None,
+            )
+            == "agent:main:session:run-1:user:u-1"
+        )
+
+    def test_double_prefix_stripped_to_idempotent_form(self, service):
+        """重复 agent:main: 前缀应被完全剥离,亲和键对前缀次数幂等。"""
+        assert (
+            service._create_session_consistency_key(
+                engine_type="openclaw",
+                tc_bot_id=BOT_UUID,
+                user_id="u-1",
+                run_id="run-1",
+                session_id="agent:main:agent:main:X",
+            )
+            == "X"
+        )
+
+    def test_empty_after_strip(self, service):
+        """仅含前缀的退化 id 剥离后为空串(不致崩溃,固定哈希到某设备)。"""
+        assert (
+            service._create_session_consistency_key(
+                engine_type="openclaw",
+                tc_bot_id=BOT_UUID,
+                user_id="u-1",
+                run_id="run-1",
+                session_id="agent:main:",
+            )
+            == ""
+        )
+
+    @pytest.mark.asyncio
+    async def test_send_path_routes_raw_and_prefixed_to_same_device(
+        self, service, wss_resolver
+    ):
+        """send/inject 路径(_resolve_ws_connection_for_binding): 裸 id 与带前缀 id
+        应使下游 resolver 收到相同 device_affinity —— 本缺陷的实际承重路径。"""
+        wss_resolver.dispatch_bot_ws_conn_info.return_value = _make_conn_info()
+        binding = _make_binding_info()
+
+        affinities = []
+        for sid in ("bcs-sess-123", "agent:main:bcs-sess-123"):
+            await service._resolve_ws_connection_for_binding(binding, session_id=sid)
+            affinities.append(
+                wss_resolver.dispatch_bot_ws_conn_info.call_args.kwargs[
+                    "device_affinity"
+                ]
+            )
+        assert affinities == ["bcs-sess-123", "bcs-sess-123"]
+
+    @pytest.mark.asyncio
+    async def test_send_path_none_session_id_routes_with_none_affinity(
+        self, service, wss_resolver
+    ):
+        """session_id=None 时 send 路由亲和键为 None(回退随机/无粘性),不报错。"""
+        wss_resolver.dispatch_bot_ws_conn_info.return_value = _make_conn_info()
+        await service._resolve_ws_connection_for_binding(
+            _make_binding_info(), session_id=None
+        )
+        assert (
+            wss_resolver.dispatch_bot_ws_conn_info.call_args.kwargs["device_affinity"]
+            is None
+        )
+
+
 class TestCreateSessionBotResolution:
     """Bot resolution error handling in create_session."""
 
@@ -708,7 +815,7 @@ class TestBuildBaseUrl:
         assert result == "https://gateway.example.com/proxypass/ARCA_sb1:20003"
 
     def test_non_wss_url(self):
-        """ws:// URL is converted to https:// (non-TLS) with WS path stripped."""
+        """ws:// URL is converted to http:// with WS path stripped."""
         conn_info = WsConnectionInfo(
             ws_url="ws://localhost:8080/api/openclaw/ws",
             token="t",
@@ -716,7 +823,7 @@ class TestBuildBaseUrl:
             expires_at=datetime.now(tz=UTC),
         )
         result = BaasBotService._build_base_url(conn_info, "openclaw")
-        assert result == "https://localhost:8080"
+        assert result == "http://localhost:8080"
 
     def test_plain_http_url_no_ws_prefix(self):
         """Plain URL without ws:// or wss:// prefix handled gracefully."""

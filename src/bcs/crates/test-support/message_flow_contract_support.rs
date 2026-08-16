@@ -8,9 +8,10 @@ use bcs_protocol::BcsFrame;
 use bcs_service_api::{
     ActorKind, ActorStatus, AgentCredentials, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
     BotDeliveryResult, BotDeliveryTarget, BotCapabilities, BotDynamicStatus, BotRegistryCoreService,
+    CoordinationSurface,
     FrontendDeliveryCommand, FrontendDeliveryPort, FrontendDeliveryResult, Group, GroupMessage,
     GroupCoreService, GroupStatus, Participant, ParticipantMode, ParticipantRole, RegisteredBot,
-    ProviderTransportPreference, RedactedToken, RouteAndSendResult, RoutingDecision,
+    RedactedToken, RouteAndSendResult, RoutingDecision,
     RoutingCoreService, RoutingTarget, ServiceError, ServiceResult, StructuredRoutingError,
     Workspace,
 };
@@ -429,6 +430,8 @@ pub struct FakeRegistryService {
     bots: RwLock<HashMap<String, RegisteredBot>>,
     protocol_versions: RwLock<HashMap<String, u32>>,
     delivery_targets: RwLock<HashMap<String, BotDeliveryTarget>>,
+    coordination_surfaces: RwLock<HashMap<String, CoordinationSurface>>,
+    coordination_surface_resolutions: RwLock<HashMap<String, usize>>,
     including_deleted_gets: RwLock<HashMap<String, usize>>,
 }
 
@@ -484,6 +487,22 @@ impl FakeRegistryService {
             .write()
             .await
             .insert(bot_id.to_string(), target);
+    }
+
+    pub async fn set_coordination_surface(&self, bot_id: &str, surface: CoordinationSurface) {
+        self.coordination_surfaces
+            .write()
+            .await
+            .insert(bot_id.to_string(), surface);
+    }
+
+    pub async fn coordination_surface_resolution_count(&self, bot_id: &str) -> usize {
+        self.coordination_surface_resolutions
+            .read()
+            .await
+            .get(bot_id)
+            .copied()
+            .unwrap_or_default()
     }
 
     pub fn provider_target(bot_id: &str) -> BotDeliveryTarget {
@@ -668,6 +687,22 @@ impl BotRegistryCoreService for FakeRegistryService {
             bot_id: bot_id.to_string(),
         })
     }
+
+    async fn resolve_coordination_surface(
+        &self,
+        bot_id: &str,
+    ) -> ServiceResult<CoordinationSurface> {
+        let mut resolutions = self.coordination_surface_resolutions.write().await;
+        *resolutions.entry(bot_id.to_string()).or_default() += 1;
+        drop(resolutions);
+        if let Some(surface) = self.coordination_surfaces.read().await.get(bot_id).cloned() {
+            return Ok(surface);
+        }
+        if !self.bots.read().await.contains_key(bot_id) {
+            return Err(ServiceError::BotNotFound(bot_id.to_string()));
+        }
+        Ok(CoordinationSurface::legacy_upstream())
+    }
 }
 
 #[derive(Default)]
@@ -675,7 +710,6 @@ pub struct RecordingBotDelivery {
     kinds: RwLock<Vec<BotDeliveryKind>>,
     frames: RwLock<Vec<BcsFrame>>,
     targets: RwLock<Vec<BotDeliveryTarget>>,
-    provider_transports: RwLock<Vec<ProviderTransportPreference>>,
     fail_for: RwLock<Vec<String>>,
     not_delivered_for: RwLock<Vec<String>>,
 }
@@ -691,10 +725,6 @@ impl RecordingBotDelivery {
 
     pub async fn targets(&self) -> Vec<BotDeliveryTarget> {
         self.targets.read().await.clone()
-    }
-
-    pub async fn provider_transports(&self) -> Vec<ProviderTransportPreference> {
-        self.provider_transports.read().await.clone()
     }
 
     pub async fn fail_for(&self, bot_id: &str) {
@@ -716,10 +746,6 @@ impl BotDeliveryPort for RecordingBotDelivery {
         let target_bot_id = cmd.target_bot_id().to_string();
         self.targets.write().await.push(cmd.target.clone());
         self.kinds.write().await.push(cmd.delivery_kind);
-        self.provider_transports
-            .write()
-            .await
-            .push(cmd.provider_transport);
         self.frames.write().await.push(cmd.frame);
         if self.fail_for.read().await.contains(&target_bot_id) {
             return Err(ServiceError::BotNotConnected(target_bot_id));

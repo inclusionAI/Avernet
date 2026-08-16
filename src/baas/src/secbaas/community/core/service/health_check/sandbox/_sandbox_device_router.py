@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from uuid import uuid4
 
 from secbaas.community.api.health_check.sandbox import (
     SandboxDeviceRouter as SandboxDeviceRouterProtocol,
@@ -18,6 +19,9 @@ if TYPE_CHECKING:
     from secbaas.community.core.service.paas import PaasServiceFacade
 
 logger = get_logger("core-service")
+
+# 专用 digest 日志器：独立命名便于 monitor/采集按 logger 名过滤
+arca_renew_digest_logger = get_logger("arca-renew-digest")
 
 # ---------------------------------------------------------------------------
 # 常量
@@ -77,6 +81,7 @@ class RenewTtlResult:
     table_type: str
     device_id: str
     success: bool
+    skipped: bool = False
     old_expiration_time: str | None = None
     new_expiration_time: str | None = None
     refresh_fail_count: int = 0
@@ -161,6 +166,50 @@ def _log_threshold_reached_warning(
         f"reached warning threshold ({fail_count} >= {WARNING_THRESHOLD}), "
         f"device will be escalated to STOPPED status"
     )
+
+
+def _log_renew_digest(
+    *,
+    run_uuid: str,
+    table_id: int,
+    table_type: str,
+    arca_device_id: str,
+    result: str,
+    ttl_before: str | None,
+    ttl_after: str | None,
+) -> None:
+    """续期结果 digest（monitor 用，逗号分隔字段，便于采集/告警）。
+
+    首字段为 run_uuid 用于区分不同轮次/请求；不含 error 详情（可能很长/带换行，
+    会破坏 monitor 格式），错误详情由各分支已有的 warning 日志记录。
+    best-effort，日志失败不影响续期流程。
+
+    ttl 时间去掉空格（``2026-05-27 21:15:05`` -> ``2026-05-27-21:15:05``），
+    缺失/空值置为 ``-``，避免破坏逗号分隔格式。
+    """
+    try:
+        before = _ttl_for_digest(ttl_before)
+        after = _ttl_for_digest(ttl_after)
+        arca_renew_digest_logger.info(
+            "ttl_renew_digest,%s,%s,%s,%s,%s,%s,%s,%s",
+            run_uuid,
+            "renew",
+            table_id,
+            table_type,
+            arca_device_id,
+            result,
+            before,
+            after,
+        )
+    except Exception as e:  # pragma: no cover - defensive
+        logger.warning("[ttl_renew_digest] log failed (non-fatal): %s", e)
+
+
+def _ttl_for_digest(ttl: str | None) -> str:
+    """把 TTL 时间规整为 monitor 友好格式：去空格、缺省置 ``-``。"""
+    if not ttl:
+        return "-"
+    return ttl.replace(" ", "-")
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +320,28 @@ class AcBindingSandboxHandler:
             refresh_fail_count=new_count,
         )
 
-    async def renew_ttl(self, *, table_id: int) -> RenewTtlResult:
+    async def renew_ttl(
+        self, *, table_id: int, run_uuid: str | None = None
+    ) -> RenewTtlResult:
+        result = await self._do_renew(table_id=table_id)
+        _log_renew_digest(
+            run_uuid=run_uuid or str(uuid4()),
+            table_id=result.table_id,
+            table_type=result.table_type.value
+            if isinstance(result.table_type, TableType)
+            else str(result.table_type),
+            arca_device_id=(result.device_id if result.device_id else None),
+            result=(
+                "skipped"
+                if result.skipped
+                else ("success" if result.success else "failure")
+            ),
+            ttl_before=result.old_expiration_time,
+            ttl_after=result.new_expiration_time,
+        )
+        return result
+
+    async def _do_renew(self, *, table_id: int) -> RenewTtlResult:
         record = self._binding_repo.get_by_id(binding_id=table_id)
         if record is None:
             raise ValueError(f"Binding record not found: id={table_id}")
@@ -287,6 +357,23 @@ class AcBindingSandboxHandler:
             ttl_info = await self._paas_facade.update_device_ttl(
                 paas_device_id=sandbox_id
             )
+            if ttl_info.skipped:
+                # 剩余时间充足，跳过续期（非失败），不改库
+                logger.info(
+                    f"[AcBindingSandboxHandler] Skip renew TTL for {sandbox_id}: "
+                    f"{ttl_info.error or 'already at or past target expiration'}"
+                )
+                return RenewTtlResult(
+                    table_id=table_id,
+                    table_type=TableType.AC_BINDING,
+                    device_id=sandbox_id,
+                    success=True,
+                    skipped=True,
+                    old_expiration_time=old_ttl,
+                    new_expiration_time=old_ttl,
+                    refresh_fail_count=dp.get("refresh_fail_count", 0),
+                    error=ttl_info.error or "already at or past target expiration",
+                )
             if ttl_info.success and ttl_info.new_expiration_time:
                 ttl_timestamp = int(ttl_info.new_expiration_time.timestamp() * 1000)
                 ttl_time_str = ttl_info.new_expiration_time.strftime(
@@ -308,6 +395,10 @@ class AcBindingSandboxHandler:
                     refresh_fail_count=0,
                 )
             else:
+                logger.warning(
+                    f"[AcBindingSandboxHandler] Renew TTL extension returned failure "
+                    f"for {sandbox_id}: {ttl_info.error or 'TTL extension failed'}"
+                )
                 return RenewTtlResult(
                     table_id=table_id,
                     table_type=TableType.AC_BINDING,
@@ -437,10 +528,46 @@ class BaasSandboxHandler:
             refresh_fail_count=new_count,
         )
 
-    async def renew_ttl(self, *, table_id: int) -> RenewTtlResult:
+    async def renew_ttl(
+        self, *, table_id: int, run_uuid: str | None = None
+    ) -> RenewTtlResult:
+        result = await self._do_renew(table_id=table_id)
+        _log_renew_digest(
+            run_uuid=run_uuid or str(uuid4()),
+            table_id=result.table_id,
+            table_type=result.table_type.value
+            if isinstance(result.table_type, TableType)
+            else str(result.table_type),
+            arca_device_id=(result.device_id if result.device_id else None),
+            result=(
+                "skipped"
+                if result.skipped
+                else ("success" if result.success else "failure")
+            ),
+            ttl_before=result.old_expiration_time,
+            ttl_after=result.new_expiration_time,
+        )
+        return result
+
+    async def _do_renew(self, *, table_id: int) -> RenewTtlResult:
         row = self._binding_repo.get_baas_device_by_id(baas_device_id=table_id)
         if row is None:
             raise ValueError(f"Device record not found: id={table_id}")
+
+        # STOPPED 状态不续期
+        if row.get("status") == "STOPPED":
+            dp = _parse_device_props(row.get("provider_device_props"))
+            logger.info(
+                f"[BaasSandboxHandler] Skip renew TTL for stopped device id={table_id}"
+            )
+            return RenewTtlResult(
+                table_id=table_id,
+                table_type=TableType.BAAS,
+                device_id=row.get("provider_device_id"),
+                success=False,
+                refresh_fail_count=dp.get("refresh_fail_count", 0),
+                error="Device is stopped",
+            )
 
         # baas_device 表的 provider_device_id 就是 sandbox_id
         sandbox_id = row.get("provider_device_id")
@@ -454,6 +581,23 @@ class BaasSandboxHandler:
             ttl_info = await self._paas_facade.update_device_ttl(
                 paas_device_id=sandbox_id
             )
+            if ttl_info.skipped:
+                # 剩余时间充足，跳过续期（非失败），不改库
+                logger.info(
+                    f"[BaasSandboxHandler] Skip renew TTL for {sandbox_id}: "
+                    f"{ttl_info.error or 'already at or past target expiration'}"
+                )
+                return RenewTtlResult(
+                    table_id=table_id,
+                    table_type=TableType.BAAS,
+                    device_id=sandbox_id,
+                    success=True,
+                    skipped=True,
+                    old_expiration_time=old_ttl,
+                    new_expiration_time=old_ttl,
+                    refresh_fail_count=dp.get("refresh_fail_count", 0),
+                    error=ttl_info.error or "already at or past target expiration",
+                )
             if ttl_info.success and ttl_info.new_expiration_time:
                 ttl_timestamp = int(ttl_info.new_expiration_time.timestamp() * 1000)
                 ttl_time_str = ttl_info.new_expiration_time.strftime(
@@ -475,6 +619,10 @@ class BaasSandboxHandler:
                     refresh_fail_count=0,
                 )
             else:
+                logger.warning(
+                    f"[BaasSandboxHandler] Renew TTL extension returned failure "
+                    f"for {sandbox_id}: {ttl_info.error or 'TTL extension failed'}"
+                )
                 return RenewTtlResult(
                     table_id=table_id,
                     table_type=TableType.BAAS,
@@ -537,6 +685,8 @@ class SandboxDeviceRouter(SandboxDeviceRouterProtocol):
         handler = self._get_handler(table_type)
         return await handler.warn_device(table_id=table_id)
 
-    async def renew_ttl(self, *, table_type: str, table_id: int) -> RenewTtlResult:
+    async def renew_ttl(
+        self, *, table_type: str, table_id: int, run_uuid: str | None = None
+    ) -> RenewTtlResult:
         handler = self._get_handler(table_type)
-        return await handler.renew_ttl(table_id=table_id)
+        return await handler.renew_ttl(table_id=table_id, run_uuid=run_uuid)

@@ -284,10 +284,15 @@ class IdentityService:
             owner_id=owner_id,
             engine_type=engine_type,
         )
-        # 容器里没写过这个 identity 文件时,baas/arca 的 device_fs.read_file 会抛
-        # 404(plugin 故意不吞,见 BaasDeviceFileSystem.read_file 注释)。identity
-        # 域的契约是"缺省即空内容",由 service 层在这里收口,避免 router 吃 500、
-        # 前端打不开编辑器。非 404 的 HTTPStatusError(代理 401/沙箱 5xx 等)仍透出。
+        # identity 域的契约是"缺省即空内容"。``DeviceFileSystem.read_file`` 的契约
+        # 同样是"文件不存在 → None",baas/teclaw/local 都已按此实现,所以正常路径
+        # 不再依赖这里的 except。
+        #
+        # 保留它只为 ArcaDeviceFileSystem:该实现是 corp-only(见
+        # ``DeviceFileSystemResolver._resolve_arca``),本仓库看不到也测不到,若它仍
+        # 抛 404,这里兜住,避免 router 吃 500、前端打不开编辑器。等 arca 侧也按契约
+        # 把 404 收敛成 None,这段 except 就该整体删掉——core 不该认识 HTTP 状态码。
+        # 非 404 的 HTTPStatusError(代理 401/沙箱 5xx 等)始终透出。
         try:
             content_bytes = await device_fs.read_file(f"{IDENTITY_NS}/{file_type}")
         except httpx.HTTPStatusError as e:

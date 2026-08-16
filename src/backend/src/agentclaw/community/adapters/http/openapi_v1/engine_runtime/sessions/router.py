@@ -1,4 +1,4 @@
-"""Sessions group — ``/openapi/v1/bots/sessions/{bot_id}``.
+"""Sessions group — ``/openapi/v1/bots/{bot_id}/sessions``.
 
 Wraps the engine's ``/api/sessions`` surface. An **operator console**: served
 to the addressed bot's owner and its member-level collaborators, for the
@@ -10,9 +10,10 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Path, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
+    BotIdPath,
     Deleted,
     Envelope,
     PageParamsDep,
@@ -53,7 +54,16 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-router = APIRouter(prefix="/openapi/v1/bots/sessions", tags=["sessions"])
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/sessions", tags=["sessions"])
+
+#: The path parameter naming the session an operation addresses.
+SessionIdPath = Annotated[
+    str,
+    Path(
+        description="The session's id, exactly as returned in a session "
+        "listing's session_id — use it verbatim, do not re-encode it."
+    ),
+]
 
 
 #: One extra item is requested beyond the page, purely to learn whether more
@@ -286,10 +296,10 @@ def _history_page(
     return n, visible
 
 
-@router.get("/{bot_id}", response_model=Envelope[SessionPage])
+@router.get("", response_model=Envelope[SessionPage])
 @envelope_errors
 async def list_sessions(
-    bot_id: str,
+    bot_id: BotIdPath,
     page: PageParamsDep,
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
@@ -335,10 +345,10 @@ async def list_sessions(
     return page_envelope(total, items, request)
 
 
-@router.post("/{bot_id}", status_code=201, response_model=Envelope[Session])
+@router.post("", status_code=201, response_model=Envelope[Session])
 @envelope_errors
 async def create_session(
-    bot_id: str,
+    bot_id: BotIdPath,
     body: SessionCreate,
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
@@ -371,11 +381,11 @@ async def create_session(
     return created(_map_session(result.data), request)
 
 
-@router.get("/{bot_id}/{session_id}", response_model=Envelope[Session])
+@router.get("/{session_id}", response_model=Envelope[Session])
 @envelope_errors
 async def get_session(
-    bot_id: str,
-    session_id: str,
+    bot_id: BotIdPath,
+    session_id: SessionIdPath,
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,
@@ -407,11 +417,11 @@ async def get_session(
     return envelope(_map_session(result.data), request)
 
 
-@router.patch("/{bot_id}/{session_id}", response_model=Envelope[Session])
+@router.patch("/{session_id}", response_model=Envelope[Session])
 @envelope_errors
 async def update_session(
-    bot_id: str,
-    session_id: str,
+    bot_id: BotIdPath,
+    session_id: SessionIdPath,
     body: SessionUpdate,
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
@@ -446,11 +456,11 @@ async def update_session(
     return envelope(_map_session(result.data), request)
 
 
-@router.delete("/{bot_id}/{session_id}", response_model=Envelope[Deleted])
+@router.delete("/{session_id}", response_model=Envelope[Deleted])
 @envelope_errors
 async def delete_session(
-    bot_id: str,
-    session_id: str,
+    bot_id: BotIdPath,
+    session_id: SessionIdPath,
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,
@@ -474,11 +484,11 @@ async def delete_session(
     return deleted(request)
 
 
-@router.get("/{bot_id}/{session_id}/messages", response_model=Envelope[MessagePage])
+@router.get("/{session_id}/messages", response_model=Envelope[MessagePage])
 @envelope_errors
 async def list_session_messages(
-    bot_id: str,
-    session_id: str,
+    bot_id: BotIdPath,
+    session_id: SessionIdPath,
     page: PageParamsDep,
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
@@ -520,11 +530,11 @@ async def list_session_messages(
     return page_envelope(total, items, request)
 
 
-@router.delete("/{bot_id}/{session_id}/messages", response_model=Envelope[Deleted])
+@router.delete("/{session_id}/messages", response_model=Envelope[Deleted])
 @envelope_errors
 async def clear_session_messages(
-    bot_id: str,
-    session_id: str,
+    bot_id: BotIdPath,
+    session_id: SessionIdPath,
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,

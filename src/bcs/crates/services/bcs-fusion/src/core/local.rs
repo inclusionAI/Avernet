@@ -3,7 +3,8 @@
 //! This crate provides the concrete implementation of `FusionCoreService`
 //! for fusing contexts from multiple bots.
 
-use std::path::Path;
+
+use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use tracing::{debug, info, warn};
@@ -110,11 +111,7 @@ impl LocalFusionService {
 }
 
 pub fn load_bot_context(bots_base_dir: &Path, bot_id: &str) -> ServiceResult<ContextBotSummary> {
-    let bot_dir = bots_base_dir.join(bot_id);
-
-    if !bot_dir.exists() {
-        return Err(ServiceError::BotNotFound(bot_id.to_string()));
-    }
+    let bot_dir = resolve_bot_dir(bots_base_dir, bot_id)?;
 
     debug!(bot_id = %bot_id, bot_dir = %bot_dir.display(), "Loading bot context");
 
@@ -122,6 +119,20 @@ pub fn load_bot_context(bots_base_dir: &Path, bot_id: &str) -> ServiceResult<Con
     let soul = read_file_opt(&bot_dir.join("SOUL.md"));
     let rules = read_file_opt(&bot_dir.join("RULES.md"));
     let memory = read_file_opt(&bot_dir.join("MEMORY.md"));
+    let tools = read_file_opt(&bot_dir.join("TOOLS.md"));
+    let agents = read_file_opt(&bot_dir.join("AGENTS.md"));
+
+    info!(
+        bot_id = %bot_id,
+        bot_dir = %bot_dir.display(),
+        identity_len = identity.as_ref().map(|s| s.len()).unwrap_or(0),
+        soul_len = soul.as_ref().map(|s| s.len()).unwrap_or(0),
+        rules_len = rules.as_ref().map(|s| s.len()).unwrap_or(0),
+        memory_len = memory.as_ref().map(|s| s.len()).unwrap_or(0),
+        tools_len = tools.as_ref().map(|s| s.len()).unwrap_or(0),
+        agents_len = agents.as_ref().map(|s| s.len()).unwrap_or(0),
+        "Loaded bot context files"
+    );
 
     // Extract name and emoji from identity frontmatter
     let (name, emoji) = parse_identity_frontmatter(identity.as_deref().unwrap_or(""));
@@ -134,7 +145,76 @@ pub fn load_bot_context(bots_base_dir: &Path, bot_id: &str) -> ServiceResult<Con
         soul,
         rules,
         memory,
+        tools,
+        agents,
     })
+}
+
+/// Resolve the concrete directory for a bot in `bots_base_dir`.
+///
+/// The primary lookup is `bots_base_dir.join(bot_id)` (production layout where
+/// directory name equals bot id). If that does not exist, fall back to scanning
+/// immediate subdirectories and matching the bot by `name` or `display_name`
+/// declared in `IDENTITY.md`. This supports local OpenClaw-based profiles whose
+/// filesystem directory names differ from the BCS bot UUID (which may be a
+/// human-readable Chinese name).
+fn resolve_bot_dir(bots_base_dir: &Path, bot_id: &str) -> ServiceResult<PathBuf> {
+    if !bots_base_dir.exists() {
+        return Err(ServiceError::BotNotFound(bot_id.to_string()));
+    }
+
+    let direct = bots_base_dir.join(bot_id);
+    if direct.exists() {
+        return Ok(direct);
+    }
+
+    let entries = match std::fs::read_dir(bots_base_dir) {
+        Ok(entries) => entries,
+        Err(e) => {
+            debug!(path = %bots_base_dir.display(), error = %e, "Failed to read bots_base_dir");
+            return Err(ServiceError::BotNotFound(bot_id.to_string()));
+        }
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let identity_path = path.join("IDENTITY.md");
+        let identity = match std::fs::read_to_string(&identity_path) {
+            Ok(content) => content,
+            Err(_) => continue,
+        };
+
+        if bot_identity_matches(&identity, bot_id) {
+            return Ok(path);
+        }
+    }
+
+    Err(ServiceError::BotNotFound(bot_id.to_string()))
+}
+
+/// Check whether the `name` or `display_name` declared in IDENTITY.md matches
+/// the given bot id.
+fn bot_identity_matches(identity: &str, bot_id: &str) -> bool {
+    for line in identity.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some((key, value)) = line.split_once(':') {
+            let key = key.trim();
+            let value = unquote_yaml_scalar(value.trim());
+            if key == "name" || key == "display_name" {
+                if value == bot_id {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Read a file, returning None if it doesn't exist.
@@ -164,6 +244,11 @@ fn parse_identity_frontmatter(content: &str) -> (Option<String>, Option<String>)
         return (None, None);
     }
 
+    extract_identity_fields(&frontmatter)
+}
+
+/// Extract `name` and `emoji` fields from a key-value block.
+fn extract_identity_fields(frontmatter: &str) -> (Option<String>, Option<String>) {
     let mut name = None;
     let mut emoji = None;
 
@@ -189,26 +274,45 @@ fn parse_identity_frontmatter(content: &str) -> (Option<String>, Option<String>)
 }
 
 /// Extract YAML frontmatter from content.
-fn extract_yaml_frontmatter(content: &str) -> &str {
+///
+/// Supports the standard `---\n...\n---` delimited form and also a simple
+/// top-level key-value header without explicit delimiters (used by many local
+/// OpenClaw profiles).
+fn extract_yaml_frontmatter(content: &str) -> String {
     let trimmed = content.trim_start();
-    if !trimmed.starts_with("---") {
-        return "";
+
+    // Standard delimited frontmatter: ---\n...\n---
+    if let Some(after_open) = trimmed.strip_prefix("---") {
+        let mut chars = after_open.chars();
+        if chars.next() == Some('\n') {
+            let after_newline = chars.as_str();
+            if let Some(end) = after_newline.find("\n---") {
+                return after_newline[..end].to_string();
+            }
+        }
     }
 
-    let rest = match trimmed.strip_prefix("---") {
-        Some(r) => r,
-        None => return "",
-    };
-
-    let rest = match rest.strip_prefix('\n') {
-        Some(r) => r,
-        None => return "",
-    };
-
-    match rest.find("\n---") {
-        Some(end) => &rest[..end],
-        None => "",
+    // Fallback: parse the first contiguous block of key-value lines as
+    // frontmatter. Leading blank/comment lines are skipped; the block stops at
+    // the first subsequent blank line, comment, or non-key-value line.
+    let mut lines = Vec::new();
+    let mut in_block = false;
+    for line in trimmed.lines() {
+        let trimmed_line = line.trim();
+        if trimmed_line.is_empty() || trimmed_line.starts_with('#') {
+            if in_block {
+                break;
+            }
+            continue;
+        }
+        if trimmed_line.split_once(':').is_none() {
+            break;
+        }
+        in_block = true;
+        lines.push(trimmed_line);
     }
+
+    lines.join("\n")
 }
 
 /// Unquote a YAML scalar value.
@@ -407,6 +511,8 @@ mod tests {
             soul: Some("I am helpful.".to_string()),
             rules: Some("- Be nice".to_string()),
             memory: None,
+            tools: None,
+            agents: None,
         }];
 
         let prompt = build_fusion_prompt(&request, &contexts);
@@ -485,6 +591,68 @@ emoji: "🧑‍💻"
         let (name, emoji) = parse_identity_frontmatter(content);
         assert_eq!(name, Some("OnlyName".to_string()));
         assert!(emoji.is_none());
+    }
+
+    #[test]
+    fn test_parse_identity_frontmatter_without_delimiters() {
+        let content = "# IDENTITY.md\n\nname: 店长日常运营\ndisplay_name: 店长日常运营\nemoji: 🏪\nrole: manager\n";
+        let (name, emoji) = parse_identity_frontmatter(content);
+        assert_eq!(name, Some("店长日常运营".to_string()));
+        assert_eq!(emoji, Some("🏪".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_bot_dir_prefers_direct_match() {
+        let tmp = std::env::temp_dir().join(format!("bcs-bot-dir-direct-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let bot_dir = tmp.join("bot-uuid-1");
+        std::fs::create_dir(&bot_dir).unwrap();
+
+        let resolved = resolve_bot_dir(&tmp, "bot-uuid-1").unwrap();
+        assert_eq!(resolved, bot_dir);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_resolve_bot_dir_falls_back_to_identity_name() {
+        let tmp = std::env::temp_dir().join(format!("bcs-bot-dir-fb-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let profile_dir = tmp.join("merchant-operations-manager");
+        std::fs::create_dir(&profile_dir).unwrap();
+        std::fs::write(
+            profile_dir.join("IDENTITY.md"),
+            "name: 店长日常运营\ndisplay_name: 店长日常运营\nrole: manager\n",
+        )
+        .unwrap();
+
+        let resolved = resolve_bot_dir(&tmp, "店长日常运营").unwrap();
+        assert_eq!(resolved, profile_dir);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_load_bot_context_reads_tools_and_agents() {
+        let tmp = std::env::temp_dir().join(format!("bcs-bot-ctx-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let bot_dir = tmp.join("some-bot");
+        std::fs::create_dir(&bot_dir).unwrap();
+        std::fs::write(bot_dir.join("SOUL.md"), "soul content").unwrap();
+        std::fs::write(bot_dir.join("TOOLS.md"), "tools content").unwrap();
+        std::fs::write(bot_dir.join("AGENTS.md"), "agents content").unwrap();
+
+        let ctx = load_bot_context(&tmp, "some-bot").unwrap();
+        assert_eq!(ctx.soul.as_deref(), Some("soul content"));
+        assert_eq!(ctx.tools.as_deref(), Some("tools content"));
+        assert_eq!(ctx.agents.as_deref(), Some("agents content"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
@@ -570,6 +738,8 @@ emoji: "🧑‍💻"
             soul: Some("I am helpful".to_string()),
             rules: Some("- Be nice\n- Be honest".to_string()),
             memory: Some("Remembered something".to_string()),
+            tools: None,
+            agents: None,
         }];
 
         let result = engine.simple_fusion(&request, &contexts).unwrap();
@@ -655,6 +825,8 @@ emoji: "🧑‍💻"
             soul: Some("I am a developer".to_string()),
             rules: None,
             memory: None,
+            tools: None,
+            agents: None,
         }];
 
         let result = engine.fuse_with_llm(&MockLlmClient { response: r#"{"perspectives":[],"conflicts":[],"alignment_points":[],"recommendation":"test","key_insights":[]}"#.to_string() }, &request, &contexts).await;
@@ -724,6 +896,8 @@ emoji: "🧑‍💻"
             soul: None,
             rules: None,
             memory: None,
+            tools: None,
+            agents: None,
         };
 
         assert_eq!(ctx.display_name(), "test-bot");
@@ -740,6 +914,8 @@ emoji: "🧑‍💻"
             soul: Some("I am a database expert.".to_string()),
             rules: Some("- Always verify before executing DDL".to_string()),
             memory: Some("Last incident: deadlock in orders table".to_string()),
+            tools: None,
+            agents: None,
         };
 
         assert_eq!(ctx.display_name(), "DBA专家");
@@ -806,6 +982,29 @@ emoji: "🧑‍💻"
         // Should return default (empty) response when bot contexts cannot be loaded
         let result = engine.fuse(&request).await.unwrap();
         assert!(result.perspectives.is_empty());
+    }
+
+    #[test]
+    #[ignore = "blocked by #1063 minimal merchant profile; see #1076"]
+    fn test_load_merchant_operations_manager_context() {
+        // Resolve the profile directory from the crate root so this test works on
+        // CI/Linux runners as well as local macOS dev machines.
+        let profile_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../../scripts/4bots_merchant_operations_profile");
+        assert!(
+            profile_dir.exists(),
+            "profile directory should exist: {}",
+            profile_dir.display()
+        );
+        let ctx = load_bot_context(&profile_dir, "店长日常运营").expect("load should succeed");
+
+        assert!(ctx.identity.is_some(), "identity should be present");
+        assert!(ctx.soul.is_some(), "soul should be present");
+        assert!(ctx.rules.is_some(), "rules should be present");
+        assert!(ctx.memory.is_some(), "memory should be present");
+        assert!(ctx.tools.is_some(), "tools should be present");
+        assert!(ctx.agents.is_some(), "agents should be present");
+        assert_eq!(ctx.display_name(), "店长日常运营");
     }
 
     #[test]

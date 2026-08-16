@@ -1,9 +1,13 @@
 """Composition root for credential issuance (access_key / app registration).
 
 Builds :class:`AccessKeyIssuer` / :class:`AppRegistrar` wired to a repository
-(backed by the shared ``DataSourcePlugin``) and the gateway ``PrincipalSigner``.
-All DB touch lives in the repositories; the issuer/registrar only mint + delegate.
-The adapters receive them via ``app.state``.
+backed by the shared ``DataSourcePlugin``. All DB touch lives in the
+repositories; the issuer/registrar only mint + delegate. The adapters receive
+them via ``app.state``.
+
+Only the access-key issuer still takes the gateway ``PrincipalSigner``: access
+keys are signed JWTs, whereas app registration now mints a random API key and
+stores only its hash, so it has no signing key to share.
 """
 
 from __future__ import annotations
@@ -21,6 +25,6 @@ def build_access_key_issuer(
     return AccessKeyIssuer(AccessKeyRepository(db), signer)
 
 
-def build_app_registrar(db: DataSourcePlugin, signer: PrincipalSigner) -> AppRegistrar:
-    """Build the AppRegistrar (shares the gateway signer + DB-backed repository)."""
-    return AppRegistrar(AppRepository(db), signer)
+def build_app_registrar(db: DataSourcePlugin) -> AppRegistrar:
+    """Build the AppRegistrar (DB-backed repository; no signer — API keys are random)."""
+    return AppRegistrar(AppRepository(db))
