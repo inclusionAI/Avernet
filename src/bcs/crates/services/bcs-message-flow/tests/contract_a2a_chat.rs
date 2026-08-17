@@ -9,7 +9,8 @@ use bcs_service_api::{
     BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget, BotDynamicStatus,
     BotRegistryCoreService, CallerContext, ChatResponseMode, ChatRunCancelCommand, ChatRunCleanupPort, ChatRunEventPort, ChatRunQueryCommand,
     AuthorizedOrganizationPair, DirectChatClientKind, DirectChatRunSnapshotPort, FriendCoreService, OrganizationCoreService, RegisteredBot,
-    OrganizationCandidateBot, OrganizationCandidateQuery, ServiceError, ServiceResult,
+    OrganizationCandidateBot, OrganizationCandidateQuery, ProviderTransportPreference,
+    ServiceError, ServiceResult,
     interceptor::{
         BlockReason, InterceptorChain, InterceptorDecision, MessageInterceptor, OutboundMessage,
     },
@@ -355,6 +356,10 @@ async fn async_chat_creates_run_and_delivers_chat_send_frame() {
         "running"
     );
     assert_eq!(bot_delivery.kinds().await, vec![BotDeliveryKind::Send]);
+    assert_eq!(
+        bot_delivery.provider_transports().await,
+        vec![ProviderTransportPreference::SseFirst]
+    );
     let chat_send = bot_delivery
         .frames()
         .await
@@ -372,6 +377,27 @@ async fn async_chat_creates_run_and_delivers_chat_send_frame() {
     assert_eq!(chat_send["timeout_ms"], serde_json::json!(7_200_000));
     assert_eq!(chat_send["tags"], serde_json::json!(["tag1", "tag2"]));
     assert_eq!(chat_send["extensions"]["caller_wait_mode"], "detached");
+}
+
+#[tokio::test]
+async fn bcs_cli_a2a_chat_requests_callback_provider_transport() {
+    let (service, bot_delivery, _) = build_service(
+        vec![
+            ("bot-source", "public", Some("owner-1")),
+            ("bot-target", "public", None),
+        ],
+        Vec::new(),
+    )
+    .await;
+    let mut command = chat_command("bot-target");
+    command.client = Some("bcs-cli/0.3.0".to_string());
+
+    service.chat(command).await.unwrap();
+
+    assert_eq!(
+        bot_delivery.provider_transports().await,
+        vec![ProviderTransportPreference::Callback]
+    );
 }
 
 #[tokio::test]
@@ -2095,6 +2121,7 @@ fn normalized_friendship(a: &str, b: &str) -> (String, String) {
 struct RecordingDelivery {
     connected: bool,
     frames: RwLock<Vec<BcsFrame>>,
+    provider_transports: RwLock<Vec<ProviderTransportPreference>>,
 }
 
 impl RecordingDelivery {
@@ -2102,11 +2129,16 @@ impl RecordingDelivery {
         Self {
             connected,
             frames: RwLock::new(Vec::new()),
+            provider_transports: RwLock::new(Vec::new()),
         }
     }
 
     async fn frames(&self) -> Vec<BcsFrame> {
         self.frames.read().await.clone()
+    }
+
+    async fn provider_transports(&self) -> Vec<ProviderTransportPreference> {
+        self.provider_transports.read().await.clone()
     }
 }
 
@@ -2229,6 +2261,10 @@ impl BotDeliveryPort for RecordingDelivery {
 
     async fn deliver(&self, cmd: BotDeliveryCommand) -> ServiceResult<BotDeliveryResult> {
         let target_bot_id = cmd.target_bot_id().to_string();
+        self.provider_transports
+            .write()
+            .await
+            .push(cmd.provider_transport);
         self.frames.write().await.push(cmd.frame);
         Ok(BotDeliveryResult {
             target_bot_id,

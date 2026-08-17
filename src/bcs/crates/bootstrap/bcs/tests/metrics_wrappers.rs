@@ -671,6 +671,7 @@ fn bot_delivery_cmd(delivery_kind: BotDeliveryKind) -> BotDeliveryCommand {
         run_id: "run-wrapper".to_string(),
         frame: BcsFrame::Request(RequestFrame::new("run-wrapper", "chat.send", None)),
         delivery_kind,
+        provider_transport: Default::default(),
         provider_bypass_headers: Vec::new(),
     }
 }

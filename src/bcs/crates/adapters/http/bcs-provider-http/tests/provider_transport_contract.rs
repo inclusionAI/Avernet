@@ -23,7 +23,7 @@ use bcs_service_api::{
     BotRunContextPort, ChatAbortCommand, ChatAbortOutcome, ChatEventState, GroupCallbackCommand,
     GroupCallbackOutcome, GroupHistoryBotRequestPort, MessageFlowService,
     ProviderEventIngestCommand, ProviderEventIngestService, ProviderEventSource,
-    ProviderRunTransport, ServiceResult,
+    ProviderRunTransport, ProviderTransportPreference, ServiceResult,
     DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
     TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome,
     TaskRunAliasRegistration, WebSendCommand, WebSendOutcome,
@@ -149,6 +149,7 @@ async fn provider_delivery_injects_current_gateway_span_context() {
                 })),
             )),
             delivery_kind: BotDeliveryKind::Send,
+            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .instrument(span)
@@ -186,6 +187,7 @@ async fn provider_delivery_applies_configured_bypass_headers() {
                 })),
             )),
             delivery_kind: BotDeliveryKind::Send,
+            provider_transport: Default::default(),
             provider_bypass_headers: vec![(
                 "x-sandbox-bypass".to_string(),
                 "sandbox-route-1".to_string(),
@@ -224,6 +226,7 @@ async fn provider_delivery_ignores_reserved_bypass_headers() {
                 })),
             )),
             delivery_kind: BotDeliveryKind::Send,
+            provider_transport: Default::default(),
             provider_bypass_headers: vec![
                 ("authorization".to_string(), "Bearer attacker".to_string()),
                 ("bcn-message-id".to_string(), "attacker-message-id".to_string()),
@@ -374,6 +377,7 @@ async fn provider_delivery_posts_bearer_token_and_chat_send_body() {
                 })),
             )),
             delivery_kind: BotDeliveryKind::Send,
+            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await
@@ -442,6 +446,7 @@ async fn provider_delivery_forwards_extensions_when_present() {
                 })),
             )),
             delivery_kind: BotDeliveryKind::Send,
+            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await
@@ -474,6 +479,7 @@ async fn provider_delivery_rejects_private_webhook_url_before_request() {
                 })),
             )),
             delivery_kind: BotDeliveryKind::Send,
+            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await
@@ -498,6 +504,7 @@ async fn provider_delivery_logs_policy_rejection_with_provider_url_ip_and_reason
                 Some(json!({ "bcs_group_id": "group-1", "message": { "text": "hello" } })),
             )),
             delivery_kind: BotDeliveryKind::Send,
+            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await
@@ -560,6 +567,7 @@ async fn provider_delivery_protocol2_sse_ingests_events() {
                 })),
             )),
             delivery_kind: BotDeliveryKind::Send,
+            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await
@@ -650,6 +658,7 @@ async fn provider_delivery_protocol2_task_kinds_sse_ingest_events() {
                     })),
                 )),
                 delivery_kind,
+                provider_transport: Default::default(),
                 provider_bypass_headers: Vec::new(),
             }),
         )
@@ -720,6 +729,7 @@ async fn provider_delivery_falls_back_to_actor_id_for_sender_name() {
                 })),
             )),
             delivery_kind: BotDeliveryKind::Send,
+            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await
@@ -927,6 +937,7 @@ async fn provider_delivery_posts_chat_inject_body_with_bcn_group_id() {
                 })),
             )),
             delivery_kind: BotDeliveryKind::Inject,
+            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await
@@ -971,6 +982,7 @@ async fn provider_delivery_rejects_chat_send_when_frame_id_differs_from_run_id()
                 })),
             )),
             delivery_kind: BotDeliveryKind::Send,
+            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await
@@ -1326,6 +1338,7 @@ async fn provider_delivery_2_0_inject_accepts_json_ack() {
                 })),
             )),
             delivery_kind: BotDeliveryKind::Inject,
+            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await
@@ -1368,6 +1381,7 @@ async fn provider_delivery_2_0_chat_send_advertises_sse_and_binds_json_fallback(
                 })),
             )),
             delivery_kind: BotDeliveryKind::Send,
+            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await
@@ -1384,6 +1398,51 @@ async fn provider_delivery_2_0_chat_send_advertises_sse_and_binds_json_fallback(
     assert_eq!(request.body["method"], "chat.send");
     assert_eq!(
         run_context.get_provider_transport("run-sse").await,
+        Some(ProviderRunTransport::Callback)
+    );
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn provider_delivery_2_0_chat_send_honors_callback_preference() {
+    let captured: CapturedState = Arc::new(Mutex::new(None));
+    let app = Router::new()
+        .route("/webhook", post(capture_ack))
+        .with_state(captured.clone());
+    let (webhook_url, server) = spawn_server(app).await;
+
+    let message_flow = Arc::new(RecordingMessageFlow::default());
+    let run_context = Arc::new(RecordingRunContext::default());
+    let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+    transport.set_ingest(message_flow, run_context.clone());
+    let result = transport
+        .deliver(BotDeliveryCommand {
+            target: provider_target_v2(webhook_url),
+            run_id: "run-callback".to_string(),
+            frame: BcsFrame::Request(RequestFrame::new(
+                "run-callback",
+                "chat.send",
+                Some(json!({
+                    "bcs_session_id": "group-1:feedbeef",
+                    "bcs_group_id": "group-1",
+                    "message": { "text": "hello" }
+                })),
+            )),
+            delivery_kind: BotDeliveryKind::Send,
+            provider_transport: ProviderTransportPreference::Callback,
+            provider_bypass_headers: Vec::new(),
+        })
+        .await
+        .expect("2.0 callback-preferred send should accept JSON ack");
+
+    assert!(result.delivered);
+    let request = captured.lock().await.clone().unwrap();
+    assert_eq!(request.protocol_version.as_deref(), Some("2.0"));
+    assert_eq!(request.accept.as_deref(), Some("application/json"));
+    assert_eq!(request.transport.as_deref(), Some("callback"));
+    assert_eq!(
+        run_context.get_provider_transport("run-callback").await,
         Some(ProviderRunTransport::Callback)
     );
 
@@ -1416,6 +1475,7 @@ async fn provider_delivery_invalid_json_ack_fails_without_second_post() {
                 })),
             )),
             delivery_kind: BotDeliveryKind::Send,
+            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await;
@@ -1460,6 +1520,7 @@ async fn provider_delivery_2_0_task_kinds_accept_json_callback_fallback() {
                     })),
                 )),
                 delivery_kind,
+                provider_transport: Default::default(),
                 provider_bypass_headers: Vec::new(),
             })
             .await
@@ -1504,6 +1565,7 @@ async fn provider_delivery_2_0_inject_propagates_json_rejection() {
                 })),
             )),
             delivery_kind: BotDeliveryKind::Inject,
+            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await

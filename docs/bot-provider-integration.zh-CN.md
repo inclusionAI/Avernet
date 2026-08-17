@@ -117,6 +117,10 @@ X-BCN-Protocol-Version: 2.0
 文本优先放在 `delta_text`，BCS 兼容读取 `message.content[].text`。带文本的
 final 按完整快照处理，不会作为新 delta 重复追加。
 
+临时兼容策略：由 `bcs-cli chat`（包括 `invoke` 别名）发起的一对一请求固定
+发送 `Accept: application/json`，使用 2.0 JSON ack + `/bot/events` callback；
+其他 Provider 2.0 `chat.send` 仍保持 SSE-first。
+
 ## 回调 BCS
 
 1.0 和 2.0 的 JSON fallback 使用 `/bot/events`。对于 JSON ack 模式，Provider

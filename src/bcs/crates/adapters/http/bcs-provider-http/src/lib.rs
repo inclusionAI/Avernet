@@ -22,7 +22,7 @@ use bcs_service_api::{
     InteractionProviderCommand, InteractionProviderPort, InteractionService,
     ProviderInteractionRequestedCommand, ProviderInteractionResolvedCommand,
     ProviderEventIngestCommand, ProviderEventIngestService, ProviderEventSource,
-    ProviderRunTransport, ServiceError, ServiceResult,
+    ProviderRunTransport, ProviderTransportPreference, ServiceError, ServiceResult,
 };
 use opentelemetry::global;
 use opentelemetry_http::HeaderInjector;
@@ -363,14 +363,16 @@ impl BotDeliveryPort for HttpProviderTransport {
             BotDeliveryTarget::HttpProvider { protocol_version, .. } if protocol_version == "2.0"
         );
         if is_proto2 {
-            let wants_sse = method == "chat.send";
+            let is_chat_send = method == "chat.send";
+            let wants_sse = is_chat_send
+                && cmd.provider_transport == ProviderTransportPreference::SseFirst;
             let client = if wants_sse { &self.sse_client } else { &self.client };
             let run_context = self
                 .bot_run_context
                 .read()
                 .expect("bot_run_context lock poisoned")
                 .clone();
-            if wants_sse {
+            if is_chat_send {
                 if let Some(context) = run_context.as_ref() {
                     let began = context
                         .begin_provider_transport(
@@ -526,7 +528,7 @@ impl BotDeliveryPort for HttpProviderTransport {
                 }
             };
             if ack.ok {
-                if wants_sse {
+                if is_chat_send {
                     if let Some(context) = run_context.as_ref() {
                         let bound = context
                             .bind_provider_transport(&run_id, ProviderRunTransport::Callback)

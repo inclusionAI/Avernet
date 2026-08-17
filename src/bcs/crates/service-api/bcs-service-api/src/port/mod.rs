@@ -36,7 +36,7 @@ pub use channel_delivery::{
 pub use delivery::{
     BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryResult,
     FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryPort, FrontendDeliveryResult,
-    FrontendDeliveryTarget, RunFallbackDelivery,
+    FrontendDeliveryTarget, ProviderTransportPreference, RunFallbackDelivery,
 };
 pub use group_context::{GroupDispatchContextPort, GroupHistoryBotRequestPort};
 pub use group_session_token::{
