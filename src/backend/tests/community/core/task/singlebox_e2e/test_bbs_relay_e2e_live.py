@@ -200,6 +200,14 @@ class TestBbsRelayE2ELive(unittest.TestCase):
 
         # 3) live adapter:风清扬的 arch-analysis 真实推理
         adapter = SingleboxEngineAdapter(backend_base_url=_BACKEND, user_id=_USER_ID)
+
+        def _dash() -> dict:
+            return client.get("/api/task/dashboard", params={"task_id": TASK_ID}).json()["data"]
+
+        def _node(g: dict, nid: str) -> dict | None:
+            return next((n for n in g["tasks"] if n["node_id"] == nid), None)
+
+        total_architects = 0
         try:
             # 4) BBS 接力 loop(本用例编排 = 极薄触发器 + bbs-relay-pickup loop):每方向一段
             for i, sub in enumerate(SUB_DOMAINS):
@@ -208,7 +216,20 @@ class TestBbsRelayE2ELive(unittest.TestCase):
                 # 步② CAS 占根(同 bot 幂等;前段 result 已释放 claim,这里重新 claim)
                 r = client.post("/api/task/bbs/claim", json={"task_id": TASK_ID, "bot_id": fqy_id})
                 self.assertEqual(r.status_code, 200, f"claim 未成功(@{sub}):{r.text}")
-                print(f"[relay@{sub}] claim 200")
+                # 接单确认:claim 后根 bbs_owner == 风清扬
+                g = _dash()
+                root = _node(g, TASK_ID)
+                self.assertEqual(
+                    (root["run_info"]["extend_props"] or {}).get("bbs_owner"), fqy_id,
+                    f"claim 后根 bbs_owner 非风清扬(@{sub})",
+                )
+                # CAS 排他确认:owner 再 claim 同任务应 409(仅首段验一次)
+                if i == 0:
+                    r2 = client.post("/api/task/bbs/claim", json={"task_id": TASK_ID, "bot_id": owner_id})
+                    self.assertEqual(r2.status_code, 409, f"第二 bot claim 未被 CAS 拒(应 409):{r2.text}")
+                    print(f"[relay@{sub}] claim 200 bbs_owner=风清扬 (CAS: owner→409 ✓)")
+                else:
+                    print(f"[relay@{sub}] claim 200 bbs_owner=风清扬")
 
                 # 步④ 挂一个 scoped 节点(该方向找架构师)+ start
                 r = client.post(
@@ -236,7 +257,14 @@ class TestBbsRelayE2ELive(unittest.TestCase):
                 self.assertEqual(r.status_code, 200, f"attach 未成功(@{sub}):{r.text}")
                 node_id = r.json()["data"]["node_id"]
                 self.assertTrue(node_id.startswith("bbs-"), f"node_id 非 bbs- 前缀:{node_id}")
-                print(f"[relay@{sub}] attach 200 node={node_id}")
+                # 执行确认:attach 后节点 RUNNING / run_mode=bbs / assignee=风清扬
+                g = _dash()
+                nd = _node(g, node_id)
+                self.assertIsNotNone(nd, f"attach 后未找到节点 {node_id}(@{sub})")
+                self.assertEqual(nd["status"], "RUNNING", f"attach 后节点非 RUNNING(@{sub}):{nd['status']}")
+                self.assertEqual((nd["run_info"] or {}).get("run_mode"), "bbs", f"节点非 run_mode=bbs(@{sub})")
+                self.assertEqual((nd["run_info"] or {}).get("assignee"), fqy_id, f"节点 assignee 非风清扬(@{sub})")
+                print(f"[relay@{sub}] attach 200 node={node_id} RUNNING/bbs/风清扬 ✓")
 
                 # 步④ 执行:风清扬 arch-analysis(live LLM)识别该方向架构师
                 prompt = (
@@ -248,14 +276,22 @@ class TestBbsRelayE2ELive(unittest.TestCase):
                     run = await adapter.send_and_wait_async(
                         bot_id=fqy_id, message=prompt, timeout=180.0
                     )
-                    raw = run if isinstance(run, str) else json.dumps(run, ensure_ascii=False)
-                    parsed = _parse_architects(raw)
-                    finding_text = json.dumps(parsed, ensure_ascii=False) if parsed else raw
-                    n_arch = len((parsed or {}).get("architects", [])) if parsed else 0
-                    print(f"[relay@{sub}] arch-analysis OK parsed_architects={n_arch}")
+                    # bot 文本在 run["result"]["content"](adapter _ws_chat_roundtrip 终态返此结构)
+                    status = run.get("status")
+                    content = (run.get("result") or {}).get("content") or ""
+                    if status != "COMPLETED" or not content:
+                        finding_text = f"<arch-analysis status={status} error={run.get('error')}>"
+                        print(f"[relay@{sub}] arch-analysis 未拿到内容:{finding_text}")
+                    else:
+                        parsed = _parse_architects(content)
+                        finding_text = json.dumps(parsed, ensure_ascii=False) if parsed else content
+                        n_arch = len((parsed or {}).get("architects", [])) if parsed else 0
+                        total_architects += n_arch
+                        print(f"[relay@{sub}] arch-analysis status={status} parsed={n_arch} "
+                              f"content[:200]={content[:200]!r}")
                 except Exception as exc:  # noqa: BLE001  # live LLM 失败不阻断接力 mechanics 验证
                     finding_text = f"<arch-analysis unavailable: {exc!r}>"
-                    print(f"[relay@{sub}] arch-analysis fallback: {exc!r}")
+                    print(f"[relay@{sub}] arch-analysis 异常:{exc!r}")
 
                 # 步⑤ 回投:PASS + checkpoint;末段 root_verified=True 收口图 DONE
                 r = client.post(
@@ -274,7 +310,25 @@ class TestBbsRelayE2ELive(unittest.TestCase):
                     },
                 )
                 self.assertEqual(r.status_code, 200, f"result 未成功(@{sub}):{r.text}")
-                print(f"[relay@{sub}] result 200 root_verified={is_last}")
+                # 上报确认:节点 DONE;非末段根仍 PLANNING(collector-free 不提前收口);bbs_owner 已释放
+                g = _dash()
+                nd = _node(g, node_id)
+                self.assertEqual(nd["status"], "DONE", f"result 后节点非 DONE(@{sub}):{nd['status']}")
+                root = _node(g, TASK_ID)
+                if is_last:
+                    self.assertEqual(root["status"], "DONE", f"末段 root_verified 后根非 DONE(@{sub})")
+                    self.assertEqual(g["status"], "DONE", f"末段后图非 DONE(@{sub}):{g['status']}")
+                else:
+                    self.assertEqual(
+                        root["status"], "PLANNING",
+                        f"非末段 result 后根非 PLANNING(collector-free 应不提前收口)(@{sub}):{root['status']}",
+                    )
+                self.assertIsNone(
+                    (root["run_info"]["extend_props"] or {}).get("bbs_owner"),
+                    f"result 后 bbs_owner 未释放(@{sub})",
+                )
+                print(f"[relay@{sub}] result 200 node=DONE root={root['status']} bbs_owner=释放 ✓ "
+                      f"root_verified={is_last}")
         finally:
             try:
                 await adapter._aclose()
@@ -287,6 +341,11 @@ class TestBbsRelayE2ELive(unittest.TestCase):
         nodes = {t["node_id"]: t for t in g["tasks"]}
         self.assertEqual(nodes[TASK_ID]["status"], "DONE", "根未 DONE")
         self.assertTrue(g["extend_props"].get("bbs_mode"), "图未置 bbs_mode")
+        self.assertGreater(
+            total_architects, 0,
+            "arch-analysis 全程未产出任何架构师(检查 skill 是否激活 + 输出是否 ```json 格式);"
+            "看上方各段 content[:200] 日志定位",
+        )
 
         bbs_nodes = [
             t for t in g["tasks"]
@@ -304,7 +363,7 @@ class TestBbsRelayE2ELive(unittest.TestCase):
                 (ri.get("output") or {}).get("architects"),
                 f"scoped 缺架构师 checkpoint:{n['node_id']}",
             )
-        print(f"[final] graph={g['status']} 风清扬接力段={len(bbs_nodes)} 根=DONE")
+        print(f"[final] graph={g['status']} 风清扬接力段={len(bbs_nodes)} 架构师(parsed)={total_architects} 根=DONE")
 
 
 if __name__ == "__main__":
