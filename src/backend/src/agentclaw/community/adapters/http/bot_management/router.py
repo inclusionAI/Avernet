@@ -442,10 +442,11 @@ async def restart_bot_for_others(
 async def restart_scheduler(
     request: Request,
     response: Response,
+    ctx: RequestContext = Depends(get_request_context),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> ApiResponse:
     """
-    Restart a bot by scheduler task
+    Restart a bot by an administrator-operated scheduler task.
 
     POST /api/bots/restart-scheduler
     Body: {
@@ -454,6 +455,19 @@ async def restart_scheduler(
     }
     """
     try:
+        caller_user_id = ctx.user_id
+        if caller_user_id not in super_admin():
+            logger.warning(
+                "[bot_router.restart_scheduler] Permission denied for user: %s",
+                caller_user_id,
+            )
+            return ApiResponse(
+                success=False,
+                message="权限不足：您没有权限调用此接口",
+                error_code=403,
+                data=None,
+            )
+
         data = await request.json()
         target_user_id = data.get("user_id")
         target_bot_id = data.get("bot_id")
