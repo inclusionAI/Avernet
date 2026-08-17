@@ -76,6 +76,7 @@ from agentclaw.community.adapters.http.skill_center.schemas import (
     UpdateRiskTagsRequest,
     UpdateSkillMemberRoleRequest,
     UpdateSkillRequest,
+    UploadSkillErrorResponse,
     UploadSkillResponse,
     VersionListResponse,
 )
@@ -90,6 +91,7 @@ from agentclaw.community.core.skill_center.errors import (
 )
 from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditGuard,
+    SkillsPoolEditLockUnavailableError,
     SkillsPoolEditPausedError,
 )
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
@@ -375,7 +377,20 @@ def _require_pool_runtime_sync_success(
 
 # ==================== Core CRUD APIs ====================
 
-@router.post("/upload", response_model=UploadSkillResponse)
+@router.post(
+    "/upload",
+    response_model=UploadSkillResponse,
+    responses={
+        409: {
+            "model": UploadSkillErrorResponse,
+            "description": "A Local Skill edit or layout rollback is in progress.",
+        },
+        503: {
+            "model": UploadSkillErrorResponse,
+            "description": "The edit-lock backend is temporarily unavailable.",
+        },
+    },
+)
 @with_interceptors(CollaboratorPermissionInterceptor(
     bot_id="$bot_id",
     owner_id="$user_id",
@@ -555,6 +570,8 @@ async def upload_skill(
             ),
             message="Skill uploaded successfully"
         )
+    except SkillsPoolEditLockUnavailableError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except SkillsPoolEditPausedError as e:
         # A held edit/rollback lock is an ordinary request conflict, not a
         # successful response carrying a failed business envelope.  Clients

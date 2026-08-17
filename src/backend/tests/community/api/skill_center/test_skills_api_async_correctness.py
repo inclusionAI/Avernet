@@ -37,7 +37,10 @@ from agentclaw.community.core.skill_center.services.runtime_layout_probe import 
     RuntimeLayoutProbeStatus,
 )
 from agentclaw.community.core.skill_center.services.skill_parser import SkillInfo
-from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditBusyError
+from agentclaw.community.core.skills_pool.edit_guard import (
+    SkillsPoolEditBusyError,
+    SkillsPoolEditLockUnavailableError,
+)
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -609,6 +612,46 @@ class TestUploadSkillValidation:
             assert response.status_code == 409
             assert response.json()["detail"] == "busy"
             mock_svc.upload_skill.assert_not_called()
+
+    def test_upload_lock_backend_outage_returns_http_503(self, mock_ctx):
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (
+            client,
+            mock_svc,
+            _,
+            _,
+        ):
+            from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
+
+            guard = client.app.state.injector.get(SkillsPoolEditGuard)
+            guard.acquire_for_edit.side_effect = SkillsPoolEditLockUnavailableError(
+                "lock service unavailable"
+            )
+
+            response = client.post(
+                "/api/skills/upload",
+                files=[
+                    (
+                        "files",
+                        ("SKILL.md", b"---\nname: a\ndescription: a\n---", "text/markdown"),
+                    )
+                ],
+                data={"file_paths": json.dumps(["SKILL.md"])},
+            )
+
+            assert response.status_code == 503
+            assert response.json()["detail"] == "lock service unavailable"
+            mock_svc.upload_skill.assert_not_called()
+
+
+def test_upload_openapi_documents_edit_lock_conflict_and_outage():
+    app = FastAPI()
+    app.include_router(skills_router)
+
+    responses = app.openapi()["paths"]["/api/skills/upload"]["post"]["responses"]
+    for status in ("409", "503"):
+        assert responses[status]["content"]["application/json"]["schema"]["$ref"].endswith(
+            "UploadSkillErrorResponse"
+        )
 
     def test_upload_persists_bot_owner_for_collaborator_upload(self):
         collaborator_ctx = RequestContext(
