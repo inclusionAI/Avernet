@@ -109,9 +109,8 @@ user_config:
     batch_size: 100  # 每页拉取条数，默认: 100
     max_page_concurrency: 10  # 每页内并发续期的最大并发数
     query_retries: 3  # 单页查询 DB 失败时的重试次数
-    lock_name: "device_ttl_timer_lock"  # 分布式锁名称
-    lock_expire_seconds: 1800  # 分布式锁租约（秒），须 >= cron 间隔，默认: 1800
-    lock_renew_interval_seconds: 60  # 分布式锁自动续期间隔（秒），默认: 60
+    lock_name: "device_ttl_timer_lock"  # 分布式锁名称基准，运行时追加环境后缀（如 _pre/_prod）以实现环境隔离
+    lock_expire_seconds: 1750  # 分布式锁租约（秒），须 < cron 间隔以允许其它实例在轮次间获取，默认: 1750
     dry_run: false  # 测试模式：只打印日志
 
   # BotRun 队列恢复配置（周期性重置心跳过期的 RUNNING 请求回 PENDING）
