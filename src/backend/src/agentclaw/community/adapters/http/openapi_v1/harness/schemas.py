@@ -52,3 +52,12 @@ class HarnessDimHistoryRequest(BaseModel):
     bot_publish_id: str | None = Field(default=None, description="Bot publish ID")
     page: int = Field(default=1, ge=1)
     size: int = Field(default=20, ge=1, le=100)
+
+
+from agentclaw.community.adapters.http.harness.schemas import (
+    DiagnoseStartResponse,
+    PreviewResponse,
+    ApplyResponse,
+    DimReportResponse,
+    DimHistoryResponse,
+)
