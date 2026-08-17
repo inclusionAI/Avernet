@@ -858,6 +858,22 @@ def test_zip_rejects_missing_multiple_outside_wrapper_and_normalized_duplicates(
         _service(_Filesystem())._unpack(_zip(entries))
 
 
+def test_zip_explains_when_multiple_skill_files_are_present():
+    with pytest.raises(LocalSkillInvalidPackageError) as error:
+        _service(_Filesystem())._unpack(
+            _zip(
+                {
+                    "SKILL.md": b"name: one\ndescription: one\n",
+                    "nested/SKILL.md": b"name: one\ndescription: two\n",
+                }
+            )
+        )
+
+    assert error.value.public_message == (
+        "Skill package must contain exactly one SKILL.md file"
+    )
+
+
 @pytest.mark.parametrize("name", ["skills-center", "skills-local", "skills-repo"])
 def test_zip_rejects_reserved_content_store_names(name):
     with pytest.raises(LocalSkillInvalidPackageError):
