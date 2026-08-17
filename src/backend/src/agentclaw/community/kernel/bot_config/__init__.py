@@ -19,6 +19,7 @@ from .artifact import (  # noqa: F401  (relative intra-kernel import — no cros
     McpServerRef,
     ResourceRef,
     SkillRef,
+    StdioSpec,
     StoreRef,
 )
 
@@ -31,5 +32,6 @@ __all__ = [
     "McpServerRef",
     "ResourceRef",
     "SkillRef",
+    "StdioSpec",
     "StoreRef",
 ]
