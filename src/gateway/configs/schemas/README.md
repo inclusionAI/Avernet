@@ -20,6 +20,25 @@ of a surface the upstream does not serve, and nothing downstream would catch it.
   `/openapi/v1/bots` surface, narrowed to public paths and the components they
   reference)
 
+## `served/` — the composed document, not an upstream's
+
+`served/gateway.openapi.json` is a different kind of artifact from the files
+above. Those are each upstream's description of its **own** surface and are the
+catalog *input*; none of them carries auth, because no upstream ever sees a
+caller's credential — the gateway mints a signed `X-Avernet-Principal` for them.
+
+`served/gateway.openapi.json` is the document the gateway *composes* from those
+inputs and serves at `/openapi.json`: the one a third-party client reads, and
+the only place the credential a caller must present is written down
+(`components.securitySchemes` + per-operation `security`). Regenerate it with
+`scripts/dump_served_openapi.py`, which builds it through the real composition
+root so it cannot drift from what a running gateway serves. It reflects *this*
+deployment's configured strategies, so a flavor reading a different user-token
+header publishes that header here.
+
+`tests/unit/scripts/test_dump_served_openapi.py` fails when the committed copy
+goes stale.
+
 ## Future: build-time generation
 
 When the pipeline is ready, generated artifacts will land here:
