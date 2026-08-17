@@ -134,8 +134,9 @@ def test_shipped_config_routes_internal_collaboration_verbatim_to_bcs() -> None:
         "GET", "/api/v1/collaboration/bots/bot-1/candidates/search"
     )
     assert requirement is not None
-    assert requirement[PrincipalType.USER] is Presence.REQUIRED
-    assert requirement[PrincipalType.APP] is Presence.REQUIRED
+    assert requirement[PrincipalType.USER] is Presence.OPTIONAL
+    assert requirement[PrincipalType.APP] is Presence.OPTIONAL
+    assert requirement[PrincipalType.BOT] is Presence.OPTIONAL
 
     file_requirement = security.resolve(
         "PUT", "/api/v1/collaboration/sessions/session-1/files/file-1/content"

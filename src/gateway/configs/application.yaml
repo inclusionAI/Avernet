@@ -240,8 +240,9 @@ user_config:
       app: required
 
     "/api/v1/collaboration/**":
-      user: required
-      app: required
+      user: optional
+      app: optional
+      bot: optional
 
     # Session-file use cases let BCN choose Human or Bot as the effective Actor.
     # Gateway therefore best-effort resolves and signs every relevant identity;
