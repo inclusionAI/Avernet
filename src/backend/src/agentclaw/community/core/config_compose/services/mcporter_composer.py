@@ -153,9 +153,31 @@ class McporterComposer:
             headers=headers,
         )
 
+    def _endpoint_tuple(
+        self, server_code: str, ep: dict[str, Any]
+    ) -> tuple[str, str]:
+        """Turn the selected endpoint record into ``(url, transport)``.
+
+        A record that carries no ``url`` cannot produce a usable remote entry —
+        the engine would get a server with nothing to connect to — so it fails
+        here rather than composing ``endpoint: null`` and deferring the discovery
+        to whoever tries to call it. Selection already passed, so the fault is the
+        record itself, and the message says so.
+        """
+        url = ep.get("url")
+        if not isinstance(url, str) or not url.strip():
+            raise McporterComposeError(
+                f"MCP {server_code}: the selected "
+                f"{ep.get('networkType', '?')}/{ep.get('env', '?')} endpoint record "
+                "carries no url."
+            )
+        protocol = ep.get("transportProtocol", "SSE")
+        transport = "http" if protocol == "STREAMABLE_HTTP" else "sse"
+        return url, transport
+
     def _inline_secrets(
-        self, endpoint: str | None, api_key: str | None, headers: dict[str, str]
-    ) -> tuple[str | None, dict[str, str]]:
+        self, endpoint: str, api_key: str | None, headers: dict[str, str]
+    ) -> tuple[str, dict[str, str]]:
         """Inline the resolved credential, mirroring ``convert_to_device_format``.
 
         ``api_key`` is ``"name=value"``. ``authorization`` is appended to the
@@ -186,7 +208,7 @@ class McporterComposer:
         endpoint_env: str,
         transport_protocol: str | None,
         network_priority: tuple[str, ...] | None = None,
-    ) -> tuple[str | None, str]:
+    ) -> tuple[str, str]:
         """Pick the (url, transport) for a REMOTE MCP, mirroring device rules.
 
         When ``network_priority`` is set (teclaw), select deterministically by
@@ -257,10 +279,7 @@ class McporterComposer:
         if ep is None:
             ep = valid[0]
 
-        url = ep.get("url")
-        protocol = ep.get("transportProtocol", "SSE")
-        transport = "http" if protocol == "STREAMABLE_HTTP" else "sse"
-        return url, transport
+        return self._endpoint_tuple(server_code, ep)
 
     def _select_by_priority(
         self,
@@ -268,7 +287,7 @@ class McporterComposer:
         endpoints: list[dict[str, Any]],
         endpoint_env: str,
         network_priority: tuple[str, ...],
-    ) -> tuple[str | None, str]:
+    ) -> tuple[str, str]:
         """Pick the (url, transport) deterministically for a priority engine.
 
         Among the ``endpoint_env`` endpoints whose ``networkType`` is in
@@ -314,7 +333,4 @@ class McporterComposer:
             )
 
         ep = min(candidates, key=_key)
-        url = ep.get("url")
-        protocol = ep.get("transportProtocol", "SSE")
-        transport = "http" if protocol == "STREAMABLE_HTTP" else "sse"
-        return url, transport
+        return self._endpoint_tuple(server_code, ep)

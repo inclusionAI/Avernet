@@ -236,6 +236,52 @@ def test_missing_server_code_raises() -> None:
         composer.compose_server(McpComposeInput(mcp_data={"name": "x"}))
 
 
+def test_selected_endpoint_without_a_url_raises() -> None:
+    """A remote entry with no URL gives the engine nothing to connect to.
+
+    Selection can pick a record that matched on network/env but carries no
+    ``url``; composing it produced ``endpoint: null``, deferring the discovery to
+    whoever tried to call the server. It fails at compose instead, naming the
+    record that was chosen.
+    """
+    composer = McporterComposer()
+    md = {
+        "server_code": "urlless",
+        "run_mode": "REMOTE",
+        "endpoints": [
+            {"networkType": "OFFICE", "env": "PROD",
+             "transportProtocol": "STREAMABLE_HTTP"},  # no url
+        ],
+    }
+
+    with pytest.raises(McporterComposeError, match="carries no url"):
+        composer.compose_server(
+            McpComposeInput(
+                mcp_data=md,
+                endpoint_env="PROD",
+                network_priority=TECLAW_MCP_NETWORK_PRIORITY,
+            )
+        )
+
+
+def test_selected_endpoint_without_a_url_raises_on_the_legacy_path() -> None:
+    """Same guard on the non-priority selector other engines still use."""
+    composer = McporterComposer()
+    md = {
+        "server_code": "urlless",
+        "run_mode": "REMOTE",
+        "endpoints": [
+            {"networkType": "INTERNET", "env": "PROD",
+             "transportProtocol": "STREAMABLE_HTTP"},  # no url
+        ],
+    }
+
+    with pytest.raises(McporterComposeError, match="carries no url"):
+        composer.compose_server(
+            McpComposeInput(mcp_data=md, endpoint_env="PROD")
+        )
+
+
 def test_no_endpoints_reports_only_what_this_layer_can_observe() -> None:
     """Zero endpoints must not be reported as "the detail was never resolved".
 

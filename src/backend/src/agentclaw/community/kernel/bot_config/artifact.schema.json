@@ -140,10 +140,11 @@
         },
         {
           "title": "remote (http/sse)",
-          "description": "transport 'http'/'sse' ⇒ no launch instruction.",
-          "required": ["transport"],
+          "description": "transport 'http'/'sse' ⇒ a URL to connect to, and no launch instruction. 'endpoint' is required here even though it is nullable at the top level: an entry with neither a URL nor a launch instruction gives the engine nothing to act on.",
+          "required": ["transport", "endpoint"],
           "properties": {
             "transport": { "enum": ["http", "sse"] },
+            "endpoint": { "type": "string", "minLength": 1 },
             "stdio": { "type": "null" }
           }
         }
