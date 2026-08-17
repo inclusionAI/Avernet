@@ -1,6 +1,5 @@
 use bcs_service_api::application::v1::{
-    AuthenticatedCaller, BotParticipantMode, CreateSession, SessionInput, SessionStatus,
-    UpdateSession,
+    AuthenticatedCaller, CreateSession, ParticipantMode, SessionInput, SessionStatus, UpdateSession,
 };
 use serde::Deserialize;
 
@@ -69,7 +68,7 @@ impl UpdateSessionRequest {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateSessionParticipantRequest {
-    pub mode: BotParticipantMode,
+    pub mode: ParticipantMode,
 }
 
 #[derive(Debug, Deserialize)]

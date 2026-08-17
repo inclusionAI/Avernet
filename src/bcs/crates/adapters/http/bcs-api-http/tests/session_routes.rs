@@ -14,8 +14,8 @@ use bcs_service_api::application::v1::{
 };
 use bcs_service_api::application::v1::{
     AddGroupParticipant, AddSessionParticipant, ApplicationError, AuthenticatedAppIdentity,
-    AuthenticatedBotIdentity, AuthenticatedCaller, AuthenticatedUserIdentity, BotParticipantMode,
-    CollectSession, CompleteSession, CreateGroup, CreateSession, CreateSessionOutcome,
+    AuthenticatedBotIdentity, AuthenticatedCaller, AuthenticatedUserIdentity, CollectSession,
+    CompleteSession, CreateGroup, CreateSession, CreateSessionOutcome,
     DeleteGroup, DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant,
     GetGroup, GetSession, GroupDetail, GroupService, GroupSummary, ListGroups,
     ListSessionMessages, ListSessions, Page, SessionCollectionResult, SessionCompletionResult,
@@ -497,14 +497,15 @@ impl SessionService for FakeSessionService {
             .lock()
             .expect("update participant lock") = Some(command.clone());
         Ok(SessionParticipant {
+            actor_kind: if command.bot_uuid.starts_with("human_") {
+                ActorKind::Human
+            } else {
+                ActorKind::Bot
+            },
             actor_id: command.bot_uuid,
-            actor_kind: ActorKind::Bot,
             name: None,
             role: ParticipantRole::Consultant,
-            mode: match command.mode {
-                BotParticipantMode::Muted => ParticipantMode::Muted,
-                BotParticipantMode::Auto => ParticipantMode::Auto,
-            },
+            mode: command.mode,
             joined_at: Some(1),
         })
     }
@@ -1429,8 +1430,37 @@ async fn update_session_participant_returns_updated_mode() {
         assert_eq!(caller_user_id(&updated.caller), "staff-1");
         assert_eq!(updated.session_id, "session-1");
         assert_eq!(updated.bot_uuid, "bot-2");
-        assert_eq!(updated.mode, BotParticipantMode::Muted);
+        assert_eq!(updated.mode, ParticipantMode::Muted);
     }
+}
+
+#[tokio::test]
+async fn update_session_human_participant_accepts_present_mode() {
+    let session = Arc::new(FakeSessionService::default());
+    let message = Arc::new(FakeSessionMessageService::default());
+    let app = test_session_router(session.clone(), message);
+
+    let response = app
+        .oneshot(authenticated_request(
+            "PATCH",
+            "/openapi/v1/collaboration/sessions/session-1/participants/human_staff-1",
+            json!({"mode": "present"}),
+        ))
+        .await
+        .expect("update Human participant response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["code"], 20_000);
+    assert_eq!(body["data"]["actor_kind"], "human");
+    assert_eq!(body["data"]["mode"], "present");
+
+    let updated = session
+        .updated_participant
+        .lock()
+        .expect("update participant lock");
+    let updated = updated.as_ref().expect("update participant command");
+    assert_eq!(updated.bot_uuid, "human_staff-1");
+    assert_eq!(updated.mode, ParticipantMode::Present);
 }
 
 #[tokio::test]
