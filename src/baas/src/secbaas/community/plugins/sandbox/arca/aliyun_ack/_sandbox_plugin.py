@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from kubernetes.client import CoreV1Api
     from kubernetes.client.rest import ApiException
 
-logger = get_logger("plugin-sandbox-arca-aliyun-ack")
+logger = get_logger("plugin-sandbox")
 
 _BOLT_PORT = 20003
 

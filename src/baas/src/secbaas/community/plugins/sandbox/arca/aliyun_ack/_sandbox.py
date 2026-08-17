@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from kubernetes.client import ApiClient, CoreV1Api
     from kubernetes.client.rest import ApiException
 
-logger = get_logger("plugin-sandbox-arca-aliyun-ack")
+logger = get_logger("plugin-sandbox")
 
 
 def _import_k8s() -> None:
