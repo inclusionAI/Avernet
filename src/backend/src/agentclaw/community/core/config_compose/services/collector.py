@@ -277,10 +277,11 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         outright. Reading a local YAML needs no network, so a local server stays
         recognizable exactly when Center cannot vouch for it.
 
-        The registry normalizes the YAML's flat ``command``/``args``/``env`` into
-        ``stdioConfigs: [{command, arguments, envVariables}]``; today that list is
-        always single-entry (a multi-variant form would need a per-variant
-        discriminator the shape does not yet carry), so the first entry is taken.
+        Either source speaks ``stdioConfigs: [{command, arguments, envVariables}]``
+        — the registry normalizes the YAML's flat ``command``/``args``/``env`` into
+        exactly that. The list holds one entry per engine layout, discriminated by
+        ``engineType``; :meth:`_stdio_config_for_engine` picks the one for this
+        engine.
         """
         if not server_code:
             return None
