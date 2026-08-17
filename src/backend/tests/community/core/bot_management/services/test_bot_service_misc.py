@@ -6,6 +6,7 @@ check_bot_name_exists, generate_bot_id.
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call as mock_call, patch
 
@@ -621,6 +622,24 @@ class TestDeleteBot:
             "staff_user001",
             "delete:bot001",
             "reacquired-delete-lock",
+        )
+
+    def test_delete_stale_reaper_fences_a_renewed_lock(self):
+        svc = _make_service()
+        stale = SimpleNamespace(
+            lock_token="delete-lock", gmt_modified=datetime(2000, 1, 1)
+        )
+        svc._restart_lock_repo.acquire.return_value = None
+        svc._restart_lock_repo.get_if_stale.return_value = stale
+
+        assert svc._try_acquire_delete_lock("dev", "staff_user001", "bot001", "user001") is None
+
+        svc._restart_lock_repo.release.assert_called_once_with(
+            "dev",
+            "staff_user001",
+            "delete:bot001",
+            "delete-lock",
+            expected_gmt_modified=stale.gmt_modified,
         )
 
     def test_delete_lock_heartbeat_marks_refresh_exception_as_lease_loss(self):

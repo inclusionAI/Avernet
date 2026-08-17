@@ -9,6 +9,7 @@ site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
 from __future__ import annotations
 
 from abc import abstractmethod
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
@@ -419,14 +420,21 @@ class BotRestartLockRepositoryProtocol(Protocol):
 
     @abstractmethod
     def release(
-        self, env: str, entity_id: str, bot_id: str, lock_token: str
+        self,
+        env: str,
+        entity_id: str,
+        bot_id: str,
+        lock_token: str,
+        *,
+        expected_gmt_modified: datetime | None = None,
     ) -> bool:
         """Release the lock by hard-deleting the row — only if it's still ours.
 
         Compare-and-delete: ``DELETE WHERE (env, entity_id, bot_id) matches AND
         lock_token = :lock_token``. The token guard prevents deleting a row that
-        a different holder acquired after ours was reaped (the stale-reaper and
-        late-async-release races). Returns ``True`` if a row was deleted.
+        a different holder acquired after ours was reaped. When supplied,
+        ``expected_gmt_modified`` also fences stale reaping against a heartbeat
+        renewal by the same holder. Returns ``True`` if a row was deleted.
         """
         ...
 

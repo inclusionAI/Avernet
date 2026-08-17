@@ -102,15 +102,23 @@ class BotRestartLockRepository(
                 return None
 
     def release(
-        self, env: str, entity_id: str, bot_id: str, lock_token: str
+        self,
+        env: str,
+        entity_id: str,
+        bot_id: str,
+        lock_token: str,
+        *,
+        expected_gmt_modified: datetime | None = None,
     ) -> bool:
         """释放重启锁（比对令牌后硬删除）。
 
         仅当行的 ``lock_token`` 与传入令牌一致时才删除，避免误删他人在本锁
         被回收后重新获取的新锁（stale-reaper 与超时后异步释放两种竞态）。
+        Stale reapers additionally provide the observed heartbeat timestamp so
+        a same-token renewal between observation and deletion wins the race.
         """
         with self._db.orm_session() as db:
-            result = (
+            query = (
                 db.query(self._Lock)
                 .filter(
                     self._Lock.env == env,
@@ -118,8 +126,12 @@ class BotRestartLockRepository(
                     self._Lock.bot_id == bot_id,
                     self._Lock.lock_token == lock_token,
                 )
-                .delete(synchronize_session=False)
             )
+            if expected_gmt_modified is not None:
+                query = query.filter(
+                    self._Lock.gmt_modified == expected_gmt_modified
+                )
+            result = query.delete(synchronize_session=False)
             if result > 0:
                 logger.info(
                     "[restart_lock.release] released, env=%s, entity_id=%s, bot_id=%s, token=%s",

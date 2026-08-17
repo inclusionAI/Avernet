@@ -888,10 +888,16 @@ class BotService:
                 env, entity_id, bot_id, stale.gmt_create,
             )
             # Compare-and-delete on the stale row's token: if another worker
-            # already reaped+reacquired, the token won't match and this is a
-            # no-op — the acquire below then fails and we suppress, instead of
-            # stealing their fresh lock.
-            self._restart_lock_repo.release(env, entity_id, bot_id, stale.lock_token)
+            # already reaped+reacquired, or the same holder refreshed its
+            # heartbeat, this is a no-op. The acquire below then fails and we
+            # suppress instead of stealing their fresh lock.
+            self._restart_lock_repo.release(
+                env,
+                entity_id,
+                bot_id,
+                stale.lock_token,
+                expected_gmt_modified=stale.gmt_modified,
+            )
 
         return self._restart_lock_repo.acquire(env, entity_id, bot_id, holder_user_id)
 
@@ -915,7 +921,11 @@ class BotService:
         )
         if stale is not None:
             self._restart_lock_repo.release(
-                env, entity_id, lock_key, stale.lock_token
+                env,
+                entity_id,
+                lock_key,
+                stale.lock_token,
+                expected_gmt_modified=stale.gmt_modified,
             )
         return self._restart_lock_repo.acquire(env, entity_id, lock_key, holder_user_id)
 
