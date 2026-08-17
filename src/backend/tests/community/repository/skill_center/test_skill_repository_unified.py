@@ -906,6 +906,46 @@ def test_remove_all_default_skill_exclusions_clears_prior_default_sets(sets, db)
     assert sets.remove_all_default_skill_exclusions("u1", "bot1", 42) is False
 
 
+def test_remove_all_default_mcp_exclusions_clears_prior_default_sets(sets, db):
+    """The MCP twin of the skill test above, and it exists for the same reason.
+
+    ``remove_all_default_mcp_exclusions`` deliberately omits ``skill_set_id``: a
+    bot's default skill set can change, and an exclusion written against the old
+    one outlives it while ``get_all_excluded_mcps`` still reads it. Re-introducing
+    a per-set filter here would pass every mocked test and silently leave a
+    server permanently un-activatable after a successful activate.
+    """
+    sets.add_default_mcp_exclusion(
+        user_id="u1", bot_id="bot1", skill_set_id=7, server_code="mcp.a"
+    )
+    sets.add_default_mcp_exclusion(
+        user_id="u1", bot_id="bot1", skill_set_id=8, server_code="mcp.a"
+    )
+    sets.add_default_mcp_exclusion(
+        user_id="u1", bot_id="bot1", skill_set_id=8, server_code="mcp.b"
+    )
+
+    assert sets.remove_all_default_mcp_exclusions("u1", "bot1", "mcp.a") is True
+    # Cleared on the former default set as well as the current one...
+    assert sets.get_excluded_mcps("u1", "bot1", 7) == []
+    # ...and an unrelated server on the same set is untouched.
+    assert sets.get_excluded_mcps("u1", "bot1", 8) == ["mcp.b"]
+    # Idempotent: nothing left to clear reports False.
+    assert sets.remove_all_default_mcp_exclusions("u1", "bot1", "mcp.a") is False
+
+
+def test_remove_all_default_mcp_exclusions_is_scoped_to_its_bot(sets, db):
+    sets.add_default_mcp_exclusion(
+        user_id="u1", bot_id="bot1", skill_set_id=7, server_code="mcp.a"
+    )
+    sets.add_default_mcp_exclusion(
+        user_id="u1", bot_id="bot2", skill_set_id=7, server_code="mcp.a"
+    )
+
+    assert sets.remove_all_default_mcp_exclusions("u1", "bot1", "mcp.a") is True
+    assert sets.get_all_excluded_mcps("u1", "bot2") == ["mcp.a"]
+
+
 def test_get_excluded_skills_filters_by_set(sets, db):
     sets.add_default_skill_exclusion("u1", "bot1", 7, 42)
     sets.add_default_skill_exclusion("u1", "bot1", 7, 99)

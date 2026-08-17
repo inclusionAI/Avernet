@@ -308,6 +308,7 @@ async def check_mcp_permission(
     "/configs",
     response_model=Envelope[Page[McpConfig]],
     responses=USER_SCOPED_403,
+    dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
 async def list_mcp_configs(
@@ -405,6 +406,7 @@ async def update_mcp_config(
     "/servers/{server_code}/config",
     response_model=Envelope[McpConfigDeleted],
     responses=USER_SCOPED_403,
+    dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
 async def delete_mcp_config(

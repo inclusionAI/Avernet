@@ -275,6 +275,19 @@ class SkillSetRepository(Protocol):
         ...
 
     @abstractmethod
+    def remove_all_default_mcp_exclusions(
+        self, user_id: str, bot_id: str, server_code: str
+    ) -> bool:
+        """Clear every default-set exclusion for one MCP server.
+
+        The MCP twin of :meth:`remove_all_default_skill_exclusions`, and it
+        omits ``skill_set_id`` for the same reason: an exclusion stranded on a
+        *former* default skill set outlives it, and reads go through
+        ``get_all_excluded_mcps``, which is not scoped to a set either.
+        """
+        ...
+
+    @abstractmethod
     def add_mcp_to_set(self, skill_set_id: str, server_code: str, name: str,
                        description: str | None = None, icon: str | None = None,
                        user_id: str | None = None, env: str | None = None) -> bool:

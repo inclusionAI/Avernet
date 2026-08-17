@@ -356,6 +356,19 @@ class BotMcpStateService:
             raise McpDefaultServerNotRemovableError(server_code)
 
         set_id = str(default_set["id"])
+        # Captured before the delete so a rollback restores the row as it was,
+        # not as ``_merged`` projected it — the projection drops ``icon``, and
+        # restoring from it would quietly lose the field on every failed remove.
+        stored = next(
+            (
+                row
+                for row in self._skill_set_repo.get_mcp_servers_in_set(set_id)
+                if row.get("server_code") == server_code
+            ),
+            {},
+        )
+        was_inactive = not entry["active"]
+
         self._skill_set_repo.remove_mcp_from_set(set_id, server_code)
         # Clear the exclusion too, or a later re-add would come back off for a
         # reason the caller has no way to see.
@@ -363,5 +376,33 @@ class BotMcpStateService:
             owner_id, bot_id, server_code
         )
 
-        await self._reconcile(bot=bot, bot_id=bot_id, owner_id=owner_id)
+        try:
+            await self._reconcile(bot=bot, bot_id=bot_id, owner_id=owner_id)
+        except McpSyncFailedError:
+            # Same contract as the other two mutations: a reconcile failure must
+            # not leave stored state diverged from the device. Without this the
+            # row is already gone, the caller gets a 502, and a retry answers
+            # "nothing to remove" — silently masking a real unsynced mutation.
+            #
+            # Each repository call commits in its own session, so this is a
+            # compensating write rather than a transaction rollback: put the
+            # membership back, and its exclusion with it if the server was
+            # inactive, so the bot returns to exactly the state it was in.
+            self._skill_set_repo.add_mcp_to_set(
+                set_id,
+                server_code,
+                stored.get("name") or entry["name"],
+                description=stored.get("description") or entry.get("description"),
+                icon=stored.get("icon"),
+                user_id=owner_id,
+            )
+            if was_inactive:
+                self._skill_set_repo.add_default_mcp_exclusion(
+                    user_id=owner_id,
+                    bot_id=bot_id,
+                    skill_set_id=int(default_set["id"]),
+                    server_code=server_code,
+                )
+            raise
+
         return True

@@ -354,12 +354,17 @@ def test_bot_scoped_mcp_stays_reachable_by_a_delegated_application(
 ) -> None:
     """Grant-checked in the backend, so it must not be refused at the edge.
 
-    The account-level MCP *config* operations sit one path segment away and are
-    human-only. The near-miss is the point of pinning this: a rule written as
-    ``/openapi/v1/bots/mcp/**`` with one segment wrong, or a well-meaning
-    "lock down MCP" edit, would take App delegation away from a group the
-    backend's admission table marks GRANT_CHECKED_OWN_BOT — and nothing else
-    would fail.
+    What this actually pins: re-adding the *correctly parameterized*
+    ``/openapi/v1/bots/{bot_id}/mcp/**`` as a refusal — the edit the comment
+    above the account-level rules in ``application.yaml`` warns against, and the
+    one a well-meaning "lock down MCP" change would make. That flips every case
+    below.
+
+    It deliberately does **not** claim to catch a rule written as
+    ``/openapi/v1/bots/mcp/**``: there ``mcp`` is a *literal* in the position
+    ``{bot_id}`` occupies, so it matches only a bot whose id is literally
+    ``"mcp"`` and leaves these cases untouched. That shape is covered separately
+    by ``test_a_bot_literally_named_mcp_is_not_captured_by_the_account_rules``.
     """
     raw = yaml.safe_load(_CONFIG.read_text())
     rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
@@ -369,3 +374,25 @@ def test_bot_scoped_mcp_stays_reachable_by_a_delegated_application(
     assert req is not None, (method, path)
     assert req[PrincipalType.USER] is Presence.OPTIONAL, (method, path)
     assert req[PrincipalType.APP] is Presence.OPTIONAL, (method, path)
+
+
+def test_a_bot_literally_named_mcp_is_not_captured_by_the_account_rules() -> None:
+    """The one path shape where the two MCP groups genuinely collide.
+
+    A bot whose id is literally ``"mcp"`` produces ``/openapi/v1/bots/mcp/...``,
+    the same prefix the account-level config rules live under. Those rules are
+    literal and specific (``/configs``, ``/servers/{server_code}/config``), so
+    they must not capture it — otherwise one unlucky bot name would silently
+    lose App delegation on its own MCP group while every other bot kept it.
+    """
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+
+    for method, path in (
+        ("GET", "/openapi/v1/bots/mcp/mcp"),
+        ("POST", "/openapi/v1/bots/mcp/mcp/svc/activate"),
+    ):
+        req = rs.resolve(method, path)
+        assert req is not None, (method, path)
+        assert req[PrincipalType.USER] is Presence.OPTIONAL, (method, path)
+        assert req[PrincipalType.APP] is Presence.OPTIONAL, (method, path)

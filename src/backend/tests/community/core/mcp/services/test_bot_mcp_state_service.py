@@ -342,6 +342,34 @@ def test_remove_of_an_engine_default_is_refused(monkeypatch):
     sets.remove_mcp_from_set.assert_not_called()
 
 
+def test_remove_rolls_back_when_the_runtime_cannot_be_reconciled():
+    """Removal must roll back too, like its two sibling mutations.
+
+    Each repository call commits in its own session, so without the
+    compensating write the row is already gone when the 502 is raised — and a
+    retry then answers "nothing to remove", silently masking a real mutation
+    the device never saw.
+    """
+    sets = _skill_set_repo(rows=[_row()])
+    with pytest.raises(McpSyncFailedError):
+        _remove(_svc(sets=sets, sync=_sync(ok=False)))
+    # Membership is put back...
+    sets.add_mcp_to_set.assert_called_once()
+    args, kwargs = sets.add_mcp_to_set.call_args
+    assert args[1] == STORED
+    # ...and it was active before, so no exclusion is re-written.
+    sets.add_default_mcp_exclusion.assert_not_called()
+
+
+def test_remove_rollback_restores_an_inactive_server_as_inactive():
+    sets = _skill_set_repo(rows=[_row()], excluded=[STORED])
+    with pytest.raises(McpSyncFailedError):
+        _remove(_svc(sets=sets, sync=_sync(ok=False)))
+    sets.add_mcp_to_set.assert_called_once()
+    # The server was off before the failed remove; it must be off after.
+    sets.add_default_mcp_exclusion.assert_called_once()
+
+
 def test_remove_never_touches_the_stored_credential():
     """The credential is account state and outlives any one bot.
 
