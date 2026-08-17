@@ -169,7 +169,7 @@ pub use port::{
     BotDeliveryResult, BotMetricCount, BotMetricsSnapshotPort, BotRepoPort, BotRunContext,
     BotControlPlaneRepoPort,
     BotRunContextPort, BotTerminalEvent, BotTerminalObserverPort, BotTerminalState,
-    CompositeBotTerminalObserver, ProviderRunTransport,
+    CompositeBotTerminalObserver, ProviderRunTransport, ProviderTransportPreference,
     NoopBotTerminalObserver, NoopChannelBindingCleanupPort, ChatRunCleanupPort,
     ChatRunEventPort, ChatRunMetricCount, DeliveryBlockContext,
     DeliveryBlockReason, DeliveryBlockSurface, DeliveryMetricKind, DeliveryMetricTarget,

@@ -139,6 +139,11 @@ delta events. Delta text should be placed in `delta_text`; BCS also accepts
 `message.content[].text` for compatibility. A textual final is a full snapshot,
 not an additional delta.
 
+Temporary compatibility behavior: direct chats initiated by `bcs-cli chat`
+(including its `invoke` alias) send `Accept: application/json` and use the 2.0
+JSON-ack plus `/bot/events` callback path. Other Provider 2.0 `chat.send`
+requests remain SSE-first.
+
 ## Calling BCS back
 
 Protocol 1.0 and protocol 2.0 JSON fallback use `/bot/events`. The Provider

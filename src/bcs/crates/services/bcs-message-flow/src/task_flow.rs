@@ -214,6 +214,7 @@ pub async fn handle_task_dispatch(
             run_id: effective_task_id.clone(),
             frame,
             delivery_kind,
+            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await
@@ -611,6 +612,7 @@ pub async fn handle_task_message(
             run_id: run_id.clone(),
             frame,
             delivery_kind,
+            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await?;

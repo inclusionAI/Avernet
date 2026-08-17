@@ -648,6 +648,7 @@ pub async fn handle_web_send(
                 run_id: run_id.clone(),
                 frame,
                 delivery_kind,
+                provider_transport: Default::default(),
                 provider_bypass_headers: cmd.provider_bypass_headers.clone(),
             })
             .await;
@@ -1105,6 +1106,7 @@ pub async fn handle_persistent_group_send(
                 run_id: run_id.clone(),
                 frame,
                 delivery_kind,
+                provider_transport: Default::default(),
                 provider_bypass_headers: Vec::new(),
             })
             .await;
@@ -1514,6 +1516,7 @@ pub async fn handle_group_callback(
                 run_id: run_id.clone(),
                 frame,
                 delivery_kind,
+                provider_transport: Default::default(),
                 provider_bypass_headers: Vec::new(),
             })
             .await;
@@ -1641,6 +1644,7 @@ pub async fn handle_chat_abort(
                 run_id: delivery_run_id,
                 frame: build_chat_abort_frame(&session_key, cmd.run_id.as_deref()),
                 delivery_kind: BotDeliveryKind::Abort,
+                provider_transport: Default::default(),
                 provider_bypass_headers: Vec::new(),
             })
             .await;

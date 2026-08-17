@@ -20,7 +20,8 @@ use bcs_service_api::{
     ChatRunMetricCount, DeliveryBlockContext, DeliveryBlockReason, DeliveryBlockSurface,
     DeliveryMetricKind, DeliveryMetricTarget, DirectChatClientKind, DirectChatRunEvent,
     DirectChatRunLifecycleHook, DirectChatRunReason, DirectChatRunSnapshotPort,
-    FriendCoreService, MetricsResult, OrganizationCoreService, RegisteredBot, ServiceError, ServiceResult,
+    FriendCoreService, MetricsResult, OrganizationCoreService, ProviderTransportPreference,
+    RegisteredBot, ServiceError, ServiceResult,
 };
 use serde_json::Value;
 use tokio::sync::mpsc;
@@ -629,6 +630,15 @@ impl A2aChatService for A2aChat {
                 run_id: run_id.clone(),
                 frame,
                 delivery_kind: BotDeliveryKind::Send,
+                provider_transport: if cmd
+                    .client
+                    .as_deref()
+                    .is_some_and(|client| client.starts_with("bcs-cli"))
+                {
+                    ProviderTransportPreference::Callback
+                } else {
+                    ProviderTransportPreference::SseFirst
+                },
                 provider_bypass_headers: cmd.provider_bypass_headers.clone(),
             })
             .await

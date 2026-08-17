@@ -659,6 +659,7 @@ impl CollaborationRuntime {
                 run_id: delivery_request_id.clone(),
                 frame,
                 delivery_kind: BotDeliveryKind::TaskDispatch,
+                provider_transport: Default::default(),
                 provider_bypass_headers: Vec::new(),
             })
             .await
