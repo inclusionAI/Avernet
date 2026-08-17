@@ -69,7 +69,7 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-router = APIRouter()
+router = APIRouter(prefix="/openapi/v1/harness", tags=["harness"])
 
 
 async def require_harness_bot_access(
