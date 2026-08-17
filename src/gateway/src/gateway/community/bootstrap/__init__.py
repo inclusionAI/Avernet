@@ -17,7 +17,7 @@ from dependency_injector.wiring import Provide
 
 from gateway.community.core.access_key import AccessKeyIssuer
 from gateway.community.core.app import AppRegistrar
-from gateway.community.core.authn import Authenticator
+from gateway.community.core.authn import Authenticator, credential_specs
 from gateway.community.core.forwarding import Forwarding
 from gateway.community.spi.principal_signer import PrincipalSigner
 
@@ -56,6 +56,7 @@ class BootstrapResult:
         """Return the served OpenAPI document across all configured domains."""
         return self.forwarding.served_openapi(
             self.authenticator.route_security,
+            credential_specs(self.authenticator.strategies),
             title=title,
             version=version,
             description=description,

@@ -7,7 +7,7 @@ this depends on any web framework (Rule 7).
 """
 
 from ._authenticator import Authenticator
-from ._chain import IdentityChain
+from ._chain import IdentityChain, credential_specs
 from ._route_security import Requirement, RouteSecurity
 from ._runner import authenticate
 
@@ -17,4 +17,5 @@ __all__ = [
     "Requirement",
     "RouteSecurity",
     "authenticate",
+    "credential_specs",
 ]

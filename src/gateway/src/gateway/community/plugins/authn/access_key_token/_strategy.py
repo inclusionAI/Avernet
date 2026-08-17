@@ -25,6 +25,8 @@ from gateway.community.spi.authn import (
     AccessKey,
     AccessKeyPrincipal,
     CredentialBundle,
+    CredentialLocation,
+    CredentialSpec,
     Principal,
     PrincipalType,
 )
@@ -65,6 +67,15 @@ class AccessKeyTokenStrategy:
     ) -> None:
         self._registry = registry
         self._token_header = token_header
+        self.credential = CredentialSpec(
+            scheme_name="accessKey",
+            location=CredentialLocation.BEARER,
+            name="Authorization",
+            description=(
+                "Granted access key token. May also be presented in the "
+                f"{token_header} header."
+            ),
+        )
 
     async def build(self, creds: CredentialBundle) -> Principal | None:
         token = extract_access_key_token(creds, self._token_header)

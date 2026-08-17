@@ -25,6 +25,8 @@ from gateway.community.spi.app import AppRegistry
 from gateway.community.spi.authn import (
     AppPrincipal,
     CredentialBundle,
+    CredentialLocation,
+    CredentialSpec,
     Principal,
     PrincipalType,
     ThirdPartyApp,
@@ -62,6 +64,15 @@ class AppTokenStrategy:
     ) -> None:
         self._registry = registry
         self._token_header = token_header
+        self.credential = CredentialSpec(
+            scheme_name="appToken",
+            location=CredentialLocation.BEARER,
+            name="Authorization",
+            description=(
+                "Application credential issued at registration. May also be "
+                f"presented in the {token_header} header."
+            ),
+        )
 
     async def build(self, creds: CredentialBundle) -> Principal | None:
         app_token = extract_app_token(creds, self._token_header)
