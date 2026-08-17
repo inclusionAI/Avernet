@@ -350,6 +350,14 @@ def test_release_binding_is_soft_delete(repo, db):
     assert rec.gmt_modified > pre  # advanced DB-side
 
 
+def test_claim_binding_release_claims_stopped_binding(repo):
+    bid = repo.insert_binding(**_binding(status="STOPPED"))
+
+    assert repo.claim_binding_release(binding_id=bid) is True
+    assert repo.get_by_id(bid).status == "RELEASED"
+    assert repo.claim_binding_release(binding_id=bid) is False
+
+
 def test_update_status_advances_gmt_modified(repo):
     bid = repo.insert_binding(**_binding())
     pre = repo.get_by_id(bid).gmt_modified

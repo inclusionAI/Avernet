@@ -97,6 +97,7 @@ class _DeviceBindingStatus:
 
     PENDING = "PENDING"
     ACTIVE = "ACTIVE"
+    STOPPED = "STOPPED"
     FAILED = "FAILED"
     RELEASED = "RELEASED"
 
