@@ -159,7 +159,7 @@ This group makes the MCP half behave like the skill half. No schema change.
       re-derived.
 - [x] **7.3** Full module gates: `OCB_PRE_PUSH_RUN_CI=1` per the `AGENTS.md`
       pre-push contract.
-- [ ] **7.4** PR titled `feat(openapi-v1): MCP config lifecycle and bot-scoped
+- [x] **7.4** PR titled `feat(openapi-v1): MCP config lifecycle and bot-scoped
       activation`, body using the `Problem` / `Solution` / `Validation` sections
       from `.github/pull_request_template.md`.
 
