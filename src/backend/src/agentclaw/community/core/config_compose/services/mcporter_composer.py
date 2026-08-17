@@ -285,9 +285,24 @@ class McporterComposer:
             if ep.get("env") == endpoint_env and ep.get("networkType") in net_rank
         ]
         if not candidates:
+            # Two different faults used to share one message. "Server declares no
+            # endpoints at all" points at the lookup that produced this dict;
+            # "declares some, none usable" points at the server's own config. The
+            # collector now fails the first case before we get here, so this is a
+            # backstop — but it still has to name the right suspect, or it sends
+            # the reader auditing network coverage for a record that was never
+            # fetched.
+            if not endpoints:
+                raise McporterComposeError(
+                    f"MCP {server_code}: server declares no endpoints at all — its "
+                    "detail was never resolved (MCP Center unreachable, or no "
+                    "record for this code)."
+                )
             raise McporterComposeError(
                 f"MCP {server_code}: no usable {endpoint_env} endpoint "
-                f"(networks {'/'.join(network_priority)})."
+                f"(networks {'/'.join(network_priority)}); the server declares "
+                f"{len(endpoints)} endpoint(s), none on a reachable network for "
+                "this env."
             )
 
         def _key(ep: dict[str, Any]) -> tuple[int, int]:

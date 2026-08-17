@@ -17,6 +17,10 @@ from agentclaw.community.core.channel.services.engine_overrides_reader import (
 from agentclaw.community.core.config_compose.models import ComposeRequest, StdioLaunch
 from agentclaw.community.core.config_compose.services.collector import (
     ConfigComposerInputCollector,
+    McpDetailUnavailableError,
+)
+from agentclaw.community.core.config_compose.services.mcporter_composer import (
+    McporterComposeError,
 )
 from agentclaw.community.core.mcp.services.local_mcp_registry import LocalMCPRegistry
 
@@ -128,8 +132,9 @@ def test_mcps_run_collect_then_per_server_merge():
     svc.collect_bot_active_mcps.return_value = [
         {"server_code": "a"}, {"server_code": "b"}
     ]
-    # Center has no extra detail for these — leaves the bare dicts unchanged.
-    svc.mcp_center.get_mcp_detail.return_value = None
+    # Center carries both codes. A resolvable record is now a precondition for a
+    # remote server: an empty lookup fails the compose (see the raise cases below).
+    svc.mcp_center.get_mcp_detail.return_value = {"runMode": "REMOTE", "endpoints": []}
     mcp_cfg = MagicMock()
     mcp_cfg.build_mcp_sync_payload.return_value = ("kee", {"h": "v"}, "PROD", "http")
     inputs = _collector(skill_set_service=svc, mcp_config_service=mcp_cfg).mcps(_req())
@@ -232,7 +237,9 @@ def test_mcps_center_remote_wins_over_colliding_registry_name():
 @pytest.mark.unit
 def test_mcps_remote_server_absent_from_registry_has_no_stdio():
     inputs = _mcps_with(
-        [{"server_code": "dima"}], center_detail=None, registry_catalog=_HITL_CATALOG
+        [{"server_code": "dima"}],
+        center_detail={"serverCode": "dima", "runMode": "REMOTE", "endpoints": []},
+        registry_catalog=_HITL_CATALOG,
     )
 
     assert inputs[0].stdio is None
@@ -242,12 +249,25 @@ def test_mcps_remote_server_absent_from_registry_has_no_stdio():
 def test_mcps_registry_entry_without_command_yields_no_launch():
     """An unlaunchable catalog entry must not produce a half-formed local entry.
 
-    Better to fall through to the remote path — which raises naming the registry —
-    than to publish a stdio entry the engine cannot act on.
+    With Center also holding no record, the server resolves as neither form and
+    the compose fails — the correct outcome, and better than publishing a stdio
+    entry the engine cannot act on.
     """
+    with pytest.raises(McporterComposeError, match="not a local server"):
+        _mcps_with(
+            [{"server_code": "broken"}],
+            center_detail=None,
+            registry_catalog={"broken": {"args": ["--x"]}},
+        )
+
+
+@pytest.mark.unit
+def test_mcps_registry_entry_without_command_defers_to_center_when_it_has_one():
+    """Same unlaunchable catalog entry, but Center knows the code: it composes as
+    a remote server. The broken catalog row is simply not a launch instruction."""
     inputs = _mcps_with(
         [{"server_code": "broken"}],
-        center_detail=None,
+        center_detail={"serverCode": "broken", "runMode": "REMOTE", "endpoints": []},
         registry_catalog={"broken": {"args": ["--x"]}},
     )
 
@@ -311,16 +331,56 @@ def test_mcps_skip_center_lookup_when_no_server_code():
 
 
 @pytest.mark.unit
-def test_mcps_center_error_leaves_bare_dict_unchanged():
-    # A Center fetch failure is best-effort: the bare dict flows through unchanged
-    # (the composer surfaces the "no usable endpoint" error, same as before).
+def test_mcps_center_error_raises_here_with_the_cause_chained():
+    """A Center failure on a remote server fails the compose, keeping the cause.
+
+    Swallowing it produced an entry with no endpoints, and the composer three
+    layers down then reported "no usable endpoint" — which reads as a
+    misconfigured server and sends the reader auditing network coverage for a
+    record that was never fetched. The original error must survive as
+    ``__cause__`` so the traceback names what actually broke.
+    """
     svc = MagicMock()
     svc.collect_bot_active_mcps.return_value = [{"server_code": "boom"}]
     svc.mcp_center.get_mcp_detail.side_effect = RuntimeError("center down")
     mcp_cfg = MagicMock()
     mcp_cfg.build_mcp_sync_payload.return_value = (None, {}, "PROD", None)
-    inputs = _collector(skill_set_service=svc, mcp_config_service=mcp_cfg).mcps(_req())
-    assert inputs[0].mcp_data == {"server_code": "boom"}
+
+    with pytest.raises(McporterComposeError, match="could not resolve") as excinfo:
+        _collector(skill_set_service=svc, mcp_config_service=mcp_cfg).mcps(_req())
+
+    assert isinstance(excinfo.value.__cause__, RuntimeError)
+    assert str(excinfo.value.__cause__) == "center down"
+
+
+@pytest.mark.unit
+def test_mcps_center_empty_record_raises_here_too():
+    """A lookup that succeeds but returns nothing is equally fatal for a remote
+    server — the code is simply unknown to Center — and is reported as its own
+    cause rather than as a transport error."""
+    svc = MagicMock()
+    svc.collect_bot_active_mcps.return_value = [{"server_code": "ghost"}]
+    svc.mcp_center.get_mcp_detail.return_value = None
+    mcp_cfg = MagicMock()
+    mcp_cfg.build_mcp_sync_payload.return_value = (None, {}, "PROD", None)
+
+    with pytest.raises(McporterComposeError, match="could not resolve") as excinfo:
+        _collector(skill_set_service=svc, mcp_config_service=mcp_cfg).mcps(_req())
+
+    assert isinstance(excinfo.value.__cause__, McpDetailUnavailableError)
+
+
+@pytest.mark.unit
+def test_mcps_local_server_survives_center_having_no_record():
+    """The converse, and the reason the failure is decided by the caller: Center
+    legitimately has no record of a stdio server, so an empty lookup must NOT be
+    fatal once the registry has supplied a launch instruction."""
+    inputs = _mcps_with(
+        [{"server_code": "hitl"}], center_detail=None, registry_catalog=_HITL_CATALOG
+    )
+
+    assert inputs[0].stdio is not None
+    assert inputs[0].stdio.command == "python3"
 
 
 @pytest.mark.unit

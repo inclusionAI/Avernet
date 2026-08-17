@@ -236,6 +236,49 @@ def test_missing_server_code_raises() -> None:
         composer.compose_server(McpComposeInput(mcp_data={"name": "x"}))
 
 
+def test_no_endpoints_at_all_blames_the_lookup_not_the_networks() -> None:
+    """An entry with zero endpoints means its detail was never resolved.
+
+    Blaming network coverage here would send the reader auditing MCP Center for a
+    record that was never fetched. The collector fails this case earlier now, so
+    this is a backstop — but it still has to name the right suspect.
+    """
+    composer = McporterComposer()
+    md = {"server_code": "unresolved", "run_mode": "REMOTE", "endpoints": []}
+
+    with pytest.raises(McporterComposeError, match="declares no endpoints at all"):
+        composer.compose_server(
+            McpComposeInput(
+                mcp_data=md,
+                endpoint_env="PROD",
+                network_priority=TECLAW_MCP_NETWORK_PRIORITY,
+            )
+        )
+
+
+def test_endpoints_present_but_unreachable_blames_the_networks() -> None:
+    """The genuinely misconfigured case keeps pointing at network coverage, and
+    reports how many endpoints were rejected so the gap is diagnosable."""
+    composer = McporterComposer()
+    md = {
+        "server_code": "wrong-net",
+        "run_mode": "REMOTE",
+        "endpoints": [
+            {"networkType": "DEVNET", "env": "PROD",
+             "transportProtocol": "STREAMABLE_HTTP", "url": "https://dev/x"},
+        ],
+    }
+
+    with pytest.raises(McporterComposeError, match="declares 1 endpoint"):
+        composer.compose_server(
+            McpComposeInput(
+                mcp_data=md,
+                endpoint_env="PROD",
+                network_priority=TECLAW_MCP_NETWORK_PRIORITY,
+            )
+        )
+
+
 def test_compose_builds_manifest_for_multiple_servers() -> None:
     composer = McporterComposer()
     manifest = composer.compose(

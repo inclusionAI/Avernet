@@ -36,6 +36,7 @@ from agentclaw.community.core.config_compose.models import (
 )
 from agentclaw.community.core.config_compose.protocols import ComposeInputCollector
 from agentclaw.community.core.config_compose.services.mcporter_composer import (
+    McporterComposeError,
     mcp_network_priority_for,
 )
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
@@ -56,6 +57,17 @@ if TYPE_CHECKING:
     from agentclaw.community.core.services.identity import IdentityService
 
 logger = get_logger()
+
+
+class McpDetailUnavailableError(LookupError):
+    """MCP Center returned no record for a server code.
+
+    Distinct from a transport error out of the Center client: this one says the
+    lookup *worked* and came back empty, which for a remote server means the code
+    is unknown to Center — a bad entry in the bot's MCP set or in the per-engine
+    default list. Raised as the chained cause so that distinction survives into
+    the traceback.
+    """
 
 
 def bot_data_relpath(host_path: str) -> str:
@@ -200,8 +212,23 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         network_priority = mcp_network_priority_for(req.engine_type)
         inputs: list[McpComposeInput] = []
         for md in raw:
-            md = self._enrich_mcp_detail(svc, md)
+            md, detail_failure = self._enrich_mcp_detail(svc, md)
             server_code = md.get("server_code") or md.get("serverCode") or ""
+            stdio = self._stdio_launch_for(server_code, md)
+            if stdio is None and detail_failure is not None:
+                # Remote server we could not resolve. Fail here, at the point the
+                # lookup actually failed, with the cause chained — rather than
+                # composing an entry with no endpoints and letting the composer
+                # report "no usable endpoint", which reads as a misconfigured
+                # server and sends the reader hunting in MCP Center for a record
+                # the lookup never retrieved. A local server takes the branch
+                # above instead: Center having no record of it is expected.
+                raise McporterComposeError(
+                    f"MCP {server_code or '<no server_code>'}: could not resolve "
+                    "server detail, and it is not a local server either (the "
+                    "local-MCP registry has no entry for it). MCP Center is "
+                    "unreachable or holds no record for this code."
+                ) from detail_failure
             api_key, headers, endpoint_env, transport = (
                 self._mcp_config_service.build_mcp_sync_payload(
                     user_id=req.user_id,
@@ -217,7 +244,7 @@ class ConfigComposerInputCollector(ComposeInputCollector):
                     endpoint_env=endpoint_env,
                     transport_protocol=transport,
                     network_priority=network_priority,
-                    stdio=self._stdio_launch_for(server_code, md),
+                    stdio=stdio,
                 )
             )
         return inputs
@@ -269,7 +296,9 @@ class ConfigComposerInputCollector(ComposeInputCollector):
             },
         )
 
-    def _enrich_mcp_detail(self, svc: Any, md: dict[str, Any]) -> dict[str, Any]:
+    def _enrich_mcp_detail(
+        self, svc: Any, md: dict[str, Any]
+    ) -> tuple[dict[str, Any], Exception | None]:
         """Merge MCP Center detail (endpoints/runMode/…) over a bare association.
 
         ``collect_bot_active_mcps`` returns only the skill-set association fields;
@@ -277,28 +306,28 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         detail per server (same source ``add_mcp_to_skill_set`` validates against)
         and merge it over the bare dict — Center is authoritative for endpoints,
         while locally-set fields absent from Center (e.g. default-MCP ``headers``)
-        are preserved. Best-effort: a missing detail or a Center error leaves the
-        bare dict unchanged (the composer then surfaces the "no usable endpoint"
-        error, same as before).
+        are preserved.
+
+        Returns ``(merged, failure)``. A lookup that raised or returned nothing
+        yields the bare dict plus the **cause**, which is deliberately *carried*
+        rather than logged and dropped: only the caller knows whether the server
+        is local — Center legitimately has no record of a stdio server — so only
+        the caller can decide whether the failure is fatal. It raises with this
+        exception chained, so the root cause survives into the traceback instead
+        of resurfacing three layers down as a misleading "no usable endpoint".
         """
         server_code = md.get("server_code") or md.get("serverCode")
         if not server_code:
-            return md
+            return md, None
         try:
             detail = svc.mcp_center.get_mcp_detail(server_code)
-        except Exception as e:
-            logger.warning(
-                "[ConfigComposerInputCollector] MCP Center detail fetch failed "
-                "for %s: %s", server_code, e,
-            )
-            return md
+        except Exception as e:  # noqa: BLE001 — returned to the caller, not swallowed
+            return md, e
         if not detail:
-            logger.warning(
-                "[ConfigComposerInputCollector] MCP Center has no detail for %s; "
-                "composing without endpoints", server_code,
+            return md, McpDetailUnavailableError(
+                f"MCP Center returned no detail for {server_code}"
             )
-            return md
-        return {**md, **detail}
+        return {**md, **detail}, None
 
     # ── resources ───────────────────────────────────────────────────────
     def resources(self, req: ComposeRequest) -> list[CollectedFile]:
