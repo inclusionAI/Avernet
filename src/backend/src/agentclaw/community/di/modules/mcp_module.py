@@ -26,6 +26,7 @@ from typing import Callable
 
 from injector import Binder, Injector, Module, inject, provider, singleton
 
+from agentclaw.community.api.bot_mcp_state_service import BotMcpStateServiceProtocol
 from agentclaw.community.api.mcp_auth_service import MCPAuthServiceProtocol
 from agentclaw.community.api.mcp_config_service import MCPConfigServiceProtocol
 from agentclaw.community.api.mcp_market_service import MCPMarketServiceProtocol
@@ -35,6 +36,7 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
 from agentclaw.community.core.mcp.services.auth_service import MCPAuthService
+from agentclaw.community.core.mcp.services.bot_mcp_state_service import BotMcpStateService
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
 from agentclaw.community.core.mcp.services.market_service import MCPMarketService
 from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
@@ -159,4 +161,12 @@ class McpModule(Module):
     @provider
     @inject
     def _mcp_sync_service_protocol(self, svc: MCPSyncService) -> MCPSyncServiceProtocol:
+        return svc
+
+    @singleton
+    @provider
+    @inject
+    def _bot_mcp_state_service_protocol(
+        self, svc: BotMcpStateService
+    ) -> BotMcpStateServiceProtocol:
         return svc

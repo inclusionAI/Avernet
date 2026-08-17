@@ -96,6 +96,8 @@ from agentclaw.community.core.gateway_principal import PrincipalVerificationErro
 from agentclaw.community.core.mcp.errors import (
     McpConfigValueError,
     McpHeadersInvalidError,
+    McpBotServerNotFoundError,
+    McpDefaultServerNotRemovableError,
     McpMarketUnavailableError,
     McpServerNotFoundError,
     McpSyncFailedError,
@@ -375,6 +377,16 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # probed. The two upstream failures are 502 (downstream problem), matching how
     # PassportError / ConnInfoBuildError are mapped above.
     McpServerNotFoundError: (404, "Not found"),
+    # "not on this bot" is a different cause from "no such server in the
+    # marketplace", and the two stay separable in logs — but the caller gets the
+    # byte-identical 404, so neither is a way to probe what exists.
+    McpBotServerNotFoundError: (404, "Not found"),
+    # Removing an engine-supplied default is not representable, and saying so is
+    # more useful than a success that would do nothing on the next read.
+    McpDefaultServerNotRemovableError: (
+        409,
+        "Default MCP server cannot be removed; deactivate it instead",
+    ),
     McpHeadersInvalidError: (400, "Invalid MCP headers"),
     McpConfigValueError: (400, "Invalid MCP configuration"),
     McpSyncFailedError: (502, "Device sync failed"),

@@ -77,38 +77,38 @@ This group makes the MCP half behave like the skill half. No schema change.
 
 ## Group 4 — Bot-scoped state service
 
-- [ ] **4.1** `BotMcpStateServiceProtocol` in `api/bot_mcp_state_service.py` —
+- [x] **4.1** `BotMcpStateServiceProtocol` in `api/bot_mcp_state_service.py` —
       the five methods in `plan.md`.
-- [ ] **4.2** Implement `core/mcp/services/bot_mcp_state_service.py`, modelled on
+- [x] **4.2** Implement `core/mcp/services/bot_mcp_state_service.py`, modelled on
       `local_skill_state_service.py`. Resolve the bot with `get_by_id_and_owner`
       (masked `404`); resolve the container with `skill_set_repo.get_default(
       user_id=owner_id, bolt_id=bot_id, engine_type=bot["active_engine"])`,
       treating `None` as not-found — never an implicit create. No skills-pool
       edit guard.
-- [ ] **4.3** Merged read: default-set rows (`get_mcp_servers_in_set`) unioned
+- [x] **4.3** Merged read: default-set rows (`get_mcp_servers_in_set`) unioned
       with `get_default_mcp_servers(engine, template_type)`, `active` = not in
       `get_all_excluded_mcps`, each marked `is_default`. Dedupe by `server_code`,
       stored row wins.
-- [ ] **4.4** `add_bot_server` — validate via `market_service.get_mcp_detail` +
+- [x] **4.4** `add_bot_server` — validate via `market_service.get_mcp_detail` +
       `is_network_type_visible` (one raise site), then `skill_set_repo
       .add_mcp_to_set` **directly** (the service refuses the default set), then
       `add_default_mcp_exclusion` so it lands **inactive**. Already present →
       `changed: false`.
-- [ ] **4.5** `set_bot_server_active` — activate is
+- [x] **4.5** `set_bot_server_active` — activate is
       `remove_all_default_mcp_exclusions`, deactivate is
       `add_default_mcp_exclusion`. Identical for stored rows and engine defaults;
       no branch needed. `changed` computed against the pre-state. A server not on
       the bot at all is not-found.
-- [ ] **4.6** `remove_bot_server` — `remove_mcp_from_set` plus clearing its
+- [x] **4.6** `remove_bot_server` — `remove_mcp_from_set` plus clearing its
       exclusions for a stored row; raise `McpDefaultServerNotRemovableError`
       (`409`, added to `core/mcp/errors.py`) for an engine default. Absent →
       `deleted: false`.
-- [ ] **4.7** End every mutation with `sync_service.refresh_mcp_scope(...)`; on
+- [x] **4.7** End every mutation with `sync_service.refresh_mcp_scope(...)`; on
       `success: false`, roll the state write back and raise. One rollback test per
       mutation, with a stubbed sync service — the community device plugins are
       no-ops and cannot fail.
-- [ ] **4.8** Bind the service in `di/modules/mcp_module.py`.
-- [ ] **4.9** Service tests: add is idempotent and lands **inactive**;
+- [x] **4.8** Bind the service in `di/modules/mcp_module.py`.
+- [x] **4.9** Service tests: add is idempotent and lands **inactive**;
       activate/deactivate idempotent with correct `changed`; activating a server
       not on the bot is not-found; defaults read active until excluded;
       remove-default is `409`; remove leaves `ac_user_mcp_config` intact; an

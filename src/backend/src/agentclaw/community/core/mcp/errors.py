@@ -50,3 +50,25 @@ class McpMarketUnavailableError(McpError):
     A dependency problem, not a caller mistake — distinct from a genuinely empty
     result, which is a success with no rows.
     """
+
+
+class McpBotServerNotFoundError(McpError):
+    """The bot does not carry this MCP server.
+
+    Distinct from :class:`McpServerNotFoundError`, which means the *marketplace*
+    has no such server. A server can exist in the catalogue and still not be on
+    a given bot — activating one is a different failure from naming one that
+    does not exist, and the surfaces map them to the same 404 for the caller
+    while keeping the two causes separable in logs.
+    """
+
+
+class McpDefaultServerNotRemovableError(McpError):
+    """An engine-default MCP server cannot be removed from a bot.
+
+    A default is synthesised per request from the engine's own configuration
+    rather than stored as a row, so "not on this bot" is not a state it can
+    hold — the only representable off state is deactivated. Raised so the
+    caller is told to deactivate rather than being handed a success that would
+    silently do nothing on the next read.
+    """

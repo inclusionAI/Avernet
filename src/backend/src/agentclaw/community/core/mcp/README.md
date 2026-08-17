@@ -42,6 +42,10 @@ consumes:
   - "PassportPlugin"
 internal_dependencies:
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
+  # Bot-scoped MCP activation stores its state in the bot's default skill set
+  # and the skill-set exclusion table — the same mechanism `skills` uses. The
+  # contract only; no skill_center service is imported.
+  - agentclaw.community.core.repository.protocols.skill_center
   - agentclaw.community.core.default_capabilities
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.config
