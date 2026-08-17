@@ -249,6 +249,9 @@ class _Storage:
     async def cleanup(self):
         return await self.filesystem.delete_tree(self.directory)
 
+    async def exists(self):
+        return await self.filesystem.exists(self.directory)
+
     async def verify(self):
         entries = await self.filesystem.list_dir(self.directory, recursive=True)
         if not entries:
@@ -1041,6 +1044,31 @@ async def test_same_name_replacement_preserves_id_owner_and_desired_state_after_
     assert filesystem.files["/private/skills-local/upload-skill/SKILL.md"] == (
         b"name: upload-skill\ndescription: new description\n"
     )
+
+
+@pytest.mark.asyncio
+async def test_replacement_recreates_a_missing_canonical_package_for_a_stale_row():
+    filesystem = _Filesystem()
+    skill = _existing_skill(active=False)
+    repo = _ReplacementRepo([skill])
+
+    result = await _replacement_service(
+        filesystem, repo, _ReplacementRuntime([True])
+    ).upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        package=_zip(
+            {"SKILL.md": b"name: upload-skill\ndescription: restored\n"}
+        ),
+    )
+
+    assert result["operation"] == "updated"
+    assert skill["git_path"] == "local:///private/skills-local/upload-skill"
+    assert filesystem.files["/private/skills-local/upload-skill/SKILL.md"] == (
+        b"name: upload-skill\ndescription: restored\n"
+    )
+    assert not any(".replacement-" in path for path in filesystem.files)
 
 
 @pytest.mark.asyncio
