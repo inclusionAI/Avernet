@@ -42,6 +42,7 @@ from agentclaw.community.core.resources.factory import ResourceServiceFactory
 from agentclaw.community.core.devices.services.device_filesystem import (
     FileTooLargeError as DeviceFileTooLargeError,
 )
+from agentclaw.community.core.devices.services.device_context import DeviceNotBoundError
 
 
 def _request_scope() -> dict:
@@ -1073,6 +1074,25 @@ async def test_upload_502_when_the_device_write_fails():
         )
 
     assert excinfo.value.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_upload_preserves_device_not_bound_from_the_write():
+    """A deletion can release the binding after the duplicate probe succeeds."""
+    file_svc = _StubFileService(raises=DeviceNotBoundError("binding released"))
+
+    resp = await upload_resource(
+        path="a.txt",
+        content=b"x",
+        owner_id="u1",
+        bot_id="bot-a",
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
+
+    assert resp.status_code == 409
+    assert json.loads(resp.body)["message"] == "Bot has no active device"
 
 
 @pytest.mark.asyncio

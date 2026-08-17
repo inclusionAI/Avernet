@@ -502,6 +502,12 @@ async def upload_resource(
         )
         logger.exception("[upload_resource] BaaS storage failed")
         raise HTTPException(status_code=502, detail="Upload storage failed") from exc
+    except DeviceNotBoundError:
+        # The workspace disappeared after the duplicate probe, typically because
+        # a concurrent delete released its device binding.  Preserve the domain
+        # error so ``@envelope_errors`` returns the public lifecycle-conflict
+        # response instead of collapsing it into a storage 502.
+        raise
     except Exception:
         # Device write failure → 502. No record is written below, so a failed
         # upload leaves neither bytes nor a row.
