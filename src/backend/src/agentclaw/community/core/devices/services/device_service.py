@@ -781,7 +781,10 @@ class DeviceService:
             return current
 
         if current.status == DeviceBindingStatus.RELEASING.value:
-            raise InvalidDeviceStatusError("device release is already in progress")
+            # A concurrent caller owns the physical release.  Joining that
+            # claim is idempotent: it must not invoke the provider again, nor
+            # turn a second bot-delete request into a failure.
+            return current
 
         if current.status not in [
             DeviceBindingStatus.ACTIVE.value,
@@ -799,7 +802,10 @@ class DeviceService:
             released_by=operator.staff,
         ):
             claimed = self._repo.get_by_id(binding_id)
-            if claimed is not None and claimed.status == DeviceBindingStatus.RELEASED.value:
+            if claimed is not None and claimed.status in {
+                DeviceBindingStatus.RELEASING.value,
+                DeviceBindingStatus.RELEASED.value,
+            }:
                 return claimed
             raise InvalidDeviceStatusError("device release is already in progress")
 

@@ -482,9 +482,9 @@ class TestReleaseDevice:
 
     def test_release_losing_database_claim_skips_physical_release(self):
         active = _make_record(status=DeviceBindingStatus.ACTIVE.value)
-        released = _make_record(status=DeviceBindingStatus.RELEASED.value)
+        releasing = _make_record(status=DeviceBindingStatus.RELEASING.value)
         repo = MagicMock()
-        repo.get_by_id.side_effect = [active, released]
+        repo.get_by_id.side_effect = [active, releasing]
         repo.claim_binding_release.return_value = False
         svc = _make_service(repo=repo)
         svc._do_release = MagicMock()
@@ -495,7 +495,24 @@ class TestReleaseDevice:
             operator=_make_operator(),
         )
 
-        assert result is released
+        assert result is releasing
+        svc._do_release.assert_not_called()
+
+    def test_release_in_progress_is_idempotent(self):
+        releasing = _make_record(status=DeviceBindingStatus.RELEASING.value)
+        repo = MagicMock()
+        repo.get_by_id.return_value = releasing
+        svc = _make_service(repo=repo)
+        svc._do_release = MagicMock()
+
+        result = svc.release_device(
+            binding_id=1,
+            release_reason="duplicate request",
+            operator=_make_operator(),
+        )
+
+        assert result is releasing
+        repo.claim_binding_release.assert_not_called()
         svc._do_release.assert_not_called()
 
     def test_release_not_found_raises(self):
