@@ -45,8 +45,13 @@ _HUMAN_ONLY = [
     ("GET", "/openapi/v1/bots/logs/traces"),
     ("GET", "/openapi/v1/bots/logs/traces/t-1"),
     ("GET", "/openapi/v1/bots/logs/sessions/s-1/traces"),
+    ("GET", "/openapi/v1/bots/mcp/configs"),
     ("GET", "/openapi/v1/bots/mcp/servers/svc/config"),
     ("PUT", "/openapi/v1/bots/mcp/servers/svc/config"),
+    # DELETE is covered by the same method-unqualified rule as GET and PUT;
+    # listed anyway, because "the rule happens to be method-unqualified" is a
+    # property a future edit could remove without noticing this depended on it.
+    ("DELETE", "/openapi/v1/bots/mcp/servers/svc/config"),
     ("GET", "/openapi/v1/bots/mcp/servers/svc/permissions"),
     ("GET", "/openapi/v1/bots/loadtest/hello"),
 ]
@@ -329,3 +334,38 @@ def test_from_yaml_user_config_not_dict_uses_empty_table(tmp_path) -> None:
     cfg.write_text("user_config: not-a-dict\n")
     rs = RouteSecurity.from_yaml(cfg)
     assert rs.resolve("GET", "/anything") is None
+
+
+#: The bot-scoped MCP group is the counter-case to ``_HUMAN_ONLY`` above: it
+#: addresses a bot, so a grant covers it and the wide rule must keep applying.
+_BOT_SCOPED_MCP = [
+    ("GET", "/openapi/v1/bots/bot-123/mcp"),
+    ("POST", "/openapi/v1/bots/bot-123/mcp"),
+    ("GET", "/openapi/v1/bots/bot-123/mcp/svc"),
+    ("DELETE", "/openapi/v1/bots/bot-123/mcp/svc"),
+    ("POST", "/openapi/v1/bots/bot-123/mcp/svc/activate"),
+    ("POST", "/openapi/v1/bots/bot-123/mcp/svc/deactivate"),
+]
+
+
+@pytest.mark.parametrize(("method", "path"), _BOT_SCOPED_MCP)
+def test_bot_scoped_mcp_stays_reachable_by_a_delegated_application(
+    method: str, path: str
+) -> None:
+    """Grant-checked in the backend, so it must not be refused at the edge.
+
+    The account-level MCP *config* operations sit one path segment away and are
+    human-only. The near-miss is the point of pinning this: a rule written as
+    ``/openapi/v1/bots/mcp/**`` with one segment wrong, or a well-meaning
+    "lock down MCP" edit, would take App delegation away from a group the
+    backend's admission table marks GRANT_CHECKED_OWN_BOT — and nothing else
+    would fail.
+    """
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+
+    req = rs.resolve(method, path)
+
+    assert req is not None, (method, path)
+    assert req[PrincipalType.USER] is Presence.OPTIONAL, (method, path)
+    assert req[PrincipalType.APP] is Presence.OPTIONAL, (method, path)

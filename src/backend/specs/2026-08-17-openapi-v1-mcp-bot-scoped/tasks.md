@@ -138,12 +138,12 @@ This group makes the MCP half behave like the skill half. No schema change.
 
 ## Group 6 — Edge and gateway agreement
 
-- [ ] **6.1** `route_security` rules for the two new `REFUSED` config operations
+- [x] **6.1** `route_security` rules for the two new `REFUSED` config operations
       in `src/gateway/configs/application.yaml`.
-- [ ] **6.2** Update the gateway's `tests/unit/core/authn/test_route_security.py`.
-- [ ] **6.3** Regenerate `src/gateway/configs/schemas/bots.openapi.json` with the
+- [x] **6.2** Update the gateway's `tests/unit/core/authn/test_route_security.py`.
+- [x] **6.3** Regenerate `src/gateway/configs/schemas/bots.openapi.json` with the
       existing dump/publish scripts — do not hand-edit.
-- [ ] **6.4** Confirm `test_principal_seam.py` passes: surface and admission
+- [x] **6.4** Confirm `test_principal_seam.py` passes: surface and admission
       table agree in both directions.
 
 ## Group 7 — Docs and close-out

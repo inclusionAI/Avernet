@@ -167,6 +167,22 @@ user_config:
     # is consent to reach a bot, not to reconfigure an account. (The catalogue
     # reads under /mcp/servers and /mcp/tenants are a different thing and stay
     # on the wide rule.)
+    #
+    # These rules are METHOD-UNQUALIFIED on purpose, and that is what makes the
+    # config rule cover DELETE without a line of its own: read, write and
+    # revoke are the same account state and refuse a machine caller alike.
+    #
+    # The listing needs its own literal because it is not under /servers/: it
+    # enumerates every server the caller has configured, which is a question
+    # about the account rather than about any bot a grant covers.
+    #
+    # Note what is NOT here: /openapi/v1/bots/{bot_id}/mcp/** — the bot-scoped
+    # activation group. It addresses a bot, so it is grant-checked in the
+    # backend's admission table rather than refused, and stays on the wide
+    # /openapi/v1/bots/** rule above. Adding it here would break App delegation
+    # for it.
+    "/openapi/v1/bots/mcp/configs":
+      user: required
     "/openapi/v1/bots/mcp/servers/{server_code}/config":
       user: required
     "/openapi/v1/bots/mcp/servers/{server_code}/permissions":
