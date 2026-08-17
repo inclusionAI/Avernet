@@ -129,3 +129,11 @@ def test_get_if_stale_judges_db_side(repo):
     assert repo.get_if_stale("dev", "ent_c", "bot_c3", 0) is not None
     # Absent row → None regardless of TTL.
     assert repo.get_if_stale("dev", "ent_c", "missing", 0) is None
+
+
+def test_refresh_renews_only_the_owned_lock(repo):
+    lock = repo.acquire("dev", "ent_refresh", "bot_refresh", "owner")
+    assert lock is not None
+
+    assert repo.refresh("dev", "ent_refresh", "bot_refresh", lock.lock_token) is True
+    assert repo.refresh("dev", "ent_refresh", "bot_refresh", "wrong-token") is False

@@ -11,8 +11,8 @@ Behavior:
   INSERT wins, the rest hit ``IntegrityError`` and are treated as "lock held".
 - ``release`` hard-deletes the row (no soft delete).
 - Staleness (``get_if_stale``) is judged on the DB clock only: both the row's
-  ``gmt_create`` and "now" are sourced from the database, so app/DB clock skew
-  cannot mis-judge the TTL.
+  ``gmt_modified`` heartbeat and "now" are sourced from the database, so app/DB
+  clock skew cannot mis-judge the TTL.
 """
 from __future__ import annotations
 
@@ -133,6 +133,26 @@ class BotRestartLockRepository(
                 )
             return result > 0
 
+    def refresh(
+        self, env: str, entity_id: str, bot_id: str, lock_token: str
+    ) -> bool:
+        """Renew a fenced lock without extending another holder's lease."""
+        with self._db.orm_session() as db:
+            result = (
+                db.query(self._Lock)
+                .filter(
+                    self._Lock.env == env,
+                    self._Lock.entity_id == entity_id,
+                    self._Lock.bot_id == bot_id,
+                    self._Lock.lock_token == lock_token,
+                )
+                .update(
+                    {self._Lock.gmt_modified: func.now()},
+                    synchronize_session=False,
+                )
+            )
+            return result > 0
+
     # ========================================================================
     # Query
     # ========================================================================
@@ -158,7 +178,7 @@ class BotRestartLockRepository(
     ) -> Optional[BotRestartLockRecord]:
         """仅当锁存在且已超过 ttl_seconds 时返回记录，否则返回 None。
 
-        过期判定完全基于数据库时钟：``gmt_create`` 与 "now" 都取自 DB，
+        过期判定完全基于数据库时钟：``gmt_modified`` 与 "now" 都取自 DB，
         因此不受应用与数据库之间的时钟漂移影响。
         """
         with self._db.orm_session() as db:
@@ -171,7 +191,7 @@ class BotRestartLockRepository(
                 )
                 .first()
             )
-            if row is None or row.gmt_create is None:
+            if row is None or row.gmt_modified is None:
                 return None
 
             # type_coerce ensures both SQLite and MySQL/OceanBase yield a
@@ -187,7 +207,7 @@ class BotRestartLockRepository(
             # while ``func.now()`` coerces tz-naive. Normalize both to naive so
             # the subtraction can't raise "can't subtract offset-naive and
             # offset-aware datetimes" on any driver.
-            elapsed = (_as_naive(db_now) - _as_naive(row.gmt_create)).total_seconds()
+            elapsed = (_as_naive(db_now) - _as_naive(row.gmt_modified)).total_seconds()
             if elapsed >= ttl_seconds:
                 logger.info(
                     "[restart_lock.get_if_stale] stale lock, env=%s, entity_id=%s, bot_id=%s, elapsed=%.1fs, ttl=%ss",

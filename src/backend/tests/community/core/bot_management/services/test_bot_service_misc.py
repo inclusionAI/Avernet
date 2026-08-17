@@ -554,10 +554,10 @@ class TestDeleteBot:
         assert result is True
         svc._repository.soft_delete_by_owner.assert_called_once_with("bot001", "user001")
 
-    def test_concurrent_delete_joins_before_passport_or_soft_delete(self):
-        """The durable delete lock covers all destructive stages, not only devices."""
+    def test_concurrent_delete_waits_for_durable_completion(self):
+        """A joined request succeeds only after the winner's soft delete is visible."""
         svc = _make_service()
-        svc._repository.get_by_id_and_owner.return_value = _make_bot(binding_id=None)
+        svc._repository.get_by_id_and_owner.side_effect = [_make_bot(binding_id=None), None]
         svc._restart_lock_repo.acquire.return_value = None
         svc._restart_lock_repo.get_if_stale.return_value = None
 
@@ -566,6 +566,20 @@ class TestDeleteBot:
         svc._passport_plugin.destroy_passport.assert_not_called()
         svc._repository.soft_delete_by_owner.assert_not_called()
         svc._restart_lock_repo.release.assert_not_called()
+
+    def test_concurrent_delete_surfaces_a_winner_that_released_without_deleting(self):
+        svc = _make_service()
+        bot = _make_bot(binding_id=None)
+        svc._repository.get_by_id_and_owner.side_effect = [bot, bot]
+        svc._restart_lock_repo.acquire.return_value = None
+        svc._restart_lock_repo.get_if_stale.return_value = None
+        svc._restart_lock_repo.get.return_value = None
+
+        with pytest.raises(BotServiceError, match="did not complete"):
+            svc.delete_bot("bot001", "user001")
+
+        svc._passport_plugin.destroy_passport.assert_not_called()
+        svc._repository.soft_delete_by_owner.assert_not_called()
 
     def test_delete_releases_its_operation_lock_after_completion(self):
         svc = _make_service()
@@ -577,6 +591,9 @@ class TestDeleteBot:
             assert svc.delete_bot("bot001", "user001") is True
 
         svc._restart_lock_repo.release.assert_called_once_with(
+            "dev", "staff_user001", "delete:bot001", "delete-lock"
+        )
+        svc._restart_lock_repo.refresh.assert_called_once_with(
             "dev", "staff_user001", "delete:bot001", "delete-lock"
         )
 

@@ -399,9 +399,21 @@ class BotRestartLockRepositoryProtocol(Protocol):
     ) -> Optional[BotRestartLockRecord]:
         """Return the lock row only if it is older than ``ttl_seconds``.
 
-        Staleness is evaluated DB-side (comparing ``gmt_create`` against the
+        Staleness is evaluated DB-side (comparing ``gmt_modified`` against the
         database clock) to avoid app/DB clock-skew. Returns ``None`` when no
         row exists or the existing row is still fresh.
+        """
+        ...
+
+    @abstractmethod
+    def refresh(
+        self, env: str, entity_id: str, bot_id: str, lock_token: str
+    ) -> bool:
+        """Renew an owned lock's DB-side heartbeat timestamp.
+
+        The token guard means a stale holder cannot extend a lock reaped and
+        acquired by another operation. Returns ``False`` when ownership was
+        lost, allowing the caller to fail rather than continue unfenced.
         """
         ...
 
