@@ -110,16 +110,55 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["server_code"],
+      "description": "One MCP server, in one of two mutually exclusive forms discriminated by 'transport'. The 'oneOf' below is the authority: a local entry ('stdio') must carry the 'stdio' launch object and no endpoint/headers; a remote entry ('http'/'sse') must carry no 'stdio'. Validating against this schema is enough to reject a half-formed entry — no engine-side launch attempt required.",
       "properties": {
         "server_code": { "type": "string" },
         "name": { "type": ["string", "null"] },
-        "endpoint": { "type": ["string", "null"], "description": "May carry an inlined ?authorization=<token> query." },
-        "transport": { "type": ["string", "null"] },
+        "endpoint": { "type": ["string", "null"], "description": "Remote form. May carry an inlined ?authorization=<token> query." },
+        "transport": { "type": ["string", "null"], "description": "Discriminator: 'stdio' (local) | 'http' | 'sse' (remote)." },
         "headers": {
           "type": "object",
-          "description": "May carry inlined secret headers (e.g. x-ling-auth).",
+          "description": "Remote form. May carry inlined secret headers (e.g. x-ling-auth).",
           "additionalProperties": { "type": "string" }
+        },
+        "stdio": {
+          "oneOf": [{ "$ref": "#/definitions/stdioSpec" }, { "type": "null" }],
+          "description": "Local form (transport == 'stdio'). Null/absent for a remote server."
         }
+      },
+      "oneOf": [
+        {
+          "title": "local (stdio)",
+          "description": "transport 'stdio' ⇒ a launch instruction, and none of the remote fields.",
+          "required": ["transport", "stdio"],
+          "properties": {
+            "transport": { "const": "stdio" },
+            "stdio": { "$ref": "#/definitions/stdioSpec" },
+            "endpoint": { "type": "null" },
+            "headers": { "type": "object", "maxProperties": 0 }
+          }
+        },
+        {
+          "title": "remote (http/sse)",
+          "description": "transport 'http'/'sse' ⇒ a URL to connect to, and no launch instruction. 'endpoint' is required here even though it is nullable at the top level: an entry with neither a URL nor a launch instruction gives the engine nothing to act on.",
+          "required": ["transport", "endpoint"],
+          "properties": {
+            "transport": { "enum": ["http", "sse"] },
+            "endpoint": { "type": "string", "minLength": 1 },
+            "stdio": { "type": "null" }
+          }
+        }
+      ]
+    },
+    "stdioSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command"],
+      "description": "How to launch a local MCP server: the engine spawns 'command' as a child process and speaks JSON-RPC over its stdin/stdout. Carries no credentials — the child runs inside the engine's own container.",
+      "properties": {
+        "command": { "type": "string", "minLength": 1, "description": "Executable, e.g. 'python3'." },
+        "args": { "type": "array", "items": { "type": "string" } },
+        "env": { "type": "object", "additionalProperties": { "type": "string" } }
       }
     }
   }
