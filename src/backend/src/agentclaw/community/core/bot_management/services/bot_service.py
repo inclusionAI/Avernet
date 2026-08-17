@@ -118,6 +118,12 @@ logger = get_logger()
 # blocked from restarting.
 RESTART_LOCK_TTL_SECONDS = 120
 
+# Deletion shares the durable, fenced lock implementation used by restart, but
+# uses a separate key namespace.  A restart must not accidentally join a
+# deletion (or vice versa), while duplicate deletes must coalesce before either
+# request reaches Passport or the final soft-delete CAS.
+_DELETE_LOCK_KEY_PREFIX = "delete:"
+
 # Passport refresh is callback-driven and retryable. Keep caller-instance
 # fan-out bounded while still attempting every instance before reporting an
 # aggregate failure.
@@ -881,6 +887,23 @@ class BotService:
             self._restart_lock_repo.release(env, entity_id, bot_id, stale.lock_token)
 
         return self._restart_lock_repo.acquire(env, entity_id, bot_id, holder_user_id)
+
+    def _try_acquire_delete_lock(
+        self, env: str, entity_id: str, bot_id: str, holder_user_id: str
+    ) -> Optional[BotRestartLockRecord]:
+        """Acquire the durable operation lock for a complete bot deletion.
+
+        The underlying lock is intentionally namespaced so a delete joins only
+        another delete.  This guards every destructive step, not just device
+        release: Passport destruction and the terminal soft-delete CAS are
+        otherwise still reachable by two concurrent requests.
+        """
+        return self._try_acquire_restart_lock(
+            env,
+            entity_id,
+            f"{_DELETE_LOCK_KEY_PREFIX}{bot_id}",
+            holder_user_id,
+        )
 
     async def get_bot_by_ip_and_user(self, ip: str, user_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -3398,6 +3421,9 @@ class BotService:
         if not user_id:
             raise BotServiceError("User ID is required for deleting bot")
 
+        delete_lock: BotRestartLockRecord | None = None
+        delete_lock_env: str | None = None
+        delete_lock_entity_id: str | None = None
         try:
             # Get bot by bot_id and owner_id (user_id)
             bot = self._repository.get_by_id_and_owner(bot_id, user_id)
@@ -3423,6 +3449,29 @@ class BotService:
                 earliest_bot_id = earliest.get("bot_id")
                 if earliest_bot_id and bot_id == earliest_bot_id:
                     raise BotOperationNotAllowedError("不能删除首个创建的 Bot，该 Bot 受保护")
+
+            # A device-release claim alone only prevents duplicate provider
+            # destruction.  Keep the rest of deletion (Passport + bot row)
+            # under the same durable operation fence as well.  The losing
+            # request joins the in-flight deletion without repeating any
+            # destructive operation; the winning request reports any failure.
+            delete_lock_env = get_current_env()
+            delete_lock_entity_id = bot.get("entity_id") or user_id
+            delete_lock = self._try_acquire_delete_lock(
+                delete_lock_env,
+                delete_lock_entity_id,
+                bot_id,
+                user_id,
+            )
+            if delete_lock is None:
+                logger.info(
+                    "[bot_service.delete_bot] Deletion already in progress for bot %s "
+                    "(env=%s, entity_id=%s); joining duplicate request.",
+                    bot_id,
+                    delete_lock_env,
+                    delete_lock_entity_id,
+                )
+                return True
 
             # Withdraw every application authorization standing against this
             # bot — whoever delegated it — before anything destructive happens.
@@ -3546,6 +3595,14 @@ class BotService:
         except Exception as e:
             logger.error(f"[bot_service.delete_bot] Failed to delete bot {bot_id}: {e}")
             raise BotServiceError(f"Failed to delete bot: {e}")
+        finally:
+            if delete_lock is not None:
+                self._restart_lock_repo.release(
+                    delete_lock_env,
+                    delete_lock_entity_id,
+                    f"{_DELETE_LOCK_KEY_PREFIX}{bot_id}",
+                    delete_lock.lock_token,
+                )
 
     def _sweep_grants_that_raced_the_deletion(
         self, bot_id: str, user_id: str

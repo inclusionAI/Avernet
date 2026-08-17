@@ -6,6 +6,7 @@ check_bot_name_exists, generate_bot_id.
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from unittest.mock import MagicMock, call as mock_call, patch
 
 import pytest
@@ -552,6 +553,32 @@ class TestDeleteBot:
         result = svc.delete_bot("bot001", "user001")
         assert result is True
         svc._repository.soft_delete_by_owner.assert_called_once_with("bot001", "user001")
+
+    def test_concurrent_delete_joins_before_passport_or_soft_delete(self):
+        """The durable delete lock covers all destructive stages, not only devices."""
+        svc = _make_service()
+        svc._repository.get_by_id_and_owner.return_value = _make_bot(binding_id=None)
+        svc._restart_lock_repo.acquire.return_value = None
+        svc._restart_lock_repo.get_if_stale.return_value = None
+
+        assert svc.delete_bot("bot001", "user001") is True
+
+        svc._passport_plugin.destroy_passport.assert_not_called()
+        svc._repository.soft_delete_by_owner.assert_not_called()
+        svc._restart_lock_repo.release.assert_not_called()
+
+    def test_delete_releases_its_operation_lock_after_completion(self):
+        svc = _make_service()
+        svc._repository.get_by_id_and_owner.return_value = _make_bot(binding_id=None)
+        svc._repository.soft_delete_by_owner.return_value = True
+        svc._restart_lock_repo.acquire.return_value = SimpleNamespace(lock_token="delete-lock")
+
+        with patch.object(bot_service_module, "get_current_env", return_value="dev"):
+            assert svc.delete_bot("bot001", "user001") is True
+
+        svc._restart_lock_repo.release.assert_called_once_with(
+            "dev", "staff_user001", "delete:bot001", "delete-lock"
+        )
 
     def test_syncs_bcn_provider_delete_after_soft_delete(self):
         svc = _make_service()
