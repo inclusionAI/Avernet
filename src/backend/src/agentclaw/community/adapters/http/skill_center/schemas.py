@@ -408,6 +408,12 @@ class UploadSkillResponse(BaseModel):
     message: str
 
 
+class UploadSkillErrorResponse(BaseModel):
+    """HTTP error body returned when an upload cannot start safely."""
+
+    detail: str = Field(description="Human-readable reason for the failed upload.")
+
+
 class SkillParametersResponse(BaseModel):
     success: bool
     data: dict
