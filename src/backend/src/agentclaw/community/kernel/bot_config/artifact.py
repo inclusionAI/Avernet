@@ -105,7 +105,7 @@ class FileRef:
 class StdioSpec:
     """How to launch a local (stdio) MCP server.
 
-    Present only on entries whose ``transport`` is ``"STDIO"``. Unlike a remote
+    Present only on entries whose ``transport`` is ``"stdio"``. Unlike a remote
     entry — which is pure data (a URL plus headers) — this is an **instruction to
     execute**, so it is only meaningful in an engine whose image actually carries
     ``command`` at that path. Placement/lifecycle of the child process is the
