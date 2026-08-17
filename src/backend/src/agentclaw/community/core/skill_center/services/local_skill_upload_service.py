@@ -20,7 +20,9 @@ from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
-from agentclaw.community.core.repository.protocols.bot import BotCollabLogRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import (
+    BotCollabLogRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillDuplicateError,
@@ -34,7 +36,9 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillTooLargeError,
     LocalSkillLayoutRollbackError,
 )
-from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillSetRepository,
+)
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
@@ -42,7 +46,9 @@ from agentclaw.community.core.skill_center.factories import (
     SkillServiceFactory,
     SkillSetServiceFactory,
 )
-from agentclaw.community.core.repository.protocols.skill_center import LocalSkillCleanupRepository
+from agentclaw.community.core.repository.protocols.skill_center import (
+    LocalSkillCleanupRepository,
+)
 from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditBusyError,
     SkillsPoolEditGuard,
@@ -344,19 +350,39 @@ class LocalSkillUploadService:
         files: list[tuple[str, bytes]],
         is_teclaw: bool,
     ) -> dict[str, Any]:
-        """Stage a complete replacement, then atomically switch its locator authority."""
+        """Publish a replacement at the stable layout-owned package locator.
+
+        The hidden directory is staging only.  Runtime and database authority
+        always converge on ``<resolved-local-root>/<skill-name>``; this keeps
+        normal and Skills Pool layouts consistent and keeps implementation
+        directories out of the public workspace contract.
+        """
         old_locator = str(skill["git_path"])[len("local://") :]
         version_dir = f".{name}.replacement-{uuid4().hex}"
-        new_locator, staged = self._skill_service_factory.local_skill_package_storage(
-            entity_id=str(bot["entity_id"]),
-            owner_id=owner_id,
-            bot_id=bot_id,
-            engine_type=bot.get("active_engine"),
-            entity_type=str(bot.get("entity_type") or "staff"),
-            is_desktop=bot.get("bot_type") == "desktop",
-            is_teclaw=is_teclaw,
-            name=name,
-            directory_name=version_dir,
+        canonical_locator, canonical = (
+            self._skill_service_factory.local_skill_package_storage(
+                entity_id=str(bot["entity_id"]),
+                owner_id=owner_id,
+                bot_id=bot_id,
+                engine_type=bot.get("active_engine"),
+                entity_type=str(bot.get("entity_type") or "staff"),
+                is_desktop=bot.get("bot_type") == "desktop",
+                is_teclaw=is_teclaw,
+                name=name,
+            )
+        )
+        staged_locator, staged = (
+            self._skill_service_factory.local_skill_package_storage(
+                entity_id=str(bot["entity_id"]),
+                owner_id=owner_id,
+                bot_id=bot_id,
+                engine_type=bot.get("active_engine"),
+                entity_type=str(bot.get("entity_type") or "staff"),
+                is_desktop=bot.get("bot_type") == "desktop",
+                is_teclaw=is_teclaw,
+                name=name,
+                directory_name=version_dir,
+            )
         )
         old_storage = (
             self._skill_service_factory.local_skill_package_storage_for_locator(
@@ -370,6 +396,10 @@ class LocalSkillUploadService:
                 locator=old_locator,
             )
         )
+        old_is_canonical = old_locator == canonical_locator
+        obsolete_locator = old_locator
+        obsolete_storage = old_storage
+        backup = None
         old_metadata = {
             "description": skill.get("description"),
             "git_path": skill.get("git_path"),
@@ -378,14 +408,38 @@ class LocalSkillUploadService:
         switched = False
         old_cleanup_work_id: int | None = None
         runtime_sync_attempted = False
+        canonical_published = False
         try:
             await staged.write(files)
+            await staged.verify()
+            if old_is_canonical:
+                backup_dir = f".{name}.rollback-{uuid4().hex}"
+                obsolete_locator, backup = (
+                    self._skill_service_factory.local_skill_package_storage(
+                        entity_id=str(bot["entity_id"]),
+                        owner_id=owner_id,
+                        bot_id=bot_id,
+                        engine_type=bot.get("active_engine"),
+                        entity_type=str(bot.get("entity_type") or "staff"),
+                        is_desktop=bot.get("bot_type") == "desktop",
+                        is_teclaw=is_teclaw,
+                        name=name,
+                        directory_name=backup_dir,
+                    )
+                )
+                await old_storage.copy_to(backup)
+                obsolete_storage = backup
+            # ``copy_to(..., replace=True)`` can fail after clearing or partly
+            # writing the canonical directory.  Mark the mutation before the
+            # call so every such failure restores the old authority.
+            canonical_published = True
+            await staged.copy_to(canonical, replace=True)
             old_cleanup_work_id = self._cleanup_repo.record_preparing(
                 env=str(bot["env"]),
                 owner_id=owner_id,
                 bot_id=bot_id,
                 skill_id=str(skill["id"]),
-                package_locator=old_locator,
+                package_locator=obsolete_locator,
             )
             if old_cleanup_work_id is None:
                 raise LocalSkillStorageError()
@@ -394,7 +448,7 @@ class LocalSkillUploadService:
                 owner_id=owner_id,
                 bot_id=bot_id,
                 old_locator=old_locator,
-                new_locator=new_locator,
+                new_locator=canonical_locator,
                 description=description,
                 # Replacements always reconcile the runtime before the old
                 # package can be cleaned up, including an inactive skill
@@ -449,14 +503,20 @@ class LocalSkillUploadService:
                 owner_id=owner_id,
                 bot_id=bot_id,
                 staged=staged,
-                staged_locator=new_locator,
+                staged_locator=staged_locator,
+                canonical=canonical,
+                canonical_locator=canonical_locator,
+                old_is_canonical=old_is_canonical,
+                backup=backup,
+                obsolete_locator=obsolete_locator,
+                canonical_published=canonical_published,
                 switched=switched,
                 old_cleanup_work_id=old_cleanup_work_id,
                 runtime_sync_attempted=runtime_sync_attempted,
             )
             raise
         except Exception as exc:
-            if switched:
+            if switched or canonical_published:
                 await self._restore_replacement(
                     skill=skill,
                     old_metadata=old_metadata,
@@ -464,8 +524,14 @@ class LocalSkillUploadService:
                     owner_id=owner_id,
                     bot_id=bot_id,
                     staged=staged,
-                    staged_locator=new_locator,
-                    switched=True,
+                    staged_locator=staged_locator,
+                    canonical=canonical,
+                    canonical_locator=canonical_locator,
+                    old_is_canonical=old_is_canonical,
+                    backup=backup,
+                    obsolete_locator=obsolete_locator,
+                    canonical_published=canonical_published,
+                    switched=switched,
                     old_cleanup_work_id=old_cleanup_work_id,
                     runtime_sync_attempted=runtime_sync_attempted,
                 )
@@ -473,19 +539,28 @@ class LocalSkillUploadService:
                 self._cancel_cleanup_if_registered(
                     old_cleanup_work_id, bot, owner_id, bot_id
                 )
+                if backup is not None:
+                    await self._discard_or_record(
+                        bot=bot,
+                        owner_id=owner_id,
+                        bot_id=bot_id,
+                        skill_id=str(skill["id"]),
+                        storage=backup,
+                        locator=obsolete_locator,
+                    )
                 await self._discard_or_record(
                     bot=bot,
                     owner_id=owner_id,
                     bot_id=bot_id,
                     skill_id=str(skill["id"]),
                     storage=staged,
-                    locator=new_locator,
+                    locator=staged_locator,
                 )
             raise LocalSkillStorageError() from exc
         # The old locator already has durable work.  Its purge is never a
         # reason to undo a working replacement.
         try:
-            cleaned = await old_storage.cleanup()
+            cleaned = await obsolete_storage.cleanup()
         except Exception:
             cleaned = False
         if cleaned:
@@ -496,12 +571,20 @@ class LocalSkillUploadService:
                 bot_id=bot_id,
             ):
                 raise LocalSkillStorageError()
+        await self._discard_or_record(
+            bot=bot,
+            owner_id=owner_id,
+            bot_id=bot_id,
+            skill_id=str(skill["id"]),
+            storage=staged,
+            locator=staged_locator,
+        )
         return {
             "operation": "updated",
             "skill": {
                 **skill,
                 "description": description,
-                "git_path": f"local://{new_locator}",
+                "git_path": f"local://{canonical_locator}",
                 "user_id": owner_id,
             },
             "actor_id": actor_id,
@@ -517,18 +600,31 @@ class LocalSkillUploadService:
         bot_id: str,
         staged,
         staged_locator: str,
+        canonical,
+        canonical_locator: str,
+        old_is_canonical: bool,
+        backup,
+        obsolete_locator: str,
+        canonical_published: bool,
         switched: bool,
         old_cleanup_work_id: int | None,
         runtime_sync_attempted: bool,
     ) -> None:
+        if canonical_published:
+            try:
+                if old_is_canonical:
+                    if backup is None:
+                        raise LocalSkillStorageError()
+                    await backup.copy_to(canonical, replace=True)
+                elif not await canonical.cleanup():
+                    raise LocalSkillStorageError()
+            except Exception as exc:
+                raise LocalSkillStorageError() from exc
         if switched:
             restored = self._skill_repo.update(skill["id"], old_metadata)
             if restored is None:
                 raise LocalSkillStorageError()
-            if (
-                runtime_sync_attempted
-                and not self._sync_runtime(bot, owner_id, bot_id)
-            ):
+            if runtime_sync_attempted and not self._sync_runtime(bot, owner_id, bot_id):
                 # Runtime may have switched partway before reporting failure.
                 # Keep the complete staged package until a later serialized
                 # mutation can restore the old mapping before deleting it.
@@ -538,7 +634,9 @@ class LocalSkillUploadService:
                         owner_id=owner_id,
                         bot_id=bot_id,
                         skill_id=str(skill["id"]),
-                        locator=staged_locator,
+                        locator=(
+                            staged_locator if old_is_canonical else canonical_locator
+                        ),
                         requires_runtime_restore=True,
                     )
                     is None
@@ -548,8 +646,15 @@ class LocalSkillUploadService:
                     old_cleanup_work_id, bot, owner_id, bot_id
                 )
                 raise LocalSkillRuntimeSyncError()
-            self._cancel_cleanup_if_registered(
-                old_cleanup_work_id, bot, owner_id, bot_id
+        self._cancel_cleanup_if_registered(old_cleanup_work_id, bot, owner_id, bot_id)
+        if backup is not None:
+            await self._discard_or_record(
+                bot=bot,
+                owner_id=owner_id,
+                bot_id=bot_id,
+                skill_id=str(skill["id"]),
+                storage=backup,
+                locator=obsolete_locator,
             )
         await self._discard_or_record(
             bot=bot,
@@ -695,9 +800,12 @@ class LocalSkillUploadService:
             skill = self._skill_repo.get_by_id(str(skill_id))
             if skill and skill.get("git_path") == f"local://{locator}":
                 return True
-        return self._skill_repo.get_bot_local_by_locator(
-            bot_id=bot_id, user_id=owner_id, locator=locator
-        ) is not None
+        return (
+            self._skill_repo.get_bot_local_by_locator(
+                bot_id=bot_id, user_id=owner_id, locator=locator
+            )
+            is not None
+        )
 
     def _same_name_matches(
         self, *, bot_id: str, owner_id: str, name: str
