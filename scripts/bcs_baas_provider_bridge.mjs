@@ -22,7 +22,14 @@ function parseArgs(argv) {
   if (!Number.isInteger(options.port) || options.port < 1 || options.port > 65535 || !options.tokenFile) {
     throw new Error('usage: bcs_baas_provider_bridge.mjs --port PORT --token-file PATH [--baas-url URL]');
   }
-  options.downlinkUrl = `${options.baasUrl.replace(/\/$/, '')}/bcn/downlink`;
+  let baasUrl;
+  try { baasUrl = new URL(options.baasUrl); } catch { throw new Error('invalid BaaS URL'); }
+  // COSEC: restrict the bridge to a literal loopback target so launch options
+  // cannot turn this local Provider callback into an SSRF proxy.
+  if (baasUrl.protocol !== 'http:' || baasUrl.hostname !== '127.0.0.1'
+    || baasUrl.username || baasUrl.password || baasUrl.search || baasUrl.hash
+    || !['', '/'].includes(baasUrl.pathname)) throw new Error('BaaS URL must be a loopback HTTP origin');
+  options.downlinkUrl = `${baasUrl.origin}/bcn/downlink`;
   return options;
 }
 
@@ -30,12 +37,12 @@ function credentials(tokenFile) {
   let raw;
   try { raw = JSON.parse(readFileSync(tokenFile, 'utf8')); } catch { throw new Error('runtime credentials unavailable'); }
   if (typeof raw.baas_token !== 'string' || typeof raw.bcs_to_provider_token !== 'string') throw new Error('runtime credentials invalid');
-  const references = new Set();
+  const routes = new Map();
   for (const item of Object.values(raw.provider_bots ?? {})) {
-    if (!item || typeof item !== 'object' || typeof item.provider_bot_ref !== 'string') throw new Error('runtime provider bot credentials invalid');
-    references.add(item.provider_bot_ref);
+    if (!item || typeof item !== 'object' || typeof item.provider_bot_ref !== 'string' || typeof item.baas_bot_ref !== 'string') throw new Error('runtime provider bot credentials invalid');
+    routes.set(item.provider_bot_ref, item.baas_bot_ref);
   }
-  return { baasToken: raw.baas_token, bcsToken: raw.bcs_to_provider_token, references };
+  return { baasToken: raw.baas_token, bcsToken: raw.bcs_to_provider_token, routes };
 }
 
 function bearer(headers) {
@@ -108,7 +115,7 @@ function handler(options) {
       safeLog(`bridge.reject reason=unauthorized method=${meta.method} run_id=${meta.runId} provider_bot_ref=${meta.providerBotRef}`);
       return json(response, 401, { error: 'unauthorized' });
     }
-    if (!auth.references.has(meta.providerBotRef)) {
+    if (!auth.routes.has(meta.providerBotRef)) {
       safeLog(`bridge.reject reason=provider_bot_mismatch method=${meta.method} run_id=${meta.runId} provider_bot_ref=${meta.providerBotRef}`);
       return json(response, 403, { error: 'provider bot mismatch' });
     }
@@ -117,6 +124,11 @@ function handler(options) {
       return json(response, 400, { error: 'unsupported method' });
     }
 
+    // COSEC: authorize the stable BCS ref before translating it to the local
+    // BAAS target; callers cannot choose an arbitrary downstream Bot.
+    const baasBotRef = auth.routes.get(meta.providerBotRef);
+    const downstreamBody = { ...body, to_bot: { ...body.to_bot, provider_bot_ref: baasBotRef } };
+
     const isStream = meta.method === 'chat.send' && String(request.headers['x-bcn-transport'] ?? '').toLowerCase() === 'sse';
     const controller = new AbortController();
     if (isStream) response.once('close', () => { if (!response.writableEnded) controller.abort(); });
@@ -124,8 +136,9 @@ function handler(options) {
       const upstream = await fetch(options.downlinkUrl, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${auth.baasToken}`, 'x-bcn-transport': isStream ? 'sse' : 'json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify(downstreamBody),
         signal: controller.signal,
+        redirect: 'error',
       });
       if (!isStream) {
         const payload = Buffer.from(await upstream.arrayBuffer());

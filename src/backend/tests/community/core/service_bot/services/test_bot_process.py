@@ -7,6 +7,7 @@ from agentclaw.community.core.service_bot.services.bot_process import (
     BotProcessRegistry,
     EmptyBotProcess,
     PersonalBotProcess,
+    ServiceBotProcess,
 )
 
 
@@ -35,16 +36,28 @@ def test_personal_bot_process_reads_only_explicit_runtime_engine(
     template_service.get_template_config.assert_called_once_with("bot_001")
 
 
+def test_service_bot_process_reads_template_config():
+    template_service = Mock()
+    template_service.get_template_config.return_value = {
+        "active_runtime_engine_type": "  aicoding  ",
+    }
+    process = ServiceBotProcess(template_service)
+
+    assert process.get_active_runtime_engine_type("bot_001") == "aicoding"
+    template_service.get_template_config.assert_called_once_with("bot_001")
+
+
 def test_empty_bot_process_returns_empty_runtime_engine():
     assert EmptyBotProcess().get_active_runtime_engine_type("bot_001") == ""
 
 
-def test_registry_selects_personal_process_and_defaults_other_types():
+def test_registry_selects_template_process_for_personal_and_service():
     personal = Mock()
+    service = Mock()
     default = Mock()
-    registry = BotProcessRegistry(personal, default)
+    registry = BotProcessRegistry(personal, default, service)
 
     assert registry.get("personal") is personal
-    assert registry.get("service") is default
+    assert registry.get("service") is service
     assert registry.get("desktop") is default
     assert registry.get("") is default

@@ -70,6 +70,10 @@ class MemoryCachePlugin(MockSeam, CachePlugin):
             self._store[lock_storage_key] = (lock_value, time.time() + ttl)
         return lock_value
 
+    def acquire_lock_strict(self, lock_key: str, ttl: int = 30) -> Optional[str]:
+        """Local memory never has a separate cache infrastructure boundary."""
+        return self.acquire_lock(lock_key, ttl)
+
     def release_lock(self, lock_key: str, lock_value: str) -> bool:
         """释放分布式锁。"""
         lock_storage_key = f"lock:{lock_key}"

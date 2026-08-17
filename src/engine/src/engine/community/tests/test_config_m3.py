@@ -20,6 +20,7 @@ from engine.community.config import (
     _resolve_default_engine,
     load_engine_config,
     load_engine_process_settings,
+    load_temporary_url_settings,
 )
 
 
@@ -187,3 +188,15 @@ class TestLoadEngineProcessSettings:
         assert settings.engine == "claude-code"
         assert settings.start_cmd == ()
         assert settings.enabled is False
+
+
+def test_temporary_url_settings_load_separate_image_limit(monkeypatch):
+    monkeypatch.setenv("ENGINE_TEMPORARY_URL_MAX_BYTES", "100")
+    monkeypatch.setenv("ENGINE_TEMPORARY_URL_IMAGE_MAX_BYTES", "20")
+    monkeypatch.setenv("ENGINE_TEMPORARY_URL_TIMEOUT_SECONDS", "5")
+
+    settings = load_temporary_url_settings()
+
+    assert settings.max_bytes == 100
+    assert settings.image_max_bytes == 20
+    assert settings.timeout_seconds == 5

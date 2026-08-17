@@ -211,6 +211,18 @@ singlebox_model_config_select_mode() {
 }
 
 singlebox_model_config_require_manual_env() {
+    # 以下为安全注释COSEC：仅解析明确的环境变量引用，避免将占位符当作可用凭据。
+    if [ "${OPENCLAW_OPENAI_API_KEY:-}" = "OPENAI_API_KEY" ]; then
+        if [ -z "${OPENAI_API_KEY:-}" ]; then
+            log_error "OPENCLAW_OPENAI_API_KEY references OPENAI_API_KEY, but OPENAI_API_KEY is not set."
+            log_error "Set OPENAI_API_KEY in the launch environment, or set OPENCLAW_OPENAI_API_KEY to a real key in ${PROJECT_ROOT}/.env.local."
+            return 1
+        fi
+        OPENCLAW_OPENAI_API_KEY="$OPENAI_API_KEY"
+        export OPENCLAW_OPENAI_API_KEY
+        log_info "Resolved OpenClaw manual model credential from OPENAI_API_KEY."
+    fi
+
     local missing=()
     [ -n "${OPENCLAW_OPENAI_BASE_URL:-}" ] || missing+=("OPENCLAW_OPENAI_BASE_URL")
     [ -n "${OPENCLAW_OPENAI_API_KEY:-}" ] || missing+=("OPENCLAW_OPENAI_API_KEY")
@@ -263,15 +275,13 @@ singlebox_model_config_apply_thinking_policy() {
             $model_ref | split("/")[0];
           def model_id($model_ref):
             $model_ref | split("/")[1:] | join("/");
-          def needs_bailian_glm_thinking_override($config; $model_ref):
+          def needs_glm_thinking_override($config; $model_ref):
             ($config.models.providers[model_provider_id($model_ref)] // {}) as $provider
             | (($provider.api // "") == "openai-completions"
                or ($provider.api // "") == "openai")
-              and (($provider.baseUrl // "" | ascii_downcase)
-                   | contains("aliyuncs.com/compatible-mode/"))
               and ((model_id($model_ref) | ascii_downcase)
                    | test("(^|/)glm-(4\\.(5|6|7)|5([.-]|$))"));
-          def set_bailian_glm_thinking_override:
+          def set_glm_thinking_override:
             if type != "object" then {} else . end
             | .params = (if (.params? | type) == "object" then .params else {} end)
             | .params.extra_body = (
@@ -329,7 +339,7 @@ singlebox_model_config_apply_thinking_policy() {
               )
             else . end
           | if ($primary_model | type) == "string"
-               and needs_bailian_glm_thinking_override($source_config; $primary_model) then
+               and needs_glm_thinking_override($source_config; $primary_model) then
               .agents.defaults.models = (
                 if (.agents.defaults.models? | type) == "object" then
                   .agents.defaults.models
@@ -339,14 +349,14 @@ singlebox_model_config_apply_thinking_policy() {
               )
               | .agents.defaults.models[$primary_model] = (
                   (.agents.defaults.models[$primary_model] // {})
-                  | set_bailian_glm_thinking_override
+                  | set_glm_thinking_override
                 )
             else . end
           | if (.agents.defaults.models? | type) == "object" then
               .agents.defaults.models |= with_entries(
                 .key as $model_ref
-                | if needs_bailian_glm_thinking_override($source_config; $model_ref) then
-                    .value |= set_bailian_glm_thinking_override
+                | if needs_glm_thinking_override($source_config; $model_ref) then
+                    .value |= set_glm_thinking_override
                   else . end
               )
             else . end
@@ -371,7 +381,6 @@ singlebox_model_config_write_manual() {
         jq -n \
             --arg provider_id "$provider_id" \
             --arg base_url "$OPENCLAW_OPENAI_BASE_URL" \
-            --arg api_key "$OPENCLAW_OPENAI_API_KEY" \
             --arg model_id "$model_id" \
             --arg model_name "$model_name" \
             --arg model_api "$model_api" \
@@ -381,7 +390,11 @@ singlebox_model_config_write_manual() {
             providers: {
               ($provider_id): {
                 baseUrl: $base_url,
-                apiKey: $api_key,
+                apiKey: {
+                  source: "env",
+                  provider: "default",
+                  id: "OPENCLAW_OPENAI_API_KEY"
+                },
                 api: $model_api,
                 models: [
                   {
@@ -605,29 +618,9 @@ singlebox_model_config_export_llm_env() {
             ;;
     esac
 
-    # Pick a fallback reasoning model: prefer a faster non-primary model from the
-    # same provider (e.g. GLM-5.1 for antchat) so local fusion answers finish
-    # before the antchat 90s gateway window. Respect explicit LLM_*_MODEL env vars.
+    # Respect explicit LLM_*_MODEL env vars; otherwise use the primary model
+    # from the openclaw config so that endpoint, token, and model stay consistent.
     local preferred_model="$model_name"
-    if [ -z "${LLM_REASONING_MODEL:-}" ]; then
-        local models fast_candidate
-        models="$(jq -r --arg p "$provider_id" --arg primary "$model_name" '
-            .models.providers[$p].models[]? | select(.id != $primary) | .id
-        ' "$source_file" 2>/dev/null || true)"
-        fast_candidate="$(printf '%s\n' $models | awk '$0=="GLM-5.1"{print; exit}')"
-        if [ -z "$fast_candidate" ]; then
-            fast_candidate="$(printf '%s\n' $models | awk '$0=="Qwen3.5-397B-A17B"{print; exit}')"
-        fi
-        if [ -z "$fast_candidate" ]; then
-            fast_candidate="$(printf '%s\n' $models | awk '$0=="claude-3-5-sonnet"{print; exit}')"
-        fi
-        if [ -z "$fast_candidate" ]; then
-            fast_candidate="$(printf '%s\n' $models | head -1 || true)"
-        fi
-        if [ -n "$fast_candidate" ]; then
-            preferred_model="$fast_candidate"
-        fi
-    fi
 
     export LLM_BASE_URL="${LLM_BASE_URL:-$base_url}"
     export LLM_AUTH_TOKEN="${LLM_AUTH_TOKEN:-$api_key}"
@@ -641,6 +634,45 @@ singlebox_model_config_export_llm_env() {
     export LLM_REASONING_TIMEOUT_MS="${LLM_REASONING_TIMEOUT_MS:-600000}"
 
     log_info "Exported bcsfuse LLM config from ${source_file} (provider=${provider_id}, api_type=${api_type}, model=${model_name})"
+}
+
+singlebox_model_config_export_manual_llm_env() {
+    # When singlebox uses manual mode for the OpenClaw bot config, derive bcsfuse
+    # LLM settings from the same OPENCLAW_OPENAI_* env vars. This mirrors the
+    # home-mode export: base URL, token, and all model selectors are reused so
+    # users do not have to duplicate them in .env.local.
+    if [ "${SINGLEBOX_MODEL_CONFIG_MODE:-}" != "manual" ]; then
+        return 0
+    fi
+
+    local base_url="${OPENCLAW_OPENAI_BASE_URL:-}"
+    local api_key="${OPENCLAW_OPENAI_API_KEY:-}"
+    local model_id="${OPENCLAW_OPENAI_MODEL_ID:-}"
+
+    if [ -z "$base_url" ] || [ -z "$api_key" ] || [ -z "$model_id" ]; then
+        return 0
+    fi
+
+    if { [ -z "${LLM_BASE_URL:-}" ] || [ "${LLM_BASE_URL}" = "change_me" ]; }; then
+        export LLM_BASE_URL="$base_url"
+    fi
+    if { [ -z "${LLM_AUTH_TOKEN:-}" ] || [ "${LLM_AUTH_TOKEN}" = "change_me" ]; }; then
+        export LLM_AUTH_TOKEN="$api_key"
+    fi
+    if { [ -z "${LLM_API_TYPE:-}" ] || [ "${LLM_API_TYPE}" = "change_me" ]; }; then
+        export LLM_API_TYPE="openai"
+    fi
+
+    local preferred_model="$model_id"
+    export LLM_FAST_MODEL="${LLM_FAST_MODEL:-$preferred_model}"
+    export LLM_BALANCED_MODEL="${LLM_BALANCED_MODEL:-$preferred_model}"
+    export LLM_REASONING_MODEL="${LLM_REASONING_MODEL:-$preferred_model}"
+    export LLM_LONG_CONTEXT_MODEL="${LLM_LONG_CONTEXT_MODEL:-$preferred_model}"
+    export LLM_EXTRACTION_MODEL="${LLM_EXTRACTION_MODEL:-$preferred_model}"
+    export LLM_DEFAULT_TIMEOUT_MS="${LLM_DEFAULT_TIMEOUT_MS:-120000}"
+    export LLM_REASONING_TIMEOUT_MS="${LLM_REASONING_TIMEOUT_MS:-600000}"
+
+    log_info "Exported bcsfuse LLM config from manual env (api_type=openai, model=${model_id})"
 }
 
 singlebox_model_config_prepare() {
@@ -658,6 +690,7 @@ singlebox_model_config_prepare() {
         manual)
             singlebox_model_config_require_manual_env || return 1
             singlebox_model_config_write_manual "$output_file" || return 1
+            singlebox_model_config_export_manual_llm_env || true
             ;;
         home)
             singlebox_model_config_write_home "$output_file" || return 1

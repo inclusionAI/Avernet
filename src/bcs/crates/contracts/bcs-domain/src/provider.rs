@@ -101,6 +101,9 @@ pub struct CoordinationSurface {
     pub mcp_server: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcporter_command: Option<String>,
+    /// Exact provider-emitted MCP tool name to canonical BCS coordination tool.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tool_name_mapping: BTreeMap<String, String>,
 }
 
 impl CoordinationSurface {
@@ -109,6 +112,7 @@ impl CoordinationSurface {
             mode: CoordinationMode::LegacyUpstream,
             mcp_server: None,
             mcporter_command: None,
+            tool_name_mapping: BTreeMap::new(),
         }
     }
 
@@ -117,6 +121,7 @@ impl CoordinationSurface {
             mode: CoordinationMode::NativeTool,
             mcp_server: None,
             mcporter_command: None,
+            tool_name_mapping: BTreeMap::new(),
         }
     }
 }
@@ -127,6 +132,7 @@ impl From<ProviderCoordinationConfig> for CoordinationSurface {
             mode: config.mode,
             mcp_server: config.mcp_server,
             mcporter_command: config.mcporter_command,
+            tool_name_mapping: config.tool_name_mapping,
         }
     }
 }

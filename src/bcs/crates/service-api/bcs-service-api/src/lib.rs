@@ -27,11 +27,22 @@ pub mod workbench_use_cases;
 pub use actors::{
     ActorCapabilitiesView, ActorDirectoryEntry, ActorDirectoryService, ActorListCommand,
     ActorListResult, ActorSearchCommand, ActorSearchContext, ActorSearchResult,
-    ActorStatusUpdateCommand, ActorStatusUpdateResult, WorkerProfile, WorkerProfileService,
-    WorkerRecommendCommand, WorkerRecommendResult, WorkerRecommendation,
+    ActorStatusUpdateCommand, ActorStatusUpdateResult,
+};
+#[deprecated(
+    note = "worker-profile contracts moved to bcs_service_api::core; import them from core"
+)]
+pub use core::{
+    WorkerProfile, WorkerProfileCoreService as WorkerProfileService, WorkerRecommendCommand,
+    WorkerRecommendResult, WorkerRecommendation,
 };
 pub use application::SystemMessageService;
 pub use application::system_message::resolve_session_topic;
+pub use application::interaction::{
+    InteractionRequestedOutcome, InteractionService, InteractionServiceError,
+    ProviderInteractionRequestedCommand,
+    ProviderInteractionResolvedCommand, ResolveInteractionCommand, ResolveInteractionResult,
+};
 pub use application::channel::{
     ChannelInboundError, ChannelInboundFailureKind, ChannelService, ChannelUseCaseError,
     CreateBindingCommand, InboundMessage, OutboundMessage,
@@ -158,7 +169,7 @@ pub use port::{
     BotDeliveryResult, BotMetricCount, BotMetricsSnapshotPort, BotRepoPort, BotRunContext,
     BotControlPlaneRepoPort,
     BotRunContextPort, BotTerminalEvent, BotTerminalObserverPort, BotTerminalState,
-    ProviderRunTransport,
+    CompositeBotTerminalObserver, ProviderRunTransport,
     NoopBotTerminalObserver, NoopChannelBindingCleanupPort, ChatRunCleanupPort,
     ChatRunEventPort, ChatRunMetricCount, DeliveryBlockContext,
     DeliveryBlockReason, DeliveryBlockSurface, DeliveryMetricKind, DeliveryMetricTarget,
@@ -172,8 +183,9 @@ pub use port::{
     FrontendDeliveryPort, FrontendDeliveryResult, FrontendDeliveryTarget, GroupDispatchContextPort,
     GroupHistoryBotRequestPort, GroupMetricCount, GroupMetricsSnapshotPort, GroupRepoPort,
     GroupRuntimeBindingRepoPort, GroupSessionMetricCount, GroupSessionMetricsSnapshotPort,
-    HumanInputReadyEvent, ImParticipantRepoPort, JudgeArtifact, JudgeCheckedCriterion,
-    JudgeDecision, JudgeEvaluatorPort, JudgeRequest, KickReason, LeaderElectionPort, LeaderInfo,
+    HumanInputReadyEvent, ImParticipantRepoPort, InteractionFrontendPort, JudgeArtifact,
+    JudgeCheckedCriterion, JudgeDecision, JudgeEvaluatorPort, JudgeRequest, KickReason,
+    LeaderElectionPort, LeaderInfo,
     LeaderStatus, MarkHumanNodeRunningCommand, MetricsResult, NewSessionParams,
     ProviderBotBindingRepoPort, ProviderBotDiscoveryRecord, ProviderBotDiscoverySelector,
     ProviderCredentialRepoPort, ProviderRepoPort, ProviderStreamGrayList,
@@ -215,7 +227,9 @@ pub use types::{
 
 pub use core::{
     ActorKind, ActorStatus, AgentCredentials, AuditEntry, BindingChannel, BindingChannels,
-    BotCapabilities, BotConnectParams, BotConnectResult, BotControlPlaneCandidate,
+    BotCandidateSearchCoreResult, BotCandidateSearchCoreService, BotCandidateSearchHit,
+    BotCandidateSearchMode, BotCandidateSearchQuery, BotCapabilities, BotConnectParams,
+    BotConnectResult, BotControlPlaneCandidate,
     BotControlPlaneCoreService, BotControlPlaneProvider, BotControlPlaneView, BotDynamicStatus,
     BotRegistryCoreService,
     BotSendResult, ChatEventRouting, ConnectError, ConnectionKind, ContextBotSummary, HiddenMentionInfo,
@@ -231,7 +245,8 @@ pub use core::{
     OrganizationCandidatePageQuery, OrganizationCandidateQuery,
     OrganizationCoreService, OrganizationMemberBotDetail, OrganizationMemberDetail,
     OrganizationMemberPageQuery, OrganizationMemberProfile, OrganizationMemberProfilePatch,
-    RelationCoreService, BCS_SYSTEM_MESSAGE, RelationEdge, ResponseMode, RouteAndSendResult,
+    LegacyBotCandidateSearchCoreResult, RelationCoreService, BCS_SYSTEM_MESSAGE, RelationEdge,
+    ResponseMode, RouteAndSendResult,
     RouteParticipantOverlay, RouteSelectorWire, RoutingCoreService, RoutingDecision,
     RoutingMode, RoutingPolicy, RoutingTarget, RuntimeBotIdentity, SenderRoutesValidationError,
     ServiceError, ServiceResult, ServiceSpec, Session, SessionKind, SessionStatus, Skill,
@@ -240,6 +255,16 @@ pub use core::{
     SystemMessageEvent, SystemMessageEventKind, SystemMessageProducerService,
     SystemMessageRecipientResult, Task, TaskStatus, Workspace, backfill_bot_names,
     backfill_participant_names, deserialize_skills, validate_sender_routes,
+};
+
+pub use core::interaction::{
+    InteractionKey, InteractionKind, InteractionStatus, InteractionTransitionError,
+};
+pub use port::interaction::{
+    CanResolveInteraction, CanResolveInteractionCommand, CanResolveInteractionPort,
+    InteractionFrontendEvent, InteractionInsertResult, InteractionProviderAck,
+    InteractionProviderCommand, InteractionProviderPort, InteractionRecord,
+    InteractionResolveClaim, InteractionResolveCommit, InteractionStorePort,
 };
 
 pub use bcs_domain::{

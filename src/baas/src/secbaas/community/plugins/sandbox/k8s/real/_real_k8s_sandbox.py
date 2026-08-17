@@ -45,7 +45,7 @@ if TYPE_CHECKING:
     from secbaas.community.api.device_manage import K8sCredentials
     from secbaas.community.plugins.sandbox.k8s.real import K8sClientManager
 
-logger = get_logger("plugin-sandbox-k8s-real")
+logger = get_logger("plugin-sandbox")
 
 _RFC1123_PATTERN = re.compile(r"[^a-z0-9-]")
 _MULTI_DASH_PATTERN = re.compile(r"-+")

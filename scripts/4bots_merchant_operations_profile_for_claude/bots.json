@@ -16,7 +16,6 @@
         "relay_port": 18900,
         "claude_config_dir": "~/.claude-platform-data",
         "workspace": "~/.teamclaw/claude-workspaces/platform-data",
-        "model": "Kimi-K2.6",
         "permission_mode": "bypassPermissions",
         "system_prompt_md": "platform-data/CLAUDE.md"
       }

@@ -25,6 +25,15 @@ class EngineConfigServiceProtocol(Protocol):
     request failed at runtime with ``TypeError``, and the adapters' mocks would
     not catch the drift either. The keyword-only markers mirror the
     implementation, so a positional call is a type error here too.
+
+    ``stage`` is **required, with no default**, matching
+    ``EngineRuntimeRelayProtocol``: "the stage a handler gated on and the stage
+    it forwards to cannot silently diverge." A default would also have to be the
+    same object on both sides — ``test_service_api_conformance.py`` compares
+    defaults by value — which means this package importing
+    ``core.engine_runtime`` at runtime, and that package's import graph reaches
+    the DI container and a partially-initialised ``bot_service``. Convention and
+    mechanics agree.
     """
 
     async def read_bot_config(
@@ -35,8 +44,13 @@ class EngineConfigServiceProtocol(Protocol):
         entity_id: str,
         entity_type: str,
         engine_type: str,
+        stage: str,
     ) -> dict[str, Any]:
-        """Read a bot's engine config from its own device, provider-blind."""
+        """Read a bot's engine config from the runtime ``stage`` names.
+
+        ``draft`` is the bot's own workspace — what every caller read before
+        stages were addressable.
+        """
         ...
 
     async def write_bot_config(
@@ -48,8 +62,13 @@ class EngineConfigServiceProtocol(Protocol):
         entity_type: str,
         engine_type: str,
         config: dict[str, Any],
+        stage: str,
     ) -> None:
-        """Write a bot's engine config to its own device, provider-blind."""
+        """Write a bot's engine config to its own device, provider-blind.
+
+        Only the draft accepts a write; naming a published stage is refused
+        rather than applied to the draft.
+        """
         ...
 
     async def read_publish_config(

@@ -44,6 +44,29 @@ user_config:
     api_key: "@dummy_api_key"
     default_ttl_minutes: 1440 # 分钟 => 1 天
 
+  # Aliyun ACK 沙箱模板配置（第二类模板，用于 plugins.sandbox.arca = "aliyun_ack"）
+  # 默认使用 dummy 值，启用该后端时才需填充 cluster 与 pod 真实值，无需新增配置键。
+  aliyun_ack_template:
+    template_id: "ALIYUN-ACK-TEMPLATE-000000"
+    cluster:
+      endpoint: "https://k8s.example.com"
+      region: "cn-hangzhou"
+      cluster_name: "ack-sandbox"
+      kubeconfig: ""
+      context: "ack-sandbox"
+      access_key_id: "@dummy_access_key_id"
+      access_key_secret: "@dummy_access_key_secret"
+    pod:
+      image: "ubuntu:22.04"
+      namespace: "default"
+      service_account: ""
+      cpu_request: ""
+      cpu_limit: ""
+      memory_request: ""
+      memory_limit: ""
+      storage_class: ""
+      envs: {}
+
   bot_service:
     proxy_base_url: "https://bot_service.example.com"
     proxy_ws_base_url: "wss://bot_service.example.com"
@@ -94,14 +117,16 @@ user_config:
   oauth:
     base_url: "https://oauth.example.com"
 
-  # 设备 TTL 定时器配置（每 5 分钟扫描 TTL 最小的设备并续期+探活）
+  # 设备 TTL 定时器配置（每 30 分钟扫描整个到期队列并续期+探活）
   device_ttl_timer:
     enabled: true  # 是否启用定时任务
-    cron_interval_seconds: 300  # 执行间隔（秒），默认: 300（5分钟）
-    batch_size: 100  # 每类设备取 top N，默认: 100
+    cron_interval_seconds: 1800  # 执行间隔（秒），默认: 1800（30分钟）
+    batch_size: 100  # 每页拉取条数，默认: 100
+    max_page_concurrency: 10  # 每页内并发续期的最大并发数
+    query_retries: 3  # 单页查询 DB 失败时的重试次数
     lock_name: "device_ttl_timer_lock"  # 分布式锁名称
-    lock_expire_seconds: 300  # 分布式锁过期时间（秒），默认: 300（5分钟）
-    lock_renew_interval_seconds: 60  # 分布式锁自动续期间隔（秒），默认: 60（0 表示禁用续期）
+    lock_expire_seconds: 1800  # 分布式锁租约（秒），须 >= cron 间隔，默认: 1800
+    lock_renew_interval_seconds: 60  # 分布式锁自动续期间隔（秒），默认: 60
     dry_run: false  # 测试模式：只打印日志
 
   # 文件传输轮询器配置（定期检测 OSS 上传完成并触发 device 下载）

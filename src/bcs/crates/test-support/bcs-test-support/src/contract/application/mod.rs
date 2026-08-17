@@ -6,8 +6,8 @@ use bcs_service_api::{
     FriendService, GroupFusionService, GroupManagementService, GroupMessageHistoryService,
     GroupProposalService, GroupQueryService, HumanActorService, MessageFlowService,
     CreateOrganizationCommand, OrganizationAuth, OrganizationManagementService,
-    OrganizationMemberAuth, ServiceError, SystemMessageService, WorkbenchSessionService,
-    WorkerProfileService,
+    InteractionService, OrganizationMemberAuth, ServiceError, SystemMessageService,
+    WorkbenchSessionService,
 };
 use bcs_service_api::application::v1::{
     AuthenticatedBotIdentity, AuthenticatedCaller, BotService, QueryBots,
@@ -76,6 +76,8 @@ pub async fn group_query_service_contract_tests<T: GroupQueryService + ?Sized>(_
 
 pub async fn human_actor_service_contract_tests<T: HumanActorService + ?Sized>(_svc: &T) {}
 
+pub async fn interaction_service_contract_tests<T: InteractionService + ?Sized>(_svc: &T) {}
+
 pub async fn message_flow_service_contract_tests<T: MessageFlowService + ?Sized>(_svc: &T) {}
 
 pub async fn organization_management_service_contract_tests<
@@ -113,8 +115,6 @@ pub async fn organization_management_service_contract_tests<
         .expect("get organization through application service");
     assert_eq!(fetched.name, "Application Contract");
 }
-
-pub async fn worker_profile_service_contract_tests<T: WorkerProfileService + ?Sized>(_svc: &T) {}
 
 pub async fn system_message_service_contract_tests<T: SystemMessageService + ?Sized>(_svc: &T) {}
 

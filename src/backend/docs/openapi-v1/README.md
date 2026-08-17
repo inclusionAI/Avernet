@@ -152,7 +152,7 @@ _Ordered by priority tier._
 |---|---|---|---|---|---|
 | bots | totalfrank | P1 | `openapi_v1/bots/router.py` | ✅ **DONE — PR #494 merged 2026-07-29** (13/13 endpoints) | ~~Track A stage 1~~ ✅ |
 | mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` | ✅ **DONE — PR #610** (6/6 endpoints) | ~~Track A stage 5~~ ✅ (PR #564) |
-| resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | 🔧 IN PROGRESS (PARTIAL) — 9 handlers all wired but DEFINITION-ONLY / NOT PUBLIC-READY | Track A resources ✅(Phase 0); Track B all 9 endpoints wired stub→service; gated on auth workstream (gateway principal seam) + DDL deploy before public exposure |
+| resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | 🔧 IN PROGRESS (PARTIAL) — 7 handlers all wired but DEFINITION-ONLY / NOT PUBLIC-READY | Track A resources ✅(Phase 0); Track B all 7 endpoints wired stub→service, files-only and path-addressed; gated on auth workstream (gateway principal seam) + DDL deploy before public exposure |
 | routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` *(stub)* | ⬜ TODO | Track A routines (lucas-xzp) |
 | channels | — | ❌ **REMOVED (2026-08-03)** | *(deleted)* | Router, schemas and both published paths deleted — see the channels section below | n/a |
 | identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` *(stub)* | ⬜ TODO | bots isolation (Stage 1 ✅) |
@@ -653,7 +653,7 @@ the method, whatever the body.
 GET    /openapi/v1/bots/b-1?user_id=u-42
 PUT    /openapi/v1/bots/b-1?user_id=u-42        {"bot_name": "Ada"}
 DELETE /openapi/v1/bots/b-1?user_id=u-42
-POST   /openapi/v1/bots/skills/upload?bot_id=b-1&user_id=u-42    <raw zip>
+POST   /openapi/v1/bots/b-1/skills?user_id=u-42                  <raw zip>
 ```
 
 **Why one placement.** The user id is not an attribute of any resource on this
@@ -670,7 +670,7 @@ reopened from scratch (`specs/2026-08-08-openapi-v1-explicit-user-id/plan.md`):
 
 | Rejected | Why |
 | --- | --- |
-| Body field on the 11 JSON-body writes | Needed a three-row exception table for the writes whose body this API does not define — the two raw-byte uploads and the free-form `PUT …/engine-config` — and split one concept across two placements on the same resource |
+| Body field on the 11 JSON-body writes | Needed a three-row exception table for the writes whose body this API does not define — the two raw-byte uploads and the free-form `PUT …/engine/config` — and split one concept across two placements on the same resource |
 | Path segment | Inverts ownership as above; the user-first form `/openapi/v1/users/{user_id}/…` is coherent but closed, because the first segment after `/openapi/v1` is the gateway's **domain selector** |
 | `X-Avernet-User-Id` header | Uniform and matches the gateway's delegation sketch (auth design §15), but makes the user transport metadata rather than an argument of the operation |
 
@@ -697,13 +697,17 @@ scope by. They still require an authenticated caller — that is
 | `GET /openapi/v1/bots/mcp/servers/{server_code}` | Same |
 | `GET /openapi/v1/bots/mcp/tenants` | Same |
 
-Note what is *not* on that list: `list_resources`, `create_resource`,
-`get_resource` and `update_resource` also do not use the value, but they take it
-anyway. They are user-scoped in principle and merely fail to enforce it today —
-they scope on a caller-supplied `bot_id` without checking the caller owns that
-bot, the gap `specs/2026-08-02-public-api-user-only-principal/` records. Closing
-it later should be a change to those handlers, not a required parameter added to
-four public operations.
+Note what is *not* on that list: four resources handlers (`list_resources`,
+`create_resource`, `get_resource`, `update_resource`) used to take the value
+without using it — user-scoped in principle, scoping on a caller-supplied
+`bot_id` without checking the caller owns that bot, the gap
+`specs/2026-08-02-public-api-user-only-principal/` records. Three of them went
+with the link resources they served, and the surviving `list_resources` now
+consumes the value: every files-only handler resolves the workspace through
+`_file_coords(bot_id, owner_id, …)`, so the parameter reaches the seam rather
+than being accepted and dropped. The ownership gap itself is unchanged — the
+`bot_id` is still caller-supplied — and closing it remains a change to those
+handlers, not a new parameter.
 
 **Bot Logs is a different exclusion, and the sharpest thing to know here.**
 `GET /openapi/v1/bots/logs/traces` has taken a required `user_id` since #692 —
@@ -737,9 +741,11 @@ Two optional query parameters name the target, following the same placement
 rule as `user_id` (query string, never a body field or a path segment):
 
 ```text
-GET /openapi/v1/bots/sessions/b-1?user_id=u-collab&owner_id=u-owner            collaborator, team bot
-GET /openapi/v1/bots/engine/b-1/status?user_id=u-owner&stage=online            owner, live runtime
-GET /openapi/v1/bots/connection/b-1?user_id=u-collab&owner_id=u-owner&stage=verify
+GET /openapi/v1/bots/b-1/sessions?user_id=u-collab&owner_id=u-owner            collaborator, team bot
+GET /openapi/v1/bots/b-1/engine/status?user_id=u-owner&stage=online            owner, live runtime
+GET /openapi/v1/bots/b-1/connection?user_id=u-collab&owner_id=u-owner&stage=verify
+GET /openapi/v1/bots/b-1/engine/config?user_id=u-owner&stage=online            the release's own config
+GET /openapi/v1/bots/b-1/identity/RULES?user_id=u-owner&stage=verify           what verify received
 ```
 
 - **`owner_id`** — the owner of the bot the request addresses. Defaults to
@@ -755,6 +761,74 @@ GET /openapi/v1/bots/connection/b-1?user_id=u-collab&owner_id=u-owner&stage=veri
   published stage named on a personal bot — is `409` `"No live runtime at
   the requested stage"`, never a fallback to another stage's binding.
   (`eval` has no long-lived runtime and is not addressable.)
+
+### `?stage=` beyond the operator console
+
+Five more operations take it — the ones that read or write a file **on** a
+runtime, rather than forwarding a request to it:
+
+```text
+GET, PUT  /openapi/v1/bots/{bot_id}/engine/config
+GET       /openapi/v1/bots/{bot_id}/identity
+GET, PUT  /openapi/v1/bots/{bot_id}/identity/{file_type}
+```
+
+Same vocabulary, same default, same liveness rule. Two differences worth
+knowing:
+
+- **The reads serve all three stages; the writes accept only the draft.** A
+  published runtime is what a release produced and is replaced by publishing
+  again, never edited, so `PUT …?stage=verify` or `?stage=online` is refused
+  with `409` `"The requested stage is read-only"` and **nothing is written** —
+  not to the published runtime, and not to the draft as a substitute. This is
+  deliberately not a `200` carrying a no-op flag: automation that checks the
+  status code would record the write as landed. It is also a different answer
+  from `"No live runtime at the requested stage"`, which would send a caller
+  off to publish something and retry; publishing would not make the write land.
+- **The list reports one runtime.** `GET …/identity?stage=verify` probes every
+  identity file against the verify runtime, so a caller never sees a draft row
+  beside a verify row.
+
+These five carry `user_id`, not `owner_id`: they are owner-scoped, not operator
+console operations, and reaching another owner's bot through them is not
+offered.
+
+**These five retiring addresses do not take `stage`:**
+
+```text
+GET, PUT  /openapi/v1/bots/{bot_id}/engine-config
+GET       /openapi/v1/bots/identity/{bot_id}
+GET, PUT  /openapi/v1/bots/identity/{bot_id}/{file_type}
+```
+
+They answer with the contract they were frozen with, which is the draft. A
+caller who sends the parameter at one of them gets the draft, because the
+parameter is not declared there — including on the two writes, which therefore
+answer `200` and write the draft where their replacements answer `409` and write
+nothing. That divergence is the strongest reason to migrate.
+
+This is **not** a statement about every retiring address. The engine-runtime
+ones — `…/bots/sessions/{bot_id}`, `…/bots/engine/{bot_id}/status` and the rest
+— *do* publish `stage` and honour it, because they took it before the freeze, so
+it is part of the contract they were frozen with.
+
+### Per-bot device surfaces that are still draft-only
+
+Named so a reader looking for them stops here rather than in the source:
+
+- **Startup script** (`GET`/`PUT`/`DELETE …/{bot_id}/startup-script`) takes no
+  `stage`, and that is not an omission. It is backed by
+  `ac_bot_startup_script`, keyed `(env, entity_id, bot_id)` — one row per bot,
+  not one per runtime — so the parameter would be inert.
+- **MCP** addresses no bot at all; its six operations are keyed by
+  `server_code` and `user_id`. The config write does fan out to every bot's
+  **draft** device, which is correct for the same reason the writes above are
+  draft-only: a release inlines its MCP credentials into the artifact, so a
+  published runtime's config changes by republishing.
+- **Resources, skills and routines** read or write per-bot device state and are
+  still draft-only. Deferred, with reasons, in
+  `specs/2026-08-15-openapi-v1-stage-addressed-bot-files/spec.md`; routines'
+  stage pin is [#908](https://github.com/inclusionAI/Avernet/issues/908).
 
 **What an operator sees is device-wide, by documented contract.** The
 engine's session collection is not scoped per caller — the engine ports drop
@@ -781,59 +855,102 @@ lifecycle ([#909](https://github.com/inclusionAI/Avernet/issues/909)),
 visibility/collaborator management
 ([#910](https://github.com/inclusionAI/Avernet/issues/910)), delegation
 ([#911](https://github.com/inclusionAI/Avernet/issues/911)). The skills
-group's `owner_entity_id` locator predates `owner_id` and should be
-reconciled to it before skills' pending release (spec Open Question 1).
+group's `owner_entity_id` locator predated `owner_id`; it was reconciled to
+`owner_id` on 2026-08-15 with bot-first addressing, and the retiring skills
+addresses still publish the old name (spec Open Question 1, closed).
 
 `tests/…/openapi_v1/engine_runtime/test_operator_access.py` sweeps the
 operator matrix across all sixteen operations;
 `…/test_stage_addressing.py` pins the stage behaviour and asserts the two
-parameters sit on exactly the sixteen, optional, in the query;
-`tests/community/core/engine_runtime/test_stage.py` pins the liveness rule.
+parameters sit on exactly the operations listed above — optional, in the query,
+and on no retiring address that did not already have them;
+`tests/community/core/engine_runtime/test_stage.py` pins the liveness rule;
+`…/openapi_v1/test_stage_addressed_bot_files.py` pins the five file operations,
+including that their retiring twins still read the draft.
 
 ---
 
 ## Addressing rule
 
-**Every operation is addressed `/openapi/v1/bots/<component>/…`.** The
-component's **literal** name comes first; a bot-scoped operation takes
-`{bot_id}` as the first segment *after* it — never before it, and never with a
-`/bot/` segment in between.
+**Every bot-scoped operation is addressed
+`/openapi/v1/bots/{bot_id}/<component>/…`.** The bot comes first; the
+component's literal name hangs off it.
 
 ```text
-/openapi/v1/bots/<component>            # the component's own collection
-/openapi/v1/bots/<component>/{bot_id}   # …scoped to one bot
+/openapi/v1/bots                        # the account-level collection
+/openapi/v1/bots/{bot_id}               # one bot
+/openapi/v1/bots/{bot_id}/<component>   # …one component of that bot
 ```
 
-The `bots` component is the one exception, and only because it *is* the
-component the base names: it owns `/openapi/v1/bots` and
-`/openapi/v1/bots/{bot_id}`, and its own sub-resources (`/status`, `/passport`,
-`/restart`, `/auth-status`, `/engine-config`) hang off the bot record beneath
-it. Those are properties of the bot, not other components borrowing the bot's
-address.
+A bot is the noun this API is about, so the address names the bot before it
+names what about the bot, and every operation on one bot shares one prefix. The
+bots component's own sub-resources (`/status`, `/passport`, `/restart`,
+`/auth-status`, `/engine/config`) sit in that same third position, alongside
+`sessions`, `skills` and the rest — a property of the bot is addressed no
+differently from a component of it.
 
-**Why.** Three components used to break this — `identity` carried a redundant
-`/bot/` segment, and `connection`/`engine`/`approvals`/`sessions`/`models`/
-`skills` put `{bot_id}` *before* their own name. That made a router file unable
-to state its own address (a reader of `engine_runtime/sessions/router.py` could
-not tell whether `/openapi/v1/bots/{bot_id}/sessions` was served there or by a
-`{bot_id}`-shaped route in the bots component), and it blocked a second owner
-under the same base — the reason BCS moved its own control plane to
-`/openapi/v1/bots/collaboration/{bot_id}`
-(`src/bcs/docs/plans/2026-08-03-bcn-collaboration-paths-design.md`). Normalized
-in the `2026-08-03-openapi-v1-path-normalization` spec; a test
+**The bot is always a path parameter.** Never a query parameter, never a body
+field. Which bot an operation acts on is the *address*, not an argument to the
+call, and a client told to put the same id in two places has been told the
+address twice. That was the concrete defect this rule fixed: nine operations
+took `bot_id` in the query string and one took it in a request body, all of them
+under a path that already had somewhere to put it.
+
+**Why it is worth the migration.** Two things follow from it that the old
+component-first shape could not give.
+
+*Authorization becomes one mechanism.* `require_granted_bot` reads the addressed
+bot off the path, the same way, for every operation on the surface. Under the
+old shape seven operations carried their bot somewhere that dependency could not
+see it and checked the grant inside their handlers instead — two mechanisms
+doing one job, which had already cost one real defect. That was `TODO(#960)`;
+bot-first addressing narrowed it from seven operations to four. The four that
+remain are the `{skill_id}` skills operations: they resolve by `(skill, actor)`,
+so the addressed bot's *owner* arrives on the record rather than on the wire —
+a collaborator reaches a skill on someone else's bot routinely — and there is
+nothing for the shared dependency to look a grant up against until that read has
+happened. They are named in `admission.SKILL_SCOPED_OPERATIONS` and check the
+grant in their handlers. **Do not remove those checks believing the dependency
+covers them; it does not.**
+
+*The reserved-name list shrinks to the operations that earn it.* Because
+`{bot_id}` is a single wildcard segment, any literal served in that position is
+a name no bot can be called. Component-first put **every** component name there.
+Bot-first moves them one segment deeper, where they collide with nothing.
+
+The operations that keep a literal in that segment are the ones with no single
+bot to name: creating a bot, listing them, `check-name`, `ceiling`, the
+`authorized` groups, the tenant-wide `mcp` catalogue, `logs` (a trace query that
+reads *across* bots), and `loadtest`. They are the only things that do.
+
+Specified in `specs/2026-08-15-openapi-v1-bot-first-addressing`; a test
 (`tests/…/openapi_v1/test_path_convention.py`) asserts the rule against the
 generated document, so a route that breaks it fails there rather than in review.
 
 **Reserved names.** Because the `bots` component keeps the bare
-`/openapi/v1/bots/{bot_id}`, a bot whose id equals a component name is
-unreachable at that address. The set is fixed, and the same test asserts this
-list still equals the literals the routes actually publish:
+`/openapi/v1/bots/{bot_id}`, a bot whose id equals a literal in that segment is
+unreachable at that address. The same test asserts this list still equals the
+literals the routes actually publish:
 
 <!-- reserved-component-names -->
 ```text
 approvals  authorized  ceiling  check-name  connection  engine  identity
 loadtest  logs  mcp  models  resources  routines  sessions  skills
 ```
+
+Nine of those fifteen — `approvals`, `connection`, `engine`, `identity`,
+`models`, `resources`, `routines`, `sessions`, `skills` — are held **only by the
+retiring addresses**. Bot-first addressing moved every bot-scoped component out
+of that segment, so once the deprecated addresses are removed the list is the
+six that remain:
+
+```text
+authorized  ceiling  check-name  loadtest  logs  mcp
+```
+
+They are still reserved today, and the list above is the accurate one: a bot
+whose id is `sessions` is unreachable at `/openapi/v1/bots/sessions` for as long
+as the old address answers there.
 
 **Reserved ahead of their routes.** A second, separate list — names claimed here
 before any route publishes them. They are *not* reserved for the reason above:
@@ -859,13 +976,54 @@ publishes it — the convention test asserts the two lists stay disjoint, so
 adding the route without moving the name fails there rather than in review.
 
 > **Mount order is load-bearing.** `build_public_router()` includes the literal
-> sub-groups **before** the bots group, so `/openapi/v1/bots/resources` resolves
-> ahead of the `/openapi/v1/bots/{bot_id}` wildcard. Only the components that
-> serve a single-segment collection root (`resources`, `routines`, plus the
-> bots-owned `check-name`/`ceiling`) actually depend on it now — every other
-> component is reachable only at two segments or more — but keep any new group
-> in the `_SUBGROUPS` list, above the bots router, rather than reasoning about
-> the exception each time.
+> sub-groups **before** the bots group, so `/openapi/v1/bots/check-name`
+> resolves ahead of the `/openapi/v1/bots/{bot_id}` wildcard. Under bot-first
+> addressing only the groups that genuinely keep a literal in that segment
+> depend on it — the account-level ones listed above, and the retiring addresses,
+> which are component-first by definition. The current bot-scoped groups are all
+> `{bot_id}`-first and could be mounted in any order. Keep any new group above
+> the bots router anyway, rather than reasoning about the exception each time.
+
+## Retiring addresses (the migration window)
+
+**Nothing was removed.** Every address this surface answered before bot-first
+addressing still answers — same shape, same parameters, in the same places,
+including the `bot_id` in a query string and the one in a request body that the
+rule above exists to remove. Forty-one operations, served by
+`openapi_v1/deprecated/`.
+
+They are not aliases. A retiring address publishes the *old* parameter names in
+the *old* locations and translates, so a client that has not moved keeps working
+unchanged. `tests/…/openapi_v1/test_legacy_parity.py` drives each retiring
+address and its replacement through the same application and asserts they reach
+the same decision; that assertion is the whole of the compatibility promise.
+
+How a caller finds out:
+
+| Channel | What it carries |
+|---|---|
+| The published document | `deprecated: true` on every retiring operation, so a generated client can annotate it |
+| Response headers | `Deprecation: @1786752000` and `Sunset: Sun, 15 Aug 2027 00:00:00 GMT`, on **every** response from the address, failures included. The two are spelled differently on purpose: `Deprecation` is an RFC 9745 structured-field date (`@` and seconds since the epoch), `Sunset` an RFC 8594 HTTP-date. |
+
+**The window runs 2026-08-15 → 2027-08-15.** Removal is driven by traffic, not
+by the date: the public access log says when an address has no callers left, and
+that is when it goes. The sunset is the outer bound a client can plan against,
+not a countdown.
+
+**Migration is mechanical.** Move `bot_id` from the query string (or, for
+`POST …/routines`, from the request body) into the path, and put the component
+after it:
+
+```text
+GET  /openapi/v1/bots/sessions/{bot_id}          →  GET  /openapi/v1/bots/{bot_id}/sessions
+GET  /openapi/v1/bots/resources?bot_id=b-1       →  GET  /openapi/v1/bots/b-1/resources
+POST /openapi/v1/bots/skills/upload?bot_id=b-1   →  POST /openapi/v1/bots/b-1/skills
+```
+
+Two renames come with it, and they are the only parameter changes in the
+migration: `skills` spells its owner locator `owner_id` like the rest of the
+surface (it was `owner_entity_id`), and `PUT …/approvals/mode` no longer takes
+the `session_key` it never read.
 
 All responses use the `Envelope[T]` / `Page[T]` shapes from
 `openapi_v1/contracts.py` unless noted (binary streams bypass the envelope).
@@ -887,8 +1045,8 @@ the other six: this is what "done" looks like per category.
 | GET | `/openapi/v1/bots/{bot_id}/auth-status` | Poll Passport auth; completes creation when ISSUED | `Envelope[BotAuthStatus]` |
 | GET | `/openapi/v1/bots/{bot_id}/status` | Runtime / device readiness | `Envelope[BotStatus]` |
 | GET | `/openapi/v1/bots/{bot_id}/passport` | Get the bot's Agent Passport | `Envelope[Passport]` |
-| GET | `/openapi/v1/bots/{bot_id}/engine-config` | Read engine config (free-form JSON) | `Envelope[dict]` |
-| PUT | `/openapi/v1/bots/{bot_id}/engine-config` | Write engine config (free-form JSON) | `Envelope[dict]` |
+| GET | `/openapi/v1/bots/{bot_id}/engine/config` | Read engine config (free-form JSON) | `Envelope[dict]` |
+| PUT | `/openapi/v1/bots/{bot_id}/engine/config` | Write engine config (free-form JSON) | `Envelope[dict]` |
 | GET | `/openapi/v1/bots/{bot_id}/startup-script` | Read the bot's startup script | `Envelope[StartupScript]` |
 | PUT | `/openapi/v1/bots/{bot_id}/startup-script` | Set/replace it; takes effect next start | `Envelope[StartupScript]` |
 | DELETE | `/openapi/v1/bots/{bot_id}/startup-script` | Clear it | `Envelope[Deleted]` |
@@ -1076,23 +1234,38 @@ strict enums (`PROD`/`PRE`, `SSE`/`STREAMABLE_HTTP`). **Preserved fail-open:** a
 marketplace outage still reports the caller as permitted (advisory endpoint; the
 MCP server enforces) — pinned by a test so it reads as a decision, not a bug._
 
-### 🟩 lucas-xzp · P1 — resources (9 endpoints) · `openapi_v1/resources/router.py`
-Unified file/link/folder abstraction; storage location never exposed.
+### 🟩 lucas-xzp · P1 — resources (7 endpoints) · `openapi_v1/resources/router.py`
+The bot's workspace files and folders; storage location never exposed. Every
+operation is addressed by a workspace-relative `path` query parameter; the bot
+is on the path and `user_id` is required on all seven.
 | Method | Path | Purpose | Success |
 |---|---|---|---|
-| GET | `/openapi/v1/bots/resources` | List (`bot_id`, `type`, paged) | `Envelope[Page[Resource]]` |
-| GET | `/openapi/v1/bots/resources/check-name` | Name availability (`name`) | `Envelope[NameCheck]` |
-| POST | `/openapi/v1/bots/resources` | Create (file placeholder / link / folder) | `201 Envelope[Resource]` |
-| POST | `/openapi/v1/bots/resources/upload` | Upload raw bytes as a resource (`application/octet-stream`) | `201 Envelope[Resource]` |
-| GET | `/openapi/v1/bots/resources/{resource_id}` | Get | `Envelope[Resource]` |
-| PUT | `/openapi/v1/bots/resources/{resource_id}` | Update | `Envelope[Resource]` |
-| DELETE | `/openapi/v1/bots/resources/{resource_id}` | Delete | `Envelope[Deleted]` |
-| GET | `/openapi/v1/bots/resources/{resource_id}/download` | Download bytes (**raw, not enveloped**) | `application/octet-stream` |
-| GET | `/openapi/v1/bots/resources/{resource_id}/preview` | Preview | `Envelope[Preview]` |
+| GET | `/openapi/v1/bots/{bot_id}/resources` | List a directory (`path`, `type`, paged) | `Envelope[Page[FileEntry]]` |
+| GET | `/openapi/v1/bots/{bot_id}/resources/stat` | One entry's metadata (`path`) | `Envelope[FileEntry]` |
+| POST | `/openapi/v1/bots/{bot_id}/resources/upload` | Upload raw bytes (`application/octet-stream`, `overwrite`) | `201 Envelope[FileEntry]` |
+| GET | `/openapi/v1/bots/{bot_id}/resources/download` | Download bytes (**raw, not enveloped**) | `application/octet-stream` |
+| GET | `/openapi/v1/bots/{bot_id}/resources/preview` | Preview as text (1 MB cap → 413) | `Envelope[Preview]` |
+| POST | `/openapi/v1/bots/{bot_id}/resources/mkdir` | Create a directory | `201 Envelope[FileEntry]` |
+| DELETE | `/openapi/v1/bots/{bot_id}/resources` | Delete a file or directory | `Envelope[Deleted]` |
 
 _Note: upload is finalized as a raw `application/octet-stream` body (not
 multipart). This diverges from PR #363's multipart summary — implementation
 follows the route; switching to multipart would be a contract change._
+
+_Note: the group carries **no record ids**. #1001 made the engine the source of
+truth for files, which left `resource_id` permanently empty on every file
+response and three id-addressed routes that only ever resolved link records.
+Links left this surface, so the id left the contract rather than being reported
+as `""` — an empty string standing in for "no id" is a sentinel a caller cannot
+tell from a real address until it fails. `GET /stat` replaces both the
+id-addressed single lookup and `check-name`: it answers existence against the
+workspace, the same authority the listing reads, so the two cannot disagree._
+
+_Note: `Page` here is applied by the backend over a whole directory listing —
+the engine's `ListDirRequest` carries no page, limit or cursor. `page_size`
+bounds the response, not the device round trip, and a later page costs what the
+first one costs. That is proportionate only because listing is non-recursive; a
+`recursive=true` option would have to revisit it._
 
 ### 🟪 totalfrank + lucas-xzp · P3 — skills, co-owned (six ratified operations) · `openapi_v1/skills/router.py`
 
@@ -1104,12 +1277,12 @@ and uses the standard `Envelope` / `Page` contract.
 
 | Method | Path | Purpose | Success |
 |---|---|---|---|
-| GET | `/openapi/v1/bots/skills` | List exact Bot-owned Local Skill metadata (`bot_id`, optional owner locator, `active`, `keyword`, paged) | `Envelope[Page[Skill]]` |
-| POST | `/openapi/v1/bots/skills/upload` | Create or safely replace one raw `application/zip` Local Skill package | `201 Envelope[SkillUpload]` / `200` replacement |
-| GET | `/openapi/v1/bots/skills/{skill_id}` | Read public metadata for one deployment-wide Skill ID | `Envelope[Skill]` |
-| POST | `/openapi/v1/bots/skills/{skill_id}/activate` | Set desired Active state and synchronously reconcile runtime | `Envelope[SkillState]` |
-| POST | `/openapi/v1/bots/skills/{skill_id}/deactivate` | Set desired Inactive state and synchronously reconcile runtime | `Envelope[SkillState]` |
-| DELETE | `/openapi/v1/bots/skills/{skill_id}` | Recoverably delete one Inactive Local Skill | `Envelope[Deleted]` |
+| GET | `/openapi/v1/bots/{bot_id}/skills` | List exact Bot-owned Local Skill metadata (`bot_id`, optional owner locator, `active`, `keyword`, paged) | `Envelope[Page[Skill]]` |
+| POST | `/openapi/v1/bots/{bot_id}/skills` | Create or safely replace one raw `application/zip` Local Skill package | `201 Envelope[SkillUpload]` / `200` replacement |
+| GET | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | Read public metadata for one deployment-wide Skill ID | `Envelope[Skill]` |
+| POST | `/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate` | Set desired Active state and synchronously reconcile runtime | `Envelope[SkillState]` |
+| POST | `/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate` | Set desired Inactive state and synchronously reconcile runtime | `Envelope[SkillState]` |
+| DELETE | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | Recoverably delete one Inactive Local Skill | `Envelope[Deleted]` |
 
 `413101` is documented only on raw ZIP upload. The stable Local Skill business
 subcodes are `400101`, `404000`, `409101`–`409104`, `413101`, `502101`, and
@@ -1125,22 +1298,22 @@ and Bot containers. See the [English runbook and rollback procedure](skills-trac
 Scheduled/triggered agent tasks (the former "cron"); trigger is a nested object.
 | Method | Path | Purpose | Success |
 |---|---|---|---|
-| GET | `/openapi/v1/bots/routines` | List (`bot_id`, `status`, paged) | `Envelope[Page[Routine]]` |
-| POST | `/openapi/v1/bots/routines` | Create | `201 Envelope[Routine]` |
-| GET | `/openapi/v1/bots/routines/{routine_id}` | Get | `Envelope[Routine]` |
-| PATCH | `/openapi/v1/bots/routines/{routine_id}` | Update (partial) | `Envelope[Routine]` |
-| DELETE | `/openapi/v1/bots/routines/{routine_id}` | Delete | `Envelope[Deleted]` |
-| POST | `/openapi/v1/bots/routines/{routine_id}/run` | Run now | `Envelope[RoutineRun]` |
-| GET | `/openapi/v1/bots/routines/{routine_id}/runs` | Execution history (paged) | `Envelope[Page[RoutineRun]]` |
+| GET | `/openapi/v1/bots/{bot_id}/routines` | List (`bot_id`, `status`, paged) | `Envelope[Page[Routine]]` |
+| POST | `/openapi/v1/bots/{bot_id}/routines` | Create | `201 Envelope[Routine]` |
+| GET | `/openapi/v1/bots/{bot_id}/routines/{routine_id}` | Get | `Envelope[Routine]` |
+| PATCH | `/openapi/v1/bots/{bot_id}/routines/{routine_id}` | Update (partial) | `Envelope[Routine]` |
+| DELETE | `/openapi/v1/bots/{bot_id}/routines/{routine_id}` | Delete | `Envelope[Deleted]` |
+| POST | `/openapi/v1/bots/{bot_id}/routines/{routine_id}/run` | Run now | `Envelope[RoutineRun]` |
+| GET | `/openapi/v1/bots/{bot_id}/routines/{routine_id}/runs` | Execution history (paged) | `Envelope[Page[RoutineRun]]` |
 
 ### 🟩 lucas-xzp · P2 — identity (3 endpoints) · `openapi_v1/identity/router.py`
 Read/write a bot's identity markdown files (RULES, SOUL, …), `file_type` is an
 enum whitelist. No own Track A stage — scoped by bots isolation (Stage 1 ✅).
 | Method | Path | Purpose | Success |
 |---|---|---|---|
-| GET | `/openapi/v1/bots/identity/{bot_id}` | List identity files + whether each exists | `Envelope[IdentityFileList]` |
-| GET | `/openapi/v1/bots/identity/{bot_id}/{file_type}` | Read one identity file | `Envelope[IdentityFile]` |
-| PUT | `/openapi/v1/bots/identity/{bot_id}/{file_type}` | Overwrite one identity file (`content`) | `Envelope[IdentityFileRef]` |
+| GET | `/openapi/v1/bots/{bot_id}/identity` | List identity files + whether each exists | `Envelope[IdentityFileList]` |
+| GET | `/openapi/v1/bots/{bot_id}/identity/{file_type}` | Read one identity file | `Envelope[IdentityFile]` |
+| PUT | `/openapi/v1/bots/{bot_id}/identity/{file_type}` | Overwrite one identity file (`content`) | `Envelope[IdentityFileRef]` |
 
 ### ✅ loadtest (2 endpoints) · `openapi_v1/loadtest/router.py` — **IMPLEMENTED**
 
@@ -1209,11 +1382,11 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 
 | Group | Endpoints | Public paths |
 |---|---|---|
-| sessions | 7 | `/openapi/v1/bots/sessions/{bot_id}…` — owner/collaborator operators |
-| engine | 3 | `/openapi/v1/bots/engine/{bot_id}/{status,capabilities,available}` |
-| models | 2 | `/openapi/v1/bots/models/{bot_id}`, `…/{bot_id}/{model_id}` |
-| approvals | 3 | `/openapi/v1/bots/approvals/{bot_id}/mode` (GET/PUT), `…/modes` |
-| connection | 1 | `/openapi/v1/bots/connection/{bot_id}` — complete WS URL, replaces `get_device_connection` |
+| sessions | 7 | `/openapi/v1/bots/{bot_id}/sessions…` — owner/collaborator operators |
+| engine | 3 | `/openapi/v1/bots/{bot_id}/engine/{status,capabilities,available}` |
+| models | 2 | `/openapi/v1/bots/{bot_id}/models`, `…/models/{model_id}` |
+| approvals | 3 | `/openapi/v1/bots/{bot_id}/approvals/mode` (GET/PUT), `…/modes` |
+| connection | 1 | `/openapi/v1/bots/{bot_id}/connection` — complete WS URL, replaces `get_device_connection` |
 
 ---
 
@@ -1332,6 +1505,26 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 ---
 
 ## Changelog (append a dated line whenever you move the board)
+
+- **2026-08-15** — **Bot-first addressing.** Every bot-scoped operation moved
+  to `/openapi/v1/bots/{bot_id}/<component>/…`, reversing the component-first
+  rule of 2026-08-03. Nine operations that took `bot_id` in the query string
+  and one that took it in a request body now take it on the path, where the
+  address already had somewhere to put it — the duplicate field the client was
+  asked to fill twice is gone. Two contract fixes ride along: `skills` spells
+  its owner locator `owner_id` like the rest of the surface, and
+  `PUT …/approvals/mode` no longer takes the `session_key` it never read.
+  `TODO(#960)` is narrowed from seven operations to four, not closed: with the
+  bot on the path, `require_granted_bot` checks the grant for every operation
+  except the four `{skill_id}` skills ones, whose bot owner is only known after
+  the skill is read and which therefore still check in their handlers
+  (`admission.SKILL_SCOPED_OPERATIONS`). Bot-scoped
+  component names left the `{bot_id}` segment, so the reserved-name list falls
+  from fifteen to six once the old addresses go. **Nothing was removed** — all
+  forty-one prior addresses still answer, at the same shape, marked
+  `deprecated` with `Deprecation`/`Sunset` headers; the window runs to
+  **2027-08-15** and removal is driven by traffic. See **Retiring addresses**
+  above and `specs/2026-08-15-openapi-v1-bot-first-addressing`.
 
 - **2026-08-09** — **The engine-runtime groups serve shared bots and published
   stages.** The operator rule replaces the shared-bot refusal: a bot's owner
@@ -1641,7 +1834,7 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   left no room for a second owner under the shared base (the collision BCS hit
   from the other side and solved the same way). `skills` also gained a literal
   `catalog` segment, because its two resource families would otherwise both want
-  `/openapi/v1/bots/skills/{…}`. `channels` was deleted rather than parked.
+  `/openapi/v1/bots/{bot_id}/skills/{…}`. `channels` was deleted rather than parked.
   41 published paths, down from 43. No handler, schema, status code, auth rule
   or tenant-scoping rule changed — addresses only, and **no compatibility
   aliases**: the surface has no reachable external caller yet, so there was no

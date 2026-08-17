@@ -26,7 +26,7 @@ from agentclaw.community.adapters.http.openapi_v1.routines.router import (
 )
 from agentclaw.community.adapters.http.openapi_v1.routines.schemas import (
     Routine,
-    RoutineCreate,
+    RoutineSpec,
     RoutineRun,
     RoutineUpdate,
     ScheduleTrigger,
@@ -306,17 +306,16 @@ class _StubCronCreateService:
 @pytest.mark.asyncio
 async def test_create_routine_returns_201_envelope():
     service = _StubCronCreateService(_adapter_dict())
-    body = RoutineCreate(
-        bot_id="bot-x",
-        name="cron1",
+    body = RoutineSpec(
+                name="cron1",
         trigger=ScheduleTrigger(cron="0 9 * * *"),
         command="echo hi",
     )
 
     env = await create_routine(
+        bot_id="bot-x",
         body=body,
         owner_id="u1",
-        caller=_human("u1"),
         factory=service,
         request=_request_without_trace(),
     )
@@ -334,24 +333,23 @@ async def test_create_routine_returns_201_envelope():
 
 
 @pytest.mark.asyncio
-async def test_create_routine_uses_body_bot_id_for_owner_and_call():
+async def test_create_routine_uses_the_addressed_bot_for_owner_and_call():
     service = _StubCronCreateService(_adapter_dict())
-    body = RoutineCreate(
-        bot_id="bot-x",
-        name="cron1",
+    body = RoutineSpec(
+                name="cron1",
         trigger=ScheduleTrigger(cron="0 9 * * *"),
         command="echo hi",
     )
 
     await create_routine(
+        bot_id="bot-x",
         body=body,
         owner_id="u1",
-        caller=_human("u1"),
         factory=service,
         request=_request_without_trace(),
     )
 
-    # body.bot_id flows to factory.create_cron; owner comes from principal
+    # the addressed bot flows to factory.create_cron; owner comes from principal
     assert service.last_call_kwargs["bot_id"] == "bot-x"
     assert service.last_call_kwargs["user_id"] == "u1"
     assert service.last_call_kwargs["nick_name"] == "u1"
@@ -360,12 +358,11 @@ async def test_create_routine_uses_body_bot_id_for_owner_and_call():
 @pytest.mark.asyncio
 async def test_create_routine_passes_schedule_as_cron_string():
     # The adapter accepts schedule as the raw cron string; the openapi
-    # RoutineCreate carries it nested under trigger.cron. Verify the
+    # RoutineSpec carries it nested under trigger.cron. Verify the
     # translation does NOT forward a {kind,expr,tz} dict to the service.
     service = _StubCronCreateService(_adapter_dict())
-    body = RoutineCreate(
-        bot_id="bot-x",
-        name="cron1",
+    body = RoutineSpec(
+                name="cron1",
         trigger=ScheduleTrigger(cron="0 9 * * *"),
         command="echo hi",
         timezone="Asia/Shanghai",
@@ -373,9 +370,9 @@ async def test_create_routine_passes_schedule_as_cron_string():
     )
 
     await create_routine(
+        bot_id="bot-x",
         body=body,
         owner_id="u1",
-        caller=_human("u1"),
         factory=service,
         request=_request_without_trace(),
     )
@@ -391,18 +388,17 @@ async def test_create_routine_passes_schedule_as_cron_string():
 @pytest.mark.asyncio
 async def test_create_routine_defaults_timezone_when_null():
     service = _StubCronCreateService(_adapter_dict())
-    body = RoutineCreate(
-        bot_id="bot-x",
-        name="cron1",
+    body = RoutineSpec(
+                name="cron1",
         trigger=ScheduleTrigger(cron="0 9 * * *"),
         command="echo hi",
         timezone=None,
     )
 
     await create_routine(
+        bot_id="bot-x",
         body=body,
         owner_id="u1",
-        caller=_human("u1"),
         factory=service,
         request=_request_without_trace(),
     )
@@ -414,17 +410,16 @@ async def test_create_routine_defaults_timezone_when_null():
 async def test_create_routine_reads_x_trace_id_from_request():
     service = _StubCronCreateService(_adapter_dict())
     request = _request_with_trace("trace-create-1")
-    body = RoutineCreate(
-        bot_id="bot-x",
-        name="cron1",
+    body = RoutineSpec(
+                name="cron1",
         trigger=ScheduleTrigger(cron="0 9 * * *"),
         command="echo hi",
     )
 
     env = await create_routine(
+        bot_id="bot-x",
         body=body,
         owner_id="u1",
-        caller=_human("u1"),
         factory=service,
         request=request,
     )
@@ -435,18 +430,17 @@ async def test_create_routine_reads_x_trace_id_from_request():
 @pytest.mark.asyncio
 async def test_create_routine_500_when_service_returns_no_data():
     service = _StubCronCreateService(None)  # data is None
-    body = RoutineCreate(
-        bot_id="bot-x",
-        name="cron1",
+    body = RoutineSpec(
+                name="cron1",
         trigger=ScheduleTrigger(cron="0 9 * * *"),
         command="echo hi",
     )
 
     with pytest.raises(HTTPException) as exc:
         await create_routine(
+            bot_id="bot-x",
             body=body,
             owner_id="u1",
-            caller=_human("u1"),
             factory=service,
             request=_request_without_trace(),
         )

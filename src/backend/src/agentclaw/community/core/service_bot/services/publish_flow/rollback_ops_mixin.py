@@ -13,8 +13,9 @@ from agentclaw.community.core.service_bot.schemas.publish_schemas import Publish
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishNotFoundError,
 )
-from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
-    service_skills_env_from_ext,
+from agentclaw.community.core.service_bot.services.deploy.service_publish_env import (
+    service_publish_extra_envs,
+    service_publish_template_config,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
@@ -114,7 +115,7 @@ class RollbackOpsMixin:
         # longer silently ship the raw artifact (the single-config-slot hazard).
         version = f"{target_record.version}"
         delivery = self._ext_state.compose_stored(target_ext, PublishStage.ONLINE)
-        skills_env = service_skills_env_from_ext(target_ext, bot)
+        skills_env = service_publish_extra_envs(target_ext, bot)
         image_pin = self.resolve_publish_image_pin(target_record)
 
         # (#197) Crash-safe issuance via the operation runner (existing bot →
@@ -140,6 +141,7 @@ class RollbackOpsMixin:
                 extra_envs=skills_env,
                 docker_image=image_pin.docker_image,
                 runtime_kind=self.resolve_publish_runtime_kind(target_record),
+                template_config=service_publish_template_config(bot),
             )
 
         op = await self._operation_runner.acquire_workflow(op, _issue)

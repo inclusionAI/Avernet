@@ -160,6 +160,7 @@ const BCS_TARGET = process.env.BCS_PORT
 const BCSFUSE_TARGET = process.env.BCSFUSE_PORT
   ? `http://127.0.0.1:${process.env.BCSFUSE_PORT}`
   : preset.servers.BCNFUSE || 'http://127.0.0.1:8765';
+const LOCAL_BCN_PORT = presetName === 'local' ? new URL(BCS_TARGET).port : '';
 
 if (process.env.BCS_PORT || process.env.BCSFUSE_PORT) {
   console.log(
@@ -358,8 +359,8 @@ export default defineConfig({
     // 用于 UmdLoader 的副屏 CDN 同源代理：dev 下把 fetch(cdn) 改写到 /__umd_cdn
     // 走 dev server 转发，绕过 CDN 的 CORS 白名单（生产不注入，直连原始 CDN）。
     UMD_CDN_PROXY: true,
-    // 群聊 WS 的 BCS 基址（含 BCS_PORT）。dev 下注入，让 connectionStore 直连
-    // ws://127.0.0.1:<BCS_PORT>/ws，跟随自定义端口；生产不注入，走 getServers().BCN。
-    DEV_BCN_BASE: BCS_TARGET,
+    // local demo 中浏览器用「页面 hostname + BCS 端口」连接群聊 WS。
+    // 只注入端口，避免把 127.0.0.1 带到远程访问者的浏览器。
+    LOCAL_BCN_PORT,
   },
 });

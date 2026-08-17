@@ -124,6 +124,7 @@ class BotWebSocketClient:
         timeout: float = 10.0,
         disable_ssl_verify: bool = True,
         open_timeout: float = 5.0,
+        max_size: int = 10 * 2**20,
     ) -> dict[str, Any]:
         """连接到服务器并完成握手
 
@@ -132,6 +133,8 @@ class BotWebSocketClient:
             disable_ssl_verify: 是否禁用 SSL 证书验证（仅用于测试）
             open_timeout: WebSocket 连接建立（TCP + HTTP 升级）超时时间（秒），
                 None 表示与 timeout 一致
+            max_size: 单条 WebSocket 消息最大字节数，None 表示不限制。
+                websockets 库默认为 1MiB (2**20)，超过会抛 ConnectionClosedError。
 
         Returns:
             握手响应 payload
@@ -166,6 +169,7 @@ class BotWebSocketClient:
             "ssl": ssl_context,
             "open_timeout": open_timeout,
             "ping_interval": None,
+            "max_size": max_size,
         }
         if _is_loopback_websocket_uri(self.uri):
             # websockets reads proxy settings independently of NO_PROXY.

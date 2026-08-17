@@ -46,7 +46,10 @@ use bcs_app_session::{
 };
 use bcs_api_http::{ApiState, PrincipalVerifier};
 use bcs_api_http::v1::openapi::SessionFileUrlProjector;
-use bcs_bot::{Bot, BotControlPlaneCore, BotCore, ProviderBotEvents, ProviderCore, ProviderManagement};
+use bcs_bot::{
+    Bot, BotCandidateSearchCore, BotControlPlaneCore, BotCore, EmptyWorkerProfileCoreService,
+    ProviderBotEvents, ProviderCore, ProviderManagement,
+};
 use bcs_api_http::v1::gateway_principal::{
     GatewayPrincipalTokenVerifier, GatewayPrincipalTrust,
 };
@@ -75,6 +78,9 @@ use bcs_group::{
     GroupConfig, GroupCore, GroupManagement, GroupManagementWithRuntimeCleanup,
 };
 use bcs_group_store::{MemoryGroupRepo, MySqlGroupStore};
+use bcs_interaction::{
+    InteractionManagement, InteractionTerminalObserver, MemoryInteractionStore,
+};
 use bcs_http::{
     admin_invocation_terminal::AdminInvocationTerminalObserver,
     state::AdminInvocationStore,
@@ -100,12 +106,13 @@ use bcs_security_gateway_api::SecurityGatewayPort;
 use bcs_security_gateway_local::NoopSecurityGateway;
 use bcs_secret_local::InMemorySecretAccess;
 use bcs_service_api::application::v1::GroupSessionConnectionService;
+use bcs_service_api::core::WorkerProfileCoreService;
 use bcs_service_api::interceptor::InterceptorChain;
 use bcs_service_api::lifecycle::ServiceLifecycle;
 use bcs_service_api::port::{GroupSessionTokenPort, SecretAccessPort};
 use bcs_service_api::{
-    A2aChatRunService, A2aChatService, BotActor, BotDeliveryPort, BotDeliveryTarget,
-    BotControlPlaneRepoPort, BotRegistryCoreService, CallerContext,
+    A2aChatRunService, A2aChatService, BotActor, BotCandidateSearchCoreService, BotDeliveryPort,
+    BotDeliveryTarget, BotControlPlaneRepoPort, BotRegistryCoreService, CallerContext,
     BotMetricsSnapshotPort, BotRunContextPort, BotTerminalEvent, BotTerminalObserverPort,
     BotTerminalState, ChannelBindingCleanupPort,
     ChannelService, CollaborationRuntimeService, CollaborationTemplateService,
@@ -113,8 +120,9 @@ use bcs_service_api::{
     DirectChatRunReason, DirectChatRunSnapshotPort, FrontendDeliveryPort, GroupCoreService,
     GroupHistoryBotRequestPort, GroupManagementService, GroupMessageHistoryService,
     GroupMetricsSnapshotPort, GroupRepoPort, GroupSessionMetricsSnapshotPort,
-    HandleBotTerminalEventCommand, HumanInputReadyEvent, JudgeEvaluatorPort, LeaderElectionPort,
-    MessageFlowService, MetricsResult,
+    CanResolveInteraction, CompositeBotTerminalObserver, HumanInputReadyEvent, InteractionService,
+    HandleBotTerminalEventCommand, JudgeEvaluatorPort, LeaderElectionPort, MessageFlowService,
+    MetricsResult,
     OrganizationCoreService, OrganizationManagementService, OrganizationRepoPort,
     FriendCoreService, FriendRequestCoreService, InviteService, ProviderBotBindingRepoPort,
     ProviderBotCoreService, ProviderBotEventService, ProviderCoreService,
@@ -1341,6 +1349,37 @@ fn resolve_invite_token_secret(config: &BcsConfig) -> Vec<u8> {
         })
 }
 
+struct CandidateSearchBindings {
+    worker_profiles: Arc<dyn WorkerProfileCoreService>,
+    legacy: Arc<dyn BotCandidateSearchCoreService>,
+    openapi_v1: Arc<dyn BotCandidateSearchCoreService>,
+}
+
+fn build_candidate_search_bindings(
+    config: &BcsConfig,
+    registry: Arc<dyn BotRegistryCoreService>,
+    friends: Arc<dyn FriendCoreService>,
+    fuse_client: Option<Arc<FuseClient>>,
+) -> CandidateSearchBindings {
+    let worker_profiles: Arc<dyn WorkerProfileCoreService> = match fuse_client {
+        Some(client) => Arc::new(FuseWorkerProfileService::new(client)),
+        None => Arc::new(EmptyWorkerProfileCoreService),
+    };
+    let candidate_search: Arc<dyn BotCandidateSearchCoreService> =
+        Arc::new(BotCandidateSearchCore::new(
+            registry,
+            friends,
+            worker_profiles.clone(),
+            config.bcsfuse.recommend_min_score,
+        ));
+
+    CandidateSearchBindings {
+        worker_profiles,
+        legacy: candidate_search.clone(),
+        openapi_v1: candidate_search,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_openapi_v1_state(
     config: &BcsConfig,
@@ -1350,6 +1389,7 @@ fn build_openapi_v1_state(
     registry: Arc<dyn BotRegistryCoreService>,
     groups: Arc<dyn GroupCoreService>,
     friends: Arc<dyn FriendCoreService>,
+    candidate_search: Arc<dyn BotCandidateSearchCoreService>,
     friend_requests: Arc<dyn FriendRequestCoreService>,
     relation: Arc<dyn RelationCoreService>,
     sessions: Arc<dyn SessionManagementService>,
@@ -1371,6 +1411,7 @@ fn build_openapi_v1_state(
         control_plane,
         registry.clone(),
         friends.clone(),
+        candidate_search,
         BotServiceConfig {
             env: relation_env.clone(),
         },
@@ -1595,6 +1636,24 @@ mod gateway_principal_tests {
     }
 }
 
+#[cfg(test)]
+mod candidate_search_wiring_tests {
+    use super::*;
+    use bcs_test_support::{NoopBotRegistryCoreService, NoopFriendCoreService};
+
+    #[test]
+    fn bindings_share_one_core_between_legacy_and_v1() {
+        let bindings = build_candidate_search_bindings(
+            &BcsConfig::default(),
+            Arc::new(NoopBotRegistryCoreService),
+            Arc::new(NoopFriendCoreService),
+            None,
+        );
+
+        assert!(Arc::ptr_eq(&bindings.legacy, &bindings.openapi_v1));
+    }
+}
+
 impl Default for BcsServerState {
     fn default() -> Self {
         let config = BcsConfig::default();
@@ -1780,13 +1839,17 @@ impl Default for BcsServerState {
                 sessions.clone(),
             ))
         };
-        let state_machine_terminal_observer = Arc::new(
-            DeferredStateMachineTerminalObserver::new(Arc::new(
-                AdminInvocationTerminalObserver::new(
+        let interaction_terminal_observer = Arc::new(InteractionTerminalObserver::default());
+        let terminal_observer: Arc<dyn BotTerminalObserverPort> =
+            Arc::new(CompositeBotTerminalObserver::new(vec![
+                interaction_terminal_observer.clone(),
+                Arc::new(AdminInvocationTerminalObserver::new(
                     admin_invocation_runs.clone(),
                     outbound_url_guard.clone(),
-                ),
-            )),
+                )),
+            ]));
+        let state_machine_terminal_observer = Arc::new(
+            DeferredStateMachineTerminalObserver::new(terminal_observer),
         );
         let (message_flow, channel_slot) = create_message_flow_services(
             bot_registry.clone(),
@@ -1838,6 +1901,13 @@ impl Default for BcsServerState {
         ));
         let group_fusion = Arc::new(BcsGroupFusion::new(sessions.clone(), fusion.clone()));
         let message_flow = maybe_wrap_message_flow(&config, message_flow);
+        let interactions = create_interaction_service(
+            provider_transport.clone(),
+            group_management_impl.clone(),
+            frontend_delivery.clone(),
+            config.async_chat_run_retention_ms,
+        );
+        interaction_terminal_observer.set_service(interactions.clone());
         let collaboration_store = Arc::new(MemoryCollaborationStore::new());
         let judge_evaluator: Arc<dyn JudgeEvaluatorPort> = Arc::new(NoopJudgeEvaluator::default());
         let (session_channel_outbound_slot, session_channel_outbound) =
@@ -1878,6 +1948,21 @@ impl Default for BcsServerState {
                 collaboration_runtime.clone(),
             )),
         );
+        let candidate_search = build_candidate_search_bindings(
+            &config,
+            bot_registry.clone(),
+            friend_store.clone(),
+            None,
+        );
+        let actor_directory: Arc<dyn bcs_service_api::ActorDirectoryService> = Arc::new(
+            bcs_bot::ActorDirectory::new(
+                bot_registry.clone(),
+                friend_store.clone(),
+                relation_store.clone(),
+                candidate_search.worker_profiles,
+                candidate_search.legacy,
+            ),
+        );
         let openapi_v1 = build_openapi_v1_state(
             &config,
             invite_token_secret.clone(),
@@ -1886,6 +1971,7 @@ impl Default for BcsServerState {
             bot_registry.clone(),
             sessions.clone(),
             friend_store.clone(),
+            candidate_search.openapi_v1,
             friend_request_store,
             relation_store.clone(),
             session_management.clone(),
@@ -1936,11 +2022,13 @@ impl Default for BcsServerState {
             .bot_run_context(bot_run_context)
             .frontend_delivery(frontend_delivery)
             .message_flow(message_flow)
+            .interactions(interactions)
             .group_message_history(group_message_history)
             .a2a_chat(a2a_chat)
             .a2a_chat_runs(a2a_chat_runs)
             .collaboration_runtime(collaboration_runtime)
             .collaboration_templates(build_standalone_collaboration_template_service(&config))
+            .actor_directory(actor_directory)
             .bot_query(bot_use_cases.clone())
             .bot_management(bot_use_cases.clone())
             .bot_runtime(bot_use_cases.clone())
@@ -2202,6 +2290,7 @@ fn register_channel_lifecycles(
 
 struct UseCaseBundle {
     actor_directory: Arc<dyn bcs_service_api::ActorDirectoryService>,
+    candidate_search: Arc<dyn BotCandidateSearchCoreService>,
     friend_use_cases: Arc<dyn bcs_service_api::FriendService>,
     human_actors: Arc<dyn bcs_service_api::HumanActorService>,
     bot_onboarding: Arc<dyn bcs_service_api::BotOnboardingService>,
@@ -2212,6 +2301,7 @@ struct UseCaseBundle {
     group_management: Arc<dyn bcs_service_api::GroupManagementService>,
     group_query: Arc<dyn bcs_service_api::GroupQueryService>,
     workbench_sessions: Arc<dyn bcs_service_api::WorkbenchSessionService>,
+    interaction_authorization: Arc<dyn CanResolveInteraction>,
     group_proposals: Arc<dyn bcs_service_api::GroupProposalService>,
     group_fusion: Arc<dyn bcs_service_api::GroupFusionService>,
     system_message: Arc<dyn bcs_service_api::SystemMessageService>,
@@ -2241,13 +2331,19 @@ fn build_use_case_bundle(
     callback_url_guard: OutboundUrlGuard,
     provider_stream_gray_list: Arc<ProviderStreamGrayList>,
 ) -> UseCaseBundle {
-    let mut actor_directory =
-        bcs_bot::ActorDirectory::new(bot_registry.clone(), friend.clone(), relation.clone())
-            .with_recommend_min_score(config.bcsfuse.recommend_min_score);
-    if let Some(client) = fuse_client {
-        actor_directory =
-            actor_directory.with_worker_profiles(Arc::new(FuseWorkerProfileService::new(client)));
-    }
+    let candidate_search = build_candidate_search_bindings(
+        config,
+        bot_registry.clone(),
+        friend.clone(),
+        fuse_client,
+    );
+    let actor_directory = bcs_bot::ActorDirectory::new(
+        bot_registry.clone(),
+        friend.clone(),
+        relation.clone(),
+        candidate_search.worker_profiles,
+        candidate_search.legacy,
+    );
 
     let mut bot_use_cases = Bot::new_with_friend(bot_registry.clone(), friend.clone())
         .with_bot_core(bot_core.clone())
@@ -2322,6 +2418,7 @@ fn build_use_case_bundle(
 
     UseCaseBundle {
         actor_directory: Arc::new(actor_directory),
+        candidate_search: candidate_search.openapi_v1,
         friend_use_cases: Arc::new(bcs_friend::Friend::new(
             bot_registry.clone(),
             friend,
@@ -2344,11 +2441,33 @@ fn build_use_case_bundle(
         bot_discovery: bot_use_cases,
         group_management: group_management.clone(),
         group_query: group_management.clone(),
-        workbench_sessions: group_management,
+        workbench_sessions: group_management.clone(),
+        interaction_authorization: group_management,
         group_proposals,
         group_fusion: Arc::new(BcsGroupFusion::new(group, fusion)),
         system_message,
     }
+}
+
+fn create_interaction_service(
+    provider_transport: Arc<bcs_provider_http::HttpProviderTransport>,
+    authorization: Arc<dyn CanResolveInteraction>,
+    frontend_delivery: Arc<dyn FrontendDeliveryPort>,
+    terminal_retention_ms: u64,
+) -> Arc<dyn InteractionService> {
+    let store = Arc::new(MemoryInteractionStore::new());
+    let interaction_frontend = Arc::new(bcs_ws::web::WorkbenchInteractionDelivery::new(
+        frontend_delivery,
+    ));
+    let interactions: Arc<dyn InteractionService> = Arc::new(InteractionManagement::new(
+        store,
+        authorization,
+        provider_transport.clone(),
+        interaction_frontend,
+        terminal_retention_ms,
+    ));
+    provider_transport.set_interactions(interactions.clone());
+    interactions
 }
 
 struct DeferredStateMachineTerminalObserver {
@@ -3155,13 +3274,17 @@ impl BcsServer {
             callback_url_guard.clone(),
             provider_stream_gray_list.clone(),
         );
-        let state_machine_terminal_observer = Arc::new(
-            DeferredStateMachineTerminalObserver::new(Arc::new(
-                AdminInvocationTerminalObserver::new(
+        let interaction_terminal_observer = Arc::new(InteractionTerminalObserver::default());
+        let terminal_observer: Arc<dyn BotTerminalObserverPort> =
+            Arc::new(CompositeBotTerminalObserver::new(vec![
+                interaction_terminal_observer.clone(),
+                Arc::new(AdminInvocationTerminalObserver::new(
                     admin_invocation_runs.clone(),
                     callback_url_guard.clone(),
-                ),
-            )),
+                )),
+            ]));
+        let state_machine_terminal_observer = Arc::new(
+            DeferredStateMachineTerminalObserver::new(terminal_observer),
         );
         let (message_flow, channel_slot) = create_message_flow_services(
             bot_registry.clone(),
@@ -3235,6 +3358,7 @@ impl BcsServer {
             bot_registry.clone(),
             sessions.clone(),
             friend_store.clone(),
+            use_cases.candidate_search.clone(),
             friend_request_store,
             relation_store.clone(),
             session_management.clone(),
@@ -3249,6 +3373,13 @@ impl BcsServer {
 
         // Build services bundle
         let message_flow = maybe_wrap_message_flow(&config, message_flow);
+        let interactions = create_interaction_service(
+            provider_transport.clone(),
+            use_cases.interaction_authorization.clone(),
+            frontend_delivery.clone(),
+            config.async_chat_run_retention_ms,
+        );
+        interaction_terminal_observer.set_service(interactions.clone());
         let channel_runtime = build_channel_runtime(
             &config,
             channel_slot,
@@ -3288,6 +3419,7 @@ impl BcsServer {
             .bot_run_context(bot_run_context)
             .frontend_delivery(frontend_delivery)
             .message_flow(message_flow)
+            .interactions(interactions)
             .group_message_history(group_message_history)
             .a2a_chat(a2a_chat)
             .a2a_chat_runs(a2a_chat_runs)
@@ -3743,13 +3875,17 @@ impl BcsServer {
             outbound_url_guard.clone(),
             provider_stream_gray_list.clone(),
         );
-        let state_machine_terminal_observer = Arc::new(
-            DeferredStateMachineTerminalObserver::new(Arc::new(
-                AdminInvocationTerminalObserver::new(
+        let interaction_terminal_observer = Arc::new(InteractionTerminalObserver::default());
+        let terminal_observer: Arc<dyn BotTerminalObserverPort> =
+            Arc::new(CompositeBotTerminalObserver::new(vec![
+                interaction_terminal_observer.clone(),
+                Arc::new(AdminInvocationTerminalObserver::new(
                     admin_invocation_runs.clone(),
                     outbound_url_guard.clone(),
-                ),
-            )),
+                )),
+            ]));
+        let state_machine_terminal_observer = Arc::new(
+            DeferredStateMachineTerminalObserver::new(terminal_observer),
         );
         let (message_flow, channel_slot) = create_message_flow_services(
             bot_registry.clone(),
@@ -3835,6 +3971,7 @@ impl BcsServer {
             bot_registry.clone(),
             sessions.clone(),
             friend_svc.clone(),
+            use_cases.candidate_search.clone(),
             friend_request_svc,
             relation_svc.clone(),
             session_management.clone(),
@@ -3849,6 +3986,13 @@ impl BcsServer {
 
         // Build services bundle
         let message_flow = maybe_wrap_message_flow(&config, message_flow);
+        let interactions = create_interaction_service(
+            provider_transport.clone(),
+            use_cases.interaction_authorization.clone(),
+            frontend_delivery.clone(),
+            config.async_chat_run_retention_ms,
+        );
+        interaction_terminal_observer.set_service(interactions.clone());
         let channel_repos = if channel_bridge_enabled(&config) {
             channel_repos_with_storage(&infrastructure_plugins).await?
         } else {
@@ -3893,6 +4037,7 @@ impl BcsServer {
             .bot_run_context(bot_run_context)
             .frontend_delivery(frontend_delivery)
             .message_flow(message_flow)
+            .interactions(interactions)
             .group_message_history(group_message_history)
             .a2a_chat(a2a_chat)
             .a2a_chat_runs(a2a_chat_runs)
@@ -4484,6 +4629,7 @@ fn web_ws_dispatch_state(
         message_flow: state.services.message_flow.clone(),
         collaboration_runtime: state.services.collaboration_runtime.clone(),
         workbench_sessions: state.services.workbench_sessions.clone(),
+        interactions: state.services.interactions.clone(),
         group_session_connections,
         frontend_connections: state.frontend_connections.clone(),
         run_channels: state.frontend_run_channels.clone(),

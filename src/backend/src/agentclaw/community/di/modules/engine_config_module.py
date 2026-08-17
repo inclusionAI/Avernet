@@ -1,8 +1,10 @@
 """EngineConfigModule — production singleton for the engine-config service.
 
 ``EngineConfigService.__init__`` uses ``@inject`` to receive ``BotRepository``,
-``DeviceContextResolver`` and ``DeviceFilesystemDispatcher``; a ``configure``
-self-binding is enough for the injector to construct it.
+``DeviceContextResolver``, ``DeviceFilesystemDispatcher``,
+``BotPublishRepositoryProtocol`` and ``DeviceBindingRepository`` (the last two
+for stage-addressed reads); a ``configure`` self-binding is enough for the
+injector to construct it.
 
 The ``EngineConfigService`` import is deferred to ``configure`` time so that loading
 this module file does not eagerly pull ``service_bot``/``skill_center`` into the early

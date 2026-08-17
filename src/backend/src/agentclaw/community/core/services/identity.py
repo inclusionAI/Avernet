@@ -31,6 +31,15 @@ from agentclaw.community.core.devices.services.device_context import (
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
+from agentclaw.community.core.engine_runtime.stage import (
+    STAGE_DRAFT,
+    require_known_stage,
+    require_stage_writable,
+    resolve_stage_device_context,
+)
+from agentclaw.community.core.repository.protocols.devices import (
+    DeviceBindingRepository,
+)
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.devices.services import device_info as device_info_lookup
 from agentclaw.community.di.modules.skill_center_module import (
@@ -181,12 +190,16 @@ class IdentityService:
         bot_repo: BotRepository,
         resolver: DeviceContextResolver,
         device_fs_dispatcher: DeviceFilesystemDispatcher,
+        binding_repo: DeviceBindingRepository,
     ):
         self.path_factory = path_factory
         self._publish_repo = publish_repo
         self._resolver = resolver
         self._device_fs_dispatcher = device_fs_dispatcher
         self._bot_repo = bot_repo
+        # Only for a read that names a published stage: confirming that a verify
+        # runtime retained after promotion still has an ACTIVE binding.
+        self._binding_repo = binding_repo
 
     # ==================== Validation ====================
 
@@ -254,10 +267,26 @@ class IdentityService:
         bot_id: str,
         owner_id: str,
         engine_type: str,
+        stage: str = STAGE_DRAFT,
     ):
-        """Resolve the bot's device context (raises if unbound) and build its
-        identity-addressing DeviceFileSystem via the dispatcher."""
-        ctx = self._resolver.resolve_for_bot(bot_id, owner_id)
+        """Resolve the runtime ``stage`` names and build its identity-addressing
+        DeviceFileSystem via the dispatcher.
+
+        The default is the bot's own workspace, resolved exactly as it always
+        was (raises if unbound). A service bot's published runtimes resolve
+        through the shared stage rule, which raises ``EngineStageNotLiveError``
+        when the named stage has none up. Both legs, and the reasons behind
+        them, live in :func:`resolve_stage_device_context`.
+        """
+        ctx = resolve_stage_device_context(
+            self._resolver,
+            self._publish_repo,
+            self._binding_repo,
+            self._bot_repo,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            stage=stage,
+        )
         return self._device_fs_dispatcher.dispatch_addressed(
             ctx,
             namespace=IDENTITY_NS,
@@ -276,6 +305,7 @@ class IdentityService:
         file_type: str,
         owner_id: str,
         engine_type: str,
+        stage: str = STAGE_DRAFT,
     ) -> str:
         device_fs = self._identity_device_fs(
             entity_type=entity_type,
@@ -283,11 +313,27 @@ class IdentityService:
             bot_id=bot_id,
             owner_id=owner_id,
             engine_type=engine_type,
+            stage=stage,
         )
-        # 容器里没写过这个 identity 文件时,baas/arca 的 device_fs.read_file 会抛
-        # 404(plugin 故意不吞,见 BaasDeviceFileSystem.read_file 注释)。identity
-        # 域的契约是"缺省即空内容",由 service 层在这里收口,避免 router 吃 500、
-        # 前端打不开编辑器。非 404 的 HTTPStatusError(代理 401/沙箱 5xx 等)仍透出。
+        # identity 域的契约是"缺省即空内容"。``DeviceFileSystem.read_file`` 的契约
+        # 同样是"文件不存在 → None",baas/teclaw/local 都已按此实现,所以正常路径
+        # 不再依赖这里的 except。
+        #
+        # 保留它只为 ArcaDeviceFileSystem:该实现是 corp-only(见
+        # ``DeviceFileSystemResolver._resolve_arca``),本仓库看不到也测不到,若它仍
+        # 抛 404,这里兜住,避免 router 吃 500、前端打不开编辑器。等 arca 侧也按契约
+        # 把 404 收敛成 None,这段 except 就该整体删掉——core 不该认识 HTTP 状态码。
+        # 非 404 的 HTTPStatusError(代理 401/沙箱 5xx 等)始终透出。
+        return await self._read_through(device_fs, file_type)
+
+    @staticmethod
+    async def _read_through(device_fs, file_type: str) -> str:
+        """One identity file, through an **already-resolved** ``device_fs``.
+
+        Split out of :meth:`_device_read` so a caller reading many files for one
+        runtime resolves that runtime once — see :meth:`list_bot_files`. The 404
+        contract is the one described there and is not repeated.
+        """
         try:
             content_bytes = await device_fs.read_file(f"{IDENTITY_NS}/{file_type}")
         except httpx.HTTPStatusError as e:
@@ -327,12 +373,16 @@ class IdentityService:
         owner_id: str,
         *,
         engine_type: str | None = None,
+        stage: str = STAGE_DRAFT,
     ) -> str:
         """Read a bot-level **identity** file (provider-blind, coordinate-based).
 
-        ``engine_type`` is resolved per-bot when not given. The high-level identity
-        methods + ``bot_profile`` use this; it addresses the file as
-        ``identity/<file_type>`` and lets the factory compose the device address.
+        ``engine_type`` is resolved per-bot when not given. ``stage`` names which
+        of the bot's runtimes to read and defaults to its own workspace, so every
+        caller that does not address a stage reads what it always did. The
+        high-level identity methods + ``bot_profile`` use this; it addresses the
+        file as ``identity/<file_type>`` and lets the factory compose the device
+        address.
         """
         eng = resolve_engine_for_bot(
             bot_id, entity_id, override=engine_type, bot_repo=self._bot_repo
@@ -344,6 +394,7 @@ class IdentityService:
             file_type=file_type,
             owner_id=owner_id,
             engine_type=eng,
+            stage=stage,
         )
 
     async def write_identity_file(
@@ -606,9 +657,25 @@ class IdentityService:
         operator_id: str,
         publish_id: str | None = None,
         engine_type: str | None = None,
+        *,
+        stage: str = STAGE_DRAFT,
     ) -> BotIdentityFileResponse:
+        """Read one identity file of a bot.
+
+        Two ways to name a runtime other than the draft, and they are not
+        interchangeable. ``stage`` names a **stage** and resolves whichever
+        runtime that stage currently has; ``publish_id`` names a **release
+        record** and reads the binding that record holds. The record-keyed
+        branch wins when both are given — it names one exact release, which is
+        the more specific address — and it is the older internal contract, so
+        nothing about it changes here.
+        """
         self.validate_entity_type(entity_type)
         self.validate_file_type(file_type)
+        # Checked even though the ``publish_id`` branch below ignores ``stage``:
+        # a caller who passed a stage name that is not one should hear about it
+        # rather than have the argument silently discarded.
+        require_known_stage(stage)
         eng = resolve_engine_for_bot(
             bot_id, entity_id, override=engine_type, bot_repo=self._bot_repo
         )
@@ -647,6 +714,7 @@ class IdentityService:
             file_type,
             owner_id,
             engine_type=eng,
+            stage=stage,
         )
         return BotIdentityFileResponse(
             success=True,
@@ -666,6 +734,7 @@ class IdentityService:
         owner_id: str,
         *,
         engine_type: str | None = None,
+        stage: str = STAGE_DRAFT,
     ) -> list[tuple[str, bool]]:
         """Probe each whitelisted identity file_type's presence for a bot.
 
@@ -674,8 +743,31 @@ class IdentityService:
         returned non-empty content. Provider-blind: ``read_identity_file``
         addresses each file as ``identity/<file_type>`` and turns a device
         404 into an empty string (absent → ``exists=False``).
+
+        ``stage`` names which runtime is probed, and the whole list comes from
+        that one runtime — a caller never sees a draft row beside a verify row.
         """
         self.validate_entity_type(entity_type)
+
+        # The runtime is resolved **once**, not once per file. Every resolution
+        # step is synchronous — the engine lookup, and on a published stage a
+        # bot-row read, a publish-record scan, a binding read and a provider
+        # call with a 30-second timeout — and synchronous work in a coroutine
+        # runs before its first ``await``, so ``gather`` would execute sixteen
+        # of them back to back on the event loop rather than concurrently. One
+        # resolution, sixteen reads through it.
+        eng = resolve_engine_for_bot(
+            bot_id, entity_id, override=engine_type, bot_repo=self._bot_repo
+        )
+        device_fs = self._identity_device_fs(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            engine_type=eng,
+            stage=stage,
+        )
+
         # Probe all 16 identity files concurrently: each read is a device
         # round-trip (baas/arca = a network hop), so gathering instead of a
         # serial loop cuts this list endpoint's tail latency from 16× to ~1×.
@@ -690,17 +782,7 @@ class IdentityService:
         # cap is needed, wrap the gather in asyncio.Semaphore.
         ordered = list(VALID_IDENTITY_FILES)
         contents = await asyncio.gather(
-            *(
-                self.read_identity_file(
-                    entity_type,
-                    entity_id,
-                    bot_id,
-                    ft,
-                    owner_id,
-                    engine_type=engine_type,
-                )
-                for ft in ordered
-            )
+            *(self._read_through(device_fs, ft) for ft in ordered)
         )
         return list(zip(ordered, [bool(c) for c in contents]))
 
@@ -722,6 +804,13 @@ class IdentityService:
         device_fs.read_file("identity/<file>")`` — covering arca / baas / teclaw
         uniformly (replaces the old ``ARCA_`` target string-sniff). Returns ``None``
         when the publish record / stage binding can't be resolved.
+
+        Deliberately **not** ``engine_runtime.stage.resolve_stage_bind_id``,
+        which the stage-addressed read uses. The caller here named one publish
+        record, and that rule picks the newest record at a status — routing this
+        path through it would answer a question about release 7 from whichever
+        release is currently newest. Keyed by record, stay here; keyed by stage,
+        go there.
         """
         from agentclaw.community.core.service_bot.repository.models import (
             select_stage_bind_id,
@@ -782,9 +871,25 @@ class IdentityService:
         content: str,
         operator_id: str,
         engine_type: str | None = None,
+        *,
+        stage: str = STAGE_DRAFT,
     ) -> BotIdentityFileUpdateResponse:
+        """Create or overwrite one identity file of a bot.
+
+        Only the draft accepts a write, and it is the default. ``stage`` is taken
+        so that a caller naming a published runtime is *refused*
+        (``EngineStageReadOnlyError``) rather than having their edit quietly
+        applied to the draft. The refusal is the first thing that happens, before
+        anything is resolved — which is also why the write path below needs no
+        stage of its own: there is only one runtime it can reach.
+        """
+        # The two static validators run first: they resolve nothing, so the
+        # stage guard keeps its "before anything is resolved" property, and a
+        # request that is *also* malformed still hears which part is wrong
+        # rather than being answered only about its stage.
         self.validate_entity_type(entity_type)
         self.validate_file_type(file_type)
+        require_stage_writable(stage)
         eng = resolve_engine_for_bot(
             bot_id, entity_id, override=engine_type, bot_repo=self._bot_repo
         )

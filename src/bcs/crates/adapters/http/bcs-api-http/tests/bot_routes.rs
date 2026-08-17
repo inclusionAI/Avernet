@@ -47,6 +47,7 @@ impl PrincipalVerifier for HeaderVerifier {
 #[derive(Default)]
 struct FakeBotService {
     candidates: Mutex<Option<ListBotCandidates>>,
+    candidate_searches: Mutex<Vec<SearchBotCandidates>>,
     query: Mutex<Option<QueryBots>>,
     get: Mutex<Option<GetBot>>,
     update: Mutex<Option<UpdateBot>>,
@@ -68,6 +69,45 @@ impl BotService for FakeBotService {
             total: 1,
             offset: 5,
             limit: 10,
+        })
+    }
+
+    async fn search_candidates(
+        &self,
+        command: SearchBotCandidates,
+    ) -> Result<BotCandidateSearchResult, ApplicationError> {
+        let query = command.query.clone();
+        self.candidate_searches
+            .lock()
+            .expect("candidate searches lock")
+            .push(command);
+        if query.as_deref().is_none_or(|query| query.trim().is_empty()) {
+            return Ok(BotCandidateSearchResult {
+                items: Vec::new(),
+                search_mode: BotCandidateSearchMode::EmptyQuery,
+            });
+        }
+        let is_fallback = query.as_deref() == Some("fallback");
+        Ok(BotCandidateSearchResult {
+            items: vec![BotCandidateSearchItem {
+                bot: physical_bot(),
+                is_friend: true,
+                tags: std::collections::BTreeMap::from([(
+                    "specialty".to_string(),
+                    json!("planning"),
+                )]),
+                score: if is_fallback { None } else { Some(0.0) },
+                short_profile: if is_fallback {
+                    None
+                } else {
+                    Some("Planning specialist".to_string())
+                },
+            }],
+            search_mode: if is_fallback {
+                BotCandidateSearchMode::NameFallback
+            } else {
+                BotCandidateSearchMode::Semantic
+            },
         })
     }
 
@@ -289,7 +329,7 @@ fn test_router(service: Arc<FakeBotService>) -> axum::Router {
 }
 
 #[tokio::test]
-async fn all_five_bot_routes_forward_verified_human_and_contract_inputs() {
+async fn all_six_bot_routes_forward_verified_human_and_contract_inputs() {
     let service = Arc::new(FakeBotService::default());
     let app = test_router(service.clone());
 
@@ -307,6 +347,33 @@ async fn all_five_bot_routes_forward_verified_human_and_contract_inputs() {
         response_json(candidates).await["data"]["items"][0]["bot"]["kind"],
         "bot"
     );
+
+    let searched = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/collaboration/bots/human_staff-1/candidates/search?q=planning%20help&purpose=collaboration",
+            Value::Null,
+        ))
+        .await
+        .expect("candidate search response");
+    assert_eq!(searched.status(), StatusCode::OK);
+    let searched_body = response_json(searched).await;
+    assert_eq!(
+        searched_body["data"],
+        json!({
+            "items": [{
+                "bot": physical_bot(),
+                "is_friend": true,
+                "tags": {"specialty": "planning"},
+                "score": 0.0,
+                "short_profile": "Planning specialist"
+            }],
+            "search_mode": "semantic"
+        })
+    );
+    assert!(searched_body["data"].get("context").is_none());
+    assert!(!searched_body.to_string().contains("recommend_response"));
 
     let queried = app
         .clone()
@@ -370,6 +437,18 @@ async fn all_five_bot_routes_forward_verified_human_and_contract_inputs() {
     assert_eq!(candidates.purpose, BotCandidatePurpose::Collaboration);
     assert_eq!(candidates.name.as_deref(), Some("planner"));
     assert_eq!((candidates.offset, candidates.limit), (5, 10));
+    let searches = service
+        .candidate_searches
+        .lock()
+        .expect("candidate searches lock");
+    let search = searches.first().expect("candidate search command");
+    assert_eq!(
+        search.caller.user.as_ref().map(|user| user.id.as_str()),
+        Some("staff-1")
+    );
+    assert_eq!(search.bot_id, "human_staff-1");
+    assert_eq!(search.purpose, BotCandidatePurpose::Collaboration);
+    assert_eq!(search.query.as_deref(), Some("planning help"));
 
     assert_eq!(
         service
@@ -400,8 +479,68 @@ async fn all_five_bot_routes_forward_verified_human_and_contract_inputs() {
 }
 
 #[tokio::test]
+async fn candidate_search_accepts_omitted_empty_and_whitespace_queries() {
+    let service = Arc::new(FakeBotService::default());
+    let app = test_router(service.clone());
+
+    for uri in [
+        "/api/v1/collaboration/bots/human_staff-1/candidates/search",
+        "/api/v1/collaboration/bots/human_staff-1/candidates/search?q=",
+        "/api/v1/collaboration/bots/human_staff-1/candidates/search?q=%20%20%20",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(request("GET", uri, Value::Null))
+            .await
+            .expect("empty candidate search response");
+        assert_eq!(response.status(), StatusCode::OK, "{uri}");
+        assert_eq!(
+            response_json(response).await["data"],
+            json!({"items": [], "search_mode": "empty_query"}),
+            "{uri}"
+        );
+    }
+
+    let searches = service
+        .candidate_searches
+        .lock()
+        .expect("candidate searches lock");
+    assert_eq!(searches.len(), 3);
+    assert_eq!(searches[0].query, None);
+    assert_eq!(searches[1].query.as_deref(), Some(""));
+    assert_eq!(searches[2].query.as_deref(), Some("   "));
+}
+
+#[tokio::test]
+async fn candidate_search_serializes_name_fallback_without_a_score() {
+    let service = Arc::new(FakeBotService::default());
+    let response = test_router(service)
+        .oneshot(request(
+            "GET",
+            "/api/v1/collaboration/bots/human_staff-1/candidates/search?q=fallback",
+            Value::Null,
+        ))
+        .await
+        .expect("fallback candidate search response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(response).await["data"],
+        json!({
+            "items": [{
+                "bot": physical_bot(),
+                "is_friend": true,
+                "tags": {"specialty": "planning"}
+            }],
+            "search_mode": "name_fallback"
+        })
+    );
+}
+
+#[tokio::test]
 async fn bot_routes_reject_unknown_request_fields_and_missing_principal() {
-    let app = test_router(Arc::new(FakeBotService::default()));
+    let service = Arc::new(FakeBotService::default());
+    let app = test_router(service.clone());
     let unknown = app
         .clone()
         .oneshot(request(
@@ -415,6 +554,28 @@ async fn bot_routes_reject_unknown_request_fields_and_missing_principal() {
     assert_eq!(
         response_json(unknown).await["data"]["error_code"],
         "invalid_request"
+    );
+
+    let unknown_search_query = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/collaboration/bots/bot-1/candidates/search?q=planning&limit=10",
+            Value::Null,
+        ))
+        .await
+        .expect("unknown search query response");
+    assert_eq!(unknown_search_query.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response_json(unknown_search_query).await["data"]["error_code"],
+        "invalid_request"
+    );
+    assert!(
+        service
+            .candidate_searches
+            .lock()
+            .expect("candidate searches lock")
+            .is_empty()
     );
 
     let missing = app
@@ -442,6 +603,7 @@ async fn previous_bcn_path_families_are_not_mounted() {
         "/openapi/v1/group-sessions/session-1",
         "/openapi/v1/friend-requests/request-1/accept",
         "/openapi/v1/invitations/token-1/accept",
+        "/api/v1/collaboration/bots/bot-1/candidates",
     ] {
         let response = app
             .clone()

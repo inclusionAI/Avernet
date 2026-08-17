@@ -13,7 +13,7 @@ from ._orm_model import DistributedLockModel
 from ._protocol import DistributedLockRepository
 from ._record import LockRecord
 
-log = get_logger("orm-repository")
+log = get_logger("orm")
 
 
 def _is_lock_wait_timeout(exc: Exception) -> bool:

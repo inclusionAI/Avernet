@@ -4,10 +4,11 @@ The behavioural half: the default is the draft byte-for-byte, a named stage
 travels to the forward unchanged, a stage a bot cannot have is the one fixed
 409, and a value outside the enum never reaches a handler. The document half,
 in the shape of ``test_explicit_user_id.py``: ``stage`` is an optional query
-parameter on exactly the sixteen engine-runtime operations and nowhere else,
-and ``owner_id`` on those plus the three bot-scoped authorization operations —
-asserted against the generated description so a later operation is covered
-without editing this file.
+parameter on exactly the engine-runtime operations (current and retiring) plus
+the five per-bot file operations that address a runtime, and ``owner_id`` on the
+engine-runtime ones plus the bot-scoped authorization and skills operations — asserted against the
+generated description so a later operation is covered without editing this
+file.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from functools import lru_cache
 
 import pytest
 from fastapi import FastAPI
+from fastapi.routing import APIRoute
 
 from agentclaw.community.adapters.http.openapi_v1 import build_public_router
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
@@ -28,24 +30,68 @@ from agentclaw.community.core.engine_runtime.models import EngineResult
 
 from .conftest import BOT, OWNER, fails, ok
 
-_ENGINE_RUNTIME_PREFIXES = (
-    "/openapi/v1/bots/sessions",
-    "/openapi/v1/bots/engine",
-    "/openapi/v1/bots/models",
-    "/openapi/v1/bots/approvals",
-    "/openapi/v1/bots/connection",
-)
+#: The engine-runtime paths, taken from the routers themselves rather than
+#: guessed from a segment. Segment-matching was wrong the moment engine config
+#: moved to ``/{bot_id}/engine/config``: it sits under the ``engine`` literal by
+#: address but is not an engine-runtime operation, takes neither ``owner_id``
+#: nor ``stage``, and documents no 501 — so a name test would sweep it in and
+#: assert it carries parameters it has no business carrying.
+def _engine_runtime_paths() -> frozenset[str]:
+    from agentclaw.community.adapters.http.openapi_v1 import _ENGINE_RUNTIME_GROUPS
+    from agentclaw.community.adapters.http.openapi_v1.deprecated import (
+        ENGINE_RUNTIME_GROUPS as LEGACY_ENGINE_RUNTIME,
+    )
+
+    # The retiring addresses are mounted with the same response table and take
+    # the same parameters — they are the same operations at a former address —
+    # so they belong in this set until they are deleted. Leaving them out would
+    # have the test assert they carry neither owner_id nor stage, which is the
+    # opposite of the parity this feature promises.
+    return frozenset(
+        route.path.replace(":path", "")
+        for group in [*_ENGINE_RUNTIME_GROUPS, *LEGACY_ENGINE_RUNTIME]
+        for route in group.routes
+        if isinstance(route, APIRoute)
+    )
+
+
+def _is_engine_runtime(path: str) -> bool:
+    """Whether *path* is served by one of the engine-runtime groups."""
+    return path in _engine_runtime_paths()
+
+
+#: The per-bot file operations. They read or write a file **on** the addressed
+#: runtime, so they name one the same way the forwarding groups do — but they
+#: are not engine-runtime operations: they carry ``user_id`` rather than
+#: ``owner_id``, and engine-config publishes the ordinary error table because it
+#: cannot produce the 501 or 504 those groups document.
+#:
+#: The retiring twins of these five are deliberately absent. Their contract is
+#: frozen, so they must not have grown the parameter — which the exclusivity
+#: assertion below is what proves.
+_STAGE_ADDRESSED_ELSEWHERE = {
+    ("get", "/openapi/v1/bots/{bot_id}/engine/config"),
+    ("put", "/openapi/v1/bots/{bot_id}/engine/config"),
+    ("get", "/openapi/v1/bots/{bot_id}/identity"),
+    ("get", "/openapi/v1/bots/{bot_id}/identity/{file_type}"),
+    ("put", "/openapi/v1/bots/{bot_id}/identity/{file_type}"),
+}
 
 #: The other operations that address a bot by ``(owner, bot_id)``.
 #:
 #: They take ``owner_id`` for the same reason and with the same default — the
 #: caller's own bot — because ``bot_id`` alone does not identify one. They do
 #: **not** take ``stage``: there is no runtime in question when you are
-#: recording who may reach a bot.
+#: recording who may reach a bot, or listing a bot's stored skills.
 _OWNER_ADDRESSED_ELSEWHERE = {
     ("get", "/openapi/v1/bots/{bot_id}/authorized-apps"),
     ("post", "/openapi/v1/bots/{bot_id}/authorized-apps"),
     ("delete", "/openapi/v1/bots/{bot_id}/authorized-apps/{app_id}"),
+    # The skills group addresses an owner too, and now says so under the same
+    # name as everywhere else — it spelled this owner_entity_id until the
+    # bot-first change, which is why it was not in this set before.
+    ("get", "/openapi/v1/bots/{bot_id}/skills"),
+    ("post", "/openapi/v1/bots/{bot_id}/skills"),
 }
 
 
@@ -55,7 +101,7 @@ def client(make_client):
 
 
 def _base(bot: str = BOT) -> str:
-    return f"/openapi/v1/bots/sessions/{bot}"
+    return f"/openapi/v1/bots/{bot}/sessions"
 
 
 # ── behaviour ────────────────────────────────────────────────────────────────
@@ -73,10 +119,10 @@ def test_the_default_is_the_draft_byte_for_byte(client, relay):
 #: gated on the requested stage but forwarded a pasted literal would slip a
 #: sessions-only pin.
 _GROUP_ROUTES = [
-    ("sessions", f"/openapi/v1/bots/sessions/{BOT}"),
-    ("engine", f"/openapi/v1/bots/engine/{BOT}/capabilities"),
-    ("models", f"/openapi/v1/bots/models/{BOT}"),
-    ("approvals", f"/openapi/v1/bots/approvals/{BOT}/mode?session_key=k"),
+    ("sessions", f"/openapi/v1/bots/{BOT}/sessions"),
+    ("engine", f"/openapi/v1/bots/{BOT}/engine/capabilities"),
+    ("models", f"/openapi/v1/bots/{BOT}/models"),
+    ("approvals", f"/openapi/v1/bots/{BOT}/approvals/mode?session_key=k"),
 ]
 
 
@@ -141,7 +187,7 @@ def test_the_connection_build_receives_the_named_stage(relay):
     client = user_scoped_client(app, OWNER)
 
     resp = client.get(
-        f"/openapi/v1/bots/connection/{BOT}", params={"stage": "online"}
+        f"/openapi/v1/bots/{BOT}/connection", params={"stage": "online"}
     )
     assert resp.status_code == 200, resp.json()
     assert [b["stage"] for b in connections.builds] == ["online"]
@@ -211,7 +257,7 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
     engine_runtime, carrying_stage, carrying_owner = [], [], []
     for path, method, operation in _operations(schema):
         params = _query_params(operation)
-        if path.startswith(_ENGINE_RUNTIME_PREFIXES):
+        if _is_engine_runtime(path):
             engine_runtime.append((method, path))
             assert "owner_id" in params, f"{method.upper()} {path} lacks owner_id"
             assert "stage" in params, f"{method.upper()} {path} lacks stage"
@@ -225,12 +271,21 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
             # parameter existed.
             assert not params["owner_id"].get("required", False), path
 
-    assert len(engine_runtime) == 16
-    assert sorted(carrying_stage) == sorted(engine_runtime), "stage is theirs alone"
+    # 16 current operations, and the same 16 answering at their former
+    # addresses while callers migrate. The number halves again when the
+    # deprecated package is deleted.
+    assert len(engine_runtime) == 32
+    assert sorted(carrying_stage) == sorted(
+        set(engine_runtime) | _STAGE_ADDRESSED_ELSEWHERE
+    ), (
+        "stage belongs to the engine-runtime operations and the five per-bot "
+        "file operations, and to nothing else by accident — in particular to "
+        "no retiring address of those five, whose contract is frozen"
+    )
     assert sorted(carrying_owner) == sorted(
         set(engine_runtime) | _OWNER_ADDRESSED_ELSEWHERE
     ), (
-        "owner_id belongs to the engine-runtime operations and the three "
+        "owner_id belongs to the engine-runtime operations, the three "
         "authorization operations, and to nothing else by accident"
     )
 
@@ -250,7 +305,7 @@ def test_neither_parameter_is_ever_a_body_field_or_a_path_segment():
     schema = _schema()
     components = schema.get("components", {}).get("schemas", {})
     for path, method, operation in _operations(schema):
-        if not path.startswith(_ENGINE_RUNTIME_PREFIXES):
+        if not _is_engine_runtime(path):
             continue
         body = operation.get("requestBody", {})
         ref = (
@@ -275,7 +330,7 @@ def test_the_409_is_documented_on_every_engine_runtime_operation():
     it."""
     schema = _schema()
     for path, method, operation in _operations(schema):
-        if path.startswith(_ENGINE_RUNTIME_PREFIXES):
+        if _is_engine_runtime(path):
             assert "409" in operation.get("responses", {}), (
                 f"{method.upper()} {path} does not document 409"
             )

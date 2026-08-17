@@ -1,0 +1,20 @@
+openapi: 3.1.0
+info:
+  title: BCN Internal API
+  version: 1.0.0
+  description: Versioned internal contract for trusted BCN collaboration services.
+paths:
+  /api/v1/collaboration/bots/{bot_id}/candidates/search:
+    $ref: ./openapi/bots.yaml#/BotCandidateSearchPath
+  /api/v1/collaboration/sessions/{session_id}/files:
+    $ref: ./openapi/session-files.yaml#/SessionFilesPath
+  /api/v1/collaboration/sessions/{session_id}/files/{file_id}:
+    $ref: ./openapi/session-files.yaml#/SessionFilePath
+  /api/v1/collaboration/sessions/{session_id}/files/{file_id}/content:
+    $ref: ./openapi/session-files.yaml#/SessionFileContentPath
+  /api/v1/collaboration/sessions/{session_id}/files/{file_id}/complete:
+    $ref: ./openapi/session-files.yaml#/CompleteSessionFilePath
+  /api/v1/collaboration/sessions/{session_id}/files/{file_id}/share:
+    $ref: ./openapi/session-files.yaml#/ShareSessionFilePath
+  /api/v1/collaboration/sessions/shared-file/content:
+    $ref: ./openapi/session-files.yaml#/SharedSessionFileContentPath

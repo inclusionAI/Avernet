@@ -234,6 +234,7 @@ impl OrganizationManagementService for RecordingOrganizationManagement {
         Ok(vec![OrganizationCandidateBot {
             bot_uuid: "bot-b".to_string(),
             provider_id: "provider-b".to_string(),
+            agent_code: Some("agent-code-b".to_string()),
             capabilities: bcs_service_api::BotCapabilities {
                 name: (!self.candidate_name_missing.load(Ordering::Relaxed))
                     .then(|| "Bot B".to_string()),
@@ -566,6 +567,7 @@ async fn candidate_bots_response_exposes_name_without_capabilities() {
         json!({
             "bot_uuid": "bot-b",
             "provider_id": "provider-b",
+            "agent_code": "agent-code-b",
             "name": "Bot B"
         })
     );

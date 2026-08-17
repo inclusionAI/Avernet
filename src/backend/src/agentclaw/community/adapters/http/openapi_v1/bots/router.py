@@ -13,14 +13,16 @@ internal router does.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
+    EXAMPLE_TRACE_ID,
     STARTUP_SCRIPT_WRITE_RESPONSES,
     USER_SCOPED_403,
+    BotIdPath,
     Deleted,
     Envelope,
     NameCheck,
@@ -77,7 +79,6 @@ from agentclaw.community.api.bot_startup_script_service import (
     SUPPORTED,
     BotStartupScriptServiceProtocol,
 )
-from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.core.workspace.constants import (
     DEFAULT_ENGINE_TYPE,
     _get_engine_types,
@@ -246,7 +247,24 @@ def _sync_passport_identity(
         202: {
             "model": Envelope[BotAuthPending],
             "description": "Needs user authorization",
-        }
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": 202000,
+                        "message": "Accepted",
+                        "data": {
+                            "bot_id": "20260813_a7k2m9p1",
+                            "iframe_url": (
+                                "https://auth.example.com/passport/consent"
+                                "?flow=f-123"
+                            ),
+                            "redirect_url": "",
+                        },
+                        "request_id": EXAMPLE_TRACE_ID,
+                    }
+                }
+            },
+        },
     },
 )
 @envelope_errors
@@ -262,12 +280,17 @@ async def create_bot(
         SkillSetServiceFactoryProtocol
     ),
 ):
-    """Create a bot (201), or return 202 + a Passport iframe when authorization is needed.
+    """Create a bot (201), or 202 with authorization URLs when consent is needed.
 
-    Engine-specific inputs belong in ``BotCreateSpec.extra_properties``, but
-    nothing downstream reads that bag yet, so the request model does not expose
-    an ``engine_options`` field for it — see :class:`BotCreate`.
+    On a 202, have the user complete authorization at one of the returned
+    URLs, then poll the auth-status endpoint — the bot is only created there,
+    on ISSUED. Engine-specific options are not accepted here; engine
+    configuration is managed through the engine-config endpoints after
+    creation.
     """
+    # Engine-specific inputs belong in BotCreateSpec.extra_properties, but
+    # nothing downstream reads that bag yet, so the request model does not
+    # expose an `engine_options` field for it — see BotCreate.
     # Validate the engine against the configured registry FIRST: the cluster rule
     # below treats every non-teclaw value as ACRA, so an unknown engine would
     # otherwise sail through, allocate an id, apply for a Passport, and only fail
@@ -318,9 +341,21 @@ async def list_bots(
     page_params: PageParamsDep,
     owner_id: UserIdDep,
     caller: ActingCallerDep,
-    keyword: str | None = None,
-    engine: str | None = None,
-    status: str | None = None,
+    keyword: Annotated[
+        str | None,
+        Query(description="Filter: bots whose name contains this text."),
+    ] = None,
+    engine: Annotated[
+        str | None,
+        Query(description="Filter: only bots on this engine, matched exactly."),
+    ] = None,
+    status: Annotated[
+        str | None,
+        Query(
+            description="Filter: only bots in this lifecycle status, matched "
+            "exactly (e.g. 'ACTIVE'; see the Bot schema for the vocabulary)."
+        ),
+    ] = None,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[Page[Bot]]:
     """List the user's bots (filter + paginate), narrowed to what may be reached.
@@ -340,7 +375,7 @@ async def list_bots(
     Note this listing can never show a bot the user does not own, for an
     application any more than for the user — it is owner-scoped underneath. The
     complete view of what an application may reach, including bots delegated by
-    a collaborator, is ``GET /openapi/v1/bots/authorized``.
+    a collaborator, is the authorized-bots listing.
     """
     # ``owned_by_delegator``: this query is owner-scoped, and ``bot_id`` is not
     # unique across owners — filtering it by a set holding someone else's
@@ -376,21 +411,28 @@ async def list_bots(
 )
 @envelope_errors
 async def check_bot_name(
-    name: str,
+    name: Annotated[
+        str,
+        Query(
+            description="The bot name to check. Validated with the same rules "
+            "create applies (non-blank, no '@'), so an invalid name is a 400 "
+            "here rather than a false 'available'."
+        ),
+    ],
     request: Request,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[NameCheck]:
     """Check whether a bot name is available (within the caller's tenant).
 
-    Applies the same rule create and update do, because "available" has to mean
-    "you could create this". ``check_bot_name_exists`` only does a repository
-    lookup — it answers ``False`` for a blank or ``@``-bearing name, which would
-    report a name as free that the very next request would reject (400).
-    Rejecting here instead keeps one answer across the three endpoints.
-
-    The echoed ``name`` is the trimmed form actually checked, so a caller that
-    sends ``" Foo "`` sees which string the availability applies to.
+    Applies the same validation create and update do, so "available" always
+    means "you could create this". The echoed name is the trimmed form
+    actually checked — a caller that sends " Foo " sees which string the
+    availability answer applies to.
     """
+    # The same rule as create/update on purpose: the repository lookup alone
+    # answers False for a blank or @-bearing name, which would report a name
+    # as free that the very next request rejects (400). Rejecting here keeps
+    # one answer across the three endpoints.
     # No ``user_id``: this operation has no user dimension to scope by. Name
     # uniqueness is checked across the whole tenant — ``check_bot_name_exists``
     # takes only the name.
@@ -413,21 +455,24 @@ async def get_bots_ceiling(
 ) -> Envelope[Ceiling]:
     """Get the named user's bot-creation quota ceiling.
 
-    Names no bot, so there is no grant to check against one — but the answer is
-    still *about a person's account*, and a stranger application must not be
-    able to read it by naming a user id. So it is gated on the application
-    holding **at least one** live delegation from that user: proof of a
-    relationship, which is the closest thing this operation has to a scope.
-
-    An application with no delegation from them is answered as if the user were
-    not there. It learns nothing it did not already know.
-
-    Resolved through the same method creation enforces, not
-    ``PolicyService.get_bots_ceiling`` directly: that one falls back to its own
-    hardcoded default of 5, while creation falls back to the configured
-    ``max_devices_per_entity``. Reading it directly would advertise 5 to a caller
-    whose deployment allows (or rejects at) a different number.
+    The number creation actually enforces: creating a bot while the user owns
+    this many live bots is refused (409). A ceiling of 0 or less means the
+    limit is disabled. For an application caller, reading it requires holding
+    at least one live delegation from the named user; without one the user is
+    answered as if they did not exist.
     """
+    # Names no bot, so there is no grant to check against one — but the answer
+    # is still about a person's account, and a stranger application must not be
+    # able to read it by naming a user id. So it is gated on the application
+    # holding at least one live delegation from that user: proof of a
+    # relationship, the closest thing this operation has to a scope. An
+    # application with no delegation learns nothing it did not already know.
+    #
+    # Resolved through the same method creation enforces, not
+    # PolicyService.get_bots_ceiling directly: that one falls back to its own
+    # hardcoded default of 5, while creation falls back to the configured
+    # max_devices_per_entity. Reading it directly would advertise 5 to a caller
+    # whose deployment allows (or rejects at) a different number.
     granted = caller.granted_bot_ids()
     if granted is not None and not granted:
         # The named user goes to the log bounded and escaped, never into the
@@ -452,7 +497,7 @@ async def get_bots_ceiling(
 )
 @envelope_errors
 async def get_bot(
-    bot_id: str,
+    bot_id: BotIdPath,
     request: Request,
     owner_id: UserIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
@@ -470,7 +515,7 @@ async def get_bot(
 )
 @envelope_errors
 async def update_bot(
-    bot_id: str,
+    bot_id: BotIdPath,
     body: BotUpdate,
     request: Request,
     owner_id: UserIdDep,
@@ -479,9 +524,9 @@ async def update_bot(
 ) -> Envelope[Bot]:
     """Update a bot's name/description (engine is fixed at creation).
 
-    ``cluster_name`` is engine-derived and the engine is immutable, so it is not
-    updatable here; ``engine_options`` is managed via the engine-config
-    endpoints. Neither is accepted — see :class:`BotUpdate`.
+    The cluster is engine-derived and the engine is immutable, so neither is
+    updatable here; engine options are managed via the engine-config
+    endpoints. Sending either fails validation with the field named.
     """
     # Same name rule as create and the internal update route — otherwise this
     # surface could persist names the rest of the lifecycle rejects.
@@ -526,12 +571,17 @@ async def update_bot(
 )
 @envelope_errors
 async def delete_bot(
-    bot_id: str,
+    bot_id: BotIdPath,
     request: Request,
     owner_id: UserIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[Deleted]:
-    """Delete a bot. See :func:`_reject_unowned_lifecycle` for what is refused."""
+    """Delete a bot.
+
+    Refused (409) for bots whose lifecycle lives elsewhere: desktop bots are
+    managed by the desktop service, and service bots are deleted through
+    their publish lifecycle.
+    """
     _reject_unowned_lifecycle(bot_service.get_bot(bot_id, owner_id), deleting=True)
     bot_service.delete_bot(bot_id, owner_id)
     return deleted_envelope(request)
@@ -545,12 +595,17 @@ async def delete_bot(
 )
 @envelope_errors
 async def restart_bot(
-    bot_id: str,
+    bot_id: BotIdPath,
     request: Request,
     owner_id: UserIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[Bot]:
-    """Restart a bot. Desktop bots are rejected — see :func:`_reject_unowned_lifecycle`."""
+    """Restart a bot's container.
+
+    Also what applies a changed startup script. Refused (409) for desktop
+    bots, whose lifecycle is managed by the desktop service, and for bots in
+    a lifecycle state a restart cannot leave.
+    """
     _reject_unowned_lifecycle(bot_service.get_bot(bot_id, owner_id))
     bot = bot_service.restart_bot(bot_id, owner_id)
     return envelope(_to_bot(bot), request)
@@ -570,42 +625,79 @@ async def restart_bot(
             "model": Envelope[BotAuthStatus],
             "description": "Authorization did not complete; `data.status` "
             "carries the terminal state (e.g. REJECTED, EXPIRED)",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": 400000,
+                        "message": "Authorization did not complete",
+                        "data": {
+                            "status": "REJECTED",
+                            "message": None,
+                            "bot": None,
+                        },
+                        "request_id": EXAMPLE_TRACE_ID,
+                    }
+                }
+            },
         },
     },
     dependencies=_GRANT_CHECKED,
 )
 @envelope_errors
 async def get_bot_auth_status(
-    bot_id: str,
+    bot_id: BotIdPath,
     request: Request,
     owner_id: UserIdDep,
-    engine: str | None = None,
+    engine: Annotated[
+        str | None,
+        Query(
+            description="Echo of the engine the bot was requested with. "
+            "Required in practice on the 202 flow: creation completes here, "
+            "and an omitted value falls back to the deployment default."
+        ),
+    ] = None,
     # Enum, not a bare str: validate_engine_cluster accepts only ACRA/ANDC,
     # so a plain string would let a generated client compile
     # ``cluster_name=foo`` that the server always rejects — the same
     # contract/behaviour gap as F29/F35/F41. Create already models it this way.
-    cluster_name: ClusterName | None = None,
-    bot_name: str | None = None,
-    bot_desc: str | None = None,
-    bot_type: BotType | None = None,
+    cluster_name: Annotated[
+        ClusterName | None,
+        Query(
+            description="Echo of the cluster the bot was requested with; "
+            "validated against the engine exactly as on create."
+        ),
+    ] = None,
+    bot_name: Annotated[
+        str | None,
+        Query(description="Echo of the name the bot was requested with."),
+    ] = None,
+    bot_desc: Annotated[
+        str | None,
+        Query(description="Echo of the description the bot was requested with."),
+    ] = None,
+    bot_type: Annotated[
+        BotType | None,
+        Query(
+            description="Echo of the bot type the bot was requested with; "
+            "defaults to 'personal' when omitted."
+        ),
+    ] = None,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     passport_plugin: PassportPlugin = Injected(PassportPlugin),
     auth_rel_plugin: AuthRelationshipPlugin = Injected(AuthRelationshipPlugin),
 ) -> Envelope[BotAuthStatus]:
-    """Poll Passport authorization; complete creation when ISSUED.
+    """Poll authorization for a pending creation; the bot is created on ISSUED.
 
-    On the async-create flow the bot is only actually created here (on ISSUED),
-    so the caller must re-supply the attributes it created with — passed as
-    optional query params and forwarded to completion. Without them the bot
-    would be created with defaults (e.g. engine ``openclaw``) that contradict the
-    Passport applied for at ``POST`` time, so callers on the 202 flow should
-    always echo back ``engine``/``cluster_name``/``bot_name``/… here.
+    On the 202 create flow the bot is only actually created here, so the
+    caller must re-supply the attributes it created with — the optional query
+    parameters mirror the create body and are forwarded to completion. Omit
+    them and the bot is created with defaults that contradict what was
+    requested, so always echo back engine, cluster_name, bot_name, bot_desc
+    and bot_type when polling.
 
-    Because this is where the record is actually inserted, every restriction
-    ``POST`` enforces is re-applied to the echoed-back values: the same engine
-    registry check, the same engine/cluster bijection, and the same
-    personal|service restriction on ``bot_type``. Otherwise the completion path
-    would be a way to create exactly the bots ``POST`` rejects.
+    Every restriction create enforces is re-applied to the echoed values:
+    the same engine registry check, the same engine/cluster pairing, and the
+    same personal/service restriction on bot_type.
     """
     # Validate against the engine completion will actually use, not against the
     # query param: omitting ``engine`` does not mean "no engine", it means the
@@ -658,7 +750,7 @@ async def get_bot_auth_status(
 )
 @envelope_errors
 async def get_bot_status(
-    bot_id: str,
+    bot_id: BotIdPath,
     request: Request,
     owner_id: UserIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
@@ -686,7 +778,7 @@ async def get_bot_status(
 )
 @envelope_errors
 async def get_bot_passport(
-    bot_id: str,
+    bot_id: BotIdPath,
     request: Request,
     owner_id: UserIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
@@ -705,69 +797,6 @@ async def get_bot_passport(
         # No passport issued for this bot yet — a missing sub-resource is a 404.
         raise BotNotFoundError(f"passport not found: {bot_id}")
     return envelope(Passport(bot_id=bot_id, passport_id=passport_id), request)
-
-
-def _engine_config_target(bot: dict[str, Any]) -> tuple[str, str, str]:
-    """Resolve (entity_id, entity_type, engine) for an engine-config call."""
-    entity_id = bot.get("entity_id")
-    if not entity_id:
-        raise BotNotFoundError("bot has no associated entity")
-    entity_type = bot.get("entity_type") or "staff"
-    engine = bot.get("active_engine") or DEFAULT_ENGINE_TYPE
-    return entity_id, entity_type, engine
-
-
-@router.get(
-    "/{bot_id}/engine-config",
-    response_model=Envelope[dict[str, Any]],
-    responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
-)
-@envelope_errors
-async def get_bot_engine_config(
-    bot_id: str,
-    request: Request,
-    owner_id: UserIdDep,
-    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    engine_config_service: EngineConfigServiceProtocol = Injected(
-        EngineConfigServiceProtocol
-    ),
-) -> Envelope[dict[str, Any]]:
-    """Read a bot's engine configuration (free-form JSON)."""
-    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
-    entity_id, entity_type, engine = _engine_config_target(bot)
-    data = await engine_config_service.read_bot_config(
-        bot_id=bot_id, owner_id=owner_id, entity_id=entity_id,
-        entity_type=entity_type, engine_type=engine,
-    )
-    return envelope(data, request)
-
-
-@router.put(
-    "/{bot_id}/engine-config",
-    response_model=Envelope[dict[str, Any]],
-    responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
-)
-@envelope_errors
-async def update_bot_engine_config(
-    bot_id: str,
-    body: dict[str, Any],
-    request: Request,
-    owner_id: UserIdDep,
-    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    engine_config_service: EngineConfigServiceProtocol = Injected(
-        EngineConfigServiceProtocol
-    ),
-) -> Envelope[dict[str, Any]]:
-    """Write a bot's engine configuration (free-form JSON)."""
-    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
-    entity_id, entity_type, engine = _engine_config_target(bot)
-    await engine_config_service.write_bot_config(
-        bot_id=bot_id, owner_id=owner_id, entity_id=entity_id,
-        entity_type=entity_type, engine_type=engine, config=body,
-    )
-    return envelope(body, request)
 
 
 def _audit_actor(caller: ActingCaller, owner_id: str) -> str:
@@ -794,7 +823,7 @@ def _audit_actor(caller: ActingCaller, owner_id: str) -> str:
 )
 @envelope_errors
 async def get_bot_startup_script(
-    bot_id: str,
+    bot_id: BotIdPath,
     request: Request,
     owner_id: UserIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
@@ -805,8 +834,8 @@ async def get_bot_startup_script(
     """Read a bot's startup script.
 
     A bot that has never had one reads as an empty script, not an error. An
-    unsupported bot still answers here — with ``supported: false`` and a reason —
-    so a caller can discover *why* before trying to write.
+    unsupported bot still answers here — with supported false and a reason —
+    so a caller can discover why before trying to write.
     """
     bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
     entity_id, state, reason = _startup_script_target(bot, startup_script_service)
@@ -822,7 +851,7 @@ async def get_bot_startup_script(
 )
 @envelope_errors
 async def update_bot_startup_script(
-    bot_id: str,
+    bot_id: BotIdPath,
     body: StartupScriptWrite,
     request: Request,
     owner_id: UserIdDep,
@@ -834,11 +863,11 @@ async def update_bot_startup_script(
 ) -> Envelope[StartupScript]:
     """Set or replace a bot's startup script.
 
-    Takes effect the next time the platform **composes** a start command. A
-    restart or republish of the bot does that; a targeted device restart
-    (``POST /api/v1/devices/{binding_id}/restart``) and a scale-out do not —
-    they reuse the deploy config stored at the last compose, so a replica or a
-    restarted instance can still run the previously published script.
+    Takes effect the next time the platform composes a start command — a
+    restart or republish of the bot does that. Lower-level restarts and
+    scale-outs reuse the previously composed configuration, so an instance
+    started that way can still run the previously stored script until the bot
+    is next restarted or republished.
 
     Refused for a bot whose container cannot run one: storing it would be a
     silent no-op the caller could not distinguish from success.
@@ -873,7 +902,7 @@ async def update_bot_startup_script(
 )
 @envelope_errors
 async def delete_bot_startup_script(
-    bot_id: str,
+    bot_id: BotIdPath,
     request: Request,
     owner_id: UserIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),

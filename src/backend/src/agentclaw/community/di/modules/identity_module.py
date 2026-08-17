@@ -1,9 +1,11 @@
 """IdentityModule — production singleton for the identity service.
 
 ``IdentityService.__init__`` uses ``@inject`` to receive
-``WorkspacePathFactory``, ``BotPublishRepositoryProtocol`` and
-``BaasService``; a ``configure`` self-binding is enough for the
-injector to construct it.
+``WorkspacePathFactory``, ``BotPublishRepositoryProtocol``,
+``BotRepository``, ``DeviceContextResolver``,
+``DeviceFilesystemDispatcher`` and ``DeviceBindingRepository`` (the
+last for stage-addressed reads); a ``configure`` self-binding is
+enough for the injector to construct it.
 
 The ``IdentityService`` import is deferred to ``configure`` time so
 that loading this module file does not eagerly pull

@@ -18,7 +18,7 @@ then performs resource authorization in the application facade.
 
 ## 2. Scope
 
-The new routes are mounted below `/openapi/v1/collaboration`:
+The new routes are mounted below `/api/v1/collaboration`:
 
 | Method | Path | Identity policy | Purpose |
 | --- | --- | --- | --- |
@@ -246,7 +246,7 @@ Bootstrap introduces:
 
 ```toml
 [openapi_v1]
-public_collaboration_base_url = "https://gateway.example.com/openapi/v1/collaboration"
+public_collaboration_base_url = "https://gateway.example.com/api/v1/collaboration"
 ```
 
 The value is required to be an absolute `http` or `https` URL when configured,

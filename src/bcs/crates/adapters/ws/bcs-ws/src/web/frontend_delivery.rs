@@ -3,7 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bcs_service_api::{
     FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryPort,
-    FrontendDeliveryResult, FrontendDeliveryTarget, RunFallbackDelivery, ServiceResult,
+    FrontendDeliveryResult, FrontendDeliveryTarget, InteractionFrontendEvent,
+    InteractionFrontendPort, RunFallbackDelivery, ServiceError, ServiceResult,
 };
 
 use crate::shared::RunChannelManager;
@@ -24,6 +25,50 @@ impl WorkbenchFrontendDelivery {
             connections,
             run_channels,
         }
+    }
+}
+
+/// Serializes typed interaction events into the Workbench WebSocket envelope.
+pub struct WorkbenchInteractionDelivery {
+    frontend: Arc<dyn FrontendDeliveryPort>,
+}
+
+impl WorkbenchInteractionDelivery {
+    pub fn new(frontend: Arc<dyn FrontendDeliveryPort>) -> Self {
+        Self { frontend }
+    }
+}
+
+pub(crate) fn interaction_event_json(event: &InteractionFrontendEvent) -> ServiceResult<String> {
+    serde_json::to_string(&serde_json::json!({
+        "type": "event",
+        "event": "interaction",
+        "group_id": event.group_id,
+        "bot_uuid": event.bot_id,
+        "bcsRunId": event.bcs_run_id,
+        "bcsSessionId": event.bcs_session_id,
+        "payload": event.payload,
+    }))
+    .map_err(|error| ServiceError::InternalError(format!(
+        "serialize interaction Workbench event: {error}"
+    )))
+}
+
+#[async_trait]
+impl InteractionFrontendPort for WorkbenchInteractionDelivery {
+    async fn publish_interaction(&self, event: InteractionFrontendEvent) -> ServiceResult<()> {
+        self.frontend
+            .publish(FrontendDeliveryCommand {
+                target: FrontendDeliveryTarget::Session {
+                    session_id: event.bcs_session_id.clone(),
+                },
+                event_json: interaction_event_json(&event)?,
+                delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
+                run_fallback: None,
+                exclude_conn_id: None,
+            })
+            .await?;
+        Ok(())
     }
 }
 

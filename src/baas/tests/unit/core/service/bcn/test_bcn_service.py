@@ -208,9 +208,7 @@ async def test_handle_chat_send_deliver_fails(
     mock_run_repo.update_error.side_effect = _update_error
     mock_run_repo.get_by_run_id.return_value = failed_run
 
-    with patch(
-        "secbaas.community.core.service.bcn._bcn_service.logger"
-    ) as mock_logger:
+    with patch("secbaas.community.core.service.bcn._bcn_service.logger") as mock_logger:
         result = await service.handle_chat_send(_make_chat_send_input())
         assert result.ok is True  # acknowledgement remains fire-and-forget
         await asyncio.wait_for(callback_sent.wait(), timeout=1)

@@ -1,4 +1,4 @@
-"""Engine group (read-only) — ``/openapi/v1/bots/engine/{bot_id}``.
+"""Engine group (read-only) — ``/openapi/v1/bots/{bot_id}/engine``.
 
 An **operator console**: served to the addressed bot's owner and its
 member-level collaborators, for the stage the request names (``?stage=``,
@@ -17,7 +17,10 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 
-from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
+from agentclaw.community.adapters.http.openapi_v1.contracts import (
+    BotIdPath,
+    Envelope,
+)
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.engine.schemas import (
     EngineCapabilities,
     EngineInfo,
@@ -42,7 +45,7 @@ from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayPro
 from agentclaw.community.core.engine_runtime.errors import EngineUpstreamError
 from agentclaw.community.di import Injected
 
-router = APIRouter(prefix="/openapi/v1/bots/engine", tags=["engine"])
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/engine", tags=["engine"])
 
 
 def _names(raw: Any) -> list[str]:
@@ -60,10 +63,10 @@ def _names(raw: Any) -> list[str]:
     return []
 
 
-@router.get("/{bot_id}/status", response_model=Envelope[EngineStatus])
+@router.get("/status", response_model=Envelope[EngineStatus])
 @envelope_errors
 async def get_engine_status(
-    bot_id: str,
+    bot_id: BotIdPath,
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,
@@ -100,10 +103,10 @@ async def get_engine_status(
     )
 
 
-@router.get("/{bot_id}/capabilities", response_model=Envelope[EngineCapabilities])
+@router.get("/capabilities", response_model=Envelope[EngineCapabilities])
 @envelope_errors
 async def get_engine_capabilities(
-    bot_id: str,
+    bot_id: BotIdPath,
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,
@@ -143,10 +146,10 @@ async def get_engine_capabilities(
     )
 
 
-@router.get("/{bot_id}/available", response_model=Envelope[list[EngineInfo]])
+@router.get("/available", response_model=Envelope[list[EngineInfo]])
 @envelope_errors
 async def list_available_engines(
-    bot_id: str,
+    bot_id: BotIdPath,
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,

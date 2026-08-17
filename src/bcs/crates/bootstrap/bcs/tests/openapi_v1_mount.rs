@@ -93,7 +93,7 @@ async fn mounted_session_file_routes_use_the_real_facade_and_public_token_bounda
     let (addr, handle) = server.run_on_random_port().await.expect("start server");
     let client = reqwest::Client::new();
     let protected_url = format!(
-        "http://{addr}/openapi/v1/collaboration/sessions/missing-session/files"
+        "http://{addr}/api/v1/collaboration/sessions/missing-session/files"
     );
 
     let missing = client
@@ -118,7 +118,7 @@ async fn mounted_session_file_routes_use_the_real_facade_and_public_token_bounda
 
     let public = client
         .get(format!(
-            "http://{addr}/openapi/v1/collaboration/sessions/shared-file/content?token=invalid"
+            "http://{addr}/api/v1/collaboration/sessions/shared-file/content?token=invalid"
         ))
         .send()
         .await

@@ -13,7 +13,11 @@ from pathlib import Path
 from typing import Any
 
 from gateway.community.core.authn import RouteSecurity
-from gateway.community.core.forwarding import DomainMap, build_served_openapi
+from gateway.community.core.forwarding import (
+    DomainMap,
+    build_combined_openapi,
+    build_served_openapi,
+)
 
 _FIXTURE = Path(__file__).resolve().parents[3] / "fixtures" / "bots.openapi.json"
 _BAAS_ARTIFACT = (
@@ -21,6 +25,12 @@ _BAAS_ARTIFACT = (
 )
 _BCN_ARTIFACT = (
     Path(__file__).resolve().parents[4] / "configs" / "schemas" / "bcn.openapi.json"
+)
+_BCN_INTERNAL_ARTIFACT = (
+    Path(__file__).resolve().parents[4]
+    / "configs"
+    / "schemas"
+    / "bcn.internal.openapi.json"
 )
 _SHIPPED_CONFIG = Path(__file__).resolve().parents[4] / "configs" / "application.yaml"
 _METHODS = {"get", "post", "put", "delete", "patch"}
@@ -122,15 +132,15 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
     # the shipped baas artifact now serves the sessions path under chat.
     assert "/openapi/v1/chat/sessions/{session_id}" in paths
     assert "/openapi/v1/collaboration/bots/mine" in paths
+    assert not any(
+        path.startswith("/api/v1/collaboration") for path in paths
+    )
     assert "post" in paths["/openapi/v1/collaboration/sessions/{session_id}/token"]
     collection = paths[
         "/openapi/v1/collaboration/sessions/{session_id}/collect"
     ]
     assert set(collection) == {"delete", "post"}
     assert "get" in paths["/openapi/v1/collaboration/messages/ws"]
-    assert "put" in paths[
-        "/openapi/v1/collaboration/sessions/{session_id}/files/{file_id}/content"
-    ]
     message_data = paths[
         "/openapi/v1/collaboration/sessions/{session_id}/messages"
     ]["get"]["responses"]["200"]["content"]["application/json"]["schema"][
@@ -155,16 +165,6 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
     assert paths["/openapi/v1/collaboration/sessions/{session_id}/token"]["post"][
         "x-avernet-security"
     ] == collaboration_http_security
-    assert paths[
-        "/openapi/v1/collaboration/sessions/{session_id}/files/{file_id}/content"
-    ]["put"]["x-avernet-security"] == {
-        "user": "optional",
-        "app": "optional",
-        "bot": "optional",
-    }
-    assert paths[
-        "/openapi/v1/collaboration/sessions/shared-file/content"
-    ]["get"]["x-avernet-security"] == {}
     # REL qualified the collaboration messages/ws exemption by plane: only the
     # WEBSOCKET handshake is exempt (BCN verifies its session credential); the
     # HTTP GET operation on the same path keeps the collaboration HTTP security.
@@ -184,6 +184,78 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
         "Collaboration / Sessions",
         "Collaboration / Invitations",
     ]
+
+
+def test_shipped_internal_openapi_serves_bcn_internal_paths_only() -> None:
+    internal = json.loads(_BCN_INTERNAL_ARTIFACT.read_text())
+    public = json.loads(_BCN_ARTIFACT.read_text())
+
+    document = build_combined_openapi(
+        ["bcn-internal"],
+        {"bcn-internal": internal, "collaboration": public}.__getitem__,
+        title="gateway internal",
+        version="0.1.0",
+        description="Internal APIs",
+    )
+
+    paths = document["paths"]
+    assert "/api/v1/collaboration/sessions/{session_id}/files" in paths
+    assert (
+        "/api/v1/collaboration/bots/{bot_id}/candidates/search" in paths
+    )
+    assert not any(
+        path.startswith("/openapi/v1/collaboration") for path in paths
+    )
+
+
+def test_served_internal_openapi_combines_only_internal_schema_paths() -> None:
+    internal = {
+        "openapi": "3.1.0",
+        "info": {"title": "BCN Internal", "version": "1.0.0"},
+        "paths": {
+            "/api/v1/collaboration/sessions/{session_id}/files": {
+                "get": {
+                    "tags": ["Internal / Session Files"],
+                    "responses": {"200": {"description": "OK"}},
+                }
+            }
+        },
+        "components": {"schemas": {"InternalFile": {"type": "object"}}},
+        "tags": [
+            "not-a-tag",
+            {"name": "Internal / Session Files"},
+            {"name": "Internal / Session Files", "description": "duplicate"},
+            {"name": 123},
+        ],
+    }
+    public = {
+        "openapi": "3.1.0",
+        "info": {"title": "BCN Public", "version": "1.0.0"},
+        "paths": {
+            "/openapi/v1/collaboration/groups": {
+                "get": {
+                    "tags": ["Collaboration / Groups"],
+                    "responses": {"200": {"description": "OK"}},
+                }
+            }
+        },
+    }
+
+    document = build_combined_openapi(
+        ["bcn-internal"],
+        {"bcn-internal": internal, "bcn": public}.__getitem__,
+        title="gateway internal",
+        version="0.1.0",
+        description="Internal APIs",
+    )
+
+    assert document["info"]["title"] == "gateway internal"
+    assert (
+        "/api/v1/collaboration/sessions/{session_id}/files" in document["paths"]
+    )
+    assert "/openapi/v1/collaboration/groups" not in document["paths"]
+    assert document["components"]["schemas"]["InternalFile"] == {"type": "object"}
+    assert document["tags"] == [{"name": "Internal / Session Files"}]
 
 
 _BCSFUSE_FUSION_FIXTURE = (

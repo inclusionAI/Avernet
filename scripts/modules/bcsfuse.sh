@@ -35,7 +35,11 @@ bcsfuse_load_env() {
     # Its generated BCSFuse env file may predate that policy, so restore the
     # five SOP model selectors only after that file has been loaded.
     if [ "${HYBRID_CLAUDE_ACTIVE:-${MERCHANT_HYBRID_ACTIVE:-0}}" = "1" ]; then
-        local hybrid_model="${HYBRID_MODEL_ID:-Kimi-K2.6}"
+        local hybrid_model="${HYBRID_MODEL_ID:-${OPENCLAW_OPENAI_MODEL_ID:-}}"
+        if [ -z "$hybrid_model" ]; then
+            log_error "Hybrid model policy has no model resolved from the selected Singlebox configuration"
+            return 1
+        fi
         export LLM_FAST_MODEL="$hybrid_model"
         export LLM_BALANCED_MODEL="$hybrid_model"
         export LLM_REASONING_MODEL="$hybrid_model"
@@ -54,6 +58,9 @@ bcsfuse_load_env() {
     # generated .runtime/env/.env.local after setup.
     { [ -z "${LLM_BASE_URL:-}" ] || [ "${LLM_BASE_URL}" = "change_me" ]; } && [ -n "${OPENCLAW_OPENAI_BASE_URL:-}" ] && export LLM_BASE_URL="${OPENCLAW_OPENAI_BASE_URL}" || true
     { [ -z "${LLM_AUTH_TOKEN:-}" ] || [ "${LLM_AUTH_TOKEN}" = "change_me" ]; } && [ -n "${OPENCLAW_OPENAI_API_KEY:-}" ] && export LLM_AUTH_TOKEN="${OPENCLAW_OPENAI_API_KEY}" || true
+    # OPENCLAW_OPENAI_* points to an OpenAI-compatible provider, so default
+    # bcsfuse's LLM API type to openai when we fall back to it.
+    { [ -z "${LLM_API_TYPE:-}" ] || [ "${LLM_API_TYPE}" = "change_me" ]; } && [ -n "${OPENCLAW_OPENAI_BASE_URL:-}" ] && export LLM_API_TYPE="openai" || true
     { [ -z "${EMBEDDING_BASE_URL:-}" ] || [ "${EMBEDDING_BASE_URL}" = "change_me" ]; } && [ -n "${OPENCLAW_OPENAI_BASE_URL:-}" ] && export EMBEDDING_BASE_URL="${OPENCLAW_OPENAI_BASE_URL}" || true
     { [ -z "${EMBEDDING_AUTH_TOKEN:-}" ] || [ "${EMBEDDING_AUTH_TOKEN}" = "change_me" ]; } && [ -n "${OPENCLAW_OPENAI_API_KEY:-}" ] && export EMBEDDING_AUTH_TOKEN="${OPENCLAW_OPENAI_API_KEY}" || true
 
@@ -203,10 +210,14 @@ EOF
 bcsfuse_start() {
     # In home mode, reuse the openclaw.json LLM config for bcsfuse so users
     # don't have to duplicate base_url/api_key/model in .env.local.
+    # In manual mode, reuse the OPENCLAW_OPENAI_* env vars for the same reason.
     # Must be done BEFORE bcsfuse_load_env() so the loader can see LLM_BASE_URL
     # and default LLM_ENABLED/ENABLE_REAL_LLM when those flags are absent.
     if type -t singlebox_model_config_export_llm_env >/dev/null 2>&1; then
         singlebox_model_config_export_llm_env || true
+    fi
+    if type -t singlebox_model_config_export_manual_llm_env >/dev/null 2>&1; then
+        singlebox_model_config_export_manual_llm_env || true
     fi
 
     bcsfuse_load_env

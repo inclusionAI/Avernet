@@ -1,9 +1,10 @@
-"""Identity group — ``/openapi/v1/bots/identity/{bot_id}`` bot identity files.
+"""Identity group — ``/openapi/v1/bots/{bot_id}/identity`` bot identity files.
 
 Read/write a bot's identity markdown files (RULES, SOUL, …), addressed by bot.
-``{bot_id}`` is the first segment after the component, as everywhere on this
-surface — there is no ``/bot/`` segment before it, because the base already
-says ``bots`` and saying it twice told a reader nothing the base did not.
+``{bot_id}`` comes first, ahead of the component, as everywhere on this
+surface: an operation that acts on one bot starts with that bot's address.
+The component name follows it, and there is no ``/bot/`` segment anywhere —
+the base already says ``bots``.
 Every route requires an authenticated user principal. ``entity_type`` is
 hardcoded to ``staff`` for the personal-bot surface — ``proj``/``team``
 identity files (both valid entity types) are intentionally out of scope for
@@ -12,11 +13,19 @@ openapi_v1 and not reachable through this API.
 
 from __future__ import annotations
 
+from typing import Annotated
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Path, Request
 
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
+    RuntimeStage,
+)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
+    StageQuery,
+    WriteStageQuery,
+)
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
-from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
+from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath, Envelope
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
@@ -39,22 +48,38 @@ from .schemas import (
     IdentityFileWrite,
 )
 
-router = APIRouter(prefix="/openapi/v1/bots/identity", tags=["identity"])
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/identity", tags=["identity"])
+
+#: The path parameter naming which identity file an operation addresses.
+FileTypePath = Annotated[
+    IdentityFileType,
+    Path(
+        description="Which identity file to address — one of the whitelisted "
+        "types (see the enum's per-value documentation for what each file is "
+        "for)."
+    ),
+]
 
 
-@router.get("/{bot_id}", response_model=Envelope[IdentityFileList])
+@router.get("", response_model=Envelope[IdentityFileList])
 @envelope_errors
 async def list_bot_identity_files(
-    bot_id: str,
+    bot_id: BotIdPath,
     owner_id: UserIdDep,
     request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
     identity_service: IdentityService = Injected(IdentityService),
 ) -> Envelope[IdentityFileList]:
-    """List a bot's identity files and whether each exists.
+    """List every identity file type a bot can carry and whether each exists.
 
-    I2: entity_type/entity_id/operator_id come from the authenticated
-    request's ``user_id`` parameter (personal bot owner = the named user).
+    Every entry comes from the one runtime the stage parameter names, so a
+    file's presence is always reported for the runtime asked about.
+
+    A file reports exists false both when it is absent and when it exists
+    with empty content. Entry order is not guaranteed — key off type.
     """
+    # I2: entity_type/entity_id/operator_id come from the authenticated
+    # request's user_id parameter (personal bot owner = the named user).
     entity_type = "staff"  # personal bot owner is a staff entity
     entity_id = owner_id
     presence = await identity_service.list_bot_files(
@@ -62,6 +87,7 @@ async def list_bot_identity_files(
         entity_id,
         bot_id,
         owner_id,
+        stage=stage.value,
     )
     files = [
         IdentityFileInfo(
@@ -75,26 +101,32 @@ async def list_bot_identity_files(
 
 
 @router.get(
-    "/{bot_id}/{file_type}",
+    "/{file_type}",
     response_model=Envelope[IdentityFile],
 )
 @envelope_errors
 async def get_bot_identity_file(
-    bot_id: str,
-    file_type: IdentityFileType,
+    bot_id: BotIdPath,
+    file_type: FileTypePath,
     owner_id: UserIdDep,
     request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
     identity_service: IdentityService = Injected(IdentityService),
 ) -> Envelope[IdentityFile]:
     """Read one identity file of a bot.
 
-    I2: entity params come from the authenticated principal via
-    ``UserIdDep`` (personal bot owner = the named user). I3: ``publish_id`` is
-    not exposed — only draft-device reads (``get_bot_file`` default branch).
-    The service's ``validate_file_type`` requires the physical ``<type>.md``
-    form (``VALID_IDENTITY_FILES`` carries the suffix), so the enum value is
-    re-suffixed before forwarding.
+    Reads the runtime named by the stage parameter — the bot's own workspace
+    unless a published one is asked for.
+
+    A file that has never been written reads as an empty content string, not
+    an error.
     """
+    # I2: entity params come from the authenticated principal via UserIdDep
+    # (personal bot owner = the named user). I3: publish_id is not exposed —
+    # the runtime is named by ``stage`` instead. The service's
+    # validate_file_type requires the physical <type>.md form
+    # (VALID_IDENTITY_FILES carries the suffix), so the enum value is
+    # re-suffixed before forwarding.
     entity_type = "staff"  # personal bot owner is a staff entity
     entity_id = owner_id
     file_type_md = f"{file_type.value}.md"
@@ -104,6 +136,7 @@ async def get_bot_identity_file(
         bot_id,
         file_type_md,
         owner_id,
+        stage=stage.value,
     )
     # BotIdentityFileResponse → openapi IdentityFile. content/file_path are
     # guaranteed by the legacy response model; getattr is a defensive belt.
@@ -119,24 +152,30 @@ async def get_bot_identity_file(
 
 
 @router.put(
-    "/{bot_id}/{file_type}",
+    "/{file_type}",
     response_model=Envelope[IdentityFileRef],
 )
 @envelope_errors
 async def update_bot_identity_file(
-    bot_id: str,
-    file_type: IdentityFileType,
+    bot_id: BotIdPath,
+    file_type: FileTypePath,
     body: IdentityFileWrite,
     owner_id: UserIdDep,
     request: Request,
+    stage: WriteStageQuery = RuntimeStage.DRAFT,
     identity_service: IdentityService = Injected(IdentityService),
 ) -> Envelope[IdentityFileRef]:
-    """Overwrite one identity file of a bot.
+    """Create or overwrite one identity file of a bot.
 
-    I2: entity params come from the authenticated principal via
-    ``UserIdDep`` as above; ``validate_file_type`` requires the
-    ``<type>.md`` form. Returns an ``IdentityFileRef`` (no content echoed).
+    A full replacement — the body's content becomes the whole file. The
+    response is a reference only; the content is not echoed back.
+
+    Writes the bot's own workspace. A published runtime is what a release
+    produced and is replaced by publishing again, never edited, so naming one is
+    refused and nothing is written.
     """
+    # I2: entity params come from the authenticated principal via UserIdDep
+    # as above; validate_file_type requires the <type>.md form.
     entity_type = "staff"  # personal bot owner is a staff entity
     entity_id = owner_id
     file_type_md = f"{file_type.value}.md"
@@ -147,6 +186,7 @@ async def update_bot_identity_file(
         file_type_md,
         body.content,
         owner_id,
+        stage=stage.value,
     )
     return envelope(
         IdentityFileRef(

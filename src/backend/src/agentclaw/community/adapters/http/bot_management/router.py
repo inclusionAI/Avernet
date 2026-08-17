@@ -77,6 +77,7 @@ from agentclaw.community.core.bot_management.create_flow import (  # noqa: F401
 )
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
+from agentclaw.community.core.engine_runtime.stage import STAGE_DRAFT
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE, _get_engine_types
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
@@ -2924,9 +2925,13 @@ async def get_engine_config(
         # Provider-blind read through EngineConfigService (resolve_for_bot +
         # dispatch_addressed(config)). data is {} only when the file is missing/empty;
         # malformed JSON / resolve failures surface via the except blocks below.
+        # ``STAGE_DRAFT``: this internal console edits the bot's own workspace.
+        # Naming a runtime is the public surface's parameter
+        # (``/openapi/v1/bots/{bot_id}/engine/config?stage=``), not this route's.
         data = await engine_config_service.read_bot_config(
             bot_id=bot_id, owner_id=resolved_owner_id,
             entity_id=entity_id, entity_type=entity_type, engine_type=effective_engine,
+            stage=STAGE_DRAFT,
         )
         return ApiResponse(success=True, data=data)
 
@@ -3050,7 +3055,7 @@ async def update_engine_config(
         await engine_config_service.write_bot_config(
             bot_id=bot_id, owner_id=resolved_owner_id,
             entity_id=entity_id, entity_type=entity_type, engine_type=effective_engine,
-            config=config_data,
+            config=config_data, stage=STAGE_DRAFT,
         )
         logger.info(f"[bot_router.update_engine_config] Saved engine config for bot {bot_id}")
         return ApiResponse(

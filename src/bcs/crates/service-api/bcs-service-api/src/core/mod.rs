@@ -1,9 +1,11 @@
 pub mod actor;
 pub mod bot_control_plane;
+pub mod candidate_search;
 pub mod error;
 pub mod friend;
 pub mod fusion;
 pub mod group;
+pub mod interaction;
 pub mod message;
 pub mod organization;
 pub mod proposal;
@@ -15,10 +17,12 @@ pub mod system_message;
 
 pub use actor::*;
 pub use bot_control_plane::*;
+pub use candidate_search::*;
 pub use error::*;
 pub use friend::*;
 pub use fusion::*;
 pub use group::*;
+pub use interaction::*;
 pub use message::*;
 pub use organization::*;
 pub use proposal::*;

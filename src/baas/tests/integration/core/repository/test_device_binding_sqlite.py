@@ -236,8 +236,8 @@ class TestDeviceBindingSqliteOrmEquivalence:
         assert record.gmt_create is not None
 
 
-class TestListBaasDevicesByTtlAscProviderFilter:
-    """list_baas_devices_by_ttl_asc 必须只返回 provider_type='ARCA' 的设备。
+class TestListBaasDevicesByIdAscProviderFilter:
+    """list_baas_devices_by_id_asc 必须只返回 provider_type='ARCA' 的设备。
 
     DeviceTtlTimer 用此查询捞服务 bot 设备做 TTL 续期 + 探活;teclaw 的
     update_device_ttl 是 NotImplementedError,混入会触发无效续期噪声,
@@ -273,7 +273,7 @@ class TestListBaasDevicesByTtlAscProviderFilter:
             provider_type="TECLAW", sandbox_id="sbx-teclaw", ttl="2026-01-01 00:00:00"
         )
 
-        result = repo.list_baas_devices_by_ttl_asc(limit=100)
+        result = repo.list_baas_devices_by_id_asc(limit=100)
 
         returned_ids = {row["id"] for row in result}
         provider_types = {row["provider_type"] for row in result}
@@ -281,3 +281,25 @@ class TestListBaasDevicesByTtlAscProviderFilter:
         assert arca_id in returned_ids
         assert teclaw_id not in returned_ids
         assert provider_types == {"ARCA"}
+
+    def test_excludes_devices_with_ttl_beyond_24h(self):
+        """TTL 超过 24 小时的设备会被续期逻辑跳过，查询应过滤掉。"""
+        from datetime import datetime, timedelta
+
+        repo = get_container().repository.device_binding_repository()
+
+        due_ttl = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+        far_ttl = (datetime.now() + timedelta(hours=48)).strftime("%Y-%m-%d %H:%M:%S")
+
+        due_id = self._insert_device(
+            provider_type="ARCA", sandbox_id="sbx-due", ttl=due_ttl
+        )
+        far_id = self._insert_device(
+            provider_type="ARCA", sandbox_id="sbx-far", ttl=far_ttl
+        )
+
+        result = repo.list_baas_devices_by_id_asc(limit=100)
+
+        returned_ids = {row["id"] for row in result}
+        assert due_id in returned_ids
+        assert far_id not in returned_ids

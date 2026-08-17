@@ -22,7 +22,7 @@ from secbaas.community.logger import get_logger
 from ._config_loader import ConfigLoader
 from ._models import Config
 
-logger = get_logger("config_utils")
+logger = get_logger("config")
 
 # ---------------------------------------------------------------------------
 # Singleton config holder

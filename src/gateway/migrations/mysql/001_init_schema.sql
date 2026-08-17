@@ -5,6 +5,10 @@
 -- ON UPDATE CURRENT_TIMESTAMP), named `uk_`/`idx_` indexes, and per-column
 -- `COMMENT` (following the backend SQL style).
 --
+-- This file is CREATE TABLE IF NOT EXISTS, so it only provisions a NEW database.
+-- Changes to an already-deployed schema go in a numbered migration beside it
+-- (see `002_application_api_key.sql`); editing this file alone migrates nobody.
+--
 -- The gateway's bare/community edition creates these tables from ORM metadata
 -- via `DataSourcePlugin.create_all()` (in-memory SQLite; the bare plugin
 -- downgrades BIGINT PKs to INTEGER automatically). This DDL is the canonical
@@ -16,24 +20,40 @@
 -- below: the third-party-app registry (`avernet_application`), the tenant master
 -- (`avernet_tenant`), and the access-key registry (`avernet_access_key_token`).
 
+-- The unique indexes on the two `token` columns span a 700-character prefix,
+-- not the whole varchar(1024): at utf8mb4 the full width is a 4096-byte key,
+-- past InnoDB's 3072-byte limit, which made this file non-executable as
+-- previously written. Both token kinds are signed JWTs of ~261 characters, so a
+-- 700-character prefix (2800 bytes) covers the entire value and uniqueness is
+-- unaffected. `002_application_api_key.sql` makes the same change on deployed
+-- databases.
+--
+-- `avernet_access_key_token.token` keeps the server-default (case-insensitive)
+-- collation, so its exact-match lookup is case-insensitive on MySQL. Left alone
+-- because access-key credentials are outside this change.
+
 -- Table: avernet_application
--- 第三方应用注册表：按 opaque `token`(签名 JWT) 查找；`id` 为应用稳定身份。
+-- 第三方应用注册表：按 `api_key_prefix`(API Key 前 8 位)定位、再比对 `api_key_hash`；
+-- `id` 为应用稳定身份。每行只填一种凭证：新行填 api_key_*，迁移前的旧行填 `token`。
 CREATE TABLE IF NOT EXISTS `avernet_application` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',
   `gmt_create` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `gmt_modified` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
   `app_name` varchar(256) NOT NULL COMMENT '应用名称',
   `app_type` varchar(64) NOT NULL DEFAULT 'UNKNOWN' COMMENT '应用类型',
-  `token` varchar(1024) NOT NULL COMMENT '应用访问令牌(签名 JWT)，opaque 查找键',
+  `api_key_hash` varchar(256) DEFAULT NULL COMMENT 'API Key 哈希(PBKDF2-SHA256，格式 base64(salt):base64(dk))',
+  `api_key_prefix` varchar(8) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'API Key 前 8 位，查找键(哈希加盐，无法按哈希查找)',
+  `token` varchar(1024) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL COMMENT '[废弃] 旧版应用令牌(明文签名 JWT)，过渡期精确匹配查找键；待废弃日志静默后随查找路径一并删除',
   `owners` varchar(1024) NOT NULL COMMENT '应用归属(开发者/组织)',
   `tenant` varchar(64) NOT NULL COMMENT '所属租户(逻辑引用 avernet_tenant.name)',
-  `status` varchar(32) NOT NULL DEFAULT 'ACTIVE' COMMENT '状态(ACTIVE/INACTIVE)',
+  `status` varchar(32) NOT NULL DEFAULT 'ACTIVE' COMMENT '状态(ACTIVE/INACTIVE)，仅 ACTIVE 可通过鉴权',
   `env` varchar(64) NOT NULL DEFAULT '' COMMENT '环境标识',
   `config` json DEFAULT NULL COMMENT '扩展配置(JSON)',
   `creator` varchar(128) NOT NULL DEFAULT '' COMMENT '创建人',
   `modifier` varchar(128) NOT NULL DEFAULT '' COMMENT '修改人',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_avernet_application_token` (`token`),
+  UNIQUE KEY `uk_avernet_application_api_key_prefix` (`api_key_prefix`),
+  UNIQUE KEY `uk_avernet_application_token_prefix` (`token`(700)),
   KEY `idx_avernet_application_app_name` (`app_name`)
 ) DEFAULT CHARSET = utf8mb4 COMMENT = '第三方应用注册表';
 
@@ -67,6 +87,6 @@ CREATE TABLE IF NOT EXISTS `avernet_access_key_token` (
   `creator` varchar(128) NOT NULL DEFAULT '' COMMENT '创建人',
   `modifier` varchar(128) NOT NULL DEFAULT '' COMMENT '修改人',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_avernet_access_key_token_token` (`token`),
+  UNIQUE KEY `uk_avernet_access_key_token_token` (`token`(700)),
   KEY `idx_avernet_access_key_token_access_key` (`access_key`)
 ) DEFAULT CHARSET = utf8mb4 COMMENT = '访问密钥注册表';

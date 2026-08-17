@@ -1,17 +1,18 @@
-"""The seven operations the shared grant check cannot bind, for an app caller.
+"""The operations whose bot an application could otherwise reach unchecked.
 
-Four name a skill, one carries its bot in the body, and two name a bot but
-address an owner under their own parameter (``owner_entity_id``). The shared
-dependency **defers** for exactly these seven — they are named in
-``admission.py``, not detected by their shape — and each handler binds the grant
-to the ``(bot, owner)`` it actually acts on before acting.
+Four name a **skill** and no owner: the services beneath them scope by *user*
+alone, so an application holding a grant on one of a user's bots would reach
+that user's skills on **every** bot they own unless the handler binds the grant
+to the ``(bot, owner)`` on the record. Those four are named in
+``admission.SKILL_SCOPED_OPERATIONS`` and are the whole of what ``TODO(#960)``
+has left; the routines create and the two skills collection reads moved to the
+shared dependency when bot-first addressing gave them somewhere to put the bot
+and the owner.
 
 This file exists because these are the operations most likely to be quietly
-wrong. The services beneath the skill routes scope by *user* alone, so an
-application holding a grant on one of a user's bots would otherwise reach that
-user's skills on **every** bot they own; and a body-carried bot id arrives after
-every dependency has already run. Both failures are silent — a `200` with data
-the caller should not have — which is exactly the kind a test has to catch.
+wrong, and the failure is silent — a `200` with data the caller should not have
+— which is exactly the kind a test has to catch. The mirror case, a valid grant
+wrongly *refused*, is ``test_skills_shared_bot_grant.py``.
 """
 
 from __future__ import annotations
@@ -19,11 +20,12 @@ from __future__ import annotations
 from datetime import datetime
 
 import pytest
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
+from agentclaw.community.adapters.http.openapi_v1.principal import require_granted_bot
 from agentclaw.community.adapters.http.openapi_v1.routines import (
     router as routines_router,
 )
@@ -183,9 +185,16 @@ def client(skills, cron):
             binder.bind(LocalSkillUploadServiceProtocol, to=skills)
             binder.bind(CronRelayServiceProtocol, to=cron)
 
+    # Both groups are mounted with the shared grant check in build_public_router,
+    # and this file is about what an application caller may reach — so the
+    # fixture mounts them the same way. Mounting them bare used to pass because
+    # routines checked the grant inside its handler; now that the check is the
+    # dependency's for every route, a bare mount would assert against an
+    # assembly production does not have.
+    grant_checked = [Depends(require_granted_bot)]
     app = FastAPI()
-    app.include_router(skills_router)
-    app.include_router(routines_router)
+    app.include_router(skills_router, dependencies=grant_checked)
+    app.include_router(routines_router, dependencies=grant_checked)
     app.dependency_overrides[require_principal] = _app_caller
     attach_injector(app, Injector([_M()]))
     mount_public_error_handlers(app)
@@ -198,10 +207,10 @@ def client(skills, cron):
 @pytest.mark.parametrize(
     ("method", "template"),
     [
-        ("get", "/openapi/v1/bots/skills/{skill}"),
-        ("delete", "/openapi/v1/bots/skills/{skill}"),
-        ("post", "/openapi/v1/bots/skills/{skill}/activate"),
-        ("post", "/openapi/v1/bots/skills/{skill}/deactivate"),
+        ("get", "/openapi/v1/bots/{bot}/skills/{skill}"),
+        ("delete", "/openapi/v1/bots/{bot}/skills/{skill}"),
+        ("post", "/openapi/v1/bots/{bot}/skills/{skill}/activate"),
+        ("post", "/openapi/v1/bots/{bot}/skills/{skill}/deactivate"),
     ],
 )
 def test_a_skill_on_an_ungranted_bot_is_refused(client, method, template):
@@ -211,7 +220,9 @@ def test_a_skill_on_an_ungranted_bot_is_refused(client, method, template):
     service beneath scopes by user, so it would happily serve this — a ``200``
     carrying a skill the application has no authorization for.
     """
-    response = getattr(client, method)(template.format(skill=OTHER_SKILL))
+    response = getattr(client, method)(
+        template.format(bot=OTHER_BOT, skill=OTHER_SKILL)
+    )
 
     assert response.status_code == 404, response.json()
 
@@ -219,15 +230,17 @@ def test_a_skill_on_an_ungranted_bot_is_refused(client, method, template):
 @pytest.mark.parametrize(
     ("method", "template"),
     [
-        ("get", "/openapi/v1/bots/skills/{skill}"),
-        ("delete", "/openapi/v1/bots/skills/{skill}"),
-        ("post", "/openapi/v1/bots/skills/{skill}/activate"),
-        ("post", "/openapi/v1/bots/skills/{skill}/deactivate"),
+        ("get", "/openapi/v1/bots/{bot}/skills/{skill}"),
+        ("delete", "/openapi/v1/bots/{bot}/skills/{skill}"),
+        ("post", "/openapi/v1/bots/{bot}/skills/{skill}/activate"),
+        ("post", "/openapi/v1/bots/{bot}/skills/{skill}/deactivate"),
     ],
 )
 def test_a_skill_on_the_granted_bot_is_served(client, method, template):
     """The same four operations still work where the grant covers them."""
-    response = getattr(client, method)(template.format(skill=GRANTED_SKILL))
+    response = getattr(client, method)(
+        template.format(bot=GRANTED_BOT, skill=GRANTED_SKILL)
+    )
 
     assert response.status_code == 200, response.json()
 
@@ -237,8 +250,8 @@ def test_the_refusal_happens_before_the_skill_is_touched(client, skills):
 
     A delete that ran and then answered 404 would be the worst of both.
     """
-    client.delete(f"/openapi/v1/bots/skills/{OTHER_SKILL}")
-    client.post(f"/openapi/v1/bots/skills/{OTHER_SKILL}/activate")
+    client.delete(f"/openapi/v1/bots/{OTHER_BOT}/skills/{OTHER_SKILL}")
+    client.post(f"/openapi/v1/bots/{OTHER_BOT}/skills/{OTHER_SKILL}/activate")
 
     assert skills.deleted == []
     assert skills.activated == []
@@ -247,9 +260,8 @@ def test_the_refusal_happens_before_the_skill_is_touched(client, skills):
 # ── the body-carried bot id ──────────────────────────────────────────────────
 
 
-def _routine(bot_id: str) -> dict:
+def _routine() -> dict:
     return {
-        "bot_id": bot_id,
         "name": "nightly",
         "trigger": {"cron": "0 9 * * *"},
         "command": "echo hi",
@@ -257,19 +269,23 @@ def _routine(bot_id: str) -> dict:
 
 
 def test_creating_a_routine_on_an_ungranted_bot_is_refused(client, cron):
-    """The bot arrives in the body, after every dependency has run.
+    """The bot is the address, so the shared dependency refuses before the
+    handler runs at all.
 
-    So the check is in the handler — and it must be the *first* thing, or the
-    refusal arrives after the routine exists.
+    This used to be the one operation whose bot arrived in the body, after
+    every dependency had already resolved — so its grant check lived in the
+    handler and had to be the *first* statement there, or the refusal would
+    arrive after the routine existed. Bot-first addressing removed the
+    exception rather than the guarantee; what is asserted is unchanged.
     """
-    response = client.post("/openapi/v1/bots/routines", json=_routine(OTHER_BOT))
+    response = client.post(f"/openapi/v1/bots/{OTHER_BOT}/routines", json=_routine())
 
     assert response.status_code == 404, response.json()
     assert cron.created == [], "refused before the routine was created"
 
 
 def test_creating_a_routine_on_the_granted_bot_works(client, cron):
-    response = client.post("/openapi/v1/bots/routines", json=_routine(GRANTED_BOT))
+    response = client.post(f"/openapi/v1/bots/{GRANTED_BOT}/routines", json=_routine())
 
     assert response.status_code == 201, response.json()
     assert cron.created == [GRANTED_BOT]
@@ -279,24 +295,20 @@ def test_creating_a_routine_on_the_granted_bot_works(client, cron):
 
 
 def test_listing_skills_on_an_ungranted_bot_is_refused(client, skills):
-    """``owner_entity_id`` names whose bot this reads, and the grant must match.
+    """``owner_id`` names whose bot this reads, and the grant must match.
 
     Classifying these as plainly owner-scoped was wrong in both directions: a
     grant on the caller's own same-named bot would authorize a read of someone
     else's, and a legitimate grant on a shared bot would be refused.
     """
-    response = client.get(
-        "/openapi/v1/bots/skills", params={"bot_id": OTHER_BOT}
-    )
+    response = client.get(f"/openapi/v1/bots/{OTHER_BOT}/skills")
 
     assert response.status_code == 404, response.json()
     assert skills.listed == [], "refused before the read"
 
 
 def test_listing_skills_on_the_granted_bot_works(client, skills):
-    response = client.get(
-        "/openapi/v1/bots/skills", params={"bot_id": GRANTED_BOT}
-    )
+    response = client.get(f"/openapi/v1/bots/{GRANTED_BOT}/skills")
 
     assert response.status_code == 200, response.json()
     assert skills.listed == [(GRANTED_BOT, USER)]
@@ -312,8 +324,8 @@ def test_listing_another_owners_bot_is_refused_even_with_a_same_named_grant(
     it.
     """
     response = client.get(
-        "/openapi/v1/bots/skills",
-        params={"bot_id": GRANTED_BOT, "owner_entity_id": "someone-else"},
+        f"/openapi/v1/bots/{GRANTED_BOT}/skills",
+        params={"owner_id": "someone-else"},
     )
 
     assert response.status_code == 404, response.json()
@@ -323,8 +335,7 @@ def test_listing_another_owners_bot_is_refused_even_with_a_same_named_grant(
 def test_uploading_a_skill_to_an_ungranted_bot_is_refused(client, skills):
     """A write makes the mis-binding worse — it would create a skill there."""
     response = client.post(
-        "/openapi/v1/bots/skills/upload",
-        params={"bot_id": OTHER_BOT},
+        f"/openapi/v1/bots/{OTHER_BOT}/skills",
         content=b"PK\x03\x04",
         headers={"content-type": "application/zip"},
     )

@@ -16,7 +16,7 @@ from ._paas_health_provider import PaaSHealthProvider
 if TYPE_CHECKING:
     from secbaas.community.core.service.paas import PaasServiceFacade
 
-log = get_logger("docker-paas-health-provider")
+log = get_logger("core-service")
 
 
 class EchoHealthChecker:
@@ -236,7 +236,7 @@ class DockerPaaSHealthProvider(PaaSHealthProvider):
                 health_endpoint=health_endpoint,
             ),
         }
-        self._logger = get_logger("docker-paas-health-provider")
+        self._logger = get_logger("core-service")
 
     async def check_health(
         self,

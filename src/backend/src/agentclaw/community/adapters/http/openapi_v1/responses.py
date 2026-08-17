@@ -89,6 +89,7 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineResourceNotFoundError,
     EngineRuntimeError,
     EngineStageNotLiveError,
+    EngineStageReadOnlyError,
     EngineUpstreamError,
 )
 from agentclaw.community.core.gateway_principal import PrincipalVerificationError
@@ -108,7 +109,10 @@ from agentclaw.community.core.resources.service import (
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillDuplicateError,
     LocalSkillActiveError,
+    LocalSkillEditBusyError,
+    LocalSkillEditLockUnavailableError,
     LocalSkillEditPausedError,
+    LocalSkillLayoutRollbackError,
     LocalSkillInvalidPackageError,
     LocalSkillNotFoundError,
     LocalSkillNotReadyError,
@@ -268,6 +272,9 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LocalSkillTooLargeError: (413, "Skill package is too large"),
     LocalSkillStorageError: (502, "Skill storage operation failed"),
     LocalSkillRuntimeSyncError: (502, "Skill runtime synchronization failed"),
+    LocalSkillEditBusyError: (409, "Another Skill update is in progress"),
+    LocalSkillLayoutRollbackError: (409, "Skill layout rollback is in progress"),
+    LocalSkillEditLockUnavailableError: (503, "Skill update service is temporarily unavailable"),
     LocalSkillEditPausedError: (409, "Skill layout is being updated"),
     FileTooLargeError: (413, "File too large for preview"),
     # Startup script (issue #926): the body is refused at write time so a
@@ -292,7 +299,10 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     InvalidIdentityFileTypeError: (400, "Invalid file type"),
     # ── Engine-runtime (Track C) ──────────────────────────────────────────
     # Ordering inside this block is load-bearing: ``EngineRuntimeError`` is the
-    # base of the four ``Engine*`` errors below it and is listed AFTER them.
+    # base of every ``Engine*`` error below it and is listed AFTER them.
+    # ``test_engine_runtime_base_does_not_swallow_its_leaves`` finds the leaves
+    # by scanning the errors module and its ``__all__``, so a new one is covered
+    # here without editing any list — but it must still be given an entry below.
     # Lookup returns on the first isinstance match in insertion order, so a base
     # placed first would swallow every leaf under it — the trap recorded in the
     # Track B gotchas.
@@ -326,6 +336,13 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # publishing — and from "device not ready", which promises a retry will
     # eventually succeed.
     EngineStageNotLiveError: (409, "No live runtime at the requested stage"),
+    # A write addressed to a published runtime. 409 like the two above, and a
+    # *separate* answer from both: "no live runtime" would send the caller off to
+    # publish one and retry, which would not help, and the caller is entitled to
+    # the operation — it is the addressed runtime that does not take writes.
+    # Deliberately not a 200 with a no-op flag either: automation that checks the
+    # status code would record the write as landed.
+    EngineStageReadOnlyError: (409, "The requested stage is read-only"),
     # An out-of-range page argument, so it joins the 422 FastAPI already returns
     # for page_size > 100 rather than inventing a status. Needs a mapped entry
     # rather than a bare HTTPException: app-level handlers replace an unmapped

@@ -9,7 +9,8 @@ use crate::noop::{
 };
 use bcs_service_api::{
     ActorKind, ActorStatus, BotRegistryCoreService, BotRuntimeConnectionService,
-    CallbackChannelConfig, ChannelBindingCleanupPort, DmActorSpec, DmCreateCommand, DmCreateResult,
+    CallbackChannelConfig, CanResolveInteraction, CanResolveInteractionCommand,
+    ChannelBindingCleanupPort, DmActorSpec, DmCreateCommand, DmCreateResult,
     CollaborationRuntimeService, FriendCoreService, Group as DomainGroup, GroupAddMemberCommand,
     GroupAddMemberResult, GroupCoreService, GroupCreateCommand, GroupDeleteCommand, GroupDeleteResult,
     GroupDetailCommand, GroupDetailResult, GroupKind, GroupListCommand, GroupListEntry,
@@ -21,7 +22,7 @@ use bcs_service_api::{
     GroupTerminateCommand, GroupUpdateLabelCommand, GroupUpdateVisibilityCommand,
     GroupUpdateWorkspaceCommand, GroupUseCaseError, GroupWorkspaceQueryCommand,
     GroupWorkspaceResult, NoopChannelBindingCleanupPort, Participant, ParticipantMode,
-    ParticipantRole, RegisteredBot, RelationCoreService, ServiceError, ServiceSpec,
+    ParticipantRole, RegisteredBot, RelationCoreService, ServiceError, ServiceResult, ServiceSpec,
     ServiceSpecPatchConflictField, Session, SessionKind, SessionManagementService,
     SystemMessageEvent, WorkbenchChatAuthorizationCommand, WorkbenchConnectCommand,
     WorkbenchConnectOutcome, WorkbenchParticipantView, WorkbenchSessionService,
@@ -1869,6 +1870,47 @@ impl WorkbenchSessionService for GroupManagement {
             Some(_) => Ok(()),
             None => Err(WorkbenchUseCaseError::SenderNotInGroup),
         }
+    }
+}
+
+#[async_trait]
+impl CanResolveInteraction for GroupManagement {
+    async fn can_resolve(&self, command: CanResolveInteractionCommand) -> ServiceResult<bool> {
+        let Some(staff_no) = command
+            .actor_id
+            .strip_prefix("human_")
+            .filter(|staff_no| !staff_no.is_empty())
+        else {
+            return Ok(false);
+        };
+        let Some(session) = self
+            .session_management
+            .get(&command.bcs_session_id)
+            .await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?
+            .filter(|session| session.group_id == command.group_id)
+        else {
+            return Ok(false);
+        };
+
+        for participant in &session.participants {
+            if participant.effective_mode() == ParticipantMode::Absent {
+                continue;
+            }
+            if participant.is_human() && participant.bot_uuid == command.actor_id {
+                return Ok(true);
+            }
+            if !participant.is_bot() {
+                continue;
+            }
+            let Some(bot) = self.registry.get(&participant.bot_uuid).await else {
+                continue;
+            };
+            if bot_belongs_to_staff(&participant.bot_uuid, bot.created_by.as_deref(), staff_no) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 }
 

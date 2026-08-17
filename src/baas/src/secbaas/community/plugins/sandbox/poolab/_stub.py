@@ -26,7 +26,7 @@ from secbaas.community.spi.sandbox.poolab import PoolabSandboxPlugin
 if TYPE_CHECKING:
     pass
 
-logger = get_logger("plugin-sandbox-poolab")
+logger = get_logger("plugin-sandbox")
 
 
 class StubPoolabSandboxPlugin(PoolabSandboxPlugin):
