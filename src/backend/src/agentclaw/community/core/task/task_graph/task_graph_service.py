@@ -5,6 +5,7 @@ in-memory store(M1);ORM 适配按需后续。查询返回引用(D3-A:调用方�
 """
 from __future__ import annotations
 
+import logging
 import threading
 import time
 import uuid
@@ -35,6 +36,8 @@ from agentclaw.community.core.task.domain.models import (
     TaskSpec,
     TaskSummary,
 )
+
+_LOG = logging.getLogger(__name__)
 
 # 合法状态转换(PLANNING/RUNNING 解耦:PLANNING=规划中(显式委托态),RUNNING=执行中(子执行/自身执行))
 # acceptance 驱动(skill 验收回投):仅 RUNNING->DONE(PASS)/FAILED(FAIL+gaps);FAILED 不再经 acceptance 翻
@@ -352,6 +355,10 @@ class TaskGraphService:
         同 bot 重 claim 幂等(成功)。非 ``bbs_mode`` 任务拒绝(``TaskStateError``)。
         实现:取 ``_lock_for(task_id)``(RLock 可重入)后调 ``update_task_node_info`` 折叠
         ``extend_props_patch={'bbs_owner','bbs_claim_at'}`` —— 不翻态,PLANNING/HUNG 根均可写。
+
+        **recover 清理**:CAS 占根成功后,先把图中所有 ``HUNG`` 子树(每个 HUNG 节点及其 DEPENDENCY 后代)
+        删除——这些是 planner 规划不合理 / 派发全 MISS 造的死分支,BBS 接力视为推倒重做,清掉让根回到
+        干净委托点(根 ``task_id`` 永不清)。不区分 ``hung_reason``/checkpoint(按 recover 语义)。
         """
         with self._lock_for(task_id):
             graph = self._require_graph(task_id)
@@ -363,6 +370,9 @@ class TaskGraphService:
             owner = root.run_info.extend_props.get("bbs_owner")
             if owner is not None and owner != bot_id:
                 raise TaskStateError(f"claim_bbs_owner: task={task_id} 已被 {owner} 占有")
+            pruned = self._prune_hung_subtrees(graph, task_id)
+            if pruned:
+                _LOG.info("[bbs-claim] task=%s recover 清理 HUNG 死子树 %d 个", task_id, pruned)
             return self.update_task_node_info(
                 TaskNodePatch(
                     task_id=task_id,
@@ -370,6 +380,36 @@ class TaskGraphService:
                     extend_props_patch={"bbs_owner": bot_id, "bbs_claim_at": int(time.time() * 1000)},
                 )
             )
+
+    def _prune_hung_subtrees(self, graph: TaskExecutionGraph, task_id: str) -> int:
+        """删除图中所有 ``HUNG`` 子树(每个 HUNG 节点 + 其 DEPENDENCY 后代),返回删除节点数。
+
+        根(``task_id``)永不清。调用方须持 ``_lock_for(task_id)``。recover 语义:清掉 planner 造的
+        HUNG 死分支(规划不合理 / 派发全 MISS),不区分 ``hung_reason``/checkpoint。
+        """
+        children: dict[str, list[str]] = {}
+        for rel in graph.relations:
+            if rel.type == RelationType.DEPENDENCY:
+                children.setdefault(rel.src_id, []).append(rel.dst_id)
+        prune: set[str] = set()
+        stack = [n.node_id for n in graph.tasks
+                 if n.status == Status.HUNG and n.node_id != task_id]
+        while stack:
+            nid = stack.pop()
+            if nid in prune:
+                continue
+            prune.add(nid)
+            for child in children.get(nid, []):
+                if child not in prune:
+                    stack.append(child)
+        if not prune:
+            return 0
+        graph.tasks = [n for n in graph.tasks if n.node_id not in prune]
+        graph.relations = [
+            r for r in graph.relations
+            if r.src_id not in prune and r.dst_id not in prune
+        ]
+        return len(prune)
 
     def attach_bbs_node(
         self, task_id: str, parent_node_id: str, task_spec: TaskSpec, bot_id: str

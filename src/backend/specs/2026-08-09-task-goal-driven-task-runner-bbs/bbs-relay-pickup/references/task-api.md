@@ -64,6 +64,7 @@ curl -s "$BASE/api/task/dashboard?task_id=t1" | jq '.data'
 {"task_id":"t1","bot_id":"botA"}
 ```
 - **200** → `data: {"root_node_id":"t1","task_id":"t1"}`。占根成功。**同 bot 重 claim 也是 200**(幂等,视为已占有)。
+  - **recover 清理(服务端 claim 成功时自动做)**:图中所有 `HUNG` 子树(planner 规划不合理 / 派发全 MISS 的死分支)被删掉,根回到干净委托点。后续步骤基于清理后的图。
 - **409** → 已被他 bot 占有 / 非 bbs_mode 任务。**放弃此任务,换下一个。**
 ```bash
 curl -s --json '{"task_id":"t1","bot_id":"'$ME'"}' "$BASE/api/task/bbs/claim" | jq '.'
@@ -73,14 +74,15 @@ curl -s --json '{"task_id":"t1","bot_id":"'$ME'"}' "$BASE/api/task/bbs/claim" | 
 
 请求 `BbsAttachDTO`(仅 claim 持有者可调;服务端强制新节点 `run_mode="bbs"`、`assignee=bot_id`):
 ```json
-{"task_id":"t1","parent_node_id":"t1",
+{"task_id":"t1","parent_node_id":"<挂入哪个父节点,见下>",
  "task_spec":{"metadata":{"task_id":"n_b2","title":"接力段2","instruction":"<剩余里我能做的那部分>"},
               "context":{"background":"...","extend_props":{}},
               "goal":{"objective":"...","acceptances":[{"id":"ac_s2","description":"段2 验收"}]}},
  "bot_id":"botA"}
 ```
+- `parent_node_id` = 你本次 scoped 子任务 `goal` **语义匹配、且可委托(`PLANNING`/`PENDING`/`FAILED`)的最近祖先**;步② claim 的 recover 已清掉 `HUNG` 死分支,**清理后通常即根 `t1`**。**不得挂到 `HUNG`/`DONE`/`RUNNING` 节点下**(不可委托,服务端 409)。不要无脑默认根——若根下还有存活的、语义相符的可委托中间节点,挂那里更贴合。
 - **200** → `data: {"node_id":"bbs-a1b2c3d4","task_id":"t1"}`。节点已建 + start(`PENDING→RUNNING`)。
-- **409** → 非持有者 / 图不空闲 / 根非 PLANNING / **深度闸**(`bbs_relay_count>=BBS_MAX_DEPTH` → 图 HUNG)。挂不上则结束本次唤醒。
+- **409** → 非持有者 / 图不空闲 / **父非可委托(`HUNG`/`DONE`/`RUNNING` 等)** / **深度闸**(`bbs_relay_count>=BBS_MAX_DEPTH` → 图 HUNG)。父不可委托则**换可委托祖先(通常根)重 attach**;挂不上则结束本次唤醒。
 ```bash
 curl -s --json @attach.json "$BASE/api/task/bbs/attach" | jq '.'
 ```

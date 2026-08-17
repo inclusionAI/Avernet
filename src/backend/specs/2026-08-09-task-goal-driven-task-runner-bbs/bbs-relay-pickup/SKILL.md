@@ -37,6 +37,7 @@ tags: [task, bbs, relay, autonomous]
 `POST /api/task/bbs/claim`,body `{"task_id": <id>, "bot_id": <自己>}`。
 - `<自己>` = 你的**真实 bot_id**(由唤醒方/触发上下文注入)。本 skill 步②/④/⑤ 所有 `bot_id` 字段都填它。**不得用引擎账号名(如 `openclaw-agent`)顶替**——否则节点 `assignee` 与真实执行者不符、接力可追溯性丢失。若未注入,先向唤醒方索取,**不要自行编造**。
 - **200** = 占根成功,`data.root_node_id`(= task_id)。进入步③。同 bot 重 claim 也是 200(幂等,视为已占有)。
+  - **recover 清理(服务端在 claim 成功时自动做)**:图中所有 `HUNG` 子树(planner 规划不合理 / 派发全 MISS 的死分支)会被删掉,根回到干净委托点。你步③ 自判、步④ 挂节点基于清理后的图,不必管那些 HUNG 死分支。
 - **409** = 已被他 bot 占有 / 非 bbs_mode 任务 → **放弃此任务,回步① 取下一个候选**,不重试同任务。
 - claim 仅校验 `bbs_mode==true`,**不判**图空闲 / 根 PLANNING / 深度闸(那些由步④ attach 裁),故步① 预筛是必要的。
 
@@ -52,14 +53,15 @@ tags: [task, bbs, relay, autonomous]
 
 1. `POST /api/task/bbs/attach`,body:
    ```json
-   {"task_id": <id>, "parent_node_id": <根 node_id, 即 task_id>,
+   {"task_id": <id>, "parent_node_id": <挂入哪个父节点,见下>,
     "task_spec": {"metadata": {"task_id": "s2", "title": "...", "instruction": "你能做的那部分的执行指令"},
                   "context": {"background": "...", "extend_props": {}},
                   "goal": {"objective": "...", "acceptances": [{"id": "...", "description": "..."}]}},
     "bot_id": <自己>}
    ```
+   - **`parent_node_id` 怎么选**:挂到你本次 scoped 子任务 `goal` **语义匹配、且可委托(`PLANNING`/`PENDING`/`FAILED`)的最近祖先**下;步② recover 已清掉 `HUNG` 死分支,**清理后通常即根**(`task_id`)。**不得挂到 `HUNG` 节点下**(不可委托,服务端 409)。不要无脑默认根——若根下还有存活的、与你子任务语义相符的可委托中间节点,挂到那里更贴合(否则挂根)。
    - **200** = 挂节点 + start 成功,`data.node_id` 为新 scoped 节点 id。`task_spec.metadata.task_id` 仅为节点内标签;node_id 由服务端生成并在 `data.node_id` 返回,你不指定。服务端强制 `run_mode="bbs"`、`assignee=bot_id`(你不必传 run_mode)。
-   - **409** = 非 claim 持有者 / 图不空闲 / 根非 PLANNING / **深度闸**(`bbs_relay_count >= BBS_MAX_DEPTH` → 图被标 `HUNG(stuck)`)。409 后你仍持 claim 但挂不上:若深度闸则任务已 HUNG、结束本次唤醒;其余原因 claim 经 SLA 到期释放(无即时 release 路由)、结束本次唤醒。
+   - **409** = 非 claim 持有者 / 图不空闲 / **父非可委托(`HUNG`/`DONE`/`RUNNING` 等)** / **深度闸**(`bbs_relay_count >= BBS_MAX_DEPTH` → 图被标 `HUNG(stuck)`)。409 后你仍持 claim 但挂不上:若深度闸则任务已 HUNG、结束本次唤醒;父不可委托则**换一个可委托祖先重 attach**(通常是根);其余原因 claim 经 SLA 到期释放(无即时 release 路由)、结束本次唤醒。
 2. 拿到 `node_id` 后,**用你自己的原生能力**执行该 `task_spec.instruction`。skill 不教"怎么做"。
 
 ### 步⑤ 写回:一次 `bbs/result` = 一次 pass 终结 + 自动释放 claim
