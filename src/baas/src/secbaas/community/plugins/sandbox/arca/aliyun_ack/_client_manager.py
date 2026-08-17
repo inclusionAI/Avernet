@@ -21,7 +21,7 @@ from secbaas.community.logger import get_logger
 if TYPE_CHECKING:
     from kubernetes.client import ApiClient
 
-logger = get_logger("plugin-sandbox-arca-aliyun-ack")
+logger = get_logger("plugin-sandbox")
 
 
 class AliyunAckClusterConfigLike(Protocol):
