@@ -587,7 +587,9 @@ async def delete_bot(
     # Bot deletion calls providers and may join an in-flight deletion.  The
     # service API is synchronous, so keep that blocking work off this async
     # request worker's event loop.
-    await run_in_threadpool(bot_service.delete_bot, bot_id, owner_id)
+    await run_in_threadpool(  # allow-run-in-threadpool: BotService API is synchronous.
+        bot_service.delete_bot, bot_id, owner_id
+    )
     return deleted_envelope(request)
 
 
@@ -927,4 +929,3 @@ async def delete_bot_startup_script(
         raise BotNotFoundError("bot has no associated entity")
     startup_script_service.delete(entity_id=entity_id, bot_id=bot_id)
     return deleted_envelope(request)
-

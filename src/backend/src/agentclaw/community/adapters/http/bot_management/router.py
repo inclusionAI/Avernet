@@ -2297,7 +2297,7 @@ async def delete_bot(
         # ``BotService.delete_bot`` is synchronous and may wait for a
         # concurrent deletion result.  Do not block this async route's event
         # loop while the service performs provider calls or that join.
-        await run_in_threadpool(
+        await run_in_threadpool(  # allow-run-in-threadpool: BotService API is synchronous.
             bot_service.delete_bot, bot_id=bot_id, user_id=resolved_owner_id
         )
 
