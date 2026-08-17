@@ -14,13 +14,22 @@ green — `uv run pytest` on the touched suites plus lint — before the next st
       `UserMCPConfigRepository.list_by_user`, returns rows in the same
       `UnifiedConfig` shape `read_unified_config` returns, with a total. Masking
       stays `mask_api_key` — the same function, not a second implementation.
-- [ ] **1.2** Add `delete_unified_config(*, user_id, server_code, config_service,
-      market_service, sync_service)`. Sequence, mirroring `write_unified_config`
-      in reverse: confirm the server exists via `market_service.get_mcp_detail`
-      (raise `McpServerNotFoundError` if not) → read the row for rollback →
-      delete → `sync_service.remove_mcp_detail` → restore the row and raise
-      `McpSyncFailedError` if the push fails. An absent row returns
-      `deleted: False` without touching the device.
+- [x] **1.2** Add `delete_unified_config(*, user_id, server_code, entity_id,
+      entity_type, config_service, market_service, sync_service)`. Sequence,
+      mirroring `write_unified_config` in reverse: confirm the server exists via
+      `market_service.get_mcp_detail` (raise `McpServerNotFoundError` if not) →
+      delete the row, keeping it for rollback → push → restore the row and raise
+      `McpSyncFailedError` if the push fails. An absent row returns `False`
+      without touching the device.
+
+      **Corrected during implementation:** the push is
+      `sync_mcp_detail_to_all_bots(..., api_key=None)`, *not*
+      `remove_mcp_detail` as originally written. `remove_mcp_detail` un-installs
+      the MCP from the device, which would make deleting a credential silently
+      deactivate the server on every bot — contradicting the spec's "deleting a
+      configuration does not deactivate the server on any bot". Re-syncing with
+      the credential cleared is what expresses "the server stays, its credential
+      does not". The sequence and its atomicity are unchanged.
 - [ ] **1.3** Unit tests: paging and totals; masking parity with
       `read_unified_config` including short keys; empty result is an empty page;
       delete-absent is success-with-`false`; unknown server code is not-found;

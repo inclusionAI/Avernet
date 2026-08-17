@@ -188,6 +188,28 @@ class MCPConfigService:
 
         return old_config
 
+    def delete_user_unified_config(
+        self, *, user_id: str, server_code: str
+    ) -> Optional[dict[str, Any]]:
+        """Delete a caller's stored config, returning the previous one.
+
+        The return value is what :meth:`rollback_unified_config` needs to put
+        the row back, so the caller can restore it if the device push fails —
+        the same shape ``update_user_unified_config`` returns for the same
+        reason.
+
+        ``None`` means there was no row: nothing was deleted, and nothing needs
+        restoring. It is not an error — revoking twice is not a failure.
+        """
+        existing = self.user_mcp_config_repo.get_by_user_and_server_code(
+            user_id, server_code
+        )
+        if not existing:
+            return None
+        old_config = self._unified_from_row(existing)
+        self.user_mcp_config_repo.delete(existing["id"])
+        return old_config
+
     def rollback_unified_config(
         self,
         *,

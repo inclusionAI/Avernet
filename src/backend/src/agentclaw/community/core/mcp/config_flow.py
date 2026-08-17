@@ -262,6 +262,87 @@ async def write_unified_config(
     )
 
 
+async def delete_unified_config(
+    *,
+    user_id: str,
+    server_code: str,
+    entity_id: str,
+    entity_type: str,
+    config_service: Any,
+    market_service: Any,
+    sync_service: Any,
+) -> bool:
+    """Delete a caller's config and clear it from their devices, atomically.
+
+    :func:`write_unified_config` in reverse, with the same ordering guarantees:
+
+    1. Confirm the server exists via the marketplace **before** any delete, so a
+       bad server code never touches the database.
+    2. Delete the row, keeping the previous config for rollback.
+    3. Push the now-credential-less config to every device carrying this MCP.
+    4. If the push fails, restore the row and raise — the caller never believes
+       a credential is gone while an agent still holds it.
+
+    Returns whether a row was actually deleted. An absent row is ``False``, not
+    an error, and never touches a device: revoking twice is not a failure.
+
+    **Why the push is a re-sync and not a removal.** The obvious call is
+    ``remove_mcp_detail``, and it is the wrong one: it un-installs the MCP from
+    the device, which would make deleting a credential silently deactivate the
+    server on every bot. Deleting a config is not deactivation — the two are
+    separate axes, and the spec keeps them that way. Re-syncing with
+    ``api_key=None`` after the row is gone is what actually expresses "this
+    server stays, its credential does not": ``build_mcp_sync_payload`` falls
+    back to the stored row, finds nothing, and the device is handed the bare
+    server config.
+
+    Devices that do not carry this MCP are skipped by the sync service, exactly
+    as on the write path.
+    """
+    mcp_data = market_service.get_mcp_detail(server_code)
+    if not mcp_data:
+        raise McpServerNotFoundError(server_code)
+
+    old_config = config_service.delete_user_unified_config(
+        user_id=user_id, server_code=server_code
+    )
+    if old_config is None:
+        return False
+
+    def _roll_back() -> None:
+        config_service.rollback_unified_config(
+            user_id=user_id,
+            server_code=server_code,
+            old_config=old_config,
+        )
+
+    try:
+        result = await sync_service.sync_mcp_detail_to_all_bots(
+            user_id=user_id,
+            server_code=server_code,
+            mcp_data=mcp_data,
+            entity_id=entity_id,
+            entity_type=entity_type,
+            api_key=None,
+            custom_headers=None,
+            endpoint_env=None,
+            transport_protocol=None,
+        )
+    except Exception as exc:
+        # Same defence as the write path: a push that raises rather than
+        # returning a failure dict must not leave the row deleted-but-unpushed.
+        _roll_back()
+        raise McpSyncFailedError(str(exc)) from exc
+
+    if not result["success"]:
+        _roll_back()
+        raise McpSyncFailedError(
+            result.get("error", "Failed to sync to all devices")
+        )
+
+    return True
+
+
 def list_marketplace_servers(
     *,
     page: int,
