@@ -148,12 +148,12 @@ This group makes the MCP half behave like the skill half. No schema change.
 
 ## Group 7 — Docs and close-out
 
-- [ ] **7.1** Update `src/backend/docs/openapi-v1/README.md`: the `mcp` endpoint
+- [x] **7.1** Update `src/backend/docs/openapi-v1/README.md`: the `mcp` endpoint
       table (6 → 14), the "**MCP** addresses no bot at all" note under *Per-bot
       device surfaces that are still draft-only* (now false), and the
       delivered-decisions paragraph. Record the 3.2 filter fix as an intentional
       internal behaviour change.
-- [ ] **7.2** Module docstring in `bot_mcp_state_service.py` recording that this
+- [x] **7.2** Module docstring in `bot_mcp_state_service.py` recording that this
       is the `skills` mechanism applied to MCP, and pointing at `plan.md` — in
       particular why a dedicated skill set cannot be used, so that is not
       re-derived.

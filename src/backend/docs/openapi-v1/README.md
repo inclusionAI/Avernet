@@ -151,7 +151,7 @@ _Ordered by priority tier._
 | Category | Owner | Pri | Router | State | Depends on |
 |---|---|---|---|---|---|
 | bots | totalfrank | P1 | `openapi_v1/bots/router.py` | ✅ **DONE — PR #494 merged 2026-07-29** (13/13 endpoints) | ~~Track A stage 1~~ ✅ |
-| mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` | ✅ **DONE — PR #610** (6/6 endpoints) | ~~Track A stage 5~~ ✅ (PR #564) |
+| mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` + `openapi_v1/bot_mcp/router.py` | ✅ **DONE — PR #610** (6/6), **completed in #1110** (14/14: +2 config lifecycle, +6 bot-scoped) | ~~Track A stage 5~~ ✅ (PR #564) |
 | resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | 🔧 IN PROGRESS (PARTIAL) — 7 handlers all wired but DEFINITION-ONLY / NOT PUBLIC-READY | Track A resources ✅(Phase 0); Track B all 7 endpoints wired stub→service, files-only and path-addressed; gated on auth workstream (gateway principal seam) + DDL deploy before public exposure |
 | routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` *(stub)* | ⬜ TODO | Track A routines (lucas-xzp) |
 | channels | — | ❌ **REMOVED (2026-08-03)** | *(deleted)* | Router, schemas and both published paths deleted — see the channels section below | n/a |
@@ -820,11 +820,13 @@ Named so a reader looking for them stops here rather than in the source:
   `stage`, and that is not an omission. It is backed by
   `ac_bot_startup_script`, keyed `(env, entity_id, bot_id)` — one row per bot,
   not one per runtime — so the parameter would be inert.
-- **MCP** addresses no bot at all; its six operations are keyed by
-  `server_code` and `user_id`. The config write does fan out to every bot's
-  **draft** device, which is correct for the same reason the writes above are
-  draft-only: a release inlines its MCP credentials into the artifact, so a
-  published runtime's config changes by republishing.
+- **MCP** splits in two, and only the account-level half is bot-less. Its eight
+  account-level operations are keyed by `server_code` and `user_id`; the config
+  write fans out to every bot's **draft** device, which is correct for the same
+  reason the writes above are draft-only: a release inlines its MCP credentials
+  into the artifact, so a published runtime's config changes by republishing.
+  The six bot-scoped operations (`/openapi/v1/bots/{bot_id}/mcp`, added in
+  #1110) do address a bot, and are draft-only on the same terms.
 - **Resources, skills and routines** read or write per-bot device state and are
   still draft-only. Deferred, with reasons, in
   `specs/2026-08-15-openapi-v1-stage-addressed-bot-files/spec.md`; routines'
@@ -1212,7 +1214,7 @@ CRUD + a status toggle) are recorded above in the `2026-07-27` history and in th
 PR that removed them. If channels come back, they come back as a designed
 component, not as a resurrected stub.
 
-### ✅ totalfrank · P1 — mcp (6 endpoints) · `openapi_v1/mcp/router.py` — **IMPLEMENTED (PR #610)**
+### ✅ totalfrank · P1 — mcp (14 endpoints) · `openapi_v1/mcp/` + `openapi_v1/bot_mcp/` — **IMPLEMENTED (PR #610, completed in #1110)**
 Marketplace + tenants + the caller's unified per-server config. All 6 wired to
 the internal MCP services through the shared `core/mcp/` flow (extracted from the
 internal router so both surfaces answer identically); owner-scoped via
@@ -1225,6 +1227,52 @@ internal router so both surfaces answer identically); owner-scoped via
 | GET | `/openapi/v1/bots/mcp/servers/{server_code}/permissions` | Caller's permission for a server | `Envelope[McpPermission]` |
 | GET | `/openapi/v1/bots/mcp/servers/{server_code}/config` | Read caller's unified server config | `Envelope[McpConfig]` |
 | PUT | `/openapi/v1/bots/mcp/servers/{server_code}/config` | Write config (pushed to devices) | `Envelope[McpConfig]` |
+| GET | `/openapi/v1/bots/mcp/configs` | List every server the caller has configured (paged, masked) | `Envelope[Page[McpConfig]]` |
+| DELETE | `/openapi/v1/bots/mcp/servers/{server_code}/config` | Delete the caller's config, clearing it from devices | `Envelope[McpConfigDeleted]` |
+
+**Bot-scoped (`openapi_v1/bot_mcp/router.py`)** — which servers a bot carries
+and which it may call. All six `GRANT_CHECKED_OWN_BOT`.
+
+| Method | Path | Purpose | Success |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/{bot_id}/mcp` | List the bot's servers with active state (paged) | `Envelope[Page[BotMcpServer]]` |
+| GET | `/openapi/v1/bots/{bot_id}/mcp/{server_code}` | One server's state on the bot | `Envelope[BotMcpServer]` |
+| POST | `/openapi/v1/bots/{bot_id}/mcp` | Add a server to the bot (lands **inactive**) | `201 Envelope[BotMcpServerState]` |
+| POST | `/openapi/v1/bots/{bot_id}/mcp/{server_code}/activate` | Let the bot's agent call it | `Envelope[BotMcpServerState]` |
+| POST | `/openapi/v1/bots/{bot_id}/mcp/{server_code}/deactivate` | Stop it calling, without removing | `Envelope[BotMcpServerState]` |
+| DELETE | `/openapi/v1/bots/{bot_id}/mcp/{server_code}` | Take the server off the bot | `Envelope[BotMcpServerRemoved]` |
+
+_Delivered decisions (#1110): **the credential and the activation are separate
+axes.** `ac_user_mcp_config` stays keyed `(user_id, server_code)` and is shared
+across the user's bots; activation is the per-bot axis. Deleting a config never
+deactivates a server, and removing a server never deletes the credential._
+
+_**Activation is the `skills` mechanism, not a new one.** Membership in the
+bot's default skill set says a server is on the bot; a row in
+`ac_default_skillset_mcp_exclusion` says it is off — exactly what
+`_write_desired_state` does for skills. **No schema change.** A dedicated skill
+set (one, or one per server) was rejected: `set_active_skill_set` clears
+`is_active` on every non-default set for the (user, bot, engine) before
+activating its target, so any workbench skill-set switch would silently
+deactivate every MCP this surface owns. The default set is appended separately
+by `get_all_active_skill_sets` and never swept._
+
+_**One intentional internal behaviour change.** `get_set_mcp_servers` now
+applies `excluded_codes` to stored `ac_skill_set_mcp` rows, not only to
+synthesised engine defaults — matching the skill half, which has always filtered
+its member rows this way. Before this, an exclusion written against a code that
+also had a row was inert, **including the ones `remove_mcp_from_skill_set`
+writes**, which is that method's entire removal mechanism for a default set.
+Those removals silently did not take; they do now. The existing skill-set and
+MCP suites pass unmodified (1062 tests), which is the evidence the blast radius
+is what it looks like._
+
+_Adding a server leaves it **deactivated**, matching `skills` — adding never
+changes what an agent can call. Engine defaults are listed and deactivatable but
+refused on remove (409): synthesised per request, so "not on the bot" is not a
+state they can hold. `DELETE config` pushes a credential-clearing re-sync rather
+than `remove_mcp_detail`, which would un-install the MCP and turn a revocation
+into a deactivation._
 
 _Delivered decisions (PR #610): paths stay nested (`/openapi/v1/bots/mcp/...`);
 `sync_mode` dropped from the write body (no single-device push path — `extra=
