@@ -47,7 +47,7 @@ green — `uv run pytest` on the touched suites plus lint — before the next st
       path.
 - [x] **2.4** Add both to `admission.py` as `REFUSED`, in the config block,
       extending the existing reason comment rather than duplicating it.
-- [ ] **2.5** Endpoint tests: both operations; `403` when `user_id` names another
+- [x] **2.5** Endpoint tests: both operations; `403` when `user_id` names another
       user; `401` with no principal; app-only caller refused; delete leaves bot
       activation untouched.
 

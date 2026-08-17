@@ -13,6 +13,7 @@ status, not the envelope shape.
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -430,3 +431,140 @@ def test_the_catalogue_reads_need_no_user_id(client, path):
     response = client.get(path, params={"user_id": None})
 
     assert response.status_code == 200, response.json()
+
+
+# ── config listing ──────────────────────────────────────────────────
+
+
+def test_list_configs_pages_and_masks(client, config):
+    config.list_user_unified_configs.return_value = [
+        {
+            "server_code": "mcp.weather",
+            "api_key": "sk-abcdefghijkl",
+            "headers": {"x": "1"},
+            "endpoint_env": "PROD",
+            "transport_protocol": "SSE",
+        },
+        {
+            "server_code": "mcp.crm",
+            "api_key": "short",
+            "headers": {},
+            "endpoint_env": "PRE",
+            "transport_protocol": None,
+        },
+    ]
+    data = _ok(client.get("/openapi/v1/bots/mcp/configs?page=1&page_size=1"))
+
+    assert data["total"] == 2
+    assert len(data["items"]) == 1
+    entry = data["items"][0]
+    assert entry["server_code"] == "mcp.weather"
+    # Masked, and the real key is nowhere in the payload — enumerating must not
+    # reveal what reading one server protects.
+    assert entry["api_key"] != "sk-abcdefghijkl"
+    assert "sk-abcdefghijkl" not in json.dumps(data)
+
+
+def test_list_configs_with_nothing_configured_is_an_empty_page(client, config):
+    config.list_user_unified_configs.return_value = []
+    data = _ok(client.get("/openapi/v1/bots/mcp/configs"))
+    assert data == {"total": 0, "items": []}
+
+
+def test_list_configs_is_scoped_to_the_named_caller(client, config):
+    config.list_user_unified_configs.return_value = []
+    client.get("/openapi/v1/bots/mcp/configs")
+    # The only identity that reaches the service is the verified caller's.
+    assert config.list_user_unified_configs.call_args[0][0] == "u1"
+
+
+def test_list_configs_for_another_user_is_403(client):
+    resp = client.get("/openapi/v1/bots/mcp/configs", params={"user_id": "someone-else"})
+    assert resp.status_code == 403, resp.json()
+
+
+def test_list_configs_without_principal_is_401(client):
+    def _no_caller():
+        raise MissingPrincipalError("no verified caller for this request")
+
+    client.app.dependency_overrides[require_principal] = _no_caller
+    resp = client.get("/openapi/v1/bots/mcp/configs")
+    assert resp.status_code == 401
+    assert resp.json()["code"] == 401000
+
+
+# ── config deletion ─────────────────────────────────────────────────
+
+
+_STORED = {
+    "api_key": "sk-abcdefghijkl",
+    "headers": {},
+    "endpoint_env": "PROD",
+    "transport_protocol": None,
+}
+
+
+def test_delete_config_removes_it_and_reports_deleted(client, config):
+    config.delete_user_unified_config.return_value = _STORED
+    data = _ok(client.delete("/openapi/v1/bots/mcp/servers/mcp.weather/config"))
+    assert data == {"server_code": "mcp.weather", "deleted": True}
+
+
+def test_delete_config_that_does_not_exist_is_success_not_404(client, config):
+    # Revoking twice must answer the same way as revoking once.
+    config.delete_user_unified_config.return_value = None
+    data = _ok(client.delete("/openapi/v1/bots/mcp/servers/mcp.weather/config"))
+    assert data == {"server_code": "mcp.weather", "deleted": False}
+
+
+def test_delete_config_for_unknown_server_is_404(client, config, market):
+    market.get_mcp_detail.return_value = None
+    config.delete_user_unified_config.return_value = _STORED
+    resp = client.delete("/openapi/v1/bots/mcp/servers/mcp.nope/config")
+    assert resp.status_code == 404, resp.json()
+    # Refused before anything was deleted.
+    config.delete_user_unified_config.assert_not_called()
+
+
+def test_delete_config_device_push_failure_is_502(client, config, sync):
+    config.delete_user_unified_config.return_value = _STORED
+    sync.sync_mcp_detail_to_all_bots = AsyncMock(
+        return_value={"success": False, "sync_results": [], "error": "device down"}
+    )
+    resp = client.delete("/openapi/v1/bots/mcp/servers/mcp.weather/config")
+    assert resp.status_code == 502, resp.json()
+    # The row is restored, so the caller is never told a credential is gone
+    # while an agent still holds it.
+    config.rollback_unified_config.assert_called_once()
+
+
+def test_delete_config_does_not_deactivate_the_server_on_any_bot(client, config, sync):
+    """The credential and the bot's use of the server are separate axes.
+
+    Deleting a config re-syncs the MCP without a credential; it must never
+    un-install it, which is what ``remove_mcp_detail`` would do.
+    """
+    config.delete_user_unified_config.return_value = _STORED
+    _ok(client.delete("/openapi/v1/bots/mcp/servers/mcp.weather/config"))
+
+    sync.remove_mcp_detail.assert_not_called()
+    _, kw = sync.sync_mcp_detail_to_all_bots.call_args
+    assert kw["api_key"] is None
+
+
+def test_delete_config_for_another_user_is_403(client):
+    resp = client.delete(
+        "/openapi/v1/bots/mcp/servers/mcp.weather/config",
+        params={"user_id": "someone-else"},
+    )
+    assert resp.status_code == 403, resp.json()
+
+
+def test_delete_config_without_principal_is_401(client):
+    def _no_caller():
+        raise MissingPrincipalError("no verified caller for this request")
+
+    client.app.dependency_overrides[require_principal] = _no_caller
+    resp = client.delete("/openapi/v1/bots/mcp/servers/mcp.weather/config")
+    assert resp.status_code == 401
+    assert resp.json()["code"] == 401000
