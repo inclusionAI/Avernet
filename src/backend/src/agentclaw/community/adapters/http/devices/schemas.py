@@ -56,6 +56,7 @@ class DeviceBindingStatus(StrEnum):
     ACTIVE = "ACTIVE"
     STOPPED = "STOPPED"
     FAILED = "FAILED"
+    RELEASING = "RELEASING"
     RELEASED = "RELEASED"
 
 

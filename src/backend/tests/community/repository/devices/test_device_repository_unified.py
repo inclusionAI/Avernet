@@ -366,6 +366,19 @@ def test_claim_binding_release_claims_stopped_binding(repo):
     ) is False
 
 
+def test_release_binding_finalizes_claimed_binding(repo):
+    bid = repo.insert_binding(**_binding(status="ACTIVE"))
+    assert repo.claim_binding_release(
+        binding_id=bid, release_reason="bot deleted", released_by="emp-9"
+    ) is True
+
+    repo.release_binding(
+        binding_id=bid, release_reason="bot deleted", released_by="emp-9"
+    )
+
+    assert repo.get_by_id(bid).status == "RELEASED"
+
+
 def test_status_callbacks_do_not_reopen_released_binding(repo):
     bid = repo.insert_binding(**_binding(status="ACTIVE"))
     repo.release_binding(
