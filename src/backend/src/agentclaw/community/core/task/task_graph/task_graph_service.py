@@ -276,10 +276,10 @@ class TaskGraphService:
             #   进入 DONE/FAILED/HUNG(终态) → 写 end_time(start_time 可能仍 None:纯规划后直终态)
             #   回到 PENDING(harness 复位重投) → 清 start_time/end_time(下次重派重写 start_time)
             if new_status == Status.RUNNING and prev_status != Status.RUNNING:
-                node.run_info.start_time = time.time()
+                node.run_info.start_time = int(time.time() * 1000)
                 node.run_info.end_time = None
             elif new_status in {Status.DONE, Status.FAILED, Status.HUNG}:
-                node.run_info.end_time = time.time()
+                node.run_info.end_time = int(time.time() * 1000)
             elif new_status == Status.PENDING:
                 node.run_info.start_time = None
                 node.run_info.end_time = None
@@ -318,7 +318,7 @@ class TaskGraphService:
             node.run_info.action_log.append(
                 NodeActionEvent(
                     seq=len(node.run_info.action_log) + 1,
-                    ts=time.time(),
+                    ts=int(time.time() * 1000),
                     action=action,
                     loop_round=graph.loop_round,
                     attempt=attempt,
@@ -366,7 +366,7 @@ class TaskGraphService:
                 TaskNodePatch(
                     task_id=task_id,
                     node_id=task_id,
-                    extend_props_patch={"bbs_owner": bot_id, "bbs_claim_at": time.time()},
+                    extend_props_patch={"bbs_owner": bot_id, "bbs_claim_at": int(time.time() * 1000)},
                 )
             )
 
@@ -403,7 +403,7 @@ class TaskGraphService:
                 task_id=task_id,
                 status=Status.PENDING,
                 task_spec=task_spec,
-                run_info=RuntimeInfo(run_mode="bbs", assignee=bot_id, start_time=time.time()),
+                run_info=RuntimeInfo(run_mode="bbs", assignee=bot_id, start_time=int(time.time() * 1000)),
                 node_run_graph=graph,
             )
             self.add_task_nodes([node], parent_node_id=parent_node_id)  # a/b/c/d 校验 + 父→PLANNING

@@ -110,7 +110,7 @@ class NodeActionEvent:
     """
 
     seq: int                              # 节点内自增序号(1-based;由 SSOT 网关 append 时填)
-    ts: float                             # 动作发生时间戳(由网关填 time.time())
+    ts: int                               # 动作发生时间戳(毫秒,由网关填 int(time.time()*1000))
     action: NodeAction
     loop_round: int = 0                   # 图级 loop_round 快照(定位第几轮)
     attempt: int = 0                      # planning/执行重试序号(harness_retries 快照)
@@ -129,8 +129,8 @@ class RuntimeInfo:
 
     run_mode: str | None = None              # "single_bot"/"coop_group"/"bbs";无 collab_mode
     assignee: str | None = None              # 执行者(bot_id / group_id)
-    start_time: float | None = None
-    end_time: float | None = None
+    start_time: int | None = None         # 进 RUNNING 时写(毫秒,int(time.time()*1000))
+    end_time: int | None = None           # 进终态时写(毫秒,int(time.time()*1000))
     output: dict[str, Any] = field(default_factory=dict)
     acceptance_result: AcceptanceResult | None = None
     extend_props: dict[str, Any] = field(default_factory=dict)  # miss_events/崩溃栈/超时/hung_reason(stuck)

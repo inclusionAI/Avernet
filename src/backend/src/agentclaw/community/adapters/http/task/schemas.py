@@ -117,7 +117,7 @@ class AcceptanceResultDTO(BaseModel):
 class NodeActionEventDTO(BaseModel):
     """节点动作级历史快照(诊断用;默认不序列化,include_action_log=true 时返回)。"""
     seq: int
-    ts: float
+    ts: int
     action: str
     loop_round: int = 0
     attempt: int = 0
@@ -129,8 +129,8 @@ class NodeActionEventDTO(BaseModel):
 class RuntimeInfoDTO(BaseModel):
     run_mode: str | None = None
     assignee: str | None = None
-    start_time: float | None = None
-    end_time: float | None = None
+    start_time: int | None = None
+    end_time: int | None = None
     output: dict[str, Any] = Field(default_factory=dict)
     acceptance_result: AcceptanceResultDTO | None = None
     extend_props: dict[str, Any] = Field(default_factory=dict)

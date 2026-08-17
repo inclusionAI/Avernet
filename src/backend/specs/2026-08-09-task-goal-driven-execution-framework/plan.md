@@ -69,10 +69,11 @@ class RelationType(StrEnum):      DEPENDENCY    # 节点间依赖关系
 @dataclass RuntimeInfo:           # 持久运行面(所有 None 均合法域态)
     run_mode: str | None          # "single_bot"/"coop_group"/"bbs";无 collab_mode
     assignee: str | None          # 执行者(bot_id / group_id)
-    start_time: float | None; end_time: float | None
+    start_time: int | None; end_time: int | None  # 毫秒(int(time.time()*1000));秒级可换 float 但契约=int ms
     output: dict
     acceptance_result: AcceptanceResult | None
     extend_props: dict            # miss_events(list[str]) / 崩溃栈/超时
+    action_log: list[NodeActionEvent] # 动作级历史快照(append-only;NodeActionEvent.ts=int ms)
     # depth 核内派生(从 relations),非持久
 
 @dataclass Relation:              # 分解树边(一等公民);承载结构归属,单入(每非根节点恰好 1 入边=结构父)
@@ -449,7 +450,7 @@ class TaskHarness:
     """旁路常驻:周期巡检 SLA 超时/崩溃,经 graph.update_task_node_info 复位回 PENDING,不抢正向驱动。
     超时阈值从 execution_config / extend_props 读(SLA 不在 TaskSpec)。"""
     def run_poll_loop(self) -> None:
-        # 周期:graph.query_task_nodes(status=RUNNING) → 比对 start_time + sla_timeout → 超时/崩溃
+        # 周期:graph.query_task_nodes(status=RUNNING) → 比对 harness 自持 monotonic 计时(_dispatched_at) + sla_timeout → 超时/崩溃(不读 node.start_time,故 ms 化无影响)
         #   → graph.update_task_node_info(TaskNodePatch{status=PENDING, extend_props_patch={崩溃栈/超时}})复位 → 正常 dispatch 重投
         # 不调编排核正向;主链下一轮事件自然续驱。RUNNING 复位不直接写 HUNG(STUCK 走 on_miss 升 BBS 链路上限判)
 ```

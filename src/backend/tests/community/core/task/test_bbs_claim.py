@@ -68,7 +68,7 @@ def test_claim_writes_owner_and_claim_at_on_root():
 
     svc = TaskGraphService()
     _bbs_task(svc, "p4")
-    before = _time.time()
+    before = int(_time.time() * 1000)
     svc.claim_bbs_owner("p4", "botA")
     root = next(n for n in svc._require_graph("p4").tasks if n.node_id == "p4")
     assert root.run_info.extend_props.get("bbs_owner") == "botA"
