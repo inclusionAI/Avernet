@@ -2,15 +2,20 @@
 #
 # These servers are not fetched from MCP Center, but they are still used by
 # the production MCP Center plugin as fallback metadata for LOCAL/stdio MCPs.
-# The key is used as serverCode. ``args`` is normalized to stdio
-# ``arguments`` before sync.
+# The key is used as serverCode.
 #
-# A server whose launch differs per engine declares ``stdioConfigs`` explicitly,
-# one entry per variant, with ``engineType`` naming the engine an entry is for.
-# An entry with no ``engineType`` is the default for every other engine. The
-# flat ``command``/``args``/``env`` form below is shorthand for a single
-# engine-agnostic entry, so a server that launches the same way everywhere needs
-# no ``stdioConfigs`` at all.
+# Every server declares ``stdioConfigs``: a list of launch instructions, one per
+# engine layout, each naming the engine it is for in ``engineType``. An entry
+# with no ``engineType`` is the default for every other engine, so a server that
+# launches the same way everywhere is just a one-entry list.
+#
+# ``LocalMCPRegistry`` also accepts a flat ``command``/``args``/``env`` shorthand
+# on the server itself and expands it into a single entry (translating ``args`` ->
+# ``arguments`` and ``env`` -> ``envVariables`` on the way). That form is kept
+# working for any deployment whose own catalog uses it, but is deliberately not
+# used here: two shapes in one file means two sets of key names, and the next
+# entry added by copying the wrong neighbour would write ``args`` inside a
+# ``stdioConfigs`` entry, where nothing translates it.
 #
 # ORDER MATTERS: the engine-agnostic entry MUST come first. The teclaw compose
 # path selects by ``engineType`` and is order-blind, but the arca/baas device
@@ -33,9 +38,10 @@ servers:
         arguments:
           - "/usr/local/bin/teclaw_hitl_mcp_server.py"
   clawmind:
-    command: "node"
-    args:
-      - "/home/admin/clawmind-mcp/dist/esm/platform/mcp-entry.js"
-    env:
-      MCP_TRANSPORT: "stdio"
-      CCT_SOP_MCP_SERVER_MODE: "prod"
+    stdioConfigs:
+      - command: "node"
+        arguments:
+          - "/home/admin/clawmind-mcp/dist/esm/platform/mcp-entry.js"
+        envVariables:
+          MCP_TRANSPORT: "stdio"
+          CCT_SOP_MCP_SERVER_MODE: "prod"
