@@ -39,13 +39,13 @@ green — `uv run pytest` on the touched suites plus lint — before the next st
 
 - [x] **2.1** Response models in `openapi_v1/mcp/schemas.py` (reuse the shared
       `Deleted` contract if it fits).
-- [ ] **2.2** `GET /openapi/v1/bots/mcp/configs` → `Envelope[Page[McpConfig]]`,
+- [x] **2.2** `GET /openapi/v1/bots/mcp/configs` → `Envelope[Page[McpConfig]]`,
       using `PageParamsDep` + `UserIdDep`, projecting through the existing
       `_to_config`, carrying `USER_SCOPED_403`.
-- [ ] **2.3** `DELETE /openapi/v1/bots/mcp/servers/{server_code}/config` →
+- [x] **2.3** `DELETE /openapi/v1/bots/mcp/servers/{server_code}/config` →
       `Envelope[Deleted]`. `McpSyncFailedError` maps to `502`, as on the write
       path.
-- [ ] **2.4** Add both to `admission.py` as `REFUSED`, in the config block,
+- [x] **2.4** Add both to `admission.py` as `REFUSED`, in the config block,
       extending the existing reason comment rather than duplicating it.
 - [ ] **2.5** Endpoint tests: both operations; `403` when `user_id` names another
       user; `401` with no principal; app-only caller refused; delete leaves bot

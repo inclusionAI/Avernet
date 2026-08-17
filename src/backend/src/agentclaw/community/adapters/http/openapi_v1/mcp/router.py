@@ -1,14 +1,19 @@
 """MCP group — ``/openapi/v1/bots/mcp`` public endpoints.
 
 Public handlers for the MCP marketplace (list / detail / permission), MCP
-tenants, and the caller's unified per-server config (read / write, pushed to the
-caller's devices). They delegate to the same MCP services the internal
-``/api/mcp`` router uses, through the shared ``core/mcp`` flow and presentation
-helpers, and wrap the result in the standard :class:`Envelope` / :class:`Page`
-contracts.
+tenants, and the caller's unified per-server config (list / read / write /
+delete, pushed to the caller's devices). They delegate to the same MCP services
+the internal ``/api/mcp`` router uses, through the shared ``core/mcp`` flow and
+presentation helpers, and wrap the result in the standard :class:`Envelope` /
+:class:`Page` contracts.
+
+Everything here is **account-level**: keyed by ``(user_id, server_code)``, with
+no bot dimension. Which bots may actually *use* a server is the separate
+bot-scoped group at ``/openapi/v1/bots/{bot_id}/mcp`` — deleting a config here
+never deactivates a server there, and vice versa.
 
 Identity is the end user the request names in ``?user_id=`` (owner-scoping,
-via ``UserIdDep``) — on the three config/permission operations. The three
+via ``UserIdDep``) — on the five config/permission operations. The three
 marketplace catalogue reads reply the same for every caller in the tenant and
 take no ``user_id``. The request tenant is bound by ``AvernetTenantMiddleware``
 before the handler runs, so every config read/write is already tenant-scoped by
@@ -44,8 +49,10 @@ from agentclaw.community.api.mcp_config_service import MCPConfigServiceProtocol
 from agentclaw.community.api.mcp_market_service import MCPMarketServiceProtocol
 from agentclaw.community.api.mcp_sync_service import MCPSyncServiceProtocol
 from agentclaw.community.core.mcp.config_flow import (
+    delete_unified_config,
     list_marketplace_servers,
     list_marketplace_tenants,
+    list_unified_configs,
     read_unified_config,
     write_unified_config,
 )
@@ -61,6 +68,7 @@ from agentclaw.community.di import Injected
 
 from .schemas import (
     McpConfig,
+    McpConfigDeleted,
     McpConfigWrite,
     McpPermission,
     McpServer,
@@ -285,6 +293,37 @@ async def check_mcp_permission(
 
 
 @router.get(
+    "/configs",
+    response_model=Envelope[Page[McpConfig]],
+    responses=USER_SCOPED_403,
+)
+@envelope_errors
+async def list_mcp_configs(
+    request: Request,
+    page_params: PageParamsDep,
+    owner_id: UserIdDep,
+    config_service: MCPConfigServiceProtocol = Injected(MCPConfigServiceProtocol),
+) -> Envelope[Page[McpConfig]]:
+    """List the servers the caller has configured (api_keys masked).
+
+    The counterpart to reading one server's config, and the only way to answer
+    "what have I set up?" without already knowing every server code. Entries are
+    newest-configured first.
+
+    Masking is the same function the single-server read uses, so enumerating
+    cannot reveal what reading one server protects. A caller who has configured
+    nothing gets an empty page, not an error.
+    """
+    total, configs = list_unified_configs(
+        user_id=owner_id,
+        page=page_params.page,
+        page_size=page_params.page_size,
+        config_service=config_service,
+    )
+    return page(total, [_to_config(cfg) for cfg in configs], request)
+
+
+@router.get(
     "/servers/{server_code}/config",
     response_model=Envelope[McpConfig],
     responses=USER_SCOPED_403,
@@ -346,3 +385,47 @@ async def update_mcp_config(
         user_id=owner_id, server_code=server_code, config_service=config_service
     )
     return envelope(_to_config(cfg), request)
+
+
+@router.delete(
+    "/servers/{server_code}/config",
+    response_model=Envelope[McpConfigDeleted],
+    responses=USER_SCOPED_403,
+)
+@envelope_errors
+async def delete_mcp_config(
+    server_code: ServerCodePath,
+    request: Request,
+    owner_id: UserIdDep,
+    config_service: MCPConfigServiceProtocol = Injected(MCPConfigServiceProtocol),
+    market_service: MCPMarketServiceProtocol = Injected(MCPMarketServiceProtocol),
+    sync_service: MCPSyncServiceProtocol = Injected(MCPSyncServiceProtocol),
+) -> Envelope[McpConfigDeleted]:
+    """Delete the caller's config for an MCP server and clear it from devices.
+
+    The only way to *remove* a credential. The write path merges — a null field
+    leaves the stored value alone — so without this a stored api_key could be
+    overwritten but never taken away, and revoking a leaked key meant replacing
+    it with a decoy.
+
+    Deleting a config the caller does not have succeeds with deleted false;
+    revoking twice is not an error. If the device push fails the row is restored
+    and the call fails (502), so a caller never believes a credential is gone
+    while an agent still holds it.
+
+    **This does not deactivate the server on any bot.** The credential and the
+    bot's use of the server are separate axes: the MCP stays where it is, now
+    without a stored credential. Use the bot-scoped deactivate to turn it off.
+    """
+    deleted = await delete_unified_config(
+        user_id=owner_id,
+        server_code=server_code,
+        entity_id=owner_id,
+        entity_type=_ENTITY_TYPE,
+        config_service=config_service,
+        market_service=market_service,
+        sync_service=sync_service,
+    )
+    return envelope(
+        McpConfigDeleted(server_code=server_code, deleted=deleted), request
+    )

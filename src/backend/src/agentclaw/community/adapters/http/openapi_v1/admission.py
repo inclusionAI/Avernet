@@ -244,8 +244,21 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # MCP *configuration* — account-level state with no bot dimension. A grant
     # is consent to reach a bot, not to reconfigure an account. (The catalogue
     # reads above are a different thing and are OPEN.)
+    #
+    # The listing and the delete join the same group for the same reason, and
+    # each sharpens it. Enumerating an account's configured servers is a
+    # question about the account, not about any bot a grant covers; and delete
+    # is the only operation that can *destroy* a credential, so admitting an
+    # application to it would let a delegation revoke access the delegating user
+    # never offered up. Note the bot-scoped group is a different matter
+    # entirely — it addresses a bot, so it is grant-checked, not refused.
+    ("GET", "/openapi/v1/bots/mcp/configs"): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/bots/mcp/servers/{server_code}/config"): AdmissionMode.REFUSED,
     ("PUT", "/openapi/v1/bots/mcp/servers/{server_code}/config"): AdmissionMode.REFUSED,
+    (
+        "DELETE",
+        "/openapi/v1/bots/mcp/servers/{server_code}/config",
+    ): AdmissionMode.REFUSED,
     (
         "GET",
         "/openapi/v1/bots/mcp/servers/{server_code}/permissions",
