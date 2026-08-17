@@ -1585,9 +1585,8 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   now locked to exactly six Bot-owned Local Skill operations; obsolete
   `{bot_id}/skills` install/uninstall stubs were removed. Assembled real-guard
   tests prove another tenant cannot list, read, upload/replace, activate,
-  deactivate, or delete the target tenant's Local Skill. The #725
-  `ac_local_skill_cleanup_work` deploy-before-code DDL remains pending, and the
-  owner plus authorized collaborator pre-production lifecycle remains **PRE-PROD
+  deactivate, or delete the target tenant's Local Skill. The owner plus
+  authorized collaborator pre-production lifecycle remains **PRE-PROD
   PENDING**. The executable acceptance, verification, and rollback checklist is
   `skills-track-b-preprod-acceptance.md`.
 
