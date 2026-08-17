@@ -413,7 +413,10 @@ class DeviceRepository(
         # conditional bulk UPDATE matches prod's raw UPDATE SQL.
         with self._db.orm_session() as db:
             db.query(EntityDeviceBinding).filter(
-                EntityDeviceBinding.id == binding_id
+                EntityDeviceBinding.id == binding_id,
+                EntityDeviceBinding.status.notin_(
+                    (_DeviceBindingStatus.RELEASING, _DeviceBindingStatus.RELEASED)
+                ),
             ).update(
                 {
                     EntityDeviceBinding.status: _DeviceBindingStatus.RELEASED,

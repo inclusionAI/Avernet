@@ -69,6 +69,7 @@ from agentclaw.community.core.bot_management.services.engine_resolver import (
 from agentclaw.community.core.devices.services.device_filesystem import (
     FileTooLargeError as DeviceFileTooLargeError,
 )
+from agentclaw.community.core.devices.services.device_context import DeviceNotBoundError
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
 from agentclaw.community.core.resources.service import (
@@ -204,7 +205,7 @@ def _file_coords(
 
 def _is_baas_bot_not_found(exc: Exception) -> bool:
     """Recognize the BaaS deletion response across direct and proxy calls."""
-    if "BOT_NOT_FOUND" in str(exc):
+    if "BOT_NOT_FOUND" in str(exc) or "NO_DEVICES_FOUND" in str(exc):
         return True
     if not isinstance(exc, httpx.HTTPStatusError):
         return False
@@ -212,7 +213,7 @@ def _is_baas_bot_not_found(exc: Exception) -> bool:
     if response.status_code != 404:
         return False
     try:
-        return "BOT_NOT_FOUND" in response.text
+        return any(marker in response.text for marker in ("BOT_NOT_FOUND", "NO_DEVICES_FOUND"))
     except httpx.ResponseNotRead:
         return False
 
@@ -460,6 +461,8 @@ async def upload_resource(
         raise HTTPException(
             status_code=502, detail="Upload storage failed"
         ) from exc
+    except DeviceNotBoundError:
+        raise
     except Exception as exc:
         logger.exception("[upload_resource] duplicate probe failed")
         raise HTTPException(
