@@ -433,6 +433,54 @@ class ClawBotService(BotService):
         except Exception as e:
             raise BotServiceError(f"Failed to get session: {e}") from e
 
+    async def list_sessions(
+        self,
+        *,
+        bot_id: str,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[SessionInfo]:
+        """查询指定 Bot 下的会话列表
+
+        通过 AsyncSessionClient 从 adapter 侧查询会话列表。
+
+        Args:
+            bot_id: Bot 唯一标识
+            binding_info: Binding info for HTTP connection.
+            context: Optional request context (unused in ClawBotService).
+            limit: 返回数量上限，默认 20
+            offset: 偏移量，默认 0
+
+        Returns:
+            会话信息列表
+
+        Raises:
+            BotServiceError: 请求失败
+        """
+        sandbox_id = binding_info.sandbox_id
+        if sandbox_id is None:
+            raise BotServiceError("ClawBotService requires sandbox_id in binding_info.")
+
+        session_client = self._create_session_client(sandbox_id)
+        try:
+            async with session_client:
+                sessions = await session_client.list_sessions(
+                    agent_id=binding_info.bot_id,
+                    limit=limit,
+                    offset=offset,
+                    engine=binding_info.engine_type,
+                )
+                return [
+                    _map_adapter_session_info(s, binding_info.bot_id)
+                    for s in sessions
+                ]
+        except BotServiceError:
+            raise
+        except Exception as e:
+            raise BotServiceError(f"Failed to list sessions: {e}") from e
+
     # ── 私有方法 ─────────────────────────────────────────────────────────────
 
     def _adapter_for(self, engine_type: str | None) -> BotEngineAdapter | None:

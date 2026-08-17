@@ -183,6 +183,29 @@ class BotService(Protocol):
         """
         ...
 
+    async def list_sessions(
+        self,
+        *,
+        bot_id: str,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[SessionInfo]:
+        """查询指定 Bot 下的会话列表
+
+        Args:
+            bot_id: Bot 唯一标识
+            binding_info: 已解析的 binding 信息
+            context: 可选的请求上下文
+            limit: 返回数量上限，默认 20
+            offset: 偏移量，默认 0
+
+        Returns:
+            会话信息列表
+        """
+        ...
+
 
 @runtime_checkable
 class MessageDispatcher(Protocol):

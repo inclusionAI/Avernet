@@ -404,6 +404,31 @@ class BotRunner(Protocol):
         """
         ...
 
+    async def list_sessions(
+        self,
+        *,
+        bot_id: str,
+        context: "BotChatContext",
+        metadata: dict[str, Any],
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list["SessionInfo"]:
+        """查询指定 Bot 下的会话列表
+
+        复用 get_session / get_messages 同一套 AsyncSessionClient 链路。
+
+        Args:
+            bot_id: Bot 唯一标识，格式为 <real_bot_id>:<entity_id>
+            context: 请求上下文
+            metadata: 元数据，支持 bot_options.lifecycle_stage 指定生命周期阶段
+            limit: 返回数量上限，默认 20
+            offset: 偏移量，默认 0
+
+        Returns:
+            会话信息列表
+        """
+        ...
+
     def get_result(self, run_id: str) -> Any:
         """获取执行结果
 
