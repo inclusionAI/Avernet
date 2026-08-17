@@ -37,6 +37,7 @@ from agentclaw.community.core.skill_center.services.runtime_layout_probe import 
     RuntimeLayoutProbeStatus,
 )
 from agentclaw.community.core.skill_center.services.skill_parser import SkillInfo
+from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditBusyError
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -469,9 +470,7 @@ def _upload_skill_di_app(
                 DeviceContextResolver,
             )
             from agentclaw.community.core.skill_center.factories import SkillServiceFactory
-            from agentclaw.community.core.skills_pool.edit_guard import (
-                SkillsPoolEditGuard,
-            )
+            from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
             from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 
             from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
@@ -577,6 +576,39 @@ class TestUploadSkillValidation:
             body = response.json()
             assert body["success"] is True
             assert mock_svc.upload_skill.await_count == 1
+
+    def test_upload_edit_lock_conflict_returns_http_409(self, mock_ctx):
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (
+            client,
+            mock_svc,
+            _,
+            _,
+        ):
+            from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
+
+            # The fixture's injected guard is resolved through the app injector;
+            # reach it via the dependency's configured instance.
+            # Rebuilding this narrow response assertion through a side effect
+            # prevents a failed mutation from masquerading as HTTP 200.
+            app = client.app
+            injector = app.state.injector
+            guard = injector.get(SkillsPoolEditGuard)
+            guard.acquire_for_edit.side_effect = SkillsPoolEditBusyError("busy")
+
+            response = client.post(
+                "/api/skills/upload",
+                files=[
+                    (
+                        "files",
+                        ("SKILL.md", b"---\nname: a\ndescription: a\n---", "text/markdown"),
+                    )
+                ],
+                data={"file_paths": json.dumps(["SKILL.md"])},
+            )
+
+            assert response.status_code == 409
+            assert response.json()["detail"] == "busy"
+            mock_svc.upload_skill.assert_not_called()
 
     def test_upload_persists_bot_owner_for_collaborator_upload(self):
         collaborator_ctx = RequestContext(
