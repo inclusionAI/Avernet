@@ -184,6 +184,25 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         )
         logger.info(f"[update_device_binding_with_props] binding_id={binding_id}, status={status}, device_props updated")
 
+    def activate_publish_binding_with_props(
+        self,
+        binding_id: int,
+        device_props: Dict[str, Any],
+    ) -> None:
+        """Activate a successful publish binding without reopening device deletion."""
+        device_binding_repo = self._device_binding_repo
+        if not device_binding_repo.activate_publish_binding(binding_id=binding_id):
+            raise BotPublishServiceError(
+                f"Binding {binding_id} has an active release claim and cannot be activated"
+            )
+        device_binding_repo.update_device_props(
+            binding_id=binding_id, props=device_props
+        )
+        logger.info(
+            "[activate_publish_binding_with_props] binding_id=%s, device_props updated",
+            binding_id,
+        )
+
     def create_publish(
         self,
         source_bot_pk: int,

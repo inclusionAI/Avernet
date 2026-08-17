@@ -113,6 +113,16 @@ class DeviceBindingRepository(Protocol):
         ...
 
     @abstractmethod
+    def activate_publish_binding(self, *, binding_id: int) -> bool:
+        """Activate a publish-flow binding without overriding a claimed release.
+
+        A normal publish-flow release has no device-service release audit data and
+        may be restored by a rollback. A binding claimed by device deletion keeps
+        its release audit fields and must remain unavailable.
+        """
+        ...
+
+    @abstractmethod
     def update_device_props(self, *, binding_id: int, props: dict[str, Any]) -> None:
         """合并 ``props`` 到绑定的 device_props（保留其它键）。
 

@@ -391,6 +391,23 @@ def test_status_callbacks_do_not_reopen_released_binding(repo):
     assert repo.get_by_id(bid).status == "RELEASED"
 
 
+def test_publish_activation_restores_only_unclaimed_release(repo):
+    bid = repo.insert_binding(**_binding(status="RELEASED"))
+
+    assert repo.activate_publish_binding(binding_id=bid) is True
+    assert repo.get_by_id(bid).status == "ACTIVE"
+
+
+def test_publish_activation_does_not_restore_claimed_release(repo):
+    bid = repo.insert_binding(**_binding(status="ACTIVE"))
+    repo.release_binding(
+        binding_id=bid, release_reason="bot deleted", released_by="emp-9"
+    )
+
+    assert repo.activate_publish_binding(binding_id=bid) is False
+    assert repo.get_by_id(bid).status == "RELEASED"
+
+
 def test_props_update_does_not_reopen_claimed_release(repo):
     bid = repo.insert_binding(**_binding(status="ACTIVE"))
     assert repo.claim_binding_release(

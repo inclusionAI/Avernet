@@ -78,7 +78,7 @@ import json
 from typing import Any
 
 from injector import inject
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
@@ -501,6 +501,41 @@ class DeviceRepository(
                 },
                 synchronize_session=False,
             )
+
+    def activate_publish_binding(self, *, binding_id: int) -> bool:
+        """Reactivate a publish binding only when no device release owns it.
+
+        Rollback may restore a binding that the publish flow itself marked
+        RELEASED while superseding an earlier version. Device-service deletion
+        records ``release_reason`` and ``released_by`` while it claims the
+        binding; that claim is deliberately never reopened here.
+        """
+        with self._db.orm_session() as db:
+            updated = (
+                db.query(EntityDeviceBinding)
+                .filter(
+                    EntityDeviceBinding.id == binding_id,
+                    or_(
+                        EntityDeviceBinding.status.notin_(
+                            (_DeviceBindingStatus.RELEASING, _DeviceBindingStatus.RELEASED)
+                        ),
+                        and_(
+                            EntityDeviceBinding.status == _DeviceBindingStatus.RELEASED,
+                            EntityDeviceBinding.release_reason.is_(None),
+                            EntityDeviceBinding.released_by.is_(None),
+                        ),
+                    ),
+                )
+                .update(
+                    {
+                        EntityDeviceBinding.status: _DeviceBindingStatus.ACTIVE,
+                        EntityDeviceBinding.last_alive_at: func.now(),
+                        EntityDeviceBinding.gmt_modified: func.now(),
+                    },
+                    synchronize_session=False,
+                )
+            )
+        return updated == 1
 
     def update_device_props(
         self, *, binding_id: int, props: dict[str, Any]
