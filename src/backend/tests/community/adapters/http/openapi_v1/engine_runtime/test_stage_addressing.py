@@ -271,10 +271,10 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
             # parameter existed.
             assert not params["owner_id"].get("required", False), path
 
-    # 17 current operations, and the same 17 answering at their former
-    # addresses while callers migrate. The relocation layer picks up restart
-    # along with the three existing engine operations.
-    assert len(engine_runtime) == 34
+    # 17 current operations. Sixteen also answer at their former addresses
+    # while callers migrate; engine restart was introduced after bot-first
+    # addressing and therefore has no legacy alias.
+    assert len(engine_runtime) == 33
     assert sorted(carrying_stage) == sorted(
         set(engine_runtime) | _STAGE_ADDRESSED_ELSEWHERE
     ), (
