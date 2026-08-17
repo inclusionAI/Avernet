@@ -26,6 +26,8 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     PageParams,
 )
 from agentclaw.community.adapters.http.openapi_v1.resources.router import (
+    _is_baas_bot_not_found,
+    _raise_upload_lifecycle_error,
     create_directory,
     delete_file,
     download_file,
@@ -1146,6 +1148,93 @@ async def test_upload_returns_409_for_desktop_proxy_bot_not_found():
         )
 
     assert excinfo.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_upload_maps_duplicate_probe_storage_failures_to_502():
+    from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
+
+    file_svc = _StubFileService(exists_raises=BaasServiceError("upstream unavailable"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await upload_resource(
+            path="a.txt", content=b"x", owner_id="u1", bot_id="bot-a",
+            bot_repo=_StubBotRepo(), file_svc=file_svc, request=_request_without_trace(),
+        )
+
+    assert excinfo.value.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_upload_preserves_device_not_bound_from_duplicate_probe():
+    file_svc = _StubFileService(exists_raises=DeviceNotBoundError("binding released"))
+
+    resp = await upload_resource(
+        path="a.txt", content=b"x", owner_id="u1", bot_id="bot-a",
+        bot_repo=_StubBotRepo(), file_svc=file_svc, request=_request_without_trace(),
+    )
+
+    assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_upload_maps_generic_duplicate_probe_failures_to_502():
+    file_svc = _StubFileService(exists_raises=RuntimeError("device unavailable"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await upload_resource(
+            path="a.txt", content=b"x", owner_id="u1", bot_id="bot-a",
+            bot_repo=_StubBotRepo(), file_svc=file_svc, request=_request_without_trace(),
+        )
+
+    assert excinfo.value.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_upload_maps_write_storage_failures_to_502():
+    from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
+
+    file_svc = _StubFileService(raises=BaasServiceError("upstream unavailable"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await upload_resource(
+            path="a.txt", content=b"x", owner_id="u1", bot_id="bot-a",
+            bot_repo=_StubBotRepo(), file_svc=file_svc, request=_request_without_trace(),
+        )
+
+    assert excinfo.value.status_code == 502
+
+
+def test_baas_bot_not_found_rejects_non_matching_proxy_status():
+    request = httpx.Request("POST", "http://desktop-proxy/upload")
+    response = httpx.Response(503, request=request)
+    exc = httpx.HTTPStatusError("upstream unavailable", request=request, response=response)
+
+    assert _is_baas_bot_not_found(exc) is False
+
+
+def test_baas_bot_not_found_handles_unread_proxy_body():
+    request = httpx.Request("POST", "http://desktop-proxy/upload")
+    response = httpx.Response(404, stream=httpx.ByteStream(b"BOT_NOT_FOUND"), request=request)
+    exc = httpx.HTTPStatusError("not found", request=request, response=response)
+
+    assert _is_baas_bot_not_found(exc) is False
+
+
+def test_upload_lifecycle_error_maps_missing_bot_to_404():
+    from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
+
+    bot_repo = SimpleNamespace(get_by_id_and_owner=lambda *_args: None)
+
+    with pytest.raises(HTTPException) as excinfo:
+        _raise_upload_lifecycle_error(
+            exc=BaasServiceError("404 BOT_NOT_FOUND"),
+            bot_id="bot-a",
+            owner_id="u1",
+            bot_repo=bot_repo,
+        )
+
+    assert excinfo.value.status_code == 404
 
 
 @pytest.mark.asyncio

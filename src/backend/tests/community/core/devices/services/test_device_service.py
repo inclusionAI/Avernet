@@ -498,6 +498,24 @@ class TestReleaseDevice:
         assert result is releasing
         svc._do_release.assert_not_called()
 
+    def test_release_losing_database_claim_returns_finalized_release(self):
+        active = _make_record(status=DeviceBindingStatus.ACTIVE.value)
+        released = _make_record(status=DeviceBindingStatus.RELEASED.value)
+        repo = MagicMock()
+        repo.get_by_id.side_effect = [active, released]
+        repo.claim_binding_release.return_value = False
+        svc = _make_service(repo=repo)
+        svc._do_release = MagicMock()
+
+        result = svc.release_device(
+            binding_id=1,
+            release_reason="duplicate request",
+            operator=_make_operator(),
+        )
+
+        assert result is released
+        svc._do_release.assert_not_called()
+
     def test_release_in_progress_is_idempotent(self):
         releasing = _make_record(status=DeviceBindingStatus.RELEASING.value)
         repo = MagicMock()
