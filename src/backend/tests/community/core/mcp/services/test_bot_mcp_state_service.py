@@ -85,8 +85,20 @@ def _svc(*, bots=None, sets=None, center=None, sync=None):
     )
 
 
+#: ``icon`` is deliberately non-null. It is the one field the ``_merged``
+#: projection drops, so it is what distinguishes a rollback that restores from
+#: the stored row from one that restores from the projection.
+ICON = "https://example.test/weather.png"
+
+
 def _row(code=STORED, name="Stored"):
-    return {"id": 7, "server_code": code, "name": name, "description": "d"}
+    return {
+        "id": 7,
+        "server_code": code,
+        "name": name,
+        "description": "d",
+        "icon": ICON,
+    }
 
 
 def _patch_defaults(monkeypatch, codes=(DEFAULT_CODE,)):
@@ -357,7 +369,12 @@ def test_remove_rolls_back_when_the_runtime_cannot_be_reconciled():
     sets.add_mcp_to_set.assert_called_once()
     args, kwargs = sets.add_mcp_to_set.call_args
     assert args[1] == STORED
-    # ...and it was active before, so no exclusion is re-written.
+    # ...faithfully. ``icon`` is absent from the ``_merged`` projection, so this
+    # fails if the rollback ever restores from that instead of the stored row —
+    # which is the whole reason the row is captured before the delete.
+    assert kwargs.get("icon") == ICON
+    assert kwargs.get("description") == "d"
+    # It was active before, so no exclusion is re-written.
     sets.add_default_mcp_exclusion.assert_not_called()
 
 
