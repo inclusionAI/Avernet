@@ -74,6 +74,7 @@ from agentclaw.community.core.service_bot.services.bot_process import (
     BotProcessRegistry,
     EmptyBotProcess,
     PersonalBotProcess,
+    ServiceBotProcess,
 )
 from agentclaw.community.core.service_bot.services.bot_publish_service import BotPublishService
 from agentclaw.community.core.service_bot.services.deploy.arca_snapshot_producer import (
@@ -272,6 +273,7 @@ class ServiceBotModule(Module):
         """Construct bot-type-specific binding response processors."""
         return BotProcessRegistry(
             personal_bot_process=PersonalBotProcess(template_service),
+            service_bot_process=ServiceBotProcess(template_service),
             default_bot_process=EmptyBotProcess(),
         )
 

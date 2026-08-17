@@ -367,6 +367,7 @@ def _identity_router_app(mock_ctx, tmp_path, monkeypatch):
         bot_repo=bot_repo,
         resolver=resolver,
         device_fs_dispatcher=dispatcher,
+        binding_repo=MagicMock(),
     )
 
     class _TestModule(Module):

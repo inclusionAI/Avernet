@@ -9,9 +9,17 @@ from pathlib import Path
 import yaml
 
 try:
-    from .validate_openapi_contract import load_contract, validate_contract
+    from .validate_openapi_contract import (
+        PUBLIC_COLLABORATION_PREFIX,
+        load_contract,
+        validate_contract,
+    )
 except ImportError:
-    from validate_openapi_contract import load_contract, validate_contract
+    from validate_openapi_contract import (
+        PUBLIC_COLLABORATION_PREFIX,
+        load_contract,
+        validate_contract,
+    )
 
 
 def _pointer_part(value: str | int) -> str:
@@ -64,9 +72,18 @@ def _rewrite_discriminator_mappings(
         _rewrite_discriminator_mappings(item, (*path, key))
 
 
-def bundle_contract(root: Path, output_dir: Path) -> Path:
-    contract = load_contract(root)
-    errors = validate_contract(contract)
+def bundle_contract(
+    root: Path,
+    output_dir: Path,
+    *,
+    entrypoint: str = "openapi.yaml",
+    path_prefix: str = PUBLIC_COLLABORATION_PREFIX,
+) -> Path:
+    contract = load_contract(root, entrypoint=entrypoint)
+    errors = validate_contract(
+        contract,
+        path_prefix=path_prefix,
+    )
     if errors:
         raise ValueError("\n".join(errors))
     _rewrite_discriminator_mappings(contract)
@@ -83,11 +100,18 @@ def bundle_contract(root: Path, output_dir: Path) -> Path:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--entrypoint", default="openapi.yaml")
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--path-prefix", default=PUBLIC_COLLABORATION_PREFIX)
     args = parser.parse_args()
 
     try:
-        output = bundle_contract(args.root, args.output_dir)
+        output = bundle_contract(
+            args.root,
+            args.output_dir,
+            entrypoint=args.entrypoint,
+            path_prefix=args.path_prefix,
+        )
     except (OSError, ValueError, yaml.YAMLError) as error:
         print(error)
         return 1

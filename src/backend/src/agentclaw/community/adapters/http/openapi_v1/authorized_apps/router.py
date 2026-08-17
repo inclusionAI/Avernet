@@ -126,7 +126,15 @@ PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
 #: Shared by both bot-scoped path declarations so the constraint cannot drift
 #: between them.
-BotIdPath = Annotated[str, Path(min_length=1, max_length=256)]
+BotIdPath = Annotated[
+    str,
+    Path(
+        min_length=1,
+        max_length=256,
+        description="The bot the authorization covers — its `bot_id` as "
+        "returned by the bots listing.",
+    ),
+]
 
 #: Whose bot the request addresses, defaulting to the caller's own.
 #:
@@ -217,9 +225,9 @@ async def grant_authorized_app(
     resolved owner is recorded alongside them, and is someone else whenever the
     bot is shared.
 
-    ``owner_id`` names whose bot this is and defaults to the caller's own, so
+    `owner_id` names whose bot this is and defaults to the caller's own, so
     omitting it behaves exactly as this operation always has. Name it to
-    delegate on a bot shared with you: ``bot_id`` alone does not identify a bot,
+    delegate on a bot shared with you: `bot_id` alone does not identify a bot,
     and two owners may hold the same one.
 
     Idempotent: granting an authorization that is already in force returns it
@@ -268,7 +276,7 @@ async def list_authorized_apps(
     colleagues' delegations, so theirs is narrowed — the same reason their
     withdrawal is.
 
-    ``owner_id`` says whose bot to read and defaults to the caller's own. It
+    `owner_id` says whose bot to read and defaults to the caller's own. It
     addresses the bot; it does not widen the answer — a collaborator naming the
     owner still sees only what they themselves delegated.
     """
@@ -294,7 +302,11 @@ async def revoke_authorized_app(
     user_id: UserIdDep,
     principal: PrincipalDep,
     owner_id: OwnerIdQuery = None,
-    app_id: int = Path(ge=1),
+    app_id: int = Path(
+        ge=1,
+        description="The application whose authorization to revoke — its "
+        "`app_id` as listed on the bot's authorized apps.",
+    ),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     collaborators: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
     grants: BotAppGrantServiceProtocol = Injected(BotAppGrantServiceProtocol),
@@ -305,10 +317,10 @@ async def revoke_authorized_app(
     because a withdrawal must not require the application's cooperation — that
     is precisely the situation it exists for: a credential lost, rotated, or a
     relationship ended. Withdrawing an authorization that does not exist answers
-    404, distinctly from a successful withdrawal (``GrantNotFoundError``).
+    404, distinctly from a successful withdrawal.
 
     **How much this withdraws depends on who asks**, and it has to: since a
-    delegation is keyed on the user who made it, ``{app_id}`` alone no longer
+    delegation is keyed on the user who made it, `app_id` alone no longer
     names one row.
 
     - The **owner** withdraws *every* delegation of this application on their
@@ -319,20 +331,19 @@ async def revoke_authorized_app(
     - A **collaborator** withdraws only their own. Theirs is the loan they made;
       a colleague's is not theirs to call in.
 
-    TODO(#951 follow-up): the owner's withdrawal is all-or-nothing, and it
-    should not be. An owner who wants to cut off *one* colleague's delegation of
-    an application — the colleague who left the team, say — currently has to
-    withdraw every delegation of that application on the bot, including their
-    own and other colleagues'. The record supports the narrower operation
-    already (``revoke`` is keyed on the delegating user), so what is missing is
-    a way to *name* whose delegation to withdraw: another path segment, or a
-    parameter. Deliberately not added here — it is a new operation on the public
-    surface, not a fix.
-
-    ``owner_id`` names whose bot is being withdrawn from and defaults to the
+    `owner_id` names whose bot is being withdrawn from and defaults to the
     caller's own. Which delegations go still follows from who is asking, not
     from this parameter.
     """
+    # TODO(#951 follow-up): the owner's withdrawal is all-or-nothing, and it
+    # should not be. An owner who wants to cut off one colleague's delegation
+    # of an application — the colleague who left the team, say — currently has
+    # to withdraw every delegation of that application on the bot, including
+    # their own and other colleagues'. The record supports the narrower
+    # operation already (revoke is keyed on the delegating user), so what is
+    # missing is a way to name whose delegation to withdraw: another path
+    # segment, or a parameter. Deliberately not added here — it is a new
+    # operation on the public surface, not a fix.
     del principal
     resolved_owner, _ = resolve_delegable_bot(
         bot_service, collaborators, bot_id=bot_id, caller_id=user_id,
@@ -362,7 +373,7 @@ async def list_authorized_bots(
     Names no bot and so performs no bot-existence check, unlike the three above:
     there is nothing to mask. The result is one user's own delegations to the
     calling application, and an empty page discloses nothing — which is why
-    holding none answers ``200`` with no items rather than ``404``.
+    holding none answers 200 with no items rather than 404.
 
     This is also the **only** complete view of what the application may reach.
     A delegated bot the user does not own appears in no listing of that user's

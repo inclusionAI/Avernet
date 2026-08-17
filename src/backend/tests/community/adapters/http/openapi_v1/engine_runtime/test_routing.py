@@ -18,7 +18,27 @@ _BOTS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/"
 
 
 def _engine_runtime_routes() -> list[APIRoute]:
+    """The current engine-runtime routes."""
     return [r for g in _ENGINE_RUNTIME_GROUPS for r in g.routes if isinstance(r, APIRoute)]
+
+
+def _all_engine_runtime_paths() -> set[str]:
+    """Current *and* retiring, for the assertions about the response table.
+
+    The legacy addresses are mounted with the same table and answer with the
+    same handlers, so they document the 501 and 504 too — as they must, or the
+    old address would stop describing what it returns.
+    """
+    from agentclaw.community.adapters.http.openapi_v1.deprecated import (
+        ENGINE_RUNTIME_GROUPS as LEGACY,
+    )
+
+    return {
+        _schema_path(r.path)
+        for g in [*_ENGINE_RUNTIME_GROUPS, *LEGACY]
+        for r in g.routes
+        if isinstance(r, APIRoute)
+    }
 
 
 def _document() -> dict:
@@ -52,27 +72,35 @@ def test_every_route_begins_with_the_bots_prefix():
     assert not offenders, f"routes outside {_BOTS_PREFIX}: {offenders}"
 
 
-#: Each group's component segment, which its paths must name before ``{bot_id}``.
+#: Each group's component segment, which its paths must name after ``{bot_id}``.
 _COMPONENTS = ("sessions", "engine", "models", "approvals", "connection")
 
 
-def test_every_route_names_its_component_then_the_bot():
-    """The surface's addressing rule, asserted for the groups that broke it.
+def test_every_route_names_the_bot_then_its_component():
+    """The surface's addressing rule: an operation on one bot starts with it.
 
-    These five used to be mounted at ``/openapi/v1/bots/{bot_id}/<component>``,
-    which put the wildcard ahead of the component and made a router file unable
-    to state its own address. Every path must now be
-    ``/openapi/v1/bots/<component>/{bot_id}/…``.
+    Every path here is ``/openapi/v1/bots/{bot_id}/<component>/…``. The bot
+    comes first because that is what the operation acts on; the component
+    follows because it says which part of the bot.
+
+    These five have now been addressed three ways. They began as
+    ``{bot_id}/<component>``, were normalized to ``<component>/{bot_id}``, and
+    are back to bot-first — this time with the resources, routines and skills
+    groups joining them rather than staying on a query parameter, which is what
+    makes it a rule rather than a preference. The reasoning is in
+    ``specs/2026-08-15-openapi-v1-bot-first-addressing/spec.md``; the short of
+    it is that component-first put every component name in the segment a bot id
+    is read from, which is what made fifteen names unusable as bot ids.
     """
     offenders = [
         r.path
         for r in _engine_runtime_routes()
         if not any(
-            r.path.startswith(f"{_BOTS_PREFIX}{component}/{{bot_id}}")
+            r.path.startswith(f"{_BOTS_PREFIX}{{bot_id}}/{component}")
             for component in _COMPONENTS
         )
     ]
-    assert not offenders, f"routes not <component>/{{bot_id}}-shaped: {offenders}"
+    assert not offenders, f"routes not {{bot_id}}/<component>-shaped: {offenders}"
 
 
 def test_the_surface_is_the_agreed_size():
@@ -83,11 +111,11 @@ def test_the_surface_is_the_agreed_size():
 def test_groups_are_mounted_and_reachable_in_the_public_router():
     paths = set(_document()["paths"])
     for expected in (
-        f"{_BOTS_PREFIX}sessions/{{bot_id}}",
-        f"{_BOTS_PREFIX}engine/{{bot_id}}/capabilities",
-        f"{_BOTS_PREFIX}models/{{bot_id}}",
-        f"{_BOTS_PREFIX}approvals/{{bot_id}}/mode",
-        f"{_BOTS_PREFIX}connection/{{bot_id}}",
+        f"{_BOTS_PREFIX}{{bot_id}}/sessions",
+        f"{_BOTS_PREFIX}{{bot_id}}/engine/capabilities",
+        f"{_BOTS_PREFIX}{{bot_id}}/models",
+        f"{_BOTS_PREFIX}{{bot_id}}/approvals/mode",
+        f"{_BOTS_PREFIX}{{bot_id}}/connection",
     ):
         assert expected in paths, f"{expected} not mounted"
 
@@ -95,15 +123,20 @@ def test_groups_are_mounted_and_reachable_in_the_public_router():
 def test_literal_groups_are_registered_before_the_bot_id_wildcard():
     """A single-segment literal must not be swallowed by ``{bot_id}``.
 
-    A pre-existing Track B invariant, re-asserted because Track C inserts five
-    routers into the same assembly. Registration order is what decides it, and
-    the document preserves it. ``resources`` and ``routines`` are the cases that
-    still depend on it — they serve their own collection roots one segment under
-    ``/openapi/v1/bots``, exactly where the bots wildcard also matches.
+    Bot-first addressing shrank this invariant rather than removing it.
+    ``resources`` and ``routines`` used to be the cases that depended on it —
+    they served their own collection roots one segment under
+    ``/openapi/v1/bots``, exactly where the bots wildcard also matches. Both now
+    sit beneath ``{bot_id}``, so ordering no longer decides their fate.
+
+    What still occupies that segment is the set of operations with no single
+    bot to address: the account-level reads and the two groups that are not
+    bot-scoped. They are the reason the rule survives, and the reason the
+    reserved-name list is not empty.
     """
     order = list(_document()["paths"])
     wildcard = order.index(f"{_BOTS_PREFIX}{{bot_id}}")
-    for literal in ("resources", "routines", "mcp/servers"):
+    for literal in ("check-name", "ceiling", "authorized", "mcp/servers", "logs/traces"):
         assert order.index(f"{_BOTS_PREFIX}{literal}") < wildcard, literal
 
 
@@ -111,7 +144,7 @@ def test_engine_runtime_routes_document_501_and_504():
     """And the rest of the surface does not — they cannot return them."""
     schema = _document()
 
-    runtime_paths = {_schema_path(r.path) for r in _engine_runtime_routes()}
+    runtime_paths = _all_engine_runtime_paths()
     for path, methods in schema["paths"].items():
         for method, operation in methods.items():
             documented = set(operation["responses"])

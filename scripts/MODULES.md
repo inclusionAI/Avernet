@@ -241,7 +241,7 @@ foo_help() {
 1. **模块只 check 不装** — `_setup()` 检查工具是否存在，失败时提示 `$0 install-tools`，不自动安装
 2. **`_prereqs()` 只检不装** — 声明服务外部依赖，按服务粒度执行，不自动安装
 3. **start 是纯启动** — `_start()` 不含隐式 setup/check/依赖安装，依赖由 `start_service()` 自动调用 `_prereqs()` 守护。不要在 `_start()` 中调用 `_setup()` 或 `uv sync`/`cargo build`
-4. **toolchain 负责安装** — `install-tools` 命令安装/升级工具链，幂等；`setup [service|group|all]` 检查+编译依赖，默认当前 all 组
+4. **toolchain 负责安装** — `install-tools` 命令安装/升级工具链，幂等；Claude Code 为选装项（提示 `[Y/n]`，输入 `n` 跳过）；`setup [service|group|all]` 检查+编译依赖，默认当前 all 组
 5. **模块是集成层** — 委托服务自身脚本 (`src/*/scripts/`) 或自己实现
 6. **utils.sh 纯函数** — 无状态，不被 ≥2 个模块用则留在模块内
 7. **双 source 守卫** — 每个文件开头 `_XXX_SH_LOADED` 防重复加载

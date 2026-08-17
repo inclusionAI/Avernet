@@ -11,6 +11,7 @@ import redis as real_redis
 
 import agentclaw.community.plugins.community.cache as cache_mod
 from agentclaw.community.plugins.community.cache import CommunityCache
+from agentclaw.community.plugin_api.cache import CacheLockInfrastructureError
 
 
 @pytest.fixture(params=["inproc", "redis"])
@@ -124,6 +125,8 @@ def test_redis_unreachable_degrades_without_raising(monkeypatch):
     assert cache.release_lock("L", "tok") is False  # eval+fallback both fail
     assert cache.get_json("k") is None
     assert cache.set_json("k", {"a": 1}) is False
+    with pytest.raises(CacheLockInfrastructureError):
+        cache.acquire_lock_strict("L")
 
 
 def test_set_json_non_serializable_returns_false(cache):

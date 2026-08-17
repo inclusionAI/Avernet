@@ -89,6 +89,7 @@ user_config:
     env_folder: "aidesktop_singlebox"
     openclaw_root: "~/.openclaw"
     claude_code_root: "~/.claude_code"
+    aicoding_root: "~/.aicoding"
 
   openclaw:
     skills_repo_url: "git@code.teamclaw.com:security_release/aiworkbench.git"

@@ -13,7 +13,9 @@ from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
     from agentclaw.community.core.devices.protocols import BotQueryProtocol
-    from agentclaw.community.core.devices.services.baas_device_service import TemplateConfigReader
+    from agentclaw.community.core.devices.services.baas_device_service import (
+        TemplateConfigReader,
+    )
     from agentclaw.community.core.service_bot.services.baas_service import BaasService
     from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 
@@ -70,8 +72,10 @@ class BaasDeviceHeaderUpdater:
 
         try:
             if device.device_provider == TECLAW_DEVICE_PROVIDER:
-                outbound_rule = self._baas_service._build_teclaw_outbound_operation_rule(
-                    agent_pass_token=agent_pass_token,
+                outbound_rule = (
+                    self._baas_service._build_teclaw_outbound_operation_rule(
+                        agent_pass_token=agent_pass_token,
+                    )
                 )
             else:
                 # 引擎解耦：复用创建链路同一套 provisioning 协议解析自定义 egress-key
@@ -79,6 +83,7 @@ class BaasDeviceHeaderUpdater:
                 from agentclaw.community.core.bot_management.engines import (
                     resolve_outbound_rule_envelope,
                 )
+
                 extra_properties = resolve_outbound_rule_envelope(
                     bot_id=bolt_id,
                     owner_id=owner_id,
@@ -86,6 +91,18 @@ class BaasDeviceHeaderUpdater:
                     template_service=self._template_service,
                     secret_resolver=self._secret_resolver,
                     theta_master_key_secret=self._theta_master_key_secret,
+                )
+                logger.info(
+                    "[BaasDeviceHeaderUpdater.update] outbound envelope: "
+                    "device_id=%s, bolt_id=%s, owner_id=%s, "
+                    "custom_outbound_key_resolved=%s",
+                    device.device_id,
+                    bolt_id,
+                    owner_id,
+                    bool(
+                        isinstance(extra_properties, dict)
+                        and extra_properties.get("outbound_api_key")
+                    ),
                 )
                 outbound_rule = self._baas_service._build_outbound_operation_rule(
                     bot_id=bolt_id,
@@ -162,10 +179,12 @@ class BaasDeviceHeaderUpdater:
             f"device_id={device.device_id}, device_uuid={device_uuid}, "
             f"paas_device_id={paas_device_id}"
         )
-        return [{
-            "baas_device_uuid": device_uuid,
-            "paas_device_id": paas_device_id,
-        }]
+        return [
+            {
+                "baas_device_uuid": device_uuid,
+                "paas_device_id": paas_device_id,
+            }
+        ]
 
     def _update_bot_devices(
         self,
@@ -200,10 +219,12 @@ class BaasDeviceHeaderUpdater:
                 paas_device_id,
                 outbound_rule,
             )
-            updated_devices.append({
-                "device_uuid": device_uuid,
-                "paas_device_id": paas_device_id,
-            })
+            updated_devices.append(
+                {
+                    "device_uuid": device_uuid,
+                    "paas_device_id": paas_device_id,
+                }
+            )
             logger.info(
                 f"[BaasDeviceHeaderUpdater.update] Device updated: "
                 f"device_id={device.device_id}, device_uuid={device_uuid}, "

@@ -93,3 +93,27 @@ def mount_public_error_handlers(app: FastAPI) -> FastAPI:
     app.add_exception_handler(GrantNotResolvableError, _grant_not_resolvable_handler)
     app.add_exception_handler(RequestValidationError, _validation_error_handler)
     return app
+
+
+def is_current(operation: dict) -> bool:
+    """Whether a published operation is part of the *current* contract.
+
+    The surface serves two contracts at once while callers migrate: the
+    addresses this API has, and the addresses it had. Both are real, both are
+    documented, and a test has to say which one it means.
+
+    Convention tests mean the current one — a rule that bound the retiring
+    addresses too could only be satisfied by never having changed anything.
+    Safety tests mean both, and say so by not calling this.
+    """
+    return not operation.get("deprecated", False)
+
+
+def current_operations(document: dict):
+    """``(method, path, operation)`` for every non-deprecated operation."""
+    for path, item in (document.get("paths") or {}).items():
+        for method, operation in item.items():
+            if not isinstance(operation, dict) or "responses" not in operation:
+                continue
+            if is_current(operation):
+                yield method, path, operation

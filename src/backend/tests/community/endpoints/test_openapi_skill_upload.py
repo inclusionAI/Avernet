@@ -233,10 +233,11 @@ def _assert_associated_to_owning_bot_default(response, world) -> None:
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/bots/skills/upload",
+    path="/openapi/v1/bots/{bot_id}/skills",
     scenario="raw_zip_created_in_verified_tenant",
     input=CaseInput(
-        query_params={"bot_id": _BOT_ID, "user_id": _OWNER},
+        path_params={"bot_id": _BOT_ID},
+        query_params={"user_id": _OWNER},
         headers=_HEADERS,
         raw_body=_package(),
     ),
@@ -259,10 +260,11 @@ def raw_zip_upload_creates_an_inactive_skill():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/bots/skills/upload",
+    path="/openapi/v1/bots/{bot_id}/skills",
     scenario="multipart_rejected_after_verified_tenant_guard",
     input=CaseInput(
-        query_params={"bot_id": _BOT_ID, "user_id": _OWNER},
+        path_params={"bot_id": _BOT_ID},
+        query_params={"user_id": _OWNER},
         headers={**_HEADERS, "content-type": "multipart/form-data; boundary=x"},
         raw_body=b"--x--",
     ),
@@ -271,3 +273,53 @@ def raw_zip_upload_creates_an_inactive_skill():
 )
 def multipart_upload_is_an_explicit_error_case():
     """The public endpoint accepts only raw ``application/zip`` bodies."""
+
+
+# The retiring address. `POST /openapi/v1/bots/skills/upload?bot_id=` is what
+# clients call today, and it is not a re-registration: the shim publishes
+# `bot_id` in the query and `owner_entity_id` where the current address
+# publishes `owner_id`, then translates. That translation is the code most
+# likely to be wrong in `openapi_v1/deprecated/skills.py`, so it is driven here
+# rather than only asserted structurally by `test_legacy_parity.py`.
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/skills/upload",
+    scenario="legacy_address_creates_the_same_skill",
+    input=CaseInput(
+        query_params={"bot_id": _BOT_ID, "user_id": _OWNER},
+        headers=_HEADERS,
+        raw_body=_package(),
+    ),
+    seed=_seed_uploadable_bot,
+    extra_assertions=(_assert_associated_to_owning_bot_default,),
+    expect=ExpectSuccess(
+        status=201,
+        json_contains={
+            "code": 201000,
+            "data": {
+                "operation": "created",
+                "skill": {"name": "raw-upload", "active": False},
+            },
+        },
+    ),
+)
+def legacy_raw_zip_upload_creates_an_inactive_skill():
+    """A bot named in the query reaches the same handler as one named in the path."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/skills/upload",
+    scenario="legacy_address_rejects_multipart_identically",
+    input=CaseInput(
+        query_params={"bot_id": _BOT_ID, "user_id": _OWNER},
+        headers={**_HEADERS, "content-type": "multipart/form-data; boundary=x"},
+        raw_body=b"--x--",
+    ),
+    seed=_seed_uploadable_bot,
+    expect=ExpectError(status=400),
+)
+def legacy_multipart_upload_is_refused_as_it_always_was():
+    """The retiring address rejects what it always rejected."""

@@ -9,7 +9,7 @@ from ._orm_model import PublishBatchModel
 from ._protocol import PublishBatchRepository
 from ._record import PublishBatchRecord
 
-log = get_logger("orm-repository")
+log = get_logger("orm")
 
 
 class OrmPublishBatchRepository(OrmConnectionMixin, PublishBatchRepository):

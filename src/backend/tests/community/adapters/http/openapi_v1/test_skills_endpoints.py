@@ -18,6 +18,7 @@ from agentclaw.community.adapters.http.middleware import AvernetTenantMiddleware
 from tests.community.adapters.http.openapi_v1.conftest import (
     user_scoped_client,
 )
+from agentclaw.community.adapters.http.openapi_v1.contracts import EXAMPLE_TRACE_ID
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     PRINCIPAL_HEADER,
     require_principal,
@@ -156,7 +157,7 @@ def _client(
 def test_upload_accepts_only_raw_zip_and_returns_created_inactive_skill():
     client = _client(_Query())
     response = client.post(
-        "/openapi/v1/bots/skills/upload?bot_id=bot-1",
+        "/openapi/v1/bots/bot-1/skills",
         content=b"PK\x03\x04",
         headers={"content-type": "application/zip"},
     )
@@ -194,7 +195,7 @@ def test_upload_replacement_returns_200_and_updated_operation():
     attach_injector(app, Injector([Bindings()]))
     client = user_scoped_client(app, "actor")
     response = client.post(
-        "/openapi/v1/bots/skills/upload?bot_id=bot-1",
+        "/openapi/v1/bots/bot-1/skills",
         content=b"PK\x03\x04",
         headers={"content-type": "application/zip"},
     )
@@ -207,7 +208,7 @@ def test_upload_rejects_multipart_and_other_content_types_before_service_call():
     client = _client(_Query())
     for content_type in ("multipart/form-data; boundary=x", "application/octet-stream"):
         response = client.post(
-            "/openapi/v1/bots/skills/upload?bot_id=bot-1",
+            "/openapi/v1/bots/bot-1/skills",
             content=b"not-a-zip",
             headers={"content-type": content_type},
         )
@@ -219,7 +220,7 @@ def test_activate_and_deactivate_derive_scope_from_id_and_return_desired_state()
     state = _State()
     client = _client(_Query(), state)
 
-    activated = client.post("/openapi/v1/bots/skills/8/activate")
+    activated = client.post("/openapi/v1/bots/bot-1/skills/8/activate")
     assert activated.status_code == 200
     assert activated.json()["data"] == {
         "skill": {
@@ -236,7 +237,7 @@ def test_activate_and_deactivate_derive_scope_from_id_and_return_desired_state()
     }
     assert state.args == {"skill_id": "8", "actor_id": "actor", "active": True}
 
-    deactivated = client.post("/openapi/v1/bots/skills/8/deactivate")
+    deactivated = client.post("/openapi/v1/bots/bot-1/skills/8/deactivate")
     assert deactivated.status_code == 200
     assert deactivated.json()["data"]["skill"]["active"] is False
     assert state.args == {"skill_id": "8", "actor_id": "actor", "active": False}
@@ -244,7 +245,7 @@ def test_activate_and_deactivate_derive_scope_from_id_and_return_desired_state()
 
 def test_delete_derives_scope_from_skill_id_and_returns_standard_deleted_payload():
     delete = _Delete()
-    response = _client(_Query(), delete=delete).delete("/openapi/v1/bots/skills/8")
+    response = _client(_Query(), delete=delete).delete("/openapi/v1/bots/bot-1/skills/8")
 
     assert response.status_code == 200
     assert response.json()["code"] == 200000
@@ -259,7 +260,7 @@ def test_delete_active_error_uses_the_fixed_public_conflict_envelope():
             raise LocalSkillActiveError()
 
     response = _client(_Query(), delete=_ActiveDelete()).delete(
-        "/openapi/v1/bots/skills/8"
+        "/openapi/v1/bots/bot-1/skills/8"
     )
 
     assert response.status_code == 409
@@ -274,7 +275,7 @@ def test_delete_active_error_uses_the_fixed_public_conflict_envelope():
 def test_list_uses_verified_actor_and_exposes_only_public_metadata():
     query = _Query()
     response = _client(query).get(
-        "/openapi/v1/bots/skills?bot_id=bot-1&owner_entity_id=owner&active=false&keyword=cast&page=2&page_size=7"
+        "/openapi/v1/bots/bot-1/skills?owner_id=owner&active=false&keyword=cast&page=2&page_size=7"
     )
 
     assert response.status_code == 200
@@ -309,24 +310,25 @@ def test_detail_derives_scope_from_skill_id_and_masks_invisible_rows():
     query = _Query()
     client = _client(query)
 
-    visible = client.get("/openapi/v1/bots/skills/7")
+    visible = client.get("/openapi/v1/bots/bot-1/skills/7")
     assert visible.status_code == 200
     assert visible.json()["data"]["skill_id"] == "7"
 
-    hidden = client.get("/openapi/v1/bots/skills/hidden")
+    hidden = client.get("/openapi/v1/bots/bot-1/skills/hidden")
     assert hidden.status_code == 404
     assert hidden.json()["code"] == 404000
 
-    ambiguous = client.get("/openapi/v1/bots/skills/ambiguous")
+    ambiguous = client.get("/openapi/v1/bots/bot-1/skills/ambiguous")
     assert ambiguous.status_code == 409
     assert ambiguous.json()["code"] == 409104
 
 
 def test_list_requires_bot_id_and_shared_page_limits():
     client = _client(_Query())
-    assert client.get("/openapi/v1/bots/skills").status_code == 422
+    # No bot in the address means no such route, not a missing parameter.
+    assert client.get("/openapi/v1/bots/skills").status_code == 404
     assert (
-        client.get("/openapi/v1/bots/skills?bot_id=bot&page_size=101").status_code
+        client.get("/openapi/v1/bots/bot/skills?page_size=101").status_code
         == 422
     )
 
@@ -336,40 +338,41 @@ def test_openapi_declares_exactly_the_six_ratified_skills_operations():
     skill_paths = {
         path: operations
         for path, operations in schema["paths"].items()
-        if path.startswith("/openapi/v1/bots/skills")
+        if "/skills" in path and path.startswith("/openapi/v1/bots/{bot_id}")
         or path.startswith("/openapi/v1/bots/{bot_id}/skills")
     }
     assert {path: set(operations) for path, operations in skill_paths.items()} == {
-        "/openapi/v1/bots/skills": {"get"},
-        "/openapi/v1/bots/skills/upload": {"post"},
-        "/openapi/v1/bots/skills/{skill_id}": {"get", "delete"},
-        "/openapi/v1/bots/skills/{skill_id}/activate": {"post"},
-        "/openapi/v1/bots/skills/{skill_id}/deactivate": {"post"},
+        "/openapi/v1/bots/{bot_id}/skills": {"get", "post"},
+        "/openapi/v1/bots/{bot_id}/skills/{skill_id}": {"get", "delete"},
+        "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate": {"post"},
+        "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate": {"post"},
     }
     for path in (
-        "/openapi/v1/bots/skills/{skill_id}/activate",
-        "/openapi/v1/bots/skills/{skill_id}/deactivate",
+        "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate",
+        "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate",
     ):
         assert set(schema["paths"][path]) == {"post"}
         response_schema = schema["paths"][path]["post"]["responses"]["200"]["content"][
             "application/json"
         ]["schema"]
         assert response_schema["$ref"].endswith("Envelope_SkillState_")
-    delete = schema["paths"]["/openapi/v1/bots/skills/{skill_id}"]
+    delete = schema["paths"]["/openapi/v1/bots/{bot_id}/skills/{skill_id}"]
     assert set(delete) == {"get", "delete"}
     assert delete["delete"]["responses"]["200"]["content"]["application/json"][
         "schema"
     ]["$ref"].endswith("Envelope_Deleted_")
     state_schema = schema["components"]["schemas"]["SkillState"]
     assert state_schema["required"] == ["skill", "changed"]
-    upload = schema["paths"]["/openapi/v1/bots/skills/upload"]["post"]
+    upload = schema["paths"]["/openapi/v1/bots/{bot_id}/skills"]["post"]
     assert {"200", "201", "413"} <= set(upload["responses"])
     assert set(upload["requestBody"]["content"]) == {"application/zip"}
     error_example = upload["responses"]["413"]["content"]["application/json"]["example"]
+    # request_id carries the surface-wide illustrative trace id, so rendered
+    # samples show a realistic value instead of an empty placeholder.
     assert {**error_example, "data": error_example.get("data")} == {
         "code": 413101,
         "message": "Skill package is too large",
-        "request_id": "",
+        "request_id": EXAMPLE_TRACE_ID,
         "data": None,
     }
     error_schema = upload["responses"]["413"]["content"]["application/json"]["schema"]
@@ -381,7 +384,7 @@ def test_openapi_declares_exactly_the_six_ratified_skills_operations():
     }
     for path, methods in skill_paths.items():
         for method, operation in methods.items():
-            if path != "/openapi/v1/bots/skills/upload" or method != "post":
+            if path != "/openapi/v1/bots/{bot_id}/skills" or method != "post":
                 assert "413" not in operation.get("responses", {})
     for status in ("200", "201"):
         assert upload["responses"][status]["content"]["application/json"]["schema"]["$ref"].endswith(
@@ -504,15 +507,15 @@ def test_router_uses_verified_principal_and_real_tenant_guard(tmp_path):
     client = user_scoped_client(app, "owner")
     try:
         visible = client.get(
-            "/openapi/v1/bots/skills?bot_id=bot",
+            "/openapi/v1/bots/bot/skills",
             headers={PRINCIPAL_HEADER: token("tenant-a")},
         )
         hidden = client.get(
-            "/openapi/v1/bots/skills?bot_id=bot",
+            "/openapi/v1/bots/bot/skills",
             headers={PRINCIPAL_HEADER: token("tenant-b")},
         )
         invisible_git = client.get(
-            f"/openapi/v1/bots/skills/{git_default['id']}",
+            f"/openapi/v1/bots/default/skills/{git_default['id']}",
             headers={PRINCIPAL_HEADER: token("tenant-a")},
         )
     finally:

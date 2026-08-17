@@ -17,6 +17,7 @@ use bcs_test_support::{
     NoopProviderManagementService, NoopRelationCoreService, NoopRoutingCoreService,
     NoopSessionManagementService, NoopSystemMessageService, NoopWorkbenchSessionService,
 };
+use bcs_test_support::NoopInteractionService;
 
 use crate::services::{Services, ServicesBuilder};
 
@@ -31,6 +32,7 @@ pub fn with_all_noop() -> ServicesBuilder {
         .friend(Arc::new(NoopFriendCoreService))
         .relation(Arc::new(NoopRelationCoreService))
         .message_flow(Arc::new(NoopMessageFlowService))
+        .interactions(Arc::new(NoopInteractionService))
         .a2a_chat(Arc::new(NoopA2aChatService))
         .a2a_chat_runs(Arc::new(NoopA2aChatRunService))
         .collaboration_runtime(Arc::new(NoopCollaborationRuntimeService))

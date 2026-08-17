@@ -11,7 +11,7 @@ from typing import Any
 
 from secbaas.community.logger import get_logger
 
-log = get_logger("orm-repository")
+log = get_logger("orm")
 
 
 @dataclass(slots=True)

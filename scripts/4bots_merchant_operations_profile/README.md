@@ -104,16 +104,14 @@ Profile 不预置本次活动的目标值、店主预算、授权阈值、异常
 ./scripts/singlebox.sh install-tools
 ```
 
-然后直接启动；`start hybrid` 会自动完成项目 setup，只传 profile 时全部 Bot 使用 OpenClaw：
+然后直接启动；`start hybrid` 会自动完成项目 setup，并默认加载本目录的全部 OpenClaw Bot：
 
 ```bash
-./scripts/singlebox.sh start hybrid \
-  --profile-dir scripts/4bots_merchant_operations_profile
+./scripts/singlebox.sh start hybrid
 ```
 
 停止服务：
 
 ```bash
-./scripts/singlebox.sh stop hybrid \
-  --profile-dir scripts/4bots_merchant_operations_profile
+./scripts/singlebox.sh stop hybrid
 ```

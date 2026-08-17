@@ -345,6 +345,16 @@ export type StartClaudeSdkParams = {
   onInteractionRequested?: (event: InteractionRequestedRuntimeEvent) => void;
 };
 
+/** Apply relay-level thinking controls to the concrete SDK query options. */
+export function applySdkThinkingPolicy(
+  options: Record<string, unknown>,
+  env: Record<string, string | undefined>,
+): void {
+  if (env.MAX_THINKING_TOKENS?.trim() === '0') {
+    options.thinking = { type: 'disabled' };
+  }
+}
+
 /**
  * Probe whether the Claude Agent SDK is installed and importable.
  * Parallel to `probeClaudeCli()` in `claude-cli-bridge.ts`.
@@ -547,19 +557,21 @@ export function startClaudePromptSdk(
     const claudeHomeOverride = process.env.RELAY_CLAUDE_HOME?.trim();
     const claudeConfigDirOverride = process.env.RELAY_CLAUDE_CONFIG_DIR?.trim();
     const modelProviderEnv = loadRelayModelProviderEnv();
+    const sdkEnv = {
+      ...process.env,
+      ...modelProviderEnv,
+      ...(claudeHomeOverride ? { HOME: claudeHomeOverride } : {}),
+      ...(claudeConfigDirOverride ? { CLAUDE_CONFIG_DIR: claudeConfigDirOverride } : {}),
+      ...(params.env ?? {}),
+    };
     const options: Record<string, unknown> = {
       cwd: params.cwd,
-      env: {
-        ...process.env,
-        ...modelProviderEnv,
-        ...(claudeHomeOverride ? { HOME: claudeHomeOverride } : {}),
-        ...(claudeConfigDirOverride ? { CLAUDE_CONFIG_DIR: claudeConfigDirOverride } : {}),
-        ...(params.env ?? {}),
-      },
+      env: sdkEnv,
       includePartialMessages: true,
       abortController,
       ...(params.sdkOptions ?? {}),
     };
+    applySdkThinkingPolicy(options, sdkEnv);
     if (params.additionalDirectories?.length) {
       const cleaned = params.additionalDirectories.filter(p => typeof p === 'string' && p.trim()).map(p => p.trim());
       if (cleaned.length) options.additionalDirectories = cleaned;

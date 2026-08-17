@@ -25,8 +25,8 @@ class _FakeAppRegistry:
         tenant="t",
     )
 
-    async def find_app_by_token(self, token: str) -> RegisteredApp | None:
-        return self._APP if token == "app-key" else None
+    async def find_app_by_credential(self, credential: str) -> RegisteredApp | None:
+        return self._APP if credential == "app-key" else None
 
 
 def _strat() -> AppTokenStrategy:

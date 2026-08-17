@@ -28,7 +28,7 @@ use crate::v1::openapi::dto::session_file::{
     ShareSessionFileRequest, SharedFileContentQuery, UploadSessionFileQuery,
 };
 
-use super::super::SessionFileUrlProjector;
+use crate::v1::openapi::SessionFileUrlProjector;
 
 struct RequestBodyStream(BodyDataStream);
 

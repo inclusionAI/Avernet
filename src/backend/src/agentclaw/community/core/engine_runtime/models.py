@@ -56,15 +56,45 @@ class BotFacts:
     #: were once "the caller's id" now need the owner the bot was actually
     #: resolved against.
     owner_id: str
-    #: ``ac_bots`` primary key of the row ownership was just proven against.
-    #: Internal, never published — it exists because ``bot_id`` is **not**
-    #: unique across owners (no unique constraint on the column, and
-    #: ``create_bot_for_others`` gives every user a bot called ``default``), so
-    #: any second query keyed on ``bot_id`` alone could select a different
-    #: owner's row. This is the discriminator that keeps the service-bot
-    #: publish lookup — and the collaborator adjudication — on the bot the
-    #: caller actually addressed.
-    bot_pk: int = 0
+
+    @classmethod
+    def from_record(
+        cls, record: dict[str, Any], *, bot_id: str, owner_id: str
+    ) -> "BotFacts":
+        """Project an ``ac_bots`` row onto the narrow facts.
+
+        The one place an ``ac_bots`` row becomes **engine-runtime** facts — the
+        relay, the connection socket and the stage-addressed file reads all come
+        through here, so they cannot disagree about which columns matter or how a
+        missing one reads. ``bot_id`` and ``owner_id`` are the *requested*
+        values, used only as the fallback when the row does not carry its own —
+        the same fallback this projection has always applied.
+
+        Not every projection on the surface: ``authorized_apps.gating`` reads the
+        same row and deliberately **refuses** an empty ``owner_id`` rather than
+        substituting the requested one, because that value is written into a
+        grant record where it must name a real owner. Its rule is stricter on
+        purpose and is not folded in here.
+
+        ``record`` must come from an **owner-scoped** ``(bot_id, owner_id)``
+        read. ``bot_id`` carries no unique constraint and every user's first bot
+        is called ``default``, so a row fetched by ``bot_id`` alone can belong to
+        another owner.
+
+        Deliberately **without** ``ac_bots.id``. The collaborator adjudication
+        and the publish lookup are keyed on that primary key, but they take it
+        from the row their caller read rather than from these facts — see
+        ``gate.require_bot_operator`` and ``stage.resolve_stage_bind_id``.
+        Carrying it here would put an internal join key on the value object
+        three of its four consumers already hold the row for, and give it a
+        default no caller could satisfy.
+        """
+        return cls(
+            bot_id=str(record.get("bot_id") or bot_id),
+            bot_type=str(record.get("bot_type") or ""),
+            active_engine=str(record.get("active_engine") or ""),
+            owner_id=str(record.get("owner_id") or owner_id),
+        )
 
 
 @dataclass(frozen=True)

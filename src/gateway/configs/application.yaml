@@ -239,6 +239,10 @@ user_config:
       user: required
       app: required
 
+    "/api/v1/collaboration/**":
+      user: required
+      app: required
+
     # Session-file use cases let BCN choose Human or Bot as the effective Actor.
     # Gateway therefore best-effort resolves and signs every relevant identity;
     # BCN's HumanOrOwnedBot policy rejects "none" and mismatched User/Bot owner
@@ -248,9 +252,15 @@ user_config:
       app: optional
       bot: optional
 
+    "/api/v1/collaboration/sessions/{session_id}/files/**":
+      user: optional
+      app: optional
+      bot: optional
+
     # A share token is the complete credential for this one download route.
     # BCN verifies it and deliberately returns the same 404 for every failure.
     "GET /openapi/v1/collaboration/sessions/shared-file/content": {}
+    "GET /api/v1/collaboration/sessions/shared-file/content": {}
 
     "/openapi/v1/bcsfuse/**":
       user: required
@@ -315,6 +325,13 @@ user_config:
   # "object_store" is vendor-neutral (S3 / MinIO / GCS / OSS / …); the reader is
   # a pluggable flavor of the SchemaCatalog SPI. The schema is a DOC-ONLY input —
   # routing/auth/forwarding never read it.
+  internal_api_docs:
+    schemas:
+      bcn-internal:
+        source: file
+        path: schemas/bcn.internal.openapi.json
+        refresh_seconds: 300
+
   upstreams:
     base_path: /openapi/v1
 
@@ -370,6 +387,10 @@ user_config:
           source: file
           path: schemas/bcn.openapi.json
           refresh_seconds: 300
+      collaboration-internal:
+        match: /api/v1/collaboration/**
+        server: bcs
+        protocols: [http]
       # bcsfuse public surface: fusion + fusable worker-config queries, served
       # under clean, version-free sub-prefixes. bcsfuse still serves its own /api/v1
       # and /v1 prefixes directly (unchanged) for callers that reach the service

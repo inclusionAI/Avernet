@@ -53,9 +53,18 @@ async def test_read_file_calls_transport_post():
 
 
 @pytest.mark.asyncio
-async def test_read_file_raises_on_404():
-    """A failed read must NOT be swallowed — surface every HTTP error (404 included)
-    so a silent 401 can't masquerade as an empty/missing file (the file-loss bug)."""
+async def test_read_file_returns_none_on_404():
+    """An explicit 404 is the container saying "no such file" — the contract's ``None``.
+
+    ``DeviceFileSystem.read_file`` documents "bytes, or None if file does not exist",
+    and the two impls hitting the same read endpoint (TeclawDeviceFileSystem,
+    LocalDeviceFileSystem._baas_read_file) already answer None. Raising here instead
+    forced every core caller to catch httpx and made an unconfigured bot a 500.
+
+    This is narrower than the guard it replaces, not weaker: only a *verified* 404
+    becomes None, so the swallowed-401 file-loss bug stays impossible — see
+    ``test_read_file_raises_on_401`` and ``test_read_file_raises_on_5xx``.
+    """
     from agentclaw.community.core.devices.services.baas_device_filesystem import BaasDeviceFileSystem
     err_resp = httpx.Response(
         status_code=404, content=b"not found",
@@ -63,8 +72,67 @@ async def test_read_file_raises_on_404():
     )
     transport = _make_transport(response=err_resp)
     fs = BaasDeviceFileSystem(transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p)
-    with pytest.raises(httpx.HTTPStatusError):
-        await fs.read_file("/missing")
+    assert await fs.read_file("/missing") is None
+
+
+@pytest.mark.asyncio
+async def test_read_file_raises_on_proxy_routing_404():
+    """A proxy 404 means the bot/device is gone — unavailability, not an absent file.
+
+    ``DesktopBaasInvokeTransport`` reaches the device through secbaas'
+    ``invoke-http`` router, which answers 404 with its own error body when it cannot
+    route to a device — before the request reaches the device at all. Mapping that to
+    ``None`` would report a gone bot as "engine config is {}", the exact
+    absence/unavailability conflation the surrounding guard exists to prevent.
+    """
+    from agentclaw.community.core.devices.services.baas_device_filesystem import BaasDeviceFileSystem
+    for marker in ("BOT_NOT_FOUND", "NO_DEVICES_FOUND"):
+        err_resp = httpx.Response(
+            status_code=404,
+            json={"detail": {"error": marker, "message": "gone", "bot_uuid": "b1"}},
+            request=httpx.Request("POST", "http://fake/"),
+        )
+        transport = _make_transport(response=err_resp)
+        fs = BaasDeviceFileSystem(transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p)
+        with pytest.raises(httpx.HTTPStatusError):
+            await fs.read_file("/some/file")
+
+
+@pytest.mark.asyncio
+async def test_read_file_returns_none_on_json_404_that_is_not_a_proxy_error():
+    """Only the proxy's own markers re-raise; a device 404 with a JSON body is absence.
+
+    The proxy emits exactly two 404s of its own, so any other 404 — whatever its body
+    looks like — travelled through it from the device.
+    """
+    from agentclaw.community.core.devices.services.baas_device_filesystem import BaasDeviceFileSystem
+    err_resp = httpx.Response(
+        status_code=404,
+        json={"detail": "file not found"},
+        request=httpx.Request("POST", "http://fake/"),
+    )
+    transport = _make_transport(response=err_resp)
+    fs = BaasDeviceFileSystem(transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p)
+    assert await fs.read_file("/missing") is None
+
+
+@pytest.mark.asyncio
+async def test_read_file_raises_on_5xx():
+    """A server failure is unavailability, not absence — it must not read as None.
+
+    Collapsing it would let a caller treat an unreachable runtime as an empty file
+    and overwrite content it never managed to read.
+    """
+    from agentclaw.community.core.devices.services.baas_device_filesystem import BaasDeviceFileSystem
+    for status in (500, 502, 503):
+        err_resp = httpx.Response(
+            status_code=status, content=b"boom",
+            request=httpx.Request("POST", "http://fake/"),
+        )
+        transport = _make_transport(response=err_resp)
+        fs = BaasDeviceFileSystem(transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p)
+        with pytest.raises(httpx.HTTPStatusError):
+            await fs.read_file("/foo")
 
 
 @pytest.mark.asyncio

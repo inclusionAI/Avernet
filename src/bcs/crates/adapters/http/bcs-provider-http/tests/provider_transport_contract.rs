@@ -28,6 +28,60 @@ use bcs_service_api::{
     TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome,
     TaskRunAliasRegistration, WebSendCommand, WebSendOutcome,
 };
+use bcs_service_api::{InteractionKind, InteractionProviderCommand, InteractionProviderPort};
+
+#[tokio::test]
+async fn interaction_resolve_reuses_provider_route_and_expects_json_ack() {
+    let captured: CapturedState = Arc::new(Mutex::new(None));
+    let app = Router::new()
+        .route("/webhook", post(capture_ack))
+        .with_state(captured.clone());
+    let (webhook_url, server) = spawn_server(app).await;
+    let target = provider_target_v2(webhook_url);
+    let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+
+    let ack = transport
+        .resolve_interaction(InteractionProviderCommand {
+            target,
+            provider_bypass_headers: vec![(
+                "x-sandbox-bypass".to_string(),
+                "sandbox-route-1".to_string(),
+            )],
+            bcs_run_id: "bcs-run-1".to_string(),
+            provider_run_id: "provider-run-1".to_string(),
+            bcs_session_id: "session-1".to_string(),
+            group_id: "group-1".to_string(),
+            bot_id: "bot-1".to_string(),
+            interaction_id: "interaction-1".to_string(),
+            kind: InteractionKind::Exec,
+            idempotency_key: "idem-1".to_string(),
+            resolution: json!({"decision":"allow_once"}),
+        })
+        .await
+        .unwrap();
+
+    assert!(ack.ok);
+    let request = captured.lock().await.clone().unwrap();
+    assert_eq!(request.authorization.as_deref(), Some("Bearer secret-b2p"));
+    assert_eq!(request.sandbox_bypass.as_deref(), Some("sandbox-route-1"));
+    assert!(
+        !request
+            .accept
+            .as_deref()
+            .unwrap_or_default()
+            .contains("text/event-stream")
+    );
+    assert_eq!(request.body["method"], "interaction.resolve");
+    assert_eq!(request.body["session_id"], "session-1");
+    assert_eq!(request.body["bcn_group_id"], "group-1");
+    assert_eq!(request.body["params"]["bcsRunId"], "bcs-run-1");
+    assert_eq!(request.body["params"]["runId"], "provider-run-1");
+    assert_eq!(request.body["params"]["interactionId"], "interaction-1");
+    assert_eq!(request.body["params"]["kind"], "exec");
+    assert_eq!(request.body["params"]["idempotencyKey"], "idem-1");
+    assert_eq!(request.body["params"]["decision"], "allow_once");
+    server.abort();
+}
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, RwLock};
 use tracing::Instrument;
@@ -973,6 +1027,10 @@ async fn capture_sse() -> Response {
     );
     Response::builder()
         .header("content-type", "text/event-stream; charset=utf-8")
+        // Contract tests use HTTP/1 while production SSE is HTTP/2-only. BCS
+        // deliberately stops reading at the terminal frame, so make the mock
+        // response non-reusable instead of depending on an extra EOF poll.
+        .header("connection", "close")
         .body(Body::from(body))
         .unwrap()
 }

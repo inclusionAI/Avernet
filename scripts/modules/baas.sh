@@ -131,7 +131,9 @@ baas_setup() {
 
     # Sync Python dependencies
     log_info "Syncing Python dependencies for BAAS..."
-    if ! uv sync --index-url "${PYPI_INDEX_URL}"; then
+    # baas requires Python >=3.12,<3.13; be explicit so a root .python-version
+    # of 3.13 does not cause resolution failures during setup.
+    if ! uv sync --python ">=3.12,<3.13" --index-url "${PYPI_INDEX_URL}"; then
         log_error "Failed to sync Python dependencies for BAAS"
         return 1
     fi

@@ -2,6 +2,24 @@
 
 Spec: [`spec.md`](./spec.md) · Issue: [inclusionAI/Avernet#1000](https://github.com/inclusionAI/Avernet/issues/1000)
 
+> **⚠️ Partially superseded by
+> [#1043](https://github.com/inclusionAI/Avernet/pull/1043) (2026-08-14)** —
+> see the annotations in [`spec.md`](./spec.md) for the reasoning. The route
+> table below and the schema notes are the parts that no longer describe the
+> served contract: links left this API, so `POST ""`, `GET`/`PUT`/`DELETE
+> /{resource_id}` and `GET /check-name` are gone, `GET /stat?path=` was added,
+> and `resource_id` / `source` / `gmt_create` / `gmt_modified` left the response
+> model rather than being reported empty. The root cause, the device-seam
+> analysis, and the record-retention rationale are unchanged and still govern.
+>
+> Two notes below are worth reading as predictions that came true rather than as
+> stale text: the schema section calls a shared file/link model "the floor for a
+> single shared model … removing it means splitting the schema into file and
+> link variants, which is a larger contract change than this one", and the route
+> table warns that literal routes must be declared before `/{resource_id}`.
+> #1043 made the split, which retired the ordering hazard along with the
+> catch-all route.
+
 ## Root cause
 
 The OpenAPI path **uses the same device-filesystem seam** as the console — the

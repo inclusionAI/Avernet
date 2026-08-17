@@ -45,14 +45,14 @@ session exists is appended to its JSONL leaf and retained in relay history.
 ## Model policy
 
 For this opt-in group, all four Bot defaults and the BCSFuse-backed SOP model
-roles use `Kimi-K2.6`.  The original OpenClaw profile remains unchanged.  At
-runtime, the launcher clones the configured home primary provider's existing
-model metadata into a `Kimi-K2.6` entry when necessary, makes that entry the
-generated OpenClaw default, and refreshes only the three active OpenClaw
-profiles.  The Claude profile explicitly supplies the same relay default.
-BCSFuse receives `Kimi-K2.6` for fast, balanced, reasoning, long-context and
-extraction roles.  Credentials and endpoints remain sourced from the local
-home configuration and are never written to version-controlled profile files.
+roles use the primary model selected by Singlebox. In `manual` mode that model
+comes from the repository-local `.env.local`; in `home` mode it comes from the
+imported OpenClaw configuration. The launcher validates the configured primary
+but does not synthesize another model or rewrite the generated OpenClaw
+default. The Claude relay receives the same model ID at runtime, while the
+reusable Claude role profile remains model-agnostic. Credentials and endpoints
+remain sourced from local runtime configuration and are never written to
+version-controlled profile files.
 
 ## Acceptance
 

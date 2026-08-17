@@ -9,7 +9,7 @@ from secbaas.community.spi.database import Base
 
 from ._record import DeviceRecord
 
-logger = get_logger("orm-model")
+logger = get_logger("orm")
 
 
 class DeviceModel(Base):

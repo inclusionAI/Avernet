@@ -10,7 +10,7 @@ from secbaas.community.logger import get_logger
 from ._orm_model import AcBotPublishModel
 from ._protocol import AcBotPublishRepository
 
-log = get_logger("orm-repository")
+log = get_logger("orm")
 
 
 class OrmAcBotPublishRepository(OrmConnectionMixin, AcBotPublishRepository):
