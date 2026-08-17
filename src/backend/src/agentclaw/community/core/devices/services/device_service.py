@@ -761,6 +761,10 @@ class DeviceService:
     ) -> DeviceBindingRecord | None:
         """Release a device.
 
+        The operation first claims a binding as ``RELEASING``.  A concurrent
+        caller returns that current record without invoking the provider again;
+        only ``RELEASED`` represents completed physical-release handling.
+
         Args:
             binding_id: Binding ID to release
             release_reason: Reason for release

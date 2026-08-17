@@ -17,6 +17,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     EXAMPLE_TRACE_ID,
@@ -583,7 +584,10 @@ async def delete_bot(
     their publish lifecycle.
     """
     _reject_unowned_lifecycle(bot_service.get_bot(bot_id, owner_id), deleting=True)
-    bot_service.delete_bot(bot_id, owner_id)
+    # Bot deletion calls providers and may join an in-flight deletion.  The
+    # service API is synchronous, so keep that blocking work off this async
+    # request worker's event loop.
+    await run_in_threadpool(bot_service.delete_bot, bot_id, owner_id)
     return deleted_envelope(request)
 
 
@@ -923,5 +927,4 @@ async def delete_bot_startup_script(
         raise BotNotFoundError("bot has no associated entity")
     startup_script_service.delete(entity_id=entity_id, bot_id=bot_id)
     return deleted_envelope(request)
-
 

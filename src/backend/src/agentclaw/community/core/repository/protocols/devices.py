@@ -88,7 +88,12 @@ class DeviceBindingRepository(Protocol):
         release_reason: str | None,
         released_by: str,
     ) -> None:
-        """释放设备，标记绑定记录为 RELEASED 状态."""
+        """Finalize a claimed release by transitioning it to ``RELEASED``.
+
+        This is idempotent for an already released binding.  Callers must first
+        win :meth:`claim_binding_release`; it is not an authorization to begin
+        another provider release for an arbitrary binding.
+        """
         ...
 
     @abstractmethod
@@ -99,7 +104,13 @@ class DeviceBindingRepository(Protocol):
         release_reason: str | None,
         released_by: str,
     ) -> bool:
-        """Atomically claim a releasable binding and persist its audit data."""
+        """Atomically claim a releasable binding as ``RELEASING``.
+
+        The successful caller exclusively owns provider destruction and must
+        later call :meth:`release_binding`.  A ``False`` result means another
+        lifecycle transition won; it must never be followed by another
+        destructive provider call.
+        """
         ...
 
     @abstractmethod

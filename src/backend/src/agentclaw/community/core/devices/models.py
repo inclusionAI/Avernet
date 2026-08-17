@@ -46,7 +46,13 @@ class Env(StrEnum):
 
 
 class DeviceBindingStatus(StrEnum):
-    """Device binding status enumeration."""
+    """Device binding lifecycle states.
+
+    ``RELEASING`` is the durable, exclusive claim between a releasable state
+    and ``RELEASED``.  Only the claim winner may run provider destruction; a
+    caller that observes ``RELEASING`` must not start another release.  A
+    returned binding is fully released only when its status is ``RELEASED``.
+    """
     PENDING = "PENDING"
     ACTIVE = "ACTIVE"
     STOPPED = "STOPPED"
