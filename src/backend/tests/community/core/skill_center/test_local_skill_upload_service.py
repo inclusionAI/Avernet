@@ -282,6 +282,61 @@ async def test_package_storage_prepare_accepts_an_absent_first_upload_directory(
     assert filesystem.deleted == []
 
 
+@pytest.mark.asyncio
+async def test_package_storage_copy_to_preserves_source_and_verifies_target():
+    filesystem = _Filesystem()
+    filesystem.files["/private/source/SKILL.md"] = b"skill"
+    source = LocalSkillPackageStorage(filesystem, "/private/source")
+    target = LocalSkillPackageStorage(filesystem, "/private/target")
+
+    await source.copy_to(target)
+
+    assert filesystem.files["/private/source/SKILL.md"] == b"skill"
+    assert filesystem.files["/private/target/SKILL.md"] == b"skill"
+
+
+@pytest.mark.asyncio
+async def test_package_storage_copy_to_rejects_an_existing_target_without_replace():
+    filesystem = _Filesystem()
+    filesystem.files["/private/source/SKILL.md"] = b"new"
+    filesystem.files["/private/target/SKILL.md"] = b"old"
+
+    with pytest.raises(OSError, match="copy target already exists"):
+        await LocalSkillPackageStorage(filesystem, "/private/source").copy_to(
+            LocalSkillPackageStorage(filesystem, "/private/target")
+        )
+
+    assert filesystem.files["/private/target/SKILL.md"] == b"old"
+
+
+@pytest.mark.asyncio
+async def test_package_storage_copy_to_requires_existing_target_cleanup():
+    filesystem = _Filesystem(cleanup_results=[False])
+    filesystem.files["/private/source/SKILL.md"] = b"new"
+    filesystem.files["/private/target/SKILL.md"] = b"old"
+
+    with pytest.raises(OSError, match="unable to clear Local Skill copy target"):
+        await LocalSkillPackageStorage(filesystem, "/private/source").copy_to(
+            LocalSkillPackageStorage(filesystem, "/private/target"), replace=True
+        )
+
+    assert filesystem.files["/private/target/SKILL.md"] == b"old"
+
+
+@pytest.mark.asyncio
+async def test_package_storage_copy_to_rejects_failed_target_verification():
+    filesystem = _Filesystem()
+    filesystem.files["/private/source/SKILL.md"] = b"new"
+    target = LocalSkillPackageStorage(filesystem, "/private/target")
+
+    async def fail_restore(_files):
+        return False
+
+    target._restore_contents = fail_restore
+    with pytest.raises(OSError, match="Local Skill copy verification failed"):
+        await LocalSkillPackageStorage(filesystem, "/private/source").copy_to(target)
+
+
 class _Collaborators:
     def check_collaborator_permission(self, *args):
         return {"has_permission": True}
@@ -1021,6 +1076,96 @@ async def test_replacement_migrates_a_legacy_hidden_locator_to_the_canonical_pat
         b"name: upload-skill\ndescription: canonical\n"
     )
     assert not any(".replacement-" in path for path in filesystem.files)
+
+
+@pytest.mark.asyncio
+async def test_replacement_discards_staging_and_backup_when_backup_copy_fails(
+    monkeypatch,
+):
+    filesystem = _Filesystem()
+    canonical = "/private/skills-local/upload-skill"
+    rollback = "/private/skills-local/.upload-skill.rollback-backup"
+    filesystem.files[f"{canonical}/SKILL.md"] = b"old"
+    filesystem.files[f"{rollback}/stale.txt"] = b"stale"
+    repo = _ReplacementRepo([_existing_skill(active=False)])
+    ids = iter([SimpleNamespace(hex="staged"), SimpleNamespace(hex="backup")])
+    monkeypatch.setattr(upload_module, "uuid4", lambda: next(ids))
+
+    with pytest.raises(LocalSkillStorageError):
+        await _replacement_service(
+            filesystem, repo, _ReplacementRuntime([True])
+        ).upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=_zip(
+                {"SKILL.md": b"name: upload-skill\ndescription: replacement\n"}
+            ),
+        )
+
+    assert rollback in filesystem.deleted
+    assert "/private/skills-local/.upload-skill.replacement-staged" in (
+        filesystem.deleted
+    )
+    assert repo.atomic_replacements == []
+
+
+@pytest.mark.asyncio
+async def test_restore_replacement_requires_backup_after_canonical_publish():
+    filesystem = _Filesystem()
+    skill = _existing_skill(active=False)
+    service = _replacement_service(
+        filesystem, _ReplacementRepo([skill]), _ReplacementRuntime([True])
+    )
+
+    with pytest.raises(LocalSkillStorageError):
+        await service._restore_replacement(
+            skill=skill,
+            old_metadata={},
+            bot={"env": "test", "entity_id": "owner", "active_engine": "moltis"},
+            owner_id="owner",
+            bot_id="bot",
+            staged=_Storage(filesystem, "/private/staged"),
+            staged_locator="/private/staged",
+            canonical=_Storage(filesystem, "/private/canonical"),
+            canonical_locator="/private/canonical",
+            old_is_canonical=True,
+            backup=None,
+            obsolete_locator="/private/canonical",
+            canonical_published=True,
+            switched=False,
+            old_cleanup_work_id=None,
+            runtime_sync_attempted=False,
+        )
+
+
+@pytest.mark.asyncio
+async def test_restore_replacement_requires_noncanonical_publish_cleanup():
+    filesystem = _Filesystem(cleanup_results=[False])
+    skill = _existing_skill(active=False)
+    service = _replacement_service(
+        filesystem, _ReplacementRepo([skill]), _ReplacementRuntime([True])
+    )
+
+    with pytest.raises(LocalSkillStorageError):
+        await service._restore_replacement(
+            skill=skill,
+            old_metadata={},
+            bot={"env": "test", "entity_id": "owner", "active_engine": "moltis"},
+            owner_id="owner",
+            bot_id="bot",
+            staged=_Storage(filesystem, "/private/staged"),
+            staged_locator="/private/staged",
+            canonical=_Storage(filesystem, "/private/canonical"),
+            canonical_locator="/private/canonical",
+            old_is_canonical=False,
+            backup=None,
+            obsolete_locator="/private/legacy",
+            canonical_published=True,
+            switched=False,
+            old_cleanup_work_id=None,
+            runtime_sync_attempted=False,
+        )
 
 
 @pytest.mark.asyncio
