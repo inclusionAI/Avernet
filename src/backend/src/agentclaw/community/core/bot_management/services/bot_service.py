@@ -924,7 +924,13 @@ class BotService:
     ) -> tuple[threading.Event, threading.Event, threading.Thread]:
         """Keep a deletion lease live while its blocking provider calls run."""
         lock_key = f"{_DELETE_LOCK_KEY_PREFIX}{bot_id}"
-        if not self._restart_lock_repo.refresh(env, entity_id, lock_key, lock_token):
+        try:
+            lease_established = self._restart_lock_repo.refresh(
+                env, entity_id, lock_key, lock_token
+            )
+        except Exception as exc:
+            raise BotServiceError("Failed to establish bot deletion lock lease") from exc
+        if not lease_established:
             raise BotServiceError("Failed to establish bot deletion lock lease")
 
         stop = threading.Event()
@@ -932,9 +938,19 @@ class BotService:
 
         def _heartbeat() -> None:
             while not stop.wait(DELETE_LOCK_HEARTBEAT_SECONDS):
-                if not self._restart_lock_repo.refresh(
-                    env, entity_id, lock_key, lock_token
-                ):
+                try:
+                    refreshed = self._restart_lock_repo.refresh(
+                        env, entity_id, lock_key, lock_token
+                    )
+                except Exception:
+                    lease_lost.set()
+                    logger.exception(
+                        "[bot_service.delete_bot] Failed to refresh deletion lock lease "
+                        "for bot %s",
+                        bot_id,
+                    )
+                    return
+                if not refreshed:
                     lease_lost.set()
                     logger.error(
                         "[bot_service.delete_bot] Lost deletion lock lease for bot %s",
@@ -3543,6 +3559,21 @@ class BotService:
                 return self._join_delete_result(
                     delete_lock_env, delete_lock_entity_id, bot_id, user_id
                 )
+
+            # A duplicate may acquire only after the first holder has already
+            # soft-deleted the row and released its lock. Re-read while owning
+            # the new fence so that pre-lock state cannot trigger destructive
+            # cleanup a second time. A missing row is the durable success
+            # result of the holder we just raced.
+            locked_bot = self._repository.get_by_id_and_owner(bot_id, user_id)
+            if locked_bot is None:
+                logger.info(
+                    "[bot_service.delete_bot] Bot %s was deleted before the "
+                    "reacquired deletion lock could proceed.",
+                    bot_id,
+                )
+                return True
+            bot = locked_bot
             (
                 delete_lock_heartbeat_stop,
                 delete_lock_lease_lost,

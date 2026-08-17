@@ -581,6 +581,46 @@ class TestDeleteBot:
         svc._passport_plugin.destroy_passport.assert_not_called()
         svc._repository.soft_delete_by_owner.assert_not_called()
 
+    def test_reacquired_delete_lock_rechecks_that_the_bot_is_still_live(self):
+        """A lock acquired after the winner completes must join its success."""
+        svc = _make_service()
+        svc._repository.get_by_id_and_owner.side_effect = [
+            _make_bot(binding_id=None),
+            None,
+        ]
+        svc._restart_lock_repo.acquire.side_effect = [
+            None,
+            SimpleNamespace(lock_token="reacquired-delete-lock"),
+        ]
+        svc._restart_lock_repo.get_if_stale.return_value = None
+
+        assert svc.delete_bot("bot001", "user001") is True
+
+        svc._passport_plugin.destroy_passport.assert_not_called()
+        svc._repository.soft_delete_by_owner.assert_not_called()
+        svc._restart_lock_repo.release.assert_called_once_with(
+            "dev",
+            "staff_user001",
+            "delete:bot001",
+            "reacquired-delete-lock",
+        )
+
+    def test_delete_lock_heartbeat_marks_refresh_exception_as_lease_loss(self):
+        svc = _make_service()
+        svc._restart_lock_repo.refresh.side_effect = [True, RuntimeError("db unavailable")]
+
+        with patch.object(
+            bot_service_module, "DELETE_LOCK_HEARTBEAT_SECONDS", 0.01
+        ):
+            stop, lease_lost, thread = svc._start_delete_lock_heartbeat(
+                "dev", "staff_user001", "bot001", "delete-lock"
+            )
+            assert lease_lost.wait(timeout=1)
+            stop.set()
+            thread.join(timeout=1)
+
+        assert not thread.is_alive()
+
     def test_delete_releases_its_operation_lock_after_completion(self):
         svc = _make_service()
         svc._repository.get_by_id_and_owner.return_value = _make_bot(binding_id=None)
