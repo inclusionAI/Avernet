@@ -9,7 +9,7 @@ green — `uv run pytest` on the touched suites plus lint — before the next st
 
 ## Group 1 — Config lifecycle: shared flow (Part 1 core)
 
-- [ ] **1.1** Add `list_unified_configs(*, user_id, page, page_size,
+- [x] **1.1** Add `list_unified_configs(*, user_id, page, page_size,
       config_service)` to `core/mcp/config_flow.py`. Pages
       `UserMCPConfigRepository.list_by_user`, returns rows in the same
       `UnifiedConfig` shape `read_unified_config` returns, with a total. Masking

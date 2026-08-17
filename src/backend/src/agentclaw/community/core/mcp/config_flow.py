@@ -113,6 +113,47 @@ def read_unified_config(
     )
 
 
+def list_unified_configs(
+    *, user_id: str, page: int, page_size: int, config_service: Any
+) -> tuple[int, list[UnifiedConfig]]:
+    """Page a caller's stored configs, newest first, api_keys already masked.
+
+    Returns ``(total, items)``. Every entry is the same :class:`UnifiedConfig`
+    :func:`read_unified_config` produces for that server — through the same
+    :func:`mask_api_key`, so enumeration can never reveal what the single-server
+    read protects.
+
+    **Paged in memory, deliberately.** ``list_by_user`` is one query keyed by
+    user, and the row count is bounded by how many MCP servers one person has
+    configured — tens, not thousands. Pushing LIMIT/OFFSET into the repository
+    would add a second query shape to a table the internal surface also reads,
+    for a collection that does not grow with anything.
+
+    Every entry has ``exists`` true: each came from a stored row. ``has_config``
+    still keys off content, so a row holding only ``endpoint_env`` reports false
+    here exactly as it does on the single read.
+    """
+    rows = config_service.list_user_unified_configs(user_id)
+    total = len(rows)
+    start = max(page - 1, 0) * page_size
+    items = [
+        UnifiedConfig(
+            server_code=str(row.get("server_code") or ""),
+            api_key=mask_api_key(row.get("api_key")),
+            endpoint_env=row.get("endpoint_env", "PROD"),
+            transport_protocol=row.get("transport_protocol"),
+            headers=row.get("headers", {}),
+            has_config=bool(
+                row.get("api_key")
+                or row.get("headers")
+                or row.get("transport_protocol")
+            ),
+        )
+        for row in rows[start : start + page_size]
+    ]
+    return total, items
+
+
 async def write_unified_config(
     *,
     user_id: str,

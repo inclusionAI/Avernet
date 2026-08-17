@@ -36,16 +36,13 @@ class MCPConfigService:
     # Public API
     # ------------------------------------------------------------------
 
-    def get_user_unified_config(
-        self, user_id: str, server_code: str
-    ) -> Optional[dict[str, Any]]:
-        """获取用户统一配置：api_key、headers、endpoint_env、transport_protocol。"""
-        config = self.user_mcp_config_repo.get_by_user_and_server_code(
-            user_id, server_code
-        )
-        if not config:
-            return None
+    @staticmethod
+    def _unified_from_row(config: dict[str, Any]) -> dict[str, Any]:
+        """Project one stored row onto the unified-config shape.
 
+        Extracted so the single-server read and the whole-user listing parse
+        ``extra_config`` identically — a second parser is how the two drift.
+        """
         # extra_config 在部分存储后端中以 JSON 字符串形式存放，需兼容处理
         extra_config = config.get("extra_config") or {}
         if isinstance(extra_config, str):
@@ -70,6 +67,45 @@ class MCPConfigService:
             "endpoint_env": extra_config.get("endpoint_env", "PROD"),
             "transport_protocol": extra_config.get("transport_protocol"),
         }
+
+    def get_user_unified_config(
+        self, user_id: str, server_code: str
+    ) -> Optional[dict[str, Any]]:
+        """获取用户统一配置：api_key、headers、endpoint_env、transport_protocol。"""
+        config = self.user_mcp_config_repo.get_by_user_and_server_code(
+            user_id, server_code
+        )
+        if not config:
+            return None
+        return self._unified_from_row(config)
+
+    def list_user_unified_configs(self, user_id: str) -> list[dict[str, Any]]:
+        """Every server this user has configured, newest first.
+
+        Each entry is the unified-config shape :meth:`get_user_unified_config`
+        returns, plus the ``server_code`` it belongs to — the listing has to
+        carry it because, unlike the single-server read, the caller did not
+        supply it.
+
+        Rows the repository returns without a ``server_code`` are skipped rather
+        than emitted with an empty one: an entry no caller could address again
+        is worse than an absent one.
+        """
+        rows = self.user_mcp_config_repo.list_by_user(user_id)
+        listed: list[dict[str, Any]] = []
+        for row in rows:
+            server_code = row.get("server_code")
+            if not server_code:
+                logger.warning(
+                    "[MCPConfigService] skipping config row without server_code: "
+                    "id=%s",
+                    row.get("id"),
+                )
+                continue
+            listed.append(
+                {"server_code": str(server_code), **self._unified_from_row(row)}
+            )
+        return listed
 
     def validate_headers_for_mcp(
         self, server_code: str, headers: dict[str, str]
