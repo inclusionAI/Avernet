@@ -7,7 +7,7 @@ from secbaas.community.spi.auth import AuthPlugin, AuthUser
 
 from ._oauth_client import OAuthClient
 
-logger = get_logger("plugin-auth-oauth")
+logger = get_logger("plugin-auth")
 
 
 class OAuthPlugin(AuthPlugin):

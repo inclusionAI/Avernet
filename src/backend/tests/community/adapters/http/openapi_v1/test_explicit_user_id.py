@@ -300,15 +300,47 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: them, all four taking ``bot_id`` as a query parameter — which is what it is
 #: there, since the address is the file's path and not the bot's.
 #:
+#: ``query`` then moved 20 → 16 when the resources group became files-only: the
+#: five record-addressed operations went with the links they served (``POST ""``,
+#: ``GET``/``PUT``/``DELETE /{resource_id}``, ``check-name``) and ``GET /stat``
+#: replaced them, all query-addressed like the rest of the group. ``path`` is
+#: untouched by that: those five carried ``{resource_id}``, never a ``{bot_id}``.
+#:
 #: ``path`` moved 31 → 34 with the startup-script operations (GET/PUT/DELETE on
 #: ``/bots/{bot_id}/startup-script``) — all three address a bot, none moved.
-_BOT_ID_PLACEMENT = {"path": 34, "query": 20, "none": 21}
+#:
+#: Then bot-first addressing moved 34/16/21 → 54/1/16, and this counter stopped
+#: meaning what its name says: ``bot_id`` is no longer untouched, it was the
+#: point. Every operation that acts on one bot now names it in the path, so the
+#: only ``query`` left is ``GET /bots/logs/traces``, where ``bot_id`` is a
+#: filter over a tenant-level trace query rather than an address — the one
+#: placement the rule deliberately keeps. ``none`` fell 21 → 16 because the five
+#: operations that named no bot at all (the resources and routines collection
+#: roots, skills list and upload) now do.
+_BOT_ID_PLACEMENT = {"path": 54, "query": 1, "none": 16}
 
 
 def _schema() -> dict:
     app = FastAPI()
     app.include_router(build_public_router())
     return app.openapi()
+
+
+def _current_operations(schema: dict):
+    """``(path, method, operation)`` for the operations of the current contract.
+
+    The retiring addresses answer beside them and take the same ``user_id``,
+    but every count in this file is pinned — and a pin that silently doubled
+    when the deprecated package landed, then halved again when it went, would
+    be measuring the migration rather than the rule. The rule is about the
+    surface this API has.
+    """
+    for path, item in schema["paths"].items():
+        for method, operation in item.items():
+            if not isinstance(operation, dict) or "responses" not in operation:
+                continue
+            if not operation.get("deprecated", False):
+                yield path, method, operation
 
 
 def _operations(schema: dict):
@@ -350,15 +382,22 @@ def test_the_pinned_number_of_operations_take_it():
     (#1000): four new operations (``DELETE ""``, ``/download``, ``/preview``,
     ``/mkdir``) replaced two id-addressed ones, and every one of them takes the
     caller's ``user_id`` like the rest of the user-scoped surface.
+
+    65 → 61 when the resources group became files-only: five record-addressed
+    operations were removed and ``GET /stat`` added. A *drop* is the direction
+    this pin exists to catch, so it is worth saying plainly that this one is
+    intended — the five went away with the link resources they served, not by
+    losing the dependency.
     """
     taking = [
         1
-        for path, method, operation in _operations(_schema())
+        for path, method, operation in _current_operations(_schema())
         if _user_scoped(path, method) and _param(operation, USER_ID_QUERY)
     ]
-    # 60 on the merge base, +3 for the startup-script operations and +2 for the
-    # resources file endpoints re-addressed by workspace path (#1000).
-    assert len(taking) == 65
+    # 60 on the merge base, +3 for the startup-script operations, +2 for the
+    # resources file endpoints re-addressed by workspace path (#1000), then -4
+    # for the files-only resources group.
+    assert len(taking) == 61
 
 
 def test_the_exempt_operations_take_none():
@@ -410,10 +449,16 @@ def test_user_id_is_never_a_body_field_or_a_path_segment():
         )
 
 
-def test_bot_id_placement_is_untouched():
-    """This change moved no ``bot_id``. If it ever does, it is on purpose."""
+def test_bot_id_is_in_the_path_wherever_it_addresses_a_bot():
+    """Counted over the current contract only.
+
+    The retiring addresses carry ``bot_id`` where they always did — in the
+    query, in a body, or nowhere — which is the whole point of keeping them.
+    Counting them here would measure how far through the migration we are
+    rather than whether the rule holds.
+    """
     counts = {"path": 0, "query": 0, "none": 0}
-    for _, _, operation in _operations(_schema()):
+    for _, _, operation in _current_operations(_schema()):
         parameter = _param(operation, "bot_id")
         counts[parameter["in"] if parameter else "none"] += 1
     assert counts == _BOT_ID_PLACEMENT

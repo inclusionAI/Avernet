@@ -1988,6 +1988,38 @@ class BotService:
 
         return bot
 
+    def get_bot_pk(self, bot_id: str, user_id: str) -> int:
+        """Return ``ac_bots.id`` for the owner-scoped bot, or raise.
+
+        The narrow sibling of :meth:`get_bot`, for callers that need only the
+        primary key downstream tables are keyed on (``ac_bot_collaborator``,
+        ``ac_bot_publish.source_bot_pk``). ``get_bot`` also fetches the device
+        binding and the template — a provider call and a second query — and a
+        caller that wants an int should not pay for either.
+
+        Resolved through the same ``get_by_id_and_owner`` :meth:`get_bot` uses,
+        so it returns the primary key of the row that method would have
+        returned. It states no new identity: a caller re-reading the key of a
+        bot it already resolved gets the same row back, not a wider match.
+
+        Returns the key the row carries, which is ``0`` only if the projection
+        lost it — ``ac_bots.id`` is a non-nullable autoincrement column, so a
+        live row always has one. The refusal for a keyless row belongs to the
+        caller, whose own answer for "no safe key" is already established:
+        ``engine_runtime.stage.resolve_stage_bind_id`` raises
+        ``DeviceNotBoundError`` before it queries anything. Raising a different
+        error here would change that caller-visible answer.
+
+        Raises:
+            BotNotFoundError: no live bot with this ``(bot_id, user_id)`` —
+                the bot is gone, which is not the same as a row whose key did
+                not survive projection.
+        """
+        bot = self._repository.get_by_id_and_owner(bot_id, user_id)
+        if not bot:
+            raise BotNotFoundError(f"Bot not found: {bot_id}")
+        return int(bot.get("id") or 0)
+
     def list_coding_bots_by_architect(self, architect_bot_id: str) -> List[Dict[str, Any]]:
         """List application coding bots associated with a domain architect bot.
 

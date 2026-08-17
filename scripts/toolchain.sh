@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/toolchain.sh — Development toolchain management
 # Handles installation and verification of dev tools:
-# node, npm, uv, protoc, openclaw, rust/cargo
+# node, npm, uv, python, protoc, openclaw, optional claude code, rust/cargo
 #
 # toolchain_setup()  → Check and install all tools (idempotent, skip-if-present)
 # toolchain_check()  → Check only, return 1 if missing (dry-run, no install)
@@ -13,7 +13,21 @@ _TOOLCHAIN_SH_LOADED=1
 
 # Node.js 版本要求
 REQUIRED_NODE_MAJOR="22"
-REQUIRED_RUST_TOOLCHAIN="${REQUIRED_RUST_TOOLCHAIN:-1.91.0}"
+REQUIRED_RUST_TOOLCHAIN="${REQUIRED_RUST_TOOLCHAIN:-stable}"
+
+# uv 版本要求：需要支持 uv-managed Python 安装和 `uv sync --python`
+REQUIRED_UV_VERSION="0.4.0"
+
+# 服务子项目共同满足的 Python 版本（bcsfuse >=3.10,<3.13；backend/baas >=3.12,<3.13）
+REQUIRED_PYTHON_VERSION="3.12"
+CLAUDE_CODE_NPM_PACKAGE="@anthropic-ai/claude-code"
+CLAUDE_CODE_NPM_REGISTRY="https://registry.npmmirror.com"
+
+# install-tools runs in a child process, so PATH changes made by installers do
+# not reach the invoking shell. Track profile updates and print one actionable
+# reload command after a successful setup.
+_TOOLCHAIN_SHELL_RELOAD_REQUIRED=0
+_TOOLCHAIN_SHELL_RELOAD_PROFILE=""
 
 confirm_tool_install() {
     local prompt="$1"
@@ -21,6 +35,13 @@ confirm_tool_install() {
     echo -e "${YELLOW}${prompt} [y/N]${NC}"
     read -r response || response=""
     [[ "$response" =~ ^[Yy]$ ]]
+}
+
+confirm_claude_code_install() {
+    local response
+    echo -e "${YELLOW}Install Claude Code now? [Y/n]${NC}"
+    read -r response || response=""
+    [[ ! "$response" =~ ^[Nn]$ ]]
 }
 
 # ============ System build prerequisites ============
@@ -240,17 +261,50 @@ setup_system_dependencies() {
 
 # 检测 shell profile 文件
 detect_shell_profile() {
-    if [ -n "$ZSH_VERSION" ]; then
-        echo "$HOME/.zshrc"
-    elif [ -n "$BASH_VERSION" ]; then
-        if [ -f "$HOME/.bashrc" ]; then
-            echo "$HOME/.bashrc"
-        else
-            echo "$HOME/.bash_profile"
-        fi
-    else
-        echo "$HOME/.profile"
+    local shell_path="${SHELL:-}"
+    local shell_name="${shell_path##*/}"
+
+    case "$shell_name" in
+        zsh)
+            echo "$HOME/.zshrc"
+            ;;
+        bash)
+            if [ -f "$HOME/.bashrc" ]; then
+                echo "$HOME/.bashrc"
+            else
+                echo "$HOME/.bash_profile"
+            fi
+            ;;
+        *)
+            if [ -n "${ZSH_VERSION:-}" ]; then
+                echo "$HOME/.zshrc"
+            elif [ -n "${BASH_VERSION:-}" ]; then
+                if [ -f "$HOME/.bashrc" ]; then
+                    echo "$HOME/.bashrc"
+                else
+                    echo "$HOME/.bash_profile"
+                fi
+            else
+                echo "$HOME/.profile"
+            fi
+            ;;
+    esac
+}
+
+_toolchain_require_shell_reload() {
+    _TOOLCHAIN_SHELL_RELOAD_REQUIRED=1
+    if [ -z "$_TOOLCHAIN_SHELL_RELOAD_PROFILE" ]; then
+        _TOOLCHAIN_SHELL_RELOAD_PROFILE="$(detect_shell_profile)"
     fi
+}
+
+_toolchain_print_shell_reload_hint() {
+    [ "$_TOOLCHAIN_SHELL_RELOAD_REQUIRED" -eq 1 ] || return 0
+
+    local profile="${_TOOLCHAIN_SHELL_RELOAD_PROFILE:-$(detect_shell_profile)}"
+    log_warn "The installers updated your shell startup environment, but install-tools cannot reload its parent shell."
+    log_warn "Before running ./scripts/singlebox.sh start in this terminal, run once:"
+    log_warn "  source \"${profile}\""
 }
 
 # 将 nvm 配置追加到 shell profile
@@ -264,6 +318,7 @@ export NVM_DIR="$HOME/.nvm"
     if [ -f "$profile" ] && ! grep -q 'NVM_DIR' "$profile"; then
         log_info "Adding nvm to $profile..."
         echo "$nvm_snippet" >> "$profile"
+        _toolchain_require_shell_reload
     fi
 }
 
@@ -321,6 +376,7 @@ install_node_via_nvm() {
             log_error "nvm installation failed (nvm.sh not found at $NVM_DIR/nvm.sh)"
             return 1
         fi
+        _toolchain_require_shell_reload
     else
         log_info "nvm already installed at $NVM_DIR"
     fi
@@ -418,6 +474,132 @@ check_node_available() {
     return 1
 }
 
+# ============ uv 相关 ============
+
+get_uv_version() {
+    uv --version 2>&1 | head -1 | awk '{print $2}'
+}
+
+# 检查 uv 版本是否满足最低要求
+# 返回 0 满足, 1 不满足, 2 无法解析
+_check_uv_version_meets_requirement() {
+    local current_version
+    current_version="$(get_uv_version)"
+    if [ -z "$current_version" ]; then
+        return 2
+    fi
+    version_at_least "$current_version" "$REQUIRED_UV_VERSION"
+}
+
+# 尝试升级 uv 到满足最低要求的版本
+upgrade_uv() {
+    log_info "Upgrading uv to ${REQUIRED_UV_VERSION}+..."
+
+    if command -v pip3 &> /dev/null; then
+        if pip3 install --upgrade "uv>=${REQUIRED_UV_VERSION}" -i "${PYPI_INDEX_URL}"; then
+            log_info "uv upgraded via pip3"
+            return 0
+        fi
+    elif command -v pip &> /dev/null; then
+        if pip install --upgrade "uv>=${REQUIRED_UV_VERSION}" -i "${PYPI_INDEX_URL}"; then
+            log_info "uv upgraded via pip"
+            return 0
+        fi
+    fi
+
+    # Fallback: uv's self-update (may fail in restricted networks)
+    if uv self update; then
+        log_info "uv upgraded via self update"
+        return 0
+    fi
+
+    log_error "Failed to upgrade uv to ${REQUIRED_UV_VERSION}+. Please upgrade manually:"
+    log_error "  pip3 install --upgrade 'uv>=${REQUIRED_UV_VERSION}'"
+    return 1
+}
+
+# 确保 uv 已安装且版本满足要求
+ensure_uv() {
+    if ! check_uv_installed; then
+        auto_install_uv || return 1
+        if [ -f "$HOME/.local/bin/env" ]; then
+            _toolchain_require_shell_reload
+        fi
+    fi
+
+    local rv
+    _check_uv_version_meets_requirement; rv=$?
+    if [ "$rv" -eq 0 ]; then
+        log_info "uv $(get_uv_version) satisfies required >= ${REQUIRED_UV_VERSION}"
+        return 0
+    fi
+
+    log_warn "uv $(get_uv_version 2>/dev/null || echo 'unknown') is below required ${REQUIRED_UV_VERSION}"
+    upgrade_uv || return 1
+
+    _check_uv_version_meets_requirement; rv=$?
+    if [ "$rv" -ne 0 ]; then
+        log_error "uv is still below ${REQUIRED_UV_VERSION} after upgrade attempt"
+        return 1
+    fi
+
+    log_info "uv $(get_uv_version) satisfies required >= ${REQUIRED_UV_VERSION}"
+}
+
+# 检查 uv-managed Python 指定版本是否已安装
+_check_uv_managed_python_installed() {
+    local version="$1"
+    uv python list --only-installed 2>/dev/null | grep -qE "cpython-${version//./\\.}[.0-9]+"
+}
+
+# 确保服务子项目所需的 Python 版本已安装
+# 使用 uv python list / install，不依赖当前项目的 requires-python
+ensure_uv_managed_python() {
+    log_info "Checking uv-managed Python ${REQUIRED_PYTHON_VERSION}..."
+
+    if _check_uv_managed_python_installed "${REQUIRED_PYTHON_VERSION}"; then
+        log_info "Python ${REQUIRED_PYTHON_VERSION} is available via uv"
+        return 0
+    fi
+
+    log_warn "Python ${REQUIRED_PYTHON_VERSION} not found. Installing with uv..."
+    if uv python install "${REQUIRED_PYTHON_VERSION}"; then
+        log_info "Python ${REQUIRED_PYTHON_VERSION} installed successfully"
+        return 0
+    fi
+
+    log_error "Failed to install Python ${REQUIRED_PYTHON_VERSION} with uv."
+    log_error "Install it manually, then rerun install-tools."
+    return 1
+}
+
+# 检查项目根 .python-version 是否与服务子项目冲突
+# 服务子项目（bcsfuse/backend/baas）都要求 Python <3.13
+check_python_version_file() {
+    local version_file="${PROJECT_ROOT}/.python-version"
+    [ -f "$version_file" ] || return 0
+
+    local version
+    version="$(head -n 1 "$version_file" | tr -d '[:space:]')"
+    if [ -z "$version" ]; then
+        return 0
+    fi
+
+    local major minor
+    major="$(echo "$version" | cut -d'.' -f1)"
+    minor="$(echo "$version" | cut -d'.' -f2)"
+
+    # 空值保护
+    if [ -z "$major" ] || [ -z "$minor" ]; then
+        return 0
+    fi
+
+    if [ "$major" -ge 3 ] && [ "$minor" -ge 13 ]; then
+        log_warn "${version_file} specifies Python ${version}, which conflicts with service subprojects (requires <3.13)"
+        log_warn "Run: echo '${REQUIRED_PYTHON_VERSION}' > ${version_file}"
+    fi
+}
+
 # ============ npm 相关 ============
 
 # 检查 npm 是否存在 (静默检查，不打印日志)
@@ -452,6 +634,75 @@ ensure_npm_available() {
 
     log_error "npm is still not available after Node.js setup."
     return 1
+}
+
+# ============ Claude Code 安装 ============
+
+claude_code_cli_path() {
+    local npm_prefix=""
+    local candidate
+
+    if command -v npm >/dev/null 2>&1; then
+        npm_prefix="$(npm prefix -g 2>/dev/null || true)"
+    fi
+
+    for candidate in "${CLAUDE_CODE_PATH:-}" "$(command -v claude 2>/dev/null || true)" "${npm_prefix:+${npm_prefix}/bin/claude}"; do
+        [ -n "$candidate" ] && [ -x "$candidate" ] && { printf '%s\n' "$candidate"; return 0; }
+    done
+    return 1
+}
+
+log_claude_code_path_setup() {
+    local quoted_path
+    printf -v quoted_path '%q' "$CLAUDE_CODE_PATH"
+    log_info "Claude Code CLI ready: ${CLAUDE_CODE_PATH}"
+    log_info "To configure future terminals, run:"
+    log_info "  export CLAUDE_CODE_PATH=${quoted_path}"
+}
+
+install_claude_code() {
+    if ! command -v npm >/dev/null 2>&1; then
+        log_error "npm not found. Install Node.js with npm, then rerun install-tools."
+        return 1
+    fi
+
+    log_info "Installing Claude Code from npm mirror..."
+    # 以下为安全注释COSEC：包名和镜像为固定的脚本常量，避免执行用户控制的安装参数。
+    if ! npm install -g "$CLAUDE_CODE_NPM_PACKAGE" --registry="$CLAUDE_CODE_NPM_REGISTRY"; then
+        log_error "Claude Code installation failed. Run this command manually, then rerun install-tools:"
+        log_error "  npm install -g @anthropic-ai/claude-code --registry=https://registry.npmmirror.com"
+        return 1
+    fi
+}
+
+setup_claude_code() {
+    local cli_path
+
+    log_info "Checking Claude Code installation..."
+    if cli_path="$(claude_code_cli_path)"; then
+        CLAUDE_CODE_PATH="$cli_path"
+        export CLAUDE_CODE_PATH
+        log_claude_code_path_setup
+        return 0
+    fi
+
+    log_warn "Claude Code CLI not found."
+    if ! confirm_claude_code_install; then
+        log_warn "Skipping optional Claude Code installation."
+        return 0
+    fi
+
+    install_claude_code || return 1
+    if ! cli_path="$(claude_code_cli_path)"; then
+        log_error "Claude Code was installed but no executable CLI could be resolved."
+        log_error "Set CLAUDE_CODE_PATH to the executable claude path, then rerun install-tools."
+        log_error "  export CLAUDE_CODE_PATH=/actual/path/to/claude"
+        return 1
+    fi
+
+    CLAUDE_CODE_PATH="$cli_path"
+    export CLAUDE_CODE_PATH
+    log_claude_code_path_setup
 }
 
 # ============ OpenClaw 安装 ============
@@ -555,13 +806,30 @@ rustup_target_triple() {
     esac
 }
 
+load_rust_environment() {
+    local cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+    local cargo_bin="${cargo_home}/bin"
+
+    if [ -f "${cargo_home}/env" ]; then
+        # shellcheck source=/dev/null
+        . "${cargo_home}/env"
+    fi
+    if [ -d "$cargo_bin" ]; then
+        case ":${PATH}:" in
+            *":${cargo_bin}:"*) ;;
+            *) export PATH="${cargo_bin}:${PATH}" ;;
+        esac
+    fi
+}
+
 load_existing_rust_from_home() {
     local cargo_home="${CARGO_HOME:-$HOME/.cargo}"
     if [ -x "${cargo_home}/bin/cargo" ] && [ -x "${cargo_home}/bin/rustc" ]; then
         log_warn "Rust/Cargo found under ${cargo_home}/bin but not in current PATH."
-        export PATH="${cargo_home}/bin:${PATH}"
+        load_rust_environment
         if check_rust_installed; then
             log_info "Loaded Rust/Cargo from ${cargo_home}/bin for this shell."
+            _toolchain_require_shell_reload
             return 0
         fi
     fi
@@ -616,14 +884,11 @@ install_rust_via_rustup() {
         rm -rf "${work}"
     fi
 
-    if [ -f "${cargo_home}/env" ]; then
-        # shellcheck source=/dev/null
-        . "${cargo_home}/env"
-    fi
-    export PATH="${cargo_home}/bin:${PATH}"
+    load_rust_environment
 
     if check_rust_installed; then
         log_info "Rust/Cargo installed: $(rustc --version 2>&1 | head -1)"
+        _toolchain_require_shell_reload
         return 0
     fi
 
@@ -729,49 +994,57 @@ toolchain_setup() {
     _apply_cargo_mirror_config
 
     # Step 1: System dependencies
-    log_info "[1/7] Checking system dependencies..."
+    log_info "[1/9] Checking system dependencies..."
     setup_system_dependencies || return 1
     echo ""
 
     # Step 2: Node.js
-    log_info "[2/7] Setting up Node.js..."
+    log_info "[2/9] Setting up Node.js..."
     setup_node || return 1
     echo ""
 
     # Step 3: npm
-    log_info "[3/7] Checking npm..."
+    log_info "[3/9] Checking npm..."
     ensure_npm_available || return 1
     echo ""
 
     # Step 4: uv
-    log_info "[4/7] Setting up uv..."
-    if ! check_uv_installed; then
-        auto_install_uv || return 1
-    else
-        log_info "uv already installed"
-    fi
+    log_info "[4/9] Setting up uv..."
+    ensure_uv || return 1
     echo ""
 
-    # Step 5: openclaw
-    log_info "[5/7] Setting up openclaw..."
+    # Step 5: Python (must satisfy all service subprojects)
+    log_info "[5/9] Checking Python compatibility..."
+    ensure_uv_managed_python || return 1
+    check_python_version_file
+    echo ""
+
+    # Step 6: openclaw
+    log_info "[6/9] Setting up openclaw..."
     setup_openclaw || return 1
     echo ""
 
-    # Step 6: Rust/Cargo
-    log_info "[6/7] Setting up Rust/Cargo..."
+    # Step 7: Claude Code
+    log_info "[7/9] Setting up Claude Code..."
+    setup_claude_code || return 1
+    echo ""
+
+    # Step 8: Rust/Cargo
+    log_info "[8/9] Setting up Rust/Cargo..."
     setup_rust || return 1
     echo ""
 
-    # Step 7: Protobuf
-    log_info "[7/7] Setting up protobuf..."
+    # Step 9: Protobuf
+    log_info "[9/9] Setting up protobuf..."
     setup_protobuf_interactive || return 1
     echo ""
 
     log_info "Toolchain setup complete!"
+    _toolchain_print_shell_reload_hint
     echo ""
 }
 
 # 工具链帮助
 toolchain_help() {
-    echo "toolchain - Development tools (node, npm, uv, protoc, openclaw, rust)"
+    echo "toolchain - Development tools (node, npm, uv, python, protoc, openclaw, optional claude code, rust)"
 }

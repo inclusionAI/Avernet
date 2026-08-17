@@ -14,6 +14,9 @@ import time
 from fastapi import APIRouter, WebSocket
 
 from engine.community.api.transport.ws_server import get_server
+from engine.community.core.resource_materialization.service import (
+    ResourceMaterializationService,
+)
 from engine.community.di import Injected
 from engine.community.plugin_api.auth_gate.protocol import AuthGateService
 
@@ -22,8 +25,12 @@ log = logging.getLogger("engine-ws-router")
 router = APIRouter(tags=["ws"])
 
 
-async def _handle(ws: WebSocket, engine_name: str,
-                  auth_gate_service: AuthGateService) -> None:
+async def _handle(
+    ws: WebSocket,
+    engine_name: str,
+    auth_gate_service: AuthGateService,
+    resource_materialization_service: ResourceMaterializationService | None = None,
+) -> None:
     from engine.community.manager import EngineManager
 
     manager = EngineManager.get_instance()
@@ -41,7 +48,7 @@ async def _handle(ws: WebSocket, engine_name: str,
         return
     t_start = time.monotonic()
     log.info("[ws] %s connection accepted", engine_name)
-    server = get_server()
+    server = get_server(resource_materialization_service)
     await server.handle_connection(ws, auth_gate_service=auth_gate_service)
     latency_ms = int((time.monotonic() - t_start) * 1000)
     log.info("[ws] %s closed: latency=%dms", engine_name, latency_ms)
@@ -51,7 +58,14 @@ async def _handle(ws: WebSocket, engine_name: str,
 async def openclaw_ws(
     ws: WebSocket,
     auth_gate_service: AuthGateService = Injected(AuthGateService),
+    resource_materialization_service: ResourceMaterializationService = Injected(
+        ResourceMaterializationService
+    ),
 ) -> None:
-    await _handle(ws, "openclaw", auth_gate_service)
-
+    await _handle(
+        ws,
+        "openclaw",
+        auth_gate_service,
+        resource_materialization_service,
+    )
 

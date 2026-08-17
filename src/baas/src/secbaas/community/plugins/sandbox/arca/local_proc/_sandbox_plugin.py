@@ -23,7 +23,7 @@ from ._process_manager import LocalProcessManager
 from ._sandbox import LocalProcessArcaSandbox
 from ._workspace import resolve_workspace_dir, setup_workspace_dirs
 
-logger = get_logger("plugin-sandbox-arca-local-proc")
+logger = get_logger("plugin-sandbox")
 
 # 引擎类型映射
 ENGINE_MAP = {

@@ -114,6 +114,7 @@
       "operator_names": []
     },
     "workspace": {
+      "aicoding_root": "./data/workspace/aicoding",
       "claude_code_root": "./data/workspace/claude_code",
       "openclaw_root": "./data/workspace/openclaw"
     }
@@ -247,6 +248,7 @@
       "operator_names": []
     },
     "workspace": {
+      "aicoding_root": "data/workspace/aicoding",
       "claude_code_root": "data/workspace/claude_code",
       "claude_code_session_root": "/home/admin/.claude",
       "openclaw_root": "data/workspace/openclaw"

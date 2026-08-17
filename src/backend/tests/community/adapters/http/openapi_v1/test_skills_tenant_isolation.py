@@ -155,7 +155,7 @@ def test_every_skills_operation_is_guarded_from_another_tenant(
 
     headers = {PRINCIPAL_HEADER: _principal(_TENANT_B)}
     client = user_scoped_client(app_with_testing_modules, _OWNER)
-    own_list = client.get(f"/openapi/v1/bots/skills?bot_id={_BOT_ID}", headers=headers)
+    own_list = client.get(f"/openapi/v1/bots/{_BOT_ID}/skills", headers=headers)
     assert own_list.status_code == 200
     assert own_list.json()["data"]["total"] == 1
     assert [item["skill_id"] for item in own_list.json()["data"]["items"]] == [
@@ -163,19 +163,19 @@ def test_every_skills_operation_is_guarded_from_another_tenant(
     ]
     requests = (
         client.get(
-            f"/openapi/v1/bots/skills?bot_id={_PRIVATE_BOT_ID}", headers=headers
+            f"/openapi/v1/bots/{_PRIVATE_BOT_ID}/skills", headers=headers
         ),
-        client.get(f"/openapi/v1/bots/skills/{skill['id']}", headers=headers),
+        client.get(f"/openapi/v1/bots/{_BOT_ID}/skills/{skill['id']}", headers=headers),
         client.post(
-            f"/openapi/v1/bots/skills/upload?bot_id={_PRIVATE_BOT_ID}",
+            f"/openapi/v1/bots/{_PRIVATE_BOT_ID}/skills",
             content=_package(),
             headers={**headers, "content-type": "application/zip"},
         ),
-        client.post(f"/openapi/v1/bots/skills/{skill['id']}/activate", headers=headers),
+        client.post(f"/openapi/v1/bots/{_BOT_ID}/skills/{skill['id']}/activate", headers=headers),
         client.post(
-            f"/openapi/v1/bots/skills/{skill['id']}/deactivate", headers=headers
+            f"/openapi/v1/bots/{_BOT_ID}/skills/{skill['id']}/deactivate", headers=headers
         ),
-        client.delete(f"/openapi/v1/bots/skills/{skill['id']}", headers=headers),
+        client.delete(f"/openapi/v1/bots/{_BOT_ID}/skills/{skill['id']}", headers=headers),
     )
     try:
         for response in requests:

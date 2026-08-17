@@ -47,13 +47,19 @@ class ApprovalModeInfo(BaseModel):
     description: str = Field(description="What this mode does.")
 
 
-class ApprovalModeSet(BaseModel):
-    """Set-the-mode request body."""
+class ApprovalModeChoice(BaseModel):
+    """Set-the-mode request body: the mode, and nothing else.
+
+    The session is named by the session_key query parameter, the same way the
+    read at this address names it. It selects which session the mode applies to
+    rather than forming part of the value being written, and taking it in the
+    body here meant a client filled one field in two different places depending
+    on the verb.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    session_key: str = Field(description="Session to change the mode for.")
     mode: ApprovalMode = Field(description="The mode to set.")
 
 
-__all__ = ["ApprovalModeInfo", "ApprovalModeSet", "ApprovalState"]
+__all__ = ["ApprovalModeChoice", "ApprovalModeInfo", "ApprovalState"]

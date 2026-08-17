@@ -32,8 +32,24 @@ logger = get_logger("plugin-bot-service")
 _SUPPORTED_RUNTIME_ENGINE_TYPES = frozenset(
     {"openclaw", "teclaw", "aicoding", "hermes", "claude_code"}
 )
+_CLAUDE_CODE_NORMAL_TEMPLATE = "normalCC"
 _BINDING_MAX_ATTEMPTS = 2
 _BINDING_RETRY_DELAY_SECONDS = 0.1
+
+
+def resolve_claude_code_engine(active_engine: str, template_type: str | None) -> str:
+    """Resolve the adapter engine for a ``claude_code`` active engine.
+
+    A ``claude_code`` active engine routes to the ``aicoding`` adapter while the
+    bot still carries a non-normal template, and to ``claude_code`` once the bot
+    uses the plain (``normalCC``) template. All other engines are unchanged.
+    """
+    if active_engine != "claude_code":
+        return active_engine
+    tt = template_type.strip() if isinstance(template_type, str) else ""
+    if tt and tt != _CLAUDE_CODE_NORMAL_TEMPLATE:
+        return "aicoding"
+    return "claude_code"
 
 
 class AiohttpBotServicePlugin(BotServicePlugin):
@@ -341,22 +357,27 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                         engine_type,
                     )
 
+            consumed_engine_type = resolve_claude_code_engine(
+                engine_type, inner.get("template_type")
+            )
+
             logger.info(
                 "[bot-service] get_binding raw: bot_id=%s engine_type=%r "
                 "active_runtime_engine_type=%r consumed_engine_type=%r "
-                "template_type=%r device_provider=%r",
+                "template_type=%r routed_engine_type=%r device_provider=%r",
                 resolved_bot_id,
                 original_engine_type,
                 runtime_engine_type,
                 engine_type,
                 inner.get("template_type"),
+                consumed_engine_type,
                 inner.get("device_provider"),
             )
             return BotBindingData(
                 bot_id=resolved_bot_id,
                 owner_id=inner.get("owner_id", owner_id),
                 bot_type=bot_type,
-                engine_type=engine_type,
+                engine_type=consumed_engine_type,
                 publish_id=inner.get("publish_id"),
                 publish_status=inner.get("publish_status"),
                 binding_id=inner.get("binding_id", 0),

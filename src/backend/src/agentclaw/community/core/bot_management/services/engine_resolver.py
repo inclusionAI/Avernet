@@ -1,13 +1,13 @@
 """Engine type resolution helper.
 
 Frontend should not be required to know a bot's engine type — the backend
-resolves it from `bot_id` per the multi-engine API design
-(see docs/resource-management-api.md). API endpoints call this helper to
-turn (bot_id, owner_id, optional override) into a concrete engine type.
+resolves it from `bot_id`. API endpoints call this helper to turn
+(bot_id, owner_id, optional override) into the effective engine type used by
+workspace/resource routing.
 
 Resolution order:
   1. Explicit override (operator/debug use); empty string treated as no override.
-  2. Bot record's active_engine.
+  2. Bot record's active_engine, after applying registered engine routing policy.
   3. DEFAULT_ENGINE_TYPE.
 """
 from __future__ import annotations
@@ -15,6 +15,9 @@ from __future__ import annotations
 from typing import Optional
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.bot_management.engines.registry import (
+    resolve_bot_engine,
+)
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.log import get_logger
 
@@ -68,6 +71,6 @@ def resolve_engine_for_bot(
     if bot:
         active = bot.get("active_engine")
         if active:
-            return active
+            return resolve_bot_engine(bot) or active
 
     return DEFAULT_ENGINE_TYPE

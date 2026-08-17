@@ -40,5 +40,6 @@ tokio-tungstenite = "0.26"
 bcs-session = { workspace = true }
 bcs-test-support = { workspace = true }
 bcs-services-container = { workspace = true, features = ["test-support"] }
+bcs-interaction = { workspace = true }
 tracing-subscriber = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["testing"] }

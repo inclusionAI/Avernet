@@ -8,7 +8,10 @@ use serde_json::Value;
 use tracing::warn;
 
 use super::agent::{ApprovalData, LifecycleData, PhaseData, ThinkingData, ToolData};
-use super::event::{AgentData, AgentEvent, ChatEvent, ChatState, StreamEvent};
+use super::event::{
+    AgentData, AgentEvent, ChatEvent, ChatState, InteractionEvent, InteractionKind,
+    InteractionPhase, StreamEvent,
+};
 
 /// Bounded metadata for a frame: byte size + top-level key names. No content.
 fn frame_meta(raw: &Value) -> (usize, Vec<String>) {
@@ -31,6 +34,7 @@ pub fn parse_stream_event(event: &str, data: Value) -> StreamEvent {
     match event {
         "agent" => parse_agent(data),
         "chat" => parse_chat(data),
+        "interaction" => parse_interaction(data),
         "ping" => StreamEvent::Ping {
             ts: data.get("ts").and_then(Value::as_u64),
         },
@@ -40,6 +44,51 @@ pub fn parse_stream_event(event: &str, data: Value) -> StreamEvent {
             audit_raw(&data);
             StreamEvent::Unknown {
                 event: other.to_string(),
+                raw: data,
+            }
+        }
+    }
+}
+
+fn parse_interaction(data: Value) -> StreamEvent {
+    let run_id = str_field(&data, "runId");
+    let seq = data.get("seq").and_then(Value::as_u64);
+    let interaction_id = str_field(&data, "interactionId");
+    let phase = data
+        .get("phase")
+        .cloned()
+        .map(serde_json::from_value::<InteractionPhase>)
+        .transpose();
+    let kind = data
+        .get("kind")
+        .cloned()
+        .map(serde_json::from_value::<InteractionKind>)
+        .transpose();
+
+    match (run_id, seq, interaction_id, phase, kind) {
+        (Some(run_id), Some(seq), Some(interaction_id), Ok(Some(phase)), Ok(Some(kind))) => {
+            StreamEvent::Interaction(InteractionEvent {
+                run_id,
+                seq: Some(seq),
+                ts: data.get("ts").and_then(Value::as_u64),
+                session_key: str_field(&data, "sessionKey"),
+                phase,
+                interaction_id,
+                kind,
+                raw: data,
+            })
+        }
+        _ => {
+            let (bytes, keys) = frame_meta(&data);
+            warn!(bytes, ?keys, "interaction event missing/unknown common field");
+            tracing::trace!(
+                target: "stream_audit",
+                bytes,
+                ?keys,
+                "redacted malformed interaction frame"
+            );
+            StreamEvent::Unknown {
+                event: "interaction".to_string(),
                 raw: data,
             }
         }
@@ -180,6 +229,101 @@ mod tests {
             }
             _ => panic!("expected agent/tool"),
         }
+    }
+
+    #[test]
+    fn parses_requested_exec_interaction() {
+        let data = json!({
+            "runId": "provider-run-1",
+            "seq": 7,
+            "ts": 1786300000000_u64,
+            "sessionKey": "provider-session-1",
+            "phase": "requested",
+            "interactionId": "interaction-1",
+            "kind": "exec",
+            "command": "npm run deploy",
+            "options": [
+                {"decision": "allow_once", "label": "Allow once"},
+                {"decision": "deny", "label": "Deny"}
+            ]
+        });
+
+        match parse_stream_event("interaction", data.clone()) {
+            StreamEvent::Interaction(interaction) => {
+                assert_eq!(interaction.run_id, "provider-run-1");
+                assert_eq!(interaction.seq, Some(7));
+                assert_eq!(interaction.ts, Some(1786300000000));
+                assert_eq!(interaction.session_key.as_deref(), Some("provider-session-1"));
+                assert_eq!(interaction.interaction_id, "interaction-1");
+                assert_eq!(interaction.phase, InteractionPhase::Requested);
+                assert_eq!(interaction.kind, InteractionKind::Exec);
+                assert_eq!(interaction.raw, data);
+            }
+            other => panic!("expected interaction, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_requested_ask_user_and_mode_switch_interactions() {
+        for (kind, expected) in [
+            ("ask_user", InteractionKind::AskUser),
+            ("mode_switch", InteractionKind::ModeSwitch),
+        ] {
+            let data = json!({
+                "runId": "provider-run-2",
+                "seq": 8,
+                "phase": "requested",
+                "interactionId": format!("interaction-{kind}"),
+                "kind": kind,
+                "providerExtension": {"preserved": true}
+            });
+
+            match parse_stream_event("interaction", data.clone()) {
+                StreamEvent::Interaction(interaction) => {
+                    assert_eq!(interaction.phase, InteractionPhase::Requested);
+                    assert_eq!(interaction.kind, expected);
+                    assert_eq!(interaction.raw, data);
+                }
+                other => panic!("expected interaction, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn parses_resolved_interaction_without_kind_specific_echo() {
+        let data = json!({
+            "runId": "provider-run-1",
+            "seq": 11,
+            "ts": 1786300004000_u64,
+            "phase": "resolved",
+            "interactionId": "interaction-2",
+            "kind": "ask_user"
+        });
+
+        match parse_stream_event("interaction", data.clone()) {
+            StreamEvent::Interaction(interaction) => {
+                assert_eq!(interaction.phase, InteractionPhase::Resolved);
+                assert_eq!(interaction.kind, InteractionKind::AskUser);
+                assert_eq!(interaction.raw, data);
+            }
+            other => panic!("expected interaction, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn interaction_without_required_seq_is_unknown_without_business_data_logging() {
+        let data = json!({
+            "runId": "provider-run-1",
+            "phase": "requested",
+            "interactionId": "interaction-1",
+            "kind": "exec",
+            "command": "must-not-be-audited"
+        });
+
+        assert!(matches!(
+            parse_stream_event("interaction", data),
+            StreamEvent::Unknown { event, .. } if event == "interaction"
+        ));
     }
 
     #[test]

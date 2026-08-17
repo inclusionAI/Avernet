@@ -11,8 +11,6 @@ from scripts.validate_openapi_contract import load_contract  # noqa: E402
 
 
 BOT_OPERATIONS = {
-    ("get", "/openapi/v1/collaboration/bots/{bot_id}/candidates"),
-    ("get", "/openapi/v1/collaboration/bots/{bot_id}/candidates/search"),
     ("post", "/openapi/v1/collaboration/bots/query"),
     ("get", "/openapi/v1/collaboration/bots/{bot_id}"),
     ("patch", "/openapi/v1/collaboration/bots/{bot_id}"),
@@ -26,6 +24,22 @@ def _contract():
 
 def _operation(method: str, path: str):
     return _contract()["paths"][path][method]
+
+
+def _public_contract():
+    return load_contract(CONTRACT_ROOT)
+
+
+def _internal_contract():
+    return load_contract(CONTRACT_ROOT, entrypoint="internal.yaml")
+
+
+def _public_operation(method: str, path: str):
+    return _public_contract()["paths"][path][method]
+
+
+def _internal_operation(method: str, path: str):
+    return _internal_contract()["paths"][path][method]
 
 
 def _parameters(operation):
@@ -121,7 +135,7 @@ def test_bot_domain_model_is_a_strict_bot_human_union() -> None:
 
 
 def test_candidates_contract_matches_legacy_list_semantics() -> None:
-    operation = _operation(
+    operation = _public_operation(
         "get", "/openapi/v1/collaboration/bots/{bot_id}/candidates"
     )
     parameters = _parameters(operation)
@@ -162,8 +176,8 @@ def test_candidates_contract_matches_legacy_list_semantics() -> None:
 
 
 def test_candidate_search_contract_matches_legacy_search_semantics() -> None:
-    operation = _operation(
-        "get", "/openapi/v1/collaboration/bots/{bot_id}/candidates/search"
+    operation = _internal_operation(
+        "get", "/api/v1/collaboration/bots/{bot_id}/candidates/search"
     )
     parameters = _parameters(operation)
 

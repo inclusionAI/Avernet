@@ -9,7 +9,7 @@ from secbaas.community.logger import get_logger
 
 from ._record import LocalUserMachineRecord
 
-log = get_logger("orm-repository")
+log = get_logger("orm")
 
 
 @runtime_checkable

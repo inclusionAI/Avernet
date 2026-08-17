@@ -84,6 +84,9 @@ class ConfigModule(Module):
             claude_code_root=_expand(
                 block.get("claude_code_root"), defaults.claude_code_root
             ),
+            aicoding_root=_expand(
+                block.get("aicoding_root"), defaults.aicoding_root
+            ),
         )
 
     # ── Access policy ───────────────────────────────────────────────

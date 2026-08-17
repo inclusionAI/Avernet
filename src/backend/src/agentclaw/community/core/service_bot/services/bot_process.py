@@ -16,8 +16,8 @@ class BotProcess(Protocol):
         ...
 
 
-class PersonalBotProcess:
-    """Read the explicit runtime engine type from a personal bot template."""
+class TemplateConfigBotProcess:
+    """Read the explicit runtime engine type from a bot template."""
 
     def __init__(self, template_service: TemplateService) -> None:
         self._template_service = template_service
@@ -31,6 +31,14 @@ class PersonalBotProcess:
         if not isinstance(runtime_engine_type, str):
             return ""
         return runtime_engine_type.strip()
+
+
+class PersonalBotProcess(TemplateConfigBotProcess):
+    """Read the explicit runtime engine type from a personal bot template."""
+
+
+class ServiceBotProcess(TemplateConfigBotProcess):
+    """Read the explicit runtime engine type from a service bot template."""
 
 
 class EmptyBotProcess:
@@ -47,11 +55,15 @@ class BotProcessRegistry:
         self,
         personal_bot_process: BotProcess,
         default_bot_process: BotProcess,
+        service_bot_process: BotProcess | None = None,
     ) -> None:
         self._personal_bot_process = personal_bot_process
+        self._service_bot_process = service_bot_process or personal_bot_process
         self._default_bot_process = default_bot_process
 
     def get(self, bot_type: str) -> BotProcess:
         if bot_type == "personal":
             return self._personal_bot_process
+        if bot_type == "service":
+            return self._service_bot_process
         return self._default_bot_process

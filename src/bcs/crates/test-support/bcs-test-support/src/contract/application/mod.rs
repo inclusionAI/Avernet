@@ -6,7 +6,8 @@ use bcs_service_api::{
     FriendService, GroupFusionService, GroupManagementService, GroupMessageHistoryService,
     GroupProposalService, GroupQueryService, HumanActorService, MessageFlowService,
     CreateOrganizationCommand, OrganizationAuth, OrganizationManagementService,
-    OrganizationMemberAuth, ServiceError, SystemMessageService, WorkbenchSessionService,
+    InteractionService, OrganizationMemberAuth, ServiceError, SystemMessageService,
+    WorkbenchSessionService,
 };
 use bcs_service_api::application::v1::{
     AuthenticatedBotIdentity, AuthenticatedCaller, BotService, QueryBots,
@@ -74,6 +75,8 @@ pub async fn group_proposal_service_contract_tests<T: GroupProposalService + ?Si
 pub async fn group_query_service_contract_tests<T: GroupQueryService + ?Sized>(_svc: &T) {}
 
 pub async fn human_actor_service_contract_tests<T: HumanActorService + ?Sized>(_svc: &T) {}
+
+pub async fn interaction_service_contract_tests<T: InteractionService + ?Sized>(_svc: &T) {}
 
 pub async fn message_flow_service_contract_tests<T: MessageFlowService + ?Sized>(_svc: &T) {}
 

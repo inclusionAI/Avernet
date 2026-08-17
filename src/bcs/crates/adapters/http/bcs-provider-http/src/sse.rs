@@ -60,8 +60,8 @@ pub(crate) enum SeqDecision {
 }
 
 impl SeqDedup {
-    /// Compare against last accepted seq on the agent/chat counter.
-    /// ping / gated approval must NOT be passed here (separate counters, D10).
+    /// Compare against the shared agent/chat/interaction sequence.
+    /// Ping and the legacy gated approval path do not participate.
     pub(crate) fn accept(&mut self, seq: Option<u64>) -> SeqDecision {
         let Some(seq) = seq else {
             // Missing seq: accept but caller records a metric.
@@ -92,6 +92,8 @@ pub(crate) enum IngestKind {
     Terminal { event_type: String, state: AppState },
     /// HITL approval requested — close stream, unsupported path.
     CloseUnsupported,
+    /// Provider 2.0 top-level interaction handled by InteractionService.
+    Interaction,
     /// Discard silently (ping, unknown top-level, unknown agent stream).
     Drop,
 }
@@ -133,6 +135,7 @@ pub(crate) fn classify(event: &StreamEvent) -> IngestKind {
             }
         },
         StreamEvent::Ping { .. } => IngestKind::Drop,
+        StreamEvent::Interaction(_) => IngestKind::Interaction,
         StreamEvent::Unknown { event, .. } => {
             tracing::warn!(event, "drop unknown stream event");
             IngestKind::Drop
@@ -211,6 +214,21 @@ mod tests {
             json!({ "runId": "r", "seq": 3, "stream": "approval", "phase": "requested", "kind": "exec" }),
         );
         assert!(matches!(classify(&ev), IngestKind::CloseUnsupported));
+    }
+
+    #[test]
+    fn classify_top_level_interaction_for_application_service() {
+        let ev = bcs_protocol::stream::parse_stream_event(
+            "interaction",
+            json!({
+                "runId": "provider-run-1",
+                "seq": 4,
+                "phase": "requested",
+                "interactionId": "interaction-1",
+                "kind": "exec"
+            }),
+        );
+        assert!(matches!(classify(&ev), IngestKind::Interaction));
     }
 
     #[test]

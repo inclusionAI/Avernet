@@ -352,7 +352,7 @@ async fn all_six_bot_routes_forward_verified_human_and_contract_inputs() {
         .clone()
         .oneshot(request(
             "GET",
-            "/openapi/v1/collaboration/bots/human_staff-1/candidates/search?q=planning%20help&purpose=collaboration",
+            "/api/v1/collaboration/bots/human_staff-1/candidates/search?q=planning%20help&purpose=collaboration",
             Value::Null,
         ))
         .await
@@ -484,9 +484,9 @@ async fn candidate_search_accepts_omitted_empty_and_whitespace_queries() {
     let app = test_router(service.clone());
 
     for uri in [
-        "/openapi/v1/collaboration/bots/human_staff-1/candidates/search",
-        "/openapi/v1/collaboration/bots/human_staff-1/candidates/search?q=",
-        "/openapi/v1/collaboration/bots/human_staff-1/candidates/search?q=%20%20%20",
+        "/api/v1/collaboration/bots/human_staff-1/candidates/search",
+        "/api/v1/collaboration/bots/human_staff-1/candidates/search?q=",
+        "/api/v1/collaboration/bots/human_staff-1/candidates/search?q=%20%20%20",
     ] {
         let response = app
             .clone()
@@ -517,7 +517,7 @@ async fn candidate_search_serializes_name_fallback_without_a_score() {
     let response = test_router(service)
         .oneshot(request(
             "GET",
-            "/openapi/v1/collaboration/bots/human_staff-1/candidates/search?q=fallback",
+            "/api/v1/collaboration/bots/human_staff-1/candidates/search?q=fallback",
             Value::Null,
         ))
         .await
@@ -560,7 +560,7 @@ async fn bot_routes_reject_unknown_request_fields_and_missing_principal() {
         .clone()
         .oneshot(request(
             "GET",
-            "/openapi/v1/collaboration/bots/bot-1/candidates/search?q=planning&limit=10",
+            "/api/v1/collaboration/bots/bot-1/candidates/search?q=planning&limit=10",
             Value::Null,
         ))
         .await
@@ -603,6 +603,7 @@ async fn previous_bcn_path_families_are_not_mounted() {
         "/openapi/v1/group-sessions/session-1",
         "/openapi/v1/friend-requests/request-1/accept",
         "/openapi/v1/invitations/token-1/accept",
+        "/api/v1/collaboration/bots/bot-1/candidates",
     ] {
         let response = app
             .clone()

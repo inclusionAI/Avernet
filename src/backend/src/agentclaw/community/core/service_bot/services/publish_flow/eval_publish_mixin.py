@@ -10,6 +10,9 @@ from agentclaw.community.core.service_bot.repository.models import (
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishNotFoundError,
 )
+from agentclaw.community.core.service_bot.services.deploy.service_publish_env import (
+    service_publish_template_config,
+)
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
 )
@@ -98,6 +101,7 @@ class EvalPublishMixin:
                 ext_info=ext_info,
                 docker_image=image_pin.docker_image,
                 runtime_kind=self.resolve_publish_runtime_kind(publish_record),
+                template_config=service_publish_template_config(bot),
             )
 
         op = await self._operation_runner.acquire_workflow(op, _issue)

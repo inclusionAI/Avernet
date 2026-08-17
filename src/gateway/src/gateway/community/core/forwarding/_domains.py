@@ -49,6 +49,7 @@ from gateway.community.core.paths import GLOB, PathPattern, split_segments
 
 _ENV_REF = re.compile(r"\$\{([^}]+)\}")
 _DEFAULT_BASE_PATH = "/openapi/v1"
+_INTERNAL_BASE_PATH = "/api/v1"
 _DEFAULT_REFRESH_SECONDS = 300
 
 #: The request/response plane — every HTTP verb, served by the catch-all.
@@ -480,10 +481,12 @@ def _parse_pattern(name: str, raw: Any, base_path: str) -> PathPattern:
     proxy — so the invariant now has to be enforced rather than assumed.
 
     The accepted shape is a run of literal segments followed by ``**``, and the
-    literals must extend *past* the version base. That refuses the three ways to
-    write something too wide (``/**``, ``/openapi/**``, ``/openapi/v1/**``) and
-    also refuses a leading parameter, which pins nothing at all: ``/openapi/v1/{x}/**``
-    matches every domain's traffic while looking specific.
+    literals must extend *past* one of the two Gateway API bases: the configured
+    public base path or the fixed internal ``/api/v1`` base. That refuses wide
+    patterns such as ``/**``, ``/openapi/**``, ``/openapi/v1/**``, and
+    ``/api/v1/**``, and also refuses a leading parameter, which pins nothing at
+    all: ``/openapi/v1/{x}/**`` matches every domain's traffic while looking
+    specific.
 
     A trailing ``**`` is required rather than inferred. A domain serves a
     *subtree* — the bare prefix and everything beneath it — and writing the glob
@@ -508,11 +511,17 @@ def _parse_pattern(name: str, raw: Any, base_path: str) -> PathPattern:
             f"routes could not be mounted and a raw path could not be checked "
             f"against it"
         )
-    base = split_segments(base_path)
-    if literals[: len(base)] != base or len(literals) <= len(base):
+    allowed_bases = (split_segments(base_path), split_segments(_INTERNAL_BASE_PATH))
+    if not any(
+        literals[: len(base)] == base and len(literals) > len(base)
+        for base in allowed_bases
+    ):
+        allowed = ", ".join(
+            f"{('/' + '/'.join(base)).rstrip('/')!r}" for base in allowed_bases
+        )
         raise ValueError(
-            f"domain {name!r}: match {raw!r} is too broad — it must pin "
-            f"{base_path.rstrip('/')!r} plus at least one more literal segment. "
+            f"domain {name!r}: match {raw!r} is too broad — it must pin one "
+            f"of {allowed} plus at least one more literal segment. "
             f"A wider pattern makes the gateway an open proxy into this "
             f"domain's upstream"
         )

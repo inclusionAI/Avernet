@@ -128,24 +128,23 @@ class EngineRuntimeRelay:
         — and this is a public-surface entry point whose entire purpose is to
         stop publishing device topology. A narrow value object makes leaking it
         impossible rather than merely discouraged.
+
+        The adjudication's ``bot_pk`` comes from the row read just above, not
+        from :class:`BotFacts`. ``ac_bot_collaborator`` is keyed on
+        ``ac_bots.id`` (``uk_bot_pk_user_env``), and that key is an internal
+        join value with no business on a projection built to be narrow — the
+        row is right here, so there is nothing to carry and nothing to re-read.
         """
         bot = self._bot_service.get_bot(bot_id, owner_id)
-        resolved_id = str(bot.get("bot_id") or bot_id)
-        resolved_owner = str(bot.get("owner_id") or owner_id)
+        facts = BotFacts.from_record(bot, bot_id=bot_id, owner_id=owner_id)
         require_bot_operator(
             self._collaborators,
             bot_pk=int(bot.get("id") or 0),
-            bot_id=resolved_id,
+            bot_id=facts.bot_id,
             caller_id=caller_id,
-            owner_id=resolved_owner,
+            owner_id=facts.owner_id,
         )
-        return BotFacts(
-            bot_id=resolved_id,
-            bot_type=str(bot.get("bot_type") or ""),
-            active_engine=str(bot.get("active_engine") or ""),
-            owner_id=resolved_owner,
-            bot_pk=int(bot.get("id") or 0),
-        )
+        return facts
 
     async def resolve_bot_off_loop(
         self, bot_id: str, owner_id: str, caller_id: str
@@ -229,11 +228,35 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
         different devices. A stage with no live record raises
         ``EngineStageNotLiveError`` there; no fallback to the draft binding,
         and none between stages.
+
+        **One owner-scoped row read for the primary key.** ``ac_bot_publish``
+        is keyed on ``source_bot_pk``, and this is the only one of the four
+        places needing that key that does not already hold the bot row — it
+        runs downstream of :meth:`resolve_bot`, with the facts but not the
+        record. Re-reading here rather than widening :class:`BotFacts` is the
+        trade ``stage.resolve_stage_device_context`` already makes for the same key
+        (spec D8). ``get_bot_pk`` and not ``get_bot``: the latter also fetches
+        the device binding and the template, which is a provider call and a
+        second query to buy an int.
+
+        It states no new identity. ``get_bot_pk`` resolves through the same
+        ``get_by_id_and_owner`` :meth:`resolve_bot` used, so it returns the key
+        of the row that call already adjudicated, not a wider match.
+
+        The re-read adds exactly one failure the single-read path could not
+        have: the bot is soft-deleted between the adjudication and here. That
+        raises ``BotNotFoundError`` — the same masked answer the resolution
+        itself gives for a bot that is not there — rather than being folded
+        into "device not ready", which would invite a retry of a bot that no
+        longer exists. A row that is present but carries no key is *not* that
+        case and keeps its old answer: ``resolve_stage_bind_id`` refuses it
+        with ``DeviceNotBoundError`` before querying, exactly as it did when
+        the key rode along on the facts.
         """
         bind_id = resolve_stage_bind_id(
             self._publish_repo,
             self._binding_repo,
-            bot_pk=facts.bot_pk,
+            bot_pk=self._bot_service.get_bot_pk(facts.bot_id, facts.owner_id),
             bot_id=facts.bot_id,
             stage=stage,
             env=get_current_env(),

@@ -10,6 +10,7 @@ import pytest
 from agentclaw.community.core.common_config import CommonWhiteListService
 from agentclaw.community.core.service_bot.services.baas_service import BaasService, Storage
 from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxRegistry
+from agentclaw.community.core.workspace.engines.aicoding import AICodingSandboxProvider
 from agentclaw.community.core.workspace.engines.claude_code import ClaudeCodeSandboxProvider
 from agentclaw.community.core.workspace.engines.openclaw import OpenClawSandboxProvider
 from agentclaw.community.di import config as cfg
@@ -25,6 +26,7 @@ def _make_registry() -> EngineSandboxRegistry:
     registry = EngineSandboxRegistry()
     registry.register(OpenClawSandboxProvider(workspace=workspace))
     registry.register(ClaudeCodeSandboxProvider(workspace=workspace))
+    registry.register(AICodingSandboxProvider(workspace=workspace))
     return registry
 
 
@@ -36,8 +38,9 @@ def _make_storage_path() -> MagicMock:
 
 
 def _make_service(storage_path=None, bot_repo=None, common_whitelist_service=None) -> BaasService:
+    startup_script_reader = MagicMock()
+    startup_script_reader.get_body.return_value = ""
     return BaasService(
-        startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base="http://test",
         tenant="test",
         template_uuid="test",
@@ -53,6 +56,7 @@ def _make_service(storage_path=None, bot_repo=None, common_whitelist_service=Non
         common_whitelist_service=common_whitelist_service or MagicMock(spec=CommonWhiteListService),
         outbound_rule_provider=NoopOutboundRuleProvider(),
         secret_resolver=MagicMock(),
+        startup_script_reader=startup_script_reader,
     )
 
 
@@ -218,8 +222,9 @@ class TestSetupSessionsDirEngineAware:
         registry = EngineSandboxRegistry()
         registry.register(custom_provider)
 
+        startup_script_reader = MagicMock()
+        startup_script_reader.get_body.return_value = ""
         service = BaasService(
-            startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
             baas_api_base="http://test",
             tenant="test",
             template_uuid="test",
@@ -235,6 +240,7 @@ class TestSetupSessionsDirEngineAware:
             common_whitelist_service=MagicMock(),
             secret_resolver=MagicMock(),
             outbound_rule_provider=MagicMock(),
+            startup_script_reader=startup_script_reader,
         )
 
         storage = service._setup_sessions_dir(
@@ -253,7 +259,6 @@ class TestBuildCreateBotPayloadStorageWhitelist:
     def _build_payload(self, service: BaasService):
         return service._build_create_bot_payload(
             bot={
-                "id": 501,
                 "bot_id": "b1",
                 "bot_name": "bot-one",
                 "entity_id": "u1",
@@ -381,7 +386,6 @@ class TestBuildCreateBotPayloadStorageWhitelist:
 
         payload = service._build_create_bot_payload(
             bot={
-                "id": 501,
                 "bot_id": "b1",
                 "bot_name": "bot-one",
                 "entity_id": "u1",
@@ -525,7 +529,6 @@ def test_build_create_bot_payload_rewrites_migration_path_to_opt_when_mount_home
     )
     payload = service._build_create_bot_payload(
         bot={
-            "id": 501,
             "bot_id": "b1",
             "bot_name": "bot-one",
             "entity_id": "u1",
@@ -555,7 +558,6 @@ def test_build_create_bot_payload_rewrites_opt_migration_path_back_to_home_admin
     )
     payload = service._build_create_bot_payload(
         bot={
-            "id": 501,
             "bot_id": "b1",
             "bot_name": "bot-one",
             "entity_id": "u1",

@@ -21,7 +21,7 @@ from secbaas.community.spi.bot_service import (
     LogRelationPayload,
 )
 
-logger = get_logger("plugin-bot-service-local")
+logger = get_logger("plugin-bot-service")
 
 
 class LocalBotServicePlugin(BotServicePlugin):

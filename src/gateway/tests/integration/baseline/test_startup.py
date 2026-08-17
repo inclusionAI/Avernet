@@ -39,6 +39,8 @@ class TestAppCreation:
         assert "/docs" in routes
         assert "/redoc" in routes
         assert "/openapi.json" in routes
+        assert "/internal-docs" in routes
+        assert "/internal-openapi.json" in routes
 
 
 class TestApiDocsEnabled:
@@ -57,6 +59,22 @@ class TestApiDocsEnabled:
         assert response.status_code == 200
         data = response.json()
         assert "openapi" in data
+
+    def test_internal_swagger_ui_accessible(self, client: TestClient) -> None:
+        response = client.get("/internal-docs")
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
+        assert "/internal-openapi.json" in response.text
+
+    def test_internal_openapi_schema_accessible(self, client: TestClient) -> None:
+        response = client.get("/internal-openapi.json")
+        assert response.status_code == 200
+        data = response.json()
+        paths = data["paths"]
+        assert "/api/v1/collaboration/sessions/{session_id}/files" in paths
+        assert "/api/v1/collaboration/bots/{bot_id}/candidates" not in paths
+        assert "/api/v1/collaboration/bots/{bot_id}/candidates/search" in paths
+        assert "/openapi/v1/collaboration/groups" not in paths
 
     def test_openapi_schema_has_metadata(self, client: TestClient) -> None:
         response = client.get("/openapi.json")
@@ -149,4 +167,12 @@ class TestApiDocsDisabled:
 
     def test_openapi_schema_disabled(self, disabled_client: TestClient) -> None:
         response = disabled_client.get("/openapi.json")
+        assert response.status_code == 404
+
+    def test_internal_docs_disabled(self, disabled_client: TestClient) -> None:
+        response = disabled_client.get("/internal-docs")
+        assert response.status_code == 404
+
+    def test_internal_openapi_schema_disabled(self, disabled_client: TestClient) -> None:
+        response = disabled_client.get("/internal-openapi.json")
         assert response.status_code == 404

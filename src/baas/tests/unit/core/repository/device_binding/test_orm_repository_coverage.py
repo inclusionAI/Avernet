@@ -630,10 +630,10 @@ class TestExists:
         assert result is False
 
 
-# ==================== list_bindings_by_ttl_asc Tests ====================
+# ==================== list_bindings_by_id_asc Tests ====================
 
 
-class TestListBindingsByTtlAsc:
+class TestListBindingsByIdAsc:
     def test_returns_records(self, repository, mock_session):
         model1 = _make_binding_model(id_val=1)
         model2 = _make_binding_model(id_val=2)
@@ -643,7 +643,7 @@ class TestListBindingsByTtlAsc:
             model2,
         ]
 
-        result = repository.list_bindings_by_ttl_asc(limit=100)
+        result = repository.list_bindings_by_id_asc(limit=100)
 
         assert len(result) == 2
         assert result[0].id == 1
@@ -652,7 +652,7 @@ class TestListBindingsByTtlAsc:
     def test_empty_list(self, repository, mock_session):
         mock_session.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
 
-        result = repository.list_bindings_by_ttl_asc(limit=50)
+        result = repository.list_bindings_by_id_asc(limit=50)
 
         assert result == []
 
@@ -663,7 +663,7 @@ class TestListBindingsByTtlAsc:
             None,
         ]
 
-        result = repository.list_bindings_by_ttl_asc(limit=100)
+        result = repository.list_bindings_by_id_asc(limit=100)
 
         assert len(result) == 1
         assert result[0].id == 1
@@ -1773,10 +1773,10 @@ class TestListBaasDevicesActivePaginated:
         )
 
 
-# ==================== list_baas_devices_by_ttl_asc Tests ====================
+# ==================== list_baas_devices_by_id_asc Tests ====================
 
 
-class TestListBaasDevicesByTtlAsc:
+class TestListBaasDevicesByIdAsc:
     def test_returns_dicts(self, repository, mock_session):
         device1 = _make_device_model(id_val=1, provider_device_id="sbx-001")
         device2 = _make_device_model(id_val=2, provider_device_id="sbx-002")
@@ -1786,7 +1786,7 @@ class TestListBaasDevicesByTtlAsc:
             device2,
         ]
 
-        result = repository.list_baas_devices_by_ttl_asc(limit=100)
+        result = repository.list_baas_devices_by_id_asc(limit=100)
 
         assert len(result) == 2
         assert result[0]["id"] == 1
@@ -1796,7 +1796,7 @@ class TestListBaasDevicesByTtlAsc:
     def test_empty(self, repository, mock_session):
         mock_session.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
 
-        result = repository.list_baas_devices_by_ttl_asc(limit=50)
+        result = repository.list_baas_devices_by_id_asc(limit=50)
 
         assert result == []
 
@@ -1806,7 +1806,7 @@ class TestListBaasDevicesByTtlAsc:
             device
         ]
 
-        result = repository.list_baas_devices_by_ttl_asc(limit=10)
+        result = repository.list_baas_devices_by_id_asc(limit=10)
 
         assert len(result) == 1
         expected_keys = {

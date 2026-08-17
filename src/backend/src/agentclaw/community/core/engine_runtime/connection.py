@@ -39,7 +39,11 @@ from agentclaw.community.core.engine_runtime.gate import (
     require_bot_operator,
     require_operable_bot,
 )
-from agentclaw.community.core.engine_runtime.models import ConnectionResult, SocketInfo
+from agentclaw.community.core.engine_runtime.models import (
+    BotFacts,
+    ConnectionResult,
+    SocketInfo,
+)
 from agentclaw.community.core.engine_runtime.stage import (
     STAGE_DRAFT,
     resolve_stage_bind_id,
@@ -182,8 +186,13 @@ class EngineConnectionService:
         widen this surface.
         """
         bot = self._bot_service.get_bot(bot_id, owner_id)
-        resolved_id = str(bot.get("bot_id") or bot_id)
-        resolved_owner = str(bot.get("owner_id") or owner_id)
+        facts = BotFacts.from_record(bot, bot_id=bot_id, owner_id=owner_id)
+        resolved_id = facts.bot_id
+        resolved_owner = facts.owner_id
+        # From the row read just above, not from the facts: both the
+        # collaborator adjudication and the publish lookup are keyed on
+        # ``ac_bots.id``, and that internal join key stays off the narrow
+        # projection — this method holds the record, so it costs nothing here.
         bot_pk = int(bot.get("id") or 0)
         # The socket this endpoint publishes is **not** chat-scoped, however it
         # is labelled: the engine's ``hello`` advertises the ``sessions.*`` and
@@ -200,10 +209,8 @@ class EngineConnectionService:
             caller_id=caller_id,
             owner_id=resolved_owner,
         )
-        require_operable_bot(
-            str(bot.get("bot_type") or ""), stage=stage, surface="connections"
-        )
-        engine = str(bot.get("active_engine") or "")
+        require_operable_bot(facts.bot_type, stage=stage, surface="connections")
+        engine = facts.active_engine
 
         binding_id = self._stage_binding_id(
             bot_pk=bot_pk, bot_id=resolved_id, owner_id=owner_id, stage=stage

@@ -106,6 +106,52 @@ def test_shipped_config_routes_collaboration_verbatim_to_bcs() -> None:
     assert websocket_requirement == {}
 
 
+def test_shipped_config_routes_internal_collaboration_verbatim_to_bcs() -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    dm = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
+
+    internal = dm.http_domain_for(
+        "/api/v1/collaboration/sessions/session-1/files/file-1"
+    )
+    assert internal is not None
+    assert internal.server.name == "bcs"
+    assert internal.server.base_url == "http://bcs:8081"
+    assert internal.serves_http
+    assert not internal.serves_websocket
+    assert internal.rewrite is None
+    assert internal.upstream_path(
+        "/api/v1/collaboration/sessions/session-1/files/file-1"
+    ) == "/api/v1/collaboration/sessions/session-1/files/file-1"
+    assert internal.schema.location == ""
+
+    public = dm.http_domain_for("/openapi/v1/collaboration/groups/group-1")
+    assert public is not None
+    assert public.server.name == "bcs"
+    assert public.schema.location == "schemas/bcn.openapi.json"
+
+    security = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    requirement = security.resolve(
+        "GET", "/api/v1/collaboration/bots/bot-1/candidates/search"
+    )
+    assert requirement is not None
+    assert requirement[PrincipalType.USER] is Presence.OPTIONAL
+    assert requirement[PrincipalType.APP] is Presence.OPTIONAL
+    assert requirement[PrincipalType.BOT] is Presence.OPTIONAL
+
+    file_requirement = security.resolve(
+        "PUT", "/api/v1/collaboration/sessions/session-1/files/file-1/content"
+    )
+    assert file_requirement is not None
+    assert file_requirement[PrincipalType.USER] is Presence.OPTIONAL
+    assert file_requirement[PrincipalType.APP] is Presence.OPTIONAL
+    assert file_requirement[PrincipalType.BOT] is Presence.OPTIONAL
+
+    shared_requirement = security.resolve(
+        "GET", "/api/v1/collaboration/sessions/shared-file/content"
+    )
+    assert shared_requirement == {}
+
+
 def test_shipped_config_routes_the_load_test_socket_to_the_backend() -> None:
     """The load-test echo is reachable on the socket plane, and authenticated.
 
@@ -925,7 +971,9 @@ def _match_map(pattern: str, **extra: object) -> DomainMap:
     )
 
 
-@pytest.mark.parametrize("pattern", ["/**", "/openapi/**", "/openapi/v1/**"])
+@pytest.mark.parametrize(
+    "pattern", ["/**", "/openapi/**", "/openapi/v1/**", "/api/v1/**"]
+)
 def test_an_over_broad_pattern_is_refused_at_boot(pattern: str) -> None:
     """Before patterns, an open proxy could not be typed; now it must be refused.
 

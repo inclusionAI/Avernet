@@ -2,7 +2,7 @@
 
 ## Provides
 
-- Versioned `/openapi/v1/collaboration/**` and `/internal/v1/**` HTTP delivery
+- Versioned `/openapi/v1/collaboration/**` and `/api/v1/collaboration/**` HTTP delivery
   boundaries.
 - Request/response DTO translation and the common response envelope.
 - An injectable Gateway Principal verification boundary.

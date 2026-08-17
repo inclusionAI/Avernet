@@ -15,7 +15,7 @@ from secbaas.community.api.bot_runtime import HttpConnectionInfo, WsConnectionIn
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.sandbox.docker import DockerSandbox, DockerSandboxPlugin
 
-logger = get_logger("plugin-sandbox-docker-stub")
+logger = get_logger("plugin-sandbox")
 
 
 class StubCommandResult:

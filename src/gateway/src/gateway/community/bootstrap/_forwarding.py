@@ -39,6 +39,8 @@ def build_forwarding(
     http_sources: dict[str, str] = {}
     refresh_seconds = _DEFAULT_REFRESH_SECONDS
 
+    internal_openapi_domains = _internal_openapi_domains(config)
+
     if config.config_dir is not None:
         for name, domain in domain_map.domains.items():
             if not domain.schema.location:
@@ -49,6 +51,17 @@ def build_forwarding(
             elif domain.schema.source == "http":
                 http_sources[name] = domain.schema.location
                 refresh_seconds = float(domain.schema.refresh_seconds)
+        for name, schema in internal_openapi_domains.items():
+            source = str(schema.get("source", "file"))
+            refresh_seconds = float(schema.get("refresh_seconds", refresh_seconds))
+            if source == "file":
+                location = str(schema.get("path", ""))
+                if location:
+                    file_sources[name] = config.config_dir / location
+            elif source == "http":
+                location = str(schema.get("url", ""))
+                if location:
+                    http_sources[name] = location
 
     if file_sources:
         file_cat.set_sources(file_sources)
@@ -63,6 +76,7 @@ def build_forwarding(
         schema_catalogs=schema_catalogs,
         ws_forwarder=ws_forwarder,
         refresh_seconds=refresh_seconds,
+        internal_openapi_domains=tuple(internal_openapi_domains),
     )
 
 
@@ -88,3 +102,36 @@ def _load_domain_map(config: Config | None = None) -> DomainMap:
         ),
     )
     return domain_map
+
+
+def _internal_openapi_domains(config: Config) -> dict[str, dict[str, object]]:
+    raw = config.user_config.get("internal_api_docs", {})
+    if not isinstance(raw, dict):
+        return {}
+    schemas = raw.get("schemas", {})
+    if not isinstance(schemas, dict):
+        raise ValueError("internal_api_docs.schemas: must be a mapping")
+    result: dict[str, dict[str, object]] = {}
+    for name, schema in schemas.items():
+        domain_name = str(name)
+        if not isinstance(schema, dict):
+            raise ValueError(
+                f"internal_api_docs.schemas.{domain_name}: must be a mapping"
+            )
+        source = str(schema.get("source", "file"))
+        if source == "file":
+            if not str(schema.get("path", "")).strip():
+                raise ValueError(
+                    f"internal_api_docs.schemas.{domain_name}: file source requires path"
+                )
+        elif source == "http":
+            if not str(schema.get("url", "")).strip():
+                raise ValueError(
+                    f"internal_api_docs.schemas.{domain_name}: http source requires url"
+                )
+        else:
+            raise ValueError(
+                f"internal_api_docs.schemas.{domain_name}: unsupported source {source!r}"
+            )
+        result[domain_name] = schema
+    return result

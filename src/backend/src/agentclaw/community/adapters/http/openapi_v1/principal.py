@@ -93,9 +93,6 @@ from fastapi import Depends, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.admission import (
     ADMISSION,
-    BODY_BOT_ID_OPERATIONS,
-    OWNER_ADDRESSED_OPERATIONS,
-    SKILL_SCOPED_OPERATIONS,
     ActingCaller,
     AdmissionMode,
 )
@@ -385,24 +382,33 @@ async def require_granted_bot(
     ``(app, bot, delegating user)`` raises :class:`GrantNotResolvableError`,
     which the app maps to a ``404`` byte-identical to a nonexistent bot.
 
-    Seven operations cannot be checked here — one carries its bot in the body,
-    four name a skill, and two name a bot but address an owner under their own
-    parameter name. They are **named in the table**, not detected by their
-    shape. This dependency defers for exactly those, and their handlers bind the
-    grant to the ``(bot, owner)`` they actually act on before acting. Naming
-    them is what keeps "the dependency could not tell" from becoming a way
-    through: any *other* operation arriving here without a bot id is refused.
-
-    TODO(#960): those seven are an inconsistency — two mechanisms doing one
-    job — and the exception has already cost one real defect, since a
+    **What this needs is a bot *and an owner*, because ``bot_id`` alone does not
+    identify a bot.** Seven operations could not supply both, so the check ran
+    in their handlers instead — one carried its bot in the request body, four
+    named only a skill, and two named a bot but addressed an owner under a
+    parameter this dependency did not know. That was ``TODO(#960)``: two
+    mechanisms doing one job, and it had already cost one real defect, because a
     handler-side check is a place the check and the resolution can drift apart.
-    #960 tracks removing it: make the address uniform on the skills group, move
-    the body-carried ``bot_id``, or resolve the skill before the check. Any
-    replacement has to keep the property this list exists for — an operation
-    that cannot be checked is refused, not waved through.
+
+    Bot-first addressing removed the reason for **three of the seven**. The
+    routines create takes its bot on the path; the two skills collection
+    operations spell their owner locator ``owner_id``, so
+    :func:`_addressed_owner` reads the same value the handler acts on.
+
+    The four ``{skill_id}`` operations remain, and not by omission. They resolve
+    by ``(skill, actor)``, so the bot's owner arrives *on the record* — a
+    collaborator reaches a skill on someone else's bot routinely — and there is
+    nothing here to look a grant up against until that read has happened. They
+    are named in ``admission.SKILL_SCOPED_OPERATIONS``, mounted without this
+    dependency rather than exempted from it, and check the pair the record
+    carries before acting.
+
+    The refusal below is what stays. An operation that reaches here without a
+    bot id is refused rather than waved through. The *legacy* addresses cannot
+    be checked here either — their bot really is in a body or behind a skill id
+    — so they check themselves, inside ``openapi_v1/deprecated``, and that half
+    of the mechanism is deleted when they are.
     """
-    if _defers_to_its_handler(request):
-        return caller.user_id
     addressed_owner = _addressed_owner(request, caller.user_id)
     bot_id = request.path_params.get(_BOT_ID_KEY) or request.query_params.get(
         _BOT_ID_KEY
@@ -459,52 +465,6 @@ def _addressed_owner(request: Request, caller_id: str) -> str:
     if ADMISSION.get((request.method, path)) is not AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT:
         return caller_id
     return request.query_params.get(_OWNER_ID_KEY) or caller_id
-
-
-def _defers_to_its_handler(request: Request) -> bool:
-    """Whether this operation resolves its own bot, per ``admission.py``.
-
-    :func:`require_granted_bot` needs the addressed bot to look a grant up, and
-    reads it off the path or query string. Seven operations do not put it
-    where it can be seen, so the check moves into their handlers:
-
-    - ``POST /bots/routines`` — the bot id is in the **request body**. A shared
-      dependency would have to consume and re-buffer the raw stream and know
-      this operation's field name, which is per-operation knowledge it exists
-      not to have.
-    - the four ``skills/{skill_id}`` routes — the request names a **skill**.
-      Which bot it belongs to is only known after reading the skill record.
-    - ``GET /bots/skills`` and ``POST /bots/skills/upload`` — these *do* carry a
-      ``bot_id``, but they act on ``owner_entity_id or actor_id``, so the bot
-      they address is not the one a generic reader would infer.
-
-    **Deferring is about *where* the check runs, never *whether*.** All seven
-    stay in grant-checked modes, and the inventory test asserts it, so they
-    cannot quietly become exempt.
-
-    **An allow-list rather than a shape test**, because "the request carries no
-    ``bot_id``" is wrong in both directions. It over-matches the first five: it
-    equally describes every mistake that would look like them — a renamed
-    parameter, a route placed in a grant-checked mode by accident — and would
-    wave those through unchecked, where naming the seven sends them to the
-    refusal below. And it misses the last two entirely, since they do carry a
-    ``bot_id``; a shape test would let the shared dependency check them against
-    the caller's own bot instead of the owner the handler acts on, which is
-    exactly the defect review found on this group.
-
-    So the exception list cannot grow by accident: adding to it is an edit to a
-    table the inventory test reads.
-    """
-    route = request.scope.get("route")
-    path = getattr(route, "path", None)
-    if path is None:
-        return False
-    key = (request.method, path)
-    return (
-        key in BODY_BOT_ID_OPERATIONS
-        or key in SKILL_SCOPED_OPERATIONS
-        or key in OWNER_ADDRESSED_OPERATIONS
-    )
 
 
 #: What a grant-checked handler declares to have its bot authorized.
