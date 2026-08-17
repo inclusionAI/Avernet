@@ -135,7 +135,21 @@ class TaskModule(Module):
         bot = SingleboxEngineAdapter(backend_base_url=backend, user_id=user_id)
         # 本地 BCS 与生产同 REST、require_authentication=false → SingleboxBcsAdapter(继承 BcsHttpAdapter,
         # HMAC 头被本地忽略;仅覆写本地响应形状差异)。_DoubleBcsClient 仅留单测用。
-        bcs = SingleboxBcsAdapter(LocalBcsTokenProvider.from_env())
+        # SINGLEBOX_BCS_DOUBLE=1 → 用 _DoubleBcsClient 模拟(立即 completed + success output),
+        # 供 e2e 跑协作群真链路而不依赖真 BCS 群聊时序(singlebox 无真群协作收敛保障):
+        # 真实 form_group/session/poll 路径 + 确定终态回投 PASS(经 BcsSessionTranslator 解析 output 为 success json)。
+        if os.environ.get("SINGLEBOX_BCS_DOUBLE", "").strip().lower() in {"1", "true"}:
+            from agentclaw.community.core.task.task_runner.integration.double.double_bcs_client import (
+                _DoubleBcsClient,
+            )
+            _coop_pass_output = '{"success": true, "data": "coop_group_done"}'
+            bcs = _DoubleBcsClient(
+                session_status="completed", session_output=_coop_pass_output,
+                sm_status="completed", sm_output=_coop_pass_output,
+                poll_once_then_terminal=True, terminal_after=1,
+            )
+        else:
+            bcs = SingleboxBcsAdapter(LocalBcsTokenProvider.from_env())
         return bot, bcs
 
     @staticmethod

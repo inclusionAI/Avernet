@@ -423,6 +423,14 @@ class ExecutionEngine:
             return
         root = self._root(task_id)
         is_root_parent = parent.node_id == (root.node_id if root else None)
+        # BBS 可恢复态守卫:图已升 BBS(bbs_mode=true)且根未被 BBS 接力持有(bbs_owner=None)→
+        # owner 停手不重规划根(等 BBS 接力 claim+attach 收口);只有 on_bbs_report 能收口。
+        # 避免普通子节点 DONE 触发根重规划与 BBS 接力竞态(spec §10.4)。
+        if is_root_parent:
+            g_ext = self._graph.query_task_dashboard(task_id).extend_props
+            if g_ext.get("bbs_mode") and not g_ext.get("bbs_owner"):
+                logger.info("[on_pass] task=%s 图 bbs_mode 且未 claim → owner 停手,等 BBS 接力", task_id)
+                return
         self._mark_planning(task_id, parent.node_id)
         graph = self._graph.query_task_dashboard(task_id)
         pr = await self._plan_with_retry(task_id, graph, target_node_id=parent.node_id)
@@ -598,27 +606,56 @@ class ExecutionEngine:
         self._graph.update_task_graph_info(task_id, TaskGraphPatch(extend_props_patch={"bbs_mode": True}))
         self._bump_loop_round(task_id)
         # 终态传播:查父,若兄弟全终态且含 HUNG→父 HUNG(冒泡,递归)
-        self._maybe_propagate_hung(task_id, node_id)
+        # 传 hung_reason:_maybe_propagate_hung 依据它判"可恢复 vs 硬死锁"(spec §10.5)
+        self._maybe_propagate_hung(task_id, node_id, hung_reason)
 
-    def _maybe_propagate_hung(self, task_id: str, node_id: str) -> None:
+    def _maybe_propagate_hung(self, task_id: str, node_id: str, hung_reason: str = "") -> None:
         """自 node 往上:若父的子全终态且含 HUNG → 父 HUNG(不计额外 loop_round,纯冒泡)→ 继续上行。
-        到根 → 图终态收口(HUNG)。若图已 HUNG(loop_exhausted 等已收口)→ 不覆盖 hung_reason。"""
+        到根 → 图终态收口(HUNG)。若图已 HUNG(loop_exhausted 等已收口)→ 不覆盖 hung_reason。
+
+        **BBS 可恢复态(spec §10.5)**:仅当根冒泡的来源 ``hung_reason``=``miss_depth_exhausted``
+        (LAN 未匹配执行者,BBS 中继可接)且图 ``bbs_mode`` 已置、根未被 claim 时,拒不置图 HUNG,
+        维持根原态(PLANNING 待接力)。其它 reason(``root_gap_no_decompose``/``gap_no_progress``/
+        ``plan_round_exhausted``/``exec_stuck`` 等)是**硬死锁**(无规划端口 / 拆不出 / 重规划无进展 /
+        执行卡死),即使 bbs_mode 也按硬 HUNG 收口(BBS 理论可接但 root_verified 翻态不可恢复 + 实际无规划
+        端口;为避免"图一直 RUNNING 假活着"统一收口 HUNG)。"""
+        # 仅 MISS 深度闸门升 BBS 视为可恢复;其它 reason 即便 bbs_mode 也走硬 HUNG 冒泡
+        recoverable = (hung_reason == "miss_depth_exhausted")
         cur = node_id
         while True:
             parent = self._graph.get_parent_task(task_id, cur)
             if parent is None:
-                # cur 是根 → 图级收口(根 HUNG → 图 HUNG);不覆盖已设的图级 hung_reason
+                # cur 是根 → 图级收口(根 HUNG → 图 HUNG);不覆盖已设的图级 hung_reason。
+                # 但若图已 bbs_mode=true 且根未被 BBS 持有 → 维持根原态(冒泡到此不置图 HUNG),
+                # 留 BBS 接力可恢复(spec §10.5:升 BBS 落可恢复态,非图级硬 HUNG)。
                 root = self._root(task_id)
                 if root is not None and root.node_id == cur and root.status == Status.HUNG:
                     g = self._graph.query_task_dashboard(task_id)
-                    if g.status != Status.HUNG:
-                        self._graph.update_task_graph_info(
-                            task_id, TaskGraphPatch(status=Status.HUNG, extend_props_patch={"hung_reason": "root_stuck"}))
+                    if g.status == Status.HUNG:
+                        return
+                    if (recoverable and g.extend_props.get("bbs_mode")
+                            and not g.extend_props.get("bbs_owner")):
+                        logger.info("[hung-propagate] task=%s 根冒泡被 BBS 可恢复态拦截(reason=%s),保持根原态",
+                                    task_id, hung_reason)
+                        return
+                    self._graph.update_task_graph_info(
+                        task_id, TaskGraphPatch(status=Status.HUNG, extend_props_patch={"hung_reason": "root_stuck"}))
                 return
             siblings = self._graph.get_child_tasks(task_id, parent.node_id)
             if any(st.status in {Status.RUNNING, Status.PLANNING, Status.PENDING} for st in siblings):
                 return  # 还有活子,等
             if any(st.status == Status.HUNG for st in siblings):
+                # BBS 可恢复态(spec §10.5):若父即根 + reason=miss_depth_exhausted + bbs_mode 已置且未 claim,
+                # 不把根置 HUNG(保持 PLANNING 待 BBS 中继接管);否则正常冒泡。
+                root = self._root(task_id)
+                _g_now = self._graph.query_task_dashboard(task_id)
+                if (root is not None and parent.node_id == root.node_id
+                        and recoverable
+                        and _g_now.extend_props.get("bbs_mode")
+                        and not _g_now.extend_props.get("bbs_owner")):
+                    logger.info("[hung-propagate] task=%s 根可恢复态拦截(miss_depth_exhausted),根保持 PLANNING",
+                                task_id)
+                    return
                 self._graph.update_task_node_info(
                     TaskNodePatch(task_id=task_id, node_id=parent.node_id, status=Status.HUNG,
                                   extend_props_patch={"hung_reason": "child_hung"}))

@@ -62,6 +62,7 @@ tags: [task, search, dispatch]
 | `N_customer` | HIT_MULTI_BOTS(manager_worker) | `ToG方案专家`+`ToB方案专家`+`采购决策专家`,群名"存储行业客户分析群",manager=ToG方案专家 |
 | `N_practice_bbs` | HIT_SINGLE | `实践bbs专家Bot` |
 | `N_report` | HIT_SINGLE | `报告聚合Bot` |
+| `N_field_interview` | MISS | `miss_reason="候选 bot 均无法覆盖子任务需求(现场访谈无对应专家 bot)"` |
 | `_remediate` 节点 | HIT_SINGLE | 对应原维度 bot(同主体) |
 | 候选都不匹配 / 未知 | MISS | `miss_reason="候选 bot 均无法覆盖子任务需求"` |
 

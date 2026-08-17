@@ -100,6 +100,8 @@
 28. 作为系统,我想升 BBS 自动(无人工确认挡板,BBS bot 自主认领执行),BBS 仍执行不下去时 STUCK→HUNG 留人工入口,这样长尾能力可被利用且最终有人把关。
 29. 作为系统,我想 `loop_round` 仅升 BBS 时递增(外层 BBS 上升轮次)并可在 `extend_props` 带元信息,这样 BBS 迭代可审计。
 30. 作为系统,我想 `RuntimeInfo.start_time/end_time` 由图谱流转 RUNNING 时自动维护、存储为**毫秒整数(int)**,这样时间戳与业务解耦。
+
+31. 作为系统,我想 `miss_depth_exhausted` 布升 BBS(bbs_mode=true)后,若绿上存在 RUNNING 兄弟,不把根置 HUNG(可恢复态,等 BBS 接力),且 owner 不重 plan 抢占接力;仅 `on_bbs_report root_verified=true` 可从 bbs_mode 收口图 DONE(根 PLANNING→DONE)。其它 reason(gap_no_progress/plan_round_exhausted/root_gap_no_decompose)升 BBS 仍按硬 HUNG 收口(无规划端口/无拆解能力,BBS 也接不上)。
 30b. 作为系统,我想每个**父节点**的重规划产子次数计入其 extend_props.plan_round,达 MAX_PLAN_ROUND(默认 10)→该父 HUNG(不再产子),这样单节点 gap 反复读不闭时不会无限产子撑爆图;loop_round 收敛到只数升 BBS 的总次数(MAX_LOOP)。
 31. 作为系统,我想崩溃堆栈/超时标记/miss 事件进 `extend_props`,这样非业务异常态增量合并不污染主字段。
 32. 作为开发者,我想对外服务集中在"任务中心"`TaskService` facade(2 API),图谱/规划/派发/执行/Harness 各管各的内部 API,这样模块边界清晰、调用方只认一处入口。

@@ -55,8 +55,8 @@ target 仍是 `t_case`)。按目标 `node_id` **+ 快照 `done_children`(已 DON
 | 目标 node_id | done_children(已 DONE 子节点) | 返回 children |
 |---|---|---|
 | `t_case` | `[]`(初始,无已完成子) | `[N_overview]` |
-| `t_case` | `[N_overview]` | `[N_market, N_tech, N_compete, N_customer]` |
-| `t_case` | `[N_overview, N_market, N_tech, N_compete, N_customer]` | `[N_practice_bbs]` |
+| `t_case` | `[N_overview]` | `[N_market, N_tech, N_compete, N_customer, N_field_interview]` |  <!-- N_field_interview 并行触发 MISS@MAX→升 BBS(其它兄弟仍 RUNNING 保根可恢复) -->
+| `t_case` | `[N_overview, N_market, N_tech, N_compete, N_customer]` | `[N_practice_bbs, N_report]` |  <!-- 升 BBS 后根被可恢复态守卫拦,owner 不重 plan;BBS 中继经 attach+root_verified 收口 -->
 | `t_case` | `[…, N_practice_bbs]` | `[N_report]` |
 | `t_case` | `[…, N_report]` | `[]`(根级终验 gap 闭) |
 | FAIL+gaps 叶节点(target=该叶,补救规划) | — | `[N_<叶>_remediate]`(按 gaps 描述产 1 个补救子) |
