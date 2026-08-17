@@ -208,7 +208,7 @@ class TestBbsRelayE2ENatual(unittest.TestCase):
                     )
                     for _t in g.get("tasks") or []:
                         _ri = _t.get("run_info") or {}
-                        print(f"   - {_t.get('node_id'):28} {_t.get('status'):9} "
+                        print(f" 已自然升BBS  - {_t.get('node_id'):28} {_t.get('status'):9} "
                               f"mode={_ri.get('run_mode') or '-':5} "
                               f"reason={(_ri.get('extend_props') or {}).get('hung_reason') or '-'}")
                     break  # 已自然升 BBS
