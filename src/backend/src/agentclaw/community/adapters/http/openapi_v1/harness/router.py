@@ -57,14 +57,9 @@ from agentclaw.community.api.patch_engine_service import PatchEngineProtocol
 from agentclaw.community.api.patch_library_service import PatchLibraryProtocol
 from agentclaw.community.api.patch_planner_service import PatchPlannerProtocol
 from agentclaw.community.adapters.http.harness.router import (
-    _compute_grade,
-    _domain_op_to_item,
-    _finding_to_item,
     _highest_risk,
     _is_patch_flag,
     _parse_advise,
-    _parse_db_findings,
-    _parse_db_findings_raw,
     _ScanProgress,
     _progress_store,
     _run_scan,
