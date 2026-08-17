@@ -87,6 +87,7 @@ M2 依赖 M1/M3/M4 接口(可 seam/double);M5 集成;M6 验证。
 ## M6 — E2E singlebox(主 seam,理想 seam 数=1)
 - T6.1 singlebox 编排:模型+六模块全接;in-memory `TaskGraphService`;`StubDecomposer`(注入 case 节点);`StubBotDiscover`(本地 catalog 关键词 cover);`form_coop_group` BCS local/mock。
 - T6.2 用权威案例剧本 `gwqie46v7hzr1w6h` 存储行业尽调(三阶段三模态)端到端跑完:`execute→initialize_graph→on_execute(条件a)→plan(decompose(graph) 按三阶段 AC 拆 N_overview/四专题/N_practice_bbs/N_report)→add_task_nodes(根→PLANNING,relations 登记)→dispatch(决定谁来做:single_bot/coop_group 动态拉群 manager_worker;MISS+depth≥MAX→升 BBS)→start_run→TaskLoopCallback.report_result 回投→任一专题 FAIL+gaps→on_report(条件b)→plan(补救挂该节点下,该节点→PLANNING)→二次 PASS→传播治愈→图 status=DONE`。注入一次 MISS+depth 达 MAX→自动升 BBS(remove_subtree)+loop_round+++BBS bot 认领执行+上报;再注入 BBS loop_round≥BBS_MAX_DEPTH→STUCK→HUNG(人介入)。
+   - 节点级重规划闸:在 N_report(或中间父)处反复回投 PASS 但根 gap 不闭,经多轮重 plan 产子,断言 plan_round 达 MAX_PLAN_ROUND→该父 HUNG(plan_round_exhausted)+ 不再产子。
 - T6.3 断言面:`get_task_dashboard` 终态(`TaskExecutionGraph`:status/loop_round/tasks[].status/acceptance_result/relations)+ 事件日志可重放 + `query_result`/`query_detail`。
 - T6.4 singlebox 覆盖脚本对齐仓库 ci(`scripts/ci/singlebox_coverage*`),与 PR CI 同一基线。
 

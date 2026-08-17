@@ -167,6 +167,11 @@ class ExecutionEngine:
     def _max_harness(self, task_id: str) -> int:
         cfg = self._graph._execution_config(task_id)
         return int(cfg.get("MAX_HARNESS", _DEFAULT_MAX_HARNESS))
+    def _max_plan_round(self, task_id: str) -> int:
+        """节点级重规划次数上限 MAX_PLAN_ROUND(default 10)。父节点子全 DONE→gap 未闭→重 plan 产新子,
+        每次该路径走一次 +1;达上限父节点 HUNG(不再产子)"""
+        cfg = self._graph._execution_config(task_id)
+        return int(cfg.get("MAX_PLAN_ROUND", 10))
 
     def _is_graph_terminal(self, task_id: str) -> bool:
         """图级终态(DONE/HUNG)判定。终态后自动驱动(plan/dispatch/harness/回投推进)一律冻结:
@@ -398,9 +403,10 @@ class ExecutionEngine:
     async def _on_pass_collect(self, task_id: str, node_id: str, side: list[tuple]) -> None:
         """PASS→DONE 后:查结构父 P。v4 父恒 PLANNING(委托态),无需翻态:
         兄弟仍有未终态(RUNNING/PLANNING/PENDING)→等待;兄弟全 DONE(plan-ready)→ plan(target=parent):
-          有子→add(父维持 PLANNING)+dispatch;空+has_gap=F→gap 闭:非根传播 DONE 上行/根→图 DONE;
-          空+has_gap=T→HUNG 升 BBS。兄弟全终态含 HUNG/FAILED→终态传播。
-        根成功重 plan(gap 未闭)**计 loop_round**(口子 A);中间父重 plan 不计。"""
+          有子→节点级 plan_round++(达 MAX_PLAN_ROUND→父 HUNG)+add+dispatch;
+          空+has_gap=F→gap 闭:非根传播 DONE 上行/根→图 DONE;空+has_gap=T→HUNG 升 BBS。
+        兄弟全终态含 HUNG/FAILED→终态传播。
+        v5:重规划产子由**节点级 plan_round** 闸(根+中间父统一计数);loop_round 收敛为只数升 BBS。"""
         parent = self._graph.get_parent_task(task_id, node_id)
         if parent is None:
             side.append(("finish", task_id))
@@ -423,8 +429,21 @@ class ExecutionEngine:
         logger.info("[on_pass] task=%s 父=%s 委托 plan 产 %d 子 has_gap=%s",
                     task_id, parent.node_id, len(pr.children), pr.has_gap)
         if pr.children:
-            if is_root_parent:
-                self._bump_loop_round(task_id)  # 根 gap 复发盘:口子 A 收敛
+            # 节点级重规划次数闸 MAX_PLAN_ROUND(父节点"子全 DONE→gap 未闭→重 plan 产新子"计数):
+            # 每个父节点各自计数(extend_props.plan_round);达上限 → 父 HUNG(gap_no_progress_plan_round)
+            # + 冒泡终态传播,不再 add 新子。首帧 plan(on_execute)不计;on_miss 拆细不计。
+            plan_round = int(parent.run_info.extend_props.get("plan_round", 0)) + 1
+            max_plan_round = self._max_plan_round(task_id)
+            self._graph.update_task_node_info(
+                TaskNodePatch(task_id=task_id, node_id=parent.node_id,
+                              extend_props_patch={"plan_round": plan_round}))
+            if plan_round >= max_plan_round:
+                logger.warning("[on_pass] task=%s 父=%s plan_round=%d/%d 达上限→HUNG(不再产子)",
+                               task_id, parent.node_id, plan_round, max_plan_round)
+                self._hung_and_escalate(task_id, parent.node_id, "plan_round_exhausted")
+                return
+            logger.info("[on_pass] task=%s 父=%s plan_round=%d/%d 重规划产 %d 子",
+                        task_id, parent.node_id, plan_round, max_plan_round, len(pr.children))
             self._graph.add_task_nodes(pr.children, parent.node_id)
             await self._prepare_into(task_id, side)
         elif not pr.has_gap:

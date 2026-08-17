@@ -94,7 +94,8 @@ class RelationType(StrEnum):      DEPENDENCY    # 节点间依赖关系
 
 @dataclass TaskExecutionGraph:    # 含 run_id/relations
     run_id: int                   # 运行实例唯一 ID
-    loop_round: int               # 外层 BBS 上升轮次(仅升 BBS 时++;达 BBS_MAX_DEPTH→STUCK→HUNG)
+    loop_round: int               # 图级升 BBS 总轮次(仅升 BBS 时++;达 MAX_LOOP→图 HUNG)。
+                                 # 注:v5 重规划产子由节点级 extend_props.plan_round 计(MAX_PLAN_ROUND)
     status: Status
     output: dict                  # 图的最终汇总输出
     tasks: list[TaskNode]
@@ -264,7 +265,9 @@ class TaskGraphService:
     def _node_depth(self, task_id: str, node_id: str) -> int:
         """从 relations 分解树递归自算深度(派生不持久)。内层深度闸门(MAX_DEPTH,升 BBS 阈值)读。"""
     def _execution_config(self, task_id: str) -> dict:
-        """读 MAX_DEPTH(内层升 BBS 阈值)/ BBS_MAX_DEPTH(外层 STUCK 阈值,默认 3)等(随图 extend_props/task_spec)。"""
+        """读 MAX_DEPTH(内层升 BBS 阈值)/ BBS_MAX_DEPTH(外层 STUCK 阈值,默认 3)/
+         MAX_LOOP(图级升 BBS 总轮次,默认 10)/ MAX_PLAN_ROUND(节点级重规划次数,默认 10)/
+         MAX_HARNESS(重试上限,默认 3)等(随图 extend_props/task_spec)。"""
 ```
 
 > 派生查询:`query_task_nodes`/`get_child_tasks`/`get_parent_task` 升为公开(跨模块依赖:dispatcher/runner/planner/传播);`_node_depth`/`_execution_config` 保持内部(仅编排核用,可从已返回查询/relations/dashboard 自算)。

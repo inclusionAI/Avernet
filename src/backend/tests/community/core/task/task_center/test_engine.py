@@ -347,6 +347,44 @@ class TestLoopRound:
         assert graph.loop_round == before
 
 
+
+
+
+# ===== MAX_PLAN_ROUND 节点级重规划闸 =====
+class TestMaxPlanRound:
+    def test_root_replan_to_cap_hungs_root(self, svc, graph):
+        """v5:根子全 DONE→gap 未闭→重 plan 产子,MAX_PLAN_ROUND 次后→根 HUNG(plan_round_exhausted),不再产子。"""
+        graph.extend_props["execution_config"]["MAX_PLAN_ROUND"] = 2
+        # 首帧 plan 产 c1(初始规划不计 plan_round)
+        planner = StubPlanner(lambda g: [_child("c1")])
+        eng = _engine(svc, planner=planner, runner=StubRunner())
+        _run(eng.on_execute("t1"))  # t1 PENDING→PLANNING,产 c1 RUNNING
+        # 回投 c1 PASS → c1 DONE → 兄弟全 DONE → 根重 plan(产 c_r1) → plan_round=1 < 2 → 不 HUNG
+        planner._factory = lambda g: [_child("c_r1")]
+        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))))
+        assert svc._get_node(graph, "t1").status != Status.HUNG
+        assert svc._get_node(graph, "c_r1").status == Status.RUNNING
+        assert svc._get_node(graph, "t1").run_info.extend_props.get("plan_round") == 1
+        # 回投 c_r1 PASS → 根重 plan → plan_round=2 >= MAX → 根 HUNG,不产子
+        planner._factory = lambda g: [_child("c_r2")]
+        _run(eng.on_report(_patch("t1", "c_r1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))))
+        root = svc._get_node(graph, "t1")
+        assert root.status == Status.HUNG
+        assert root.run_info.extend_props.get("hung_reason") == "plan_round_exhausted"
+        assert root.run_info.extend_props.get("plan_round") == 2
+        assert svc._get_node(graph, "c_r2") is None  # 达上限不再产子
+
+    def test_below_cap_no_hung(self, svc, graph):
+        """未达 MAX_PLAN_ROUND → 继续产子不 HUNG。"""
+        graph.extend_props["execution_config"]["MAX_PLAN_ROUND"] = 5
+        planner = StubPlanner(lambda g: [_child("c1")])
+        eng = _engine(svc, planner=planner, runner=StubRunner())
+        _run(eng.on_execute("t1"))
+        planner._factory = lambda g: [_child("c_r1")]
+        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))))
+        assert svc._get_node(graph, "t1").status == Status.PLANNING
+        assert svc._get_node(graph, "c_r1").status == Status.RUNNING
+
 # ===== 零 case 知识 =====
 class TestZeroCaseKnowledge:
     def test_no_node_name_literals_in_engine(self):

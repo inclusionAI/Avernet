@@ -23,7 +23,7 @@
 
 1. **领域模型 = 最新 classDiagram**:
    - 规格面:`TaskInfo`(入口,带 `source_channel_type/id` + `execution_config`)→ `TaskSpec`(metadata/context/goal,**无 SLA**)→ `Metadata`(**含 `task_id`**/title/instruction)、`Context`(background/**`extend_props`**)、`Goal`(objective/`acceptances: list[AcceptanceCriteria]`)、`AcceptanceCriteria`(id/description)。
-   - 运行态:`TaskExecutionGraph`(**`run_id`**/loop_round/status/output/**`tasks`**/**`relations: list[Relation]`**/extend_props)、`TaskNode`(node_id/**`task_id`**/status/task_spec/run_info/**`node_run_graph`**)、`Relation`({src_id,dst_id,**`type: RelationType`**,extend_props})、`RuntimeInfo`(**`run_mode: str`**/assignee/start_time/end_time/output/acceptance_result/extend_props,**无 collab_mode**;start_time/end_time 为**毫秒整数 int**)、`AcceptanceResult`(verdict/`acceptances_metric`/gaps,**无 verifier**)。
+   - 运行态:`TaskExecutionGraph`(**`run_id`**/loop_round/status/output/**`tasks`**/**`relations: list[Relation]`**/extend_props;loop_round=图级升 BBS 轮次达 MAX_LOOP→HUNG;节点级重规划次数由 extend_props.plan_round 记达 MAX_PLAN_ROUND→HUNG)、`TaskNode`(node_id/**`task_id`**/status/task_spec/run_info/**`node_run_graph`**)、`Relation`({src_id,dst_id,**`type: RelationType`**,extend_props})、`RuntimeInfo`(**`run_mode: str`**/assignee/start_time/end_time/output/acceptance_result/extend_props,**无 collab_mode**;start_time/end_time 为**毫秒整数 int**)、`AcceptanceResult`(verdict/`acceptances_metric`/gaps,**无 verifier**)。
    - 枚举:`Status` **6 态**(PENDING/**PLANNING**/RUNNING/DONE/FAILED/HUNG)、`AcceptanceVerdict`(PASS/FAIL)、`RelationType`(DEPENDENCY)。
    - **分解树统一承载结构归属**:`Relation{type=DEPENDENCY}` 在 `TaskExecutionGraph.relations` 表分解树(单入:每非根节点恰好 1 条入边=结构父,`src_id`=父,`dst_id`=子)。`TaskNode` 不持 `decomposed_by`/`depends_on` 字段——结构归属、验收、传播一律从 `relations` 派生。无跨兄弟直接数据边;数据流由步进式批规划顺序 + 执行时结构父聚合上下文承载。就绪=被 `add_task_nodes` 加入即就绪,无 `dependencies_satisfied` 闸门。
    - **`PLANNING` 新态**:承担"待规划/委托中"语义(节点已被/将被分解委托子执行)。
@@ -100,6 +100,7 @@
 28. 作为系统,我想升 BBS 自动(无人工确认挡板,BBS bot 自主认领执行),BBS 仍执行不下去时 STUCK→HUNG 留人工入口,这样长尾能力可被利用且最终有人把关。
 29. 作为系统,我想 `loop_round` 仅升 BBS 时递增(外层 BBS 上升轮次)并可在 `extend_props` 带元信息,这样 BBS 迭代可审计。
 30. 作为系统,我想 `RuntimeInfo.start_time/end_time` 由图谱流转 RUNNING 时自动维护、存储为**毫秒整数(int)**,这样时间戳与业务解耦。
+30b. 作为系统,我想每个**父节点**的重规划产子次数计入其 extend_props.plan_round,达 MAX_PLAN_ROUND(默认 10)→该父 HUNG(不再产子),这样单节点 gap 反复读不闭时不会无限产子撑爆图;loop_round 收敛到只数升 BBS 的总次数(MAX_LOOP)。
 31. 作为系统,我想崩溃堆栈/超时标记/miss 事件进 `extend_props`,这样非业务异常态增量合并不污染主字段。
 32. 作为开发者,我想对外服务集中在"任务中心"`TaskService` facade(2 API),图谱/规划/派发/执行/Harness 各管各的内部 API,这样模块边界清晰、调用方只认一处入口。
 33. 作为开发者,我想图谱原子变更收口在"任务图谱"`TaskGraphService`(8 API:5 核心写/读+3 派生只读),这样状态流转有单一写网关、不散在各执行器。

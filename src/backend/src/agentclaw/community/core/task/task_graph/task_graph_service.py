@@ -58,6 +58,7 @@ _DELEGATABLE_PARENT: set[Status] = {Status.PENDING, Status.FAILED, Status.PLANNI
 
 _DEFAULT_MAX_DEPTH = 2
 _DEFAULT_MAX_LOOP = 10  # 图级总轮次(根 gap 不闭 + 反复升 BBS)
+_DEFAULT_MAX_PLAN_ROUND = 10  # 节点级重规划次数(父节点子全 DONE→gap 未闭→重 plan 产新子)
 _DEFAULT_BBS_MAX_DEPTH = 3
 
 
@@ -534,5 +535,6 @@ class TaskGraphService:
             cfg.setdefault("MAX_DEPTH", _DEFAULT_MAX_DEPTH)
             cfg.setdefault("MAX_LOOP", _DEFAULT_MAX_LOOP)
             cfg.setdefault("MAX_HARNESS", 3)
+            cfg.setdefault("MAX_PLAN_ROUND", _DEFAULT_MAX_PLAN_ROUND)
             cfg.setdefault("BBS_MAX_DEPTH", _DEFAULT_BBS_MAX_DEPTH)
             return cfg
