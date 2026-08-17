@@ -76,8 +76,13 @@ internal_dependencies:
 
 Skill-set switching is the highest-throughput flow in production. Changes here can break every chat session in flight. Coordinate with the propagation log schema before changing repository protocols.
 
-Local Skill replacement stages a complete package before switching the existing
-Skill metadata. Its old-package cleanup work is persisted before an Active
+Local Skill replacement stages and verifies a complete package in a hidden
+implementation directory, then publishes it to the stable layout-owned
+``skills-local/<skill-name>`` locator before switching existing Skill metadata.
+For a Skills Pool layout, ``skills-local`` is the Pool local root resolved by
+``SkillServiceFactory``. Hidden ``.replacement-*`` and ``.rollback-*``
+directories are never database authority and are removed or recorded as
+cleanup work after the operation. Its old-package cleanup work is persisted before an Active
 runtime switch can commit; a rollback cancels that old-locator work before the
 old package becomes authoritative again. Failed post-switch obsolete-byte deletion is recorded through
 `LocalSkillCleanupRepository` in the exact deployment-wide Bot scope
