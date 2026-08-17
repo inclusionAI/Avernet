@@ -214,7 +214,7 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         for md in raw:
             md, detail_failure = self._enrich_mcp_detail(svc, md)
             server_code = md.get("server_code") or md.get("serverCode") or ""
-            stdio = self._stdio_launch_for(server_code, md)
+            stdio = self._stdio_launch_for(server_code, md, req.engine_type)
             if stdio is None and detail_failure is not None:
                 # Remote server we could not resolve. Fail here, at the point the
                 # lookup actually failed, with the cause chained — rather than
@@ -250,7 +250,7 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         return inputs
 
     def _stdio_launch_for(
-        self, server_code: str, md: dict[str, Any]
+        self, server_code: str, md: dict[str, Any], engine_type: str
     ) -> StdioLaunch | None:
         """Resolve a LOCAL server's launch instruction; ``None`` if it is remote.
 
@@ -288,10 +288,10 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         if isinstance(run_mode, str) and run_mode.strip().upper() == "REMOTE":
             return None
 
-        cfg = self._first_stdio_config(md)
+        cfg = self._stdio_config_for_engine(md, engine_type)
         if cfg is None:
             registry_detail = self._local_mcp_registry.get_mcp_detail(server_code)
-            cfg = self._first_stdio_config(registry_detail or {})
+            cfg = self._stdio_config_for_engine(registry_detail or {}, engine_type)
         if cfg is None:
             return None
         return StdioLaunch(
@@ -304,20 +304,36 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         )
 
     @staticmethod
-    def _first_stdio_config(detail: dict[str, Any]) -> dict[str, Any] | None:
-        """First launchable ``stdioConfigs`` entry, or ``None``.
+    def _stdio_config_for_engine(
+        detail: dict[str, Any], engine_type: str
+    ) -> dict[str, Any] | None:
+        """The launchable ``stdioConfigs`` entry for ``engine_type``, or ``None``.
+
+        A launch instruction is a path into a specific image, so the same
+        ``server_code`` can need a different one per engine — ``hitl`` ships at
+        ``/usr/local/bin`` on teclaw and under ``/home/admin`` elsewhere. An entry
+        naming this engine in ``engineType`` wins; an entry naming no engine is
+        the default for the rest. An entry for a *different* engine is never a
+        fallback: launching another image's binary is worse than not launching.
 
         An entry without a ``command`` is not a launch instruction, so it does not
         count as a hit — the caller then falls through to its next source rather
         than emitting a stdio server the engine cannot start.
         """
         configs = detail.get("stdioConfigs") or detail.get("stdio_configs") or []
-        if not isinstance(configs, list) or not configs:
+        if not isinstance(configs, list):
             return None
-        cfg = configs[0]
-        if not isinstance(cfg, dict) or not cfg.get("command"):
-            return None
-        return cfg
+
+        default: dict[str, Any] | None = None
+        for cfg in configs:
+            if not isinstance(cfg, dict) or not cfg.get("command"):
+                continue
+            declared = cfg.get("engineType") or cfg.get("engine_type")
+            if declared is None:
+                default = default if default is not None else cfg
+            elif str(declared).strip().lower() == engine_type.strip().lower():
+                return cfg
+        return default
 
     def _enrich_mcp_detail(
         self, svc: Any, md: dict[str, Any]

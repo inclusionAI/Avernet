@@ -25,9 +25,9 @@ from agentclaw.community.core.config_compose.services.mcporter_composer import (
 from agentclaw.community.core.mcp.services.local_mcp_registry import LocalMCPRegistry
 
 
-def _req() -> ComposeRequest:
+def _req(engine_type: str = "openclaw") -> ComposeRequest:
     return ComposeRequest(
-        entity_id="staff_u1", bot_id="bot1", user_id="u1", engine_type="openclaw"
+        entity_id="staff_u1", bot_id="bot1", user_id="u1", engine_type=engine_type
     )
 
 
@@ -210,6 +210,79 @@ def test_mcps_resolve_stdio_launch_when_center_lookup_fails():
 
     assert inputs[0].stdio is not None
     assert inputs[0].stdio.command == "python3"
+
+
+_PER_ENGINE_HITL_CATALOG = {
+    "hitl": {
+        "stdioConfigs": [
+            {"engineType": "teclaw", "command": "python3",
+             "arguments": ["/usr/local/bin/teclaw_hitl_mcp_server.py"]},
+            {"command": "python3",
+             "arguments": ["/home/admin/hitl/hitl_mcp_server.py"]},
+        ]
+    }
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "engine_type,expected_arg",
+    [
+        ("teclaw", "/usr/local/bin/teclaw_hitl_mcp_server.py"),
+        ("openclaw", "/home/admin/hitl/hitl_mcp_server.py"),
+        ("claude_code", "/home/admin/hitl/hitl_mcp_server.py"),
+    ],
+)
+def test_mcps_pick_the_launch_instruction_for_this_engine(engine_type, expected_arg):
+    """A launch instruction is a path into a specific image, so the same
+    ``server_code`` resolves differently per engine — ``hitl`` ships under
+    ``/usr/local/bin`` on teclaw and under ``/home/admin`` everywhere else. An
+    entry naming no engine is the default for the rest."""
+    svc = MagicMock()
+    svc.collect_bot_active_mcps.return_value = [{"server_code": "hitl"}]
+    svc.mcp_center.get_mcp_detail.return_value = None
+    mcp_cfg = MagicMock()
+    mcp_cfg.build_mcp_sync_payload.return_value = (None, {}, "PROD", None)
+
+    inputs = _collector(
+        skill_set_service=svc,
+        mcp_config_service=mcp_cfg,
+        local_mcp_registry=_registry_over(_PER_ENGINE_HITL_CATALOG),
+    ).mcps(_req(engine_type=engine_type))
+
+    assert inputs[0].stdio == StdioLaunch(command="python3", args=[expected_arg], env={})
+
+
+@pytest.mark.unit
+def test_mcps_never_borrow_another_engines_launch_instruction():
+    """With only a teclaw-specific entry and no engine-agnostic default, a
+    different engine gets nothing rather than teclaw's binary — launching another
+    image's path is worse than not launching."""
+    catalog = {
+        "hitl": {
+            "stdioConfigs": [
+                {"engineType": "teclaw", "command": "python3",
+                 "arguments": ["/usr/local/bin/teclaw_hitl_mcp_server.py"]},
+            ]
+        }
+    }
+    svc = MagicMock()
+    svc.collect_bot_active_mcps.return_value = [{"server_code": "hitl"}]
+    svc.mcp_center.get_mcp_detail.return_value = None
+    mcp_cfg = MagicMock()
+    mcp_cfg.build_mcp_sync_payload.return_value = (None, {}, "PROD", None)
+
+    collector = _collector(
+        skill_set_service=svc,
+        mcp_config_service=mcp_cfg,
+        local_mcp_registry=_registry_over(catalog),
+    )
+
+    # teclaw resolves it…
+    assert collector.mcps(_req(engine_type="teclaw"))[0].stdio is not None
+    # …openclaw does not, and since Center has no record either, it fails loudly.
+    with pytest.raises(McporterComposeError, match="not a local server"):
+        collector.mcps(_req(engine_type="openclaw"))
 
 
 @pytest.mark.unit

@@ -4,11 +4,25 @@
 # the production MCP Center plugin as fallback metadata for LOCAL/stdio MCPs.
 # The key is used as serverCode. ``args`` is normalized to stdio
 # ``arguments`` before sync.
+#
+# A server whose launch differs per engine declares ``stdioConfigs`` explicitly,
+# one entry per variant, with ``engineType`` naming the engine an entry is for.
+# An entry with no ``engineType`` is the default for every other engine. The
+# flat ``command``/``args``/``env`` form below is shorthand for a single
+# engine-agnostic entry, so a server that launches the same way everywhere needs
+# no ``stdioConfigs`` at all.
 servers:
   hitl:
-    command: "python3"
-    args:
-      - "/home/admin/hitl/hitl_mcp_server.py"
+    stdioConfigs:
+      # teclaw ships the server at a different path than the other engines, so
+      # the same server_code needs a per-engine launch instruction.
+      - engineType: "teclaw"
+        command: "python3"
+        arguments:
+          - "/usr/local/bin/teclaw_hitl_mcp_server.py"
+      - command: "python3"
+        arguments:
+          - "/home/admin/hitl/hitl_mcp_server.py"
   clawmind:
     command: "node"
     args:
