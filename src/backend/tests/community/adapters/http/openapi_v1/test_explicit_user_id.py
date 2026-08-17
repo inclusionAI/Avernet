@@ -317,7 +317,13 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: placement the rule deliberately keeps. ``none`` fell 21 → 16 because the five
 #: operations that named no bot at all (the resources and routines collection
 #: roots, skills list and upload) now do.
-_BOT_ID_PLACEMENT = {"path": 54, "query": 1, "none": 16}
+#:
+#: Then the MCP completion moved 54/1/16 → 60/1/18. ``path`` +6: the bot-scoped
+#: activation group addresses a bot and names it in the path, like every other
+#: per-bot group. ``none`` +2: the account-level config listing and delete are
+#: keyed by ``(user_id, server_code)`` and have no bot dimension at all — the
+#: same reason the config read and write before them name none.
+_BOT_ID_PLACEMENT = {"path": 60, "query": 1, "none": 18}
 
 
 def _schema() -> dict:
@@ -396,8 +402,11 @@ def test_the_pinned_number_of_operations_take_it():
     ]
     # 60 on the merge base, +3 for the startup-script operations, +2 for the
     # resources file endpoints re-addressed by workspace path (#1000), then -4
-    # for the files-only resources group.
-    assert len(taking) == 61
+    # for the files-only resources group, then +8 for the MCP completion: the
+    # six bot-scoped activation operations and the two account-level config
+    # operations (listing and delete). All eight are user-scoped and all eight
+    # take the parameter, which is the property this pin exists to hold.
+    assert len(taking) == 69
 
 
 def test_the_exempt_operations_take_none():

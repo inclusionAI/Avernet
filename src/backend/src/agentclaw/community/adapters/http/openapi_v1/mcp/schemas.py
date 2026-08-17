@@ -277,16 +277,11 @@ class McpConfigWrite(BaseModel):
 class McpConfigDeleted(BaseModel):
     """Outcome of deleting the caller's config for one MCP server.
 
-    Distinct from the shared ``Deleted`` contract, which documents ``deleted``
-    as *always* true because a failed delete answers an error envelope instead.
-    That is the right shape for addressing a resource: asking to delete
-    something absent is a 404. It is the wrong shape here, because this
-    operation is a **revocation** and revoking twice must not be an error — a
+    The deleted flag genuinely varies: true when a stored configuration was
+    removed, false when there was nothing stored. Both are successes, because
+    this operation is a revocation and revoking twice must not be an error — a
     caller clearing a leaked credential should get the same answer whether or
     not someone already cleared it.
-
-    So ``deleted`` genuinely varies: true when a stored config was removed,
-    false when there was nothing stored. Both are successes.
     """
 
     model_config = ConfigDict(

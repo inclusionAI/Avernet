@@ -117,22 +117,22 @@ This group makes the MCP half behave like the skill half. No schema change.
 
 ## Group 5 — Bot-scoped endpoints
 
-- [ ] **5.1** `openapi_v1/bot_mcp/schemas.py` — `BotMcpServer`,
+- [x] **5.1** `openapi_v1/bot_mcp/schemas.py` — `BotMcpServer`,
       `BotMcpServerState`, `BotMcpServerAdd`, with `extra="forbid"` on the body
       model (the `sync_mode`-rejection precedent from PR #610).
-- [ ] **5.2** `openapi_v1/bot_mcp/router.py` — the six operations at prefix
+- [x] **5.2** `openapi_v1/bot_mcp/router.py` — the six operations at prefix
       `/openapi/v1/bots/{bot_id}/mcp`, using `BotIdPath`, `UserIdDep`,
       `PageParamsDep`, `@envelope_errors`. `POST ""` answers `201`.
-- [ ] **5.3** Mount with `_GRANT_CHECKED_SUBGROUPS` in `openapi_v1/__init__.py`
+- [x] **5.3** Mount with `_GRANT_CHECKED_SUBGROUPS` in `openapi_v1/__init__.py`
       — before `bots_router`.
-- [ ] **5.4** Add all six to `admission.py` as `GRANT_CHECKED_OWN_BOT`, with the
+- [x] **5.4** Add all six to `admission.py` as `GRANT_CHECKED_OWN_BOT`, with the
       comment recording why this is narrower than `skills`.
-- [ ] **5.5** Endpoint tests: full lifecycle add → activate → deactivate →
+- [x] **5.5** Endpoint tests: full lifecycle add → activate → deactivate →
       remove; an added server reads `active: false` until activated; unowned
       `bot_id` is `404` and byte-identical to an unknown one; unknown/hidden
       `server_code` is `404`; `403` on a mismatched `user_id`; unknown body field
       is `422`.
-- [ ] **5.6** Routing test: `/openapi/v1/bots/mcp/servers`, `/…/tenants` and
+- [x] **5.6** Routing test: `/openapi/v1/bots/mcp/servers`, `/…/tenants` and
       `/…/configs` still resolve to the account-level group with the new
       `{bot_id}` group mounted.
 

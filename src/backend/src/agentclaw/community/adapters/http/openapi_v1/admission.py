@@ -203,6 +203,36 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/{bot_id}/models"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/models/{model_id:path}"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/connection"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    # bot-scoped MCP — which servers this bot carries and may call.
+    #
+    # All six are OWN_BOT, deliberately narrower than ``skills``, which uses
+    # ADDRESSED_BOT on its two collection routes because that group serves
+    # shared bots. MCP state here resolves through ``get_by_id_and_owner``, so
+    # there is no addressed-owner dimension to adjudicate and a bot merely
+    # shared with the caller is unreachable — for a human too, which is what
+    # makes an application acting as them inherit the same limit for free.
+    #
+    # Note these are grant-checked while the account-level MCP *config*
+    # operations are REFUSED. That is the same distinction, read twice: a grant
+    # is consent to reach a bot, and these address one.
+    ("GET", "/openapi/v1/bots/{bot_id}/mcp"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/mcp"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/mcp/{server_code}",
+    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    (
+        "DELETE",
+        "/openapi/v1/bots/{bot_id}/mcp/{server_code}",
+    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/mcp/{server_code}/activate",
+    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/mcp/{server_code}/deactivate",
+    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     # ── B: returns a set of bots, narrowed to the granted ones ───────────────
     ("GET", "/openapi/v1/bots"): AdmissionMode.GRANT_FILTERED,
     # The application's own view, and the **complete** one: a granted bot the

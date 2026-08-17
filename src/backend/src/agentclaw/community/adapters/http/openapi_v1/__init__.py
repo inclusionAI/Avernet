@@ -192,6 +192,7 @@ from .engine_runtime.connection import router as engine_connection_router
 from .engine_runtime.engine import router as engine_engine_router
 from .engine_runtime.models import router as engine_models_router
 from .engine_runtime.sessions import router as engine_sessions_router
+from .bot_mcp import router as bot_mcp_router
 from .identity import router as identity_router
 from .loadtest import router as loadtest_router
 from .mcp import router as mcp_router
@@ -276,6 +277,11 @@ _GRANT_CHECKED_SUBGROUPS = [
     # rather than the engine-runtime one, and mounting it here is what gives it
     # both. See ``bots/engine_config.py``.
     engine_config_router,
+    # Bot-scoped MCP activation. Sits under ``{bot_id}`` like the rest of this
+    # list, and therefore mounts ahead of ``bots_router`` — its paths never
+    # collide with the account-level ``/openapi/v1/bots/mcp/**`` group, whose
+    # segments differ on every pair, and ``test_bot_mcp_endpoints`` pins that.
+    bot_mcp_router,
     identity_router,
     resources_router,
     routines_router,
