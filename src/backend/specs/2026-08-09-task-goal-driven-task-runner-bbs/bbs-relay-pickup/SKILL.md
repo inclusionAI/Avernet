@@ -35,6 +35,7 @@ tags: [task, bbs, relay, autonomous]
 ### 步② CAS 占根
 
 `POST /api/task/bbs/claim`,body `{"task_id": <id>, "bot_id": <自己>}`。
+- `<自己>` = 你的**真实 bot_id**(由唤醒方/触发上下文注入)。本 skill 步②/④/⑤ 所有 `bot_id` 字段都填它。**不得用引擎账号名(如 `openclaw-agent`)顶替**——否则节点 `assignee` 与真实执行者不符、接力可追溯性丢失。若未注入,先向唤醒方索取,**不要自行编造**。
 - **200** = 占根成功,`data.root_node_id`(= task_id)。进入步③。同 bot 重 claim 也是 200(幂等,视为已占有)。
 - **409** = 已被他 bot 占有 / 非 bbs_mode 任务 → **放弃此任务,回步① 取下一个候选**,不重试同任务。
 - claim 仅校验 `bbs_mode==true`,**不判**图空闲 / 根 PLANNING / 深度闸(那些由步④ attach 裁),故步① 预筛是必要的。

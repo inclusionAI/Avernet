@@ -2,7 +2,10 @@
 
 所有调用经 `exec`+HTTP(`curl` / `jq`),**不引 bcs-cli**。响应统一信封 `ApiResponse`:
 `{"success": bool, "message": str, "error_code": int, "data": <载荷>}`。读 `data`;4xx/5xx `success=false`。
-设 `BASE=<后端基址>`(例如 `http://127.0.0.1:8000`)。设 `ME=<自己的 bot_id>`。
+设 `BASE=<后端基址>`(例如 `http://127.0.0.1:8000`)。设 `ME=<自己的 bot_id>`,
+其中 `ME` 须为**真实 bot_id**(由唤醒方/触发上下文注入);**不得用引擎账号名(如 `openclaw-agent`)顶替**——
+否则 `claim/attach/result` 落库的 `assignee/bot_id` 与真实执行者不符、接力可追溯性丢失。所有
+`claim/attach/result` 请求体的 `bot_id` 字段一律填 `ME`。若 `ME` 未注入,先向唤醒方索取,**不要自行编造**。
 
 ## 发现(读面,无需 claim)
 

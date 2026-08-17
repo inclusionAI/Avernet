@@ -75,6 +75,32 @@ _BBS_MAX_DEPTH = 3  # 单方向一段收口;风清扬自判 full 一次唤醒即
 
 _HDRS = {"x-user-id": _USER_ID, "accept": "application/json"}
 
+# 单次 dashboard 读超时:engine 在 threading.RLock 内跨长 LLM 调用,query_task_dashboard 同锁,
+# 写路径持锁跑规划/派发时读会排队(可远超常规读时延)。短超时 + 外层轮询重试,熬过一次性排队。
+_DASH_TIMEOUT = 60.0
+
+
+async def _get_dashboard(cli: httpx.AsyncClient, task_id: str) -> dict | None:
+    """读 ``/api/task/dashboard``;一次性排队/断网时返 ``None`` 供外层轮询重试(不直接 fail 用例)。
+
+    engine 的 ``on_miss``/``on_execute`` 等在 per-task ``threading.RLock`` 内跨长 LLM,而
+    ``query_task_dashboard`` 同锁,写路径持锁规划期间读会阻塞。用短超时把"单次卡死"降级为重试,
+    避免一次长排队直接撞穿 httpx 客户端超时(曾以 ReadTimeout 终结整个用例)。
+    """
+    try:
+        r = await cli.get(
+            f"{_BACKEND}/api/task/dashboard",
+            params={"task_id": task_id},
+            timeout=_DASH_TIMEOUT,
+        )
+    except (httpx.TimeoutException, httpx.RequestError) as exc:
+        print(f"[dashboard] 读超时/网络异常,稍后重试:{exc!r}")
+        return None
+    if r.status_code != 200:
+        print(f"[dashboard] 非 200(status={r.status_code}),稍后重试:{r.text[:120]!r}")
+        return None
+    return r.json().get("data") or {}
+
 
 def _execute_body(owner_id: str) -> dict:
     """``POST /api/task/execute`` 请求体(TaskInfoDTO):整理「基础架构」方向架构师。"""
@@ -103,20 +129,19 @@ def _execute_body(owner_id: str) -> dict:
     }
 
 
-def _wake_prompt() -> str:
-    """唤醒风清扬自驱 bbs-relay-pickup(用例只唤醒不代调 bbs/*)。"""
+def _wake_prompt(fqy_bot_id: str) -> str:
+    """唤醒风清扬自驱 bbs-relay-pickup(用例只唤醒不代调 bbs/*)。
+
+    只交代用哪个 skill 接单 + 必要定位信息(task_id / backend url / 自身 bot_id),
+    不复述 skill 内部的 6 步流程——那是 bbs-relay-pickup SKILL.md 该做的。
+
+    必须传入风清扬自身的 bot_id:bot 不知 provisioning 给它的真实 bot_id,不传会误填引擎身份
+    (如 ``openclaw-agent``),导致节点 ``assignee`` 与 provisioning bot_id 不一致。
+    """
     return (
-        "请执行 bbs-relay-pickup skill 完成 BBS 自主接力。\n"
-        f"任务 task_id={TASK_ID} 已自然升 BBS(bbs_mode=true、根 PLANNING、图空闲),等待 bot 自主接力。\n"
-        f"task API backend base url: {_BACKEND}(用 exec+curl 直调,例:"
-        f"curl { _BACKEND }/api/task/list --json ...)。\n"
-        "按 bbs-relay-pickup SKILL.md 6 步自驱:\n"
-        "  步① GET /api/task/list 当客户端筛 bbs_mode==true,GET /api/task/dashboard 取整图;\n"
-        "  步② POST /api/task/bbs/claim 占根;\n"
-        "  步③ 读根 goal + 已 DONE 叶子 + 前序 scoped 节点 checkpoint 自判 full/partial/skip;\n"
-        "  步④ POST /api/task/bbs/attach 挂一个 run_mode=bbs 节点 + 用你的 arch-analysis 能力执行该节点指令;\n"
-        "  步⑤ POST /api/task/bbs/result 写回(完满则 root_verified=true 收口全图)→ claim 自动释放。\n"
-        "本次目标单一方向,自判 full:一次唤醒做满剩余 → root_verified=true 收口全图 DONE。"
+        "请用 bbs-relay-pickup skill 接力执行已自然升 BBS 的单子。\n"
+        f"task_id={TASK_ID};task API backend base url={_BACKEND};"
+        f"你(风清扬)自身 bot_id={fqy_bot_id}(claim/attach/result 的 bot_id 字段填它)。"
     )
 
 
@@ -156,9 +181,10 @@ class TestBbsRelayE2ENatual(unittest.TestCase):
             g: dict = {}
             deadline = time.monotonic() + _TIMEOUT
             while time.monotonic() < deadline:
-                r = await cli.get(f"{_BACKEND}/api/task/dashboard", params={"task_id": TASK_ID})
-                r.raise_for_status()
-                g = r.json().get("data") or {}
+                g = await _get_dashboard(cli, TASK_ID)
+                if g is None:
+                    await asyncio.sleep(5.0)
+                    continue  # engine 持锁跑规划导致读排队,稍后重试
                 snap = [
                     (t.get("node_id"), t.get("status"),
                      (t.get("run_info") or {}).get("run_mode") or "",
@@ -168,6 +194,23 @@ class TestBbsRelayE2ENatual(unittest.TestCase):
                 print(f"[snapshot] graph={g.get('status')} loop={g.get('loop_round')} "
                       f"bbs_mode={(g.get('extend_props') or {}).get('bbs_mode')} nodes={snap}")
                 if (g.get("extend_props") or {}).get("bbs_mode"):
+                    # 已自然升 BBS:打印升 BBS 落点(可恢复态 vs 图级 HUNG),供定位 §10.5 seam
+                    _ep = g.get("extend_props") or {}
+                    _nodes = {t["node_id"]: t for t in g.get("tasks") or []}
+                    _root = _nodes.get(TASK_ID)
+                    print(
+                        f"[escalated] ⭐ 已自然升 BBS! task={TASK_ID} "
+                        f"graph={g.get('status')} loop_round={g.get('loop_round')} "
+                        f"bbs_mode={_ep.get('bbs_mode')} bbs_relay_count={_ep.get('bbs_relay_count')} "
+                        f"hung_reason(图)={_ep.get('hung_reason')} "
+                        f"root.status={(_root or {}).get('status')} "
+                        f"node_count={len(g.get('tasks') or [])}"
+                    )
+                    for _t in g.get("tasks") or []:
+                        _ri = _t.get("run_info") or {}
+                        print(f"   - {_t.get('node_id'):28} {_t.get('status'):9} "
+                              f"mode={_ri.get('run_mode') or '-':5} "
+                              f"reason={(_ri.get('extend_props') or {}).get('hung_reason') or '-'}")
                     break  # 已自然升 BBS
                 if g.get("status") == "DONE":
                     break  # 未升 BBS 已闭环(异常路径,留待断言揭出)
@@ -189,7 +232,7 @@ class TestBbsRelayE2ENatual(unittest.TestCase):
 
             # 5) 唤醒风清扬自驱 bbs-relay-pickup:用例只唤醒,不代调 bbs/* 路由。
             #    一次唤醒 = 一段接力;未收口且图空闲则再唤醒,上限 BBS_MAX_DEPTH 次。
-            wake_prompt = _wake_prompt()
+            wake_prompt = _wake_prompt(fqy_id)
             wakes = 0
             while g.get("status") not in ("DONE", "HUNG") and wakes < _BBS_MAX_DEPTH:
                 wakes += 1
@@ -206,9 +249,10 @@ class TestBbsRelayE2ENatual(unittest.TestCase):
                 # 唤醒后轮询,等接力写回落地 / 图收口 / 图空闲可再唤醒
                 sub_deadline = time.monotonic() + 300.0
                 while time.monotonic() < sub_deadline:
-                    r = await cli.get(f"{_BACKEND}/api/task/dashboard", params={"task_id": TASK_ID})
-                    r.raise_for_status()
-                    g = r.json().get("data") or {}
+                    g = await _get_dashboard(cli, TASK_ID)
+                    if g is None:
+                        await asyncio.sleep(5.0)
+                        continue  # 同上:engine 持锁排队,稍后重试
                     snap = [
                         (t.get("node_id"), t.get("status"),
                          (t.get("run_info") or {}).get("run_mode") or "",
