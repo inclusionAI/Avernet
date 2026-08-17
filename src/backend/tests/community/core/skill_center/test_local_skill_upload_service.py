@@ -874,6 +874,57 @@ def test_zip_explains_when_multiple_skill_files_are_present():
     )
 
 
+def test_zip_explains_when_an_archive_entry_cannot_be_read(monkeypatch):
+    class _UnreadableArchive:
+        def infolist(self):
+            return [zipfile.ZipInfo("SKILL.md")]
+
+        def read(self, _info):
+            raise OSError("injected archive read failure")
+
+    monkeypatch.setattr(
+        upload_module.zipfile, "ZipFile", lambda *_args: _UnreadableArchive()
+    )
+
+    with pytest.raises(LocalSkillInvalidPackageError) as error:
+        _service(_Filesystem())._unpack(b"not-read")
+
+    assert error.value.public_message == "Skill package could not be read"
+
+
+def test_zip_explains_when_wrapper_directory_does_not_match_skill_name():
+    with pytest.raises(LocalSkillInvalidPackageError) as error:
+        _service(_Filesystem())._unpack(
+            _zip(
+                {
+                    "wrong-directory/SKILL.md": (
+                        b"name: actual-skill\ndescription: valid\n"
+                    )
+                }
+            )
+        )
+
+    assert error.value.public_message == (
+        "Skill directory name must match SKILL.md name"
+    )
+
+
+def test_zip_rejects_a_file_that_conflicts_with_its_wrapper_directory():
+    with pytest.raises(LocalSkillInvalidPackageError) as error:
+        _service(_Filesystem())._unpack(
+            _zip(
+                {
+                    "wrapped/SKILL.md": b"name: wrapped\ndescription: valid\n",
+                    "wrapped": b"not a directory",
+                }
+            )
+        )
+
+    assert error.value.public_message == (
+        "Skill package files must be under one Skill directory"
+    )
+
+
 @pytest.mark.parametrize("name", ["skills-center", "skills-local", "skills-repo"])
 def test_zip_rejects_reserved_content_store_names(name):
     with pytest.raises(LocalSkillInvalidPackageError):
