@@ -44,6 +44,29 @@ user_config:
     api_key: "@dummy_api_key"
     default_ttl_minutes: 1440 # 分钟 => 1 天
 
+  # Aliyun ACK 沙箱模板配置（第二类模板，用于 plugins.sandbox.arca = "aliyun_ack"）
+  # 默认使用 dummy 值，启用该后端时才需填充 cluster 与 pod 真实值，无需新增配置键。
+  aliyun_ack_template:
+    template_id: "ALIYUN-ACK-TEMPLATE-000000"
+    cluster:
+      endpoint: "https://k8s.example.com"
+      region: "cn-hangzhou"
+      cluster_name: "ack-sandbox"
+      kubeconfig: ""
+      context: "ack-sandbox"
+      access_key_id: "@dummy_access_key_id"
+      access_key_secret: "@dummy_access_key_secret"
+    pod:
+      image: "ubuntu:22.04"
+      namespace: "default"
+      service_account: ""
+      cpu_request: ""
+      cpu_limit: ""
+      memory_request: ""
+      memory_limit: ""
+      storage_class: ""
+      envs: {}
+
   bot_service:
     proxy_base_url: "https://bot_service.example.com"
     proxy_ws_base_url: "wss://bot_service.example.com"
