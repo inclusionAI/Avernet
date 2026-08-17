@@ -25,7 +25,7 @@ from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     ActingCallerDep,
     UserIdDep,
-    require_granted_bot,
+    require_granted_addressed_bot,
 )
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
@@ -55,18 +55,19 @@ from .schemas import Skill, SkillState, SkillUpload
 router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/skills", tags=["skills"])
 
 #: The bot authorization for an application caller, on the two operations the
-#: shared dependency can decide.
+#: shared dependency can decide — the **addressed-bot** dependency, because the
+#: collection operations publish ``owner_id`` and may address a shared bot.
 #:
 #: Declared per route rather than at ``include_router``, because this group is
 #: mixed in the one way that matters to this check: the collection operations
 #: name their bot's owner in the query, so the dependency can look the grant up
 #: against the pair the handler will act on — while the four ``{skill_id}``
 #: operations learn that owner only by reading the skill. Mounting the whole
-#: group under it refused an application holding a valid grant on a *shared*
-#: bot, because the dependency fell back to the delegating user. ``admission.py``
-#: is the authority on which route is which; ``test_admission_inventory.py``
-#: fails if a declaration and a mode disagree.
-_GRANT_CHECKED = [Depends(require_granted_bot)]
+#: group under a grant check refused an application holding a valid grant on a
+#: *shared* bot, because the check fell back to the delegating user.
+#: ``admission.py`` is the authority on which route is which;
+#: ``test_admission_inventory.py`` fails if a declaration and a mode disagree.
+_GRANT_CHECKED_ADDRESSED_BOT = [Depends(require_granted_addressed_bot)]
 
 #: The path parameter naming the skill an operation addresses. The id alone
 #: still resolves the skill's bot and owner; the address names the bot as well
@@ -180,7 +181,9 @@ def _to_skill(record: dict[str, Any]) -> Skill:
     )
 
 
-@router.get("", response_model=Envelope[Page[Skill]], dependencies=_GRANT_CHECKED)
+@router.get(
+    "", response_model=Envelope[Page[Skill]], dependencies=_GRANT_CHECKED_ADDRESSED_BOT
+)
 @envelope_errors
 async def list_skills(
     page: PageParamsDep,
@@ -249,7 +252,7 @@ async def get_skill(
 @router.post(
     "",
     status_code=201,
-    dependencies=_GRANT_CHECKED,
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
     response_model=Envelope[SkillUpload],
     responses={
         200: {

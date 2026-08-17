@@ -9,7 +9,7 @@ the collection.
 
 **The four ``{skill_id}`` operations** named no bot at all — the skill id
 resolved its own — so there is nothing to put back in the query and nothing for
-``require_granted_bot`` to read. They resolve the bot from the skill exactly as
+the grant dependencies to read. They resolve the bot from the skill exactly as
 they used to, and check the grant against the ``(bot, owner)`` the record names.
 
 That last part is the second authorization mechanism in the one place it is

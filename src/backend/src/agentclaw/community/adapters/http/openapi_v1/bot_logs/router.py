@@ -11,6 +11,9 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     Principal,
     require_user_and_app_principal,
 )
+from agentclaw.community.adapters.http.openapi_v1.principal import (
+    refuse_app_only_caller,
+)
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
@@ -22,7 +25,17 @@ from agentclaw.community.core.bot_chat.schemas import (
 )
 from agentclaw.community.di import Injected
 
-router = APIRouter(prefix="/openapi/v1/bots/logs", tags=["bot-logs"])
+# Every operation here is ``REFUSED`` to a machine caller acting alone: on this
+# group ``user_id`` means *whose traces to read* over a tenant-level
+# observability surface, not *whose call this is*, and a grant covers a bot —
+# it does not translate into that meaning. The refusal already happens
+# centrally in ``require_principal``; declaring it here makes the decision
+# visible on the group that carries it. See ``refuse_app_only_caller``.
+router = APIRouter(
+    prefix="/openapi/v1/bots/logs",
+    tags=["bot-logs"],
+    dependencies=[Depends(refuse_app_only_caller)],
+)
 
 PrincipalDep = Annotated[Principal, Depends(require_user_and_app_principal)]
 

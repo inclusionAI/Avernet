@@ -20,8 +20,10 @@ argument to the call, and a client that must be told to put the same id in two
 places has been told the address twice.
 
 That is also what makes authorization mostly mechanical rather than
-per-operation. ``require_granted_bot`` reads the addressed bot off the path, the
-same way, for all but four operations on the surface.
+per-operation. The grant dependencies (``require_granted_own_bot`` /
+``require_granted_addressed_bot`` — one per grant-checked admission mode, so
+the declaration says which id model a route has) read the addressed bot off
+the path, the same way, for all but four operations on the surface.
 
 **The four are not an oversight, and their handler-side checks are
 load-bearing.** The ``{skill_id}`` skills operations resolve by
@@ -186,7 +188,7 @@ from .contracts import (
     USER_SCOPED_ERROR_RESPONSES,
 )
 from .dependencies import require_principal
-from .principal import require_granted_bot
+from .principal import require_granted_addressed_bot, require_granted_own_bot
 from .engine_runtime.approvals import router as engine_approvals_router
 from .engine_runtime.connection import router as engine_connection_router
 from .engine_runtime.engine import router as engine_engine_router
@@ -265,11 +267,12 @@ _SUBGROUPS = [
 # outright, which is exactly wrong for the listings (Mode B) and the
 # account-level reads (C/OPEN). `bots` is mixed and declares it per route;
 # `admission.py` is the authority on which is which, and
-# `test_principal_seam.py` fails if a route's declaration and its mode disagree.
+# `test_admission_inventory.py` fails if a route's declaration and its mode
+# disagree.
 #
-# The engine-runtime groups need no entry here: their `OwnerIdDep` already
-# depends on the same check, because it is where the addressed owner comes from
-# for an application caller.
+# The engine-runtime groups are not here because they are not own-bot: they may
+# address a shared bot, so their mount below declares the *addressed-bot*
+# dependency instead.
 _GRANT_CHECKED_SUBGROUPS = [
     # Engine config is bots-component work at an engine-component address: it
     # reads and writes a stored blob, so it takes the ordinary error table
@@ -315,7 +318,14 @@ _PUBLIC_AUTH = [Depends(require_principal)]
 # wholly own-bot. A no-op for a caller that names an end user — their own
 # operation's owner-scoped resolve already refuses a bot that is not theirs, and
 # re-deciding it here would risk a second, different answer.
-_GRANT_CHECKED = [Depends(require_granted_bot)]
+_GRANT_CHECKED_OWN_BOT = [Depends(require_granted_own_bot)]
+
+# The same authorization for the groups that may address a *shared* bot: the
+# grant is checked against the `owner_id` the request names (defaulting to the
+# caller) rather than pinned to the caller. Which of the two a mount gets is the
+# route's admission mode made visible — `admission.py` records the decision, and
+# `test_admission_inventory.py` fails if a mount and a mode disagree.
+_GRANT_CHECKED_ADDRESSED_BOT = [Depends(require_granted_addressed_bot)]
 
 
 def build_public_router() -> APIRouter:
@@ -344,31 +354,37 @@ def build_public_router() -> APIRouter:
         public.include_router(
             router,
             responses=USER_SCOPED_ERROR_RESPONSES,
-            dependencies=_PUBLIC_AUTH + _GRANT_CHECKED,
+            dependencies=_PUBLIC_AUTH + _GRANT_CHECKED_OWN_BOT,
         )
+    # The engine-runtime groups already run this exact check transitively —
+    # their `OwnerIdDep` consumes the owner it returns — so declaring it at the
+    # mount adds no second lookup (FastAPI caches a dependency per request).
+    # It is declared anyway so the mount says what governs the group, the same
+    # way the own-bot mounts above do, instead of the check being visible only
+    # inside `engine_runtime/params.py`.
     for router in _ENGINE_RUNTIME_GROUPS:
         public.include_router(
             router,
             responses=ENGINE_RUNTIME_ERROR_RESPONSES,
-            dependencies=_PUBLIC_AUTH,
+            dependencies=_PUBLIC_AUTH + _GRANT_CHECKED_ADDRESSED_BOT,
         )
     # The addresses this surface used to have. Each legacy group is mounted the
     # way its replacement is, because the mount decides half of what a caller
     # experiences and parity means the old address answers as it always did.
     # The exception is `skills`, whose retiring item operations name no bot for
-    # `require_granted_bot` to read and so check it themselves — see
+    # the grant dependencies to read and so check it themselves — see
     # `deprecated/__init__.py`.
     for router in _LEGACY_ENGINE_RUNTIME:
         public.include_router(
             router,
             responses=ENGINE_RUNTIME_ERROR_RESPONSES,
-            dependencies=_PUBLIC_AUTH,
+            dependencies=_PUBLIC_AUTH + _GRANT_CHECKED_ADDRESSED_BOT,
         )
     for router in _LEGACY_GRANT_CHECKED:
         public.include_router(
             router,
             responses=USER_SCOPED_ERROR_RESPONSES,
-            dependencies=_PUBLIC_AUTH + _GRANT_CHECKED,
+            dependencies=_PUBLIC_AUTH + _GRANT_CHECKED_OWN_BOT,
         )
     for router in _LEGACY_SELF_CHECKED:
         public.include_router(

@@ -25,7 +25,9 @@ from fastapi_injector import attach_injector
 from injector import Injector, Module
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
-from agentclaw.community.adapters.http.openapi_v1.principal import require_granted_bot
+from agentclaw.community.adapters.http.openapi_v1.principal import (
+    require_granted_own_bot,
+)
 from agentclaw.community.adapters.http.openapi_v1.routines import (
     router as routines_router,
 )
@@ -185,16 +187,19 @@ def client(skills, cron):
             binder.bind(LocalSkillUploadServiceProtocol, to=skills)
             binder.bind(CronRelayServiceProtocol, to=cron)
 
-    # Both groups are mounted with the shared grant check in build_public_router,
-    # and this file is about what an application caller may reach — so the
-    # fixture mounts them the same way. Mounting them bare used to pass because
-    # routines checked the grant inside its handler; now that the check is the
-    # dependency's for every route, a bare mount would assert against an
-    # assembly production does not have.
-    grant_checked = [Depends(require_granted_bot)]
+    # Mounted exactly as build_public_router mounts them, because this file is
+    # about what an application caller may reach and the mount is half of that.
+    # Routines is a wholly own-bot group and gets its dependency at include;
+    # skills is mounted bare — its two collection routes carry the
+    # addressed-bot dependency in their own decorators (which travel with the
+    # router), and its four ``{skill_id}`` routes check the grant in their
+    # handlers (``SKILL_SCOPED_OPERATIONS``). A group-level dependency on
+    # skills here would assert against an assembly production does not have.
     app = FastAPI()
-    app.include_router(skills_router, dependencies=grant_checked)
-    app.include_router(routines_router, dependencies=grant_checked)
+    app.include_router(skills_router)
+    app.include_router(
+        routines_router, dependencies=[Depends(require_granted_own_bot)]
+    )
     app.dependency_overrides[require_principal] = _app_caller
     attach_injector(app, Injector([_M()]))
     mount_public_error_handlers(app)
