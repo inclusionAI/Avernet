@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import time
+from threading import Lock
 
 from injector import inject
 
@@ -44,11 +45,22 @@ class SkillsPoolEditLockUnavailableError(SkillsPoolEditPausedError):
     """The distributed lock service is unavailable; fail closed."""
 
 
+class _OrdinaryEditLockEntry:
+    """One in-process Local Skill mutation lock and its active users."""
+
+    def __init__(self) -> None:
+        self.lock = Lock()
+        self.users = 0
+
+
 @dataclass(frozen=True, slots=True)
 class SkillsPoolEditLease:
     key: str
     token: str | None
     ttl_seconds: int | None = None
+    ordinary_lock_entry: _OrdinaryEditLockEntry | None = field(
+        default=None, repr=False, compare=False
+    )
 
 
 class SkillsPoolEditGuard:
@@ -71,6 +83,8 @@ class SkillsPoolEditGuard:
         self._cache = cache
         self._layouts = layout_repository
         self._participation_resolver = participation_resolver
+        self._ordinary_locks_guard = Lock()
+        self._ordinary_locks: dict[str, _OrdinaryEditLockEntry] = {}
 
     @staticmethod
     def _key(*, scope: BotSkillLayoutScope) -> str:
@@ -82,9 +96,6 @@ class SkillsPoolEditGuard:
         scope: BotSkillLayoutScope,
     ) -> SkillsPoolEditLease:
         participation = self._participation_resolver.resolve(scope=scope)
-        if not participation.participates_in_pool_layout:
-            return SkillsPoolEditLease(key="", token=None)
-
         if self._is_rollback_phase(scope):
             self._log_rejection(
                 scope=scope, participation=participation, reason="rollback_phase"
@@ -93,9 +104,27 @@ class SkillsPoolEditGuard:
                 "Skills are temporarily read-only during layout rollback"
             )
 
+        ordinary_lock_entry = self._acquire_ordinary_lock(scope=scope)
+        if ordinary_lock_entry is None:
+            self._log_rejection(
+                scope=scope, participation=participation, reason="ordinary_lock_busy"
+            )
+            raise SkillsPoolEditBusyError(
+                "Another skill update is already in progress; please retry shortly"
+            )
+
+        # Legacy Bots have no Pool rollback to serialize against, but still
+        # need this ordinary mutex so concurrent same-name uploads cannot both
+        # observe an absent Skill and create competing records/packages.
+        if not participation.participates_in_pool_layout:
+            return SkillsPoolEditLease(
+                key="", token=None, ordinary_lock_entry=ordinary_lock_entry
+            )
+
         try:
             lease = self._acquire_for_edit(scope=scope)
         except CacheLockInfrastructureError as exc:
+            self._release_ordinary_lock(ordinary_lock_entry)
             self._log_rejection(
                 scope=scope, participation=participation, reason="cache_unavailable"
             )
@@ -103,6 +132,7 @@ class SkillsPoolEditGuard:
                 "Skill updates are temporarily unavailable because the lock service is unavailable"
             ) from exc
         if lease is None:
+            self._release_ordinary_lock(ordinary_lock_entry)
             if self._is_rollback_phase(scope):
                 self._log_rejection(
                     scope=scope, participation=participation, reason="rollback_phase"
@@ -117,14 +147,26 @@ class SkillsPoolEditGuard:
                 "Another skill update is already in progress; please retry shortly"
             )
         if self._is_rollback_phase(scope):
-            self.release(lease)
+            self.release(
+                SkillsPoolEditLease(
+                    key=lease.key,
+                    token=lease.token,
+                    ttl_seconds=lease.ttl_seconds,
+                    ordinary_lock_entry=ordinary_lock_entry,
+                )
+            )
             self._log_rejection(
                 scope=scope, participation=participation, reason="rollback_phase"
             )
             raise SkillsPoolEditRollbackError(
                 "Skills are temporarily read-only during layout rollback"
             )
-        return lease
+        return SkillsPoolEditLease(
+            key=lease.key,
+            token=lease.token,
+            ttl_seconds=lease.ttl_seconds,
+            ordinary_lock_entry=ordinary_lock_entry,
+        )
 
     async def acquire_for_edit_wait(
         self, *, scope: BotSkillLayoutScope, timeout_seconds: float = 30.0
@@ -159,10 +201,14 @@ class SkillsPoolEditGuard:
         # Rollback has historically treated cache unavailability as a
         # retryable ``EDIT_BUSY`` outcome.  Preserve that operator contract;
         # only product-side edits need the more precise user-facing outcome.
+        ordinary_lock_entry = self._acquire_ordinary_lock(scope=scope)
+        if ordinary_lock_entry is None:
+            return None
         started_at = time.perf_counter()
         try:
             token = self._cache.acquire_lock(key, ttl=self._LOCK_TTL_SECONDS)
         except CacheLockInfrastructureError:
+            self._release_ordinary_lock(ordinary_lock_entry)
             self._log_lock_event(
                 event="acquire",
                 key=key,
@@ -179,9 +225,13 @@ class SkillsPoolEditGuard:
             outcome="acquired" if token is not None else "busy",
         )
         if token is None:
+            self._release_ordinary_lock(ordinary_lock_entry)
             return None
         return SkillsPoolEditLease(
-            key=key, token=token, ttl_seconds=self._LOCK_TTL_SECONDS
+            key=key,
+            token=token,
+            ttl_seconds=self._LOCK_TTL_SECONDS,
+            ordinary_lock_entry=ordinary_lock_entry,
         )
 
     def _acquire_for_edit(
@@ -217,6 +267,7 @@ class SkillsPoolEditGuard:
 
     def release(self, lease: SkillsPoolEditLease) -> bool:
         if lease.token is None:
+            self._release_ordinary_lock(lease.ordinary_lock_entry)
             return True
         started_at = time.perf_counter()
         try:
@@ -231,6 +282,8 @@ class SkillsPoolEditGuard:
                 ttl_seconds=lease.ttl_seconds,
             )
             raise
+        finally:
+            self._release_ordinary_lock(lease.ordinary_lock_entry)
         self._log_lock_event(
             event="release",
             key=lease.key,
@@ -240,6 +293,38 @@ class SkillsPoolEditGuard:
             ttl_seconds=lease.ttl_seconds,
         )
         return released
+
+    def _acquire_ordinary_lock(
+        self, *, scope: BotSkillLayoutScope
+    ) -> _OrdinaryEditLockEntry | None:
+        key = self._key(scope=scope)
+        with self._ordinary_locks_guard:
+            entry = self._ordinary_locks.get(key)
+            if entry is None:
+                entry = _OrdinaryEditLockEntry()
+                self._ordinary_locks[key] = entry
+            entry.users += 1
+        if entry.lock.acquire(blocking=False):
+            return entry
+        self._discard_ordinary_lock_user(entry)
+        return None
+
+    def _release_ordinary_lock(self, entry: _OrdinaryEditLockEntry | None) -> None:
+        if entry is None:
+            return
+        entry.lock.release()
+        self._discard_ordinary_lock_user(entry)
+
+    def _discard_ordinary_lock_user(self, entry: _OrdinaryEditLockEntry) -> None:
+        with self._ordinary_locks_guard:
+            entry.users -= 1
+            if entry.users == 0:
+                stale_keys = [
+                    key for key, candidate in self._ordinary_locks.items()
+                    if candidate is entry
+                ]
+                for key in stale_keys:
+                    self._ordinary_locks.pop(key, None)
 
     def _is_rollback_phase(self, scope: BotSkillLayoutScope) -> bool:
         return self._layouts.get(scope).phase in self._ROLLBACK_PHASES

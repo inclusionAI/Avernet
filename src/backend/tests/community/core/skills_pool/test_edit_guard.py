@@ -225,6 +225,37 @@ def test_legacy_bot_bypasses_an_abandoned_pool_edit_lock() -> None:
     assert cache.held
 
 
+@pytest.mark.asyncio
+async def test_legacy_bot_still_serializes_ordinary_edits() -> None:
+    layouts = _Layouts()
+    layouts.state = replace(
+        layouts.state,
+        active_layout=SkillLayout.LEGACY,
+        target_layout=None,
+        phase=SkillLayoutPhase.LEGACY_ACTIVE,
+        persisted=False,
+    )
+    guard = SkillsPoolEditGuard(
+        cache=_Cache(),
+        layout_repository=layouts,
+        participation_resolver=_Participation(
+            participates=False, label="legacy_layout_state"
+        ),
+    )
+
+    first = guard.acquire_for_edit(scope=SCOPE)
+    waiting = asyncio.create_task(
+        guard.acquire_for_edit_wait(scope=SCOPE, timeout_seconds=0.2)
+    )
+    await asyncio.sleep(0.02)
+    assert not waiting.done()
+
+    assert guard.release(first)
+    second = await waiting
+    assert second.token is None
+    assert guard.release(second)
+
+
 def test_cache_outage_is_not_reported_as_lock_contention() -> None:
     guard = SkillsPoolEditGuard(
         cache=_UnavailableCache(),
