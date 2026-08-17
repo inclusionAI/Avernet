@@ -38,6 +38,7 @@ from agentclaw.community.core.service_bot.types import (
 )
 from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
+    OnlineDeployDeferredError,
     PublishFlowServiceError,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.ext_state import (
@@ -764,7 +765,8 @@ class PublishFlowService(
             raise PublishFlowServiceError(
                 f"Unhandled online deploy decision: {decision}"
             )
-
+        except OnlineDeployDeferredError:
+            raise
         except Exception as e:
             logger.error(f"[PublishFlowService] Release failed: {e}")
 

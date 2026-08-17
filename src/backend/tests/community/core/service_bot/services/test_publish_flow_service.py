@@ -13,6 +13,7 @@ from agentclaw.community.core.service_bot.repository.models import (
     PublishStatus,
 )
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService, BotBuildServiceError
+from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
 from agentclaw.community.core.service_bot.services.arca_image_pin import (
     ImagePolicyState,
     ServiceBotImagePin,
@@ -32,6 +33,7 @@ from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
 )
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     DraftRestoreRetryableError,
+    OnlineDeployDeferredError,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
     operation_request_id,
@@ -548,9 +550,9 @@ def test_decide_online_deploy_no_candidate_is_first_release():
     baas_service.get_bot.assert_not_called()
 
 
-def test_decide_online_deploy_get_bot_error_propagates():
+def test_decide_online_deploy_get_bot_error_defers():
     # get_bot normalizes a real 404 to RELEASED; a raised error is transient/
-    # non-404, so it must propagate (durable task retries the status read) rather
+    # non-404, so it must defer (durable task reschedules the status read) rather
     # than be treated as "gone" and create a replacement for a possibly-live bot.
     publish_service = Mock()
     build_service = Mock()
@@ -559,9 +561,23 @@ def test_decide_online_deploy_get_bot_error_propagates():
 
     publish_record = _make_publish_record(ext={'binding': {'online': 99}})
     publish_service.get_device_binding_by_id.return_value = Mock(device_id='BOT-cand')
-    baas_service.get_bot.side_effect = RuntimeError("baas unreachable")
+    baas_service.get_bot.side_effect = BaasServiceError("baas unreachable")
 
-    with pytest.raises(RuntimeError, match="baas unreachable"):
+    with pytest.raises(OnlineDeployDeferredError, match="baas unreachable"):
+        svc._decide_online_deploy(publish_record, {'bot_id': 'b'})
+
+
+def test_decide_online_deploy_unexpected_get_bot_error_propagates():
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    publish_record = _make_publish_record(ext={'binding': {'online': 99}})
+    publish_service.get_device_binding_by_id.return_value = Mock(device_id='BOT-cand')
+    baas_service.get_bot.side_effect = RuntimeError("programming error")
+
+    with pytest.raises(RuntimeError, match="programming error"):
         svc._decide_online_deploy(publish_record, {'bot_id': 'b'})
 
 
@@ -569,7 +585,7 @@ def test_decide_online_deploy_get_bot_error_propagates():
 def test_decide_online_deploy_stopping_waits(provider):
     # STOPPING has an active STOP publish in flight; BaaS create_publish rejects
     # any new publish of a different type (UPGRADE's UPDATE or a retire's DESTROY)
-    # while it runs. The decision must WAIT (raise so the durable task retries)
+    # while it runs. The decision must WAIT (defer so the task reschedules)
     # rather than issue a doomed publish — for BOTH providers, no retire.
     publish_service = Mock()
     build_service = Mock()
@@ -581,15 +597,15 @@ def test_decide_online_deploy_stopping_waits(provider):
     baas_service.get_bot.return_value = {'status': 'STOPPING'}
     baas_service.resolve_container_provider.return_value = provider
 
-    with pytest.raises(PublishFlowServiceError, match="STOPPING"):
+    with pytest.raises(OnlineDeployDeferredError, match="STOPPING"):
         svc._decide_online_deploy(publish_record, {'bot_id': 'b'})
     build_service.retire_superseded_bot.assert_not_called()
 
 
-def test_decide_online_deploy_missing_status_propagates():
+def test_decide_online_deploy_missing_status_defers():
     # A *successful* envelope with no status (get_bot returns `data`, which
     # defaults to {}) is ambiguous — NOT proof the candidate is gone. It must
-    # raise (durable task retries) rather than map to FIRST_RELEASE and create a
+    # defer (durable task reschedules) rather than map to FIRST_RELEASE and create a
     # replacement for a possibly-live bot. Only a real 404 (already normalized to
     # RELEASED) or an explicit terminal status recreates.
     publish_service = Mock()
@@ -601,13 +617,84 @@ def test_decide_online_deploy_missing_status_propagates():
     publish_service.get_device_binding_by_id.return_value = Mock(device_id='BOT-cand')
     baas_service.get_bot.return_value = {}  # 200 envelope, empty data → no status
 
-    with pytest.raises(PublishFlowServiceError, match="no status"):
+    with pytest.raises(OnlineDeployDeferredError, match="no status"):
         svc._decide_online_deploy(publish_record, {'bot_id': 'b'})
     build_service.retire_superseded_bot.assert_not_called()
 
 
 # (#197 all-auto) approve_baas_publish was removed — every BaaS mutation is
 # auto-approved server-side, so there is no client approve method to test.
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("baas_bot", "error_pattern"),
+    [({"status": "STOPPING"}, "STOPPING"), ({}, "no status")],
+)
+async def test_execute_release_phase_wait_state_preserves_online_pub_for_reschedule(
+    baas_bot, error_pattern
+):
+    """Ambiguous candidate liveness is a wait state, not a failed release.
+
+    The durable handler must get a retryable signal while the publish record
+    remains in ONLINE_PUB; otherwise the task cannot safely resume after the
+    candidate bot finishes stopping.
+    """
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    publish_record = _make_publish_record(
+        status=PublishStatus.ONLINE_PUB.value,
+        source_bot_id="bot-source",
+        ext={"migration_path": "/m", "binding": {"online": 99}},
+    )
+    publish_service.get_device_binding_by_id.return_value = Mock(
+        device_id="BOT-stopping"
+    )
+    baas_service.get_bot.return_value = baas_bot
+    bot_service = Mock()
+    bot_service.get_bot.return_value = {"bot_id": "bot-source"}
+    svc._bot_service = bot_service
+    svc._get_latest_ext = Mock(return_value=copy.deepcopy(publish_record.ext))
+    svc._update_publish_status = Mock()
+
+    with pytest.raises(OnlineDeployDeferredError, match=error_pattern):
+        await svc.execute_release_phase(publish_record, operator="op")
+
+    assert publish_record.status == PublishStatus.ONLINE_PUB.value
+    svc._update_publish_status.assert_not_called()
+    build_service.retire_superseded_bot.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_release_phase_get_bot_failure_preserves_online_pub_for_reschedule():
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    publish_record = _make_publish_record(
+        status=PublishStatus.ONLINE_PUB.value,
+        source_bot_id="bot-source",
+        ext={"migration_path": "/m", "binding": {"online": 99}},
+    )
+    publish_service.get_device_binding_by_id.return_value = Mock(
+        device_id="BOT-unreachable"
+    )
+    baas_service.get_bot.side_effect = BaasServiceError("baas unreachable")
+    bot_service = Mock()
+    bot_service.get_bot.return_value = {"bot_id": "bot-source"}
+    svc._bot_service = bot_service
+    svc._get_latest_ext = Mock(return_value=copy.deepcopy(publish_record.ext))
+    svc._update_publish_status = Mock()
+
+    with pytest.raises(OnlineDeployDeferredError, match="baas unreachable"):
+        await svc.execute_release_phase(publish_record, operator="op")
+
+    assert publish_record.status == PublishStatus.ONLINE_PUB.value
+    svc._update_publish_status.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -772,6 +859,8 @@ async def test_execute_release_phase_unhandled_decision_fails_loudly():
 
     assert result.status == PublishStatus.FAILED
     assert "Unhandled online deploy decision" in result.message
+    assert svc._update_publish_status.call_args.kwargs["target_status"] == PublishStatus.FAILED
+    assert svc._update_publish_status.call_args.kwargs["source_status"] == PublishStatus.ONLINE_PUB
     svc._execute_first_release.assert_not_awaited()
     svc._execute_upgrade_release.assert_not_awaited()
 
@@ -1229,6 +1318,41 @@ async def test_restart_sets_restarting_flag_in_ext():
     assert len(mutate_calls) >= 1
     first_ext = mutate_calls[0]
     assert first_ext.get("restart", {}).get("restarting") is True
+
+
+@pytest.mark.asyncio
+async def test_restart_stopping_defers_before_setting_restarting_flag():
+    """A deferred preflight must not masquerade as a submitted restart.
+
+    In particular, a stale ``ext.restart.online`` from an older restart must not
+    combine with a newly-set ``restarting`` flag and trip the task redelivery
+    guard, which would skip the new restart entirely.
+    """
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    baas_service.get_bot.return_value = {"status": "STOPPING"}
+    svc = _pf(
+        publish_service, build_service, baas_service, Mock(), _arca_router(build_service)
+    )
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        ext={
+            "binding": {"online": 1},
+            "migration_path": "/path/to/artifact",
+            "restart": {"online": 123},
+        },
+    )
+    _setup_restart(svc, record, bot_uuid="BOT-stopping")
+
+    with pytest.raises(OnlineDeployDeferredError, match="STOPPING"):
+        await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    assert record.status == PublishStatus.SUCCESS.value
+    svc._mutate_and_update_ext.assert_not_called()
+    build_service.upgrade_async.assert_not_called()
+    build_service.release_async.assert_not_called()
+    build_service.retire_superseded_bot.assert_not_called()
 
 
 @pytest.mark.asyncio
