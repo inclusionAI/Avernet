@@ -1,7 +1,7 @@
 """Every self-checking operation must actually refuse an ungranted application.
 
 ``test_admission_inventory.py`` asserts that each grant-checked operation runs
-``require_granted_bot`` — and then *excludes* the operations that check inside
+the grant dependencies — and then *excludes* the operations that check inside
 their handlers, because for those the assertion is untrue by construction. That
 exclusion is a hole exactly the size of this file: an operation can be named
 self-checking, be excluded from the structural assertion on that basis, and

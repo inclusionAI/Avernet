@@ -5,7 +5,7 @@ Six of the seven took ``bot_id`` as a required query parameter beside a
 
 The seventh is the create, and it is the reason this package needs an
 authorization mechanism of its own. It took the bot in the request body, which
-``require_granted_bot`` cannot see — the body is not parsed when dependencies
+the grant dependencies cannot see — the body is not parsed when dependencies
 resolve — so the check has to run inside the shim, first, before anything
 touches the bot. That is exactly the arrangement ``TODO(#960)`` recorded as a
 defect, and the *routines* create no longer has it on the current surface — its
@@ -144,7 +144,7 @@ async def create_routine_legacy(
 
 
 #: The create is mounted **without** the shared grant check, on its own router.
-#: Not a style choice: require_granted_bot reads the bot off the path or the
+#: Not a style choice: require_granted_own_bot reads the bot off the path or the
 #: query string, finds neither here, and *refuses* an application caller rather
 #: than deferring — so mounting it with the others would turn a working legacy
 #: call into a 404. The old contract kept this operation out of the dependency's
