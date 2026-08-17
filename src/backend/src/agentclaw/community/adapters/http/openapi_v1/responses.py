@@ -576,6 +576,8 @@ def mapped_error_response(exc: Exception, request: Request) -> JSONResponse | No
     """
     for error_type, (http_status, message) in ENVELOPE_ERRORS.items():
         if isinstance(exc, error_type):
+            if isinstance(exc, LocalSkillInvalidPackageError):
+                message = exc.public_message
             return _error_response(
                 http_status,
                 message,
