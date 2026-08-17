@@ -320,7 +320,12 @@ Backend /openapi/v1/harness/bots/{bot_id}/diagnose
 | 新增的 harness domain 与现有 domain map 冲突 | match 使用 `/openapi/v1/harness/bots/**`，与 `/openapi/v1/bots/**` 不重叠 |
 | 权限模型切换导致现有内部调用受影响 | 内部 `/api/harness/*` 不改动，仅在 `/openapi/v1/harness/*` 使用 `require_principal` |
 
-## 未决问题
+## 已解决事项
 
-1. ocb 内部 bcsfuse 是否真实支持 `/v1/workers/config/batch`？需要接入前确认。
-2. harness 的 `preview`/`apply`/`rollback` 中 `entity_type`/`entity_id` 默认值策略是否需要统一为必须显式传入？
+1. **ocb 内部 bcsfuse 是否真实支持 `/v1/workers/config/batch`？**
+   - 接入前必须确认内部 bcsfuse 的 `worker_routes.py` 中是否存在该路由。
+   - 若不存在，本次先不在 gateway 暴露 `/openapi/v1/bcsfuse/workers/config/batch`，仅暴露 `groups/{group_id}/fuse` 和 `workers/{worker_id}/config`。
+
+2. **harness 的 `preview`/`apply`/`rollback` 中 `entity_type`/`entity_id` 默认值策略？**
+   - public harness DTO 要求显式传入 `entity_type` 和 `entity_id`，不保留内部默认 `"staff"`。
+   - 这样对外部调用者更明确，也降低默认实体类型导致误操作的风险。
