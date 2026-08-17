@@ -28,3 +28,11 @@ class ClaudeCodeAdapter(BaseEngineAdapter):
         if session_id is not None:
             return session_id
         return f"agent:{tc_bot_id}:session:{run_id}:user:{user_id}"
+
+    def should_defer_session_create(self) -> bool:
+        """Claude Code session ID 由 run_id 确定，可预构造。"""
+        return True
+
+    def deferred_session_id(self, *, run_id: str, bot_id: str, user_id: str) -> str:
+        """claude_code 传 uuid=run_id，adapter 返回 id=uuid，故 run_id 即为 session ID。"""
+        return run_id

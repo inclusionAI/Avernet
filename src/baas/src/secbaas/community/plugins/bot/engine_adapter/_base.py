@@ -64,3 +64,11 @@ class BaseEngineAdapter:
         adapter_session_id = adapter_session.id
         logger.info("Adapter session created: session_id=%s", adapter_session_id)
         return adapter_session_id, False
+
+    def should_defer_session_create(self) -> bool:
+        """默认不延迟：同步创建 adapter session。"""
+        return False
+
+    def deferred_session_id(self, *, run_id: str, bot_id: str, user_id: str) -> str:
+        """默认返回空字符串；由子类覆写。"""
+        return ""

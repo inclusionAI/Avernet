@@ -86,3 +86,28 @@ class BotEngineAdapter(Protocol):
             BotNotAvailableError: 引擎侧不可用（如 hermes 持久化超时、claude_code relay 离线）。
         """
         ...
+
+    def should_defer_session_create(self) -> bool:
+        """若 True，`BaasBotService.create_session` 跳过 adapter 侧 session 创建，
+        只做 persistence 并返回预构造 session ID。
+
+        适用于 session ID 有确定性构造规则的引擎（如 claude_code），
+        允许将 session 创建延迟到异步消息执行阶段，减少 messages 接口 RT。
+        """
+        ...
+
+    def deferred_session_id(self, *, run_id: str, bot_id: str, user_id: str) -> str:
+        """预构造 session ID，供 ``should_defer_session_create=True`` 时使用。
+
+        返回的 ID 必须与 adapter 实际创建的 session ID 格式一致，
+        确保 engine 侧在异步阶段收到该 ID 时能正确创建或复用 session。
+
+        Args:
+            run_id: 关联的 run ID（通常作为 adapter uuid）。
+            bot_id: teamclaw bot id / agent id。
+            user_id: 用户 ID。
+
+        Returns:
+            预构造的 session ID 字符串。
+        """
+        ...

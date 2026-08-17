@@ -46,6 +46,12 @@ class NoopClaudeCodeAdapter:
             await asyncio.sleep(2)
         return ("", True)
 
+    def should_defer_session_create(self) -> bool:
+        return False
+
+    def deferred_session_id(self, *, run_id: str, bot_id: str, user_id: str) -> str:
+        return ""
+
 
 class MockClaudeCodeAdapter:
     """内存版 Claude Code adapter:记录调用、返回可预期值,供单测断言。"""
@@ -91,3 +97,11 @@ class MockClaudeCodeAdapter:
     ) -> tuple[str, bool]:
         self.calls.append(("create_adapter_session", bot_id, session_id, run_id))
         return self._session_result
+
+    def should_defer_session_create(self) -> bool:
+        self.calls.append(("should_defer_session_create",))
+        return False
+
+    def deferred_session_id(self, *, run_id: str, bot_id: str, user_id: str) -> str:
+        self.calls.append(("deferred_session_id", run_id, bot_id, user_id))
+        return ""

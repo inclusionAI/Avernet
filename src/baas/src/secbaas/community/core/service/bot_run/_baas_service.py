@@ -300,40 +300,67 @@ class BaasBotService(BotService):
         # Step 2: Get or create adapter session
         session_client = self._create_session_client(conn_info, engine_type)
 
-        try:
-            async with session_client:
-                # adapter session 创建:命中 adapter 走 adapter,否则走原始分支
-                # (含 teclaw 语义 + openclaw agent:main: 前缀)。
-                _adapter = self._adapter_for(engine_type)
-                if _adapter is not None:
-                    adapter_session_id, reused = await _adapter.create_adapter_session(
-                        session_client=session_client,
-                        session_id=session_id,
-                        user_id=user_id,
-                        metadata=metadata,
-                        bot_id=binding_info.bot_id,
-                        run_id=run_id,
-                    )
-                else:
-                    (
-                        adapter_session_id,
-                        reused,
-                    ) = await self._get_or_create_adapter_session(
-                        session_client=session_client,
-                        session_id=session_id,
-                        user_id=user_id,
-                        metadata=metadata,
-                        engine_type=engine_type or "openclaw",
-                        bot_id=binding_info.bot_id,
-                        run_id=run_id,
-                    )
-        except BotServiceError:
-            raise
-        except Exception as e:
-            logger.warning("Failed to get or create adapter session: %s", e)
-            raise BotServiceError(
-                f"Failed to get or create adapter session for bot {bot_id}: {_safe_client_msg(e)}"
-            ) from e
+        _adapter = self._adapter_for(engine_type)
+
+        # 延迟创建路径：预构造 session ID，跳过 adapter 侧同步 session 创建
+        if _adapter is not None and _adapter.should_defer_session_create():
+            adapter_session_id = _adapter.deferred_session_id(
+                run_id=run_id or "", bot_id=binding_info.bot_id, user_id=user_id
+            )
+            reused = False
+            logger.info(
+                "Session deferred: session_id=%s, bot_id=%s, engine=%s",
+                adapter_session_id,
+                bot_id,
+                engine_type,
+            )
+        elif engine_type == "openclaw" and session_id is None and run_id is not None:
+            # openclaw 延迟路径：预构造 agent:main:{run_id}，跳过 adapter 调用
+            adapter_session_id = f"agent:main:{run_id}"
+            reused = False
+            logger.info(
+                "Session deferred: session_id=%s, bot_id=%s, engine=openclaw",
+                adapter_session_id,
+                bot_id,
+            )
+        else:
+            # 原路径：同步创建 adapter session
+            try:
+                async with session_client:
+                    # adapter session 创建:命中 adapter 走 adapter,否则走原始分支
+                    # (含 teclaw 语义 + openclaw agent:main: 前缀)。
+                    if _adapter is not None:
+                        (
+                            adapter_session_id,
+                            reused,
+                        ) = await _adapter.create_adapter_session(
+                            session_client=session_client,
+                            session_id=session_id,
+                            user_id=user_id,
+                            metadata=metadata,
+                            bot_id=binding_info.bot_id,
+                            run_id=run_id,
+                        )
+                    else:
+                        (
+                            adapter_session_id,
+                            reused,
+                        ) = await self._get_or_create_adapter_session(
+                            session_client=session_client,
+                            session_id=session_id,
+                            user_id=user_id,
+                            metadata=metadata,
+                            engine_type=engine_type or "openclaw",
+                            bot_id=binding_info.bot_id,
+                            run_id=run_id,
+                        )
+            except BotServiceError:
+                raise
+            except Exception as e:
+                logger.warning("Failed to get or create adapter session: %s", e)
+                raise BotServiceError(
+                    f"Failed to get or create adapter session for bot {bot_id}: {_safe_client_msg(e)}"
+                ) from e
 
         action = "reused" if reused else "created"
         logger.info(
