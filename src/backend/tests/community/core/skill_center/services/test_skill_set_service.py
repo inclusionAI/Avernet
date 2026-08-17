@@ -419,6 +419,120 @@ class TestGetSetMcpServers:
         codes = {r["server_code"] for r in result}
         assert "mcp.ant.antprocessai.anttaskmcp" not in codes
 
+    def _svc(self, mock_repo):
+        from agentclaw.community.core.skill_center.services.skill_set_service import SkillSetService
+
+        with patch(
+            "agentclaw.community.core.skill_center.services.skill_set_service.WorkspacePathFactory"
+        ):
+            svc = SkillSetService(
+                skill_repo=MagicMock(),
+                skill_set_repo=MagicMock(),
+                mcp_center=MagicMock(),
+                mcp_config_service=MagicMock(),
+                skill_service=MagicMock(),
+                bot_repo=MagicMock(),
+                path_factory=MagicMock(),
+            )
+        svc.skill_set_repo = mock_repo
+        svc.bot_id = "default"
+        return svc
+
+    def test_exclusion_hides_a_stored_association_not_only_a_default(self):
+        """The parity fix: an exclusion suppresses a real row too.
+
+        Before this, ``excluded_codes`` was consulted only when *synthesising*
+        engine defaults, so an exclusion written against a code that also had an
+        ``ac_skill_set_mcp`` row did nothing at all — including the exclusions
+        ``remove_mcp_from_skill_set`` writes, which is that method's entire
+        removal mechanism for a default set. The skill half has always filtered
+        its stored rows this way.
+        """
+        mock_repo = MagicMock()
+        mock_repo.get_by_id.return_value = {"id": "1", "is_default": True}
+        mock_repo.get_mcp_servers_in_set.return_value = [
+            {"id": 7, "server_code": "mcp.stored", "name": "Stored"},
+        ]
+        mock_repo.get_excluded_mcps.return_value = ["mcp.stored"]
+
+        result = self._svc(mock_repo).get_set_mcp_servers("1", user_id="user1")
+
+        assert "mcp.stored" not in {r["server_code"] for r in result}
+
+    def test_a_stored_association_survives_when_not_excluded(self):
+        mock_repo = MagicMock()
+        mock_repo.get_by_id.return_value = {"id": "1", "is_default": True}
+        mock_repo.get_mcp_servers_in_set.return_value = [
+            {"id": 7, "server_code": "mcp.stored", "name": "Stored"},
+        ]
+        mock_repo.get_excluded_mcps.return_value = []
+
+        result = self._svc(mock_repo).get_set_mcp_servers("1", user_id="user1")
+
+        assert "mcp.stored" in {r["server_code"] for r in result}
+
+    def test_excluding_a_code_that_is_both_stored_and_default_hides_it_once(self):
+        """The two rules must not disagree.
+
+        A code carrying a row *and* named by the engine defaults could be
+        dropped by one rule and re-synthesised by the other. Filtering the
+        associations before ``db_codes`` is computed is what prevents that.
+        """
+        both = "mcp.ant.antprocessai.anttaskmcp"
+        mock_repo = MagicMock()
+        mock_repo.get_by_id.return_value = {"id": "1", "is_default": True}
+        mock_repo.get_mcp_servers_in_set.return_value = [
+            {"id": 7, "server_code": both, "name": "Both"},
+        ]
+        mock_repo.get_excluded_mcps.return_value = [both]
+
+        result = self._svc(mock_repo).get_set_mcp_servers("1", user_id="user1")
+
+        assert both not in {r["server_code"] for r in result}
+
+    def test_collect_bot_active_mcps_reflects_a_stored_row_exclusion(self):
+        """The runtime set honours it, not just the per-set listing.
+
+        ``collect_bot_active_mcps`` is the single input to both the device
+        whitelist and artifact compose, so this is the assertion that the fix
+        actually reaches an agent rather than only a UI listing.
+        """
+        mock_repo = MagicMock()
+        mock_repo.get_all_active_skill_sets.return_value = [
+            {"id": "1", "is_default": True}
+        ]
+        mock_repo.get_by_id.return_value = {"id": "1", "is_default": True}
+        mock_repo.get_mcp_servers_in_set.return_value = [
+            {"id": 7, "server_code": "mcp.stored", "name": "Stored"},
+        ]
+        mock_repo.get_excluded_mcps.return_value = ["mcp.stored"]
+        mock_repo.get_all_excluded_mcps.return_value = ["mcp.stored"]
+
+        svc = self._svc(mock_repo)
+        result = svc.collect_bot_active_mcps(
+            entity_id="user1", bot_id="default", user_id="user1"
+        )
+
+        assert "mcp.stored" not in {r.get("server_code") for r in result}
+
+    def test_a_normal_skillset_ignores_exclusions_entirely(self):
+        """The exclusion table is documented as default-set-only.
+
+        A non-default set must not consult it, or the public API's per-bot state
+        would leak into skill sets it does not own.
+        """
+        mock_repo = MagicMock()
+        mock_repo.get_by_id.return_value = {"id": "2", "is_default": False}
+        mock_repo.get_mcp_servers_in_set.return_value = [
+            {"id": 7, "server_code": "mcp.stored", "name": "Stored"},
+        ]
+        mock_repo.get_excluded_mcps.return_value = ["mcp.stored"]
+
+        result = self._svc(mock_repo).get_set_mcp_servers("2", user_id="user1")
+
+        assert "mcp.stored" in {r["server_code"] for r in result}
+        mock_repo.get_excluded_mcps.assert_not_called()
+
     def test_normal_skillset_returns_db_mcps_only(self):
         from agentclaw.community.core.skill_center.services.skill_set_service import SkillSetService
         mock_repo = MagicMock()

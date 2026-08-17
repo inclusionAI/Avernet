@@ -62,15 +62,15 @@ This group makes the MCP half behave like the skill half. No schema change.
       clears exclusions stranded on a former default set. Without it,
       `collect_bot_mcps`' `get_all_excluded_mcps` read would keep an MCP off
       forever and activate would appear to do nothing.
-- [~] **3.2** In `get_set_mcp_servers` (`core/skill_center/services/
+- [x] **3.2** In `get_set_mcp_servers` (`core/skill_center/services/
       skill_set_service.py`), apply `excluded_codes` to `associations` as well as
       to the synthesised default codes — the missing line that makes exclusions
       mean the same thing they mean for skills (`skill.py:545-562`).
-- [ ] **3.3** Tests for the corrected filter: an exclusion on a **stored** row
+- [x] **3.3** Tests for the corrected filter: an exclusion on a **stored** row
       now hides it (this is the behaviour change — assert it deliberately); an
       exclusion on a synthesised default still hides it; no exclusion leaves both
       visible; `collect_bot_active_mcps` and `collect_bot_mcps` both reflect it.
-- [ ] **3.4** Confirm the internal surface still behaves as its own suite
+- [x] **3.4** Confirm the internal surface still behaves as its own suite
       expects: run the existing skill-set and MCP test suites unmodified. A
       needed change there is a signal to re-read Decision 1's risk 1 before
       proceeding.

@@ -1777,6 +1777,27 @@ class SkillSetService:
                     self.skill_set_repo.get_excluded_mcps(user_id, effective_bot_id, int(skill_set_id))
                 )
 
+            # An exclusion suppresses a *stored* association too, not only the
+            # synthesis of an engine default. This mirrors the skill half
+            # (SkillRepository._active_skill_assets filters get_skills_in_set
+            # rows by get_excluded_skills), and it is what makes an exclusion
+            # mean one thing instead of two.
+            #
+            # It was previously applied only to ``default_codes`` below, so an
+            # exclusion written against a code that also had a row was inert —
+            # including the ones remove_mcp_from_skill_set writes, which is that
+            # method's *entire* removal mechanism for a default set. Honouring
+            # them here is what makes those removals take effect.
+            #
+            # Filtered before ``db_codes`` is computed so the two rules cannot
+            # disagree: a code that is both excluded and a stored row leaves
+            # ``db_codes``, and the default loop then skips it on
+            # ``excluded_codes`` rather than re-synthesising it.
+            associations = [
+                a
+                for a in associations
+                if a.get("server_code") not in excluded_codes
+            ]
             db_codes = {a.get("server_code") for a in associations}
             logger.info(
                 f"[get_set_mcp_servers] skill_set_id={skill_set_id}, is_default=True, "
