@@ -374,8 +374,14 @@ class LocalSkillUploadService:
                 locator=old_locator,
             )
         )
-        old_is_canonical = old_locator == canonical_locator
-        obsolete_storage = old_storage
+        has_old_package = await old_storage.exists()
+        # A previous delete can leave a stale Local Skill row while its
+        # canonical package directory is already gone.  That row still makes
+        # this a same-name replacement, but it provides no bytes to back up.
+        # Treat it as a metadata-only legacy record and publish the staged
+        # package directly to the stable canonical locator.
+        old_is_canonical = old_locator == canonical_locator and has_old_package
+        obsolete_storage = old_storage if has_old_package else None
         backup = None
         old_metadata = {
             "description": skill.get("description"),
@@ -498,7 +504,8 @@ class LocalSkillUploadService:
                     await self._discard(backup)
                 await self._discard(staged)
             raise LocalSkillStorageError() from exc
-        await self._discard(obsolete_storage)
+        if obsolete_storage is not None:
+            await self._discard(obsolete_storage)
         await self._discard(staged)
         return {
             "operation": "updated",
