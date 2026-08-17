@@ -42,54 +42,58 @@ green — `uv run pytest` on the touched suites plus lint — before the next st
       user; `401` with no principal; app-only caller refused; delete leaves bot
       activation untouched.
 
-## Group 3 — Persistence: per-MCP active state
+## Group 3 — Skills parity in the MCP storage layer
 
-- [ ] **3.1** Add `is_active = Column(Boolean, nullable=False, server_default="1")`
-      to `SkillSetMCPServer` in `core/models/mcp.py`. `server_default`, not a
-      Python `default=`, so `create_all` emits the same `DEFAULT 1` the
-      out-of-band DDL applies and non-ORM inserts are covered.
-- [ ] **3.2** Record the DDL in the spec directory and in the docs' migration
-      list: `ALTER TABLE ac_skill_set_mcp ADD COLUMN is_active TINYINT(1) NOT
-      NULL DEFAULT 1;`. Additive with a default — safe in either deploy order.
-- [ ] **3.3** `core/repository/implementations/skill_center/skill.py`:
-      `add_mcp_to_set` accepts `is_active` defaulting to `True`;
-      `get_mcp_servers_in_set` and `_for_env` include the field; new
-      `set_mcp_active_in_set(skill_set_id, server_code, active) -> bool`.
-- [ ] **3.4** `get_set_mcp_servers` carries the field out as `active`.
-      Synthesised engine defaults get `active = True` — they have no row, and
-      exclusion already removed the ones the caller turned off.
-- [ ] **3.5** Filter `active is True` in **`collect_bot_active_mcps` only**.
-      `collect_bot_mcps` (the all-MCPs variant) must not filter — it is the
-      listing source.
-- [ ] **3.6** Regression tests: a row created without an explicit `is_active`
-      reads as active (this is the guard against silently removing capability
-      from every existing bot); an inactive row is absent from
-      `collect_bot_active_mcps` and present in `collect_bot_mcps`; the internal
-      skill-set API's behaviour is byte-identical.
+This group makes the MCP half behave like the skill half. No schema change.
+
+- [ ] **3.1** Add `remove_all_default_mcp_exclusions(user_id, bot_id,
+      server_code) -> bool` to
+      `core/repository/implementations/skill_center/skill.py`, mirroring
+      `remove_all_default_skill_exclusions:1912` — **no `skill_set_id`**, so it
+      clears exclusions stranded on a former default set. Without it,
+      `collect_bot_mcps`' `get_all_excluded_mcps` read would keep an MCP off
+      forever and activate would appear to do nothing.
+- [ ] **3.2** In `get_set_mcp_servers` (`core/skill_center/services/
+      skill_set_service.py`), apply `excluded_codes` to `associations` as well as
+      to the synthesised default codes — the missing line that makes exclusions
+      mean the same thing they mean for skills (`skill.py:545-562`).
+- [ ] **3.3** Tests for the corrected filter: an exclusion on a **stored** row
+      now hides it (this is the behaviour change — assert it deliberately); an
+      exclusion on a synthesised default still hides it; no exclusion leaves both
+      visible; `collect_bot_active_mcps` and `collect_bot_mcps` both reflect it.
+- [ ] **3.4** Confirm the internal surface still behaves as its own suite
+      expects: run the existing skill-set and MCP test suites unmodified. A
+      needed change there is a signal to re-read Decision 1's risk 1 before
+      proceeding.
 
 ## Group 4 — Bot-scoped state service
 
 - [ ] **4.1** `BotMcpStateServiceProtocol` in `api/bot_mcp_state_service.py` —
       the five methods in `plan.md`.
-- [ ] **4.2** Implement `core/mcp/services/bot_mcp_state_service.py`. Resolve the
-      bot with `get_by_id_and_owner` (masked `404`); resolve the container with
-      `skill_set_repo.get_default(user_id=owner_id, bolt_id=bot_id,
-      engine_type=bot["active_engine"])`, treating `None` as not-found — never an
-      implicit create.
-- [ ] **4.3** Merged read: default-set rows (`get_mcp_servers_in_set`, carrying
-      `active`) unioned with `get_default_mcp_servers(engine, template_type)`
-      minus `get_excluded_mcps`. Mark each `is_default`. Dedupe by `server_code`,
-      row wins.
+- [ ] **4.2** Implement `core/mcp/services/bot_mcp_state_service.py`, modelled on
+      `local_skill_state_service.py`. Resolve the bot with `get_by_id_and_owner`
+      (masked `404`); resolve the container with `skill_set_repo.get_default(
+      user_id=owner_id, bolt_id=bot_id, engine_type=bot["active_engine"])`,
+      treating `None` as not-found — never an implicit create. No skills-pool
+      edit guard.
+- [ ] **4.3** Merged read: default-set rows (`get_mcp_servers_in_set`) unioned
+      with `get_default_mcp_servers(engine, template_type)`, `active` = not in
+      `get_all_excluded_mcps`, each marked `is_default`. Dedupe by `server_code`,
+      stored row wins.
 - [ ] **4.4** `add_bot_server` — validate via `market_service.get_mcp_detail` +
-      `is_network_type_visible` (one raise site), then `add_mcp_to_set(...,
-      is_active=False)`. Already present → `changed: false`.
-- [ ] **4.5** `set_bot_server_active` — for a stored row, `set_mcp_active_in_set`;
-      for an engine default, `remove_default_mcp_exclusion` (activate) /
-      `add_default_mcp_exclusion` (deactivate). `changed` computed against the
-      pre-state. A server not on the bot is not-found.
-- [ ] **4.6** `remove_bot_server` — `remove_mcp_from_set` for a stored row;
-      raise the new `McpDefaultServerNotRemovableError` (`409`, added to
-      `core/mcp/errors.py`) for an engine default. Absent → `deleted: false`.
+      `is_network_type_visible` (one raise site), then `skill_set_repo
+      .add_mcp_to_set` **directly** (the service refuses the default set), then
+      `add_default_mcp_exclusion` so it lands **inactive**. Already present →
+      `changed: false`.
+- [ ] **4.5** `set_bot_server_active` — activate is
+      `remove_all_default_mcp_exclusions`, deactivate is
+      `add_default_mcp_exclusion`. Identical for stored rows and engine defaults;
+      no branch needed. `changed` computed against the pre-state. A server not on
+      the bot at all is not-found.
+- [ ] **4.6** `remove_bot_server` — `remove_mcp_from_set` plus clearing its
+      exclusions for a stored row; raise `McpDefaultServerNotRemovableError`
+      (`409`, added to `core/mcp/errors.py`) for an engine default. Absent →
+      `deleted: false`.
 - [ ] **4.7** End every mutation with `sync_service.refresh_mcp_scope(...)`; on
       `success: false`, roll the state write back and raise. One rollback test per
       mutation, with a stubbed sync service — the community device plugins are
@@ -98,7 +102,9 @@ green — `uv run pytest` on the touched suites plus lint — before the next st
 - [ ] **4.9** Service tests: add is idempotent and lands **inactive**;
       activate/deactivate idempotent with correct `changed`; activating a server
       not on the bot is not-found; defaults read active until excluded;
-      remove-default is `409`; remove leaves `ac_user_mcp_config` intact.
+      remove-default is `409`; remove leaves `ac_user_mcp_config` intact; an
+      exclusion stranded on a former default set does not survive activate (the
+      3.1 case).
 
 ## Group 5 — Bot-scoped endpoints
 
@@ -135,11 +141,13 @@ green — `uv run pytest` on the touched suites plus lint — before the next st
 
 - [ ] **7.1** Update `src/backend/docs/openapi-v1/README.md`: the `mcp` endpoint
       table (6 → 14), the "**MCP** addresses no bot at all" note under *Per-bot
-      device surfaces that are still draft-only* (now false), the
-      delivered-decisions paragraph, and the DDL list with 3.2's `ALTER TABLE`.
-- [ ] **7.2** Module docstring in `bot_mcp_state_service.py` recording the three
-      decisions and pointing at `plan.md` — in particular why the exclusion table
-      is *not* the activation mechanism, so the correction is not re-litigated.
+      device surfaces that are still draft-only* (now false), and the
+      delivered-decisions paragraph. Record the 3.2 filter fix as an intentional
+      internal behaviour change.
+- [ ] **7.2** Module docstring in `bot_mcp_state_service.py` recording that this
+      is the `skills` mechanism applied to MCP, and pointing at `plan.md` — in
+      particular why a dedicated skill set cannot be used, so that is not
+      re-derived.
 - [ ] **7.3** Full module gates: `OCB_PRE_PUSH_RUN_CI=1` per the `AGENTS.md`
       pre-push contract.
 - [ ] **7.4** PR titled `feat(openapi-v1): MCP config lifecycle and bot-scoped
@@ -150,16 +158,17 @@ green — `uv run pytest` on the touched suites plus lint — before the next st
 
 ## Notes for the implementer
 
-- **The one change to the shared collect path is 3.5.** Everything else in
-  `skill_set_service.py` is passing a field through. A diff that touches the sync
-  push paths, `config_compose/collector.py`, `write_unified_config` or
-  `build_mcp_sync_payload` means the design drifted.
-- **`DEFAULT 1` on `is_active` is the safety property.** Task 3.6's first test is
-  what stands between this change and silently disabling every MCP on every
-  existing bot.
-- **The exclusion table is only for engine defaults.** It is not a general on/off
-  switch — see Decision 1 in `plan.md`. Reaching for it on a stored row is the
-  mistake this plan was corrected to avoid.
+- **Read `local_skill_state_service.py` before writing Group 4.** This service is
+  its MCP twin; where the two differ, the difference should be deliberate and
+  explainable (no edit guard, no filesystem layout).
+- **Task 3.2 is the only change to existing behaviour.** Everything else is
+  additive. If the existing internal suites need edits to pass it, stop and
+  re-read Decision 1's risk 1 — that is the signal the change is wider than
+  intended.
+- **No schema change in this work.** A migration in the diff means the design
+  drifted back to the rejected `is_active` column.
+- **Do not touch** the sync push paths, `config_compose/collector.py`,
+  `write_unified_config` or `build_mcp_sync_payload`.
 - **"Skill set" must not appear** in any path, parameter, schema field or
   description on the public surface. It is expected in the storage layer.
 - `AGENTS.md`: no `T | None` unless `None` is a real contract state.
