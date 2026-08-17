@@ -38,7 +38,10 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     require_principal,
 )
-from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
+from agentclaw.community.adapters.http.openapi_v1.principal import (
+    UserIdDep,
+    refuse_app_only_caller,
+)
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
@@ -77,6 +80,14 @@ from .schemas import (
 )
 
 router = APIRouter(prefix="/openapi/v1/bots/mcp", tags=["mcp"])
+
+#: What the *configuration* operations declare: ``REFUSED`` to a machine
+#: caller. They read and write account-level state with no bot dimension — a
+#: grant is consent to reach a bot, not to reconfigure an account. The
+#: catalogue reads above them are OPEN and carry nothing. The refusal already
+#: happens centrally in ``require_principal``; the declaration makes the
+#: decision visible on the routes that carry it. See ``refuse_app_only_caller``.
+_REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
 
 #: The path parameter naming the MCP server an operation addresses.
 ServerCodePath = Annotated[
@@ -254,6 +265,7 @@ async def get_mcp_server(
     "/servers/{server_code}/permissions",
     response_model=Envelope[McpPermission],
     responses=USER_SCOPED_403,
+    dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
 async def check_mcp_permission(
@@ -327,6 +339,7 @@ async def list_mcp_configs(
     "/servers/{server_code}/config",
     response_model=Envelope[McpConfig],
     responses=USER_SCOPED_403,
+    dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
 async def get_mcp_config(
@@ -350,6 +363,7 @@ async def get_mcp_config(
     "/servers/{server_code}/config",
     response_model=Envelope[McpConfig],
     responses=USER_SCOPED_403,
+    dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
 async def update_mcp_config(

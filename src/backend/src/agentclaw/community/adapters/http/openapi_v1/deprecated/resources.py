@@ -7,7 +7,7 @@ parameter re-annotated, registered at the address it used to have — and its
 response model and response table read off the real route rather than restated
 (``download`` has its own, for the octet-stream body).
 
-``require_granted_bot`` reads the bot off the path *or* the query string, so
+``require_granted_own_bot`` reads the bot off the path *or* the query string, so
 these mount grant-checked exactly as their replacements do: the same code
 deciding the same thing, which is what makes the parity claim true rather than
 hopeful.

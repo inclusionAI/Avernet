@@ -65,17 +65,30 @@ class AdmissionMode(StrEnum):
     permission rule: both run the identical grant check. They differ only in
     where the addressed bot's owner comes from, because ``bot_id`` alone does
     not identify a bot.
+
+    **Each mode with something to enforce has a dependency that spells it**, so
+    a route's declaration and its table entry say the same thing in two places
+    and ``test_admission_inventory.py`` fails when they disagree:
+    ``require_granted_own_bot`` for own-bot, ``require_granted_addressed_bot``
+    for addressed-bot, ``refuse_app_only_caller`` for refused (all in
+    ``principal.py``). ``GRANT_FILTERED`` and ``USER_GATED`` cannot be a route
+    dependency — they shape the *result* through
+    :meth:`ActingCaller.granted_bot_ids` — and ``OPEN`` has nothing to declare.
     """
 
     #: **One bot, always the delegating user's own.** These groups resolve
     #: through ``get_by_id_and_owner(bot_id, delegating user)``, so the owner is
     #: that user by construction and the request cannot name another. Admitted
-    #: iff a live grant covers ``(app, bot, delegating user)``.
+    #: iff a live grant covers ``(app, bot, delegating user)``. Declared as
+    #: ``Depends(require_granted_own_bot)``, which never reads an owner off the
+    #: wire.
     GRANT_CHECKED_OWN_BOT = "grant-checked"
     #: **One bot, possibly someone else's.** The same check, against the bot
     #: the request addresses: these operations publish an ``owner_id`` query
     #: parameter that defaults to the caller's own, and the grant is looked up
-    #: on ``(app, bot, that owner, delegating user)``.
+    #: on ``(app, bot, that owner, delegating user)``. Declared as
+    #: ``Depends(require_granted_addressed_bot)``, the one dependency entitled
+    #: to read that parameter.
     #:
     #: The owner therefore comes *from the request*, not from the grant record.
     #: An earlier revision had it the other way round — the lookup asked "any
@@ -99,6 +112,10 @@ class AdmissionMode(StrEnum):
     #: **Refused**, with a ``401``. Also what an operation *absent* from the
     #: table gets, which is the point: a route added tomorrow is refused until
     #: someone decides otherwise, rather than admitted because nobody noticed.
+    #: A *listed* refused operation additionally declares
+    #: ``Depends(refuse_app_only_caller)``, so the decision is visible on the
+    #: route and holds even if this table were mislabelled; the absent-by-default
+    #: refusal has no route to declare anything on and stays central.
     REFUSED = "refused"
 
 
@@ -311,15 +328,16 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
 #: This is what remains of ``TODO(#960)``. Bot-first addressing removed the
 #: reason for three of the original seven — routines' create takes its bot on
 #: the path, and the two skills collection reads name their owner in the query
-#: where ``_addressed_owner`` can see it. These four are not an oversight left
-#: behind: an operation addressed by skill has no owner to check *until it has
-#: read the skill*, so the check belongs after that read or nowhere.
+#: where ``require_granted_addressed_bot`` can see it. These four are not an
+#: oversight left behind: an operation addressed by skill has no owner to check
+#: *until it has read the skill*, so the check belongs after that read or
+#: nowhere.
 #:
 #: **Naming them is what keeps the exception closed.** Deferring is about where
 #: the check runs, never whether: all four stay in a grant-checked mode, they
 #: are mounted without the group-level dependency rather than exempted from it,
 #: and ``test_admission_inventory.py`` asserts both. Any *other* operation that
-#: reached ``require_granted_bot`` without a bot id is refused, not waved past.
+#: reached a grant dependency without a bot id is refused, not waved past.
 SKILL_SCOPED_OPERATIONS = frozenset(
     {
         ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"),

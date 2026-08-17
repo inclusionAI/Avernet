@@ -76,7 +76,10 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     require_user_and_app_principal,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import MissingPrincipalError
-from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
+from agentclaw.community.adapters.http.openapi_v1.principal import (
+    UserIdDep,
+    refuse_app_only_caller,
+)
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
     deleted as deleted_envelope,
@@ -95,9 +98,16 @@ from agentclaw.community.core.bot_app_grant.models import BotAppGrantRecord
 from agentclaw.community.core.gateway_principal import PrincipalType
 from agentclaw.community.di import Injected
 
-#: The bot-scoped group — the owner's three operations.
+#: The bot-scoped group — the owner's three operations. All three are
+#: ``REFUSED`` to a machine caller: delegation is a human act, so an
+#: application must not widen its own access, withdraw a competitor's, or
+#: enumerate what else reaches a bot. The refusal already happens centrally in
+#: ``require_principal``; declaring it here makes the decision visible on the
+#: group that carries it and holds even if the admission table were mislabelled.
 router = APIRouter(
-    prefix="/openapi/v1/bots/{bot_id}/authorized-apps", tags=["authorized-apps"]
+    prefix="/openapi/v1/bots/{bot_id}/authorized-apps",
+    tags=["authorized-apps"],
+    dependencies=[Depends(refuse_app_only_caller)],
 )
 
 #: The app-scoped read, as its own literal component under the base. A second

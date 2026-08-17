@@ -44,9 +44,10 @@ from . import skills as _skills
 #: Mounted with the engine-runtime response table, like their replacements.
 ENGINE_RUNTIME_GROUPS = _engine_runtime.ENGINE_RUNTIME + [_approvals.router]
 
-#: Mounted grant-checked, like their replacements. ``require_granted_bot`` reads
-#: the bot off the path *or* the query string, so the resources and routines
-#: legacy addresses are covered by it exactly as the new ones are.
+#: Mounted grant-checked (own-bot), like their replacements.
+#: ``require_granted_own_bot`` reads the bot off the path *or* the query
+#: string, so the resources and routines legacy addresses are covered by it
+#: exactly as the new ones are.
 GRANT_CHECKED_GROUPS = _engine_runtime.GRANT_CHECKED + [
     _bots.router,
     _resources.router,
@@ -79,9 +80,9 @@ def _inherit_admission_modes() -> None:
     second copy of one decision, free to drift from the first.
 
     Run at import, before any request: ``ADMISSION`` is read per request by
-    ``require_granted_bot`` and ``_addressed_owner``, and an operation missing
-    from it is refused. ``test_admission_inventory`` is what fails if a legacy
-    address ever names a replacement that is not itself in the table.
+    ``require_principal``'s admission check, and an operation missing from it
+    is refused. ``test_admission_inventory`` is what fails if a legacy address
+    ever names a replacement that is not itself in the table.
     """
     for (method, legacy_path), replacement in LEGACY_ROUTES.items():
         mode = ADMISSION.get((method, replacement))
