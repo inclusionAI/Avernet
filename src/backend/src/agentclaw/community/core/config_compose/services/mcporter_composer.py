@@ -285,18 +285,19 @@ class McporterComposer:
             if ep.get("env") == endpoint_env and ep.get("networkType") in net_rank
         ]
         if not candidates:
-            # Two different faults used to share one message. "Server declares no
-            # endpoints at all" points at the lookup that produced this dict;
-            # "declares some, none usable" points at the server's own config. The
-            # collector now fails the first case before we get here, so this is a
-            # backstop — but it still has to name the right suspect, or it sends
-            # the reader auditing network coverage for a record that was never
-            # fetched.
+            # Two different faults, and this layer can only tell them apart by
+            # how many endpoints arrived — so it reports exactly that and no
+            # more. In particular it must NOT claim the detail was never
+            # resolved: a record Center does hold but has published no endpoints
+            # for (``{"runMode": "REMOTE"}``) reaches here with an empty list and
+            # a perfectly successful lookup behind it. Asserting a cause this
+            # frame cannot observe is the same misdirection the collector-level
+            # raise exists to remove, just narrowed to a rarer input.
             if not endpoints:
                 raise McporterComposeError(
-                    f"MCP {server_code}: server declares no endpoints at all — its "
-                    "detail was never resolved (MCP Center unreachable, or no "
-                    "record for this code)."
+                    f"MCP {server_code}: the server record carries no endpoints at "
+                    f"all, so there is nothing to select a {endpoint_env} URL from. "
+                    "Check the endpoints published for this server in MCP Center."
                 )
             raise McporterComposeError(
                 f"MCP {server_code}: no usable {endpoint_env} endpoint "

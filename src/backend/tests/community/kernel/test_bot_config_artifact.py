@@ -20,6 +20,7 @@ from agentclaw.community.kernel.bot_config import (
     McpServerRef,
     ResourceRef,
     SkillRef,
+    StdioSpec,
     StoreRef,
 )
 
@@ -32,6 +33,41 @@ _SCHEMA_PATH = (
     / "bot_config"
     / "artifact.schema.json"
 )
+
+
+def test_remote_entry_omits_the_stdio_key_entirely() -> None:
+    """An artifact with no local server keeps its pre-``stdio`` wire shape.
+
+    ``asdict`` would emit ``"stdio": null`` on every remote entry, changing the
+    bytes of artifacts that never use the new form — and a consumer validating
+    those against the pre-``stdio`` definition (``additionalProperties: false``)
+    would reject them. Only artifacts that genuinely carry a local server may
+    differ.
+    """
+    artifact = _sample_artifact()
+    entry = artifact.to_dict()["mcp"]["servers"][0]
+
+    assert "stdio" not in entry
+    assert set(entry) == {"server_code", "name", "endpoint", "transport", "headers"}
+
+
+def test_local_entry_keeps_its_stdio_key() -> None:
+    artifact = BotConfigArtifact(
+        schema_version=SCHEMA_VERSION,
+        engine_type="teclaw",
+        mcp=McpManifest(
+            servers=[
+                McpServerRef(
+                    server_code="hitl",
+                    transport="stdio",
+                    stdio=StdioSpec(command="python3", args=["/a.py"]),
+                )
+            ]
+        ),
+    )
+    entry = artifact.to_dict()["mcp"]["servers"][0]
+
+    assert entry["stdio"] == {"command": "python3", "args": ["/a.py"], "env": {}}
 
 
 def _sample_artifact() -> BotConfigArtifact:

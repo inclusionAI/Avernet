@@ -236,17 +236,19 @@ def test_missing_server_code_raises() -> None:
         composer.compose_server(McpComposeInput(mcp_data={"name": "x"}))
 
 
-def test_no_endpoints_at_all_blames_the_lookup_not_the_networks() -> None:
-    """An entry with zero endpoints means its detail was never resolved.
+def test_no_endpoints_reports_only_what_this_layer_can_observe() -> None:
+    """Zero endpoints must not be reported as "the detail was never resolved".
 
-    Blaming network coverage here would send the reader auditing MCP Center for a
-    record that was never fetched. The collector fails this case earlier now, so
-    this is a backstop — but it still has to name the right suspect.
+    Both a failed lookup and a record Center genuinely holds but has published no
+    endpoints for arrive here as an empty list, and this frame cannot tell them
+    apart. Naming either cause would misdirect for the other, so the message
+    stays with the fact — no endpoints — and points at the server's published
+    endpoints rather than at the lookup.
     """
     composer = McporterComposer()
-    md = {"server_code": "unresolved", "run_mode": "REMOTE", "endpoints": []}
+    md = {"server_code": "no-endpoints", "run_mode": "REMOTE", "endpoints": []}
 
-    with pytest.raises(McporterComposeError, match="declares no endpoints at all"):
+    with pytest.raises(McporterComposeError) as excinfo:
         composer.compose_server(
             McpComposeInput(
                 mcp_data=md,
@@ -254,6 +256,9 @@ def test_no_endpoints_at_all_blames_the_lookup_not_the_networks() -> None:
                 network_priority=TECLAW_MCP_NETWORK_PRIORITY,
             )
         )
+
+    assert "carries no endpoints at all" in str(excinfo.value)
+    assert "never resolved" not in str(excinfo.value)
 
 
 def test_endpoints_present_but_unreachable_blames_the_networks() -> None:

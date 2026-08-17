@@ -213,6 +213,31 @@ def test_mcps_resolve_stdio_launch_when_center_lookup_fails():
 
 
 @pytest.mark.unit
+def test_mcps_resolved_local_definition_wins_over_bundled_catalog():
+    """A deployment's own local server keeps its own command.
+
+    The bundled catalog ships ``hitl``; an operator may register a local server
+    under that same code with a different binary. Preferring the catalog would
+    swap in a ``/home/admin/...`` path their image need not contain.
+    """
+    inputs = _mcps_with(
+        [{"server_code": "hitl"}],
+        center_detail={
+            "serverCode": "hitl",
+            "runMode": "LOCAL",
+            "stdioConfigs": [
+                {"command": "/opt/acme/bin/hitl", "arguments": ["--serve"]}
+            ],
+        },
+        registry_catalog=_HITL_CATALOG,
+    )
+
+    assert inputs[0].stdio == StdioLaunch(
+        command="/opt/acme/bin/hitl", args=["--serve"], env={}
+    )
+
+
+@pytest.mark.unit
 def test_mcps_center_remote_wins_over_colliding_registry_name():
     """A caller's own REMOTE server is not hijacked by a same-named local entry.
 

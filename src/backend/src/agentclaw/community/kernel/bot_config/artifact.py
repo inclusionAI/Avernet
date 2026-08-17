@@ -194,8 +194,21 @@ class BotConfigArtifact:
     version: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize to the published JSON shape (matches ``artifact.schema.json``)."""
-        return asdict(self)
+        """Serialize to the published JSON shape (matches ``artifact.schema.json``).
+
+        A remote MCP entry omits ``stdio`` entirely rather than emitting it as
+        ``null``. ``asdict`` would include the key on every entry, which changes
+        the wire shape of artifacts that contain no local server at all — and a
+        consumer validating them against the pre-``stdio`` definition (which is
+        ``additionalProperties: false``) would reject them. Omitting it keeps
+        those bytes exactly what they were, so only artifacts that genuinely
+        carry the new form differ.
+        """
+        data = asdict(self)
+        for server in data.get("mcp", {}).get("servers", []):
+            if server.get("stdio") is None:
+                server.pop("stdio", None)
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "BotConfigArtifact":

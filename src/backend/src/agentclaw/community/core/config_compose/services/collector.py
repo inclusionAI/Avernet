@@ -263,12 +263,19 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         keeps a community deployment, where the MCP Center plugin deliberately
         ignores that bundled file, from inheriting its company-only launch paths.
 
-        Otherwise :class:`LocalMCPRegistry` (a local YAML read) is consulted before
-        ``md``. That order is the point: the enrichment above is best-effort, so on
-        an MCP Center failure ``md`` carries neither ``runMode`` nor
-        ``stdioConfigs`` — and a local server, having no endpoint to find, would
-        then fail the remote path outright. The registry needs no network, so a
-        local server stays recognizable exactly when Center cannot vouch for it.
+        Otherwise the launch instruction is taken from the **resolved detail
+        first**, and only then from :class:`LocalMCPRegistry`. A deployment that
+        registers its own local server — including under a name the bundled
+        catalog also ships (``hitl``, ``clawmind``) — must keep its own command
+        rather than have it replaced by the bundled ``/home/admin/...`` path,
+        which that deployment's image need not even contain.
+
+        The registry is what makes the fallback work when there is nothing to
+        prefer: enrichment is best-effort, so on an MCP Center failure ``md``
+        carries neither ``runMode`` nor ``stdioConfigs``, and a local server —
+        having no endpoint to find — would otherwise fail the remote path
+        outright. Reading a local YAML needs no network, so a local server stays
+        recognizable exactly when Center cannot vouch for it.
 
         The registry normalizes the YAML's flat ``command``/``args``/``env`` into
         ``stdioConfigs: [{command, arguments, envVariables}]``; today that list is
@@ -280,12 +287,12 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         run_mode = md.get("run_mode") or md.get("runMode")
         if isinstance(run_mode, str) and run_mode.strip().upper() == "REMOTE":
             return None
-        detail = self._local_mcp_registry.get_mcp_detail(server_code) or md
-        configs = detail.get("stdioConfigs") or detail.get("stdio_configs") or []
-        if not configs or not isinstance(configs, list):
-            return None
-        cfg = configs[0]
-        if not isinstance(cfg, dict) or not cfg.get("command"):
+
+        cfg = self._first_stdio_config(md)
+        if cfg is None:
+            registry_detail = self._local_mcp_registry.get_mcp_detail(server_code)
+            cfg = self._first_stdio_config(registry_detail or {})
+        if cfg is None:
             return None
         return StdioLaunch(
             command=str(cfg["command"]),
@@ -295,6 +302,22 @@ class ConfigComposerInputCollector(ComposeInputCollector):
                 for k, v in (cfg.get("envVariables") or cfg.get("env") or {}).items()
             },
         )
+
+    @staticmethod
+    def _first_stdio_config(detail: dict[str, Any]) -> dict[str, Any] | None:
+        """First launchable ``stdioConfigs`` entry, or ``None``.
+
+        An entry without a ``command`` is not a launch instruction, so it does not
+        count as a hit — the caller then falls through to its next source rather
+        than emitting a stdio server the engine cannot start.
+        """
+        configs = detail.get("stdioConfigs") or detail.get("stdio_configs") or []
+        if not isinstance(configs, list) or not configs:
+            return None
+        cfg = configs[0]
+        if not isinstance(cfg, dict) or not cfg.get("command"):
+            return None
+        return cfg
 
     def _enrich_mcp_detail(
         self, svc: Any, md: dict[str, Any]
