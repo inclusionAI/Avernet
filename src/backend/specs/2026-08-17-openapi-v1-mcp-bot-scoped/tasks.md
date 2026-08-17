@@ -30,7 +30,7 @@ green — `uv run pytest` on the touched suites plus lint — before the next st
       configuration does not deactivate the server on any bot". Re-syncing with
       the credential cleared is what expresses "the server stays, its credential
       does not". The sequence and its atomicity are unchanged.
-- [ ] **1.3** Unit tests: paging and totals; masking parity with
+- [x] **1.3** Unit tests: paging and totals; masking parity with
       `read_unified_config` including short keys; empty result is an empty page;
       delete-absent is success-with-`false`; unknown server code is not-found;
       push failure restores the row and raises.
