@@ -1067,8 +1067,7 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
   release complete。** Served OpenAPI 现锁定为恰好六个 Bot-owned Local Skill 操作；旧的
   `{bot_id}/skills` install/uninstall stub 已移除。组装真实 guard 测试证明另一租户不能 list、
   detail、upload/replace、activate、deactivate 或 delete 目标租户的 Local Skill。#725 的
-  `ac_local_skill_cleanup_work` deploy-before-code DDL 仍待执行；owner 加 authorized collaborator
-  的预发生命周期仍为 **PRE-PROD PENDING**。可执行验收、验证与回滚清单在
+  owner 加 authorized collaborator 的预发生命周期仍为 **PRE-PROD PENDING**。可执行验收、验证与回滚清单在
   `skills-track-b-preprod-acceptance.md`。
 
 - **2026-07-27** —— 交接 README 创建。Track A Stage 1（bots + 可复用机制）已完成，位于
