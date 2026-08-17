@@ -353,9 +353,29 @@ def test_release_binding_is_soft_delete(repo, db):
 def test_claim_binding_release_claims_stopped_binding(repo):
     bid = repo.insert_binding(**_binding(status="STOPPED"))
 
-    assert repo.claim_binding_release(binding_id=bid) is True
+    assert repo.claim_binding_release(
+        binding_id=bid, release_reason="bot deleted", released_by="emp-9"
+    ) is True
+    record = repo.get_by_id(bid)
+    assert record.status == "RELEASED"
+    assert record.release_reason == "bot deleted"
+    assert record.released_by == "emp-9"
+    assert record.released_at is not None
+    assert repo.claim_binding_release(
+        binding_id=bid, release_reason="retry", released_by="emp-10"
+    ) is False
+
+
+def test_status_callbacks_do_not_reopen_released_binding(repo):
+    bid = repo.insert_binding(**_binding(status="ACTIVE"))
+    repo.release_binding(
+        binding_id=bid, release_reason="bot deleted", released_by="emp-9"
+    )
+
+    repo.update_status(binding_id=bid, status="FAILED")
+    repo.update_status_and_alive_at(binding_id=bid, status="ACTIVE")
+
     assert repo.get_by_id(bid).status == "RELEASED"
-    assert repo.claim_binding_release(binding_id=bid) is False
 
 
 def test_update_status_advances_gmt_modified(repo):

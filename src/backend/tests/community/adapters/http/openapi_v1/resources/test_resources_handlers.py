@@ -159,10 +159,12 @@ class _StubFileService:
         *,
         existing: set[str] | None = None,
         raises: Exception | None = None,
+        exists_raises: Exception | None = None,
         delete_raises: Exception | None = None,
     ):
         self.existing: set[str] = set(existing or ())
         self.raises = raises
+        self.exists_raises = exists_raises
         self.delete_raises = delete_raises
         self.upload_calls: List[dict] = []
         self.exists_calls: List[str] = []
@@ -170,6 +172,8 @@ class _StubFileService:
 
     async def exists(self, *, path, **_kw) -> bool:
         self.exists_calls.append(path)
+        if self.exists_raises is not None:
+            raise self.exists_raises
         return path in self.existing
 
     async def upload_file(self, **kwargs) -> dict:
@@ -1076,6 +1080,44 @@ async def test_upload_returns_409_when_baas_bot_disappears_during_delete():
     from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
 
     file_svc = _StubFileService(raises=BaasServiceError("404 BOT_NOT_FOUND"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await upload_resource(
+            path="a.txt", content=b"x", owner_id="u1", bot_id="bot-a",
+            bot_repo=_StubBotRepo(), file_svc=file_svc, request=_request_without_trace(),
+        )
+
+    assert excinfo.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_upload_returns_409_when_baas_bot_disappears_during_duplicate_probe():
+    from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
+
+    file_svc = _StubFileService(
+        exists_raises=BaasServiceError("404 BOT_NOT_FOUND")
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        await upload_resource(
+            path="a.txt", content=b"x", owner_id="u1", bot_id="bot-a",
+            bot_repo=_StubBotRepo(), file_svc=file_svc, request=_request_without_trace(),
+        )
+
+    assert excinfo.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_upload_returns_409_for_desktop_proxy_bot_not_found():
+    request = httpx.Request("PUT", "http://desktop-proxy/upload")
+    response = httpx.Response(
+        404, json={"detail": {"error_code": "BOT_NOT_FOUND"}}, request=request
+    )
+    file_svc = _StubFileService(
+        raises=httpx.HTTPStatusError(
+            "Client error '404 Not Found'", request=request, response=response
+        )
+    )
 
     with pytest.raises(HTTPException) as excinfo:
         await upload_resource(

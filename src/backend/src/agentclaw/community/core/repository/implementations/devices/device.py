@@ -424,7 +424,13 @@ class DeviceRepository(
                 synchronize_session=False,
             )
 
-    def claim_binding_release(self, *, binding_id: int) -> bool:
+    def claim_binding_release(
+        self,
+        *,
+        binding_id: int,
+        release_reason: str | None,
+        released_by: str,
+    ) -> bool:
         """Claim exactly one physical release by atomically making it terminal.
 
         The release flow already treats a physical-release failure as terminal
@@ -448,6 +454,9 @@ class DeviceRepository(
                 .update(
                     {
                         EntityDeviceBinding.status: _DeviceBindingStatus.RELEASED,
+                        EntityDeviceBinding.release_reason: release_reason,
+                        EntityDeviceBinding.released_by: released_by,
+                        EntityDeviceBinding.released_at: func.now(),
                         EntityDeviceBinding.gmt_modified: func.now(),
                     },
                     synchronize_session=False,
@@ -460,7 +469,8 @@ class DeviceRepository(
     ) -> None:
         with self._db.orm_session() as db:
             db.query(EntityDeviceBinding).filter(
-                EntityDeviceBinding.id == binding_id
+                EntityDeviceBinding.id == binding_id,
+                EntityDeviceBinding.status != _DeviceBindingStatus.RELEASED,
             ).update(
                 {
                     EntityDeviceBinding.status: status,
@@ -474,7 +484,8 @@ class DeviceRepository(
     ) -> None:
         with self._db.orm_session() as db:
             db.query(EntityDeviceBinding).filter(
-                EntityDeviceBinding.id == binding_id
+                EntityDeviceBinding.id == binding_id,
+                EntityDeviceBinding.status != _DeviceBindingStatus.RELEASED,
             ).update(
                 {
                     EntityDeviceBinding.status: status,

@@ -459,6 +459,11 @@ class TestReleaseDevice:
 
         assert result is released_record
         repo.release_binding.assert_called_once()
+        repo.claim_binding_release.assert_called_once_with(
+            binding_id=1,
+            release_reason="finalize stopped binding",
+            released_by="u001",
+        )
 
     def test_release_released_device_is_idempotent(self):
         record = _make_record(status=DeviceBindingStatus.RELEASED.value)

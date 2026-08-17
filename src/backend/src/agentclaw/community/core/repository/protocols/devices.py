@@ -92,8 +92,14 @@ class DeviceBindingRepository(Protocol):
         ...
 
     @abstractmethod
-    def claim_binding_release(self, *, binding_id: int) -> bool:
-        """Atomically claim a releasable binding for one physical release."""
+    def claim_binding_release(
+        self,
+        *,
+        binding_id: int,
+        release_reason: str | None,
+        released_by: str,
+    ) -> bool:
+        """Atomically claim a releasable binding and persist its audit data."""
         ...
 
     @abstractmethod

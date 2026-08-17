@@ -790,7 +790,11 @@ class DeviceService:
                 "only ACTIVE/PENDING/FAILED/STOPPED devices can be released"
             )
 
-        if not self._repo.claim_binding_release(binding_id=binding_id):
+        if not self._repo.claim_binding_release(
+            binding_id=binding_id,
+            release_reason=release_reason,
+            released_by=operator.staff,
+        ):
             claimed = self._repo.get_by_id(binding_id)
             if claimed is not None and claimed.status == DeviceBindingStatus.RELEASED.value:
                 return claimed
