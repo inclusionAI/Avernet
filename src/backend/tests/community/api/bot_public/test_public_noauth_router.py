@@ -1,9 +1,14 @@
 """Tests for bot_public_noauth router.
 
-Tests for the public endpoints:
-- GET /api/public/bots/{bot_id}/appcoding-bots
-- PATCH /api/public/bots/{bot_id}/ext
+Tests for the endpoints:
+- GET /api/public/bots/{bot_id}/appcoding-bots (no auth, scrubbed read)
+- PATCH /api/public/bots/{bot_id}/ext (login + ``super_admin`` required)
 
+The PATCH gate is exercised with ``get_current_user`` overridden, so these
+cases pin the *authorization* decision (admin vs non-admin) rather than the
+identity resolution, which belongs to the auth dependency's own tests. The
+anonymous → 401 leg needs the real dependency and is covered by the endpoint
+test ``tests/community/endpoints/test_public_bots_ext.py``.
 """
 import json
 from unittest.mock import MagicMock
@@ -14,6 +19,9 @@ from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
+from agentclaw.community.adapters.http.bot_public import public_noauth_router
+from agentclaw.community.adapters.http.auth.dependencies import get_current_user
+from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.bot_public.public_noauth_router import (
     _scrub_sensitive,
     router,
@@ -23,6 +31,28 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 
 
 # --- Helpers ---
+
+ADMIN_STAFF_ID = "100000"
+NON_ADMIN_STAFF_ID = "999999"
+
+
+def _fake_user(staff_id: str) -> AuthenticatedUser:
+    """Build the identity ``get_current_user`` would have resolved."""
+    return AuthenticatedUser(
+        id=staff_id,
+        staffId=staff_id,
+        operatorName=staff_id,
+        nickName=staff_id,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _admin_allowlist(monkeypatch):
+    """Pin the super_admin allow-list — config is not loaded in this unit test."""
+    monkeypatch.setattr(
+        public_noauth_router, "super_admin", lambda: frozenset({ADMIN_STAFF_ID})
+    )
+
 
 def _bind_services(mock_bot_service=None, mock_bot_repo=None):
     """Bind mock services via injector Module."""
@@ -105,13 +135,25 @@ def mock_bot_repo():
     return repo
 
 
-@pytest.fixture
-def client(mock_bot_service, mock_bot_repo):
-    """TestClient with mocked services."""
+def _make_client(mock_bot_service, mock_bot_repo, staff_id):
+    """TestClient with mocked services, authenticated as ``staff_id``."""
     app = FastAPI()
     app.include_router(router)
     attach_injector(app, Injector([_bind_services(mock_bot_service, mock_bot_repo)]))
+    app.dependency_overrides[get_current_user] = lambda: _fake_user(staff_id)
     return TestClient(app)
+
+
+@pytest.fixture
+def client(mock_bot_service, mock_bot_repo):
+    """TestClient authenticated as a super_admin (the PATCH gate's happy path)."""
+    return _make_client(mock_bot_service, mock_bot_repo, ADMIN_STAFF_ID)
+
+
+@pytest.fixture
+def non_admin_client(mock_bot_service, mock_bot_repo):
+    """TestClient authenticated as an ordinary logged-in user."""
+    return _make_client(mock_bot_service, mock_bot_repo, NON_ADMIN_STAFF_ID)
 
 
 # --- Tests for GET /api/public/bots/{bot_id}/appcoding-bots ---
@@ -270,8 +312,8 @@ class TestScrubSensitiveUnit:
 class TestUpdateBotExtPublic:
     """PATCH /api/public/bots/{bot_id}/ext — whitelist enforced."""
 
-    def test_no_auth_required(self, client):
-        """Should respond successfully on a basic PATCH."""
+    def test_admin_can_update(self, client):
+        """A caller in the super_admin allow-list passes the gate."""
         resp = client.patch(
             "/api/public/bots/default/ext",
             json={"is_domain_bot": True, "arch_domain": "新架构域"},
@@ -279,6 +321,20 @@ class TestUpdateBotExtPublic:
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is True
+
+    def test_non_admin_forbidden(self, non_admin_client, mock_bot_repo):
+        """A logged-in non-admin is rejected before the bot is touched."""
+        resp = non_admin_client.patch(
+            "/api/public/bots/default/ext",
+            json={"is_domain_bot": True, "arch_domain": "新架构域"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert data["error_code"] == 403
+        # The gate runs before any repository access — nothing was read or written.
+        mock_bot_repo.list_by_conditions.assert_not_called()
+        mock_bot_repo.update_by_owner.assert_not_called()
 
     def test_whitelist_fields_accepted(self, client, mock_bot_repo):
         """Should accept whitelisted fields."""
