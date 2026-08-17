@@ -154,7 +154,6 @@ from agentclaw.community.core.skill_center.services.local_skill_delete_service i
 from agentclaw.community.api.local_skill_state_service import (
     LocalSkillStateServiceProtocol,
 )
-from agentclaw.community.core.repository.protocols.skill_center import LocalSkillCleanupRepository
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
@@ -178,7 +177,6 @@ from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
 from agentclaw.community.core.repository.implementations.skill_center.sync_log import SkillCenterSyncLogRepository as UnifiedSkillCenterSyncLogRepository
 from agentclaw.community.core.repository.implementations.skill_center.propagation_log import SkillPropagationLogRepository as UnifiedSkillPropagationLogRepository
-from agentclaw.community.core.repository.implementations.skill_center.local_skill_cleanup import SqlLocalSkillCleanupRepository
 
 
 def _template_service_cls():
@@ -316,7 +314,6 @@ class SkillCenterModule(Module):
         skill_set_service_factory: SkillSetServiceFactory,
         audit_log_repo: BotCollabLogRepositoryProtocol,
         edit_guard: SkillsPoolEditGuard,
-        cleanup_repo: LocalSkillCleanupRepository,
         injector: Injector,
     ) -> LocalSkillUploadServiceProtocol:
         return LocalSkillUploadService(
@@ -328,17 +325,8 @@ class SkillCenterModule(Module):
             skill_set_service_factory,
             audit_log_repo,
             edit_guard,
-            cleanup_repo,
             lambda: injector.get(DeviceContextResolver),
         )
-
-    @singleton
-    @provider
-    @inject
-    def local_skill_cleanup_repository(
-        self, db: DatabasePlugin
-    ) -> LocalSkillCleanupRepository:
-        return SqlLocalSkillCleanupRepository(db)
 
     @singleton
     @provider
@@ -378,7 +366,6 @@ class SkillCenterModule(Module):
         collaborator_service: CollaboratorServiceProtocol,
         skill_service_factory: SkillServiceFactory,
         edit_guard: SkillsPoolEditGuard,
-        cleanup_repo: LocalSkillCleanupRepository,
         injector: Injector,
     ) -> LocalSkillDeleteServiceProtocol:
         return LocalSkillDeleteService(
@@ -388,7 +375,6 @@ class SkillCenterModule(Module):
             collaborator_service,
             skill_service_factory,
             edit_guard,
-            cleanup_repo,
             lambda: injector.get(DeviceContextResolver),
         )
 
