@@ -119,9 +119,10 @@ def test_shipped_config_routes_internal_collaboration_verbatim_to_bcs() -> None:
     assert internal.serves_http
     assert not internal.serves_websocket
     assert internal.rewrite is None
-    assert internal.upstream_path(
-        "/api/v1/collaboration/sessions/session-1/files/file-1"
-    ) == "/api/v1/collaboration/sessions/session-1/files/file-1"
+    assert (
+        internal.upstream_path("/api/v1/collaboration/sessions/session-1/files/file-1")
+        == "/api/v1/collaboration/sessions/session-1/files/file-1"
+    )
     assert internal.schema.location == ""
 
     public = dm.http_domain_for("/openapi/v1/collaboration/groups/group-1")

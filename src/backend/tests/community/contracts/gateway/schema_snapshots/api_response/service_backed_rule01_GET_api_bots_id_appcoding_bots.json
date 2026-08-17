@@ -24,6 +24,12 @@
           "bot_type": {
             "type": "string"
           },
+          "call_type": {
+            "type": "string"
+          },
+          "caller_config_revision": {
+            "type": "integer"
+          },
           "creator_id": {
             "type": "string"
           },
@@ -166,6 +172,9 @@
           "is_delete": {
             "type": "integer"
           },
+          "members": {
+            "type": "array"
+          },
           "modifier_id": {
             "type": "string"
           },
@@ -197,6 +206,9 @@
             ],
             "additionalProperties": false
           },
+          "space_id": {
+            "type": "null"
+          },
           "status": {
             "type": "string"
           },
@@ -218,15 +230,6 @@
           },
           "template_type": {
             "type": "string"
-          },
-          "call_type": {
-            "type": "string"
-          },
-          "caller_config_revision": {
-            "type": "integer"
-          },
-          "members": {
-            "type": "array"
           }
         },
         "required": [
@@ -236,6 +239,8 @@
           "bot_id",
           "bot_name",
           "bot_type",
+          "call_type",
+          "caller_config_revision",
           "creator_id",
           "device_id",
           "engine_types",
@@ -253,11 +258,10 @@
           "owner_name",
           "public",
           "share_policy",
+          "space_id",
           "status",
           "template_config",
-          "template_type",
-          "call_type",
-          "caller_config_revision"
+          "template_type"
         ],
         "additionalProperties": false
       }

@@ -315,7 +315,11 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: operations; dormant activation and data initialization added two more paths.
 #: Engine restart adds one more bot-addressed operation. The ABC cleanup removed
 #: the single-card and standalone actions operations, reducing path by two.
-_BOT_ID_PLACEMENT = {"path": 62, "query": 1, "none": 21}
+#:
+#: The component-first service lifecycle and edit-lock surfaces add 14
+#: bot-addressed operations while leaving query and account-level operations
+#: unchanged.
+_BOT_ID_PLACEMENT = {"path": 76, "query": 1, "none": 21}
 
 
 def _schema() -> dict:
@@ -386,14 +390,17 @@ def test_the_pinned_number_of_operations_take_it():
     this pin exists to catch, so it is worth saying plainly that this one is
     intended — the five went away with the link resources they served, not by
     losing the dependency.
+
+    61 → 77 with the service-Bot lifecycle surface: conversion, approval config,
+    version reads/actions and edit-lock operations all act for an explicit user.
     """
     taking = [
         1
         for path, method, operation in _current_operations(_schema())
         if _user_scoped(path, method) and _param(operation, USER_ID_QUERY)
     ]
-    # ABC cleanup removed the single-card and standalone actions operations.
-    assert len(taking) == 74
+    # The service lifecycle and edit-lock surfaces add 14 user-scoped routes.
+    assert len(taking) == 88
 
 
 def test_the_exempt_operations_take_none():

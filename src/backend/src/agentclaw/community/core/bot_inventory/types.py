@@ -1,4 +1,5 @@
 """Domain DTOs for personal/local Bot inventory views."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -45,6 +46,11 @@ class BotAction(StrEnum):
     ENGINE_CONFIG = "engine_config"
     RUNTIME_LOGS = "runtime_logs"
     ENGINE_RESTART = "engine_restart"
+    PUBLISH_STAGING = "publish_staging"
+    PUBLISH_ONLINE = "publish_online"
+    CANCEL_STAGING = "cancel_staging"
+    OFFLINE = "offline"
+    RETRY = "retry"
 
 
 @dataclass(frozen=True)
@@ -52,6 +58,18 @@ class BusinessSpaceRef:
     space_id: str
     name: str
     kind: str
+
+
+@dataclass(frozen=True)
+class ServiceLifecycleCard:
+    """One publish-version card contributed by the service lifecycle owner."""
+
+    publication_id: int | None
+    version: int | None
+    display_state: DisplayState
+    status: str
+    actions: tuple[BotAction, ...]
+    live_version: int | None = None
 
 
 @dataclass(frozen=True)
@@ -73,6 +91,10 @@ class BotInventoryItem:
     passport_id: str | None = None
     actions: tuple[BotAction, ...] = ()
     disabled_actions: Mapping[str, str] | None = None
+    card_id: str = ""
+    publication_id: int | None = None
+    publication_version: int | None = None
+    live_version: int | None = None
 
 
 @dataclass(frozen=True)

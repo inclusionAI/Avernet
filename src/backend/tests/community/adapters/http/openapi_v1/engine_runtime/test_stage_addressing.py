@@ -92,6 +92,20 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     # bot-first change, which is why it was not in this set before.
     ("get", "/openapi/v1/bots/{bot_id}/skills"),
     ("post", "/openapi/v1/bots/{bot_id}/skills"),
+    ("post", "/openapi/v1/bots/{bot_id}/lifecycle/upgrade"),
+    ("get", "/openapi/v1/bots/{bot_id}/lifecycle"),
+    ("delete", "/openapi/v1/bots/{bot_id}/lifecycle"),
+    ("get", "/openapi/v1/bots/{bot_id}/lifecycle/approval"),
+    ("put", "/openapi/v1/bots/{bot_id}/lifecycle/approval"),
+    ("post", "/openapi/v1/bots/{bot_id}/lifecycle/advance"),
+    ("post", "/openapi/v1/bots/{bot_id}/lifecycle/restart"),
+    ("post", "/openapi/v1/bots/{bot_id}/lifecycle/cancel-staging"),
+    ("post", "/openapi/v1/bots/{bot_id}/lifecycle/offline"),
+    ("post", "/openapi/v1/bots/{bot_id}/lifecycle/retry"),
+    ("get", "/openapi/v1/bots/{bot_id}/edit-lock"),
+    ("post", "/openapi/v1/bots/{bot_id}/edit-lock"),
+    ("delete", "/openapi/v1/bots/{bot_id}/edit-lock"),
+    ("post", "/openapi/v1/bots/{bot_id}/edit-lock/steal"),
 }
 
 

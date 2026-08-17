@@ -183,6 +183,7 @@ def _to_inventory_item(item: CoreItem) -> BotInventoryItem:
         }
     return BotInventoryItem(
         bot_id=item.bot_id,
+        card_id=item.card_id,
         bot_name=item.bot_name,
         bot_desc=item.bot_desc,
         engine=item.engine,
@@ -191,6 +192,9 @@ def _to_inventory_item(item: CoreItem) -> BotInventoryItem:
         deploy_mode=item.deploy_mode.value,
         display_state=item.display_state.value,
         status=item.status,
+        publication_id=item.publication_id,
+        publication_version=item.publication_version,
+        live_version=item.live_version,
         owner_entity_id=item.owner_entity_id,
         space=space,
         avatar_url=item.avatar_url,
@@ -549,8 +553,8 @@ async def get_bots_ceiling(
 # Card list at ``/openapi/v1/bots/all``, declared before the ``/{bot_id}``
 # wildcard so ``all`` matches as a literal rather than a bot_id. Each card already
 # carries its action affordances; the former rich-card detail and standalone
-# actions endpoints were removed. The list aggregates the owner's personal cloud
-# + local Bots behind ``BotInventoryServiceProtocol`` (a distinct Service API
+# actions endpoints were removed. The list aggregates the owner's personal cloud,
+# service, and local Bots behind ``BotInventoryServiceProtocol`` (a distinct Service API
 # from the ``BotServiceProtocol`` CRUD below); ``_to_inventory_item`` translates
 # the read model to the public schema.
 
@@ -590,7 +594,7 @@ async def list_inventory(
         BusinessSpaceContextProtocol
     ),
 ) -> Envelope[Page[BotInventoryItem]]:
-    """List personal cloud and local Bots visible in the current business space."""
+    """List personal cloud, service, and local Bots in the current space."""
     current_space = space_context.resolve_current(
         owner_id=owner_id,
         header_space_id=x_space_id,
@@ -1187,4 +1191,3 @@ async def trigger_bot_data_init(
         ),
         request,
     )
-
