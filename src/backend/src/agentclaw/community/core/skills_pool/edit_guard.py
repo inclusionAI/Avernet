@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import hashlib
 import time
 
 from injector import inject
@@ -47,6 +48,7 @@ class SkillsPoolEditLockUnavailableError(SkillsPoolEditPausedError):
 class SkillsPoolEditLease:
     key: str
     token: str | None
+    ttl_seconds: int | None = None
 
 
 class SkillsPoolEditGuard:
@@ -157,24 +159,87 @@ class SkillsPoolEditGuard:
         # Rollback has historically treated cache unavailability as a
         # retryable ``EDIT_BUSY`` outcome.  Preserve that operator contract;
         # only product-side edits need the more precise user-facing outcome.
-        token = self._cache.acquire_lock(key, ttl=self._LOCK_TTL_SECONDS)
+        started_at = time.perf_counter()
+        try:
+            token = self._cache.acquire_lock(key, ttl=self._LOCK_TTL_SECONDS)
+        except CacheLockInfrastructureError:
+            self._log_lock_event(
+                event="acquire",
+                key=key,
+                token=None,
+                duration_ms=self._duration_ms(started_at),
+                outcome="unavailable",
+            )
+            raise
+        self._log_lock_event(
+            event="acquire",
+            key=key,
+            token=token,
+            duration_ms=self._duration_ms(started_at),
+            outcome="acquired" if token is not None else "busy",
+        )
         if token is None:
             return None
-        return SkillsPoolEditLease(key=key, token=token)
+        return SkillsPoolEditLease(
+            key=key, token=token, ttl_seconds=self._LOCK_TTL_SECONDS
+        )
 
     def _acquire_for_edit(
         self, *, scope: BotSkillLayoutScope
     ) -> SkillsPoolEditLease | None:
         key = self._key(scope=scope)
-        token = self._cache.acquire_lock_strict(key, ttl=self._LOCK_TTL_SECONDS)
+        started_at = time.perf_counter()
+        try:
+            token = self._cache.acquire_lock_strict(
+                key, ttl=self._LOCK_TTL_SECONDS
+            )
+        except CacheLockInfrastructureError:
+            self._log_lock_event(
+                event="acquire",
+                key=key,
+                token=None,
+                duration_ms=self._duration_ms(started_at),
+                outcome="unavailable",
+            )
+            raise
+        self._log_lock_event(
+            event="acquire",
+            key=key,
+            token=token,
+            duration_ms=self._duration_ms(started_at),
+            outcome="acquired" if token is not None else "busy",
+        )
         if token is None:
             return None
-        return SkillsPoolEditLease(key=key, token=token)
+        return SkillsPoolEditLease(
+            key=key, token=token, ttl_seconds=self._LOCK_TTL_SECONDS
+        )
 
     def release(self, lease: SkillsPoolEditLease) -> bool:
         if lease.token is None:
             return True
-        return self._cache.release_lock(lease.key, lease.token)
+        started_at = time.perf_counter()
+        try:
+            released = self._cache.release_lock(lease.key, lease.token)
+        except CacheLockInfrastructureError:
+            self._log_lock_event(
+                event="release",
+                key=lease.key,
+                token=lease.token,
+                duration_ms=self._duration_ms(started_at),
+                outcome="unavailable",
+                ttl_seconds=lease.ttl_seconds,
+            )
+            raise
+        self._log_lock_event(
+            event="release",
+            key=lease.key,
+            token=lease.token,
+            duration_ms=self._duration_ms(started_at),
+            outcome="released" if released else "token_mismatch",
+            ttl_seconds=lease.ttl_seconds,
+        )
+        return released
 
     def _is_rollback_phase(self, scope: BotSkillLayoutScope) -> bool:
         return self._layouts.get(scope).phase in self._ROLLBACK_PHASES
@@ -195,6 +260,37 @@ class SkillsPoolEditGuard:
             participation.label,
             reason,
         )
+
+    @staticmethod
+    def _duration_ms(started_at: float) -> float:
+        return (time.perf_counter() - started_at) * 1000
+
+    def _log_lock_event(
+        self,
+        *,
+        event: str,
+        key: str,
+        token: str | None,
+        duration_ms: float,
+        outcome: str,
+        ttl_seconds: int | None = None,
+    ) -> None:
+        logger.info(
+            "[skills_pool.edit_guard] lock_%s key=%s ttl_seconds=%s "
+            "token_fingerprint=%s duration_ms=%.3f outcome=%s",
+            event,
+            key,
+            ttl_seconds if ttl_seconds is not None else self._LOCK_TTL_SECONDS,
+            self._token_fingerprint(token),
+            duration_ms,
+            outcome,
+        )
+
+    @staticmethod
+    def _token_fingerprint(token: str | None) -> str:
+        if token is None:
+            return "none"
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()[:12]
 
 
 __all__ = [

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+import logging
 
 import pytest
 
@@ -195,18 +196,25 @@ def test_rollback_starting_after_lock_acquisition_releases_edit_lease() -> None:
     assert cache.held == {}
 
 
-def test_teclaw_bypasses_an_abandoned_pool_edit_lock() -> None:
+def test_legacy_bot_bypasses_an_abandoned_pool_edit_lock() -> None:
     cache = _Cache()
+    layouts = _Layouts()
+    layouts.state = replace(
+        layouts.state,
+        active_layout=SkillLayout.LEGACY,
+        target_layout=None,
+        phase=SkillLayoutPhase.LEGACY_ACTIVE,
+        persisted=False,
+    )
     guard = SkillsPoolEditGuard(
         cache=cache,
-        layout_repository=_Layouts(),
+        layout_repository=layouts,
         participation_resolver=_Participation(
-            participates=False, label="teclaw_no_pool_layout"
+            participates=False, label="legacy_layout_state"
         ),
     )
-    # Simulates a previous worker acquiring the legacy generic lock and then
-    # exiting before its finally block.  Teclaw never owns Pool rollback, so a
-    # current Teclaw write must not wait for that lock's TTL.
+    # A Legacy Bot never owns Pool rollback, so it must not wait for a generic
+    # lock left by an earlier, wrongly-participating worker.
     abandoned = cache.acquire_lock(guard._key(scope=SCOPE))
     assert abandoned is not None
 
@@ -226,6 +234,30 @@ def test_cache_outage_is_not_reported_as_lock_contention() -> None:
 
     with pytest.raises(SkillsPoolEditLockUnavailableError, match="lock service"):
         guard.acquire_for_edit(scope=SCOPE)
+
+
+def test_lock_lifecycle_logs_key_ttl_token_fingerprint_and_duration(caplog) -> None:
+    caplog.set_level(logging.INFO)
+    guard = SkillsPoolEditGuard(
+        cache=_Cache(),
+        layout_repository=_Layouts(),
+        participation_resolver=_Participation(),
+    )
+
+    lease = guard.acquire_for_edit(scope=SCOPE)
+    assert guard.release(lease)
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "lock_acquire" in message
+        and lease.key in message
+        and "ttl_seconds=600" in message
+        and "token_fingerprint=" in message
+        and "duration_ms=" in message
+        and "outcome=acquired" in message
+        for message in messages
+    )
+    assert any("lock_release" in message and "outcome=released" in message for message in messages)
 
 
 @pytest.mark.asyncio
