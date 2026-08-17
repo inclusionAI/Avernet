@@ -469,6 +469,74 @@ class TestOnChatAdditional:
         assert chunk.type == "final"
         assert chunk.content == "final text"
 
+    @pytest.mark.asyncio
+    async def test_on_chat_picks_first_text_content(self, mock_bot_ws):
+        """When contents has multiple elements, _on_chat uses the first
+        one whose ``text`` field is not None (loop breaks on first hit)."""
+        client = AsyncChatClient(uri="ws://host/ws")
+        state = _setup_session_state(client, "sk1")
+        state.stream_queue = asyncio.Queue()
+
+        client._on_chat(
+            {
+                "sessionKey": "sk1",
+                "state": "final",
+                "message": {
+                    "content": [
+                        {"text": "first"},
+                        {"text": "second"},
+                    ]
+                },
+            }
+        )
+        await asyncio.sleep(0)
+        chunk = state.stream_queue.get_nowait()
+        assert chunk.content == "first"
+        assert state.content == "first"
+
+    @pytest.mark.asyncio
+    async def test_on_chat_skips_content_without_text(self, mock_bot_ws):
+        """Content elements without a ``text`` field are skipped; the
+        first element with ``text`` is used."""
+        client = AsyncChatClient(uri="ws://host/ws")
+        state = _setup_session_state(client, "sk1")
+        state.stream_queue = asyncio.Queue()
+
+        client._on_chat(
+            {
+                "sessionKey": "sk1",
+                "state": "final",
+                "message": {
+                    "content": [
+                        {"type": "image", "url": "http://x/y.png"},
+                        {"text": "real text"},
+                    ]
+                },
+            }
+        )
+        await asyncio.sleep(0)
+        chunk = state.stream_queue.get_nowait()
+        assert chunk.content == "real text"
+
+    @pytest.mark.asyncio
+    async def test_on_chat_empty_contents_yields_empty_text(self, mock_bot_ws):
+        """When message.content is empty or has no text field, text stays ""."""
+        client = AsyncChatClient(uri="ws://host/ws")
+        state = _setup_session_state(client, "sk1")
+        state.stream_queue = asyncio.Queue()
+
+        client._on_chat(
+            {
+                "sessionKey": "sk1",
+                "state": "final",
+                "message": {"content": []},
+            }
+        )
+        await asyncio.sleep(0)
+        chunk = state.stream_queue.get_nowait()
+        assert chunk.content == ""
+        assert state.content == ""
+
 
 # ==================== _on_agent additional branches ====================
 
