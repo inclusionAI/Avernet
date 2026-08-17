@@ -111,7 +111,8 @@ Three things make this the right slice:
 ### Add a server to a bot
 
 - [ ] Adding a marketplace server to a bot succeeds and reports the server as
-      present and active.
+      present and **inactive**. Adding never changes what the bot's agent can
+      call; that takes an explicit activate.
 - [ ] Adding a server that is already on the bot succeeds and reports that nothing
       changed, rather than erroring or creating a duplicate.
 - [ ] Adding a server that does not exist in the marketplace, or that the
@@ -180,11 +181,11 @@ Three things make this the right slice:
    because the opposite reading ("revoke means revoke") is defensible and this is
    the one place the two axes touch.
 
-2. **Should adding a server to a bot activate it?** Recorded as *yes* (added
-   servers arrive active) because the alternative makes the common case two calls
-   for no benefit. `skills` differs here — an uploaded skill is inert until
-   activated — but a skill upload is a package transfer, whereas adding an MCP
-   server is a statement of intent to use it.
+2. ~~**Should adding a server to a bot activate it?**~~ **Settled: no.** Adding
+   and activating are separate acts, and a newly added server arrives
+   **deactivated**. This matches `skills`, where an uploaded skill is inert until
+   activated, and it means adding a server can never change what an agent can
+   call as a side effect. Turning it on is always an explicit second call.
 
 ## Out of Scope
 
