@@ -55,14 +55,14 @@ green — `uv run pytest` on the touched suites plus lint — before the next st
 
 This group makes the MCP half behave like the skill half. No schema change.
 
-- [ ] **3.1** Add `remove_all_default_mcp_exclusions(user_id, bot_id,
+- [x] **3.1** Add `remove_all_default_mcp_exclusions(user_id, bot_id,
       server_code) -> bool` to
       `core/repository/implementations/skill_center/skill.py`, mirroring
       `remove_all_default_skill_exclusions:1912` — **no `skill_set_id`**, so it
       clears exclusions stranded on a former default set. Without it,
       `collect_bot_mcps`' `get_all_excluded_mcps` read would keep an MCP off
       forever and activate would appear to do nothing.
-- [ ] **3.2** In `get_set_mcp_servers` (`core/skill_center/services/
+- [~] **3.2** In `get_set_mcp_servers` (`core/skill_center/services/
       skill_set_service.py`), apply `excluded_codes` to `associations` as well as
       to the synthesised default codes — the missing line that makes exclusions
       mean the same thing they mean for skills (`skill.py:545-562`).

@@ -1812,6 +1812,36 @@ class SkillSetRepository(
             )
             return [r[0] for r in rows]
 
+    def remove_all_default_mcp_exclusions(
+        self, user_id: str, bot_id: str, server_code: str
+    ) -> bool:
+        """Clear stale exclusions left behind by a former default SkillSet.
+
+        The MCP twin of :meth:`remove_all_default_skill_exclusions`, and note
+        what both omit: **no ``skill_set_id``**. That is the whole point. A bot's
+        default skill set can change (engine switch, re-provision), and an
+        exclusion written against the *old* one outlives it. Reads go through
+        :meth:`get_all_excluded_mcps`, which is not scoped to a set either — so a
+        stranded row keeps the MCP suppressed forever, and a per-set delete would
+        clear the wrong row and report success while the server stayed off.
+
+        Returns whether anything was removed, so an idempotent activate can tell
+        "was already on" from "just turned on".
+        """
+        from agentclaw.community.core.skill_center.orm import DefaultSkillsetMcpExclusion
+
+        with self._db.orm_session() as db:
+            rowcount = (
+                db.query(DefaultSkillsetMcpExclusion)
+                .filter(
+                    DefaultSkillsetMcpExclusion.user_id == user_id,
+                    DefaultSkillsetMcpExclusion.bot_id == bot_id,
+                    DefaultSkillsetMcpExclusion.server_code == server_code,
+                )
+                .delete(synchronize_session=False)
+            )
+            return rowcount > 0
+
     # ------------------------------------------------------------------
     # Default skill-set skill exclusion
     # (mirrors add/remove/get_excluded_mcps above, but for skills)
