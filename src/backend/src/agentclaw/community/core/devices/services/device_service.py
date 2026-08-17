@@ -780,6 +780,9 @@ class DeviceService:
         if current.status == DeviceBindingStatus.RELEASED.value:
             return current
 
+        if current.status == DeviceBindingStatus.RELEASING.value:
+            raise InvalidDeviceStatusError("device release is already in progress")
+
         if current.status not in [
             DeviceBindingStatus.ACTIVE.value,
             DeviceBindingStatus.PENDING.value,

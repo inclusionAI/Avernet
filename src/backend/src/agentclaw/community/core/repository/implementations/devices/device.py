@@ -98,6 +98,7 @@ class _DeviceBindingStatus:
     PENDING = "PENDING"
     ACTIVE = "ACTIVE"
     STOPPED = "STOPPED"
+    RELEASING = "RELEASING"
     FAILED = "FAILED"
     RELEASED = "RELEASED"
 
@@ -431,12 +432,11 @@ class DeviceRepository(
         release_reason: str | None,
         released_by: str,
     ) -> bool:
-        """Claim exactly one physical release by atomically making it terminal.
+        """Claim exactly one physical release with a durable intermediate state.
 
-        The release flow already treats a physical-release failure as terminal
-        to avoid orphaned active bindings.  Publishing RELEASED before the
-        external call extends that policy to concurrent callers: only the
-        conditional-update winner may invoke the provider destroy operation.
+        Only the conditional-update winner may invoke provider destruction.
+        RELEASED is written only after that operation returns, so a process
+        crash cannot make an undispatched destroy look complete.
         """
         releasable = (
             _DeviceBindingStatus.ACTIVE,
@@ -453,7 +453,7 @@ class DeviceRepository(
                 )
                 .update(
                     {
-                        EntityDeviceBinding.status: _DeviceBindingStatus.RELEASED,
+                        EntityDeviceBinding.status: _DeviceBindingStatus.RELEASING,
                         EntityDeviceBinding.release_reason: release_reason,
                         EntityDeviceBinding.released_by: released_by,
                         EntityDeviceBinding.released_at: func.now(),
@@ -470,7 +470,10 @@ class DeviceRepository(
         with self._db.orm_session() as db:
             db.query(EntityDeviceBinding).filter(
                 EntityDeviceBinding.id == binding_id,
-                EntityDeviceBinding.status != _DeviceBindingStatus.RELEASED,
+                EntityDeviceBinding.status.notin_((
+                    _DeviceBindingStatus.RELEASING,
+                    _DeviceBindingStatus.RELEASED,
+                )),
             ).update(
                 {
                     EntityDeviceBinding.status: status,
@@ -485,7 +488,10 @@ class DeviceRepository(
         with self._db.orm_session() as db:
             db.query(EntityDeviceBinding).filter(
                 EntityDeviceBinding.id == binding_id,
-                EntityDeviceBinding.status != _DeviceBindingStatus.RELEASED,
+                EntityDeviceBinding.status.notin_((
+                    _DeviceBindingStatus.RELEASING,
+                    _DeviceBindingStatus.RELEASED,
+                )),
             ).update(
                 {
                     EntityDeviceBinding.status: status,

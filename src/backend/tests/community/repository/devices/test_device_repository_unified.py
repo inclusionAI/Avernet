@@ -357,7 +357,7 @@ def test_claim_binding_release_claims_stopped_binding(repo):
         binding_id=bid, release_reason="bot deleted", released_by="emp-9"
     ) is True
     record = repo.get_by_id(bid)
-    assert record.status == "RELEASED"
+    assert record.status == "RELEASING"
     assert record.release_reason == "bot deleted"
     assert record.released_by == "emp-9"
     assert record.released_at is not None
