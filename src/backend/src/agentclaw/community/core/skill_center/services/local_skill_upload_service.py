@@ -647,7 +647,7 @@ class LocalSkillUploadService:
         try:
             archive = zipfile.ZipFile(io.BytesIO(package))
         except (zipfile.BadZipFile, UnicodeDecodeError) as exc:
-            raise LocalSkillInvalidPackageError() from exc
+            raise LocalSkillInvalidPackageError("invalid_zip") from exc
         files: list[tuple[str, bytes]] = []
         total = 0
         seen: set[str] = set()
@@ -664,12 +664,12 @@ class LocalSkillUploadService:
                 or len(path) > 256
                 or file_kind not in (0, 0o100000)
             ):
-                raise LocalSkillInvalidPackageError()
+                raise LocalSkillInvalidPackageError("unsafe_file_path")
             normalized_path = "/".join(
                 part for part in path.split("/") if part not in ("", ".")
             )
             if normalized_path in seen:
-                raise LocalSkillInvalidPackageError()
+                raise LocalSkillInvalidPackageError("duplicate_file_path")
             if info.file_size > _MAX_FILE:
                 raise LocalSkillTooLargeError()
             seen.add(normalized_path)
@@ -679,19 +679,21 @@ class LocalSkillUploadService:
             try:
                 files.append((path, archive.read(info)))
             except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
-                raise LocalSkillInvalidPackageError() from exc
+                raise LocalSkillInvalidPackageError("unreadable_archive") from exc
         skill_files = [item for item in files if item[0].split("/")[-1] == "SKILL.md"]
-        if len(skill_files) != 1:
-            raise LocalSkillInvalidPackageError()
+        if not skill_files:
+            raise LocalSkillInvalidPackageError("missing_skill_file")
+        if len(skill_files) > 1:
+            raise LocalSkillInvalidPackageError("multiple_skill_files")
         skill_path, markdown = skill_files[0]
         roots = {path.split("/")[0] for path, _ in files}
         wrapper = skill_path.split("/")[0] if "/" in skill_path else None
         if wrapper is not None and len(roots) != 1:
-            raise LocalSkillInvalidPackageError()
+            raise LocalSkillInvalidPackageError("invalid_wrapper")
         try:
             text = markdown.decode("utf-8", errors="strict")
         except UnicodeDecodeError as exc:
-            raise LocalSkillInvalidPackageError() from exc
+            raise LocalSkillInvalidPackageError("invalid_encoding") from exc
         metadata = SkillParser.parse_content(text) or {}
         if not metadata.get("name") or not metadata.get("description"):
             try:
@@ -703,7 +705,7 @@ class LocalSkillUploadService:
         name = metadata.get("name")
         description = metadata.get("description")
         if not isinstance(name, str) or not isinstance(description, str):
-            raise LocalSkillInvalidPackageError()
+            raise LocalSkillInvalidPackageError("invalid_metadata")
         name, description = name.strip(), description.strip()
         if (
             not name
@@ -711,12 +713,12 @@ class LocalSkillUploadService:
             or not _NAME.fullmatch(name)
             or name.lower() in {"skills-center", "skills-local", "skills-repo"}
         ):
-            raise LocalSkillInvalidPackageError()
+            raise LocalSkillInvalidPackageError("invalid_metadata")
         if wrapper and wrapper != name:
-            raise LocalSkillInvalidPackageError()
+            raise LocalSkillInvalidPackageError("wrapper_name_mismatch")
         if wrapper is not None and any(
             not path.startswith(f"{wrapper}/") for path, _ in files
         ):
-            raise LocalSkillInvalidPackageError()
+            raise LocalSkillInvalidPackageError("invalid_wrapper")
         normalized = [(p[len(wrapper) + 1 :] if wrapper else p, c) for p, c in files]
         return name, description, normalized
