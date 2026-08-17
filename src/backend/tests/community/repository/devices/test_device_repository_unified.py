@@ -391,6 +391,22 @@ def test_status_callbacks_do_not_reopen_released_binding(repo):
     assert repo.get_by_id(bid).status == "RELEASED"
 
 
+def test_props_update_does_not_reopen_claimed_release(repo):
+    bid = repo.insert_binding(**_binding(status="ACTIVE"))
+    assert repo.claim_binding_release(
+        binding_id=bid, release_reason="bot deleted", released_by="emp-9"
+    ) is True
+
+    repo.update_device_props(
+        binding_id=bid, props={"destroy_publish_id": "publish-1"}
+    )
+
+    record = repo.get_by_id(bid)
+    assert record.status == "RELEASING"
+    assert record.release_reason == "bot deleted"
+    assert record.device_props["destroy_publish_id"] == "publish-1"
+
+
 def test_update_status_advances_gmt_modified(repo):
     bid = repo.insert_binding(**_binding())
     pre = repo.get_by_id(bid).gmt_modified
