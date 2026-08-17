@@ -567,7 +567,12 @@ async def upload_skill(
             message="Skill uploaded successfully"
         )
     except SkillsPoolEditPausedError as e:
-        return UploadSkillResponse(success=False, message=str(e))
+        # A held edit/rollback lock is an ordinary request conflict, not a
+        # successful response carrying a failed business envelope.  Clients
+        # must be able to distinguish it from a completed upload.
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except HTTPException:
+        raise
     except ValueError as e:
         error_msg = str(e)
         logger.error(f"[skills.upload_skill] Validation error: {error_msg}")
