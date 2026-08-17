@@ -967,25 +967,44 @@ class BotService:
         return stop, lease_lost, thread
 
     def _join_delete_result(
-        self, env: str, entity_id: str, bot_id: str, user_id: str
+        self, env: str, entity_id: str, bot_id: str, user_id: str, bot: Dict[str, Any]
     ) -> bool:
         """Wait for the current holder's durable deletion result.
 
-        A duplicate reports success only after the bot row is gone. If the
-        holder releases its lock while the row is still live, it failed before
-        the terminal write, so the duplicate fails visibly instead of claiming
-        a deletion that did not happen.
+        The lock must disappear before a missing bot row means success: the
+        holder still has two failure-propagating persistence sweeps to run
+        after its soft delete. Once the holder has released the fence, this
+        duplicate reruns those idempotent sweeps against the original bot
+        context before reporting the durable completed result. That both waits
+        for an in-flight holder and repairs a holder that failed after the row
+        became invisible, without repeating Passport or device destruction.
         """
         lock_key = f"{_DELETE_LOCK_KEY_PREFIX}{bot_id}"
         deadline = time.monotonic() + DELETE_LOCK_JOIN_TIMEOUT_SECONDS
         while True:
+            if self._restart_lock_repo.get(env, entity_id, lock_key) is not None:
+                if time.monotonic() >= deadline:
+                    raise BotServiceError("Timed out waiting for concurrent bot deletion")
+                time.sleep(0.1)
+                continue
             if self._repository.get_by_id_and_owner(bot_id, user_id) is None:
+                self._finish_post_delete_sweeps(bot_id, user_id, bot)
                 return True
-            if self._restart_lock_repo.get(env, entity_id, lock_key) is None:
-                raise BotServiceError("Concurrent bot deletion did not complete")
-            if time.monotonic() >= deadline:
-                raise BotServiceError("Timed out waiting for concurrent bot deletion")
-            time.sleep(0.1)
+            raise BotServiceError("Concurrent bot deletion did not complete")
+
+    def _finish_post_delete_sweeps(
+        self, bot_id: str, user_id: str, bot: Dict[str, Any]
+    ) -> None:
+        """Run the failure-propagating cleanup that completes a soft delete.
+
+        Both operations are idempotent. A joining request may therefore safely
+        rerun them after the lock holder releases its fence; any persistence
+        error remains visible instead of converting a partially cleaned delete
+        into a successful duplicate response.
+        """
+        self._sweep_grants_that_raced_the_deletion(bot_id, user_id)
+        if bot_id != "default":
+            self._sweep_startup_script_that_raced_the_deletion(bot_id, bot)
 
     async def get_bot_by_ip_and_user(self, ip: str, user_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -3557,7 +3576,7 @@ class BotService:
                     delete_lock_entity_id,
                 )
                 return self._join_delete_result(
-                    delete_lock_env, delete_lock_entity_id, bot_id, user_id
+                    delete_lock_env, delete_lock_entity_id, bot_id, user_id, bot
                 )
 
             # A duplicate may acquire only after the first holder has already
@@ -3572,6 +3591,7 @@ class BotService:
                     "reacquired deletion lock could proceed.",
                     bot_id,
                 )
+                self._finish_post_delete_sweeps(bot_id, user_id, bot)
                 return True
             bot = locked_bot
             (
@@ -3685,10 +3705,7 @@ class BotService:
             if not result:
                 raise BotNotFoundError(f"Bot not found: {bot_id}")
 
-            self._sweep_grants_that_raced_the_deletion(bot_id, user_id)
-
-            if bot_id != "default":
-                self._sweep_startup_script_that_raced_the_deletion(bot_id, bot)
+            self._finish_post_delete_sweeps(bot_id, user_id, bot)
 
             self._sync_provider_bot_delete_to_bcn(bot_id, user_id)
 

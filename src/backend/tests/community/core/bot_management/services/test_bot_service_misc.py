@@ -555,17 +555,35 @@ class TestDeleteBot:
         svc._repository.soft_delete_by_owner.assert_called_once_with("bot001", "user001")
 
     def test_concurrent_delete_waits_for_durable_completion(self):
-        """A joined request succeeds only after the winner's soft delete is visible."""
+        """A joined request waits for the holder's post-delete sweeps."""
         svc = _make_service()
         svc._repository.get_by_id_and_owner.side_effect = [_make_bot(binding_id=None), None]
         svc._restart_lock_repo.acquire.return_value = None
         svc._restart_lock_repo.get_if_stale.return_value = None
+        svc._restart_lock_repo.get.side_effect = [SimpleNamespace(), None]
 
         assert svc.delete_bot("bot001", "user001") is True
 
         svc._passport_plugin.destroy_passport.assert_not_called()
         svc._repository.soft_delete_by_owner.assert_not_called()
         svc._restart_lock_repo.release.assert_not_called()
+
+    def test_joined_delete_propagates_post_delete_sweep_failure(self):
+        """A missing row alone never turns an incomplete cleanup into success."""
+        svc = _make_service()
+        svc._repository.get_by_id_and_owner.side_effect = [_make_bot(binding_id=None), None]
+        svc._restart_lock_repo.acquire.return_value = None
+        svc._restart_lock_repo.get_if_stale.return_value = None
+        svc._restart_lock_repo.get.return_value = None
+        grants = MagicMock()
+        grants.revoke_all_for_bot.side_effect = RuntimeError("grant store unavailable")
+        svc._bot_app_grant_provider = lambda: grants
+
+        with pytest.raises(BotServiceError, match="grant store unavailable"):
+            svc.delete_bot("bot001", "user001")
+
+        svc._passport_plugin.destroy_passport.assert_not_called()
+        svc._repository.soft_delete_by_owner.assert_not_called()
 
     def test_concurrent_delete_surfaces_a_winner_that_released_without_deleting(self):
         svc = _make_service()
