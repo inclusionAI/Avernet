@@ -70,6 +70,7 @@ from agentclaw.community.core.devices.services.device_filesystem import (
     FileTooLargeError as DeviceFileTooLargeError,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
 from agentclaw.community.core.resources.service import (
     DuplicateResourceError,
     FileTooLargeError,
@@ -446,6 +447,18 @@ async def upload_resource(
         # logged here so it is still diagnosable.
         logger.warning("[upload_resource] rejected upload: %s", exc)
         raise HTTPException(status_code=400, detail=str(exc))
+    except BaasServiceError as exc:
+        # A delete may win after this request resolved its workspace but before
+        # the engine write.  Do not turn that expected lifecycle race into an
+        # unhandled 500.
+        if "BOT_NOT_FOUND" in str(exc):
+            if bot_repo.get_by_id_and_owner(bot_id, owner_id) is None:
+                raise HTTPException(status_code=404, detail="Bot not found") from exc
+            raise HTTPException(
+                status_code=409, detail="Bot is being deleted; retry is not available"
+            ) from exc
+        logger.exception("[upload_resource] BaaS storage failed")
+        raise HTTPException(status_code=502, detail="Upload storage failed") from exc
     except Exception:
         # Device write failure → 502. No record is written below, so a failed
         # upload leaves neither bytes nor a row.

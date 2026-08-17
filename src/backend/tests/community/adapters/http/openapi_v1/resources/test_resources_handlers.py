@@ -1072,6 +1072,21 @@ async def test_upload_502_when_the_device_write_fails():
 
 
 @pytest.mark.asyncio
+async def test_upload_returns_409_when_baas_bot_disappears_during_delete():
+    from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
+
+    file_svc = _StubFileService(raises=BaasServiceError("404 BOT_NOT_FOUND"))
+
+    with pytest.raises(HTTPException) as excinfo:
+        await upload_resource(
+            path="a.txt", content=b"x", owner_id="u1", bot_id="bot-a",
+            bot_repo=_StubBotRepo(), file_svc=file_svc, request=_request_without_trace(),
+        )
+
+    assert excinfo.value.status_code == 409
+
+
+@pytest.mark.asyncio
 async def test_upload_reads_x_trace_id_from_request():
     env = await upload_resource(
         path="hello.txt",
