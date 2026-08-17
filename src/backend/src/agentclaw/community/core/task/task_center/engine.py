@@ -168,6 +168,15 @@ class ExecutionEngine:
         cfg = self._graph._execution_config(task_id)
         return int(cfg.get("MAX_HARNESS", _DEFAULT_MAX_HARNESS))
 
+    def _is_graph_terminal(self, task_id: str) -> bool:
+        """图级终态(DONE/HUNG)判定。终态后自动驱动(plan/dispatch/harness/回投推进)一律冻结:
+        MAX_LOOP 达上限→图 HUNG 后,后续 on_pass/on_miss/on_harness 不再推进(避免 loop_round 失控飙升
+        与节点无限增生);on_bbs_report(BBS 接力恢复)是唯一可从 HUNG 恢复的路径,不在本守卫范围。"""
+        try:
+            return self._graph.query_task_dashboard(task_id).status in {Status.DONE, Status.HUNG}
+        except Exception:  # noqa: BLE001  图不存在等→视为非终态,让正常入口逻辑处理
+            return False
+
     async def _plan_with_retry(self, task_id: str, graph, target_node_id: str | None = None):
         """plan 容错重试:planning 调用失败(parse/not_completed/empty 等,gap_detail 以 ``plan_`` 前缀)
         → 重试最多 MAX_HARNESS 次;耗尽后返回最后结果(has_gap=True → 编排核走深度闸门/HUNG)。
@@ -247,6 +256,10 @@ class ExecutionEngine:
     # ===== on_execute =====
     async def on_execute(self, task_id: str) -> None:
         """execute 事件:initialize_graph 后,条件 a(根 PENDING)→ plan(None 自发现根)→add→dispatch→start_run。"""
+        if self._is_graph_terminal(task_id):
+            logger.info("[on_execute] task=%s 图已终态(%s),冻结驱动", task_id,
+                        self._graph.query_task_dashboard(task_id).status.value)
+            return
         side: list[tuple] = []
         with self._lock_for(task_id):
             root = self._root(task_id)
@@ -335,6 +348,9 @@ class ExecutionEngine:
                 return result
             if patch.acceptance_result is None:
                 return result  # 仅 fold,无翻态
+            if self._is_graph_terminal(patch.task_id):
+                logger.info("[on_report] task=%s 图已终态,fold 已落但冻结驱动", patch.task_id)
+                return result
             side = []
             verdict = patch.acceptance_result.verdict
             if verdict == AcceptanceVerdict.PASS:
@@ -488,6 +504,9 @@ class ExecutionEngine:
         depth>=MAX → HUNG 升 BBS(拆不动,无 bot);depth<MAX → mark_planning + plan(target=miss 叶)拆细:
         有子→add(父置 PLANNING)+dispatch;空+has_gap=F→gap 闭不推进(罕见);空+has_gap=T→HUNG 升 BBS。
         MISS 不进 harness(无 bot 无可重试执行体)。"""
+        if self._is_graph_terminal(patch.task_id):
+            logger.info("[on_miss] task=%s 图已终态,冻结 MISS 推进", patch.task_id)
+            return
         side: list[tuple] = []
         with self._lock_for(patch.task_id):
             depth = self._graph._node_depth(patch.task_id, patch.node_id)
@@ -525,6 +544,9 @@ class ExecutionEngine:
     # ===== on_harness(harness 旁路入口:超时/崩溃/FAILED 巡检;复用 _on_harness_collect)=====
     async def on_harness(self, patch: TaskNodePatch) -> None:
         """Harness 旁路入口:exec_error 语义(超时/崩溃/FAILED 巡检)→ 复用 _on_harness_collect 重新派发重试/上限 HUNG。"""
+        if self._is_graph_terminal(patch.task_id):
+            logger.info("[on_harness] task=%s 图已终态,冻结 harness 推进", patch.task_id)
+            return
         side: list[tuple] = []
         with self._lock_for(patch.task_id):
             await self._on_harness_collect(patch.task_id, patch.node_id, patch.exec_error or "external_harness", side)
