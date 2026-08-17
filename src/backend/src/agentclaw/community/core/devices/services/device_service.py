@@ -774,6 +774,12 @@ class DeviceService:
         if current is None:
             raise DeviceNotFoundError(f"binding {binding_id} not found")
 
+        # Deletion retries are idempotent.  More importantly, a concurrent
+        # caller that lost the database claim must never invoke the provider's
+        # destructive operation a second time.
+        if current.status == DeviceBindingStatus.RELEASED.value:
+            return current
+
         if current.status not in [
             DeviceBindingStatus.ACTIVE.value,
             DeviceBindingStatus.PENDING.value,
@@ -783,6 +789,12 @@ class DeviceService:
             raise InvalidDeviceStatusError(
                 "only ACTIVE/PENDING/FAILED/STOPPED devices can be released"
             )
+
+        if not self._repo.claim_binding_release(binding_id=binding_id):
+            claimed = self._repo.get_by_id(binding_id)
+            if claimed is not None and claimed.status == DeviceBindingStatus.RELEASED.value:
+                return claimed
+            raise InvalidDeviceStatusError("device release is already in progress")
 
         entity_id = current.entity_id
         entity_type = current.entity_type

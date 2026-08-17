@@ -423,6 +423,37 @@ class DeviceRepository(
                 synchronize_session=False,
             )
 
+    def claim_binding_release(self, *, binding_id: int) -> bool:
+        """Claim exactly one physical release by atomically making it terminal.
+
+        The release flow already treats a physical-release failure as terminal
+        to avoid orphaned active bindings.  Publishing RELEASED before the
+        external call extends that policy to concurrent callers: only the
+        conditional-update winner may invoke the provider destroy operation.
+        """
+        releasable = (
+            _DeviceBindingStatus.ACTIVE,
+            _DeviceBindingStatus.PENDING,
+            _DeviceBindingStatus.FAILED,
+            _DeviceBindingStatus.STOPPED,
+        )
+        with self._db.orm_session() as db:
+            updated = (
+                db.query(EntityDeviceBinding)
+                .filter(
+                    EntityDeviceBinding.id == binding_id,
+                    EntityDeviceBinding.status.in_(releasable),
+                )
+                .update(
+                    {
+                        EntityDeviceBinding.status: _DeviceBindingStatus.RELEASED,
+                        EntityDeviceBinding.gmt_modified: func.now(),
+                    },
+                    synchronize_session=False,
+                )
+            )
+        return updated == 1
+
     def update_status(
         self, *, binding_id: int, status: str
     ) -> None:

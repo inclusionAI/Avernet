@@ -92,6 +92,11 @@ class DeviceBindingRepository(Protocol):
         ...
 
     @abstractmethod
+    def claim_binding_release(self, *, binding_id: int) -> bool:
+        """Atomically claim a releasable binding for one physical release."""
+        ...
+
+    @abstractmethod
     def update_status(self, *, binding_id: int, status: str) -> None:
         """更新设备绑定状态."""
         ...

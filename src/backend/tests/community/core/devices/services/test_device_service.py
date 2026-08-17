@@ -460,18 +460,38 @@ class TestReleaseDevice:
         assert result is released_record
         repo.release_binding.assert_called_once()
 
-    def test_release_released_device_raises(self):
+    def test_release_released_device_is_idempotent(self):
         record = _make_record(status=DeviceBindingStatus.RELEASED.value)
         repo = MagicMock()
         repo.get_by_id.return_value = record
         svc = _make_service(repo=repo)
 
-        with pytest.raises(InvalidDeviceStatusError):
-            svc.release_device(
-                binding_id=1,
-                release_reason=None,
-                operator=_make_operator(),
-            )
+        result = svc.release_device(
+            binding_id=1,
+            release_reason=None,
+            operator=_make_operator(),
+        )
+
+        assert result is record
+        repo.claim_binding_release.assert_not_called()
+
+    def test_release_losing_database_claim_skips_physical_release(self):
+        active = _make_record(status=DeviceBindingStatus.ACTIVE.value)
+        released = _make_record(status=DeviceBindingStatus.RELEASED.value)
+        repo = MagicMock()
+        repo.get_by_id.side_effect = [active, released]
+        repo.claim_binding_release.return_value = False
+        svc = _make_service(repo=repo)
+        svc._do_release = MagicMock()
+
+        result = svc.release_device(
+            binding_id=1,
+            release_reason=None,
+            operator=_make_operator(),
+        )
+
+        assert result is released
+        svc._do_release.assert_not_called()
 
     def test_release_not_found_raises(self):
         repo = MagicMock()
