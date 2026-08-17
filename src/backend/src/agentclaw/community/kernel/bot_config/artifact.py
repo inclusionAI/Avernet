@@ -25,6 +25,10 @@ Module rules (kernel is the lowest layer):
   contrast, are **inlined** into the server entry (the resolved key rides in
   the endpoint query or in ``headers``) — the backend holds the plaintext at
   compose time and the engine consumes it directly, with no secret broker.
+* An MCP server entry comes in two mutually exclusive forms, discriminated by
+  ``transport``: a **remote** one (``http`` / ``sse``) carrying ``endpoint`` +
+  ``headers``, and a **local** one (``stdio``) carrying a ``stdio`` launch
+  instruction. See :class:`McpServerRef`.
 """
 from __future__ import annotations
 
@@ -98,21 +102,54 @@ class FileRef:
 
 
 @dataclass(frozen=True)
-class McpServerRef:
-    """One MCP server entry.
+class StdioSpec:
+    """How to launch a local (stdio) MCP server.
 
-    Resolved credentials are **inlined**: an ``authorization`` key rides in the
-    ``endpoint`` query string and any secret header (e.g. ``x-ling-auth``) rides
-    in ``headers`` — exactly the shape the device ``/api/mcp`` path produces. The
-    backend holds the plaintext at compose time and the engine uses it directly;
-    there is no secret broker / by-reference indirection.
+    Present only on entries whose ``transport`` is ``"stdio"``. Unlike a remote
+    entry — which is pure data (a URL plus headers) — this is an **instruction to
+    execute**, so it is only meaningful in an engine whose image actually carries
+    ``command`` at that path. Placement/lifecycle of the child process is the
+    engine owner's decision; the backend only names what to run.
+
+    Carries no credentials: a stdio server is a child of the engine process on the
+    same host, so there is no endpoint to authenticate against.
     """
 
+    command: str
+    args: list[str] = field(default_factory=list)
+    env: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class McpServerRef:
+    """One MCP server entry, in one of two mutually exclusive forms.
+
+    ``transport`` is the discriminator:
+
+    * ``"stdio"`` — a local server. Read :attr:`stdio` for the launch
+      instruction; ``endpoint`` / ``headers`` are unset.
+    * ``"http"`` / ``"sse"`` — a remote server. Read ``endpoint`` and
+      ``headers``; ``stdio`` is ``None``.
+
+    For the remote form, resolved credentials are **inlined**: an
+    ``authorization`` key rides in the ``endpoint`` query string and any secret
+    header (e.g. ``x-ling-auth``) rides in ``headers`` — exactly the shape the
+    device ``/api/mcp`` path produces. The backend holds the plaintext at compose
+    time and the engine uses it directly; there is no secret broker /
+    by-reference indirection.
+    """
+
+    # Field order is append-only: existing fields keep their positions so
+    # positional construction and the ``asdict`` key order (which feeds the
+    # published bytes and their content digest) stay unchanged.
     server_code: str
     name: str | None = None
-    endpoint: str | None = None
-    transport: str | None = None
-    headers: dict[str, str] = field(default_factory=dict)
+    endpoint: str | None = None  # remote form
+    transport: str | None = None  # discriminator, see above
+    headers: dict[str, str] = field(default_factory=dict)  # remote form
+    # Local form. ``None`` is a meaningful contract state, not an "unset"
+    # placeholder: a remote server genuinely has no launch instruction.
+    stdio: StdioSpec | None = None
 
 
 @dataclass(frozen=True)
@@ -120,6 +157,20 @@ class McpManifest:
     """The bot's resolved MCP servers."""
 
     servers: list[McpServerRef] = field(default_factory=list)
+
+
+def _mcp_server_from_dict(data: dict[str, Any]) -> McpServerRef:
+    """Rebuild one server entry, re-nesting ``stdio`` into its dataclass.
+
+    A remote entry (no ``stdio`` key, or an explicit ``null``) yields
+    ``stdio=None`` — so artifacts published before the local form existed
+    deserialize unchanged.
+    """
+    stdio = data.get("stdio")
+    return McpServerRef(
+        **{k: v for k, v in data.items() if k != "stdio"},
+        stdio=StdioSpec(**stdio) if stdio else None,
+    )
 
 
 @dataclass(frozen=True)
@@ -143,15 +194,28 @@ class BotConfigArtifact:
     version: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize to the published JSON shape (matches ``artifact.schema.json``)."""
-        return asdict(self)
+        """Serialize to the published JSON shape (matches ``artifact.schema.json``).
+
+        A remote MCP entry omits ``stdio`` entirely rather than emitting it as
+        ``null``. ``asdict`` would include the key on every entry, which changes
+        the wire shape of artifacts that contain no local server at all — and a
+        consumer validating them against the pre-``stdio`` definition (which is
+        ``additionalProperties: false``) would reject them. Omitting it keeps
+        those bytes exactly what they were, so only artifacts that genuinely
+        carry the new form differ.
+        """
+        data = asdict(self)
+        for server in data.get("mcp", {}).get("servers", []):
+            if server.get("stdio") is None:
+                server.pop("stdio", None)
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "BotConfigArtifact":
         """Reconstruct from the published JSON shape."""
         mcp_data = data.get("mcp") or {}
         mcp = McpManifest(
-            servers=[McpServerRef(**s) for s in mcp_data.get("servers", [])],
+            servers=[_mcp_server_from_dict(s) for s in mcp_data.get("servers", [])],
         )
         return cls(
             schema_version=data["schema_version"],
@@ -203,6 +267,7 @@ EXAMPLE_ARTIFACT = BotConfigArtifact(
     ],
     mcp=McpManifest(
         servers=[
+            # remote form — reachable over HTTP, so it carries endpoint + headers
             McpServerRef(
                 server_code="github",
                 name="GitHub",
@@ -212,6 +277,18 @@ EXAMPLE_ARTIFACT = BotConfigArtifact(
                 # shape); an ``authorization`` key would instead ride in the
                 # endpoint query (``?authorization=<token>``).
                 headers={"x-ling-auth": "<resolved-token>"},
+            ),
+            # local form — the engine spawns it as a child process and speaks
+            # JSON-RPC over its stdin/stdout. No endpoint, and no credential:
+            # it runs inside the engine's own container as the same user.
+            McpServerRef(
+                server_code="hitl",
+                name="hitl",
+                transport="stdio",
+                stdio=StdioSpec(
+                    command="python3",
+                    args=["/home/admin/hitl/hitl_mcp_server.py"],
+                ),
             ),
         ],
     ),
