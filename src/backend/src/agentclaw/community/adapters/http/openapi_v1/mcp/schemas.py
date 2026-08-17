@@ -272,3 +272,32 @@ class McpConfigWrite(BaseModel):
         description="Replacement header map sent to the server on every "
         "call; omit to leave unchanged.",
     )
+
+
+class McpConfigDeleted(BaseModel):
+    """Outcome of deleting the caller's config for one MCP server.
+
+    Distinct from the shared ``Deleted`` contract, which documents ``deleted``
+    as *always* true because a failed delete answers an error envelope instead.
+    That is the right shape for addressing a resource: asking to delete
+    something absent is a 404. It is the wrong shape here, because this
+    operation is a **revocation** and revoking twice must not be an error — a
+    caller clearing a leaked credential should get the same answer whether or
+    not someone already cleared it.
+
+    So ``deleted`` genuinely varies: true when a stored config was removed,
+    false when there was nothing stored. Both are successes.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {"server_code": "mcp.example.weather", "deleted": True}
+        }
+    )
+
+    server_code: str = Field(description=_SERVER_CODE_DESC)
+    deleted: bool = Field(
+        description="True when a stored configuration was removed. False when "
+        "the caller had none for this server — still a success, not an error: "
+        "the end state is the one that was asked for either way."
+    )

@@ -37,7 +37,7 @@ green — `uv run pytest` on the touched suites plus lint — before the next st
 
 ## Group 2 — Config lifecycle: public endpoints
 
-- [ ] **2.1** Response models in `openapi_v1/mcp/schemas.py` (reuse the shared
+- [x] **2.1** Response models in `openapi_v1/mcp/schemas.py` (reuse the shared
       `Deleted` contract if it fits).
 - [ ] **2.2** `GET /openapi/v1/bots/mcp/configs` → `Envelope[Page[McpConfig]]`,
       using `PageParamsDep` + `UserIdDep`, projecting through the existing
