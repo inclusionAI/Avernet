@@ -157,7 +157,7 @@ This group makes the MCP half behave like the skill half. No schema change.
       is the `skills` mechanism applied to MCP, and pointing at `plan.md` — in
       particular why a dedicated skill set cannot be used, so that is not
       re-derived.
-- [ ] **7.3** Full module gates: `OCB_PRE_PUSH_RUN_CI=1` per the `AGENTS.md`
+- [x] **7.3** Full module gates: `OCB_PRE_PUSH_RUN_CI=1` per the `AGENTS.md`
       pre-push contract.
 - [ ] **7.4** PR titled `feat(openapi-v1): MCP config lifecycle and bot-scoped
       activation`, body using the `Problem` / `Solution` / `Validation` sections
