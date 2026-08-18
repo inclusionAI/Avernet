@@ -107,9 +107,25 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineUpstreamError,
 )
 from agentclaw.community.core.gateway_principal import PrincipalVerificationError
+from agentclaw.community.core.harness.errors import (
+    HealthDiagnosisConflictError,
+    HealthDiagnosisNotFoundError,
+    HealthDiagnosisUnavailableError,
+)
 from agentclaw.community.core.market_favorites.errors import (
     FavoriteNotFoundError,
     FavoriteTargetInvalidError,
+)
+from agentclaw.community.core.spaces.errors import (
+    PersonalSpaceInvariantError,
+    SpaceAccessDeniedError,
+    SpaceAlreadyExistsError,
+    SpaceCreatorInvariantError,
+    SpaceMemberAlreadyExistsError,
+    SpaceMemberInvalidError,
+    SpaceMemberNotFoundError,
+    SpaceNameInvalidError,
+    SpaceNotFoundError,
 )
 from agentclaw.community.core.work_orders.errors import (
     WorkOrderAccessDeniedError,
@@ -122,17 +138,6 @@ from agentclaw.community.core.work_orders.errors import (
     WorkOrderNoReviewerError,
     WorkOrderNotFoundError,
     WorkOrderNotificationNotFoundError,
-)
-from agentclaw.community.core.spaces.errors import (
-    PersonalSpaceInvariantError,
-    SpaceAccessDeniedError,
-    SpaceAlreadyExistsError,
-    SpaceCreatorInvariantError,
-    SpaceMemberAlreadyExistsError,
-    SpaceMemberInvalidError,
-    SpaceMemberNotFoundError,
-    SpaceNameInvalidError,
-    SpaceNotFoundError,
 )
 from agentclaw.community.core.mcp.errors import (
     McpConfigValueError,
@@ -180,6 +185,9 @@ from agentclaw.community.core.bot_collaborator.services.collaborator_lock_servic
     LockReleaseDeniedError,
 )
 from agentclaw.community.core.service_bot.errors import (
+    ServiceContainerConflictError,
+    ServiceContainerNotFoundError,
+    ServiceContainerUpstreamError,
     ServicePublicationConflictError,
     ServicePublicationLockedError,
     ServicePublicationNotFoundError,
@@ -331,6 +339,15 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         "Another authorization for this bot id is already live",
     ),
     BotPermissionError: (404, "Not found"),
+    ServiceContainerNotFoundError: (404, "Not found"),
+    ServiceContainerConflictError: (
+        409,
+        "Container is not in a valid state for this operation",
+    ),
+    ServiceContainerUpstreamError: (502, "Container service error"),
+    HealthDiagnosisNotFoundError: (404, "Not found"),
+    HealthDiagnosisConflictError: (409, "A health diagnosis is already running"),
+    HealthDiagnosisUnavailableError: (502, "Health diagnosis service error"),
     ServicePublicationNotFoundError: (404, "Not found"),
     LockNotHeldError: (404, "Not found"),
     LockReleaseDeniedError: (404, "Not found"),

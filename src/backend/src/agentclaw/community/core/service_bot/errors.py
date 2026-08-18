@@ -19,3 +19,15 @@ class ServicePublicationLockedError(ServicePublicationError):
 
 class ServicePublicationUnsupportedError(ServicePublicationError):
     """The Bot cannot participate in the service publication lifecycle."""
+
+
+class ServiceContainerNotFoundError(ServicePublicationError):
+    """The addressed service-Bot container is absent or hidden."""
+
+
+class ServiceContainerConflictError(ServicePublicationError):
+    """The container operation conflicts with its current runtime state."""
+
+
+class ServiceContainerUpstreamError(ServicePublicationError):
+    """The runtime provider failed while serving a container operation."""

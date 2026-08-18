@@ -14,6 +14,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from agentclaw.community.api.device_service import DeviceServiceProtocol
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import (
     CollaboratorLockService,
@@ -25,6 +26,16 @@ from agentclaw.community.core.bot_inventory.policies.combo_policy import (
     assert_service_upgrade,
 )
 from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.devices.errors import (
+    DeviceServiceError,
+    InvalidDeviceStatusError,
+)
+from agentclaw.community.core.devices.models import OperatorContext
+from agentclaw.community.core.devices.services.device_instance_service import (
+    BindingNotFoundError,
+    BotPublishNotFoundError,
+    InstanceHealthStatus,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.publishing import (
     BotPublishRepositoryProtocol,
@@ -34,6 +45,9 @@ from agentclaw.community.core.service_bot.repository.models import (
     PublishStatus,
 )
 from agentclaw.community.core.service_bot.errors import (
+    ServiceContainerConflictError,
+    ServiceContainerNotFoundError,
+    ServiceContainerUpstreamError,
     ServicePublicationConflictError,
     ServicePublicationLockedError,
     ServicePublicationNotFoundError,
@@ -42,6 +56,7 @@ from agentclaw.community.core.service_bot.errors import (
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
     BotPublishService,
 )
+from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
 from agentclaw.community.core.service_bot.services.publish_approval_service import (
     PublishApprovalService,
 )
@@ -88,6 +103,7 @@ class ServicePublicationFacade:
         collaborator_service: CollaboratorService,
         lock_service: CollaboratorLockService,
         bot_service: BotService,
+        device_service: DeviceServiceProtocol,
     ) -> None:
         self._bot_repo = bot_repo
         self._publish_repo = publish_repo
@@ -97,6 +113,7 @@ class ServicePublicationFacade:
         self._collaborator_service = collaborator_service
         self._lock_service = lock_service
         self._bot_service = bot_service
+        self._device_service = device_service
 
     def _resolve_bot(
         self,
@@ -307,6 +324,82 @@ class ServicePublicationFacade:
             for record in self._visible_records(records)
         ]
         return {"bot_id": bot_id, "items": cards}
+
+    def list_containers(
+        self, bot_id: str, *, actor_id: str, owner_id: str
+    ) -> dict[str, Any]:
+        """Return live service-Bot instances after collaborator authorization."""
+        self._resolve_bot(bot_id, actor_id=actor_id, owner_id=owner_id)
+        try:
+            result = self._device_service.get_instances_by_bot(
+                bot_id=bot_id,
+                health_check=True,
+            )
+        except (BotPublishNotFoundError, BindingNotFoundError) as exc:
+            raise ServiceContainerConflictError("service runtime is not live") from exc
+        except (DeviceServiceError, BaasServiceError) as exc:
+            raise ServiceContainerUpstreamError("container provider failed") from exc
+        return {"bot_id": bot_id, "instances": result.get("devices", [])}
+
+    def restart_container(
+        self,
+        bot_id: str,
+        instance_id: str,
+        *,
+        actor_id: str,
+        owner_id: str,
+    ) -> dict[str, Any]:
+        """Restart one abnormal live instance; only the Bot owner may do so."""
+        self._resolve_bot(
+            bot_id,
+            actor_id=actor_id,
+            owner_id=owner_id,
+            required_level=PermissionLevel.OWNER,
+        )
+        current = self.list_containers(
+            bot_id,
+            actor_id=actor_id,
+            owner_id=owner_id,
+        )
+        instance = next(
+            (
+                item
+                for item in current["instances"]
+                if item.get("device_uuid") == instance_id
+            ),
+            None,
+        )
+        # COSEC: bind the path instance id to the authorized Bot's live device
+        # inventory before forwarding it to BaaS; an instance id is not authority.
+        if instance is None:
+            raise ServiceContainerNotFoundError("container not found")
+        if instance.get("health_status") != InstanceHealthStatus.ABNORMAL:
+            raise ServiceContainerConflictError("only abnormal containers may restart")
+
+        operator = OperatorContext(
+            staff_id=actor_id,
+            staff=actor_id,
+            nick_name=actor_id,
+            operator_name=actor_id,
+        )
+        try:
+            result = self._device_service.restart_device_by_bot(
+                bot_id=bot_id,
+                device_uuid=instance_id,
+                operator=operator,
+            )
+        except (BotPublishNotFoundError, BindingNotFoundError) as exc:
+            raise ServiceContainerConflictError("service runtime is not live") from exc
+        except InvalidDeviceStatusError as exc:
+            raise ServiceContainerNotFoundError("container not found") from exc
+        except (DeviceServiceError, BaasServiceError) as exc:
+            raise ServiceContainerUpstreamError("container provider failed") from exc
+        return {
+            "bot_id": bot_id,
+            "instance_id": instance_id,
+            "publish_id": result.get("publish_id"),
+            "accepted": True,
+        }
 
     def get_publication(
         self,

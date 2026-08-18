@@ -13,10 +13,20 @@ from agentclaw.community.core.service_bot.repository.models import (
     PublishStatus,
 )
 from agentclaw.community.core.service_bot.errors import (
+    ServiceContainerConflictError,
+    ServiceContainerNotFoundError,
+    ServiceContainerUpstreamError,
     ServicePublicationConflictError,
     ServicePublicationLockedError,
     ServicePublicationNotFoundError,
     ServicePublicationUnsupportedError,
+)
+from agentclaw.community.core.devices.errors import (
+    DeviceServiceError,
+    InvalidDeviceStatusError,
+)
+from agentclaw.community.core.devices.services.device_instance_service import (
+    BotPublishNotFoundError,
 )
 from agentclaw.community.core.service_bot.services.service_publication_facade import (
     ServicePublicationFacade,
@@ -64,6 +74,7 @@ def deps():
         collaborator_service=Mock(),
         lock_service=Mock(),
         bot_service=Mock(),
+        device_service=Mock(),
     )
     values.bot_repo.get_by_id_and_owner.return_value = {
         "id": 10,
@@ -91,6 +102,7 @@ def deps():
         collaborator_service=values.collaborator_service,
         lock_service=values.lock_service,
         bot_service=values.bot_service,
+        device_service=values.device_service,
     )
     return values
 
@@ -116,6 +128,134 @@ def test_list_projects_latest_two_and_deduplicates_released(deps, monkeypatch):
     assert result["items"][0]["live_version"] == 5
     assert result["items"][0]["card_id"] == "service:bot-1:5"
     assert result["items"][1]["available_actions"] == ["publish_staging"]
+
+
+def _container(health_status: str = "ABNORMAL") -> dict:
+    return {
+        "device_uuid": "DEVICE-001",
+        "status": "FAILED",
+        "health_status": health_status,
+        "engine_type": "openclaw",
+    }
+
+
+def test_list_containers_authorizes_and_requests_realtime_health(deps):
+    deps.collaborator_service.get_permission_level.return_value = PermissionLevel.MEMBER
+    deps.device_service.get_instances_by_bot.return_value = {
+        "bot_uuid": "runtime-1",
+        "devices": [_container()],
+    }
+
+    result = deps.facade.list_containers("bot-1", actor_id="member", owner_id="owner")
+
+    assert result == {"bot_id": "bot-1", "instances": [_container()]}
+    deps.device_service.get_instances_by_bot.assert_called_once_with(
+        bot_id="bot-1", health_check=True
+    )
+
+
+def test_list_containers_masks_provider_failure(deps):
+    deps.device_service.get_instances_by_bot.side_effect = DeviceServiceError("secret")
+
+    with pytest.raises(ServiceContainerUpstreamError):
+        deps.facade.list_containers("bot-1", actor_id="owner", owner_id="owner")
+
+
+def test_list_containers_reports_missing_live_runtime_as_conflict(deps):
+    deps.device_service.get_instances_by_bot.side_effect = BotPublishNotFoundError(
+        "missing"
+    )
+
+    with pytest.raises(ServiceContainerConflictError):
+        deps.facade.list_containers("bot-1", actor_id="owner", owner_id="owner")
+
+
+def test_restart_container_accepts_owned_abnormal_instance(deps):
+    deps.device_service.get_instances_by_bot.return_value = {"devices": [_container()]}
+    deps.device_service.restart_device_by_bot.return_value = {"publish_id": 42}
+
+    result = deps.facade.restart_container(
+        "bot-1",
+        "DEVICE-001",
+        actor_id="owner",
+        owner_id="owner",
+    )
+
+    assert result == {
+        "bot_id": "bot-1",
+        "instance_id": "DEVICE-001",
+        "publish_id": 42,
+        "accepted": True,
+    }
+    call = deps.device_service.restart_device_by_bot.call_args
+    assert call.kwargs["bot_id"] == "bot-1"
+    assert call.kwargs["device_uuid"] == "DEVICE-001"
+    assert call.kwargs["operator"].staff_id == "owner"
+
+
+def test_restart_container_refuses_instance_from_another_bot(deps):
+    deps.device_service.get_instances_by_bot.return_value = {"devices": [_container()]}
+
+    with pytest.raises(ServiceContainerNotFoundError):
+        deps.facade.restart_container(
+            "bot-1",
+            "DEVICE-OTHER",
+            actor_id="owner",
+            owner_id="owner",
+        )
+
+    deps.device_service.restart_device_by_bot.assert_not_called()
+
+
+def test_restart_container_refuses_healthy_instance(deps):
+    deps.device_service.get_instances_by_bot.return_value = {
+        "devices": [_container("ACTIVE")]
+    }
+
+    with pytest.raises(ServiceContainerConflictError):
+        deps.facade.restart_container(
+            "bot-1",
+            "DEVICE-001",
+            actor_id="owner",
+            owner_id="owner",
+        )
+
+
+def test_restart_container_requires_owner(deps):
+    deps.collaborator_service.get_permission_level.return_value = PermissionLevel.MEMBER
+
+    with pytest.raises(ServicePublicationNotFoundError):
+        deps.facade.restart_container(
+            "bot-1",
+            "DEVICE-001",
+            actor_id="member",
+            owner_id="owner",
+        )
+
+    deps.device_service.get_instances_by_bot.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected"),
+    [
+        (BotPublishNotFoundError("missing"), ServiceContainerConflictError),
+        (InvalidDeviceStatusError("mismatch"), ServiceContainerNotFoundError),
+        (DeviceServiceError("upstream"), ServiceContainerUpstreamError),
+    ],
+)
+def test_restart_container_normalizes_runtime_failures(deps, failure, expected):
+    deps.device_service.get_instances_by_bot.return_value = {
+        "devices": [_container()]
+    }
+    deps.device_service.restart_device_by_bot.side_effect = failure
+
+    with pytest.raises(expected):
+        deps.facade.restart_container(
+            "bot-1",
+            "DEVICE-001",
+            actor_id="owner",
+            owner_id="owner",
+        )
 
 
 @pytest.mark.parametrize(
