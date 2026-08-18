@@ -35,6 +35,7 @@ from agentclaw.community.adapters.http.openapi_v1.deprecated import (
 from agentclaw.community.adapters.http.openapi_v1.admission import (
     ADMISSION,
     ADMITTING_MODES,
+    HARNESS_SCOPED_OPERATIONS,
     SKILL_SCOPED_OPERATIONS,
     AdmissionMode,
 )
@@ -200,6 +201,7 @@ def test_every_grant_checked_operation_declares_its_modes_dependency(mode):
         if table_mode is mode
         and key not in SELF_CHECKED_ROUTES
         and key not in SKILL_SCOPED_OPERATIONS
+        and key not in HARNESS_SCOPED_OPERATIONS
     }
     actual = {
         key
@@ -244,6 +246,12 @@ def test_only_the_named_operations_check_their_own_grant():
     What is asserted here is that the set is exactly those four: still in a
     grant-checked mode, still absent from the shared dependency, and not grown
     by one more operation that merely found the check inconvenient.
+
+    The harness operations are a second, deliberate self-checking set: they
+    resolve the addressed bot's owner from the bot record in
+    ``HarnessBotAccessDep`` and apply the owner/collaborator rule there, so
+    they also cannot use the shared ``require_granted_bot`` dependency. They
+    are named in ``HARNESS_SCOPED_OPERATIONS`` and pinned beside the four.
     """
     self_checking = {
         key
@@ -253,13 +261,15 @@ def test_only_the_named_operations_check_their_own_grant():
         and not _depends_on(_dependant_of(ctx), require_granted_addressed_bot)
         and key not in LEGACY_ROUTES
     }
-    assert self_checking == SKILL_SCOPED_OPERATIONS, (
+    named = SKILL_SCOPED_OPERATIONS | HARNESS_SCOPED_OPERATIONS
+    assert self_checking == named, (
         "the set of operations checking their grant in a handler has changed. "
-        "Adding one is an edit to admission.SKILL_SCOPED_OPERATIONS and needs "
-        "the same justification the four there have — that the addressed bot's "
-        "owner cannot be known before the handler runs.\n"
-        f"  unexpected: {sorted(self_checking - SKILL_SCOPED_OPERATIONS)}\n"
-        f"  no longer:  {sorted(SKILL_SCOPED_OPERATIONS - self_checking)}"
+        "Adding one is an edit to admission.SKILL_SCOPED_OPERATIONS or "
+        "admission.HARNESS_SCOPED_OPERATIONS and needs the same justification "
+        "the named ones have — that the addressed bot's owner cannot be known "
+        "before the handler runs.\n"
+        f"  unexpected: {sorted(self_checking - named)}\n"
+        f"  no longer:  {sorted(named - self_checking)}"
     )
 
 

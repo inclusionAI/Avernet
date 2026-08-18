@@ -29,6 +29,13 @@ from agentclaw.community.adapters.http.openapi_v1 import (
 
 _BASE = f"{PUBLIC_API_PREFIX}/bots"
 
+#: The harness group is a deliberate second base: its operations are bot-scoped
+#: but live under ``/openapi/v1/harness/bots/{bot_id}/…`` so the gateway can
+#: route them as their own domain. The addressing rule below applies to the
+#: ``/openapi/v1/bots`` base; harness paths are excluded from it and pinned by
+#: ``test_harness_paths_keep_their_own_base`` instead.
+_HARNESS_BASE = f"{PUBLIC_API_PREFIX}/harness"
+
 #: The docs' copy of the reserved names, fenced under this anchor. Parsed rather
 #: than duplicated here: the point of the check is that the docs and the routes
 #: cannot drift, which a second hardcoded list would not give.
@@ -81,6 +88,20 @@ def _segments(path: str) -> list[str]:
     return [s for s in path[len(_BASE) :].split("/") if s]
 
 
+def _bots_paths() -> list[str]:
+    """Published addresses under the ``/openapi/v1/bots`` base only."""
+    return [p for p in _paths() if p == _BASE or p.startswith(f"{_BASE}/")]
+
+
+def _current_bots_paths() -> list[str]:
+    """Current-contract addresses under the ``/openapi/v1/bots`` base only."""
+    return [
+        p
+        for p in _current_paths()
+        if p == _BASE or p.startswith(f"{_BASE}/")
+    ]
+
+
 #: The groups that address no single bot, so they keep a literal in the segment
 #: a bot id is otherwise read from. Everything else is ``{bot_id}``-first.
 #:
@@ -100,7 +121,7 @@ def _components() -> set[str]:
     """
     return {
         segments[0]
-        for path in _paths()
+        for path in _bots_paths()
         if (segments := _segments(path)) and not segments[0].startswith("{")
     }
 
@@ -110,9 +131,36 @@ def test_every_path_lives_under_the_bots_base():
 
     A path outside ``/openapi/v1/bots`` would route to a different upstream —
     or to none — and the mistake is invisible until deploy.
+
+    The harness group is the one deliberate exception: it lives under
+    ``/openapi/v1/harness`` so the gateway can route it as its own domain, and
+    is pinned by ``test_harness_paths_keep_their_own_base`` below.
     """
-    offenders = [p for p in _paths() if p != _BASE and not p.startswith(f"{_BASE}/")]
+    offenders = [
+        p
+        for p in _paths()
+        if p != _BASE
+        and not p.startswith(f"{_BASE}/")
+        and not p.startswith(f"{_HARNESS_BASE}/")
+    ]
     assert not offenders, f"paths outside {_BASE}: {offenders}"
+
+
+def test_harness_paths_keep_their_own_base():
+    """The harness group is bot-scoped but addressed under its own base.
+
+    ``/openapi/v1/harness/bots/{bot_id}/…`` keeps the bot first within the
+    group, so the gateway's ``harness`` domain can claim the whole prefix
+    without colliding with the ``bots`` domain.
+    """
+    harness_paths = [p for p in _paths() if p.startswith(f"{_HARNESS_BASE}/")]
+    assert harness_paths, "no harness paths published"
+    offenders = [
+        p
+        for p in harness_paths
+        if not p.startswith(f"{_HARNESS_BASE}/bots/{{bot_id}}/")
+    ]
+    assert not offenders, f"harness paths not bot-first under their base: {offenders}"
 
 
 def test_no_path_repeats_bot_before_the_id():
@@ -140,7 +188,7 @@ def test_every_bot_scoped_operation_names_the_bot_first():
     """
     offenders = [
         path
-        for path in _current_paths()
+        for path in _current_bots_paths()
         if (segments := _segments(path))
         and not segments[0].startswith("{")
         and segments[0] not in _BOT_FREE
@@ -155,7 +203,7 @@ def test_only_the_bots_component_owns_the_bare_wildcard():
     """Exactly one path may open with a parameter, and it is the bot itself."""
     wildcards = {
         segments[0]
-        for p in _paths()
+        for p in _bots_paths()
         if (segments := _segments(p)) and segments[0].startswith("{")
     }
     assert wildcards <= {"{bot_id}"}, f"unexpected top-level parameters: {wildcards}"

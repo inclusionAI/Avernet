@@ -317,7 +317,11 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: placement the rule deliberately keeps. ``none`` fell 21 → 16 because the five
 #: operations that named no bot at all (the resources and routines collection
 #: roots, skills list and upload) now do.
-_BOT_ID_PLACEMENT = {"path": 54, "query": 1, "none": 16}
+#:
+#: The public harness group moved ``path`` 54 → 60: its six operations
+#: (diagnose/preview/apply/rollback/dim-report/dim-history) all address a bot
+#: under ``/openapi/v1/harness/bots/{bot_id}/…`` and name it in the path.
+_BOT_ID_PLACEMENT = {"path": 60, "query": 1, "none": 16}
 
 
 def _schema() -> dict:
@@ -396,8 +400,10 @@ def test_the_pinned_number_of_operations_take_it():
     ]
     # 60 on the merge base, +3 for the startup-script operations, +2 for the
     # resources file endpoints re-addressed by workspace path (#1000), then -4
-    # for the files-only resources group.
-    assert len(taking) == 61
+    # for the files-only resources group, then +6 for the public harness group
+    # (diagnose/preview/apply/rollback/dim-report/dim-history), all of which
+    # take the caller's ``user_id`` like the rest of the user-scoped surface.
+    assert len(taking) == 67
 
 
 def test_the_exempt_operations_take_none():
