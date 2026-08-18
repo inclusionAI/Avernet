@@ -142,6 +142,7 @@ async fn patch_response(service: Arc<RecordingGroupService>) -> axum::response::
         .await
         .expect("response")
 }
+
 #[tokio::test]
 async fn legacy_patch_group_delegates_to_v1_group_application() {
     let service = Arc::new(RecordingGroupService::default());
