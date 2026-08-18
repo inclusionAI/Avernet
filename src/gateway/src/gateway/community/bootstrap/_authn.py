@@ -55,6 +55,13 @@ def build_authenticator(
     )
 
 
+# TODO(totalfrank): production code should carry ZERO mock code, including this
+# env-gated hook. Move the dev_header strategy (plugins/authn/dev_header) into a
+# dev-only distribution discovered via entry points — the same mechanism the
+# ``gateway.runner`` sofa/bare selection uses — installed only by the singlebox
+# dev flow, so this function and the plugin module disappear from production
+# installs entirely. Until then this hook is the single production touchpoint:
+# one env read that no-ops unless GATEWAY_AUTH_MOCK=1.
 def _append_dev_mock(chains: dict[PrincipalType, IdentityChain]) -> None:
     """Append the ``dev_header`` strategy to the user chain under the env gate.
 
