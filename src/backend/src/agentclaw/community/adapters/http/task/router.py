@@ -1,8 +1,8 @@
 """Task HTTP adapter routes —— thin(Rule 22:只转协议,不持领域策略)。
 
-POST /api/task/execute            — 提交任务(delegate TaskServiceProtocol.execute)
-GET  /api/task/dashboard          — 查任务图(delegate TaskServiceProtocol.get_task_dashboard)
-POST /api/task/callback/report    — 执行实体回投(delegate TaskLoopCallbackProtocol.report_result)
+POST /openapi/v1/task/execute            — 提交任务(delegate TaskServiceProtocol.execute)
+GET  /openapi/v1/task/dashboard          — 查任务图(delegate TaskServiceProtocol.get_task_dashboard)
+POST /openapi/v1/task/callback/report    — 执行实体回投(delegate TaskLoopCallbackProtocol.report_result)
 
 对齐 api/task/{task_service,task_loop_callback}.py Protocol。
 """
@@ -34,7 +34,7 @@ from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProt
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.di import Injected
 
-router = APIRouter(prefix="/api/task", tags=["task"])
+router = APIRouter(prefix="/openapi/v1/task", tags=["task"])
 
 
 @router.post("/execute", response_model=ApiResponse[TaskOpResultDTO])
@@ -189,7 +189,7 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry,
 )
 
-task_callback_router = APIRouter(prefix="/task_loop/callback", tags=["task-callback"])
+task_callback_router = APIRouter(prefix="/openapi/v1/task/callback", tags=["task-callback"])
 
 _TERMINAL = {Status.DONE, Status.FAILED, Status.HUNG}
 

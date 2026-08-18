@@ -8,9 +8,9 @@ gated by ``SINGLEBOX_TASK_E2E=1``。本地起后端 singlebox 时设置:
 完整流程覆盖:
   1) 准备 mock 数据: 将内联测试数据写入 scripts/.dependencies/data/discovered_tasks.db
   2) provisioning: 建一个 test agent bot(获取真实 agent_id)
-  3) POST /api/public/task-discovery/discover   → 读取 mock 任务 + 为每个任务创建 engine session
+  3) POST /openapi/v1/task/discovery/discover   → 读取 mock 任务 + 为每个任务创建 engine session
   4) 验证响应: success / discovered count / task_id / session_id / session_url
-  5) GET /api/public/task-discovery/status      → 验证任务状态可查询
+  5) GET /openapi/v1/task/discovery/status      → 验证任务状态可查询
   6) 验证 session_url 可达(engine session 实际存在)
 
 关键架构前提:
@@ -124,10 +124,10 @@ class TestTaskDiscoveryE2E(unittest.TestCase):
         print(f"[provision] agent_bot_id={agent_id}")
 
         async with httpx.AsyncClient(timeout=60.0, headers=_HDRS) as cli:
-            # 3) POST /api/public/task-discovery/discover
+            # 3) POST /openapi/v1/task/discovery/discover
             #    → 读取 mock 任务 + 为每个任务创建 engine session
             r = await cli.post(
-                f"{_BACKEND}/api/public/task-discovery/discover",
+                f"{_BACKEND}/openapi/v1/task/discovery/discover",
                 params={"user_id": _USER_ID, "agent_id": agent_id},
             )
             r.raise_for_status()
@@ -179,8 +179,8 @@ class TestTaskDiscoveryE2E(unittest.TestCase):
                 self.assertIn(f"bot_uuid={agent_id}", surl, f"session_url 未包含 agent_id: {surl}")
                 self.assertIn("session=", surl, f"session_url 未包含 session= 参数: {surl}")
 
-            # 5) GET /api/public/task-discovery/status → 验证任务状态可查
-            r = await cli.get(f"{_BACKEND}/api/public/task-discovery/status")
+            # 5) GET /openapi/v1/task/discovery/status → 验证任务状态可查
+            r = await cli.get(f"{_BACKEND}/openapi/v1/task/discovery/status")
             r.raise_for_status()
             status_body = r.json()
             print(f"[status] success={status_body.get('success')} "

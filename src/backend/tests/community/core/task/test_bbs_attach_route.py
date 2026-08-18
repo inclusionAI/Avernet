@@ -1,4 +1,4 @@
-"""BBS attach HTTP 路由契约测试(FR-PICK-04):POST /api/task/bbs/attach。
+"""BBS attach HTTP 路由契约测试(FR-PICK-04):POST /openapi/v1/task/bbs/attach。
 
 独立 TestClient + 小型 test injector(TaskModule + stub discover),不拉起 singlebox 全栈,
 不依赖 SINGLEBOX_TASK_E2E=1。验证:claim 持有者 attach 200(返 bbs- node_id);
@@ -104,9 +104,9 @@ def test_attach_route_creates_node(client):
     """claim 持有者 attach → 200,data.node_id 以 'bbs-' 开头。"""
     c, inj = client
     _bbs_task_planning(inj, "x1")
-    r_claim = c.post("/api/task/bbs/claim", json={"task_id": "x1", "bot_id": "botA"})
+    r_claim = c.post("/openapi/v1/task/bbs/claim", json={"task_id": "x1", "bot_id": "botA"})
     assert r_claim.status_code == 200, r_claim.text
-    r = c.post("/api/task/bbs/attach", json=_attach_body("x1", "x1", "botA"))
+    r = c.post("/openapi/v1/task/bbs/attach", json=_attach_body("x1", "x1", "botA"))
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["success"] is True
@@ -118,7 +118,7 @@ def test_attach_route_non_owner_409(client):
     """非 claim 持有者 attach → 409(TaskStateError)。"""
     c, inj = client
     _bbs_task_planning(inj, "x2")
-    r_claim = c.post("/api/task/bbs/claim", json={"task_id": "x2", "bot_id": "botA"})
+    r_claim = c.post("/openapi/v1/task/bbs/claim", json={"task_id": "x2", "bot_id": "botA"})
     assert r_claim.status_code == 200, r_claim.text
-    r = c.post("/api/task/bbs/attach", json=_attach_body("x2", "x2", "botB"))
+    r = c.post("/openapi/v1/task/bbs/attach", json=_attach_body("x2", "x2", "botB"))
     assert r.status_code == 409, r.text

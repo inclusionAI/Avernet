@@ -7,6 +7,6 @@
 
 触发方式:
 A. 自动 — backend 的 TaskDiscoveryLifecycle 在 startup 后启动定时调度
-B. 手动 — HTTP POST /api/public/task-discovery/discover
+B. 手动 — HTTP POST /openapi/v1/task/discovery/discover
 C. CLI  — scripts/task_discovery.sh discover → curl backend API
 """

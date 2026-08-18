@@ -31,9 +31,9 @@
 │  backend(8888) FastAPI                                            │
 │   ┌─────────────────────────────────────────────────────────┐     │
 │   │ adapters/http/task/router.py  (thin)                    │     │
-│   │   POST /api/task/execute                                 │     │
-│   │   GET  /api/task/dashboard                               │     │
-│   │   POST /api/task/callback/report   ← 真实回投HTTP入口    │     │
+│   │   POST /openapi/v1/task/execute                                 │     │
+│   │   GET  /openapi/v1/task/dashboard                               │     │
+│   │   POST /openapi/v1/task/callback/report   ← 真实回投HTTP入口    │     │
 │   └──────────────┬──────────────────────────────────────────┘     │
 │      di/modules/task_module.py (composition root)                  │
 │      TaskService(graph, harness) → ExecutionEngine(注入 skill-backed 策略/投递) │
@@ -44,7 +44,7 @@
 │   │   (send_and_wait_async 同步收结果)         │   (integration/) │
 │   │  runner._execution_backend = TaskExecutor   │                  │     │
 │   │   └─ dispatch(三模态): send_message→poller→report_result     │     │
-│   │       └─► POST /api/task/callback/report (回投闭环)          │
+│   │       └─► POST /openapi/v1/task/callback/report (回投闭环)          │
 │   └────────────────────────────────────────────────────┘         │
 │        ▲ bot/skill 真实资源（经 /api 创建+安装）：                  │
 │        │  owner bot（规划/搜推/验收 skill 激活）                    │
@@ -179,7 +179,7 @@ class OpenApiBotPort(Protocol):                # integration/ports.py(同学已�
 
 ### 4.2 `adapters/http/task/router.py`（thin）
 ```python
-router = APIRouter(prefix="/api/task", tags=["task"])
+router = APIRouter(prefix="/openapi/v1/task", tags=["task"])
 @router.post("/execute")        # TaskInfoDTO -> TaskOpResultDTO   (async)
 @router.get("/dashboard")       # ?task_id=&node_id= -> TaskExecutionGraphDTO
 @router.post("/callback/report")# TaskCallbackDataDTO -> {"ok": true}  (async, 调 callback.report_result)
@@ -224,8 +224,8 @@ router = APIRouter(prefix="/api/task", tags=["task"])
 3. 确保 `TASK_ENGINE=skill` 生效（singlebox 起态或运行时切换）。
 
 ### 6.2 drive
-- `POST /api/task/execute`，body = `gwqie46v7hzr1w6h` TaskInfo（metadata.task_id 固定；goal.objective=产出尽调报告；5 acceptances；execution_config: MAX_DEPTH/BBS_MAX_DEPTH；source_channel_id=owner bot）。
-- 轮询 `GET /api/task/dashboard?task_id=`（带超时），至 `status ∈ {DONE, HUNG}`。
+- `POST /openapi/v1/task/execute`，body = `gwqie46v7hzr1w6h` TaskInfo（metadata.task_id 固定；goal.objective=产出尽调报告；5 acceptances；execution_config: MAX_DEPTH/BBS_MAX_DEPTH；source_channel_id=owner bot）。
+- 轮询 `GET /openapi/v1/task/dashboard?task_id=`（带超时），至 `status ∈ {DONE, HUNG}`。
 
 ### 6.3 assert（happy，AC-4）
 - 分解树：root→N_overview→{N_market,N_tech,N_compete,N_customer}→N_practice_bbs→N_report（结构由 skill 产出）。

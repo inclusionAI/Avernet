@@ -1002,7 +1002,7 @@ from agentclaw.community.core.errors import CallbackAuthError
 _SECRET = "s3cr3t"
 
 
-def _signed(method="POST", path="/task_loop/callback/workflow_result", body=b'{"x":1}',
+def _signed(method="POST", path="/openapi/v1/task/callback/workflow_result", body=b'{"x":1}',
             ts=None, secret=_SECRET, token="bcn"):
     ts = ts if ts is not None else str(int(time.time()))
     body_hex = hashlib.sha256(body).hexdigest()
@@ -1019,7 +1019,7 @@ def test_hmac_verify_passes():
     auth = HmacCallbackAuthenticator(secrets={"bcn": _SECRET, "claw_mind": "other"})
     h = _signed()
     auth.verify(source="bcn", headers=h, raw_body=b'{"x":1}',
-                method="POST", path="/task_loop/callback/workflow_result")
+                method="POST", path="/openapi/v1/task/callback/workflow_result")
 
 
 def test_hmac_bad_signature_raises():
@@ -1170,7 +1170,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: `TaskServiceProtocol`（`Injected`；`.callback.start_run/report_result` + `get_task_dashboard`）、`CallbackAuthenticator`（`Injected`）、`CallbackCorrelationRegistry`（`Injected`）；`translate`（Task 6）；`CallbackResponse`（Task 5）；`TaskStateError`/`TaskNotFoundError`/`NodeNotFoundError`（domain/errors）；`Status`（domain/models）。
-- Produces: `task_callback_router: APIRouter`（prefix `/task_loop/callback`，4 端点）。错误映射：`TaskNotFoundError`/`NodeNotFoundError`→404；`TaskStateError`→result 路径 re-query 已终态→200 idempotent 否则 409，start 路径→409；`CallbackAuthError`/`CallbackCorrelationError` 由中央 DomainError handler→401/400；Pydantic→422。
+- Produces: `task_callback_router: APIRouter`（prefix `/openapi/v1/task/callback`，4 端点）。错误映射：`TaskNotFoundError`/`NodeNotFoundError`→404；`TaskStateError`→result 路径 re-query 已终态→200 idempotent 否则 409，start 路径→409；`CallbackAuthError`/`CallbackCorrelationError` 由中央 DomainError handler→401/400；Pydantic→422。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -1259,25 +1259,25 @@ def client(app):
 class TestRouter:
     def test_workflow_result_success(self, app, client):
         _, svc = app
-        r = client.post("/task_loop/callback/workflow_result", json=_body(loop_task_id="t1::root1"))
+        r = client.post("/openapi/v1/task/callback/workflow_result", json=_body(loop_task_id="t1::root1"))
         assert r.status_code == 200
         assert svc.callback.calls[0][0] == "result"
 
     def test_node_result_success(self, app, client):
         _, svc = app
-        r = client.post("/task_loop/callback/node_result", json=_body(node=True))
+        r = client.post("/openapi/v1/task/callback/node_result", json=_body(node=True))
         assert r.status_code == 200
         assert svc.callback.calls[0][1].loop_task_id == "t1::c1"
 
     def test_workflow_start_success(self, app, client):
         _, svc = app
-        r = client.post("/task_loop/callback/workflow_start", json=_body(loop_task_id="t1::root1", status="RUNNING"))
+        r = client.post("/openapi/v1/task/callback/workflow_start", json=_body(loop_task_id="t1::root1", status="RUNNING"))
         assert r.status_code == 200
         assert svc.callback.calls[0][0] == "start"
 
     def test_node_start_success(self, app, client):
         _, svc = app
-        r = client.post("/task_loop/callback/node_start", json=_body(node=True, status="RUNNING"))
+        r = client.post("/openapi/v1/task/callback/node_start", json=_body(node=True, status="RUNNING"))
         assert r.status_code == 200
         assert svc.callback.calls[0][0] == "start"
 
@@ -1285,35 +1285,35 @@ class TestRouter:
         _, svc = app
         svc.callback.report_result = _raise(TaskStateError("DONE->DONE"))
         svc.set_node_status("t1", "root1", Status.DONE)
-        r = client.post("/task_loop/callback/workflow_result", json=_body(loop_task_id="t1::root1"))
+        r = client.post("/openapi/v1/task/callback/workflow_result", json=_body(loop_task_id="t1::root1"))
         assert r.status_code == 200  # 幂等 ack
 
     def test_result_409_when_illegal(self, app, client):
         _, svc = app
         svc.callback.report_result = _raise(TaskStateError("PENDING->DONE"))
         svc.set_node_status("t1", "root1", Status.PENDING)  # 非终态→409
-        r = client.post("/task_loop/callback/workflow_result", json=_body(loop_task_id="t1::root1"))
+        r = client.post("/openapi/v1/task/callback/workflow_result", json=_body(loop_task_id="t1::root1"))
         assert r.status_code == 409
 
     def test_start_409_on_stale(self, app, client):
         _, svc = app
         svc.callback.start_run = _raise(TaskStateError("stale"))
-        r = client.post("/task_loop/callback/node_start", json=_body(node=True, status="RUNNING"))
+        r = client.post("/openapi/v1/task/callback/node_start", json=_body(node=True, status="RUNNING"))
         assert r.status_code == 409
 
     def test_not_found_404(self, app, client):
         _, svc = app
         svc.callback.report_result = _raise(NodeNotFoundError("x"))
-        r = client.post("/task_loop/callback/workflow_result", json=_body(loop_task_id="t1::root1"))
+        r = client.post("/openapi/v1/task/callback/workflow_result", json=_body(loop_task_id="t1::root1"))
         assert r.status_code == 404
 
     def test_correlation_error_400(self, app, client):
         # task 级无回声 + 空 registry → CallbackCorrelationError
-        r = client.post("/task_loop/callback/workflow_result", json=_body())  # 无 loop_task_id,registry 空
+        r = client.post("/openapi/v1/task/callback/workflow_result", json=_body())  # 无 loop_task_id,registry 空
         assert r.status_code == 400
 
     def test_validation_422(self, app, client):
-        r = client.post("/task_loop/callback/node_result", json={"task_id": "t1"})  # 缺必填
+        r = client.post("/openapi/v1/task/callback/node_result", json={"task_id": "t1"})  # 缺必填
         assert r.status_code == 422
 
 
@@ -1361,7 +1361,7 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
 )
 from agentclaw.community.di import Injected
 
-router = APIRouter(prefix="/task_loop/callback", tags=["task-callback"])
+router = APIRouter(prefix="/openapi/v1/task/callback", tags=["task-callback"])
 
 
 def _get_svc() -> TaskServiceProtocol:
