@@ -29,12 +29,11 @@ UpdateChannelBindingRequest:
   maxProperties: 1
   properties:
     active:
-      type: integer
-      enum: [0, 1]
+      type: boolean
     config:
       type: object
       additionalProperties: true
-  description: "Exactly one of `active` (0|1) or `config`; both or neither is a 400."
+  description: "Exactly one of `active` (boolean) or `config`; both or neither is a 400."
 
 BindingTarget:
   type: object
