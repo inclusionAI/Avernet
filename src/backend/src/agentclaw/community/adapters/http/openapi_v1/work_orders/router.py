@@ -6,12 +6,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Request
 
+from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page
-from agentclaw.community.adapters.http.openapi_v1.dependencies import (
-    Principal,
-    require_principal,
+from agentclaw.community.adapters.http.openapi_v1.errors import GrantNotResolvableError
+from agentclaw.community.adapters.http.openapi_v1.principal import (
+    ActingCallerDep,
+    UserIdDep,
+    refuse_app_only_caller,
 )
-from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
     envelope,
@@ -27,7 +29,9 @@ from agentclaw.community.adapters.http.openapi_v1.work_orders.schemas import (
     UnreadCountResponse,
     WorkOrderDetailContent,
     WorkOrderDetailResponse,
+    WorkOrderItemType,
     WorkOrderListItem,
+    WorkOrderQueryType,
     WorkOrderReviewRequest,
     WorkOrderReviewResponse,
 )
@@ -36,18 +40,29 @@ from agentclaw.community.api.work_order_service import (
     WorkOrderServiceProtocol,
 )
 from agentclaw.community.core.work_orders.models import (
-    WorkOrderItemType,
+    WorkOrderItemType as DomainWorkOrderItemType,
     WorkOrderListItem as DomainListItem,
-    WorkOrderQueryType,
+    WorkOrderQueryType as DomainWorkOrderQueryType,
 )
 from agentclaw.community.di import Injected
 
 
 router = APIRouter(tags=["work-orders"])
-PrincipalDep = Annotated[Principal, Depends(require_principal)]
-PositiveIdPath = Annotated[int, Path(ge=1)]
-PageNoQuery = Annotated[int, Query(ge=1)]
-PageSizeQuery = Annotated[int, Query(ge=1, le=100)]
+PositiveIdPath = Annotated[int, Path(ge=1, description="Positive numeric identifier.")]
+PageNoQuery = Annotated[int, Query(ge=1, description="One-based page number.")]
+PageSizeQuery = Annotated[
+    int, Query(ge=1, le=100, description="Maximum items returned per page.")
+]
+_REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
+
+
+def _require_user_delegation(caller: ActingCaller) -> str:
+    granted = caller.granted_bot_ids()
+    if granted is not None and not granted:
+        raise GrantNotResolvableError(
+            "application holds no live delegation from the named user"
+        )
+    return caller.user_id
 
 
 def _list_item(item: DomainListItem) -> WorkOrderListItem:
@@ -108,12 +123,13 @@ async def create_space_join_request(
     space_id: PositiveIdPath,
     body: CreateSpaceJoinRequest,
     request: Request,
-    principal: PrincipalDep,
+    caller: ActingCallerDep,
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
 ) -> Envelope[SpaceJoinRequestCreated]:
+    actor_id = _require_user_delegation(caller)
     record = service.create_space_join_request(
         space_id=space_id,
-        applicant_user_id=caller_owner_id(principal),
+        applicant_user_id=actor_id,
         reason=body.reason,
     )
     return created(
@@ -133,19 +149,23 @@ async def create_space_join_request(
 @envelope_errors
 async def list_work_orders(
     request: Request,
-    principal: PrincipalDep,
+    caller: ActingCallerDep,
     query_type: Annotated[
-        WorkOrderQueryType, Query()
+        WorkOrderQueryType,
+        Query(description="Relationship between the current user and returned items."),
     ] = WorkOrderQueryType.PENDING_FOR_ME,
-    item_type: Annotated[WorkOrderItemType, Query()] = WorkOrderItemType.ALL,
+    item_type: Annotated[
+        WorkOrderItemType, Query(description="Category of inbox item to return.")
+    ] = WorkOrderItemType.ALL,
     page_no: PageNoQuery = 1,
     page_size: PageSizeQuery = 20,
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
 ) -> Envelope[Page[WorkOrderListItem]]:
+    actor_id = _require_user_delegation(caller)
     total, items = service.list_items(
-        actor_id=caller_owner_id(principal),
-        query_type=query_type,
-        item_type=item_type,
+        actor_id=actor_id,
+        query_type=DomainWorkOrderQueryType(query_type),
+        item_type=DomainWorkOrderItemType(item_type),
         page_no=page_no,
         page_size=page_size,
     )
@@ -160,12 +180,11 @@ async def list_work_orders(
 async def get_work_order(
     work_order_id: PositiveIdPath,
     request: Request,
-    principal: PrincipalDep,
+    caller: ActingCallerDep,
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
 ) -> Envelope[WorkOrderDetailResponse]:
-    detail = service.get_detail(
-        work_order_id=work_order_id, actor_id=caller_owner_id(principal)
-    )
+    actor_id = _require_user_delegation(caller)
+    detail = service.get_detail(work_order_id=work_order_id, actor_id=actor_id)
     work_order = detail.work_order
     return envelope(
         WorkOrderDetailResponse(
@@ -205,18 +224,19 @@ def _review_response(result) -> WorkOrderReviewResponse:
 @router.post(
     "/openapi/v1/work-orders/{work_order_id}/approve",
     response_model=Envelope[WorkOrderReviewResponse],
+    dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
 async def approve_work_order(
     work_order_id: PositiveIdPath,
     body: WorkOrderReviewRequest,
     request: Request,
-    principal: PrincipalDep,
+    user_id: UserIdDep,
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
 ) -> Envelope[WorkOrderReviewResponse]:
     result = service.approve(
         work_order_id=work_order_id,
-        actor_id=caller_owner_id(principal),
+        actor_id=user_id,
         review_remark=body.review_remark,
     )
     return envelope(_review_response(result), request)
@@ -225,18 +245,19 @@ async def approve_work_order(
 @router.post(
     "/openapi/v1/work-orders/{work_order_id}/reject",
     response_model=Envelope[WorkOrderReviewResponse],
+    dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
 async def reject_work_order(
     work_order_id: PositiveIdPath,
     body: WorkOrderReviewRequest,
     request: Request,
-    principal: PrincipalDep,
+    user_id: UserIdDep,
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
 ) -> Envelope[WorkOrderReviewResponse]:
     result = service.reject(
         work_order_id=work_order_id,
-        actor_id=caller_owner_id(principal),
+        actor_id=user_id,
         review_remark=body.review_remark,
     )
     return envelope(_review_response(result), request)
@@ -249,12 +270,13 @@ async def reject_work_order(
 @envelope_errors
 async def unread_notification_count(
     request: Request,
-    principal: PrincipalDep,
+    caller: ActingCallerDep,
     service: WorkOrderNotificationServiceProtocol = Injected(
         WorkOrderNotificationServiceProtocol
     ),
 ) -> Envelope[UnreadCountResponse]:
-    count = service.unread_count(actor_id=caller_owner_id(principal))
+    actor_id = _require_user_delegation(caller)
+    count = service.unread_count(actor_id=actor_id)
     return envelope(UnreadCountResponse(unread_count=count), request)
 
 
@@ -265,12 +287,13 @@ async def unread_notification_count(
 @envelope_errors
 async def mark_all_notifications_read(
     request: Request,
-    principal: PrincipalDep,
+    caller: ActingCallerDep,
     service: WorkOrderNotificationServiceProtocol = Injected(
         WorkOrderNotificationServiceProtocol
     ),
 ) -> Envelope[NotificationsReadAllResponse]:
-    count = service.mark_all_read(actor_id=caller_owner_id(principal))
+    actor_id = _require_user_delegation(caller)
+    count = service.mark_all_read(actor_id=actor_id)
     return envelope(NotificationsReadAllResponse(updated_count=count), request)
 
 
@@ -282,14 +305,13 @@ async def mark_all_notifications_read(
 async def get_notification(
     notification_id: PositiveIdPath,
     request: Request,
-    principal: PrincipalDep,
+    caller: ActingCallerDep,
     service: WorkOrderNotificationServiceProtocol = Injected(
         WorkOrderNotificationServiceProtocol
     ),
 ) -> Envelope[NotificationDetailResponse]:
-    detail = service.get_detail(
-        notification_id=notification_id, actor_id=caller_owner_id(principal)
-    )
+    actor_id = _require_user_delegation(caller)
+    detail = service.get_detail(notification_id=notification_id, actor_id=actor_id)
     record = detail.notification
     return envelope(
         NotificationDetailResponse(
@@ -317,14 +339,13 @@ async def get_notification(
 async def mark_notification_read(
     notification_id: PositiveIdPath,
     request: Request,
-    principal: PrincipalDep,
+    caller: ActingCallerDep,
     service: WorkOrderNotificationServiceProtocol = Injected(
         WorkOrderNotificationServiceProtocol
     ),
 ) -> Envelope[NotificationReadResponse]:
-    record = service.mark_read(
-        notification_id=notification_id, actor_id=caller_owner_id(principal)
-    )
+    actor_id = _require_user_delegation(caller)
+    record = service.mark_read(notification_id=notification_id, actor_id=actor_id)
     return envelope(
         NotificationReadResponse(
             notification_id=record.id,

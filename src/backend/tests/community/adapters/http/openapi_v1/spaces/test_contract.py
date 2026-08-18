@@ -7,7 +7,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
@@ -40,6 +39,7 @@ from agentclaw.community.core.spaces.models import (
 )
 from tests.community.adapters.http.openapi_v1.conftest import (
     mount_public_error_handlers,
+    user_scoped_client,
 )
 
 
@@ -82,8 +82,7 @@ def client(member_service, space_service, favorite_service):
     app.dependency_overrides[require_principal] = lambda: {"user_id": "owner-1"}
     attach_injector(app, Injector([_Bindings()]))
     mount_public_error_handlers(app)
-    return TestClient(app)
-
+    return user_scoped_client(app, "owner-1")
 
 
 def test_endpoint_serializes_persisted_datetime_with_utc_marker(client, space_service):
@@ -115,14 +114,14 @@ def test_endpoint_serializes_persisted_datetime_with_utc_marker(client, space_se
     response = client.get("/openapi/v1/spaces")
 
     assert response.status_code == 200
-    assert (
-        response.json()["data"]["items"][0]["gmt_modified"]
-        == "2026-08-17T07:50:45Z"
-    )
+    assert response.json()["data"]["items"][0]["gmt_modified"] == "2026-08-17T07:50:45Z"
+
 
 def test_naive_persisted_datetime_is_serialized_as_explicit_utc():
     item = SpaceMemberItem(
         user_id="member-1",
+        user_name=None,
+        display_name=None,
         role=SpaceRole.MEMBER,
         is_creator=False,
         gmt_modified=datetime(2026, 8, 17, 7, 50, 45),
@@ -147,11 +146,13 @@ def test_aware_datetime_is_normalized_to_utc():
 @pytest.mark.parametrize(
     ("payload", "expected_role"),
     [
-        ({"user_id": "member-1"}, SpaceRole.MEMBER),
-        ({"user_id": "owner-2", "role": "OWNER"}, SpaceRole.OWNER),
+        ({"member_user_id": "member-1"}, SpaceRole.MEMBER),
+        ({"member_user_id": "owner-2", "role": "OWNER"}, SpaceRole.OWNER),
     ],
 )
-def test_add_member_accepts_an_optional_role(client, member_service, payload, expected_role):
+def test_add_member_accepts_an_optional_role(
+    client, member_service, payload, expected_role
+):
     response = client.post("/openapi/v1/spaces/7/members", json=payload)
 
     assert response.status_code == 201
@@ -160,18 +161,18 @@ def test_add_member_accepts_an_optional_role(client, member_service, payload, ex
     assert body["message"] == "Created"
     assert body["data"] == {
         "space_id": 7,
-        "user_id": payload["user_id"],
+        "user_id": payload["member_user_id"],
         "role": expected_role.value,
     }
     assert member_service.add_member.call_args.kwargs["role"] is expected_role
 
 
-def test_openapi_does_not_advertise_unavailable_profile_or_catalogue_fields(client):
+def test_openapi_advertises_nullable_member_profile_fields(client):
     schemas = client.get("/openapi.json").json()["components"]["schemas"]
 
     member_properties = schemas["SpaceMemberItem"]["properties"]
-    assert "user_name" not in member_properties
-    assert "display_name" not in member_properties
+    assert "user_name" in member_properties
+    assert "display_name" in member_properties
     assert "membership relation" in member_properties["gmt_modified"]["description"]
     assert member_properties["gmt_modified"]["format"] == "date-time"
 
@@ -202,7 +203,6 @@ def test_cancel_missing_favorite_returns_not_found(client, favorite_service):
     assert body["data"] is None
 
 
-
 def _space_record(space_type=SpaceType.TEAM):
     timestamp = datetime(2026, 8, 18, 1, 2, 3)
     return SpaceRecord(
@@ -219,7 +219,12 @@ def _space_record(space_type=SpaceType.TEAM):
     )
 
 
-def _member_summary(user_id="member-1", role=SpaceRole.MEMBER):
+def _member_summary(
+    user_id="member-1",
+    role=SpaceRole.MEMBER,
+    user_name=None,
+    display_name=None,
+):
     timestamp = datetime(2026, 8, 18, 1, 2, 3)
     return SpaceMemberSummaryRecord(
         member=SpaceMemberRecord(
@@ -233,6 +238,8 @@ def _member_summary(user_id="member-1", role=SpaceRole.MEMBER):
             gmt_modified=timestamp,
         ),
         is_creator=user_id == "owner-1",
+        user_name=user_name,
+        display_name=display_name,
     )
 
 
@@ -303,22 +310,21 @@ def test_initialize_personal_space_exposes_created_state(
 def test_create_team_space_returns_owner_metadata(client, space_service):
     space_service.create_team.return_value = _space_record()
 
-    response = client.post(
-        "/openapi/v1/spaces/create", json={"space_name": "Team"}
-    )
+    response = client.post("/openapi/v1/spaces/create", json={"space_name": "Team"})
 
     assert response.status_code == 201
     data = response.json()["data"]
     assert data["space_id"] == 7
     assert data["is_creator"] is True
     assert data["member_count"] == data["owner_count"] == 1
-    space_service.create_team.assert_called_once_with(
-        name="Team", creator_id="owner-1"
-    )
+    space_service.create_team.assert_called_once_with(name="Team", creator_id="owner-1")
 
 
 def test_member_list_delete_and_role_update(client, member_service):
-    member_service.list_members.return_value = (1, [_member_summary()])
+    member_service.list_members.return_value = (
+        1,
+        [_member_summary(user_name="Zhang San", display_name="Xiao Ming")],
+    )
     member_service.update_role.return_value = _member_summary(
         user_id="member-1", role=SpaceRole.OWNER
     )
@@ -333,7 +339,10 @@ def test_member_list_delete_and_role_update(client, member_service):
     )
 
     assert listed.status_code == deleted.status_code == updated.status_code == 200
-    assert listed.json()["data"]["items"][0]["user_id"] == "member-1"
+    listed_member = listed.json()["data"]["items"][0]
+    assert listed_member["user_id"] == "member-1"
+    assert listed_member["user_name"] == "Zhang San"
+    assert listed_member["display_name"] == "Xiao Ming"
     assert deleted.json()["data"] == {
         "space_id": 7,
         "user_id": "member-1",

@@ -83,6 +83,19 @@ def test_space_repository_full_member_lifecycle(db) -> None:
     )
     assert repository.get_space(space_id=999, env="dev") is None
 
+    other_env_personal, _ = repository.initialize_personal(
+        user_id="user-other-env", env="pre"
+    )
+    batch = repository.batch_query_personal(
+        user_ids=["missing", "user-1", "user-other-env"], env="dev"
+    )
+    assert [item.model_dump() for item in batch] == [
+        {"user_id": "missing", "space_id": None, "found": False},
+        {"user_id": "user-1", "space_id": personal.id, "found": True},
+        {"user_id": "user-other-env", "space_id": None, "found": False},
+    ]
+    assert other_env_personal.id is not None
+
     total, spaces = repository.list_spaces(
         user_id="user-1", env="dev", keyword=None, space_type=None, offset=0, limit=20
     )

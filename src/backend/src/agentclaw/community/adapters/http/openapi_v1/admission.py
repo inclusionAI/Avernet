@@ -364,13 +364,16 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("POST", "/openapi/v1/spaces/{space_id}/members"): AdmissionMode.REFUSED,
     (
         "DELETE",
-        "/openapi/v1/spaces/{space_id}/members/{user_id}",
+        "/openapi/v1/spaces/{space_id}/members/{member_user_id}",
     ): AdmissionMode.REFUSED,
     (
         "PUT",
-        "/openapi/v1/spaces/{space_id}/members/{user_id}/role",
+        "/openapi/v1/spaces/{space_id}/members/{member_user_id}/role",
     ): AdmissionMode.REFUSED,
-    ("POST", "/openapi/v1/spaces/{space_id}/market-favorites"): AdmissionMode.USER_GATED,
+    (
+        "POST",
+        "/openapi/v1/spaces/{space_id}/market-favorites",
+    ): AdmissionMode.USER_GATED,
     (
         "POST",
         "/openapi/v1/spaces/{space_id}/market-favorites/cancel",
@@ -388,7 +391,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "GET",
         "/openapi/v1/work-order-notifications/{notification_id}",
     ): AdmissionMode.USER_GATED,
-    ("GET", "/openapi/v1/work-order-notifications/unread-count"): AdmissionMode.USER_GATED,
+    (
+        "GET",
+        "/openapi/v1/work-order-notifications/unread-count",
+    ): AdmissionMode.USER_GATED,
     (
         "POST",
         "/openapi/v1/work-order-notifications/{notification_id}/read",

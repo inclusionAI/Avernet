@@ -15,6 +15,7 @@ from agentclaw.community.core.spaces.errors import (
     SpaceMemberAlreadyExistsError,
 )
 from agentclaw.community.core.spaces.models import (
+    PersonalSpaceLookupRecord,
     SpaceJoinStatus,
     SpaceMemberSummaryRecord,
     SpaceRole,
@@ -138,6 +139,29 @@ class SpaceRepository(SpaceRepositoryProtocol):
                 .one_or_none()
             )
             return row.to_record() if row is not None else None
+
+    def batch_query_personal(
+        self, *, user_ids: list[str], env: str
+    ) -> list[PersonalSpaceLookupRecord]:
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(self._Space.personal_owner_id, self._Space.id)
+                .filter(
+                    self._Space.personal_owner_id.in_(user_ids),
+                    self._Space.space_type == SpaceType.PERSONAL.value,
+                    self._Space.env == env,
+                )
+                .all()
+            )
+        space_ids = {str(user_id): int(space_id) for user_id, space_id in rows}
+        return [
+            PersonalSpaceLookupRecord(
+                user_id=user_id,
+                space_id=space_ids.get(user_id),
+                found=user_id in space_ids,
+            )
+            for user_id in user_ids
+        ]
 
     def list_spaces(
         self,

@@ -1,8 +1,8 @@
 """OpenAPI v1 adapter for spaces, members and market favorites.
 
-Application-only admission is intentionally refused in ``admission.py`` for
-this first phase. The acting user therefore comes from the verified human
-principal; no caller-supplied ``user_id`` is accepted by these routes.
+Every user-scoped operation names its acting user through the shared
+``user_id`` query dependency. Admission decides whether an application may
+reach the operation; Space ownership rules remain in the core services.
 """
 
 from __future__ import annotations
@@ -11,12 +11,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Request
 
+from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page
-from agentclaw.community.adapters.http.openapi_v1.dependencies import (
-    Principal,
-    require_principal,
+from agentclaw.community.adapters.http.openapi_v1.errors import GrantNotResolvableError
+from agentclaw.community.adapters.http.openapi_v1.principal import (
+    ActingCallerDep,
+    UserIdDep,
+    refuse_app_only_caller,
 )
-from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
     envelope,
@@ -33,6 +35,8 @@ from agentclaw.community.adapters.http.openapi_v1.spaces.schemas import (
     PersonalSpaceInitialized,
     SearchFavoritesRequest,
     SpaceCreated,
+    SpaceRole,
+    SpaceType,
     SpaceItem,
     SpaceMemberDeletedResult,
     SpaceMemberItem,
@@ -46,21 +50,35 @@ from agentclaw.community.api.space_service import (
     SpaceMemberServiceProtocol,
     SpaceServiceProtocol,
 )
-from agentclaw.community.core.market_favorites.models import MarketFavoriteRecord
+from agentclaw.community.core.market_favorites.models import (
+    FavoriteTargetType as DomainFavoriteTargetType,
+    MarketFavoriteRecord,
+)
 from agentclaw.community.core.spaces.models import (
     SpaceMemberSummaryRecord,
-    SpaceRole,
+    SpaceRole as DomainSpaceRole,
     SpaceSummaryRecord,
-    SpaceType,
+    SpaceType as DomainSpaceType,
 )
 from agentclaw.community.di import Injected
 
 
 router = APIRouter(prefix="/openapi/v1/spaces", tags=["spaces"])
-PrincipalDep = Annotated[Principal, Depends(require_principal)]
 SpaceIdPath = Annotated[int, Path(ge=1, description="Space primary identifier.")]
-PageNoQuery = Annotated[int, Query(ge=1)]
-PageSizeQuery = Annotated[int, Query(ge=1, le=100)]
+PageNoQuery = Annotated[int, Query(ge=1, description="One-based page number.")]
+PageSizeQuery = Annotated[
+    int, Query(ge=1, le=100, description="Maximum items returned per page.")
+]
+_REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
+
+
+def _require_user_delegation(caller: ActingCaller) -> str:
+    granted = caller.granted_bot_ids()
+    if granted is not None and not granted:
+        raise GrantNotResolvableError(
+            "application holds no live delegation from the named user"
+        )
+    return caller.user_id
 
 
 def _space_item(record: SpaceSummaryRecord) -> SpaceItem:
@@ -95,6 +113,8 @@ def _created_space(record) -> SpaceCreated:
 def _member_item(record: SpaceMemberSummaryRecord) -> SpaceMemberItem:
     return SpaceMemberItem(
         user_id=record.member.user_id,
+        user_name=record.user_name,
+        display_name=record.display_name,
         role=record.member.role,
         is_creator=record.is_creator,
         gmt_modified=record.member.gmt_modified,
@@ -114,18 +134,23 @@ def _favorite_item(record: MarketFavoriteRecord) -> MarketFavoriteItem:
 @envelope_errors
 async def list_spaces(
     request: Request,
-    principal: PrincipalDep,
-    keyword: Annotated[str | None, Query(max_length=128)] = None,
-    space_type: Annotated[SpaceType | None, Query()] = None,
+    caller: ActingCallerDep,
+    keyword: Annotated[
+        str | None,
+        Query(max_length=128, description="Optional Space-name search text."),
+    ] = None,
+    space_type: Annotated[
+        SpaceType | None, Query(description="Optional Space type filter.")
+    ] = None,
     page_no: PageNoQuery = 1,
     page_size: PageSizeQuery = 20,
     service: SpaceServiceProtocol = Injected(SpaceServiceProtocol),
 ) -> Envelope[Page[SpaceItem]]:
-    actor_id = caller_owner_id(principal)
+    actor_id = _require_user_delegation(caller)
     total, records = service.list_spaces(
         user_id=actor_id,
         keyword=keyword,
-        space_type=space_type,
+        space_type=DomainSpaceType(space_type) if space_type is not None else None,
         page_no=page_no,
         page_size=page_size,
     )
@@ -135,16 +160,15 @@ async def list_spaces(
 @router.post(
     "/personal/initialize",
     response_model=Envelope[PersonalSpaceInitialized],
+    dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
 async def initialize_personal_space(
     request: Request,
-    principal: PrincipalDep,
+    user_id: UserIdDep,
     service: SpaceServiceProtocol = Injected(SpaceServiceProtocol),
 ) -> Envelope[PersonalSpaceInitialized]:
-    record, was_created = service.initialize_personal(
-        user_id=caller_owner_id(principal)
-    )
+    record, was_created = service.initialize_personal(user_id=user_id)
     result = PersonalSpaceInitialized(
         **_created_space(record).model_dump(), created=was_created
     )
@@ -155,17 +179,16 @@ async def initialize_personal_space(
     "/create",
     status_code=201,
     response_model=Envelope[SpaceCreated],
+    dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
 async def create_team_space(
     body: CreateSpaceRequest,
     request: Request,
-    principal: PrincipalDep,
+    user_id: UserIdDep,
     service: SpaceServiceProtocol = Injected(SpaceServiceProtocol),
 ) -> Envelope[SpaceCreated]:
-    record = service.create_team(
-        name=body.space_name, creator_id=caller_owner_id(principal)
-    )
+    record = service.create_team(name=body.space_name, creator_id=user_id)
     return created(_created_space(record), request)
 
 
@@ -177,15 +200,18 @@ async def create_team_space(
 async def list_space_members(
     space_id: SpaceIdPath,
     request: Request,
-    principal: PrincipalDep,
-    keyword: Annotated[str | None, Query(max_length=256)] = None,
+    caller: ActingCallerDep,
+    keyword: Annotated[
+        str | None, Query(max_length=256, description="Optional member-id search text.")
+    ] = None,
     page_no: PageNoQuery = 1,
     page_size: PageSizeQuery = 20,
     service: SpaceMemberServiceProtocol = Injected(SpaceMemberServiceProtocol),
 ) -> Envelope[Page[SpaceMemberItem]]:
+    actor_id = _require_user_delegation(caller)
     total, records = service.list_members(
         space_id=space_id,
-        actor_id=caller_owner_id(principal),
+        actor_id=actor_id,
         keyword=keyword,
         page_no=page_no,
         page_size=page_size,
@@ -197,20 +223,21 @@ async def list_space_members(
     "/{space_id}/members",
     status_code=201,
     response_model=Envelope[SpaceMemberMutationResult],
+    dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
 async def add_space_member(
     space_id: SpaceIdPath,
     body: AddSpaceMemberRequest,
     request: Request,
-    principal: PrincipalDep,
+    user_id: UserIdDep,
     service: SpaceMemberServiceProtocol = Injected(SpaceMemberServiceProtocol),
 ) -> Envelope[SpaceMemberMutationResult]:
     record = service.add_member(
         space_id=space_id,
-        actor_id=caller_owner_id(principal),
-        user_id=body.user_id,
-        role=body.role,
+        actor_id=user_id,
+        user_id=body.member_user_id,
+        role=DomainSpaceRole(body.role),
     )
     return created(
         SpaceMemberMutationResult(
@@ -221,45 +248,61 @@ async def add_space_member(
 
 
 @router.delete(
-    "/{space_id}/members/{user_id}",
+    "/{space_id}/members/{member_user_id}",
     response_model=Envelope[SpaceMemberDeletedResult],
+    dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
 async def delete_space_member(
     space_id: SpaceIdPath,
-    user_id: Annotated[str, Path(min_length=1, max_length=256)],
+    member_user_id: Annotated[
+        str,
+        Path(
+            min_length=1,
+            max_length=256,
+            description="Identifier of the Space member to remove.",
+        ),
+    ],
     request: Request,
-    principal: PrincipalDep,
+    user_id: UserIdDep,
     service: SpaceMemberServiceProtocol = Injected(SpaceMemberServiceProtocol),
 ) -> Envelope[SpaceMemberDeletedResult]:
     service.delete_member(
         space_id=space_id,
-        actor_id=caller_owner_id(principal),
-        user_id=user_id,
+        actor_id=user_id,
+        user_id=member_user_id,
     )
     return envelope(
-        SpaceMemberDeletedResult(space_id=space_id, user_id=user_id), request
+        SpaceMemberDeletedResult(space_id=space_id, user_id=member_user_id), request
     )
 
 
 @router.put(
-    "/{space_id}/members/{user_id}/role",
+    "/{space_id}/members/{member_user_id}/role",
     response_model=Envelope[SpaceMemberMutationResult],
+    dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
 async def update_space_member_role(
     space_id: SpaceIdPath,
-    user_id: Annotated[str, Path(min_length=1, max_length=256)],
+    member_user_id: Annotated[
+        str,
+        Path(
+            min_length=1,
+            max_length=256,
+            description="Identifier of the Space member whose role will change.",
+        ),
+    ],
     body: UpdateSpaceMemberRoleRequest,
     request: Request,
-    principal: PrincipalDep,
+    user_id: UserIdDep,
     service: SpaceMemberServiceProtocol = Injected(SpaceMemberServiceProtocol),
 ) -> Envelope[SpaceMemberMutationResult]:
     summary = service.update_role(
         space_id=space_id,
-        actor_id=caller_owner_id(principal),
-        user_id=user_id,
-        role=body.role,
+        actor_id=user_id,
+        user_id=member_user_id,
+        role=DomainSpaceRole(body.role),
     )
     return envelope(
         SpaceMemberMutationResult(
@@ -280,13 +323,14 @@ async def add_market_favorite(
     space_id: SpaceIdPath,
     body: FavoriteTargetRequest,
     request: Request,
-    principal: PrincipalDep,
+    caller: ActingCallerDep,
     service: MarketFavoriteServiceProtocol = Injected(MarketFavoriteServiceProtocol),
 ) -> Envelope[FavoriteAddedResult]:
+    actor_id = _require_user_delegation(caller)
     record = service.add(
         space_id=space_id,
-        actor_id=caller_owner_id(principal),
-        target_type=body.target_type,
+        actor_id=actor_id,
+        target_type=DomainFavoriteTargetType(body.target_type),
         target_code=body.target_code,
     )
     return envelope(
@@ -308,13 +352,14 @@ async def cancel_market_favorite(
     space_id: SpaceIdPath,
     body: FavoriteTargetRequest,
     request: Request,
-    principal: PrincipalDep,
+    caller: ActingCallerDep,
     service: MarketFavoriteServiceProtocol = Injected(MarketFavoriteServiceProtocol),
 ) -> Envelope[FavoriteCanceledResult]:
+    actor_id = _require_user_delegation(caller)
     service.cancel(
         space_id=space_id,
-        actor_id=caller_owner_id(principal),
-        target_type=body.target_type,
+        actor_id=actor_id,
+        target_type=DomainFavoriteTargetType(body.target_type),
         target_code=body.target_code,
     )
     return envelope(
@@ -335,13 +380,18 @@ async def search_market_favorites(
     space_id: SpaceIdPath,
     body: SearchFavoritesRequest,
     request: Request,
-    principal: PrincipalDep,
+    caller: ActingCallerDep,
     service: MarketFavoriteServiceProtocol = Injected(MarketFavoriteServiceProtocol),
 ) -> Envelope[Page[MarketFavoriteItem]]:
+    actor_id = _require_user_delegation(caller)
     total, records = service.search(
         space_id=space_id,
-        actor_id=caller_owner_id(principal),
-        target_type=body.target_type,
+        actor_id=actor_id,
+        target_type=(
+            DomainFavoriteTargetType(body.target_type)
+            if body.target_type is not None
+            else None
+        ),
         keyword=body.keyword,
         page_no=body.page_no,
         page_size=body.page_size,

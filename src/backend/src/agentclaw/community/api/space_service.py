@@ -7,6 +7,7 @@ from typing import Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
     from agentclaw.community.core.spaces.models import (
+        PersonalSpaceLookupRecord,
         SpaceMemberRecord,
         SpaceMemberSummaryRecord,
         SpaceRecord,
@@ -23,6 +24,11 @@ class SpaceServiceProtocol(Protocol):
 
     @abstractmethod
     def create_team(self, *, name: str, creator_id: str) -> SpaceRecord: ...
+
+    @abstractmethod
+    def batch_query_personal(
+        self, *, user_ids: list[str]
+    ) -> list[PersonalSpaceLookupRecord]: ...
 
     @abstractmethod
     def list_spaces(

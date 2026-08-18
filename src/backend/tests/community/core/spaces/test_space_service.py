@@ -165,3 +165,25 @@ def test_list_spaces_turns_blank_optional_filters_into_none() -> None:
 
     assert repository.list_spaces.call_args.kwargs["keyword"] is None
     assert repository.list_spaces.call_args.kwargs["space_type"] is None
+
+
+def test_batch_query_personal_deduplicates_and_preserves_first_occurrence() -> None:
+    repository = MagicMock()
+    repository.batch_query_personal.return_value = []
+    service = SpaceService(repository, MagicMock())
+
+    assert service.batch_query_personal(user_ids=[" user-2 ", "user-1", "user-2"]) == []
+    repository.batch_query_personal.assert_called_once_with(
+        user_ids=["user-2", "user-1"], env="dev"
+    )
+
+
+@pytest.mark.parametrize("user_ids", [[], ["  "], [str(index) for index in range(501)]])
+def test_batch_query_personal_rejects_invalid_ids(user_ids: list[str]) -> None:
+    repository = MagicMock()
+    service = SpaceService(repository, MagicMock())
+
+    with pytest.raises(ValueError, match="user_id"):
+        service.batch_query_personal(user_ids=user_ids)
+
+    repository.batch_query_personal.assert_not_called()

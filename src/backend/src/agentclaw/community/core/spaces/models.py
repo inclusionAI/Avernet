@@ -60,3 +60,11 @@ class SpaceSummaryRecord(BaseModel):
 class SpaceMemberSummaryRecord(BaseModel):
     member: SpaceMemberRecord
     is_creator: bool
+    user_name: str | None = None
+    display_name: str | None = None
+
+
+class PersonalSpaceLookupRecord(BaseModel):
+    user_id: str
+    space_id: int | None
+    found: bool

@@ -189,9 +189,7 @@ def test_a_rejected_id_cannot_choose_how_much_it_logs(caplog):
 
     with caplog.at_level(logging.WARNING):
         with pytest.raises(UserIdMismatchError):
-            asyncio.run(
-                require_user_id(principal={"user_id": _CALLER}, user_id=flood)
-            )
+            asyncio.run(require_user_id(principal={"user_id": _CALLER}, user_id=flood))
 
     logged = "\n".join(record.getMessage() for record in caplog.records)
     assert len(logged) < 500, "a caller must not choose the size of the log line"
@@ -317,7 +315,11 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: placement the rule deliberately keeps. ``none`` fell 21 → 16 because the five
 #: operations that named no bot at all (the resources and routines collection
 #: roots, skills list and upload) now do.
-_BOT_ID_PLACEMENT = {"path": 54, "query": 1, "none": 16}
+#:
+#: ``none`` then moved 16 → 35 when the 19 collaboration operations for Spaces,
+#: work orders and recipient notifications were added. None of those operations
+#: addresses a bot, so the path and query counts remain unchanged.
+_BOT_ID_PLACEMENT = {"path": 54, "query": 1, "none": 35}
 
 
 def _schema() -> dict:
@@ -358,8 +360,7 @@ def _param(operation: dict, name: str) -> dict | None:
 
 def _user_scoped(path: str, method: str) -> bool:
     return (
-        not path.startswith(_LOGS_PREFIX)
-        and (method, path) not in _NO_USER_DIMENSION
+        not path.startswith(_LOGS_PREFIX) and (method, path) not in _NO_USER_DIMENSION
     )
 
 
@@ -396,8 +397,9 @@ def test_the_pinned_number_of_operations_take_it():
     ]
     # 60 on the merge base, +3 for the startup-script operations, +2 for the
     # resources file endpoints re-addressed by workspace path (#1000), then -4
-    # for the files-only resources group.
-    assert len(taking) == 61
+    # for the files-only resources group, then +19 for Spaces, work orders and
+    # recipient-notification operations added by the collaboration API.
+    assert len(taking) == 80
 
 
 def test_the_exempt_operations_take_none():

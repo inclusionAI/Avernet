@@ -5,7 +5,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
@@ -30,6 +29,7 @@ from agentclaw.community.core.work_orders.models import (
 )
 from tests.community.adapters.http.openapi_v1.conftest import (
     mount_public_error_handlers,
+    user_scoped_client,
 )
 
 CREATED = datetime(2026, 8, 18, 1, 2, 3)
@@ -91,16 +91,14 @@ def client(work_order_service, notification_service):
     class _Bindings(Module):
         def configure(self, binder):
             binder.bind(WorkOrderServiceProtocol, to=work_order_service)
-            binder.bind(
-                WorkOrderNotificationServiceProtocol, to=notification_service
-            )
+            binder.bind(WorkOrderNotificationServiceProtocol, to=notification_service)
 
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[require_principal] = lambda: {"user_id": "owner-1"}
     attach_injector(app, Injector([_Bindings()]))
     mount_public_error_handlers(app)
-    return TestClient(app)
+    return user_scoped_client(app, "owner-1")
 
 
 def test_create_join_request_uses_principal_and_returns_created(
@@ -123,9 +121,7 @@ def test_create_join_request_uses_principal_and_returns_created(
     )
 
 
-def test_list_work_orders_maps_plain_and_notification_items(
-    client, work_order_service
-):
+def test_list_work_orders_maps_plain_and_notification_items(client, work_order_service):
     work_order_service.list_items.return_value = (
         2,
         [
@@ -314,5 +310,9 @@ def test_domain_error_is_mapped_to_public_work_order_contract(
     ],
 )
 def test_request_validation_rejects_invalid_contract(client, path, method, payload):
-    response = getattr(client, method)(path, json=payload) if payload is not None else getattr(client, method)(path)
+    response = (
+        getattr(client, method)(path, json=payload)
+        if payload is not None
+        else getattr(client, method)(path)
+    )
     assert response.status_code == 422

@@ -7,6 +7,7 @@ from injector import inject
 from agentclaw.community.core.repository.protocols.spaces import SpaceRepositoryProtocol
 from agentclaw.community.core.spaces.errors import SpaceNameInvalidError
 from agentclaw.community.core.spaces.models import (
+    PersonalSpaceLookupRecord,
     SpaceRecord,
     SpaceSummaryRecord,
     SpaceType,
@@ -31,6 +32,26 @@ class SpaceService:
     def initialize_personal(self, *, user_id: str) -> tuple[SpaceRecord, bool]:
         return self._repository.initialize_personal(
             user_id=user_id, env=get_current_env()
+        )
+
+    def batch_query_personal(
+        self, *, user_ids: list[str]
+    ) -> list[PersonalSpaceLookupRecord]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for user_id in user_ids:
+            value = user_id.strip()
+            if not value:
+                raise ValueError("user_id must not contain blank values")
+            if value not in seen:
+                seen.add(value)
+                normalized.append(value)
+        if not normalized:
+            raise ValueError("user_id must not be empty")
+        if len(normalized) > 500:
+            raise ValueError("user_id must contain at most 500 unique values")
+        return self._repository.batch_query_personal(
+            user_ids=normalized, env=get_current_env()
         )
 
     def create_team(self, *, name: str, creator_id: str) -> SpaceRecord:

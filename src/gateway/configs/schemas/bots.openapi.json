@@ -2,21 +2,23 @@
   "components": {
     "schemas": {
       "AddSpaceMemberRequest": {
+        "description": "Request for adding a user to a Space.",
         "properties": {
+          "member_user_id": {
+            "description": "Identifier of the user to add.",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Member User Id",
+            "type": "string"
+          },
           "role": {
             "$ref": "#/components/schemas/SpaceRole",
             "default": "MEMBER",
             "description": "Role granted when the member is added; defaults to MEMBER."
-          },
-          "user_id": {
-            "maxLength": 256,
-            "minLength": 1,
-            "title": "User Id",
-            "type": "string"
           }
         },
         "required": [
-          "user_id"
+          "member_user_id"
         ],
         "title": "AddSpaceMemberRequest",
         "type": "object"
@@ -1063,8 +1065,10 @@
         "type": "object"
       },
       "CreateSpaceJoinRequest": {
+        "description": "Request for joining a Space.",
         "properties": {
           "reason": {
+            "description": "Reason for requesting membership.",
             "maxLength": 512,
             "minLength": 1,
             "title": "Reason",
@@ -1078,8 +1082,10 @@
         "type": "object"
       },
       "CreateSpaceRequest": {
+        "description": "Request for creating a shared team Space.",
         "properties": {
           "space_name": {
+            "description": "Display name for the new Space.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Space Name",
@@ -3959,22 +3965,27 @@
         "type": "object"
       },
       "FavoriteAddedResult": {
+        "description": "Favorite state returned after a target is added.",
         "properties": {
           "favorite_id": {
+            "description": "Identifier of the favorite record.",
             "title": "Favorite Id",
             "type": "integer"
           },
           "is_favorited": {
             "default": true,
+            "description": "Whether the target is now favorited.",
             "title": "Is Favorited",
             "type": "boolean"
           },
           "target_code": {
+            "description": "Stable marketplace code of the target.",
             "title": "Target Code",
             "type": "string"
           },
           "target_type": {
-            "$ref": "#/components/schemas/FavoriteTargetType"
+            "$ref": "#/components/schemas/FavoriteTargetType",
+            "description": "Marketplace category of the target."
           }
         },
         "required": [
@@ -3986,18 +3997,22 @@
         "type": "object"
       },
       "FavoriteCanceledResult": {
+        "description": "Favorite state returned after a target is removed.",
         "properties": {
           "is_favorited": {
             "default": false,
+            "description": "Whether the target remains favorited.",
             "title": "Is Favorited",
             "type": "boolean"
           },
           "target_code": {
+            "description": "Stable marketplace code of the target.",
             "title": "Target Code",
             "type": "string"
           },
           "target_type": {
-            "$ref": "#/components/schemas/FavoriteTargetType"
+            "$ref": "#/components/schemas/FavoriteTargetType",
+            "description": "Marketplace category of the target."
           }
         },
         "required": [
@@ -4008,15 +4023,18 @@
         "type": "object"
       },
       "FavoriteTargetRequest": {
+        "description": "Marketplace target to add to or remove from favorites.",
         "properties": {
           "target_code": {
+            "description": "Stable marketplace code of the target.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Target Code",
             "type": "string"
           },
           "target_type": {
-            "$ref": "#/components/schemas/FavoriteTargetType"
+            "$ref": "#/components/schemas/FavoriteTargetType",
+            "description": "Marketplace category of the target."
           }
         },
         "required": [
@@ -4027,12 +4045,25 @@
         "type": "object"
       },
       "FavoriteTargetType": {
+        "description": "Type of marketplace item saved as a favorite.",
         "enum": [
           "SKILL",
           "MCP"
         ],
         "title": "FavoriteTargetType",
-        "type": "string"
+        "type": "string",
+        "x-enum-descriptions": [
+          "A published Skill.",
+          "A published MCP server."
+        ],
+        "x-enum-varnames": [
+          "SKILL",
+          "MCP"
+        ],
+        "x-enumNames": [
+          "SKILL",
+          "MCP"
+        ]
       },
       "FileEntry": {
         "description": "A file or folder in the bot's workspace.\n\nThe container's own storage layout is never exposed — `path` is relative to\nthe workspace root, not to any real filesystem the bot runs on.",
@@ -4328,6 +4359,7 @@
         "type": "object"
       },
       "MarketFavoriteItem": {
+        "description": "One marketplace favorite saved in a Space.",
         "properties": {
           "favorite_at": {
             "description": "UTC time when the target was added to this Space's favorites.",
@@ -4336,20 +4368,24 @@
             "type": "string"
           },
           "favorite_id": {
+            "description": "Identifier of the favorite record.",
             "title": "Favorite Id",
             "type": "integer"
           },
           "is_favorited": {
             "default": true,
+            "description": "Whether the target is currently favorited.",
             "title": "Is Favorited",
             "type": "boolean"
           },
           "target_code": {
+            "description": "Stable marketplace code of the target.",
             "title": "Target Code",
             "type": "string"
           },
           "target_type": {
-            "$ref": "#/components/schemas/FavoriteTargetType"
+            "$ref": "#/components/schemas/FavoriteTargetType",
+            "description": "Marketplace category of the target."
           }
         },
         "required": [
@@ -4900,23 +4936,40 @@
         "type": "object"
       },
       "NotificationCategory": {
+        "description": "How a notification is presented to its recipient.",
         "enum": [
           "APPROVAL",
           "NOTICE"
         ],
         "title": "NotificationCategory",
-        "type": "string"
+        "type": "string",
+        "x-enum-descriptions": [
+          "Requires a review decision from the recipient.",
+          "Reports an event and requires no review decision."
+        ],
+        "x-enum-varnames": [
+          "APPROVAL",
+          "NOTICE"
+        ],
+        "x-enumNames": [
+          "APPROVAL",
+          "NOTICE"
+        ]
       },
       "NotificationDetailResponse": {
+        "description": "Detailed view of a notification addressed to the current user.",
         "properties": {
           "biz_id": {
+            "description": "Identifier of the related business object.",
             "title": "Biz Id",
             "type": "string"
           },
           "biz_type": {
-            "$ref": "#/components/schemas/WorkOrderBizType"
+            "$ref": "#/components/schemas/WorkOrderBizType",
+            "description": "Business object type."
           },
           "can_approve": {
+            "description": "Whether the recipient may review the related work order.",
             "title": "Can Approve",
             "type": "boolean"
           },
@@ -4929,23 +4982,29 @@
                 "type": "null"
               }
             ],
+            "description": "Notification message content, when present.",
             "title": "Content"
           },
           "event_type": {
-            "$ref": "#/components/schemas/WorkOrderEventType"
+            "$ref": "#/components/schemas/WorkOrderEventType",
+            "description": "Business event represented by the notification."
           },
           "is_read": {
+            "description": "Whether the recipient has read the notification.",
             "title": "Is Read",
             "type": "boolean"
           },
           "notification_category": {
-            "$ref": "#/components/schemas/NotificationCategory"
+            "$ref": "#/components/schemas/NotificationCategory",
+            "description": "Presentation category of the notification."
           },
           "notification_id": {
+            "description": "Identifier of the notification.",
             "title": "Notification Id",
             "type": "integer"
           },
           "title": {
+            "description": "Display title of the notification.",
             "title": "Title",
             "type": "string"
           },
@@ -4958,6 +5017,7 @@
                 "type": "null"
               }
             ],
+            "description": "Related work-order identifier, when one exists.",
             "title": "Work Order Id"
           },
           "work_order_status": {
@@ -4968,7 +5028,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Related work-order status, when a work order exists."
           }
         },
         "required": [
@@ -4988,12 +5049,15 @@
         "type": "object"
       },
       "NotificationReadResponse": {
+        "description": "Read state returned after one notification is marked read.",
         "properties": {
           "is_read": {
+            "description": "Whether the notification is now read.",
             "title": "Is Read",
             "type": "boolean"
           },
           "notification_id": {
+            "description": "Identifier of the notification.",
             "title": "Notification Id",
             "type": "integer"
           },
@@ -5006,6 +5070,7 @@
                 "type": "null"
               }
             ],
+            "description": "UTC time when the notification was marked read.",
             "title": "Read At"
           }
         },
@@ -5018,8 +5083,10 @@
         "type": "object"
       },
       "NotificationsReadAllResponse": {
+        "description": "Result of marking all current user's notifications read.",
         "properties": {
           "updated_count": {
+            "description": "Number of notifications changed from unread to read.",
             "title": "Updated Count",
             "type": "integer"
           }
@@ -5381,13 +5448,16 @@
         "type": "object"
       },
       "PersonalSpaceInitialized": {
+        "description": "Result of ensuring that the current user's personal Space exists.",
         "properties": {
           "created": {
+            "description": "True when a new personal Space was created by this request.",
             "title": "Created",
             "type": "boolean"
           },
           "current_user_role": {
-            "$ref": "#/components/schemas/SpaceRole"
+            "$ref": "#/components/schemas/SpaceRole",
+            "description": "Creator's role in the new Space."
           },
           "gmt_created": {
             "description": "UTC time when the Space was created.",
@@ -5402,31 +5472,38 @@
             "type": "string"
           },
           "is_creator": {
+            "description": "Whether the current user created the Space.",
             "title": "Is Creator",
             "type": "boolean"
           },
           "member_count": {
+            "description": "Number of members in the Space.",
             "title": "Member Count",
             "type": "integer"
           },
           "owner_count": {
+            "description": "Number of owners in the Space.",
             "title": "Owner Count",
             "type": "integer"
           },
           "space_code": {
+            "description": "Stable external code of the Space.",
             "title": "Space Code",
             "type": "string"
           },
           "space_id": {
+            "description": "Unique numeric identifier of the Space.",
             "title": "Space Id",
             "type": "integer"
           },
           "space_name": {
+            "description": "Display name of the Space.",
             "title": "Space Name",
             "type": "string"
           },
           "space_type": {
-            "$ref": "#/components/schemas/SpaceType"
+            "$ref": "#/components/schemas/SpaceType",
+            "description": "Ownership model of the Space."
           }
         },
         "required": [
@@ -5884,6 +5961,7 @@
         "type": "object"
       },
       "SearchFavoritesRequest": {
+        "description": "Filters and pagination for searching Space favorites.",
         "properties": {
           "keyword": {
             "anyOf": [
@@ -5895,16 +5973,19 @@
                 "type": "null"
               }
             ],
+            "description": "Optional case-insensitive target-code search text.",
             "title": "Keyword"
           },
           "page_no": {
             "default": 1,
+            "description": "One-based page number.",
             "minimum": 1.0,
             "title": "Page No",
             "type": "integer"
           },
           "page_size": {
             "default": 20,
+            "description": "Maximum items returned per page.",
             "maximum": 100.0,
             "minimum": 1.0,
             "title": "Page Size",
@@ -5918,7 +5999,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Target category filter, or null for all categories."
           }
         },
         "title": "SearchFavoritesRequest",
@@ -6359,9 +6441,11 @@
         ]
       },
       "SpaceCreated": {
+        "description": "Details returned after a Space is created.",
         "properties": {
           "current_user_role": {
-            "$ref": "#/components/schemas/SpaceRole"
+            "$ref": "#/components/schemas/SpaceRole",
+            "description": "Creator's role in the new Space."
           },
           "gmt_created": {
             "description": "UTC time when the Space was created.",
@@ -6376,31 +6460,38 @@
             "type": "string"
           },
           "is_creator": {
+            "description": "Whether the current user created the Space.",
             "title": "Is Creator",
             "type": "boolean"
           },
           "member_count": {
+            "description": "Number of members in the Space.",
             "title": "Member Count",
             "type": "integer"
           },
           "owner_count": {
+            "description": "Number of owners in the Space.",
             "title": "Owner Count",
             "type": "integer"
           },
           "space_code": {
+            "description": "Stable external code of the Space.",
             "title": "Space Code",
             "type": "string"
           },
           "space_id": {
+            "description": "Unique numeric identifier of the Space.",
             "title": "Space Id",
             "type": "integer"
           },
           "space_name": {
+            "description": "Display name of the Space.",
             "title": "Space Name",
             "type": "string"
           },
           "space_type": {
-            "$ref": "#/components/schemas/SpaceType"
+            "$ref": "#/components/schemas/SpaceType",
+            "description": "Ownership model of the Space."
           }
         },
         "required": [
@@ -6419,6 +6510,7 @@
         "type": "object"
       },
       "SpaceItem": {
+        "description": "Summary of a Space visible to the current user.",
         "properties": {
           "current_user_role": {
             "anyOf": [
@@ -6428,7 +6520,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Current user's role, or null when the user has not joined."
           },
           "gmt_modified": {
             "description": "UTC time when the Space metadata was last modified.",
@@ -6437,30 +6530,37 @@
             "type": "string"
           },
           "join_status": {
-            "$ref": "#/components/schemas/SpaceJoinStatus"
+            "$ref": "#/components/schemas/SpaceJoinStatus",
+            "description": "Current user's membership or application state."
           },
           "member_count": {
+            "description": "Number of members in the Space.",
             "title": "Member Count",
             "type": "integer"
           },
           "owner_count": {
+            "description": "Number of owners in the Space.",
             "title": "Owner Count",
             "type": "integer"
           },
           "space_code": {
+            "description": "Stable external code of the Space.",
             "title": "Space Code",
             "type": "string"
           },
           "space_id": {
+            "description": "Unique numeric identifier of the Space.",
             "title": "Space Id",
             "type": "integer"
           },
           "space_name": {
+            "description": "Display name of the Space.",
             "title": "Space Name",
             "type": "string"
           },
           "space_type": {
-            "$ref": "#/components/schemas/SpaceType"
+            "$ref": "#/components/schemas/SpaceType",
+            "description": "Ownership model of the Space."
           }
         },
         "required": [
@@ -6478,15 +6578,19 @@
         "type": "object"
       },
       "SpaceJoinRequestCreated": {
+        "description": "Work-order identity returned for a new Space join request.",
         "properties": {
           "status": {
-            "$ref": "#/components/schemas/WorkOrderStatus"
+            "$ref": "#/components/schemas/WorkOrderStatus",
+            "description": "Initial work-order status."
           },
           "work_order_id": {
+            "description": "Identifier of the created work order.",
             "title": "Work Order Id",
             "type": "integer"
           },
           "work_order_no": {
+            "description": "Human-readable work-order number.",
             "title": "Work Order No",
             "type": "string"
           }
@@ -6500,26 +6604,46 @@
         "type": "object"
       },
       "SpaceJoinStatus": {
+        "description": "Current user's membership state for a Space.",
         "enum": [
           "JOINED",
           "APPLYING",
           "NOT_JOINED"
         ],
         "title": "SpaceJoinStatus",
-        "type": "string"
+        "type": "string",
+        "x-enum-descriptions": [
+          "The user is currently a member of the Space.",
+          "The user's join request is awaiting review.",
+          "The user is not a member and has no pending request."
+        ],
+        "x-enum-varnames": [
+          "JOINED",
+          "APPLYING",
+          "NOT_JOINED"
+        ],
+        "x-enumNames": [
+          "JOINED",
+          "APPLYING",
+          "NOT_JOINED"
+        ]
       },
       "SpaceMemberDeletedResult": {
+        "description": "Confirmation that a member was removed from a Space.",
         "properties": {
           "deleted": {
             "default": true,
+            "description": "Whether the membership was deleted.",
             "title": "Deleted",
             "type": "boolean"
           },
           "space_id": {
+            "description": "Identifier of the affected Space.",
             "title": "Space Id",
             "type": "integer"
           },
           "user_id": {
+            "description": "Identifier of the removed member.",
             "title": "User Id",
             "type": "string"
           }
@@ -6532,7 +6656,20 @@
         "type": "object"
       },
       "SpaceMemberItem": {
+        "description": "Membership details for one user in a Space.",
         "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Display name of the member, when available.",
+            "title": "Display Name"
+          },
           "gmt_modified": {
             "description": "UTC time when this membership relation was created or its role was last changed.",
             "format": "date-time",
@@ -6540,15 +6677,30 @@
             "type": "string"
           },
           "is_creator": {
+            "description": "Whether this member originally created the Space.",
             "title": "Is Creator",
             "type": "boolean"
           },
           "role": {
-            "$ref": "#/components/schemas/SpaceRole"
+            "$ref": "#/components/schemas/SpaceRole",
+            "description": "Role currently held by the member."
           },
           "user_id": {
+            "description": "Identifier of the member user.",
             "title": "User Id",
             "type": "string"
+          },
+          "user_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Account name of the member, when available.",
+            "title": "User Name"
           }
         },
         "required": [
@@ -6561,15 +6713,19 @@
         "type": "object"
       },
       "SpaceMemberMutationResult": {
+        "description": "Membership state returned after an add or role update.",
         "properties": {
           "role": {
-            "$ref": "#/components/schemas/SpaceRole"
+            "$ref": "#/components/schemas/SpaceRole",
+            "description": "Role held after the operation."
           },
           "space_id": {
+            "description": "Identifier of the affected Space.",
             "title": "Space Id",
             "type": "integer"
           },
           "user_id": {
+            "description": "Identifier of the affected member.",
             "title": "User Id",
             "type": "string"
           }
@@ -6583,20 +6739,46 @@
         "type": "object"
       },
       "SpaceRole": {
+        "description": "Role held by a user in a Space.",
         "enum": [
           "OWNER",
           "MEMBER"
         ],
         "title": "SpaceRole",
-        "type": "string"
+        "type": "string",
+        "x-enum-descriptions": [
+          "May manage the Space and its membership.",
+          "May use the Space without managing its membership."
+        ],
+        "x-enum-varnames": [
+          "OWNER",
+          "MEMBER"
+        ],
+        "x-enumNames": [
+          "OWNER",
+          "MEMBER"
+        ]
       },
       "SpaceType": {
+        "description": "Kind of Space and its ownership model.",
         "enum": [
           "PERSONAL",
           "TEAM"
         ],
         "title": "SpaceType",
-        "type": "string"
+        "type": "string",
+        "x-enum-descriptions": [
+          "A private Space initialized for one user.",
+          "A shared Space managed by one or more owners."
+        ],
+        "x-enum-varnames": [
+          "PERSONAL",
+          "TEAM"
+        ],
+        "x-enumNames": [
+          "PERSONAL",
+          "TEAM"
+        ]
       },
       "StartupScript": {
         "description": "A bot's stored startup script. Every field is server-derived.",
@@ -6685,8 +6867,10 @@
         "type": "object"
       },
       "UnreadCountResponse": {
+        "description": "Unread notification total for the current user.",
         "properties": {
           "unread_count": {
+            "description": "Number of unread notifications.",
             "title": "Unread Count",
             "type": "integer"
           }
@@ -6698,9 +6882,11 @@
         "type": "object"
       },
       "UpdateSpaceMemberRoleRequest": {
+        "description": "Request for changing a Space member's role.",
         "properties": {
           "role": {
-            "$ref": "#/components/schemas/SpaceRole"
+            "$ref": "#/components/schemas/SpaceRole",
+            "description": "New role to assign to the member."
           }
         },
         "required": [
@@ -6710,19 +6896,32 @@
         "type": "object"
       },
       "WorkOrderBizType": {
+        "description": "Business object represented by a work order.",
         "enum": [
           "SPACE_JOIN"
         ],
         "title": "WorkOrderBizType",
-        "type": "string"
+        "type": "string",
+        "x-enum-descriptions": [
+          "A request to join a Space."
+        ],
+        "x-enum-varnames": [
+          "SPACE_JOIN"
+        ],
+        "x-enumNames": [
+          "SPACE_JOIN"
+        ]
       },
       "WorkOrderDetailContent": {
+        "description": "Business details for a Space join work order.",
         "properties": {
           "applicant_name": {
+            "description": "Display name of the applicant.",
             "title": "Applicant Name",
             "type": "string"
           },
           "applicant_user_id": {
+            "description": "Identifier of the applicant.",
             "title": "Applicant User Id",
             "type": "string"
           },
@@ -6735,13 +6934,16 @@
                 "type": "null"
               }
             ],
+            "description": "Applicant's reason, when supplied.",
             "title": "Reason"
           },
           "space_id": {
+            "description": "Identifier of the requested Space.",
             "title": "Space Id",
             "type": "integer"
           },
           "space_name": {
+            "description": "Display name of the requested Space.",
             "title": "Space Name",
             "type": "string"
           }
@@ -6757,23 +6959,29 @@
         "type": "object"
       },
       "WorkOrderDetailResponse": {
+        "description": "Detailed view of one work order.",
         "properties": {
           "biz_id": {
+            "description": "Identifier of the related Space.",
             "title": "Biz Id",
             "type": "integer"
           },
           "biz_type": {
-            "$ref": "#/components/schemas/WorkOrderBizType"
+            "$ref": "#/components/schemas/WorkOrderBizType",
+            "description": "Business object type."
           },
           "can_approve": {
+            "description": "Whether the current user may approve or reject this work order.",
             "title": "Can Approve",
             "type": "boolean"
           },
           "content": {
-            "$ref": "#/components/schemas/WorkOrderDetailContent"
+            "$ref": "#/components/schemas/WorkOrderDetailContent",
+            "description": "Space join request details."
           },
           "event_type": {
-            "$ref": "#/components/schemas/WorkOrderEventType"
+            "$ref": "#/components/schemas/WorkOrderEventType",
+            "description": "Event that created the work order."
           },
           "review_remark": {
             "anyOf": [
@@ -6784,6 +6992,7 @@
                 "type": "null"
               }
             ],
+            "description": "Review comment after processing, otherwise null.",
             "title": "Review Remark"
           },
           "reviewed_at": {
@@ -6795,6 +7004,7 @@
                 "type": "null"
               }
             ],
+            "description": "UTC review time after processing, otherwise null.",
             "title": "Reviewed At"
           },
           "reviewer_user_id": {
@@ -6806,20 +7016,25 @@
                 "type": "null"
               }
             ],
+            "description": "Identifier of the reviewer after processing, otherwise null.",
             "title": "Reviewer User Id"
           },
           "status": {
-            "$ref": "#/components/schemas/WorkOrderStatus"
+            "$ref": "#/components/schemas/WorkOrderStatus",
+            "description": "Current work-order status."
           },
           "title": {
+            "description": "Display title of the work order.",
             "title": "Title",
             "type": "string"
           },
           "work_order_id": {
+            "description": "Identifier of the work order.",
             "title": "Work Order Id",
             "type": "integer"
           },
           "work_order_no": {
+            "description": "Human-readable work-order number.",
             "title": "Work Order No",
             "type": "string"
           }
@@ -6842,6 +7057,7 @@
         "type": "object"
       },
       "WorkOrderEventType": {
+        "description": "Business event that created a work order or notification.",
         "enum": [
           "SPACE_JOIN_APPLIED",
           "SPACE_JOIN_REVIEWED",
@@ -6859,20 +7075,86 @@
           "BOT2BOT_PUBLIC_ORDER_COMPLETED"
         ],
         "title": "WorkOrderEventType",
-        "type": "string"
+        "type": "string",
+        "x-enum-descriptions": [
+          "A user submitted a request to join a Space.",
+          "A Space join request received a review decision.",
+          "A user was directly added to a Space.",
+          "A bot collaborator request was submitted.",
+          "A bot collaborator request was reviewed.",
+          "A member was directly added to a bot.",
+          "A user-to-bot friend request was submitted.",
+          "A user-to-bot friend request was reviewed.",
+          "A bot-to-bot friend request was submitted.",
+          "A bot-to-bot friend request was reviewed.",
+          "A user created a public order for a bot.",
+          "A user's public bot order completed.",
+          "A bot created a public order for another bot.",
+          "A bot-to-bot public order completed."
+        ],
+        "x-enum-varnames": [
+          "SPACE_JOIN_APPLIED",
+          "SPACE_JOIN_REVIEWED",
+          "SPACE_MEMBER_ADDED",
+          "BOT_COLLABORATOR_APPLIED",
+          "BOT_COLLABORATOR_REVIEWED",
+          "BOT_MEMBER_ADDED",
+          "HUMAN2BOT_FRIEND_APPLIED",
+          "HUMAN2BOT_FRIEND_REVIEWED",
+          "BOT2BOT_FRIEND_APPLIED",
+          "BOT2BOT_FRIEND_REVIEWED",
+          "HUMAN2BOT_PUBLIC_ORDER_CREATED",
+          "HUMAN2BOT_PUBLIC_ORDER_COMPLETED",
+          "BOT2BOT_PUBLIC_ORDER_CREATED",
+          "BOT2BOT_PUBLIC_ORDER_COMPLETED"
+        ],
+        "x-enumNames": [
+          "SPACE_JOIN_APPLIED",
+          "SPACE_JOIN_REVIEWED",
+          "SPACE_MEMBER_ADDED",
+          "BOT_COLLABORATOR_APPLIED",
+          "BOT_COLLABORATOR_REVIEWED",
+          "BOT_MEMBER_ADDED",
+          "HUMAN2BOT_FRIEND_APPLIED",
+          "HUMAN2BOT_FRIEND_REVIEWED",
+          "BOT2BOT_FRIEND_APPLIED",
+          "BOT2BOT_FRIEND_REVIEWED",
+          "HUMAN2BOT_PUBLIC_ORDER_CREATED",
+          "HUMAN2BOT_PUBLIC_ORDER_COMPLETED",
+          "BOT2BOT_PUBLIC_ORDER_CREATED",
+          "BOT2BOT_PUBLIC_ORDER_COMPLETED"
+        ]
       },
       "WorkOrderItemType": {
+        "description": "Category of item included in a work-order list.",
         "enum": [
           "ALL",
           "APPROVAL",
           "NOTICE"
         ],
         "title": "WorkOrderItemType",
-        "type": "string"
+        "type": "string",
+        "x-enum-descriptions": [
+          "Both approval items and informational notices.",
+          "Items that represent reviewable work orders.",
+          "Items that represent informational notifications."
+        ],
+        "x-enum-varnames": [
+          "ALL",
+          "APPROVAL",
+          "NOTICE"
+        ],
+        "x-enumNames": [
+          "ALL",
+          "APPROVAL",
+          "NOTICE"
+        ]
       },
       "WorkOrderListItem": {
+        "description": "Approval or notification item in a user's work-order inbox.",
         "properties": {
           "applicant_user_id": {
+            "description": "Identifier of the applicant.",
             "title": "Applicant User Id",
             "type": "string"
           },
@@ -6885,16 +7167,20 @@
                 "type": "null"
               }
             ],
+            "description": "Application reason, when supplied.",
             "title": "Apply Reason"
           },
           "biz_id": {
+            "description": "Identifier of the related business object.",
             "title": "Biz Id",
             "type": "string"
           },
           "biz_type": {
-            "$ref": "#/components/schemas/WorkOrderBizType"
+            "$ref": "#/components/schemas/WorkOrderBizType",
+            "description": "Business object type."
           },
           "can_approve": {
+            "description": "Whether the current user may approve or reject this item.",
             "title": "Can Approve",
             "type": "boolean"
           },
@@ -6907,9 +7193,11 @@
                 "type": "null"
               }
             ],
+            "description": "Notification content, when available.",
             "title": "Content"
           },
           "env": {
+            "description": "Environment scope of the work order.",
             "title": "Env",
             "type": "string"
           },
@@ -6921,7 +7209,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Originating event, or null when no notification is attached."
           },
           "gmt_created": {
             "anyOf": [
@@ -6932,6 +7221,7 @@
                 "type": "null"
               }
             ],
+            "description": "UTC time when the work order was created.",
             "title": "Gmt Created"
           },
           "gmt_modified": {
@@ -6943,6 +7233,7 @@
                 "type": "null"
               }
             ],
+            "description": "UTC time when the displayed item was last modified.",
             "title": "Gmt Modified"
           },
           "is_read": {
@@ -6954,14 +7245,17 @@
                 "type": "null"
               }
             ],
+            "description": "Notification read state, or null when no notification is attached.",
             "title": "Is Read"
           },
           "item_id": {
+            "description": "Stable identifier of this combined list item.",
             "title": "Item Id",
             "type": "string"
           },
           "item_type": {
-            "$ref": "#/components/schemas/WorkOrderItemType"
+            "$ref": "#/components/schemas/WorkOrderItemType",
+            "description": "Category of the list item."
           },
           "notification_category": {
             "anyOf": [
@@ -6971,7 +7265,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Notification category, or null when no notification is attached."
           },
           "notification_id": {
             "anyOf": [
@@ -6982,6 +7277,7 @@
                 "type": "null"
               }
             ],
+            "description": "Related notification identifier, or null for approval-only items.",
             "title": "Notification Id"
           },
           "read_at": {
@@ -6993,6 +7289,7 @@
                 "type": "null"
               }
             ],
+            "description": "UTC notification read time, or null when unread or unavailable.",
             "title": "Read At"
           },
           "recipient_user_id": {
@@ -7004,6 +7301,7 @@
                 "type": "null"
               }
             ],
+            "description": "Notification recipient, or null when no notification is attached.",
             "title": "Recipient User Id"
           },
           "review_remark": {
@@ -7015,6 +7313,7 @@
                 "type": "null"
               }
             ],
+            "description": "Review comment after processing, otherwise null.",
             "title": "Review Remark"
           },
           "reviewed_at": {
@@ -7026,6 +7325,7 @@
                 "type": "null"
               }
             ],
+            "description": "UTC review time after processing, otherwise null.",
             "title": "Reviewed At"
           },
           "reviewer_user_id": {
@@ -7037,10 +7337,12 @@
                 "type": "null"
               }
             ],
+            "description": "Identifier of the reviewer after processing, otherwise null.",
             "title": "Reviewer User Id"
           },
           "status": {
-            "$ref": "#/components/schemas/WorkOrderStatus"
+            "$ref": "#/components/schemas/WorkOrderStatus",
+            "description": "Current work-order status."
           },
           "title": {
             "anyOf": [
@@ -7051,13 +7353,16 @@
                 "type": "null"
               }
             ],
+            "description": "Notification title, when available.",
             "title": "Title"
           },
           "work_order_id": {
+            "description": "Identifier of the related work order.",
             "title": "Work Order Id",
             "type": "integer"
           },
           "work_order_no": {
+            "description": "Human-readable work-order number.",
             "title": "Work Order No",
             "type": "string"
           }
@@ -7092,17 +7397,35 @@
         "type": "object"
       },
       "WorkOrderQueryType": {
+        "description": "Relationship between the current user and listed work orders.",
         "enum": [
           "PENDING_FOR_ME",
           "INITIATED_BY_ME",
           "PROCESSED_BY_ME"
         ],
         "title": "WorkOrderQueryType",
-        "type": "string"
+        "type": "string",
+        "x-enum-descriptions": [
+          "Pending work orders awaiting the current user's review.",
+          "Work orders submitted by the current user.",
+          "Work orders already reviewed by the current user."
+        ],
+        "x-enum-varnames": [
+          "PENDING_FOR_ME",
+          "INITIATED_BY_ME",
+          "PROCESSED_BY_ME"
+        ],
+        "x-enumNames": [
+          "PENDING_FOR_ME",
+          "INITIATED_BY_ME",
+          "PROCESSED_BY_ME"
+        ]
       },
       "WorkOrderReviewRequest": {
+        "description": "Review comment supplied with an approval or rejection.",
         "properties": {
           "review_remark": {
+            "description": "Reviewer comment for the decision.",
             "maxLength": 512,
             "minLength": 1,
             "title": "Review Remark",
@@ -7116,8 +7439,10 @@
         "type": "object"
       },
       "WorkOrderReviewResponse": {
+        "description": "Final state returned after reviewing a work order.",
         "properties": {
           "review_remark": {
+            "description": "Reviewer comment recorded with the decision.",
             "title": "Review Remark",
             "type": "string"
           },
@@ -7130,16 +7455,20 @@
                 "type": "null"
               }
             ],
+            "description": "UTC time when the review decision was recorded.",
             "title": "Reviewed At"
           },
           "reviewer_user_id": {
+            "description": "Identifier of the reviewer.",
             "title": "Reviewer User Id",
             "type": "string"
           },
           "status": {
-            "$ref": "#/components/schemas/WorkOrderStatus"
+            "$ref": "#/components/schemas/WorkOrderStatus",
+            "description": "Status after the review decision."
           },
           "work_order_id": {
+            "description": "Identifier of the reviewed work order.",
             "title": "Work Order Id",
             "type": "integer"
           }
@@ -7155,13 +7484,29 @@
         "type": "object"
       },
       "WorkOrderStatus": {
+        "description": "Current processing state of a work order.",
         "enum": [
           "PENDING",
           "APPROVED",
           "REJECTED"
         ],
         "title": "WorkOrderStatus",
-        "type": "string"
+        "type": "string",
+        "x-enum-descriptions": [
+          "Awaiting review.",
+          "Approved by an authorized reviewer.",
+          "Rejected by an authorized reviewer."
+        ],
+        "x-enum-varnames": [
+          "PENDING",
+          "APPROVED",
+          "REJECTED"
+        ],
+        "x-enumNames": [
+          "PENDING",
+          "APPROVED",
+          "REJECTED"
+        ]
       }
     }
   },
@@ -12141,6 +12486,18 @@
             }
           },
           {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
             "description": "1-based page number.",
             "in": "query",
             "name": "page",
@@ -12165,18 +12522,6 @@
               "minimum": 1,
               "title": "Page Size",
               "type": "integer"
-            }
-          },
-          {
-            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-              "minLength": 1,
-              "title": "User Id",
-              "type": "string"
             }
           },
           {
@@ -15327,6 +15672,18 @@
             }
           },
           {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
             "description": "1-based page number.",
             "in": "query",
             "name": "page",
@@ -15351,18 +15708,6 @@
               "minimum": 1,
               "title": "Page Size",
               "type": "integer"
-            }
-          },
-          {
-            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-              "minLength": 1,
-              "title": "User Id",
-              "type": "string"
             }
           },
           {
@@ -16789,6 +17134,18 @@
             }
           },
           {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
             "description": "1-based page number.",
             "in": "query",
             "name": "page",
@@ -16813,18 +17170,6 @@
               "minimum": 1,
               "title": "Page Size",
               "type": "integer"
-            }
-          },
-          {
-            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-              "minLength": 1,
-              "title": "User Id",
-              "type": "string"
             }
           },
           {
@@ -22427,6 +22772,18 @@
             }
           },
           {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
             "description": "1-based page number.",
             "in": "query",
             "name": "page",
@@ -22451,18 +22808,6 @@
               "minimum": 1,
               "title": "Page Size",
               "type": "integer"
-            }
-          },
-          {
-            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-              "minLength": 1,
-              "title": "User Id",
-              "type": "string"
             }
           },
           {
@@ -25942,6 +26287,18 @@
             }
           },
           {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
             "description": "1-based page number.",
             "in": "query",
             "name": "page",
@@ -25966,18 +26323,6 @@
               "minimum": 1,
               "title": "Page Size",
               "type": "integer"
-            }
-          },
-          {
-            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-              "minLength": 1,
-              "title": "User Id",
-              "type": "string"
             }
           },
           {
@@ -27398,6 +27743,18 @@
             }
           },
           {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
             "description": "1-based page number.",
             "in": "query",
             "name": "page",
@@ -27422,18 +27779,6 @@
               "minimum": 1,
               "title": "Page Size",
               "type": "integer"
-            }
-          },
-          {
-            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-              "minLength": 1,
-              "title": "User Id",
-              "type": "string"
             }
           },
           {
@@ -29496,6 +29841,7 @@
         "operationId": "list_spaces_openapi_v1_spaces_get",
         "parameters": [
           {
+            "description": "Optional Space-name search text.",
             "in": "query",
             "name": "keyword",
             "required": false,
@@ -29509,10 +29855,12 @@
                   "type": "null"
                 }
               ],
+              "description": "Optional Space-name search text.",
               "title": "Keyword"
             }
           },
           {
+            "description": "Optional Space type filter.",
             "in": "query",
             "name": "space_type",
             "required": false,
@@ -29525,30 +29873,47 @@
                   "type": "null"
                 }
               ],
+              "description": "Optional Space type filter.",
               "title": "Space Type"
             }
           },
           {
+            "description": "One-based page number.",
             "in": "query",
             "name": "page_no",
             "required": false,
             "schema": {
               "default": 1,
+              "description": "One-based page number.",
               "minimum": 1,
               "title": "Page No",
               "type": "integer"
             }
           },
           {
+            "description": "Maximum items returned per page.",
             "in": "query",
             "name": "page_size",
             "required": false,
             "schema": {
               "default": 20,
+              "description": "Maximum items returned per page.",
               "maximum": 100,
               "minimum": 1,
               "title": "Page Size",
               "type": "integer"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
             }
           }
         ],
@@ -29693,6 +30058,20 @@
     "/openapi/v1/spaces/create": {
       "post": {
         "operationId": "create_team_space_openapi_v1_spaces_create_post",
+        "parameters": [
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -29844,6 +30223,20 @@
     "/openapi/v1/spaces/personal/initialize": {
       "post": {
         "operationId": "initialize_personal_space_openapi_v1_spaces_personal_initialize_post",
+        "parameters": [
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -29987,13 +30380,27 @@
         "operationId": "create_space_join_request_openapi_v1_spaces__space_id__join_requests_post",
         "parameters": [
           {
+            "description": "Positive numeric identifier.",
             "in": "path",
             "name": "space_id",
             "required": true,
             "schema": {
+              "description": "Positive numeric identifier.",
               "minimum": 1,
               "title": "Space Id",
               "type": "integer"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
             }
           }
         ],
@@ -30160,6 +30567,18 @@
               "title": "Space Id",
               "type": "integer"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -30325,6 +30744,18 @@
               "title": "Space Id",
               "type": "integer"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -30489,6 +30920,18 @@
               "minimum": 1,
               "title": "Space Id",
               "type": "integer"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
             }
           }
         ],
@@ -30657,6 +31100,7 @@
             }
           },
           {
+            "description": "Optional member-id search text.",
             "in": "query",
             "name": "keyword",
             "required": false,
@@ -30670,30 +31114,47 @@
                   "type": "null"
                 }
               ],
+              "description": "Optional member-id search text.",
               "title": "Keyword"
             }
           },
           {
+            "description": "One-based page number.",
             "in": "query",
             "name": "page_no",
             "required": false,
             "schema": {
               "default": 1,
+              "description": "One-based page number.",
               "minimum": 1,
               "title": "Page No",
               "type": "integer"
             }
           },
           {
+            "description": "Maximum items returned per page.",
             "in": "query",
             "name": "page_size",
             "required": false,
             "schema": {
               "default": 20,
+              "description": "Maximum items returned per page.",
               "maximum": 100,
               "minimum": 1,
               "title": "Page Size",
               "type": "integer"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
             }
           }
         ],
@@ -30848,6 +31309,18 @@
               "title": "Space Id",
               "type": "integer"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -30998,9 +31471,9 @@
         ]
       }
     },
-    "/openapi/v1/spaces/{space_id}/members/{user_id}": {
+    "/openapi/v1/spaces/{space_id}/members/{member_user_id}": {
       "delete": {
-        "operationId": "delete_space_member_openapi_v1_spaces__space_id__members__user_id__delete",
+        "operationId": "delete_space_member_openapi_v1_spaces__space_id__members__member_user_id__delete",
         "parameters": [
           {
             "description": "Space primary identifier.",
@@ -31015,11 +31488,25 @@
             }
           },
           {
+            "description": "Identifier of the Space member to remove.",
             "in": "path",
+            "name": "member_user_id",
+            "required": true,
+            "schema": {
+              "description": "Identifier of the Space member to remove.",
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Member User Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
             "name": "user_id",
             "required": true,
             "schema": {
-              "maxLength": 256,
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -31164,9 +31651,9 @@
         ]
       }
     },
-    "/openapi/v1/spaces/{space_id}/members/{user_id}/role": {
+    "/openapi/v1/spaces/{space_id}/members/{member_user_id}/role": {
       "put": {
-        "operationId": "update_space_member_role_openapi_v1_spaces__space_id__members__user_id__role_put",
+        "operationId": "update_space_member_role_openapi_v1_spaces__space_id__members__member_user_id__role_put",
         "parameters": [
           {
             "description": "Space primary identifier.",
@@ -31181,11 +31668,25 @@
             }
           },
           {
+            "description": "Identifier of the Space member whose role will change.",
             "in": "path",
+            "name": "member_user_id",
+            "required": true,
+            "schema": {
+              "description": "Identifier of the Space member whose role will change.",
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Member User Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
             "name": "user_id",
             "required": true,
             "schema": {
-              "maxLength": 256,
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -31343,6 +31844,20 @@
     "/openapi/v1/work-order-notifications/read-all": {
       "post": {
         "operationId": "mark_all_notifications_read_openapi_v1_work_order_notifications_read_all_post",
+        "parameters": [
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -31484,6 +31999,20 @@
     "/openapi/v1/work-order-notifications/unread-count": {
       "get": {
         "operationId": "unread_notification_count_openapi_v1_work_order_notifications_unread_count_get",
+        "parameters": [
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -31627,13 +32156,27 @@
         "operationId": "get_notification_openapi_v1_work_order_notifications__notification_id__get",
         "parameters": [
           {
+            "description": "Positive numeric identifier.",
             "in": "path",
             "name": "notification_id",
             "required": true,
             "schema": {
+              "description": "Positive numeric identifier.",
               "minimum": 1,
               "title": "Notification Id",
               "type": "integer"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
             }
           }
         ],
@@ -31780,13 +32323,27 @@
         "operationId": "mark_notification_read_openapi_v1_work_order_notifications__notification_id__read_post",
         "parameters": [
           {
+            "description": "Positive numeric identifier.",
             "in": "path",
             "name": "notification_id",
             "required": true,
             "schema": {
+              "description": "Positive numeric identifier.",
               "minimum": 1,
               "title": "Notification Id",
               "type": "integer"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
             }
           }
         ],
@@ -31933,44 +32490,64 @@
         "operationId": "list_work_orders_openapi_v1_work_orders_get",
         "parameters": [
           {
+            "description": "Relationship between the current user and returned items.",
             "in": "query",
             "name": "query_type",
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/WorkOrderQueryType",
-              "default": "PENDING_FOR_ME"
+              "default": "PENDING_FOR_ME",
+              "description": "Relationship between the current user and returned items."
             }
           },
           {
+            "description": "Category of inbox item to return.",
             "in": "query",
             "name": "item_type",
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/WorkOrderItemType",
-              "default": "ALL"
+              "default": "ALL",
+              "description": "Category of inbox item to return."
             }
           },
           {
+            "description": "One-based page number.",
             "in": "query",
             "name": "page_no",
             "required": false,
             "schema": {
               "default": 1,
+              "description": "One-based page number.",
               "minimum": 1,
               "title": "Page No",
               "type": "integer"
             }
           },
           {
+            "description": "Maximum items returned per page.",
             "in": "query",
             "name": "page_size",
             "required": false,
             "schema": {
               "default": 20,
+              "description": "Maximum items returned per page.",
               "maximum": 100,
               "minimum": 1,
               "title": "Page Size",
               "type": "integer"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
             }
           }
         ],
@@ -32117,13 +32694,27 @@
         "operationId": "get_work_order_openapi_v1_work_orders__work_order_id__get",
         "parameters": [
           {
+            "description": "Positive numeric identifier.",
             "in": "path",
             "name": "work_order_id",
             "required": true,
             "schema": {
+              "description": "Positive numeric identifier.",
               "minimum": 1,
               "title": "Work Order Id",
               "type": "integer"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
             }
           }
         ],
@@ -32270,13 +32861,27 @@
         "operationId": "approve_work_order_openapi_v1_work_orders__work_order_id__approve_post",
         "parameters": [
           {
+            "description": "Positive numeric identifier.",
             "in": "path",
             "name": "work_order_id",
             "required": true,
             "schema": {
+              "description": "Positive numeric identifier.",
               "minimum": 1,
               "title": "Work Order Id",
               "type": "integer"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
             }
           }
         ],
@@ -32433,13 +33038,27 @@
         "operationId": "reject_work_order_openapi_v1_work_orders__work_order_id__reject_post",
         "parameters": [
           {
+            "description": "Positive numeric identifier.",
             "in": "path",
             "name": "work_order_id",
             "required": true,
             "schema": {
+              "description": "Positive numeric identifier.",
               "minimum": 1,
               "title": "Work Order Id",
               "type": "integer"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
             }
           }
         ],
