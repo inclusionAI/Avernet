@@ -3,7 +3,18 @@ from dependency_injector import containers, providers
 from secbaas.community.api.publish_manage import PublishService
 from secbaas.community.core.service.paas import DeviceCallbackHandler
 from secbaas.community.core.service.paas.desktop import ConnectionManager
+from secbaas.community.core.database import db_manager as _db_manager
 from secbaas.community.logger import get_logger
+
+# ── Enterprise-only optional imports ─────────────────────────────────────
+try:
+    from secbaas.enterprise.core.arca_ttl_renewal import (
+        TtlRenewalScheduleRepository,
+    )
+
+    _HAS_ENTERPRISE_RENEWAL = True
+except ImportError:
+    _HAS_ENTERPRISE_RENEWAL = False
 
 from ._configs import ConfigError, ConfigKey, DatabaseConfig, _read_config
 from ._core_repository import CoreRepositoryContainer
@@ -121,6 +132,20 @@ def _log_container_components(container: containers.DeclarativeContainer) -> Non
         logger.info("Container components:\n%s", "\n".join(lines))
 
 
+def _select_renewal_task(engine, legacy_task, deadline_task):
+    """Return the active renewal task based on config.renewal_scheduler.engine.
+
+    Per D-04: if/else branch (not Plugin Selector).  When engine="legacy"
+    (the default), DeviceTtlTimerTask is registered as before.  When
+    engine="deadline", DeadlineRenewalScheduler replaces it in the cron list.
+
+    Phase 7 cleanup will delete this function and the legacy branch.
+    """
+    if engine == "deadline":
+        return deadline_task
+    return legacy_task
+
+
 class ApplicationContainer(containers.DeclarativeContainer):
     config = providers.Configuration()
 
@@ -192,13 +217,23 @@ class ApplicationContainer(containers.DeclarativeContainer):
         ticket_repository=repository.ticket_repository,
         paas_service_facade=services.paas_facade,
         file_transfer_backend=services.file_transfer_backend,
+        ttl_renewal_schedule_repository=(
+            providers.Singleton(TtlRenewalScheduleRepository, database=_db_manager)
+            if _HAS_ENTERPRISE_RENEWAL
+            else providers.Object(None)
+        ),
     )
 
     cron_lifecycle = providers.Singleton(
         CronLifecycle,
         app_scheduler=services.app_scheduler,
         tasks=providers.List(
-            tasks.device_ttl_timer_task,
+            providers.Callable(
+                _select_renewal_task,
+                config.renewal_scheduler.engine,
+                tasks.device_ttl_timer_task,
+                tasks.deadline_renewal_scheduler,
+            ),
             tasks.bot_run_recovery_task,
             tasks.file_transfer_poller_task,
         ),
