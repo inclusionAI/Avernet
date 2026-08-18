@@ -4,9 +4,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, List, Mapping, Optional
 
-_AICODING_EXT_KEY = "aicoding"
-
-
 @dataclass(frozen=True)
 class AicodingDefaultCapabilitiesExtInfo:
     template_config: Mapping[str, Any] | None = None
@@ -21,19 +18,13 @@ class AicodingDefaultCapabilitiesExtInfo:
         Expected shape::
 
             {
-                "aicoding": {
-                    "template_config": template_config,
-                }
+                "template_config": template_config,
             }
         """
         if not isinstance(ext_info, Mapping):
             return cls()
 
-        aicoding_info = ext_info.get(_AICODING_EXT_KEY)
-        if not isinstance(aicoding_info, Mapping):
-            return cls()
-
-        template_config = aicoding_info.get("template_config")
+        template_config = ext_info.get("template_config")
         return cls(
             template_config=template_config
             if isinstance(template_config, Mapping)
@@ -51,7 +42,7 @@ def merge_template_preset_capabilities(
     """Merge AICoding template preset capabilities onto engine defaults.
 
     Reads presets from
-    ``ext_info.aicoding.template_config.bot_template_config.preset_capabilities``
+    ``ext_info.template_config.bot_template_config.preset_capabilities``
     and merges the selected capability list by its identity field. Existing
     default entries keep their original position and are field-overridden by the
     template entry; new template entries are appended in template order.

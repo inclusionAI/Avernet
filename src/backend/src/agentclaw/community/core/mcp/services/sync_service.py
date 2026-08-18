@@ -903,7 +903,7 @@ class MCPSyncService:
         default_cli_items = get_default_cli_items(
             engine_type,
             template_type,
-            ext_info={"aicoding": {"template_config": template_config}}
+            ext_info={"template_config": template_config}
             if template_config
             else None,
         )

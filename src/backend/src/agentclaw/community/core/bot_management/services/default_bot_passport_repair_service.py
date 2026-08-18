@@ -149,7 +149,7 @@ class DefaultBotPassportRepairService:
                     cli_items=get_default_cli_items(
                         bot.get("active_engine"),
                         bot.get("template_type"),
-                        ext_info={"aicoding": {"template_config": bot.get("template_config")}}
+                        ext_info={"template_config": bot.get("template_config")}
                         if bot.get("template_config")
                         else None,
                     ),

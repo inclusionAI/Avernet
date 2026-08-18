@@ -12,7 +12,7 @@ class AicodingCliDefaultsResolver:
     """Resolve effective default CLIs for AICoding bots.
 
     AICoding templates may preset CLI capabilities at
-    ``ext_info.aicoding.template_config.bot_template_config.preset_capabilities.cli``.
+    ``ext_info.template_config.bot_template_config.preset_capabilities.cli``.
     These are merged by ``cli_code`` onto the AICoding engine default CLI list.
     """
 
