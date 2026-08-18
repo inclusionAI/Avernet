@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Mapping
 
-from fastapi import APIRouter, Header, Path as ApiPath, Query, Request
+from fastapi import APIRouter, Depends, Header, Path as ApiPath, Query, Request
 from fastapi.responses import JSONResponse
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
@@ -21,7 +21,10 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
     page as page_envelope,
 )
-from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
+from agentclaw.community.adapters.http.openapi_v1.principal import (
+    UserIdDep,
+    refuse_app_only_caller,
+)
 from agentclaw.community.api.local_bot_workflow_service import LocalBotWorkflowServiceProtocol
 from agentclaw.community.core.bot_inventory.types import LocalBotCreateCommand
 from agentclaw.community.di import Injected
@@ -39,7 +42,13 @@ from .schemas import (
 
 logger = get_logger()
 
-router = APIRouter(prefix="/openapi/v1/bots", tags=["local-bots"])
+# COSEC: Local Bot workflows require an interactive end user and must not be
+# reachable by an application-only principal, matching their REFUSED admission.
+router = APIRouter(
+    prefix="/openapi/v1/bots",
+    tags=["local-bots"],
+    dependencies=[Depends(refuse_app_only_caller)],
+)
 
 SpaceIdHeader = Annotated[
     str | None,

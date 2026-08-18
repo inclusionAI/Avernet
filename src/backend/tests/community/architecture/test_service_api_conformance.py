@@ -66,6 +66,9 @@ from agentclaw.community.api.local_skill_state_service import (
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
 )
+from agentclaw.community.api.service_publication_facade import (
+    ServicePublicationFacadeProtocol,
+)
 from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService
 from agentclaw.community.core.bot_inventory.protocols import (
     BotInventoryBotPort,
@@ -100,6 +103,9 @@ from agentclaw.community.core.bot_app_grant.services import BotAppGrantService
 from agentclaw.community.core.skill_center.services.local_skill_delete_service import (
     LocalSkillDeleteService,
 )
+from agentclaw.community.core.service_bot.services.service_publication_facade import (
+    ServicePublicationFacade,
+)
 
 
 # (Protocol, ConcreteService) pairs whose Protocol declares real signatures.
@@ -118,6 +124,7 @@ _PAIRS = [
     (LocalSkillUploadServiceProtocol, LocalSkillUploadService),
     (LocalSkillStateServiceProtocol, LocalSkillStateService),
     (LocalSkillDeleteServiceProtocol, LocalSkillDeleteService),
+    (ServicePublicationFacadeProtocol, ServicePublicationFacade),
 ]
 
 _IDS = [f"{p.__name__}->{c.__name__}" for p, c in _PAIRS]

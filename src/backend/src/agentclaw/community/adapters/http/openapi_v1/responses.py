@@ -137,6 +137,16 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterTimeoutError,
 )
 from agentclaw.community.plugin_api.passport import PassportError
+from agentclaw.community.core.service_bot.errors import (
+    ServicePublicationConflictError,
+    ServicePublicationLockedError,
+    ServicePublicationNotFoundError,
+    ServicePublicationUnsupportedError,
+)
+from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import (
+    LockNotHeldError,
+    LockReleaseDeniedError,
+)
 
 T = TypeVar("T")
 
@@ -230,6 +240,9 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         "Another authorization for this bot id is already live",
     ),
     BotPermissionError: (404, "Not found"),
+    ServicePublicationNotFoundError: (404, "Not found"),
+    LockNotHeldError: (404, "Not found"),
+    LockReleaseDeniedError: (404, "Not found"),
     BotNameExistsError: (409, "Bot name already exists"),
     BotNameInvalidError: (400, "Invalid bot name"),
     BotLimitExceededError: (409, "Bot creation limit reached"),
@@ -244,6 +257,15 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     InvalidBotStateError: (409, "Operation not supported for this bot"),
     BotInventoryPermissionError: (404, "Not found"),
     BotInventoryUpstreamError: (502, "Desktop service error"),
+    ServicePublicationConflictError: (
+        409,
+        "Publication is not in a valid state for this operation",
+    ),
+    ServicePublicationUnsupportedError: (
+        409,
+        "Operation not supported for this bot",
+    ),
+    ServicePublicationLockedError: (423, "Edit lock required"),
     ClusterMismatchError: (400, "engine and cluster_name do not match"),
     UnsupportedEngineError: (400, "Unsupported engine"),
     PassportError: (502, "Authorization service error"),

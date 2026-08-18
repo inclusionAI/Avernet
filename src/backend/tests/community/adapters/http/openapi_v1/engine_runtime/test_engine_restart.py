@@ -13,7 +13,7 @@ import pytest
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.engine import router
 from agentclaw.community.core.engine_runtime.models import EngineResult
 
-from .conftest import BOT, OWNER, fails, ok
+from .conftest import BOT, fails, ok
 
 
 @pytest.fixture

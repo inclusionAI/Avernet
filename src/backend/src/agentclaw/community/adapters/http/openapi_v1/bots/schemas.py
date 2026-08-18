@@ -423,11 +423,13 @@ BotInventoryKind = Literal["personal_cloud", "local", "service"]
 DisplayState = Literal[
     "running", "pending", "failed", "dormant",
     "local_running", "local_offline", "local_pending", "local_failed",
-    "service_draft", "service_staging", "service_online", "service_offline",
+    "service_draft", "service_deploying", "service_prestable",
+    "service_staging", "service_online", "service_offline",
 ]
 BotAction = Literal[
     "view", "chat", "edit", "delete", "restart", "data_init", "activate",
     "open_folder", "passport", "engine_config", "runtime_logs", "engine_restart",
+    "publish_staging", "publish_online", "cancel_staging", "offline", "retry",
 ]
 
 
@@ -443,6 +445,7 @@ class BotInventoryItem(BaseModel):
     """Unified card for a personal cloud, local, or service bot."""
 
     bot_id: str = Field(description="Unique identifier of the bot.")
+    card_id: str = Field(description="Stable card identity; service cards include the publication id.")
     bot_name: str = Field(description="Display name of the bot.")
     bot_desc: str = Field(description="Description of what the bot is for; may be empty.")
     engine: str = Field(description="Engine currently assigned to the bot.")
@@ -450,7 +453,13 @@ class BotInventoryItem(BaseModel):
     kind: BotInventoryKind = Field(description="Inventory category used to render the bot card.")
     deploy_mode: DeployMode = Field(description="Whether the bot runs in the cloud or on a local device.")
     display_state: DisplayState = Field(description="Normalized lifecycle state used by the inventory view.")
-    status: str = Field(description="Raw lifecycle status reported by the owning service.")
+    status: str = Field(description="Lifecycle status used by the owning view. Service cards expose draft/deploying/prestable/running/offline; other cards retain their owning service's status.")
+    internal_status: str | None = Field(
+        default=None, description="Stored service-publication status for diagnostics; null for non-service cards."
+    )
+    publication_id: int | None = Field(default=None, description="Service publication id represented by this card; otherwise null.")
+    publication_version: int | None = Field(default=None, description="Service publication version represented by this card; otherwise null.")
+    live_version: int | None = Field(default=None, description="Currently running service version, when one exists.")
     owner_entity_id: str = Field(description="User who owns the bot.")
     space: BusinessSpace | None = Field(default=None, description="Business space containing the bot, when resolved.")
     avatar_url: str | None = Field(default=None, description="Avatar URL for the bot, when configured.")
