@@ -2,6 +2,7 @@
   "components": {
     "schemas": {
       "ApplyResponse": {
+        "description": "Result of an apply or rollback request.",
         "properties": {
           "err_msg": {
             "anyOf": [
@@ -17,6 +18,7 @@
           },
           "success": {
             "default": true,
+            "description": "Whether the operation succeeded",
             "title": "Success",
             "type": "boolean"
           }
@@ -25,31 +27,38 @@
         "type": "object"
       },
       "DiagnoseStartResponse": {
+        "description": "Acknowledgement that a diagnose scan has started.",
         "properties": {
           "bot_id": {
+            "description": "Bot ID",
             "title": "Bot Id",
             "type": "string"
           },
           "entity_id": {
+            "description": "Entity ID (owner/workNo)",
             "title": "Entity Id",
             "type": "string"
           },
           "message": {
             "default": "Scan started",
+            "description": "Human-readable status message",
             "title": "Message",
             "type": "string"
           },
           "scan_id": {
+            "description": "Scan record ID, used to poll progress",
             "title": "Scan Id",
             "type": "integer"
           },
           "status": {
             "default": "scanning",
+            "description": "Initial scan status",
             "title": "Status",
             "type": "string"
           },
           "success": {
             "default": true,
+            "description": "Whether the scan was accepted",
             "title": "Success",
             "type": "boolean"
           }
@@ -168,6 +177,7 @@
                 "type": "null"
               }
             ],
+            "description": "创建时间",
             "title": "Gmt Create"
           },
           "gmt_modified": {
@@ -179,6 +189,7 @@
                 "type": "null"
               }
             ],
+            "description": "最后修改时间",
             "title": "Gmt Modified"
           },
           "grade": {
@@ -291,6 +302,7 @@
         "description": "Response for dimension history list endpoint.",
         "properties": {
           "bot_id": {
+            "description": "Bot ID",
             "title": "Bot Id",
             "type": "string"
           },
@@ -303,9 +315,11 @@
                 "type": "null"
               }
             ],
+            "description": "Bot publish ID filter",
             "title": "Bot Publish Id"
           },
           "entity_id": {
+            "description": "Entity ID",
             "title": "Entity Id",
             "type": "string"
           },
@@ -343,6 +357,7 @@
           },
           "success": {
             "default": true,
+            "description": "Whether the query succeeded",
             "title": "Success",
             "type": "boolean"
           },
@@ -361,6 +376,7 @@
         "type": "object"
       },
       "DimReportItem": {
+        "description": "Latest scan result for one dimension in the dim-report.",
         "properties": {
           "check_items": {
             "anyOf": [
@@ -443,6 +459,7 @@
                 "type": "null"
               }
             ],
+            "description": "创建时间",
             "title": "Gmt Create"
           },
           "grade": {
@@ -542,8 +559,10 @@
         "type": "object"
       },
       "DimReportResponse": {
+        "description": "Latest per-dimension scan report for a bot.",
         "properties": {
           "bot_id": {
+            "description": "Bot ID",
             "title": "Bot Id",
             "type": "string"
           },
@@ -556,13 +575,16 @@
                 "type": "null"
               }
             ],
+            "description": "Bot publish ID filter",
             "title": "Bot Publish Id"
           },
           "entity_id": {
+            "description": "Entity ID",
             "title": "Entity Id",
             "type": "string"
           },
           "items": {
+            "description": "Per-dimension report items",
             "items": {
               "$ref": "#/components/schemas/DimReportItem"
             },
@@ -571,6 +593,7 @@
           },
           "success": {
             "default": true,
+            "description": "Whether the query succeeded",
             "title": "Success",
             "type": "boolean"
           }
@@ -828,6 +851,7 @@
         "type": "object"
       },
       "HarnessApplyRequest": {
+        "description": "Apply patches (or a patch record) to a bot.",
         "properties": {
           "bot_publish_id": {
             "anyOf": [
@@ -880,6 +904,7 @@
         "type": "object"
       },
       "HarnessDiagnoseRequest": {
+        "description": "Start a diagnose scan for a bot.",
         "properties": {
           "bot_publish_id": {
             "anyOf": [
@@ -924,6 +949,7 @@
         "type": "object"
       },
       "HarnessPreviewRequest": {
+        "description": "Render a preview of applying patches, without persisting.",
         "properties": {
           "entity_id": {
             "description": "Entity ID",
@@ -977,6 +1003,7 @@
         "type": "object"
       },
       "HarnessRollbackRequest": {
+        "description": "Roll back a previously applied patch.",
         "properties": {
           "bot_publish_id": {
             "anyOf": [
@@ -1123,7 +1150,7 @@
         "type": "object"
       },
       "PatchOperationItem": {
-        "description": "Operation definition within a patch template.\n\nFixed fields: op, target, template.\nCustom fields (e.g. src_md_content, dst_md_content) go into ``detail``.",
+        "description": "Operation definition within a patch template.\n\nFixed fields: op, target, template.\nCustom fields (e.g. src_md_content, dst_md_content) go into 'detail'.",
         "properties": {
           "detail": {
             "additionalProperties": true,
@@ -1162,6 +1189,7 @@
         "type": "object"
       },
       "PreviewOperationItem": {
+        "description": "One operation in a preview result, with its rendered diff.",
         "properties": {
           "content": {
             "description": "Full content text produced/replaced by this operation",
@@ -1218,8 +1246,10 @@
         "type": "object"
       },
       "agentclaw__community__adapters__http__harness__schemas__PreviewResponse": {
+        "description": "Rendered preview of applying a set of patches, without persisting.",
         "properties": {
           "bot_id": {
+            "description": "Bot ID",
             "title": "Bot Id",
             "type": "string"
           },
@@ -1229,6 +1259,7 @@
             "type": "string"
           },
           "operations": {
+            "description": "Per-operation diffs",
             "items": {
               "$ref": "#/components/schemas/PreviewOperationItem"
             },
@@ -1254,6 +1285,7 @@
           },
           "success": {
             "default": true,
+            "description": "Whether the preview rendered",
             "title": "Success",
             "type": "boolean"
           }
@@ -1653,18 +1685,7 @@
             }
           },
           {
-            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-              "minLength": 1,
-              "title": "User Id",
-              "type": "string"
-            }
-          },
-          {
+            "description": "Filter by scan dimension",
             "in": "query",
             "name": "scan_dim",
             "required": false,
@@ -1677,10 +1698,12 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by scan dimension",
               "title": "Scan Dim"
             }
           },
           {
+            "description": "Bot publish ID, to read a specific publish version",
             "in": "query",
             "name": "bot_publish_id",
             "required": false,
@@ -1693,30 +1716,47 @@
                   "type": "null"
                 }
               ],
+              "description": "Bot publish ID, to read a specific publish version",
               "title": "Bot Publish Id"
             }
           },
           {
+            "description": "Page number, 1-based",
             "in": "query",
             "name": "page",
             "required": false,
             "schema": {
               "default": 1,
+              "description": "Page number, 1-based",
               "minimum": 1,
               "title": "Page",
               "type": "integer"
             }
           },
           {
+            "description": "Page size",
             "in": "query",
             "name": "size",
             "required": false,
             "schema": {
               "default": 20,
+              "description": "Page size",
               "maximum": 100,
               "minimum": 1,
               "title": "Size",
               "type": "integer"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
             }
           }
         ],
@@ -1885,18 +1925,7 @@
             }
           },
           {
-            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-              "minLength": 1,
-              "title": "User Id",
-              "type": "string"
-            }
-          },
-          {
+            "description": "Bot publish ID, to read a specific publish version",
             "in": "query",
             "name": "bot_publish_id",
             "required": false,
@@ -1909,7 +1938,20 @@
                   "type": "null"
                 }
               ],
+              "description": "Bot publish ID, to read a specific publish version",
               "title": "Bot Publish Id"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
             }
           }
         ],

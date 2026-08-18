@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field
 
 
 class HarnessDiagnoseRequest(BaseModel):
+    """Start a diagnose scan for a bot."""
+
     entity_type: str = Field(..., description="Entity type, e.g. staff")
     entity_id: str = Field(..., description="Entity ID (owner/workNo)")
     scan_type: str = Field(default="full", description="full / verify")
@@ -18,6 +20,8 @@ class HarnessDiagnoseRequest(BaseModel):
 
 
 class HarnessPreviewRequest(BaseModel):
+    """Render a preview of applying patches, without persisting."""
+
     entity_type: str = Field(..., description="Entity type")
     entity_id: str = Field(..., description="Entity ID")
     scan_id: int | None = Field(default=None, description="Associated scan record ID")
@@ -26,6 +30,8 @@ class HarnessPreviewRequest(BaseModel):
 
 
 class HarnessApplyRequest(BaseModel):
+    """Apply patches (or a patch record) to a bot."""
+
     entity_type: str = Field(..., description="Entity type")
     entity_id: str = Field(..., description="Entity ID")
     patch_id_list: list[int] = Field(
@@ -36,22 +42,13 @@ class HarnessApplyRequest(BaseModel):
 
 
 class HarnessRollbackRequest(BaseModel):
+    """Roll back a previously applied patch."""
+
     entity_type: str = Field(..., description="Entity type")
     entity_id: str = Field(..., description="Entity ID")
     patch_id: int = Field(..., description="Patch ID from ac_harness_patch")
     file_type: str | None = Field(default=None, description="Target file type")
     bot_publish_id: str | None = Field(default=None, description="Bot publish ID")
-
-
-class HarnessDimReportRequest(BaseModel):
-    bot_publish_id: str | None = Field(default=None, description="Bot publish ID")
-
-
-class HarnessDimHistoryRequest(BaseModel):
-    scan_dim: str | None = Field(default=None, description="Filter by scan dimension")
-    bot_publish_id: str | None = Field(default=None, description="Bot publish ID")
-    page: int = Field(default=1, ge=1)
-    size: int = Field(default=20, ge=1, le=100)
 
 
 from agentclaw.community.adapters.http.harness.schemas import (

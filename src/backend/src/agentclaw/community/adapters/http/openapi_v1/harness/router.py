@@ -18,8 +18,6 @@ from agentclaw.community.adapters.http.openapi_v1.harness.schemas import (
     HarnessPreviewRequest,
     HarnessApplyRequest,
     HarnessRollbackRequest,
-    HarnessDimReportRequest,
-    HarnessDimHistoryRequest,
 )
 from agentclaw.community.adapters.http.harness.schemas import (
     DiagnoseStartResponse,
@@ -542,15 +540,17 @@ async def harness_dim_report(
     entity_id: Annotated[str, Query(..., description="Entity ID")],
     user_id: UserIdDep,
     _: HarnessBotAccessDep,
-    body_params: HarnessDimReportRequest = Depends(),
+    bot_publish_id: Annotated[
+        str | None, Query(description="Bot publish ID, to read a specific publish version")
+    ] = None,
     repo: HarnessScanRecordRepository = Injected(HarnessScanRecordRepository),
     patch_repo: HarnessPatchRepository = Injected(HarnessPatchRepository),
 ) -> Envelope[DimReportResponse]:
-    match_null_publish = body_params.bot_publish_id is not None
+    match_null_publish = bot_publish_id is not None
     rows = repo.get_latest_dim_records(
         bot_id=bot_id,
         entity_id=entity_id,
-        bot_publish_id=body_params.bot_publish_id,
+        bot_publish_id=bot_publish_id,
         match_null_publish=match_null_publish,
     )
 
@@ -602,7 +602,7 @@ async def harness_dim_report(
         DimReportResponse(
             bot_id=bot_id,
             entity_id=entity_id,
-            bot_publish_id=body_params.bot_publish_id,
+            bot_publish_id=bot_publish_id,
             items=items,
         ),
         request,
@@ -621,17 +621,24 @@ async def harness_dim_history(
     entity_id: Annotated[str, Query(..., description="Entity ID")],
     user_id: UserIdDep,
     _: HarnessBotAccessDep,
-    params: HarnessDimHistoryRequest = Depends(),
+    scan_dim: Annotated[
+        str | None, Query(description="Filter by scan dimension")
+    ] = None,
+    bot_publish_id: Annotated[
+        str | None, Query(description="Bot publish ID, to read a specific publish version")
+    ] = None,
+    page: Annotated[int, Query(ge=1, description="Page number, 1-based")] = 1,
+    size: Annotated[int, Query(ge=1, le=100, description="Page size")] = 20,
     repo: HarnessScanRecordRepository = Injected(HarnessScanRecordRepository),
     patch_repo: HarnessPatchRepository = Injected(HarnessPatchRepository),
 ) -> Envelope[DimHistoryResponse]:
     rows, total = repo.list_dim_history(
         bot_id=bot_id,
         entity_id=entity_id,
-        scan_dim=params.scan_dim,
-        bot_publish_id=params.bot_publish_id,
-        page=params.page,
-        size=params.size,
+        scan_dim=scan_dim,
+        bot_publish_id=bot_publish_id,
+        page=page,
+        size=size,
     )
 
     all_patch_ids: set[int] = set()
@@ -689,11 +696,11 @@ async def harness_dim_history(
         DimHistoryResponse(
             bot_id=bot_id,
             entity_id=entity_id,
-            scan_dim=params.scan_dim,
-            bot_publish_id=params.bot_publish_id,
+            scan_dim=scan_dim,
+            bot_publish_id=bot_publish_id,
             total=total,
-            page=params.page,
-            size=params.size,
+            page=page,
+            size=size,
             items=items,
         ),
         request,
