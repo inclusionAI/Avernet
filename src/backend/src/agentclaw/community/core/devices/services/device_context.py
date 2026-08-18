@@ -6,25 +6,29 @@ dispatchers pick a plugin instance by ``provider``; plugins dial with
 """
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping, MutableMapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
 ProviderType = Literal["arca", "baas", "teclaw", "local"]
 
 
-class ConnInfo(MutableMapping[str, Any]):
+class ConnInfo(dict):
     """Dial-out info — typed view over the provider-built conn_info.
 
     Historically conn_info was a bare ``dict[str, Any]``; the only way to
     learn its fields was reading the builder sources. This class declares
-    every known field as a typed property with an example, while also
-    implementing the ``MutableMapping`` protocol so existing dict-style
-    access keeps working unchanged — reads (``conn_info["url"]`` /
-    ``conn_info.get("tenant")``), legacy in-place writes (e.g. expert_chat
-    overwrites ``conn["engine_type"]`` per session), the key set, and ``==``
-    semantics all match the underlying dict, and unknown builder-produced
-    keys pass through (dict-style access only).
+    every known field as a typed property with an example, on top of a
+    plain ``dict``. It IS a dict, so every legacy behavior is inherited
+    unchanged: reads (``conn_info["url"]`` / ``.get("tenant")``), in-place
+    writes (e.g. expert_chat overwrites ``conn["engine_type"]`` per
+    session), ``==``, ``json.dumps``, and pydantic/FastAPI response
+    serialization (conn_info is embedded in HTTP responses, e.g. the
+    expert-chat session endpoint's ``connection`` field). Unknown
+    builder-produced keys pass through (dict-style access only).
+
+    Construct it like a dict: ``ConnInfo(mapping)`` shallow-copies the
+    mapping, ``ConnInfo(url=...)`` takes keyword fields, and both combine
+    (keywords win on clashes).
 
     Each provider writes only the field subset it needs (see
     ``conn_info_builders/``); a property whose field is absent returns the
@@ -39,44 +43,12 @@ class ConnInfo(MutableMapping[str, Any]):
     transport fields are pre-filled.
     """
 
-    __slots__ = ("_data",)
-
-    def __init__(self, data: Mapping[str, Any] | None = None, /, **fields: Any) -> None:
-        """Build from a mapping and/or keyword fields (keywords win on clashes).
-
-        The input is shallow-copied; mutating the source dict afterwards
-        does not affect this object.
-        """
-        merged: dict[str, Any] = dict(data) if data is not None else {}
-        merged.update(fields)
-        self._data = merged
-
-    # ── MutableMapping protocol (keeps legacy dict-style access working;
-    #    get/keys/items/__contains__/__eq__/pop/update/setdefault come from
-    #    collections.abc) ────────────────────────────────────────────────
-
-    def __getitem__(self, key: str) -> Any:
-        return self._data[key]
-
-    def __setitem__(self, key: str, value: Any) -> None:
-        self._data[key] = value
-
-    def __delitem__(self, key: str) -> None:
-        del self._data[key]
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(self._data)
-
-    def __len__(self) -> int:
-        return len(self._data)
-
-    def __repr__(self) -> str:
-        return f"ConnInfo({self._data!r})"
+    __slots__ = ()
 
     def to_dict(self) -> dict[str, Any]:
-        """Export a plain dict copy (when a real dict is required, e.g. JSON
-        serialization)."""
-        return dict(self._data)
+        """Export a plain dict copy (for callers that want to detach from
+        this view)."""
+        return dict(self)
 
     # ── Seven-field schema contract (all providers) ────────────────────
 
@@ -92,12 +64,12 @@ class ConnInfo(MutableMapping[str, Any]):
         Default ``""`` — the binding-routed path pre-fills nothing; the
         transport fetches the address per binding.
         """
-        return self._data.get("url", "")
+        return self.get("url", "")
 
     @property
     def token(self) -> str:
         """Proxypass auth token. Example: ``"tok"``; ``""`` for local direct."""
-        return self._data.get("token", "")
+        return self.get("token", "")
 
     @property
     def headers(self) -> dict[str, str]:
@@ -105,7 +77,7 @@ class ConnInfo(MutableMapping[str, Any]):
 
         Example: ``{"x-proxypass-token": "tok"}``; ``{}`` for local direct.
         """
-        return self._data.get("headers", {})
+        return self.get("headers", {})
 
     @property
     def use_proxy(self) -> bool:
@@ -113,7 +85,7 @@ class ConnInfo(MutableMapping[str, Any]):
 
         Example: ``True`` for arca/baas, ``False`` for local.
         """
-        return self._data.get("use_proxy", False)
+        return self.get("use_proxy", False)
 
     @property
     def sandbox_id(self) -> str | None:
@@ -122,7 +94,7 @@ class ConnInfo(MutableMapping[str, Any]):
         Example: ``"ARCA_ARCA-SANDBOX-xxx@0:20003"``. ``None`` is the norm —
         neither local direct nor the baas invoke-http path lands on a sandbox.
         """
-        return self._data.get("sandbox_id")
+        return self.get("sandbox_id")
 
     @property
     def target(self) -> str:
@@ -131,7 +103,7 @@ class ConnInfo(MutableMapping[str, Any]):
         Example: ``"<baas-target>:20003"`` / ``"127.0.0.1:20003"``.
         Default ``""``.
         """
-        return self._data.get("target", "")
+        return self.get("target", "")
 
     @property
     def engine_type(self) -> str:
@@ -139,7 +111,7 @@ class ConnInfo(MutableMapping[str, Any]):
 
         Example: ``"openclaw"`` / ``"teclaw"``. Default ``""``.
         """
-        return self._data.get("engine_type", "")
+        return self.get("engine_type", "")
 
     # ── Extension fields (written as needed by baas / teclaw / v2 desktop) ──
 
@@ -150,14 +122,14 @@ class ConnInfo(MutableMapping[str, Any]):
         Example: ``"desktop"`` (bare ws direct) / ``"baas"`` (proxypass wss).
         Default ``""`` — the legacy arca/local paths don't write it.
         """
-        return self._data.get("type", "")
+        return self.get("type", "")
 
     @property
     def bot_type(self) -> str:
         """``ac_bots.bot_type``. Example: ``"desktop"`` / ``"personal"`` /
         ``"service"``. Default ``""`` (bot lookup failed).
         """
-        return self._data.get("bot_type", "")
+        return self.get("bot_type", "")
 
     @property
     def binding_id(self) -> int | None:
@@ -167,7 +139,7 @@ class ConnInfo(MutableMapping[str, Any]):
         path) — the transport's ``invoke`` branches on its presence to pick
         baas /http-info vs the fallback.
         """
-        return self._data.get("binding_id")
+        return self.get("binding_id")
 
     @property
     def bind_id(self) -> int | None:
@@ -178,7 +150,7 @@ class ConnInfo(MutableMapping[str, Any]):
         ``binding_id``; both keys coexist with the same value. New code
         should read :attr:`binding_id`.
         """
-        return self._data.get("bind_id")
+        return self.get("bind_id")
 
     @property
     def bot_uuid(self) -> str:
@@ -187,13 +159,13 @@ class ConnInfo(MutableMapping[str, Any]):
         Example: ``"device-201"``. Default ``""`` — only the baas/teclaw
         paths write it.
         """
-        return self._data.get("bot_uuid", "")
+        return self.get("bot_uuid", "")
 
     @property
     def tenant(self) -> str:
         """BaaS tenant. Example: ``"<tenant>"``. Default ``""`` — only the
         baas path writes it."""
-        return self._data.get("tenant", "")
+        return self.get("tenant", "")
 
     @property
     def baas_base_url(self) -> str:
@@ -202,7 +174,7 @@ class ConnInfo(MutableMapping[str, Any]):
         Default ``""`` — only the baas path writes it; the invoke-http URL
         is assembled from it.
         """
-        return self._data.get("baas_base_url", "")
+        return self.get("baas_base_url", "")
 
     @property
     def engine_port(self) -> int | None:
@@ -211,13 +183,13 @@ class ConnInfo(MutableMapping[str, Any]):
         ``None`` means this path didn't carry it (the legacy arca/local
         paths fold the port into ``url``).
         """
-        return self._data.get("engine_port")
+        return self.get("engine_port")
 
     @property
     def paas_device_id(self) -> str | None:
         """BaaS-side physical device ID. ``None`` means this path didn't
         carry it (non-baas)."""
-        return self._data.get("paas_device_id")
+        return self.get("paas_device_id")
 
     @property
     def device_affinity(self) -> str:
@@ -227,7 +199,7 @@ class ConnInfo(MutableMapping[str, Any]):
         Example: ``"user-1"``. Default ``""`` (legacy callsites didn't pass
         user_id).
         """
-        return self._data.get("device_affinity", "")
+        return self.get("device_affinity", "")
 
     @property
     def device_uuid(self) -> str | None:
@@ -237,7 +209,7 @@ class ConnInfo(MutableMapping[str, Any]):
         ``None`` is the norm — no pinning; BaaS auto-selects an active
         instance.
         """
-        return self._data.get("device_uuid")
+        return self.get("device_uuid")
 
     # ── v2 offline-branch fields ───────────────────────────────────────
 
@@ -245,13 +217,13 @@ class ConnInfo(MutableMapping[str, Any]):
     def available(self) -> bool:
         """Whether the device is online. Default ``True`` — only the v2
         offline branch explicitly writes ``False``."""
-        return self._data.get("available", True)
+        return self.get("available", True)
 
     @property
     def message(self) -> str:
         """Reason the device is unavailable (accompanies ``available=False``).
         Default ``""``."""
-        return self._data.get("message", "")
+        return self.get("message", "")
 
 
 @dataclass(frozen=True)

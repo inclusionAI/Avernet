@@ -184,6 +184,35 @@ def test_conn_info_copies_source_on_construction():
     assert ci.url == "http://written-via-view"
 
 
+def test_conn_info_is_a_dict_and_json_serializable():
+    """conn_info is embedded in HTTP responses (e.g. the expert-chat session
+    endpoint's "connection" field) — it must behave as a real dict for
+    json.dumps and downstream serializers."""
+    import json
+
+    ci = ConnInfo({"url": "http://test", "use_proxy": True})
+    assert isinstance(ci, dict)
+    assert json.loads(json.dumps({"connection": ci})) == {
+        "connection": {"url": "http://test", "use_proxy": True}
+    }
+
+
+def test_conn_info_survives_pydantic_any_field_serialization():
+    """Regression: the expert-chat session endpoint returns a pydantic
+    ApiResponse whose Any-typed data field nests conn_info; a non-dict
+    Mapping raises PydanticSerializationError there and FastAPI answers
+    500 (singlebox coverage failure on this PR's second round)."""
+    from typing import Any
+
+    from pydantic import BaseModel
+
+    class _Resp(BaseModel):
+        data: Any = None
+
+    resp = _Resp(data={"connection": ConnInfo({"url": "http://test"})})
+    assert '"url":"http://test"' in resp.model_dump_json().replace(" ", "")
+
+
 def test_conn_info_kwargs_construction():
     ci = ConnInfo(url="http://test", use_proxy=False)
     assert ci.url == "http://test"
