@@ -331,7 +331,7 @@ def test_resolve_provisioning_routes_legacy_template_only_context():
     assert strategy.should_encrypt_template_token(ctx) is True
 
 
-def test_template_factory_normal_cc_consumes_model_runtime_repos_and_token():
+def test_template_factory_service_normal_cc_consumes_model_runtime_repos_without_bot_type():
     strategy = AicodingProvisioningStrategy("claude_code")
     ctx = BotProvisioningContext(
         active_engine="claude_code",
@@ -361,7 +361,7 @@ def test_template_factory_normal_cc_consumes_model_runtime_repos_and_token():
         "https://code/repo1",
         "https://code/repo2",
     ]
-    assert envs["BOT_TYPE"] == "normalCC"
+    assert "BOT_TYPE" not in envs
     assert strategy.should_encrypt_template_token(ctx) is True
     assert strategy.extract_runtime_token(ctx) == "tok-normal"
 
