@@ -24,6 +24,7 @@ try:
     from secbaas.enterprise.core.arca_ttl_renewal import (
         DeadlineRenewalScheduler,
         DeadlineRenewalSchedulerConfig,
+        TtlRenewalScheduleRepository,
     )
 
     _HAS_ENTERPRISE_RENEWAL = True
@@ -116,7 +117,6 @@ class CoreTaskContainer(containers.DeclarativeContainer):
                 config.renewal_scheduler.engine,
             ),
             engine=config.renewal_scheduler.engine,
-            env=providers.Callable(get_current_env),
         )
 
         deadline_renewal_scheduler = providers.Singleton(
