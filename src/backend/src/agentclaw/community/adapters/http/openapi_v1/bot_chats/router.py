@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Path, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     BotIdPath,
@@ -67,19 +68,33 @@ async def list_bot_chats(
     biz_scene: str | None = Query(default=None, description="Business scene."),
     biz_task_id: str | None = Query(default=None, description="Business task id."),
     group_id: str | None = Query(default=None, description="BCS group id."),
-    match_mode: str = Query(default="exact", pattern="^(exact|contains)$"),
+    match_mode: str = Query(
+        default="exact",
+        pattern="^(exact|contains)$",
+        description="How the identifier filters and keyword query match: "
+        "'exact' compares whole values, 'contains' substring-matches.",
+    ),
     include_output_match: bool = Query(
         default=False,
         description="Include trace output when applying the keyword query.",
     ),
-    time_scope: str = Query(default="default", pattern="^(default|all)$"),
+    time_scope: str = Query(
+        default="default",
+        pattern="^(default|all)$",
+        description="'default' searches the recent window; 'all' searches the "
+        "full history and requires match_mode='exact' plus an exact "
+        "identifier filter.",
+    ),
     from_date: datetime | None = Query(default=None, description="ISO 8601 start time."),
     to_date: datetime | None = Query(default=None, description="ISO 8601 end time."),
     page: int = Query(default=1, ge=1, description="1-based page number."),
     limit: int = Query(default=20, ge=1, le=100, description="Chats per page."),
+    # The other accepted value selects the legacy trace store; its vendor name
+    # is internal and deliberately kept out of the published document.
     log_source: str | None = Query(
         default=None,
-        description="Data source override: 'db' or 'langfuse'.",
+        description="Data source override: 'db' forces the primary chat "
+        "store; unset lets the service choose.",
     ),
     service: BotChatServiceProtocol = Injected(BotChatServiceProtocol),
 ) -> Envelope[SessionListResponse]:
@@ -122,7 +137,13 @@ async def list_bot_chats(
 async def get_bot_chat(
     request: Request,
     bot_id: BotIdPath,
-    trace_id: str,
+    trace_id: Annotated[
+        str,
+        Path(
+            description="Trace identifier of the chat, as returned by the "
+            "chats listing."
+        ),
+    ],
     user_id: UserIdDep,
     owner_id: str | None = Query(
         default=None,
@@ -130,9 +151,12 @@ async def get_bot_chat(
         description="Owner of the addressed bot; defaults to user_id. Name it "
         "only when the bot is shared with the acting user.",
     ),
+    # The other accepted value selects the legacy trace store; its vendor name
+    # is internal and deliberately kept out of the published document.
     log_source: str | None = Query(
         default=None,
-        description="Data source override: 'db' or 'langfuse'.",
+        description="Data source override: 'db' forces the primary chat "
+        "store; unset lets the service choose.",
     ),
     service: BotChatServiceProtocol = Injected(BotChatServiceProtocol),
 ) -> Envelope[ConversationDetail]:
