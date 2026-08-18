@@ -22,6 +22,7 @@ from agentclaw.community.core.devices.services.conn_info_builders.teclaw_builder
     TeclawConnInfoBuilder,
 )
 from agentclaw.community.core.devices.services.device_context import (
+    ConnInfo,
     DeviceContext,
     DeviceNotBoundError,
     UnknownProviderError,
@@ -231,7 +232,7 @@ class DeviceContextResolver:
 
     def _normalize_schema(
         self, raw_conn_info: dict[str, Any], provider: str
-    ) -> dict[str, Any]:
+    ) -> ConnInfo:
         """统一字段命名 — 桥接 builder 输出与 caller 期望的 schema。
 
         当前对齐范围(Step 1.7 + 方案 X 后稳定):
@@ -261,4 +262,5 @@ class DeviceContextResolver:
         # bind_id → binding_id(为兼容期保留 alias,本期两个都暴露)
         if "bind_id" in conn_info and "binding_id" not in conn_info:
             conn_info["binding_id"] = conn_info["bind_id"]
-        return conn_info
+        # typed 只读视图 — 字段清单/类型/示例见 ConnInfo;dict 式读取原样兼容
+        return ConnInfo(conn_info)

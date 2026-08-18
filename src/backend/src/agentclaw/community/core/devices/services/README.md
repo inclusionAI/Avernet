@@ -51,7 +51,7 @@ ctx = resolver.resolve_for_bot(bot_id: str, user_id: str) -> DeviceContext
 | 字段          | 含义                                       |
 | ------------- | ------------------------------------------ |
 | `provider`    | `arca` / `baas` / `teclaw` / `local`       |
-| `conn_info`   | 拨号字段 dict（命名经 resolver schema 归一）|
+| `conn_info`   | 拨号字段（`ConnInfo` typed 只读 Mapping，命名经 resolver schema 归一；字段清单/类型/示例见 `device_context.ConnInfo`，dict 式读取继续兼容）|
 | `binding_id`  | `ac_entity_device_binding.id`              |
 | `bot_id`      | caller 透传                                |
 | `user_id`     | caller 透传（用于 device_affinity / 审计）|

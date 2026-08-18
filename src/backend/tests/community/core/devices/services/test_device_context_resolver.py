@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentclaw.community.core.devices.services.device_context import (
+    ConnInfo,
     DeviceNotBoundError,
     UnknownProviderError,
 )
@@ -310,3 +311,25 @@ def test_resolve_for_binding_handles_missing_bot_gracefully(
     ctx = resolver.resolve_for_binding(3, "user-1", bot_id="bot-orphan")
 
     assert ctx.bot_type == ""
+
+
+# ── conn_info typed 出口 ──
+
+def test_resolver_exits_carry_typed_conn_info(resolver, fake_binding_repo):
+    """三条 resolve 入口的 ctx.conn_info 都是 ConnInfo — typed 属性访问与
+    dict 式读取指向同一份数据。"""
+    fake_binding_repo.get_active_by_bot_and_owner.return_value = _mock_binding(2, "baas")
+    fake_binding_repo.get_by_id.return_value = _mock_binding(2, "baas")
+
+    for ctx in (
+        resolver.resolve_for_bot("bot-2", "user-1"),
+        resolver.resolve_for_binding(2, "user-1", bot_id="bot-2"),
+        resolver.resolve_for_binding_invoke(2, "user-1", bot_id="bot-2"),
+    ):
+        assert isinstance(ctx.conn_info, ConnInfo)
+
+    # builder 出 bind_id → _normalize_schema 补 binding_id alias,typed 属性同源
+    ctx = resolver.resolve_for_bot("bot-2", "user-1")
+    assert ctx.conn_info.bind_id == 42
+    assert ctx.conn_info.binding_id == 42
+    assert ctx.conn_info["binding_id"] == 42
