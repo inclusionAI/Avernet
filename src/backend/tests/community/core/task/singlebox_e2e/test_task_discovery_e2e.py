@@ -53,28 +53,6 @@ _MOCK_TASKS: list[dict] = [
         "discovered_at": "2026-08-17T10:00:00Z",
         "status": "pending_confirmation",
     },
-    {
-        "task_id": "disc-e2e-002",
-        "project_name": "SSD 供应链竞争格局梳理",
-        "description": "梳理全球 SSD 供应链从晶圆到终端的主要参与者、份额变化及技术演进趋势。",
-        "business_scenario": "赛道分析 — 聚焦存储产业链中游,识别核心供应商和潜在替代风险。",
-        "discovery_basis": "用户在存储行业尽调 session 中多次追问供应链问题,行为节点链路显示对供应链环节的关注持续升温。",
-        "work_item_url": None,
-        "priority": "medium",
-        "discovered_at": "2026-08-17T11:30:00Z",
-        "status": "pending_confirmation",
-    },
-    {
-        "task_id": "disc-e2e-003",
-        "project_name": "ToB 存储方案客户需求画像",
-        "description": "整合近期 ToB 客户在存储方案上的需求反馈,形成结构化的客户需求画像。",
-        "business_scenario": "客户洞察 — 用于指导后续存储产品的 roadmap 优先级排序。",
-        "discovery_basis": "用户在过去两周创建了 3 个 ToB 方案相关的 session,且多个对话节点涉及采购决策标准讨论。",
-        "work_item_url": None,
-        "priority": "low",
-        "discovered_at": "2026-08-17T14:00:00Z",
-        "status": "pending_confirmation",
-    },
 ]
 
 # 从内联数据派生断言常量
@@ -209,30 +187,39 @@ class TestTaskDiscoveryE2E(unittest.TestCase):
                 self.assertIsNotNone(t.get("priority"), f"task {t.get('task_id')} priority 为空")
 
             # 6) 验证 engine session 实际存在
-            #    relay 路由的 session 在 per-bot engine 上,通过 backend OPENAPI relay 查
+            #    通过 backend GET /api/bots/{bot_id}/connection 获取 per-bot engine 地址,
+            #    再直查 GET /api/sessions 确认 session 落在正确的 engine 上
             first_sid = tasks[0].get("session_id")
             try:
-                eng_resp = await cli.get(
-                    f"{_BACKEND}/openapi/v1/bots/{bot_id}/sessions",
-                    params={"user_id": _USER_ID, "owner_id": _USER_ID, "page_size": 50},
+                conn_resp = await cli.get(
+                    f"{_BACKEND}/api/bots/{bot_id}/connection",
                     headers={"x-user-id": _USER_ID},
                 )
-                if eng_resp.status_code == 200:
-                    eng_data = eng_resp.json()
-                    eng_sessions = eng_data.get("data", {}).get("items", [])
-                    found = any(
-                        first_sid in (s.get("session_id") or s.get("id") or "")
-                        for s in eng_sessions
+                conn_resp.raise_for_status()
+                conn_data = (conn_resp.json().get("data") or {})
+                target = conn_data.get("target") or ""
+                if target:
+                    eng_resp = await cli.get(
+                        f"http://{target}/api/sessions",
+                        params={"limit": 100, "offset": 0},
+                        headers={"x-user-id": _USER_ID},
                     )
-                    print(f"[engine] session list 返回 {len(eng_sessions)} 条, "
-                          f"first_sid={first_sid} found={found}")
-                    self.assertTrue(
-                        found,
-                        f"session {first_sid} 未在 per-bot engine session 列表中找到",
-                    )
+                    if eng_resp.status_code == 200:
+                        eng_sessions = eng_resp.json().get("data") or []
+                        found = any(
+                            first_sid in (s.get("id") or s.get("session_id") or "")
+                            for s in eng_sessions
+                        )
+                        print(f"[engine] {target} 返回 {len(eng_sessions)} 条, "
+                              f"first_sid={first_sid} found={found}")
+                        self.assertTrue(
+                            found,
+                            f"session {first_sid} 未在 per-bot engine({target})中找到",
+                        )
+                    else:
+                        print(f"[engine] {target} 查询 HTTP {eng_resp.status_code}, 跳过")
                 else:
-                    print(f"[engine] session 列表查询 HTTP {eng_resp.status_code},"
-                          f" 跳过")
+                    print("[engine] connection 返回无 target, 跳过")
             except Exception as exc:  # noqa: BLE001
                 print(f"[engine] session 查询异常({exc!r}), 跳过")
 

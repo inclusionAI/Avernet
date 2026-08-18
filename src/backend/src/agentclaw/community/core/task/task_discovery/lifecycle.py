@@ -28,14 +28,11 @@ from typing import TYPE_CHECKING, Any
 
 from injector import inject
 
-from agentclaw.community.api.engine_runtime_service import (
-    EngineRuntimeRelayProtocol,
-)
 from agentclaw.community.core.task.task_discovery.discovery_service import (
     create_default_service,
 )
 from agentclaw.community.core.task.task_discovery.session_creator import (
-    RelaySessionCreator,
+    HttpSessionCreator,
 )
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
@@ -70,11 +67,9 @@ class TaskDiscoveryLifecycle(LifecycleBase):
         self,
         bot_service: "BotService",
         notify_sender: NotifySenderPlugin,
-        relay: EngineRuntimeRelayProtocol,
     ) -> None:
         self._bot_service: Any = bot_service
         self._notify_sender = notify_sender
-        self._relay = relay
         self._task: asyncio.Task | None = None
 
     async def startup(self) -> None:
@@ -142,7 +137,7 @@ class TaskDiscoveryLifecycle(LifecycleBase):
 
         data_file = self._resolve_data_file()
 
-        session_creator = RelaySessionCreator(self._relay)
+        session_creator = HttpSessionCreator()
 
         total_discovered = 0
         for bot in bots:
@@ -155,7 +150,7 @@ class TaskDiscoveryLifecycle(LifecycleBase):
                 service = create_default_service(
                     data_file=data_file,
                     notify_sender=self._notify_sender,
-                    relay=session_creator,
+                    session_creator=session_creator,
                 )
                 results = await service.discover(
                     user_id=owner_id,

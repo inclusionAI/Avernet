@@ -34,7 +34,7 @@ from agentclaw.community.core.task.task_discovery.task_reader import (
 )
 from agentclaw.community.core.task.task_discovery.session_creator import (
     SessionCreator,
-    RelaySessionCreator,
+    HttpSessionCreator,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.notify_sender import (
@@ -213,22 +213,21 @@ class DiscoveryService:
 def create_default_service(
     data_file: str,
     notify_sender: NotifySenderPlugin,
-    relay: SessionCreator,
+    session_creator: SessionCreator,
 ) -> DiscoveryService:
     """使用默认实现创建 DiscoveryService。
 
     Args:
         data_file: SQLite db 文件路径(discovered_tasks 表)。
         notify_sender: 通知发送插件（session 创建成功后投递通知）。
-        relay: EngineRuntimeRelayProtocol 实例（由 DI 注入，
-            用于将 session 创建请求路由到 per-bot engine）。
+        session_creator: SessionCreator 实例（用于在 per-bot engine 上创建 session）。
 
     Returns:
         配置好的 :class:`DiscoveryService`
     """
     return DiscoveryService(
         reader=SqliteTaskReader(data_file),
-        session_creator=relay,
+        session_creator=session_creator,
         notify_sender=notify_sender,
     )
 

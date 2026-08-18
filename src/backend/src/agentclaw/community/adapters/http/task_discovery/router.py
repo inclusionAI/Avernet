@@ -16,15 +16,12 @@ from pathlib import Path
 
 from fastapi import APIRouter, Query
 
-from agentclaw.community.api.engine_runtime_service import (
-    EngineRuntimeRelayProtocol,
-)
 from agentclaw.community.core.task.task_discovery.discovery_service import (
     DiscoveryService,
     create_default_service,
 )
 from agentclaw.community.core.task.task_discovery.session_creator import (
-    RelaySessionCreator,
+    HttpSessionCreator,
 )
 from agentclaw.community.core.task.task_discovery.task_reader import (
     SqliteTaskReader,
@@ -51,14 +48,13 @@ def _resolve_db_path() -> str:
 
 def _build_service(
     notify_sender: NotifySenderPlugin,
-    relay: EngineRuntimeRelayProtocol,
 ) -> DiscoveryService:
-    """构建 DiscoveryService（通过 relay 路由到 per-bot engine）。"""
-    session_creator = RelaySessionCreator(relay)
+    """构建 DiscoveryService（通过 backend connection API 定位 per-bot engine）。"""
+    session_creator = HttpSessionCreator()
     return create_default_service(
         data_file=_resolve_db_path(),
         notify_sender=notify_sender,
-        relay=session_creator,
+        session_creator=session_creator,
     )
 
 
@@ -66,22 +62,21 @@ def _build_service(
 async def discover_tasks(
     user_id: str = Query("default", description="用户 ID"),
     agent_id: str = Query("bot_001", description="Bot/Agent ID"),
-    bot_id: str = Query(..., description="Bot ID（用于 relay 路由）"),
+    bot_id: str = Query(..., description="Bot ID"),
     owner_id: str = Query(..., description="Bot 所有者 ID"),
     notify_sender: NotifySenderPlugin = Injected(NotifySenderPlugin),
-    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> dict:
     """手动触发任务发现流程。
 
     读取 mock 数据中的待确认任务，创建 engine session 并投递通知。
-    通过 relay 路由到 bot 对应的 per-bot engine adapter。
+    通过 backend connection API 定位 per-bot engine 后直连创建 session。
     """
     logger.info(
         "[task_discovery] discover triggered: user_id=%s, agent_id=%s, bot_id=%s",
         user_id, agent_id, bot_id,
     )
     try:
-        service = _build_service(notify_sender=notify_sender, relay=relay)
+        service = _build_service(notify_sender=notify_sender)
         results = await service.discover(
             user_id=user_id,
             agent_id=agent_id,

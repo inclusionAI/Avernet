@@ -1,24 +1,21 @@
-"""SessionCreator — 通过 EngineRuntimeRelay 为发现的任务创建 session。
+"""SessionCreator — 通过 backend connection API 定位 per-bot engine 后直连创建 session。
 
-调用 backend 内部的 ``EngineRuntimeRelayProtocol`` 将 ``POST /api/sessions``
-转发到 bot 对应的 per-bot engine adapter，确保 session 落在正确的
-OpenClaw Gateway 上（而非全局 standalone engine）。
+singlebox 模式下 ``DeviceAdapterTransport`` 绑的是 ``InMemoryDeviceAdapterTransport``
+(mock)，relay 的 ``call()`` 不会做真实 HTTP 转发。因此 session_creator 需要自己：
+  1. 调 backend ``GET /api/bots/{bot_id}/connection`` 拿到 per-bot engine 的 target
+  2. 直连 ``http://{target}/api/sessions`` 创建 session
+
+这样 session 会落在 bot 对应的 per-bot OpenClaw Gateway 上，前端可见。
 
 创建后构建 ``session_url`` 供用户在浏览器中打开确认。
-
-与 cron ``run-single`` 的区别：
-  - ``run-single`` 直接创建 session 并开始执行
-  - 本模块只创建 session（不触发执行），等用户确认后再由 executor 执行
 """
 from __future__ import annotations
 
 import os
 from typing import Any, Protocol
 
-from agentclaw.community.api.engine_runtime_service import (
-    EngineRuntimeRelayProtocol,
-)
-from agentclaw.community.core.engine_runtime.models import BotFacts
+import httpx
+
 from agentclaw.community.core.task.task_discovery.models import (
     DiscoveredTask,
     DiscoverySession,
@@ -27,11 +24,11 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
+#: 默认 backend 地址（singlebox local）
+_DEFAULT_BACKEND_URL = "http://localhost:8888"
+
 #: 默认前端 workbench 端口（singlebox local, frontend.sh:8000）
 _DEFAULT_FRONTEND_PORT = "8000"
-
-#: 个人 bot 的 stage（relay 对个人 bot 忽略 stage）
-_DEFAULT_STAGE = "draft"
 
 
 class SessionCreator(Protocol):
@@ -51,33 +48,62 @@ class SessionCreator(Protocol):
         ...
 
 
-class RelaySessionCreator:
-    """通过 ``EngineRuntimeRelayProtocol`` 创建 session 的实现。
+class HttpSessionCreator:
+    """通过 backend connection API 定位 per-bot engine 后直连创建 session。
 
-    利用 backend 已有的 relay 机制自动路由到 bot 对应的 per-bot engine
-    adapter（如 singlebox 中 BaaS 动态分配的 20010-20099 端口），
-    而不是硬编码全局 engine 地址。
+    1. ``GET {backend_url}/api/bots/{bot_id}/connection`` → 拿到 ``target`` (如 ``127.0.0.1:20010``)
+    2. ``POST http://{target}/api/sessions`` → 在 per-bot engine 上创建 session
     """
 
     def __init__(
         self,
-        relay: EngineRuntimeRelayProtocol,
         *,
+        backend_url: str | None = None,
         frontend_url: str | None = None,
     ):
         """初始化。
 
         Args:
-            relay: 后端 engine runtime relay 协议实例（由 DI 注入）。
+            backend_url: Backend API 地址（用于查 bot connection）。
+                若为 ``None`` 则从环境变量 ``BACKEND_URL`` 读取，
+                默认 ``http://localhost:8888``。
             frontend_url: 前端 workbench 地址（用于构建 session_url）。
                 若为 ``None`` 则从环境变量 ``FRONTEND_URL`` 读取，
                 默认 ``http://localhost:8000``。
         """
-        self._relay = relay
+        self._backend_url = backend_url or os.environ.get(
+            "BACKEND_URL", _DEFAULT_BACKEND_URL,
+        )
         self._frontend_url = frontend_url or os.environ.get(
             "FRONTEND_URL",
             f"http://localhost:{_DEFAULT_FRONTEND_PORT}",
         )
+
+    async def _resolve_engine_target(
+        self, bot_id: str, owner_id: str, user_id: str,
+    ) -> str:
+        """通过 backend connection API 查 per-bot engine 的 target 地址。
+
+        Returns:
+            如 ``127.0.0.1:20010``
+        """
+        async with httpx.AsyncClient(timeout=30.0) as cli:
+            resp = await cli.get(
+                f"{self._backend_url}/api/bots/{bot_id}/connection",
+                headers={"x-user-id": user_id},
+            )
+            resp.raise_for_status()
+            data = (resp.json().get("data") or {})
+            target = data.get("target") or ""
+            if not target:
+                raise RuntimeError(
+                    f"backend connection API returned no target for bot={bot_id}"
+                )
+            logger.info(
+                "[task_discovery] resolved engine target for bot=%s → %s",
+                bot_id, target,
+            )
+            return target
 
     async def create_session(
         self,
@@ -95,7 +121,7 @@ class RelaySessionCreator:
             task: 已发现的待确认任务。
             user_id: 用户 ID（调用者 + 通知接收者）。
             agent_id: Bot/Agent ID。
-            bot_id: Bot ID（用于 relay 路由定位 per-bot engine）。
+            bot_id: Bot ID（用于查 per-bot engine 地址）。
             owner_id: Bot 所有者 ID。
             model: 可选模型覆盖。
 
@@ -103,8 +129,10 @@ class RelaySessionCreator:
             包含 session_id 和 session_url 的 :class:`DiscoverySession`
 
         Raises:
-            Exception: relay 调用失败或 session 创建未返回有效 id 时抛出。
+            httpx.HTTPError: 请求失败时抛出。
         """
+        target = await self._resolve_engine_target(bot_id, owner_id, user_id)
+
         body: dict[str, Any] = {
             "title": task.project_name,
             "user_id": user_id,
@@ -114,40 +142,33 @@ class RelaySessionCreator:
         if model:
             body["model"] = model
 
+        url = f"http://{target}/api/sessions"
         logger.info(
-            "[task_discovery] creating session via relay for task %s "
-            "bot=%s owner=%s",
-            task.task_id,
-            bot_id,
-            owner_id,
+            "[task_discovery] creating session for task %s → %s",
+            task.task_id, url,
         )
 
-        facts: BotFacts = await self._relay.resolve_bot_off_loop(
-            bot_id, owner_id, caller_id=user_id,
-        )
+        async with httpx.AsyncClient(timeout=30.0) as cli:
+            resp = await cli.post(
+                url, json=body, headers={"x-user-id": user_id},
+            )
+            resp.raise_for_status()
 
-        result = await self._relay.call(
-            bot_id=bot_id,
-            owner_id=owner_id,
-            facts=facts,
-            stage=_DEFAULT_STAGE,
-            method="POST",
-            path="/api/sessions",
-            body=body,
-        )
+        data = resp.json()
+        if not data.get("success", False):
+            raise RuntimeError(
+                f"engine session creation failed: {data.get('message', data)}"
+            )
 
-        session_data = result.data if isinstance(result.data, dict) else {}
+        session_data = data.get("data", {})
         session_id = session_data.get("id") or session_data.get("session_id", "")
         if not session_id:
-            raise RuntimeError(
-                f"engine session creation returned no session id: {result.data}"
-            )
+            raise RuntimeError(f"engine response missing session id: {data}")
 
         session_url = self._build_session_url(session_id, agent_id)
         logger.info(
             "[task_discovery] session created: id=%s url=%s",
-            session_id,
-            session_url,
+            session_id, session_url,
         )
 
         return DiscoverySession(
@@ -159,14 +180,7 @@ class RelaySessionCreator:
     def _build_session_url(self, session_id: str, agent_id: str) -> str:
         """构建用户可访问的前端 workbench session URL。
 
-        前端 SessionOnlyPage 路由期望三个 query 参数:
-        - ``bot_uuid``: bot 标识
-        - ``id``: 群组 ID(task_discovery 无 BCS 群,用 agent_id 作为容器标识)
-        - ``session``: engine session ID
-
         格式: ``{frontend_url}/bcn/chat/session?bot_uuid={agent_id}&id={agent_id}&session={session_id}``
-
-        用户点击后会跳到该 bot 的对话界面，看到任务发现的通知消息。
         """
         base = self._frontend_url.rstrip("/")
         return (
@@ -175,4 +189,4 @@ class RelaySessionCreator:
         )
 
 
-__all__ = ["SessionCreator", "RelaySessionCreator"]
+__all__ = ["SessionCreator", "HttpSessionCreator"]
