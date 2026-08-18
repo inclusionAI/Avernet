@@ -371,6 +371,66 @@ class TestHandlePublicApprovalCallback:
         result = svc.handle_public_approval_callback("bot1", "owner1", "puid1", "agree")
         assert result["success"] is False
 
+    # -- bcs_pub: new-version publish short-circuits the legacy ac_bots path --
+
+    def test_bcs_pub_user_skips_ac_bots_and_logs(self):
+        svc, _, bot_repo = self._make_svc_with_bot({
+            "public_approval": {"puid": "puid1", "status": "PROCESSING",
+                                "permission_owner": "owner", "public": "1",
+                                "applicant": "op_user"}
+        })
+        result = svc.handle_public_approval_callback(
+            "bot1", "owner1", "puid1", "agree", bcs_pub="user",
+        )
+        assert result["success"] is True
+        assert result["public"] is None
+        assert "bcs_pub=user" in result["message"]
+        # New-version path must NOT touch ac_bots at all.
+        bot_repo.get_by_id_and_owner.assert_not_called()
+        bot_repo.update_by_owner.assert_not_called()
+
+    def test_bcs_pub_agent_also_new_version(self):
+        svc = _make_service()
+        result = svc.handle_public_approval_callback(
+            "bot1", "owner1", "puid1", "disagree", bcs_pub="agent",
+        )
+        assert result["success"] is True
+        assert result["public"] is None
+        assert "bcs_pub=agent" in result["message"]
+
+    def test_bcs_pub_empty_string_runs_legacy(self):
+        # bcs_pub="" must fall through to the legacy path (here: bot lookup).
+        svc, _, bot_repo = self._make_svc_with_bot({
+            "public_approval": {"puid": "puid1", "status": "PROCESSING",
+                                "permission_owner": "owner", "public": "1",
+                                "applicant": "op_user", "friend_approval": "0"}
+        })
+        with patch.object(svc, "_sync_access_mode_and_relations_or_raise"):
+            svc.handle_public_approval_callback(
+                "bot1", "owner1", "puid1", "agree", bcs_pub="",
+            )
+        bot_repo.get_by_id_and_owner.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# _build_public_approval_context — bcs_pub stamping
+# ---------------------------------------------------------------------------
+
+class TestBuildApprovalContextBcsPub:
+    def test_includes_bcs_pub_when_set(self):
+        svc = _make_service()
+        ctx = svc._build_public_approval_context(
+            _make_bot(), _make_operator(), bcs_pub="user",
+        )
+        assert ctx["bcs_pub"] == "user"
+
+    def test_omits_bcs_pub_when_none(self):
+        svc = _make_service()
+        ctx = svc._build_public_approval_context(
+            _make_bot(), _make_operator(), bcs_pub=None,
+        )
+        assert "bcs_pub" not in ctx
+
 
 # ---------------------------------------------------------------------------
 # handle_friend_request_approval_callback

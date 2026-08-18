@@ -322,7 +322,7 @@ class BotPublicService:
 
         logger.info(f"[_rebuild_auth_relationships] Rebuild done: bot_id={bot_id}, owner_id={owner_id}, total={len(keep_work_nos)}")
 
-    def public_bot(self, bot_id: str, owner_id: str, public: str, permission_owner: str, friend_approval: str, operator: OperatorContext) -> Dict[str, Any]:
+    def public_bot(self, bot_id: str, owner_id: str, public: str, permission_owner: str, friend_approval: str, operator: OperatorContext, bcs_pub: str | None = None) -> Dict[str, Any]:
         """
         公开/取消公开 Bot。
 
@@ -393,12 +393,16 @@ class BotPublicService:
             operator_id=operator_id, operator=operator,
             public=public, permission_owner=permission_owner,
             friend_approval=friend_approval, access_mode=access_mode,
-            callbacks=self._publish_callbacks(),
+            callbacks=self._publish_callbacks(bcs_pub),
         )
 
-    def _publish_callbacks(self) -> BotPublishCallbacks:
+    def _publish_callbacks(self, bcs_pub: str | None = None) -> BotPublishCallbacks:
         """Bind the publish-approval plugin's callback bag to this
         service's bound methods.
+
+        ``bcs_pub`` is threaded into ``build_approval_context`` so the approval
+        ticket's context (and thus the echoed callback) carries the new-version
+        flag without the plugin strategy needing its own parameter.
 
         TODO(architecture): see ``plugins/bot_publish_approval.py``'s
         module docstring for the long-term plan to remove this.
@@ -409,7 +413,9 @@ class BotPublicService:
             update_with_notification=self._update_bot_with_notification,
             handle_approval_callback=self.handle_public_approval_callback,
             refetch_bot=self._bot_repository.get_by_id_and_owner,
-            build_approval_context=self._build_public_approval_context,
+            build_approval_context=lambda bot, operator: self._build_public_approval_context(
+                bot, operator, bcs_pub
+            ),
         )
 
     def _publish_directly(
@@ -467,15 +473,17 @@ class BotPublicService:
         ext["public_approval_history"] = history[-5:]
         logger.info(f"[bot_service.public_bot] Moved existing approval to history: bot_id={bot_id}, old_puid={old_approval.get('puid')}")
 
-    def _build_public_approval_context(self, bot: Dict[str, Any], operator: Optional[OperatorContext] = None) -> Dict[str, str]:
+    def _build_public_approval_context(self, bot: Dict[str, Any], operator: Optional[OperatorContext] = None, bcs_pub: str | None = None) -> Dict[str, str]:
         """构建公开审批上下文信息。
 
         Args:
             bot: Bot 对象字典
             operator: 操作者上下文，用于 owner_name 为空时获取操作人名称
+            bcs_pub: 新版发布标记(如 "user"/"agent")；非空时写入 context，
+                供审批回调分支区分新老逻辑。空则不带(老版发布)。
 
         Returns:
-            包含 publishHint、botSkills、botMcps 的字典
+            包含 publishHint、botSkills、botMcps(及可选 bcs_pub)的字典
         """
         owner_name = bot.get("owner_name") or ""
         if not owner_name and operator:
@@ -545,9 +553,12 @@ class BotPublicService:
         except Exception as e:
             logger.warning(f"[_build_public_approval_context] Failed to get mcp sets for bot {bot_id}: {e}")
             bot_mcps_str = "获取失败"
-        return {"publishHint": publish_hint, "botSkills": bot_skills_str, "botMcps": bot_mcps_str}
+        context = {"publishHint": publish_hint, "botSkills": bot_skills_str, "botMcps": bot_mcps_str}
+        if bcs_pub:
+            context["bcs_pub"] = bcs_pub
+        return context
 
-    def handle_public_approval_callback(self, bot_id: str, owner_id: str, puid: str, last_operate: str) -> Dict[str, Any]:
+    def handle_public_approval_callback(self, bot_id: str, owner_id: str, puid: str, last_operate: str, bcs_pub: str | None = None) -> Dict[str, Any]:
         """
         处理 Bot 公开审批回调。
 
@@ -562,6 +573,25 @@ class BotPublicService:
         Returns:
             操作结果字典 {"success": bool, "public": str|None, "message": str}
         """
+        # New-version publish (bcs_pub non-empty, e.g. "user"/"agent"): the
+        # bot's visibility is delegated to BCS, so this callback must NOT flip
+        # ac_bots.public or run the passport / auth-relationship / device-sync
+        # side effects of the legacy path. For now we only LOG the would-be BCS
+        # status update; the real call is wired once BCS exposes its internal
+        # (no-auth) API, invoked via httpclient — no end-user cookie is involved
+        # on this callback path. bcs_pub's value is preserved for that call.
+        if bcs_pub:
+            logger.info(
+                "[handle_public_approval_callback] bcs_pub=%s: bot_id=%s "
+                "owner_id=%s puid=%s last_operate=%s — BCS status update logged "
+                "(internal API pending)",
+                bcs_pub, bot_id, owner_id, puid, last_operate,
+            )
+            return {
+                "success": True,
+                "public": None,
+                "message": f"bcs_pub={bcs_pub} callback; BCS update logged",
+            }
         bot = self._bot_repository.get_by_id_and_owner(bot_id, owner_id)
         if not bot:
             logger.error(f"[bot_service.handle_public_approval_callback] Bot not found: {bot_id}")

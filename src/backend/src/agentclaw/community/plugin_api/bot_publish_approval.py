@@ -80,8 +80,9 @@ class BotPublishCallbacks:
     update_with_notification: Callable[..., Optional[Dict[str, Any]]]
 
     # Run the public-approval callback (used by prod strategy's
-    # COMPLETED short-circuit). Returns the callback result dict.
-    handle_approval_callback: Callable[[str, str, str, str], Dict[str, Any]]
+    # COMPLETED short-circuit). Returns the callback result dict. Accepts an
+    # optional ``bcs_pub`` kwarg so the short-circuit can carry the flag through.
+    handle_approval_callback: Callable[..., Dict[str, Any]]
 
     # Re-fetch a bot after a downstream mutation (e.g. after the
     # COMPLETED short-circuit). Returns the bot dict or None.

@@ -97,11 +97,13 @@ async def approval_callback(
     logger.info("[回调] 收到表单数据: %s", data)
 
     # 转换为统一格式处理
+    # bcs_pub: 流程平台把创建工单时 context 里的 bcs_pub 原样回传；兼容驼峰/下划线。
     callback_data = {
         "global_unique_id": data.get("globalUniqueId"),
         "last_operate": data.get("lastOperate"),
         "owner_id": data.get("ownerId"),
         "bot_id": data.get("botId"),
+        "bcs_pub": data.get("bcsPub") or data.get("bcs_pub") or "",
     }
 
     return handle_approval_callback(callback_data, bot_public_service)
