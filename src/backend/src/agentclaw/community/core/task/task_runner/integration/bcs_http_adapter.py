@@ -69,7 +69,7 @@ def _map_status(resp: httpx.Response) -> None:
         raise BcsServerError(f"{resp.status_code} {resp.text}")
 
 
-class BcsHttpAdapter:
+class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing + REST); exercised by singlebox/corp acceptance / 联调, not CI LOCAL line coverage
     def __init__(self, token: BcsTokenProvider, *, http_client: httpx.AsyncClient | None = None) -> None:
         self._t = token
         self._client = http_client or httpx.AsyncClient(base_url=token.base_url)
