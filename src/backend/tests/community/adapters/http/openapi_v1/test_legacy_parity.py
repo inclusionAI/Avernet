@@ -106,12 +106,13 @@ def test_every_legacy_route_names_a_replacement_that_exists() -> None:
 
 
 def test_the_expected_number_of_addresses_are_retiring() -> None:
-    """Thirty-nine re-addressed operations, plus the two engine-config ones.
+    """Thirty-nine re-addressed operations, the two engine-config ones, and
+    the retiring GET spelling of the auth-status poll (now a POST).
 
     Pinned so that adding a legacy address, or losing one, is a number somebody
     has to look at rather than a silent change to what this API still answers.
     """
-    assert len(LEGACY_ROUTES) == 41
+    assert len(LEGACY_ROUTES) == 42
 
 
 def test_a_retiring_body_keeps_the_component_name_it_published() -> None:

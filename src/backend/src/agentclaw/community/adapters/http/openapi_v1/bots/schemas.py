@@ -208,6 +208,58 @@ class BotAuthPending(BaseModel):
     )
 
 
+class BotAuthStatusPoll(BaseModel):
+    """Poll-authorization request body: the attributes the bot was requested with.
+
+    On the 202 create flow the bot is only actually created by this poll, so
+    re-supply the attributes the create request carried. An omitted field falls
+    back to the same default create would have applied, so omitting one the
+    create named can produce a bot that contradicts the original request —
+    always echo back what was sent. Every restriction create enforces is
+    re-applied to the echoed values.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "bot_name": "research-assistant",
+                "bot_desc": "Summarizes weekly industry news.",
+                "engine": "openclaw",
+                "cluster_name": "ACRA",
+                "bot_type": "personal",
+            }
+        },
+    )
+
+    # Each field mirrors its BotCreate counterpart but is optional: this body
+    # echoes an earlier create rather than stating a new request, and "omitted"
+    # has to stay expressible so completion can apply the create-time defaults.
+    engine: str | None = Field(
+        default=None,
+        description="Echo of the engine the bot was requested with. Required "
+        "in practice: an omitted value falls back to the deployment default.",
+    )
+    cluster_name: ClusterName | None = Field(
+        default=None,
+        description="Echo of the cluster the bot was requested with; validated "
+        "against the engine exactly as on create.",
+    )
+    bot_name: str | None = Field(
+        default=None,
+        description="Echo of the name the bot was requested with.",
+    )
+    bot_desc: str | None = Field(
+        default=None,
+        description="Echo of the description the bot was requested with.",
+    )
+    bot_type: BotType | None = Field(
+        default=None,
+        description="Echo of the bot type the bot was requested with; "
+        "defaults to 'personal' when omitted.",
+    )
+
+
 class BotAuthStatus(BaseModel):
     """Authorization status of a pending bot creation."""
 
@@ -240,14 +292,14 @@ class BotAuthStatus(BaseModel):
         "(e.g. 'REJECTED', 'EXPIRED') is terminal and is answered as a 400 "
         "with the state kept in data.status."
     )
-    # Reserved, not wired: the completion flow's result carries only the
-    # status and the bot, so nothing populates this yet. Documented as always
-    # null rather than promising a note the server never sends; wiring the
-    # provider's message through is a behavior change for a separate PR.
+    # One producer today: the POST poll sets it when the authorization service
+    # has no status for the bot yet (see poll_bot_auth_status). The provider's
+    # own message is still not wired through — that remains a separate change.
     message: str | None = Field(
         default=None,
-        description="Reserved for a human-readable note from the "
-        "authorization service; currently always null.",
+        description="Human-readable note accompanying the status — for "
+        "example, that the Passport is not ready yet while status is "
+        "'PENDING'. Null when there is nothing to add.",
     )
     bot: Bot | None = Field(
         default=None,

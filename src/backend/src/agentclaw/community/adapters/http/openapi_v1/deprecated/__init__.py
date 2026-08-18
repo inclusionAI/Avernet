@@ -8,6 +8,11 @@ the address (the routines create's body bot, the skills group's
 ``owner_entity_id``, the approvals write's ``session_key``) this package owns
 the old shape and translates.
 
+One entry retires a **method** rather than an address: the auth-status poll
+became a POST at the same path (it creates the bot, so it was never a read),
+and the GET spelling — query parameters and all — survives here the same way
+(``auth_status.py``).
+
 Nothing here is removed by the change that created it. Removal is a later,
 per-address decision made when the access log shows no traffic, and it is meant
 to be cheap: delete a module, delete its line in :func:`build_deprecated_router`,
@@ -35,6 +40,7 @@ from agentclaw.community.adapters.http.openapi_v1.admission import ADMISSION
 
 from ._shim import LEGACY_ROUTES
 from . import approvals as _approvals
+from . import auth_status as _auth_status
 from . import bots as _bots
 from . import engine_runtime as _engine_runtime
 from . import resources as _resources
@@ -48,6 +54,7 @@ ENGINE_RUNTIME_GROUPS = _engine_runtime.ENGINE_RUNTIME + [_approvals.router]
 #: the bot off the path *or* the query string, so the resources and routines
 #: legacy addresses are covered by it exactly as the new ones are.
 GRANT_CHECKED_GROUPS = _engine_runtime.GRANT_CHECKED + [
+    _auth_status.router,
     _bots.router,
     _resources.router,
     _routines.router,

@@ -324,7 +324,7 @@
                 "type": "null"
               }
             ],
-            "description": "Reserved for a human-readable note from the authorization service; currently always null.",
+            "description": "Human-readable note accompanying the status — for example, that the Passport is not ready yet while status is 'PENDING'. Null when there is nothing to add.",
             "title": "Message"
           },
           "status": {
@@ -337,6 +337,89 @@
           "status"
         ],
         "title": "BotAuthStatus",
+        "type": "object"
+      },
+      "BotAuthStatusPoll": {
+        "additionalProperties": false,
+        "description": "Poll-authorization request body: the attributes the bot was requested with.\n\nOn the 202 create flow the bot is only actually created by this poll, so\nre-supply the attributes the create request carried. An omitted field falls\nback to the same default create would have applied, so omitting one the\ncreate named can produce a bot that contradicts the original request —\nalways echo back what was sent. Every restriction create enforces is\nre-applied to the echoed values.",
+        "example": {
+          "bot_desc": "Summarizes weekly industry news.",
+          "bot_name": "research-assistant",
+          "bot_type": "personal",
+          "cluster_name": "ACRA",
+          "engine": "openclaw"
+        },
+        "properties": {
+          "bot_desc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Echo of the description the bot was requested with.",
+            "title": "Bot Desc"
+          },
+          "bot_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Echo of the name the bot was requested with.",
+            "title": "Bot Name"
+          },
+          "bot_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "personal",
+                  "service"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Echo of the bot type the bot was requested with; defaults to 'personal' when omitted.",
+            "title": "Bot Type"
+          },
+          "cluster_name": {
+            "anyOf": [
+              {
+                "enum": [
+                  "ACRA",
+                  "ANDC"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Echo of the cluster the bot was requested with; validated against the engine exactly as on create.",
+            "title": "Cluster Name"
+          },
+          "engine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Echo of the engine the bot was requested with. Required in practice: an omitted value falls back to the deployment default.",
+            "title": "Engine"
+          }
+        },
+        "title": "BotAuthStatusPoll",
         "type": "object"
       },
       "BotCreate": {
@@ -17447,7 +17530,8 @@
     },
     "/openapi/v1/bots/{bot_id}/auth-status": {
       "get": {
-        "description": "Poll authorization for a pending creation; the bot is created on ISSUED.\n\nOn the 202 create flow the bot is only actually created here, so the\ncaller must re-supply the attributes it created with — the optional query\nparameters mirror the create body and are forwarded to completion. Omit\nthem and the bot is created with defaults that contradict what was\nrequested, so always echo back engine, cluster_name, bot_name, bot_desc\nand bot_type when polling.\n\nEvery restriction create enforces is re-applied to the echoed values:\nthe same engine registry check, the same engine/cluster pairing, and the\nsame personal/service restriction on bot_type.",
+        "deprecated": true,
+        "description": "Poll authorization for a pending creation; the bot is created on ISSUED.\n\nOn the 202 create flow the bot is only actually created here, so the\ncaller must re-supply the attributes it created with — the optional query\nparameters mirror the create body and are forwarded to completion. Omit\nthem and the bot is created with defaults that contradict what was\nrequested, so always echo back engine, cluster_name, bot_name, bot_desc\nand bot_type when polling.\n\nEvery restriction create enforces is re-applied to the echoed values:\nthe same engine registry check, the same engine/cluster pairing, and the\nsame personal/service restriction on bot_type.\n\nDeprecated: use POST /openapi/v1/bots/{bot_id}/auth-status instead.",
         "operationId": "get_bot_auth_status_openapi_v1_bots__bot_id__auth_status_get",
         "parameters": [
           {
@@ -17708,6 +17792,184 @@
           }
         },
         "summary": "Get Bot Auth Status",
+        "tags": [
+          "bots (deprecated)"
+        ]
+      },
+      "post": {
+        "description": "Poll authorization for a pending creation; the bot is created on ISSUED.\n\nA POST because this operation is not a read: on the 202 create flow the\nbot is only actually created here, once authorization is granted. The\ncaller must re-supply the attributes it created with — the body fields\nmirror the create body and are forwarded to completion. Omit them and the\nbot is created with defaults that contradict what was requested, so\nalways echo back engine, cluster_name, bot_name, bot_desc and bot_type\nwhen polling.\n\nEvery restriction create enforces is re-applied to the echoed values:\nthe same engine registry check, the same engine/cluster pairing, and the\nsame personal/service restriction on bot_type.\n\nWhile the authorization service has no status for the bot yet — the\nPassport is not ready — the poll answers PENDING with a message saying\nso, rather than an error: keep polling.",
+        "operationId": "poll_bot_auth_status_openapi_v1_bots__bot_id__auth_status_post",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotAuthStatusPoll"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_BotAuthStatus_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "data": {
+                    "status": "REJECTED"
+                  },
+                  "message": "Authorization did not complete",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_BotAuthStatus_"
+                }
+              }
+            },
+            "description": "Authorization did not complete; `data.status` carries the terminal state (e.g. REJECTED, EXPIRED)"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Poll Bot Auth Status",
         "tags": [
           "bots"
         ]

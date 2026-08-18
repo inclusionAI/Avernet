@@ -63,6 +63,7 @@ from agentclaw.community.api.skill_set_service_factory import (
 from agentclaw.community.core.bot_management.create_flow import (
     AuthPending,
     AuthStatus,
+    AuthStatusUnavailableError,
     BotCreateSpec,
     complete_bot_authorization,
     create_bot_with_authorization,
@@ -97,6 +98,7 @@ from .schemas import (
     Bot,
     BotAuthPending,
     BotAuthStatus,
+    BotAuthStatusPoll,
     BotCreate,
     BotStatus,
     BotType,
@@ -611,98 +613,62 @@ async def restart_bot(
     return envelope(_to_bot(bot), request)
 
 
-@router.get(
-    "/{bot_id}/auth-status",
-    response_model=Envelope[BotAuthStatus],
-    responses={
-        **USER_SCOPED_403,
-        # This route's 400 is the one documented exception to the surface-wide
-        # ErrorEnvelope (whose ``data`` is null): a terminal authorization state
-        # is reported as a failure, but the state itself is the actionable part,
-        # so it stays in ``data``. Declared here so generated clients
-        # deserialize it against the model it actually returns.
-        400: {
-            "model": Envelope[BotAuthStatus],
-            "description": "Authorization did not complete; `data.status` "
-            "carries the terminal state (e.g. REJECTED, EXPIRED)",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "code": 400000,
-                        "message": "Authorization did not complete",
-                        "data": {
-                            "status": "REJECTED",
-                            "message": None,
-                            "bot": None,
-                        },
-                        "request_id": EXAMPLE_TRACE_ID,
-                    }
+#: Response table shared by the auth-status poll and its retiring GET spelling
+#: (``deprecated/auth_status.py``) — one declaration, so the two cannot drift.
+#:
+#: The 400 is the one documented exception to the surface-wide ErrorEnvelope
+#: (whose ``data`` is null): a terminal authorization state is reported as a
+#: failure, but the state itself is the actionable part, so it stays in
+#: ``data``. Declared here so generated clients deserialize it against the
+#: model it actually returns.
+AUTH_STATUS_RESPONSES = {
+    **USER_SCOPED_403,
+    400: {
+        "model": Envelope[BotAuthStatus],
+        "description": "Authorization did not complete; `data.status` "
+        "carries the terminal state (e.g. REJECTED, EXPIRED)",
+        "content": {
+            "application/json": {
+                "example": {
+                    "code": 400000,
+                    "message": "Authorization did not complete",
+                    "data": {
+                        "status": "REJECTED",
+                        "message": None,
+                        "bot": None,
+                    },
+                    "request_id": EXAMPLE_TRACE_ID,
                 }
-            },
+            }
         },
     },
-    dependencies=_GRANT_CHECKED,
-)
-@envelope_errors
-async def get_bot_auth_status(
-    bot_id: BotIdPath,
+}
+
+
+def _complete_auth_status(
+    *,
+    bot_id: str,
     request: Request,
-    owner_id: UserIdDep,
-    engine: Annotated[
-        str | None,
-        Query(
-            description="Echo of the engine the bot was requested with. "
-            "Required in practice on the 202 flow: creation completes here, "
-            "and an omitted value falls back to the deployment default."
-        ),
-    ] = None,
-    # Enum, not a bare str: validate_engine_cluster accepts only ACRA/ANDC,
-    # so a plain string would let a generated client compile
-    # ``cluster_name=foo`` that the server always rejects — the same
-    # contract/behaviour gap as F29/F35/F41. Create already models it this way.
-    cluster_name: Annotated[
-        ClusterName | None,
-        Query(
-            description="Echo of the cluster the bot was requested with; "
-            "validated against the engine exactly as on create."
-        ),
-    ] = None,
-    bot_name: Annotated[
-        str | None,
-        Query(description="Echo of the name the bot was requested with."),
-    ] = None,
-    bot_desc: Annotated[
-        str | None,
-        Query(description="Echo of the description the bot was requested with."),
-    ] = None,
-    bot_type: Annotated[
-        BotType | None,
-        Query(
-            description="Echo of the bot type the bot was requested with; "
-            "defaults to 'personal' when omitted."
-        ),
-    ] = None,
-    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    passport_plugin: PassportPlugin = Injected(PassportPlugin),
-    auth_rel_plugin: AuthRelationshipPlugin = Injected(AuthRelationshipPlugin),
-) -> Envelope[BotAuthStatus]:
-    """Poll authorization for a pending creation; the bot is created on ISSUED.
+    owner_id: str,
+    engine: str | None,
+    cluster_name: ClusterName | None,
+    bot_name: str | None,
+    bot_desc: str | None,
+    bot_type: BotType | None,
+    bot_service: BotServiceProtocol,
+    passport_plugin: PassportPlugin,
+    auth_rel_plugin: AuthRelationshipPlugin,
+) -> Envelope[BotAuthStatus] | JSONResponse:
+    """Validate the echoed attributes, poll Passport, and map the outcome.
 
-    On the 202 create flow the bot is only actually created here, so the
-    caller must re-supply the attributes it created with — the optional query
-    parameters mirror the create body and are forwarded to completion. Omit
-    them and the bot is created with defaults that contradict what was
-    requested, so always echo back engine, cluster_name, bot_name, bot_desc
-    and bot_type when polling.
-
-    Every restriction create enforces is re-applied to the echoed values:
-    the same engine registry check, the same engine/cluster pairing, and the
-    same personal/service restriction on bot_type.
+    The one implementation behind both spellings of the poll — the POST (body)
+    and the retiring GET (query parameters). The two must answer identically,
+    and sharing the body is what makes that a property rather than a promise.
     """
     # Validate against the engine completion will actually use, not against the
-    # query param: omitting ``engine`` does not mean "no engine", it means the
-    # default one. Checking only when ``engine`` was supplied let
-    # ``?cluster_name=ANDC`` alone through, and the bot was then provisioned on
+    # supplied value: omitting ``engine`` does not mean "no engine", it means
+    # the default one. Checking only when ``engine`` was supplied let
+    # ``cluster_name=ANDC`` alone through, and the bot was then provisioned on
     # the ACRA default — a success response contradicting the request.
     effective_engine = engine if engine is not None else DEFAULT_ENGINE_TYPE
     # Check the engine completion will actually use, supplied or defaulted. A
@@ -740,6 +706,72 @@ async def get_bot_auth_status(
 
     bot = _to_bot(result.bot) if result.bot else None
     return envelope(BotAuthStatus(status=result.status, bot=bot), request)
+
+
+@router.post(
+    "/{bot_id}/auth-status",
+    response_model=Envelope[BotAuthStatus],
+    responses=AUTH_STATUS_RESPONSES,
+    dependencies=_GRANT_CHECKED,
+)
+@envelope_errors
+async def poll_bot_auth_status(
+    bot_id: BotIdPath,
+    body: BotAuthStatusPoll,
+    request: Request,
+    owner_id: UserIdDep,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    passport_plugin: PassportPlugin = Injected(PassportPlugin),
+    auth_rel_plugin: AuthRelationshipPlugin = Injected(AuthRelationshipPlugin),
+) -> Envelope[BotAuthStatus]:
+    """Poll authorization for a pending creation; the bot is created on ISSUED.
+
+    A POST because this operation is not a read: on the 202 create flow the
+    bot is only actually created here, once authorization is granted. The
+    caller must re-supply the attributes it created with — the body fields
+    mirror the create body and are forwarded to completion. Omit them and the
+    bot is created with defaults that contradict what was requested, so
+    always echo back engine, cluster_name, bot_name, bot_desc and bot_type
+    when polling.
+
+    Every restriction create enforces is re-applied to the echoed values:
+    the same engine registry check, the same engine/cluster pairing, and the
+    same personal/service restriction on bot_type.
+
+    While the authorization service has no status for the bot yet — the
+    Passport is not ready — the poll answers PENDING with a message saying
+    so, rather than an error: keep polling.
+    """
+    try:
+        return _complete_auth_status(
+            bot_id=bot_id,
+            request=request,
+            owner_id=owner_id,
+            engine=body.engine,
+            cluster_name=body.cluster_name,
+            bot_name=body.bot_name,
+            bot_desc=body.bot_desc,
+            bot_type=body.bot_type,
+            bot_service=bot_service,
+            passport_plugin=passport_plugin,
+            auth_rel_plugin=auth_rel_plugin,
+        )
+    except AuthStatusUnavailableError:
+        # The passport service answered with no status at all — typically the
+        # apply is still propagating and the Passport is not ready yet. On this
+        # spelling that is a wait, not a fault: answering 502 (as the retiring
+        # GET still does, its contract being frozen) made every caller's first
+        # poll after a 202 look like an outage. PENDING keeps the documented
+        # poll loop intact — PENDING/ISSUED are the two non-terminal states —
+        # and the message says what the wait is.
+        return envelope(
+            BotAuthStatus(
+                status=AuthStatus.PENDING,
+                message="Passport is not ready yet; keep polling.",
+                bot=None,
+            ),
+            request,
+        )
 
 
 @router.get(
