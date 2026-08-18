@@ -757,8 +757,9 @@ function validateFileUrl(attachment: Attachment): void {
   } catch {
     throw new InboundFileError('FILE_INVALID_URL', 'The attached file has an invalid download URL.', attachment.attachment_id);
   }
+  // COSEC: Restrict schemes and reject userinfo; fetchRemoteMedia guards the initial URL and redirects against SSRF.
   if (
-    parsed.protocol !== 'https:'
+    ![ 'http:', 'https:' ].includes(parsed.protocol)
     || parsed.username !== ''
     || parsed.password !== ''
   ) {
