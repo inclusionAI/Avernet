@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from agentclaw.community.core.workspace.engine_sandbox import EngineBuildPlan
+from agentclaw.community.core.workspace.engines.aicoding import _AICODING_BUILD_PLAN
 
 
 def _minimal_plan(**overrides) -> EngineBuildPlan:
@@ -34,6 +35,7 @@ class TestEngineBuildPlanExtraSync:
 
         assert plan.extra_sync_source_relpath == ""
         assert plan.extra_sync_target_relpath == ""
+        assert plan.extra_include_files == []
 
     def test_extra_sync_fields_are_assignable(self):
         plan = _minimal_plan(
@@ -49,3 +51,9 @@ class TestEngineBuildPlanExtraSync:
 
         with pytest.raises(Exception):
             plan.extra_sync_source_relpath = "mutated"  # type: ignore[misc]
+
+
+@pytest.mark.unit
+def test_aicoding_build_plan_extra_includes_cron_tasks_only():
+    assert _AICODING_BUILD_PLAN.extra_include_files == ["sessions/cron-tasks.json"]
+    assert "sessions" in _AICODING_BUILD_PLAN.rsync_excludes
