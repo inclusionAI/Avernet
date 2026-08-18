@@ -1,14 +1,22 @@
 """TaskDispatcher 派发编排壳(零 case 知识)+ 内置策略库(first-match-wins)。
 
-对齐 plan §3.3 + §3.4 + 派发文档 ue1ie0g3supwo2uf。零参构造(持 graph 只读 config),内置默认策略池
-[DirectDispatchStrategy, SearchBasedDispatchStrategy];策略库(first-match-wins by priority,
-类 SQL optimizer,据 execution_config 动态匹配:config 有 bot→direct 跳搜推;否则 search 兜底)。
+对齐 plan.md §3.3 + §3.4。构造期注入策略池(``pool=``),内置默认
+[DirectDispatchStrategy, SearchBasedDispatchStrategy];``set_strategies`` 仅供测试覆写。
 不持 runner(HIT_MULTI_BOTS 拉群归编排核+runner);不写图、不起 run。
-引擎自带能力,不开放自定义;corp 经 ocb 仓覆写 ``_build_*`` 替换策略版本(待后续 PR 落 strategies.py)。
 """
 from __future__ import annotations
 
-from agentclaw.community.core.task.domain.models import TaskNode
+import logging
+
+from agentclaw.community.core.task.domain.models import TaskExecutionGraph, TaskNode
+from agentclaw.community.core.task.task_dispatch.strategies import (
+    DirectDispatchStrategy,
+    DispatchStrategy,
+    SearchBasedDispatchStrategy,
+    SearchOutcome,
+)
+
+logger = logging.getLogger("task.dispatcher")
 
 
 class TaskDispatcher:
@@ -16,22 +24,64 @@ class TaskDispatcher:
 
     不写图、不起 run(编排核落库+起 run)。BBS 节点(run_mode 已 "bbs")退化为直接维持(不走策略)。
     HIT_MULTI_BOTS 时填 run_mode="coop_group"+extend_props["pending_group_formation"],assignee 留空
-    (拉群归编排核调 runner.form_coop_group 后填 assignee)。不持 runner。策略契约 + SearchResult/
-    GroupFormation/SearchOutcome + 默认 stub 类定义待后续 PR 落 task_dispatch/strategies.py。
+    (拉群归编排核调 runner.form_coop_group 后填 assignee)。
     """
 
-    def __init__(self, graph) -> None:
-        """graph: TaskGraphService(读图级 execution_config 匹配策略用,不写)。
-        零参构造,内置默认策略池 [DirectDispatchStrategy, SearchBasedDispatchStrategy]
-        (首批壳,策略池接线待后续 PR 落 strategies.py)。不持 runner。"""
+    def __init__(self, graph, *, pool: list[DispatchStrategy] | None = None) -> None:
+        """graph: TaskGraphService(读图级 execution_config 匹配策略用,不写);
+        pool: 策略池(构造期注入;省略=内置默认 [DirectDispatch, SearchBased])。"""
         self._graph = graph
-        self._strategies = None  # list[DispatchStrategy](首批壳,待后续 PR)
+        self._strategies: list[DispatchStrategy] = list(pool) if pool is not None else [
+            DirectDispatchStrategy(),
+            SearchBasedDispatchStrategy(),
+        ]
+
+    def set_strategies(self, strategies: list[DispatchStrategy]) -> None:
+        """(测试覆写用)替换策略池。prod 经构造器 ``pool=`` 注入。"""
+        self._strategies = list(strategies)
 
     async def dispatch(self, toDoTaskList: list[TaskNode]) -> list[TaskNode]:
         """入参=待派发节点;返回=填充执行者信息后的 list[TaskNode](对齐派发文档签名)。
-        协程化:catalog 搜推在 corp 是耗时 IO,锁内 await。
         不写图、不起 run;per node first-match 策略 await apply SearchResult → 填 node.run_info:
         HIT_SINGLE→single_bot/bot_id;HIT_GROUP→coop_group/group_id;
-        HIT_MULTI_BOTS→coop_group/pending_group_formation(assignee 留空,编排核拉群填);
-        MISS→不填+标 miss_events。BBS 节点(run_mode 已 "bbs")→ 退化直接维持。"""
-        raise NotImplementedError
+        HIT_MULTI_BOTS→coop_group/pending_group_formation(assignee 留空,编排核拉群填);MISS→不填+标 miss_events。
+        BBS 节点(run_mode 已 "bbs")→ 退化直接维持。协程化:catalog 搜推是耗时 IO,await 不阻塞编排核。"""
+        graph = self._graph.query_task_dashboard(
+            toDoTaskList[0].task_id if toDoTaskList else ""
+        ) if toDoTaskList else None
+        import asyncio as _aio
+        # v4:并发搜推(gather,无并发限流;catalog IO 耗时,串行是瓶颈)。BBS 节点跳过策略直接维持。
+        async def _one(node: "TaskNode"):
+            # 容错:搜推异常(无响应/推理失败/端口错)不崩整批,留 PENDING 标 dispatch_error 交 harness 重试搜推
+            try:
+                if node.run_info.run_mode == "bbs":
+                    return node  # BBS 节点退化维持
+                result = await self._select_and_apply(node, graph)
+                if result.outcome == SearchOutcome.HIT_SINGLE:
+                    node.run_info.run_mode = "single_bot"
+                    node.run_info.assignee = result.bot_id
+                elif result.outcome == SearchOutcome.HIT_GROUP:
+                    node.run_info.run_mode = "coop_group"
+                    node.run_info.assignee = result.group_id
+                elif result.outcome == SearchOutcome.HIT_MULTI_BOTS:
+                    node.run_info.run_mode = "coop_group"
+                    node.run_info.extend_props["pending_group_formation"] = result.group_formation
+                else:  # MISS
+                    node.run_info.extend_props["miss_events"] = [result.miss_reason or "no_bot"]
+                return node
+            except Exception as ex:  # noqa: BLE001  搜推异常→吞掉,留 PENDING 交 harness 按超时重试
+                logger.warning("[dispatch] node=%s 搜推异常→留 PENDING 交 harness: %s", node.node_id, ex)
+                node.run_info.extend_props["dispatch_error"] = f"dispatch_exception:{type(ex).__name__}"
+                return node
+        out = list(await _aio.gather(*[_one(n) for n in toDoTaskList]))
+        return out
+
+    async def _select_and_apply(self, node: TaskNode, graph: TaskExecutionGraph | None):
+        """first-match-wins 选策略 await apply。graph 为 None 时走兜底 MISS。"""
+        import agentclaw.community.core.task.task_dispatch.strategies as _s
+        if graph is None:
+            return _s.SearchResult(outcome=_s.SearchOutcome.MISS, miss_reason="no_graph")
+        for strategy in sorted(self._strategies, key=lambda r: r.priority):
+            if await strategy.matches(node, graph):
+                return await strategy.apply(node, graph)
+        return _s.SearchResult(outcome=_s.SearchOutcome.MISS, miss_reason="no_strategy")
