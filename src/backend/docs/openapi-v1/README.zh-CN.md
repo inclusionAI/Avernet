@@ -689,7 +689,9 @@ messages
 
 **没有删除任何东西。** Agent 在前的寻址之前这套面上应答的每一个地址，现在仍然应答 ——
 形态不变、参数不变、位置不变，包括本规则要消除的那个查询串里的 `bot_id` 和那个请求体里的
-`bot_id`。共四十一个操作，由 `openapi_v1/deprecated/` 提供。
+`bot_id`。共四十二个操作，由 `openapi_v1/deprecated/` 提供 —— Agent 在前寻址搬迁的四十
+一个，外加一个退役的是**方法**而非地址：auth-status 轮询在同一路径上改为 POST（ISSUED
+时它实际创建 Bot，本来就不是读操作），带查询串参数的 GET 拼法以同样的方式保留。
 
 它们不是别名。待退役地址仍以**旧的**参数名、在**旧的**位置上发布参数，然后自行转译，因此
 尚未迁移的客户端可以原样继续工作。`tests/…/openapi_v1/test_legacy_parity.py` 会把每个待退
@@ -736,7 +738,8 @@ POST /openapi/v1/bots/skills/upload?bot_id=b-1   →  POST /openapi/v1/bots/b-1/
 | PUT | `/openapi/v1/bots/{bot_id}` | 更新（`engine` 不可改） | `Envelope[Bot]` |
 | DELETE | `/openapi/v1/bots/{bot_id}` | 删除 | `Envelope[Deleted]` |
 | POST | `/openapi/v1/bots/{bot_id}/restart` | 重启（重新置备设备） | `Envelope[Bot]` |
-| GET | `/openapi/v1/bots/{bot_id}/auth-status` | 轮询 Passport 授权；ISSUED 时完成创建 | `Envelope[BotAuthStatus]` |
+| POST | `/openapi/v1/bots/{bot_id}/auth-status` | 轮询 Passport 授权（创建属性放在请求体里回传）；ISSUED 时完成创建 —— 是写操作，因此用 POST | `Envelope[BotAuthStatus]` |
+| GET | `/openapi/v1/bots/{bot_id}/auth-status` | 轮询的旧拼法（属性在查询串里）；已弃用，请改用 POST | `Envelope[BotAuthStatus]` |
 | GET | `/openapi/v1/bots/{bot_id}/status` | 运行时/设备就绪状态 | `Envelope[BotStatus]` |
 | GET | `/openapi/v1/bots/{bot_id}/passport` | 获取 Agent Passport | `Envelope[Passport]` |
 | GET | `/openapi/v1/bots/{bot_id}/engine/config` | 读取引擎配置（自由格式 JSON） | `Envelope[dict]` |
