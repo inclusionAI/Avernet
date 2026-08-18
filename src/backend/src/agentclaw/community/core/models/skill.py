@@ -94,14 +94,30 @@ class Skill(Base):
     category_path = Column(String(256), nullable=True, comment="类目完整路径(ac_skill_category.code)")
     package_url = Column(String(1028), nullable=True, comment="上传到oss上的可访问的url")
     zip_url = Column(String(1028), nullable=True, comment="用户上传的url")
+    # Additive Space Skill identity fields.  The existing name/description/
+    # status/version columns remain Legacy projections; their write paths stay
+    # untouched while the Space Skill feature flag is off.
+    draft_target_version = Column(Integer, nullable=True)
+    draft_status = Column(String(16), nullable=True)
+    retired_at = Column(DateTime, nullable=True)
+    retired_by = Column(String(128), nullable=True)
+    source_repo_url = Column(String(2048), nullable=True)
+    source_branch = Column(String(512), nullable=True)
+    source_subdir = Column(String(1024), nullable=True)
+    source_commit_sha = Column(String(64), nullable=True)
     # Deliberately absent from to_dict(): tenant is persistence metadata, not
     # part of the established internal Skills response contract.
     avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
 
-    # uix_skill_link_name_env_version was dropped with link_name, and prod has
-    # no replacement unique key on these fields. Keep SQLite create_all aligned
-    # with that production DDL rather than inventing a source-only constraint.
-    __table_args__ = {"extend_existing": True}
+    # ``link_name`` remains derived and has no stored uniqueness rule.  The
+    # additive F01 migration instead makes the non-null stable Skill UUID
+    # unique within its tenant and environment.
+    __table_args__ = (
+        UniqueConstraint(
+            "avernet_tenant", "env", "skill_uuid", name="uk_skill_uuid"
+        ),
+        {"extend_existing": True},
+    )
 
     skill_sets = relationship("SkillSetSkill", back_populates="skill", cascade="all, delete-orphan")
 
@@ -156,7 +172,13 @@ register_avernet_tenant_guard(Skill)
 class SkillSetSkill(Base):
     """Association table between SkillSet and Skill."""
     __tablename__ = "ac_skill_set_skill"
-    __table_args__ = {"extend_existing": True}
+    __table_args__ = (
+        UniqueConstraint(
+            "avernet_tenant", "env", "skill_set_id", "skill_id",
+            name="uk_skill_set_skill",
+        ),
+        {"extend_existing": True},
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     skill_set_id = Column(Integer, ForeignKey("ac_skill_set.id"), nullable=False, index=True)

@@ -1450,6 +1450,21 @@ class SkillSetRepository(
             )
             if skill_set is None or skill is None:
                 return False
+            # The F01 uniqueness migration makes an existing relation the
+            # successful, idempotent result required by the new control-plane
+            # contract.  Checking after both tenant-guarded parent lookups
+            # preserves the old cross-tenant false result.
+            if (
+                db.query(self.SkillSetSkill)
+                .filter(
+                    self.SkillSetSkill.skill_set_id == int(skill_set_id),
+                    self.SkillSetSkill.skill_id == int(skill_id),
+                    self.SkillSetSkill.env == get_current_env(),
+                )
+                .first()
+                is not None
+            ):
+                return True
             db.add(
                 self.SkillSetSkill(
                     skill_set_id=int(skill_set_id),
