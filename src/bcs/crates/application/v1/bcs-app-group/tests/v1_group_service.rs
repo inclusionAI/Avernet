@@ -377,6 +377,12 @@ impl ChannelBindingCleanupPort for FailingChannelBindingCleanup {
             "channel binding cleanup failed".to_string(),
         ))
     }
+
+    async fn delete_bindings_for_bot(&self, _bot_id: &str) -> ServiceResult<u64> {
+        Err(ServiceError::InternalError(
+            "channel binding cleanup failed".to_string(),
+        ))
+    }
 }
 
 #[derive(Default)]
