@@ -417,22 +417,29 @@ impl SessionServiceImpl {
         Ok(session)
     }
 
-    /// VSN7B: Mirror `bcs-app-group`'s `ensure_collaboration_eligible`. A
-    /// caller may add a Bot to a session only when that Bot is
-    /// collaboration-eligible for the caller:
-    /// - the target must be a Bot Actor that is not Hidden; AND
-    /// - the caller IS the target bot; OR the target is `public`; OR (for a
-    ///   Human caller) the caller owns the target via `created_by` or a
-    ///   creator relation edge; OR the caller and target are friends.
+    /// VSN7B: A caller may add a Bot to a session only when that Bot is
+    /// collaboration-eligible from the caller OR from at least one of the
+    /// parent Group's management anchors (driver, originator). A Hidden bot is
+    /// rejected outright regardless of which anchor could sponsor it.
     ///
-    /// Called for the session driver, every participant in `create`, and in
-    /// `add_participant` so a manager cannot pull a hidden / protected Bot
-    /// into a session without the required relation.
+    /// Eligibility from an anchor actor (a Human `human_{id}` or a Bot uuid) is:
+    /// - the target must be a Bot Actor that is not Hidden; AND
+    /// - the anchor IS the target bot; OR the target is `public`; OR (for a
+    ///   Human anchor) the anchor owns the target via `created_by` or a creator
+    ///   relation edge; OR the anchor and target are friends.
+    ///
+    /// This widens the sibling `bcs-app-group::ensure_collaboration_eligible`
+    /// (caller-only) check for the session-add case: a group's existing
+    /// driver/originator may legitimately sponsor a participant that the caller
+    /// itself cannot reach (e.g. a protected Bot that is the driver's friend
+    /// but not the caller's), so a manager cannot be blocked from pulling a Bot
+    /// the group already collaborates with.
     async fn ensure_collaboration_eligible(
         &self,
         principal: &Principal,
         bot_uuid: &str,
         field_name: &str,
+        group: &DomainGroup,
     ) -> Result<(), ApplicationError> {
         let bot = self.load_bot(bot_uuid).await?;
         if bot.actor_kind != ActorKind::Bot {
@@ -446,37 +453,69 @@ impl SessionServiceImpl {
                 "Bot '{bot_uuid}' is hidden and cannot collaborate"
             )));
         }
-        let principal_actor_id = principal.actor_id();
-        if principal_actor_id == bot_uuid || bot.capabilities.visibility == "public" {
+        if bot.capabilities.visibility == "public" {
             return Ok(());
         }
 
-        if let Principal::Human(human) = principal {
-            if bot.created_by.as_deref() == Some(human.subject.id.as_str()) {
-                return Ok(());
-            }
-            let creator_edge = self
-                .relation
-                .get_edge(&principal_actor_id, bot_uuid, &self.config.relation_env)
-                .await
-                .map_err(map_service_error)?;
-            if creator_edge.is_some_and(|edge| edge.is_creator) {
-                return Ok(());
-            }
+        // Anchor set: the calling Principal plus the parent Group's driver and
+        // originator. Dedup so a Human originator that also equals the caller,
+        // or a driver that equals the originator, is not consulted twice.
+        let mut anchors = Vec::new();
+        anchors.push(principal.actor_id());
+        anchors.push(group.driver_bot.clone());
+        if let Some(originator) = group.originator.as_deref() {
+            anchors.push(originator.to_string());
         }
-
-        if self
-            .friends
-            .try_are_friends(&principal_actor_id, bot_uuid)
-            .await
-            .map_err(map_service_error)?
-        {
-            return Ok(());
+        let mut seen = HashSet::new();
+        for anchor in anchors {
+            if !seen.insert(anchor.clone()) {
+                continue;
+            }
+            if self.anchor_reaches_bot(&anchor, &bot).await? {
+                return Ok(());
+            }
         }
 
         Err(ApplicationError::forbidden(format!(
-            "Bot '{bot_uuid}' is not collaboration-eligible for this Principal"
+            "Bot '{bot_uuid}' is not collaboration-eligible for this Principal or the Group driver/originator"
         )))
+    }
+
+    /// Whether `bot` is collaboration-reachable from the anchor actor
+    /// `anchor_id`. An anchor is a `human_{id}` actor id or a Bot uuid; only a
+    /// Human anchor may sponsor via `created_by` or a creator relation edge
+    /// (ownership semantics), while any anchor may sponsor via self-identity or
+    /// direct friendship. The public/hidden gates are evaluated by the caller.
+    async fn anchor_reaches_bot(
+        &self,
+        anchor_id: &str,
+        bot: &RegisteredBot,
+    ) -> Result<bool, ApplicationError> {
+        if anchor_id == bot.bot_uuid {
+            return Ok(true);
+        }
+        if let Some(staff_no) = anchor_id.strip_prefix("human_") {
+            if bot.created_by.as_deref() == Some(staff_no) {
+                return Ok(true);
+            }
+            let creator_edge = self
+                .relation
+                .get_edge(anchor_id, &bot.bot_uuid, &self.config.relation_env)
+                .await
+                .map_err(map_service_error)?;
+            if creator_edge.is_some_and(|edge| edge.is_creator) {
+                return Ok(true);
+            }
+        }
+        if self
+            .friends
+            .try_are_friends(anchor_id, &bot.bot_uuid)
+            .await
+            .map_err(map_service_error)?
+        {
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     // ── projections ────────────────────────────────────────────────────
@@ -812,9 +851,10 @@ impl SessionService for SessionServiceImpl {
         let (session, group) = self
             .load_session_for_manage(&principal, &command.session_id)
             .await?;
-        // VSN7B: the added Bot must be collaboration-eligible for the caller
-        // (visible + friend/creator relation), not merely registered.
-        self.ensure_collaboration_eligible(&principal, &command.bot_uuid, "bot_uuid")
+        // VSN7B: the added Bot must be collaboration-eligible from the caller
+        // OR from the parent Group's driver/originator (visible + friend/creator
+        // relation), not merely registered.
+        self.ensure_collaboration_eligible(&principal, &command.bot_uuid, "bot_uuid", &group)
             .await?;
         // VfhG3: explicit 409 if the target Bot is already a session participant.
         // The legacy memory repo silently skipped duplicates (idempotent); the V1
