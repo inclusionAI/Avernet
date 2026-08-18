@@ -64,7 +64,7 @@ frontend rewrites to the engine.
 
 ---
 
-## The public surface — 16 endpoints
+## The public surface — 19 endpoints
 
 All bot-scoped under `/openapi/v1/bots/{bot_id}/<component>/…`, all returning
 the `Envelope[T]` / `Page[T]` shapes from `openapi_v1/contracts.py`.
@@ -82,12 +82,12 @@ the `Envelope[T]` / `Page[T]` shapes from `openapi_v1/contracts.py`.
 > the current addresses; the component-first ones still answer, marked
 > `deprecated`, until the sunset (see **Retiring addresses** in `README.md`).
 
-### sessions (7) — engine `/api/sessions`
+### sessions (10) — engine `/api/sessions` + `/api/session-favorites`
 
 > **An operator console, device-wide by contract.** _Amended 2026-08-09
 > (`specs/2026-08-09-openapi-v1-access-expansion/`); original 2026-07-30
 > ruling served personal bots only, PR #880 added the service draft._ All
-> seven routes serve the addressed bot's **operators** — its owner and its
+> ten routes serve the addressed bot's **operators** — its owner and its
 > member-level collaborators, adjudicated before any device call; anyone else
 > gets the masked 404 — at the stage the request names (`?stage=`, draft by
 > default; verify/online while live). The engine accepts `user_id`, logs it,
@@ -111,10 +111,13 @@ the `Envelope[T]` / `Page[T]` shapes from `openapi_v1/contracts.py`.
 | GET | `…/{bot_id}/sessions/{session_id}/messages` | `GET …/messages` | paged → `Envelope[MessagePage]` |
 | DELETE | `…/{bot_id}/sessions/{session_id}/messages` | `DELETE …/messages` | clear history → `Envelope[Deleted]` |
 | PATCH | `…/{bot_id}/sessions/{session_id}` | `POST …/{session_id}/update` | **divergence:** partial update is `PATCH` on the resource publicly, not a `/update` sub-path. Body is `title`/`model` only — see below |
+| GET | `…/{bot_id}/sessions/favorites` | `GET /api/session-favorites` | acting user's favorites, paged → `Envelope[SessionPage]` |
+| PUT | `…/{bot_id}/sessions/{session_id}/favorite` | `PUT /api/session-favorites/{encoded_session_id}` | idempotently favorite → `Envelope[SessionFavorite]` |
+| DELETE | `…/{bot_id}/sessions/{session_id}/favorite` | `DELETE /api/session-favorites/{encoded_session_id}` | idempotently unfavorite → `Envelope[SessionFavorite]` |
 
 Two things about this group are not the shape a reader would assume:
 
-- **`total` is a lower bound, not a count.** Both paged routes answer with
+- **`total` is a lower bound, not a count.** All three paged routes answer with
   `SessionPage` / `MessagePage` — `Page` subclasses whose `total` says *at least
   this many exist*, exact once you reach a page shorter than `page_size`. The
   engine reports no count for either collection, and the only way to compute one
@@ -290,7 +293,7 @@ Rules this endpoint must hold:
 | `api/bot` | `/api/bot` | 1 | — | ⛔ **C2** | `POST /config` — backend `bot_public` sync path |
 | `api/bash` | `/api/bash` | 1 | — | ⛔ **C2** | backend exposes `POST /api/v1/devices/exec_shell`; arbitrary shell on a tenant device is not a v1 public contract regardless |
 | `api/work_item` | `/api/work-items` | 3 | — | ⛔ **C2** | backend-mediated |
-| `api/session_favorites` | `/api/session-favorites` | 3 | — | 🟡 **deferred** | the engine's own doc calls it frontend-direct via the engine proxy, but it is **absent from the proxypass prefix list** and has zero references in `src/frontend`. Likely corp-frontend-only. Additive later; excluded from v1. _Decided 2026-07-30._ |
+| `api/session_favorites` | `/api/session-favorites` | 3 | — | ✅ **wrapped** | Published as session subresources; callers use the raw `session_id` returned by the sessions list and Backend owns upstream path encoding. _Added 2026-08-18._ |
 | `api/routers/openclaw_http` | `/api/openclaw` | 3 | — | 🟡 **deferred** | `test-connection` / `disconnect` / `config`. Listed in the proxypass array as `'api/openclaw'` — **no leading slash**, so `url.startsWith()` never matches `/api/openclaw/...` and the entry is dead as written (`requestConfig.ts:191`). Also openclaw-specific gateway debug tooling. _Decided 2026-07-30._ |
 | `api/default_config` | `/api/openclaw` | 1 | — | 🟡 **deferred** | same dead prefix entry |
 | `api/zero_check` | `/api/openclaw/zero-check` | 2 | — | 🟡 **deferred** | same dead prefix entry |

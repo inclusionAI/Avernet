@@ -24,6 +24,9 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
 **[`engine-surface.zh-CN.md`](engine-surface.zh-CN.md)**
 （[English](engine-surface.md)）。本 README 仍是唯一的状态看板；清单在那个文件里。
 
+前端接入会话收藏能力时，请参考
+**[`session-favorites.zh-CN.md`](session-favorites.zh-CN.md)**。
+
 ---
 
 ## 全局视角（请先读这一节）
@@ -970,7 +973,7 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 > 不写数据 —— 但在本面上任何 socket 路由开始接触数据之前，这是第一件要修的事：在默认
 > 租户下执行按租户收敛的读取是数据隔离故障，而不只是少了一行日志。
 
-### ⬜ 未分配 · Track C —— engine 运行时（16 个端点）
+### ⬜ 未分配 · Track C —— engine 运行时（19 个端点）
 这不是一个 Track B 类别 —— 它们包装的是 Bot 设备上的 **engine adapter**，
 而不是某个后端服务。逐端点清单、每个端点对应的 engine 路由，以及那约 72 条
 *不*包装的 engine 路由的裁定，都在
@@ -978,7 +981,7 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 
 | 组 | 端点数 | 公共路径 |
 |---|---|---|
-| sessions | 7 | `/openapi/v1/bots/{bot_id}/sessions…` —— 拥有者/协作者运维 |
+| sessions | 10 | `/openapi/v1/bots/{bot_id}/sessions…` —— 拥有者/协作者运维，含收藏 |
 | engine | 3 | `/openapi/v1/bots/{bot_id}/engine/{status,capabilities,available}` |
 | models | 2 | `/openapi/v1/bots/{bot_id}/models`、`…/models/{model_id}` |
 | approvals | 3 | `/openapi/v1/bots/{bot_id}/approvals/mode`（GET/PUT）、`…/modes` |

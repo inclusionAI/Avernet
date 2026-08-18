@@ -58,7 +58,7 @@ C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypa
 
 ---
 
-## 公共面 —— 16 个端点
+## 公共面 —— 19 个端点
 
 全部按 bot 收敛在 `/openapi/v1/bots/{bot_id}/<component>/…` 之下，全部返回
 `openapi_v1/contracts.py` 的 `Envelope[T]` / `Page[T]` 形状。
@@ -74,11 +74,11 @@ C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypa
 > 前的旧地址仍会应答、标记为 `deprecated`，直至日落（见 `README.zh-CN.md` 的
 > **待退役地址**）。
 
-### sessions（7）—— engine `/api/sessions`
+### sessions（10）—— engine `/api/sessions` + `/api/session-favorites`
 
 > **一个运维台，整设备可见是明文契约。** _2026-08-09 修订
 > （`specs/2026-08-09-openapi-v1-access-expansion/`）；2026-07-30 的原始裁定仅服务
-> personal bot，PR #880 增加了 service 草稿。_ 七条路由服务所指 Bot 的**运维者** ——
+> personal bot，PR #880 增加了 service 草稿。_ 十条路由服务所指 Bot 的**运维者** ——
 > 拥有者与 member 级及以上协作者，在任何设备调用之前裁定；其他调用者得到掩蔽
 > 404 —— 指向请求指定的阶段（`?stage=`，默认 draft；verify/online 存活时可用）。
 > engine 接受 `user_id`、记了日志、然后**丢弃**它 —— `sessions_list()` 根本没有
@@ -98,10 +98,13 @@ C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypa
 | GET | `…/{bot_id}/sessions/{session_id}/messages` | `GET …/messages` | 分页 → `Envelope[MessagePage]` |
 | DELETE | `…/{bot_id}/sessions/{session_id}/messages` | `DELETE …/messages` | 清空历史 → `Envelope[Deleted]` |
 | PATCH | `…/{bot_id}/sessions/{session_id}` | `POST …/{session_id}/update` | **差异：** 公共面上部分更新是资源上的 `PATCH`，不是 `/update` 子路径。请求体只有 `title`/`model`，见下 |
+| GET | `…/{bot_id}/sessions/favorites` | `GET /api/session-favorites` | 当前用户的收藏会话，分页 → `Envelope[SessionPage]` |
+| PUT | `…/{bot_id}/sessions/{session_id}/favorite` | `PUT /api/session-favorites/{encoded_session_id}` | 幂等收藏 → `Envelope[SessionFavorite]` |
+| DELETE | `…/{bot_id}/sessions/{session_id}/favorite` | `DELETE /api/session-favorites/{encoded_session_id}` | 幂等取消收藏 → `Envelope[SessionFavorite]` |
 
 这一组有两点不是读者会默认的形状：
 
-- **`total` 是下界，不是计数。** 两条分页路由返回 `SessionPage` / `MessagePage`
+- **`total` 是下界，不是计数。** 三条分页路由返回 `SessionPage` / `MessagePage`
   —— `Page` 的子类，其 `total` 语义是*至少有这么多*，当你翻到短于 `page_size`
   的那一页时才是精确值。engine 对这两个集合都不报计数，而唯一能算出计数的办法
   是读完每一条记录：对 sessions 而言那意味着每个 session 一次 `chat.history`
@@ -234,7 +237,7 @@ socket 也是干净的。
 | `api/bot` | `/api/bot` | 1 | — | ⛔ **C2** | `POST /config` —— 后端 `bot_public` 同步路径 |
 | `api/bash` | `/api/bash` | 1 | — | ⛔ **C2** | 后端已有 `POST /api/v1/devices/exec_shell`；无论如何，在租户设备上执行任意 shell 都不该是 v1 的公共契约 |
 | `api/work_item` | `/api/work-items` | 3 | — | ⛔ **C2** | 经由后端 |
-| `api/session_favorites` | `/api/session-favorites` | 3 | — | 🟡 **延后** | engine 自己的文档说它由前端经 Engine Proxy 直连，但它**不在 proxypass 前缀列表里**，且在 `src/frontend` 中零引用。大概率只有 corp 前端在用。后续可增量加入；v1 排除。_2026-07-30 决定。_ |
+| `api/session_favorites` | `/api/session-favorites` | 3 | — | ✅ **包装** | 作为 sessions 子资源公开；公共调用方使用 sessions 列表返回的原始 `session_id`，Backend 负责上游路径编码。_2026-08-18 加入。_ |
 | `api/routers/openclaw_http` | `/api/openclaw` | 3 | — | 🟡 **延后** | `test-connection` / `disconnect` / `config`。它在 proxypass 数组里写作 `'api/openclaw'` —— **没有前导斜杠**，因此 `url.startsWith()` 永远匹配不到 `/api/openclaw/...`，该条目按现状是死的（`requestConfig.ts:191`）。而且是 openclaw 专有的网关调试工具 |
 | `api/default_config` | `/api/openclaw` | 1 | — | 🟡 **延后** | 同一个失效前缀条目 |
 | `api/zero_check` | `/api/openclaw/zero-check` | 2 | — | 🟡 **延后** | 同一个失效前缀条目 |

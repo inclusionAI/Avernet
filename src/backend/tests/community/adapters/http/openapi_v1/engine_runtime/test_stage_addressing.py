@@ -297,10 +297,10 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
             # parameter existed.
             assert not params["owner_id"].get("required", False), path
 
-    # 17 current operations. Sixteen also answer at their former addresses
-    # while callers migrate; engine restart was introduced after bot-first
-    # addressing and therefore has no legacy alias.
-    assert len(engine_runtime) == 33
+    # The original 16 operations also answer at their former addresses while
+    # callers migrate. The three newly added favorite operations have only
+    # their bot-first address, so there are 19 current + 16 retiring operations.
+    assert len(engine_runtime) == 35
     assert sorted(carrying_stage) == sorted(
         set(engine_runtime) | _STAGE_ADDRESSED_ELSEWHERE
     ), (
@@ -324,7 +324,7 @@ def test_the_stage_enum_publishes_exactly_the_three_runtimes():
 
 
 def test_neither_parameter_is_ever_a_body_field_or_a_path_segment():
-    """Scoped to the sixteen operations' request bodies and addresses — a
+    """Scoped to the engine-runtime operations' request bodies and addresses — a
     future *response* model elsewhere on the surface may legitimately expose
     an ``owner_id`` or ``stage`` field; the placement rule is about where
     these two request parameters travel."""
