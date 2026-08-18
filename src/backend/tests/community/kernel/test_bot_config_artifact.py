@@ -81,9 +81,9 @@ def test_local_entry_carries_its_launch_instruction_flat() -> None:
     }
 
 
-def test_from_dict_reflattens_a_pre_v5_nested_stdio_entry() -> None:
-    """A pinned schema_version-4 artifact (nested ``{"stdio": {...}}``) still
-    loads — its launch instruction lands on the flat fields."""
+def test_from_dict_reflattens_a_legacy_nested_stdio_entry() -> None:
+    """An artifact pinned before the flat local form (nested ``{"stdio":
+    {...}}``) still loads — its launch instruction lands on the flat fields."""
     restored = BotConfigArtifact.from_dict(
         {
             "schema_version": 4,
