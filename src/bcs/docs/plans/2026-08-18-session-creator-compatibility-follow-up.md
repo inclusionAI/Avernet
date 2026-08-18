@@ -374,4 +374,3 @@ scripts/ci/pre_push.sh
 ```
 
 If this broader gate cannot run because of unrelated environment or dependency constraints, record the exact failure and retain the focused passing evidence above.
-
