@@ -583,6 +583,7 @@ async def get_bots_ceiling(
     "/all",
     response_model=Envelope[Page[BotInventoryItem]],
     responses=USER_SCOPED_403,
+    dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
 async def list_inventory(
@@ -667,7 +668,7 @@ def _require_personal_cloud_bot(bot: dict[str, Any]) -> None:
     "/{bot_id}/activate",
     response_model=Envelope[BotActivateResult],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
 )
 @envelope_errors
 async def activate_dormant_bot(
@@ -1157,7 +1158,7 @@ async def delete_bot_startup_script(
     "/{bot_id}/data-init",
     response_model=Envelope[DataInitResult],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
 )
 @envelope_errors
 async def trigger_bot_data_init(
