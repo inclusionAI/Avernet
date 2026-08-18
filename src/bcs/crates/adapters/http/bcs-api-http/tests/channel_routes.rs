@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Request, StatusCode};
 use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
-use bcs_domain::{BindingStatus, BindingTarget, ChannelBinding, ChannelType};
+use bcs_domain::{BindingStatus, BindingTarget, ChannelBinding, ChannelType, ConversationSessionMap};
 use bcs_service_api::application::channel::{
     ChannelInboundError, ChannelService, ChannelUseCaseError, CreateBindingCommand, InboundMessage,
     OutboundMessage,
@@ -365,6 +365,14 @@ impl ChannelService for FakeChannel {
         _: BindingTarget,
         _: Option<ChannelType>,
     ) -> Result<Vec<ChannelBinding>, ChannelUseCaseError> {
+        Ok(Vec::new())
+    }
+
+    async fn list_conversations_by_session(
+        &self,
+        _: &str,
+        _: Option<ChannelType>,
+    ) -> Result<Vec<ConversationSessionMap>, ChannelUseCaseError> {
         Ok(Vec::new())
     }
 
