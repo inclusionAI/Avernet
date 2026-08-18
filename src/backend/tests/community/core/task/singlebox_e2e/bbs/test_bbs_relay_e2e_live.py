@@ -72,7 +72,7 @@ _USER_ID = os.environ.get("SINGLEBOX_USER_ID", "146836")
 _OWNER_BOT_NAME = "task-owner-bot"  # 对齐 test_task_integration_e2e.py:owner 做 planning+search
 _JY_BOT_NAME = "金庸"
 
-SKILLS_DIR = Path(__file__).parent / "skills"
+SKILLS_DIR = Path(__file__).parent / "../skills"
 _ARCH_SKILL = str(SKILLS_DIR / "arch-analysis")
 # bbs-relay-pickup skill 落在 spec 目录下(非 src/backend/skills);
 # test 文件在 <repo>/src/backend/tests/community/core/task/singlebox_e2e/ ,parents[5] = <repo>/src/backend

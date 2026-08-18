@@ -59,7 +59,7 @@ _TIMEOUT = float(os.environ.get("SINGLEBOX_TASK_E2E_TIMEOUT", "1500"))
 _OWNER_BOT_NAME = "task-owner-arch-bot"
 _JY_BOT_NAME = "金庸"
 
-SKILLS_DIR = Path(__file__).parent / "skills"
+SKILLS_DIR = Path(__file__).parent / "../skills"
 _ARCH_PLANNING_SKILL = str(SKILLS_DIR / "planning-arch")
 _SEARCH_SKILL = str(SKILLS_DIR / "search")
 _ARCH_SKILL = str(SKILLS_DIR / "arch-analysis")
