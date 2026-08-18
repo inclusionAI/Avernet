@@ -23,6 +23,26 @@
         "title": "AddSpaceMemberRequest",
         "type": "object"
       },
+      "CallerIdentityReady": {
+        "description": "Confirmation that Caller identity preparation completed successfully.",
+        "properties": {
+          "bot_id": {"title": "Bot Id", "type": "string"},
+          "ready": {"default": true, "title": "Ready", "type": "boolean"},
+          "stage": {"enum": ["draft", "verify", "online"], "title": "CallerIdentityStage", "type": "string"}
+        },
+        "required": ["bot_id", "stage"],
+        "title": "CallerIdentityReady",
+        "type": "object"
+      },
+      "IamToken": {
+        "description": "The current user's opaque IAM token for first-party WebSocket auth.",
+        "properties": {
+          "iam_token": {"description": "Opaque IAM credential for the first-party chat WebSocket.", "title": "Iam Token", "type": "string"}
+        },
+        "required": ["iam_token"],
+        "title": "IamToken",
+        "type": "object"
+      },
       "ApprovalMode": {
         "description": "How much the bot may do without asking first.",
         "enum": [
@@ -11958,6 +11978,50 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/openapi/v1/token/iam": {
+      "get": {
+        "description": "Return the signed-in user's IAM token for the first-party chat client.",
+        "operationId": "get_iam_token_openapi_v1_token_iam_get",
+        "parameters": [{"description": "The end user this request acts for; a person must name themselves.", "in": "query", "name": "user_id", "required": true, "schema": {"minLength": 1, "title": "User Id", "type": "string"}}],
+        "responses": {
+          "200": {"content": {"application/json": {"schema": {"properties": {"code": {"type": "integer"}, "message": {"type": "string"}, "data": {"anyOf": [{"$ref": "#/components/schemas/IamToken"}, {"type": "null"}]}, "request_id": {"type": "string"}}, "required": ["code", "message", "data", "request_id"], "title": "Envelope[IamToken]", "type": "object"}}}, "description": "Successful Response"},
+          "400": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}, "description": "Invalid request"},
+          "401": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}, "description": "Missing, invalid, or unavailable user credentials"},
+          "403": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}, "description": "The requested user does not match the authenticated user"},
+          "422": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}, "description": "Request failed validation"},
+          "500": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}, "description": "Internal error"},
+          "502": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}, "description": "Upstream service error"}
+        },
+        "summary": "Get Iam Token",
+        "tags": ["Token"]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/caller-identity": {
+      "post": {
+        "description": "Prepare the caller credential required by this bot's chat runtime.",
+        "operationId": "prepare_caller_identity_openapi_v1_bots__bot_id__caller_identity_post",
+        "parameters": [
+          {"description": "The bot this operation addresses.", "in": "path", "name": "bot_id", "required": true, "schema": {"title": "Bot Id", "type": "string"}},
+          {"description": "The end user this request acts for; a person must name themselves.", "in": "query", "name": "user_id", "required": true, "schema": {"minLength": 1, "title": "User Id", "type": "string"}},
+          {"in": "query", "name": "stage", "required": false, "schema": {"default": "draft", "enum": ["draft", "verify", "online"], "title": "Stage", "type": "string"}},
+          {"in": "query", "name": "publish_id", "required": false, "schema": {"anyOf": [{"type": "integer"}, {"type": "null"}], "title": "Publish Id"}},
+          {"in": "query", "name": "entity_id", "required": false, "schema": {"anyOf": [{"type": "string"}, {"type": "null"}], "title": "Entity Id"}}
+        ],
+        "responses": {
+          "200": {"content": {"application/json": {"schema": {"properties": {"code": {"type": "integer"}, "message": {"type": "string"}, "data": {"anyOf": [{"$ref": "#/components/schemas/CallerIdentityReady"}, {"type": "null"}]}, "request_id": {"type": "string"}}, "required": ["code", "message", "data", "request_id"], "title": "Envelope[CallerIdentityReady]", "type": "object"}}}, "description": "Successful Response"},
+          "400": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}, "description": "Invalid request"},
+          "401": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}, "description": "Missing, invalid, or unavailable user credentials"},
+          "403": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}, "description": "The requested user does not match the authenticated user"},
+          "404": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}, "description": "Not found"},
+          "409": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}, "description": "Conflicts with current state"},
+          "422": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}, "description": "Request failed validation"},
+          "500": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}, "description": "Internal error"},
+          "502": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}, "description": "Upstream service error"}
+        },
+        "summary": "Prepare Caller Identity",
+        "tags": ["Caller identity"]
+      }
+    },
     "/openapi/v1/bots": {
       "get": {
         "description": "List the caller's bots, narrowed to the caller's authorized scope.\n\nHuman callers see their own bots. Application callers see only owned bots\nexplicitly granted by the delegating user. The grant restriction is passed\nto the service before pagination.\n\nAn application granted nothing gets an empty page, not an error: naming no\nbot, this operation has nothing to mask. The complete view of delegated\nbots, including bots the user does not own, is the authorized-bots listing.\n\nThe keyword, engine, and status filters are applied before pagination.\nFor richer inventory fields such as deployment mode and business space,\nuse GET /openapi/v1/bots/all.",

@@ -86,6 +86,18 @@ def test_shipped_config_loads() -> None:
     assert spaces.schema.location == "schemas/bots.openapi.json"
 
 
+def test_shipped_config_routes_token_verbatim_to_backend() -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    dm = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
+
+    token = dm.http_domain_for("/openapi/v1/token/iam")
+
+    assert token is not None
+    assert token.server.name == "backend"
+    assert token.upstream_path("/openapi/v1/token/iam") == "/openapi/v1/token/iam"
+    assert token.schema.location == "schemas/bots.openapi.json"
+
+
 def test_shipped_config_routes_collaboration_verbatim_to_bcs() -> None:
     raw = yaml.safe_load(_CONFIG.read_text())
     dm = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
