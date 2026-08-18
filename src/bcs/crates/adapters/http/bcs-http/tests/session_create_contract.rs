@@ -13,7 +13,7 @@ use axum::{
 };
 use bcs_auth_api::{AuthError, UserIdentityInfo};
 use bcs_bot::BotCore;
-use bcs_group::GroupStore;
+use bcs_group::{GroupStore, MemoryGroupRepo};
 use bcs_http::{
     router::build_router,
     state::{HttpAppState, HttpUserIdentity, UserIdentityPort},
@@ -29,7 +29,8 @@ use bcs_service_api::{
     StateMachineDeliveryCorrelation, StateMachineRun, StateMachineRunStatus, StateMachineRunView,
 };
 use bcs_services_container::Services;
-use bcs_session::SessionLaunchApplication;
+use bcs_session::{SessionLaunchApplication, SessionManagementServiceImpl};
+use bcs_session_store::MemorySessionRepo;
 use serde_json::Value;
 use tempfile::TempDir;
 use tokio::sync::Mutex;
@@ -373,6 +374,144 @@ async fn state_machine_group_session_creation_starts_run_with_created_session() 
             display_name: Some("Test".to_string()),
         })
     );
+}
+
+#[tokio::test]
+async fn legacy_private_human_creator_membership_matches_the_pre_pr_contract() {
+    let temp_dir = TempDir::new().unwrap();
+    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
+    registry
+        .register(
+            "driver-bot".to_string(),
+            BotCapabilities {
+                name: Some("Driver".to_string()),
+                visibility: "public".to_string(),
+                ..BotCapabilities::default()
+            },
+        )
+        .await
+        .unwrap();
+    registry
+        .save_created_by("driver-bot", "alice", true)
+        .await
+        .unwrap();
+
+    let group_store = Arc::new(GroupStore::new());
+    for group_id in ["group-explicit", "group-inferred"] {
+        group_store
+            .upsert(Group::new(
+                group_id,
+                "driver-bot",
+                vec![Participant::bot("driver-bot", ParticipantRole::Driver)],
+            ))
+            .await
+            .unwrap();
+    }
+
+    let session_repo = Arc::new(MemorySessionRepo::new());
+    let sessions = Arc::new(SessionManagementServiceImpl::new(
+        session_repo,
+        Arc::new(MemoryGroupRepo::new()),
+    ));
+
+    let mut services = Services::noop();
+    services.registry = registry.clone();
+    services.group = group_store.clone();
+    services.session_management = sessions.clone();
+    services.session_launch = Arc::new(SessionLaunchApplication::new(
+        registry,
+        group_store.clone(),
+        sessions.clone(),
+        services.collaboration_runtime.clone(),
+        services.system_message.clone(),
+    ));
+
+    let identity_port: Arc<dyn UserIdentityPort + Send + Sync> = Arc::new(StaticHumanIdentity {
+        staff_no: Some("alice".to_string()),
+    });
+    let app = build_router(HttpAppState::new(services).with_user_identity(identity_port));
+
+    let explicit_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/groups/group-explicit/sessions")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({"created_by": "human_alice"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(explicit_response.status(), StatusCode::CREATED);
+    let explicit_body: Value = serde_json::from_slice(
+        &to_bytes(explicit_response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(explicit_body["created_by"], "human_alice");
+    let explicit_human = explicit_body["participants"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|participant| participant["bot_uuid"] == "human_alice")
+        .expect("explicit Human creator must be a Session participant");
+    assert_eq!(explicit_human["role"], "driver");
+    assert_eq!(explicit_human["actor_kind"], "human");
+    assert_eq!(explicit_human["mode"], "present");
+    assert_eq!(explicit_body["participant_join_seq"]["human_alice"], 0);
+
+    let explicit_session_id = explicit_body["session_id"].as_str().unwrap();
+    let stored_explicit = sessions
+        .get(explicit_session_id)
+        .await
+        .unwrap()
+        .expect("explicit Session must be persisted");
+    assert_eq!(
+        stored_explicit
+            .participant_join_seq
+            .as_ref()
+            .and_then(|join_seq| join_seq.get("human_alice")),
+        Some(&Value::from(0)),
+    );
+
+    let inferred_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/groups/group-inferred/sessions")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::json!({}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(inferred_response.status(), StatusCode::CREATED);
+    let inferred_body: Value = serde_json::from_slice(
+        &to_bytes(inferred_response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(inferred_body["created_by"], "human_alice");
+    assert!(
+        inferred_body["participants"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|participant| participant["bot_uuid"] != "human_alice"),
+        "inferred Human creator must not become a private Session participant",
+    );
+    assert!(inferred_body["participant_join_seq"]["human_alice"].is_null());
+
+    for group_id in ["group-explicit", "group-inferred"] {
+        let group = group_store.get(group_id).await.unwrap();
+        assert_eq!(group.participants.len(), 1);
+        assert_eq!(group.participants[0].bot_uuid, "driver-bot");
+    }
 }
 
 // ----- helpers -----
