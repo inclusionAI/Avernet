@@ -3,15 +3,15 @@
 参考 ``CronModule`` 的模式：
 - 绑定 ``TaskDiscoveryLifecycle`` 为 singleton
 - Lifecycle 参与者由 ``discover_lifecycle_participants`` 自动发现
-- ``TaskDiscoveryLifecycle.__init__`` 通过 @inject 注入 BotService
+- ``TaskDiscoveryLifecycle.__init__`` 通过 @inject 注入 BotService、
+  NotifySenderPlugin 和 EngineRuntimeRelayProtocol
+- relay 自动路由到 per-bot engine adapter，无需硬编码 engine 地址
 - 在 backend startup 后自动触发定时调度，为所有用户 bot 执行任务发现
 
 配置项 (通过环境变量):
   TASK_DISCOVERY_AUTO_START        是否启用自动调度 (true/false, 默认 true)
   TASK_DISCOVERY_SCHEDULE_HOUR     调度小时 (默认 11)
   TASK_DISCOVERY_SCHEDULE_MINUTE   调度分钟 (默认 0)
-  TASK_DISCOVERY_ENGINE_URL        Engine API 地址 (默认 http://localhost:20003)
-  TASK_DISCOVERY_FRONTEND_URL      Engine 前端地址 (默认同 engine URL)
   TASK_DISCOVERY_DATA_FILE         任务数据文件路径
 """
 from __future__ import annotations

@@ -34,7 +34,7 @@ from agentclaw.community.core.task.task_discovery.task_reader import (
 )
 from agentclaw.community.core.task.task_discovery.session_creator import (
     SessionCreator,
-    EngineSessionCreator,
+    RelaySessionCreator,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.notify_sender import (
@@ -87,6 +87,8 @@ class DiscoveryService:
         *,
         user_id: str,
         agent_id: str,
+        bot_id: str,
+        owner_id: str,
         model: str | None = None,
     ) -> list[DiscoveryResult]:
         """执行发现流程：读取任务 → 创建 session → 投递通知。
@@ -94,6 +96,8 @@ class DiscoveryService:
         Args:
             user_id: 用户 ID（通知接收者）。
             agent_id: Bot/Agent ID。
+            bot_id: Bot ID（用于 relay 路由 per-bot engine）。
+            owner_id: Bot 所有者 ID。
             model: 可选模型覆盖。
 
         Returns:
@@ -107,7 +111,12 @@ class DiscoveryService:
         results: list[DiscoveryResult] = []
         for task in tasks:
             result = await self._discover_single(
-                task, user_id=user_id, agent_id=agent_id, model=model
+                task,
+                user_id=user_id,
+                agent_id=agent_id,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                model=model,
             )
             results.append(result)
             self._discoveries[task.task_id] = result
@@ -120,6 +129,8 @@ class DiscoveryService:
         *,
         user_id: str,
         agent_id: str,
+        bot_id: str,
+        owner_id: str,
         model: str | None,
     ) -> DiscoveryResult:
         """处理单个任务的发现流程：创建 session → 投递通知。"""
@@ -128,6 +139,8 @@ class DiscoveryService:
                 task,
                 user_id=user_id,
                 agent_id=agent_id,
+                bot_id=bot_id,
+                owner_id=owner_id,
                 model=model,
             )
             message = task.to_notification_message()
@@ -200,23 +213,22 @@ class DiscoveryService:
 def create_default_service(
     data_file: str,
     notify_sender: NotifySenderPlugin,
-    engine_base_url: str | None = None,
+    relay: SessionCreator,
 ) -> DiscoveryService:
     """使用默认实现创建 DiscoveryService。
 
     Args:
         data_file: SQLite db 文件路径(discovered_tasks 表)。
         notify_sender: 通知发送插件（session 创建成功后投递通知）。
-        engine_base_url: Engine API 地址（创建 session 用）。
+        relay: EngineRuntimeRelayProtocol 实例（由 DI 注入，
+            用于将 session 创建请求路由到 per-bot engine）。
 
     Returns:
         配置好的 :class:`DiscoveryService`
     """
     return DiscoveryService(
         reader=SqliteTaskReader(data_file),
-        session_creator=EngineSessionCreator(
-            engine_base_url=engine_base_url,
-        ),
+        session_creator=relay,
         notify_sender=notify_sender,
     )
 

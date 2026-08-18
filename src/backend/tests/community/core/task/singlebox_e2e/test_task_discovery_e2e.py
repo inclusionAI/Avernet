@@ -31,17 +31,12 @@ import httpx
 from agentclaw.community.core.task.task_discovery.task_reader import (
     init_discovered_tasks_db,
 )
-from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adapter import (
-    SingleboxBotProvisioner,
-)
 
 _LIVE = os.environ.get("SINGLEBOX_TASK_E2E", "").strip() in {"1", "true"}
 _BACKEND = os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
 _USER_ID = os.environ.get("SINGLEBOX_USER_ID", "440718")
-_ENGINE_URL = os.environ.get("TASK_DISCOVERY_ENGINE_URL", "http://localhost:20003")
 
 _HDRS = {"x-user-id": _USER_ID, "accept": "application/json"}
-_TEST_BOT_NAME = "task-discovery-test-bot"
 
 # ===== 内联测试数据(运行前写入 scripts/.dependencies/data/discovered_tasks.db)=====
 # 参考 test_task_integration_e2e.py 的 _execute_body() / ROLE_BOTS 模式:
@@ -117,20 +112,30 @@ class TestTaskDiscoveryE2E(unittest.TestCase):
         # 1) 准备 mock 数据: 写入磁盘(backend 的 MockTaskReader 从此文件读)
         _write_mock_data()
 
-        # 2) provisioning: 建一个 test bot 获取真实 agent_id
-        prov = SingleboxBotProvisioner(
-            backend_base_url=_BACKEND, user_id=_USER_ID
-        )
-        agent_id = await prov.create_bot(bot_name=_TEST_BOT_NAME)
-        await prov._aclose()
-        print(f"[provision] agent_bot_id={agent_id}")
-
         async with httpx.AsyncClient(timeout=60.0, headers=_HDRS) as cli:
+            # 2) 查 singlebox 已有 bot(singlebox 启动时 BaaS 自动 provision)
+            bot_resp = await cli.get(
+                f"{_BACKEND}/api/bots/by-owner-or-collaborator",
+                params={"user_id": _USER_ID},
+            )
+            bot_resp.raise_for_status()
+            bots = (bot_resp.json().get("data") or {}).get("items") or []
+            self.assertTrue(bots, "singlebox 未 provision 任何 bot,请先 start all")
+            bot = bots[0]
+            bot_id = bot["bot_id"]
+            owner_id = bot["owner_id"]
+            print(f"[bot] 使用已有 bot: bot_id={bot_id} owner_id={owner_id}")
+
             # 3) POST /api/public/task-discovery/discover
-            #    → 读取 mock 任务 + 为每个任务创建 engine session
+            #    传 bot_id + owner_id: relay 用它路由到 per-bot engine
             r = await cli.post(
                 f"{_BACKEND}/api/public/task-discovery/discover",
-                params={"user_id": _USER_ID, "agent_id": agent_id},
+                params={
+                    "user_id": _USER_ID,
+                    "agent_id": bot_id,
+                    "bot_id": bot_id,
+                    "owner_id": _USER_ID,
+                },
             )
             r.raise_for_status()
             body = r.json()
@@ -203,28 +208,33 @@ class TestTaskDiscoveryE2E(unittest.TestCase):
                 self.assertIsNotNone(t.get("status"), f"task {t.get('task_id')} status 为空")
                 self.assertIsNotNone(t.get("priority"), f"task {t.get('task_id')} priority 为空")
 
-            # 6) 验证 engine session 实际存在(GET /api/sessions/{id} 可达)
-            #    取第一个任务的 session_id 验证
+            # 6) 验证 engine session 实际存在
+            #    relay 路由的 session 在 per-bot engine 上,通过 backend OPENAPI relay 查
             first_sid = tasks[0].get("session_id")
             try:
                 eng_resp = await cli.get(
-                    f"{_ENGINE_URL}/api/sessions/{first_sid}",
+                    f"{_BACKEND}/openapi/v1/bots/{bot_id}/sessions",
+                    params={"user_id": _USER_ID, "owner_id": _USER_ID, "page_size": 50},
                     headers={"x-user-id": _USER_ID},
                 )
                 if eng_resp.status_code == 200:
                     eng_data = eng_resp.json()
-                    print(f"[engine] session {first_sid} 存在: "
-                          f"success={eng_data.get('success')}")
+                    eng_sessions = eng_data.get("data", {}).get("items", [])
+                    found = any(
+                        first_sid in (s.get("session_id") or s.get("id") or "")
+                        for s in eng_sessions
+                    )
+                    print(f"[engine] session list 返回 {len(eng_sessions)} 条, "
+                          f"first_sid={first_sid} found={found}")
                     self.assertTrue(
-                        eng_data.get("success") or eng_data.get("data") is not None,
-                        f"engine session {first_sid} 查询返回异常: {eng_data}",
+                        found,
+                        f"session {first_sid} 未在 per-bot engine session 列表中找到",
                     )
                 else:
-                    print(f"[engine] session {first_sid} 查询 HTTP {eng_resp.status_code},"
-                          f" 跳过(engine 可能未启用该查询端点)")
+                    print(f"[engine] session 列表查询 HTTP {eng_resp.status_code},"
+                          f" 跳过")
             except Exception as exc:  # noqa: BLE001
-                print(f"[engine] session {first_sid} 查询异常({exc!r}),"
-                      f" 跳过(engine 可能未运行)")
+                print(f"[engine] session 查询异常({exc!r}), 跳过")
 
         print("[done] task_discovery e2e 全链路验证通过")
 
