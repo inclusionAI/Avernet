@@ -4254,6 +4254,9 @@
         "description": "Agent Passport (identity credential) summary.",
         "example": {
           "bot_id": "20260813_a7k2m9p1",
+          "clis": [],
+          "expire_at": "2030-01-01T00:00:00Z",
+          "mcps": [],
           "passport_id": "20260813_a7k2m9p1"
         },
         "properties": {
@@ -4261,6 +4264,46 @@
             "description": "The bot this Passport belongs to.",
             "title": "Bot Id",
             "type": "string"
+          },
+          "certificate_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "URL of the passport certificate, if the provider issued one.",
+            "title": "Certificate Url"
+          },
+          "clis": {
+            "description": "CLI tools the passport is authorized to run.",
+            "items": {
+              "$ref": "#/components/schemas/PassportCli"
+            },
+            "title": "Clis",
+            "type": "array"
+          },
+          "expire_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Expiry of the passport credential as reported by the identity provider, as a string whose format is provider-defined. Absent when the credential does not expire or the provider did not report it.",
+            "title": "Expire At"
+          },
+          "mcps": {
+            "description": "MCP servers the passport is authorized to invoke.",
+            "items": {
+              "$ref": "#/components/schemas/PassportMcp"
+            },
+            "title": "Mcps",
+            "type": "array"
           },
           "passport_id": {
             "description": "Identifier of the bot's Passport — the platform-issued identity credential downstream services authenticate the bot against. An opaque string whose shape is deployment-defined; it may equal the bot_id.",
@@ -4273,6 +4316,60 @@
           "passport_id"
         ],
         "title": "Passport",
+        "type": "object"
+      },
+      "PassportCli": {
+        "description": "A single CLI identifier bound to the passport.",
+        "properties": {
+          "cli_code": {
+            "description": "Stable code identifying the CLI tool.",
+            "title": "Cli Code",
+            "type": "string"
+          },
+          "cli_desc": {
+            "description": "Human-readable description of the CLI tool.",
+            "title": "Cli Desc",
+            "type": "string"
+          },
+          "cli_name": {
+            "description": "Display name of the CLI tool.",
+            "title": "Cli Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cli_code",
+          "cli_name",
+          "cli_desc"
+        ],
+        "title": "PassportCli",
+        "type": "object"
+      },
+      "PassportMcp": {
+        "description": "A single MCP (Model-Context-Protocol server) identifier bound to the passport.",
+        "properties": {
+          "mcp_code": {
+            "description": "Stable code identifying the MCP server.",
+            "title": "Mcp Code",
+            "type": "string"
+          },
+          "mcp_desc": {
+            "description": "Human-readable description of the MCP server.",
+            "title": "Mcp Desc",
+            "type": "string"
+          },
+          "mcp_name": {
+            "description": "Display name of the MCP server.",
+            "title": "Mcp Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mcp_code",
+          "mcp_name",
+          "mcp_desc"
+        ],
+        "title": "PassportMcp",
         "type": "object"
       },
       "Preview": {
@@ -10211,6 +10308,18 @@
             }
           },
           {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
             "description": "1-based page number.",
             "in": "query",
             "name": "page",
@@ -10235,18 +10344,6 @@
               "minimum": 1,
               "title": "Page Size",
               "type": "integer"
-            }
-          },
-          {
-            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-              "minLength": 1,
-              "title": "User Id",
-              "type": "string"
             }
           },
           {
@@ -13397,6 +13494,18 @@
             }
           },
           {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
             "description": "1-based page number.",
             "in": "query",
             "name": "page",
@@ -13421,18 +13530,6 @@
               "minimum": 1,
               "title": "Page Size",
               "type": "integer"
-            }
-          },
-          {
-            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-              "minLength": 1,
-              "title": "User Id",
-              "type": "string"
             }
           },
           {
@@ -14859,6 +14956,18 @@
             }
           },
           {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
             "description": "1-based page number.",
             "in": "query",
             "name": "page",
@@ -14883,18 +14992,6 @@
               "minimum": 1,
               "title": "Page Size",
               "type": "integer"
-            }
-          },
-          {
-            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-              "minLength": 1,
-              "title": "User Id",
-              "type": "string"
             }
           },
           {
@@ -20497,6 +20594,18 @@
             }
           },
           {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
             "description": "1-based page number.",
             "in": "query",
             "name": "page",
@@ -20521,18 +20630,6 @@
               "minimum": 1,
               "title": "Page Size",
               "type": "integer"
-            }
-          },
-          {
-            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-              "minLength": 1,
-              "title": "User Id",
-              "type": "string"
             }
           },
           {
@@ -24012,6 +24109,18 @@
             }
           },
           {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
             "description": "1-based page number.",
             "in": "query",
             "name": "page",
@@ -24036,18 +24145,6 @@
               "minimum": 1,
               "title": "Page Size",
               "type": "integer"
-            }
-          },
-          {
-            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-              "minLength": 1,
-              "title": "User Id",
-              "type": "string"
             }
           },
           {
@@ -25468,6 +25565,18 @@
             }
           },
           {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
             "description": "1-based page number.",
             "in": "query",
             "name": "page",
@@ -25492,18 +25601,6 @@
               "minimum": 1,
               "title": "Page Size",
               "type": "integer"
-            }
-          },
-          {
-            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-              "minLength": 1,
-              "title": "User Id",
-              "type": "string"
             }
           },
           {

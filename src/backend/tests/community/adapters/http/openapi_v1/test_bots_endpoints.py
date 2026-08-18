@@ -216,7 +216,6 @@ def test_passport(client):
         "expire_at": None,
         "mcps": [],
         "clis": [],
-        "skills": None,
         "certificate_url": None,
     }
 
@@ -229,14 +228,12 @@ def test_passport_surfaces_full_detail(client, passport):
         "expire_at": "2030-01-01T00:00:00Z",
         "mcps": [{"mcp_code": "m1", "mcp_name": "M1", "mcp_desc": "desc"}],
         "clis": [{"cli_code": "c1", "cli_name": "C1", "cli_desc": "d"}],
-        "skills": [{"skill_code": "s1"}],
         "certificate_url": "https://idp.example.com/cert/ac-1",
     }
     data = _ok(client.get("/openapi/v1/bots/b1/passport"))
     assert data["expire_at"] == "2030-01-01T00:00:00Z"
     assert data["mcps"] == [{"mcp_code": "m1", "mcp_name": "M1", "mcp_desc": "desc"}]
     assert data["clis"] == [{"cli_code": "c1", "cli_name": "C1", "cli_desc": "d"}]
-    assert data["skills"] == [{"skill_code": "s1"}]
     assert data["certificate_url"] == "https://idp.example.com/cert/ac-1"
 
 
@@ -751,7 +748,6 @@ def test_passport_accepts_the_local_plugin_identifier(client, passport):
         "expire_at": None,
         "mcps": [],
         "clis": [],
-        "skills": None,
         "certificate_url": None,
     }
 

@@ -8,7 +8,7 @@ internal names belong in ``#`` comments.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -298,17 +298,17 @@ class Ceiling(BaseModel):
 class PassportMcp(BaseModel):
     """A single MCP (Model-Context-Protocol server) identifier bound to the passport."""
 
-    mcp_code: str | None = Field(default=None, description="Stable code identifying the MCP server.")
-    mcp_name: str | None = Field(default=None, description="Display name of the MCP server.")
-    mcp_desc: str | None = Field(default=None, description="Human-readable description of the MCP server.")
+    mcp_code: str = Field(description="Stable code identifying the MCP server.")
+    mcp_name: str = Field(description="Display name of the MCP server.")
+    mcp_desc: str = Field(description="Human-readable description of the MCP server.")
 
 
 class PassportCli(BaseModel):
     """A single CLI identifier bound to the passport."""
 
-    cli_code: str | None = Field(default=None, description="Stable code identifying the CLI tool.")
-    cli_name: str | None = Field(default=None, description="Display name of the CLI tool.")
-    cli_desc: str | None = Field(default=None, description="Human-readable description of the CLI tool.")
+    cli_code: str = Field(description="Stable code identifying the CLI tool.")
+    cli_name: str = Field(description="Display name of the CLI tool.")
+    cli_desc: str = Field(description="Human-readable description of the CLI tool.")
 
 
 class Passport(BaseModel):
@@ -322,7 +322,6 @@ class Passport(BaseModel):
                 "expire_at": "2030-01-01T00:00:00Z",
                 "mcps": [],
                 "clis": [],
-                "skills": [],
                 "certificate_url": None,
             }
         }
@@ -349,11 +348,6 @@ class Passport(BaseModel):
     clis: list[PassportCli] = Field(
         default_factory=list,
         description="CLI tools the passport is authorized to run.",
-    )
-    skills: Any | None = Field(
-        default=None,
-        description="Skills attached to the passport, in the shape returned "
-        "by the identity provider. Absent when no skills are bound.",
     )
     certificate_url: str | None = Field(
         default=None,

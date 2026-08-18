@@ -813,7 +813,6 @@ async def get_bot_passport(
             expire_at=info.get("expire_at"),
             mcps=info.get("mcps") or [],
             clis=info.get("clis") or [],
-            skills=info.get("skills"),
             certificate_url=info.get("certificate_url"),
         ),
         request,
