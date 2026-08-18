@@ -5,21 +5,28 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bcs_service_api::port::repo::NewSessionParams;
 use bcs_service_api::{
-    ActorKind, BotRegistryCoreService, CollaborationRuntimeService, CreateOrReactivateCommand,
-    CreateSessionLaunch, Group, GroupCoreService, GroupStrategy, Participant, ParticipantMode,
-    ParticipantRole, ReactivateSessionLaunch, SessionCaller, SessionKind, SessionLaunchError,
-    SessionLaunchOutcome, SessionLaunchRequest, SessionLaunchService, SessionManagementService,
-    SessionUseCaseError, SystemMessageService, backfill_bot_names,
+    ActorKind, AuthenticatedHumanCaller, BotRegistryCoreService, CollaborationRuntimeService,
+    CreateOrReactivateCommand, CreateSessionLaunch, DeliveryType, Group, GroupCoreService,
+    GroupStrategy, Participant, ParticipantMode, ParticipantRole, ReactivateSessionLaunch, Session,
+    SessionCaller, SessionKind, SessionLaunchError, SessionLaunchOutcome, SessionLaunchRequest,
+    SessionLaunchService, SessionManagementService, SessionUseCaseError,
+    StartStateMachineRunCommand, SystemMessageEvent, SystemMessageService, backfill_bot_names,
+    resolve_session_topic,
 };
 
 pub struct SessionLaunchApplication {
     registry: Arc<dyn BotRegistryCoreService>,
     groups: Arc<dyn GroupCoreService>,
     sessions: Arc<dyn SessionManagementService>,
-    #[allow(dead_code)]
     runtime: Arc<dyn CollaborationRuntimeService>,
-    #[allow(dead_code)]
     system_message: Arc<dyn SystemMessageService>,
+}
+
+struct PreparedLaunch {
+    group: Group,
+    params: NewSessionParams,
+    caller: SessionCaller,
+    context_delivery: Option<DeliveryType>,
 }
 
 impl SessionLaunchApplication {
@@ -254,7 +261,7 @@ impl SessionLaunchApplication {
     async fn prepare(
         &self,
         request: SessionLaunchRequest,
-    ) -> Result<(Group, NewSessionParams), SessionLaunchError> {
+    ) -> Result<PreparedLaunch, SessionLaunchError> {
         let mut group = self.load_group(&request.group_id).await?;
         backfill_bot_names(self.registry.as_ref(), &mut group).await;
 
@@ -299,6 +306,8 @@ impl SessionLaunchApplication {
         let participants = self
             .build_participants(&group, &request, &creator, kind)
             .await?;
+        let caller = request.caller.clone();
+        let context_delivery = request.context_delivery;
         let params = NewSessionParams {
             session_kind: kind,
             participants,
@@ -310,7 +319,89 @@ impl SessionLaunchApplication {
             meta: request.meta,
             ..Default::default()
         };
-        Ok((group, params))
+        Ok(PreparedLaunch {
+            group,
+            params,
+            caller,
+            context_delivery,
+        })
+    }
+
+    async fn finish_launch(
+        &self,
+        prepared: PreparedLaunch,
+        session: Session,
+        emit_session_context: bool,
+    ) -> Result<SessionLaunchOutcome, SessionLaunchError> {
+        if prepared.group.group_strategy == GroupStrategy::StateMachine
+            && session.session_kind == SessionKind::ServiceInvocation
+        {
+            let authenticated_human = match &prepared.caller {
+                SessionCaller::Human {
+                    actor_id,
+                    display_name,
+                    ..
+                } => Some(AuthenticatedHumanCaller {
+                    actor_id: actor_id.clone(),
+                    display_name: display_name.clone(),
+                }),
+                SessionCaller::Bot { .. } => None,
+            };
+            let run = self
+                .runtime
+                .start_state_machine_run(StartStateMachineRunCommand {
+                    group_id: prepared.group.id.clone(),
+                    session_id: Some(session.id.clone()),
+                    definition_yaml: None,
+                    definition: None,
+                    definition_ref: None,
+                    participant_bindings: None,
+                    input: session.input.clone().unwrap_or(serde_json::Value::Null),
+                    caller_id: Some(prepared.caller.actor_id().to_string()),
+                    authenticated_human,
+                })
+                .await?;
+            return Ok(SessionLaunchOutcome {
+                session,
+                state_machine_run: Some(run.view),
+            });
+        }
+
+        if emit_session_context {
+            let notify = self.system_message.clone();
+            let group_id = prepared.group.id.clone();
+            let session_id = session.id.clone();
+            let session_input = session.input.clone();
+            let participants = session.participants.clone();
+            let reason = resolve_session_topic(
+                session_input.as_ref(),
+                prepared.group.context.as_deref(),
+                prepared.group.label.as_deref(),
+            )
+            .unwrap_or_default();
+            tokio::spawn(async move {
+                let _ = notify
+                    .notify(
+                        &group_id,
+                        SystemMessageEvent::SessionContext {
+                            group_id: group_id.clone(),
+                            session_id: session_id.clone(),
+                            reason,
+                            session_input,
+                            task_ledger: None,
+                            driver_delivery: prepared.context_delivery,
+                        },
+                        &session_id,
+                        &participants,
+                    )
+                    .await;
+            });
+        }
+
+        Ok(SessionLaunchOutcome {
+            session,
+            state_machine_run: None,
+        })
     }
 }
 
@@ -333,28 +424,42 @@ impl SessionLaunchService for SessionLaunchApplication {
         command: CreateSessionLaunch,
     ) -> Result<SessionLaunchOutcome, SessionLaunchError> {
         let group_id = command.request.group_id.clone();
-        let (_group, params) = self.prepare(command.request).await?;
+        let prepared = self.prepare(command.request).await?;
         let outcome = self
             .sessions
             .create_or_reactivate(CreateOrReactivateCommand {
                 group_id,
                 session_id: None,
-                params,
+                params: prepared.params.clone(),
             })
             .await
             .map_err(map_session_error)?;
-        Ok(SessionLaunchOutcome {
-            session: outcome.session,
-            state_machine_run: None,
-        })
+        self.finish_launch(prepared, outcome.session, true).await
     }
 
     async fn reactivate(
         &self,
-        _command: ReactivateSessionLaunch,
+        command: ReactivateSessionLaunch,
     ) -> Result<SessionLaunchOutcome, SessionLaunchError> {
-        Err(SessionLaunchError::InvalidRequest(
-            "session reactivation is not implemented by the shared launcher".to_string(),
-        ))
+        let group_id = command.request.group_id.clone();
+        let prepared = self.prepare(command.request).await?;
+        let belongs = self
+            .sessions
+            .belongs_to_group(&command.session_id, &group_id)
+            .await
+            .map_err(map_session_error)?;
+        if !belongs {
+            return Err(SessionLaunchError::SessionNotFound(command.session_id));
+        }
+        let outcome = self
+            .sessions
+            .create_or_reactivate(CreateOrReactivateCommand {
+                group_id,
+                session_id: Some(command.session_id),
+                params: prepared.params.clone(),
+            })
+            .await
+            .map_err(map_session_error)?;
+        self.finish_launch(prepared, outcome.session, false).await
     }
 }
