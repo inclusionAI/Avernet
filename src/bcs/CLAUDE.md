@@ -387,7 +387,7 @@ export BOT_DATA_DIR=/path/to/bot/data
 | `/groups` | GET | List all groups |
 | `/groups/my` | GET | List formal groups for the authenticated human or bot |
 | `/groups/{id}` | GET | Get group details |
-| `/groups/{id}` | PATCH | Update mutable group properties (legacy compatibility route) |
+| `/groups/{id}` | PATCH | Update `name`, `context`, `visibility`, or delivery policy (legacy compatibility route) |
 | `/groups/{id}` | DELETE | Delete group |
 | `/groups/{id}/members` | POST | Add member to group |
 | `/groups/{id}/chat` | POST | Send group chat message |

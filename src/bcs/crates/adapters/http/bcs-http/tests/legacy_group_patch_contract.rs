@@ -155,6 +155,7 @@ async fn legacy_patch_group_delegates_to_v1_group_application() {
                 .body(Body::from(
                     json!({
                         "name": "Renamed",
+                        "context": "测试1",
                         "visibility": "public",
                         "delivery_policy": {
                             "bot_final_delivery": "inject_observers"
@@ -186,6 +187,7 @@ async fn legacy_patch_group_delegates_to_v1_group_application() {
     assert_eq!(user.id, "staff-1");
     assert_eq!(user.display_name.as_deref(), Some("Ray"));
     assert_eq!(command.patch.name.as_deref(), Some("Renamed"));
+    assert_eq!(command.patch.context.as_deref(), Some("测试1"));
     assert_eq!(command.patch.visibility, Some(GroupVisibility::Public));
     assert_eq!(
         command

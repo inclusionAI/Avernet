@@ -81,7 +81,7 @@ test_patch_group() {
     local group_id
     group_id=$(json_field "$RESPONSE" "id")
 
-    api_patch "/groups/$group_id" '{"name":"legacy-patch-e2e"}'
+    api_patch "/groups/$group_id" '{"name":"legacy-patch-e2e","context":"legacy-context-e2e"}'
     assert_eq "legacy group PATCH returns 200" "$HTTP_STATUS" "200"
     assert_eq "legacy group PATCH returns the new name" \
         "$(json_field "$RESPONSE" "name")" "legacy-patch-e2e"
@@ -89,6 +89,8 @@ test_patch_group() {
     api_get "/groups/$group_id"
     assert_eq "legacy group PATCH persists the label" \
         "$(json_field "$RESPONSE" "label")" "legacy-patch-e2e"
+    assert_eq "legacy group PATCH persists the context" \
+        "$(json_field "$RESPONSE" "context")" "legacy-context-e2e"
 }
 
 test_list_groups() {

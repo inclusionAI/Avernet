@@ -248,6 +248,7 @@ impl From<UpdateGroupRequest> for GroupPatch {
     fn from(value: UpdateGroupRequest) -> Self {
         Self {
             name: value.name,
+            context: None,
             visibility: value.visibility,
             delivery_policy: value.delivery_policy.map(|policy| GroupDeliveryPolicy {
                 bot_final_delivery: policy.bot_final_delivery,

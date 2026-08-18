@@ -146,6 +146,8 @@ pub struct LegacyUpdateGroupRequest {
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub name: Option<String>,
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
+    pub context: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub visibility: Option<GroupVisibility>,
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub delivery_policy: Option<LegacyGroupDeliveryPolicyRequest>,
@@ -163,6 +165,7 @@ impl From<LegacyUpdateGroupRequest> for GroupPatch {
     fn from(value: LegacyUpdateGroupRequest) -> Self {
         Self {
             name: value.name,
+            context: value.context,
             visibility: value.visibility,
             delivery_policy: value.delivery_policy.map(|policy| GroupDeliveryPolicy {
                 bot_final_delivery: policy.bot_final_delivery,
