@@ -59,8 +59,8 @@ class DiscoveredTask:
             "source": "task_discovery",
         }
 
-    def to_notification_message(self, session_url: str) -> str:
-        """生成用户在 engine session 中看到的通知消息文本。"""
+    def to_notification_message(self, session_url: str = "") -> str:
+        """生成通知消息文本。"""
         lines = [
             "🔔 发现待执行任务",
             "",
@@ -74,9 +74,9 @@ class DiscoveredTask:
             "",
             "─" * 40,
             "请确认是否执行此任务。",
-            "",
-            f"Session 链接: {session_url}",
         ]
+        if session_url:
+            lines.extend(["", f"Session 链接: {session_url}"])
         return "\n".join(lines)
 
 
