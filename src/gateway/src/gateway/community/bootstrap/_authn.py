@@ -44,9 +44,50 @@ def build_authenticator(
     user_config: UserConfig,
 ) -> Authenticator:
     """Build the identity-chain registry + route table from DI and typed config."""
+    chains = _strategy_chains(strategies, user_config=user_config)
+    _append_dev_mock(chains, strategies)
     return Authenticator(
-        strategies=_strategy_chains(strategies, user_config=user_config),
+        strategies=chains,
         route_security=_load_route_security(user_config),
+    )
+
+
+def _append_dev_mock(
+    chains: dict[PrincipalType, IdentityChain],
+    pool: Mapping[str, AuthStrategy],
+) -> None:
+    """Append the ``dev_header`` strategy to the user chain under the env gate.
+
+    ``GATEWAY_AUTH_MOCK=1`` is an env var and not config on purpose: the
+    shipped ``identity_strategies`` table never names the mock, so no overlay
+    can switch it on — only the operator of the process can. Appended last, so
+    a real Google token keeps winning when one is presented; the strategy
+    itself re-checks the same env var per request (its second gate), so this
+    composition is the convenience half, not the security boundary.
+    """
+    from gateway.community.plugins.authn.dev_header import (
+        DEV_USER_HEADER,
+        auth_mock_enabled,
+    )
+
+    if not auth_mock_enabled():
+        return
+    dev = pool.get("dev_header")
+    if dev is None:
+        _logger.warning(
+            "GATEWAY_AUTH_MOCK=1 but no 'dev_header' strategy in the pool; "
+            "dev auth mock NOT active"
+        )
+        return
+    chain = chains.get(PrincipalType.USER)
+    existing = chain._strategies if chain is not None else ()
+    if any(s.name == dev.name for s in existing):
+        return
+    chains[PrincipalType.USER] = IdentityChain(PrincipalType.USER, (*existing, dev))
+    _logger.warning(
+        "DEV AUTH MOCK ACTIVE (GATEWAY_AUTH_MOCK=1): the '%s' header is "
+        "trusted verbatim as the user identity — local development only",
+        DEV_USER_HEADER,
     )
 
 

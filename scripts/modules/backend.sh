@@ -91,7 +91,12 @@ backend_start() {
             rm -f "${RUNTIME_DATA_DIR}/backend.db"
         fi
 
+        # Gateway principal verifier: deliberately armed for singlebox (see
+        # src/backend/docs/openapi-v1/README.md) with the same dev key the
+        # gateway signs with (gateway.sh) and BCS verifies with (bcs.sh), so
+        # locally forwarded /openapi/v1 requests verify instead of all-401.
         SERVER_ENV=dev DEPLOY_PROFILE=singlebox \
+            AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE="${AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}" \
             DATABASE_URL="sqlite:///${RUNTIME_DATA_DIR}/backend.db" \
             ENABLE_OSS_SYNC=false \
             CHAT_ENGINE="${CHAT_ENGINE}" \
