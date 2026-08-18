@@ -44,6 +44,7 @@ members = [
     "crates/services/bcs-leader-election",
     "crates/services/bcs-relation",
     "crates/services/bcs-relation-store",
+    "crates/services/bcs-edge-permission-store",
     "crates/services/bcs-user-identity",
     "crates/services/bcs-proposal",
     "crates/services/bcs-proposal-store",
@@ -265,6 +266,7 @@ bcs-friend     = { path = "crates/services/bcs-friend" }
 bcs-friend-store = { path = "crates/services/bcs-friend-store" }
 bcs-relation   = { path = "crates/services/bcs-relation" }
 bcs-relation-store = { path = "crates/services/bcs-relation-store" }
+bcs-edge-permission-store = { path = "crates/services/bcs-edge-permission-store" }
 bcs-secret         = { path = "crates/services/bcs-secret" }
 bcs-telemetry      = { path = "crates/auxiliary/bcs-telemetry" }
 ding-logger    = { path = "crates/auxiliary/ding-logger" }
