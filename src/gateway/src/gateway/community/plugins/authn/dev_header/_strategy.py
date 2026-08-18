@@ -7,16 +7,19 @@ box alone: it maps the ``x-dev-user`` header's value onto a
 :class:`UserPrincipal` verbatim, no verification, the same trust move
 ``BCS_AUTH_MOCK`` makes on the BCS side.
 
-It is DOUBLE-gated, and both gates are environment variables rather than
-config on purpose — config travels through overlays and repos, an env var is
-set by the operator of the process:
+It is DOUBLE-gated, and both gates are the same environment variable rather
+than config on purpose — config travels through overlays and repos, an env var
+is set by the operator of the process:
 
-- the bootstrap appends it to the ``user`` chain only when
-  ``GATEWAY_AUTH_MOCK=1`` (``bootstrap/_authn.py``), so the shipped
-  ``identity_strategies`` table never names it; and
+- the bootstrap constructs and appends it to the ``user`` chain only when
+  ``GATEWAY_AUTH_MOCK=1`` (``bootstrap/_authn.py``). It is deliberately NOT in
+  the DI strategy pool — the pool is the production graph, enterprise merges
+  into it, and ``identity_strategies`` naming ``dev_header`` is refused at
+  boot as an unknown strategy; without the env var this module is never even
+  imported; and
 - :meth:`build` itself answers ``None`` unless the same variable is set, so
-  even a config overlay that declares ``dev_header`` in a chain gets an inert
-  strategy, not an open door.
+  any future wiring that reaches this class some other way still gets an
+  inert strategy, not an open door.
 
 The env var is read per request, not cached at construction: the singleton is
 built once per process, and reading late keeps a test's ``monkeypatch.setenv``
