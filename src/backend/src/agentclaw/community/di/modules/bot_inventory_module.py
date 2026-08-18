@@ -1,15 +1,18 @@
 """BotInventoryModule — production bindings for Bot inventory."""
+
 from __future__ import annotations
 
 from injector import Binder, Module, inject, provider, singleton
 
 from agentclaw.community.api.bot_inventory_service import BotInventoryServiceProtocol
-from agentclaw.community.api.local_bot_workflow_service import LocalBotWorkflowServiceProtocol
+from agentclaw.community.api.local_bot_workflow_service import (
+    LocalBotWorkflowServiceProtocol,
+)
 from agentclaw.community.core.bot_inventory.adapters.noop_business_space import (
     NoopBusinessSpaceContext,
 )
-from agentclaw.community.core.bot_inventory.adapters.noop_service_lifecycle import (
-    NoopServiceLifecyclePort,
+from agentclaw.community.core.bot_inventory.adapters.service_lifecycle import (
+    ServiceLifecycleView,
 )
 from agentclaw.community.core.bot_inventory.protocols import (
     BotInventoryBotPort,
@@ -20,10 +23,19 @@ from agentclaw.community.core.bot_inventory.protocols import (
 from agentclaw.community.core.bot_inventory.services.bot_inventory_service import (
     BotInventoryService,
 )
-from agentclaw.community.core.bot_inventory.services.lifecycle_view import BotLifecycleView
-from agentclaw.community.core.bot_inventory.services.local_bot_workflow import LocalBotWorkflowService
+from agentclaw.community.core.bot_inventory.services.lifecycle_view import (
+    BotLifecycleView,
+)
+from agentclaw.community.core.bot_inventory.services.local_bot_workflow import (
+    LocalBotWorkflowService,
+)
 from agentclaw.community.core.bot_management.services.bot_service import BotService
-from agentclaw.community.core.desktop_bot.services.desktop_bot_service import DesktopBotService
+from agentclaw.community.core.desktop_bot.services.desktop_bot_service import (
+    DesktopBotService,
+)
+from agentclaw.community.core.repository.protocols.publishing import (
+    BotPublishRepositoryProtocol,
+)
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
@@ -37,14 +49,36 @@ class BotInventoryModule(Module):
             to=NoopBusinessSpaceContext,
             scope=singleton,
         )
-        binder.bind(
-            ServiceLifecyclePort,
-            to=NoopServiceLifecyclePort,
-            scope=singleton,
-        )
-        binder.bind(BotLifecycleView, to=BotLifecycleView, scope=singleton)
-        binder.bind(BotInventoryBotPort, to=BotService, scope=singleton)
-        binder.bind(DesktopBotInventoryPort, to=DesktopBotService, scope=singleton)
+
+    @singleton
+    @provider
+    @inject
+    def service_lifecycle(
+        self, publish_repo: BotPublishRepositoryProtocol
+    ) -> ServiceLifecyclePort:
+        return ServiceLifecycleView(publish_repo)
+
+    @singleton
+    @provider
+    @inject
+    def lifecycle_view(
+        self, service_lifecycle: ServiceLifecyclePort
+    ) -> BotLifecycleView:
+        return BotLifecycleView(service_lifecycle)
+
+    @singleton
+    @provider
+    @inject
+    def inventory_bot_port(self, service: BotService) -> BotInventoryBotPort:
+        return service
+
+    @singleton
+    @provider
+    @inject
+    def desktop_inventory_port(
+        self, service: DesktopBotService
+    ) -> DesktopBotInventoryPort:
+        return service
 
     @singleton
     @provider

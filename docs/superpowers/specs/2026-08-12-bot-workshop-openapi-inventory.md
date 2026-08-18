@@ -41,7 +41,7 @@
 
 ### 0.5 命名已决定（2026-08-12）
 - 系分 §3-A/§10.2 原称 `/openapi/v1/bots/workshop`（list）+ `/workshop/{bot_id}`（card）+ `/workshop/{bot_id}/actions`，作跨 personal+local+service 富卡片面。
-- **已决定**采用 `/openapi/v1/bots/all`（更符合领域模型），不再使用 `/workshop`。当前已实现范围 = 个人云端 + 本地 Bot，**尚不返回 service Bot**；`ServiceLifecyclePort` 目前只预留展示态派生能力，不等于 service 数据源已接入。完整工坊是否由 B 线扩展 `/all` 为统一 read model，或由前端合并独立 service 列表，仍需在 B 线契约落地前明确。
+- **已决定**采用 `/openapi/v1/bots/all`（更符合领域模型），不再使用 `/workshop`。当前已实现个人云端、本地 Bot 和 service Bot 统一 read model；service Bot 通过 `ServiceLifecyclePort` 按发布版本最多展开两张卡片。
 - 溯源：本决定由契约接口人（lucas）2026-08-12 给出，覆盖系分。系分语雀文档侧尚未同步改名；后续更新系分时统一改成 `/all`。
 - 影响 #67–69；其「委托/备注」列保留「系分原称 `/workshop`」仅作交叉溯源，不代表待决。
 
@@ -117,7 +117,7 @@
 | 64 | mcp | 权限 | `GET /openapi/v1/bots/mcp/servers/{server_code}/permissions` | 已有 | 已完成 | — | — |
 | 65 | mcp | 读配置 | `GET /openapi/v1/bots/mcp/servers/{server_code}/config` | 已有 | 已完成 | — | — |
 | 66 | mcp | 写配置 | `PUT /openapi/v1/bots/mcp/servers/{server_code}/config` | 已有 | 已完成 | — | per-bot 绑定 + caller 在 #99 `skill-sets/mcps` |
-| 67 | bots(all) | 个人云端 + 本地卡片列表 | `GET /openapi/v1/bots/all` | 新增 | 已开发 | P0 | **并回 bots/router.py**(A 方案,§5)，`/all` literal 块(声明早于 `/{bot_id}`)。委托 `BotInventoryServiceProtocol` 聚合 personal cloud+local；当前不含 service。现有 card 字段覆盖基础信息、`kind/deploy_mode/display_state/space/passport/actions`；`health/version/deploy_stage/container_summary/lock_info/last_active_at/current_user_role` 等如需首页展示，须在对应 B 线/后续能力落地时明确是聚合进 `/all` 还是详情按需获取，避免前端 N+1。系分原称 `/workshop`；曾用名 `/inventory` |
+| 67 | bots(all) | 个人云端 + 本地 + 服务 Bot 卡片列表 | `GET /openapi/v1/bots/all` | 升级 | 已开发 | P0 | **并回 bots/router.py**(A 方案,§5)，`/all` literal 块(声明早于 `/{bot_id}`)。委托 `BotInventoryServiceProtocol` 聚合 personal cloud+local+service；service 发布记录批量查询，每个 Bot 最多展开两张版本卡片，避免 N+1。 |
 | ~~68~~ | ~~bots(all)~~ | ~~单卡片~~ | ~~`GET /openapi/v1/bots/all/{bot_id}`~~ | ~~新增~~ | **已删除** | ~~P0~~ | **已删**：前端从 `GET /bots/all` 当前页结果取卡片；`GET /bots/{bot_id}` 只提供基础 Bot，不能替代富卡片刷新。所有会改变 `display_state/actions/disabled_actions` 的 mutation 成功后，前端必须重新请求当前页 `/bots/all`；若详情页没有当前页上下文，则回到列表或显式刷新列表。若后续该策略造成明显额外请求，再恢复富单卡 endpoint |
 | ~~69~~ | ~~bots~~ | ~~可用动作集~~ | ~~`GET /openapi/v1/bots/{bot_id}/actions`~~ | ~~新增~~ | **已删除** | ~~P0~~ | **已删**:`actions`/`disabled_actions`/`display_state` 已在 `BotInventoryItem` 里返回;前端用 `GET /bots/all` 列表结果里的 `actions` 字段直接渲染按钮,无需单独调 |
 | 70 | local | 设备列表 | `GET /openapi/v1/bots/local/devices` | 新增 | 已开发 | P0 | 创建选 machine；`DesktopBotServiceProtocol.list_devices` |
@@ -135,20 +135,20 @@
 | 82 | diagnostics | 触发健康检查 | `POST /openapi/v1/bots/diagnostics/{bot_id}/health-check` | 新增 | 已设计未建 | P2 | **已移交其他团队负责，A 线仅待跟进**；同 #81，仅 openclaw + 云端，由 policy 前门拦截不支持的组合，不阻塞 A 线当前联调 |
 | 83 | bots | 激活沉寂 Bot | `POST /openapi/v1/bots/{bot_id}/activate` | 新增 | 已开发 | P0 | **并回 bots/router.py**(A 方案,§5)，`/{bot_id}` 子资源(像 `/restart`)。helper `_require_personal_cloud_bot` + 委托 `BotDormantActivateServiceProtocol.activate`(`ActivateBotService`)。`bot_type==personal`+cloud 裁决(desktop/service→409) + owner guard(`get_bot`→404);`InvalidBotStateError`→409。30 天·仅非服务·本地豁免·蒙层非状态 |
 | 84 | bots | 初始化配置 | `POST /openapi/v1/bots/{bot_id}/data-init` | 新增 | 已开发 | P0 | 已委托 `DataInitServiceProtocol.trigger_init`（async, fire-and-forget），仅 personal+cloud（desktop/service→409）。**当前仍有联调阻塞，不能视为 legacy 1:1**：OpenAPI handler 尚未像老 `/api` 一样把 Cookie `IAM_TOKEN` 写入 `bot.ext`；同时公开 `Bot` 与 `BotInventoryItem` 均不返回 `ext.data_init_status`，前端没有可执行的轮询契约。联调前须补齐凭证传递，并确定独立 status endpoint（优先）或受控状态字段；创建 checkbox 仍由前端在 Bot 真正存在后单独触发本端点 |
-| 85 | lifecycle | 开启服务化（personal→service） | `POST /openapi/v1/bots/lifecycle/{bot_id}/upgrade` | 新增 | 未开工 | P1 | 委托 `upgrade_bot_type`；改 service 去反向，不动契约 |
-| 86 | lifecycle | 发布态 / 版本 / 阶段 | `GET /openapi/v1/bots/lifecycle/{bot_id}` | 新增 | 未开工 | P1 | 委托 `publish_flow_service` |
-| 87 | lifecycle | 草稿→预发 / 预发→上线 | `POST /openapi/v1/bots/lifecycle/{bot_id}/advance` | 新增 | 未开工 | P1 | body `{stage: staging\|online}` |
-| 88 | lifecycle | 下线 | `POST /openapi/v1/bots/lifecycle/{bot_id}/offline` | 新增 | 未开工 | P1 | 不可逆 |
-| 89 | lifecycle | 重启发布 | `POST /openapi/v1/bots/lifecycle/{bot_id}/restart` | 新增 | 未开工 | P1 | — |
-| 90 | lifecycle | 发布 / 下线审批开关 | `GET /PUT /openapi/v1/bots/lifecycle/{bot_id}/approval` | 新增 | 未开工 | P2 | 系分原称 `/publish-approval`；关联 approvals |
+| 85 | lifecycle | 开启服务化（personal→service） | `POST /openapi/v1/bots/{bot_id}/lifecycle/upgrade` | 新增 | 已开发 | P1 | 复用 Bot 类型升级；仅 `openclaw/claude_code/teclaw` 云端个人 Bot 可服务化 |
+| 86 | lifecycle | 发布态 / 版本 / 阶段 | `GET /openapi/v1/bots/{bot_id}/lifecycle` | 新增 | 已开发 | P1 | 最多返回两张可见版本卡片 |
+| 87 | lifecycle | 草稿→预发 / 预发→上线 | `POST /openapi/v1/bots/{bot_id}/lifecycle/advance` | 新增 | 已开发 | P1 | body `{stage: prestable\|online}`；兼容旧值 `staging` |
+| 88 | lifecycle | 下线 | `POST /openapi/v1/bots/{bot_id}/lifecycle/offline` | 新增 | 已开发 | P1 | 下线后保留最新 `released` 版本 |
+| 89 | lifecycle | 重启发布 | `POST /openapi/v1/bots/{bot_id}/lifecycle/restart` | 新增 | 已开发 | P1 | body `{stage: prestable\|online}`；兼容旧值 `staging` |
+| 90 | lifecycle | 发布 / 下线审批开关 | `GET /PUT /openapi/v1/bots/{bot_id}/lifecycle/approval` | 新增 | 已开发 | P2 | Owner 管理开关；开启后非 Owner 的上线/下线进入审批 |
 | 91 | containers | 实例列表 | `GET /openapi/v1/bots/containers/{bot_id}` | 新增 | 未开工 | P0 | `summary{total,healthy,abnormal}` + `instances[id,node,status]`；cpu/mem 留空待 BaaS |
 | 92 | containers | 单实例重启 | `POST /openapi/v1/bots/containers/{bot_id}/{instance_id}/restart` | 新增 | 未开工 | P0 | 仅异常态 |
 | 93 | containers | 单实例日志 | `GET /openapi/v1/bots/containers/{bot_id}/{instance_id}/logs` | 新增 | 未开工 | P0 | — |
 | 94 | evaluation | 创建评测任务 | `POST /openapi/v1/bots/evaluation/{bot_id}` | 新增 | 未开工 | P1 | 返回评测页 URL/token；仅服务预发/运行态；委托 `quality` |
-| 95 | edit-lock | 获取 / 抢占编辑锁 | `POST /openapi/v1/bots/edit-lock/{bot_id}`(+`/steal`) | 新增 | 已设计未建 | P1 | **归 B 线/joseph(2026-08-12 lucas移交,见 §5)**：`CollaboratorLockService.acquire/steal` 的下游协作本质属服务 bot 链路(`service_bot/router_publish.py` 15 处 + `bot_collaborator` `BotNotServiceTypeError`);个人云端 Bot 无协作者(`can_manage_collaborators=False`),本期 P0 不用锁。A 线不做;B 线做公开契约+内部改造 |
-| 96 | edit-lock | 释放编辑锁 | `DELETE /openapi/v1/bots/edit-lock/{bot_id}` | 新增 | 已设计未建 | P1 | 归 B 线(同 #95),`CollaboratorLockService.release_lock` |
-| 97 | edit-lock | 编辑锁信息 | `GET /openapi/v1/bots/edit-lock/{bot_id}` | 新增 | 已设计未建 | P1 | 归 B 线(同 #95),`CollaboratorLockService.get_lock_info`(系分原称 `/lock/info`) |
-| 98 | editors | 协作者管理 | `GET/POST/PATCH/DELETE /openapi/v1/bots/editors/{bot_id}`(+`/{member_id}`) | 新增 | 已设计未建 | P1 | **归 B 线/joseph**:协作本质属服务 bot(`CollaboratorService` 的 `BotNotServiceTypeError` 对非 service 默认拒);"空间成员先验集合 + 唯一管理员"是 service 改造(碰红线,`collaborator_service` 内部逻辑)。A 线不做 |
+| 95 | edit-lock | 获取 / 抢占编辑锁 | `POST /openapi/v1/bots/{bot_id}/edit-lock`(+`/steal`) | 新增 | 已开发 | P1 | 复用 `CollaboratorLockService.acquire/steal`；仅“有协作者且有草稿”需要锁，Bot Member+ 可抢占 |
+| 96 | edit-lock | 释放编辑锁 | `DELETE /openapi/v1/bots/{bot_id}/edit-lock` | 新增 | 已开发 | P1 | 复用 `CollaboratorLockService.release_lock` |
+| 97 | edit-lock | 编辑锁信息 | `GET /openapi/v1/bots/{bot_id}/edit-lock` | 新增 | 已开发 | P1 | 复用 `CollaboratorLockService.get_lock_info` |
+| 98 | editors | 协作者管理 | `GET/POST/PATCH/DELETE /openapi/v1/bots/editors/{bot_id}`(+`/{member_id}`) | 新增 | 后续批次 | P1 | 本期只交付 edit-lock；独立协作者 CRUD 待空间成员模型和统一协作契约完成后实施 |
 | 99 | skill-sets | 能力集分组 + 引用型 Skill + per-bot MCP | `GET/POST/PUT/DELETE /openapi/v1/bots/skill-sets/{bot_id}`(+`/{set_id}/skills`、`/mcps`) | 新增 | 未开工 | P2 | 引用型 Skill（市场/工坊，引用后只读）+ per-bot MCP 绑定（带 caller 字段） |
 | 100 | files | 容器目录树 | `GET /openapi/v1/bots/files/{bot_id}` | 新增 | 未开工 | P2 | 委托 `service_bot/router_build.py:read-only/tree`；本地 Bot 只读；≠`/resources` |
 | 101 | flow | 任务护航 DAG/YAML 编排 | `GET/PUT /openapi/v1/bots/flow/{bot_id}` | 新增 | 未开工 | P2 | 引擎 = BCS State Machine；P2 前需 BCS owner 进 openapi 或允许直调 |
@@ -171,14 +171,14 @@
 | **有效条目数** | 105 | 排除已删除 #68/#69；仍包含 #14 schema |
 | **有效 endpoint rows** | 104 | 有效条目再排除 #14 schema；多 Method/子路径分组仍按一行计，本文不混算 HTTP operation 数 |
 | 按归类 · 已有 | 62 | 包含 #14 schema；若只算 endpoint rows 则为 61 |
-| 按归类 · 升级 | 4 | #1 create、#11 passport、#35/#36 identity |
-| 按归类 · 新增 | 39 | #67 + #70–107；已删除 #68/#69 不计 |
+| 按归类 · 升级 | 5 | #1 create、#11 passport、#35/#36 identity、#67 统一列表接入 service |
+| 按归类 · 新增 | 38 | #70–107；已删除 #68/#69 不计 |
 | 按完成 · 已完成 | 62 | 存量 60 + #2/#14 ABC 回退；包含 #14 schema |
-| 按完成 · 已开发 | 15 | `/all` 1(#67) + local 9(#70–78) + dormant 1(#83) + data-init trigger 1(#84，端到端契约仍待补) + passport 1(#11) + engine restart 1(#80) + create space_id 1(#1) |
+| 按完成 · 已开发 | 24 | A 线 15 项 + lifecycle 6(#85–90) + edit-lock 3(#95–97) |
 | 按完成 · 已删除 | 2 | ~~#68~~ 单卡片 + ~~#69~~ actions |
 | 按完成 · 待升级 | 2 | #35/#36 identity `file_type` 13 MD 待核 P2 |
-| 按完成 · 已设计未建 | 7 | diagnostics 3(#79/#81/#82) + edit-lock 3(B线) + editors 1(B线) |
-| 按完成 · 未开工 | 19 | lifecycle/containers/evaluation/skill-sets/files/flow/channels/nodes/render-screens/spaces/migrate 等 |
+| 按完成 · 已设计未建 | 4 | diagnostics 3(#79/#81/#82) + editors 1(B线) |
+| 按完成 · 未开工 | 13 | containers/evaluation/skill-sets/files/flow/channels/nodes/render-screens/spaces/migrate 等 |
 | 按阶段 · P0 | 19 | #1/#11/#67/#70–80/#83–84/#91–93；已删除 #68/#69 不计 |
 | 按阶段 · P1 | 10 | #85–89/#94–98 |
 | 按阶段 · P2 | 12 | #35–36/#81–82/#90/#99–105 |
@@ -186,7 +186,7 @@
 
 **A/B 线归属口径（2026-08-13 修订）**：
 - **A 线（lucas）** = 个人云端 Bot + 本地 Bot + 壳层(`/all`) + 空间消费。**已开发 15 项**（ABC 回退后 #2/#14 为存量已完成，#68/#69 已删）。diagnostics 3 项（#79/#81/#82）已移交其他团队负责，A 线仅维护契约对账与进度跟进，不再承担实现；其中 #79 按指示降低优先级，#81/#82 为 P2 且不阻塞当前联调。#84 trigger 虽已开发，但 IAM 凭证与状态查询契约仍是 A 线联调阻塞。
-- **B 线（joseph）** = service Bot 生命周期 + 容器/评测 + 编辑页内核(skill-sets/files/flow/channels/nodes/render-screens) + 空间/迁移 + 协作(edit-lock/editors #95–98)。B 线还需明确 service Bot 如何进入工坊首页：优先扩展 `/bots/all` 为统一 read model；若选择独立 service 列表，则必须给出前端合并、分页、筛选与排序契约。
+- **B 线（joseph）** = service Bot 生命周期 + 容器/评测 + 编辑页内核(skill-sets/files/flow/channels/nodes/render-screens) + 空间/迁移 + 协作(edit-lock/editors #95–98)。已完成 service Bot 生命周期、edit-lock 和 `/bots/all` service 多版本卡片接入；editors 及其他 B 线项目按各自排期继续。
 
 ---
 
@@ -199,7 +199,7 @@
 | `GET /openapi/v1/bots/logs/*` | 对话 **trace** | `GET /openapi/v1/bots/diagnostics/{bot_id}/runtime-logs`（运行日志抽屉） |
 | `GET /openapi/v1/bots/resources/*` | **资源库** CRUD | `GET /openapi/v1/bots/files/{bot_id}`（容器目录树） |
 | `GET /openapi/v1/bots/identity/{bot_id}/{file_type}` | `file_type` 覆盖 13 个 MD **待核** | 加法补枚举（同路径） |
-| `DELETE /openapi/v1/bots/{bot_id}` | **拒 desktop + service** | 本地走 `DELETE /openapi/v1/bots/local/{bot_id}`；服务走 `POST /openapi/v1/bots/lifecycle/{bot_id}/offline` |
+| `DELETE /openapi/v1/bots/{bot_id}` | **拒 desktop + service** | 本地走 `DELETE /openapi/v1/bots/{bot_id}/local`；服务走 `POST /openapi/v1/bots/{bot_id}/lifecycle/offline` |
 
 ---
 

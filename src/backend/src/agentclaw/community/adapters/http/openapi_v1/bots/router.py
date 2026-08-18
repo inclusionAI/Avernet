@@ -100,9 +100,15 @@ from agentclaw.community.api.bot_dormant_service import (
 from agentclaw.community.core.bot_inventory.protocols import (
     BusinessSpaceContextProtocol,
 )
+from agentclaw.community.core.bot_inventory.policies.combo_policy import (
+    assert_service_upgrade,
+)
 from agentclaw.community.core.bot_inventory.types import (
     BotInventoryItem as CoreItem,
     DeployMode as CoreDeployMode,
+)
+from agentclaw.community.core.service_bot.errors import (
+    ServicePublicationUnsupportedError,
 )
 
 from .engine_config import _engine_config_target
@@ -152,6 +158,17 @@ _REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
 
 router = APIRouter(prefix="/openapi/v1/bots", tags=["bots"])
 
+
+def _require_service_capable_engine(bot_type: str, engine: str) -> None:
+    if bot_type != "service":
+        return
+    decision = assert_service_upgrade(engine)
+    if not decision.ok:
+        raise ServicePublicationUnsupportedError(
+            decision.reason or "engine cannot be used by a service bot"
+        )
+
+
 def _to_bot(d: dict[str, Any]) -> Bot:
     """Adapt an internal bot ``to_dict()`` record to the public ``Bot`` schema."""
     engine = d.get("active_engine") or ""
@@ -183,6 +200,7 @@ def _to_inventory_item(item: CoreItem) -> BotInventoryItem:
         }
     return BotInventoryItem(
         bot_id=item.bot_id,
+        card_id=item.card_id,
         bot_name=item.bot_name,
         bot_desc=item.bot_desc,
         engine=item.engine,
@@ -191,6 +209,10 @@ def _to_inventory_item(item: CoreItem) -> BotInventoryItem:
         deploy_mode=item.deploy_mode.value,
         display_state=item.display_state.value,
         status=item.status,
+        publication_id=item.publication_id,
+        publication_version=item.publication_version,
+        live_version=item.live_version,
+        internal_status=item.internal_status,
         owner_entity_id=item.owner_entity_id,
         space=space,
         avatar_url=item.avatar_url,
@@ -365,6 +387,7 @@ async def create_bot(
         raise UnsupportedEngineError(body.engine)
     # The engine/cluster pair must obey the bijection (ANDC⟺teclaw, ACRA⟺else).
     validate_engine_cluster(body.engine, body.cluster_name)
+    _require_service_capable_engine(body.bot_type, body.engine)
 
     bot_id = generate_bot_id(owner_id, bot_repo)
     outcome = create_bot_with_authorization(
@@ -549,8 +572,8 @@ async def get_bots_ceiling(
 # Card list at ``/openapi/v1/bots/all``, declared before the ``/{bot_id}``
 # wildcard so ``all`` matches as a literal rather than a bot_id. Each card already
 # carries its action affordances; the former rich-card detail and standalone
-# actions endpoints were removed. The list aggregates the owner's personal cloud
-# + local Bots behind ``BotInventoryServiceProtocol`` (a distinct Service API
+# actions endpoints were removed. The list aggregates the owner's personal cloud,
+# service, and local Bots behind ``BotInventoryServiceProtocol`` (a distinct Service API
 # from the ``BotServiceProtocol`` CRUD below); ``_to_inventory_item`` translates
 # the read model to the public schema.
 
@@ -560,6 +583,7 @@ async def get_bots_ceiling(
     "/all",
     response_model=Envelope[Page[BotInventoryItem]],
     responses=USER_SCOPED_403,
+    dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
 async def list_inventory(
@@ -590,7 +614,7 @@ async def list_inventory(
         BusinessSpaceContextProtocol
     ),
 ) -> Envelope[Page[BotInventoryItem]]:
-    """List personal cloud and local Bots visible in the current business space."""
+    """List personal cloud, service, and local Bots in the current space."""
     current_space = space_context.resolve_current(
         owner_id=owner_id,
         header_space_id=x_space_id,
@@ -644,7 +668,7 @@ def _require_personal_cloud_bot(bot: dict[str, Any]) -> None:
     "/{bot_id}/activate",
     response_model=Envelope[BotActivateResult],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
 )
 @envelope_errors
 async def activate_dormant_bot(
@@ -905,6 +929,7 @@ async def get_bot_auth_status(
         raise UnsupportedEngineError(effective_engine)
     if cluster_name is not None:
         validate_engine_cluster(effective_engine, cluster_name)
+    _require_service_capable_engine(bot_type or "personal", effective_engine)
     result = complete_bot_authorization(
         user_id=owner_id,
         nick_name=owner_id,
@@ -1133,7 +1158,7 @@ async def delete_bot_startup_script(
     "/{bot_id}/data-init",
     response_model=Envelope[DataInitResult],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
 )
 @envelope_errors
 async def trigger_bot_data_init(
@@ -1187,4 +1212,3 @@ async def trigger_bot_data_init(
         ),
         request,
     )
-

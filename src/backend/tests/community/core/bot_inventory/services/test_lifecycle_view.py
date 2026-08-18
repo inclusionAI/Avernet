@@ -1,10 +1,17 @@
 """Unit tests for Bot inventory lifecycle display mapping."""
+
 from __future__ import annotations
 
 import pytest
 
-from agentclaw.community.core.bot_inventory.services.lifecycle_view import BotLifecycleView
-from agentclaw.community.core.bot_inventory.types import BotAction, BotInventoryKind, DisplayState
+from agentclaw.community.core.bot_inventory.services.lifecycle_view import (
+    BotLifecycleView,
+)
+from agentclaw.community.core.bot_inventory.types import (
+    BotAction,
+    BotInventoryKind,
+    DisplayState,
+)
 
 
 class _ServiceLifecycle:
@@ -13,6 +20,9 @@ class _ServiceLifecycle:
 
     def allowed_actions(self, *, bot):
         return (BotAction.VIEW, BotAction.CHAT)
+
+    def cards_for_bots(self, *, bots):
+        return {"service": ()}
 
 
 @pytest.fixture
@@ -55,12 +65,19 @@ def test_personal_display_state_matrix(view, bot, expected) -> None:
     ],
 )
 def test_local_display_state_matrix(view, status, expected) -> None:
-    assert view.display_state(bot={"status": status}, kind=BotInventoryKind.LOCAL) is expected
+    assert (
+        view.display_state(bot={"status": status}, kind=BotInventoryKind.LOCAL)
+        is expected
+    )
 
 
 @pytest.mark.unit
 def test_service_lifecycle_delegates_to_port(view) -> None:
-    assert view.display_state(bot={}, kind=BotInventoryKind.SERVICE) is DisplayState.SERVICE_ONLINE
+    assert (
+        view.display_state(bot={}, kind=BotInventoryKind.SERVICE)
+        is DisplayState.SERVICE_ONLINE
+    )
     actions, disabled = view.allowed_actions(bot={}, kind=BotInventoryKind.SERVICE)
     assert actions == (BotAction.VIEW, BotAction.CHAT)
     assert disabled == {}
+    assert view.service_cards(bots=[{"bot_id": "service"}]) == {"service": ()}

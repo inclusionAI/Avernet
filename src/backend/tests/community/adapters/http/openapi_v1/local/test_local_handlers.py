@@ -19,7 +19,6 @@ from agentclaw.community.core.bot_inventory.adapters.noop_business_space import 
     NoopBusinessSpaceContext,
 )
 from agentclaw.community.core.bot_inventory.protocols import (
-    BotInventoryBotPort,
     BusinessSpaceContextProtocol,
     DesktopBotInventoryPort,
 )

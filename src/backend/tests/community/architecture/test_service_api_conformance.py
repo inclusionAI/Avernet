@@ -69,6 +69,9 @@ from agentclaw.community.api.local_skill_delete_service import (
 from agentclaw.community.api.market_favorite_service import (
     MarketFavoriteServiceProtocol,
 )
+from agentclaw.community.api.service_publication_facade import (
+    ServicePublicationFacadeProtocol,
+)
 from agentclaw.community.api.space_service import (
     SpaceMemberServiceProtocol,
     SpaceServiceProtocol,
@@ -108,6 +111,9 @@ from agentclaw.community.core.skill_center.services.local_skill_delete_service i
     LocalSkillDeleteService,
 )
 from agentclaw.community.core.market_favorites.services import MarketFavoriteService
+from agentclaw.community.core.service_bot.services.service_publication_facade import (
+    ServicePublicationFacade,
+)
 from agentclaw.community.core.spaces.services import SpaceMemberService, SpaceService
 
 
@@ -130,6 +136,7 @@ _PAIRS = [
     (SpaceServiceProtocol, SpaceService),
     (SpaceMemberServiceProtocol, SpaceMemberService),
     (MarketFavoriteServiceProtocol, MarketFavoriteService),
+    (ServicePublicationFacadeProtocol, ServicePublicationFacade),
 ]
 
 _IDS = [f"{p.__name__}->{c.__name__}" for p, c in _PAIRS]

@@ -205,6 +205,10 @@ from .bot_chats import router as chats_router
 from .resources import router as resources_router
 from .routines import router as routines_router
 from .skills import router as skills_router
+from .service_publications import (
+    edit_lock_router as service_edit_lock_router,
+    router as service_lifecycle_router,
+)
 from .spaces import router as spaces_router
 from .work_orders import router as work_orders_router
 
@@ -269,6 +273,11 @@ _SUBGROUPS = [
     # Local workflows are human-only rather than grant-checked. Their admission
     # entries and gateway route security refuse application-only callers.
     local_router,
+    # These groups resolve the addressed owner through OwnerIdDep, which also
+    # performs the application-grant check. Their handlers then enforce the
+    # live Bot collaborator relation at member level before any publication read.
+    service_lifecycle_router,
+    service_edit_lock_router,
 ]
 
 # The groups where **every** route is GRANT_CHECKED_OWN_BOT — it names a bot and resolves it

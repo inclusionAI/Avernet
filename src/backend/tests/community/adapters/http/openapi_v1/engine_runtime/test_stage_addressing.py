@@ -97,6 +97,20 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     # reason and with the same default — the caller's own bot.
     ("get", "/openapi/v1/bots/{bot_id}/chats"),
     ("get", "/openapi/v1/bots/{bot_id}/chats/{trace_id}"),
+    ("post", "/openapi/v1/bots/{bot_id}/lifecycle/upgrade"),
+    ("get", "/openapi/v1/bots/{bot_id}/lifecycle"),
+    ("delete", "/openapi/v1/bots/{bot_id}/lifecycle"),
+    ("get", "/openapi/v1/bots/{bot_id}/lifecycle/approval"),
+    ("put", "/openapi/v1/bots/{bot_id}/lifecycle/approval"),
+    ("post", "/openapi/v1/bots/{bot_id}/lifecycle/advance"),
+    ("post", "/openapi/v1/bots/{bot_id}/lifecycle/restart"),
+    ("post", "/openapi/v1/bots/{bot_id}/lifecycle/cancel-staging"),
+    ("post", "/openapi/v1/bots/{bot_id}/lifecycle/offline"),
+    ("post", "/openapi/v1/bots/{bot_id}/lifecycle/retry"),
+    ("get", "/openapi/v1/bots/{bot_id}/edit-lock"),
+    ("post", "/openapi/v1/bots/{bot_id}/edit-lock"),
+    ("delete", "/openapi/v1/bots/{bot_id}/edit-lock"),
+    ("post", "/openapi/v1/bots/{bot_id}/edit-lock/steal"),
 }
 
 

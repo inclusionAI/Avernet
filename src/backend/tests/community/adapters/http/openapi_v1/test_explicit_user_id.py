@@ -400,6 +400,9 @@ def test_the_pinned_number_of_operations_take_it():
     this pin exists to catch, so it is worth saying plainly that this one is
     intended — the five went away with the link resources they served, not by
     losing the dependency.
+
+    61 → 77 with the service-Bot lifecycle surface: conversion, approval config,
+    version reads/actions and edit-lock operations all act for an explicit user.
     """
     taking = [
         1

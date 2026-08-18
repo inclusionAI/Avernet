@@ -1,4 +1,5 @@
 """Replaceable seams consumed by the Bot inventory core."""
+
 from __future__ import annotations
 
 from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
@@ -7,6 +8,7 @@ from agentclaw.community.core.bot_inventory.types import (
     BotAction,
     BusinessSpaceRef,
     DisplayState,
+    ServiceLifecycleCard,
 )
 
 
@@ -117,3 +119,7 @@ class ServiceLifecyclePort(Protocol):
     def display_state(self, *, bot: Mapping[str, Any]) -> DisplayState: ...
 
     def allowed_actions(self, *, bot: Mapping[str, Any]) -> Sequence[BotAction]: ...
+
+    def cards_for_bots(
+        self, *, bots: Sequence[Mapping[str, Any]]
+    ) -> Mapping[str, Sequence[ServiceLifecycleCard]]: ...

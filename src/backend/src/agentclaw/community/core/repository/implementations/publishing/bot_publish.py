@@ -34,7 +34,7 @@ reference):
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from injector import inject
 from sqlalchemy import func
@@ -232,6 +232,26 @@ class BotPublishRepository(
             )
             records = [r.to_record() for r in rows]
         return [self._resolve_record(r) for r in records]
+
+    def list_by_source_bots(
+        self,
+        source_bot_pks: Sequence[int],
+        env: str,
+    ) -> List[BotPublishRecord]:
+        if not source_bot_pks:
+            return []
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.source_bot_pk.in_(tuple(source_bot_pks)),
+                    self.Model.env == env,
+                )
+                .order_by(self.Model.gmt_create.desc())
+                .all()
+            )
+            records = [row.to_record() for row in rows]
+        return [self._resolve_record(record) for record in records]
 
     def list_by_status(
         self,

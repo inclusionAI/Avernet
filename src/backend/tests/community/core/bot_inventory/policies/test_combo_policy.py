@@ -1,4 +1,5 @@
 """Unit tests for Bot inventory create-combination policies."""
+
 from __future__ import annotations
 
 import pytest
@@ -6,8 +7,10 @@ import pytest
 from agentclaw.community.core.bot_inventory.policies.combo_policy import (
     LOCAL_CAPABLE_ENGINES,
     PERSONAL_CLOUD_CAPABLE_ENGINES,
+    SERVICE_CAPABLE_ENGINES,
     assert_local_create,
     assert_personal_cloud_create,
+    assert_service_upgrade,
 )
 
 
@@ -58,3 +61,14 @@ def test_local_rejects_teclaw_cloud_only_engine() -> None:
     assert rejected.reason == "local bot does not support engine: teclaw"
     # Cloud personal bots still accept teclaw — see PERSONAL_CLOUD path above.
     assert assert_personal_cloud_create("teclaw", "personal").ok
+
+
+@pytest.mark.unit
+def test_service_upgrade_engine_matrix() -> None:
+    assert SERVICE_CAPABLE_ENGINES == frozenset({"openclaw", "claude_code", "teclaw"})
+    for engine in SERVICE_CAPABLE_ENGINES:
+        assert assert_service_upgrade(engine).ok
+
+    rejected = assert_service_upgrade("hermes")
+    assert not rejected.ok
+    assert rejected.reason == "engine cannot be serviced: hermes"

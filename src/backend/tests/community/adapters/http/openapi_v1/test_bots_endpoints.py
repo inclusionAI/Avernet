@@ -539,6 +539,30 @@ def test_teclaw_andc_create_allowed_when_engine_configured(client, svc, passport
     svc.create_bot.assert_called_once()
 
 
+def test_service_create_rejects_non_service_engine_before_side_effects(
+    client, svc, passport
+):
+    body = {
+        **_CREATE_BODY,
+        "engine": "hermes",
+        "cluster_name": "ACRA",
+        "bot_type": "service",
+    }
+    with (
+        patch.object(
+            bots_router, "_get_engine_types", return_value=["openclaw", "hermes"]
+        ),
+        patch.object(bots_router, "generate_bot_id", return_value="default") as gen,
+    ):
+        response = client.post("/openapi/v1/bots", json=body)
+
+    assert response.status_code == 409
+    assert response.json()["code"] == 409000
+    gen.assert_not_called()
+    passport.apply_first_agent_passport.assert_not_called()
+    svc.create_bot.assert_not_called()
+
+
 def test_desktop_bot_type_rejected(client, svc):
     """R3/F17: desktop bots have their own flow; 201-ing a PENDING shell is wrong."""
     resp = client.post("/openapi/v1/bots", json={**_CREATE_BODY, "bot_type": "desktop"})
@@ -598,6 +622,23 @@ def test_auth_status_accepts_supported_bot_type(client, svc, passport):
     passport.query_agent_passport.return_value = {"agent_code": "ac"}
     _ok(client.get("/openapi/v1/bots/b1/auth-status?bot_type=service"))
     assert svc.create_bot.call_args.kwargs["bot_type"] == "service"
+
+
+def test_auth_status_rejects_non_service_engine_before_authorization_lookup(
+    client, svc, passport
+):
+    with patch.object(
+        bots_router, "_get_engine_types", return_value=["openclaw", "hermes"]
+    ):
+        response = client.get(
+            "/openapi/v1/bots/b1/auth-status"
+            "?engine=hermes&cluster_name=ACRA&bot_type=service"
+        )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == 409000
+    passport.query_auth_status.assert_not_called()
+    svc.create_bot.assert_not_called()
 
 
 def test_engine_config_unknown_provider_is_enveloped(client, engine_config):

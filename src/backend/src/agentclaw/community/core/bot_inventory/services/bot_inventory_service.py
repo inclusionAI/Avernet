@@ -1,4 +1,5 @@
 """Transport-agnostic Bot inventory aggregation service."""
+
 from __future__ import annotations
 
 import json
@@ -13,12 +14,15 @@ from agentclaw.community.core.bot_inventory.protocols import (
     BusinessSpaceContextProtocol,
     DesktopBotInventoryPort,
 )
-from agentclaw.community.core.bot_inventory.services.lifecycle_view import BotLifecycleView
+from agentclaw.community.core.bot_inventory.services.lifecycle_view import (
+    BotLifecycleView,
+)
 from agentclaw.community.core.bot_inventory.types import (
     BotInventoryItem,
     BotInventoryKind,
     BusinessSpaceRef,
     DeployMode,
+    ServiceLifecycleCard,
 )
 
 
@@ -54,14 +58,26 @@ class BotInventoryService:
     ) -> tuple[list[BotInventoryItem], int]:
         cards: list[BotInventoryItem] = []
         if deploy_mode in (None, DeployMode.CLOUD):
-            cards.extend(
-                self._to_cloud_item(row, owner_id)
-                for row in self._list_personal_cloud_rows(
-                    owner_id=owner_id,
-                    keyword=keyword,
-                    engine=engine,
-                )
+            cloud_rows = self._list_cloud_rows(
+                owner_id=owner_id,
+                keyword=keyword,
+                engine=engine,
             )
+            service_rows = [
+                row for row in cloud_rows if row.get("bot_type") == "service"
+            ]
+            cards.extend(
+                self._to_item(row, owner_id)
+                for row in cloud_rows
+                if row.get("bot_type") != "service"
+            )
+            service_cards = self._lifecycle.service_cards(bots=service_rows)
+            for row in service_rows:
+                bot_id = str(row.get("bot_id") or "")
+                cards.extend(
+                    self._to_service_item(row, owner_id, lifecycle_card)
+                    for lifecycle_card in service_cards.get(bot_id, ())
+                )
         if deploy_mode in (None, DeployMode.LOCAL):
             cards.extend(
                 self._to_local_item(row, owner_id)
@@ -73,7 +89,14 @@ class BotInventoryService:
             )
         if space is not None:
             cards = [c for c in cards if c.space and c.space.space_id == space.space_id]
-        cards.sort(key=lambda c: (c.deploy_mode.value, c.bot_name, c.bot_id))
+        cards.sort(
+            key=lambda c: (
+                c.deploy_mode.value,
+                c.bot_name,
+                c.bot_id,
+                -(c.publication_version or 0),
+            )
+        )
         total = len(cards)
         start = (page - 1) * page_size
         return cards[start : start + page_size], total
@@ -94,7 +117,7 @@ class BotInventoryService:
                     return row
             raise
 
-    def _list_personal_cloud_rows(
+    def _list_cloud_rows(
         self, *, owner_id: str, keyword: str | None, engine: str | None
     ) -> list[Mapping[str, Any]]:
         rows: list[Mapping[str, Any]] = []
@@ -124,7 +147,7 @@ class BotInventoryService:
                 break
             if len(rows) >= MAX_CLOUD_ROWS:
                 logger.warning(
-                    "[BotInventoryService._list_personal_cloud_rows] truncated "
+                    "[BotInventoryService._list_cloud_rows] truncated "
                     "cloud rows owner_id=%s keyword=%s engine=%s max_rows=%d total=%s",
                     owner_id,
                     keyword,
@@ -134,7 +157,11 @@ class BotInventoryService:
                 )
                 break
             page += 1
-        return [row for row in rows if row.get("bot_type") in (None, "", "personal")]
+        return [
+            row
+            for row in rows
+            if row.get("bot_type") in (None, "", "personal", "service")
+        ]
 
     def _list_local_rows(
         self, *, owner_id: str, keyword: str | None, engine: str | None
@@ -148,8 +175,10 @@ class BotInventoryService:
             rows = [r for r in rows if keyword in str(r.get("bot_name") or "")]
         if engine:
             rows = [
-                r for r in rows
-                if (r.get("active_engine") or r.get("engine_type") or r.get("engine")) == engine
+                r
+                for r in rows
+                if (r.get("active_engine") or r.get("engine_type") or r.get("engine"))
+                == engine
             ]
         return rows
 
@@ -157,8 +186,6 @@ class BotInventoryService:
         bot_type = str(row.get("bot_type") or "personal")
         if bot_type == "desktop":
             return self._to_local_item(row, owner_id)
-        if bot_type == "service":
-            return self._to_service_item(row, owner_id)
         return self._to_cloud_item(row, owner_id)
 
     def _to_cloud_item(self, row: Mapping[str, Any], owner_id: str) -> BotInventoryItem:
@@ -177,12 +204,18 @@ class BotInventoryService:
             deploy_mode=DeployMode.LOCAL,
         )
 
-    def _to_service_item(self, row: Mapping[str, Any], owner_id: str) -> BotInventoryItem:
+    def _to_service_item(
+        self,
+        row: Mapping[str, Any],
+        owner_id: str,
+        lifecycle_card: ServiceLifecycleCard,
+    ) -> BotInventoryItem:
         return self._build_item(
             row=row,
             owner_id=owner_id,
             kind=BotInventoryKind.SERVICE,
             deploy_mode=DeployMode.CLOUD,
+            lifecycle_card=lifecycle_card,
         )
 
     def _build_item(
@@ -192,28 +225,61 @@ class BotInventoryService:
         owner_id: str,
         kind: BotInventoryKind,
         deploy_mode: DeployMode,
+        lifecycle_card: ServiceLifecycleCard | None = None,
     ) -> BotInventoryItem:
         ext = _as_mapping(row.get("ext"))
-        display_state = self._lifecycle.display_state(bot={**dict(row), "ext": ext}, kind=kind)
-        actions, disabled = self._lifecycle.allowed_actions(bot={**dict(row), "ext": ext}, kind=kind)
+        normalized = {**dict(row), "ext": ext}
+        if lifecycle_card is None:
+            display_state = self._lifecycle.display_state(bot=normalized, kind=kind)
+            actions, disabled = self._lifecycle.allowed_actions(
+                bot=normalized, kind=kind
+            )
+            raw_status = str(row.get("status") or "")
+        else:
+            display_state = lifecycle_card.display_state
+            actions = lifecycle_card.actions
+            disabled = {}
+            raw_status = lifecycle_card.status
+        bot_id = str(row.get("bot_id") or "")
+        publication_id = lifecycle_card.publication_id if lifecycle_card else None
         return BotInventoryItem(
-            bot_id=str(row.get("bot_id") or ""),
+            bot_id=bot_id,
             bot_name=str(row.get("bot_name") or ""),
             bot_desc=str(row.get("bot_desc") or ""),
-            engine=str(row.get("active_engine") or row.get("engine_type") or row.get("engine") or ""),
+            engine=str(
+                row.get("active_engine")
+                or row.get("engine_type")
+                or row.get("engine")
+                or ""
+            ),
             bot_type=str(row.get("bot_type") or "personal"),
             kind=kind,
             deploy_mode=deploy_mode,
             display_state=display_state,
-            status=str(row.get("status") or ""),
-            owner_entity_id=str(row.get("owner_id") or row.get("entity_id") or owner_id),
-            space=self._business_space.bot_space(bot={**dict(row), "ext": ext}, owner_id=owner_id),
+            status=raw_status,
+            owner_entity_id=str(
+                row.get("owner_id") or row.get("entity_id") or owner_id
+            ),
+            space=self._business_space.bot_space(
+                bot={**dict(row), "ext": ext}, owner_id=owner_id
+            ),
             avatar_url=_optional_str(ext.get("avatar_url") or row.get("avatar_url")),
             machine_id=_optional_str(ext.get("machine_id") or row.get("machine_id")),
             mount_path=_optional_str(ext.get("mount_path") or row.get("mount_path")),
             passport_id=_passport_id(ext),
             actions=actions,
             disabled_actions=disabled or None,
+            card_id=(
+                f"service:{bot_id}:{publication_id}"
+                if publication_id is not None
+                else bot_id
+            ),
+            publication_id=publication_id,
+            publication_version=(lifecycle_card.version if lifecycle_card else None),
+            live_version=(lifecycle_card.live_version if lifecycle_card else None),
+            internal_status=(
+                lifecycle_card.internal_status if lifecycle_card else None
+            ),
         )
 
 
