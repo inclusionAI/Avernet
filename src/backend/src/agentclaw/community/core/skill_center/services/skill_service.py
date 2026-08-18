@@ -33,7 +33,11 @@ from agentclaw.community.core.skill_center.errors import (
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillCategoryRepository
 from agentclaw.community.core.skill_center.services.skill_cache import MarketCache
-from agentclaw.community.core.skill_center.services.skill_parser import SkillInfo, SkillParser, SkillTreeNode
+from agentclaw.community.core.skill_center.services.skill_parser import (
+    LegacySkillParserAdapter,
+    SkillInfo,
+    SkillTreeNode,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
 
@@ -449,7 +453,7 @@ class SkillService:
             # Translate device-side absolute path to management-accessible path
             source_path = self._resolve_symlink_for_management(item)
 
-            skill_info = SkillParser.parse(source_path)
+            skill_info = LegacySkillParserAdapter.parse(source_path)
 
             if not skill_info:
                 continue
@@ -528,7 +532,7 @@ class SkillService:
                 text = content.decode("utf-8")
             except UnicodeDecodeError:
                 text = content.decode("gbk", errors="replace")
-            skill_info = SkillParser.parse_content(text)
+            skill_info = LegacySkillParserAdapter.parse_content(text)
             if not skill_info:
                 continue
 
@@ -582,7 +586,7 @@ class SkillService:
 
         # Translate device-side absolute path to management-accessible path
         source_path = self._resolve_symlink_for_management(active_path)
-        skill_info = SkillParser.parse(source_path)
+        skill_info = LegacySkillParserAdapter.parse(source_path)
 
         if not skill_info:
             return None
@@ -1038,9 +1042,9 @@ class SkillService:
                     rel_path = str(item.relative_to(market_repo_dir))
 
                     # 只有包含 SKILL.md 的目录才被认为是技能
-                    if SkillParser.has_skill_file(item):
+                    if LegacySkillParserAdapter.has_skill_file(item):
                         # 是技能目录，解析并缓存
-                        skill_info = SkillParser.parse(item)
+                        skill_info = LegacySkillParserAdapter.parse(item)
                         if skill_info:
                             index[rel_path] = skill_info
                     else:
@@ -1074,8 +1078,8 @@ class SkillService:
             )
 
         # 检查是否是技能目录（不在索引中的情况）- 只有 SKILL.md 才算
-        if SkillParser.has_skill_file(path):
-            skill_info = SkillParser.parse(path)
+        if LegacySkillParserAdapter.has_skill_file(path):
+            skill_info = LegacySkillParserAdapter.parse(path)
             if skill_info:
                 # 添加到索引
                 skills_index[rel_path] = skill_info
@@ -1112,8 +1116,8 @@ class SkillService:
         market_repo_dir = self._get_market_repo_dir()
 
         # 只有包含 SKILL.md 的目录才被认为是技能
-        if SkillParser.has_skill_file(path):
-            skill_info = SkillParser.parse(path)
+        if LegacySkillParserAdapter.has_skill_file(path):
+            skill_info = LegacySkillParserAdapter.parse(path)
             return SkillTreeNode(
                 name=skill_info.get("name", path.name) if skill_info else path.name,
                 path=str(path.relative_to(market_repo_dir)),
@@ -1496,7 +1500,7 @@ class SkillService:
                     skill_path = self._get_market_repo_dir() / relative_path
                     logger.info(f"[get_skill_readme] git:// path: {skill_path}, exists={skill_path.exists()}")
                     if skill_path.exists():
-                        skill_file = SkillParser.find_skill_file(skill_path)
+                        skill_file = LegacySkillParserAdapter.find_skill_file(skill_path)
                         if skill_file:
                             try:
                                 return skill_file.read_text(encoding="utf-8")
@@ -1534,7 +1538,7 @@ class SkillService:
         if not skill_path:
             return None
 
-        skill_file = SkillParser.find_skill_file(skill_path)
+        skill_file = LegacySkillParserAdapter.find_skill_file(skill_path)
         if skill_file:
             try:
                 return skill_file.read_text(encoding="utf-8")
@@ -1556,7 +1560,7 @@ class SkillService:
                 if item.is_dir():
                     if item.name == skill_name:
                         # 只有包含 SKILL.md 的目录才被认为是技能
-                        if SkillParser.has_skill_file(item):
+                        if LegacySkillParserAdapter.has_skill_file(item):
                             return item
                     result = find_recursive(item)
                     if result:
@@ -1576,7 +1580,7 @@ class SkillService:
 
     def _parse_skill_md_for_db(self, skill_path: Path) -> dict[str, Any] | None:
         """解析技能文件，返回数据库需要的格式"""
-        base_info = SkillParser.parse(skill_path)
+        base_info = LegacySkillParserAdapter.parse(skill_path)
         if not base_info:
             return None
 
@@ -1601,7 +1605,7 @@ class SkillService:
             protocol, source = self.parse_skill_path(skill_path)
             if not source.exists():
                 return None
-            return SkillParser.parse(source)
+            return LegacySkillParserAdapter.parse(source)
         except Exception as e:
             logger.warning(f"[_parse_skill_from_git] Failed to parse {skill_path}: {e}")
             return None
@@ -1631,7 +1635,7 @@ class SkillService:
                 text = content.decode("utf-8")
             except UnicodeDecodeError:
                 text = content.decode("gbk", errors="replace")
-            return SkillParser.parse_content(text)
+            return LegacySkillParserAdapter.parse_content(text)
         except Exception as e:
             logger.warning(f"[parse_local_skill_config] Failed to parse {git_path}: {e}")
             return None
@@ -1842,7 +1846,9 @@ class SkillService:
             content_str = raw_bytes.decode("utf-8")
         except UnicodeDecodeError:
             content_str = raw_bytes.decode("gbk", errors="replace")
-        skill_info = SkillParser.parse_content(content_str) if content_str else {}
+        skill_info = (
+            LegacySkillParserAdapter.parse_content(content_str) if content_str else {}
+        )
         if not self._has_required_skill_field(content_str, "name"):
             raise ValueError("SKILL.md must contain required field: name.")
         skill_name = self._extract_upload_scalar_field(content_str, "name")
@@ -1892,7 +1898,7 @@ class SkillService:
             return None
 
         # Parse skill info from filesystem
-        skill_info = SkillParser.parse(source_path)
+        skill_info = LegacySkillParserAdapter.parse(source_path)
         if not skill_info:
             return None
 

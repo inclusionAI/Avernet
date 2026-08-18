@@ -8,19 +8,23 @@ class TestSkillParserParseContent:
 
     def test_parse_basic_frontmatter(self):
         """Test parsing basic YAML frontmatter."""
-        from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
+        from agentclaw.community.core.skill_center.services.skill_parser import (
+            LegacySkillParserAdapter,
+        )
 
         content = "---\nname: my-skill\ndescription: A test skill\n---\n# My Skill"
-        result = SkillParser.parse_content(content)
+        result = LegacySkillParserAdapter.parse_content(content)
         assert result["name"] == "my-skill"
         assert result["description"] == "A test skill"
 
     def test_parse_empty_content(self):
         """Test parsing empty content returns None."""
-        from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
+        from agentclaw.community.core.skill_center.services.skill_parser import (
+            LegacySkillParserAdapter,
+        )
 
-        assert SkillParser.parse_content("") is None
-        assert SkillParser.parse_content(None) is None
+        assert LegacySkillParserAdapter.parse_content("") is None
+        assert LegacySkillParserAdapter.parse_content(None) is None
 
 
 class TestSkillServiceAsyncRouting:

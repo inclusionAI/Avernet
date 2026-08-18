@@ -19,6 +19,13 @@ provides:
   - "LocalSkillStateService"
   - "LocalSkillDeleteService"
   - "LocalSkillCleanupWorkModel"
+  - "SkillParser"
+  - "SkillMetadata"
+  - "SkillMetadataProjection"
+  - "SkillMetadataErrorCode"
+  - "SkillMetadataValidationIssue"
+  - "SkillMetadataValidationResult"
+  - "SkillMetadataValidationError"
 consumes:
   - "BotRepository"
   - "BotCollabLogRepositoryProtocol"
@@ -89,6 +96,22 @@ before it attempts byte cleanup. Cleanup identity uses the full SHA-256 of the
 locator, while retaining the locator itself for execution; a digest collision
 fails closed. Apply
 `sql/2026_08_04_local_skill_cleanup_work.sql` before deploying this behavior.
+
+## SKILL.md metadata contract
+
+`api/skill_metadata_parser.py` is the Service API Protocol for strict metadata
+reads. Its implementation accepts only a normalized root `SKILL.md`, encoded
+as UTF-8, with YAML frontmatter containing non-empty string `name` and
+`description` fields plus a non-empty Markdown body. Names are at most 256
+characters and descriptions at most 65,535 UTF-8 bytes. All strict parse,
+validation, and projection calls expose the same `SkillMetadataErrorCode` and
+value objects from `skill_metadata.py`; consumers display only
+`SkillMetadataProjection` and never write name or description independently.
+
+`LegacySkillParserAdapter` remains a compatibility adapter for existing
+Local/Repo content and is not a valid entry point for new Space Skill or
+published-version flows. Its best-effort fallback is deliberately isolated so
+the canonical contract can fail closed without changing historical reads.
 
 Public Local Skill deletion first persists a non-purgeable `preparing` record,
 then promotes it to `repair_required` before copying and verifying package

@@ -18,7 +18,9 @@ from typing import Optional
 from injector import inject
 
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
-from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
+from agentclaw.community.core.skill_center.services.skill_parser import (
+    LegacySkillParserAdapter,
+)
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
 
@@ -160,7 +162,7 @@ class SkillBatchSyncService:
         # 1) 解析元数据
         skill_metas: list[dict] = []
         for sd in all_skill_dirs:
-            parsed = SkillParser.parse(sd)
+            parsed = LegacySkillParserAdapter.parse(sd)
             if parsed is None:
                 report.results.append(SyncResult(skill_code=sd.name, success=False, error="parse failed"))
                 report.failed += 1
@@ -252,8 +254,8 @@ class SkillBatchSyncService:
             if preferred_parent in challenger.parts:
                 return challenger
             return existing
-        parsed_e = SkillParser.parse(existing)
-        parsed_c = SkillParser.parse(challenger)
+        parsed_e = LegacySkillParserAdapter.parse(existing)
+        parsed_c = LegacySkillParserAdapter.parse(challenger)
         desc_e = len((parsed_e or {}).get("description", ""))
         desc_c = len((parsed_c or {}).get("description", ""))
         if desc_c > desc_e:
