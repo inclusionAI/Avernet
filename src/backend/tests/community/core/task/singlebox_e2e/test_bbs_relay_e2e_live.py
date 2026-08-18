@@ -1,4 +1,4 @@
-"""BBS 自主接力 live e2e(风清扬案例)。
+"""BBS 自主接力 live e2e(金庸案例)。
 
 gated by ``SINGLEBOX_TASK_E2E=1``。本地 ``./scripts/singlebox.sh start all`` 起好 singlebox 后:
 
@@ -8,28 +8,28 @@ gated by ``SINGLEBOX_TASK_E2E=1``。本地 ``./scripts/singlebox.sh start all`` 
 
 # 场景(对齐 spec §6 / test_task_integration_e2e.py)
 
-- 新建 ``task-owner-bot``(装 planning+search,做任务规划/分解)+「风清扬」(装 ``arch-analysis`` +
+- 新建 ``task-owner-bot``(装 planning+search,做任务规划/分解)+「金庸」(装 ``arch-analysis`` +
   ``bbs-relay-pickup``,BBS 接力执行者)。
 - 任务目标:**整理支付宝公司内部技术架构师**。理论上:owner 规划分解后,子任务"找架构师"经普通搜索
-  找不到合适的人 → 升 BBS;只有「风清扬」会通过 bbs 接力把各方向的架构师逐段整理出来,最终满足根目标 → 图 DONE。
+  找不到合适的人 → 升 BBS;只有「金庸」会通过 bbs 接力把各方向的架构师逐段整理出来,最终满足根目标 → 图 DONE。
 
 # 为什么是 in-process 图 + live adapter(设计说明)
 
 - BBS 接力的写口(``bbs/claim``/``attach``/``result``)+ ``on_bbs_report`` 都是 collector-free 的图操作,
   不跑框架 dispatch/planner,因此用一个 in-process FastAPI+Injector(stub discover,同
   ``test_bbs_claim_route.py`` 套路)承载图与路由即可,接力 mechanics 无需 singlebox 全栈。
-- 风清扬的 ``arch-analysis`` 是真实 LLM 推理,经 ``SingleboxEngineAdapter``(直连 singlebox 上风清扬的
-  引擎 ws)live 调用;风清扬本体由 ``SingleboxBotProvisioner`` 真实建 bot + 装 skill。
+- 金庸的 ``arch-analysis`` 是真实 LLM 推理,经 ``SingleboxEngineAdapter``(直连 singlebox 上金庸的
+  引擎 ws)live 调用;金庸本体由 ``SingleboxBotProvisioner`` 真实建 bot + 装 skill。
 - "单 bot 找不到 → 升 BBS"在框架里要求任务处于 **bbs 可恢复态**(根 ``PLANNING`` + ``bbs_mode=True``;
   见 spec §10.5 seam:图级 ``HUNG`` 是硬终态,BBS 不碰)。自然升 BBS 对非案例目标易落到图级 ``HUNG``
-  (planning skill 是案例剧本式),故本用例**直接构造 bbs 可恢复态**来演练风清扬的接力,模拟
+  (planning skill 是案例剧本式),故本用例**直接构造 bbs 可恢复态**来演练金庸的接力,模拟
   "普通派发找不到架构师后,任务被升到 BBS 且仍可恢复"。
 - `task-owner-bot` 作任务的 planner/source(对齐范本 provisioning)。自然链里 owner 的 planning skill
   是案例剧本式(只认存储行业 case),且 §10.5 seam 下"整任务单 bot 做不了"会同步图级 ``HUNG``(BBS 接不上);
-  故本用例 **provision owner 但接力态由用例构造**为可恢复态,风清扬再 self-decompose via attach 接力。
+  故本用例 **provision owner 但接力态由用例构造**为可恢复态,金庸再 self-decompose via attach 接力。
   若要让 owner 真实规划 + 自然升 BBS 接力成功,需另做 planning skill 剧本并(可能)放宽 §10.5 seam——独立工作,不在本用例。
 - 接力循环由本用例编排(充当"极薄外部触发器 + bbs-relay-pickup 的 loop 驱动"),每段:
-  claim → attach(scoped 子节点:某方向找架构师)→ 风清扬 arch-analysis(live)→ result(PASS+checkpoint)
+  claim → attach(scoped 子节点:某方向找架构师)→ 金庸 arch-analysis(live)→ result(PASS+checkpoint)
   → 释放 → 下段;根收口由框架经 owner 复核自判(非 bot 声明,无 root_verified;见 natual live 测)。复刻 bbs-relay-pickup SKILL.md 的 6 步 loop。
 """
 from __future__ import annotations
@@ -70,7 +70,7 @@ _LIVE = os.environ.get("SINGLEBOX_TASK_E2E", "").strip() in {"1", "true"}
 _BACKEND = os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
 _USER_ID = os.environ.get("SINGLEBOX_USER_ID", "146836")
 _OWNER_BOT_NAME = "task-owner-bot"  # 对齐 test_task_integration_e2e.py:owner 做 planning+search
-_FQY_BOT_NAME = "风清扬"
+_JY_BOT_NAME = "金庸"
 
 SKILLS_DIR = Path(__file__).parent / "skills"
 _ARCH_SKILL = str(SKILLS_DIR / "arch-analysis")
@@ -81,7 +81,7 @@ _BBS_SKILL = str(
     / "specs" / "2026-08-09-task-goal-driven-task-runner-bbs" / "bbs-relay-pickup"
 )
 
-# 任务目标:整理支付宝公司内部技术架构师。风清扬按方向拆段接力。
+# 任务目标:整理支付宝公司内部技术架构师。金庸按方向拆段接力。
 TASK_ID = f"t_arch_{uuid.uuid4().hex[:6]}"
 SUB_DOMAINS = ["基础架构", "中间件架构", "数据架构", "业务架构"]
 
@@ -160,7 +160,7 @@ def _seed_bbs_recoverable(injector: Injector, owner_id: str) -> None:
 
 
 def _parse_architects(text: str) -> dict | None:
-    """从风清扬 arch-analysis 回的文本里抠 ```json 代码块;抠不到返 None。"""
+    """从金庸 arch-analysis 回的文本里抠 ```json 代码块;抠不到返 None。"""
     m = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
     if not m:
         return None
@@ -182,23 +182,23 @@ class TestBbsRelayE2ELive(unittest.TestCase):
     async def _run(self) -> None:
         # 1) provisioning(对齐 test_task_integration_e2e.py):
         #    task-owner-bot 做 planning+search(owner 规划/分解任务);
-        #    风清扬 装 arch-analysis + bbs-relay-pickup(BBS 接力执行者)。幂等。
+        #    金庸 装 arch-analysis + bbs-relay-pickup(BBS 接力执行者)。幂等。
         prov = SingleboxBotProvisioner(backend_base_url=_BACKEND, user_id=_USER_ID)
         owner_id = await prov.create_bot(bot_name=_OWNER_BOT_NAME)
         await prov.install_skills(
             owner_id, [str(SKILLS_DIR / "planning"), str(SKILLS_DIR / "search")]
         )
-        fqy_id = await prov.create_bot(bot_name=_FQY_BOT_NAME)
-        await prov.install_skills(fqy_id, [_ARCH_SKILL, _BBS_SKILL])
+        jy_id = await prov.create_bot(bot_name=_JY_BOT_NAME)
+        await prov.install_skills(jy_id, [_ARCH_SKILL, _BBS_SKILL])
         await prov._aclose()
-        print(f"[provision] owner={owner_id} ← planning+search ; 风清扬={fqy_id} ← arch-analysis+bbs-relay-pickup")
+        print(f"[provision] owner={owner_id} ← planning+search ; 金庸={jy_id} ← arch-analysis+bbs-relay-pickup")
 
         # 2) in-process 图 + 路由(接力 mechanics);构造 bbs 可恢复态(source = owner)
         client, injector = _build_client()
         _seed_bbs_recoverable(injector, owner_id=owner_id)
         print(f"[seed] task={TASK_ID} source=owner({owner_id}) bbs_mode=True root=PLANNING(可恢复)")
 
-        # 3) live adapter:风清扬的 arch-analysis 真实推理
+        # 3) live adapter:金庸的 arch-analysis 真实推理
         adapter = SingleboxEngineAdapter(backend_base_url=_BACKEND, user_id=_USER_ID)
 
         def _dash() -> dict:
@@ -213,22 +213,22 @@ class TestBbsRelayE2ELive(unittest.TestCase):
             for i, sub in enumerate(SUB_DOMAINS):
 
                 # 步② CAS 占根(同 bot 幂等;前段 result 已释放 claim,这里重新 claim)
-                r = client.post("/api/task/bbs/claim", json={"task_id": TASK_ID, "bot_id": fqy_id})
+                r = client.post("/api/task/bbs/claim", json={"task_id": TASK_ID, "bot_id": jy_id})
                 self.assertEqual(r.status_code, 200, f"claim 未成功(@{sub}):{r.text}")
-                # 接单确认:claim 后根 bbs_owner == 风清扬
+                # 接单确认:claim 后根 bbs_owner == 金庸
                 g = _dash()
                 root = _node(g, TASK_ID)
                 self.assertEqual(
-                    (root["run_info"]["extend_props"] or {}).get("bbs_owner"), fqy_id,
-                    f"claim 后根 bbs_owner 非风清扬(@{sub})",
+                    (root["run_info"]["extend_props"] or {}).get("bbs_owner"), jy_id,
+                    f"claim 后根 bbs_owner 非金庸(@{sub})",
                 )
                 # CAS 排他确认:owner 再 claim 同任务应 409(仅首段验一次)
                 if i == 0:
                     r2 = client.post("/api/task/bbs/claim", json={"task_id": TASK_ID, "bot_id": owner_id})
                     self.assertEqual(r2.status_code, 409, f"第二 bot claim 未被 CAS 拒(应 409):{r2.text}")
-                    print(f"[relay@{sub}] claim 200 bbs_owner=风清扬 (CAS: owner→409 ✓)")
+                    print(f"[relay@{sub}] claim 200 bbs_owner=金庸 (CAS: owner→409 ✓)")
                 else:
-                    print(f"[relay@{sub}] claim 200 bbs_owner=风清扬")
+                    print(f"[relay@{sub}] claim 200 bbs_owner=金庸")
 
                 # 步④ 挂一个 scoped 节点(该方向找架构师)+ start
                 r = client.post(
@@ -236,7 +236,7 @@ class TestBbsRelayE2ELive(unittest.TestCase):
                     json={
                         "task_id": TASK_ID,
                         "parent_node_id": TASK_ID,  # 根
-                        "bot_id": fqy_id,
+                        "bot_id": jy_id,
                         "task_spec": {
                             "metadata": {
                                 "task_id": f"{TASK_ID}::bbs::{sub}",
@@ -256,16 +256,16 @@ class TestBbsRelayE2ELive(unittest.TestCase):
                 self.assertEqual(r.status_code, 200, f"attach 未成功(@{sub}):{r.text}")
                 node_id = r.json()["data"]["node_id"]
                 self.assertTrue(node_id.startswith("bbs-"), f"node_id 非 bbs- 前缀:{node_id}")
-                # 执行确认:attach 后节点 RUNNING / run_mode=bbs / assignee=风清扬
+                # 执行确认:attach 后节点 RUNNING / run_mode=bbs / assignee=金庸
                 g = _dash()
                 nd = _node(g, node_id)
                 self.assertIsNotNone(nd, f"attach 后未找到节点 {node_id}(@{sub})")
                 self.assertEqual(nd["status"], "RUNNING", f"attach 后节点非 RUNNING(@{sub}):{nd['status']}")
                 self.assertEqual((nd["run_info"] or {}).get("run_mode"), "bbs", f"节点非 run_mode=bbs(@{sub})")
-                self.assertEqual((nd["run_info"] or {}).get("assignee"), fqy_id, f"节点 assignee 非风清扬(@{sub})")
-                print(f"[relay@{sub}] attach 200 node={node_id} RUNNING/bbs/风清扬 ✓")
+                self.assertEqual((nd["run_info"] or {}).get("assignee"), jy_id, f"节点 assignee 非金庸(@{sub})")
+                print(f"[relay@{sub}] attach 200 node={node_id} RUNNING/bbs/金庸 ✓")
 
-                # 步④ 执行:风清扬 arch-analysis(live LLM)识别该方向架构师
+                # 步④ 执行:金庸 arch-analysis(live LLM)识别该方向架构师
                 prompt = (
                     f"请用 arch-analysis skill 分析:支付宝(蚂蚁集团)内部「{sub}」方向的技术架构师是谁?"
                     f"给出该方向架构师清单(姓名/角色/职责)。按 arch-analysis SKILL.md 的 ```json 格式输出。"
@@ -273,7 +273,7 @@ class TestBbsRelayE2ELive(unittest.TestCase):
                 finding_text = ""
                 try:
                     run = await adapter.send_and_wait_async(
-                        bot_id=fqy_id, message=prompt, timeout=180.0
+                        bot_id=jy_id, message=prompt, timeout=180.0
                     )
                     # bot 文本在 run["result"]["content"](adapter _ws_chat_roundtrip 终态返此结构)
                     status = run.get("status")
@@ -298,7 +298,7 @@ class TestBbsRelayE2ELive(unittest.TestCase):
                     json={
                         "task_id": TASK_ID,
                         "node_id": node_id,
-                        "bot_id": fqy_id,
+                        "bot_id": jy_id,
                         "acceptance_result": {
                             "verdict": "PASS",
                             "acceptances_metric": [],
@@ -325,7 +325,7 @@ class TestBbsRelayE2ELive(unittest.TestCase):
             except Exception:
                 pass
 
-        # 5) 断言:各方向 scoped bbs 节点 DONE(assignee=风清扬,带架构师 checkpoint)+ bbs_mode 已置。
+        # 5) 断言:各方向 scoped bbs 节点 DONE(assignee=金庸,带架构师 checkpoint)+ bbs_mode 已置。
         # 根/图是否 DONE 由框架复核根 gap 自判(无 root_verified);本 in-process 编排无 owner bot→不收口,
         # 故不断言图 DONE(根收口见 natual live 测 ``test_bbs_relay_e2e_natual``)。
         g = client.get("/api/task/dashboard", params={"task_id": TASK_ID}).json()["data"]
@@ -347,12 +347,12 @@ class TestBbsRelayE2ELive(unittest.TestCase):
         for n in bbs_nodes:
             ri = n["run_info"] or {}
             self.assertEqual(n["status"], "DONE", f"scoped 未 DONE:{n['node_id']}")
-            self.assertEqual(ri.get("assignee"), fqy_id, f"scoped 非 风清扬 接力:{n['node_id']}")
+            self.assertEqual(ri.get("assignee"), jy_id, f"scoped 非 金庸 接力:{n['node_id']}")
             self.assertTrue(
                 (ri.get("output") or {}).get("architects"),
                 f"scoped 缺架构师 checkpoint:{n['node_id']}",
             )
-        print(f"[final] graph={g['status']} 风清扬接力段={len(bbs_nodes)} 架构师(parsed)={total_architects}")
+        print(f"[final] graph={g['status']} 金庸接力段={len(bbs_nodes)} 架构师(parsed)={total_architects}")
 
 
 if __name__ == "__main__":
