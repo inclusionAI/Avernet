@@ -36,7 +36,7 @@ from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adap
 
 _LIVE = os.environ.get("SINGLEBOX_TASK_E2E", "").strip() in {"1", "true"}
 _BACKEND = os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
-_USER_ID = os.environ.get("SINGLEBOX_USER_ID", "146836")
+_USER_ID = os.environ.get("SINGLEBOX_USER_ID", "440718")
 _ENGINE_URL = os.environ.get("TASK_DISCOVERY_ENGINE_URL", "http://localhost:20003")
 _FRONTEND_URL = os.environ.get("TASK_DISCOVERY_FRONTEND_URL", "http://localhost:8000")
 
@@ -172,13 +172,14 @@ class TestTaskDiscoveryE2E(unittest.TestCase):
                 f"发现 task_id 集合不匹配: {discovered_ids} vs {_EXPECTED_TASK_IDS}",
             )
 
-            # session_url 格式校验: {frontend}/bcn/chat/session?bot_uuid=...&session=...
+            # session_url 格式校验: {frontend}/bcn/chat/session?bot_uuid=...&id=...&session=...
             for surl in session_urls:
                 self.assertIn(
                     "/bcn/chat/session", surl,
                     f"session_url 格式异常(缺少 /bcn/chat/session): {surl}",
                 )
-                self.assertIn(f"bot_uuid={agent_id}", surl, f"session_url 未包含 agent_id: {surl}")
+                self.assertIn(f"bot_uuid={agent_id}", surl, f"session_url 未包含 bot_uuid: {surl}")
+                self.assertIn("id=", surl, f"session_url 未包含 id(群组ID) 参数: {surl}")
                 self.assertIn("session=", surl, f"session_url 未包含 session= 参数: {surl}")
 
             # 5) GET /api/public/task-discovery/status → 验证任务状态可查

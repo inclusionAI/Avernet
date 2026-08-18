@@ -149,15 +149,19 @@ class EngineSessionCreator:
     def _build_session_url(self, session_id: str, agent_id: str) -> str:
         """构建用户可访问的前端 workbench session URL。
 
-        前端通过 bot 的对话页面访问 engine session：
-        ``{frontend_url}/bcn/chat/session?bot_uuid={agent_id}&session={session_id}``
+        前端 SessionOnlyPage 路由期望三个 query 参数:
+        - ``bot_uuid``: bot 标识
+        - ``id``: 群组 ID(task_discovery 无 BCS 群,用 agent_id 作为容器标识)
+        - ``session``: engine session ID
+
+        格式: ``{frontend_url}/bcn/chat/session?bot_uuid={agent_id}&id={agent_id}&session={session_id}``
 
         用户点击后会跳到该 bot 的对话界面，看到任务发现的通知消息。
         """
         base = self._engine_frontend_url.rstrip("/")
         return (
             f"{base}/bcn/chat/session"
-            f"?bot_uuid={agent_id}&session={session_id}"
+            f"?bot_uuid={agent_id}&id={agent_id}&session={session_id}"
         )
 
 
