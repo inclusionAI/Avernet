@@ -337,6 +337,14 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "GET",
         "/openapi/v1/bots/{bot_id}/connection",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/chats",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/chats/{trace_id}",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     # ── B: returns a set of bots, narrowed to the granted ones ───────────────
     ("GET", "/openapi/v1/bots"): AdmissionMode.GRANT_FILTERED,
     # The application's own view, and the **complete** one: a granted bot the
