@@ -20,8 +20,11 @@ CreateSessionRequest:
     creator_role:
       type: string
       description: >-
-        Role assigned when a permitted non-member creator joins a public
-        Group for this Session. Driver is intentionally unavailable.
+        Optional role assigned only when the resolved creator is not already a
+        participant and is added to a public Group Session. If omitted in that
+        case, it defaults to consultant. For private Groups or creators already
+        present in the inherited Group participant list, this field is ignored
+        and does not override the existing role. Driver is not allowed.
       enum:
         - consultant
         - manager
