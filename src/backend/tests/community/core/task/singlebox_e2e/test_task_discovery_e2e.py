@@ -80,50 +80,48 @@ class TestTaskDiscoveryE2E(unittest.TestCase):
     """任务主动发现 singlebox e2e: discover → session → notify → status。"""
 
     def test_discover_notifies_and_returns_tasks(self) -> None:
-        loop = asyncio.new_event_loop()
-        try:
-            loop.run_until_complete(self._run(loop))
-        finally:
-            loop.close()
-
-    async def _run(self, loop: asyncio.AbstractEventLoop) -> None:
-        # 1) 准备 mock 数据: 写入磁盘(backend 的 MockTaskReader 从此文件读)
+        # 准备 mock 数据
         _write_mock_data()
 
-        async with httpx.AsyncClient(timeout=60.0, headers=_HDRS) as cli:
-            # 2) 查 singlebox 已有 bot(singlebox 启动时 BaaS 自动 provision)
-            #    尝试多个端点，取到第一个 ACTIVE bot 即可
+        # 同步查已有 bot（skipTest 在 event loop 内会被吞，所以放在外面）
+        with httpx.Client(timeout=30.0, headers=_HDRS) as cli:
             bots: list[dict] = []
             for endpoint in [
                 f"{_BACKEND}/api/bots/by-owner-or-collaborator",
                 f"{_BACKEND}/api/bots",
             ]:
                 try:
-                    bot_resp = await cli.get(
-                        endpoint, params={"user_id": _USER_ID},
-                    )
-                    if bot_resp.status_code == 200:
-                        bots = (bot_resp.json().get("data") or {}).get("items") or []
+                    r = cli.get(endpoint, params={"user_id": _USER_ID})
+                    if r.status_code == 200:
+                        bots = (r.json().get("data") or {}).get("items") or []
                         if bots:
                             break
                 except Exception:
                     continue
-            if not bots:
-                self.skipTest("singlebox 未 provision 任何 bot,请先 start all")
-            bot = bots[0]
-            bot_id = bot["bot_id"]
-            owner_id = bot.get("owner_id", _USER_ID)
-            print(f"[bot] 使用已有 bot: bot_id={bot_id} owner_id={owner_id}")
+        if not bots:
+            self.skipTest("singlebox 未 provision 任何 bot,请先 start all")
+        bot = bots[0]
+        bot_id = bot["bot_id"]
+        owner_id = bot.get("owner_id", _USER_ID)
+        print(f"[bot] 使用已有 bot: bot_id={bot_id} owner_id={owner_id}")
 
-            # 3) POST /api/public/task-discovery/discover
-            #    传 bot_id + owner_id: relay 用它路由到 per-bot engine
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(self._run(loop, bot_id, owner_id))
+        finally:
+            loop.close()
+
+    async def _run(self, loop: asyncio.AbstractEventLoop, bot_id: str, owner_id: str) -> None:
+        async with httpx.AsyncClient(timeout=60.0, headers=_HDRS) as cli:
+            # POST /api/public/task-discovery/discover
+            #    传 bot_id + owner_id: 定位到 per-bot engine 直连创建 session
             r = await cli.post(
                 f"{_BACKEND}/api/public/task-discovery/discover",
                 params={
                     "user_id": _USER_ID,
                     "agent_id": bot_id,
                     "bot_id": bot_id,
-                    "owner_id": _USER_ID,
+                    "owner_id": owner_id,
                 },
             )
             r.raise_for_status()
