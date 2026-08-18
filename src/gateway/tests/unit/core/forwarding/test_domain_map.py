@@ -78,6 +78,13 @@ def test_shipped_config_loads() -> None:
     dm = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
     assert dm.http_domain_for("/openapi/v1/bots") is not None
 
+    spaces = dm.http_domain_for("/openapi/v1/spaces/1/members")
+    assert spaces is not None
+    assert spaces.server.name == "backend"
+    assert spaces.server.base_url == "http://backend:8080"
+    assert spaces.schema.source == "file"
+    assert spaces.schema.location == "schemas/bots.openapi.json"
+
 
 def test_shipped_config_routes_collaboration_verbatim_to_bcs() -> None:
     raw = yaml.safe_load(_CONFIG.read_text())

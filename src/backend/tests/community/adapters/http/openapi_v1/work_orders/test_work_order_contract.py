@@ -1,0 +1,318 @@
+"""Contract tests for work-order and notification OpenAPI handlers."""
+
+from datetime import datetime
+from unittest.mock import MagicMock
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from fastapi_injector import attach_injector
+from injector import Injector, Module
+
+from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
+from agentclaw.community.adapters.http.openapi_v1.work_orders.router import router
+from agentclaw.community.api.work_order_service import (
+    WorkOrderNotificationServiceProtocol,
+    WorkOrderServiceProtocol,
+)
+from agentclaw.community.core.work_orders.errors import WorkOrderNotFoundError
+from agentclaw.community.core.work_orders.models import (
+    NotificationCategory,
+    WorkOrderBizType,
+    WorkOrderDetail,
+    WorkOrderEventType,
+    WorkOrderListItem,
+    WorkOrderNotificationDetail,
+    WorkOrderNotificationRecord,
+    WorkOrderRecord,
+    WorkOrderReviewResult,
+    WorkOrderStatus,
+)
+from tests.community.adapters.http.openapi_v1.conftest import (
+    mount_public_error_handlers,
+)
+
+CREATED = datetime(2026, 8, 18, 1, 2, 3)
+MODIFIED = datetime(2026, 8, 18, 2, 3, 4)
+NOTIFICATION_MODIFIED = datetime(2026, 8, 18, 3, 4, 5)
+
+
+def _work_order(status: WorkOrderStatus = WorkOrderStatus.PENDING) -> WorkOrderRecord:
+    return WorkOrderRecord(
+        id=11,
+        work_order_no="WO-11",
+        biz_type=WorkOrderBizType.SPACE_JOIN,
+        biz_id="7",
+        applicant_user_id="applicant-1",
+        apply_reason="join",
+        status=status,
+        reviewer_user_id=None,
+        review_remark=None,
+        reviewed_at=None,
+        env="dev",
+        gmt_created=CREATED,
+        gmt_modified=MODIFIED,
+    )
+
+
+def _notification(
+    category: NotificationCategory = NotificationCategory.NOTICE,
+) -> WorkOrderNotificationRecord:
+    return WorkOrderNotificationRecord(
+        id=21,
+        work_order_id=11,
+        recipient_user_id="owner-1",
+        notification_category=category,
+        event_type=WorkOrderEventType.SPACE_JOIN_REVIEWED,
+        biz_type=WorkOrderBizType.SPACE_JOIN,
+        biz_id="7",
+        title="reviewed",
+        content="approved",
+        is_read=False,
+        read_at=None,
+        env="dev",
+        gmt_created=CREATED,
+        gmt_modified=NOTIFICATION_MODIFIED,
+    )
+
+
+@pytest.fixture
+def work_order_service():
+    return MagicMock()
+
+
+@pytest.fixture
+def notification_service():
+    return MagicMock()
+
+
+@pytest.fixture
+def client(work_order_service, notification_service):
+    class _Bindings(Module):
+        def configure(self, binder):
+            binder.bind(WorkOrderServiceProtocol, to=work_order_service)
+            binder.bind(
+                WorkOrderNotificationServiceProtocol, to=notification_service
+            )
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_principal] = lambda: {"user_id": "owner-1"}
+    attach_injector(app, Injector([_Bindings()]))
+    mount_public_error_handlers(app)
+    return TestClient(app)
+
+
+def test_create_join_request_uses_principal_and_returns_created(
+    client, work_order_service
+):
+    work_order_service.create_space_join_request.return_value = _work_order()
+
+    response = client.post(
+        "/openapi/v1/spaces/7/join-requests", json={"reason": "join"}
+    )
+
+    assert response.status_code == 201
+    assert response.json()["data"] == {
+        "work_order_id": 11,
+        "work_order_no": "WO-11",
+        "status": "PENDING",
+    }
+    work_order_service.create_space_join_request.assert_called_once_with(
+        space_id=7, applicant_user_id="owner-1", reason="join"
+    )
+
+
+def test_list_work_orders_maps_plain_and_notification_items(
+    client, work_order_service
+):
+    work_order_service.list_items.return_value = (
+        2,
+        [
+            WorkOrderListItem(
+                work_order=_work_order(), notification=None, can_approve=True
+            ),
+            WorkOrderListItem(
+                work_order=_work_order(WorkOrderStatus.APPROVED),
+                notification=_notification(),
+                can_approve=False,
+            ),
+        ],
+    )
+
+    response = client.get(
+        "/openapi/v1/work-orders",
+        params={
+            "query_type": "INITIATED_BY_ME",
+            "item_type": "ALL",
+            "page_no": 2,
+            "page_size": 5,
+        },
+    )
+
+    assert response.status_code == 200
+    items = response.json()["data"]["items"]
+    assert items[0]["item_id"] == "WORK_ORDER_11"
+    assert items[0]["item_type"] == "APPROVAL"
+    assert items[0]["notification_id"] is None
+    assert items[0]["gmt_modified"] == "2026-08-18T02:03:04Z"
+    assert items[1]["item_id"] == "NOTIFICATION_21"
+    assert items[1]["item_type"] == "NOTICE"
+    assert items[1]["notification_id"] == 21
+    assert items[1]["gmt_modified"] == "2026-08-18T03:04:05Z"
+    work_order_service.list_items.assert_called_once()
+    assert work_order_service.list_items.call_args.kwargs == {
+        "actor_id": "owner-1",
+        "query_type": "INITIATED_BY_ME",
+        "item_type": "ALL",
+        "page_no": 2,
+        "page_size": 5,
+    }
+
+
+def test_get_work_order_maps_nested_content(client, work_order_service):
+    work_order_service.get_detail.return_value = WorkOrderDetail(
+        work_order=_work_order(),
+        event_type=WorkOrderEventType.SPACE_JOIN_APPLIED,
+        title="pending",
+        space_id=7,
+        space_name="Team",
+        applicant_name="Applicant",
+        can_approve=True,
+    )
+
+    response = client.get("/openapi/v1/work-orders/11")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["work_order_id"] == 11
+    assert data["biz_id"] == 7
+    assert data["content"] == {
+        "space_id": 7,
+        "space_name": "Team",
+        "applicant_user_id": "applicant-1",
+        "applicant_name": "Applicant",
+        "reason": "join",
+    }
+    assert data["can_approve"] is True
+    work_order_service.get_detail.assert_called_once_with(
+        work_order_id=11, actor_id="owner-1"
+    )
+
+
+@pytest.mark.parametrize(
+    ("operation", "status"),
+    [("approve", WorkOrderStatus.APPROVED), ("reject", WorkOrderStatus.REJECTED)],
+)
+def test_review_endpoints_return_explicit_result(
+    client, work_order_service, operation, status
+):
+    getattr(work_order_service, operation).return_value = WorkOrderReviewResult(
+        work_order_id=11,
+        status=status,
+        reviewer_user_id="owner-1",
+        review_remark="done",
+        reviewed_at=MODIFIED,
+    )
+
+    response = client.post(
+        f"/openapi/v1/work-orders/11/{operation}",
+        json={"review_remark": "done"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "work_order_id": 11,
+        "status": status.value,
+        "reviewer_user_id": "owner-1",
+        "review_remark": "done",
+        "reviewed_at": "2026-08-18T02:03:04Z",
+    }
+    getattr(work_order_service, operation).assert_called_once_with(
+        work_order_id=11, actor_id="owner-1", review_remark="done"
+    )
+
+
+def test_notification_count_and_read_all(client, notification_service):
+    notification_service.unread_count.return_value = 4
+    notification_service.mark_all_read.return_value = 3
+
+    unread = client.get("/openapi/v1/work-order-notifications/unread-count")
+    read_all = client.post("/openapi/v1/work-order-notifications/read-all")
+
+    assert unread.status_code == 200
+    assert unread.json()["data"] == {"unread_count": 4}
+    assert read_all.status_code == 200
+    assert read_all.json()["data"] == {"updated_count": 3}
+    notification_service.unread_count.assert_called_once_with(actor_id="owner-1")
+    notification_service.mark_all_read.assert_called_once_with(actor_id="owner-1")
+
+
+def test_notification_detail_and_mark_read(client, notification_service):
+    notification_service.get_detail.return_value = WorkOrderNotificationDetail(
+        notification=_notification(NotificationCategory.APPROVAL),
+        work_order_status=WorkOrderStatus.PENDING,
+        can_approve=True,
+    )
+    notification_service.mark_read.return_value = _notification().model_copy(
+        update={"is_read": True, "read_at": MODIFIED}
+    )
+
+    detail = client.get("/openapi/v1/work-order-notifications/21")
+    marked = client.post("/openapi/v1/work-order-notifications/21/read")
+
+    assert detail.status_code == 200
+    assert detail.json()["data"] == {
+        "notification_id": 21,
+        "work_order_id": 11,
+        "notification_category": "APPROVAL",
+        "event_type": "SPACE_JOIN_REVIEWED",
+        "title": "reviewed",
+        "content": "approved",
+        "is_read": False,
+        "work_order_status": "PENDING",
+        "can_approve": True,
+        "biz_type": "SPACE_JOIN",
+        "biz_id": "7",
+    }
+    assert marked.status_code == 200
+    assert marked.json()["data"] == {
+        "notification_id": 21,
+        "is_read": True,
+        "read_at": "2026-08-18T02:03:04Z",
+    }
+    notification_service.get_detail.assert_called_once_with(
+        notification_id=21, actor_id="owner-1"
+    )
+    notification_service.mark_read.assert_called_once_with(
+        notification_id=21, actor_id="owner-1"
+    )
+
+
+def test_domain_error_is_mapped_to_public_work_order_contract(
+    client, work_order_service
+):
+    work_order_service.get_detail.side_effect = WorkOrderNotFoundError("private id")
+
+    response = client.get("/openapi/v1/work-orders/999")
+
+    assert response.status_code == 404
+    body = response.json()
+    assert body["code"] == 404201
+    assert body["message"] == "Not found"
+    assert body["data"] is None
+    assert "private id" not in body["message"]
+
+
+@pytest.mark.parametrize(
+    ("path", "method", "payload"),
+    [
+        ("/openapi/v1/spaces/0/join-requests", "post", {"reason": "join"}),
+        ("/openapi/v1/spaces/7/join-requests", "post", {"reason": ""}),
+        ("/openapi/v1/work-orders?page_no=0", "get", None),
+        ("/openapi/v1/work-orders/0", "get", None),
+    ],
+)
+def test_request_validation_rejects_invalid_contract(client, path, method, payload):
+    response = getattr(client, method)(path, json=payload) if payload is not None else getattr(client, method)(path)
+    assert response.status_code == 422

@@ -39,6 +39,16 @@ def test_shipped_config_admits_a_machine_caller_on_the_public_api() -> None:
 #: packages, so the agreement is kept by these tests plus the backend's own
 #: enumeration rather than by a shared import.
 _HUMAN_ONLY = [
+    ("GET", "/openapi/v1/spaces"),
+    ("POST", "/openapi/v1/spaces/personal/initialize"),
+    ("POST", "/openapi/v1/spaces/create"),
+    ("GET", "/openapi/v1/spaces/1/members"),
+    ("POST", "/openapi/v1/spaces/1/members"),
+    ("DELETE", "/openapi/v1/spaces/1/members/user-1"),
+    ("PUT", "/openapi/v1/spaces/1/members/user-1/role"),
+    ("POST", "/openapi/v1/spaces/1/market-favorites"),
+    ("POST", "/openapi/v1/spaces/1/market-favorites/cancel"),
+    ("POST", "/openapi/v1/spaces/1/market-favorites/search"),
     ("POST", "/openapi/v1/bots"),
     ("GET", "/openapi/v1/bots/bot-123/authorized-apps"),
     ("DELETE", "/openapi/v1/bots/bot-123/authorized-apps/42"),

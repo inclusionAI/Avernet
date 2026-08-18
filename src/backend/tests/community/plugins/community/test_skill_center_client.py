@@ -4,10 +4,15 @@ Skill Center marketplace is unsupported in the community build: every method
 raises ``SkillCenterUnsupportedError`` so a caller fails loudly rather than
 silently receiving a fake result.
 """
+
 from __future__ import annotations
 
 import pytest
 
+from agentclaw.community.plugin_api.skill_center_client import (
+    SkillCenterTeamCreateError,
+    SkillCenterTeamCreateRequest,
+)
 from agentclaw.community.plugins.community.skill_center_client import (
     CommunitySkillCenterClient,
     SkillCenterUnsupportedError,
@@ -16,6 +21,16 @@ from agentclaw.community.plugins.community.skill_center_client import (
 
 def _client() -> CommunitySkillCenterClient:
     return CommunitySkillCenterClient()
+
+
+def test_create_team_raises_stable_sync_error():
+    request = SkillCenterTeamCreateRequest(
+        team_code="spc-0123456789abcdef0123",
+        team_name="Demo Team",
+        ref_source_id="7",
+    )
+    with pytest.raises(SkillCenterTeamCreateError):
+        _client().create_team(request)
 
 
 def test_upload_and_publish_raises():

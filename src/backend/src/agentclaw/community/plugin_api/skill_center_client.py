@@ -9,13 +9,50 @@
 - GET  /api/v1/skills/{skillCode}/versions/{ver}/download （版本下载）
 """
 
+from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
+
 from agentclaw.community.plugin_api.base import Plugin
+
+
+class SkillCenterTeamCreateError(RuntimeError):
+    """Raised when Skill Center rejects or cannot complete team creation."""
+
+
+@dataclass(frozen=True)
+class SkillCenterTeamCreateRequest:
+    """Transport-neutral data required to mirror one OCB Space to SC."""
+
+    team_code: str
+    team_name: str
+    ref_source_id: str
+    description: str | None = None
+    icon: str | None = None
+    ref_source_platform: str | None = None
+
+
+@dataclass(frozen=True)
+class SkillCenterTeamCreateResult:
+    """Confirmed SC team identity returned after a successful creation."""
+
+    team_id: str
 
 
 @runtime_checkable
 class SkillCenterClient(Plugin, Protocol):
     """SkillCenter 开放 API 客户端。"""
+
+    def create_team(
+        self, request: SkillCenterTeamCreateRequest
+    ) -> SkillCenterTeamCreateResult:
+        """Create the SC team corresponding to an OCB team Space.
+
+        Implementations obtain endpoint, appKey and source from deployment
+        configuration. A failed or rejected creation raises
+        :class:`SkillCenterTeamCreateError`; it must not return a false-success
+        result.
+        """
+        ...
 
     def upload_and_publish(self, payload: dict) -> dict:
         """上传并发布技能（异步，返回后需轮询状态）。
@@ -48,7 +85,11 @@ class SkillCenterClient(Plugin, Protocol):
         ...
 
     def search_market_skills(
-        self, keyword: str = "", tag: str = "", page: int = 1, page_size: int = 20,
+        self,
+        keyword: str = "",
+        tag: str = "",
+        page: int = 1,
+        page_size: int = 20,
         team_id: str | None = None,
     ) -> dict:
         """搜索公开市场技能。"""
@@ -81,7 +122,9 @@ class SkillCenterClient(Plugin, Protocol):
         """
         ...
 
-    def get_file_content(self, skill_code: str, file_path: str, version: str = "") -> dict:
+    def get_file_content(
+        self, skill_code: str, file_path: str, version: str = ""
+    ) -> dict:
         """获取技能指定文件内容。
 
         Args:

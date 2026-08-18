@@ -7,9 +7,15 @@ production); the real skills pipeline is the local skills source (see
 so a caller that actually tries to use the marketplace fails loudly rather than
 silently receiving a fake result.
 """
+
 from __future__ import annotations
 
-from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
+from agentclaw.community.plugin_api.skill_center_client import (
+    SkillCenterClient,
+    SkillCenterTeamCreateError,
+    SkillCenterTeamCreateRequest,
+    SkillCenterTeamCreateResult,
+)
 
 
 class SkillCenterUnsupportedError(RuntimeError):
@@ -22,6 +28,11 @@ _MSG = "Skill Center is not available in the community build"
 
 class CommunitySkillCenterClient(SkillCenterClient):
     """Skill Center marketplace bypass for the community profile (raises)."""
+
+    def create_team(
+        self, request: SkillCenterTeamCreateRequest
+    ) -> SkillCenterTeamCreateResult:
+        raise SkillCenterTeamCreateError(_MSG)
 
     def upload_and_publish(self, payload: dict) -> dict:
         raise SkillCenterUnsupportedError(_MSG)

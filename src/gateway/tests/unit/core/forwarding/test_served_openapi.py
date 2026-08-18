@@ -60,6 +60,25 @@ def test_non_public_paths_are_filtered_out() -> None:
     assert "/api/internal/debug" not in _served()["paths"]
 
 
+def test_backend_artifact_serves_spaces_through_its_own_domain() -> None:
+    artifact = json.loads(
+        (_SHIPPED_CONFIG.parent / "schemas" / "bots.openapi.json").read_text()
+    )
+    document = build_served_openapi(
+        ["bots", "spaces"],
+        lambda _domain: artifact,
+        _SHIPPED_RULES,
+        title="gateway",
+        version="0.1.0",
+    )
+
+    assert "/openapi/v1/bots" in document["paths"]
+    assert "/openapi/v1/spaces" in document["paths"]
+    assert document["paths"]["/openapi/v1/spaces"]["get"][
+        "x-avernet-security"
+    ] == {"user": "required"}
+
+
 def test_every_served_operation_carries_security() -> None:
     for path, item in _served()["paths"].items():
         for method, operation in item.items():

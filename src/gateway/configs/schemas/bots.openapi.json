@@ -1,6 +1,26 @@
 {
   "components": {
     "schemas": {
+      "AddSpaceMemberRequest": {
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/SpaceRole",
+            "default": "MEMBER",
+            "description": "Role granted when the member is added; defaults to MEMBER."
+          },
+          "user_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "title": "AddSpaceMemberRequest",
+        "type": "object"
+      },
       "ApprovalMode": {
         "description": "How much the bot may do without asking first.",
         "enum": [
@@ -1042,6 +1062,36 @@
         "title": "ConversationSession",
         "type": "object"
       },
+      "CreateSpaceJoinRequest": {
+        "properties": {
+          "reason": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "CreateSpaceJoinRequest",
+        "type": "object"
+      },
+      "CreateSpaceRequest": {
+        "properties": {
+          "space_name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Space Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "space_name"
+        ],
+        "title": "CreateSpaceRequest",
+        "type": "object"
+      },
       "Deleted": {
         "description": "Payload returned by delete operations.",
         "example": {
@@ -1675,6 +1725,90 @@
         "title": "Envelope[EngineStatus]",
         "type": "object"
       },
+      "Envelope_FavoriteAddedResult_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FavoriteAddedResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[FavoriteAddedResult]",
+        "type": "object"
+      },
+      "Envelope_FavoriteCanceledResult_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FavoriteCanceledResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[FavoriteCanceledResult]",
+        "type": "object"
+      },
       "Envelope_FileEntry_": {
         "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
         "properties": {
@@ -2137,6 +2271,132 @@
         "title": "Envelope[NameCheck]",
         "type": "object"
       },
+      "Envelope_NotificationDetailResponse_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NotificationDetailResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[NotificationDetailResponse]",
+        "type": "object"
+      },
+      "Envelope_NotificationReadResponse_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NotificationReadResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[NotificationReadResponse]",
+        "type": "object"
+      },
+      "Envelope_NotificationsReadAllResponse_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NotificationsReadAllResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[NotificationsReadAllResponse]",
+        "type": "object"
+      },
       "Envelope_Page_AuthorizedApp__": {
         "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
         "properties": {
@@ -2303,6 +2563,48 @@
           "request_id"
         ],
         "title": "Envelope[Page[FileEntry]]",
+        "type": "object"
+      },
+      "Envelope_Page_MarketFavoriteItem__": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Page_MarketFavoriteItem_"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Page[MarketFavoriteItem]]",
         "type": "object"
       },
       "Envelope_Page_McpServer__": {
@@ -2515,6 +2817,132 @@
         "title": "Envelope[Page[Skill]]",
         "type": "object"
       },
+      "Envelope_Page_SpaceItem__": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Page_SpaceItem_"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Page[SpaceItem]]",
+        "type": "object"
+      },
+      "Envelope_Page_SpaceMemberItem__": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Page_SpaceMemberItem_"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Page[SpaceMemberItem]]",
+        "type": "object"
+      },
+      "Envelope_Page_WorkOrderListItem__": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Page_WorkOrderListItem_"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Page[WorkOrderListItem]]",
+        "type": "object"
+      },
       "Envelope_Passport_": {
         "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
         "properties": {
@@ -2555,6 +2983,48 @@
           "request_id"
         ],
         "title": "Envelope[Passport]",
+        "type": "object"
+      },
+      "Envelope_PersonalSpaceInitialized_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PersonalSpaceInitialized"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[PersonalSpaceInitialized]",
         "type": "object"
       },
       "Envelope_Preview_": {
@@ -2935,6 +3405,174 @@
         "title": "Envelope[Skill]",
         "type": "object"
       },
+      "Envelope_SpaceCreated_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpaceCreated"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[SpaceCreated]",
+        "type": "object"
+      },
+      "Envelope_SpaceJoinRequestCreated_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpaceJoinRequestCreated"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[SpaceJoinRequestCreated]",
+        "type": "object"
+      },
+      "Envelope_SpaceMemberDeletedResult_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpaceMemberDeletedResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[SpaceMemberDeletedResult]",
+        "type": "object"
+      },
+      "Envelope_SpaceMemberMutationResult_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpaceMemberMutationResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[SpaceMemberMutationResult]",
+        "type": "object"
+      },
       "Envelope_StartupScript_": {
         "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
         "properties": {
@@ -2975,6 +3613,132 @@
           "request_id"
         ],
         "title": "Envelope[StartupScript]",
+        "type": "object"
+      },
+      "Envelope_UnreadCountResponse_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnreadCountResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[UnreadCountResponse]",
+        "type": "object"
+      },
+      "Envelope_WorkOrderDetailResponse_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkOrderDetailResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[WorkOrderDetailResponse]",
+        "type": "object"
+      },
+      "Envelope_WorkOrderReviewResponse_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkOrderReviewResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[WorkOrderReviewResponse]",
         "type": "object"
       },
       "Envelope_dict_str__Any__": {
@@ -3193,6 +3957,82 @@
         ],
         "title": "ErrorEnvelope",
         "type": "object"
+      },
+      "FavoriteAddedResult": {
+        "properties": {
+          "favorite_id": {
+            "title": "Favorite Id",
+            "type": "integer"
+          },
+          "is_favorited": {
+            "default": true,
+            "title": "Is Favorited",
+            "type": "boolean"
+          },
+          "target_code": {
+            "title": "Target Code",
+            "type": "string"
+          },
+          "target_type": {
+            "$ref": "#/components/schemas/FavoriteTargetType"
+          }
+        },
+        "required": [
+          "favorite_id",
+          "target_type",
+          "target_code"
+        ],
+        "title": "FavoriteAddedResult",
+        "type": "object"
+      },
+      "FavoriteCanceledResult": {
+        "properties": {
+          "is_favorited": {
+            "default": false,
+            "title": "Is Favorited",
+            "type": "boolean"
+          },
+          "target_code": {
+            "title": "Target Code",
+            "type": "string"
+          },
+          "target_type": {
+            "$ref": "#/components/schemas/FavoriteTargetType"
+          }
+        },
+        "required": [
+          "target_type",
+          "target_code"
+        ],
+        "title": "FavoriteCanceledResult",
+        "type": "object"
+      },
+      "FavoriteTargetRequest": {
+        "properties": {
+          "target_code": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Target Code",
+            "type": "string"
+          },
+          "target_type": {
+            "$ref": "#/components/schemas/FavoriteTargetType"
+          }
+        },
+        "required": [
+          "target_type",
+          "target_code"
+        ],
+        "title": "FavoriteTargetRequest",
+        "type": "object"
+      },
+      "FavoriteTargetType": {
+        "enum": [
+          "SKILL",
+          "MCP"
+        ],
+        "title": "FavoriteTargetType",
+        "type": "string"
       },
       "FileEntry": {
         "description": "A file or folder in the bot's workspace.\n\nThe container's own storage layout is never exposed — `path` is relative to\nthe workspace root, not to any real filesystem the bot runs on.",
@@ -3485,6 +4325,40 @@
           "content"
         ],
         "title": "IdentityFileWrite",
+        "type": "object"
+      },
+      "MarketFavoriteItem": {
+        "properties": {
+          "favorite_at": {
+            "description": "UTC time when the target was added to this Space's favorites.",
+            "format": "date-time",
+            "title": "Favorite At",
+            "type": "string"
+          },
+          "favorite_id": {
+            "title": "Favorite Id",
+            "type": "integer"
+          },
+          "is_favorited": {
+            "default": true,
+            "title": "Is Favorited",
+            "type": "boolean"
+          },
+          "target_code": {
+            "title": "Target Code",
+            "type": "string"
+          },
+          "target_type": {
+            "$ref": "#/components/schemas/FavoriteTargetType"
+          }
+        },
+        "required": [
+          "favorite_id",
+          "target_type",
+          "target_code",
+          "favorite_at"
+        ],
+        "title": "MarketFavoriteItem",
         "type": "object"
       },
       "McpConfig": {
@@ -4025,6 +4899,137 @@
         "title": "NameCheck",
         "type": "object"
       },
+      "NotificationCategory": {
+        "enum": [
+          "APPROVAL",
+          "NOTICE"
+        ],
+        "title": "NotificationCategory",
+        "type": "string"
+      },
+      "NotificationDetailResponse": {
+        "properties": {
+          "biz_id": {
+            "title": "Biz Id",
+            "type": "string"
+          },
+          "biz_type": {
+            "$ref": "#/components/schemas/WorkOrderBizType"
+          },
+          "can_approve": {
+            "title": "Can Approve",
+            "type": "boolean"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "event_type": {
+            "$ref": "#/components/schemas/WorkOrderEventType"
+          },
+          "is_read": {
+            "title": "Is Read",
+            "type": "boolean"
+          },
+          "notification_category": {
+            "$ref": "#/components/schemas/NotificationCategory"
+          },
+          "notification_id": {
+            "title": "Notification Id",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "work_order_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Order Id"
+          },
+          "work_order_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkOrderStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "notification_id",
+          "work_order_id",
+          "notification_category",
+          "event_type",
+          "title",
+          "content",
+          "is_read",
+          "work_order_status",
+          "can_approve",
+          "biz_type",
+          "biz_id"
+        ],
+        "title": "NotificationDetailResponse",
+        "type": "object"
+      },
+      "NotificationReadResponse": {
+        "properties": {
+          "is_read": {
+            "title": "Is Read",
+            "type": "boolean"
+          },
+          "notification_id": {
+            "title": "Notification Id",
+            "type": "integer"
+          },
+          "read_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read At"
+          }
+        },
+        "required": [
+          "notification_id",
+          "is_read",
+          "read_at"
+        ],
+        "title": "NotificationReadResponse",
+        "type": "object"
+      },
+      "NotificationsReadAllResponse": {
+        "properties": {
+          "updated_count": {
+            "title": "Updated Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "updated_count"
+        ],
+        "title": "NotificationsReadAllResponse",
+        "type": "object"
+      },
       "Page_AuthorizedApp_": {
         "description": "One page of a list result: `total` counts every match, `items` holds the current page.",
         "properties": {
@@ -4123,6 +5128,31 @@
           "items"
         ],
         "title": "Page[FileEntry]",
+        "type": "object"
+      },
+      "Page_MarketFavoriteItem_": {
+        "description": "One page of a list result: `total` counts every match, `items` holds the current page.",
+        "properties": {
+          "items": {
+            "description": "Items on the current page (present, possibly empty).",
+            "items": {
+              "$ref": "#/components/schemas/MarketFavoriteItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "description": "Total number of items matching the query.",
+            "example": 1,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "Page[MarketFavoriteItem]",
         "type": "object"
       },
       "Page_McpServer_": {
@@ -4250,6 +5280,81 @@
         "title": "Page[Skill]",
         "type": "object"
       },
+      "Page_SpaceItem_": {
+        "description": "One page of a list result: `total` counts every match, `items` holds the current page.",
+        "properties": {
+          "items": {
+            "description": "Items on the current page (present, possibly empty).",
+            "items": {
+              "$ref": "#/components/schemas/SpaceItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "description": "Total number of items matching the query.",
+            "example": 1,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "Page[SpaceItem]",
+        "type": "object"
+      },
+      "Page_SpaceMemberItem_": {
+        "description": "One page of a list result: `total` counts every match, `items` holds the current page.",
+        "properties": {
+          "items": {
+            "description": "Items on the current page (present, possibly empty).",
+            "items": {
+              "$ref": "#/components/schemas/SpaceMemberItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "description": "Total number of items matching the query.",
+            "example": 1,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "Page[SpaceMemberItem]",
+        "type": "object"
+      },
+      "Page_WorkOrderListItem_": {
+        "description": "One page of a list result: `total` counts every match, `items` holds the current page.",
+        "properties": {
+          "items": {
+            "description": "Items on the current page (present, possibly empty).",
+            "items": {
+              "$ref": "#/components/schemas/WorkOrderListItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "description": "Total number of items matching the query.",
+            "example": 1,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "Page[WorkOrderListItem]",
+        "type": "object"
+      },
       "Passport": {
         "description": "Agent Passport (identity credential) summary.",
         "example": {
@@ -4273,6 +5378,71 @@
           "passport_id"
         ],
         "title": "Passport",
+        "type": "object"
+      },
+      "PersonalSpaceInitialized": {
+        "properties": {
+          "created": {
+            "title": "Created",
+            "type": "boolean"
+          },
+          "current_user_role": {
+            "$ref": "#/components/schemas/SpaceRole"
+          },
+          "gmt_created": {
+            "description": "UTC time when the Space was created.",
+            "format": "date-time",
+            "title": "Gmt Created",
+            "type": "string"
+          },
+          "gmt_modified": {
+            "description": "UTC time when the Space metadata was last modified.",
+            "format": "date-time",
+            "title": "Gmt Modified",
+            "type": "string"
+          },
+          "is_creator": {
+            "title": "Is Creator",
+            "type": "boolean"
+          },
+          "member_count": {
+            "title": "Member Count",
+            "type": "integer"
+          },
+          "owner_count": {
+            "title": "Owner Count",
+            "type": "integer"
+          },
+          "space_code": {
+            "title": "Space Code",
+            "type": "string"
+          },
+          "space_id": {
+            "title": "Space Id",
+            "type": "integer"
+          },
+          "space_name": {
+            "title": "Space Name",
+            "type": "string"
+          },
+          "space_type": {
+            "$ref": "#/components/schemas/SpaceType"
+          }
+        },
+        "required": [
+          "space_id",
+          "space_code",
+          "space_name",
+          "space_type",
+          "current_user_role",
+          "is_creator",
+          "member_count",
+          "owner_count",
+          "gmt_created",
+          "gmt_modified",
+          "created"
+        ],
+        "title": "PersonalSpaceInitialized",
         "type": "object"
       },
       "Preview": {
@@ -4713,6 +5883,47 @@
         "title": "ScheduleTrigger",
         "type": "object"
       },
+      "SearchFavoritesRequest": {
+        "properties": {
+          "keyword": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Keyword"
+          },
+          "page_no": {
+            "default": 1,
+            "minimum": 1.0,
+            "title": "Page No",
+            "type": "integer"
+          },
+          "page_size": {
+            "default": 20,
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "target_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FavoriteTargetType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "SearchFavoritesRequest",
+        "type": "object"
+      },
       "Session": {
         "description": "A conversation session on the bot's device.",
         "example": {
@@ -5147,6 +6358,246 @@
           "CHAT"
         ]
       },
+      "SpaceCreated": {
+        "properties": {
+          "current_user_role": {
+            "$ref": "#/components/schemas/SpaceRole"
+          },
+          "gmt_created": {
+            "description": "UTC time when the Space was created.",
+            "format": "date-time",
+            "title": "Gmt Created",
+            "type": "string"
+          },
+          "gmt_modified": {
+            "description": "UTC time when the Space metadata was last modified.",
+            "format": "date-time",
+            "title": "Gmt Modified",
+            "type": "string"
+          },
+          "is_creator": {
+            "title": "Is Creator",
+            "type": "boolean"
+          },
+          "member_count": {
+            "title": "Member Count",
+            "type": "integer"
+          },
+          "owner_count": {
+            "title": "Owner Count",
+            "type": "integer"
+          },
+          "space_code": {
+            "title": "Space Code",
+            "type": "string"
+          },
+          "space_id": {
+            "title": "Space Id",
+            "type": "integer"
+          },
+          "space_name": {
+            "title": "Space Name",
+            "type": "string"
+          },
+          "space_type": {
+            "$ref": "#/components/schemas/SpaceType"
+          }
+        },
+        "required": [
+          "space_id",
+          "space_code",
+          "space_name",
+          "space_type",
+          "current_user_role",
+          "is_creator",
+          "member_count",
+          "owner_count",
+          "gmt_created",
+          "gmt_modified"
+        ],
+        "title": "SpaceCreated",
+        "type": "object"
+      },
+      "SpaceItem": {
+        "properties": {
+          "current_user_role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpaceRole"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "gmt_modified": {
+            "description": "UTC time when the Space metadata was last modified.",
+            "format": "date-time",
+            "title": "Gmt Modified",
+            "type": "string"
+          },
+          "join_status": {
+            "$ref": "#/components/schemas/SpaceJoinStatus"
+          },
+          "member_count": {
+            "title": "Member Count",
+            "type": "integer"
+          },
+          "owner_count": {
+            "title": "Owner Count",
+            "type": "integer"
+          },
+          "space_code": {
+            "title": "Space Code",
+            "type": "string"
+          },
+          "space_id": {
+            "title": "Space Id",
+            "type": "integer"
+          },
+          "space_name": {
+            "title": "Space Name",
+            "type": "string"
+          },
+          "space_type": {
+            "$ref": "#/components/schemas/SpaceType"
+          }
+        },
+        "required": [
+          "space_id",
+          "space_code",
+          "space_name",
+          "space_type",
+          "current_user_role",
+          "join_status",
+          "member_count",
+          "owner_count",
+          "gmt_modified"
+        ],
+        "title": "SpaceItem",
+        "type": "object"
+      },
+      "SpaceJoinRequestCreated": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/WorkOrderStatus"
+          },
+          "work_order_id": {
+            "title": "Work Order Id",
+            "type": "integer"
+          },
+          "work_order_no": {
+            "title": "Work Order No",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_order_id",
+          "work_order_no",
+          "status"
+        ],
+        "title": "SpaceJoinRequestCreated",
+        "type": "object"
+      },
+      "SpaceJoinStatus": {
+        "enum": [
+          "JOINED",
+          "APPLYING",
+          "NOT_JOINED"
+        ],
+        "title": "SpaceJoinStatus",
+        "type": "string"
+      },
+      "SpaceMemberDeletedResult": {
+        "properties": {
+          "deleted": {
+            "default": true,
+            "title": "Deleted",
+            "type": "boolean"
+          },
+          "space_id": {
+            "title": "Space Id",
+            "type": "integer"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "space_id",
+          "user_id"
+        ],
+        "title": "SpaceMemberDeletedResult",
+        "type": "object"
+      },
+      "SpaceMemberItem": {
+        "properties": {
+          "gmt_modified": {
+            "description": "UTC time when this membership relation was created or its role was last changed.",
+            "format": "date-time",
+            "title": "Gmt Modified",
+            "type": "string"
+          },
+          "is_creator": {
+            "title": "Is Creator",
+            "type": "boolean"
+          },
+          "role": {
+            "$ref": "#/components/schemas/SpaceRole"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "role",
+          "is_creator",
+          "gmt_modified"
+        ],
+        "title": "SpaceMemberItem",
+        "type": "object"
+      },
+      "SpaceMemberMutationResult": {
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/SpaceRole"
+          },
+          "space_id": {
+            "title": "Space Id",
+            "type": "integer"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "space_id",
+          "user_id",
+          "role"
+        ],
+        "title": "SpaceMemberMutationResult",
+        "type": "object"
+      },
+      "SpaceRole": {
+        "enum": [
+          "OWNER",
+          "MEMBER"
+        ],
+        "title": "SpaceRole",
+        "type": "string"
+      },
+      "SpaceType": {
+        "enum": [
+          "PERSONAL",
+          "TEAM"
+        ],
+        "title": "SpaceType",
+        "type": "string"
+      },
       "StartupScript": {
         "description": "A bot's stored startup script. Every field is server-derived.",
         "example": {
@@ -5232,6 +6683,485 @@
         ],
         "title": "StartupScriptWrite",
         "type": "object"
+      },
+      "UnreadCountResponse": {
+        "properties": {
+          "unread_count": {
+            "title": "Unread Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "unread_count"
+        ],
+        "title": "UnreadCountResponse",
+        "type": "object"
+      },
+      "UpdateSpaceMemberRoleRequest": {
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/SpaceRole"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "UpdateSpaceMemberRoleRequest",
+        "type": "object"
+      },
+      "WorkOrderBizType": {
+        "enum": [
+          "SPACE_JOIN"
+        ],
+        "title": "WorkOrderBizType",
+        "type": "string"
+      },
+      "WorkOrderDetailContent": {
+        "properties": {
+          "applicant_name": {
+            "title": "Applicant Name",
+            "type": "string"
+          },
+          "applicant_user_id": {
+            "title": "Applicant User Id",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "space_id": {
+            "title": "Space Id",
+            "type": "integer"
+          },
+          "space_name": {
+            "title": "Space Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "space_id",
+          "space_name",
+          "applicant_user_id",
+          "applicant_name",
+          "reason"
+        ],
+        "title": "WorkOrderDetailContent",
+        "type": "object"
+      },
+      "WorkOrderDetailResponse": {
+        "properties": {
+          "biz_id": {
+            "title": "Biz Id",
+            "type": "integer"
+          },
+          "biz_type": {
+            "$ref": "#/components/schemas/WorkOrderBizType"
+          },
+          "can_approve": {
+            "title": "Can Approve",
+            "type": "boolean"
+          },
+          "content": {
+            "$ref": "#/components/schemas/WorkOrderDetailContent"
+          },
+          "event_type": {
+            "$ref": "#/components/schemas/WorkOrderEventType"
+          },
+          "review_remark": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Remark"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          },
+          "reviewer_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewer User Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/WorkOrderStatus"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "work_order_id": {
+            "title": "Work Order Id",
+            "type": "integer"
+          },
+          "work_order_no": {
+            "title": "Work Order No",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_order_id",
+          "work_order_no",
+          "biz_type",
+          "biz_id",
+          "event_type",
+          "title",
+          "content",
+          "status",
+          "reviewer_user_id",
+          "review_remark",
+          "reviewed_at",
+          "can_approve"
+        ],
+        "title": "WorkOrderDetailResponse",
+        "type": "object"
+      },
+      "WorkOrderEventType": {
+        "enum": [
+          "SPACE_JOIN_APPLIED",
+          "SPACE_JOIN_REVIEWED",
+          "SPACE_MEMBER_ADDED",
+          "BOT_COLLABORATOR_APPLIED",
+          "BOT_COLLABORATOR_REVIEWED",
+          "BOT_MEMBER_ADDED",
+          "HUMAN2BOT_FRIEND_APPLIED",
+          "HUMAN2BOT_FRIEND_REVIEWED",
+          "BOT2BOT_FRIEND_APPLIED",
+          "BOT2BOT_FRIEND_REVIEWED",
+          "HUMAN2BOT_PUBLIC_ORDER_CREATED",
+          "HUMAN2BOT_PUBLIC_ORDER_COMPLETED",
+          "BOT2BOT_PUBLIC_ORDER_CREATED",
+          "BOT2BOT_PUBLIC_ORDER_COMPLETED"
+        ],
+        "title": "WorkOrderEventType",
+        "type": "string"
+      },
+      "WorkOrderItemType": {
+        "enum": [
+          "ALL",
+          "APPROVAL",
+          "NOTICE"
+        ],
+        "title": "WorkOrderItemType",
+        "type": "string"
+      },
+      "WorkOrderListItem": {
+        "properties": {
+          "applicant_user_id": {
+            "title": "Applicant User Id",
+            "type": "string"
+          },
+          "apply_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Apply Reason"
+          },
+          "biz_id": {
+            "title": "Biz Id",
+            "type": "string"
+          },
+          "biz_type": {
+            "$ref": "#/components/schemas/WorkOrderBizType"
+          },
+          "can_approve": {
+            "title": "Can Approve",
+            "type": "boolean"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "env": {
+            "title": "Env",
+            "type": "string"
+          },
+          "event_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkOrderEventType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "gmt_created": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gmt Created"
+          },
+          "gmt_modified": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gmt Modified"
+          },
+          "is_read": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Read"
+          },
+          "item_id": {
+            "title": "Item Id",
+            "type": "string"
+          },
+          "item_type": {
+            "$ref": "#/components/schemas/WorkOrderItemType"
+          },
+          "notification_category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NotificationCategory"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "notification_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notification Id"
+          },
+          "read_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read At"
+          },
+          "recipient_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipient User Id"
+          },
+          "review_remark": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Remark"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          },
+          "reviewer_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewer User Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/WorkOrderStatus"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "work_order_id": {
+            "title": "Work Order Id",
+            "type": "integer"
+          },
+          "work_order_no": {
+            "title": "Work Order No",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_id",
+          "item_type",
+          "work_order_id",
+          "work_order_no",
+          "notification_id",
+          "notification_category",
+          "biz_type",
+          "biz_id",
+          "applicant_user_id",
+          "apply_reason",
+          "reviewer_user_id",
+          "review_remark",
+          "reviewed_at",
+          "recipient_user_id",
+          "event_type",
+          "title",
+          "content",
+          "status",
+          "is_read",
+          "read_at",
+          "env",
+          "can_approve",
+          "gmt_created",
+          "gmt_modified"
+        ],
+        "title": "WorkOrderListItem",
+        "type": "object"
+      },
+      "WorkOrderQueryType": {
+        "enum": [
+          "PENDING_FOR_ME",
+          "INITIATED_BY_ME",
+          "PROCESSED_BY_ME"
+        ],
+        "title": "WorkOrderQueryType",
+        "type": "string"
+      },
+      "WorkOrderReviewRequest": {
+        "properties": {
+          "review_remark": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Review Remark",
+            "type": "string"
+          }
+        },
+        "required": [
+          "review_remark"
+        ],
+        "title": "WorkOrderReviewRequest",
+        "type": "object"
+      },
+      "WorkOrderReviewResponse": {
+        "properties": {
+          "review_remark": {
+            "title": "Review Remark",
+            "type": "string"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          },
+          "reviewer_user_id": {
+            "title": "Reviewer User Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/WorkOrderStatus"
+          },
+          "work_order_id": {
+            "title": "Work Order Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "work_order_id",
+          "status",
+          "reviewer_user_id",
+          "review_remark",
+          "reviewed_at"
+        ],
+        "title": "WorkOrderReviewResponse",
+        "type": "object"
+      },
+      "WorkOrderStatus": {
+        "enum": [
+          "PENDING",
+          "APPROVED",
+          "REJECTED"
+        ],
+        "title": "WorkOrderStatus",
+        "type": "string"
       }
     }
   },
@@ -27558,6 +29488,3106 @@
         "summary": "Get Bot Status",
         "tags": [
           "bots"
+        ]
+      }
+    },
+    "/openapi/v1/spaces": {
+      "get": {
+        "operationId": "list_spaces_openapi_v1_spaces_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "keyword",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Keyword"
+            }
+          },
+          {
+            "in": "query",
+            "name": "space_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SpaceType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Space Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_no",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page No",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Page_SpaceItem__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "List Spaces",
+        "tags": [
+          "spaces"
+        ]
+      }
+    },
+    "/openapi/v1/spaces/create": {
+      "post": {
+        "operationId": "create_team_space_openapi_v1_spaces_create_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSpaceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SpaceCreated_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Create Team Space",
+        "tags": [
+          "spaces"
+        ]
+      }
+    },
+    "/openapi/v1/spaces/personal/initialize": {
+      "post": {
+        "operationId": "initialize_personal_space_openapi_v1_spaces_personal_initialize_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_PersonalSpaceInitialized_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Initialize Personal Space",
+        "tags": [
+          "spaces"
+        ]
+      }
+    },
+    "/openapi/v1/spaces/{space_id}/join-requests": {
+      "post": {
+        "operationId": "create_space_join_request_openapi_v1_spaces__space_id__join_requests_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Space Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSpaceJoinRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SpaceJoinRequestCreated_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Create Space Join Request",
+        "tags": [
+          "work-orders"
+        ]
+      }
+    },
+    "/openapi/v1/spaces/{space_id}/market-favorites": {
+      "post": {
+        "operationId": "add_market_favorite_openapi_v1_spaces__space_id__market_favorites_post",
+        "parameters": [
+          {
+            "description": "Space primary identifier.",
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "description": "Space primary identifier.",
+              "minimum": 1,
+              "title": "Space Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FavoriteTargetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_FavoriteAddedResult_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Add Market Favorite",
+        "tags": [
+          "spaces"
+        ]
+      }
+    },
+    "/openapi/v1/spaces/{space_id}/market-favorites/cancel": {
+      "post": {
+        "operationId": "cancel_market_favorite_openapi_v1_spaces__space_id__market_favorites_cancel_post",
+        "parameters": [
+          {
+            "description": "Space primary identifier.",
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "description": "Space primary identifier.",
+              "minimum": 1,
+              "title": "Space Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FavoriteTargetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_FavoriteCanceledResult_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Cancel Market Favorite",
+        "tags": [
+          "spaces"
+        ]
+      }
+    },
+    "/openapi/v1/spaces/{space_id}/market-favorites/search": {
+      "post": {
+        "operationId": "search_market_favorites_openapi_v1_spaces__space_id__market_favorites_search_post",
+        "parameters": [
+          {
+            "description": "Space primary identifier.",
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "description": "Space primary identifier.",
+              "minimum": 1,
+              "title": "Space Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchFavoritesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Page_MarketFavoriteItem__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Search Market Favorites",
+        "tags": [
+          "spaces"
+        ]
+      }
+    },
+    "/openapi/v1/spaces/{space_id}/members": {
+      "get": {
+        "operationId": "list_space_members_openapi_v1_spaces__space_id__members_get",
+        "parameters": [
+          {
+            "description": "Space primary identifier.",
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "description": "Space primary identifier.",
+              "minimum": 1,
+              "title": "Space Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "keyword",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Keyword"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_no",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page No",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Page_SpaceMemberItem__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "List Space Members",
+        "tags": [
+          "spaces"
+        ]
+      },
+      "post": {
+        "operationId": "add_space_member_openapi_v1_spaces__space_id__members_post",
+        "parameters": [
+          {
+            "description": "Space primary identifier.",
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "description": "Space primary identifier.",
+              "minimum": 1,
+              "title": "Space Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddSpaceMemberRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SpaceMemberMutationResult_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Add Space Member",
+        "tags": [
+          "spaces"
+        ]
+      }
+    },
+    "/openapi/v1/spaces/{space_id}/members/{user_id}": {
+      "delete": {
+        "operationId": "delete_space_member_openapi_v1_spaces__space_id__members__user_id__delete",
+        "parameters": [
+          {
+            "description": "Space primary identifier.",
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "description": "Space primary identifier.",
+              "minimum": 1,
+              "title": "Space Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SpaceMemberDeletedResult_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Delete Space Member",
+        "tags": [
+          "spaces"
+        ]
+      }
+    },
+    "/openapi/v1/spaces/{space_id}/members/{user_id}/role": {
+      "put": {
+        "operationId": "update_space_member_role_openapi_v1_spaces__space_id__members__user_id__role_put",
+        "parameters": [
+          {
+            "description": "Space primary identifier.",
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "description": "Space primary identifier.",
+              "minimum": 1,
+              "title": "Space Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSpaceMemberRoleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SpaceMemberMutationResult_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Update Space Member Role",
+        "tags": [
+          "spaces"
+        ]
+      }
+    },
+    "/openapi/v1/work-order-notifications/read-all": {
+      "post": {
+        "operationId": "mark_all_notifications_read_openapi_v1_work_order_notifications_read_all_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_NotificationsReadAllResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Mark All Notifications Read",
+        "tags": [
+          "work-orders"
+        ]
+      }
+    },
+    "/openapi/v1/work-order-notifications/unread-count": {
+      "get": {
+        "operationId": "unread_notification_count_openapi_v1_work_order_notifications_unread_count_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_UnreadCountResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Unread Notification Count",
+        "tags": [
+          "work-orders"
+        ]
+      }
+    },
+    "/openapi/v1/work-order-notifications/{notification_id}": {
+      "get": {
+        "operationId": "get_notification_openapi_v1_work_order_notifications__notification_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "notification_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Notification Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_NotificationDetailResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Get Notification",
+        "tags": [
+          "work-orders"
+        ]
+      }
+    },
+    "/openapi/v1/work-order-notifications/{notification_id}/read": {
+      "post": {
+        "operationId": "mark_notification_read_openapi_v1_work_order_notifications__notification_id__read_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "notification_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Notification Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_NotificationReadResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Mark Notification Read",
+        "tags": [
+          "work-orders"
+        ]
+      }
+    },
+    "/openapi/v1/work-orders": {
+      "get": {
+        "operationId": "list_work_orders_openapi_v1_work_orders_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "query_type",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/WorkOrderQueryType",
+              "default": "PENDING_FOR_ME"
+            }
+          },
+          {
+            "in": "query",
+            "name": "item_type",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/WorkOrderItemType",
+              "default": "ALL"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_no",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page No",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Page_WorkOrderListItem__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "List Work Orders",
+        "tags": [
+          "work-orders"
+        ]
+      }
+    },
+    "/openapi/v1/work-orders/{work_order_id}": {
+      "get": {
+        "operationId": "get_work_order_openapi_v1_work_orders__work_order_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_order_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Work Order Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_WorkOrderDetailResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Get Work Order",
+        "tags": [
+          "work-orders"
+        ]
+      }
+    },
+    "/openapi/v1/work-orders/{work_order_id}/approve": {
+      "post": {
+        "operationId": "approve_work_order_openapi_v1_work_orders__work_order_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_order_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Work Order Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkOrderReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_WorkOrderReviewResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Approve Work Order",
+        "tags": [
+          "work-orders"
+        ]
+      }
+    },
+    "/openapi/v1/work-orders/{work_order_id}/reject": {
+      "post": {
+        "operationId": "reject_work_order_openapi_v1_work_orders__work_order_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_order_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Work Order Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkOrderReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_WorkOrderReviewResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Reject Work Order",
+        "tags": [
+          "work-orders"
         ]
       }
     }
