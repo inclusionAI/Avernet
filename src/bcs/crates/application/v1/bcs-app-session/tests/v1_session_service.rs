@@ -30,9 +30,10 @@ use bcs_service_api::application::v1::{
 };
 use bcs_service_api::port::repo::{NewSessionParams, SessionRepoPort};
 use bcs_service_api::{
-    ActorKind, BotCapabilities, BotRegistryCoreService, CallerContext,
+    ActorKind, ActorStatus, BotCapabilities, BotRegistryCoreService, CallerContext,
     CancelStateMachineRunCommand, CollaborationDefinition, CollaborationRuntimeError,
-    CollaborationRuntimeService, ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome, Group,
+    CollaborationRuntimeService, ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome,
+    FriendCoreService, Group,
     GroupCoreService, GroupHistoryCommand, GroupHistoryResult, GroupMessage,
     GroupMessageHistoryService, GroupMessageType, GroupStrategy, GroupUseCaseError,
     HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, HumanActor, MessageRole,
@@ -217,6 +218,7 @@ struct Fixture {
     service: SessionServiceImpl,
     groups: Arc<GroupCore>,
     bots: Arc<BotCore>,
+    friends: Arc<FriendCore>,
     history: Arc<RecordingHistoryService>,
     runtime: Arc<RecordingRuntime>,
     session_repo: Arc<dyn SessionRepoPort>,
@@ -233,6 +235,7 @@ impl Fixture {
         let groups = Arc::new(GroupCore::with_repo(group_repo.clone()));
         let relation = Arc::new(RelationCore::memory());
         let friends = Arc::new(FriendCore::memory().with_relation(relation.clone()));
+        let friends_handle = friends.clone();
         let session_repo: Arc<dyn SessionRepoPort> = Arc::new(MemorySessionRepo::new());
         let history = Arc::new(RecordingHistoryService::default());
         let runtime = Arc::new(RecordingRuntime::default());
@@ -265,6 +268,7 @@ impl Fixture {
             service,
             groups,
             bots,
+            friends: friends_handle,
             history,
             runtime,
             session_repo,
@@ -287,6 +291,37 @@ impl Fixture {
             .save_created_by(bot_uuid, bot_uuid, true)
             .await
             .expect("assign test Bot owner");
+    }
+
+    /// Register a Bot with explicit `visibility` and `created_by` owner, for
+    /// collaboration-eligibility tests that need a non-public or non-caller-owned
+    /// actor (the default `add_bot` always registers a `public` Bot owned by
+    /// itself).
+    async fn add_bot_with(&self, bot_uuid: &str, visibility: &str, created_by: &str) {
+        self.bots
+            .register(
+                bot_uuid.to_string(),
+                BotCapabilities {
+                    name: Some(bot_uuid.to_string()),
+                    visibility: visibility.to_string(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("register bot");
+        self.bots
+            .save_created_by(bot_uuid, created_by, true)
+            .await
+            .expect("assign test Bot owner");
+    }
+
+    /// Establish a bidirectional friendship between two Bots in the fixture's
+    /// shared in-memory friend repo.
+    async fn befriend(&self, bot_a: &str, bot_b: &str) {
+        self.friends
+            .add_friendship(bot_a, bot_b)
+            .await
+            .expect("establish friendship");
     }
 
     async fn store_group(&self, group_id: &str, driver: &str, context: Option<&str>) {
@@ -3236,4 +3271,208 @@ async fn add_participant_derives_worker_role_for_manager_worker() {
         "VfhG3: ManagerWorker Worker gains Worker role on add_participant, not Consultant"
     );
     assert_eq!(worker.mode, ParticipantMode::Auto);
+}
+
+// ── ensure_collaboration_eligible: session add-participant anchor set ──
+//
+// VSN7B (revised): an added Bot is admitted when collaboration-reachable from
+// the caller OR from the parent Group's driver/originator. These tests pin the
+// widened behavior so a manager is not blocked from pulling a Bot the group's
+// driver/originator already collaborates with.
+
+async fn eligibility_fixture(group_id: &str, driver: &str, originator: &str) -> Fixture {
+    let fixture = Fixture::new().await;
+    // The Human caller `manager` owns the public driver Bot, which grants group
+    // access for session creation and group-management authority.
+    fixture.add_bot_with(driver, "public", "manager").await;
+    fixture
+        .store_group_with_originator(group_id, driver, originator, None)
+        .await;
+    fixture
+}
+
+#[tokio::test]
+async fn add_participant_admits_protected_bot_reachable_from_driver_friend() {
+    // Protected Bot not owned by / friends with the caller, but friends with the
+    // group driver → admitted via the driver anchor.
+    let fixture = eligibility_fixture("g1", "driver-bot", "human_manager").await;
+    fixture
+        .add_bot_with("px", "protected", "other-owner")
+        .await;
+    fixture.befriend("driver-bot", "px").await;
+
+    let outcome = create_session(
+        &fixture,
+        human_principal("manager"),
+        "g1",
+        "driver-bot",
+        vec![],
+        None,
+        None,
+    )
+    .await;
+    let session_id = outcome.session.session_id.clone();
+
+    let added = fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            caller: human_principal("manager"),
+            session_id: session_id.clone(),
+            bot_uuid: "px".into(),
+        })
+        .await
+        .expect("driver-friend Bot should be admitted");
+    assert_eq!(added.actor_id, "px");
+}
+
+#[tokio::test]
+async fn add_participant_rejects_protected_bot_unreachable_from_all_anchors() {
+    // Protected Bot reachable from none of caller/driver/originator → 403.
+    let fixture = eligibility_fixture("g1", "driver-bot", "human_manager").await;
+    fixture
+        .add_bot_with("px", "protected", "other-owner")
+        .await;
+
+    let outcome = create_session(
+        &fixture,
+        human_principal("manager"),
+        "g1",
+        "driver-bot",
+        vec![],
+        None,
+        None,
+    )
+    .await;
+    let session_id = outcome.session.session_id.clone();
+
+    let error = fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            caller: human_principal("manager"),
+            session_id: session_id.clone(),
+            bot_uuid: "px".into(),
+        })
+        .await
+        .expect_err("unreachable Bot should be rejected");
+    assert!(
+        matches!(
+            error,
+            bcs_service_api::application::v1::ApplicationError::Forbidden(_)
+        ),
+        "expected Forbidden, got {error:?}",
+    );
+    assert_eq!(error.code(), "forbidden");
+}
+
+#[tokio::test]
+async fn add_participant_admits_protected_bot_owned_by_caller() {
+    // Protected Bot whose `created_by` matches the Human caller → admitted via
+    // the caller (Human) anchor's ownership rule.
+    let fixture = eligibility_fixture("g1", "driver-bot", "human_manager").await;
+    fixture.add_bot_with("px", "protected", "manager").await;
+
+    let outcome = create_session(
+        &fixture,
+        human_principal("manager"),
+        "g1",
+        "driver-bot",
+        vec![],
+        None,
+        None,
+    )
+    .await;
+    let session_id = outcome.session.session_id.clone();
+
+    let added = fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            caller: human_principal("manager"),
+            session_id: session_id.clone(),
+            bot_uuid: "px".into(),
+        })
+        .await
+        .expect("caller-owned protected Bot should be admitted");
+    assert_eq!(added.actor_id, "px");
+}
+
+#[tokio::test]
+async fn add_participant_admits_protected_bot_reachable_from_originator_friend() {
+    // Distinct Bot originator (not the driver) is the only anchor that reaches
+    // the target → admitted via the originator anchor, proving the anchor set is
+    // not collapsed to caller+driver only.
+    let fixture = eligibility_fixture("g1", "driver-bot", "originator-bot").await;
+    fixture
+        .add_bot_with("px", "protected", "other-owner")
+        .await;
+    fixture.befriend("originator-bot", "px").await;
+
+    let outcome = create_session(
+        &fixture,
+        human_principal("manager"),
+        "g1",
+        "driver-bot",
+        vec![],
+        None,
+        None,
+    )
+    .await;
+    let session_id = outcome.session.session_id.clone();
+
+    let added = fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            caller: human_principal("manager"),
+            session_id: session_id.clone(),
+            bot_uuid: "px".into(),
+        })
+        .await
+        .expect("originator-friend Bot should be admitted");
+    assert_eq!(added.actor_id, "px");
+}
+
+#[tokio::test]
+async fn add_participant_rejects_hidden_bot_regardless_of_anchors() {
+    // A Hidden Bot is rejected outright before any anchor is consulted, even when
+    // the driver is its friend.
+    let fixture = eligibility_fixture("g1", "driver-bot", "human_manager").await;
+    fixture
+        .add_bot_with("px", "protected", "other-owner")
+        .await;
+    fixture.befriend("driver-bot", "px").await;
+    fixture
+        .bots
+        .update_actor_status("px", ActorStatus::Hidden)
+        .await
+        .expect("hide bot");
+
+    let outcome = create_session(
+        &fixture,
+        human_principal("manager"),
+        "g1",
+        "driver-bot",
+        vec![],
+        None,
+        None,
+    )
+    .await;
+    let session_id = outcome.session.session_id.clone();
+
+    let error = fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            caller: human_principal("manager"),
+            session_id: session_id.clone(),
+            bot_uuid: "px".into(),
+        })
+        .await
+        .expect_err("hidden Bot should be rejected");
+    assert!(
+        matches!(
+            error,
+            bcs_service_api::application::v1::ApplicationError::Forbidden(ref message)
+                if message.contains("hidden")
+        ),
+        "expected hidden-Bot Forbidden, got {error:?}",
+    );
+    assert_eq!(error.code(), "forbidden");
 }
