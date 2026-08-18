@@ -1,4 +1,4 @@
-"""任务主动发现 — singlebox 真实端到端集成用例(发现 → 通知 → session 创建全链路)。
+"""任务主动发现 — singlebox 真实端到端集成用例(发现 → session 创建 → 通知投递)。
 
 gated by ``SINGLEBOX_TASK_E2E=1``。本地起后端 singlebox 时设置:
 
@@ -8,14 +8,15 @@ gated by ``SINGLEBOX_TASK_E2E=1``。本地起后端 singlebox 时设置:
 完整流程覆盖:
   1) 准备 mock 数据: 将内联测试数据写入 scripts/.dependencies/data/discovered_tasks.db
   2) provisioning: 建一个 test agent bot(获取真实 agent_id)
-  3) POST /api/public/task-discovery/discover   → 读取 mock 任务 + 为每个任务创建 engine session
-  4) 验证响应: success / discovered count / task_id / session_id / session_url
+  3) POST /api/public/task-discovery/discover   → 读取 mock 任务 + 创建 engine session + 投递通知
+  4) 验证响应: success / discovered count / task_id / session_id / notification_sent
   5) GET /api/public/task-discovery/status      → 验证任务状态可查询
-  6) 验证 session_url 可达(engine session 实际存在)
+  6) 验证 engine session 实际存在(GET /api/sessions/{id} 可达)
 
 关键架构前提:
-  - DiscoveryService 编排 TaskReader(读 SQLite db)→ SessionCreator(调 engine POST /api/sessions)
-  - 每个 pending_confirmation 任务 → 一个 engine session + session_url(供用户前端确认)
+  - DiscoveryService 编排 TaskReader(读 SQLite db)→ SessionCreator(调 engine POST /api/sessions)→ NotifySenderPlugin(投递通知)
+  - 每个 pending_confirmation 任务 → 一个 engine session + 通知投递(供用户前端确认)
+  - session_url 不在 discover 阶段构建 — 用户 bot 没有单独的 session_url
   - 任务执行不在本测试范围(由 task 执行框架负责)
 """
 from __future__ import annotations
@@ -38,7 +39,6 @@ _LIVE = os.environ.get("SINGLEBOX_TASK_E2E", "").strip() in {"1", "true"}
 _BACKEND = os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
 _USER_ID = os.environ.get("SINGLEBOX_USER_ID", "440718")
 _ENGINE_URL = os.environ.get("TASK_DISCOVERY_ENGINE_URL", "http://localhost:20003")
-_FRONTEND_URL = os.environ.get("TASK_DISCOVERY_FRONTEND_URL", "http://localhost:8000")
 
 _HDRS = {"x-user-id": _USER_ID, "accept": "application/json"}
 _TEST_BOT_NAME = "task-discovery-test-bot"
@@ -104,9 +104,9 @@ def _write_mock_data() -> None:
 
 @unittest.skipUnless(_LIVE, "设置 SINGLEBOX_TASK_E2E=1 启用真实 singlebox e2e")
 class TestTaskDiscoveryE2E(unittest.TestCase):
-    """任务主动发现 singlebox e2e: discover → status → session 可达。"""
+    """任务主动发现 singlebox e2e: discover → session → notify → status。"""
 
-    def test_discover_creates_sessions_and_returns_tasks(self) -> None:
+    def test_discover_notifies_and_returns_tasks(self) -> None:
         loop = asyncio.new_event_loop()
         try:
             loop.run_until_complete(self._run(loop))
@@ -146,41 +146,35 @@ class TestTaskDiscoveryE2E(unittest.TestCase):
             tasks = body.get("tasks", [])
             self.assertEqual(len(tasks), _EXPECTED_TASK_COUNT, "tasks 列表长度不匹配")
 
-            # 4) 逐任务验证: task_id / session_id / session_url 非空
+            # 4) 逐任务验证: task_id / session_id / notification_sent
             discovered_ids: set[str] = set()
-            session_urls: list[str] = []
             for t in tasks:
                 tid = t.get("task_id", "")
                 sid = t.get("session_id")
-                surl = t.get("session_url")
                 success = t.get("success")
+                notified = t.get("notification_sent")
 
                 print(f"  - task={tid} success={success} "
-                      f"session_id={sid} url={surl}")
+                      f"session_id={sid} notified={notified}")
                 discovered_ids.add(tid)
 
                 self.assertTrue(success, f"任务 {tid} discovery 未成功")
                 self.assertIsNotNone(sid, f"任务 {tid} session_id 为空")
                 self.assertTrue(sid, f"任务 {tid} session_id 为空字符串")
-                self.assertIsNotNone(surl, f"任务 {tid} session_url 为空")
-                self.assertTrue(surl, f"任务 {tid} session_url 为空字符串")
-                session_urls.append(surl)
+                self.assertIn(
+                    "notification_sent", t,
+                    f"任务 {tid} 响应缺少 notification_sent 字段",
+                )
+                self.assertTrue(
+                    notified,
+                    f"任务 {tid} 通知未发送 (notification_sent={notified})",
+                )
 
             # task_id 集合与内联 mock 数据一致
             self.assertEqual(
                 discovered_ids, _EXPECTED_TASK_IDS,
                 f"发现 task_id 集合不匹配: {discovered_ids} vs {_EXPECTED_TASK_IDS}",
             )
-
-            # session_url 格式校验: {frontend}/bcn/chat/session?bot_uuid=...&id=...&session=...
-            for surl in session_urls:
-                self.assertIn(
-                    "/bcn/chat/session", surl,
-                    f"session_url 格式异常(缺少 /bcn/chat/session): {surl}",
-                )
-                self.assertIn(f"bot_uuid={agent_id}", surl, f"session_url 未包含 bot_uuid: {surl}")
-                self.assertIn("id=", surl, f"session_url 未包含 id(群组ID) 参数: {surl}")
-                self.assertIn("session=", surl, f"session_url 未包含 session= 参数: {surl}")
 
             # 5) GET /api/public/task-discovery/status → 验证任务状态可查
             r = await cli.get(f"{_BACKEND}/api/public/task-discovery/status")

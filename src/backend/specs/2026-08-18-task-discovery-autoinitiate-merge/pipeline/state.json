@@ -1,10 +1,10 @@
 {
   "module": "task-discovery",
-  "feature": "discovery-autoinitiate-merge",
+  "feature": "discovery-notification-integration",
   "date": "2026-08-18",
-  "phase": "propose",
-  "status": "awaiting-confirmation",
-  "readiness_score": 8,
+  "phase": "implement",
+  "status": "implemented",
+  "readiness_score": 9,
   "artifacts": {
     "proposal.md": "created",
     "spec.md": "created",
@@ -24,8 +24,21 @@
     "acceptance_alignment": "passed"
   },
   "tasks": {
-    "total_slices": 9,
-    "completed": 0,
-    "pending": 9
+    "total_slices": 5,
+    "completed": 5,
+    "pending": 0
+  },
+  "validation": {
+    "ruff": "passed",
+    "mypy": "skipped (not installed)",
+    "import_check": "passed",
+    "unit_tests": "not run (no existing unit tests for this module)",
+    "e2e": "gated (SINGLEBOX_TASK_E2E=1)"
+  },
+  "revision": {
+    "date": "2026-08-18",
+    "from": "task_discovery-autoinitiate-merge (方案B)",
+    "to": "task_discovery 通知集成",
+    "reason": "用户修订：discover 阶段所有任务仅展示等确认，autoInitiate 执行是后续独立步骤；不按 work_item_url 分支"
   }
 }

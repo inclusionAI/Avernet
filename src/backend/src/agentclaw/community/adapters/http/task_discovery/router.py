@@ -23,7 +23,9 @@ from agentclaw.community.core.task.task_discovery.discovery_service import (
 from agentclaw.community.core.task.task_discovery.task_reader import (
     SqliteTaskReader,
 )
+from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.notify_sender import NotifySenderPlugin
 
 logger = get_logger()
 
@@ -41,18 +43,15 @@ def _resolve_db_path() -> str:
     return os.environ.get("TASK_DISCOVERY_DATA_FILE", _DEFAULT_DB)
 
 
-def _build_service() -> DiscoveryService:
+def _build_service(notify_sender: NotifySenderPlugin) -> DiscoveryService:
     """从环境变量构建 DiscoveryService。"""
     engine_url = os.environ.get(
         "TASK_DISCOVERY_ENGINE_URL", "http://localhost:20003"
     )
-    frontend_url = os.environ.get(
-        "TASK_DISCOVERY_FRONTEND_URL", "http://localhost:8000"
-    )
     return create_default_service(
         data_file=_resolve_db_path(),
+        notify_sender=notify_sender,
         engine_base_url=engine_url,
-        engine_frontend_url=frontend_url,
     )
 
 
@@ -60,17 +59,18 @@ def _build_service() -> DiscoveryService:
 async def discover_tasks(
     user_id: str = Query("default", description="用户 ID"),
     agent_id: str = Query("bot_001", description="Bot/Agent ID"),
+    notify_sender: NotifySenderPlugin = Injected(NotifySenderPlugin),
 ) -> dict:
     """手动触发任务发现流程。
 
-    读取 mock 数据中的待确认任务，为每个任务创建 engine session + session_url。
+    读取 mock 数据中的待确认任务，创建 engine session 并投递通知。
     """
     logger.info(
         "[task_discovery] discover triggered: user_id=%s, agent_id=%s",
         user_id, agent_id,
     )
     try:
-        service = _build_service()
+        service = _build_service(notify_sender=notify_sender)
         results = await service.discover(user_id=user_id, agent_id=agent_id)
 
         return {
@@ -82,7 +82,7 @@ async def discover_tasks(
                     "project_name": r.task.project_name,
                     "success": r.success,
                     "session_id": r.session.session_id if r.session else None,
-                    "session_url": r.session.session_url if r.session else None,
+                    "notification_sent": r.notification_sent,
                     "error": r.error,
                 }
                 for r in results

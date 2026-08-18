@@ -1,84 +1,72 @@
-# task_discovery × autoInitiate 合并（方案 B）
+# task_discovery 通知集成
 
 ## 背景
 
-`task_discovery` 模块（`core/task/task_discovery/`）当前实现独立流程：读 SQLite mock → 创建 engine session → 等用户确认。与 `core/cron/services/cron_relay.py` 的 `autoInitiate` 体系（查询 DIMA → 过滤 → 直接执行）是两条平行路径。
+`task_discovery` 模块（`core/task/task_discovery/`）当前流程：读 SQLite mock → 创建 engine session → 生成通知文本（仅存在 `DiscoveryResult.notification_message` 字段中，不投递到任何通知通道）。
 
-用户洞察：如果"发现"最终都走向"自动执行"，中间的人工确认是可选的，那 task_discovery 读 mock SQLite → 建 session 等确认 → 人工触发执行的路径就是冗余的。`autoInitiate` 已经做完了 DIMA 查询和过滤，`TaskDiscoveryLifecycle` 读 mock SQLite 只是过渡方案。
+用户不知道有任务待处理，除非主动查询 `GET /api/public/task-discovery/status` 或查看 engine session。
+
+`NotifySenderPlugin` Protocol + `CommunityNotifySender`（log-only）已由 `CommunityNotifyModule` 绑定为 singleton，可直接注入使用。
 
 ## 问题定义
 
-1. **路径冗余**：task_discovery 创建被动 session 等用户确认，autoInitiate 直接执行——两套独立流程做类似的事
-2. **通知缺失**：发现任务后无通知机制，用户不知道有任务待处理
-3. **执行衔接断裂**：task_discovery 建了 session 但无法自动触发执行，需用户手动确认后才能走执行框架
+**通知投递缺失**：发现任务并创建 session 后，通知消息仅作为字符串返回，未通过任何通道投递给用户。用户无从感知"有新任务被发现了"。
 
 ## 目标
 
-将 task_discovery 与 autoInitiate 合并：
-- 读 SQLite 发现的任务 → 有 `work_item_url` 的任务直接通过 autoInitiate 执行 → 执行成功后通过 `NotifySenderPlugin` 发通知
-- 无 `work_item_url` 的任务仅创建 session 展示 + 发通知（不执行）
-- 保留 `SessionCreator` Protocol 作为降级路径
+在 `DiscoveryService` 创建 session 成功后，通过 `NotifySenderPlugin.send()` 投递通知。
+
+- 所有任务统一走"创建 session + 展示 + 通知"单一路径
+- 通知在 session 创建成功后发送
+- 通知失败不阻塞发现流程（`NotifySenderPlugin` Protocol 约定从不抛异常）
 
 ## 用户/角色
 
 | 角色 | 关注点 |
 |---|---|
-| 框架维护者 | Protocol seam 可插拔；transport-agnostic；与 cron 模块解耦 |
+| 框架维护者 | Protocol seam 可插拔；transport-agnostic |
 | corp 接入者 | `NotifySenderPlugin` 替换为钉钉通道即可 |
-| singlebox/CI | e2e gated 测试验证 autoInitiate 触发 |
+| singlebox/CI | e2e gated 测试验证通知日志可见 |
 
 ## 范围
 
-修改现有所有 `task_discovery` 文件：
-
 | 文件 | 变更类型 |
 |---|---|
-| `models.py` | 新增 `InitiateResult`；`DiscoveredTask` 增加方法；`DiscoveryResult` 扩展 |
-| `discovery_service.py` | 编排扩展：新增 `TaskInitiator` + `NotifySenderPlugin` 依赖；分流逻辑 |
-| `session_creator.py` | 新增 `TaskInitiator` Protocol + `AutoInitiateExecutor` 实现 |
-| `lifecycle.py` | `_discover_once()` 注入新依赖；服务创建变更 |
-| `router.py` | `_build_service()` 适配；响应格式更新 |
-| `task_discovery_module.py` | 新增 `TaskInitiator` 绑定 |
+| `discovery_service.py` | `DiscoveryService` 新增 `notify_sender` 依赖 + `_send_notification()`；`DiscoveryResult` 加 `notification_sent` 字段 |
+| `lifecycle.py` | `_discover_once()` 注入并传 `NotifySenderPlugin` |
+| `router.py` | `_build_service()` 适配；响应格式加 `notification_sent` |
 | `__init__.py` | 更新 docstring |
-| `task_reader.py` | 不变（读 SQLite 逻辑保留） |
-| `test_task_discovery_e2e.py` | 更新断言（验证 autoInitiate 执行） |
+| `test_task_discovery_e2e.py` | 加通知日志断言 |
 
 ## 非范围
 
+- **不**引入 `TaskInitiator` / `AutoInitiateExecutor` — autoInitiate 执行不在 discovery 阶段
+- **不**按 `work_item_url` 分支 — 所有任务统一走 SessionCreator 路径
 - **不**实现真实钉钉机器人通知（corp 侧 `DingTalkNotifySender` 负责）
-- **不**替换 SQLite mock 为真实数据源（仍为过渡方案）
-- **不**修改 engine 侧 autoInitiate 插件代码
+- **不**修改 `models.py`（复用现有 `to_notification_message()`）
+- **不**修改 `task_reader.py` / `session_creator.py`
+- **不**修改 `task_discovery_module.py`（`NotifySenderPlugin` 已由 `CommunityNotifyModule` 绑定）
+- **不**修改 engine 侧代码
 - **不**做前端页面变更
-- **不**修改 cron 模块核心逻辑（仅通过 Protocol 注入调用）
-
-## Open Questions
-
-所有必答问题已在 Clarification 阶段确认：
-- 执行路径：通过 Protocol seam 注入 `CronRelayServiceProtocol`（解耦）
-- 无 `work_item_url`：仅展示 + 通知，不报错
-- 通知时机：执行成功后
-- Protocol 保留：双 Protocol 并存
 
 ## AI Assumptions
 
 | 假设 | 风险 | 可逆性 |
 |---|---|---|
-| `CronRelayServiceProtocol` 已由 `CronModule` 绑定为 singleton | 低 — 代码已确认 `cron_module.py:44` | 高 |
 | `NotifySenderPlugin` 已由 `CommunityNotifyModule` 绑定为 singleton | 低 — 代码已确认 `notify.py:22` | 高 |
-| `AutoInitiateExecutor` 通过 `@inject` 注入 `CronRelayServiceProtocol` | 低 — 与 `cron_noauth_router.py` 使用 `Injected()` 一致 | 高 |
-| 无 `work_item_url` 的任务走 `SessionCreator` 降级路径 | 低 — 保留现有 Protocol | 高 |
+| `NotifySenderPlugin.send()` 从不抛异常 | 低 — Protocol 约定 | 高 |
+| `Injected()` 可在 task_discovery router 中使用 | 低 — `cron_noauth_router` 已用同一模式 | 高 |
 
 ## Decision Log
 
 | 日期 | 决策 | 理由 |
 |---|---|---|
-| 2026-08-18 | 选用方案 B（合并 task_discovery 与 autoInitiate） | 用户明确选择：发现→自动执行，人工确认可选 |
-| 2026-08-18 | 执行路径通过 Protocol seam 注入 | 用户要求解耦；`CronRelayServiceProtocol` 已绑定 |
-| 2026-08-18 | 保留双 Protocol（SessionCreator + TaskInitiator） | 用户确认保留降级路径 |
-| 2026-08-18 | 无 work_item_url 的任务仅展示+通知 | 用户确认：work_item_url 是原始记录，可不报错 |
+| 2026-08-18 | 推翻原方案 B（autoInitiate 合并），收窄为通知集成 | 用户明确：discover 阶段所有任务仅展示等确认，autoInitiate 执行是后续独立步骤 |
+| 2026-08-18 | 不按 `work_item_url` 分支 | 数据字段不应决定代码走向；所有任务统一走 SessionCreator |
 
 ## 变更记录
 
 | 日期 | 变更 |
 |---|---|
 | 2026-08-18 | 初始创建 |
+| 2026-08-18 | 方向修订：从"autoInitiate 合并"收窄为"通知集成" |
