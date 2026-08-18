@@ -1,0 +1,337 @@
+# Channel bindings OpenAPI v1 fragment. Schemas are inline because the shared
+# contract YAML has none of BindingTarget/ChannelBinding/BindingStatus/
+# Visibility/GroupChatScope; reuse the ErrorEnvelope/InternalErrorResponse short refs.
+CreateChannelBindingRequest:
+  type: object
+  additionalProperties: false
+  required: [channel_type, account_ref, target, outbound_visibility, config]
+  properties:
+    channel_type:
+      type: string
+    account_ref:
+      type: string
+      minLength: 1
+    target:
+      $ref: "#/BindingTarget"
+    group_chat_scope:
+      $ref: "#/GroupChatScope"
+    outbound_visibility:
+      $ref: "#/Visibility"
+    config:
+      type: object
+      additionalProperties: true
+
+# Exactly one of `active` or `config` is accepted (the server XOR-checks).
+UpdateChannelBindingRequest:
+  type: object
+  additionalProperties: false
+  minProperties: 1
+  maxProperties: 1
+  properties:
+    active:
+      type: integer
+      enum: [0, 1]
+    config:
+      type: object
+      additionalProperties: true
+  description: "Exactly one of `active` (0|1) or `config`; both or neither is a 400."
+
+BindingTarget:
+  type: object
+  additionalProperties: false
+  minProperties: 1
+  maxProperties: 1
+  properties:
+    bot:
+      type: object
+      additionalProperties: false
+      required: [bot_id]
+      properties:
+        bot_id:
+          type: string
+          minLength: 1
+    group:
+      type: object
+      additionalProperties: false
+      required: [group_id]
+      properties:
+        group_id:
+          type: string
+          minLength: 1
+
+ChannelBindingIdPath:
+  name: id
+  in: path
+  required: true
+  schema:
+    type: string
+    minLength: 1
+
+BindingStatus:
+  type: string
+  enum: [active, disabled]
+
+Visibility:
+  type: string
+  enum: [full_transcript, lead_only]
+
+GroupChatScope:
+  type: string
+  enum: [conversation_shared, per_sender]
+
+ChannelBinding:
+  type: object
+  additionalProperties: false
+  required:
+    [id, channel_type, account_ref, target, outbound_visibility, env, status, created_by, config]
+  properties:
+    id: { type: string }
+    channel_type: { type: string }
+    account_ref: { type: string }
+    target: { $ref: "#/BindingTarget" }
+    group_chat_scope: { $ref: "#/GroupChatScope" }
+    outbound_visibility: { $ref: "#/Visibility" }
+    env: { type: string }
+    status: { $ref: "#/BindingStatus" }
+    created_by: { type: string, nullable: true }
+    config:
+      type: object
+      additionalProperties: true
+
+ChannelBindingPage:
+  type: object
+  additionalProperties: false
+  required: [items]
+  properties:
+    items:
+      type: array
+      items: { $ref: "#/ChannelBinding" }
+
+CreatedChannelBindingEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code: { const: 20100 }
+    message: { type: string }
+    data: { $ref: "#/ChannelBinding" }
+    request_id: { type: string }
+
+ChannelBindingPageEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code: { const: 20000 }
+    message: { type: string }
+    data: { $ref: "#/ChannelBindingPage" }
+    request_id: { type: string }
+
+# PATCH/DELETE success — data is null.
+ChannelBindingOkEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code: { const: 20000 }
+    message: { type: string }
+    data: {}
+    request_id: { type: string }
+
+ChannelsBindingsCollectionPath:
+  post:
+    operationId: create_channel_binding
+    tags: ["Collaboration / Channels"]
+    summary: Create a channel binding.
+    x-avernet-security:
+      user: required
+      app: required
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: "#/CreateChannelBindingRequest" }
+    responses:
+      "201":
+        description: Created.
+        content:
+          application/json:
+            schema: { $ref: "#/CreatedChannelBindingEnvelope" }
+      "400":
+        x-error-codes: [invalid_request, invalid_channel_params]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "401":
+        x-error-codes: [unauthenticated]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "403":
+        x-error-codes: [forbidden]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "404":
+        x-error-codes: [channel_binding_not_found]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "409":
+        x-error-codes: [channel_binding_conflict]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+  get:
+    operationId: list_channel_bindings
+    tags: ["Collaboration / Channels"]
+    summary: List channel bindings (human-only; admin list).
+    x-avernet-security:
+      user: required
+      app: required
+    responses:
+      "200":
+        description: OK.
+        content:
+          application/json:
+            schema: { $ref: "#/ChannelBindingPageEnvelope" }
+      "401":
+        x-error-codes: [unauthenticated]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "403":
+        x-error-codes: [forbidden]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+ChannelsBindingsByTargetPath:
+  get:
+    operationId: list_channel_bindings_by_target
+    tags: ["Collaboration / Channels"]
+    summary: List channel bindings for a target (bot or group).
+    x-avernet-security:
+      user: required
+      app: required
+    parameters:
+      - name: target_type
+        in: query
+        required: true
+        schema:
+          type: string
+          enum: [bot, group]
+      - name: target_id
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: channel_type
+        in: query
+        required: false
+        schema:
+          type: string
+    responses:
+      "200":
+        description: OK.
+        content:
+          application/json:
+            schema: { $ref: "#/ChannelBindingPageEnvelope" }
+      "400":
+        x-error-codes: [invalid_request]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "401":
+        x-error-codes: [unauthenticated]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "403":
+        x-error-codes: [forbidden]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+ChannelsBindingsIdPath:
+  patch:
+    operationId: update_channel_binding
+    tags: ["Collaboration / Channels"]
+    summary: Update a binding's status (active) or config (exactly one).
+    x-avernet-security:
+      user: required
+      app: required
+    parameters:
+      - $ref: "#/ChannelBindingIdPath"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: "#/UpdateChannelBindingRequest" }
+    responses:
+      "200":
+        description: OK.
+        content:
+          application/json:
+            schema: { $ref: "#/ChannelBindingOkEnvelope" }
+      "400":
+        x-error-codes: [invalid_request]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "401":
+        x-error-codes: [unauthenticated]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "403":
+        x-error-codes: [forbidden]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "404":
+        x-error-codes: [channel_binding_not_found]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+  delete:
+    operationId: delete_channel_binding
+    tags: ["Collaboration / Channels"]
+    summary: Delete a channel binding.
+    x-avernet-security:
+      user: required
+      app: required
+    parameters:
+      - $ref: "#/ChannelBindingIdPath"
+    responses:
+      "200":
+        description: OK.
+        content:
+          application/json:
+            schema: { $ref: "#/ChannelBindingOkEnvelope" }
+      "401":
+        x-error-codes: [unauthenticated]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "403":
+        x-error-codes: [forbidden]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "404":
+        x-error-codes: [channel_binding_not_found]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
