@@ -752,7 +752,10 @@ async fn reactivate_does_not_add_explicit_private_human_creator() {
     let created = fixture
         .service
         .create(CreateSessionLaunch {
-            request: request(human("alice"), "group-1", Some("driver")),
+            request: SessionLaunchRequest {
+                kind: Some(SessionKind::ServiceInvocation),
+                ..request(human("alice"), "group-1", Some("driver"))
+            },
         })
         .await
         .expect("create");
@@ -761,12 +764,20 @@ async fn reactivate_does_not_add_explicit_private_human_creator() {
         .complete_if_running(&created.session.id, None, None)
         .await
         .expect("complete");
+    fixture
+        .session_repo
+        .update_callback_status(&created.session.id, "success")
+        .await
+        .expect("complete callback");
 
     let outcome = fixture
         .service
         .reactivate(ReactivateSessionLaunch {
             session_id: created.session.id,
-            request: request(human("alice"), "group-1", Some("human_alice")),
+            request: SessionLaunchRequest {
+                kind: Some(SessionKind::ServiceInvocation),
+                ..request(human("alice"), "group-1", Some("human_alice"))
+            },
         })
         .await
         .expect("reactivate");

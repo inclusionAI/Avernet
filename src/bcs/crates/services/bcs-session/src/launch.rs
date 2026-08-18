@@ -27,6 +27,12 @@ struct PreparedLaunch {
     params: NewSessionParams,
     caller: SessionCaller,
     context_delivery: Option<DeliveryType>,
+    deferred_after_create: Option<Participant>,
+}
+
+struct BuiltParticipants {
+    initial: Vec<Participant>,
+    deferred_after_create: Option<Participant>,
 }
 
 impl SessionLaunchApplication {
@@ -189,7 +195,7 @@ impl SessionLaunchApplication {
         request: &SessionLaunchRequest,
         creator: &str,
         kind: SessionKind,
-    ) -> Result<Vec<Participant>, SessionLaunchError> {
+    ) -> Result<BuiltParticipants, SessionLaunchError> {
         let mut participants = group.participants.clone();
         for participant in &mut participants {
             if participant.mode.is_none() {
@@ -259,22 +265,24 @@ impl SessionLaunchApplication {
             .requested_creator
             .as_deref()
             .is_some_and(|requested| requested.starts_with("human_"));
-        if explicit_human_creator
+        let deferred_after_create = (explicit_human_creator
             && !participants
                 .iter()
                 .any(|participant| participant.bot_uuid == creator)
-        {
-            participants.push(Participant {
-                bot_uuid: creator.to_string(),
-                bot_name: request.caller.display_name().map(str::to_string),
-                kind: None,
-                role: ParticipantRole::Driver,
-                actor_kind: ActorKind::Human,
-                mode: Some(ParticipantMode::Present),
-            });
-        }
+        )
+        .then(|| Participant {
+            bot_uuid: creator.to_string(),
+            bot_name: request.caller.display_name().map(str::to_string),
+            kind: None,
+            role: ParticipantRole::Driver,
+            actor_kind: ActorKind::Human,
+            mode: Some(ParticipantMode::Present),
+        });
 
-        Ok(participants)
+        Ok(BuiltParticipants {
+            initial: participants,
+            deferred_after_create,
+        })
     }
 
     async fn prepare(
@@ -333,7 +341,7 @@ impl SessionLaunchApplication {
         let context_delivery = request.context_delivery;
         let params = NewSessionParams {
             session_kind: kind,
-            participants,
+            participants: participants.initial,
             group_version: Some(group.version),
             caller_principal: Some(request.caller.actor_id().to_string()),
             input: request.input,
@@ -347,6 +355,7 @@ impl SessionLaunchApplication {
             params,
             caller,
             context_delivery,
+            deferred_after_create: participants.deferred_after_create,
         })
     }
 
@@ -461,7 +470,17 @@ impl SessionLaunchService for SessionLaunchApplication {
             .await
             .map_err(map_session_error)?;
         let created = outcome.created;
-        self.finish_launch(prepared, outcome.session, created, created)
+        let mut session = outcome.session;
+        if created
+            && let Some(participant) = prepared.deferred_after_create.clone()
+        {
+            session = self
+                .sessions
+                .add_participant(&session.id, participant)
+                .await
+                .map_err(map_session_error)?;
+        }
+        self.finish_launch(prepared, session, created, created)
             .await
     }
 
