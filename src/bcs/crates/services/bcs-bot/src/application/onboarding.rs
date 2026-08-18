@@ -11,12 +11,17 @@ use bcs_service_api::{
 };
 use serde_json::Value;
 
+use bcs_service_api::port::repo::PermissionProfileRepoPort;
+
 /// Bot onboarding application service backed by registry and relation services.
 pub struct BotOnboarding {
     registry: Arc<dyn BotRegistryCoreService>,
     relation: Arc<dyn RelationCoreService>,
     binding_enabled: bool,
     default_visibility: Option<String>,
+    /// Permission-profile repo for seeding the bot's default profile on onboard
+    /// (spec §5.1.1). `None` skips the seed (tests/dev without a profile store).
+    profiles: Option<Arc<dyn PermissionProfileRepoPort>>,
 }
 
 impl BotOnboarding {
@@ -31,7 +36,15 @@ impl BotOnboarding {
             relation,
             binding_enabled,
             default_visibility,
+            profiles: None,
         }
+    }
+
+    /// Inject the permission-profile repository so onboarding seeds the bot's
+    /// default profile (idempotent wildcard-allow; spec §5.1.1, D12 rule 2).
+    pub fn with_profiles(mut self, profiles: Arc<dyn PermissionProfileRepoPort>) -> Self {
+        self.profiles = Some(profiles);
+        self
     }
 
     async fn process_binding_channels(
@@ -209,7 +222,14 @@ impl BotOnboarding {
             .await?;
         self.relation
             .ensure_owner_edges(&human_id, bot_uuid, &env)
-            .await
+            .await?;
+
+        // Seed the bot's default permission profile (wildcard-allow) — idempotent;
+        // D12 rule 2: never overwrites an existing default. Spec §5.1.1.
+        if let Some(profiles) = &self.profiles {
+            profiles.ensure_default_profile(bot_uuid, &env).await?;
+        }
+        Ok(())
     }
 }
 
