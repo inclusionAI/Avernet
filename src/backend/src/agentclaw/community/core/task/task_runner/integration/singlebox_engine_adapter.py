@@ -414,6 +414,27 @@ class SingleboxBotProvisioner:
         r.raise_for_status()
         return r.json()
 
+    async def onboard_to_bcn(self, bot_id: str, bot_desc: str | None = None) -> dict[str, Any]:
+        """``PUT /api/bots/{bot_id}`` 改 ``bot_desc`` → 触发 ``bot_service._sync_bot_to_bcn`` → ``BcnService.onboard_bot``
+        → BCN ``POST /admin/bots/onboard`` 把 ``{bot_id}:{owner_id}`` 注册进协作网。
+
+        **为何需要**:`create_bot` 对 ``openclaw+personal`` bot 主动 skip BCN provider 注册
+        (``_should_register_bcn_provider`` 返回 False + DRM 默认关),provisioned bot 默认不在 BCN;
+        ``form_coop_group`` 建群校验成员时 BCS 按 ``{bot_id}:{owner_id}`` 查会 404 ``bot_not_found``。
+        本方法走 **update(上行 onboard)路**——不经 ``_should_register_bcn_provider``/DRM gate——把 bot 入网 BCN。
+        **coop_group 成员 bot 建群前必须 onboard**(single_bot/BBS 用不到,调了也无害)。
+        """
+        r = await self._http.put(
+            f"{self._backend}/api/bots/{bot_id}",
+            headers=self._hdrs(),
+            json={"bot_desc": bot_desc or "e2e fixture bot"},
+        )
+        r.raise_for_status()
+        data = r.json()
+        if not data.get("success"):
+            raise RuntimeError(f"onboard_to_bcn failed (PUT /api/bots/{bot_id}): {data.get('message') or data}")
+        return data
+
     # ===== install skills =====
     async def install_skills(
         self,
