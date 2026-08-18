@@ -1630,7 +1630,7 @@ mod tests {
                     "human_input_im_requests".to_string(),
                     "sqlite".to_string()
                 ),
-                (9, "eventing".to_string(), "sqlite".to_string()),
+(9, "eventing".to_string(), "sqlite".to_string()),
                 (
                     10,
                     "eventing_plaintext_endpoint".to_string(),
@@ -1643,7 +1643,12 @@ mod tests {
                 ),
                 (
                     12,
-                    "add_bot_task_modes".to_string(),
+"add_bot_task_modes".to_string(),
+                    "sqlite".to_string()
+                ),
+                (
+                    13,
+                    "edge_permission".to_string(),
                     "sqlite".to_string()
                 )
             ]
@@ -1657,7 +1662,7 @@ mod tests {
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 12);
+        assert_eq!(report.pending_versions.len(), 13);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
         assert!(report.pending_versions[0].statements.is_empty());
@@ -1692,10 +1697,12 @@ mod tests {
             report.pending_versions[9].name,
             "eventing_plaintext_endpoint"
         );
-        assert_eq!(report.pending_versions[10].version, 11);
+assert_eq!(report.pending_versions[10].version, 11);
         assert_eq!(report.pending_versions[10].name, "group_opening_message");
         assert_eq!(report.pending_versions[11].version, 12);
         assert_eq!(report.pending_versions[11].name, "add_bot_task_modes");
+        assert_eq!(report.pending_versions[12].version, 13);
+        assert_eq!(report.pending_versions[12].name, "edge_permission");
         Ok(())
     }
 
@@ -1737,7 +1744,7 @@ mod tests {
                     "human_input_im_requests".to_string(),
                     "sqlite".to_string()
                 ),
-                (9, "eventing".to_string(), "sqlite".to_string()),
+(9, "eventing".to_string(), "sqlite".to_string()),
                 (
                     10,
                     "eventing_plaintext_endpoint".to_string(),
@@ -1750,7 +1757,12 @@ mod tests {
                 ),
                 (
                     12,
-                    "add_bot_task_modes".to_string(),
+"add_bot_task_modes".to_string(),
+                    "sqlite".to_string()
+                ),
+                (
+                    13,
+                    "edge_permission".to_string(),
                     "sqlite".to_string()
                 )
             ]

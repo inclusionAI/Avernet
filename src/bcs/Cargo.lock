@@ -294,6 +294,8 @@ dependencies = [
  "bcs-db-local",
  "bcs-db-mysql",
  "bcs-domain",
+ "bcs-edge-permission",
+ "bcs-edge-permission-store",
  "bcs-event-store",
  "bcs-eventing",
  "bcs-friend",
@@ -941,6 +943,38 @@ dependencies = [
  "thiserror 2.0.19",
  "ulid",
  "uuid",
+]
+
+[[package]]
+name = "bcs-edge-permission"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-db-api",
+ "bcs-db-local",
+ "bcs-domain",
+ "bcs-edge-permission-store",
+ "bcs-service-api",
+ "bcs-test-support",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "bcs-edge-permission-store"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-db-api",
+ "bcs-db-local",
+ "bcs-domain",
+ "bcs-service-api",
+ "bcs-test-support",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
