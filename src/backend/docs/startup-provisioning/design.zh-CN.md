@@ -33,7 +33,7 @@ md）维护在他们自己的服务上，希望 bot 每次拉起时自动取最�
 
 | 部分 | 性质 | 表达能力 | 引擎支持 |
 | --- | --- | --- | --- |
-| `manifest` | 声明式 | 「要什么、从哪来」：MCP、workspace 资源、local skills、engine config、identity | **所有引擎**（含 teclaw） |
+| `manifest` | 声明式 | 「要什么、从哪来」：MCP、workspace 资源（含目录）、local skills、engine config、identity、CLI 工具（`cli_tools`，排期后置） | **所有引擎**（含 teclaw；`cli_tools` 在 teclaw 待确认 T4） |
 | `script` | 命令式 | 任意 shell：沙箱内出网取数、条件逻辑、转换 | 能力门控：ARCA 系支持；**teclaw、desktop 拒绝**（沿用 #935 `_support.py` 口径） |
 
 预期绝大多数需求（取内容→装上）能被带 `source` 的 manifest 吸收；script 只
@@ -314,8 +314,9 @@ planning 决定；模块边界按 `context-boundary-format.md` 出 README。
 
 | 期 | 内容 |
 | --- | --- |
-| **v1** | manifest 五类（mcp / resources / skills / engine_config / identity）+ script 归编到置备文档；平台侧 apply + guarded fetcher；租户级凭证引用（§4.5，仅请求头注入）；能力表；apply report；teclaw 经 artifact 组装生效 |
-| **v2 候选** | 条目级结果上报（teclaw 唯一可能的契约增量）；strict 就绪门控；`apply_once`；skill-center 引用源（`center://uuid@version`）；容器内 op CLI（服务 script 用户体验：`install-skill` 等意图层命令，ARCA 系实现）；凭证注入的扩展形态（query 参数 / mTLS，O8）；模板级 manifest（一份声明应用于多个 bot） |
+| **v1** | manifest 五类（mcp / resources / skills / engine_config / identity；resources 含**目录条目**——归档 + `strip_components` 展开，schema §3.2）+ script 归编到置备文档；平台侧 apply + guarded fetcher；租户级凭证引用（§4.5，仅请求头注入）；能力表；apply report；teclaw 经 artifact 组装生效 |
+| **cli_tools（schema 已定稿，排期后置）** | 给模型调用的命令行工具（schema §3.7）：静态二进制/压缩包、digest 强制、平台工具目录 + PATH 注入；ARCA 系先行（A2），teclaw 待确认（T4）。按业务优先级排期 |
+| **v2 候选** | 条目级结果上报（teclaw 唯一可能的契约增量）；strict 就绪门控；`apply_once`；skill-center 引用源（`center://uuid@version`）；目录源的更多传输形态（git 子树 / 索引文件 / 对象存储前缀——「文件夹语义」需要带目录枚举能力的协议，归档只是最普适的一种）；engine plugin 类目（**注册表引用**模式，照 MCP 模子而非任意 URL——插件在引擎进程内自动执行，供应链敏感度最高；前置确认见 O10）；容器内 op CLI（服务 script 用户体验：`install-skill` 等意图层命令，ARCA 系实现）；凭证注入的扩展形态（query 参数 / mTLS，O8）；模板级 manifest（一份声明应用于多个 bot） |
 
 ## 10. 实现注意（backend 内部，不涉及引擎侧改动）
 

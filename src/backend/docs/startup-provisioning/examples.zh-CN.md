@@ -1,6 +1,6 @@
 # Manifest 完整案例集
 
-> 状态：DRAFT（讨论稿）。本文对六类配置各给出一个完整案例：业务场景、今天
+> 状态：DRAFT（讨论稿）。本文对七类配置各给出一个完整案例：业务场景、今天
 > 的人工做法（真实端点）、manifest 写法、apply 逐步动作、两个引擎家族各自的
 > 交付形态。所有端点、字段、路径均取自现有业务代码，出处随文标注。
 > 规范性定义见 `manifest-schema.zh-CN.md`，本文只作示例。
@@ -60,6 +60,12 @@ manifest:
       source: https://cms.example.com/kb/faq.csv
       auth: cms-token
       on_fetch_failure: keep_last
+    - path: data/kb/                         # 目录条目：整个知识库
+      source: https://cms.example.com/kb/knowledge-base.zip
+      unpack: zip
+      strip_components: 1                    # 消掉 `zip -r kb.zip kb/` 的壳目录
+      auth: cms-token
+      on_fetch_failure: keep_last
 
   skills:
     - name: quality-check
@@ -90,6 +96,7 @@ apply 报告（`GET …/provisioning/last-apply`）：
     {"category": "identity", "name": "RULES.md", "action": "unchanged"},
     {"category": "identity", "name": "SAFETY.md", "action": "unchanged"},
     {"category": "resources", "name": "data/faq.csv", "action": "updated"},
+    {"category": "resources", "name": "data/kb/", "action": "unchanged", "source_digest": "sha256:7b…"},
     {"category": "skills", "name": "quality-check", "action": "unchanged", "source_digest": "sha256:9f2c…"},
     {"category": "mcp", "name": "mcp.ant.homistudio.meetmcp", "action": "unchanged"}
   ]
@@ -165,6 +172,26 @@ resource 写路径落盘并记 `updated`，未变记 `unchanged`。
 `ResourceRef{name, store, path}` 进 artifact——与今天手工上传的资源在
 artifact 里**无法区分**（对照 `artifact.py` 中 `EXAMPLE_ARTIFACT` 的
 `resources` 条目：`path="staff_u123/bot7/openclaw/workspace/data/sales.csv"`）。
+
+**目录形态**：知识库这类含大量子文件夹/文件的资源，不逐文件声明——HTTP
+的一个 URL 只能是一个字节流，「文件夹」必须以归档为约定形态整体运输：
+
+```yaml
+resources:
+  - path: data/kb/                           # 展开根（workspace 相对，/ 结尾）
+    source: https://cms.example.com/kb/knowledge-base.zip
+    unpack: zip
+    strip_components: 1                      # 业务 `zip -r kb.zip kb/` 打出的壳目录，剥一层
+    auth: cms-token
+    on_fetch_failure: keep_last
+```
+
+`kb.zip` 内的 `kb/intro.md`、`kb/faq/refund.md` 落地为 `data/kb/intro.md`、
+`data/kb/faq/refund.md`。**收敛单位是整个归档**：内容 hash 未变即
+`unchanged` 零动作（几百个文件也不逐一比对）；变化则 temp 解包 + 原子
+rename 整树替换——归档里删掉的文件随之消失，手工塞进该目录的文件也会被
+清（目录级声明获胜，schema §3.2）。teclaw 侧 compose 时逐文件展开为
+`ResourceRef`，契约零改动。
 
 **注意**：`type: link` 类资源（仅记录、无文件的链接资源，现有 API 支持）
 可作为 v1.x 扩展条目类型，本期先不进 schema。
@@ -314,16 +341,52 @@ script:
 即拒绝（fail closed），错误信息指明原因；业务据此在建 bot 时就知道该租户
 能不能用 script，而不是启动后静默不执行。
 
-## 7. 案例对照总表
+## 7. `cli_tools` — 给模型调用的命令行工具（排期后置）
+
+**场景**：业务有一个内部数据查询 CLI `shopctl`（静态 Go 二进制），希望
+每个客服 bot 里都有，agent 处理工单时自己 bash 调它查订单。
+
+**今天的做法（仓库内的手工先例）**：`bcs-cli` 正是这个模式——二进制目录
+挂进 openclaw gateway 的 PATH（`scripts/modules/bots.sh`），配一个
+`SKILL.md`（`allowed_tools: [exec]`）教 agent 用法。全程手工、不可复现、
+容器重建即失效。本类目是它的产品化。
+
+**manifest 写法**：
+
+```yaml
+cli_tools:
+  - name: shopctl
+    source: https://cms.example.com/tools/shopctl-linux-amd64
+    auth: cms-token
+    digest: "sha256:…"           # 本类目强制：平台代发可执行物，供应链钉死
+    version: "2.3.0"             # 进 apply report，审计线上版本
+```
+
+**apply 做什么**：fetch → digest 校验（不符即 `failed`）→ 落入平台定义的
+逻辑「工具目录」（NAS 持久）+ 置可执行位；PATH 注入由平台保证（注入点见
+engine-requirements A2）。收敛以 digest 为准，未变零动作。
+
+**配套**：安装只保证「`shopctl` 在 PATH 上」；agent 怎么知道并正确使用它，
+推荐照 `bcs-cli` 双件套——skills 类目里配一个教用法的 skill，或 identity
+里写 `TOOLS.md`。
+
+**能力**：ARCA 系支持；**teclaw 待确认（T4）**——可执行位 + PATH 注入 +
+用户二进制的沙箱策略，与 script 的能力边界相邻，须 teclaw 表态；v1 只做
+静态二进制/压缩包，包管理器安装走 script。
+
+## 8. 案例对照总表
 
 | 类目 | 场景一句话 | 等价的人工调用 | apply 动作 | teclaw 落点 |
 | --- | --- | --- | --- | --- |
 | mcp | 全量实例带会议 MCP | mcp servers/config API | 权限校验 + 入 bot MCP 集合 | `mcp.servers[]` |
-| resources | FAQ 表每周更新自动同步 | resources 上传 API | fetch → digest 比对 → 资源写路径 | `resources[]` |
+| resources（文件） | FAQ 表每周更新自动同步 | resources 上传 API | fetch → digest 比对 → 资源写路径 | `resources[]` |
+| resources（目录） | 整个知识库随源收敛 | 无（逐文件上传不可行） | fetch 归档 → 解包守卫 → 原子整树替换 | `resources[]`（逐文件展开；子树引用见 T5） |
 | skills | 质检 skill 锁版全量生效 | skills upload + activate | fetch → upload(created/updated) → activate | `skills[]`（scope=user） |
 | engine_config | 语言/风格统一且不可漏配 | engine-config PUT | 声明键逐键覆盖 → provider-blind 写 | 既有 `config/teclaw.json` 文件通道（非 artifact 字段，T3） |
 | identity | 人设集中运营、红线内联 | identity PUT × N | fetch/内联 → IdentityService 写 | `identity_files[]` |
+| cli_tools | 内部查询 CLI 全量可用 | 手工挂 PATH（bcs-cli 模式） | fetch → digest 强校验 → 工具目录 + PATH | 待确认（T4） |
 | script | 沙箱内网取当日白名单 | ssh/手工（无 API） | #935 启动链现状 | ——（不支持） |
 
-六行里五行的「apply 动作」列没有出现任何新机制——只有对现有服务的编排加
-一个 guarded fetcher。这就是本设计的实现面与说服点。
+「apply 动作」列的新机制只有三个：guarded fetcher、归档解包（复用 skills
+zip 守卫）、工具目录 + PATH 注入；其余全部是对现有服务的编排。这就是本
+设计的实现面与说服点。

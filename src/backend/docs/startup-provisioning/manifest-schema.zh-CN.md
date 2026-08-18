@@ -13,10 +13,11 @@ schema_version: 1
 
 manifest:                      # 声明式部分，所有引擎
   mcp: [ … ]                   # §3.1
-  resources: [ … ]             # §3.2
+  resources: [ … ]             # §3.2（含文件与目录两种条目形态）
   skills: [ … ]                # §3.3
   engine_config: { … }         # §3.4
   identity: [ … ]              # §3.5
+  cli_tools: [ … ]             # §3.7（schema 已定稿，交付排期按业务优先级后置）
 
 script:                        # 命令式部分，能力门控（teclaw / desktop 拒绝）
   body: |                      # §3.6，即 #935 的 startup script
@@ -24,7 +25,7 @@ script:                        # 命令式部分，能力门控（teclaw / deskt
     …
 ```
 
-两部分均可缺省。`manifest` 五个类别均可缺省，缺省的类别不参与 apply
+两部分均可缺省。`manifest` 六个类别均可缺省，缺省的类别不参与 apply
 （不碰任何实体）。**类别存在但为空列表（`skills: []`）含义不同**：声明
 「该类别下不应有 managed 实体」，会把此前 apply 落成的 managed 实体摘除
 标记（不删资产，语义同 DELETE，见 design §6）。
@@ -99,6 +100,7 @@ v1 仅支持请求头注入；query 参数型、mTLS 见开放问题 O8。
 | skills | 本地 skill 记录（现 skills upload 同源服务） | 现有 skill 交付 / NAS | `skills[]`（`SkillRef, scope=user`） |
 | engine_config | engine config（`EngineConfigServiceProtocol.write_bot_config`） | 现有 provider-blind 写 | 同一条 provider-blind 写（既有 `config/teclaw.json` 文件通道，**非 artifact 字段**；创建时序确认 T3） |
 | identity | identity 文件记录（现 `openapi_v1/identity` 同源服务） | 现有 identity 交付 | `identity_files[]`（`FileRef`） |
+| cli_tools | **新实体**（无现状对应） | 平台工具目录（NAS）+ PATH 注入 | **待确认（T4）**：可执行位 + PATH + 沙箱策略 |
 | script | script 存储（#935 现状） | `after_create_cmd_hook` 启动链 | **不支持，写入时拒绝** |
 
 ### 3.1 `mcp` — MCP servers
@@ -115,16 +117,46 @@ mcp:
 
 ### 3.2 `resources` — workspace 资源文件
 
+条目分**文件**与**目录**两种形态，`path` 以 `/` 结尾即目录条目：
+
 ```yaml
 resources:
-  - name: sales.csv              # 逻辑名（bot 工作区内的文件名/相对名，必填）
+  # 文件条目
+  - path: data/sales.csv         # workspace 相对路径（必填）
     source: https://my-svc.example.com/data/sales.csv
+
+  # 目录条目：source 为归档，内容按相对层次展开到 path 之下
+  - path: data/kb/
+    source: https://my-svc.example.com/kb/knowledge-base.zip
+    unpack: zip                  # zip | tar.gz（目录条目必填）
+    strip_components: 1          # 可选，默认 0：剥掉归档内的前 N 层目录
+                                 # （语义同 tar --strip-components；业务用
+                                 #  `zip -r kb.zip kb/` 打包出的壳目录用它消掉）
 ```
 
-- `name` 是**逻辑名**，不是引擎路径；语义与现有 resources API 的资源名一致，
-  物理位置由各引擎照现状决定。
-- 校验：`name` 白名单字符、禁止路径穿越（`../`、绝对路径）；与现有
-  resources API 的命名规则完全一致。
+**共同规则**：
+- `path` 是 workspace 相对的**逻辑路径**，不是引擎物理路径；寻址语义与
+  现有 resources API 一致，物理位置由各引擎照现状决定。
+- 校验：白名单字符、禁止路径穿越（`../`、绝对路径）。
+
+**目录条目语义**（HTTP 没有目录语义，归档是把树运过来的约定形态）：
+- **收敛单位是整个归档**：内容 hash 未变 → `unchanged`、零动作（不做
+  逐文件比对）；变化 → 整目录替换。`digest` 仍为可选的钉版手段。
+- **目录级声明获胜**：`path` 下整棵树归 manifest 管辖——归档中不存在的
+  文件在 apply 时被清除（含手工添加的）；temp 目录解包 + 原子 rename，
+  无半新半旧的中间态。目录之外不碰。
+- **`strip_components` 不做魔法**：只按声明的层数剥，**不**自动探测单一
+  顶层目录——同一份声明的行为不取决于归档内部长什么样。
+- **嵌套禁止**：任何条目的 `path` 不得位于另一个目录条目之下（目录归
+  manifest、内部文件又单独声明的所有权无法定义），PUT 时拒绝。
+- **解包守卫**沿用 skills zip 的现成规则：路径穿越、绝对路径、symlink
+  逃逸、文件数与总大小上限（§5）。**权限拍平为普通文件**——归档内的可
+  执行位不保留，可执行物必须走 `cli_tools`（§3.7）。
+- **teclaw**：物化后逐文件展开为 `ResourceRef`，artifact 契约零改动；
+  `ResourceRef` 直接引用目录子树（`SkillRef` 已有目录先例）为可选优化，
+  见确认项 T5。
+- 目录源的其他传输形态（git 子树、索引文件、对象存储前缀）列 v2 候选
+  （design §9）。
 
 ### 3.3 `skills` — local skills
 
@@ -196,6 +228,42 @@ script:
 - 能力：ARCA 系支持；teclaw、desktop、LOCAL/singlebox、ARCA-direct 遗留
   形态写入时拒绝（fail closed，见 `engine-requirements.zh-CN.md` 矩阵）。
 
+### 3.7 `cli_tools` — 给模型调用的命令行工具
+
+> schema 已定稿；**交付排期按业务优先级后置**（业务反馈优先级低于目录
+> 资源）。设计动机：把仓库内 `bcs-cli` 的手工模式（二进制挂 PATH +
+> SKILL.md 教用法）产品化、声明化。
+
+```yaml
+cli_tools:
+  - name: mycli                              # 单二进制形态：name 即命令名
+    source: https://my-svc.example.com/tools/mycli-linux-amd64
+    digest: "sha256:…"                       # 本类目强制，无 digest 拒绝写入
+    version: "1.4.2"                         # 元数据，进 apply report，审计线上版本
+  - name: toolkit                            # 压缩包形态
+    source: https://my-svc.example.com/tools/toolkit.tar.gz
+    unpack: tar.gz
+    strip_components: 1                      # 可选，同 §3.2
+    digest: "sha256:…"
+    entrypoints: [bin/tk, bin/tk-helper]     # 包内哪些文件暴露为命令（必填）
+```
+
+规则：
+- **v1 只支持静态二进制 / 压缩包**两种形态。需要跑包管理器
+  （npm/pip/apt）的安装属命令式领域，走 script（ARCA-only）——与「机制层
+  操作不进 manifest」同一条原则。
+- **`digest` 强制**：平台代为分发**可执行物**，供应链必须钉死；digest 同时
+  是收敛判断的唯一依据（未变 → `unchanged` 零动作）。
+- **落点与 PATH**：平台定义引擎无关的逻辑「工具目录」，工具落入其中并由
+  平台保证其在 agent 进程的 PATH 上——用户不感知物理路径。
+- **用法认知不归本类目**：安装只保证「命令在 PATH 上」；模型如何知道并
+  正确使用它，走用户自己声明的 identity（`TOOLS.md` 是合法类型）或配套
+  skill——`bcs-cli` 的「二进制 + SKILL.md」双件套即推荐姿势。
+- **能力门控**：ARCA 系支持（PATH 注入点见 engine-requirements A2）；
+  **teclaw 待确认（T4）**——可执行位、PATH 注入、以及对用户提供二进制的
+  沙箱策略（其能力面与 script 相邻，须由 teclaw 表态）；其余形态见能力
+  矩阵。
+
 ## 4. 变量替换
 
 `source` URL 与 `script` 环境中可用一小组平台注入变量（契约的一部分，随
@@ -221,8 +289,9 @@ script:
 | 置备文档总大小 | 64 KiB（script 部分另按现状 24 KiB） |
 | 每类别条目数 | 50 |
 | `content` 内联单条 | 64 KiB |
-| fetch 单条目 | skills zip 100 MiB；resources 100 MiB；identity 1 MiB |
-| 单次 apply fetch 总量 | 500 MiB |
+| fetch 单条目 | skills zip 100 MiB；resources 文件 100 MiB；identity 1 MiB；cli_tools 单工具 200 MiB |
+| resources 目录条目 | 单归档 200 MiB；解包后 500 MiB；单归档文件数 5000 |
+| 单次 apply fetch 总量 | 500 MiB（目录条目计解包后大小） |
 | fetch 超时 | 单条 60s；单次 apply 总预算 300s |
 
 超限在 PUT 时能校验的（文档大小、条目数、内联大小）当场拒绝；只能在

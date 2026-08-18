@@ -8,8 +8,8 @@
 | 团队 | v1 工作量 | 说明 |
 | --- | --- | --- |
 | backend（平台） | **主体**：置备文档存储 + API、平台侧 apply、guarded fetcher、能力表、apply report | 全部在平台侧 |
-| teclaw | **零改动**（3 项确认，见 §3） | artifact schema 不动、组装管线不动、不加出网要求 |
-| ARCA 系引擎（openclaw / claude_code / aicoding / hermes / moltis） | **零改动**（1 项确认，见 §4） | 声明式走平台实体 + 现有交付；script 走 #935 现状 |
+| teclaw | **零改动**（必答确认 T1–T3；`cli_tools` 相关 T4、可选优化 T5，见 §3） | artifact schema 不动、组装管线不动、不加出网要求 |
+| ARCA 系引擎（openclaw / claude_code / aicoding / hermes / moltis） | **零改动**（2 项确认，见 §4） | 声明式走平台实体 + 现有交付；script 走 #935 现状；cli_tools 需确认 PATH 注入点（A2） |
 | BaaS | **零改动** | 启动链、hook 派发均不变 |
 | 业务方 | 回答 §6 的确认清单 | 决定 v1 边界是否够用 |
 
@@ -23,20 +23,20 @@ skill / identity 之后完全相同。
 按 `(engine_type, provider/platform)` 二维判定（design §5.1），从 bot 记录
 可答、fail closed：
 
-| 形态 | manifest（五类） | script | 备注 |
-| --- | --- | --- | --- |
-| openclaw / aicoding / hermes / moltis @ ARCA/BaaS（ARCA, SIGMA, POOLAB, DOCKER） | ✅ 全部 | ✅ | 现状主流形态 |
-| claude_code @ ARCA/BaaS | ✅（identity 仅 `CLAUDE.md`） | ✅ | identity 合法集按引擎校验 |
-| teclaw @ TECLAW | ✅ 全部（engine_config 见确认项 T3） | ❌ 写入拒绝 | 经 artifact 组装生效 |
-| desktop | ✅（平台侧 apply 可行，交付按其现状通道） | ❌ 写入拒绝（#935 现状口径） | 需 desktop owner 确认交付路径，见 O2 |
-| LOCAL / singlebox | ✅ | ❌ 写入拒绝 | #935 的静默坑（hook 不派发）在新判定中变为显式拒绝 |
-| ARCA-direct 遗留 bot | ✅ | ❌ 写入拒绝 | 同上，静默不执行 → 显式拒绝 |
-| 未知引擎 | ❌ | ❌ | fail closed |
+| 形态 | manifest（五类） | cli_tools | script | 备注 |
+| --- | --- | --- | --- | --- |
+| openclaw / aicoding / hermes / moltis @ ARCA/BaaS（ARCA, SIGMA, POOLAB, DOCKER） | ✅ 全部 | ✅（排期后置；PATH 注入点见 A2） | ✅ | 现状主流形态 |
+| claude_code @ ARCA/BaaS | ✅（identity 仅 `CLAUDE.md`） | ✅（同上） | ✅ | identity 合法集按引擎校验 |
+| teclaw @ TECLAW | ✅ 全部（engine_config 见确认项 T3） | **待确认（T4）** | ❌ 写入拒绝 | 经 artifact 组装生效 |
+| desktop | ✅（平台侧 apply 可行，交付按其现状通道） | 待定（随 O2） | ❌ 写入拒绝（#935 现状口径） | 需 desktop owner 确认交付路径，见 O2 |
+| LOCAL / singlebox | ✅ | 待定 | ❌ 写入拒绝 | #935 的静默坑（hook 不派发）在新判定中变为显式拒绝 |
+| ARCA-direct 遗留 bot | ✅ | 待定 | ❌ 写入拒绝 | 同上，静默不执行 → 显式拒绝 |
+| 未知引擎 | ❌ | ❌ | ❌ | fail closed |
 
 对比 #935：script 的支持面**没有扩大**，但判定从「静默不执行」收紧为「写入
 时拒绝」；manifest 因为是平台侧 apply，支持面覆盖到了 script 到不了的形态。
 
-## 3. teclaw：3 项确认（T1–T3）
+## 3. teclaw：确认项（T1–T5）
 
 零改动的论证：manifest apply 落成平台实体 → `TeclawProvisionService` 组装
 artifact 时照旧读平台状态 → 引擎拉到的仍是现有 `schema_version` 的
@@ -44,7 +44,8 @@ artifact 时照旧读平台状态 → 引擎拉到的仍是现有 `schema_versio
 只是它今天已认识的 `{store, path}`。bot 拿到的**第一份** artifact 即包含
 manifest 结果（apply 先于组装），不存在「起来之后逐个补打」。
 
-需 teclaw 团队确认的三件事：
+需 teclaw 团队确认的事项（T1–T3 为 v1 必答；T4 随 `cli_tools` 排期；T5
+为可选优化）：
 
 - **T1（就绪时序）**：引擎在向 publish-poll 报告就绪**之前**完成 artifact
   应用（skills / identity / resources / mcp 落地）。我们理解现状即如此，
@@ -64,12 +65,23 @@ manifest 结果（apply 先于组装），不存在「起来之后逐个补打�
   实例——初始文件集是否会包含它，还是 apply 需在 ACTIVE 后经逐文件通道
   补写；② 引擎何时读取该文件（仅启动读一次，还是会重读）——这决定
   ACTIVE 后补写是否需要重启才生效。
+- **T4（`cli_tools`，随该类目排期）**：manifest 新增「给模型调用的命令行
+  工具」类目（schema §3.7：静态二进制/压缩包、digest 强制）。在贵侧落地
+  需要三件事表态：① 物化进 store 的文件能否带**可执行位**（或引擎侧落地
+  时置位）；② 是否愿意把平台定义的工具目录加入 agent 进程的 **PATH**；
+  ③ **策略**——贵侧不支持 script 的理由是无用户代码执行通道，而「装用户
+  二进制 + agent 会执行它」在能力面上与之相邻，是否接受、如何约束由贵侧
+  定。三者任一不成立，则 teclaw 上本类目按能力矩阵标不支持，写入时拒绝。
+- **T5（可选优化，不阻塞任何排期）**：目录型资源默认在 compose 时逐文件
+  展开为 `ResourceRef`（契约零改动）；若贵侧确认 `ResourceRef.path` 可
+  引用**目录子树**（`SkillRef` 已有目录先例），大目录场景 artifact 可以
+  更紧凑。不确认则维持逐文件展开。
 
 v2 才可能涉及的唯一契约增量：**条目级应用结果上报**（哪个 skill 装成功了）。
 v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化环节的
 条目级结果）覆盖，不要求 teclaw 提供。
 
-## 4. ARCA 系引擎：1 项确认（A1）
+## 4. ARCA 系引擎：2 项确认（A1–A2）
 
 声明式部分零改动：apply 落成的实体与用户今天手工调 TC Open API 的结果无
 差别，交付通道现状不变。script 部分即 #935 现状。
@@ -80,6 +92,12 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
   重建后天然满足；若存在依赖「对活容器 push」的实体类别，需与 backend 一起
   确认其在启动链中的时点（backend 实现注意项 design §10.1，由 backend
   先行内部确认）。
+- **A2（`cli_tools` 的 PATH 注入点，随该类目排期）**：平台工具目录需要
+  出现在 agent 进程的 PATH 上。已知先例：singlebox 的
+  `bots_dynamic_start_openclaw` 把 `bcs-cli` 所在目录加进 openclaw
+  gateway 的 PATH（`scripts/modules/bots.sh`）。需与各引擎确认其 gateway
+  进程环境的标准注入点（启动脚本 / supervisor 环境 / gateway 配置），
+  由 backend 牵头逐引擎核对。
 
 可选（v2，非本期承诺）：容器内 op CLI（`install-skill` 等意图层命令，封装
 对本机引擎适配器 API 的调用 + 就绪等待 + 重试），提升 script 用户的体验。
@@ -97,6 +115,8 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
 | O6 | 模板级 manifest（一份声明 → 多个 bot） | v2；v1 仅 bot 级 | 业务 |
 | O7 | `center://` skill-center 引用源 | v2 | backend |
 | O8 | 凭证注入方式是否需要请求头之外的形态（query 参数 token / mTLS） | v1 仅请求头；有真实业务源依赖再评估 | backend + 业务 |
+| O9 | `cli_tools` 的目标架构：容器架构是否统一（x86_64），是否需要多架构源（per-arch URL / `${OCB_ARCH}` 变量） | 先确认容器架构现状；v1 单 URL | backend + 业务 |
+| O10 | engine plugin 类目（openclaw extensions / claude_code plugins）如何声明化 | v2；方向定为**注册表引用**（照 MCP 模子，不走任意 URL——插件在引擎进程内自动执行，供应链敏感度最高）。两项引擎侧前置确认：openclaw extensions 目录作为落点是否成立；claude_code 的同步规则**刻意排除 `plugins/`** 的原因 | backend + 两引擎 + 业务 |
 
 ## 6. 业务方前提确认清单
 
@@ -117,3 +137,12 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
    网络 ACL / 签名 URL）不受影响。
 6. **更新频率与体量**：源内容多大、多久变一次？用于校准限额（O4）与
    fetch 预算。
+7. **目录资源的打包**：目录型资源以归档（zip/tar.gz）为传输形态
+   （schema §3.2——HTTP 无目录语义，归档是把树运过来的约定）。你们的
+   内容源能否产出归档（CI 一条 zip 命令）？打包习惯是打目录还是打内容
+   （决定 `strip_components` 用不用）？若强依赖「免打包的文件夹同步」，
+   请说明源的实际存放形态（git 仓库 / OSS bucket / 其他），对应 v2 的
+   git 子树 / 对象存储前缀方案。
+8. **CLI 工具的形态**：想装的工具具体是什么——静态二进制/压缩包（v1 范围
+   内），还是 npm/pip 包（属命令式，走 script，且 teclaw 不可用）？目标
+   容器架构是否单一（对应 O9）？
