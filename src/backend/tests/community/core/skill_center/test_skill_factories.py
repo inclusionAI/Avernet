@@ -42,6 +42,40 @@ def test_real_skill_service_factory_create(test_injector):
     assert svc.runtime_uses_pool_paths is False
 
 
+def test_default_capabilities_ext_info_provider_uses_unwrapped_template_config(
+    monkeypatch,
+):
+    from agentclaw.community.di.modules import skill_center_module
+
+    template_config = {
+        "bot_template_config": {
+            "preset_capabilities": {
+                "mcp": [{"server_code": "mcp.ant.custom.template.server"}],
+            }
+        }
+    }
+
+    class FakeTemplateService:
+        def get_template_config(self, bot_id):
+            assert bot_id == "bot-1"
+            return template_config
+
+    class FakeInjector:
+        def get(self, cls):
+            assert cls is FakeTemplateService
+            return FakeTemplateService()
+
+    monkeypatch.setattr(
+        skill_center_module,
+        "_template_service_cls",
+        lambda: FakeTemplateService,
+    )
+
+    provider = skill_center_module._build__ext_info_provider(FakeInjector())
+
+    assert provider("bot-1") == {"template_config": template_config}
+
+
 @pytest.mark.parametrize(
     ("engine", "engine_root", "active_dir"),
     [
