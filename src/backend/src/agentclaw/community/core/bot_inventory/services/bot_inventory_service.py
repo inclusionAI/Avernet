@@ -6,8 +6,6 @@ import json
 from typing import Any, Mapping
 
 from agentclaw.community.core.bot_inventory.errors import BotInventoryUpstreamError
-from agentclaw.community.log import get_logger
-
 from agentclaw.community.core.bot_inventory.protocols import (
     BotInventoryBotPort,
     BusinessSpaceContextProtocol,
@@ -24,10 +22,6 @@ from agentclaw.community.core.bot_inventory.types import (
     ServiceLifecycleCard,
 )
 
-
-logger = get_logger()
-
-MAX_CLOUD_ROWS = 1_000
 
 
 class BotInventoryService:
@@ -117,8 +111,7 @@ class BotInventoryService:
                 page_size=fetch_size,
             )
             page_items = list(result.get("items", []))
-            remaining = MAX_CLOUD_ROWS - len(rows)
-            rows.extend(page_items[:remaining])
+            rows.extend(page_items)
             if total is None:
                 raw_total = result.get("total")
                 total = raw_total if isinstance(raw_total, int) else None
@@ -127,17 +120,6 @@ class BotInventoryService:
             if total is not None and len(rows) >= total:
                 break
             if len(page_items) < fetch_size:
-                break
-            if len(rows) >= MAX_CLOUD_ROWS:
-                logger.warning(
-                    "[BotInventoryService._list_cloud_rows] truncated "
-                    "cloud rows owner_id=%s keyword=%s engine=%s max_rows=%d total=%s",
-                    owner_id,
-                    keyword,
-                    engine,
-                    MAX_CLOUD_ROWS,
-                    total,
-                )
                 break
             page += 1
         return [

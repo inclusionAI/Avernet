@@ -173,13 +173,13 @@ _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶�
 | 事项 | 状态 | 备注 |
 |---|---|---|
 | 真实的调用方身份验证器（认证工作线） | ✅ **两半均已完成** —— 后端 PR [#634](https://github.com/inclusionAI/Avernet/pull/634)、网关 PR [#599](https://github.com/inclusionAI/Avernet/pull/599) **已合并** | `require_principal` 与 `resolve_avernet_tenant` 会校验网关签发的 `X-Avernet-Principal`（HS256、`aud=backend`），并从中读出租户与 owner。线上契约已通过把**真实**网关签名器接进**真实**后端验证器做往返验证（2026-08-02）：user/bot/app/access_key 四种形状、机密不外投、`aud`/`iss` 不符即拒。**`user` 调用方已可端到端跑通。** 剩下的是*哪些*调用方被接纳 —— 见下一行 |
-| **身份接纳：仅 `user`** | ✅ **2026-08-02 完成** | `verify_principal_token` 拒绝任何不指向终端用户的身份集合，因此 `bot` / `app` / `access_key` 调用方是**按设计**返回 `401`，而不是取决于某个 handler 是否去取 owner。放宽它靠委托（认证设计 §15），不是改配置。SDD：`specs/2026-08-02-public-api-user-only-principal/` |
+| **身份接纳：`user`，以及持有授权的 `app`** | ✅ **2026-08-10 完成** | 已从仅 user 放宽。应用以自己的凭证调用时，只能访问授权用户明确委托给它的 Bot，并在每次请求重新判定授权；`bot` / `access_key` 调用方仍被拒绝。未进入 `adapters/http/openapi_v1/admission.py` 分组的 operation 默认拒绝机器调用方。SDD：`specs/2026-08-10-openapi-v1-app-only-caller/`（前置设计：`specs/2026-08-02-public-api-user-only-principal/`）。 |
 | **没有跨仓测试钉住 principal 线上形状** | ⬜ TODO | 两侧各自对着自己手写的 payload 认知做测试（`test_verifier.py` 拼 dict；网关测自己的 model）。任一侧改个字段名，两边测试都还是绿的，线上却全 401 |
 | 租户前导索引（F2，**强制**策略） | ⬜ TODO | 多租户上线前必须完成 |
 | 后台/定时任务的复查 | ⬜ TODO | 在第二个租户持有真实数据之前完成 |
 | **Agent 身份标识在租户之间会撞车**（[#556](https://github.com/inclusionAI/Avernet/issues/556)） | ⬜ TODO（totalfrank） | Passport、授权关系、BCN、策略行都只用 `bot_id`/`owner_id` 作键，没有租户维度，而每个 owner 的第一个 bot 的 id 就是字符串 `"default"`。**应当成为开启多租户的前置闸口。** #494 里以公共更新路径上的 `sync_to_bcn=False` 做了临时止血 |
 | 异步创建出的 bot 可能不是被授权的那个（[#559](https://github.com/inclusionAI/Avernet/issues/559)） | ⬜ TODO（totalfrank） | pending 状态的创建规格从未被持久化，完成时是用轮询请求重建的。`dev` 上既有问题；当前潜伏（社区版 Passport 总是直接签发） |
-| 外部身份写入失败被吞掉（[#560](https://github.com/inclusionAI/Avernet/issues/560)） | ⬜ TODO（totalfrank） | 创建时的 owner 授权写入、更新时的 Passport 元数据写入都是"记日志然后继续"，违反 `AGENTS.md:203-204`。一次决策同时覆盖两处；建议做法是*报告部分成功* |
+| 外部身份写入失败被吞掉（[#560](https://github.com/inclusionAI/Avernet/issues/560)） | 🔧 部分完成 | 云端 Bot 创建/授权完成和 Local Bot 授权完成的 owner 授权写入均已改为失败传播，Passport 已签发但缺少 `agent_code` 时也会 fail-closed；公开 OpenAPI 更新 Bot 时的 Passport 元数据同步失败会规范化为 502 Envelope，不再返回成功。遗留内部更新路由仍会记日志后继续，且尚无持久化的跨系统 repair/reconciliation 工作流。 |
 | resources/routines/identity principal/tenant 真正接入 | ⬜ TODO | 三组 handler 已接通但仍依赖 gateway principal verifier 与 `resolve_avernet_tenant` 真正落地；对外开放前必须统一从 `require_principal`/`caller_owner_id` 消费调用者身份 |
 | 资源所有权/权限边界 403/404 | ⬜ TODO | 当前跨租户靠 ORM guard（Phase 0） + bot_id 必填；ownership/permission mismatch 显式 403/404 待对外开放前补 |
 | 上游/storage/provider 错误统一映射 | ⬜ TODO | handler 现按点抛 HTTPException（400/404/409/500）；对外开放前统一错误码映射 |
@@ -206,13 +206,25 @@ _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶�
 按既定决策，租户隔离相关的库表变更一律在平台侧带外执行，因此**下列语句就是权威记录**。
 请把它们连同顺序约束一并交给执行 DDL 的同学。
 
-**阶段 1 —— `ac_bots`**（已执行）：
+**阶段 1 —— `ac_bots`**（租户列已执行；Bot 工坊空间列待平台执行）：
 
 ```sql
 ALTER TABLE ac_bots
   ADD COLUMN avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw'
     COMMENT 'data-isolation tenant; existing rows are the internal teamclaw tenant';
+
+-- Bot 工坊 Business Space 归属。必须在包含 BotModel.space_id 的代码发布前执行：
+-- ORM 的 SELECT 会读取该列，缺列会让 Bot 查询和创建整体失败。
+-- NULL 表示历史记录尚未显式归属空间；公开 Inventory 按 personal:{owner_id}
+-- 解释该状态，因此无需一次性回填历史行。回滚代码前可保留此兼容列；确认没有
+-- 旧版本/新版本代码再使用后，才可由平台单独评估 DROP COLUMN。
+ALTER TABLE ac_bots
+  ADD COLUMN space_id VARCHAR(128) NULL
+    COMMENT 'business-space ownership; NULL uses the owner personal-space fallback';
 ```
+
+`space_id` 的平台执行记录必须随交付补充环境、变更单/版本、执行时间和回滚负责人；
+在这些证据齐全之前，团队空间能力不得标记为可上线。
 
 **阶段 5 —— MCP 配置**（PR #564）。三条语句，**两个不同的时间点**：
 

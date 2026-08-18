@@ -89,7 +89,7 @@ from agentclaw.community.core.workspace.constants import (
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
-from agentclaw.community.plugin_api.passport import PassportPlugin
+from agentclaw.community.plugin_api.passport import PassportError, PassportPlugin
 
 from agentclaw.community.api.bot_inventory_service import (
     BotInventoryServiceProtocol,
@@ -303,12 +303,7 @@ def _sync_passport_identity(
     bot_desc: str | None,
     engine_type: str | None,
 ) -> None:
-    """Push renamed identity metadata to the Passport (best-effort).
-
-    Mirrors the internal update route: metadata only, no MCP/CLI resource scope,
-    and a failure is logged rather than failing the update the caller already
-    succeeded in making.
-    """
+    """Push renamed identity metadata or fail the completed-update contract."""
     try:
         passport_plugin.update_passport(
             bot_id=bot_id,
@@ -317,10 +312,10 @@ def _sync_passport_identity(
             bot_desc=bot_desc,
             engine_type=engine_type or DEFAULT_ENGINE_TYPE,
         )
-    except Exception as e:  # noqa: BLE001 — must not fail an applied update
-        logger.warning(
-            "[openapi_v1.update_bot] passport sync failed for bot %s: %s", bot_id, e
-        )
+    except PassportError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — normalize plugin implementations
+        raise PassportError(f"Passport metadata update failed: {exc}") from exc
 
 
 @router.post(
@@ -367,6 +362,9 @@ async def create_bot(
     skill_set_factory: SkillSetServiceFactoryProtocol = Injected(
         SkillSetServiceFactoryProtocol
     ),
+    space_context: BusinessSpaceContextProtocol = Injected(
+        BusinessSpaceContextProtocol
+    ),
 ):
     """Create a bot (201), or 202 with authorization URLs when consent is needed.
 
@@ -388,6 +386,10 @@ async def create_bot(
     # The engine/cluster pair must obey the bijection (ANDC⟺teclaw, ACRA⟺else).
     validate_engine_cluster(body.engine, body.cluster_name)
     _require_service_capable_engine(body.bot_type, body.engine)
+    current_space = space_context.resolve_current(
+        owner_id=owner_id,
+        header_space_id=body.space_id,
+    )
 
     bot_id = generate_bot_id(owner_id, bot_repo)
     outcome = create_bot_with_authorization(
@@ -400,7 +402,7 @@ async def create_bot(
             bot_type=body.bot_type,
             bot_name=body.bot_name,
             bot_desc=body.bot_desc,
-            space_id=body.space_id,
+            space_id=current_space.space_id,
         ),
         bot_service=bot_service,
         passport_plugin=passport_plugin,
@@ -899,6 +901,9 @@ async def get_bot_auth_status(
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     passport_plugin: PassportPlugin = Injected(PassportPlugin),
     auth_rel_plugin: AuthRelationshipPlugin = Injected(AuthRelationshipPlugin),
+    space_context: BusinessSpaceContextProtocol = Injected(
+        BusinessSpaceContextProtocol
+    ),
 ) -> Envelope[BotAuthStatus]:
     """Poll authorization for a pending creation; the bot is created on ISSUED.
 
@@ -930,6 +935,10 @@ async def get_bot_auth_status(
     if cluster_name is not None:
         validate_engine_cluster(effective_engine, cluster_name)
     _require_service_capable_engine(bot_type or "personal", effective_engine)
+    current_space = space_context.resolve_current(
+        owner_id=owner_id,
+        header_space_id=space_id,
+    )
     result = complete_bot_authorization(
         user_id=owner_id,
         nick_name=owner_id,
@@ -940,7 +949,7 @@ async def get_bot_auth_status(
             bot_type=bot_type or "personal",
             bot_name=bot_name,
             bot_desc=bot_desc,
-            space_id=space_id,
+            space_id=current_space.space_id,
         ),
         bot_service=bot_service,
         passport_plugin=passport_plugin,

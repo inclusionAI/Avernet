@@ -205,7 +205,7 @@ DDL. Full ruling and per-endpoint mapping in
 | Background/scheduled work revisit | ⬜ TODO | before a 2nd tenant holds real data |
 | **Bot identity keys collide across tenants** ([#556](https://github.com/inclusionAI/Avernet/issues/556)) | ⬜ TODO (totalfrank) | Passport, auth relationships, BCN, policy row are keyed on `bot_id`/`owner_id` with no tenant axis, and every owner's first bot is literally `"default"`. **Should gate enabling multi-tenancy.** Stopgapped in #494 by `sync_to_bcn=False` on the public update path |
 | Async create ≠ authorized bot ([#559](https://github.com/inclusionAI/Avernet/issues/559)) | ⬜ TODO (totalfrank) | the pending create spec is never persisted; completion rebuilds it from the polling request. Pre-existing on `dev`; latent (community Passport always issues) |
-| Swallowed external identity writes ([#560](https://github.com/inclusionAI/Avernet/issues/560)) | ⬜ TODO (totalfrank) | owner-grant on create and Passport metadata on update log-and-continue, against `AGENTS.md:203-204`. One ruling settles both sites; recommendation is *report partial success* |
+| Swallowed external identity writes ([#560](https://github.com/inclusionAI/Avernet/issues/560)) | 🔧 PARTIAL | Owner-grant writes in shared cloud create/auth completion and Local Bot completion now propagate failures, and an issued Passport identity without `agent_code` fails closed; public OpenAPI Passport metadata updates are normalized to a 502 envelope instead of returning success. The legacy internal update route still logs and continues, and no durable cross-system repair/reconciliation workflow exists yet. |
 
 > The three issues above came out of #494's review and are **pre-existing on
 > `dev`**, not regressions — they're recorded here because they are decisions
@@ -228,13 +228,28 @@ Per the standing decision, tenant-isolation schema changes are applied on the
 platform out of band, so **these statements are the authoritative record**.
 Hand them to whoever applies DDL together with the ordering notes.
 
-**Stage 1 — `ac_bots`** (already applied):
+**Stage 1 — `ac_bots`** (tenant column already applied; Bot Workshop space column pending platform execution):
 
 ```sql
 ALTER TABLE ac_bots
   ADD COLUMN avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw'
     COMMENT 'data-isolation tenant; existing rows are the internal teamclaw tenant';
+
+-- Bot Workshop Business Space ownership. Run this before deploying code that
+-- contains BotModel.space_id: ORM SELECTs read the column, so a missing column
+-- breaks Bot reads and creation. NULL represents a legacy row with no explicit
+-- space assignment; the public Inventory interprets it as personal:{owner_id},
+-- so no one-time backfill is required. The compatibility column may remain
+-- during code rollback; platform owners should assess DROP COLUMN only after no
+-- deployed version uses it.
+ALTER TABLE ac_bots
+  ADD COLUMN space_id VARCHAR(128) NULL
+    COMMENT 'business-space ownership; NULL uses the owner personal-space fallback';
 ```
+
+The delivery record for `space_id` must identify the environment, change/version
+record, execution time, rollback owner, and result. Team-space support is not
+release-ready until that evidence exists.
 
 **Stage 5 — MCP configuration** (PR #564). Three statements, **two different
 deadlines**:

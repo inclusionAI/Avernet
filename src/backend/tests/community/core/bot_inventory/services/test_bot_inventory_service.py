@@ -13,7 +13,6 @@ from agentclaw.community.core.bot_inventory.adapters.noop_service_lifecycle impo
     NoopServiceLifecyclePort,
 )
 from agentclaw.community.core.bot_inventory.services.bot_inventory_service import (
-    MAX_CLOUD_ROWS,
     BotInventoryService,
 )
 from agentclaw.community.core.bot_inventory.services.lifecycle_view import (
@@ -85,11 +84,11 @@ def test_list_items_combines_filters_and_paginates(service) -> None:
 
 
 @pytest.mark.unit
-def test_cloud_source_is_capped_and_logs_truncation(service, caplog) -> None:
+def test_cloud_source_fetches_all_pages_for_exact_total(service) -> None:
     inventory, bot, desktop = service
     cloud_rows = [
         {**CLOUD, "bot_id": f"c{i:04d}", "bot_name": f"Cloud {i:04d}"}
-        for i in range(MAX_CLOUD_ROWS + 200)
+        for i in range(1_200)
     ]
 
     def list_page(**kwargs):
@@ -110,14 +109,14 @@ def test_cloud_source_is_capped_and_logs_truncation(service, caplog) -> None:
         keyword=None,
         engine=None,
         deploy_mode=DeployMode.CLOUD,
-        page=1,
-        page_size=MAX_CLOUD_ROWS + 500,
+        page=12,
+        page_size=100,
     )
 
-    assert total == MAX_CLOUD_ROWS
-    assert len(items) == MAX_CLOUD_ROWS
-    assert bot.list_bots_by_conditions.call_count == MAX_CLOUD_ROWS // 200
-    assert "truncated cloud rows" in caplog.text
+    assert total == len(cloud_rows)
+    assert len(items) == 100
+    assert items[0].bot_id == "c1100"
+    assert bot.list_bots_by_conditions.call_count == 6
 
 
 @pytest.mark.unit
