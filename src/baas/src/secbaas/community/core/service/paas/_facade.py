@@ -1389,6 +1389,94 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
                 original_error=e,
             ) from e
 
+    async def extend_ttl(self, paas_device_id: str, ttl_minutes: int) -> bool:
+        """Extend device TTL by a specific number of minutes.
+
+        Low-level TTL extension for schedulers that need fine-grained control
+        over the TTL value. Unlike ``update_device_ttl`` which computes its
+        own extension strategy (target = now + 24h), this method passes the
+        exact ttl_minutes to the underlying platform service.
+
+        Args:
+            paas_device_id: Device ID with optional @template_id suffix
+                          (e.g., "sandbox-abc123@42").
+            ttl_minutes: Number of minutes to extend the TTL by.
+
+        Returns:
+            True if extension succeeded, False otherwise.
+
+        Raises:
+            DeviceFacadeException: If the platform does not support TTL
+                extension (NotImplementedError) or if the API call fails.
+        """
+        raw_paas_device_id, template_id = self._parse_device_id(paas_device_id)
+
+        self._logger.info(
+            f"Extending device TTL: raw_id={paas_device_id}, "
+            f"parsed_device_id={raw_paas_device_id}, "
+            f"ttl_minutes={ttl_minutes}, template_id={template_id}"
+        )
+
+        service = None
+        try:
+            template = self._device_template_service.get_by_template_id(
+                template_id=template_id
+            )
+            if not template:
+                raise DeviceFacadeException(
+                    operation="extend_ttl",
+                    platform_type="UNKNOWN",
+                    template_id=template_id,
+                    paas_device_id=paas_device_id,
+                    original_error=PaasError(
+                        ErrorCode.TEMPLATE_NOT_FOUND,
+                        f"Template not found for template_id: {template_id}",
+                    ),
+                )
+
+            service = self._factory.create(
+                tenant_name=template.tenant,
+                template_uuid=template.template_uuid,
+                template=template,
+            )
+
+            result = await service.extend_ttl(raw_paas_device_id, ttl_minutes)
+
+            self._logger.info(
+                f"Device TTL extended: {paas_device_id}, "
+                f"success={result}"
+            )
+            return result
+
+        except NotImplementedError as e:
+            self._logger.warning(
+                f"Device TTL extension not supported for this platform: {e}"
+            )
+            platform_type = await self._get_platform_type(service)
+            raise DeviceFacadeException(
+                operation="extend_ttl",
+                platform_type=platform_type,
+                template_id=template_id,
+                paas_device_id=paas_device_id,
+                original_error=PaasError(
+                    ErrorCode.PLATFORM_ERROR,
+                    str(e),
+                ),
+            ) from e
+
+        except PaasError as e:
+            self._logger.error(
+                f"extend_ttl failed for {paas_device_id}: {e.code} - {e.message}"
+            )
+            platform_type = await self._get_platform_type(service)
+            raise DeviceFacadeException(
+                operation="extend_ttl",
+                platform_type=platform_type,
+                template_id=template_id,
+                paas_device_id=paas_device_id,
+                original_error=e,
+            ) from e
+
     async def invoke_http_in_device(
         self,
         paas_device_id: str,
