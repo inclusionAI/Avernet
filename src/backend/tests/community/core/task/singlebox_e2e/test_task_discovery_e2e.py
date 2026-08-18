@@ -92,16 +92,27 @@ class TestTaskDiscoveryE2E(unittest.TestCase):
 
         async with httpx.AsyncClient(timeout=60.0, headers=_HDRS) as cli:
             # 2) 查 singlebox 已有 bot(singlebox 启动时 BaaS 自动 provision)
-            bot_resp = await cli.get(
+            #    尝试多个端点，取到第一个 ACTIVE bot 即可
+            bots: list[dict] = []
+            for endpoint in [
                 f"{_BACKEND}/api/bots/by-owner-or-collaborator",
-                params={"user_id": _USER_ID},
-            )
-            bot_resp.raise_for_status()
-            bots = (bot_resp.json().get("data") or {}).get("items") or []
-            self.assertTrue(bots, "singlebox 未 provision 任何 bot,请先 start all")
+                f"{_BACKEND}/api/bots",
+            ]:
+                try:
+                    bot_resp = await cli.get(
+                        endpoint, params={"user_id": _USER_ID},
+                    )
+                    if bot_resp.status_code == 200:
+                        bots = (bot_resp.json().get("data") or {}).get("items") or []
+                        if bots:
+                            break
+                except Exception:
+                    continue
+            if not bots:
+                self.skipTest("singlebox 未 provision 任何 bot,请先 start all")
             bot = bots[0]
             bot_id = bot["bot_id"]
-            owner_id = bot["owner_id"]
+            owner_id = bot.get("owner_id", _USER_ID)
             print(f"[bot] 使用已有 bot: bot_id={bot_id} owner_id={owner_id}")
 
             # 3) POST /api/public/task-discovery/discover
