@@ -77,7 +77,7 @@ _ARCH_SKILL = str(SKILLS_DIR / "arch-analysis")
 # bbs-relay-pickup skill 落在 spec 目录下(非 src/backend/skills);
 # test 文件在 <repo>/src/backend/tests/community/core/task/singlebox_e2e/ ,parents[5] = <repo>/src/backend
 _BBS_SKILL = str(
-    Path(__file__).resolve().parents[5]
+    Path(__file__).resolve().parents[6]
     / "specs" / "2026-08-09-task-goal-driven-task-runner-bbs" / "bbs-relay-pickup"
 )
 
