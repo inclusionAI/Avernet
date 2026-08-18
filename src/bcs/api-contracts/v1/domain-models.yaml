@@ -977,6 +977,12 @@ SessionSummary:
     updated_at:
       type: integer
       minimum: 0
+    collected:
+      type: boolean
+      description: >
+        Whether the view actor (the `view_bot_id` resolved by the request) has
+        collected this session. Surfaced only when `view_bot_id` is explicitly
+        supplied; absent otherwise.
 
 SessionDetail:
   type: object

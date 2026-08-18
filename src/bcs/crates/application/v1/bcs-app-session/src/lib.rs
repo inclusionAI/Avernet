@@ -613,7 +613,33 @@ impl SessionService for SessionServiceImpl {
             .count_by_group(&command.group_id, status, None, participant_id)
             .await
             .map_err(map_service_error)?;
-        let items = sessions.iter().map(project_summary).collect::<Vec<_>>();
+        // Surface per-session collected state for the view actor, but only
+        // when the request explicitly names that actor (mirrors the legacy
+        // `list_sessions_for_group` gating: collected is only meaningful
+        // relative to a named participant). When `view_bot_id` is omitted the
+        // field stays `None` and is skipped on serialization.
+        let collected_set: HashSet<String> = if command.view_bot_id.is_some() {
+            let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
+            self.sessions
+                .collected_at_map(&ids, &view_actor_id)
+                .await
+                .map_err(map_session_error)?
+                .into_iter()
+                .map(|(sid, _collected_at)| sid)
+                .collect()
+        } else {
+            HashSet::new()
+        };
+        let items = sessions
+            .iter()
+            .map(|s| {
+                let mut summary = project_summary(s);
+                if command.view_bot_id.is_some() {
+                    summary.collected = Some(collected_set.contains(&s.id));
+                }
+                summary
+            })
+            .collect::<Vec<_>>();
         Ok(Page {
             items,
             total,
@@ -1018,6 +1044,7 @@ fn project_summary(session: &Session) -> SessionSummary {
         participant_count: Some(session.participants.len()),
         created_at: session.created_at,
         updated_at: session.updated_at,
+        collected: None,
     }
 }
 
