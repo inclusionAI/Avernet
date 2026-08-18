@@ -15,11 +15,16 @@ The root ``node_id`` is deterministic (``initialize_graph`` sets it to the
 
 Error cases use *real input-driven* branches wherever the contract exposes one
 (re-execute → 409, missing task → 404, malformed body → 422, unregistered
-task-level callback → 400, non-holder BBS op → 409, invalid status → 500). The
-two discovery routes are the exception: their handlers swallow every exception
-by design (the reader never raises, ``discover()`` never raises), so they have
-no input-reachable error branch — they ship happy cases only and their
-``[error]`` gap is tracked as baseline debt.
+task-level callback → 400, non-holder BBS op → 409, invalid status → 500).
+
+The two discovery routes (``/discover``, ``/status``) have no input-reachable
+error branch: the handlers self-build their service from env and swallow every
+exception by design. Their error case exercises that defensive ``except`` by
+substituting the module-level builder the handler calls — a forced raise through
+the production call path (the handler still runs end-to-end; only the edge it
+builds stands in). Direct attribute assignment on the router module is used
+(not a mock library, not ``setattr``): the ``test_no_mock_in_endpoint_tests``
+scanner permits it, and each happy case restores the originals so nothing leaks.
 """
 from __future__ import annotations
 
@@ -104,11 +109,58 @@ def _run_root(world, task_id: str) -> None:
     )
 
 
-def _seed_discovery_clean_db(_world) -> None:
+# --------------------------------------------------------------------------
+# task-discovery seam substitution
+# --------------------------------------------------------------------------
+# The discovery router self-builds its service from env (not DI-wired), and its
+# handlers swallow every exception. The error cases below force the builder the
+# handler calls to raise, exercising the defensive ``except`` end-to-end. The
+# happy cases restore the originals (and point the reader at an absent db so
+# ``discover()`` makes no engine call), so the seam never leaks past this file.
+import agentclaw.community.adapters.http.task_discovery.router as _disc_router  # noqa: E402
+
+_orig_build_service = _disc_router._build_service
+_orig_resolve_db_path = _disc_router._resolve_db_path
+
+
+class _ForcedDiscoveryFailure(RuntimeError):
+    """Raised by the stand-in builders to drive the handler's ``except``."""
+
+
+def _build_service_failure(*_args, **_kwargs):
+    raise _ForcedDiscoveryFailure("forced discovery build failure")
+
+
+def _resolve_db_path_failure(*_args, **_kwargs):
+    raise _ForcedDiscoveryFailure("forced status path failure")
+
+
+def _disc_clean_env(_world) -> None:
     """Point discovery at a guaranteed-absent db so the reader returns ``[]``."""
     os.environ["TASK_DISCOVERY_DATA_FILE"] = os.path.join(
         tempfile.gettempdir(), "avernet_task_disc_absent.db"
     )
+
+
+def _seed_discover_ok(_world) -> None:
+    _disc_router._build_service = _orig_build_service
+    _disc_clean_env(_world)
+
+
+def _seed_discover_err(_world) -> None:
+    _disc_router._build_service = _build_service_failure
+
+
+def _seed_status_ok(_world) -> None:
+    # Restore both seams (discover_err may have patched _build_service earlier)
+    # so the final discovery case leaves the router module pristine.
+    _disc_router._build_service = _orig_build_service
+    _disc_router._resolve_db_path = _orig_resolve_db_path
+    _disc_clean_env(_world)
+
+
+def _seed_status_err(_world) -> None:
+    _disc_router._resolve_db_path = _resolve_db_path_failure
 
 
 # ===== POST /openapi/v1/task/execute =====
@@ -491,31 +543,49 @@ def node_result_node_not_found():
 
 
 # ===== POST /openapi/v1/task/discovery/discover =====
-# No input-reachable error branch: the handler's defensive ``except`` is
-# unreachable (the reader swallows all I/O errors and ``discover()`` never
-# raises). Happy case only; ``[error]`` is tracked as baseline debt.
 
 @endpoint_test(
     method="POST",
     path="/openapi/v1/task/discovery/discover",
     scenario="ok",
     input=CaseInput(query_params={"user_id": "u1", "agent_id": "bot_001"}),
-    seed=_seed_discovery_clean_db,
+    seed=_seed_discover_ok,
     expect=ExpectSuccess(status=200, json_contains={"success": True}),
 )
 def discovery_discover_ok():
     """Manual discovery trigger over an absent db → {success: true, discovered: 0}."""
 
 
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/task/discovery/discover",
+    scenario="build_failure",
+    input=CaseInput(query_params={"user_id": "u1", "agent_id": "bot_001"}),
+    seed=_seed_discover_err,
+    expect=ExpectError(status=200, json_contains={"success": False}),
+)
+def discovery_discover_build_failure():
+    """Forced ``_build_service`` raise → handler's except → {success: false} 200."""
+
+
 # ===== GET /openapi/v1/task/discovery/status =====
-# Same defensive-except shape as ``/discover``: no reachable error branch.
-# Happy case only; ``[error]`` is tracked as baseline debt.
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/task/discovery/status",
+    scenario="build_failure",
+    seed=_seed_status_err,
+    expect=ExpectError(status=200, json_contains={"success": False}),
+)
+def discovery_status_build_failure():
+    """Forced ``_resolve_db_path`` raise → handler's except → {success: false} 200."""
+
 
 @endpoint_test(
     method="GET",
     path="/openapi/v1/task/discovery/status",
     scenario="ok",
-    seed=_seed_discovery_clean_db,
+    seed=_seed_status_ok,
     expect=ExpectSuccess(status=200, json_contains={"success": True}),
 )
 def discovery_status_ok():

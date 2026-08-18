@@ -449,11 +449,3 @@ PUT /openapi/v1/bots/{bot_id}/engine-config: missing [happy, error]
 PUT /openapi/v1/bots/{bot_id}/engine/config: missing [happy, error]
 PUT /openapi/v1/bots/{bot_id}/identity/{file_type}: missing [happy, error]
 PUT /openapi/v1/bots/{bot_id}: missing [happy, error]
-# task-discovery public triggers (inclusionAI/Avernet task-api rename): these
-# handlers self-build their service from env + always return HTTP 200 — their
-# defensive ``except`` is unreachable via any request input or DI seam (the
-# SQLite reader swallows all I/O errors; ``discover()`` never raises), so there
-# is no client-facing error branch to pin. Happy cases exist; ``[error]`` is
-# tracked here as debt rather than forced via a synthetic fault.
-GET /openapi/v1/task/discovery/status: missing [error]
-POST /openapi/v1/task/discovery/discover: missing [error]
