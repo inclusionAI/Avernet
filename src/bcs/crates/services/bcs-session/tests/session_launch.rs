@@ -355,6 +355,15 @@ async fn public_non_member_is_added_with_requested_role() {
     assert_eq!(participant.actor_kind, ActorKind::Human);
     assert_eq!(participant.role, ParticipantRole::Observer);
     assert_eq!(participant.mode, Some(ParticipantMode::Present));
+    assert!(
+        outcome
+            .session
+            .participant_join_seq
+            .as_ref()
+            .and_then(|join_seq| join_seq.get("human_bob"))
+            .is_none(),
+        "public creators belong to the initial Session roster"
+    );
 }
 
 #[tokio::test]
@@ -409,6 +418,46 @@ async fn unknown_legacy_role_is_rejected_only_for_public_groups() {
 }
 
 #[tokio::test]
+async fn explicit_private_human_creator_is_added_with_join_sequence() {
+    let fixture = Fixture::new();
+    fixture.add_bot("driver", "alice").await;
+    fixture
+        .add_group(Group::new(
+            "group-1",
+            "driver",
+            vec![Participant::bot("driver", ParticipantRole::Driver)],
+        ))
+        .await;
+
+    let outcome = fixture
+        .service
+        .create(CreateSessionLaunch {
+            request: request(human("alice"), "group-1", Some("human_alice")),
+        })
+        .await
+        .expect("explicit Human creator may create");
+
+    let participant = outcome
+        .session
+        .participants
+        .iter()
+        .find(|participant| participant.bot_uuid == "human_alice")
+        .expect("explicit Human creator is inserted");
+    assert_eq!(participant.actor_kind, ActorKind::Human);
+    assert_eq!(participant.role, ParticipantRole::Driver);
+    assert_eq!(participant.mode, Some(ParticipantMode::Present));
+    assert_eq!(
+        outcome
+            .session
+            .participant_join_seq
+            .as_ref()
+            .and_then(|join_seq| join_seq.get("human_alice"))
+            .and_then(serde_json::Value::as_i64),
+        Some(0)
+    );
+}
+
+#[tokio::test]
 async fn inferred_private_human_creator_is_not_auto_added() {
     let fixture = Fixture::new();
     fixture.add_bot("driver", "alice").await;
@@ -435,6 +484,14 @@ async fn inferred_private_human_creator_is_not_auto_added() {
             .participants
             .iter()
             .all(|participant| participant.bot_uuid != "human_alice")
+    );
+    assert!(
+        outcome
+            .session
+            .participant_join_seq
+            .as_ref()
+            .and_then(|join_seq| join_seq.get("human_alice"))
+            .is_none()
     );
 }
 
@@ -469,6 +526,17 @@ async fn state_machine_human_is_added_as_present_observer() {
         .expect("authenticated Human inserted");
     assert_eq!(participant.role, ParticipantRole::Observer);
     assert_eq!(participant.mode, Some(ParticipantMode::Present));
+    assert!(
+        outcome
+            .session
+            .participants
+            .iter()
+            .all(|participant| {
+                participant.bot_uuid != "human_alice"
+                    || participant.role == ParticipantRole::Observer
+            }),
+        "StateMachine Human must not be rewritten as Driver"
+    );
 }
 
 #[tokio::test]
@@ -667,6 +735,56 @@ async fn reactivate_replaces_input_and_preserves_other_session_fields() {
             .lock()
             .expect("system events lock")
             .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn reactivate_does_not_add_explicit_private_human_creator() {
+    let fixture = Fixture::new();
+    fixture.add_bot("driver", "alice").await;
+    fixture
+        .add_group(Group::new(
+            "group-1",
+            "driver",
+            vec![Participant::bot("driver", ParticipantRole::Driver)],
+        ))
+        .await;
+    let created = fixture
+        .service
+        .create(CreateSessionLaunch {
+            request: request(human("alice"), "group-1", Some("driver")),
+        })
+        .await
+        .expect("create");
+    fixture
+        .sessions
+        .complete_if_running(&created.session.id, None, None)
+        .await
+        .expect("complete");
+
+    let outcome = fixture
+        .service
+        .reactivate(ReactivateSessionLaunch {
+            session_id: created.session.id,
+            request: request(human("alice"), "group-1", Some("human_alice")),
+        })
+        .await
+        .expect("reactivate");
+
+    assert!(
+        outcome
+            .session
+            .participants
+            .iter()
+            .all(|participant| participant.bot_uuid != "human_alice")
+    );
+    assert!(
+        outcome
+            .session
+            .participant_join_seq
+            .as_ref()
+            .and_then(|join_seq| join_seq.get("human_alice"))
+            .is_none()
     );
 }
 
