@@ -407,8 +407,8 @@ POST /openapi/v1/bots/{bot_id}/containers/{instance_id}/restart
 | 能力 | 领域现状 | 缺口 | 备注 |
 |---|---|---|---|
 | Runtime logs（含容器实例日志） | Bot Inventory 只有 action 声明；日志来源尚需确定 | Runtime Log Contract、受限参数、公开 Adapter、Gateway | 必须限制日志来源、路径、`tail`、level 和敏感信息；A/B 不实现采集或日志公开接口 |
-| Health score | `community/core/harness` 已有领域与内部 API | 稳定 Service API、OpenAPI、能力限制和 Gateway | 当前规划仅 OpenClaw + cloud；由任务护航团队实现 |
-| Health check | Harness 已有诊断能力 | 触发、轮询、报告 Contract | 由任务护航团队实现 |
+| Health score | `community/core/harness` 已有领域与内部 API | 已新增 Bot-first OpenAPI，待 Gateway 发布和联调 | 当前仅 OpenClaw + cloud；复用 Harness 评分能力 |
+| Health check | Harness 已有诊断能力 | 已新增触发及按 `scan_id` 轮询契约，待 Gateway 发布和联调 | 复用 Harness 扫描与诊断记录 |
 | Evaluation | `community/core/quality` 与 `QualityTaskServiceProtocol` 已存在 | 公开创建/查询、结果页 URL/token Contract | 由 Quality/任务护航相关同学实现 |
 
 推荐按独立领域公开：

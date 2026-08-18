@@ -106,6 +106,10 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("post", "/openapi/v1/bots/{bot_id}/edit-lock"),
     ("delete", "/openapi/v1/bots/{bot_id}/edit-lock"),
     ("post", "/openapi/v1/bots/{bot_id}/edit-lock/steal"),
+    ("get", "/openapi/v1/bots/{bot_id}/containers"),
+    ("post", "/openapi/v1/bots/{bot_id}/containers/{instance_id}/restart"),
+    ("get", "/openapi/v1/bots/{bot_id}/diagnostics/health"),
+    ("post", "/openapi/v1/bots/{bot_id}/diagnostics/health-check"),
 }
 
 
@@ -299,8 +303,8 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
     assert sorted(carrying_owner) == sorted(
         set(engine_runtime) | _OWNER_ADDRESSED_ELSEWHERE
     ), (
-        "owner_id belongs to the engine-runtime operations, the three "
-        "authorization operations, and to nothing else by accident"
+        "owner_id belongs to engine-runtime and the explicitly listed "
+        "owner-addressed operations, and to nothing else by accident"
     )
 
 

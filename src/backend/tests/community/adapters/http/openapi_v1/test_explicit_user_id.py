@@ -318,9 +318,9 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #:
 #: The component-first service lifecycle and edit-lock surfaces add 14
 #: bot-addressed operations while leaving query and account-level operations
-#: unchanged. ``GET /{bot_id}/data-init`` adds one more — the status read
-#: sibling to the existing POST trigger.
-_BOT_ID_PLACEMENT = {"path": 77, "query": 1, "none": 21}
+#: unchanged. ``GET /{bot_id}/data-init`` adds one more, then the container and
+#: health-diagnosis surfaces add four more bot-addressed operations.
+_BOT_ID_PLACEMENT = {"path": 81, "query": 1, "none": 21}
 
 
 def _schema() -> dict:
@@ -399,14 +399,14 @@ def test_the_pinned_number_of_operations_take_it():
     POST /{bot_id}/data-init trigger, passport fields, /openapi/v1/bots/all).
     88 → 89 adds the GET /{bot_id}/data-init status read — the polling sibling
     to the POST trigger, also user-scoped.
+    89 → 93 adds the two container and two health-diagnosis operations.
     """
     taking = [
         1
         for path, method, operation in _current_operations(_schema())
         if _user_scoped(path, method) and _param(operation, USER_ID_QUERY)
     ]
-    # The service lifecycle and edit-lock surfaces add 14 user-scoped routes.
-    assert len(taking) == 89
+    assert len(taking) == 93
 
 
 def test_the_exempt_operations_take_none():

@@ -87,3 +87,16 @@ class ServicePublicationFacadeProtocol(Protocol):
     def steal_lock(self, bot_id: str, *, actor_id: str, owner_id: str) -> Any: ...
 
     def get_lock(self, bot_id: str, *, actor_id: str, owner_id: str) -> Any: ...
+
+    def list_containers(
+        self, bot_id: str, *, actor_id: str, owner_id: str
+    ) -> dict[str, Any]: ...
+
+    def restart_container(
+        self,
+        bot_id: str,
+        instance_id: str,
+        *,
+        actor_id: str,
+        owner_id: str,
+    ) -> dict[str, Any]: ...

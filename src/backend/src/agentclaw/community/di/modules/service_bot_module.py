@@ -37,6 +37,7 @@ from agentclaw.community.api.bot_startup_script_service import (
 )
 from agentclaw.community.api.bot_publish_service import BotPublishServiceProtocol
 from agentclaw.community.api.channel_service import ChannelServiceProtocol
+from agentclaw.community.api.device_service import DeviceServiceProtocol
 from agentclaw.community.api.publish_flow_service import PublishFlowServiceProtocol
 from agentclaw.community.api.publish_approval import PublishApprovalServiceProtocol
 from agentclaw.community.api.service_publication_facade import (
@@ -602,6 +603,7 @@ class ServiceBotModule(Module):
         collaborator_service: CollaboratorServiceProtocol,
         lock_service: CollaboratorLockServiceProtocol,
         bot_service: BotService,
+        device_service: DeviceServiceProtocol,
     ) -> ServicePublicationFacade:
         """Construct the public publication facade from existing domain services."""
         return ServicePublicationFacade(
@@ -613,6 +615,7 @@ class ServiceBotModule(Module):
             collaborator_service=collaborator_service,
             lock_service=lock_service,
             bot_service=bot_service,
+            device_service=device_service,
         )
 
     @singleton

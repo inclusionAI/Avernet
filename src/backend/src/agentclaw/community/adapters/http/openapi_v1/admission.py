@@ -236,6 +236,16 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("POST", "/openapi/v1/bots/{bot_id}/edit-lock"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("DELETE", "/openapi/v1/bots/{bot_id}/edit-lock"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("POST", "/openapi/v1/bots/{bot_id}/edit-lock/steal"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/containers"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/containers/{instance_id}/restart",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/diagnostics/health"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/diagnostics/health-check",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     # ── B: returns a set of bots, narrowed to the granted ones ───────────────
     ("GET", "/openapi/v1/bots"): AdmissionMode.GRANT_FILTERED,
     # The application's own view, and the **complete** one: a granted bot the
