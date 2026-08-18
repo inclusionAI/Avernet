@@ -2,9 +2,11 @@
 
 记录每次 force_sync 的结果：pending → success / failed。
 """
-from sqlalchemy import Column, Index, Integer, String, Text, func
+from sqlalchemy import BigInteger, Column, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy.dialects import mysql
 
 from agentclaw.community.core.base import Base
+from agentclaw.community.utils.avernet_tenant_guard import register_avernet_tenant_guard
 
 
 class SkillCenterSyncLog(Base):
@@ -12,6 +14,10 @@ class SkillCenterSyncLog(Base):
     __tablename__ = "ac_skill_center_sync_log"
     __table_args__ = (
         Index("idx_sync_skill_env_created", "skill_uuid", "env", "gmt_created"),
+        UniqueConstraint(
+            "avernet_tenant", "env", "skill_version_id",
+            name="uk_center_version_materialization",
+        ),
         {"extend_existing": True},
     )
 
@@ -23,6 +29,11 @@ class SkillCenterSyncLog(Base):
     checksum = Column(String(128), nullable=True)
     error_msg = Column(String(500), nullable=True)
     extra = Column(Text, default="{}", nullable=False)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
+    skill_version_id = Column(
+        BigInteger().with_variant(mysql.BIGINT(unsigned=True), "mysql"),
+        nullable=True,
+    )
     # Production stores these as varchar(64) DB-clock strings, not
     # DATETIME — see specs/2026-05-17-unified-repository-round-2/
     # ddl-parity-ac_skill_center_sync_log.md (same drift the pilot found
@@ -33,3 +44,6 @@ class SkillCenterSyncLog(Base):
     gmt_modified = Column(
         String(64), server_default=func.now(), onupdate=func.now(), nullable=False,
     )
+
+
+register_avernet_tenant_guard(SkillCenterSyncLog)

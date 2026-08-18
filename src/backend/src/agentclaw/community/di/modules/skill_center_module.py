@@ -89,6 +89,7 @@ from agentclaw.community.core.repository.protocols.skill_center import SkillSetR
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillMemberRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillCategoryRepository
+from agentclaw.community.core.repository.protocols.skill_center import SpaceSkillRepository
 from agentclaw.community.core.skill_center.services.skill_auth_service import (
     SkillAuthService,
 )
@@ -177,6 +178,7 @@ from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
 from agentclaw.community.core.repository.implementations.skill_center.sync_log import SkillCenterSyncLogRepository as UnifiedSkillCenterSyncLogRepository
+from agentclaw.community.core.repository.implementations.skill_center.space_skill import SpaceSkillRepository as UnifiedSpaceSkillRepository
 from agentclaw.community.core.repository.implementations.skill_center.propagation_log import SkillPropagationLogRepository as UnifiedSkillPropagationLogRepository
 from agentclaw.community.core.repository.implementations.skill_center.local_skill_cleanup import SqlLocalSkillCleanupRepository
 
@@ -258,6 +260,11 @@ class SkillCenterModule(Module):
         binder.bind(
             SkillCenterSyncLogRepository,
             to=UnifiedSkillCenterSyncLogRepository,
+            scope=singleton,
+        )
+        binder.bind(
+            SpaceSkillRepository,
+            to=UnifiedSpaceSkillRepository,
             scope=singleton,
         )
         binder.bind(

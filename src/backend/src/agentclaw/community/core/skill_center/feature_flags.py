@@ -14,6 +14,7 @@ class SkillCenterFlags:
     propagation_enabled: bool
     symlink_verify_auto_fix: bool
     write_skill_uuid: bool  # 双写控制，不关
+    space_skill_enabled: bool = False
 
     @classmethod
     def from_env(cls) -> "SkillCenterFlags":
@@ -24,11 +25,17 @@ class SkillCenterFlags:
             propagation_enabled=os.environ.get("SC_PROPAGATION_ENABLED", "false").lower() == "true",
             symlink_verify_auto_fix=os.environ.get("SC_SYMLINK_AUTO_FIX", "false").lower() == "true",
             write_skill_uuid=os.environ.get("SC_WRITE_SKILL_UUID", "true").lower() == "true",
+            space_skill_enabled=os.environ.get("SC_SPACE_SKILL_ENABLED", "false").lower() == "true",
         )
 
     def any_blocking_enabled(self) -> bool:
         """任一核心 flag 开启（用于日志采样等）。"""
-        return self.nas_sync_enabled or self.center_uri_enabled or self.propagation_enabled
+        return (
+            self.nas_sync_enabled
+            or self.center_uri_enabled
+            or self.propagation_enabled
+            or self.space_skill_enabled
+        )
 
 
 # 全局单例（延迟初始化）
