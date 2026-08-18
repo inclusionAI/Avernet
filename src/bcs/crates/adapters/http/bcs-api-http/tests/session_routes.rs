@@ -404,9 +404,14 @@ impl SessionService for FakeSessionService {
     async fn list(&self, command: ListSessions) -> Result<Page<SessionSummary>, ApplicationError> {
         let offset = command.offset;
         let limit = command.limit;
+        let view_bot_id = command.view_bot_id.clone();
         *self.listed.lock().expect("list lock") = Some(command);
+        let mut summary = session_summary();
+        // Mirror the real app: surface `collected` only for an explicitly
+        // named view actor, so the route can be asserted to serialize it.
+        summary.collected = view_bot_id.as_ref().map(|_| true);
         Ok(Page {
-            items: vec![session_summary()],
+            items: vec![summary],
             total: 1,
             offset,
             limit,
@@ -591,6 +596,7 @@ fn session_summary() -> SessionSummary {
         participant_count: Some(1),
         created_at: 1,
         updated_at: 2,
+        collected: None,
     }
 }
 
@@ -1017,6 +1023,8 @@ async fn list_sessions_returns_page_and_forwards_filters() {
     assert_eq!(body["data"]["total"], 1);
     assert_eq!(body["data"]["offset"], 5);
     assert_eq!(body["data"]["limit"], 10);
+    // `collected` is surfaced for an explicitly named view actor.
+    assert_eq!(body["data"]["items"][0]["collected"], true);
     {
         let listed = session.listed.lock().expect("list lock");
         let listed = listed.as_ref().expect("list command");

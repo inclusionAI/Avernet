@@ -109,8 +109,12 @@ def _merge(base: dict, overlay: dict) -> dict:
 def _parse_config(raw: dict, *, config_dir: Path | None = None) -> Config:
     module_raw = raw.get("module_config") or {}
     web_raw = module_raw.get("web") or {}
+    port = int(web_raw.get("port", 8888))
+    env_port = os.getenv("GATEWAY_PORT", "").strip()
+    if env_port:
+        port = int(env_port)
     web = WebConfig(
-        port=int(web_raw.get("port", 8888)),
+        port=port,
         start=web_raw.get("start", WebConfig.start),
         enable_api_docs=bool(web_raw.get("enable_api_docs", True)),
     )
