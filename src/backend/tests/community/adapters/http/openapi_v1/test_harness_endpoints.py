@@ -25,9 +25,7 @@ from agentclaw.community.api.content_scanner_service import ContentScannerProtoc
 from agentclaw.community.api.patch_engine_service import PatchEngineProtocol
 from agentclaw.community.api.patch_library_service import PatchLibraryProtocol
 from agentclaw.community.api.patch_planner_service import PatchPlannerProtocol
-from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
-    CollaboratorService,
-)
+from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.harness import (
     HarnessPatchRecordRepository,
@@ -65,7 +63,7 @@ def client(bot_repo, collaborator, scan_repo):
     class _M(Module):
         def configure(self, binder):
             binder.bind(BotRepository, to=bot_repo)
-            binder.bind(CollaboratorService, to=collaborator)
+            binder.bind(CollaboratorServiceProtocol, to=collaborator)
             binder.bind(HarnessScanRecordRepository, to=scan_repo)
             binder.bind(HarnessPatchRepository, to=MagicMock())
             binder.bind(HarnessPatchRecordRepository, to=MagicMock())

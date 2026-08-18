@@ -32,9 +32,7 @@ from agentclaw.community.adapters.http.harness.schemas import (
     PatchItem,
 )
 from agentclaw.community.di import Injected
-from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
-    CollaboratorService,
-)
+from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.adapters.http.openapi_v1.dependencies import Principal
 from agentclaw.community.core.harness.models import (
@@ -75,7 +73,7 @@ async def require_harness_bot_access(
     user_id: UserIdDep,
     bot_id: Annotated[str, Path(..., description="Bot ID")],
     bot_repo: BotRepository = Injected(BotRepository),
-    collaborator_service: CollaboratorService = Injected(CollaboratorService),
+    collaborator_service: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
 ) -> str:
     """Ensure the caller may operate on *bot_id* in harness context.
 
