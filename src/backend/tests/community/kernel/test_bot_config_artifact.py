@@ -20,7 +20,6 @@ from agentclaw.community.kernel.bot_config import (
     McpServerRef,
     ResourceRef,
     SkillRef,
-    StdioSpec,
     StoreRef,
 )
 
@@ -35,23 +34,22 @@ _SCHEMA_PATH = (
 )
 
 
-def test_remote_entry_omits_the_stdio_key_entirely() -> None:
-    """An artifact with no local server keeps its pre-``stdio`` wire shape.
+def test_remote_entry_omits_the_launch_keys_entirely() -> None:
+    """An artifact with no local server keeps its pre-local-form wire shape.
 
-    ``asdict`` would emit ``"stdio": null`` on every remote entry, changing the
-    bytes of artifacts that never use the new form — and a consumer validating
-    those against the pre-``stdio`` definition (``additionalProperties: false``)
-    would reject them. Only artifacts that genuinely carry a local server may
-    differ.
+    ``asdict`` would emit ``"command": null`` / empty ``args``/``env`` on every
+    remote entry, changing the bytes of artifacts that never use the local form
+    — and a consumer validating those against the pre-local-form definition
+    (``additionalProperties: false``) would reject them. Only artifacts that
+    genuinely carry a local server may differ.
     """
     artifact = _sample_artifact()
     entry = artifact.to_dict()["mcp"]["servers"][0]
 
-    assert "stdio" not in entry
     assert set(entry) == {"server_code", "name", "endpoint", "transport", "headers"}
 
 
-def test_local_entry_keeps_its_stdio_key() -> None:
+def test_local_entry_carries_its_launch_instruction_flat() -> None:
     artifact = BotConfigArtifact(
         schema_version=SCHEMA_VERSION,
         engine_type="teclaw",
@@ -59,15 +57,52 @@ def test_local_entry_keeps_its_stdio_key() -> None:
             servers=[
                 McpServerRef(
                     server_code="hitl",
+                    name="HITL",
                     transport="stdio",
-                    stdio=StdioSpec(command="python3", args=["/a.py"]),
+                    command="python3",
+                    args=["/a.py"],
                 )
             ]
         ),
     )
     entry = artifact.to_dict()["mcp"]["servers"][0]
 
-    assert entry["stdio"] == {"command": "python3", "args": ["/a.py"], "env": {}}
+    # The launch instruction is flat on the entry — no nested "stdio" object.
+    assert "stdio" not in entry
+    assert entry == {
+        "server_code": "hitl",
+        "name": "HITL",
+        "endpoint": None,
+        "transport": "stdio",
+        "headers": {},
+        "command": "python3",
+        "args": ["/a.py"],
+        "env": {},
+    }
+
+
+def test_from_dict_reflattens_a_pre_v5_nested_stdio_entry() -> None:
+    """A pinned schema_version-4 artifact (nested ``{"stdio": {...}}``) still
+    loads — its launch instruction lands on the flat fields."""
+    restored = BotConfigArtifact.from_dict(
+        {
+            "schema_version": 4,
+            "engine_type": "teclaw",
+            "mcp": {
+                "servers": [
+                    {
+                        "server_code": "hitl",
+                        "transport": "stdio",
+                        "stdio": {"command": "python3", "args": ["/a.py"], "env": {}},
+                    }
+                ]
+            },
+        }
+    )
+    server = restored.mcp.servers[0]
+    assert server.command == "python3"
+    assert server.args == ["/a.py"]
+    assert server.env == {}
 
 
 def _sample_artifact() -> BotConfigArtifact:

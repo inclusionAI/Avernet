@@ -27,6 +27,7 @@
 # this matter is not in this repo.
 servers:
   hitl:
+    name: "HITL"
     stdioConfigs:
       - command: "python3"
         arguments:
