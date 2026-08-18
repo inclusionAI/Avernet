@@ -61,7 +61,7 @@ _DEFAULT_MCP_SERVERS_BY_ENGINE: Dict[str, List[dict]] = {
         {"server_code": "mcp.ant.rpc.dcanttouch.adminservice", "name": "行政小宝MCP服务"},
         # Local/stdio; resolved through LocalMCPRegistry, not MCP Center. Kept
         # last to match the other engines' lists.
-        {"server_code": "hitl"},
+        {"server_code": "hitl", "name": "HITL"},
     ],
     "claude_code": [
         {"server_code": "mcp.ant.antprocessai.anttaskmcp", "name": "任务中心MCP", "description": "任务中心待办任务，已办任务等相关任务查询MCP"},

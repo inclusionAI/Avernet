@@ -207,14 +207,13 @@ def test_composed_stdio_mcp_carries_launch_and_no_credential() -> None:
 
     local = by_code["hitl"]
     assert local.transport == STDIO_TRANSPORT
-    assert local.stdio is not None
-    assert local.stdio.command == "python3"
-    assert local.stdio.args == ["/home/admin/hitl/hitl_mcp_server.py"]
+    assert local.command == "python3"
+    assert local.args == ["/home/admin/hitl/hitl_mcp_server.py"]
     assert local.endpoint is None and local.headers == {}
 
     # The remote entry is unaffected: it still inlines its secret.
     remote = by_code["github"]
-    assert remote.stdio is None
+    assert remote.command is None
     assert _SECRET in json.dumps(asdict(remote), ensure_ascii=False)
 
 
