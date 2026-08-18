@@ -1,42 +1,48 @@
-"""BBS 2-mode live e2e(natural):LLM 自规划,一子任务匹配到现成 bot、一子任务 MISS→HUNG→BBS 中继。
+"""3-mode live e2e(natural):LLM 自规划,3 子任务分别走 single_bot / coop_group / BBS 三种执行模态。
 
-gated by ``SINGLEBOX_TASK_E2E=1``。本地 ``./scripts/singlebox.sh start all`` 起好 singlebox 后:
+gated by ``SINGLEBOX_TASK_E2E=1``。**协作群需 BCS double**,本地起后端 singlebox 时务必设:
 
-  SINGLEBOX_TASK_E2E=1 \
+  SINGLEBOX_BCS_DOUBLE=1 SINGLEBOX_TASK_E2E=1 \
     src/backend/.venv/bin/python -m pytest \
-      tests/community/core/task/singlebox_e2e/bbs/test_bbs_relay_e2e_natual_2_mode.py -s
+      tests/community/core/task/singlebox_e2e/test_task_integration_e2e_3_mode.py -s
 
-# 剧本(natural 2-mode:依赖 LLM 自规划 + 真实匹配)
+# 剧本(natural 3-mode:依赖 LLM 自规划 + 真实匹配,三种 run_mode 共存)
 
-- 主任务含**两份交付物**:① 基础架构方向技术栈概览;② 基础架构方向 3 位架构师名册。
+- 主任务含**三份交付物**:
+  ① 基础架构方向技术栈概览 → 命中现成 bot 走 **single_bot**;
+  ② 业务架构与数据架构双视角深度分析 → 命中协作群走 **coop_group**(2 bot);
+  ③ 基础架构方向 3 位架构师名册 → 无现成 bot → MISS → HUNG → 升 **BBS** 中继。
 - **owner bot 只装通用 ``planning-arch``(不装 case-scripted 的 `search`)**:
-  - 规划走 LLM 自分解(``planning-arch`` 是通用 gap 驱动,非 case 剧本)→ 拆出 ~2 个子任务;
+  - 规划走 LLM 自分解(``planning-arch`` 通用 gap 驱动)→ 拆出 ~3 个子任务;
   - 派发不走 ``search`` skill(它对非 storage node_id 强制 MISS),而由 owner 通用 LLM 直读候选 catalog
-    判 HIT/MISS——即"真实匹配":候选里有匹配 bot → HIT_SINGLE,无 → MISS。
-- 预期正好:**技术栈概览**子任务的 token 命中新 ``基础架构技术栈概览Bot`` → HIT single_bot 正常执行;
-  **架构师名册**子任务匹配不到任何 bot → MISS;``MAX_DEPTH=1`` → ``miss_depth_exhausted`` → 节点 HUNG →
-  自然升 BBS(``bbs_mode=True``、根 ``PLANNING``、图空闲,spec §10.5 可恢复态)。
-- 升 BBS 后唤醒一次金庸(``bbs-relay-pickup``):claim(recover 清掉 HUNG 死分支)→ 自判"架构师名册"段
-  full → 挂 ``run_mode="bbs"`` scoped 节点 → ``arch-analysis`` mock 执行 → ``bbs/result`` 写回
-  ``output_patch.architects`` → scoped DONE。owner 复核根 gap 两份交付物齐 → 根 DONE → 图 DONE。
+    判 4 态——"真实匹配":单一 bot 足够 → HIT_SINGLE;需多 bot 协作 → HIT_MULTI_BOTS;无匹配 → MISS。
+- 预期:① 命中 ``技术栈概览Bot`` → HIT_SINGLE single_bot;② 命中 ``业务架构视角Bot``+``数据架构视角Bot``
+  → HIT_MULTI_BOTS coop_group(BCS double 拉群 → completed→PASS);③ 无匹配 → MISS;``MAX_DEPTH=1``
+  → ``miss_depth_exhausted`` → 节点 HUNG → 自然升 BBS(``bbs_mode=True``、根 ``PLANNING``、图空闲)。
+- 升 BBS 后唤醒一次金庸(``bbs-relay-pickup``):claim(recover 清 HUNG 死分支)→ 自判"架构师名册"段 full
+  → 挂 ``run_mode="bbs"`` scoped 节点 → ``arch-analysis`` mock 执行 → ``bbs/result`` 写回
+  ``output_patch.architects`` → scoped DONE。owner 复核根 gap 三份交付物齐 → 根 DONE → 图 DONE。
 
 # 为什么不装 `search` skill
 
-``skills/search`` 是 storage 案例的**确定式映射表**:对 storage node_id(N_overview 等)按表返 HIT,
-对**任何未知 node_id 一律 MISS**(表末行)。``planning-arch`` 产出的子任务 node_id 是 LLM 自定的(非 storage),
-若装了 ``search`` 则**全部强制 MISS** → 没有 HIT,2-mode 退化成 natual 全 MISS。
-故 owner 只装 ``planning-arch``,派发由 owner 通用 LLM 按 catalog 真判(LLM 自驱、非确定,断言取宽容 ≥1)。
+``skills/search`` 是 storage 案例的**确定式映射表**:对 storage node_id 按表返 HIT,对**任何未知 node_id
+一律 MISS**。``planning-arch`` 产出的子任务 node_id 是 LLM 自定的(非 storage),若装了 ``search`` 则**全部
+强制 MISS** → 没有 single_bot / 没有 coop_group,3-mode 退化成全 BBS。故 owner 只装 ``planning-arch``,
+派发由 owner 通用 LLM 按 catalog 真判(含自行组合 HIT_MULTI_BOTS 拉群)——LLM 自驱、非确定,断言取宽容 ≥1。
 
-# 与 ``test_bbs_relay_e2e_natual.py`` 的区别
+# 命名约束(让 BBS 那子任务必 MISS)
 
-- natual:单一交付物,owner 装 planning-arch+search → search 强制全 MISS → 全 BBS,金庸一段收口。
-- **2-mode natural**:两份交付物,owner **不装 search** → 一子任务真匹配 bot(single_bot HIT)、一子任务
-  MISS→HUNG→BBS 中继(bbs);断言图里**同时**存在 single_bot 的 HIT 节点与 bbs scoped 中继节点。
+协作群两 bot 命名 ``业务架构视角Bot`` / ``数据架构视角Bot``(含「架构」**不含**「架构师」),技术栈 bot
+``技术栈概览Bot``。BBS 那子任务是「架构师名册」,token「架构师」LIKE 匹配 bot_name —— 上述 bot 名里
+**都没有「架构师」子串** → 该子任务候选 catalog 为空 → owner 判 MISS → 升 BBS。若给协作 bot 命名
+含「架构师」(如 业务架构师Bot),则「架构师名册」会命中它们 → 不 MISS、不升 BBS,破坏 3-mode。
 
-# 不改/不新增 skill
+# 与 ``test_task_integration_e2e.py`` 的区别
 
-全程只用已有 skill(``planning-arch`` / ``acceptance`` / ``arch-analysis`` / ``bbs-relay-pickup``),均原样;
-不装 ``search``/``planning``(那两个是 storage case-scripted,会强制 MISS)。
+- integration e2e:storage case-scripted skill(planning+search),~8 子任务覆盖三模态,确定式映射;
+- **3-mode natural**:通用 ``planning-arch``(**不装 search**),LLM 自拆 ~3 子 + 自判派发,三模态共存,
+  非确定(断言宽容 ≥1 每模态)。不改/不新增 skill,全程用已有 ``planning-arch``/``acceptance``/
+  ``arch-analysis``/``bbs-relay-pickup``。
 """
 from __future__ import annotations
 
@@ -57,27 +63,30 @@ from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adap
 _LIVE = os.environ.get("SINGLEBOX_TASK_E2E", "").strip() in {"1", "true"}
 _BACKEND = os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
 _USER_ID = os.environ.get("SINGLEBOX_USER_ID", "146836")
-_TIMEOUT = float(os.environ.get("SINGLEBOX_TASK_E2E_TIMEOUT", "1500"))
+_TIMEOUT = float(os.environ.get("SINGLEBOX_TASK_E2E_TIMEOUT", "2000"))
 # 独立 owner 名:避免与其它 e2e 的 task-owner-* 共用 bot 造成 skill 串扰
-_OWNER_BOT_NAME = "task-owner-2mode-bot"
-# N_hit 的现成执行者:bot_name 含「技术栈概览」token,供该子任务预查候选命中(owner 通用 LLM 据此 HIT)
-_HIT_BOT_NAME = "基础架构技术栈概览Bot"
+_OWNER_BOT_NAME = "task-owner-3mode-bot"
+# ① single_bot 现成执行者:bot_name 含「技术栈概览」,供该子任务候选命中
+_SINGLE_BOT_NAME = "技术栈概览Bot"
+# ② coop_group 两成员:含「架构」**不含**「架构师」,使「架构师名册」子任务不命中它们 → 必 MISS→BBS
+_COOP_BOT_A = "业务架构视角Bot"
+_COOP_BOT_B = "数据架构视角Bot"
 _JY_BOT_NAME = "金庸"
 
-SKILLS_DIR = Path(__file__).parent / "../skills"
+SKILLS_DIR = Path(__file__).parent / "skills"  # 本文件在 singlebox_e2e/ 下,skills 即同级 ./skills
 _PLANNING_SKILL = str(SKILLS_DIR / "planning-arch")  # 通用 LLM 规划(非 case 剧本)
-_ACCEPTANCE_SKILL = str(SKILLS_DIR / "acceptance")   # N_hit worker 自验收
-_ARCH_SKILL = str(SKILLS_DIR / "arch-analysis")      # N_miss 升 BBS 后金庸中继执行侧 mock
-# 注意:故意**不装** skills/search —— 它对非 storage node_id 强制 MISS,会抹掉 HIT。
+_ACCEPTANCE_SKILL = str(SKILLS_DIR / "acceptance")   # worker / 群成员 自验收
+_ARCH_SKILL = str(SKILLS_DIR / "arch-analysis")      # BBS 那段金庸中继执行侧 mock
+# 注意:故意**不装** skills/search —— 它对非 storage node_id 强制 MISS,会抹掉 single_bot/coop_group。
 # bbs-relay-pickup skill 落在 spec 目录下(非 src/backend/skills);
-# test 文件在 <repo>/src/backend/tests/community/core/task/singlebox_e2e/bbs/ ,parents[6] = <repo>/src/backend
+# 本文件在 <repo>/src/backend/tests/community/core/task/singlebox_e2e/ ,parents[5] = <repo>/src/backend
 _BBS_SKILL = str(
-    Path(__file__).resolve().parents[6]
+    Path(__file__).resolve().parents[5]
     / "specs" / "2026-08-09-task-goal-driven-task-runner-bbs" / "bbs-relay-pickup"
 )
 
-# 主任务:两份交付物(技术栈概览 + 架构师名册);planning-arch LLM 自拆 ~2 子。
-TASK_ID = f"t_2mode_{uuid.uuid4().hex[:6]}"
+# 主任务:三份交付物(技术栈概览 + 业务/数据双视角分析 + 架构师名册);planning-arch LLM 自拆 ~3 子。
+TASK_ID = f"t_3mode_{uuid.uuid4().hex[:6]}"
 _BBS_MAX_DEPTH = 3  # 架构师名册一段中继收口;金庸自判 full 一次唤醒即可
 
 _HDRS = {"x-user-id": _USER_ID, "accept": "application/json"}
@@ -105,38 +114,42 @@ async def _get_dashboard(cli: httpx.AsyncClient, task_id: str) -> dict | None:
 
 
 def _execute_body(owner_id: str) -> dict:
-    """``POST /api/task/execute`` 请求体(TaskInfoDTO):基础架构方向「技术栈概览 + 架构师名册」两份交付物。
+    """``POST /api/task/execute`` 请求体(TaskInfoDTO):基础架构方向三份交付物。
 
-    planning-arch(通用 LLM)读根 goal 自拆 ~2 子:技术栈概览(命中 ``基础架构技术栈概览Bot`` → HIT)、
+    planning-arch(通用 LLM)读根 goal 自拆 ~3 子:技术栈概览(命中 技术栈概览Bot → single_bot HIT)、
+    业务+数据双视角分析(命中 业务架构视角Bot+数据架构视角Bot → coop_group HIT_MULTI_BOTS)、
     架构师名册(无匹配 bot → MISS)。``MAX_DEPTH=1`` → 架构师名册 MISS@depth-1 直走 miss_depth_exhausted 升 BBS。
     """
     return {
         "task_spec": {
             "metadata": {
                 "task_id": TASK_ID,
-                "title": "整理某某某公司基础架构方向:技术栈概览 + 架构师名册",
+                "title": "整理某某某公司基础架构方向:技术栈概览 + 业务/数据双视角分析 + 架构师名册",
                 "instruction": (
-                    "本任务有**两份交付物**,请拆成两个子任务分别完成:"
+                    "本任务有**三份交付物**,请拆成三个子任务分别完成:"
                     "1) 给出基础架构方向的技术栈概览(计算/存储/网络等分层与核心组件);"
-                    "2) 整理某某某公司基础架构方向的 3 位核心技术架构师(姓名/角色 + 职责)。"
+                    "2) 从**业务架构与数据架构双视角**深度分析该公司基础架构的现状与演进"
+                    "(需业务架构、数据架构两个视角的专家协作完成);"
+                    "3) 整理某某某公司基础架构方向的 3 位核心技术架构师(姓名/角色 + 职责)。"
                     "基于自身知识即可,不联网。"
                 ),
             },
             "context": {"background": "某某某公司基础架构方向梳理", "extend_props": {}},
             "goal": {
                 "objective": (
-                    "产出某某某公司基础架构方向:技术栈概览(分层+核心组件) + 3 位核心架构师名册(姓名/角色+职责)"
+                    "产出某某某公司基础架构方向:技术栈概览 + 业务/数据双视角架构分析 + 3 位核心架构师名册"
                 ),
                 "acceptances": [
                     {"id": "ac1", "description": "给出基础架构方向技术栈概览(计算/存储/网络等层与核心组件)"},
-                    {"id": "ac2", "description": "给出基础架构方向 3 位架构师的姓名/角色 + 职责"},
+                    {"id": "ac2", "description": "从业务架构与数据架构双视角深度分析基础架构现状与演进"},
+                    {"id": "ac3", "description": "给出基础架构方向 3 位架构师的姓名/角色 + 职责"},
                 ],
             },
         },
         "source_channel_type": "bot",
         "source_channel_id": owner_id,
         # MAX_DEPTH=1:架构师名册子任务在 depth-1 MISS 直走 miss_depth_exhausted 升 BBS(不 re-plan 嵌套);
-        # 技术栈概览子任务同为 depth-1,命中 bot 正常执行不受影响。
+        # single_bot / coop_group 子任务同为 depth-1,命中执行不受影响。BBS拉群需 SINGLEBOX_BCS_DOUBLE=1。
         "execution_config": {"MAX_DEPTH": 1, "BBS_MAX_DEPTH": _BBS_MAX_DEPTH},
     }
 
@@ -145,8 +158,8 @@ def _wake_prompt(jy_bot_id: str) -> str:
     """唤醒金庸自驱 bbs-relay-pickup 收口"架构师名册"侧(MISS→HUNG→升 BBS 的那段)。
 
     只交代用哪个 skill 接单 + 必要定位信息(task_id / backend url / 自身 bot_id),
-    不复述 skill 内部的 6 步流程。金庸读 dashboard 自判:**技术栈概览已由现成 bot 做完、剩余"架构师名册"
-    这段它 full 能做** → 挂 bbs scoped 节点 → arch-analysis 执行 → bbs/result 写回。
+    不复述 skill 内部 6 步流程。金庸读 dashboard 自判:**技术栈概览 + 双视角分析已由现成 bot/群做完、
+    剩余"架构师名册"这段它 full 能做** → 挂 bbs scoped 节点 → arch-analysis 执行 → bbs/result 写回。
 
     必须传入金庸自身 bot_id(否则误填引擎身份);另钉**交付物编码契约**:step⑤ ``output_patch`` 必含
     ``architects`` 键(架构师名册数组),本用例据此断言 scoped 节点 ``run_info.output.architects``。
@@ -161,8 +174,8 @@ def _wake_prompt(jy_bot_id: str) -> str:
 
 
 @unittest.skipUnless(_LIVE, "设置 SINGLEBOX_TASK_E2E=1 启用真实 singlebox live e2e")
-class TestBbsRelayE2ENatual2Mode(unittest.TestCase):
-    def test_one_hit_one_miss_to_bbs(self) -> None:
+class TestTaskIntegrationE2E3Mode(unittest.TestCase):
+    def test_single_bot_coop_group_and_bbs(self) -> None:
         loop = asyncio.new_event_loop()
         try:
             loop.run_until_complete(self._run(loop))
@@ -171,19 +184,25 @@ class TestBbsRelayE2ENatual2Mode(unittest.TestCase):
 
     async def _run(self, loop: asyncio.AbstractEventLoop) -> None:
         # 1) provisioning(幂等建 bot + 装 skill,全部用已有 skill、原样、不新增):
-        #    owner 只装 planning-arch(通用 LLM 规划)**不装 search**(它对非 storage node_id 强制 MISS 会抹掉 HIT);
-        #    技术栈 bot(现成执行者)装 acceptance(N_hit worker 自验收,用自身 LLM 知识产技术栈概览);
-        #    金庸(中继)装 arch-analysis(N_miss 执行侧 mock)+ bbs-relay-pickup。
+        #    owner 只装 planning-arch(**不装 search** —— 它对非 storage node_id 强制 MISS 会抹掉 HIT);
+        #    技术栈 bot(single_bot 执行者)装 acceptance;
+        #    业务/数据双视角 bot(coop_group 两成员)装 acceptance;(命名含「架构」不含「架构师」,见文件头)
+        #    金庸(BBS 中继)装 arch-analysis + bbs-relay-pickup。
         prov = SingleboxBotProvisioner(backend_base_url=_BACKEND, user_id=_USER_ID)
         owner_id = await prov.create_bot(bot_name=_OWNER_BOT_NAME)
         await prov.install_skills(owner_id, [_PLANNING_SKILL])  # 只 planning-arch,不装 search
-        hit_id = await prov.create_bot(bot_name=_HIT_BOT_NAME)
-        await prov.install_skills(hit_id, [_ACCEPTANCE_SKILL])
+        single_id = await prov.create_bot(bot_name=_SINGLE_BOT_NAME)
+        await prov.install_skills(single_id, [_ACCEPTANCE_SKILL])
+        coop_a_id = await prov.create_bot(bot_name=_COOP_BOT_A)
+        await prov.install_skills(coop_a_id, [_ACCEPTANCE_SKILL])
+        coop_b_id = await prov.create_bot(bot_name=_COOP_BOT_B)
+        await prov.install_skills(coop_b_id, [_ACCEPTANCE_SKILL])
         jy_id = await prov.create_bot(bot_name=_JY_BOT_NAME)
         await prov.install_skills(jy_id, [_ARCH_SKILL, _BBS_SKILL])
         await prov._aclose()
         print(f"[provision] owner={owner_id} ← planning-arch(不装 search) ; "
-              f"技术栈bot={hit_id} ← acceptance ; "
+              f"技术栈bot={single_id} ← acceptance ; "
+              f"业务视角bot={coop_a_id}+数据视角bot={coop_b_id} ← acceptance(协作群两成员) ; "
               f"金庸={jy_id} ← arch-analysis+bbs-relay-pickup")
 
         # 2) live adapter:用于唤醒金庸自驱 bbs-relay-pickup(真实 LLM 推理)
@@ -191,9 +210,10 @@ class TestBbsRelayE2ENatual2Mode(unittest.TestCase):
 
         async with httpx.AsyncClient(timeout=300.0, headers=_HDRS) as cli:
             # 3) POST /api/task/execute → backend 进程内真实 engine 推进:
-            #    planning-arch LLM 自拆 ~2 子 → owner 通用 LLM 派发判:技术栈概览命中技术栈bot(HIT single_bot)、
-            #    架构师名册无匹配 bot(MISS)→ 后者 @MAX_DEPTH=1 升 BBS(bbs_mode=True / 根 PLANNING / 图空闲;
-            #    技术栈概览在跑保根可恢复)。
+            #    planning-arch LLM 自拆 ~3 子 → owner 通用 LLM 派发判:
+            #      技术栈概览 → HIT_SINGLE 技术栈概览Bot(single_bot);
+            #      业务+数据双视角 → HIT_MULTI_BOTS [业务架构视角Bot,数据架构视角Bot](coop_group,BCS 拉群);
+            #      架构师名册 → MISS → @MAX_DEPTH=1 升 BBS(bbs_mode=True / 根 PLANNING / 图空闲;前两子在跑保根可恢复)。
             r = await cli.post(f"{_BACKEND}/api/task/execute", json=_execute_body(owner_id))
             r.raise_for_status()
             print(f"[execute] {r.json().get('message')} data={r.json().get('data')}")
@@ -228,7 +248,7 @@ class TestBbsRelayE2ENatual2Mode(unittest.TestCase):
                     for _t in g.get("tasks") or []:
                         _ri = _t.get("run_info") or {}
                         print(f" 已自然升BBS  - {_t.get('node_id'):28} {_t.get('status'):9} "
-                              f"mode={_ri.get('run_mode') or '-':5} "
+                              f"mode={_ri.get('run_mode') or '-':11} "
                               f"assignee={str(_ri.get('assignee') or '')[:24]}")
                     break
                 if g.get("status") == "DONE":
@@ -281,8 +301,8 @@ class TestBbsRelayE2ENatual2Mode(unittest.TestCase):
                         break
                     await asyncio.sleep(5.0)
 
-        # 6) 断言:2-mode natural 混合结局——一子任务真匹配 bot(single_bot HIT)+ 一子任务 MISS→BBS 中继(bbs)
-        #    + 图收口 DONE。断言取宽容(≥1):LLM 自分解/自判非确定,只要 HIT 与中继共存即达到 2-mode 意图。
+        # 6) 断言:3-mode natural 三种执行模态共存 + 图收口 DONE。
+        #    断言取宽容(≥1 每模态):LLM 自分解/自判非确定,只要三模态共存即达到 3-mode 意图。
         try:
             await adapter._aclose()
         except Exception:
@@ -293,25 +313,42 @@ class TestBbsRelayE2ENatual2Mode(unittest.TestCase):
         self.assertEqual(nodes[TASK_ID]["status"], "DONE", "根未 DONE")
         self.assertTrue((g.get("extend_props") or {}).get("bbs_mode"), "图未置 bbs_mode(架构师名册未升 BBS)")
 
-        # 6a) HIT 侧:一子任务真匹配到现成 bot(single_bot,DONE,assignee=技术栈bot)
-        hit_nodes = [
+        # 6a) single_bot:技术栈概览子任务真匹配到现成 bot(DONE,assignee=技术栈概览Bot)
+        single_nodes = [
             t for t in g.get("tasks") or []
             if (t.get("run_info") or {}).get("run_mode") == "single_bot" and t["node_id"] != TASK_ID
         ]
         self.assertGreaterEqual(
-            len(hit_nodes), 1,
-            f"无 single_bot 派发节点(技术栈概览子任务未真匹配到技术栈bot;看 owner 派发判 / 候选预查 token)。"
+            len(single_nodes), 1,
+            f"无 single_bot 派发节点(技术栈概览子任务未真匹配到技术栈概览Bot;看 owner 派发判 / 候选预查)。"
             f"nodes={[t.get('node_id') for t in g.get('tasks') or []]}",
         )
-        for n in hit_nodes:
+        for n in single_nodes:
             ri = n.get("run_info") or {}
-            self.assertEqual(n.get("status"), "DONE", f"HIT 子任务未 DONE:{n.get('node_id')}")
+            self.assertEqual(n.get("status"), "DONE", f"single_bot 子任务未 DONE:{n.get('node_id')}")
             self.assertEqual(
-                ri.get("assignee"), hit_id,
-                f"HIT 子任务非技术栈bot 执行:{n.get('node_id')} assignee={ri.get('assignee')}",
+                ri.get("assignee"), single_id,
+                f"single_bot 非技术栈概览Bot 执行:{n.get('node_id')} assignee={ri.get('assignee')}",
             )
 
-        # 6b) 中继侧:架构师名册 MISS→BBS,金庸自驱 bbs scoped 节点(DONE,assignee=金庸,output.architects)
+        # 6b) coop_group:业务+数据双视角子任务命中协作群(DONE,assignee=grp_ 群 id)
+        coop_nodes = [
+            t for t in g.get("tasks") or []
+            if (t.get("run_info") or {}).get("run_mode") == "coop_group" and t["node_id"] != TASK_ID
+        ]
+        self.assertGreaterEqual(
+            len(coop_nodes), 1,
+            f"无 coop_group 派发节点(双视角子任务未拉协作群;看 owner 是否判 HIT_MULTI_BOTS / BCS double 是否开)。"
+            f"nodes={[t.get('node_id') for t in g.get('tasks') or []]}",
+        )
+        for n in coop_nodes:
+            self.assertEqual(n.get("status"), "DONE", f"coop_group 子任务未 DONE:{n.get('node_id')}")
+            self.assertTrue(
+                str((n.get("run_info") or {}).get("assignee") or "").startswith("grp_"),
+                f"coop_group assignee 非群 id:{n.get('node_id')} assignee={(n.get('run_info') or {}).get('assignee')}",
+            )
+
+        # 6c) bbs:架构师名册 MISS→BBS,金庸自驱 bbs scoped 节点(DONE,assignee=金庸,output.architects)
         bbs_nodes = [
             t for t in g.get("tasks") or []
             if (t.get("run_info") or {}).get("run_mode") == "bbs" and t["node_id"] != TASK_ID
@@ -332,8 +369,8 @@ class TestBbsRelayE2ENatual2Mode(unittest.TestCase):
                 (ri.get("output") or {}).get("architects"),
                 f"scoped 缺架构师 checkpoint:{n.get('node_id')}",
             )
-        print(f"[final] graph={g.get('status')} HIT(single_bot)={len(hit_nodes)} "
-              f"中继(bbs)={len(bbs_nodes)} 唤醒={wakes} 根=DONE")
+        print(f"[final] graph={g.get('status')} single_bot={len(single_nodes)} "
+              f"coop_group={len(coop_nodes)} bbs={len(bbs_nodes)} 唤醒={wakes} 根=DONE")
 
 
 def nodes_first_ext(g: dict, key: str) -> str:
