@@ -470,38 +470,16 @@ def test_claude_code_normal_template_keeps_claude_mcp_bucket():
     assert "mcp.ant.agentix.112858.aixAicoding" not in codes
 
 
-# The teclaw roster, spelled out independently of the source list. The publish
-# suite's ``_install_default_mcp_catalog`` derives its mock *from*
-# ``_DEFAULT_MCP_SERVERS_BY_ENGINE["teclaw"]``, so it proves only that a build
-# resolves whatever the roster happens to hold — a typo'd or duplicated
-# ``server_code`` would sail straight through it. This second, independent copy
-# is what makes such an edit fail loudly.
-TECLAW_DEFAULT_MCP_CODES = (
-    "mcp.ant.lwawchat.cogmessagemcp",
-    "mcp.ant.antdingopenapi.antdingreportmcpserver",
-    "mcp.ant.antdingopenapi.antdinggroupmcpserver",
-    "mcp.ant.lwawchat.cogdocumentmcp",
-    "mcp.ant.antdingopenapi.antdingeventmcpserver",
-    "mcp.ant.antdingopenapi.antdingrobotmcpserver",
-    "mcp.ant.antdingopenapi.antdingmessagemcpserver",
-    "mcp.ant.antdingopenapi.antdingtodomcpserver",
-    "mcp.ant.faas.skylarkmcpserver.skylarkmcpserver",
-    "mcp.ant.arkai.dimamcpserver",
-    "mcp.ant.homistudio.recordmcp",
-    "mcp.ant.rpc.dcanttouch.adminservice",
-    "hitl",
-)
+def test_teclaw_default_roster_is_empty():
+    """teclaw ships no default MCPs — its roster is intentionally empty.
 
-
-def test_teclaw_default_roster_shape():
-    """teclaw's roster: exact codes, exact order, no dupes, local entry last."""
-    codes = [s["server_code"] for s in get_default_mcp_servers("teclaw")]
-    assert codes == list(TECLAW_DEFAULT_MCP_CODES)
-    assert len(codes) == len(set(codes)), "duplicate server_code in the teclaw roster"
-    # ``hitl`` is the only local/stdio entry and stays last, matching how the
-    # other engines list it. The artifact path resolves its launch instruction
-    # through LocalMCPRegistry, not MCP Center — see ``_stdio_launch_for``.
-    assert codes[-1] == "hitl"
+    The publish suite's ``_install_default_mcp_catalog`` derives its mock *from*
+    ``_DEFAULT_MCP_SERVERS_BY_ENGINE["teclaw"]``, so a server added there would
+    be resolved silently. This independent pin makes such an edit fail loudly.
+    """
+    assert get_default_mcp_servers("teclaw") == []
+    assert get_default_mcp_server_codes("teclaw") == []
+    assert "hitl" not in get_default_mcp_server_codes("teclaw")
 
 
 def test_teclaw_roster_is_its_own_bucket():
@@ -509,10 +487,8 @@ def test_teclaw_roster_is_its_own_bucket():
 
     ``_resolve_default_mcp_engine_bucket`` normalizes case and delegates bucket
     overrides to the engine registry; an alias onto ``openclaw`` would silently
-    swap the whole roster, so pin both the normalization and the distinctness.
+    swap in that engine's whole roster, so pin both the normalization and the
+    distinctness.
     """
-    assert [s["server_code"] for s in get_default_mcp_servers("TECLAW")] == list(
-        TECLAW_DEFAULT_MCP_CODES
-    )
-    openclaw_codes = {s["server_code"] for s in get_default_mcp_servers("openclaw")}
-    assert "mcp.ant.lwawchat.cogmessagemcp" not in openclaw_codes
+    assert get_default_mcp_servers("TECLAW") == []
+    assert get_default_mcp_servers("openclaw") != []
