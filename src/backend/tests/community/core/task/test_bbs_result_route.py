@@ -2,7 +2,8 @@
 
 独立 TestClient + 小型 test injector(TaskModule + stub discover),不拉起 singlebox 全栈,
 不依赖 SINGLEBOX_TASK_E2E=1。验证:
-- claim 持有者 report PASS + root_verified=True → 200,且 dashboard 图状态 DONE(根 PLANNING→DONE)。
+- claim 持有者 report PASS → 200,scoped 节点 DONE + claim 释放(根收口由框架经 owner 复核,单测无 owner bot
+  则不收 DONE,见 live e2e)。
 - 非 claim 持有者 report → 409(TaskStateError)。
 """
 from __future__ import annotations
@@ -103,14 +104,13 @@ def _attach_body(task_id: str, parent_node_id: str, bot_id: str) -> dict:
     }
 
 
-def _result_body(task_id: str, node_id: str, bot_id: str, *, root_verified: bool = False) -> dict:
-    """对齐 BbsResultDTO 的请求体(PASS 验收)。"""
+def _result_body(task_id: str, node_id: str, bot_id: str) -> dict:
+    """对齐 BbsResultDTO 的请求体(PASS 验收)。收口由框架自判,无 root_verified 字段。"""
     return {
         "task_id": task_id,
         "node_id": node_id,
         "bot_id": bot_id,
         "acceptance_result": {"verdict": "PASS", "acceptances_metric": [], "gaps": []},
-        "root_verified": root_verified,
     }
 
 
@@ -133,17 +133,21 @@ def bbs_task_with_claimed_node(client):
     return c, task_id, node_id, "botA"
 
 
-def test_result_route_root_verified_done(bbs_task_with_claimed_node):
-    """claim 持有者 report PASS + root_verified=True → 200,且 dashboard 图状态 DONE。"""
+def test_result_route_pass_marks_scoped_done_and_releases_claim(bbs_task_with_claimed_node):
+    """claim 持有者 report PASS → 200,scoped 节点 DONE + claim 释放。根收口由框架经 owner 复核(单测无
+    owner bot → 不收 DONE,见 live e2e)。"""
     c, task_id, node_id, bot = bbs_task_with_claimed_node
-    r = c.post("/api/task/bbs/result", json=_result_body(task_id, node_id, bot, root_verified=True))
+    r = c.post("/api/task/bbs/result", json=_result_body(task_id, node_id, bot))
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["success"] is True
     assert body["data"] == {"ok": True}
-    # dashboard 图状态 DONE(根 PLANNING→DONE + scoped PASS→DONE)
+    # scoped DONE + claim 释放
     d = c.get("/api/task/dashboard", params={"task_id": task_id}).json()["data"]
-    assert d["status"] == "DONE"
+    nodes = {t["node_id"]: t for t in d["tasks"]}
+    assert nodes[node_id]["status"] == "DONE"
+    root = nodes[task_id]
+    assert (root["run_info"]["extend_props"] or {}).get("bbs_owner") is None
 
 
 def test_result_route_non_owner_409(bbs_task_with_claimed_node):

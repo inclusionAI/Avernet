@@ -95,10 +95,9 @@ curl -s --json @attach.json "$BASE/api/task/bbs/attach" | jq '.'
 {"task_id":"t1","node_id":"bbs-a1b2c3d4","bot_id":"botA",
  "acceptance_result":{"verdict":"FAIL","acceptances_metric":[],"gaps":["尚缺报告第3节"]},
  "output_patch":{"done_sections":[1,2],"draft_2":"...","progress":30},
- "exec_error":null,
- "root_verified":false}
+ "exec_error":null}
 ```
-- **200** → `data: {"ok":true}`。scoped 节点翻终态(`verdict=PASS`→`DONE` / `verdict=FAIL`→`FAILED`);**服务端 `finally` 无条件清根 `bbs_owner` = 释放 claim**。`root_verified=true` → 再把根翻 `DONE` + 图翻 `DONE`。
+- **200** → `data: {"ok":true}`。scoped 节点翻终态(`verdict=PASS`→`DONE` / `verdict=FAIL`→`FAILED`);**服务端 `finally` 无条件清根 `bbs_owner` = 释放 claim**。**根是否收口由框架自行判定**(经 owner 复核根 gap 满足→根 `DONE`+图 `DONE`),bot 不声明(无 `root_verified` 字段)。
 - **409** → 非持有者。放弃写回。
 ```bash
 curl -s --json @result.json "$BASE/api/task/bbs/result" | jq '.'
@@ -106,23 +105,21 @@ curl -s --json @result.json "$BASE/api/task/bbs/result" | jq '.'
 
 ## `bbs/result` envelope 构造样例
 
-`acceptance_result.verdict` 取 `Literal["PASS","FAIL"]`;`acceptances_metric` 是已达成的 AC 标签数组;`gaps` 是仍存在的差距字符串数组;`output_patch` 是本次产出/checkpoint 对象;`root_verified` 仅在根目标已满足时置 `true`。
+`acceptance_result.verdict` 取 `Literal["PASS","FAIL"]`;`acceptances_metric` 是已达成的 AC 标签数组;`gaps` 是仍存在的差距字符串数组;`output_patch` 是本次产出/checkpoint 对象。**无 `root_verified`**——根收口由框架复核根 gap 自判,bot 只如实报本 scoped 节点的 PASS/FAIL。
 
-### A. 收口(根目标满足 → 图 DONE)
+### A. 收口(本 scoped 节点 PASS、做满剩余 → 框架复核根 gap 闭 → 图 DONE)
 ```json
 {"task_id":"t1","node_id":"bbs-a1b2c3d4","bot_id":"botA",
  "acceptance_result":{"verdict":"PASS","acceptances_metric":["ac1:ok","ac2:ok","ac3:ok"],"gaps":[]},
- "output_patch":{"report":"<完整产出>"},
- "root_verified":true}
+ "output_patch":{"report":"<完整产出>"}}
 ```
-→ scoped 节点 `DONE`、根 `DONE`、图 `DONE`。接力完成。
+→ scoped 节点 `DONE`、claim 释放;框架复核根 gap 闭→根 `DONE`、图 `DONE`。接力完成。
 
 ### B. partial 交棒(只完成本段,根未满足 → 释放给下个 bot 续)
 ```json
 {"task_id":"t1","node_id":"bbs-a1b2c3d4","bot_id":"botA",
  "acceptance_result":{"verdict":"FAIL","acceptances_metric":[],"gaps":["缺第3节","缺图表"]},
- "output_patch":{"done_sections":[1,2],"draft_2":"...","progress":30},
- "root_verified":false}
+ "output_patch":{"done_sections":[1,2],"draft_2":"...","progress":30}}
 ```
 → scoped 节点 `FAILED`、claim 释放;`output_patch` 落进 `run_info.output` 供下个 bot 续。
 
@@ -130,18 +127,16 @@ curl -s --json @result.json "$BASE/api/task/bbs/result" | jq '.'
 ```json
 {"task_id":"t1","node_id":"bbs-a1b2c3d4","bot_id":"botA",
  "acceptance_result":{"verdict":"PASS","acceptances_metric":["ac_s2:ok"],"gaps":[]},
- "output_patch":{"part":"..."},
- "root_verified":false}
+ "output_patch":{"part":"..."}}
 ```
-→ scoped 节点 `DONE`、claim 释放,下个 bot 接着做剩余。
+→ scoped 节点 `DONE`、claim 释放;框架复核根 gap 未闭→根仍 `PLANNING`,下个 bot 接着做剩余。
 
 ### D. 执行报错(以 FAIL 表达终态,exec_error 作补充)
 ```json
 {"task_id":"t1","node_id":"bbs-a1b2c3d4","bot_id":"botA",
  "acceptance_result":{"verdict":"FAIL","acceptances_metric":[],"gaps":["未完成:工具 X 超时"]},
  "output_patch":{"progress":10},
- "exec_error":"Tool X timeout",
- "root_verified":false}
+ "exec_error":"Tool X timeout"}
 ```
 > 推荐终态总带 `acceptance_result`(PASS/FAIL)让节点翻转终态;`exec_error` 作为 FAIL 的补充信息,而不是 `acceptance_result` 的替代。
 

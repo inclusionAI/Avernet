@@ -412,10 +412,11 @@ class TestMissEscalateBbs:
         assert g.loop_round >= 1  # 升 BBS 自增图级 loop_round
 
     def test_bbs_bot_claims_and_relays_to_done(self):
-        """v5 真实 BBS 接力经 facade API(claim→attach→report root_verified=true 收口),不需直写复位:
-        MISS at max→HUNG→升 BBS(miss_depth_exhausted 可恢复态)→ 根保 PLANNING 待接力 →
+        """v5 真实 BBS 接力经 facade API(claim→attach→report PASS 收口;根收口由框架经 owner 复核自判),
+        不需直写复位:MISS at max→HUNG→升 BBS(miss_depth_exhausted 可恢复态)→ 根保 PLANNING 待接力 →
         BBS bot 经 facade.claim_bbs_task 占根 → facade.attach_bbs_node 挂 run_mode=bbs scoped 节点
-        (已 RUNNING)→ facade.report_bbs_result(PASS, root_verified=true)→ scoped DONE + 根 DONE + 图 DONE。"""
+        (已 RUNNING)→ facade.report_bbs_result(PASS)→ scoped DONE + claim 释放;框架 _on_pass_collect 复核
+        根 gap(case planner 返 has_gap=False)→ 根 DONE + 图 DONE。"""
         facade, svc, runner = _wire_facade(max_depth=1, miss_nodes={"N_practice_bbs"})
         _exec(facade, _task_info("t_case", max_depth=1))
         _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="overview")))
@@ -428,7 +429,7 @@ class TestMissEscalateBbs:
         assert g.extend_props.get("bbs_mode") is True
         assert svc._get_node(g, "t_case").status == Status.PLANNING
 
-        # BBS 中继接管:claim → attach(run_mode=bbs 自动 PENDING→RUNNING) → report root_verified
+        # BBS 中继接管:claim → attach(run_mode=bbs 自动 PENDING→RUNNING) → report PASS(根收口框架自判)
         bbs_bot_id = "bot_bbs_7"
         claim = facade.claim_bbs_task("t_case", bbs_bot_id)
         assert claim.success
@@ -444,10 +445,9 @@ class TestMissEscalateBbs:
             task_id="t_case", node_id=scoped.node_id, bot_id=bbs_bot_id,
             acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS, gaps=[]),
             output_patch={"result": "bbs 一手实践"},
-            root_verified=True,
         ))
         g = svc.query_task_dashboard("t_case")
-        # 收口:scoped DONE + 根 DONE + 图 DONE(on_bbs_report root_verified 路径)
+        # 收口:scoped DONE + 根 DONE + 图 DONE(框架 _on_pass_collect 复核根 gap 闭→_maybe_finish_graph)
         assert svc._get_node(g, scoped.node_id).status == Status.DONE
         assert svc._get_node(g, "t_case").status == Status.DONE
         assert g.status == Status.DONE

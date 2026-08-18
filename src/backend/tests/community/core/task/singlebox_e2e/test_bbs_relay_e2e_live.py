@@ -30,7 +30,7 @@ gated by ``SINGLEBOX_TASK_E2E=1``。本地 ``./scripts/singlebox.sh start all`` 
   若要让 owner 真实规划 + 自然升 BBS 接力成功,需另做 planning skill 剧本并(可能)放宽 §10.5 seam——独立工作,不在本用例。
 - 接力循环由本用例编排(充当"极薄外部触发器 + bbs-relay-pickup 的 loop 驱动"),每段:
   claim → attach(scoped 子节点:某方向找架构师)→ 风清扬 arch-analysis(live)→ result(PASS+checkpoint)
-  → 释放 → 下段;末段 ``root_verified=True`` 收口图 DONE。复刻 bbs-relay-pickup SKILL.md 的 6 步 loop。
+  → 释放 → 下段;根收口由框架经 owner 复核自判(非 bot 声明,无 root_verified;见 natual live 测)。复刻 bbs-relay-pickup SKILL.md 的 6 步 loop。
 """
 from __future__ import annotations
 
@@ -211,7 +211,6 @@ class TestBbsRelayE2ELive(unittest.TestCase):
         try:
             # 4) BBS 接力 loop(本用例编排 = 极薄触发器 + bbs-relay-pickup loop):每方向一段
             for i, sub in enumerate(SUB_DOMAINS):
-                is_last = i == len(SUB_DOMAINS) - 1
 
                 # 步② CAS 占根(同 bot 幂等;前段 result 已释放 claim,这里重新 claim)
                 r = client.post("/api/task/bbs/claim", json={"task_id": TASK_ID, "bot_id": fqy_id})
@@ -293,7 +292,7 @@ class TestBbsRelayE2ELive(unittest.TestCase):
                     finding_text = f"<arch-analysis unavailable: {exc!r}>"
                     print(f"[relay@{sub}] arch-analysis 异常:{exc!r}")
 
-                # 步⑤ 回投:PASS + checkpoint;末段 root_verified=True 收口图 DONE
+                # 步⑤ 回投:PASS + checkpoint;根收口由框架经 owner 复核自判(非 bot 声明,无 root_verified)
                 r = client.post(
                     "/api/task/bbs/result",
                     json={
@@ -306,40 +305,30 @@ class TestBbsRelayE2ELive(unittest.TestCase):
                             "gaps": [],
                         },
                         "output_patch": {"domain": sub, "architects": finding_text},
-                        "root_verified": is_last,
                     },
                 )
                 self.assertEqual(r.status_code, 200, f"result 未成功(@{sub}):{r.text}")
-                # 上报确认:节点 DONE;非末段根仍 PLANNING(collector-free 不提前收口);bbs_owner 已释放
+                # 上报确认:节点 DONE;bbs_owner 已释放。根是否 DONE 由框架复核根 gap 自判;
+                # 本 in-process 编排无 owner bot→根不收口(不断言根 DONE,根收口见 natual live 测)。
                 g = _dash()
                 nd = _node(g, node_id)
                 self.assertEqual(nd["status"], "DONE", f"result 后节点非 DONE(@{sub}):{nd['status']}")
                 root = _node(g, TASK_ID)
-                if is_last:
-                    self.assertEqual(root["status"], "DONE", f"末段 root_verified 后根非 DONE(@{sub})")
-                    self.assertEqual(g["status"], "DONE", f"末段后图非 DONE(@{sub}):{g['status']}")
-                else:
-                    self.assertEqual(
-                        root["status"], "PLANNING",
-                        f"非末段 result 后根非 PLANNING(collector-free 应不提前收口)(@{sub}):{root['status']}",
-                    )
                 self.assertIsNone(
                     (root["run_info"]["extend_props"] or {}).get("bbs_owner"),
                     f"result 后 bbs_owner 未释放(@{sub})",
                 )
-                print(f"[relay@{sub}] result 200 node=DONE root={root['status']} bbs_owner=释放 ✓ "
-                      f"root_verified={is_last}")
+                print(f"[relay@{sub}] result 200 node=DONE root={root['status']} bbs_owner=释放 ✓")
         finally:
             try:
                 await adapter._aclose()
             except Exception:
                 pass
 
-        # 5) 断言:图 DONE + 各方向 scoped bbs 节点 DONE(assignee=风清扬,带架构师 checkpoint)
+        # 5) 断言:各方向 scoped bbs 节点 DONE(assignee=风清扬,带架构师 checkpoint)+ bbs_mode 已置。
+        # 根/图是否 DONE 由框架复核根 gap 自判(无 root_verified);本 in-process 编排无 owner bot→不收口,
+        # 故不断言图 DONE(根收口见 natual live 测 ``test_bbs_relay_e2e_natual``)。
         g = client.get("/api/task/dashboard", params={"task_id": TASK_ID}).json()["data"]
-        self.assertEqual(g["status"], "DONE", f"全图未闭环 DONE:status={g['status']}")
-        nodes = {t["node_id"]: t for t in g["tasks"]}
-        self.assertEqual(nodes[TASK_ID]["status"], "DONE", "根未 DONE")
         self.assertTrue(g["extend_props"].get("bbs_mode"), "图未置 bbs_mode")
         self.assertGreater(
             total_architects, 0,
@@ -363,7 +352,7 @@ class TestBbsRelayE2ELive(unittest.TestCase):
                 (ri.get("output") or {}).get("architects"),
                 f"scoped 缺架构师 checkpoint:{n['node_id']}",
             )
-        print(f"[final] graph={g['status']} 风清扬接力段={len(bbs_nodes)} 架构师(parsed)={total_architects} 根=DONE")
+        print(f"[final] graph={g['status']} 风清扬接力段={len(bbs_nodes)} 架构师(parsed)={total_architects}")
 
 
 if __name__ == "__main__":

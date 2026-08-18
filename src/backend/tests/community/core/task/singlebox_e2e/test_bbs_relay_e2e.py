@@ -11,7 +11,7 @@ SSOT 播种经 injector 取 ``TaskGraphService`` 白盒建图/置 bbs_mode/根 P
 - C(claim race):两 bot 同 ``bbs/claim`` 同一 bbs 任务 → 恰一 200、一 409(CAS 输者)。
 - B(partial-handoff relay):botA claim→attach→result(FAIL+gaps+output_patch checkpoint)→释放;
   botB claim→读 dashboard(scoped FAILED + 上一段 checkpoint)→attach(新 scoped 节点)→
-  result(PASS+root_verified=True)→图 DONE。接力不重做:botA checkpoint 留存其 scoped 节点。
+  result(PASS)→scoped DONE + claim 释放(根收口由框架自判,见 natual live 测)。接力不重做:botA checkpoint 留存其 scoped 节点。
 - D(crash lease):botA claim+attach 后不 result(模拟崩溃)→ harness SLA 到期清根 bbs_owner +
   scoped 标终态 FAILED(非 PENDING 重派)→ botB claim 接管并完成接力。
   D 以服务级 ``TaskHarness``(注入假时钟 + 短 SLA,范本 ``test_bbs_harness_expire.py``)直写同一
@@ -147,16 +147,15 @@ def _attach_body(task_id: str, parent_node_id: str, bot_id: str) -> dict:
 def _result_body(
     task_id: str, node_id: str, bot_id: str, *,
     verdict: str = "PASS", gaps: list[str] | None = None,
-    output_patch: dict | None = None, root_verified: bool = False,
+    output_patch: dict | None = None,
 ) -> dict:
-    """对齐 BbsResultDTO 的请求体。FAIL 强制要求 gaps 非空(验收 skill 契约)。"""
+    """对齐 BbsResultDTO 的请求体。FAIL 强制要求 gaps 非空(验收 skill 契约)。收口由框架自判,无 root_verified。"""
     return {
         "task_id": task_id,
         "node_id": node_id,
         "bot_id": bot_id,
         "acceptance_result": {"verdict": verdict, "acceptances_metric": [], "gaps": gaps or []},
         "output_patch": output_patch,
-        "root_verified": root_verified,
     }
 
 
@@ -203,7 +202,7 @@ def test_c_two_bots_claim_same_bbs_task_exactly_one_wins(client):
 def test_b_partial_handoff_relay(client):
     """场景 B:botA claim→attach→result(FAIL+gaps+output_patch checkpoint)→释放;
     botB claim→读 dashboard(scoped FAILED + 上一段 checkpoint)→attach(新 scoped 节点)→
-    result(PASS+root_verified=True)→图 DONE。接力不重做:botA checkpoint 留存其 scoped 节点。"""
+    result(PASS)→scoped DONE + claim 释放(根收口由框架自判,见 natual live 测)。接力不重做:botA checkpoint 留存其 scoped 节点。"""
     c, inj = client
     task_id = f"bbs-b-{uuid.uuid4().hex[:6]}"
     _seed_bbs_planning(inj, task_id, execution_config={"BBS_MAX_DEPTH": 5})
@@ -232,19 +231,19 @@ def test_b_partial_handoff_relay(client):
     assert r_attach_b.status_code == 200, r_attach_b.text
     node_b = r_attach_b.json()["data"]["node_id"]
     assert node_b != node_a, "接力应挂新 scoped 节点,不重做 botA 段"
-    # botB 续做:PASS + root_verified → 根 PLANNING→DONE + 图 DONE
+    # botB 续做:PASS → 本 scoped DONE + claim 释放(根收口由框架经 owner 复核自判,非 bot 声明;单测无 owner
+    # bot→不收图 DONE,见 natual live 测)。这里验接力机制:接力不重做 + checkpoint 留存 + claim 释放。
     r_pass = c.post("/api/task/bbs/result", json=_result_body(
-        task_id, node_b, "botB", verdict="PASS", root_verified=True))
+        task_id, node_b, "botB", verdict="PASS"))
     assert r_pass.status_code == 200, r_pass.text
 
-    # 终局:图 DONE;根 DONE;botA scoped FAILED(checkpoint 留存,接力不重做);botB scoped DONE;claim 已释放
+    # 终局:botA scoped FAILED(checkpoint 留存,接力不重做);botB scoped DONE;claim 已释放。
+    # (根是否 DONE 由框架复核根 gap 自判;in-process 无 owner bot 不收口,断言略,见 natual live 测)
     d2, nodes2 = _dashboard_tasks(c, task_id)
-    assert d2["status"] == "DONE"
-    assert nodes2[task_id]["status"] == "DONE"
     assert nodes2[node_a]["status"] == "FAILED"
     assert nodes2[node_b]["status"] == "DONE"
     assert nodes2[node_a]["run_info"]["output"] == {"progress": 30}, "botA checkpoint 应留存(接力不重做)"
-    assert _root_owner(nodes2, task_id) is None, "root_verified 后 claim 应已释放"
+    assert _root_owner(nodes2, task_id) is None, "result 后 claim 应已释放"
 
 
 def test_d_crash_lease_relay(client):
@@ -287,15 +286,17 @@ def test_d_crash_lease_relay(client):
     assert not any(getattr(p, "node_id", None) == node_a for p in recorder), (
         f"bbs 节点不应经 on_harness_fn 重派(标终态不重派): {recorder}")
 
-    # botB claim 接管(owner 已清 → CAS 成功)并完成接力 → 图 DONE
+    # botB claim 接管(owner 已清 → CAS 成功)并完成接力段 → 本 scoped DONE + claim 释放
+    # (根收口由框架自判;in-process 无 owner bot 不收图 DONE,见 natual live 测)
     assert c.post("/api/task/bbs/claim", json={"task_id": task_id, "bot_id": "botB"}).status_code == 200
     r_attach_b = c.post("/api/task/bbs/attach", json=_attach_body(task_id, task_id, "botB"))
     assert r_attach_b.status_code == 200, r_attach_b.text
     node_b = r_attach_b.json()["data"]["node_id"]
     assert c.post("/api/task/bbs/result", json=_result_body(
-        task_id, node_b, "botB", verdict="PASS", root_verified=True)).status_code == 200
-    d2, _ = _dashboard_tasks(c, task_id)
-    assert d2["status"] == "DONE"
+        task_id, node_b, "botB", verdict="PASS")).status_code == 200
+    _, nodes_done = _dashboard_tasks(c, task_id)
+    assert nodes_done[node_b]["status"] == "DONE"
+    assert _root_owner(nodes_done, task_id) is None
 
 
 def test_g_graph_hung_attach_rejected(client):

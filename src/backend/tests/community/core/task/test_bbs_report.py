@@ -1,9 +1,10 @@
-"""BBS 接力步⑤ on_bbs_report / report_bbs_result 回投(collector-free)单测。
+"""BBS 接力步⑤ on_bbs_report / report_bbs_result 回投单测。
 
-对齐 task-7 brief(TDD RED→GREEN)。scoped 节点终态回投(PASS→DONE / FAIL+gaps→FAILED +
-output_patch fold)+ root_verified 根 PLANNING→DONE + 图 DONE + 释放 bbs_owner claim。
-collector-free:不跑 _on_pass_collect/_on_fail_collect/_drain(避免框架经 owner-bot 重规划
-抢占 bot 接力,对齐 spec §10.4)。
+对齐 task-7 brief。scoped 节点终态回投(PASS→DONE / FAIL+gaps→FAILED + output_patch fold)+ 释放
+bbs_owner claim。收口不由 bot 声明:``on_bbs_report`` 翻 scoped 终态后走 ``_on_pass_collect``/
+``_on_fail_collect`` 收口路径,根目标满足由框架经 owner 复核(``plan(root)``→``_maybe_finish_graph``)判定。
+单测无 owner bot → ``plan(root)`` 走 ``no_planning_port``→``gap_no_progress``→根 HUNG,故单测只断
+mechanics(scoped 终态 + claim 释放),收口见 live e2e(``test_bbs_relay_e2e_natual``)。
 """
 import uuid
 
@@ -73,17 +74,21 @@ def task_service_with_bbs_node():
 
 
 @pytest.mark.asyncio
-async def test_report_pass_finishes_graph_when_root_verified(task_service_with_bbs_node):
+async def test_report_pass_marks_scoped_done_and_releases_claim(task_service_with_bbs_node):
+    """步⑤ PASS:scoped 节点 DONE + claim 释放。根收口由框架经 owner 复核(live 有 planner):``on_bbs_report``
+    →``_on_pass_collect``→``plan(root)``→``has_gap=False``→``_maybe_finish_graph``。单测无 owner bot,
+    ``plan(root)`` 返 ``no_planning_port``→``gap_no_progress``→根 HUNG,故此处只断 mechanics(scoped DONE +
+    claim 释放),不断言图 DONE(收口见 live e2e ``test_bbs_relay_e2e_natual``)。"""
     svc, task_id, node_id, bot = task_service_with_bbs_node
     r = await svc.report_bbs_result(
         task_id, node_id, bot,
-        acceptance_result=AcceptanceResult(AcceptanceVerdict.PASS), root_verified=True,
+        acceptance_result=AcceptanceResult(AcceptanceVerdict.PASS),
     )
     assert r.success is True
-    assert svc.get_task_dashboard(task_id).status == Status.DONE
-    # claim 已释放
+    scoped = next(n for n in svc.get_task_dashboard(task_id).tasks if n.node_id == node_id)
+    assert scoped.status == Status.DONE
     root = next(n for n in svc.get_task_dashboard(task_id).tasks if n.node_id == task_id)
-    assert root.run_info.extend_props.get("bbs_owner") is None
+    assert root.run_info.extend_props.get("bbs_owner") is None  # claim 已释放
 
 
 @pytest.mark.asyncio
@@ -112,19 +117,22 @@ async def test_report_rejects_non_owner(task_service_with_bbs_node):
 
 
 @pytest.mark.asyncio
-async def test_report_clears_owner_on_mid_path_raise(task_service_with_bbs_node):
-    """root_verified=True 在根 HUNG 时翻态 HUNG→DONE 非法(_DIRECT_TRANSITIONS 无 HUNG 出边)→抛
-    TaskStateError;try/finally 须仍清根 bbs_owner,避免持卡者死锁(他 bot claim 被 CAS 拒、
-    持卡者重报已 DONE 节点再翻 DONE 亦非法)。owner 校验在 try 之外,故非持有者抛错不清他卡。"""
+async def test_report_clears_owner_even_if_scoped_flip_raises(task_service_with_bbs_node):
+    """scoped 翻态抛错(如对已 DONE 的 scoped 节点再报 PASS:DONE→DONE 非法)时,``finally`` 仍须清根
+    ``bbs_owner``,避免持卡者死锁(他 bot claim 被 CAS 拒)。owner 校验在 ``try`` 之外,非持有者抛错不清他卡。"""
     svc, task_id, node_id, bot = task_service_with_bbs_node
-    # 白盒置根 HUNG(模拟 bbs_relay_exhausted 等已 HUNG 的根);get_task_dashboard(node_id=None) 返回存储引用
-    stored = svc.get_task_dashboard(task_id)
-    root = next(n for n in stored.tasks if n.node_id == task_id)
-    root.status = Status.HUNG
+    # 先正常回投 PASS 一次 → scoped DONE + claim 释放
+    await svc.report_bbs_result(
+        task_id, node_id, bot,
+        acceptance_result=AcceptanceResult(AcceptanceVerdict.PASS),
+    )
+    # 重新 claim(模拟同 bot 再报已 DONE 节点)
+    svc.claim_bbs_task(task_id, bot)
+    # 对已 DONE 节点再报 PASS → 翻态抛 TaskStateError(DONE→DONE 非法)
     with pytest.raises(TaskStateError):
         await svc.report_bbs_result(
             task_id, node_id, bot,
-            acceptance_result=AcceptanceResult(AcceptanceVerdict.PASS), root_verified=True,
+            acceptance_result=AcceptanceResult(AcceptanceVerdict.PASS),
         )
     # 持卡者即使翻态抛错也已被释放,不再死锁
     root_after = next(n for n in svc.get_task_dashboard(task_id).tasks if n.node_id == task_id)

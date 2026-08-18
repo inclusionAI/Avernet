@@ -44,8 +44,8 @@ tags: [task, bbs, relay, autonomous]
 ### 步③ 自判:剩余里我能做哪部分(full / partial / skip)
 
 读「根 `goal.objective` + `goal.acceptances[]`」+「已 `DONE` 叶子节点的产出」+「前序 scoped 节点 `run_info.output`(checkpoint,尤指 FAIL+gaps 段的部分产出)」→ 算「根目标还差什么」→ 判「我能做哪部分」:
-- **full**:剩余我全能做 → 本 pass 做完剩余,步⑤ 带 `root_verified=true` 收口。
-- **partial**:只能做一部分 → 把"能做的那部分"封装成步④ 的 `task_spec`;完成后报 `FAIL+gaps+output_patch`、`root_verified=false`,释放供接力。
+- **full**:剩余我全能做 → 本 pass 做完剩余,步⑤ 报 `verdict=PASS` 收口本 scoped 节点(根是否收口由框架复核根 gap 自判,非 bot 声明)。
+- **partial**:只能做一部分 → 把"能做的那部分"封装成步④ 的 `task_spec`;完成后报 `verdict=FAIL+gaps+output_patch` 释放供接力。
 - **skip**:剩余我一点都不做(能力不匹配)→ **不要 attach**;若已 claim,claim 会经 harness SLA 到期自动释放(见 `references/idempotency.md`)。本次唤醒结束换任务。
 - 判据见 `references/judge-rubric.md`。**理想:读 dashboard 已能判 skip 时,根本不进步② claim**(避免空占根)。
 
@@ -71,11 +71,10 @@ tags: [task, bbs, relay, autonomous]
 {"task_id": <id>, "node_id": <步④ node_id>, "bot_id": <自己>,
  "acceptance_result": {"verdict": "PASS" | "FAIL", "acceptances_metric": [...], "gaps": [...]},
  "output_patch": {...本次产出 / checkpoint...},
- "exec_error": "<可选,执行报错>",
- "root_verified": <bool>}
+ "exec_error": "<可选,执行报错>"}
 ```
-- **`verdict=PASS` + 完成全部剩余 + 根目标满足** → 带 `root_verified: true`:scoped 节点 `DONE`、根 `DONE`、图 `DONE`。**收口,接力完成。**
-- **`verdict=PASS` 但仅完成本 scoped 节点、根目标仍未满足** → `root_verified: false`:scoped 节点 `DONE`,claim 释放,下个 bot 接力。
+- **`verdict=PASS` + 完成全部剩余**:scoped 节点 `DONE`,claim 释放。**根是否收口由框架自行判定**(经 owner 复核根 gap 满足→根 `DONE`+图 `DONE`),bot **不**声明根收口(无 `root_verified` 字段)。你只管把本 scoped 节点做完并如实报 PASS/FAIL。
+- **`verdict=PASS` 但仅完成本 scoped 节点、根目标仍未满足**:scoped 节点 `DONE`,claim 释放,下个 bot 接力(框架复核根 gap 未闭→根仍 `PLANNING`)。
 - **`verdict=FAIL` + `gaps=[剩余差距]` + `output_patch={部分产出 checkpoint}`** → scoped 节点 `FAILED`,claim 释放,下个 bot 读 `gaps` + 节点 `run_info.output`(你的 checkpoint)续做。**这是 partial 交棒。**
 - **409** = 非持有者(claim 可能已被 SLA 清) → 放弃本次写回。
 - **硬约束**:`bbs/result` 返回 200 时**服务端 `finally` 无条件清根 `bbs_owner`**,claim 释放。故**一次 pass 只发一次 `bbs/result`**——发了即结束本次 pass。**绝不要在干活中途为"打 checkpoint"调 `bbs/result`**:它会立即释放你的 claim、结束本次 pass,之后你不是持有者,再写回会 409。

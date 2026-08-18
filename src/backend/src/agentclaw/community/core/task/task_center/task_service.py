@@ -133,20 +133,20 @@ class TaskService(TaskServiceProtocol):
         self, task_id: str, node_id: str, bot_id: str,
         acceptance_result: AcceptanceResult | None = None,
         output_patch: dict | None = None, exec_error: str | None = None,
-        root_verified: bool = False,
     ) -> NodeOpResult:
-        """BBS 接力步⑤:回投 scoped 节点终态 + 释放 claim。collector-free(经 ``on_bbs_report``)。
+        """BBS 接力步⑤:回投 scoped 节点终态 + 释放 claim(经 ``on_bbs_report``);收口由框架自行判定(非 bot 声明)。
 
         供 bbs 接力执行实体(FR-PICK-05)回投:``acceptance_result``(PASS→DONE / FAIL+gaps→FAILED)/
-        ``output_patch``(checkpoint fold)/``exec_error``(执行报错 fold);``root_verified=True`` →
-        根 PLANNING→DONE + 图 DONE。``bot_id`` 须为当前 ``bbs_owner``(经 on_bbs_report 持有者校验),
+        ``output_patch``(checkpoint fold)/``exec_error``(执行报错 fold)。根目标是否满足由框架经 owner
+        复核(``on_bbs_report``→``_on_pass_collect``→``plan(root)``→``_maybe_finish_graph``)判定,
+        **非 bot 自报**(故无 ``root_verified``)。``bot_id`` 须为当前 ``bbs_owner``(经 on_bbs_report 持有者校验),
         否则 ``TaskStateError``。
         """
         patch = TaskNodePatch(
             task_id=task_id, node_id=node_id, assignee=bot_id,
             acceptance_result=acceptance_result, output_patch=output_patch, exec_error=exec_error,
         )
-        return await self._engine.on_bbs_report(patch, root_verified=root_verified)
+        return await self._engine.on_bbs_report(patch)
 
 
 def run_execute(facade: TaskService, task_info: TaskInfo) -> TaskOpResult:

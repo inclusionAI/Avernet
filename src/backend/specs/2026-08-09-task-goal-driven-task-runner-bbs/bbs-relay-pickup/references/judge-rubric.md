@@ -21,14 +21,14 @@
 
 ### full — 剩余我全能做
 - **判据**:剩余的全部 AC 都在你的能力范围内,且你能在 harness SLA 窗口内一次做完。
-- **行动**:步④ `task_spec` 覆盖**全部剩余**;步⑤ `verdict=PASS`、`acceptances_metric` 列出达成的 AC、`gaps=[]`、带 `output_patch={完整产出}`、`root_verified=true`(做完后根 acceptance 全达成时)。
-- **预期**:图 `DONE`,接力收口。
+- **行动**:步④ `task_spec` 覆盖**全部剩余**;步⑤ `verdict=PASS`、`acceptances_metric` 列出达成的 AC、`gaps=[]`、带 `output_patch={完整产出}`。**不声明根收口**(无 `root_verified`)——根是否 DONE 由框架复核根 gap 自判。
+- **预期**:scoped 节点 `DONE`、claim 释放;框架复核根 acceptance 全达成→图 `DONE`,接力收口。
 
 ### partial — 剩余里我只能做一部分
 - **判据**:剩余的 AC 中,你能做一部分(某几条 AC、或某条 AC 的一部分),其余超你的能力 / 超单次 SLA 窗口。
 - **行动**:
   - 步④ `task_spec` 只封装**你能做的那部分**——`goal.objective` / `instruction` 精确圈定范围,不要假装覆盖全部剩余。
-  - 步⑤ `verdict=FAIL`、`gaps=[剩余你未做的 AC / 差距描述]`、`output_patch={本次部分产出 checkpoint}`、`root_verified=false`。
+  - 步⑤ `verdict=FAIL`、`gaps=[剩余你未做的 AC / 差距描述]`、`output_patch={本次部分产出 checkpoint}`。
 - **交棒**:claim 释放,下个 bot 读你的 `gaps` + 节点 `run_info.output`(你的 `output_patch`)续。
 - **长活**:一段做不完 → 现在做能做的一段、报 partial 交棒、(下次或同 bot)重新 claim 续下一段 = **分段接力**。每段一次 attach,消耗 1 接力深度(受 `BBS_MAX_DEPTH` 约束)。
 

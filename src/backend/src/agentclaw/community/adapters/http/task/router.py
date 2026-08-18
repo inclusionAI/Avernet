@@ -146,11 +146,10 @@ async def bbs_result(
     body: BbsResultDTO,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
 ) -> ApiResponse[dict[str, Any]]:
-    """BBS 接力步⑤:回投 scoped 节点终态 + 释放 claim(collector-free)。
+    """BBS 接力步⑤:回投 scoped 节点终态 + 释放 claim;收口由框架经 owner 复核根 gap 自行收口(非 bot 声明)。
 
     ``acceptance_result``(PASS→DONE / FAIL+gaps→FAILED)/ ``output_patch``(checkpoint fold)/
-    ``exec_error``(执行报错 fold);``root_verified=True`` → 根 PLANNING→DONE + 图 DONE。
-    ``bot_id`` 须为当前 ``bbs_owner``,否则 ``TaskStateError`` → 409。
+    ``exec_error``(执行报错 fold)。``bot_id`` 须为当前 ``bbs_owner``,否则 ``TaskStateError`` → 409。
     """
     from fastapi import HTTPException
 
@@ -160,7 +159,7 @@ async def bbs_result(
         await service.report_bbs_result(
             body.task_id, body.node_id, body.bot_id,
             acceptance_result=ar, output_patch=body.output_patch,
-            exec_error=body.exec_error, root_verified=body.root_verified,
+            exec_error=body.exec_error,
         )
     except TaskStateError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None

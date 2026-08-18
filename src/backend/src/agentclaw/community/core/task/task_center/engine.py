@@ -365,40 +365,50 @@ class ExecutionEngine:
             await self._drain(patch.task_id, side)
             return result
 
-    # ===== on_bbs_report:BBS 接力步⑤回投(collector-free)=====
-    async def on_bbs_report(self, patch: TaskNodePatch, root_verified: bool = False) -> NodeOpResult:
-        """BBS 接力步⑤回投:collector-free——仅翻 scoped 节点终态(SSOT ``update_task_node_info``),
-        不跑 ``_on_pass_collect``/``_on_fail_collect``/``_drain``(避免框架经 owner-bot 重规划抢占接力,
-        对齐 spec §10.4)。``root_verified=True`` → 根 PLANNING→DONE + 图 DONE。最后清根 ``bbs_owner`` 释放 claim。
+    # ===== on_bbs_report:BBS 接力步⑤回投 =====
+    async def on_bbs_report(self, patch: TaskNodePatch) -> NodeOpResult:
+        """BBS 接力步⑤回投:翻 scoped 节点终态 + 释放 claim,**收口交给 engine 既有路径(非 bot 声明)**。
+
+        不再有 ``root_verified``:根目标是否满足由框架经 owner 复核(``_on_pass_collect``→``plan(root)``→
+        ``has_gap=False``→``_maybe_finish_graph``)判定,**不由接力 bot 自报**。scoped 节点 PASS→DONE 走正常
+        PASS 传播(parent=root;守卫对 ``run_mode=="bbs"`` 触发的 root 复核放行,见 §10.5 seam 对应处);
+        FAIL+gaps→FAILED 走 FAIL 传播。最后清根 ``bbs_owner`` 释放 claim。
 
         持有者校验:``root.run_info.extend_props['bbs_owner']`` 须 == ``patch.assignee``(调用方
         ``report_bbs_result`` 设 ``patch.assignee=bot_id``);非持有者 → ``TaskStateError``(在校验抛,
         不清 claim)。
 
-        释放安全:scoped 翻态 / root_verified 根翻态(HUNG→DONE 等非法翻会抛)全部收在 ``try`` 内,
-        ``finally`` 无条件清根 ``bbs_owner`` —— 翻态抛错也释放 claim,避免持卡者死锁(他 bot claim 被
-        CAS 拒、持卡者重报已 DONE 节点再翻 DONE 亦非法)。owner 校验在 ``try`` 之前,非持有者抛错不清他卡。"""
+        释放安全:scoped 终态翻转(fold)收在 ``try`` 内,``finally`` 无条件清根 ``bbs_owner`` —— 翻态抛错也
+        释放 claim,避免持卡者死锁(他 bot claim 被 CAS 拒)。owner 校验在 ``try`` 之前,非持有者抛错不清他卡。
+
+        无 owner bot 时(单测)``plan(root)`` 返 ``has_gap=True``(no_planning_port)→ ``gap_no_progress`` → 父
+        HUNG;故收口需 owner planner(live 有),单测只验 mechanics(scoped DONE + claim 释放)。"""
+        side: list[tuple] = []
         with self._lock_for(patch.task_id):
             graph = self._graph.query_task_dashboard(patch.task_id)
             root = next((n for n in graph.tasks if n.node_id == patch.task_id), None)
             if root is None or root.run_info.extend_props.get("bbs_owner") != patch.assignee:
                 raise TaskStateError(f"on_bbs_report: 非claim持有者 task={patch.task_id}")
             try:
-                # scoped 节点终态翻转(acceptance→DONE/FAILED)或 fold(output_patch/exec_error);无 collector
+                # scoped 节点终态翻转(acceptance→DONE/FAILED)或 fold(output_patch/exec_error)
                 result = self._graph.update_task_node_info(patch)
-                if root_verified:
-                    # 根 PLANNING→DONE:走 status 直驱(_DIRECT_TRANSITIONS 允许 PLANNING→DONE/HUNG);
-                    # acceptance 驱动仅允许 RUNNING→DONE/FAILED(_ACCEPTANCE_TRANSITIONS),根非 RUNNING 故不可走 acceptance
-                    self._graph.update_task_node_info(
-                        TaskNodePatch(task_id=patch.task_id, node_id=patch.task_id, status=Status.DONE))
-                    self._graph.update_task_graph_info(
-                        patch.task_id, TaskGraphPatch(status=Status.DONE))
-                return result
             finally:
-                # 无论翻态是否抛(如 root_verified 在根 HUNG 时 HUNG→DONE 非法),都清根 bbs_owner 释放 claim
+                # 无论翻态是否抛,都清根 bbs_owner 释放 claim
                 self._graph.update_task_node_info(
                     TaskNodePatch(task_id=patch.task_id, node_id=patch.task_id,
                                   extend_props_patch={"bbs_owner": None}))
+            # 收口交 engine 既有路径:scoped DONE→PASS 传播(parent=root,owner 复核根 gap);FAILED→FAIL 传播
+            if self._is_graph_terminal(patch.task_id):
+                logger.info("[on_bbs_report] task=%s 图已终态,不再驱动", patch.task_id)
+            else:
+                node = next((n for n in self._graph.query_task_dashboard(patch.task_id).tasks
+                             if n.node_id == patch.node_id), None)
+                if node is not None and node.status == Status.DONE:
+                    await self._on_pass_collect(patch.task_id, patch.node_id, side)
+                elif node is not None and node.status == Status.FAILED:
+                    await self._on_fail_collect(patch.task_id, patch.node_id, side)
+        await self._drain(patch.task_id, side)
+        return result
 
     async def _on_pass_collect(self, task_id: str, node_id: str, side: list[tuple]) -> None:
         """PASS→DONE 后:查结构父 P。v4 父恒 PLANNING(委托态),无需翻态:
@@ -424,13 +434,20 @@ class ExecutionEngine:
         root = self._root(task_id)
         is_root_parent = parent.node_id == (root.node_id if root else None)
         # BBS 可恢复态守卫:图已升 BBS(bbs_mode=true)且根未被 BBS 接力持有(bbs_owner=None)→
-        # owner 停手不重规划根(等 BBS 接力 claim+attach 收口);只有 on_bbs_report 能收口。
-        # 避免普通子节点 DONE 触发根重规划与 BBS 接力竞态(spec §10.4)。
+        # 普通子节点 DONE 不触发根重规划(避免与 BBS 接力竞态,spec §10.4);由 BBS 接力收口。
+        # **例外**:触发本轮 PASS 的是 ``run_mode=="bbs"`` scoped 节点(BBS 接力刚回投的进展)→ 放行 owner
+        # 复核根 gap,满足则收口(``_maybe_finish_graph``),否则继续接力。无此例外则删去 ``root_verified`` 后
+        # 收口会被守卫死锁(图 bbs_mode 且未 claim 时谁也收不了)。
         if is_root_parent:
             g_ext = self._graph.query_task_dashboard(task_id).extend_props
             if g_ext.get("bbs_mode") and not g_ext.get("bbs_owner"):
-                logger.info("[on_pass] task=%s 图 bbs_mode 且未 claim → owner 停手,等 BBS 接力", task_id)
-                return
+                triggering = next(
+                    (n for n in self._graph.query_task_dashboard(task_id).tasks if n.node_id == node_id), None)
+                if triggering is not None and (triggering.run_info.run_mode or "") == "bbs":
+                    logger.info("[on_pass] task=%s bbs scoped 节点 DONE→放行 owner 复核根 gap 收口", task_id)
+                else:
+                    logger.info("[on_pass] task=%s 图 bbs_mode 且未 claim,普通叶子→owner 停手等 BBS 接力", task_id)
+                    return
         self._mark_planning(task_id, parent.node_id)
         graph = self._graph.query_task_dashboard(task_id)
         pr = await self._plan_with_retry(task_id, graph, target_node_id=parent.node_id)
@@ -617,8 +634,8 @@ class ExecutionEngine:
         (LAN 未匹配执行者,BBS 中继可接)且图 ``bbs_mode`` 已置、根未被 claim 时,拒不置图 HUNG,
         维持根原态(PLANNING 待接力)。其它 reason(``root_gap_no_decompose``/``gap_no_progress``/
         ``plan_round_exhausted``/``exec_stuck`` 等)是**硬死锁**(无规划端口 / 拆不出 / 重规划无进展 /
-        执行卡死),即使 bbs_mode 也按硬 HUNG 收口(BBS 理论可接但 root_verified 翻态不可恢复 + 实际无规划
-        端口;为避免"图一直 RUNNING 假活着"统一收口 HUNG)。"""
+        执行卡死),即使 bbs_mode 也按硬 HUNG 收口(无规划端口可继 / 无进展可恢复;为避免"图一直 RUNNING 假活着"
+        统一收口 HUNG)。"""
         # 仅 MISS 深度闸门升 BBS 视为可恢复;其它 reason 即便 bbs_mode 也走硬 HUNG 冒泡
         recoverable = (hung_reason == "miss_depth_exhausted")
         cur = node_id

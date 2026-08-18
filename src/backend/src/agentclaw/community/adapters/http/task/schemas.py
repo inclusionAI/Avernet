@@ -75,7 +75,11 @@ class BbsAttachDTO(BaseModel):
 
 
 class BbsResultDTO(BaseModel):
-    """POST /api/task/bbs/result 请求体(BBS 接力步⑤:回投 scoped 节点终态 + 释放 claim)。"""
+    """POST /api/task/bbs/result 请求体(BBS 接力步⑤:回投 scoped 节点终态 + 释放 claim)。
+
+    收口不由 bot 声明:框架经 owner 复核根 gap 满足后自行收口(``on_bbs_report``→``_on_pass_collect``→
+    ``_maybe_finish_graph``),故无 ``root_verified`` 字段。
+    """
 
     task_id: str = Field(..., description="任务ID")
     node_id: str = Field(..., description="scoped 子节点ID(attach 返回的 bbs- 节点)")
@@ -83,7 +87,6 @@ class BbsResultDTO(BaseModel):
     acceptance_result: AcceptanceResultDTO | None = Field(None, description="验收结论(PASS/FAIL)")
     output_patch: dict[str, Any] | None = Field(None, description="checkpoint fold 增量输出")
     exec_error: str | None = Field(None, description="执行报错(fold 进节点)")
-    root_verified: bool = Field(False, description="True → 根 PLANNING→DONE + 图 DONE")
 
 
 class TaskCallbackDataDTO(BaseModel):
