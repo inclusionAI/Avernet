@@ -105,9 +105,15 @@ async def deliver_message(
     # 注入 eval 路由 Header 到 metadata
     if x_eval_id:
         metadata["eval_id"] = x_eval_id
+        metadata.setdefault("session_id", x_eval_id)
+        if not x_eval_id.startswith("eval"):
+            logger.warning(
+                f"deliver_message: x-eval-id format mismatch: {x_eval_id}, "
+                f"expected 'eval-...' format"
+            )
     if x_default_tag:
         metadata["default_tag"] = x_default_tag
-        metadata.setdefault("bot_options", {})["lifecycle_stage"] = "eval"
+        metadata.setdefault("bot_options", {})["lifecycle_stage"] = x_default_tag
     if request.callback_url is not None:
         metadata["callback_url"] = request.callback_url
         callback = "http_callback"
@@ -240,9 +246,15 @@ async def deliver_message_stream(
     # 注入 eval 路由 Header 到 metadata
     if x_eval_id:
         metadata["eval_id"] = x_eval_id
+        metadata.setdefault("session_id", x_eval_id)
+        if not x_eval_id.startswith("eval"):
+            logger.warning(
+                f"deliver_message_stream: x-eval-id format mismatch: {x_eval_id}, "
+                f"expected 'eval-...' format"
+            )
     if x_default_tag:
         metadata["default_tag"] = x_default_tag
-        metadata.setdefault("bot_options", {})["lifecycle_stage"] = "eval"
+        metadata.setdefault("bot_options", {})["lifecycle_stage"] = x_default_tag
 
     logger.info(
         f"deliver_message_stream: bot_id={bot_id}, app_id={api_key_record.app_id}, "

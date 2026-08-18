@@ -120,7 +120,7 @@ class BotBindingResolver:
         # Step 2: For service bots, resolve binding based on lifecycle_stage
         if ac_bot.bot_type == "service":
             # eval 生命周期阶段 → 走 eval binding 解析
-            if lifecycle_stage == "eval":
+            if lifecycle_stage in ("eval", "default"):
                 resolved_binding_id = self._resolve_eval_binding(
                     bot_id=bot_id,
                     entity_id=entity_id,
