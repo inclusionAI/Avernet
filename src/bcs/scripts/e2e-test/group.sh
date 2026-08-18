@@ -6,6 +6,7 @@ E2E_TESTS_GROUP=(
     "test_create_group"
     "test_create_group_with_members"
     "test_get_group_detail"
+    "test_patch_group"
     "test_list_groups"
     "test_add_member"
     "test_remove_member"
@@ -72,6 +73,22 @@ test_get_group_detail() {
     assert_not_empty "detail has driver_bot" "$(json_field "$RESPONSE" "driver_bot")"
     assert_not_empty "detail has group_kind" "$(json_field "$RESPONSE" "group_kind")"
     assert_not_empty "detail has visibility" "$(json_field "$RESPONSE" "visibility")"
+}
+
+test_patch_group() {
+    info "Group: update mutable fields through the legacy PATCH route"
+    api_post "/groups" "{\"driver_bot\":\"$BOT_CEO_UUID\"}"
+    local group_id
+    group_id=$(json_field "$RESPONSE" "id")
+
+    api_patch "/groups/$group_id" '{"name":"legacy-patch-e2e"}'
+    assert_eq "legacy group PATCH returns 200" "$HTTP_STATUS" "200"
+    assert_eq "legacy group PATCH returns the new name" \
+        "$(json_field "$RESPONSE" "name")" "legacy-patch-e2e"
+
+    api_get "/groups/$group_id"
+    assert_eq "legacy group PATCH persists the label" \
+        "$(json_field "$RESPONSE" "label")" "legacy-patch-e2e"
 }
 
 test_list_groups() {

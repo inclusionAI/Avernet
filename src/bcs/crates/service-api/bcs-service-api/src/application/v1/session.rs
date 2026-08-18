@@ -45,6 +45,12 @@ pub struct SessionSummary {
     pub participant_count: Option<usize>,
     pub created_at: u64,
     pub updated_at: u64,
+    /// Whether the view actor (`view_bot_id`) has collected this session.
+    /// Populated only when the request explicitly passes `view_bot_id`; absent
+    /// otherwise. Mirrors the legacy `list_sessions_for_group` participant
+    /// gating (collected is meaningful only relative to a named viewer).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collected: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

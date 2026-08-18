@@ -1061,6 +1061,103 @@ async fn human_collects_and_uncollects_for_owned_participant_bot_idempotently() 
 }
 
 #[tokio::test]
+async fn list_surfaces_per_session_collected_for_explicit_view_actor() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("bot-1").await;
+    fixture
+        .bots
+        .save_created_by("bot-1", "owner-1", true)
+        .await
+        .expect("assign Bot ownership");
+    fixture
+        .store_group_with_originator("g1", "bot-1", "human_owner-1", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+
+    // Seed two sessions both listing bot-1 as a participant.
+    let mk = || Participant::bot("bot-1", ParticipantRole::Driver);
+    let s_a = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![mk()],
+                group_version: Some(group.version),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed session A");
+    let s_b = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![mk()],
+                group_version: Some(group.version),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed session B");
+
+    // Collect only session A as the owned participant bot.
+    fixture
+        .service
+        .collect(CollectSession {
+            caller: human_principal("owner-1"),
+            session_id: s_a.id.clone(),
+            participant: "bot-1".into(),
+        })
+        .await
+        .expect("collect session A");
+
+    let page = SessionService::list(
+        &fixture.service,
+        ListSessions {
+            caller: human_principal("owner-1"),
+            group_id: "g1".into(),
+            view_bot_id: Some("bot-1".into()),
+            offset: 0,
+            limit: 10,
+            status: None,
+        },
+    )
+    .await
+    .expect("list sessions");
+
+    let by_id = page
+        .items
+        .iter()
+        .map(|s| (s.session_id.as_str(), s.collected))
+        .collect::<std::collections::HashMap<&str, Option<bool>>>();
+    // The explicitly named view actor sees its per-session collected state.
+    assert_eq!(by_id.get(s_a.id.as_str()), Some(&Some(true)));
+    assert_eq!(by_id.get(s_b.id.as_str()), Some(&Some(false)));
+
+    // When no view actor is named the field is left absent (None). Here the
+    // human views as themselves, so the bot-participant sessions are filtered
+    // out and the page is empty — confirming collected is not synthesized.
+    let none_page = SessionService::list(
+        &fixture.service,
+        ListSessions {
+            caller: human_principal("owner-1"),
+            group_id: "g1".into(),
+            view_bot_id: None,
+            offset: 0,
+            limit: 10,
+            status: None,
+        },
+    )
+    .await
+    .expect("list sessions (no view actor)");
+    assert!(
+        none_page.items.iter().all(|s| s.collected.is_none()),
+        "collected must be absent when view_bot_id is not specified"
+    );
+}
+
+#[tokio::test]
 async fn session_collection_rejects_an_unowned_bot() {
     let fixture = Fixture::new().await;
     fixture.add_bot("bot-1").await;

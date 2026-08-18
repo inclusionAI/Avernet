@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    extract::{Path, Query, State},
+    extract::{Path, Query, State, rejection::JsonRejection},
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
@@ -10,6 +10,10 @@ use bcs_domain::{
 };
 use bcs_protocol::CreateGroupRequest;
 use bcs_route_security::OutboundUrlGuard;
+use bcs_service_api::application::v1::{
+    ApplicationError, BotFinalDelivery, GroupDeliveryPolicy, GroupPatch, GroupVisibility,
+    UpdateGroup,
+};
 use bcs_service_api::{
     BotDetailCommand, BotGroupListCommand, CallbackChannelConfig, CollaborationRuntimeError,
     ConfigureGroupRuntimeCommand, DefaultDelivery, DmCreateCommand, GroupAddMemberCommand,
@@ -23,11 +27,12 @@ use bcs_service_api::{
     ServiceSpec, SessionKind, SessionStatus, StartStateMachineRunCommand,
     UpgradeGroupCollaborationDefinitionCommand, Workspace,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::error::HttpAdapterError;
+use crate::routes::group_messages::{application_caller, resolve_group_chat_caller};
 use crate::state::HttpAppState;
 
 use super::{
@@ -127,6 +132,43 @@ pub struct UpdateGroupStatusRequest {
 pub struct UpdateLabelRequest {
     #[serde(default)]
     pub label: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LegacyGroupDeliveryPolicyRequest {
+    pub bot_final_delivery: BotFinalDelivery,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LegacyUpdateGroupRequest {
+    #[serde(default, deserialize_with = "deserialize_present_non_null")]
+    pub name: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_present_non_null")]
+    pub visibility: Option<GroupVisibility>,
+    #[serde(default, deserialize_with = "deserialize_present_non_null")]
+    pub delivery_policy: Option<LegacyGroupDeliveryPolicyRequest>,
+}
+
+fn deserialize_present_non_null<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
+impl From<LegacyUpdateGroupRequest> for GroupPatch {
+    fn from(value: LegacyUpdateGroupRequest) -> Self {
+        Self {
+            name: value.name,
+            visibility: value.visibility,
+            delivery_policy: value.delivery_policy.map(|policy| GroupDeliveryPolicy {
+                bot_final_delivery: policy.bot_final_delivery,
+            }),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -483,6 +525,112 @@ pub async fn get_group(
     }
 
     Ok(Json(json))
+}
+
+pub async fn patch_group(
+    State(state): State<HttpAppState>,
+    Path(group_id): Path<String>,
+    headers: HeaderMap,
+    uri: Uri,
+    body: Result<Json<LegacyUpdateGroupRequest>, JsonRejection>,
+) -> Response {
+    let Json(body) = match body {
+        Ok(body) => body,
+        Err(error) => {
+            return legacy_group_error_response(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                error.body_text(),
+            );
+        }
+    };
+    let caller = match resolve_group_chat_caller(&state, &headers, &uri).await {
+        Ok(caller) => application_caller(&caller),
+        Err(error) => return error.into_response(),
+    };
+    let Some(application) = state.group_application.as_ref() else {
+        return legacy_group_error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            "group update service is unavailable",
+        );
+    };
+
+    match application
+        .update(UpdateGroup {
+            caller,
+            group_id,
+            patch: body.into(),
+        })
+        .await
+    {
+        Ok(group) => Json(group).into_response(),
+        Err(error) => group_application_error_response(error),
+    }
+}
+
+fn group_application_error_response(error: ApplicationError) -> Response {
+    match error {
+        ApplicationError::InvalidInput { code, message } => {
+            legacy_group_error_response(StatusCode::BAD_REQUEST, &code, message)
+        }
+        ApplicationError::Unauthenticated => legacy_group_error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthenticated",
+            "authentication is required",
+        ),
+        ApplicationError::Forbidden(message) => {
+            legacy_group_error_response(StatusCode::FORBIDDEN, "forbidden", message)
+        }
+        ApplicationError::ForbiddenCode { code, message } => {
+            legacy_group_error_response(StatusCode::FORBIDDEN, &code, message)
+        }
+        ApplicationError::NotFound { code, message } => {
+            legacy_group_error_response(StatusCode::NOT_FOUND, &code, message)
+        }
+        ApplicationError::Conflict { code, message } => {
+            legacy_group_error_response(StatusCode::CONFLICT, &code, message)
+        }
+        ApplicationError::Gone { code, message } => {
+            legacy_group_error_response(StatusCode::GONE, &code, message)
+        }
+        ApplicationError::QuotaExceeded { code, message } => {
+            legacy_group_error_response(StatusCode::TOO_MANY_REQUESTS, &code, message)
+        }
+        ApplicationError::PayloadTooLarge { code, message } => {
+            legacy_group_error_response(StatusCode::PAYLOAD_TOO_LARGE, &code, message)
+        }
+        ApplicationError::Unprocessable { code, message } => {
+            legacy_group_error_response(StatusCode::UNPROCESSABLE_ENTITY, &code, message)
+        }
+        ApplicationError::BadGateway { code, message } => {
+            legacy_group_error_response(StatusCode::BAD_GATEWAY, &code, message)
+        }
+        // COSEC: keep persistence and infrastructure details out of the legacy response.
+        ApplicationError::Internal(_) => legacy_group_error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            "internal server error",
+        ),
+    }
+}
+
+fn legacy_group_error_response(
+    status: StatusCode,
+    code: &str,
+    message: impl Into<String>,
+) -> Response {
+    let message = message.into();
+    (
+        status,
+        Json(serde_json::json!({
+            "status": status.as_u16(),
+            "code": code,
+            "message": message,
+            "error": message,
+        })),
+    )
+        .into_response()
 }
 
 pub async fn get_group_collaboration_definition(

@@ -196,7 +196,7 @@ def _build__ext_info_provider(injector: Injector):
         )
         if not isinstance(template_config, dict):
             return None
-        return {"aicoding": {"template_config": template_config}}
+        return {"template_config": template_config}
 
     return provider
 

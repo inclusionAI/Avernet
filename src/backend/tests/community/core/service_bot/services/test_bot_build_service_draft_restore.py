@@ -272,3 +272,160 @@ async def test_restore_teclaw_draft_retries_after_progress_query_error():
     assert result["baas_status"] == "QUERY_ERROR"
     assert result["progress_error"] == "temporary gateway error"
     baas.update_teclaw_bot.assert_not_called()
+
+
+def test_sync_extra_include_files_copies_only_configured_file(tmp_path):
+    plan = EngineBuildPlan(
+        engine_type="aicoding",
+        source_root_name=".aicoding",
+        migration_subpath="aicoding",
+        workspace_subdir="workspace",
+        mcp_config_relpath="workspace/config/mcporter.json",
+        skill_source_relpath="workspace/skills",
+        skill_target_relpath="workspace/skills",
+        rsync_excludes=["sessions"],
+        extra_include_files=["sessions/cron-tasks.json"],
+    )
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    (source_dir / "sessions").mkdir(parents=True)
+    (source_dir / "sessions" / "cron-tasks.json").write_text("{}")
+
+    svc = object.__new__(BotBuildService)
+    svc._run_local_command = MagicMock()
+
+    svc._sync_extra_include_files(
+        source_dir=source_dir,
+        target_dir=target_dir,
+        build_plan=plan,
+        command_name="rsync draft restore extra include",
+        error_message="restore draft extra include file failed",
+        chown="1000:1000",
+        timeout_seconds=123,
+    )
+
+    assert (target_dir / "sessions").is_dir()
+    cmd = svc._run_local_command.call_args.kwargs["cmd"]
+    assert cmd == [
+        "sudo",
+        "rsync",
+        "-av",
+        "--chown=1000:1000",
+        str(source_dir / "sessions" / "cron-tasks.json"),
+        str(target_dir / "sessions" / "cron-tasks.json"),
+    ]
+    assert svc._run_local_command.call_args.kwargs["timeout_seconds"] == 123
+
+
+def test_sync_extra_include_files_logs_and_continues_on_copy_failure(tmp_path, caplog):
+    plan = EngineBuildPlan(
+        engine_type="aicoding",
+        source_root_name=".aicoding",
+        migration_subpath="aicoding",
+        workspace_subdir="workspace",
+        mcp_config_relpath="workspace/config/mcporter.json",
+        skill_source_relpath="workspace/skills",
+        skill_target_relpath="workspace/skills",
+        rsync_excludes=["sessions"],
+        extra_include_files=["sessions/cron-tasks.json"],
+    )
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    (source_dir / "sessions").mkdir(parents=True)
+    (source_dir / "sessions" / "cron-tasks.json").write_text("{}")
+
+    svc = object.__new__(BotBuildService)
+    svc._run_local_command = MagicMock(side_effect=module.BotBuildMigrationError("boom"))
+
+    svc._sync_extra_include_files(
+        source_dir=source_dir,
+        target_dir=target_dir,
+        build_plan=plan,
+        command_name="rsync extra include",
+        error_message="rsync extra include file failed",
+    )
+
+    assert "Failed to sync extra include file" in caplog.text
+
+
+def test_sync_extra_include_files_skips_missing_file(tmp_path):
+    plan = EngineBuildPlan(
+        engine_type="aicoding",
+        source_root_name=".aicoding",
+        migration_subpath="aicoding",
+        workspace_subdir="workspace",
+        mcp_config_relpath="workspace/config/mcporter.json",
+        skill_source_relpath="workspace/skills",
+        skill_target_relpath="workspace/skills",
+        rsync_excludes=["sessions"],
+        extra_include_files=["sessions/cron-tasks.json"],
+    )
+    svc = object.__new__(BotBuildService)
+    svc._run_local_command = MagicMock()
+
+    svc._sync_extra_include_files(
+        source_dir=tmp_path / "source",
+        target_dir=tmp_path / "target",
+        build_plan=plan,
+        command_name="rsync extra include",
+        error_message="rsync extra include file failed",
+    )
+
+    svc._run_local_command.assert_not_called()
+
+
+def test_sync_extra_include_files_skips_non_file_path(tmp_path, caplog):
+    plan = EngineBuildPlan(
+        engine_type="aicoding",
+        source_root_name=".aicoding",
+        migration_subpath="aicoding",
+        workspace_subdir="workspace",
+        mcp_config_relpath="workspace/config/mcporter.json",
+        skill_source_relpath="workspace/skills",
+        skill_target_relpath="workspace/skills",
+        rsync_excludes=["sessions"],
+        extra_include_files=["sessions/cron-tasks.json"],
+    )
+    source_dir = tmp_path / "source"
+    (source_dir / "sessions" / "cron-tasks.json").mkdir(parents=True)
+    svc = object.__new__(BotBuildService)
+    svc._run_local_command = MagicMock()
+
+    svc._sync_extra_include_files(
+        source_dir=source_dir,
+        target_dir=tmp_path / "target",
+        build_plan=plan,
+        command_name="rsync extra include",
+        error_message="rsync extra include file failed",
+    )
+
+    svc._run_local_command.assert_not_called()
+    assert "Skip non-file extra include path" in caplog.text
+
+
+@pytest.mark.parametrize("rel_path", ["", "/abs/path", "../escape", "sessions/../escape"])
+def test_sync_extra_include_files_logs_and_continues_on_invalid_path(tmp_path, caplog, rel_path):
+    plan = EngineBuildPlan(
+        engine_type="aicoding",
+        source_root_name=".aicoding",
+        migration_subpath="aicoding",
+        workspace_subdir="workspace",
+        mcp_config_relpath="workspace/config/mcporter.json",
+        skill_source_relpath="workspace/skills",
+        skill_target_relpath="workspace/skills",
+        rsync_excludes=["sessions"],
+        extra_include_files=[rel_path],
+    )
+    svc = object.__new__(BotBuildService)
+    svc._run_local_command = MagicMock()
+
+    svc._sync_extra_include_files(
+        source_dir=tmp_path / "source",
+        target_dir=tmp_path / "target",
+        build_plan=plan,
+        command_name="rsync extra include",
+        error_message="rsync extra include file failed",
+    )
+
+    svc._run_local_command.assert_not_called()
+    assert "Failed to sync extra include file" in caplog.text
