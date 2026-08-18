@@ -262,5 +262,6 @@ class DeviceContextResolver:
         # bind_id → binding_id(为兼容期保留 alias,本期两个都暴露)
         if "bind_id" in conn_info and "binding_id" not in conn_info:
             conn_info["binding_id"] = conn_info["bind_id"]
-        # typed 只读视图 — 字段清单/类型/示例见 ConnInfo;dict 式读取原样兼容
+        # Typed read-only view — see ConnInfo for the field list, types, and
+        # examples; dict-style reads stay compatible.
         return ConnInfo(conn_info)

@@ -313,11 +313,11 @@ def test_resolve_for_binding_handles_missing_bot_gracefully(
     assert ctx.bot_type == ""
 
 
-# ── conn_info typed 出口 ──
+# ── conn_info typed exit ──
 
 def test_resolver_exits_carry_typed_conn_info(resolver, fake_binding_repo):
-    """三条 resolve 入口的 ctx.conn_info 都是 ConnInfo — typed 属性访问与
-    dict 式读取指向同一份数据。"""
+    """All three resolve entry points return ctx.conn_info as ConnInfo —
+    typed attribute access and dict-style reads point at the same data."""
     fake_binding_repo.get_active_by_bot_and_owner.return_value = _mock_binding(2, "baas")
     fake_binding_repo.get_by_id.return_value = _mock_binding(2, "baas")
 
@@ -328,7 +328,8 @@ def test_resolver_exits_carry_typed_conn_info(resolver, fake_binding_repo):
     ):
         assert isinstance(ctx.conn_info, ConnInfo)
 
-    # builder 出 bind_id → _normalize_schema 补 binding_id alias,typed 属性同源
+    # builder emits bind_id → _normalize_schema adds the binding_id alias;
+    # the typed properties read the same data
     ctx = resolver.resolve_for_bot("bot-2", "user-1")
     assert ctx.conn_info.bind_id == 42
     assert ctx.conn_info.binding_id == 42

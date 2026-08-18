@@ -61,7 +61,7 @@ def test_exception_classes_exist():
         assert str(e) == "test"
 
 
-# ── ConnInfo:typed 只读视图 ──
+# ── ConnInfo: typed read-only view ──
 
 _BAAS_STYLE_CONN_INFO = {
     "url": "https://<baas-host>/api/v1/bots/team_claw/device-201/invoke-http/20003",
@@ -110,8 +110,9 @@ def test_conn_info_typed_attribute_access():
 
 
 def test_conn_info_defaults_for_absent_fields():
-    """binding 路由链路(resolve_for_binding_invoke)不预置传输字段 —
-    缺席字段的 property 返回文档标注的缺省值,不 KeyError。"""
+    """The binding-routed path (resolve_for_binding_invoke) pre-fills no
+    transport fields — properties of absent fields return their documented
+    defaults instead of raising KeyError."""
     ci = ConnInfo({"bind_id": 201, "engine_type": "teclaw"})
     assert ci.url == ""
     assert ci.token == ""
@@ -119,7 +120,8 @@ def test_conn_info_defaults_for_absent_fields():
     assert ci.use_proxy is False
     assert ci.sandbox_id is None
     assert ci.target == ""
-    assert ci.binding_id is None  # alias 由 resolver 层补,不在 ConnInfo 里推导
+    # the alias is added by the resolver layer, not derived inside ConnInfo
+    assert ci.binding_id is None
     assert ci.engine_port is None
     assert ci.paas_device_id is None
     assert ci.device_uuid is None
@@ -128,24 +130,25 @@ def test_conn_info_defaults_for_absent_fields():
 
 
 def test_conn_info_mapping_compat_with_plain_dict_reads():
-    """存量 conn_info["url"] / .get / in / dict() / == 读法原样兼容。"""
+    """Legacy conn_info["url"] / .get / in / dict() / == reads keep working."""
     ci = ConnInfo(_BAAS_STYLE_CONN_INFO)
     assert ci["url"] == _BAAS_STYLE_CONN_INFO["url"]
     assert ci.get("tenant") == "team_claw"
     assert ci.get("nonexistent", "fallback") == "fallback"
     assert "bind_id" in ci
     assert "nonexistent" not in ci
-    # key 集合与底层 dict 一致 — 不因缺席 property 长出幻影 key
+    # key set matches the underlying dict — absent properties don't grow
+    # phantom keys
     assert set(ci.keys()) == set(_BAAS_STYLE_CONN_INFO.keys())
     assert dict(ci) == _BAAS_STYLE_CONN_INFO
     assert len(ci) == len(_BAAS_STYLE_CONN_INFO)
-    # 等值比较双向成立(Mapping.__eq__)
+    # equality holds in both directions (Mapping.__eq__)
     assert ci == _BAAS_STYLE_CONN_INFO
     assert _BAAS_STYLE_CONN_INFO == ci
 
 
 def test_conn_info_unknown_keys_pass_through():
-    """builder 产出的未知 key 原样透传(dict 式访问)。"""
+    """Unknown builder-produced keys pass through (dict-style access)."""
     ci = ConnInfo({"url": "http://test", "_provider_mark": "baas-built"})
     assert ci["_provider_mark"] == "baas-built"
     assert set(ci.keys()) == {"url", "_provider_mark"}
@@ -156,10 +159,11 @@ def test_conn_info_is_read_only_and_copies_source():
     ci = ConnInfo(source)
     with pytest.raises(TypeError):
         ci["url"] = "http://mutated"  # type: ignore[index]
-    # 构造时浅拷贝 — 外部改源 dict 不影响本对象
+    # shallow-copied at construction — mutating the source dict afterwards
+    # does not affect the object
     source["url"] = "http://mutated"
     assert ci.url == "http://test"
-    # to_dict 是副本,改它也不影响本对象
+    # to_dict returns a copy; mutating it doesn't affect the object either
     exported = ci.to_dict()
     exported["url"] = "http://mutated"
     assert ci.url == "http://test"
@@ -169,7 +173,7 @@ def test_conn_info_kwargs_construction():
     ci = ConnInfo(url="http://test", use_proxy=False)
     assert ci.url == "http://test"
     assert ci == {"url": "http://test", "use_proxy": False}
-    # mapping + kwargs 合并,kwargs 覆盖同名 key
+    # mapping + kwargs merge; kwargs win on clashing keys
     merged = ConnInfo({"url": "http://a", "token": "tok"}, url="http://b")
     assert merged.url == "http://b"
     assert merged.token == "tok"
