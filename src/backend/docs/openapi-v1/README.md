@@ -1084,21 +1084,26 @@ that one design choice, and none of it is visible in the OpenAPI document.
   A script written after a bot was created reaches a container only once that
   bot restarts. The first write therefore always needs a restart.
 - **A failure degrades rather than blocks — the script's *execution*, that is.**
-  A non-zero exit, a crash, or a timeout leaves the agent running: the script is
+  A non-zero exit or a crash leaves the agent running: the script is
   guarded so it cannot change the boot's outcome, and it is skipped entirely if
   the boot itself failed. That is not a promise to start anyway if the platform
   *cannot read* your stored script: a start that could not resolve it fails
   rather than bringing up a bot that looks ready and is not provisioned.
-- **Limits:** body ≤ **24 KiB** (413 above that, naming the limit); each run
-  capped at **300s** by `timeout`, sized against the 600s publish budget the
-  start reports into. The cap is enforced as TERM at 300s followed by an
-  uncatchable KILL **10s** later, so a script that traps or ignores TERM cannot
-  hold the start open past **310s**. The cap bounds **the start**, not your
-  descendants: a process the script deliberately backgrounds (`something &`)
-  outlives it, because the script itself has exited and the start has already
-  completed — nothing reaps it, so it runs until it ends or the container does.
+- **Limits:** body ≤ **24 KiB** (413 above that, naming the limit). There is
+  currently **no cap on the run itself**: the per-run `timeout` was removed, so
+  the script runs to completion however long it takes. The start only reports
+  once the script exits, and the 600s publish budget the start reports into
+  does not stop the script — a run that overstays it leaves the publish marked
+  failed while the script (and the container's boot) carries on. A script that
+  never exits holds the start open indefinitely, so bound your own long-running
+  work (background it with `something &` if it should outlive the start).
   Interpreter is `bash`; the body runs as `admin`, the same user every platform
   step runs as.
+- **Each run brackets itself in the log.** The platform writes a timestamped
+  `[startup_script] started at ...` line before your body runs and a
+  `[startup_script] finished at ... rc=<exit code>` line after it, into the
+  same log the body's output goes to — with no cap on the run, those markers
+  are how you tell a still-running script apart from a finished one.
 - **Do not put secrets in the body.** This is a hard requirement, not advice.
   The body is stored as written, and it is **logged in recoverable form**: the
   backend elides it from its own payload log, but the start command travels to
