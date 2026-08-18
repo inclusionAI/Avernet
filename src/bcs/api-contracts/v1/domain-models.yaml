@@ -1015,9 +1015,9 @@ SessionDetail:
     title:
       type: string
     input:
-      $ref: "#/SessionInput"
+      $ref: "#/PersistedSessionInput"
     meta:
-      $ref: "#/SessionMetadata"
+      $ref: "#/PersistedSessionMetadata"
     participants:
       type: array
       items:
@@ -1043,9 +1043,17 @@ SessionInput:
     - type: string
     - type: object
       additionalProperties: true
-      properties:
-        query:
-          type: string
+
+PersistedSessionInput:
+  description: >-
+    Raw persisted Session input. Existing Sessions created through the legacy
+    API may contain any JSON value, so V1 reads preserve that value unchanged.
+
+PersistedSessionMetadata:
+  description: >-
+    Raw persisted Session metadata. Existing Sessions created through the
+    legacy API may contain any JSON value, so V1 reads preserve that value
+    unchanged.
 
 SessionKind:
   type: string

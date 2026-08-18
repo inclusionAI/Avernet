@@ -138,7 +138,9 @@ use bcs_service_api::{
     },
 };
 use bcs_services_container::{Services, ServicesBuilder};
-use bcs_session::{SessionManagementServiceImpl, SessionManagementWithRuntimeCleanup};
+use bcs_session::{
+    SessionLaunchApplication, SessionManagementServiceImpl, SessionManagementWithRuntimeCleanup,
+};
 use bcs_session_store::{MemorySessionRepo, MySqlSessionStore};
 use bcs_system_message::{
     SystemMessageDispatcherImpl, SystemMessageServiceImpl,
@@ -1404,6 +1406,7 @@ fn build_openapi_v1_state(
     friend_requests: Arc<dyn FriendRequestCoreService>,
     relation: Arc<dyn RelationCoreService>,
     sessions: Arc<dyn SessionManagementService>,
+    session_launch: Arc<dyn bcs_service_api::SessionLaunchService>,
     group_management: Arc<dyn GroupManagementService>,
     collaboration_runtime: Arc<dyn bcs_service_api::CollaborationRuntimeService>,
     session_repo: Arc<dyn SessionRepoPort>,
@@ -1442,6 +1445,7 @@ fn build_openapi_v1_state(
         .with_collaboration_runtime(collaboration_runtime.clone()),
     );
     let session_service = Arc::new(SessionServiceImpl::new(
+        session_launch,
         sessions.clone(),
         groups.clone(),
         registry.clone(),
@@ -1952,6 +1956,13 @@ impl Default for BcsServerState {
             session_management.clone(),
             collaboration_runtime.clone(),
         ));
+        let session_launch = Arc::new(SessionLaunchApplication::new(
+            bot_registry.clone(),
+            sessions.clone(),
+            session_management.clone(),
+            collaboration_runtime.clone(),
+            system_message.clone(),
+        ));
         let group_management = maybe_wrap_group_management(
             &config,
             Arc::new(GroupManagementWithRuntimeCleanup::new(
@@ -1986,6 +1997,7 @@ impl Default for BcsServerState {
             friend_request_store,
             relation_store.clone(),
             session_management.clone(),
+            session_launch.clone(),
             group_management.clone(),
             collaboration_runtime.clone(),
             session_repo.clone(),
@@ -2056,6 +2068,7 @@ impl Default for BcsServerState {
             .group_fusion(group_fusion)
             .system_message(system_message)
             .session_management(session_management.clone())
+            .session_launch(session_launch)
             .channel(channel_service.clone())
             .secret(default_bootstrap_secret_service())
             .session_files(session_file_service)
@@ -3354,6 +3367,13 @@ impl BcsServer {
             session_management.clone(),
             collaboration_runtime.clone(),
         ));
+        let session_launch = Arc::new(SessionLaunchApplication::new(
+            bot_registry.clone(),
+            sessions.clone(),
+            session_management.clone(),
+            collaboration_runtime.clone(),
+            use_cases.system_message.clone(),
+        ));
         let group_management = maybe_wrap_group_management(
             &config,
             Arc::new(GroupManagementWithRuntimeCleanup::new(
@@ -3373,6 +3393,7 @@ impl BcsServer {
             friend_request_store,
             relation_store.clone(),
             session_management.clone(),
+            session_launch.clone(),
             group_management.clone(),
             collaboration_runtime.clone(),
             session_repo.clone(),
@@ -3456,6 +3477,7 @@ impl BcsServer {
             .group_fusion(use_cases.group_fusion)
             .system_message(use_cases.system_message)
             .session_management(session_management.clone())
+            .session_launch(session_launch)
             .channel(channel_service.clone())
             .secret(default_bootstrap_secret_service())
             .session_files(session_file_service)
@@ -3967,6 +3989,13 @@ impl BcsServer {
             session_management.clone(),
             collaboration_runtime.clone(),
         ));
+        let session_launch = Arc::new(SessionLaunchApplication::new(
+            bot_registry.clone(),
+            sessions.clone(),
+            session_management.clone(),
+            collaboration_runtime.clone(),
+            use_cases.system_message.clone(),
+        ));
         let group_management = maybe_wrap_group_management(
             &config,
             Arc::new(GroupManagementWithRuntimeCleanup::new(
@@ -3986,6 +4015,7 @@ impl BcsServer {
             friend_request_svc,
             relation_svc.clone(),
             session_management.clone(),
+            session_launch.clone(),
             group_management.clone(),
             collaboration_runtime.clone(),
             session_repo.clone(),
@@ -4078,6 +4108,7 @@ impl BcsServer {
             .group_fusion(use_cases.group_fusion)
             .system_message(use_cases.system_message)
             .session_management(session_management.clone())
+            .session_launch(session_launch)
             .channel(channel_service.clone())
             .secret(default_bootstrap_secret_service())
             .session_files(session_file_service)

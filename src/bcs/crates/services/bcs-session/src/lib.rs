@@ -6,4 +6,4 @@ pub mod noop;
 
 pub use application::{SessionManagementServiceImpl, SessionManagementWithRuntimeCleanup};
 pub use launch::SessionLaunchApplication;
-pub use noop::NoopSessionManagementService;
+pub use noop::{NoopSessionLaunchService, NoopSessionManagementService};

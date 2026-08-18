@@ -22,10 +22,10 @@ use bcs_friend::FriendCore;
 use bcs_group::{GroupCore, MemoryGroupRepo};
 use bcs_relation::RelationCore;
 use bcs_service_api::application::v1::{
-    AddSessionParticipant, AuthenticatedAppIdentity, AuthenticatedBotIdentity,
-    AuthenticatedCaller, AuthenticatedUserIdentity, CollectSession, CompleteSession, CreateSession,
+    AddSessionParticipant, AuthenticatedAppIdentity, AuthenticatedBotIdentity, AuthenticatedCaller,
+    AuthenticatedUserIdentity, BotParticipantMode, CollectSession, CompleteSession, CreateSession,
     DeleteSession, DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions,
-    SessionInput, SessionMessageService, SessionParticipantInput, SessionService,
+    SessionMessageService, SessionParticipantInput, SessionService,
     SessionStatus as V1SessionStatus, UncollectSession, UpdateSession, UpdateSessionParticipant,
 };
 use bcs_service_api::port::repo::{NewSessionParams, SessionRepoPort};
@@ -36,12 +36,13 @@ use bcs_service_api::{
     GroupCoreService, GroupHistoryCommand, GroupHistoryResult, GroupMessage,
     GroupMessageHistoryService, GroupMessageType, GroupStrategy, GroupUseCaseError,
     HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, HumanActor, MessageRole,
-    Participant, ParticipantMode, ParticipantRole, SessionHistoryCommand, SessionHistoryResult,
-    SessionKind, StartStateMachineRunCommand, StartStateMachineRunOutcome,
-    StateMachineDeliveryCorrelation, StateMachineRunView,
+    Participant, ParticipantMode, ParticipantRole, SessionCaller, SessionHistoryCommand,
+    SessionHistoryResult, SessionKind, StartStateMachineRunCommand, StartStateMachineRunOutcome,
+    StateMachineDeliveryCorrelation, StateMachineRun, StateMachineRunStatus, StateMachineRunView,
 };
-use bcs_session::SessionManagementServiceImpl;
+use bcs_session::{SessionLaunchApplication, SessionManagementServiceImpl};
 use bcs_session_store::MemorySessionRepo;
+use bcs_test_support::NoopSystemMessageService;
 
 #[derive(Default)]
 struct RecordingHistoryService {
@@ -79,6 +80,7 @@ impl GroupMessageHistoryService for RecordingHistoryService {
 
 #[derive(Default)]
 struct RecordingRuntime {
+    start_calls: Mutex<Vec<StartStateMachineRunCommand>>,
     history_calls: Mutex<Vec<(String, u64, Option<u64>)>>,
     history_result: Mutex<Option<SessionHistoryResult>>,
 }
@@ -87,9 +89,35 @@ struct RecordingRuntime {
 impl CollaborationRuntimeService for RecordingRuntime {
     async fn start_state_machine_run(
         &self,
-        _cmd: StartStateMachineRunCommand,
+        cmd: StartStateMachineRunCommand,
     ) -> Result<StartStateMachineRunOutcome, CollaborationRuntimeError> {
-        panic!("start_state_machine_run is not used by SessionServiceImpl")
+        self.start_calls
+            .lock()
+            .expect("runtime start lock")
+            .push(cmd.clone());
+        let session_id = cmd.session_id.expect("Session launch pins id");
+        Ok(StartStateMachineRunOutcome {
+            view: StateMachineRunView {
+                run: StateMachineRun {
+                    run_id: "run-1".into(),
+                    definition_id: "definition-1".into(),
+                    definition_version: 1,
+                    group_id: cmd.group_id,
+                    group_version: 1,
+                    session_id,
+                    created_by: cmd.caller_id,
+                    status: StateMachineRunStatus::Running,
+                    input: cmd.input,
+                    output: None,
+                    error: None,
+                    created_at: 1,
+                    updated_at: 1,
+                    completed_at: None,
+                },
+                nodes: Vec::new(),
+                judge_outputs: Vec::new(),
+            },
+        })
     }
 
     async fn get_state_machine_run(
@@ -212,7 +240,15 @@ impl Fixture {
             session_repo.clone(),
             group_repo,
         ));
+        let launch = Arc::new(SessionLaunchApplication::new(
+            bots.clone(),
+            groups.clone(),
+            sessions.clone(),
+            runtime.clone(),
+            Arc::new(NoopSystemMessageService),
+        ));
         let service = SessionServiceImpl::new(
+            launch,
             sessions,
             groups.clone(),
             bots.clone(),
@@ -255,7 +291,7 @@ impl Fixture {
 
     async fn store_group(&self, group_id: &str, driver: &str, context: Option<&str>) {
         self.store_group_with_originator(group_id, driver, &format!("human_{driver}"), context)
-        .await;
+            .await;
     }
 
     /// Like `store_group` but lets the caller name a distinct group
@@ -391,7 +427,21 @@ fn app_only_caller() -> AuthenticatedCaller {
     }
 }
 
-fn participant_input(bot_uuid: &str, _mode: Option<ParticipantMode>) -> SessionParticipantInput {
+fn launch_caller(caller: AuthenticatedCaller) -> SessionCaller {
+    if let Some(bot) = caller.bot {
+        return SessionCaller::Bot {
+            bot_uuid: bot.bot_uuid,
+        };
+    }
+    let user = caller.user.expect("launch test caller identity");
+    SessionCaller::Human {
+        actor_id: format!("human_{}", user.id),
+        owner_id: user.id,
+        display_name: user.display_name.or(user.full_name),
+    }
+}
+
+fn participant_input(bot_uuid: &str, _mode: Option<BotParticipantMode>) -> SessionParticipantInput {
     SessionParticipantInput {
         bot_uuid: bot_uuid.to_string(),
     }
@@ -403,16 +453,21 @@ async fn create_session(
     group_id: &str,
     _driver: &str,
     _participants: Vec<SessionParticipantInput>,
-    input: Option<SessionInput>,
+    input: Option<serde_json::Value>,
     title: Option<&str>,
 ) -> bcs_service_api::application::v1::CreateSessionOutcome {
     fixture
         .service
         .create(CreateSession {
-            caller,
+            caller: launch_caller(caller),
             group_id: group_id.to_string(),
             title: title.map(str::to_string),
+            kind: None,
+            acting_bot_id: None,
+            creator_role: None,
             input,
+            meta: None,
+            context_delivery: None,
         })
         .await
         .expect("create session")
@@ -450,13 +505,8 @@ async fn create_as_manager_succeeds_and_projects_participants() {
     assert_eq!(detail.group_id, "g1");
     assert_eq!(detail.status, V1SessionStatus::Running);
     assert_eq!(detail.title.as_deref(), Some("session title"));
-    // Input falls back to the parent group's context.
-    assert_eq!(
-        detail.input,
-        Some(SessionInput {
-            query: Some("the task".into())
-        })
-    );
+    // Omitted input stays omitted; shared launch logic does not synthesize it.
+    assert_eq!(detail.input, None);
     // Driver (Driver role) + inherited expert from the parent group.
     assert_eq!(detail.participants.len(), 2);
     let expert = detail
@@ -492,19 +542,66 @@ async fn create_with_explicit_input_does_not_fall_back() {
         "g1",
         "driver",
         vec![participant_input("expert", None)],
-        Some(SessionInput {
-            query: Some("explicit query".into()),
-        }),
+        Some(serde_json::json!({"query": "explicit query"})),
         None,
     )
     .await;
 
     assert_eq!(
         outcome.session.input,
-        Some(SessionInput {
-            query: Some("explicit query".into())
-        })
+        Some(serde_json::json!({"query": "explicit query"}))
     );
+}
+
+#[tokio::test]
+async fn state_machine_service_create_projects_raw_fields_and_run() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    fixture.store_state_machine_group("g1", "driver").await;
+    let input = serde_json::json!("run this task");
+    let meta = serde_json::json!({
+        "callback_target": {"baas_session_id": "baas-1"},
+        "channel": {"source": "caller-value"}
+    });
+
+    let outcome = fixture
+        .service
+        .create(CreateSession {
+            caller: launch_caller(bot_principal("driver")),
+            group_id: "g1".into(),
+            title: Some("Invocation".into()),
+            kind: Some(SessionKind::ServiceInvocation),
+            acting_bot_id: Some("driver".into()),
+            creator_role: None,
+            input: Some(input.clone()),
+            meta: Some(meta.clone()),
+            context_delivery: None,
+        })
+        .await
+        .expect("StateMachine service invocation");
+
+    assert_eq!(outcome.session.kind, SessionKind::ServiceInvocation);
+    assert_eq!(outcome.session.input, Some(input.clone()));
+    assert_eq!(outcome.session.meta, Some(meta));
+    assert_eq!(
+        outcome.session.state_machine_run_id.as_deref(),
+        Some("run-1")
+    );
+    assert_eq!(
+        outcome
+            .session
+            .state_machine_run
+            .as_ref()
+            .map(|view| view.run.run_id.as_str()),
+        Some("run-1")
+    );
+    let calls = fixture
+        .runtime
+        .start_calls
+        .lock()
+        .expect("runtime start lock");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].input, input);
 }
 
 #[tokio::test]
@@ -516,10 +613,15 @@ async fn create_as_non_manager_is_forbidden() {
     let error = fixture
         .service
         .create(CreateSession {
-            caller: bot_principal("outsider"),
+            caller: launch_caller(bot_principal("outsider")),
             group_id: "g1".into(),
             title: None,
+            kind: None,
+            acting_bot_id: None,
+            creator_role: None,
             input: None,
+            meta: None,
+            context_delivery: None,
         })
         .await
         .expect_err("non-manager should be forbidden");
@@ -537,10 +639,15 @@ async fn create_with_unknown_group_is_not_found() {
     let error = fixture
         .service
         .create(CreateSession {
-            caller: bot_principal("driver"),
+            caller: launch_caller(bot_principal("driver")),
             group_id: "missing-group".into(),
             title: None,
+            kind: None,
+            acting_bot_id: None,
+            creator_role: None,
             input: None,
+            meta: None,
+            context_delivery: None,
         })
         .await
         .expect_err("unknown group should 404");
@@ -664,8 +771,8 @@ async fn session_list_uses_only_the_selected_authorized_view_actor() {
         .expect("omission selects the authenticated Human");
     assert_eq!(default_human.total, 1);
     let explicit_human = SessionService::list(&fixture.service, list(Some("human_alice".into())))
-    .await
-    .expect("the authenticated Human is a valid explicit view");
+        .await
+        .expect("the authenticated Human is a valid explicit view");
     assert_eq!(explicit_human.total, 1);
     let owned_bot = SessionService::list(&fixture.service, list(Some("owned".into())))
         .await
@@ -674,8 +781,8 @@ async fn session_list_uses_only_the_selected_authorized_view_actor() {
 
     for invalid_view in ["human_bob", "unowned", "missing"] {
         let error = SessionService::list(&fixture.service, list(Some(invalid_view.into())))
-        .await
-        .expect_err("an unauthorized explicit view never falls back to Human");
+            .await
+            .expect_err("an unauthorized explicit view never falls back to Human");
         assert!(matches!(
             error,
             bcs_service_api::application::v1::ApplicationError::Forbidden(_)
@@ -739,6 +846,40 @@ async fn session_detail_accepts_human_or_exact_owned_bot_participation_only() {
         error,
         bcs_service_api::application::v1::ApplicationError::Forbidden(_)
     ));
+}
+
+#[tokio::test]
+async fn session_detail_preserves_legacy_json_input_and_metadata() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    fixture.store_group("g1", "driver", None).await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![Participant::bot("driver", ParticipantRole::Driver)],
+                group_version: Some(group.version),
+                input: Some(serde_json::json!(["legacy", 1])),
+                meta: Some(serde_json::json!("legacy-metadata")),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed legacy-shaped Session");
+
+    let detail = fixture
+        .service
+        .get(GetSession {
+            caller: bot_principal("driver"),
+            session_id: session.id,
+        })
+        .await
+        .expect("read legacy-shaped Session through V1");
+
+    assert_eq!(detail.input, Some(serde_json::json!(["legacy", 1])));
+    assert_eq!(detail.meta, Some(serde_json::json!("legacy-metadata")));
 }
 
 #[tokio::test]
@@ -1006,10 +1147,7 @@ async fn human_collects_and_uncollects_for_owned_participant_bot_idempotently() 
         .create(
             "g1",
             NewSessionParams {
-                participants: vec![Participant::bot(
-                    "bot-1",
-                    ParticipantRole::Driver,
-                )],
+                participants: vec![Participant::bot("bot-1", ParticipantRole::Driver)],
                 group_version: Some(group.version),
                 ..Default::default()
             },
@@ -1103,10 +1241,7 @@ async fn session_collection_hides_an_owned_bot_membership_miss() {
         .create(
             "g1",
             NewSessionParams {
-                participants: vec![Participant::bot(
-                    "driver",
-                    ParticipantRole::Driver,
-                )],
+                participants: vec![Participant::bot("driver", ParticipantRole::Driver)],
                 group_version: Some(group.version),
                 ..Default::default()
             },
@@ -1184,7 +1319,7 @@ async fn list_messages_delegates_and_returns_legacy_group_messages_unchanged() {
     let session = fixture
         .session_repo
         .create(
-        "g1",
+            "g1",
             NewSessionParams {
                 session_kind: SessionKind::Chat,
                 participants: vec![
@@ -1194,8 +1329,8 @@ async fn list_messages_delegates_and_returns_legacy_group_messages_unchanged() {
                 group_version: Some(group.version),
                 ..Default::default()
             },
-    )
-            .await
+        )
+        .await
         .expect("seed session");
     let expected = rich_group_message();
     *fixture.history.messages.lock().expect("messages lock") = vec![expected.clone()];
@@ -1216,7 +1351,7 @@ async fn list_messages_delegates_and_returns_legacy_group_messages_unchanged() {
     assert_eq!(
         serde_json::to_value(&messages).expect("serialize messages"),
         serde_json::to_value([expected]).expect("serialize expected")
-        );
+    );
     let calls = fixture.history.session_calls.lock().expect("history lock");
     let call = calls.last().expect("history call");
     assert_eq!(call.group_id, "g1");
@@ -1280,7 +1415,7 @@ async fn state_machine_session_history_uses_runtime_and_returns_messages_unchang
     let session = fixture
         .session_repo
         .create(
-        "g1",
+            "g1",
             NewSessionParams {
                 session_kind: SessionKind::Chat,
                 participants: vec![
@@ -1290,7 +1425,7 @@ async fn state_machine_session_history_uses_runtime_and_returns_messages_unchang
                 group_version: Some(group.version),
                 ..Default::default()
             },
-    )
+        )
         .await
         .expect("seed state-machine session");
     let expected = rich_group_message();
@@ -2400,10 +2535,15 @@ async fn create_session_inherits_parent_group_participants_without_request_roste
     let outcome = fixture
         .service
         .create(CreateSession {
-            caller: bot_principal("driver"),
+            caller: launch_caller(bot_principal("driver")),
             group_id: "g1".into(),
             title: None,
+            kind: None,
+            acting_bot_id: None,
+            creator_role: None,
             input: None,
+            meta: None,
+            context_delivery: None,
         })
         .await
         .expect("session should inherit parent group roster");
@@ -2424,9 +2564,9 @@ async fn create_session_inherits_parent_group_participants_without_request_roste
     assert_eq!(inherited_human.actor_kind, ActorKind::Human);
     assert!(
         outcome
-        .session
-        .participants
-        .iter()
+            .session
+            .participants
+            .iter()
             .any(|p| p.actor_id == "driver" && p.role == ParticipantRole::Driver)
     );
 }

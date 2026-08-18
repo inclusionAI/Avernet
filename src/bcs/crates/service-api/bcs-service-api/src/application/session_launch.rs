@@ -27,6 +27,20 @@ pub enum SessionCaller {
     },
 }
 
+/// Creator role supplied by an adapter. Unknown legacy values are retained so
+/// the shared service can preserve the legacy public-vs-private validation rule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RequestedSessionRole {
+    Known(ParticipantRole),
+    Unknown(String),
+}
+
+impl From<ParticipantRole> for RequestedSessionRole {
+    fn from(role: ParticipantRole) -> Self {
+        Self::Known(role)
+    }
+}
+
 impl SessionCaller {
     pub fn actor_id(&self) -> &str {
         match self {
@@ -65,7 +79,7 @@ pub struct SessionLaunchRequest {
     /// Raw Session metadata. The application does not derive nested fields.
     pub meta: Option<Value>,
     /// Role for a public-Group creator who is not already a participant.
-    pub public_creator_role: Option<ParticipantRole>,
+    pub public_creator_role: Option<RequestedSessionRole>,
     pub context_delivery: Option<DeliveryType>,
 }
 
@@ -83,6 +97,8 @@ pub struct ReactivateSessionLaunch {
 #[derive(Debug, Clone)]
 pub struct SessionLaunchOutcome {
     pub session: Session,
+    /// Preserves the legacy create-or-reactivate result for adapter-specific status codes.
+    pub created: bool,
     pub state_machine_run: Option<StateMachineRunView>,
 }
 

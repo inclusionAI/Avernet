@@ -162,7 +162,7 @@ pub struct CreateSessionLaunch {
     pub kind: Option<SessionKind>,
     pub input: Option<serde_json::Value>,
     pub meta: Option<serde_json::Value>,
-    pub public_creator_role: Option<ParticipantRole>,
+    pub public_creator_role: Option<RequestedSessionRole>,
     pub context_delivery: Option<DeliveryType>,
 }
 ```
@@ -191,9 +191,14 @@ pub trait SessionLaunchService: Send + Sync {
 }
 ```
 
-The outcome contains the domain Session and optional StateMachine run view.
+`RequestedSessionRole` retains unknown legacy strings until the shared service
+can apply the historical rule: public Groups reject them, while private Groups
+ignore `caller_role`. V1 produces only known non-Driver roles.
+
+The outcome contains the domain Session, the lower-level `created` flag used by
+the legacy status-code projection, and an optional StateMachine run view.
 Adapters are responsible for projecting that outcome into their own response
-schema.
+schema; V1 always returns its create-specific 201 Envelope.
 
 ## Launch Behavior
 

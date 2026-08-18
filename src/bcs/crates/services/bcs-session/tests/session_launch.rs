@@ -10,11 +10,11 @@ use bcs_service_api::{
     ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome, CreateSessionLaunch, DeliveryType,
     Group, GroupCoreService, GroupStrategy, HandleBotTerminalEventCommand,
     HandleBotTerminalEventOutcome, Participant, ParticipantMode, ParticipantRole,
-    ReactivateSessionLaunch, ServiceResult, SessionCaller, SessionHistoryResult, SessionKind,
-    SessionLaunchError, SessionLaunchRequest, SessionLaunchService, SessionManagementService,
-    StartStateMachineRunCommand, StartStateMachineRunOutcome, StateMachineDeliveryCorrelation,
-    StateMachineRun, StateMachineRunStatus, StateMachineRunView, SystemMessageEvent,
-    SystemMessageService,
+    ReactivateSessionLaunch, RequestedSessionRole, ServiceResult, SessionCaller,
+    SessionHistoryResult, SessionKind, SessionLaunchError, SessionLaunchRequest,
+    SessionLaunchService, SessionManagementService, StartStateMachineRunCommand,
+    StartStateMachineRunOutcome, StateMachineDeliveryCorrelation, StateMachineRun,
+    StateMachineRunStatus, StateMachineRunView, SystemMessageEvent, SystemMessageService,
 };
 use bcs_session::{SessionLaunchApplication, SessionManagementServiceImpl};
 use bcs_session_store::MemorySessionRepo;
@@ -339,7 +339,7 @@ async fn public_non_member_is_added_with_requested_role() {
     fixture.add_group(group).await;
 
     let mut launch = request(human("bob"), "group-public", None);
-    launch.public_creator_role = Some(ParticipantRole::Observer);
+    launch.public_creator_role = Some(ParticipantRole::Observer.into());
     let outcome = fixture
         .service
         .create(CreateSessionLaunch { request: launch })
@@ -355,6 +355,57 @@ async fn public_non_member_is_added_with_requested_role() {
     assert_eq!(participant.actor_kind, ActorKind::Human);
     assert_eq!(participant.role, ParticipantRole::Observer);
     assert_eq!(participant.mode, Some(ParticipantMode::Present));
+}
+
+#[tokio::test]
+async fn unknown_legacy_role_is_rejected_only_for_public_groups() {
+    let public = Fixture::new();
+    public.add_bot("driver", "alice").await;
+    let mut group = Group::new(
+        "group-public",
+        "driver",
+        vec![Participant::bot("driver", ParticipantRole::Driver)],
+    );
+    group.visibility = "public".into();
+    public.add_group(group).await;
+    let mut launch = request(human("bob"), "group-public", None);
+    launch.public_creator_role = Some(RequestedSessionRole::Unknown("legacy-role".into()));
+    assert!(matches!(
+        public
+            .service
+            .create(CreateSessionLaunch { request: launch })
+            .await,
+        Err(SessionLaunchError::InvalidRole(_))
+    ));
+    assert!(
+        public
+            .session_repo
+            .list_by_group("group-public", None, 0, 20, None, None)
+            .await
+            .is_empty(),
+        "invalid public roles must fail before writing a Session"
+    );
+    assert!(
+        public.bots.get("human_bob").await.is_none(),
+        "invalid public roles must fail before registering the Human actor"
+    );
+
+    let private = Fixture::new();
+    private.add_bot("driver", "alice").await;
+    private
+        .add_group(Group::new(
+            "group-private",
+            "driver",
+            vec![Participant::bot("driver", ParticipantRole::Driver)],
+        ))
+        .await;
+    let mut launch = request(human("alice"), "group-private", Some("driver"));
+    launch.public_creator_role = Some(RequestedSessionRole::Unknown("legacy-role".into()));
+    private
+        .service
+        .create(CreateSessionLaunch { request: launch })
+        .await
+        .expect("private groups historically ignore caller_role");
 }
 
 #[tokio::test]

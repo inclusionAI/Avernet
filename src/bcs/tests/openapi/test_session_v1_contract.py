@@ -394,7 +394,7 @@ def test_session_input_is_a_raw_string_or_open_json_object() -> None:
     object_schema = schema["oneOf"][1]
     assert object_schema["type"] == "object"
     assert object_schema["additionalProperties"] is True
-    assert object_schema["properties"] == {"query": {"type": "string"}}
+    assert "properties" not in object_schema
 
 
 def test_session_metadata_models_current_legacy_consumers_and_stays_open() -> None:
@@ -450,14 +450,20 @@ def test_created_session_exposes_resolved_launch_and_state_machine_run() -> None
     assert data["additionalProperties"] is False
     assert {"kind", "input", "meta", "participants"}.issubset(data["properties"])
     assert data["properties"]["kind"]["enum"] == ["chat", "service_invocation"]
-    assert data["properties"]["input"] == contract["components"]["schemas"][
-        "SessionInput"
-    ]
-    assert data["properties"]["meta"] == contract["components"]["schemas"][
-        "SessionMetadata"
-    ]
+    assert "type" not in data["properties"]["input"]
+    assert "oneOf" not in data["properties"]["input"]
+    assert "type" not in data["properties"]["meta"]
+    assert "oneOf" not in data["properties"]["meta"]
     assert "state_machine_run_id" in data["properties"]
     run_view = data["properties"]["state_machine_run"]
     assert run_view["additionalProperties"] is False
     assert set(run_view["required"]) == {"run", "nodes"}
     assert set(run_view["properties"]) == {"run", "nodes", "judge_outputs"}
+
+
+def test_create_session_documents_only_reachable_errors() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    responses = _create_session_operation(contract)["responses"]
+
+    assert responses["404"]["x-error-codes"] == ["group_not_found"]
+    assert responses["409"]["x-error-codes"] == ["conflict"]

@@ -7,11 +7,11 @@ use bcs_service_api::port::repo::NewSessionParams;
 use bcs_service_api::{
     ActorKind, AuthenticatedHumanCaller, BotRegistryCoreService, CollaborationRuntimeService,
     CreateOrReactivateCommand, CreateSessionLaunch, DeliveryType, Group, GroupCoreService,
-    GroupStrategy, Participant, ParticipantMode, ParticipantRole, ReactivateSessionLaunch, Session,
-    SessionCaller, SessionKind, SessionLaunchError, SessionLaunchOutcome, SessionLaunchRequest,
-    SessionLaunchService, SessionManagementService, SessionUseCaseError,
-    StartStateMachineRunCommand, SystemMessageEvent, SystemMessageService, backfill_bot_names,
-    resolve_session_topic,
+    GroupStrategy, Participant, ParticipantMode, ParticipantRole, ReactivateSessionLaunch,
+    RequestedSessionRole, Session, SessionCaller, SessionKind, SessionLaunchError,
+    SessionLaunchOutcome, SessionLaunchRequest, SessionLaunchService, SessionManagementService,
+    SessionUseCaseError, StartStateMachineRunCommand, SystemMessageEvent, SystemMessageService,
+    backfill_bot_names, resolve_session_topic,
 };
 
 pub struct SessionLaunchApplication {
@@ -113,7 +113,7 @@ impl SessionLaunchApplication {
         }
         let SessionCaller::Human { owner_id, .. } = caller else {
             return Err(SessionLaunchError::Forbidden(format!(
-                "caller is not authorized to create session as {target}"
+                "caller does not own bot {target}"
             )));
         };
         let owned = self
@@ -161,6 +161,28 @@ impl SessionLaunchApplication {
         })
     }
 
+    fn validate_public_creator_role(
+        group: &Group,
+        role: Option<&RequestedSessionRole>,
+    ) -> Result<(), SessionLaunchError> {
+        if group.visibility != "public" {
+            return Ok(());
+        }
+        match role {
+            Some(RequestedSessionRole::Known(ParticipantRole::Driver)) => {
+                Err(SessionLaunchError::InvalidRole(
+                    "Non-member actors cannot use the driver role".to_string(),
+                ))
+            }
+            Some(RequestedSessionRole::Unknown(role)) => {
+                Err(SessionLaunchError::InvalidRole(format!(
+                    "Invalid caller_role '{role}': must be one of consultant, manager, worker, observer"
+                )))
+            }
+            _ => Ok(()),
+        }
+    }
+
     async fn build_participants(
         &self,
         group: &Group,
@@ -168,14 +190,6 @@ impl SessionLaunchApplication {
         creator: &str,
         kind: SessionKind,
     ) -> Result<Vec<Participant>, SessionLaunchError> {
-        if group.visibility == "public"
-            && request.public_creator_role == Some(ParticipantRole::Driver)
-        {
-            return Err(SessionLaunchError::InvalidRole(
-                "Non-member actors cannot use the driver role".to_string(),
-            ));
-        }
-
         let mut participants = group.participants.clone();
         for participant in &mut participants {
             if participant.mode.is_none() {
@@ -222,6 +236,11 @@ impl SessionLaunchApplication {
                 kind: None,
                 role: request
                     .public_creator_role
+                    .as_ref()
+                    .and_then(|role| match role {
+                        RequestedSessionRole::Known(role) => Some(*role),
+                        RequestedSessionRole::Unknown(_) => None,
+                    })
                     .unwrap_or(ParticipantRole::Consultant),
                 actor_kind: if is_human {
                     ActorKind::Human
@@ -274,6 +293,8 @@ impl SessionLaunchApplication {
             ));
         }
 
+        Self::validate_public_creator_role(&group, request.public_creator_role.as_ref())?;
+
         if group.visibility == "public"
             && let SessionCaller::Human {
                 owner_id,
@@ -296,10 +317,12 @@ impl SessionLaunchApplication {
             .creator_has_group_access(&group, &request.caller, &creator)
             .await?
         {
-            return Err(SessionLaunchError::Forbidden(format!(
-                "creator {creator} cannot access group {}",
-                group.id
-            )));
+            let message = if creator.starts_with("human_") {
+                format!("human {creator} does not own any bot in this group")
+            } else {
+                format!("bot {creator} is not a participant in this group")
+            };
+            return Err(SessionLaunchError::Forbidden(message));
         }
 
         let kind = Self::resolve_kind(&group, request.kind);
@@ -331,6 +354,7 @@ impl SessionLaunchApplication {
         &self,
         prepared: PreparedLaunch,
         session: Session,
+        created: bool,
         emit_session_context: bool,
     ) -> Result<SessionLaunchOutcome, SessionLaunchError> {
         if prepared.group.group_strategy == GroupStrategy::StateMachine
@@ -363,6 +387,7 @@ impl SessionLaunchApplication {
                 .await?;
             return Ok(SessionLaunchOutcome {
                 session,
+                created,
                 state_machine_run: Some(run.view),
             });
         }
@@ -400,6 +425,7 @@ impl SessionLaunchApplication {
 
         Ok(SessionLaunchOutcome {
             session,
+            created,
             state_machine_run: None,
         })
     }
@@ -434,7 +460,9 @@ impl SessionLaunchService for SessionLaunchApplication {
             })
             .await
             .map_err(map_session_error)?;
-        self.finish_launch(prepared, outcome.session, true).await
+        let created = outcome.created;
+        self.finish_launch(prepared, outcome.session, created, created)
+            .await
     }
 
     async fn reactivate(
@@ -460,6 +488,8 @@ impl SessionLaunchService for SessionLaunchApplication {
             })
             .await
             .map_err(map_session_error)?;
-        self.finish_launch(prepared, outcome.session, false).await
+        let created = outcome.created;
+        self.finish_launch(prepared, outcome.session, created, false)
+            .await
     }
 }
