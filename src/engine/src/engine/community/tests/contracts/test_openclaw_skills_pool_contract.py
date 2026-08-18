@@ -245,6 +245,33 @@ async def test_openclaw_adapter_propagates_logical_mapping_version() -> None:
 
 
 @pytest.mark.asyncio
+async def test_openclaw_adapter_serializes_center_v3_for_full_lifecycle() -> None:
+    port = MagicMock()
+    port.activate_pool_layout = AsyncMock(return_value={"committed": True, "status": "COMMITTED", "evidence": {}})
+    port.publish_pool_mappings = AsyncMock(return_value={"published": True, "evidence": {}})
+    port.verify_pool_mappings = AsyncMock(return_value={"valid": True, "evidence": {}})
+    mapping = PoolSkillMappingIntent(
+        corpus="center", relative_path=None, link_name="risk-review",
+        skill_uuid="2e0f2a89-5f8e-4df2-bc3e-797f5f02d26a", sc_version_number="2026.8.19",
+    )
+    version = "skills-pool-mapping-v3"
+    adapter = OpenClawSkillsAdapter(port)
+
+    await adapter.activate_pool_layout(PoolLayoutActivateRequest(
+        migration_generation="generation-1", preparation_id="preparation-1",
+        mappings=[mapping], mapping_contract_version=version,
+    ))
+    await adapter.publish_pool_mappings([mapping], retired_mappings=[mapping], mapping_contract_version=version)
+    await adapter.verify_pool_mappings([mapping], retired_mappings=[mapping], mapping_contract_version=version)
+
+    expected = {"corpus": "center", "skill_uuid": mapping.skill_uuid, "sc_version_number": mapping.sc_version_number, "link_name": "risk-review"}
+    assert port.activate_pool_layout.await_args.args[0]["mappings"] == [expected]
+    assert port.publish_pool_mappings.await_args.args[0]["mappings"] == [expected]
+    assert port.publish_pool_mappings.await_args.args[0]["retired_mappings"] == [expected]
+    assert port.verify_pool_mappings.await_args.args[0]["mappings"] == [expected]
+
+
+@pytest.mark.asyncio
 async def test_openclaw_adapter_keeps_unversioned_physical_mapping() -> None:
     port = MagicMock()
     port.publish_pool_mappings = AsyncMock(

@@ -78,7 +78,7 @@ class SkillsPoolRuntime:
         ):
             return PoolCutoverResult(
                 committed=False,
-                status=PoolCutoverStatus.INVALID,
+                status=PoolCutoverStatus.TRANSIENT_ERROR,
                 evidence={"reason": "center_ensure_failed_before_mapping_publish"},
             )
         try:
