@@ -22,6 +22,17 @@ SessionParticipantInput:
     bot_uuid:
       type: string
 
+SessionParticipantActorIdPath:
+  name: bot_uuid
+  in: path
+  required: true
+  description: >-
+    Bot or Human Actor identifier. The historical bot_uuid parameter name is
+    retained for wire compatibility; Human identifiers use human_{user.id}.
+  schema:
+    type: string
+    minLength: 1
+
 UpdateSessionRequest:
   type: object
   additionalProperties: false
@@ -36,7 +47,7 @@ UpdateSessionParticipantRequest:
   minProperties: 1
   properties:
     mode:
-      $ref: ../domain-models.yaml#/BotParticipantMode
+      $ref: ../domain-models.yaml#/SessionParticipantMode
 
 CollectSessionRequest:
   type: object
@@ -681,7 +692,7 @@ SessionParticipantPath:
       app: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
-      - $ref: ../shared.yaml#/BotUuidPath
+      - $ref: "#/SessionParticipantActorIdPath"
     requestBody:
       required: true
       content:
@@ -699,6 +710,7 @@ SessionParticipantPath:
         description: Invalid patch.
         x-error-codes:
           - invalid_request
+          - invalid_participant_mode
         content:
           application/json:
             schema:
@@ -713,12 +725,10 @@ SessionParticipantPath:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
         description: >-
-          Principal cannot manage the participant. A Human Principal may manage
-          when it can act as the Session creator or at least one parent Group
-          management actor: the driver, originator, or ManagerWorker manager participant.
-          Human-to-actor authority is checked only against those target actors:
-          direct human_{user.id}, a Bot whose created_by equals the Human user
-          id, or a creator relation edge from human_{user.id} to that Bot.
+          A Human caller may only update its own present/absent mode and must be
+          able to read the Session. Bot participant modes require Session
+          management authority through the Session creator or a parent Group
+          driver, originator, or ManagerWorker manager participant.
         x-error-codes:
           - forbidden
         content:
@@ -753,7 +763,7 @@ SessionParticipantPath:
       app: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
-      - $ref: ../shared.yaml#/BotUuidPath
+      - $ref: "#/SessionParticipantActorIdPath"
     responses:
       "200":
         description: Idempotent remove result.
