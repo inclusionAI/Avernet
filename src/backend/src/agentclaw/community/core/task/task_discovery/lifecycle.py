@@ -24,9 +24,11 @@ import asyncio
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from injector import inject
+
+from agentclaw.community.core.bot_management.services.bot_service import BotService
 
 from agentclaw.community.core.task.task_discovery.discovery_service import (
     DiscoveryService,
@@ -34,9 +36,6 @@ from agentclaw.community.core.task.task_discovery.discovery_service import (
 )
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
-
-if TYPE_CHECKING:
-    from agentclaw.community.core.bot_management.services.bot_service import BotService
 
 logger = get_logger()
 
