@@ -739,3 +739,174 @@ class TestTemplateTypeNormalization:
         result = resolver.resolve(bot_id=BOT_ID, entity_id=ENTITY_ID, env=ENV)
         assert result is not None
         assert result.engine_type == "hermes"
+
+
+# ==================== Tests: eval lifecycle_stage ====================
+
+
+class TestServiceBotEvalStage:
+    """Tests for service bot eval lifecycle_stage（场景三：服务 Bot 主动发起评测）。"""
+
+    BINDING_ID_EVAL = 100099
+
+    def test_eval_stage_resolves_eval_binding(
+        self, resolver, mock_ac_bot_repo, mock_binding_repo
+    ):
+        """lifecycle_stage='eval' 走 _resolve_eval_binding 解析 binding。"""
+        mock_ac_bot_repo.get_by_bot_id_env_exclude_default.return_value = (
+            _make_bot_record(bot_type="service", binding_id=BINDING_ID_DRAFT)
+        )
+
+        # list_bindings 返回含 eval tag 的 binding
+        eval_binding = _make_binding_record(
+            device_provider="baas",
+            device_id="eval-uuid-001",
+            binding_id=self.BINDING_ID_EVAL,
+            props={"AGENTCLAW_DEFAULT_TAG": "eval", "bot_id": BOT_ID},
+        )
+        mock_binding_repo.list_bindings.return_value = (1, [eval_binding])
+
+        # get_by_id 返回完整 binding（最终 resolve 返回）
+        mock_binding_repo.get_by_id.return_value = eval_binding
+
+        result = resolver.resolve(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            env=ENV,
+            lifecycle_stage="eval",
+        )
+
+        assert result is not None
+        assert result.binding_id == self.BINDING_ID_EVAL
+        # 不应查 publish 表
+        mock_ac_bot_repo.get_by_bot_id_env_exclude_default.assert_called_once()
+
+    def test_eval_stage_prefers_eval_tag_over_default(
+        self, resolver, mock_ac_bot_repo, mock_binding_repo
+    ):
+        """有多个 AGENTCLAW_DEFAULT_TAG 的 binding 时，优先选择 tag='eval' 的。"""
+        mock_ac_bot_repo.get_by_bot_id_env_exclude_default.return_value = (
+            _make_bot_record(bot_type="service", binding_id=BINDING_ID_DRAFT)
+        )
+
+        default_binding = _make_binding_record(
+            device_provider="baas",
+            device_id="default-uuid",
+            binding_id=100050,
+            props={"AGENTCLAW_DEFAULT_TAG": "default", "bot_id": BOT_ID},
+        )
+        eval_binding = _make_binding_record(
+            device_provider="baas",
+            device_id="eval-uuid",
+            binding_id=self.BINDING_ID_EVAL,
+            props={"AGENTCLAW_DEFAULT_TAG": "eval", "bot_id": BOT_ID},
+        )
+        mock_binding_repo.list_bindings.return_value = (2, [default_binding, eval_binding])
+        mock_binding_repo.get_by_id.return_value = eval_binding
+
+        result = resolver.resolve(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            env=ENV,
+            lifecycle_stage="eval",
+        )
+
+        assert result is not None
+        assert result.binding_id == self.BINDING_ID_EVAL
+
+    def test_eval_stage_no_bindings_returns_none(
+        self, resolver, mock_ac_bot_repo, mock_binding_repo
+    ):
+        """无含 AGENTCLAW_DEFAULT_TAG 的 binding 时返回 None。"""
+        mock_ac_bot_repo.get_by_bot_id_env_exclude_default.return_value = (
+            _make_bot_record(bot_type="service", binding_id=BINDING_ID_DRAFT)
+        )
+
+        mock_binding_repo.list_bindings.return_value = (0, [])
+
+        result = resolver.resolve(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            env=ENV,
+            lifecycle_stage="eval",
+        )
+
+        assert result is None
+
+    def test_eval_stage_filters_released_bindings(
+        self, resolver, mock_ac_bot_repo, mock_binding_repo
+    ):
+        """RELEASED 状态的 binding 不参与 eval 匹配。"""
+        mock_ac_bot_repo.get_by_bot_id_env_exclude_default.return_value = (
+            _make_bot_record(bot_type="service", binding_id=BINDING_ID_DRAFT)
+        )
+
+        released_binding = _make_binding_record(
+            device_provider="baas",
+            device_id="released-uuid",
+            binding_id=888,
+            props={"AGENTCLAW_DEFAULT_TAG": "eval", "bot_id": BOT_ID},
+        )
+        released_binding.status = "RELEASED"
+        mock_binding_repo.list_bindings.return_value = (1, [released_binding])
+
+        result = resolver.resolve(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            env=ENV,
+            lifecycle_stage="eval",
+        )
+
+        assert result is None
+
+    def test_eval_stage_filters_other_bot_id(
+        self, resolver, mock_ac_bot_repo, mock_binding_repo
+    ):
+        """device_props 中 bot_id 不匹配的 binding 被过滤。"""
+        mock_ac_bot_repo.get_by_bot_id_env_exclude_default.return_value = (
+            _make_bot_record(bot_type="service", binding_id=BINDING_ID_DRAFT)
+        )
+
+        other_binding = _make_binding_record(
+            device_provider="baas",
+            device_id="other-uuid",
+            binding_id=999,
+            props={"AGENTCLAW_DEFAULT_TAG": "eval", "bot_id": "other-bot"},
+        )
+        mock_binding_repo.list_bindings.return_value = (1, [other_binding])
+
+        result = resolver.resolve(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            env=ENV,
+            lifecycle_stage="eval",
+        )
+
+        assert result is None
+
+    def test_eval_stage_falls_back_to_non_eval_tag(
+        self, resolver, mock_ac_bot_repo, mock_binding_repo
+    ):
+        """无 tag='eval' 的 binding 时，回退到第一个匹配的 binding。"""
+        mock_ac_bot_repo.get_by_bot_id_env_exclude_default.return_value = (
+            _make_bot_record(bot_type="service", binding_id=BINDING_ID_DRAFT)
+        )
+
+        staging_binding = _make_binding_record(
+            device_provider="baas",
+            device_id="staging-uuid",
+            binding_id=100077,
+            props={"AGENTCLAW_DEFAULT_TAG": "staging", "bot_id": BOT_ID},
+        )
+        mock_binding_repo.list_bindings.return_value = (1, [staging_binding])
+        mock_binding_repo.get_by_id.return_value = staging_binding
+
+        result = resolver.resolve(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            env=ENV,
+            lifecycle_stage="eval",
+        )
+
+        assert result is not None
+        assert result.binding_id == 100077

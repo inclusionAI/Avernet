@@ -88,7 +88,10 @@ class MessageRequest(BaseModel):
             "Optional metadata information."
             "Recognized keys: "
             "biz_task_id (str, optional): Caller-assigned business task identifier. Defaults to run_id when absent. "
-            "biz_scene (str, optional): Business scene/category tag. Defaults to 'default' when absent."
+            "biz_scene (str, optional): Business scene/category tag. Defaults to 'default' when absent. "
+            "eval_id (str, optional): Eval environment routing identifier, injected from X-Eval-Id header. "
+            "default_tag (str, optional): Eval environment tag, injected from X-Agentclaw-Default-Tag header. "
+            "bot_options.lifecycle_stage (str, optional): Bot lifecycle stage, set to 'eval' for eval routing."
         ),
     )
 
@@ -104,7 +107,10 @@ class StreamMessageRequest(BaseModel):
             "Optional metadata information."
             "Recognized keys: "
             "biz_task_id (str, optional): Caller-assigned business task identifier. Defaults to run_id when absent. "
-            "biz_scene (str, optional): Business scene/category tag. Defaults to 'default' when absent."
+            "biz_scene (str, optional): Business scene/category tag. Defaults to 'default' when absent. "
+            "eval_id (str, optional): Eval environment routing identifier, injected from X-Eval-Id header. "
+            "default_tag (str, optional): Eval environment tag, injected from X-Agentclaw-Default-Tag header. "
+            "bot_options.lifecycle_stage (str, optional): Bot lifecycle stage, set to 'eval' for eval routing."
         ),
     )
 

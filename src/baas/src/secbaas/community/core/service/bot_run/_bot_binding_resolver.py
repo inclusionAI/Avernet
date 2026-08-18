@@ -21,6 +21,9 @@ if TYPE_CHECKING:
 
 logger = get_logger("core-bot-run")
 
+# default_tag 键名（与 OCB 侧 device_props 中的键一致）
+_DYNAMIC_ENV_TAG_KEY = "AGENTCLAW_DEFAULT_TAG"
+
 # 支持的 engine_type 白名单：openclaw/teclaw（老引擎）+ 3 个新引擎。
 _SUPPORTED_ENGINES = frozenset(
     {"openclaw", "teclaw", "aicoding", "hermes", "claude_code"}
@@ -116,29 +119,43 @@ class BotBindingResolver:
 
         # Step 2: For service bots, resolve binding based on lifecycle_stage
         if ac_bot.bot_type == "service":
-            stages = (
-                ["online", "verify", "draft"]
-                if lifecycle_stage == "all"
-                else [lifecycle_stage]
-            )
-            resolved_binding_id: int | None = None
-            for stage in stages:
-                resolved_binding_id = self._resolve_service_bot_binding(
+            # eval 生命周期阶段 → 走 eval binding 解析
+            if lifecycle_stage == "eval":
+                resolved_binding_id = self._resolve_eval_binding(
                     bot_id=bot_id,
                     entity_id=entity_id,
-                    lifecycle_stage=stage,
-                    draft_binding_id=binding_id,
+                    env=env,
                 )
-                if resolved_binding_id is not None:
-                    break
+                if resolved_binding_id is None:
+                    logger.warning(
+                        f"[resolve] No eval binding found for service bot: bot_id={bot_id}"
+                    )
+                    return None
+                binding_id = resolved_binding_id
+            else:
+                stages = (
+                    ["online", "verify", "draft"]
+                    if lifecycle_stage == "all"
+                    else [lifecycle_stage]
+                )
+                resolved_binding_id: int | None = None
+                for stage in stages:
+                    resolved_binding_id = self._resolve_service_bot_binding(
+                        bot_id=bot_id,
+                        entity_id=entity_id,
+                        lifecycle_stage=stage,
+                        draft_binding_id=binding_id,
+                    )
+                    if resolved_binding_id is not None:
+                        break
 
-            if resolved_binding_id is None:
-                logger.warning(
-                    f"[resolve] No binding found for service bot: bot_id={bot_id}, "
-                    f"lifecycle_stage={lifecycle_stage}"
-                )
-                return None
-            binding_id = resolved_binding_id
+                if resolved_binding_id is None:
+                    logger.warning(
+                        f"[resolve] No binding found for service bot: bot_id={bot_id}, "
+                        f"lifecycle_stage={lifecycle_stage}"
+                    )
+                    return None
+                binding_id = resolved_binding_id
 
         # Step 3: Query binding for device info
         binding = self._binding_repo.get_by_id(binding_id)
@@ -279,3 +296,72 @@ class BotBindingResolver:
                 f"lifecycle_stage={lifecycle_stage}"
             )
             return None
+
+    def _resolve_eval_binding(
+        self,
+        bot_id: str,
+        entity_id: str,
+        env: str,
+    ) -> int | None:
+        """解析 eval 生命周期阶段的 binding_id（场景三：服务 Bot 主动发起评测）。
+
+        从 binding 的 device_props 中按 AGENTCLAW_DEFAULT_TAG + bot_id 匹配，
+        逻辑同 OCB 侧 _resolve_eval_binding_id。
+
+        过滤规则：
+        - status="RELEASED" 的 binding 不参与匹配
+
+        Args:
+            bot_id: Bot ID
+            entity_id: 实体 ID
+            env: 环境
+
+        Returns:
+            匹配的 binding_id，无匹配返回 None
+        """
+        # 分页查询所有 binding
+        all_bindings = []
+        _page_size = 200
+        _page = 1
+        while True:
+            _total, _rows = self._binding_repo.list_bindings(
+                env=env,
+                entity_id=entity_id,
+                entity_type=None,
+                status=None,
+                page=_page,
+                page_size=_page_size,
+            )
+            all_bindings.extend(_rows)
+            if _page * _page_size >= _total:
+                break
+            _page += 1
+
+        # 按 device_props 精细过滤
+        matched = []
+        for b in all_bindings:
+            # 过滤 RELEASED 状态
+            if b.status == "RELEASED":
+                continue
+            device_props = b.device_props or {}
+            # 必须有 AGENTCLAW_DEFAULT_TAG
+            if not device_props.get(_DYNAMIC_ENV_TAG_KEY):
+                continue
+            # 按 bot_id 过滤
+            if "bot_id" in device_props and device_props["bot_id"] != bot_id:
+                continue
+            matched.append(b)
+
+        if not matched:
+            return None
+
+        # 优先匹配 AGENTCLAW_DEFAULT_TAG == "eval" 的 binding
+        eval_bindings = [
+            b for b in matched
+            if b.device_props.get(_DYNAMIC_ENV_TAG_KEY) == "eval"
+        ]
+        if eval_bindings:
+            return eval_bindings[0].id
+
+        # 回退到第一个匹配的 binding
+        return matched[0].id
