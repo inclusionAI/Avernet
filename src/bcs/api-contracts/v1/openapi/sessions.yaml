@@ -15,8 +15,10 @@ CreateSessionRequest:
       type: string
       minLength: 1
       description: >-
-        Optional Bot identity to create the Session as. A Human caller may use
-        only a Bot they own; a Bot caller may use only its own identity.
+        Optional explicit creator Actor identity. A Human caller may specify
+        its authenticated Human Actor ID (`human_{user.id}`) or a Bot ID it
+        owns. A Bot caller may specify only its own Bot ID. When omitted, the
+        authenticated caller is selected implicitly.
     creator_role:
       type: string
       description: >-

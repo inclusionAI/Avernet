@@ -59,6 +59,8 @@ pub struct CreateSessionRequest {
     pub title: Option<String>,
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub kind: Option<SessionKind>,
+    /// Optional explicit creator Actor. The V1 wire name is retained even
+    /// though an authenticated Human may pass its own `human_{user.id}`.
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub acting_bot_id: Option<String>,
     #[serde(default, deserialize_with = "deserialize_present_non_null")]

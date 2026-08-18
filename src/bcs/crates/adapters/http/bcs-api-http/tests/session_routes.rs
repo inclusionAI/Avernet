@@ -1005,6 +1005,39 @@ async fn create_session_returns_created_and_forwards_principal() {
 }
 
 #[tokio::test]
+async fn create_session_accepts_explicit_authenticated_human_actor() {
+    let session = Arc::new(FakeSessionService::default());
+    let message = Arc::new(FakeSessionMessageService::default());
+    let app = test_session_router(session.clone(), message);
+
+    let response = app
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/collaboration/groups/group-1/sessions",
+            json!({
+                "acting_bot_id": "human_staff-1",
+                "creator_role": "observer"
+            }),
+        ))
+        .await
+        .expect("explicit Human create response");
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let created = session.created.lock().expect("create lock");
+    let created = created.as_ref().expect("create command");
+    assert_eq!(
+        created.caller,
+        SessionCaller::Human {
+            actor_id: "human_staff-1".into(),
+            owner_id: "staff-1".into(),
+            display_name: None,
+        }
+    );
+    assert_eq!(created.acting_bot_id.as_deref(), Some("human_staff-1"));
+    assert_eq!(created.creator_role, Some(ParticipantRole::Observer));
+}
+
+#[tokio::test]
 async fn create_session_accepts_bot_identity_and_raw_string_input() {
     let session = Arc::new(FakeSessionService::default());
     let message = Arc::new(FakeSessionMessageService::default());

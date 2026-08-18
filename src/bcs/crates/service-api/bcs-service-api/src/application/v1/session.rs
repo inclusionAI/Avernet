@@ -99,6 +99,8 @@ pub struct CreateSession {
     pub group_id: String,
     pub title: Option<String>,
     pub kind: Option<SessionKind>,
+    /// Optional explicit creator Actor ID supplied through V1
+    /// `acting_bot_id`; Human callers may select themselves or an owned Bot.
     pub acting_bot_id: Option<String>,
     pub creator_role: Option<ParticipantRole>,
     pub input: Option<Value>,

@@ -383,6 +383,15 @@ def test_create_group_session_accepts_the_v1_native_launch_fields() -> None:
         "worker",
         "observer",
     ]
+    acting_creator_description = schema["properties"]["acting_bot_id"]["description"]
+    for required_text in (
+        "explicit creator Actor",
+        "human_{user.id}",
+        "Bot ID it owns",
+        "Bot caller may specify only its own Bot ID",
+        "When omitted",
+    ):
+        assert required_text in acting_creator_description
     assert schema["properties"]["context_delivery"]["enum"] == ["send", "inject"]
 
 
