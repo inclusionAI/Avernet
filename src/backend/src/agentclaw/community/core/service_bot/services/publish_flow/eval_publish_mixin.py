@@ -30,6 +30,7 @@ class EvalPublishMixin:
         publish_id: int,
         operator: str,
         biz_id: str = "",
+        default_tag: str = "",
     ) -> dict:
         """Publish to the eval environment.
 
@@ -72,6 +73,8 @@ class EvalPublishMixin:
         ext_info = {}
         if biz_id:
             ext_info["biz_id"] = biz_id
+        if default_tag:
+            ext_info["default_tag"] = default_tag
 
         # (#197) Crash-safe issuance via the operation runner. Eval is a CREATION
         # (no bot to adopt), so a crash after the BaaS create but before the id is
@@ -147,6 +150,7 @@ class EvalPublishMixin:
         *,
         operator: str = "system",
         publish_id: int = 0,
+        default_tag: str = "",
     ) -> dict:
         """Tear down the eval environment (#197: enqueue the durable teardown).
 
@@ -173,10 +177,11 @@ class EvalPublishMixin:
         result = {
             "success": True,
             "bot_uuid": bot_uuid,
+            "default_tag": default_tag,
             "message": "Eval environment teardown enqueued",
         }
         logger.info(
-            f"[PublishFlowService.eval_teardown] Teardown enqueued: {result}"
+            f"[PublishFlowService.eval_teardown] Teardown enqueued: default_tag={default_tag}, {result}"
         )
         return result
 

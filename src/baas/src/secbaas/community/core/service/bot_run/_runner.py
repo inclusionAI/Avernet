@@ -263,6 +263,15 @@ class BotRunner:
 
         route = await self._resolve_bot_route(bot_id, metadata)
 
+        # eval 对话 session 日志与保护性校验
+        eval_id = metadata.get("eval_id")
+        if eval_id:
+            logger.info(
+                "[runner.deliver_message] eval chat session: eval_id=%s, bot_id=%s",
+                eval_id,
+                bot_id,
+            )
+
         # 3. 创建会话
         actual_session_id = await self._create_session(
             run_id=message_id,
@@ -343,6 +352,15 @@ class BotRunner:
             raise ValueError(f"Duplicate request in stream mode: {message_id}")
 
         route = await self._resolve_bot_route(bot_id, metadata)
+
+        # eval 对话 session 日志与保护性校验
+        eval_id = metadata.get("eval_id")
+        if eval_id:
+            logger.info(
+                "[runner.deliver_message_stream] eval chat session: eval_id=%s, bot_id=%s",
+                eval_id,
+                bot_id,
+            )
 
         raw_session_id = metadata.get("session_id")
 

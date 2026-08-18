@@ -79,12 +79,18 @@ def resolve_bot_id(bot_id: str, binding_info: BotBindingInfo | None) -> str:
 
 
 def extract_lifecycle_stage(metadata: dict[str, Any] | None) -> str:
-    """从 metadata 中提取 lifecycle_stage"""
+    """从 metadata 中提取 lifecycle_stage
+
+    支持 "eval" 返回值：当 metadata["bot_options"]["lifecycle_stage"] == "eval"
+    时返回 "eval"，供 BotBindingResolver 走 eval binding 路由。
+    """
     if not metadata:
         return "online"
     bot_options = metadata.get("bot_options")
     if isinstance(bot_options, dict):
-        return bot_options.get("lifecycle_stage") or "online"
+        stage = bot_options.get("lifecycle_stage")
+        if stage:
+            return stage
     return "online"
 
 
@@ -161,6 +167,7 @@ def build_chat_metadata(
     """从 metadata 中构造 chat_metadata，用于透传到 WS chat 请求。
 
     参考 _report_log_relation 的取值逻辑，提取 biz_task_id / biz_scene。
+    当 metadata 中包含 eval_id / default_tag 时，增加观测字段。
     """
     metadata = metadata or {}
     biz_task_id = (
@@ -168,13 +175,24 @@ def build_chat_metadata(
         if metadata.get("biz_task_id") is not None
         else run_id
     )
-    biz_scene = (
-        metadata.get("biz_scene")
-        if metadata.get("biz_scene") is not None
-        else "default"
-    )
+    # eval 场景：default_tag 非空时 biz_scene 设为 "eval:{default_tag}"
+    default_tag = metadata.get("default_tag")
+    if default_tag:
+        biz_scene = f"eval:{default_tag}"
+    else:
+        biz_scene = (
+            metadata.get("biz_scene")
+            if metadata.get("biz_scene") is not None
+            else "default"
+        )
     chat_metadata: dict[str, str] = {
         "biz_task_id": str(biz_task_id),
         "biz_scene": str(biz_scene),
     }
+    # eval 观测字段注入
+    eval_id = metadata.get("eval_id")
+    if eval_id:
+        chat_metadata["eval_id"] = str(eval_id)
+    if default_tag:
+        chat_metadata["default_tag"] = str(default_tag)
     return chat_metadata

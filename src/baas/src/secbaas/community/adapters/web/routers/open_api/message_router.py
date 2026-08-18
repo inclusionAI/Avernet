@@ -7,7 +7,7 @@ import json
 import time
 
 from dependency_injector.wiring import Provide, inject
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from secbaas.community.adapters.web.routers.open_api.dependencies import (
@@ -71,6 +71,8 @@ async def deliver_message(
     api_key_record: APIKeyRecord = Depends(validate_api_key),
     context: BotChatContext = Depends(get_bot_chat_context),
     bot_runner: BotRunner = Depends(Provide[ApplicationContainer.services.bot_runner]),
+    x_eval_id: str | None = Header(None, alias="X-Eval-Id"),
+    x_default_tag: str | None = Header(None, alias="X-Agentclaw-Default-Tag"),
 ) -> MessageResponse:
     """Message delivery endpoint
 
@@ -99,6 +101,13 @@ async def deliver_message(
 
     metadata = request.metadata or {}
     callback = None
+
+    # 注入 eval 路由 Header 到 metadata
+    if x_eval_id:
+        metadata["eval_id"] = x_eval_id
+    if x_default_tag:
+        metadata["default_tag"] = x_default_tag
+        metadata.setdefault("bot_options", {})["lifecycle_stage"] = "eval"
     if request.callback_url is not None:
         metadata["callback_url"] = request.callback_url
         callback = "http_callback"
@@ -200,6 +209,8 @@ async def deliver_message_stream(
     converter_factory: SseConverterFactory = Depends(
         Provide[ApplicationContainer.services.stream_converter_factory]
     ),
+    x_eval_id: str | None = Header(None, alias="X-Eval-Id"),
+    x_default_tag: str | None = Header(None, alias="X-Agentclaw-Default-Tag"),
 ) -> StreamingResponse:
     """Streaming message delivery endpoint
 
@@ -225,6 +236,13 @@ async def deliver_message_stream(
 
     metadata = request.metadata or {}
     metadata["stream"] = "true"
+
+    # 注入 eval 路由 Header 到 metadata
+    if x_eval_id:
+        metadata["eval_id"] = x_eval_id
+    if x_default_tag:
+        metadata["default_tag"] = x_default_tag
+        metadata.setdefault("bot_options", {})["lifecycle_stage"] = "eval"
 
     logger.info(
         f"deliver_message_stream: bot_id={bot_id}, app_id={api_key_record.app_id}, "
