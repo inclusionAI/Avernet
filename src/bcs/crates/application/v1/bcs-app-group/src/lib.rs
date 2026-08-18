@@ -218,6 +218,88 @@ impl GroupServiceImpl {
         )))
     }
 
+    /// The authenticated human caller may act as itself or as an owned Bot
+    /// originator. Anything else is forbidden. This is stricter than legacy
+    /// `authorize_originator` (which lets any human designate any originator);
+    /// it is a V1 gate and legacy `POST /groups` is unaffected.
+    async fn authorize_originator(
+        &self,
+        principal: &Principal,
+        originator: &str,
+    ) -> Result<(), ApplicationError> {
+        if principal.actor_id() == originator {
+            return Ok(());
+        }
+        let bot = self.load_bot(originator).await.map_err(|error| match error {
+            ApplicationError::NotFound { .. } => ApplicationError::forbidden(format!(
+                "Authenticated User cannot act as originator '{originator}'"
+            )),
+            other => other,
+        })?;
+        if bot.actor_kind != ActorKind::Bot {
+            return Err(ApplicationError::invalid(
+                "invalid_originator",
+                "originator must be a Bot Actor",
+            ));
+        }
+        if let Principal::Human(human) = principal {
+            if bot.created_by.as_deref() == Some(human.subject.id.as_str()) {
+                return Ok(());
+            }
+        }
+        Err(ApplicationError::forbidden(format!(
+            "Authenticated User cannot act as originator '{originator}'"
+        )))
+    }
+
+    /// Structural validity only: the driver must resolve to a registered Bot
+    /// Actor. Does NOT check any caller↔driver relationship (that was dropped
+    /// by design) — it only rejects a non-existent or non-Bot driver id.
+    async fn ensure_driver_is_registered_bot(
+        &self,
+        driver_bot_uuid: &str,
+    ) -> Result<(), ApplicationError> {
+        let bot = self.load_bot(driver_bot_uuid).await?;
+        if bot.actor_kind != ActorKind::Bot {
+            return Err(ApplicationError::invalid(
+                "invalid_participant",
+                "driver_bot_uuid must identify a Bot Actor",
+            ));
+        }
+        Ok(())
+    }
+
+    /// When the originator is a caller-owned Bot distinct from the caller,
+    /// the driver must be reachable from that originator bot (public or a
+    /// friend of it). Skipped when the originator is the human caller itself
+    /// — the driver is ungated against the caller by design.
+    async fn ensure_originator_can_reach_driver(
+        &self,
+        originator_bot_id: &str,
+        driver_bot_id: &str,
+    ) -> Result<(), ApplicationError> {
+        let driver = self.load_bot(driver_bot_id).await?;
+        if driver.status == ActorStatus::Hidden {
+            return Err(ApplicationError::forbidden(format!(
+                "Bot '{driver_bot_id}' is hidden and cannot be invited into a group"
+            )));
+        }
+        if driver.capabilities.visibility == "public" {
+            return Ok(());
+        }
+        if self
+            .friends
+            .try_are_friends(originator_bot_id, driver_bot_id)
+            .await
+            .map_err(map_service_error)?
+        {
+            return Ok(());
+        }
+        Err(ApplicationError::forbidden(format!(
+            "Driver '{driver_bot_id}' is not reachable from originator '{originator_bot_id}'"
+        )))
+    }
+
     async fn can_read_group(
         &self,
         principal: &Principal,
@@ -625,12 +707,25 @@ impl GroupServiceImpl {
         principal: Principal,
         mut request: CreateCollaborationGroup,
     ) -> Result<GroupDetail, ApplicationError> {
-        self.ensure_collaboration_eligible(
-            &principal,
-            &request.driver_bot_uuid,
-            "driver_bot_uuid",
-        )
-        .await?;
+        let originator = request
+            .originator
+            .take()
+            .unwrap_or_else(|| principal.actor_id());
+        self.authorize_originator(&principal, &originator)
+            .await?;
+        // Structural validity only: the driver must be a registered Bot Actor.
+        // This is NOT a caller↔driver relationship check (that was deliberately
+        // dropped); callers may drive bots they do not own, as long as the bot
+        // exists and is a Bot.
+        self.ensure_driver_is_registered_bot(&request.driver_bot_uuid)
+            .await?;
+        // The driver is ungated against the caller (caller↔driver is not
+        // checked). Only when the originator is a caller-owned Bot distinct
+        // from the caller must the driver be reachable from that originator.
+        if originator != principal.actor_id() {
+            self.ensure_originator_can_reach_driver(&originator, &request.driver_bot_uuid)
+                .await?;
+        }
         if request
             .participants
             .iter()
@@ -667,7 +762,6 @@ impl GroupServiceImpl {
             }),
             Principal::Bot(_) => None,
         };
-        let originator = principal_actor_id.clone();
         let (strategy, routing_policy, state_machine) =
             map_create_collaboration(request.collaboration.clone());
         let lead_role = strategy.lead_role();
