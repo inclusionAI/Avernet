@@ -4,7 +4,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-
 from engine.community.core.adapters.claude_code.skills import (
     ClaudeCodeSkillsAdapter,
 )
