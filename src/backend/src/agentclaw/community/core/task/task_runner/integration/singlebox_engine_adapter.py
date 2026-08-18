@@ -31,7 +31,7 @@ import httpx
 import websockets
 
 from agentclaw.community.core.task.task_runner.integration.ports import OpenApiBotPort
-from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
+from agentclaw.community.core.task.task_runner.integration.protocols import BotPublicServiceProtocol
 
 _WS_PATH = "/api/openclaw/ws"
 _CONNECT_PARAMS = {

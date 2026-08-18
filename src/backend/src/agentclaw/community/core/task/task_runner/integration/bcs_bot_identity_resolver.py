@@ -1,9 +1,9 @@
 """BCS Bot 身份解析：产品 Bot ID → BCS ``bot_id:owner_id`` UUID。"""
 from __future__ import annotations
 
-from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.core.task.domain.errors import BotIdentityResolutionError
 from agentclaw.community.core.task.task_runner.integration.ports import BcsBotIdentityResolver
+from agentclaw.community.core.task.task_runner.integration.protocols import BotServiceProtocol
 
 
 class BotServiceBcsBotIdentityResolver(BcsBotIdentityResolver):
