@@ -159,6 +159,13 @@ user_config:
 
     # ── The refusals: operations that still require a human on the wire ──────
 
+    # The caller-identity read: its answer IS the end user, so a caller with no
+    # human on the wire has nothing to ask. Explicit even though /** already
+    # requires a user, for the same reason the spaces rules below are: when the
+    # broader policy evolves, this route must remain fail-closed.
+    "/openapi/v1/caller":
+      user: required
+
     # Space/member/favorite OpenAPI operations are user-only in the first
     # refactor phase. Keep this explicit even though /** also requires a user:
     # when the broader public API policy evolves, these routes must remain
@@ -405,6 +412,12 @@ user_config:
         #     source: object_store
         #     url: "${BOTS_OPENAPI_URL}"   # e.g. https://<bucket>/bots/openapi-latest.json
         #     refresh_seconds: 300
+        schema:
+          source: file
+          path: schemas/bots.openapi.json
+          refresh_seconds: 300
+      caller:
+        server: backend
         schema:
           source: file
           path: schemas/bots.openapi.json
