@@ -26,6 +26,7 @@ use tower::ServiceExt;
 #[derive(Default)]
 struct RecordingGroupService {
     update: Mutex<Option<UpdateGroup>>,
+    update_error: Mutex<Option<ApplicationError>>,
 }
 
 #[async_trait]
@@ -47,6 +48,9 @@ impl GroupService for RecordingGroupService {
 
     async fn update(&self, command: UpdateGroup) -> Result<GroupDetail, ApplicationError> {
         *self.update.lock().expect("update lock") = Some(command);
+        if let Some(error) = self.update_error.lock().expect("update error lock").take() {
+            return Err(error);
+        }
         Ok(group_detail())
     }
 
@@ -116,6 +120,27 @@ fn test_router(service: Arc<RecordingGroupService>) -> axum::Router {
         .with_group_application(service)
         .with_user_identity(Arc::new(ChainUserIdentityPort::new(auth_chain)));
     build_router(state)
+}
+
+fn service_returning(error: ApplicationError) -> Arc<RecordingGroupService> {
+    Arc::new(RecordingGroupService {
+        update: Mutex::new(None),
+        update_error: Mutex::new(Some(error)),
+    })
+}
+
+async fn patch_response(service: Arc<RecordingGroupService>) -> axum::response::Response {
+    test_router(service)
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/groups/group-1")
+                .header("content-type", "application/json")
+                .body(Body::from(json!({"name": "Renamed"}).to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response")
 }
 
 #[tokio::test]
@@ -189,4 +214,133 @@ async fn legacy_patch_group_rejects_unknown_fields_before_application() {
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     assert!(service.update.lock().expect("update lock").is_none());
+}
+
+#[tokio::test]
+async fn legacy_patch_group_maps_application_errors_to_legacy_responses() {
+    let cases = [
+        (
+            ApplicationError::invalid("invalid_group", "invalid group"),
+            StatusCode::BAD_REQUEST,
+            "invalid_group",
+            "invalid group",
+        ),
+        (
+            ApplicationError::Unauthenticated,
+            StatusCode::UNAUTHORIZED,
+            "unauthenticated",
+            "authentication is required",
+        ),
+        (
+            ApplicationError::forbidden("access denied"),
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            "access denied",
+        ),
+        (
+            ApplicationError::forbidden_code("owner_required", "owner required"),
+            StatusCode::FORBIDDEN,
+            "owner_required",
+            "owner required",
+        ),
+        (
+            ApplicationError::not_found("group_not_found", "group not found"),
+            StatusCode::NOT_FOUND,
+            "group_not_found",
+            "group not found",
+        ),
+        (
+            ApplicationError::conflict("version_conflict", "version conflict"),
+            StatusCode::CONFLICT,
+            "version_conflict",
+            "version conflict",
+        ),
+        (
+            ApplicationError::Gone {
+                code: "group_gone".into(),
+                message: "group is gone".into(),
+            },
+            StatusCode::GONE,
+            "group_gone",
+            "group is gone",
+        ),
+        (
+            ApplicationError::QuotaExceeded {
+                code: "group_quota_exceeded".into(),
+                message: "group quota exceeded".into(),
+            },
+            StatusCode::TOO_MANY_REQUESTS,
+            "group_quota_exceeded",
+            "group quota exceeded",
+        ),
+        (
+            ApplicationError::payload_too_large("payload_too_large", "payload too large"),
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "payload_too_large",
+            "payload too large",
+        ),
+        (
+            ApplicationError::unprocessable("invalid_state", "invalid state"),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_state",
+            "invalid state",
+        ),
+        (
+            ApplicationError::bad_gateway("storage_unavailable", "storage unavailable"),
+            StatusCode::BAD_GATEWAY,
+            "storage_unavailable",
+            "storage unavailable",
+        ),
+        (
+            ApplicationError::internal("database credentials leaked"),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            "internal server error",
+        ),
+    ];
+
+    for (error, expected_status, expected_code, expected_message) in cases {
+        let response = patch_response(service_returning(error)).await;
+        assert_eq!(response.status(), expected_status);
+        let response_body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        let response_json: Value = serde_json::from_slice(&response_body).expect("response JSON");
+        assert_eq!(response_json["status"], expected_status.as_u16());
+        assert_eq!(response_json["code"], expected_code);
+        assert_eq!(response_json["message"], expected_message);
+        assert_eq!(response_json["error"], expected_message);
+        assert!(!response_json.to_string().contains("database credentials"));
+    }
+}
+
+#[tokio::test]
+async fn legacy_patch_group_reports_unavailable_application_service() {
+    let principal = AuthPrincipal {
+        user_id: Some("staff-1".to_string()),
+        ..Default::default()
+    };
+    let auth_chain = Arc::new(AuthPluginChain::new(vec![Box::new(
+        StaticAuthPlugin::with_principal(principal),
+    )]));
+    let state = HttpAppState::new(Services::builder().build_for_test())
+        .with_user_identity(Arc::new(ChainUserIdentityPort::new(auth_chain)));
+    let response = build_router(state)
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/groups/group-1")
+                .header("content-type", "application/json")
+                .body(Body::from(json!({"name": "Renamed"}).to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let response_body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("response body");
+    let response_json: Value = serde_json::from_slice(&response_body).expect("response JSON");
+    assert_eq!(response_json["code"], "internal_error");
 }
