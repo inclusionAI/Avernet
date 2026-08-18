@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 logger = get_logger()
 
 #: 默认 mock 数据文件路径 (相对于项目根目录)
-_DEFAULT_DATA_FILE = "scripts/data/discovered_tasks.json"
+_DEFAULT_DATA_FILE = "scripts/.dependencies/data/discovered_tasks.db"
 
 #: 默认 engine URL (singlebox local)
 _DEFAULT_ENGINE_URL = "http://localhost:20003"

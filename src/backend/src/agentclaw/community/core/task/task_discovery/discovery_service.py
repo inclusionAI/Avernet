@@ -10,7 +10,7 @@
 使用方式::
 
     service = DiscoveryService(
-        reader=MockTaskReader("scripts/data/discovered_tasks.json"),
+        reader=SqliteTaskReader("scripts/.dependencies/data/discovered_tasks.db"),
         session_creator=EngineSessionCreator(),
     )
 
@@ -28,7 +28,7 @@ from agentclaw.community.core.task.task_discovery.models import (
 )
 from agentclaw.community.core.task.task_discovery.task_reader import (
     TaskReader,
-    MockTaskReader,
+    SqliteTaskReader,
 )
 from agentclaw.community.core.task.task_discovery.session_creator import (
     SessionCreator,
@@ -163,7 +163,7 @@ def create_default_service(
     """使用默认实现创建 DiscoveryService。
 
     Args:
-        data_file: mock 任务数据文件路径。
+        data_file: SQLite db 文件路径(discovered_tasks 表)。
         engine_base_url: Engine API 地址。
         engine_frontend_url: 前端 workbench 地址（构建 session_url）。
 
@@ -171,7 +171,7 @@ def create_default_service(
         配置好的 :class:`DiscoveryService`
     """
     return DiscoveryService(
-        reader=MockTaskReader(data_file),
+        reader=SqliteTaskReader(data_file),
         session_creator=EngineSessionCreator(
             engine_base_url=engine_base_url,
             engine_frontend_url=engine_frontend_url,

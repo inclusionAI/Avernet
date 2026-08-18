@@ -11,11 +11,17 @@
 """
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 from fastapi import APIRouter, Query
 
 from agentclaw.community.core.task.task_discovery.discovery_service import (
     DiscoveryService,
     create_default_service,
+)
+from agentclaw.community.core.task.task_discovery.task_reader import (
+    SqliteTaskReader,
 )
 from agentclaw.community.log import get_logger
 
@@ -23,21 +29,20 @@ logger = get_logger()
 
 router = APIRouter(prefix="/api/public/task-discovery", tags=["task-discovery"])
 
+#: 默认 db 文件路径(9 级上溯到项目根 → scripts/.dependencies/data/discovered_tasks.db)
+_PROJECT_ROOT = Path(__file__).resolve()
+for _ in range(9):
+    _PROJECT_ROOT = _PROJECT_ROOT.parent
+_DEFAULT_DB = str(_PROJECT_ROOT / "scripts" / ".dependencies" / "data" / "discovered_tasks.db")
+
+
+def _resolve_db_path() -> str:
+    """从环境变量或默认路径解析 db 文件路径。"""
+    return os.environ.get("TASK_DISCOVERY_DATA_FILE", _DEFAULT_DB)
+
 
 def _build_service() -> DiscoveryService:
     """从环境变量构建 DiscoveryService。"""
-    import os
-    from pathlib import Path
-
-    project_root = Path(__file__).resolve()
-    # adapters/http/task_discovery/router.py → 9 级上溯到项目根
-    for _ in range(9):
-        project_root = project_root.parent
-
-    data_file = os.environ.get(
-        "TASK_DISCOVERY_DATA_FILE",
-        str(project_root / "scripts" / "data" / "discovered_tasks.json"),
-    )
     engine_url = os.environ.get(
         "TASK_DISCOVERY_ENGINE_URL", "http://localhost:20003"
     )
@@ -45,7 +50,7 @@ def _build_service() -> DiscoveryService:
         "TASK_DISCOVERY_FRONTEND_URL", "http://localhost:8000"
     )
     return create_default_service(
-        data_file=data_file,
+        data_file=_resolve_db_path(),
         engine_base_url=engine_url,
         engine_frontend_url=frontend_url,
     )
@@ -90,36 +95,23 @@ async def discover_tasks(
 
 @router.get("/status")
 async def get_status() -> dict:
-    """查看任务发现状态。"""
-    import json
-    import os
-    from pathlib import Path
-
-    project_root = Path(__file__).resolve()
-    for _ in range(9):
-        project_root = project_root.parent
-
-    data_file = os.environ.get(
-        "TASK_DISCOVERY_DATA_FILE",
-        str(project_root / "scripts" / "data" / "discovered_tasks.json"),
-    )
-
+    """查看任务发现状态(从 SQLite db 读取)。"""
+    db_path = _resolve_db_path()
     try:
-        with open(data_file, encoding="utf-8") as f:
-            data = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError) as exc:
+        reader = SqliteTaskReader(db_path)
+        tasks = reader.read_discovered_tasks()
+    except Exception as exc:
         return {"success": False, "message": str(exc)}
 
-    tasks = data.get("tasks", [])
     return {
         "success": True,
         "total": len(tasks),
         "tasks": [
             {
-                "task_id": t.get("task_id"),
-                "project_name": t.get("project_name"),
-                "status": t.get("status", "unknown"),
-                "priority": t.get("priority", "medium"),
+                "task_id": t.task_id,
+                "project_name": t.project_name,
+                "status": t.status,
+                "priority": t.priority,
             }
             for t in tasks
         ],
