@@ -741,7 +741,23 @@ async def get_active_skills(
     path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
     repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
 
-    # Create per-request service instance with user-specific paths
+    runtime_skills_dir = skills_dir
+    if is_desktop and runtime_engine in _FILESYSTEM_LAYOUT_ENGINES:
+        probe = await runtime_layout_probe.probe_bot(
+            bot_id=effective_bot_id,
+            user_id=effective_entity_id,
+            engine=runtime_engine,
+        )
+        # Probe before creating the service so invalid/unbound desktop runtime
+        # layouts fail closed and never fall back to the management filesystem.
+        runtime_skills_dir = _desktop_active_root_from_probe(
+            probe,
+            legacy_fallback=skills_dir,
+        )
+
+    # Create per-request service instance with user-specific paths.  The service
+    # keeps the management active_dir for compatibility; desktop reads use the
+    # authoritative runtime_skills_dir computed above.
     service = skill_service_factory.create(
         active_dir=skills_dir,
         repo_dir=repo_dir,
@@ -750,18 +766,6 @@ async def get_active_skills(
         bot_id=effective_bot_id,
         engine_type=effective_engine,
     )
-
-    runtime_skills_dir = service.active_dir
-    if is_desktop and runtime_engine in _FILESYSTEM_LAYOUT_ENGINES:
-        probe = await runtime_layout_probe.probe_bot(
-            bot_id=effective_bot_id,
-            user_id=effective_entity_id,
-            engine=runtime_engine,
-        )
-        runtime_skills_dir = _desktop_active_root_from_probe(
-            probe,
-            legacy_fallback=service.active_dir,
-        )
 
     if is_desktop:
         active_skills = await service.get_active_skills_from_device(

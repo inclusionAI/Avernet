@@ -509,13 +509,16 @@ class SkillSetServiceFactory:
                     owner_id,
                     exc,
                 )
-        effective_runtime_engine = runtime_engine_type
+        # Backward compatibility: callers that explicitly pass only ``engine_type``
+        # to this factory have historically meant "use this engine's filesystem
+        # layout". HTTP routers that need bot-aware runtime remapping now pass
+        # ``runtime_engine_type`` explicitly, so keep this fallback predictable.
+        effective_runtime_engine = runtime_engine_type or engine_type
         if effective_runtime_engine is None:
             owner_id = user_id or entity_id
             effective_runtime_engine = resolve_runtime_engine_for_bot(
                 bot_id or "default",
                 str(owner_id) if owner_id is not None else None,
-                override=engine_type,
                 bot_repo=self._bot_repo,
             )
 
