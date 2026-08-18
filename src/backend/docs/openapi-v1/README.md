@@ -989,8 +989,11 @@ adding the route without moving the name fails there rather than in review.
 **Nothing was removed.** Every address this surface answered before bot-first
 addressing still answers — same shape, same parameters, in the same places,
 including the `bot_id` in a query string and the one in a request body that the
-rule above exists to remove. Forty-one operations, served by
-`openapi_v1/deprecated/`.
+rule above exists to remove. Forty-two operations, served by
+`openapi_v1/deprecated/` — the forty-one re-addressed by bot-first addressing,
+plus one that retires a *method*: the auth-status poll became a POST at the
+same path (it creates the bot on ISSUED, so it was never a read), and the GET
+spelling with its query parameters is kept the same way.
 
 They are not aliases. A retiring address publishes the *old* parameter names in
 the *old* locations and translates, so a client that has not moved keeps working
@@ -1020,6 +1023,21 @@ GET  /openapi/v1/bots/resources?bot_id=b-1       →  GET  /openapi/v1/bots/b-1/
 POST /openapi/v1/bots/skills/upload?bot_id=b-1   →  POST /openapi/v1/bots/b-1/skills
 ```
 
+For the auth-status poll the move is the method and where the echoed create
+attributes go — from the query string into a JSON body, same names, same
+meanings:
+
+```text
+GET  /openapi/v1/bots/b-1/auth-status?engine=openclaw&bot_name=N
+  →  POST /openapi/v1/bots/b-1/auth-status   {"engine": "openclaw", "bot_name": "N"}
+```
+
+One behaviour change ships with the method move, on both spellings: while
+the authorization service has no status for the bot yet (the Passport is not
+ready), the poll answers 200 with `status: "PENDING"` and a message saying so
+— keep polling — where this operation used to answer 502. The internal
+`/api/bots/auth-status` route is unchanged.
+
 Two renames come with it, and they are the only parameter changes in the
 migration: `skills` spells its owner locator `owner_id` like the rest of the
 surface (it was `owner_entity_id`), and `PUT …/approvals/mode` no longer takes
@@ -1042,7 +1060,8 @@ the other six: this is what "done" looks like per category.
 | PUT | `/openapi/v1/bots/{bot_id}` | Update bot (engine immutable) | `Envelope[Bot]` |
 | DELETE | `/openapi/v1/bots/{bot_id}` | Delete bot | `Envelope[Deleted]` |
 | POST | `/openapi/v1/bots/{bot_id}/restart` | Restart (re-provision device) | `Envelope[Bot]` |
-| GET | `/openapi/v1/bots/{bot_id}/auth-status` | Poll Passport auth; completes creation when ISSUED | `Envelope[BotAuthStatus]` |
+| POST | `/openapi/v1/bots/{bot_id}/auth-status` | Poll Passport auth (attributes echoed in the body); completes creation when ISSUED — a write, hence a POST | `Envelope[BotAuthStatus]` |
+| GET | `/openapi/v1/bots/{bot_id}/auth-status` | Retiring spelling of the poll (attributes in the query string); deprecated — use the POST | `Envelope[BotAuthStatus]` |
 | GET | `/openapi/v1/bots/{bot_id}/status` | Runtime / device readiness | `Envelope[BotStatus]` |
 | GET | `/openapi/v1/bots/{bot_id}/passport` | Get the bot's Agent Passport | `Envelope[Passport]` |
 | GET | `/openapi/v1/bots/{bot_id}/engine/config` | Read engine config (free-form JSON) | `Envelope[dict]` |
