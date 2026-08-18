@@ -1,8 +1,9 @@
 # Bot 工坊 OpenAPI 接入矩阵与分工
 
 - **日期**：2026-08-18
-- **核对分支**：`bot_workshop_reconstruction_v1`
-- **核对提交**：`42f0ab75f1714ad6cb8fa76a48aa17bfc67e4c9d`
+- **核对分支**：`rongzhi_dev_0811`
+- **核对基线提交**：`61c1832bebcbe2008ad33e83fd1f07bb99eace00`
+- **核对方式**：上述基线提交 + 本轮工作区变更（最终提交 SHA 以合入记录为准）
 - **文档性质**：开发对账与任务分工文档，不替代正式 API Contract 或领域 Spec。
 - **主要依据**：
   1. `docs/superpowers/specs/2026-08-12-bot-workshop-openapi-inventory.md` 的产品清单；其中旧的“组件在前、`{bot_id}` 在后”路径约定已经过时，新增 Bot-scoped 接口以当前 Bot-first 规范为准。
@@ -155,9 +156,9 @@ Flow 若用于任务护航，按本次分工交由任务护航团队牵头、BCS
 | 维度 | 当前值 | 说明 |
 |---|---:|---|
 | `bots.openapi.json` 唯一路径 | **101** | Gateway served schema |
-| `bots.openapi.json` HTTP operations | **139** | GET/POST/PUT/PATCH/DELETE 等操作总数 |
-| `admission.py` 注册项 | **99** | 包括一个 WebSocket admission |
-| A 线清单中已实现 operations | **13** | 其中 `data-init` 仍有端到端阻塞 |
+| `bots.openapi.json` HTTP operations | **140** | GET/POST/PUT/PATCH/DELETE 等操作总数 |
+| `admission.py` 注册项 | **100** | 包括一个 WebSocket admission |
+| A 线清单中已实现 operations | **14** | `data-init` trigger + status API 已闭环，真实环境 E2E 待验证 |
 | B 线 lifecycle admission entries | **10** | 对应 8 个 served paths |
 | B 线 edit-lock admission entries | **4** | 对应 2 个 served paths |
 
@@ -189,7 +190,8 @@ Flow 若用于任务护航，按本次分工交由任务护航团队牵头、BCS
 | `DELETE /openapi/v1/bots/{bot_id}/local` | 已实现 | Desktop Bot 删除 |
 | `POST /openapi/v1/bots/{bot_id}/local/open-folder` | 已实现 | 本地打开目录 |
 | `POST /openapi/v1/bots/{bot_id}/activate` | 已实现 | 沉寂个人云端 Bot 激活 |
-| `POST /openapi/v1/bots/{bot_id}/data-init` | 已实现但 E2E 阻塞 | 见 §4.2 |
+| `POST /openapi/v1/bots/{bot_id}/data-init` | 已实现 | 传递 `IAM_TOKEN` 到 typed Service API；异步执行，异常被观察和记录 |
+| `GET /openapi/v1/bots/{bot_id}/data-init` | 已实现 | 仅返回公开状态字段，不暴露 `bot.ext`、IAM token 或下游内部状态 |
 | `POST /openapi/v1/bots/{bot_id}/engine/restart` | 已实现 | 委托 `EngineRuntimeRelayProtocol`；不同于容器重启 |
 
 同时已经完成：
@@ -202,7 +204,7 @@ Flow 若用于任务护航，按本次分工交由任务护航团队牵头、BCS
 
 | 事项 | 当前问题 | A 线下一步 | 外部依赖 |
 |---|---|---|---|
-| `data-init` | OpenAPI 未形成 IAM 凭证传递和合法状态查询闭环 | 定义正式 status/repair Contract；不得只写 warning 后返回成功 | IAM/DataInit 上游 |
+| `data-init` 真实环境验证 | 本仓 API 闭环已完成：Cookie `IAM_TOKEN` 在 HTTP 边界解析并传入 typed Service API，新增安全状态查询；尚缺真实 IAM/Engine/下游环境的 E2E 证据 | 完成 singlebox/集成环境 trigger→poll→completed/failed 验证，并验证现有“读取后立即清除”临时凭证流程 | IAM、Engine 与数据初始化下游环境 |
 | `/all` service Bot 与富字段 | 是否统一聚合以及 health/version/container/lock 等字段的批量策略需收敛 | 只做 read model 编排，不能读取其他领域 Repository | Service lifecycle、Harness、BaaS、Lock 等 Service API |
 | Bot Inventory 空间上下文 | 当前只有 `NoopBusinessSpaceContext` personal fallback | A 线接入 Business Space Owner 的正式上下文 Service API，完成 `/all` 团队空间消费 | Business Space prod adapter |
 | `ac_bots.space_id` DDL | 本仓可见 ORM 字段，但未见仓内 migration 证据 | 在交付记录中明确实际 DDL 执行环境、版本和回滚方式 | 平台数据库变更流程 |
@@ -494,7 +496,12 @@ flow.openapi.json
    - OCB 对应 Gateway `application.yaml`
    - OCB 对应 served OpenAPI schema
 
-OCB 当前状态必须在 clean checkout 上按 commit/SHA 核对；不能根据有未提交修改的本地工作区直接标记“已完成”。
+本轮已在 OCB/Sofapy 仓库 `dev` 分支、基线 `6fbdc74e4fb9032ae98afe942c2f83611c3b908b` 上同步：
+
+- `src/gateway/configs/application.yaml`：补齐 `/bots/all` 与 local 两类 human-only 规则；
+- `src/gateway/configs/schemas/bots.openapi.json`：与 Avernet 本轮生成产物一致。
+
+该 OCB 工作区原有未跟踪目录 `openocb/`，本轮未触碰；上述两项当前仍是未提交修改，最终完成状态以 OCB 独立提交/PR SHA 为准。
 
 ---
 
@@ -502,7 +509,7 @@ OCB 当前状态必须在 clean checkout 上按 commit/SHA 核对；不能根据
 
 | 产品能力 | 领域 Owner | 执行分工 | 上游状态 | 工坊公开接入 | 当前结论 |
 |---|---|---|---|---|---|
-| Personal/Local Bot | Bot Inventory/Desktop | A 线 | 已有 | 已实现 | `data-init` 仍阻塞 |
+| Personal/Local Bot | Bot Inventory/Desktop | A 线 | 已有 | 已实现 | `data-init` API 闭环完成，真实环境 E2E 待验证 |
 | Workshop `/all` | Bot Inventory 聚合 | A 线 | 已有 | 已实现 | 富字段批量策略待收敛 |
 | Inventory 空间消费 | Business Space + Bot Inventory | A 线接入 | Prod context adapter 缺失 | 部分实现 | `/all` 当前仅 personal fallback |
 | Spaces list | Business Space | B 线接入 + Business Space Owner | Prod Service API 缺失 | 未实现 | B 线 P3，A 线消费结果 |
@@ -567,4 +574,37 @@ INTEGRATED
 - Singlebox/E2E：<command + result，或未执行原因>
 ```
 
-本文当前只记录静态代码核对结果；未在本文中声明新的全量测试执行结果。
+本轮核对已执行：
+
+```text
+# Avernet Backend：data-init、Local、admission、principal seam、Service API conformance
+src/backend/.venv/bin/pytest -q \
+  tests/community/adapters/http/openapi_v1/test_bots_data_init.py \
+  tests/community/adapters/http/openapi_v1/local/test_local_handlers.py \
+  tests/community/core/bot_management/services/test_data_init_service.py \
+  tests/community/adapters/http/openapi_v1/test_admission_inventory.py \
+  tests/community/adapters/http/openapi_v1/test_principal_seam.py \
+  tests/community/architecture/test_service_api_conformance.py
+# 121 passed
+
+# Avernet Backend：架构边界（API 仅依赖 Protocol、HTTP/Core 分层、模块边界）
+src/backend/.venv/bin/pytest -q \
+  tests/community/architecture/test_api_layer_is_protocols_only.py \
+  tests/community/architecture/test_http_adapter_layer_is_http_only.py \
+  tests/community/architecture/test_no_fastapi_in_core.py \
+  tests/community/architecture/test_module_boundaries.py
+# 13 passed
+
+# Avernet Gateway：route security 与 served schema
+src/gateway/.venv/bin/pytest -q \
+  tests/unit/core/authn/test_route_security.py \
+  tests/unit/core/forwarding/test_served_openapi.py
+# 43 passed
+
+# OCB/Sofapy Gateway：当前仓库具备的配置解析测试
+PYTHONDONTWRITEBYTECODE=1 <Avernet gateway venv>/bin/pytest -q \
+  -p no:cacheprovider tests/test_gateway_config.py
+# 2 passed
+```
+
+Gateway schema 已由 Backend 生成器更新并同步到 OCB/Sofapy 工作区。尚未执行真实 IAM/Engine/数据初始化下游 E2E，也未为 OCB 修改生成独立提交 SHA；因此这两项仍不能标记为部署完成。

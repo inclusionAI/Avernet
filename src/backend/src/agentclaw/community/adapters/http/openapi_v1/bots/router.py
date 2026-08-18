@@ -1154,6 +1154,55 @@ async def delete_bot_startup_script(
     return deleted_envelope(request)
 
 
+def _require_personal_cloud_bot(bot: dict[str, Any]) -> None:
+    bot_type = bot.get("bot_type") or ""
+    if bot_type == "desktop":
+        raise BotOperationNotAllowedError(
+            "local bots do not support data initialization"
+        )
+    if bot_type == "service":
+        raise BotOperationNotAllowedError(
+            "service bot data lifecycle is owned by the publish flow"
+        )
+    if bot_type != "personal":
+        raise BotOperationNotAllowedError(
+            f"data initialization is not supported for bot_type: {bot_type or 'unknown'}"
+        )
+
+
+def _observe_data_init_task(task: asyncio.Task[dict[str, str]]) -> None:
+    """Consume a detached task's exception so failures are never unobserved."""
+    if task.cancelled():
+        return
+    error = task.exception()
+    if error is not None:
+        logger.error(
+            "data-init background task failed",
+            exc_info=(type(error), error, error.__traceback__),
+        )
+
+
+@router.get(
+    "/{bot_id}/data-init",
+    response_model=Envelope[DataInitResult],
+    responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
+)
+@envelope_errors
+async def get_bot_data_init_status(
+    bot_id: BotIdPath,
+    request: Request,
+    owner_id: UserIdDep,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    data_init_service: DataInitServiceProtocol = Injected(DataInitServiceProtocol),
+) -> Envelope[DataInitResult]:
+    """Read cold-start initialization state without exposing the bot ext bag."""
+    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard (→ 404)
+    _require_personal_cloud_bot(bot)
+    result = data_init_service.get_status(bot_id, owner_id)
+    return envelope(DataInitResult(**result), request)
+
+
 @router.post(
     "/{bot_id}/data-init",
     response_model=Envelope[DataInitResult],
@@ -1171,39 +1220,28 @@ async def trigger_bot_data_init(
 ) -> Envelope[DataInitResult]:
     """Trigger cold-start data initialization for a personal cloud bot.
 
-    The operation returns immediately with an `in_progress` state while work
-    continues in the background. Local and service bots are refused with 409.
+    The operation returns immediately while work continues in the background.
+    Read this resource with GET to observe the persisted state. Local and
+    service bots are refused with 409.
     """
     bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard (→ 404)
-    bot_type = bot.get("bot_type") or ""
-    if bot_type == "desktop":
-        raise BotOperationNotAllowedError(
-            "local bots do not support data initialization"
-        )
-    if bot_type == "service":
-        raise BotOperationNotAllowedError(
-            "service bot data lifecycle is owned by the publish flow"
-        )
-    if bot_type != "personal":
-        raise BotOperationNotAllowedError(
-            f"data initialization is not supported for bot_type: {bot_type or 'unknown'}"
-        )
-    # ``_engine_config_target`` resolves (entity_id, entity_type, engine) from the
-    # bot record and raises BotNotFoundError (→ 404) when the bot has no entity,
-    # which is the same precondition data-init needs.
+    _require_personal_cloud_bot(bot)
     entity_id, entity_type, _engine = _engine_config_target(bot)
-    # Fire-and-forget, exactly as the legacy handler does: ``trigger_init`` is
-    # async and owns its own idempotency + retry + status machine, so releasing
-    # it to the loop lets the HTTP request return ``in_progress`` immediately.
-    asyncio.ensure_future(
+
+    # Cookie parsing belongs to the HTTP adapter. The transport-agnostic service
+    # decides whether and when the temporary credential must be persisted.
+    iam_token = request.cookies.get("IAM_TOKEN") or None
+    task = asyncio.create_task(
         data_init_service.trigger_init(
             bot_id=bot_id,
             owner_id=owner_id,
             entity_id=entity_id,
             entity_type=entity_type,
             force=body.force,
+            iam_token=iam_token,
         )
     )
+    task.add_done_callback(_observe_data_init_task)
     return envelope(
         DataInitResult(
             bot_id=bot_id,

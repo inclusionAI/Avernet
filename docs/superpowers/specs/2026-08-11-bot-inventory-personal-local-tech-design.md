@@ -453,7 +453,7 @@ def require_personal_cloud_bot(bot: Mapping[str, Any]) -> None:
 | Method | Path | 现状 | 本文要求 |
 | --- | --- | --- | --- |
 | POST | `/openapi/v1/bots` | 创建 personal/service | 保持 `BotType = Literal["personal", "service"]`；个人线只使用 `personal` |
-| GET | `/openapi/v1/bots` | list | 保留；Bot Inventory 新列表走 `/inventory`，避免改变旧契约 |
+| GET | `/openapi/v1/bots` | list | 保留；Bot Inventory 聚合列表走 `/all`，避免改变旧契约 |
 | GET | `/openapi/v1/bots/{bot_id}` | detail | 保留 |
 | PUT | `/openapi/v1/bots/{bot_id}` | 更新名称 / 描述 | 保留 |
 | DELETE | `/openapi/v1/bots/{bot_id}` | 删除；拒绝 desktop/service | 保留，个人云端可用 |
@@ -464,24 +464,26 @@ def require_personal_cloud_bot(bot: Mapping[str, Any]) -> None:
 
 **data-init 不并入创建入参（2026-08-12 lucas决定，跟老 `/api` 逻辑）**：**不**给 `BotCreate` 加 `init_config` 字段，**不**在 create handler / `create_bot_with_authorization` / `complete_bot_authorization` 里塞 data-init 副作用。data-init 走独立端点 `POST /openapi/v1/bots/{bot_id}/data-init`（见 §7.x / OpenAPI 清单 #84），是老 `POST /api/bots/{bot_id}/data-init` 的纯委托暴露：
 
-- 老端点语义：fire-and-forget 异步（ACTIVE）/标记 `ext.data_init_status="pending"`（PENDING），前端轮询 `ext.data_init_status` 取进度，body 仅 `{force: bool}`。
+- 老端点语义：fire-and-forget 异步（ACTIVE）/标记 `ext.data_init_status="pending"`（PENDING），body 仅 `{force: bool}`；公开面不暴露整个 `ext`，进度由 `GET /openapi/v1/bots/{bot_id}/data-init` 查询。
 - 触发时机由前端控制：创建成功（201 同步）或 `auth-status` ISSUED 后（202 异步落库后）再单独发一次 #84。后端不因此在 create 链路做任何分支。
 - 这样规避 §14「同步创建 vs 202 授权完成两路径 `init_config` 语义不一致」风险；创建链路零改动，与"不影响原有代码逻辑"一致。
-- 新端点委托 `DataInitServiceProtocol.trigger_init`，失败经 domain error 映射为错误 envelope（不静默吞）。
+- POST 委托 typed `DataInitServiceProtocol.trigger_init`；HTTP Adapter 解析 `IAM_TOKEN` Cookie，Service 只在确需执行时与状态同写暂存。GET 委托 `get_status`，只返回受控状态和 `started_at`，不泄露 `ext`/凭证/下游内部状态。真实 IAM/Engine/下游 trigger→poll E2E 仍需集成环境验证。
 
 ### 7.4 `local`：本地 Bot
 
-**路径前缀**: `/openapi/v1/bots/local`  
+**集合路径前缀**: `/openapi/v1/bots/local`；单 Bot 操作采用 Bot-first `/openapi/v1/bots/{bot_id}/local`
+
 **包**: `openapi_v1/local/`
 
 | Method | Path | 说明 | 委托 |
 | --- | --- | --- | --- |
 | POST | `/openapi/v1/bots/local` | 创建本地 Bot，可能返回 201 或 202 授权等待 | `DesktopBotServiceProtocol.apply_passport_before_create` |
-| GET | `/openapi/v1/bots/local/{bot_id}/auth-status` | 本地 Bot 授权轮询并完成创建 | `DesktopBotServiceProtocol.create_after_authorization` + Passport/AuthRelationship |
+| GET | `/openapi/v1/bots/{bot_id}/local/auth-status` | 本地 Bot 授权轮询并完成创建 | `DesktopBotServiceProtocol.create_after_authorization` + Passport/AuthRelationship |
 | GET | `/openapi/v1/bots/local` | 列本地 Bot，可选；Bot Inventory 列表已覆盖 | `DesktopBotServiceProtocol.list_user_bots` |
-| POST | `/openapi/v1/bots/local/{bot_id}/restart` | 重启本地 Bot | `DesktopBotServiceProtocol.restart` |
-| DELETE | `/openapi/v1/bots/local/{bot_id}` | 删除本地 Bot | `DesktopBotServiceProtocol.delete` |
-| POST | `/openapi/v1/bots/local/{bot_id}/open-folder` | 打开本地目录 | `DesktopBotServiceProtocol.open_folder` |
+| GET | `/openapi/v1/bots/{bot_id}/local` | 本地 Bot 详情 | `DesktopBotServiceProtocol.get_user_bot` |
+| POST | `/openapi/v1/bots/{bot_id}/local/restart` | 重启本地 Bot | `DesktopBotServiceProtocol.restart` |
+| DELETE | `/openapi/v1/bots/{bot_id}/local` | 删除本地 Bot | `DesktopBotServiceProtocol.delete` |
+| POST | `/openapi/v1/bots/{bot_id}/local/open-folder` | 打开本地目录 | `DesktopBotServiceProtocol.open_folder` |
 | GET | `/openapi/v1/bots/local/devices` | 设备列表，可用于创建选择 machine | `DesktopBotServiceProtocol.list_devices` |
 | GET | `/openapi/v1/bots/local/devices/{machine_id}/files` | 选择本地挂载目录 | `DesktopBotServiceProtocol.list_directory` |
 
@@ -620,12 +622,12 @@ P0 在业务空间 prod API 未接入时只允许个人业务空间 fallback：
 | `dormant` | `POST /openapi/v1/bots/{bot_id}/activate` | 是 | 激活沉寂个人云端 Bot 前确认当前空间可见 | 仅 personal cloud；空间不可见则拒绝 |
 | `local` | `POST /openapi/v1/bots/local` | 是，但只允许个人空间 | 本地 Bot 创建只能发生在个人业务空间 | `resolve_current` 后要求 `space.kind == "personal"` |
 | `local` | `GET /openapi/v1/bots/local` | 是，但只允许个人空间 | 本地 Bot 列表是个人空间资源视图 | 非个人空间返回不支持或空列表；建议 fail closed |
-| `local` | `GET /openapi/v1/bots/local/{bot_id}`，`GET /openapi/v1/bots/local/{bot_id}/auth-status`，`POST /openapi/v1/bots/local/{bot_id}/restart`，`DELETE /openapi/v1/bots/local/{bot_id}`，`POST /openapi/v1/bots/local/{bot_id}/open-folder` | 是，但只允许个人空间 | 本地 Bot 单资源操作前确认当前空间是个人空间，并做 desktop ownership guard | 非个人空间拒绝；本地 Bot 不挂团队空间 |
+| `local` | `GET /openapi/v1/bots/{bot_id}/local`，`GET /openapi/v1/bots/{bot_id}/local/auth-status`，`POST /openapi/v1/bots/{bot_id}/local/restart`，`DELETE /openapi/v1/bots/{bot_id}/local`，`POST /openapi/v1/bots/{bot_id}/local/open-folder` | 是，但只允许个人空间 | 本地 Bot 单资源操作前确认当前空间是个人空间，并做 desktop ownership guard | 非个人空间拒绝；本地 Bot 不挂团队空间 |
 | `local` | `GET /openapi/v1/bots/local/devices`，`GET /openapi/v1/bots/local/devices/{machine_id}/files` | 是，但只允许个人空间 | 设备 / 文件选择属于本地个人资源，不暴露到团队空间 | 非个人空间拒绝 |
 
 结论：
 
-- **空间视图主入口是 `inventory`**，前端空间切换后应优先刷新 `/bots/inventory`。
+- **空间视图主入口是 Bot Inventory read model**，前端空间切换后应优先刷新 `/bots/all`。
 - **个人云端 Bot 创建与操作需要带空间上下文**：创建时用于绑定；操作时用于可见性校验。
 - **本地 Bot 只消费空间上下文做限制**：本地 Bot 本期固定个人空间，不支持团队 / 业务空间归属。
 - **旧 `GET /openapi/v1/bots` 不承担空间过滤职责**：避免破坏已有 owner 维度列表语义。
