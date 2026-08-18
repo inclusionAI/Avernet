@@ -317,11 +317,14 @@ AvernetTenantMiddleware → resolve_avernet_tenant(request)  ─┐
 - `utils/gateway_principal_config.py` —— 通过 `SecretResolver` 按
   `SecretNamesConfig.gateway_principal_signing_key` 解析共享密钥。该密钥名**自带默认
   值**，因此部署只需配置「值」：公司密钥库（corp，overlay 同时覆盖密钥名）、
-  `AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE`（community）。单盒**不解析任何值** ——
-  既没有密钥库，也不提供本地替代品，因此单盒的 `/openapi/v1` 一律拒绝。
-  单盒没有任何配置项可以改变这一点；要让单盒拿到密钥属于一次刻意的改动，而不是加一行配置。
-  这一侧故意**不带** dev 兜底密钥（提交进仓库的共享密钥就是提交进仓库的凭据）。密钥只在启动
-  时解析一次，因此轮换密钥需要两侧都重启。
+  `AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE`（community）。**后端自身在单盒里
+  不解析任何值** —— 既没有密钥库，也不提供本地替代品，后端配置里也没有任何开关能改变这一点。
+  那次「刻意的改动」发生在启动器里：`scripts/modules/backend.sh` 会用与网关签名侧
+  （`scripts/modules/gateway.sh`）、BCS 验证侧（`scripts/modules/bcs.sh`）相同的
+  NOT-FOR-PROD dev 密钥填入该 community 环境变量，使本地经网关转发的 `/openapi/v1`
+  请求得以验签而非一律 401；自行导出该变量（例如写入 `.env.local`）即可覆盖。
+  应用本身依旧故意**不带** dev 兜底密钥（提交进仓库的共享密钥就是提交进仓库的凭据），
+  启动器默认值在开发机之外不为任何身份背书。密钥只在启动时解析一次，因此轮换密钥需要两侧都重启。
 
   **拿不到密钥时的行为按环境区分**，这个区别正是要点：
 

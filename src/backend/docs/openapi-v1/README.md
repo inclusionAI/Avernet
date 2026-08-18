@@ -349,11 +349,17 @@ route dependency        → require_principal(request)       ─┘  cache on sc
   That name **defaults**, so a deployment configures only the *value*: the corp
   secret store (corp overlays also override the name),
   or `AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE` (community).
-  **Singlebox resolves nothing** — no secret store, no local stand-in — so
-  `/openapi/v1` denies there and no config knob changes that; giving singlebox a
-  key is a deliberate change, not a config line. There is no dev fallback key on
-  this side on purpose: a committed shared secret is a committed credential. The
-  key is resolved once at boot, so rotating it needs a restart on both sides.
+  **The backend itself resolves nothing in singlebox** — no secret store, no
+  local stand-in, and no backend config knob changes that. The deliberate
+  change lives in the *launcher*: `scripts/modules/backend.sh` arms the
+  community env var with the same NOT-FOR-PROD dev key the gateway signs with
+  (`scripts/modules/gateway.sh`) and BCS verifies with
+  (`scripts/modules/bcs.sh`), so a locally forwarded `/openapi/v1` request
+  verifies instead of always-401. Export the variable yourself (e.g. in
+  `.env.local`) to override it. The application still ships no dev fallback
+  key on purpose: a committed shared secret is a committed credential, and the
+  launcher default authenticates nothing outside a dev box. The key is
+  resolved once at boot, so rotating it needs a restart on both sides.
 
   **An unresolvable key behaves differently by environment**, and the
   difference is the whole point:

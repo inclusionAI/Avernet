@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from gateway.community.bootstrap._authn import (
+    _append_dev_mock,
     _load_route_security,
     _strategy_chains,
 )
@@ -14,6 +15,7 @@ from gateway.community.core.authn import IdentityChain
 from gateway.community.plugins.authn.access_key_token import AccessKeyTokenStrategy
 from gateway.community.plugins.authn.app_token import AppTokenStrategy
 from gateway.community.plugins.authn.bot_token import BotTokenStrategy
+from gateway.community.plugins.authn.dev_header import DevHeaderUserStrategy
 from gateway.community.plugins.authn.google_token import GoogleUserStrategy
 from gateway.community.spi.authn import PrincipalType
 
@@ -24,6 +26,7 @@ def _pool():
         "bot_token": BotTokenStrategy(registry=None),
         "app_token": AppTokenStrategy(registry=None),
         "access_key_token": AccessKeyTokenStrategy(registry=None),
+        "dev_header": DevHeaderUserStrategy(),
     }
 
 
@@ -133,3 +136,56 @@ def test_load_route_security_with_none_user_config_uses_fail_closed_default(
     route_security = _load_route_security(user_config=None)
     req = route_security.resolve("GET", "/anything")
     assert req is not None
+
+
+# ── dev auth mock gating (_append_dev_mock) ─────────────────────────────────
+
+
+def _declared_config(tmp_path, monkeypatch):
+    (tmp_path / "application.yaml").write_text(
+        "user_config:\n  identity_strategies:\n    user: [google]\n    bot: [bot_token]\n    app: [app_token]\n    access_key: [access_key_token]\n"
+    )
+    monkeypatch.setenv("GATEWAY_CONFIG_PATH", str(tmp_path))
+    return _user_config()
+
+
+def _user_chain_names(chains) -> list[str]:
+    return [s.name for s in chains[PrincipalType.USER]._strategies]
+
+
+def test_dev_mock_absent_without_env(tmp_path, monkeypatch):
+    """Pool membership alone activates nothing — the env var is the switch."""
+    monkeypatch.delenv("GATEWAY_AUTH_MOCK", raising=False)
+    cfg = _declared_config(tmp_path, monkeypatch)
+    chains = _strategy_chains(_pool(), user_config=cfg)
+    _append_dev_mock(chains, _pool())
+    assert _user_chain_names(chains) == ["google"]
+
+
+def test_dev_mock_appended_last_with_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("GATEWAY_AUTH_MOCK", "1")
+    cfg = _declared_config(tmp_path, monkeypatch)
+    chains = _strategy_chains(_pool(), user_config=cfg)
+    _append_dev_mock(chains, _pool())
+    assert _user_chain_names(chains) == ["google", "dev_header"]
+
+
+def test_dev_mock_env_without_pool_entry_is_skipped(tmp_path, monkeypatch):
+    monkeypatch.setenv("GATEWAY_AUTH_MOCK", "1")
+    cfg = _declared_config(tmp_path, monkeypatch)
+    pool = {k: v for k, v in _pool().items() if k != "dev_header"}
+    chains = _strategy_chains(pool, user_config=cfg)
+    _append_dev_mock(chains, pool)
+    assert _user_chain_names(chains) == ["google"]
+
+
+def test_dev_mock_not_duplicated_when_declared(tmp_path, monkeypatch):
+    """A config that already names dev_header does not get it twice."""
+    monkeypatch.setenv("GATEWAY_AUTH_MOCK", "1")
+    (tmp_path / "application.yaml").write_text(
+        "user_config:\n  identity_strategies:\n    user: [google, dev_header]\n"
+    )
+    monkeypatch.setenv("GATEWAY_CONFIG_PATH", str(tmp_path))
+    chains = _strategy_chains(_pool(), user_config=_user_config())
+    _append_dev_mock(chains, _pool())
+    assert _user_chain_names(chains) == ["google", "dev_header"]
